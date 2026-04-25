@@ -7,6 +7,19 @@ this file wins for backend topics.
 
 ---
 
+## 0. Locked Decisions
+
+| Decision                      | Status   | Notes                                                            |
+| ----------------------------- | -------- | ---------------------------------------------------------------- |
+| Default backend mode          | **Path A — Direct** | TS spawns `llama-server`, no Python required for end users |
+| Path B (bridge mode)          | **Opt-in alternative** | For users who already run `continue-llamacpp-bridge` |
+| `llamabridge/` location       | **Reference in this repo** | Removed from tree before deploy / public release         |
+| Bridge slim recommendations   | **Documented in `llamabridge/SLIM-RECOMMENDATIONS.md`** | Applied later in the dedicated `llamabridge` repo, not here |
+| Source of bridge semantics    | **TS port** | LLamaSide reimplements sampling-merge, system-prompt injection, thinking-mode, strip-tools, llama-server argv composition in TypeScript |
+| Bundled `llama-server` binary | **No (pre-v1.0)** | Detect on PATH or absolute path in config; revisit in v1.0       |
+
+---
+
 ## 1. Locked Architecture — Two Paths, One Schema
 
 LLamaSide ships with **two backend modes**, both reading the same
