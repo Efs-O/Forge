@@ -10,7 +10,7 @@ backed by GGUF models via llama.cpp / Ollama. Three modes: Ask, Plan, Execute.
 | Area              | Decision                                                                 |
 | ----------------- | ------------------------------------------------------------------------ |
 | Backend           | OpenAI-compatible HTTP (`/v1/chat/completions`) — llama.cpp / Ollama     |
-| Target models     | Qwen3 family, Gemma 3/4 family — 3-bit quants                            |
+| Target models     | Qwen3 family, Gemma 4 family — 3-bit quants                              |
 | Default context   | ~100k tokens (user-tunable)                                              |
 | UI                | `WebviewViewProvider` sidebar (no Copilot Chat API)                      |
 | Modes             | Ask / Plan / Execute                                                     |

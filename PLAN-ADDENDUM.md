@@ -184,7 +184,7 @@ Status legend:
 | `web_fetch`   | 🟧+🟥  | net:fetch   | [v0.5]  | `fetch` + `@mozilla/readability` + `turndown`; SSRF guard |
 | `http_request`| 🟧     | net:http    | v1.0    | Allowlist + per-call confirm                              |
 
-### Vision (requires multimodal model — Qwen3-VL, Gemma 3 multimodal)
+### Vision (requires multimodal model — Qwen3-VL, Gemma 4 multimodal)
 | Tool              | Source | Permission | Version |
 | ----------------- | ------ | ---------- | ------- |
 | `analyze_image`   | 🟧     | fs:read    | v1.0    |
