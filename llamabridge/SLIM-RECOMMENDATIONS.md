@@ -1,10 +1,10 @@
 # LlamaBridge — Slim & Polish Recommendations
 
 Standalone improvements for the `llamabridge` repo. None of these are
-required for LLamaSide; they're independent quality-of-life wins for the
+required for Forge; they're independent quality-of-life wins for the
 bridge itself.
 
-Apply these in the `llamabridge` repo's own commit history, not LLamaSide's.
+Apply these in the `llamabridge` repo's own commit history, not Forge's.
 
 ---
 
@@ -136,7 +136,7 @@ Add a comment to the example `sampling:` block:
 ### Why
 
 The bridge currently exposes `/v1/models` and `/v1/chat/completions`. Both
-require a Bearer token. Clients (Continue, LLamaSide, monitoring) have no
+require a Bearer token. Clients (Continue, Forge, monitoring) have no
 unauthenticated way to ask "is the bridge process up?" — they have to
 either send a real auth'd request or TCP-probe the port.
 
@@ -213,9 +213,9 @@ with sane defaults (`num_ctx: default_num_ctx`, no `system_prompt`, no
 
 ### Note
 
-This is also a planned feature for LLamaSide (PLAN-ADDENDUM § A pillar 3,
-roadmap v0.3). If both the bridge and LLamaSide implement it, consider
-extracting the scan logic into a small shared utility.
+This is also a planned feature for Forge (`docs/02-wedge-and-positioning.md`
+pillar 3, `docs/07-roadmap.md` v0.3). If both the bridge and Forge implement
+it, consider extracting the scan logic into a small shared utility.
 
 ---
 
