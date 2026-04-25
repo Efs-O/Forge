@@ -267,3 +267,45 @@ toolset. Write tools, git, and exec follow in v0.6/v0.7.
 2. Tool confirmation UX: per-call dialog vs. session-allowlist. Recommend session-allowlist with "always allow this tool" toggle.
 3. `config.yaml` location: `<workspace>/.llamaside/config.yaml` vs. global `~/.llamaside/config.yaml` vs. both with merge. Recommend both, workspace overrides global.
 4. Surprises pending from user.
+
+---
+
+## K. Complementary Tool — HalluMeter
+
+**HalluMeter** (github.com/Efs-O/hallumeter, Apache 2.0, by the same author) is a
+Tauri-based always-on-top desktop overlay that monitors AI coding sessions'
+context-window fill and surfaces a green/amber/red hallucination-risk score
+based on research-backed degradation curves. Already supports Claude Code,
+Codex, Continue, and Cursor.
+
+### Why it's relevant to LLamaSide
+- Local OSS models (Qwen3, Gemma 4) currently use HalluMeter's **generic
+  fallback curve** because per-model data is sparse — LLamaSide is the ideal
+  first-party data source to improve those curves.
+- LLamaSide knows its exact token count and `contextLength` per model;
+  no scraping or telemetry-file estimation needed.
+- HalluMeter's **"hallucination-aware"** angle directly extends our wedge
+  pillar of "tools tuned for local-model reliability."
+
+### Two integration paths (decision deferred)
+
+**Path 1 — Recommend in README, no code coupling**
+- Add a "Recommended companion" section to LLamaSide's README pointing to
+  HalluMeter, explaining the always-on-top overlay.
+- Optionally write a HalluMeter-compatible session file from LLamaSide
+  (~50 LoC) so HalluMeter detects LLamaSide automatically.
+- Zero ongoing maintenance burden; tools stay independent.
+
+**Path 2 — Deeper integration via shared `hallumeter-core` package**
+- Extract HalluMeter's degradation curves into a shared TS/Rust package.
+- LLamaSide renders an inline meter in the sidebar webview (no desktop
+  overlay required).
+- Curve updates land in one place; both projects benefit.
+- Adds a dependency edge between the two repos.
+
+### Decision criteria
+Defer until after v0.5 dogfooding. If users naturally run both side-by-side,
+Path 1 is enough. If LLamaSide users would be served by inline awareness
+without an extra desktop app, Path 2 is justified.
+
+No roadmap commitments yet — this section is a placeholder for the decision.
