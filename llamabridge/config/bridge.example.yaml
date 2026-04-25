@@ -1,0 +1,73 @@
+# Bridge YAML — copy this to config/bridge.yaml and fill in your paths.
+#
+# Run:
+#   continue-llamacpp-bridge config/bridge.yaml
+#
+# Continue: set apiBase to http://127.0.0.1:<bind_port>/v1, apiKey to the
+# value of api_key below, and model to one of the keys under models:.
+
+api_key: "continue-local-change-me"
+bind_host: "127.0.0.1"
+bind_port: 9099
+
+llama_server:
+  # Full path to your llama-server executable.
+  # Windows example: C:/Program Files/llama.cpp/llama-server.exe
+  # macOS/Linux example: /usr/local/bin/llama-server
+  # You can also set the LLAMA_SERVER_BINARY environment variable instead.
+  binary: "/path/to/llama-server"
+
+  host: "127.0.0.1"
+  port: 8080
+  n_gpu_layers: -1       # -1 = offload all layers to GPU; set to 0 for CPU-only
+  n_batch: 512
+  n_parallel: 1
+  type_k: 8              # KV cache quantization (8 = Q8_0, saves VRAM vs f16)
+  type_v: 8
+  default_num_ctx: 4096  # Default context window; overridden per-model below
+  flash_attn_default: true
+
+models:
+  # Keys must match the "model" id sent by the client (Continue, etc.).
+  # Add as many models as you need — the bridge hot-swaps llama-server on demand.
+
+  my-model-alias:
+    # Path to the GGUF weights file.
+    # Absolute path:   /path/to/weights/model.gguf
+    # Relative path:   ../weights/model.gguf  (relative to this YAML file)
+    gguf_path: "/path/to/your/model.gguf"
+
+    num_ctx: 4096        # Context window for this model (tokens)
+    n_batch: 512         # Batch size; increase (e.g. 1024) for throughput if VRAM allows
+    flash_attn: true     # Enable flash attention (requires compatible GPU)
+    think: false         # Set true for reasoning/thinking models (e.g. Qwen3, QwQ)
+    # system_prompt: |   # Optional: prepend/extend the leading system message before forwarding
+    #   You may reason privately, but when calling tools you must emit valid arguments only.
+    #   For edit_existing_file, always include filepath and changes.
+
+    # strip_tools: true  # Uncomment to remove tool-call fields before forwarding
+    #                    # (prevents llama-server 500s on models that can't handle tool JSON,
+    #                    #  but disables IDE agent actions like Apply / run terminal)
+
+    sampling:
+      # These override whatever Continue sends in the request body for this model.
+      # Remove any key you want Continue's value to pass through unchanged.
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 40
+      min_p: 0.0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+      max_tokens: 4096   # Maps to --n-predict in llama-server; cap per-request length
+
+  # Example second model entry (MoE or different quantization):
+  # another-model:
+  #   gguf_path: "/path/to/another/model.gguf"
+  #   num_ctx: 32768
+  #   n_batch: 1024
+  #   flash_attn: true
+  #   think: false
+  #   sampling:
+  #     temperature: 0.7
+  #     top_p: 0.9
+  #     max_tokens: 32768

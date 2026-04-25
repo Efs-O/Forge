@@ -1,0 +1,33 @@
+# Example Continue user config (minimal wiring to this bridge).
+# Install path: %USERPROFILE%\.continue\config.yaml (Windows) or ~/.continue/config.yaml (macOS/Linux).
+# Docs: https://docs.continue.dev/reference
+#
+# Copy values from your bridge YAML: apiBase + port from bind_host/bind_port, apiKey from api_key,
+# model id must match a key under models: in the bridge file.
+#
+# Generation flags: omit defaultCompletionOptions here if you want the bridge YAML `sampling`
+# block to be the single place you tune temperature, top_p, etc. (Continue UI may still send
+# some fields; keys listed under bridge `sampling` override them per README.)
+
+name: LlamaBridge example
+version: 1.0.0
+schema: v1
+
+models:
+  - name: Local GGUF via bridge
+    provider: openai
+    model: my-model-alias
+    apiBase: http://127.0.0.1:9099/v1
+    apiKey: continue-local-change-me
+    roles:
+      - chat
+      - edit
+      - apply
+
+  # This bridge only implements /v1/models and /v1/chat/completions — not /v1/embeddings.
+  # Point "embed" at another provider (Ollama, cloud OpenAI, etc.) or add embedding support to the bridge.
+  - name: Embeddings (Ollama example)
+    provider: ollama
+    model: nomic-embed-text
+    roles:
+      - embed

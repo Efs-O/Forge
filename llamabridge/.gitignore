@@ -1,0 +1,23 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Local machine config (copy bridge.example.yaml → bridge.yaml and edit)
+config/bridge.yaml
+
+# Local scratch files and tooling
+scratch/
+tools/
+
+# Claude project memory
+.claude/
+
+# Logs
+*.log
+
+# AdvanLLM project files (separate project, not part of LlamaBridge)
+advanllm/
