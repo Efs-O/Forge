@@ -66,54 +66,80 @@ model_dirs:
   # - "D:/local-models"
 
 # Default model alias
-default_model: qwen3-coder-7b
+default_model: qwen36-27b-q3km
 
 # Per-model definitions
 models:
 
-  qwen3-coder-7b:
-    gguf_path: "~/.cache/huggingface/hub/models--Qwen--Qwen3-Coder-7B-GGUF/snapshots/.../Qwen3-Coder-7B-Q3_K_M.gguf"
-    num_ctx: 100000
-    n_batch: 512
-    flash_attn: true
-    think: false
-    capabilities: [tool-call, long-context]
-    system_prompt: |
-      You are a coding assistant. When calling tools, emit complete JSON arguments
-      only — never describe edits in prose. For replace_in_file, the old_str must
-      match the file exactly including whitespace.
-    sampling:
-      temperature: 0.3
-      top_p: 0.95
-      top_k: 40
-      min_p: 0.0
-      max_tokens: 4096
-    extra_llama_server_args:
-      - "--rope-scaling"
-      - "linear"
-    strip_tools: false                # Per-model override of global
-
-  gemma4-12b:
-    gguf_path: "~/.cache/huggingface/hub/models--google--gemma-4-12b-it-GGUF/.../gemma-4-12b-it-Q3_K_M.gguf"
-    num_ctx: 100000
+  qwen36-27b-q3km:
+    gguf_path: "N:/.cache/huggingface/hub/models--unsloth--Qwen3.6-27B-GGUF/snapshots/82d411acf4a06cfb8d9b073a5211bf410bfc29bf/Qwen3.6-27B-Q3_K_M.gguf"
+    num_ctx: 98304
     n_batch: 1024
     flash_attn: true
-    think: false
-    capabilities: [tool-call]
-    system_prompt: |
-      Reasoning is private; tool calls must contain only the required arguments
-      and nothing else. Never include explanations inside tool argument values.
+    think: true
     sampling:
-      temperature: 0.4
-      top_p: 0.9
-      max_tokens: 8192
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 20
+      min_p: 0.0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+      max_tokens: 98304
+      preserve_thinking: true
 
-  qwen3-vl-7b:
-    gguf_path: "~/local-models/Qwen3-VL-7B-Q4_K_M.gguf"
-    num_ctx: 32768
-    capabilities: [tool-call, vision]
+  gemma4-31b-it-q3ks:
+    gguf_path: "N:/.cache/huggingface/hub/models--unsloth--gemma-4-31B-it-GGUF/snapshots/43e80d41a220ac7c83023daacd6a0d1fd8559251/gemma-4-31B-it-Q3_K_S.gguf"
+    num_ctx: 98304
+    n_batch: 512
+    flash_attn: true
+    think: true
+    system_prompt: |
+      When using tools, output only the tool call with complete valid arguments.
+      For edit_existing_file, always include filepath and changes.
+    strip_tools: false
     sampling:
-      temperature: 0.5
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 64
+      min_p: 0.0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+      max_tokens: 98304
+
+  qwen36-35b-a3b-iq3s:
+    gguf_path: "N:/.cache/huggingface/hub/models--unsloth--Qwen3.6-35B-A3B-GGUF/snapshots/a483e9e6cbd595906af30beda3187c2663a1118c/Qwen3.6-35B-A3B-UD-IQ3_S.gguf"
+    num_ctx: 98304
+    n_batch: 1024
+    flash_attn: true
+    think: true
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 20
+      min_p: 0.0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+      max_tokens: 98304
+      preserve_thinking: true
+
+  gemma4-26b-a4b-it-q3km:
+    gguf_path: "N:/.cache/huggingface/hub/models--unsloth--gemma-4-26B-A4B-it-GGUF/snapshots/2f6caf1733f31c87fdcfda391e978120033609a0/gemma-4-26B-A4B-it-UD-Q3_K_M.gguf"
+    num_ctx: 98304
+    n_batch: 1024
+    flash_attn: true
+    think: true
+    system_prompt: |
+      When using tools, output only the tool call with complete valid arguments.
+      For edit_existing_file, always include filepath and changes.
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 64
+      min_p: 0.0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+      max_tokens: 98304
 ```
 
 ---

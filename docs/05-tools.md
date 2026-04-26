@@ -128,6 +128,166 @@ No `changes: string`, no `description: string`, no free-form fields.
 output capture**. Different tools, different use cases. Both gated by
 allowlist + per-call confirmation by default.
 
+---
+
+### Terminal safety architecture (hard rules)
+
+This is the highest-risk tool surface in Forge. The following rules are
+non-negotiable and must all be in place before `run_terminal` or `exec_command`
+ship.
+
+#### 1. Show-before-execute — always
+
+The user sees the **exact, fully-resolved command string** in a confirmation
+dialog before any execution. No exceptions. The dialog shows:
+
+- The command and every argument, rendered verbatim
+- The working directory it will run in
+- A **denylist warning banner** if any blocked pattern matches (see §3)
+- `[Run]` / `[Cancel]` — no auto-accept, no session-level bypass for exec tools
+
+The model is told: "Forge will show the user the command before running it."
+This is included in the system prompt for Execute mode.
+
+#### 2. No shell interpretation — ever (`exec_command`)
+
+`exec_command` uses `child_process.spawn` with an **argument array** and
+`shell: false`. Never a shell string, never `shell: true`:
+
+```ts
+// CORRECT
+spawn('git', ['reset', '--hard', 'HEAD'], { shell: false, cwd: workspaceRoot })
+
+// NEVER
+spawn('git reset --hard HEAD', { shell: true })
+```
+
+The tool schema requires `command: string` (the executable) and
+`args: string[]` (separate array). A single `commandLine: string` field is
+explicitly banned — splitting on spaces is lossy and injection-prone.
+
+**Windows built-in commands (`dir`, `echo`, `copy`, `type`) are not
+executables** — they only exist inside `cmd.exe`. On Windows the model must
+pass the shell explicitly:
+
+```ts
+spawn('cmd.exe',        ['/c', 'dir', '/b'],   { shell: false })
+spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', 'script.ps1'], { shell: false })
+```
+
+`-Command <string>` and `-EncodedCommand <base64>` are **banned** as
+PowerShell args — both accept a shell string that PowerShell evaluates,
+reintroducing injection risk. The implementation checks for these flags and
+returns `ToolError` if found. Models that need PowerShell must use `-File`
+with a `.ps1` file, or use discrete `-Command` only with a single safe
+literal verb (validated against allowlist).
+
+#### 2b. `run_terminal` — shell-string risk
+
+`window.createTerminal` opens the user's **default interactive shell** (bash/zsh
+on macOS/Linux, PowerShell or cmd on Windows). There is no arg array here —
+any text the model sends to the terminal is a string the shell interprets.
+
+This means `run_terminal` **cannot rely on shell-operator blocking or
+the arg-array model**. Its only defences are:
+
+- Show-before-execute (§1) — the user sees the full string before it is sent
+- Denylist pattern match on the string (§3)
+- No auto-send: the command is pasted into the terminal but **not submitted**
+  (i.e. `sendText(cmd, false)`) — the user must press Enter themselves
+
+The last point is critical: `sendText(text, true)` submits immediately.
+Forge **always** uses `sendText(text, false)`. The user retains final control.
+
+#### 3. Denylist — platform-aware, hard block with override
+
+A static denylist is checked against the full command string **before** showing
+the confirmation dialog. A match:
+
+- Shows a **red warning banner** in the confirmation dialog
+- Requires the user to type a confirmation phrase (e.g. `"i understand"`)
+  rather than just clicking `[Run]`
+- Is always logged to the output channel regardless of outcome
+
+**Unix/cross-platform patterns:**
+```
+rm\s+-[rR][fF]?\s+[/~]        # rm -rf / or ~/
+git\s+reset\s+--hard           # git reset --hard
+git\s+clean\s+-[fFdDxX]        # git clean -f / -fd / -fx
+git\s+push\s+--force           # force push
+DROP\s+(TABLE|DATABASE|SCHEMA) # SQL DROP
+shutdown|reboot|halt|poweroff  # system power (cross-platform)
+mkfs\.|fdisk\s                  # disk format (Linux)
+curl\s+.*\|\s*(ba)?sh           # curl | sh / bash
+wget\s+.*-O\s*-.*\|            # wget pipe
+```
+
+**Windows-specific patterns:**
+```
+del\s+/[fFsS]                         # del /f /s
+rd\s+/[sS]                            # rd /s
+rmdir\s+/[sS]                         # rmdir /s
+format\s+[a-zA-Z]:                    # format C:
+Remove-Item.*-Recurse.*-Force         # PowerShell rm -rf equivalent
+ri\s+.*-r.*-fo                        # ri alias shorthand
+Format-Volume                          # PowerShell disk format
+Stop-Computer|Restart-Computer        # PowerShell power commands
+Invoke-Expression|iex\s               # PowerShell eval — curl|sh equivalent
+-EncodedCommand|-enc\s                # PowerShell base64 eval
+diskpart\s                             # Windows disk partition tool
+cipher\s+/w                           # Windows secure wipe
+```
+
+The denylist is extensible via `config.yaml`:
+
+```yaml
+exec:
+  denylist_extra:
+    - "my-destroy-script"
+  denylist_override: []    # set to disable specific built-in patterns
+```
+
+#### 4. Shell operator blocking (`exec_command` only)
+
+The `args` array is scanned before execution. If any element contains:
+`&&`, `||`, `;`, `|`, `` ` ``, `$(`, `>`, `>>`, `<`
+
+...the tool returns an error to the model:
+
+```
+ToolError: Shell operators are not permitted in arguments.
+Split into separate tool calls.
+```
+
+This does not apply to `run_terminal` (which is already a shell — the user
+types freely). It applies only to `exec_command`'s arg array.
+
+#### 5. Workspace-root scope
+
+`exec_command` always runs with `cwd` set to the workspace root unless
+`config.yaml` explicitly grants `exec.allow_arbitrary_cwd: true`.
+
+`run_terminal` opens in the workspace root. The user can `cd` freely —
+that is their session to control.
+
+#### 6. Timeout + kill
+
+`exec_command` has a hard timeout (default 30s, configurable via
+`exec.timeout_ms`). On timeout: `SIGTERM`, then `SIGKILL` after 5s.
+On Windows, `SIGTERM` is not supported — use `process.kill(pid)` directly.
+The user is notified. No zombie processes.
+
+`run_terminal` has no timeout — the user owns the interactive session.
+
+#### 7. Untrusted-content origin block
+
+Commands discovered inside `<UNTRUSTED_CONTENT>` delimiters (fetched web
+pages, search results) are **never dispatched**, even if the model wraps them
+in a tool call. The `ToolRegistry.dispatch` origin check applies to all
+exec-category tools with zero exceptions.
+
+This is the primary defence against prompt-injection → RCE.
+
 ### Git (via `vscode.git` extension API)
 | Tool                | Permission |
 | ------------------- | ---------- |

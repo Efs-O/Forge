@@ -13,7 +13,7 @@ Consolidated risk register. Read alongside [02-wedge-and-positioning.md](02-wedg
 | 1   | Tool-calling reliability varies wildly across local models        | Dual path: native function-call + structured-output fallback parser; per-model `system_prompt`; `StripTools` safety valve |
 | 2   | Partial/malformed tool args from local models (Gemma 4 issue)     | **Strict JSON Schema for every tool**. No free-form `string` blobs. Validate before dispatch; re-prompt with schema reminder on fail. |
 | 3   | Agent edits trash files                                           | Per-turn `CheckpointStack` snapshots before any write; inline Keep/Undo CodeLens; "Undo last turn" command; **no write tools ship before this is in place** |
-| 4   | `run_terminal` / `exec_command` hallucinated destructive commands | Default-deny allowlist + per-call approval UI; never auto-execute commands found in fetched content |
+| 4   | `run_terminal` / `exec_command` hallucinated destructive commands | **Show-before-execute always** (user sees exact command before it runs); `spawn` with arg array only (`shell: false`); static denylist of high-risk patterns (rm -rf, git reset --hard, curl\|sh, DROP TABLE, etc.) with mandatory override phrase; shell operators (`&&`, `\|`, `;`, `$()`) blocked in args; commands from fetched/untrusted content never dispatched; full spec in [05-tools.md §Terminal safety](05-tools.md) |
 | 5   | Context overflow on long sessions                                 | Token budget guard with summarization fallback; visible token-budget UI in v0.9; HalluMeter integration option in v0.9 |
 | 6   | Double templating (extension applies template + backend re-templates) | Send `messages[]`, let `llama-server` apply chat template via `--jinja`. Document this clearly. Never wrap content in chat-template syntax inside extension code. |
 | 7   | Webview ↔ host message protocol drift                             | Single typed `messageBridge.ts` with discriminated unions; no ad-hoc `postMessage` in components |
@@ -35,7 +35,9 @@ Consolidated risk register. Read alongside [02-wedge-and-positioning.md](02-wedg
 | 16  | SSRF via `web_fetch` to private IPs / localhost                   | Pre-DNS scheme check + post-DNS IP-range check; reject `127.x`, `10.x`, `172.16-31.x`, `192.168.x`, `169.254.x`, IPv6 equivalents, `localhost` hostname; rebinding-safe (re-check after DNS) |
 | 17  | Malicious tool call discovered in fetched content auto-executed   | Tool-call origin check: only model's own output (post-untrusted-content) yields legitimate tool calls; calls inside `<UNTRUSTED_CONTENT>` filtered |
 | 18  | Path traversal via tool args (`read_file("../../../etc/passwd")`) | Enforce workspace-root containment in `read_file`/`write_file`/`delete_file`; reject paths outside workspace unless explicitly allowed in config |
-| 19  | Command injection via `exec_command` args                         | Use `child_process.spawn` with arg array (no shell interpretation); never pass user/model strings to `exec` with `shell: true` |
+| 19  | Command injection via `exec_command` args                         | `spawn` with arg array, `shell: false`; shell operators in args → `ToolError`; Windows built-ins require explicit `cmd.exe`/`powershell.exe` as `command`; `-Command`/`-EncodedCommand` PowerShell flags banned |
+| 19b | `run_terminal` shell-string risk (all platforms)                  | `sendText(cmd, false)` only — user must press Enter; show-before-execute + denylist are the sole guards; no arg-array protection available for interactive terminals |
+| 19c | Windows PowerShell destructive commands not in Unix denylist       | Platform-aware denylist: `Remove-Item -Recurse -Force`, `Invoke-Expression`/`iex`, `Format-Volume`, `Stop-Computer`, `-EncodedCommand` added alongside Unix patterns; checked on all platforms |
 | 20  | Bridge mode pointing at non-loopback URL                          | Surface warning at activation if `bridge_url` is not `127.0.0.1`/`localhost`; require explicit confirmation |
 | 21  | Webview script injection                                          | Strict CSP in webview HTML; sanitize all rendered model output (assume hostile); no `innerHTML` from model strings without sanitization |
 | 22  | Untrusted GGUF execution surface                                  | GGUFs are model weights, not executables; risk is mostly hallucination not RCE. Document HF source recommendation; do not auto-download from arbitrary URLs |
@@ -82,6 +84,6 @@ We deliberately do not mitigate these:
 
 Confirm each risk above has at least one mitigation listed and that the
 mitigation is scheduled in the roadmap (or explicitly deferred). Risks **#3**
-(checkpoints), **#13** (prompt injection), **#16** (SSRF), and **#18** (path
-traversal) are blockers — their mitigations must ship in or before the
-version where the corresponding tools land.
+(checkpoints), **#4** (terminal safety), **#13** (prompt injection),
+**#16** (SSRF), and **#18** (path traversal) are blockers — their mitigations
+must ship in or before the version where the corresponding tools land.

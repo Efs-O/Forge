@@ -17,6 +17,7 @@ Single navigational entry point. **Start here.**
 9. **[09-references.md](09-references.md)** — VS Code, llama.cpp, libraries, research
 10. **[10-bridge-audit.md](10-bridge-audit.md)** — `llamabridge/` audit + lift list
 11. **[11-hallumeter.md](11-hallumeter.md)** — companion tool integration (decision deferred)
+12. **[12-release-and-publish.md](12-release-and-publish.md)** — packaging, CI workflow, GitHub Release, Marketplace + Open VSX publish
 
 Also relevant at repo root:
 - **`CLAUDE.md`** / **`AGENTS.md`** — agent rules (hard stops, single-point-of-truth, code quality gates)
@@ -47,6 +48,13 @@ These are settled. Do not relitigate without flagging.
 | Edit UX                   | Inline Keep/Undo via `CodeLens` decorations                           |
 | Tool order                | Read-only (v0.5) → write + checkpoints (v0.6) → terminal (v0.7)       |
 | Tool schemas              | **Strict JSON Schema** — never free-form `string` blobs               |
+| Terminal execution model  | `exec_command`: `spawn` + arg array, `shell: false`; Windows built-ins require explicit `cmd.exe`/`powershell.exe` as `command` |
+| Terminal confirmation      | Show-before-execute always — user sees exact command before any run   |
+| Terminal denylist         | Platform-aware: Unix + Windows/PowerShell destructive patterns; override-phrase required; extensible via config |
+| Shell operator policy     | `exec_command`: `&&`, `\|`, `;`, `$()` in args → `ToolError`; model splits into separate calls |
+| PowerShell eval ban       | `-Command <string>` and `-EncodedCommand` banned as args to `powershell.exe`; use `-File` only |
+| `run_terminal` send policy | `sendText(cmd, false)` only — command pasted but not submitted; user presses Enter |
+| Terminal untrusted-content | Commands from fetched/searched content never dispatched — origin check in ToolRegistry |
 | Search providers          | Tavily (default, free 1k/mo) + Brave (alt)                            |
 | Outbound network          | Only `web_search` + `web_fetch`. Both opt-in via API key/explicit enable |
 | Editor target             | VS Code first; Cursor compatibility post-v1.0                         |
