@@ -52,6 +52,7 @@ These are settled. Do not relitigate without flagging.
 | Editor target             | VS Code first; Cursor compatibility post-v1.0                         |
 | `llamabridge/` location   | In-tree reference; **removed before deploy**                          |
 | Bridge logic source       | TS port (no Python runtime dep for end users)                         |
+| README posture (v1.0)     | Document both Path A (default) and Path B; link to upstream `llamabridge` repo for Path B users |
 | `llama-server` binary     | Detect on PATH or absolute path in config; **no bundling pre-v1.0**   |
 | HalluMeter integration    | **Deferred** — decide post-v0.5 dogfooding                            |
 

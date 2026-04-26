@@ -151,6 +151,18 @@ addressed: `replace_in_file`, `replace_selection`, `insert_at_cursor`,
 
 ## 6. Lift List — What Goes into Forge
 
+> **Note: this is a conceptual lift, not a file import.** The Python bridge
+> files in `legacy/llamabridge/` stay Python and are removed from this repo
+> before deploy. They are read as a *specification* for behavior; Forge's
+> TypeScript modules in `src/llm/` and `src/backend/` are fresh
+> implementations using Node primitives (`fetch`, `child_process.spawn`,
+> `AbortController`) that mirror the bridge's semantics.
+>
+> The unrelated `requests → httpx` slim recommendation in
+> `legacy/llamabridge/SLIM-RECOMMENDATIONS.md` applies only to the upstream
+> Python `llamabridge` repo — it has no effect on Forge's TypeScript code,
+> which uses neither library.
+
 | From bridge file                          | To Forge                                                       | Effort  |
 | ----------------------------------------- | -------------------------------------------------------------- | ------- |
 | `config/bridge.example.yaml` schema       | `config/config.example.yaml` (rename keys to Forge vocab)      | 30 min  |

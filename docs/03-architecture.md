@@ -102,6 +102,11 @@ the extension is mode-agnostic.
 
 ### Path A — Direct (default)
 
+> **Note: conceptual lift, not a file import.** `src/llm/` and `src/backend/`
+> are fresh TypeScript using Node primitives (`fetch`, `child_process.spawn`,
+> `AbortController`). The Python files in `legacy/llamabridge/` are a
+> read-only specification; they are removed before deploy.
+
 - Extension spawns `llama-server` via `child_process.spawn` on activation (or on first model use).
 - Composes CLI argv from `config.yaml` (`LlamaServerArgs.ts`, mirroring `llamabridge/continue_llamacpp_bridge/llama_server.py:_compose_cmd`).
 - Polls `/health` every 1s, max 120s, until ready (mirrors bridge `is_up()` loop).
