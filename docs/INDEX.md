@@ -18,6 +18,7 @@ Single navigational entry point. **Start here.**
 10. **[10-bridge-audit.md](10-bridge-audit.md)** — `llamabridge/` audit + lift list
 11. **[11-hallumeter.md](11-hallumeter.md)** — companion tool integration (decision deferred)
 12. **[12-release-and-publish.md](12-release-and-publish.md)** — packaging, CI workflow, GitHub Release, Marketplace + Open VSX publish
+13. **[13-testing.md](13-testing.md)** — test strategy: vitest unit, @vscode/test-electron integration, ESLint, coverage thresholds, quality gates by stage
 
 Also relevant at repo root:
 - **`CLAUDE.md`** / **`AGENTS.md`** — agent rules (hard stops, single-point-of-truth, code quality gates)
@@ -63,6 +64,9 @@ These are settled. Do not relitigate without flagging.
 | README posture (v1.0)     | Document both Path A (default) and Path B; link to upstream `llamabridge` repo for Path B users |
 | `llama-server` binary     | Detect on PATH or absolute path in config; **no bundling pre-v1.0**   |
 | HalluMeter integration    | **Deferred** — decide post-v0.5 dogfooding                            |
+| Test framework            | vitest (unit) + @vscode/test-electron (integration); 80% line/function coverage floor |
+| Lint + format             | ESLint + `@typescript-eslint/recommended-type-checked` + Prettier via eslint-plugin-prettier |
+| Quality gate              | tsc + lint + unit + integration + build — all green on Win/Mac/Linux before merge |
 
 ---
 
