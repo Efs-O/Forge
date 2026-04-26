@@ -1,0 +1,256 @@
+/**
+ * Integration smoke tests: mock HTTP server → streamChatCompletion → ToolRegistry.
+ * No VS Code API needed — exercises the pure-Node layers end-to-end.
+ */
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import * as http from 'http';
+import type { AddressInfo } from 'net';
+import { streamChatCompletion } from '../../src/llm/OpenAIClient';
+import { ToolRegistry } from '../../src/tools/ToolRegistry';
+import type { ChatCompletionRequest } from '../../src/llm/types';
+
+// ── Mock HTTP server helpers ──────────────────────────────────────────────────
+
+type Handler = (req: http.IncomingMessage, res: http.ServerResponse) => void;
+
+function startServer(handler: Handler): Promise<{ url: string; close: () => Promise<void> }> {
+  return new Promise((resolve) => {
+    const srv = http.createServer(handler);
+    srv.listen(0, '127.0.0.1', () => {
+      const { port } = srv.address() as AddressInfo;
+      const url = `http://127.0.0.1:${port}`;
+      const close = () =>
+        new Promise<void>((res, rej) => srv.close((e) => (e ? rej(e) : res())));
+      resolve({ url, close });
+    });
+  });
+}
+
+function sseBody(events: string[]): Buffer {
+  return Buffer.from(events.join('') + 'data: [DONE]\n\n');
+}
+
+function makeChunk(content: string, finishReason: string | null = null): string {
+  const choice: Record<string, unknown> = {
+    index: 0,
+    delta: { content },
+    finish_reason: finishReason,
+  };
+  return `data: ${JSON.stringify({ choices: [choice] })}\n\n`;
+}
+
+function makeToolChunk(
+  index: number,
+  id: string,
+  name: string,
+  args: string,
+  finishReason: string | null = null,
+): string {
+  const choice: Record<string, unknown> = {
+    index: 0,
+    delta: {
+      tool_calls: [{ index, id, type: 'function', function: { name, arguments: args } }],
+    },
+    finish_reason: finishReason,
+  };
+  return `data: ${JSON.stringify({ choices: [choice] })}\n\n`;
+}
+
+const baseRequest: ChatCompletionRequest = {
+  model: 'test-model',
+  messages: [{ role: 'user', content: 'hello' }],
+  stream: true,
+};
+
+// ── Suite ──────────────────────────────────────────────────────────────────────
+
+describe('streamChatCompletion — basic token streaming', () => {
+  let url: string;
+  let close: () => Promise<void>;
+
+  beforeAll(async () => {
+    ({ url, close } = await startServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.end(sseBody([makeChunk('Hello'), makeChunk(', world!', 'stop')]));
+    }));
+  });
+
+  afterAll(() => close());
+
+  it('fires onToken for each chunk and onDone with stop', async () => {
+    const tokens: string[] = [];
+    let doneReason: string | null = 'PENDING' as unknown as null;
+
+    await streamChatCompletion(url, baseRequest, {
+      onToken: (t) => tokens.push(t),
+      onDone: (r) => { doneReason = r; },
+      onError: (e) => { throw e; },
+    });
+
+    expect(tokens).toEqual(['Hello', ', world!']);
+    expect(doneReason).toBe('stop');
+  });
+});
+
+describe('streamChatCompletion — tool_calls round-trip', () => {
+  let url: string;
+  let close: () => Promise<void>;
+
+  beforeAll(async () => {
+    ({ url, close } = await startServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      // Single tool call streamed in two delta fragments, then finish.
+      const body = sseBody([
+        makeToolChunk(0, 'call-1', 'read_file', '{"path":"/tmp/f'),
+        makeToolChunk(0, '',       '',          'ile.txt"}', 'tool_calls'),
+      ]);
+      res.end(body);
+    }));
+  });
+
+  afterAll(() => close());
+
+  it('accumulates fragments and fires onToolCalls before onDone', async () => {
+    const tokens: string[] = [];
+    let toolCalls: { id: string; name: string; arguments: string }[] = [];
+    let doneReason: string | null = null;
+
+    await streamChatCompletion(url, baseRequest, {
+      onToken: (t) => tokens.push(t),
+      onDone: (r) => { doneReason = r; },
+      onError: (e) => { throw e; },
+      onToolCalls: (calls) => {
+        toolCalls = calls.map((c) => ({ id: c.id, name: c.function.name, arguments: c.function.arguments }));
+      },
+    });
+
+    expect(tokens).toHaveLength(0);
+    expect(toolCalls).toHaveLength(1);
+    expect(toolCalls[0]).toEqual({
+      id: 'call-1',
+      name: 'read_file',
+      arguments: '{"path":"/tmp/file.txt"}',
+    });
+    expect(doneReason).toBe('tool_calls');
+  });
+});
+
+describe('streamChatCompletion — HTTP error surface', () => {
+  let url: string;
+  let close: () => Promise<void>;
+
+  beforeAll(async () => {
+    ({ url, close } = await startServer((_req, res) => {
+      res.writeHead(503, { 'Content-Type': 'text/plain' });
+      res.end('Service Unavailable');
+    }));
+  });
+
+  afterAll(() => close());
+
+  it('calls onError with HTTP status when server returns non-200', async () => {
+    let errorMsg = '';
+    await streamChatCompletion(url, baseRequest, {
+      onToken: () => {},
+      onDone: () => {},
+      onError: (e) => { errorMsg = e.message; },
+    });
+    expect(errorMsg).toMatch(/503/);
+  });
+});
+
+describe('streamChatCompletion — AbortSignal cancellation', () => {
+  let url: string;
+  let close: () => Promise<void>;
+
+  beforeAll(async () => {
+    ({ url, close } = await startServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      // Hang intentionally — the client will abort before we send anything.
+      void res;
+    }));
+  });
+
+  afterAll(() => close());
+
+  it('resolves with "cancelled" when aborted before first byte', async () => {
+    const ac = new AbortController();
+    let doneReason: string | null = null;
+
+    const promise = streamChatCompletion(url, baseRequest, {
+      onToken: () => {},
+      onDone: (r) => { doneReason = r; },
+      onError: (e) => { throw e; },
+    }, ac.signal);
+
+    // Abort immediately.
+    ac.abort();
+    await promise;
+
+    expect(doneReason).toBe('cancelled');
+  });
+});
+
+describe('ToolRegistry — registration and dispatch', () => {
+  it('dispatches a registered tool and returns its result', async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      permission: 'read',
+      definition: {
+        type: 'function',
+        function: {
+          name: 'echo',
+          description: 'Returns the input string',
+          parameters: {
+            type: 'object',
+            properties: { text: { type: 'string' } },
+            required: ['text'],
+          },
+        },
+      },
+      handler: async (args) => String(args['text']),
+    });
+
+    const result = await registry.dispatch('echo', { text: 'ping' }, new Set(['read']));
+    expect(result).toBe('ping');
+  });
+
+  it('throws on unknown tool', async () => {
+    const registry = new ToolRegistry();
+    await expect(registry.dispatch('nope', {}, new Set(['read']))).rejects.toThrow('unknown tool');
+  });
+
+  it('throws when required permission is not granted', async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      permission: 'write',
+      definition: {
+        type: 'function',
+        function: { name: 'w', description: '', parameters: { type: 'object', properties: {}, required: [] } },
+      },
+      handler: async () => 'ok',
+    });
+
+    await expect(registry.dispatch('w', {}, new Set(['read']))).rejects.toThrow('permission');
+  });
+
+  it('filters definitions by allowed permission set', () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      permission: 'read',
+      definition: { type: 'function', function: { name: 'r', description: '', parameters: { type: 'object', properties: {}, required: [] } } },
+      handler: async () => '',
+    });
+    registry.register({
+      permission: 'write',
+      definition: { type: 'function', function: { name: 'w', description: '', parameters: { type: 'object', properties: {}, required: [] } } },
+      handler: async () => '',
+    });
+
+    const readOnly = registry.definitions(new Set(['read']));
+    expect(readOnly.map((d) => d.function.name)).toEqual(['r']);
+
+    const all = registry.definitions(new Set(['read', 'write']));
+    expect(all.map((d) => d.function.name)).toEqual(['r', 'w']);
+  });
+});

@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.vsix
+coverage/
+.forge/
+*.log
+.DS_Store
+Thumbs.db

@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'nonce-${nonce}'; style-src ${cspSource};">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Forge</title>
+  <link rel="stylesheet" href="${cssUri}">
+</head>
+<body>
+  <div id="app"></div>
+  <script nonce="${nonce}" src="${jsUri}"></script>
+</body>
+</html>

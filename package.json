@@ -1,0 +1,170 @@
+{
+  "name": "forge",
+  "displayName": "Forge",
+  "description": "Local-LLM coding assistant — direct llama.cpp, strict tool schemas, Ask / Plan / Execute modes",
+  "version": "0.1.0",
+  "publisher": "efs-o",
+  "license": "Apache-2.0",
+  "private": true,
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Other"
+  ],
+  "keywords": [
+    "llm",
+    "llama.cpp",
+    "local ai",
+    "coding assistant",
+    "agent",
+    "gguf"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Efs-O/Forge"
+  },
+  "bugs": {
+    "url": "https://github.com/Efs-O/Forge/issues"
+  },
+  "homepage": "https://github.com/Efs-O/Forge#readme",
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "forge-sidebar",
+          "title": "Forge",
+          "icon": "assets/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "forge-sidebar": [
+        {
+          "type": "webview",
+          "id": "forge.sidebar",
+          "name": "Forge",
+          "icon": "assets/icon.svg",
+          "contextualTitle": "Forge"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "forge.openSidebar",
+        "title": "Forge: Open Sidebar"
+      },
+      {
+        "command": "forge.restartBackend",
+        "title": "Forge: Restart Backend"
+      },
+      {
+        "command": "forge.newChat",
+        "title": "Forge: New Chat"
+      },
+      {
+        "command": "forge.undo",
+        "title": "Forge: Undo Last Turn"
+      },
+      {
+        "command": "forge.keep",
+        "title": "Forge: Keep Changes"
+      },
+      {
+        "command": "forge.setSearchApiKey",
+        "title": "Forge: Set Search API Key"
+      }
+    ],
+    "configuration": {
+      "title": "Forge",
+      "properties": {
+        "forge.endpoint": {
+          "type": "string",
+          "default": "",
+          "description": "Override the llama-server endpoint (leave empty to use config.yaml)"
+        },
+        "forge.defaultMode": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "plan",
+            "execute"
+          ],
+          "default": "ask",
+          "description": "Default mode on activation"
+        },
+        "forge.logLevel": {
+          "type": "string",
+          "enum": [
+            "trace",
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ],
+          "default": "info",
+          "description": "Log verbosity level"
+        },
+        "forge.sidebar.retainContextWhenHidden": {
+          "type": "boolean",
+          "default": true,
+          "description": "Keep webview state when sidebar is hidden"
+        },
+        "forge.firstRun.shown": {
+          "type": "boolean",
+          "default": false,
+          "description": "Managed by extension — tracks first-run wizard state"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "svg:png": "node scripts/svg-to-png.mjs",
+    "build:ext": "node esbuild.config.mjs",
+    "build:webview": "node esbuild.config.mjs --webview",
+    "build": "node esbuild.config.mjs --all",
+    "build:release": "node esbuild.config.mjs --all --release",
+    "watch": "node esbuild.config.mjs --watch",
+    "type-check": "tsc --noEmit && tsc -p webview-ui/tsconfig.json --noEmit",
+    "lint": "eslint src webview-ui --ext .ts",
+    "lint:fix": "eslint src webview-ui --ext .ts --fix",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "package": "npm run build:release && vsce package --no-dependencies",
+    "publish": "npm run build:release && vsce publish --no-dependencies",
+    "ci": "npm run type-check && npm run lint && npm run test:coverage && npm run build"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^20.0.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@types/vscode": "^1.90.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "@vitest/coverage-v8": "^1.0.0",
+    "@vscode/test-electron": "^2.4.0",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.21.0",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.0.0",
+    "eslint-plugin-prettier": "^5.0.0",
+    "js-yaml": "^4.1.0",
+    "prettier": "^3.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.0.0"
+  },
+  "dependencies": {
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "zod": "^4.3.6"
+  }
+}
