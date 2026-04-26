@@ -1,5 +1,5 @@
 {
-  "name": "forge",
+  "name": "forge-ai",
   "displayName": "Forge",
   "description": "Local-LLM coding assistant — direct llama.cpp, strict tool schemas, Ask / Plan / Execute modes",
   "version": "0.1.0",
