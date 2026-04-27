@@ -1,18 +1,16 @@
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { SidebarProvider } from './sidebar/SidebarProvider';
 import { DirectBackend } from './backend/DirectBackend';
 import { BridgeBackend } from './backend/BridgeBackend';
-import { loadConfig } from './config/ConfigLoader';
+import { loadConfig, findConfigPath, watchConfig } from './config/ConfigLoader';
 import { initLogger, getLogger } from './util/logger';
 import { ToolRegistry } from './tools/ToolRegistry';
 import { CheckpointStack } from './checkpoint/CheckpointStack';
-import {
-  makeReadFileTool,
-  makeWriteFileTool,
-  makeReplaceSelectionTool,
-  makeInsertCodeTool,
-} from './tools/builtinTools';
-import { makeWebSearchTool } from './tools/searchTool';
+import { KeepUndoCodeLensProvider } from './sidebar/KeepUndoCodeLens';
+import { TemplateEngine } from './llm/TemplateEngine';
+import { runFirstRunWizard } from './sidebar/FirstRunWizard';
+import { registerAllTools } from './tools/registerAllTools';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   initLogger(context);
@@ -20,9 +18,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   log.info('Forge activating');
 
   const storagePath = context.globalStorageUri.fsPath;
+
+  // ── Find or create config ─────────────────────────────────────────────────
+  let configPath = findConfigPath(storagePath);
+
+  if (!configPath) {
+    const wizardDone = await runFirstRunWizard(context);
+    if (!wizardDone) {
+      const msg = 'Forge: No config.yaml found. Create .forge/config.yaml in your workspace.';
+      log.error(msg);
+      void vscode.window.showErrorMessage(msg, 'Retry').then((choice) => {
+        if (choice === 'Retry') void vscode.commands.executeCommand('workbench.action.reloadWindow');
+      });
+    }
+    return; // wizard asks user to reload; let activate re-run
+  }
+
   let config;
   try {
-    config = loadConfig(storagePath);
+    config = loadConfig(path.dirname(configPath));
   } catch (err) {
     const msg = (err as Error).message;
     log.error(msg);
@@ -30,20 +44,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     return;
   }
 
-  if (config.log_level) {
-    log.setLevel(config.log_level);
+  if (config.log_level) log.setLevel(config.log_level);
+
+  // ── Template engine (v0.8) ────────────────────────────────────────────────
+  const builtinDir = path.join(context.extensionPath, 'config', 'templates', 'builtin');
+  const userDirs = config.templates_dir ? [config.templates_dir] : [];
+  let templateEngine: TemplateEngine | undefined;
+  try {
+    templateEngine = new TemplateEngine(builtinDir, userDirs);
+  } catch (err) {
+    log.warn(`[TemplateEngine] init failed, using hardcoded prompts: ${(err as Error).message}`);
   }
 
   // ── Tool registry ─────────────────────────────────────────────────────────
   const toolRegistry = new ToolRegistry();
-  toolRegistry.register(makeReadFileTool());
-  toolRegistry.register(makeWriteFileTool());
-  toolRegistry.register(makeReplaceSelectionTool());
-  toolRegistry.register(makeInsertCodeTool());
-
-  if (config.search) {
-    toolRegistry.register(makeWebSearchTool(context.secrets, config.search));
-  }
+  registerAllTools(toolRegistry, context.workspaceState, context.secrets, config.search);
 
   // ── Checkpoint stack ──────────────────────────────────────────────────────
   const checkpoints = new CheckpointStack();
@@ -55,13 +70,29 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       })
     : new DirectBackend(config);
 
+  // ── KeepUndo CodeLens (v0.6) ──────────────────────────────────────────────
+  // Declared before SidebarProvider so the provider can reference its methods
+  let sidebarProvider: SidebarProvider;
+
+  const codeLensProvider = new KeepUndoCodeLensProvider(
+    () => { sidebarProvider.keep(); },
+    () => { sidebarProvider.undo(); },
+  );
+  context.subscriptions.push(
+    vscode.languages.registerCodeLensProvider({ scheme: 'file' }, codeLensProvider),
+    codeLensProvider,
+  );
+
   // ── Sidebar ───────────────────────────────────────────────────────────────
-  const sidebarProvider = new SidebarProvider(
+  sidebarProvider = new SidebarProvider(
     context.extensionUri,
     backend,
     config,
     checkpoints,
     toolRegistry,
+    context.workspaceState,
+    codeLensProvider,
+    templateEngine,
   );
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(SidebarProvider.viewId, sidebarProvider, {
@@ -74,8 +105,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     void vscode.window.showErrorMessage(`Forge: ${err.message}`);
   });
 
+  // ── Config hot-reload (v0.8) ──────────────────────────────────────────────
+  context.subscriptions.push(
+    watchConfig(configPath, (newConfig, err) => {
+      if (err) {
+        void vscode.window.showErrorMessage(`Forge: config reload failed — ${err.message}`);
+      } else if (newConfig) {
+        const newUserDirs = newConfig.templates_dir ? [newConfig.templates_dir] : [];
+        templateEngine?.reload(newUserDirs);
+        log.info('Forge: config reloaded');
+        void vscode.window.showInformationMessage(
+          'Forge: config reloaded (restart backend to apply model changes)',
+        );
+      }
+    }),
+  );
+
   // ── Commands ──────────────────────────────────────────────────────────────
   context.subscriptions.push(
+    vscode.commands.registerCommand('forge.openSidebar', () => {
+      void vscode.commands.executeCommand('workbench.view.extension.forge-sidebar');
+    }),
+
     vscode.commands.registerCommand('forge.restartBackend', async () => {
       try {
         await backend.start();
@@ -109,10 +160,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       sidebarProvider.newChat();
     }),
 
+    // v0.2 — send active editor selection to sidebar input
+    vscode.commands.registerCommand('forge.sendSelection', () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.selection.isEmpty) {
+        void vscode.window.showWarningMessage('Forge: no text selected');
+        return;
+      }
+      const text = editor.document.getText(editor.selection);
+      sidebarProvider.sendSelectionContent(text);
+    }),
+
     vscode.commands.registerCommand('forge.setSearchApiKey', async () => {
       if (!config.search) {
         void vscode.window.showErrorMessage(
-          'Forge: search is not configured in config.yaml. Add a "search:" block first.',
+          'Forge: search not configured. Add a "search:" block to config.yaml first.',
         );
         return;
       }
@@ -124,10 +186,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       });
       if (key) {
         await context.secrets.store(config.search.secret_key_name, key);
-        void vscode.window.showInformationMessage(
-          `Forge: ${config.search.provider} API key saved.`,
-        );
+        void vscode.window.showInformationMessage(`Forge: ${config.search.provider} API key saved.`);
       }
+    }),
+
+    // v0.3 — first-run / setup wizard (manual trigger)
+    vscode.commands.registerCommand('forge.setupWizard', async () => {
+      await runFirstRunWizard(context);
     }),
   );
 
@@ -139,5 +204,5 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 }
 
 export function deactivate(): void {
-  // backend.stop() is called via the subscription added in activate().
+  // backend.stop() called via subscription above
 }

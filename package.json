@@ -54,29 +54,33 @@
       ]
     },
     "commands": [
-      {
-        "command": "forge.openSidebar",
-        "title": "Forge: Open Sidebar"
-      },
-      {
-        "command": "forge.restartBackend",
-        "title": "Forge: Restart Backend"
-      },
+      { "command": "forge.openSidebar",      "title": "Forge: Open Sidebar" },
+      { "command": "forge.restartBackend",   "title": "Forge: Restart Backend" },
+      { "command": "forge.newChat",          "title": "Forge: New Chat" },
+      { "command": "forge.undo",             "title": "Forge: Undo Last Turn" },
+      { "command": "forge.keep",             "title": "Forge: Keep Changes" },
+      { "command": "forge.setSearchApiKey",  "title": "Forge: Set Search API Key" },
+      { "command": "forge.sendSelection",    "title": "Forge: Send Selection to Chat" },
+      { "command": "forge.setupWizard",      "title": "Forge: Setup Wizard" }
+    ],
+    "keybindings": [
       {
         "command": "forge.newChat",
-        "title": "Forge: New Chat"
+        "key": "ctrl+shift+n",
+        "mac": "cmd+shift+n",
+        "when": "focusedView == forge.sidebar"
+      },
+      {
+        "command": "forge.sendSelection",
+        "key": "ctrl+shift+e",
+        "mac": "cmd+shift+e",
+        "when": "editorHasSelection"
       },
       {
         "command": "forge.undo",
-        "title": "Forge: Undo Last Turn"
-      },
-      {
-        "command": "forge.keep",
-        "title": "Forge: Keep Changes"
-      },
-      {
-        "command": "forge.setSearchApiKey",
-        "title": "Forge: Set Search API Key"
+        "key": "ctrl+shift+z",
+        "mac": "cmd+shift+z",
+        "when": "focusedView == forge.sidebar"
       }
     ],
     "configuration": {
@@ -141,7 +145,6 @@
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",
-    "@types/mozilla__readability": "^0.5.0",
     "@types/nunjucks": "^3.2.6",
     "@types/turndown": "^5.0.4",
     "@types/js-yaml": "^4.0.9",

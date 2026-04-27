@@ -17,6 +17,25 @@ export interface ModelConfig {
   flash_attn?: boolean;
   /** Extra argv tokens appended verbatim after all computed args. */
   extra_llama_server_args?: string[];
+  /** Per-model sampling parameter overrides. */
+  sampling?: {
+    temperature?: number;
+    top_p?: number;
+    top_k?: number;
+    min_p?: number;
+    max_tokens?: number;
+    presence_penalty?: number;
+    frequency_penalty?: number;
+    preserve_thinking?: boolean;
+  };
+  /** Model capability hints used for tool-call routing and UI. */
+  capabilities?: ('tool-call' | 'vision' | 'long-context')[];
+  /** When true, strip tool definitions from the request for this model. */
+  strip_tools?: boolean;
+  /** Per-model system prompt override (takes precedence over template). */
+  system_prompt?: string;
+  /** When true, enable thinking/reasoning tokens for this model. */
+  think?: boolean;
 }
 
 export interface LlamaServerConfig {
@@ -61,4 +80,22 @@ export interface ForgeConfig {
   bridge_mode?: boolean;
   search?: SearchConfig;
   log_level?: 'trace' | 'debug' | 'info' | 'warn' | 'error';
+  /** Extra directories to scan for GGUF files (used by first-run wizard). */
+  model_dirs?: string[];
+  /** Path to a directory containing user-defined Nunjucks template overrides. */
+  templates_dir?: string;
+  /** Text injected into every system prompt via the template engine. */
+  custom_instructions?: string;
+  /** Tool permission gates. Defaults to read-only fs, no net/exec/git-write. */
+  permissions?: {
+    fs?: { read?: boolean; write?: boolean; delete?: boolean };
+    net?: { search?: boolean; fetch?: boolean };
+    exec?: { terminal?: boolean; headless?: boolean };
+    git?: { read?: boolean; write?: boolean };
+  };
+  /** Execution sandbox settings. */
+  exec?: {
+    timeout_ms?: number;
+    denylist_extra?: string[];
+  };
 }
