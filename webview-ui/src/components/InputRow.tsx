@@ -1,15 +1,36 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { vscode } from '../vscode';
 
 interface Props {
   onSend: (text: string) => void;
   onCancel: () => void;
   streaming: boolean;
   backendReady: boolean;
+  /** When this prop changes to a non-empty string the textarea is prefilled. */
+  prefillText?: string;
+  /** Called after prefill has been consumed so the parent can reset to ''. */
+  onPrefillConsumed?: () => void;
 }
 
-export function InputRow({ onSend, onCancel, streaming, backendReady }: Props): React.ReactElement {
+export function InputRow({
+  onSend,
+  onCancel,
+  streaming,
+  backendReady,
+  prefillText = '',
+  onPrefillConsumed,
+}: Props): React.ReactElement {
   const [text, setText] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Inject prefill text whenever the prop changes to something non-empty.
+  useEffect(() => {
+    if (prefillText) {
+      setText(prefillText);
+      textareaRef.current?.focus();
+      onPrefillConsumed?.();
+    }
+  }, [prefillText, onPrefillConsumed]);
 
   const submit = useCallback(() => {
     const trimmed = text.trim();
@@ -26,6 +47,12 @@ export function InputRow({ onSend, onCancel, streaming, backendReady }: Props): 
     }
   }, [submit]);
 
+  const handleUseSelection = useCallback(() => {
+    vscode.postMessage({ type: 'sendSelection' });
+  }, []);
+
+  const selDisabled = streaming || !backendReady;
+
   return (
     <div id="input-row">
       <textarea
@@ -37,13 +64,23 @@ export function InputRow({ onSend, onCancel, streaming, backendReady }: Props): 
         onChange={(e) => setText(e.target.value)}
         onKeyDown={handleKeyDown}
       />
-      {streaming ? (
-        <button onClick={onCancel}>Cancel</button>
-      ) : (
-        <button onClick={submit} disabled={!backendReady || !text.trim()}>
-          Send
+      <div id="input-btn-col">
+        {streaming ? (
+          <button onClick={onCancel}>Cancel</button>
+        ) : (
+          <button onClick={submit} disabled={!backendReady || !text.trim()}>
+            Send
+          </button>
+        )}
+        <button
+          id="sel-btn"
+          title="Prefill with active editor selection"
+          disabled={selDisabled}
+          onClick={handleUseSelection}
+        >
+          ⊕ Sel
         </button>
-      )}
+      </div>
     </div>
   );
 }

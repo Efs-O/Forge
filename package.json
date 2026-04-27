@@ -141,6 +141,9 @@
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",
+    "@types/mozilla__readability": "^0.5.0",
+    "@types/nunjucks": "^3.2.6",
+    "@types/turndown": "^5.0.4",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.0.0",
     "@types/react": "^19.2.14",
@@ -161,10 +164,13 @@
     "vitest": "^1.0.0"
   },
   "dependencies": {
+    "@mozilla/readability": "^0.5.0",
+    "nunjucks": "^3.2.4",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "turndown": "^7.2.0",
     "zod": "^4.3.6"
   }
 }

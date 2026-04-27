@@ -1,6 +1,6 @@
 import type { ToolDefinition } from '../llm/types';
 
-export type ToolPermission = 'read' | 'write' | 'terminal' | 'search';
+export type ToolPermission = 'read' | 'write' | 'delete' | 'terminal' | 'search' | 'git';
 
 export interface ToolHandler {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- tool args are schema-validated at call site
@@ -66,5 +66,5 @@ export class ToolRegistry {
 export const MODE_PERMISSIONS: Record<string, Set<ToolPermission>> = {
   ask:     new Set(['search']),
   plan:    new Set(['read', 'search']),
-  execute: new Set(['read', 'write', 'terminal', 'search']),
+  execute: new Set(['read', 'write', 'delete', 'terminal', 'search', 'git']),
 };

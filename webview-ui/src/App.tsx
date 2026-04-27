@@ -1,4 +1,4 @@
-import React, { useEffect, useReducer, useCallback } from 'react';
+import React, { useEffect, useReducer, useCallback, useState } from 'react';
 import type { HostToWebview } from '../../src/sidebar/messageBridge';
 import type { Mode } from '../../src/llm/types';
 import { vscode } from './vscode';
@@ -6,6 +6,7 @@ import { Header } from './components/Header';
 import { MessageList } from './components/MessageList';
 import { CheckpointBar } from './components/CheckpointBar';
 import { InputRow } from './components/InputRow';
+import { ConfirmationDialog } from './components/ConfirmationDialog';
 
 export interface AppMessage {
   id: string;
@@ -35,7 +36,8 @@ type Action =
   | { type: 'SET_MODEL'; name: string }
   | { type: 'CHECKPOINT_READY' }
   | { type: 'CHECKPOINT_DISMISSED' }
-  | { type: 'NEW_CHAT' };
+  | { type: 'NEW_CHAT' }
+  | { type: 'HISTORY_RESTORE'; messages: Array<{ role: 'user' | 'assistant'; content: string }> };
 
 function mkId(): string {
   return Math.random().toString(36).slice(2);
@@ -115,6 +117,15 @@ function reducer(state: State, action: Action): State {
         checkpointPending: false,
       };
 
+    case 'HISTORY_RESTORE': {
+      const restored: AppMessage[] = action.messages.map((m) => ({
+        id: mkId(),
+        role: m.role,
+        content: m.content,
+      }));
+      return { ...state, messages: restored };
+    }
+
     default:
       return state;
   }
@@ -133,6 +144,16 @@ const initial: State = {
 export function App(): React.ReactElement {
   const [state, dispatch] = useReducer(reducer, initial);
 
+  // v0.2+ local state (not in the reducer to stay lightweight)
+  const [confirmRequest, setConfirmRequest] = useState<{
+    id: string;
+    toolName: string;
+    detail: string;
+  } | null>(null);
+  const [tokenUsed, setTokenUsed] = useState(0);
+  const [tokenMax, setTokenMax] = useState(0);
+  const [selectionPrefill, setSelectionPrefill] = useState('');
+
   useEffect(() => {
     function handler(event: MessageEvent): void {
       const msg = event.data as HostToWebview;
@@ -146,6 +167,11 @@ export function App(): React.ReactElement {
         case 'checkpointReady':     dispatch({ type: 'CHECKPOINT_READY' }); break;
         case 'checkpointDismissed': dispatch({ type: 'CHECKPOINT_DISMISSED' }); break;
         case 'newChat':             dispatch({ type: 'NEW_CHAT' }); break;
+        // v0.2+ messages
+        case 'selectionContent':    setSelectionPrefill(msg.text); break;
+        case 'confirmRequest':      setConfirmRequest({ id: msg.id, toolName: msg.toolName, detail: msg.detail }); break;
+        case 'tokenBudget':         setTokenUsed(msg.used); setTokenMax(msg.max); break;
+        case 'historyRestore':      dispatch({ type: 'HISTORY_RESTORE', messages: msg.messages }); break;
       }
     }
     window.addEventListener('message', handler);
@@ -176,6 +202,22 @@ export function App(): React.ReactElement {
     vscode.postMessage({ type: 'newChat' });
   }, []);
 
+  const handleConfirmApprove = useCallback(() => {
+    if (!confirmRequest) return;
+    vscode.postMessage({ type: 'confirmResponse', id: confirmRequest.id, approved: true });
+    setConfirmRequest(null);
+  }, [confirmRequest]);
+
+  const handleConfirmDeny = useCallback(() => {
+    if (!confirmRequest) return;
+    vscode.postMessage({ type: 'confirmResponse', id: confirmRequest.id, approved: false });
+    setConfirmRequest(null);
+  }, [confirmRequest]);
+
+  const handlePrefillConsumed = useCallback(() => {
+    setSelectionPrefill('');
+  }, []);
+
   return (
     <div id="forge-root">
       <Header
@@ -186,6 +228,8 @@ export function App(): React.ReactElement {
         onModeChange={handleModeChange}
         onNewChat={handleNewChat}
         disabled={state.streaming}
+        tokenUsed={tokenUsed}
+        tokenMax={tokenMax}
       />
       <MessageList messages={state.messages} />
       <CheckpointBar visible={state.checkpointPending} />
@@ -194,7 +238,17 @@ export function App(): React.ReactElement {
         onCancel={handleCancel}
         streaming={state.streaming}
         backendReady={state.backendReady}
+        prefillText={selectionPrefill}
+        onPrefillConsumed={handlePrefillConsumed}
       />
+      {confirmRequest && (
+        <ConfirmationDialog
+          toolName={confirmRequest.toolName}
+          detail={confirmRequest.detail}
+          onApprove={handleConfirmApprove}
+          onDeny={handleConfirmDeny}
+        />
+      )}
     </div>
   );
 }
