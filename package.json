@@ -2,7 +2,7 @@
   "name": "forge-llm",
   "displayName": "Forge LLM",
   "description": "Local-LLM coding assistant — direct llama.cpp, strict tool schemas, Ask / Plan / Execute modes",
-  "version": "0.1.0",
+  "version": "0.9.0",
   "publisher": "efs-o",
   "license": "Apache-2.0",
   "private": true,
