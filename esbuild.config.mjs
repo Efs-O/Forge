@@ -1,6 +1,6 @@
 import * as esbuild from 'esbuild';
 import { argv } from 'process';
-import { copyFileSync, mkdirSync } from 'fs';
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 
 const watchMode = argv.includes('--watch');
 const buildAll = argv.includes('--all');
@@ -32,9 +32,20 @@ const webviewConfig = {
   jsxImportSource: 'react',
 };
 
+const CSS_PARTIALS = [
+  'webview-ui/styles/base.css',
+  'webview-ui/styles/animations.css',
+  'webview-ui/styles/layout.css',
+  'webview-ui/styles/tabs.css',
+  'webview-ui/styles/messages.css',
+  'webview-ui/styles/input.css',
+  'webview-ui/styles/dialogs.css',
+];
+
 function copyWebviewAssets() {
   mkdirSync('dist/webview', { recursive: true });
-  copyFileSync('webview-ui/styles.css', 'dist/webview/styles.css');
+  const css = CSS_PARTIALS.map((f) => readFileSync(f, 'utf8')).join('\n');
+  writeFileSync('dist/webview/styles.css', css);
   copyFileSync('webview-ui/index.html', 'dist/webview/index.html');
 }
 
