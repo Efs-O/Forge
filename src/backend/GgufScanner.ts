@@ -67,23 +67,34 @@ function walkDir(dir: string, depth: number, results: Map<string, GgufCandidate>
   }
 }
 
-function defaultHfCachePath(): string {
+function defaultScanDirs(): string[] {
   const home = os.homedir();
+  const hfRelative = path.join('.cache', 'huggingface', 'hub');
+  const dirs: string[] = [path.join(home, hfRelative)];
+
   if (process.platform === 'win32') {
-    return path.join(home, '.cache', 'huggingface', 'hub');
+    // Check HF cache on all mounted drive letters (covers external / NAS drives)
+    const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+    for (const letter of letters) {
+      const candidate = `${letter}:\\${hfRelative}`;
+      if (candidate !== dirs[0] && fs.existsSync(candidate)) {
+        dirs.push(candidate);
+      }
+    }
   }
-  return path.join(home, '.cache', 'huggingface', 'hub');
+
+  return dirs;
 }
 
 /**
  * Scan model directories for .gguf files.
  * Directories searched in order:
  * 1. User-configured model_dirs from config (extraDirs)
- * 2. Default HF cache: ~/.cache/huggingface/hub
+ * 2. Default HF cache on home drive
+ * 3. (Windows) HF cache on all other mounted drives
  */
 export async function scanForGgufs(extraDirs: string[] = []): Promise<GgufCandidate[]> {
-  const hfCache = defaultHfCachePath();
-  const dirsToSearch = [...extraDirs, hfCache];
+  const dirsToSearch = [...extraDirs, ...defaultScanDirs()];
 
   const results = new Map<string, GgufCandidate>();
 

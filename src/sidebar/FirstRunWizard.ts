@@ -101,8 +101,22 @@ async function runLlamaCppFlow(context: vscode.ExtensionContext): Promise<boolea
       async () => { candidates = await scanForGgufs(); },
     );
     if (candidates.length === 0) {
-      await vscode.window.showWarningMessage('No GGUF files found. Configure config.yaml manually.');
-      return false;
+      const extraDir = await vscode.window.showInputBox({
+        title: 'Forge: No GGUF files found',
+        prompt: 'Enter a directory path to search (e.g. D:\\models or /mnt/nas/models), or leave blank to skip',
+        placeHolder: 'D:\\models',
+        ignoreFocusOut: true,
+      });
+      if (extraDir?.trim()) {
+        await vscode.window.withProgress(
+          { location: vscode.ProgressLocation.Notification, title: 'Forge: Scanning…' },
+          async () => { candidates = await scanForGgufs([extraDir.trim()]); },
+        );
+      }
+      if (candidates.length === 0) {
+        await vscode.window.showWarningMessage('No GGUF files found. Configure config.yaml manually.');
+        return false;
+      }
     }
   } else {
     return false;
