@@ -146,7 +146,7 @@ describe('ToolDispatch', () => {
 
     await dispatch.dispatch(toolCalls, allowed, messages as never);
 
-    expect(requestApproval).toHaveBeenCalledWith('write_file', expect.stringContaining('hello'));
+    expect(requestApproval).toHaveBeenCalledWith('write_file', expect.stringContaining('hello'), false);
     expect(checkpoints.snapshotBefore).toHaveBeenCalled();
     expect(codeLens.markPending).toHaveBeenCalled();
   });
@@ -170,7 +170,7 @@ describe('ToolDispatch', () => {
 
     await dispatch.dispatch(toolCalls, allowed, messages as never);
 
-    expect(requestApproval).toHaveBeenCalledWith('delete_file', expect.any(String));
+    expect(requestApproval).toHaveBeenCalledWith('delete_file', expect.any(String), false);
   });
 
   it('requests approval for terminal tools', async () => {
@@ -192,7 +192,7 @@ describe('ToolDispatch', () => {
 
     await dispatch.dispatch(toolCalls, allowed, messages as never);
 
-    expect(requestApproval).toHaveBeenCalledWith('run_terminal', expect.any(String));
+    expect(requestApproval).toHaveBeenCalledWith('run_terminal', expect.any(String), false);
   });
 
   it('requests approval for git tools', async () => {
@@ -214,7 +214,29 @@ describe('ToolDispatch', () => {
 
     await dispatch.dispatch(toolCalls, allowed, messages as never);
 
-    expect(requestApproval).toHaveBeenCalledWith('git_commit', expect.any(String));
+    expect(requestApproval).toHaveBeenCalledWith('git_commit', expect.any(String), false);
+  });
+
+  it('flags delete_file with recursive=true as dangerous', async () => {
+    toolRegistry.register({
+      definition: {
+        type: 'function',
+        function: {
+          name: 'delete_file',
+          description: 'Delete a file',
+          parameters: { type: 'object' },
+        },
+      },
+      permission: 'delete',
+      handler: vi.fn().mockResolvedValue('deleted'),
+    });
+
+    const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> = [];
+    const toolCalls = [makeToolCall('delete_file', { path: 'src/', recursive: true })];
+
+    await dispatch.dispatch(toolCalls, allowed, messages as never);
+
+    expect(requestApproval).toHaveBeenCalledWith('delete_file', expect.any(String), true);
   });
 
   it('skips execution when user declines approval', async () => {
