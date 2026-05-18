@@ -39,6 +39,16 @@ function makeChunk(content: string, finishReason: string | null = null): string 
   return `data: ${JSON.stringify({ choices: [choice] })}\n\n`;
 }
 
+/** SSE chunk with arbitrary delta (tests Ollama-style empty `finish_reason` or `reasoning_content`). */
+function makeDeltaChunk(delta: Record<string, unknown>, finishReason: string | null = null): string {
+  const choice: Record<string, unknown> = {
+    index: 0,
+    delta,
+    finish_reason: finishReason,
+  };
+  return `data: ${JSON.stringify({ choices: [choice] })}\n\n`;
+}
+
 function makeToolChunk(
   index: number,
   id: string,
@@ -92,6 +102,96 @@ describe('streamChatCompletion — basic token streaming', () => {
   });
 });
 
+describe('streamChatCompletion — empty-string finish_reason (Ollama interim chunks)', () => {
+  let url: string;
+  let close: () => Promise<void>;
+
+  beforeAll(async () => {
+    ({ url, close } = await startServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      const body = sseBody([
+        makeDeltaChunk({}, ''),
+        makeDeltaChunk({ content: 'Visible' }, 'stop'),
+      ]);
+      res.end(body);
+    }));
+  });
+
+  afterAll(() => close());
+
+  it('does not end stream until a non-empty finish_reason or [DONE]', async () => {
+    const tokens: string[] = [];
+    let doneReason: string | null = null;
+
+    await streamChatCompletion(url, baseRequest, {
+      onToken: (t) => tokens.push(t),
+      onDone: (r) => { doneReason = r; },
+      onError: (e) => { throw e; },
+    });
+
+    expect(tokens).toEqual(['Visible']);
+    expect(doneReason).toBe('stop');
+  });
+});
+
+describe('streamChatCompletion — reasoning_content when content is absent', () => {
+  let url: string;
+  let close: () => Promise<void>;
+
+  beforeAll(async () => {
+    ({ url, close } = await startServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      const body = sseBody([
+        makeDeltaChunk({ reasoning_content: 'Step one. ' }, null),
+        makeDeltaChunk({ content: 'Done.' }, 'stop'),
+      ]);
+      res.end(body);
+    }));
+  });
+
+  afterAll(() => close());
+
+  it('forwards reasoning_content as tokens', async () => {
+    const tokens: string[] = [];
+    await streamChatCompletion(url, baseRequest, {
+      onToken: (t) => tokens.push(t),
+      onDone: () => {},
+      onError: (e) => { throw e; },
+    });
+
+    expect(tokens).toEqual(['Step one. ', 'Done.']);
+  });
+});
+
+describe('streamChatCompletion — Ollama reasoning when content is absent', () => {
+  let url: string;
+  let close: () => Promise<void>;
+
+  beforeAll(async () => {
+    ({ url, close } = await startServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      const body = sseBody([
+        makeDeltaChunk({ reasoning: 'Think first. ' }, null),
+        makeDeltaChunk({ content: 'Done.' }, 'stop'),
+      ]);
+      res.end(body);
+    }));
+  });
+
+  afterAll(() => close());
+
+  it('forwards Ollama reasoning as tokens', async () => {
+    const tokens: string[] = [];
+    await streamChatCompletion(url, baseRequest, {
+      onToken: (t) => tokens.push(t),
+      onDone: () => {},
+      onError: (e) => { throw e; },
+    });
+
+    expect(tokens).toEqual(['Think first. ', 'Done.']);
+  });
+});
+
 describe('streamChatCompletion — tool_calls round-trip', () => {
   let url: string;
   let close: () => Promise<void>;
@@ -132,6 +232,46 @@ describe('streamChatCompletion — tool_calls round-trip', () => {
       arguments: '{"path":"/tmp/file.txt"}',
     });
     expect(doneReason).toBe('tool_calls');
+  });
+});
+
+describe('streamChatCompletion — Ollama-style tool deltas with finish_reason stop', () => {
+  let url: string;
+  let close: () => Promise<void>;
+
+  beforeAll(async () => {
+    ({ url, close } = await startServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      const body = sseBody([
+        makeToolChunk(0, 'call-ollama', 'write_new_file', '{"path":"/tmp/out.tx'),
+        makeToolChunk(0, '', '', 't"}', 'stop'),
+      ]);
+      res.end(body);
+    }));
+  });
+
+  afterAll(() => close());
+
+  it('still fires onToolCalls when terminal finish_reason is stop (not tool_calls)', async () => {
+    let toolCalls: { id: string; name: string; arguments: string }[] = [];
+    let doneReason: string | null = null;
+
+    await streamChatCompletion(url, baseRequest, {
+      onToken: () => {},
+      onDone: (r) => { doneReason = r; },
+      onError: (e) => { throw e; },
+      onToolCalls: (calls) => {
+        toolCalls = calls.map((c) => ({ id: c.id, name: c.function.name, arguments: c.function.arguments }));
+      },
+    });
+
+    expect(toolCalls).toHaveLength(1);
+    expect(toolCalls[0]).toEqual({
+      id: 'call-ollama',
+      name: 'write_new_file',
+      arguments: '{"path":"/tmp/out.txt"}',
+    });
+    expect(doneReason).toBe('stop');
   });
 });
 

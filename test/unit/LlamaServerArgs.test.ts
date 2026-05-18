@@ -36,7 +36,10 @@ describe('composeLlamaServerArgs', () => {
     expect(args[args.indexOf('--n-gpu-layers') + 1]).toBe('-1');
     expect(args).toContain('--ctx-size');
     expect(args[args.indexOf('--ctx-size') + 1]).toBe('4096');
+    expect(args[args.indexOf('--cache-type-k') + 1]).toBe('q8_0');
+    expect(args[args.indexOf('--cache-type-v') + 1]).toBe('q8_0');
     expect(args).toContain('--flash-attn');
+    expect(args[args.indexOf('--flash-attn') + 1]).toBe('on');
   });
 
   it('prefers model overrides over server defaults', () => {
@@ -49,8 +52,8 @@ describe('composeLlamaServerArgs', () => {
     const args = composeLlamaServerArgs('', model, serverDefaults, '127.0.0.1', 8080);
     expect(args[args.indexOf('--n-gpu-layers') + 1]).toBe('32');
     expect(args[args.indexOf('--ctx-size') + 1]).toBe('8192');
-    expect(args).toContain('--no-flash-attn');
-    expect(args).not.toContain('--flash-attn');
+    expect(args).toContain('--flash-attn');
+    expect(args[args.indexOf('--flash-attn') + 1]).toBe('off');
   });
 
   it('appends extra_llama_server_args verbatim', () => {
@@ -62,6 +65,17 @@ describe('composeLlamaServerArgs', () => {
     expect(args).toContain('--verbose');
     expect(args).toContain('--log-format');
     expect(args).toContain('json');
+  });
+
+  it('passes through string cache types verbatim', () => {
+    const server: LlamaServerConfig = {
+      ...serverDefaults,
+      type_k: 'q4_0',
+      type_v: 'f16',
+    };
+    const args = composeLlamaServerArgs('', baseModel, server, '127.0.0.1', 8080);
+    expect(args[args.indexOf('--cache-type-k') + 1]).toBe('q4_0');
+    expect(args[args.indexOf('--cache-type-v') + 1]).toBe('f16');
   });
 
   it('omits --threads when not set', () => {
