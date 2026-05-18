@@ -13,6 +13,7 @@ import { CheckpointStack } from './checkpoint/CheckpointStack';
 import { KeepUndoCodeLensProvider } from './sidebar/KeepUndoCodeLens';
 import { TemplateEngine } from './llm/TemplateEngine';
 import { runFirstRunWizard } from './sidebar/FirstRunWizard';
+import { SESSION_KEY_V1, HISTORY_KEY_LEGACY } from './sidebar/sessionTypes';
 import { registerAllTools } from './tools/registerAllTools';
 import { BackendStatusBar } from './vscode/BackendStatusBar';
 import { ForgeCodeActionProvider } from './vscode/codeActions';
@@ -126,6 +127,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.languages.registerCodeLensProvider({ scheme: 'file' }, codeLensProvider),
     codeLensProvider,
   );
+
+  // ── One-time migration: workspaceState → globalState (history now global) ──
+  if (!context.globalState.get<boolean>('forge.migrated.sessions.v1')) {
+    void context.globalState.update('forge.migrated.sessions.v1', true);
+    if (!context.globalState.get(SESSION_KEY_V1)) {
+      const wsSession = context.workspaceState.get(SESSION_KEY_V1);
+      if (wsSession) void context.globalState.update(SESSION_KEY_V1, wsSession);
+    }
+    if (!context.globalState.get(HISTORY_KEY_LEGACY)) {
+      const wsLegacy = context.workspaceState.get(HISTORY_KEY_LEGACY);
+      if (wsLegacy) void context.globalState.update(HISTORY_KEY_LEGACY, wsLegacy);
+    }
+  }
 
   // ── Sidebar ───────────────────────────────────────────────────────────────
   sidebarProvider = new SidebarProvider(
