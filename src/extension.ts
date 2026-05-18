@@ -129,20 +129,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     codeLensProvider,
   );
 
-  // ── One-time migration: workspaceState → globalState (history now global) ──
-  if (!context.globalState.get<boolean>('forge.migrated.sessions.v1')) {
-    void context.globalState.update('forge.migrated.sessions.v1', true);
-    // Try seed file written by external migration tool (old efs-o.forge-llm data)
-    const seedPath = path.join(context.globalStorageUri.fsPath, 'sessions.seed.json');
-    if (fs.existsSync(seedPath)) {
-      try {
-        const seed = JSON.parse(fs.readFileSync(seedPath, 'utf8'));
-        void context.globalState.update(SESSION_KEY_V1, seed);
-        fs.unlinkSync(seedPath);
-      } catch { /* ignore corrupt seed */ }
-    } else if (!context.globalState.get(SESSION_KEY_V1)) {
+  // ── One-time migration: seed file / workspaceState → globalState ──────────
+  // Seed file takes priority regardless of migration flag (flag may have been
+  // set on a prior empty run before the seed file existed).
+  const seedPath = path.join(context.globalStorageUri.fsPath, 'sessions.seed.json');
+  if (fs.existsSync(seedPath)) {
+    try {
+      const seed = JSON.parse(fs.readFileSync(seedPath, 'utf8'));
+      await context.globalState.update(SESSION_KEY_V1, seed);
+      fs.unlinkSync(seedPath);
+      await context.globalState.update('forge.migrated.sessions.v1', true);
+    } catch { /* ignore corrupt seed */ }
+  } else if (!context.globalState.get<boolean>('forge.migrated.sessions.v1')) {
+    await context.globalState.update('forge.migrated.sessions.v1', true);
+    if (!context.globalState.get(SESSION_KEY_V1)) {
       const wsSession = context.workspaceState.get(SESSION_KEY_V1);
-      if (wsSession) void context.globalState.update(SESSION_KEY_V1, wsSession);
+      if (wsSession) await context.globalState.update(SESSION_KEY_V1, wsSession);
     }
   }
 
