@@ -32,7 +32,7 @@ export function Header({
   tokenUsed,
   tokenMax,
 }: Props): React.ReactElement {
-  const showBudget = tokenUsed > 0;
+  const showBudget = tokenMax > 0;
   const fillPct = tokenMax > 0 ? Math.min(100, (tokenUsed / tokenMax) * 100) : 0;
 
   return (
