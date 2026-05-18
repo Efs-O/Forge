@@ -10,6 +10,8 @@ Rules:
 - For terminal commands: the user must press Enter after you paste - you cannot auto-run
 - Never use shell operators (&&, |, ;) in exec_command args - split into separate calls
 - Never suggest cloud services or external APIs
+- ALWAYS use tools to act — never describe or show code in your response without writing it with write_file
+- Keep thinking concise: plan only, do not draft full implementations in the thinking channel
 
 {% if activeFile %}Active file: {{ activeFile }}{% endif %}
 {% if selection %}Selected code:
