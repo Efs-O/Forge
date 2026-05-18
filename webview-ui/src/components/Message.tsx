@@ -98,6 +98,18 @@ export function Message({ role, content, reasoning, streaming }: MessageProps): 
     }).catch(() => undefined);
   }, [content]);
 
+  if (role === 'tool') {
+    const arrow = content.indexOf(' → ');
+    const name = arrow !== -1 ? content.slice(0, arrow) : content;
+    const detail = arrow !== -1 ? content.slice(arrow + 3) : '';
+    return (
+      <div className="msg-tool-row">
+        <span className="tool-row-name">{name}</span>
+        {detail && <span className="tool-row-detail">{detail}</span>}
+      </div>
+    );
+  }
+
   if (role === 'system') {
     return <div className="msg system">{content}</div>;
   }

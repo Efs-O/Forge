@@ -27,6 +27,7 @@ import { getLogger } from '../util/logger';
 import { inspectRuntimeModelCapabilities, type RuntimeModelCapabilities } from '../backend/ModelCapabilities';
 import { ToolDispatch } from './ToolDispatch';
 import { deriveTitle } from './sessionTypes';
+import { extractToolDetail } from './toolSummary';
 const log = getLogger();
 const MAX_TOOL_ROUNDS = 20;
 
@@ -283,6 +284,10 @@ export class AgentLoop {
 
       if (toolCalls?.length) {
         this.failureTracker.reset();
+        for (const tc of toolCalls) {
+          const detail = extractToolDetail(tc.function.arguments);
+          this.post({ type: 'toolActivity', toolName: tc.function.name, ...(detail ? { detail } : {}) });
+        }
         conv.messages.push({ role: 'assistant', content: null, tool_calls: toolCalls });
         await this.toolDispatch.dispatch(toolCalls, allowed, conv.messages);
         continue;
@@ -293,6 +298,10 @@ export class AgentLoop {
         : null;
       if (fallbackToolCalls?.length) {
         this.failureTracker.reset();
+        for (const tc of fallbackToolCalls) {
+          const detail = extractToolDetail(tc.function.arguments);
+          this.post({ type: 'toolActivity', toolName: tc.function.name, ...(detail ? { detail } : {}) });
+        }
         conv.messages.push({ role: 'assistant', content: null, tool_calls: fallbackToolCalls });
         await this.toolDispatch.dispatch(fallbackToolCalls, allowed, conv.messages);
         continue;

@@ -45,6 +45,7 @@ export interface CheckpointDismissedMsg { type: 'checkpointDismissed' }
 export interface NewChatMsg        { type: 'newChat' }
 
 export interface ConfirmRequestMsg   { type: 'confirmRequest'; id: string; toolName: string; detail: string; isDangerous?: boolean }
+export interface ToolActivityMsg     { type: 'toolActivity';   toolName: string; detail?: string }
 export interface TokenBudgetMsg      { type: 'tokenBudget'; used: number; max: number }
 export interface SetInputMsg         { type: 'setInput'; text: string }
 /** @deprecated Replaced by sessionSync on load. */
@@ -72,6 +73,7 @@ export type HostToWebview =
   | CheckpointDismissedMsg
   | NewChatMsg
   | ConfirmRequestMsg
+  | ToolActivityMsg
   | TokenBudgetMsg
   | SetInputMsg
   | HistoryRestoreMsg

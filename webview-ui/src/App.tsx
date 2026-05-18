@@ -18,7 +18,7 @@ import { SLASH_COMMANDS } from './slashCommands';
 
 export interface AppMessage {
   id: string;
-  role: 'user' | 'assistant' | 'error' | 'system';
+  role: 'user' | 'assistant' | 'error' | 'system' | 'tool';
   content: string;
   reasoning?: string | undefined;
 }
@@ -52,6 +52,7 @@ type Action =
   | { type: 'SET_MODEL'; name: string | null }
   | { type: 'CHECKPOINT_READY' }
   | { type: 'CHECKPOINT_DISMISSED' }
+  | { type: 'TOOL_ACTIVITY'; toolName: string; detail?: string }
   | {
       type: 'SESSION_SYNC';
       activeId: string;
@@ -155,6 +156,16 @@ export function reducer(state: State, action: Action): State {
     case 'SET_MODEL':
       return { ...state, activeModel: action.name };
 
+    case 'TOOL_ACTIVITY':
+      return {
+        ...state,
+        messages: [...state.messages, {
+          id: mkId(),
+          role: 'tool' as const,
+          content: action.detail ? `${action.toolName} → ${action.detail}` : action.toolName,
+        }],
+      };
+
     case 'CHECKPOINT_READY':
       return { ...state, checkpointPending: true };
 
@@ -234,6 +245,7 @@ export function App(): React.ReactElement {
             messagesById: msg.messagesById,
           });
           break;
+        case 'toolActivity':        dispatch({ type: 'TOOL_ACTIVITY', toolName: msg.toolName, detail: msg.detail }); break;
         case 'confirmRequest':      setConfirmRequest({ id: msg.id, toolName: msg.toolName, detail: msg.detail, isDangerous: msg.isDangerous }); break;
         case 'tokenBudget':         setTokenUsed(msg.used); setTokenMax(msg.max); break;
         case 'setInput':
