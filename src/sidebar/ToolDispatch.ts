@@ -72,8 +72,8 @@ export class ToolDispatch {
         }
 
         if (reg.permission === 'write' || reg.permission === 'delete') {
-          if (typeof args['path'] === 'string') this.checkpoints.snapshotBefore(args['path']);
-          if (typeof args['filepath'] === 'string') this.checkpoints.snapshotBefore(args['filepath']);
+          if (typeof args['path'] === 'string') this.checkpoints.snapshotBefore(resolveToolPath(args['path']));
+          if (typeof args['filepath'] === 'string') this.checkpoints.snapshotBefore(resolveToolPath(args['filepath']));
         }
 
         result = await this.toolRegistry.dispatch(tc.function.name, args, allowed);
@@ -81,7 +81,7 @@ export class ToolDispatch {
         if (reg.permission === 'write' || reg.permission === 'delete') {
           const filePath = (args['path'] ?? args['filepath']) as string | undefined;
           if (filePath) {
-            const resolved = path.resolve(filePath);
+            const resolved = resolveToolPath(filePath);
             this.codeLens.markPending([resolved]);
             this.postFileDiff(tc.function.name, resolved);
           }
