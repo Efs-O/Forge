@@ -57,40 +57,142 @@
       ]
     },
     "commands": [
-      { "command": "forge.openSidebar",      "title": "Forge: Open Sidebar" },
-      { "command": "forge.startBackend",     "title": "Forge: Start Backend" },
-      { "command": "forge.stopBackend",      "title": "Forge: Stop Backend" },
-      { "command": "forge.showBackendConsole","title": "Forge: Show Backend Console" },
-      { "command": "forge.restartBackend",   "title": "Forge: Restart Backend" },
-      { "command": "forge.openConfig",       "title": "Forge: Open Config" },
-      { "command": "forge.validateConfig",   "title": "Forge: Validate Config" },
-      { "command": "forge.pickModel",        "title": "Forge: Pick Model" },
-      { "command": "forge.pickGgufModelFile","title": "Forge: Pick GGUF Model File" },
-      { "command": "forge.clearChat",        "title": "Forge: Clear Active Chat" },
-      { "command": "forge.unloadModel",      "title": "Forge: Unload Model" },
-      { "command": "forge.explainSelection", "title": "Forge: Explain Selection" },
-      { "command": "forge.reviewSelection",  "title": "Forge: Review Selection" },
-      { "command": "forge.generateTestsForSelection", "title": "Forge: Generate Tests For Selection" },
-      { "command": "forge.refactorSelection","title": "Forge: Refactor Selection" },
-      { "command": "forge.runExplainSelection", "title": "Forge: Run Explain Selection" },
-      { "command": "forge.runReviewSelection", "title": "Forge: Run Review Selection" },
-      { "command": "forge.runGenerateTestsForSelection", "title": "Forge: Run Generate Tests For Selection" },
-      { "command": "forge.runRefactorSelection", "title": "Forge: Run Refactor Selection" },
-      { "command": "forge.explainDiagnostic","title": "Forge: Explain Diagnostic" },
-      { "command": "forge.fixDiagnostic",    "title": "Forge: Propose Fix For Diagnostic" },
-      { "command": "forge.runFixDiagnostic", "title": "Forge: Run Fix For Diagnostic" },
-      { "command": "forge.fixFileDiagnostics","title": "Forge: Propose Fix For File Diagnostics" },
-      { "command": "forge.useCurrentFile",   "title": "Forge: Use Current File As Context" },
-      { "command": "forge.useSelection",     "title": "Forge: Use Selection As Context" },
-      { "command": "forge.useOpenTabs",      "title": "Forge: Use Open Tabs As Context" },
-      { "command": "forge.pickContextFiles", "title": "Forge: Pick Files For Context" },
-      { "command": "forge.draftPlanScratch", "title": "Forge: Draft Plan In Scratch Document" },
-      { "command": "forge.draftReviewScratch","title": "Forge: Draft Review In Scratch Document" },
-      { "command": "forge.newChat",          "title": "Forge: New Chat" },
-      { "command": "forge.undo",             "title": "Forge: Undo Last Turn" },
-      { "command": "forge.keep",             "title": "Forge: Keep Changes" },
-      { "command": "forge.setSearchApiKey",  "title": "Forge: Set Search API Key" },
-      { "command": "forge.setupWizard",      "title": "Forge: Setup Wizard" }
+      {
+        "command": "forge.openSidebar",
+        "title": "Forge: Open Sidebar"
+      },
+      {
+        "command": "forge.startBackend",
+        "title": "Forge: Start Backend"
+      },
+      {
+        "command": "forge.stopBackend",
+        "title": "Forge: Stop Backend"
+      },
+      {
+        "command": "forge.showBackendConsole",
+        "title": "Forge: Show Backend Console"
+      },
+      {
+        "command": "forge.restartBackend",
+        "title": "Forge: Restart Backend"
+      },
+      {
+        "command": "forge.openConfig",
+        "title": "Forge: Open Config"
+      },
+      {
+        "command": "forge.validateConfig",
+        "title": "Forge: Validate Config"
+      },
+      {
+        "command": "forge.pickModel",
+        "title": "Forge: Pick Model"
+      },
+      {
+        "command": "forge.pickGgufModelFile",
+        "title": "Forge: Pick GGUF Model File"
+      },
+      {
+        "command": "forge.clearChat",
+        "title": "Forge: Clear Active Chat"
+      },
+      {
+        "command": "forge.unloadModel",
+        "title": "Forge: Unload Model"
+      },
+      {
+        "command": "forge.explainSelection",
+        "title": "Forge: Explain Selection"
+      },
+      {
+        "command": "forge.reviewSelection",
+        "title": "Forge: Review Selection"
+      },
+      {
+        "command": "forge.generateTestsForSelection",
+        "title": "Forge: Generate Tests For Selection"
+      },
+      {
+        "command": "forge.refactorSelection",
+        "title": "Forge: Refactor Selection"
+      },
+      {
+        "command": "forge.runExplainSelection",
+        "title": "Forge: Run Explain Selection"
+      },
+      {
+        "command": "forge.runReviewSelection",
+        "title": "Forge: Run Review Selection"
+      },
+      {
+        "command": "forge.runGenerateTestsForSelection",
+        "title": "Forge: Run Generate Tests For Selection"
+      },
+      {
+        "command": "forge.runRefactorSelection",
+        "title": "Forge: Run Refactor Selection"
+      },
+      {
+        "command": "forge.explainDiagnostic",
+        "title": "Forge: Explain Diagnostic"
+      },
+      {
+        "command": "forge.fixDiagnostic",
+        "title": "Forge: Propose Fix For Diagnostic"
+      },
+      {
+        "command": "forge.runFixDiagnostic",
+        "title": "Forge: Run Fix For Diagnostic"
+      },
+      {
+        "command": "forge.fixFileDiagnostics",
+        "title": "Forge: Propose Fix For File Diagnostics"
+      },
+      {
+        "command": "forge.useCurrentFile",
+        "title": "Forge: Use Current File As Context"
+      },
+      {
+        "command": "forge.useSelection",
+        "title": "Forge: Use Selection As Context"
+      },
+      {
+        "command": "forge.useOpenTabs",
+        "title": "Forge: Use Open Tabs As Context"
+      },
+      {
+        "command": "forge.pickContextFiles",
+        "title": "Forge: Pick Files For Context"
+      },
+      {
+        "command": "forge.draftPlanScratch",
+        "title": "Forge: Draft Plan In Scratch Document"
+      },
+      {
+        "command": "forge.draftReviewScratch",
+        "title": "Forge: Draft Review In Scratch Document"
+      },
+      {
+        "command": "forge.newChat",
+        "title": "Forge: New Chat"
+      },
+      {
+        "command": "forge.undo",
+        "title": "Forge: Undo Last Turn"
+      },
+      {
+        "command": "forge.keep",
+        "title": "Forge: Keep Changes"
+      },
+      {
+        "command": "forge.setSearchApiKey",
+        "title": "Forge: Set Search API Key"
+      },
+      {
+        "command": "forge.setupWizard",
+        "title": "Forge: Setup Wizard"
+      }
     ],
     "menus": {
       "editor/context": [
@@ -222,12 +324,12 @@
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",
-    "@types/nunjucks": "^3.2.6",
-    "@types/turndown": "^5.0.4",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.0.0",
+    "@types/nunjucks": "^3.2.6",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@types/turndown": "^5.0.4",
     "@types/vscode": "^1.90.0",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
@@ -244,11 +346,13 @@
   },
   "dependencies": {
     "@mozilla/readability": "^0.5.0",
+    "highlight.js": "^11.11.1",
     "js-yaml": "^4.1.0",
     "nunjucks": "^3.2.4",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
     "remark-gfm": "^4.0.1",
     "turndown": "^7.2.0",
     "zod": "^4.3.6"

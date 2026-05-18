@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeHighlight from 'rehype-highlight';
 import type { AppMessage } from '../App';
 import { vscode } from '../vscode';
 
@@ -39,13 +40,13 @@ function AssistantContent({ content, streaming }: { content: string; streaming?:
   );
 
   if (!streaming) {
-    return <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{content}</Markdown>;
+    return <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={markdownComponents}>{content}</Markdown>;
   }
 
   return (
     <>
       {settled && (
-        <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{settled}</Markdown>
+        <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={markdownComponents}>{settled}</Markdown>
       )}
       <span className="streaming-tail">{live}</span>
       <span className="streaming-cursor" aria-hidden="true" />
