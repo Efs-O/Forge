@@ -1,0 +1,85 @@
+# Forge config example
+#
+# Copy this file to <your-project>/.forge/config.yaml and edit.
+# The setup wizard (first run) can also generate this file for you.
+#
+# All paths are absolute or relative to the workspace root.
+# API keys are stored in VS Code SecretStorage — never put them here.
+
+# Model to activate on startup (must match a key under models:)
+active_model: my-model
+
+# -------------------------------------------------------------------
+# llama-server settings (direct GGUF mode)
+# -------------------------------------------------------------------
+llama_server:
+  binary: /path/to/llama-server      # required for direct mode
+  host: 127.0.0.1
+  port: 8080
+  n_gpu_layers: -1                   # -1 = all layers on GPU
+  default_num_ctx: 8192
+  n_batch: 512
+  n_parallel: 1
+  type_k: q8_0                       # KV cache quantization
+  type_v: q8_0
+  flash_attn_default: true
+
+# -------------------------------------------------------------------
+# Models (map-style — keys are the model IDs shown in the picker)
+# -------------------------------------------------------------------
+models:
+
+  # --- GGUF / direct llama-server ---
+  my-model:
+    gguf_path: /path/to/model.gguf
+    n_gpu_layers: -1
+    num_ctx: 8192
+    flash_attn: true
+    think: false                     # set true for reasoning models
+    strip_thinking_channels: true    # hide <think>...</think> in output
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 64
+      max_tokens: 8192
+
+  # --- Ollama (local daemon) ---
+  # gemma4:26b:
+  #   provider: ollama
+  #   endpoint: http://127.0.0.1:11434
+  #   num_ctx: 262144
+  #   think: true
+  #   reasoning_effort: medium       # low | medium | high
+  #   sampling:
+  #     temperature: 0.6
+  #     top_p: 0.95
+  #     max_tokens: 131072
+
+  # --- Ollama cloud (routed through local daemon) ---
+  # deepseek-v4-flash:cloud:
+  #   provider: ollama
+  #   endpoint: http://127.0.0.1:11434
+  #   num_ctx: 1000000
+  #   think: true
+  #   reasoning_effort: medium
+  #   sampling:
+  #     temperature: 0.6
+  #     top_p: 0.95
+  #     max_tokens: 65536
+
+# -------------------------------------------------------------------
+# Optional: bridge mode (connect to an already-running server)
+# -------------------------------------------------------------------
+# bridge_mode: true
+# llama_server:
+#   host: 127.0.0.1
+#   port: 8080
+
+# -------------------------------------------------------------------
+# Optional: web search (Tavily or Brave)
+# Store the key with: Command Palette → Forge: Set Search API Key
+# -------------------------------------------------------------------
+# search:
+#   provider: tavily
+#   secret_key_name: forge.tavily.apiKey
+#   max_results: 5

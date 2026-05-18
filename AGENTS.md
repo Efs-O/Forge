@@ -9,9 +9,13 @@ spawn). Optional Python bridge mode (opt-in) for users who already run
 
 ## What This Project Is
 Forge is a local-first VS Code extension providing a sidebar AI coding companion
-backed by GGUF models via direct llama.cpp integration. Three modes: Ask, Plan,
-Execute. Optional online search via Tavily / Brave (user-supplied API key). No
-cloud LLM endpoints, ever.
+— single execute-style workflow, no mode switching. Multi-tab conversations,
+tool-calling agent with per-action confirmation gate, per-turn checkpoint/Keep/Undo
+for file changes, reasoning token display, and image+file attachment support.
+
+Backends: llama.cpp (GGUF, direct spawn), Python bridge (opt-in), and Ollama
+(local models + Ollama cloud routing via local daemon). Optional web search via
+Tavily / Brave (user-supplied key). No direct cloud LLM calls from Forge itself, ever.
 
 The wedge: first-class llama.cpp control, tools tuned for local-model
 reliability, zero-friction GGUF loading, optional search, hallucination-aware.

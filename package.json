@@ -5,6 +5,10 @@
   "version": "0.10.0",
   "publisher": "Efsoo",
   "icon": "assets/publisher-logo.png",
+  "galleryBanner": {
+    "color": "#1a1a2e",
+    "theme": "dark"
+  },
   "license": "Apache-2.0",
   "engines": {
     "vscode": "^1.90.0"
