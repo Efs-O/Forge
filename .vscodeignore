@@ -2,6 +2,7 @@ docs/**
 legacy/**
 .claude/**
 .cursor/**
+.forge/**
 test/**
 **/*.test.ts
 **/*.spec.ts
@@ -17,7 +18,10 @@ vitest.config.ts
 src/**
 webview-ui/**
 node_modules/**
+scripts/**
 .gitignore
 .vscodeignore
 **/*.map
 **/*.vsix
+bridge.yaml
+fireworks.html
