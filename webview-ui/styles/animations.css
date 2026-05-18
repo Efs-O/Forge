@@ -6,7 +6,7 @@
 }
 
 #forge-typing {
-  display: inline-flex;
+  display: none; /* hidden — kept for future use */
   align-items: center;
   gap: 3px;
   flex-shrink: 0;
