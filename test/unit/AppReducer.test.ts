@@ -52,7 +52,7 @@ beforeAll(async () => {
     setState: () => undefined,
   });
 
-  appModule = await import('../../webview-ui/src/App') as AppModule;
+  appModule = await import('../../webview-ui/src/reducer') as AppModule;
 });
 
 describe('webview App reducer', () => {
