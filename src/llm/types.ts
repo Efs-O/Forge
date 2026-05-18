@@ -1,9 +1,15 @@
 export type Role = 'system' | 'user' | 'assistant' | 'tool';
 
+export interface ContentPartText  { type: 'text';      text: string }
+export interface ContentPartImage { type: 'image_url'; image_url: { url: string } }
+export type ContentPart = ContentPartText | ContentPartImage;
+
 export interface ChatMessage {
   role: Role;
   /** null only on assistant messages that carry tool_calls instead of text. */
-  content: string | null;
+  content: string | ContentPart[] | null;
+  /** Optional reasoning/thinking text shown in the sidebar but never sent back to the model. */
+  reasoning?: string;
   tool_call_id?: string;
   name?: string;
   tool_calls?: ToolCall[];
@@ -21,6 +27,10 @@ export interface ToolCall {
 export interface ChatDelta {
   role?: Role;
   content?: string | null;
+  /** OpenAI-compat reasoning models sometimes stream assistant text here instead of `content`. */
+  reasoning_content?: string | null;
+  /** Ollama cloud models may stream reasoning here instead of `reasoning_content`. */
+  reasoning?: string | null;
   tool_calls?: ToolCall[];
 }
 
@@ -48,6 +58,9 @@ export interface ChatCompletionRequest {
   presence_penalty?: number;
   repetition_penalty?: number;
   repeat_penalty?: number;
+  repeat_last_n?: number;
+  stop?: string | string[];
+  reasoning_effort?: 'high' | 'medium' | 'low' | 'none';
   tools?: ToolDefinition[];
   chat_template_kwargs?: Record<string, unknown>;
 }
@@ -60,7 +73,5 @@ export interface ToolDefinition {
     parameters: Record<string, unknown>;
   };
 }
-
-export type Mode = 'ask' | 'plan' | 'execute';
 
 export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';

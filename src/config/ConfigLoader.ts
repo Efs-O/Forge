@@ -4,6 +4,7 @@ import * as yaml from 'js-yaml';
 import * as vscode from 'vscode';
 import { ForgeConfigSchema } from './schema';
 import type { ForgeConfig } from './types';
+import { loadBridgeConfigDocument, loadBridgeModels, resolveBridgeConfigPath } from './BridgeConfigLoader';
 
 const CONFIG_FILENAME = 'config.yaml';
 
@@ -13,12 +14,26 @@ export function loadConfig(storagePath: string): ForgeConfig {
   if (!fs.existsSync(filePath)) {
     throw new Error(
       `Forge: config.yaml not found at ${filePath}.\n` +
-      `Copy config/config.example.yaml to that location and edit it.`,
+      `Create .forge/config.yaml in your workspace or use the setup wizard to generate one.`,
     );
   }
 
   const raw = fs.readFileSync(filePath, 'utf8');
-  const parsed = yaml.load(raw);
+  const parsed = (yaml.load(raw) ?? {}) as Record<string, unknown>;
+  const bridgeConfigValue = typeof parsed.bridge_config === 'string' ? parsed.bridge_config : undefined;
+  if (bridgeConfigValue) {
+    const bridgeConfigPath = resolveBridgeConfigPath(filePath, bridgeConfigValue);
+    const bridgeDoc = loadBridgeConfigDocument(bridgeConfigPath);
+    if (parsed.llama_server === undefined && bridgeDoc.llama_server !== undefined) {
+      parsed.llama_server = bridgeDoc.llama_server;
+    }
+    if (parsed.strip_thinking_channels === undefined && bridgeDoc.strip_thinking_channels !== undefined) {
+      parsed.strip_thinking_channels = bridgeDoc.strip_thinking_channels;
+    }
+    if (parsed.models === undefined) {
+      parsed.models = [];
+    }
+  }
 
   const result = ForgeConfigSchema.safeParse(parsed);
   if (!result.success) {
@@ -28,14 +43,58 @@ export function loadConfig(storagePath: string): ForgeConfig {
     throw new Error(`Forge: config.yaml validation failed:\n${issues}`);
   }
 
-  return result.data as ForgeConfig;
+  const config = result.data as ForgeConfig;
+  const bridgeModels = config.bridge_config
+    ? loadBridgeModels(resolveBridgeConfigPath(filePath, config.bridge_config))
+    : [];
+  const mergedModels = [...config.models, ...bridgeModels];
+  if (mergedModels.length === 0) {
+    throw new Error('Forge: no models configured after merging config.yaml and bridge.yaml');
+  }
+  const seen = new Set<string>();
+  for (const model of mergedModels) {
+    if (seen.has(model.name)) {
+      throw new Error(`Forge: duplicate model name "${model.name}" across config.yaml and bridge.yaml`);
+    }
+    seen.add(model.name);
+  }
+  if (config.active_model && !mergedModels.some((model) => model.name === config.active_model)) {
+    throw new Error(
+      `Forge: active_model "${config.active_model}" does not match any entry in merged models (${mergedModels.map((m) => m.name).join(', ')})`,
+    );
+  }
+  config.models = mergedModels.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  return config;
 }
 
 /**
- * Find config.yaml: check workspace .forge/ first, then global storage.
+ * Resolve explicit path from user settings: absolute path to config.yaml, or to a directory that contains it.
+ * Returns null if empty, missing, or invalid.
+ */
+export function resolveExplicitConfigPath(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const normalized = path.normalize(trimmed);
+  if (!fs.existsSync(normalized)) return null;
+  const stat = fs.statSync(normalized);
+  if (stat.isFile()) {
+    return path.basename(normalized).toLowerCase() === CONFIG_FILENAME.toLowerCase() ? normalized : null;
+  }
+  if (stat.isDirectory()) {
+    const candidate = path.join(normalized, CONFIG_FILENAME);
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
+  }
+  return null;
+}
+
+/**
+ * Find config.yaml: optional absolute override (settings), then workspace .forge/, then global storage.
  * Returns the path if found, null otherwise.
  */
-export function findConfigPath(globalStoragePath: string): string | null {
+export function findConfigPath(globalStoragePath: string, explicitConfigPathSetting?: string | null): string | null {
+  const fromSetting = explicitConfigPathSetting ? resolveExplicitConfigPath(explicitConfigPathSetting) : null;
+  if (fromSetting) return fromSetting;
+
   // Check workspace root first
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (workspaceFolders?.length) {
@@ -49,28 +108,58 @@ export function findConfigPath(globalStoragePath: string): string | null {
 }
 
 /**
- * Watch config.yaml for changes. Calls callback with new config or error.
- * Returns a disposable to stop watching.
+ * Watch workspace `config.yaml` and optional extra absolute paths (e.g. merged `bridge.yaml`).
+ * Debounces so saves that touch multiple files produce one reload.
  */
-export function watchConfig(
-  configPath: string,
+export function watchForgeConfigPaths(
+  primaryConfigYamlPath: string,
+  extraAbsolutePaths: string[],
   onReload: (config: ForgeConfig | null, error?: Error) => void,
 ): vscode.Disposable {
-  const watcher = vscode.workspace.createFileSystemWatcher(
-    new vscode.RelativePattern(path.dirname(configPath), path.basename(configPath)),
-  );
+  const forgeDir = path.dirname(primaryConfigYamlPath);
+  let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
-  const reload = () => {
+  const reload = (): void => {
     try {
-      const config = loadConfig(path.dirname(configPath));
-      onReload(config);
+      const loaded = loadConfig(forgeDir);
+      onReload(loaded);
     } catch (err) {
-      onReload(null, err as Error);
+      onReload(null, err instanceof Error ? err : new Error(String(err)));
     }
   };
 
-  watcher.onDidChange(reload);
-  watcher.onDidCreate(reload);
+  const schedule = (): void => {
+    if (debounceTimer !== undefined) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      debounceTimer = undefined;
+      reload();
+    }, 150);
+  };
 
-  return watcher;
+  const normalizedSeen = new Set<string>();
+  const watchers: vscode.Disposable[] = [];
+
+  const watchOne = (absPath: string): void => {
+    const normalized = path.normalize(absPath);
+    if (normalizedSeen.has(normalized)) return;
+    normalizedSeen.add(normalized);
+
+    const watcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(path.dirname(normalized), path.basename(normalized)),
+    );
+    watcher.onDidChange(schedule);
+    watcher.onDidCreate(schedule);
+    watchers.push(watcher);
+  };
+
+  watchOne(primaryConfigYamlPath);
+  for (const p of extraAbsolutePaths) watchOne(p);
+
+  watchers.push(
+    new vscode.Disposable(() => {
+      if (debounceTimer !== undefined) clearTimeout(debounceTimer);
+    }),
+  );
+
+  return vscode.Disposable.from(...watchers);
 }

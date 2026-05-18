@@ -1,13 +1,27 @@
 import { z } from 'zod';
 
+const CacheTypeSchema = z.union([
+  z.number().int().min(0).max(8),
+  z.string().min(1),
+]);
+
+const ReasoningEffortSchema = z.enum(['high', 'medium', 'low', 'none']);
+const ActiveModelSchema = z.preprocess((value) => {
+  if (value === undefined || value === null) return null;
+  if (typeof value === 'string' && value.trim().toLowerCase() === 'none') return null;
+  return value;
+}, z.union([z.string().min(1), z.null()]));
+
 const ModelConfigSchema = z.object({
   name: z.string().min(1),
-  gguf_path: z.string().min(1),
+  provider: z.enum(['llama.cpp', 'ollama']).optional(),
+  gguf_path: z.string().min(1).optional(),
+  endpoint: z.string().url().optional(),
   n_gpu_layers: z.number().int().optional(),
   num_ctx: z.number().int().positive().optional(),
   n_batch: z.number().int().positive().optional(),
-  type_k: z.number().int().min(0).max(8).optional(),
-  type_v: z.number().int().min(0).max(8).optional(),
+  type_k: CacheTypeSchema.optional(),
+  type_v: CacheTypeSchema.optional(),
   flash_attn: z.boolean().optional(),
   extra_llama_server_args: z.array(z.string()).optional(),
   // v0.3 additions
@@ -17,14 +31,37 @@ const ModelConfigSchema = z.object({
     top_k: z.number().int().optional(),
     min_p: z.number().optional(),
     max_tokens: z.number().int().optional(),
+    seed: z.number().int().optional(),
     presence_penalty: z.number().optional(),
     frequency_penalty: z.number().optional(),
+    repetition_penalty: z.number().optional(),
+    repeat_penalty: z.number().optional(),
+    repeat_last_n: z.number().int().optional(),
+    stop: z.union([z.string(), z.array(z.string())]).optional(),
     preserve_thinking: z.boolean().optional(),
   }).optional(),
   capabilities: z.array(z.enum(['tool-call', 'vision', 'long-context'])).optional(),
   strip_tools: z.boolean().optional(),
   system_prompt: z.string().optional(),
   think: z.boolean().optional(),
+  reasoning_effort: ReasoningEffortSchema.optional(),
+  strip_thinking_channels: z.boolean().optional(),
+}).superRefine((model, ctx) => {
+  const provider = model.provider ?? 'llama.cpp';
+  if (provider === 'llama.cpp' && !model.gguf_path) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['gguf_path'],
+      message: 'gguf_path is required for provider: llama.cpp',
+    });
+  }
+  if (provider === 'ollama' && !model.endpoint) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['endpoint'],
+      message: 'endpoint is required for provider: ollama',
+    });
+  }
 });
 
 const LlamaServerConfigSchema = z.object({
@@ -33,8 +70,8 @@ const LlamaServerConfigSchema = z.object({
   default_num_ctx: z.number().int().positive().optional(),
   n_batch: z.number().int().positive().optional(),
   n_parallel: z.number().int().positive().optional(),
-  type_k: z.number().int().min(0).max(8).optional(),
-  type_v: z.number().int().min(0).max(8).optional(),
+  type_k: CacheTypeSchema.optional(),
+  type_v: CacheTypeSchema.optional(),
   flash_attn_default: z.boolean().optional(),
   n_threads: z.number().int().min(0).optional(),
   n_threads_batch: z.number().int().min(0).optional(),
@@ -74,9 +111,10 @@ const ExecConfigSchema = z.object({
 }).optional();
 
 export const ForgeConfigSchema = z.object({
-  models: z.array(ModelConfigSchema).min(1, 'At least one model is required'),
-  active_model: z.string().min(1),
-  llama_server: LlamaServerConfigSchema,
+  models: z.array(ModelConfigSchema).default([]),
+  active_model: ActiveModelSchema.default(null),
+  bridge_config: z.string().min(1).optional(),
+  llama_server: LlamaServerConfigSchema.default({}),
   bridge_mode: z.boolean().optional(),
   search: SearchConfigSchema.optional(),
   log_level: z.enum(['trace', 'debug', 'info', 'warn', 'error']).optional(),
@@ -84,15 +122,16 @@ export const ForgeConfigSchema = z.object({
   model_dirs: z.array(z.string()).optional(),
   templates_dir: z.string().optional(),
   custom_instructions: z.string().optional(),
+  strip_thinking_channels: z.boolean().optional(),
+  max_simultaneous_models: z.number().int().min(1).max(8).optional(),
   permissions: PermissionsSchema,
   exec: ExecConfigSchema,
 }).superRefine((cfg, ctx) => {
-  const names = cfg.models.map((m) => m.name);
-  if (!names.includes(cfg.active_model)) {
+  if (cfg.models.length === 0 && !cfg.bridge_config) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      path: ['active_model'],
-      message: `active_model "${cfg.active_model}" does not match any entry in models (${names.join(', ')})`,
+      path: ['models'],
+      message: 'At least one model is required unless bridge_config is provided',
     });
   }
   if (!cfg.bridge_mode && !cfg.llama_server.binary) {

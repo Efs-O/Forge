@@ -1,18 +1,24 @@
 export interface ModelConfig {
   /** Display name shown in the sidebar model picker. */
   name: string;
-  /** Absolute path to the .gguf file. */
-  gguf_path: string;
+  /** Runtime provider for this model entry. */
+  provider?: 'llama.cpp' | 'ollama';
+  /** Absolute path to the .gguf file. Required for llama.cpp models. */
+  gguf_path?: string;
+  /** Optional path to the vision projector .gguf (mmproj). Enables multimodal image input. */
+  mmproj_path?: string;
+  /** Ollama server base URL, e.g. http://127.0.0.1:11434 */
+  endpoint?: string;
   /** Per-model GPU layer override. Falls back to LlamaServerConfig.n_gpu_layers. */
   n_gpu_layers?: number;
   /** Context window size override. Falls back to LlamaServerConfig.default_num_ctx. */
   num_ctx?: number;
   /** Batch size override. Falls back to LlamaServerConfig.n_batch. */
   n_batch?: number;
-  /** KV-cache quantization for K tensors (0=f32, 1=f16, 8=q8_0). */
-  type_k?: number;
-  /** KV-cache quantization for V tensors. */
-  type_v?: number;
+  /** KV-cache quantization for K tensors (legacy int or llama.cpp string like q8_0). */
+  type_k?: number | string;
+  /** KV-cache quantization for V tensors (legacy int or llama.cpp string like q8_0). */
+  type_v?: number | string;
   /** Flash attention override. Falls back to LlamaServerConfig.flash_attn_default. */
   flash_attn?: boolean;
   /** Extra argv tokens appended verbatim after all computed args. */
@@ -24,8 +30,13 @@ export interface ModelConfig {
     top_k?: number;
     min_p?: number;
     max_tokens?: number;
+    seed?: number;
     presence_penalty?: number;
     frequency_penalty?: number;
+    repetition_penalty?: number;
+    repeat_penalty?: number;
+    repeat_last_n?: number;
+    stop?: string | string[];
     preserve_thinking?: boolean;
   };
   /** Model capability hints used for tool-call routing and UI. */
@@ -36,6 +47,10 @@ export interface ModelConfig {
   system_prompt?: string;
   /** When true, enable thinking/reasoning tokens for this model. */
   think?: boolean;
+  /** Ollama reasoning effort level when think is enabled. */
+  reasoning_effort?: 'high' | 'medium' | 'low' | 'none';
+  /** When true, strip visible thinking/channel markup when think is explicitly false. */
+  strip_thinking_channels?: boolean;
 }
 
 export interface LlamaServerConfig {
@@ -49,10 +64,10 @@ export interface LlamaServerConfig {
   n_batch?: number;
   /** Number of parallel request slots. */
   n_parallel?: number;
-  /** KV-cache K quantization default. */
-  type_k?: number;
-  /** KV-cache V quantization default. */
-  type_v?: number;
+  /** KV-cache K quantization default (legacy int or llama.cpp string like q8_0). */
+  type_k?: number | string;
+  /** KV-cache V quantization default (legacy int or llama.cpp string like q8_0). */
+  type_v?: number | string;
   /** Flash attention default. */
   flash_attn_default?: boolean;
   /** CPU thread count (0 = auto). */
@@ -74,7 +89,9 @@ export interface SearchConfig {
 
 export interface ForgeConfig {
   models: ModelConfig[];
-  active_model: string;
+  active_model: string | null;
+  /** Optional path to a bridge-style YAML file whose models are merged into the selector. */
+  bridge_config?: string;
   llama_server: LlamaServerConfig;
   /** When true, connect to a pre-running server instead of spawning llama-server. */
   bridge_mode?: boolean;
@@ -86,6 +103,10 @@ export interface ForgeConfig {
   templates_dir?: string;
   /** Text injected into every system prompt via the template engine. */
   custom_instructions?: string;
+  /** Default thinking/channel stripping behavior, overridable per model. */
+  strip_thinking_channels?: boolean;
+  /** Maximum number of llama-server processes to keep alive simultaneously. Default: 1. */
+  max_simultaneous_models?: number;
   /** Tool permission gates. Defaults to read-only fs, no net/exec/git-write. */
   permissions?: {
     fs?: { read?: boolean; write?: boolean; delete?: boolean };

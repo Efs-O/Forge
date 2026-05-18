@@ -3,7 +3,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 export interface TemplateContext {
-  mode: string;
   workspaceName?: string;
   activeFile?: string;
   selection?: string;
@@ -25,11 +24,11 @@ export class TemplateEngine {
   }
 
   /**
-   * Render a template by mode name.
-   * Looks for `<mode>.njk` in user dirs first, then builtin dir.
+   * Render a named prompt template.
+   * Looks for `<name>.njk` in user dirs first, then builtin dir.
    */
-  render(mode: string, context: TemplateContext): string {
-    const templateName = `${mode}.njk`;
+  render(name: string, context: TemplateContext): string {
+    const templateName = `${name}.njk`;
     try {
       return this.env.render(templateName, context);
     } catch (err) {
