@@ -3,6 +3,7 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import type { AppMessage } from '../App';
+import type { DiffHunk } from '../../../src/sidebar/messageBridge';
 import { vscode } from '../vscode';
 
 const FILE_LINK_SCHEME = 'forge-file://';
@@ -55,6 +56,61 @@ function AssistantContent({ content, streaming }: { content: string; streaming?:
   );
 }
 
+// ── Diff block ────────────────────────────────────────────────────────────────
+
+function hunkHeader(h: DiffHunk): string {
+  const oldCount = h.lines.filter(l => l.kind !== 'added').length;
+  const newCount = h.lines.filter(l => l.kind !== 'removed').length;
+  return `@@ -${h.oldStart},${oldCount} +${h.newStart},${newCount} @@`;
+}
+
+function DiffBlock({ filePath, hunks, isNew, isDeleted }: {
+  filePath: string;
+  hunks: DiffHunk[] | null | undefined;
+  isNew?: boolean;
+  isDeleted?: boolean;
+}): React.ReactElement {
+  const [collapsed, setCollapsed] = useState(false);
+
+  const badge = isDeleted ? 'deleted' : isNew ? 'new' : 'modified';
+
+  return (
+    <div className="diff-block">
+      <button className="diff-header" type="button" onClick={() => setCollapsed(c => !c)}>
+        <span className={`diff-badge diff-badge-${badge}`}>{badge}</span>
+        <span className="diff-filepath">{filePath}</span>
+        <span className="diff-chevron">{collapsed ? '›' : '‹'}</span>
+      </button>
+      {!collapsed && (
+        <div className="diff-body">
+          {hunks === null && (
+            <div className="diff-toolarge">File too large to diff inline.</div>
+          )}
+          {isDeleted && !hunks && (
+            <div className="diff-toolarge">File deleted.</div>
+          )}
+          {hunks?.length === 0 && (
+            <div className="diff-toolarge">No changes.</div>
+          )}
+          {hunks?.map((hunk, hi) => (
+            <div key={hi} className="diff-hunk">
+              <div className="diff-hunk-header">{hunkHeader(hunk)}</div>
+              {hunk.lines.map((line, li) => (
+                <div key={li} className={`diff-line diff-line-${line.kind}`}>
+                  <span className="diff-gutter">
+                    {line.kind === 'added' ? '+' : line.kind === 'removed' ? '−' : ' '}
+                  </span>
+                  <span className="diff-line-text">{line.text}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface MessageProps extends AppMessage {
   streaming?: boolean;
 }
@@ -87,7 +143,7 @@ function splitStreamingContent(content: string): { settled: string; live: string
   return { settled: content.slice(0, lastSafeSplit), live: content.slice(lastSafeSplit) };
 }
 
-export function Message({ role, content, reasoning, streaming }: MessageProps): React.ReactElement {
+export function Message({ role, content, reasoning, streaming, diffHunks, diffIsNew, diffIsDeleted }: MessageProps): React.ReactElement {
   const [thinkingOpen, setThinkingOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -97,6 +153,17 @@ export function Message({ role, content, reasoning, streaming }: MessageProps): 
       setTimeout(() => setCopied(false), 1500);
     }).catch(() => undefined);
   }, [content]);
+
+  if (role === 'diff') {
+    return (
+      <DiffBlock
+        filePath={content}
+        hunks={diffHunks}
+        isNew={diffIsNew}
+        isDeleted={diffIsDeleted}
+      />
+    );
+  }
 
   if (role === 'tool') {
     const arrow = content.indexOf(' → ');

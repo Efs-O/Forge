@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { HostToWebview } from './messageBridge';
@@ -7,6 +8,7 @@ import type { KeepUndoCodeLensProvider } from './KeepUndoCodeLens';
 import type { ToolPermission } from '../tools/ToolRegistry';
 import { ToolRegistry } from '../tools/ToolRegistry';
 import { ToolFailureTracker } from '../tools/StripTools';
+import { computeDiff } from './DiffUtils';
 
 const WRITE_PERMISSIONS = new Set<ToolPermission>(['write', 'delete']);
 
@@ -78,7 +80,11 @@ export class ToolDispatch {
 
         if (reg.permission === 'write' || reg.permission === 'delete') {
           const filePath = (args['path'] ?? args['filepath']) as string | undefined;
-          if (filePath) this.codeLens.markPending([path.resolve(filePath)]);
+          if (filePath) {
+            const resolved = path.resolve(filePath);
+            this.codeLens.markPending([resolved]);
+            this.postFileDiff(tc.function.name, resolved);
+          }
         }
       } catch (err) {
         this.failureTracker.record();
@@ -107,6 +113,24 @@ export class ToolDispatch {
         : typeof args?.['filepath'] === 'string' ? args['filepath'] : null;
       if (rawPath) void this.openFile(rawPath);
     }
+  }
+
+  private postFileDiff(toolName: string, resolvedPath: string): void {
+    const FILE_DIFF_TOOLS = new Set(['write_file', 'replace_in_file', 'delete_file']);
+    if (!FILE_DIFF_TOOLS.has(toolName)) return;
+
+    const beforeContent = this.checkpoints.readSnapshotContent(resolvedPath);
+    if (beforeContent === undefined) return;
+
+    const isDeleted = !fs.existsSync(resolvedPath);
+    const afterContent = isDeleted ? '' : fs.readFileSync(resolvedPath, 'utf8');
+    const isNew = beforeContent === null;
+    const hunks = !isDeleted
+      ? computeDiff(beforeContent ?? '', afterContent)
+      : null;
+
+    const relPath = vscode.workspace.asRelativePath(resolvedPath, true);
+    this.post({ type: 'fileDiff', filePath: relPath, hunks, isNew, isDeleted });
   }
 
   private buildFileLink(toolName: string, result: string, args?: Record<string, unknown>): string | null {

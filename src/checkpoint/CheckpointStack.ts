@@ -98,6 +98,17 @@ export class CheckpointStack {
     log.debug(`[CheckpointStack] kept, depth=${this.stack.length}`);
   }
 
+  /**
+   * Return the snapshotted before-content for a file in the current pending
+   * turn. Returns undefined if the file was not snapshotted this turn.
+   * Returns null if the file did not exist before this turn (new file).
+   */
+  readSnapshotContent(filePath: string): string | null | undefined {
+    const abs = path.resolve(filePath);
+    const snap = this.pendingSnapshots.find(s => s.filePath === abs);
+    return snap ? snap.originalContent : undefined;
+  }
+
   depth(): number { return this.stack.length; }
 
   canUndo(): boolean { return this.stack.length > 0; }

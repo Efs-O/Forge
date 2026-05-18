@@ -47,6 +47,19 @@ export interface NewChatMsg        { type: 'newChat' }
 export interface ConfirmRequestMsg   { type: 'confirmRequest'; id: string; toolName: string; detail: string; isDangerous?: boolean }
 export interface ToolActivityMsg     { type: 'toolActivity';   toolName: string; detail?: string }
 export interface TokenBudgetMsg      { type: 'tokenBudget'; used: number; max: number }
+
+export type DiffLineKind = 'context' | 'added' | 'removed';
+export interface DiffLine  { kind: DiffLineKind; text: string }
+export interface DiffHunk  { oldStart: number; newStart: number; lines: DiffLine[] }
+
+/** Posted after each file write/delete so the sidebar can render a red/green diff. */
+export interface FileDiffMsg {
+  type: 'fileDiff';
+  filePath: string;
+  hunks: DiffHunk[] | null;
+  isNew: boolean;
+  isDeleted: boolean;
+}
 export interface SetInputMsg         { type: 'setInput'; text: string }
 /** @deprecated Replaced by sessionSync on load. */
 export interface HistoryRestoreMsg   { type: 'historyRestore'; messages: Array<{ role: 'user' | 'assistant'; content: string }> }
@@ -77,7 +90,8 @@ export type HostToWebview =
   | TokenBudgetMsg
   | SetInputMsg
   | HistoryRestoreMsg
-  | SessionSyncMsg;
+  | SessionSyncMsg
+  | FileDiffMsg;
 
 // ── Webview → Host ────────────────────────────────────────────────────────────
 
