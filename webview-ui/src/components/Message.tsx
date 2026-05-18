@@ -51,7 +51,6 @@ function AssistantContent({ content, streaming }: { content: string; streaming?:
       )}
       <span className="streaming-tail">{live}</span>
       <span className="streaming-cursor" aria-hidden="true" />
-      <span className="streaming-label" aria-live="polite">Eating tokens...</span>
     </>
   );
 }
