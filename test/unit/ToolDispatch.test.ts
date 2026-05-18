@@ -7,22 +7,27 @@ import type { KeepUndoCodeLensProvider } from '../../src/sidebar/KeepUndoCodeLen
 import type { ToolFailureTracker } from '../../src/tools/StripTools';
 import { ToolRegistry } from '../../src/tools/ToolRegistry';
 
-const WS = path.resolve('/workspace');
+// vi.mock is hoisted — compute WS inside the factory using require
+vi.mock('vscode', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const p = require('path') as typeof import('path');
+  const ws = p.resolve('/workspace');
+  return {
+    workspace: {
+      workspaceFolders: [{ uri: { fsPath: ws } }],
+      openTextDocument: vi.fn().mockResolvedValue({}),
+      asRelativePath: vi.fn((s: string) => s.replace(ws + p.sep, '')),
+    },
+    window: {
+      showTextDocument: vi.fn().mockResolvedValue(undefined),
+    },
+    Uri: {
+      file: vi.fn((s: string) => ({ fsPath: s })),
+    },
+  };
+});
 
-// Mock vscode
-vi.mock('vscode', () => ({
-  workspace: {
-    workspaceFolders: [{ uri: { fsPath: WS } }],
-    openTextDocument: vi.fn().mockResolvedValue({}),
-    asRelativePath: vi.fn((p: string) => p.replace(WS + path.sep, '')),
-  },
-  window: {
-    showTextDocument: vi.fn().mockResolvedValue(undefined),
-  },
-  Uri: {
-    file: vi.fn((p: string) => ({ fsPath: p })),
-  },
-}));
+const WS = path.resolve('/workspace');
 
 function makeToolCall(name: string, args: Record<string, unknown>): ToolCall {
   return {
