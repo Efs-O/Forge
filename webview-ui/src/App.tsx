@@ -66,14 +66,20 @@ function mkId(): string {
 
 export function reducer(state: State, action: Action): State {
   switch (action.type) {
-    case 'USER_SEND':
+    case 'USER_SEND': {
+      const last = state.messages[state.messages.length - 1];
+      const base =
+        last?.role === 'assistant' && last.content === ''
+          ? state.messages.slice(0, -1)
+          : state.messages;
       return {
         ...state,
         streaming: true,
         generating: true,
         checkpointPending: false,
-        messages: [...state.messages, { id: mkId(), role: 'user', content: action.text }],
+        messages: [...base, { id: mkId(), role: 'user', content: action.text }],
       };
+    }
 
     case 'TOKEN': {
       const last = state.messages[state.messages.length - 1];
