@@ -52,8 +52,7 @@
           "type": "webview",
           "id": "forge.sidebar",
           "name": "Forge",
-          "icon": "assets/icon.svg",
-          "contextualTitle": "Forge"
+          "visibility": "visible"
         }
       ]
     },
