@@ -104,9 +104,19 @@ export class ToolDispatch {
 
   private postResult(tc: ToolCall, result: string, args?: Record<string, unknown>): void {
     const fileLink = this.buildFileLink(tc.function.name, result, args);
+    const suffix = fileLink ? ` (${fileLink})` : '';
+
+    const READ_ONLY_TOOLS = new Set(['read_file', 'list_directory', 'search_code', 'get_diagnostics']);
+    if (READ_ONLY_TOOLS.has(tc.function.name)) {
+      const pathArg = typeof args?.['path'] === 'string' ? args['path']
+        : typeof args?.['filepath'] === 'string' ? args['filepath'] : null;
+      const label = pathArg ?? result.slice(0, 80).replace(/\r?\n/g, ' ');
+      this.post({ type: 'token', text: `\n\n> **${tc.function.name}** → \`${label}\`${suffix}\n\n` });
+      return;
+    }
+
     const truncated = result.length > 600 ? result.slice(0, 600) + '…' : result;
     const preview = truncated.replace(/\[(file|dir|staged)\]\s*/g, '').replace(/\r?\n/g, ' ');
-    const suffix = fileLink ? ` (${fileLink})` : '';
     this.post({ type: 'token', text: `\n\n> **${tc.function.name}** → \`${preview}\`${suffix}\n\n` });
     if (fileLink) {
       const rawPath = typeof args?.['path'] === 'string' ? args['path']
