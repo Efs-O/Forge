@@ -98,7 +98,8 @@ export class ToolDispatch {
 
   private postResult(tc: ToolCall, result: string, args?: Record<string, unknown>): void {
     const fileLink = this.buildFileLink(tc.function.name, result, args);
-    const preview = (result.length > 600 ? result.slice(0, 600) + '…' : result).replace(/\r?\n/g, ' ');
+    const truncated = result.length > 600 ? result.slice(0, 600) + '…' : result;
+    const preview = truncated.replace(/\[(file|dir|staged)\]\s*/g, '').replace(/\r?\n/g, ' ');
     const suffix = fileLink ? ` (${fileLink})` : '';
     this.post({ type: 'token', text: `\n\n> **${tc.function.name}** → \`${preview}\`${suffix}\n\n` });
     if (fileLink) {
