@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import { scanForGgufs } from '../backend/GgufScanner';
 import { deriveModelSuggestion } from '../backend/ModelHeuristics';
 import type { GgufCandidate } from '../backend/GgufScanner';
@@ -67,11 +66,10 @@ function writeConfigAndReload(configDir: string, yaml: string): void {
   fs.writeFileSync(configPath, yaml, 'utf8');
 }
 
-function targetConfigDir(): string {
-  return path.join(
-    vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir(),
-    '.forge',
-  );
+function targetConfigDir(context: vscode.ExtensionContext): string {
+  // Write to global storage so the config is found in any workspace.
+  // Per-workspace override: create .forge/config.yaml in the workspace root.
+  return context.globalStorageUri.fsPath;
 }
 
 async function promptReload(configPath: string): Promise<boolean> {
@@ -132,7 +130,7 @@ async function runLlamaCppFlow(context: vscode.ExtensionContext): Promise<boolea
   if (!selectedCandidate) return false;
 
   const suggestion = deriveModelSuggestion(selectedCandidate);
-  const configDir = targetConfigDir();
+  const configDir = targetConfigDir(context);
   const yaml = generateLlamaCppConfig({
     ggufPath: picked.path,
     modelName: suggestion.suggestedName,
@@ -192,7 +190,7 @@ async function runOllamaFlow(context: vscode.ExtensionContext): Promise<boolean>
   }
   if (!modelName) return false;
 
-  const configDir = targetConfigDir();
+  const configDir = targetConfigDir(context);
   writeConfigAndReload(configDir, generateOllamaConfig(endpoint, modelName));
   await context.globalState.update('forge.firstRun.shown', true);
   await promptReload(path.join(configDir, 'config.yaml'));
@@ -246,7 +244,7 @@ async function runBridgeFlow(context: vscode.ExtensionContext): Promise<boolean>
   }
   if (!modelName) return false;
 
-  const configDir = targetConfigDir();
+  const configDir = targetConfigDir(context);
   writeConfigAndReload(configDir, generateBridgeConfig(baseUrl, modelName));
   await context.globalState.update('forge.firstRun.shown', true);
   await promptReload(path.join(configDir, 'config.yaml'));
@@ -257,7 +255,8 @@ async function runBridgeFlow(context: vscode.ExtensionContext): Promise<boolean>
 
 /**
  * Shown when no config.yaml exists. Guides the user through backend selection
- * and writes a starter config.yaml into .forge/ in the workspace (or home dir).
+ * and writes a starter config.yaml to global storage (works across all workspaces).
+ * Per-workspace override: create .forge/config.yaml in the workspace root.
  * Returns true if a config was written, false if the user cancelled.
  */
 export async function runFirstRunWizard(context: vscode.ExtensionContext): Promise<boolean> {
