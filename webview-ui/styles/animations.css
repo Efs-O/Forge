@@ -83,7 +83,7 @@
   gap: 6px;
   padding: 4px 12px;
   font-size: 0.78em;
-  color: var(--vscode-descriptionForeground, #888);
+  color: var(--forge-accent, #0090ff);
   border-top: 1px solid var(--vscode-editorWidget-border, rgba(128,128,128,0.15));
   user-select: none;
   letter-spacing: 0.02em;

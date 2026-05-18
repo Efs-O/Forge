@@ -50,7 +50,6 @@ function AssistantContent({ content, streaming }: { content: string; streaming?:
         <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={markdownComponents}>{settled}</Markdown>
       )}
       <span className="streaming-tail">{live}</span>
-      <span className="streaming-cursor" aria-hidden="true" />
     </>
   );
 }
