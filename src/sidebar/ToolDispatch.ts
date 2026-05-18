@@ -25,7 +25,7 @@ export class ToolDispatch {
     private readonly codeLens: KeepUndoCodeLensProvider,
     private readonly failureTracker: ToolFailureTracker,
     private readonly post: (msg: HostToWebview) => void,
-    private readonly requestApproval: (toolName: string, detail: string) => Promise<boolean>,
+    private readonly requestApproval: (toolName: string, detail: string, isDangerous?: boolean) => Promise<boolean>,
   ) {}
 
   async dispatch(
@@ -58,7 +58,8 @@ export class ToolDispatch {
         const needsConfirm = WRITE_PERMISSIONS.has(reg.permission) || reg.permission === 'terminal' || reg.permission === 'git';
         if (needsConfirm) {
           const detail = JSON.stringify(args, null, 2).slice(0, 500);
-          const approved = await this.requestApproval(tc.function.name, detail);
+          const isDangerous = tc.function.name === 'delete_file' && args['recursive'] === true;
+          const approved = await this.requestApproval(tc.function.name, detail, isDangerous);
           if (!approved) {
             result = `User declined: ${tc.function.name}`;
             this.postResult(tc, result);

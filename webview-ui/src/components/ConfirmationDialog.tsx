@@ -3,6 +3,7 @@ import React from 'react';
 interface Props {
   toolName: string;
   detail: string;
+  isDangerous?: boolean;
   onApprove: () => void;
   onDeny: () => void;
 }
@@ -13,18 +14,22 @@ const WarningIcon = (): React.ReactElement => (
   </svg>
 );
 
-export function ConfirmationDialog({ toolName, detail, onApprove, onDeny }: Props): React.ReactElement {
+export function ConfirmationDialog({ toolName, detail, isDangerous, onApprove, onDeny }: Props): React.ReactElement {
   return (
     <div className="confirm-overlay" role="dialog" aria-modal="true" aria-label={`Confirm tool: ${toolName}`}>
-      <div className="confirm-dialog">
+      <div className={`confirm-dialog${isDangerous ? ' confirm-dialog--dangerous' : ''}`}>
         <div className="confirm-header">
           <WarningIcon />
-          <span className="confirm-tool-name">{toolName}</span>
+          <span className="confirm-tool-name">
+            {isDangerous ? '⚠ DANGEROUS: ' : ''}{toolName}
+          </span>
         </div>
         <pre className="confirm-detail">{detail}</pre>
         <div className="confirm-actions">
           <button className="confirm-btn-deny" type="button" onClick={onDeny}>Deny</button>
-          <button className="confirm-btn-approve" type="button" onClick={onApprove}>Approve</button>
+          <button className="confirm-btn-approve" type="button" onClick={onApprove}>
+            {isDangerous ? 'Run (I understand the risk)' : 'Approve'}
+          </button>
         </div>
       </div>
     </div>

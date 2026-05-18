@@ -67,7 +67,7 @@ export class AgentLoop {
       codeLens,
       failureTracker,
       post,
-      (name, detail) => this.requestToolApproval(name, detail),
+      (name, detail, isDangerous) => this.requestToolApproval(name, detail, isDangerous),
     );
   }
 
@@ -343,13 +343,13 @@ export class AgentLoop {
     return stripHtmlDocumentBoilerplateFromFullText(withoutStructured);
   }
 
-  private async requestToolApproval(toolName: string, detail: string): Promise<boolean> {
+  private async requestToolApproval(toolName: string, detail: string, isDangerous?: boolean): Promise<boolean> {
     const view = this.getView();
     if (!view) throw new Error(`Forge: sidebar is unavailable for tool approval (${toolName}).`);
     const id = `confirm-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const approved = new Promise<boolean>((resolve) => { this.pendingConfirmations.set(id, resolve); });
     await vscode.commands.executeCommand('workbench.view.extension.forge-sidebar');
-    this.post({ type: 'confirmRequest', id, toolName, detail });
+    this.post({ type: 'confirmRequest', id, toolName, detail, ...(isDangerous ? { isDangerous: true } : {}) });
     return approved;
   }
 

@@ -44,7 +44,7 @@ export interface CheckpointDismissedMsg { type: 'checkpointDismissed' }
 /** @deprecated Prefer sessionSync — kept for compat with stale webviews. */
 export interface NewChatMsg        { type: 'newChat' }
 
-export interface ConfirmRequestMsg   { type: 'confirmRequest'; id: string; toolName: string; detail: string }
+export interface ConfirmRequestMsg   { type: 'confirmRequest'; id: string; toolName: string; detail: string; isDangerous?: boolean }
 export interface TokenBudgetMsg      { type: 'tokenBudget'; used: number; max: number }
 export interface SetInputMsg         { type: 'setInput'; text: string }
 /** @deprecated Replaced by sessionSync on load. */

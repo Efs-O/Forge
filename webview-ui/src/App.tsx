@@ -199,6 +199,7 @@ export function App(): React.ReactElement {
     id: string;
     toolName: string;
     detail: string;
+    isDangerous?: boolean;
   } | null>(null);
   const [tokenUsed, setTokenUsed] = useState(0);
   const [tokenMax, setTokenMax] = useState(0);
@@ -227,7 +228,7 @@ export function App(): React.ReactElement {
             messagesById: msg.messagesById,
           });
           break;
-        case 'confirmRequest':      setConfirmRequest({ id: msg.id, toolName: msg.toolName, detail: msg.detail }); break;
+        case 'confirmRequest':      setConfirmRequest({ id: msg.id, toolName: msg.toolName, detail: msg.detail, isDangerous: msg.isDangerous }); break;
         case 'tokenBudget':         setTokenUsed(msg.used); setTokenMax(msg.max); break;
         case 'setInput':
           setPrefillText(msg.text);
@@ -337,6 +338,7 @@ export function App(): React.ReactElement {
         <ConfirmationDialog
           toolName={confirmRequest.toolName}
           detail={confirmRequest.detail}
+          isDangerous={confirmRequest.isDangerous}
           onApprove={handleConfirmApprove}
           onDeny={handleConfirmDeny}
         />
