@@ -1,4 +1,3 @@
-import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { SidebarProvider } from './sidebar/SidebarProvider';
@@ -129,18 +128,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     codeLensProvider,
   );
 
-  // ── One-time migration: seed file / workspaceState → globalState ──────────
-  // Seed file takes priority regardless of migration flag (flag may have been
-  // set on a prior empty run before the seed file existed).
-  const seedPath = path.join(context.globalStorageUri.fsPath, 'sessions.seed.json');
-  if (fs.existsSync(seedPath)) {
-    try {
-      const seed = JSON.parse(fs.readFileSync(seedPath, 'utf8'));
-      await context.globalState.update(SESSION_KEY_V1, seed);
-      fs.unlinkSync(seedPath);
-      await context.globalState.update('forge.migrated.sessions.v1', true);
-    } catch { /* ignore corrupt seed */ }
-  } else if (!context.globalState.get<boolean>('forge.migrated.sessions.v1')) {
+  // ── One-time migration: workspaceState → globalState (history now global) ──
+  if (!context.globalState.get<boolean>('forge.migrated.sessions.v1')) {
     await context.globalState.update('forge.migrated.sessions.v1', true);
     if (!context.globalState.get(SESSION_KEY_V1)) {
       const wsSession = context.workspaceState.get(SESSION_KEY_V1);
