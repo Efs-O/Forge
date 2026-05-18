@@ -57,7 +57,8 @@ export class ToolDispatch {
 
         const needsConfirm = WRITE_PERMISSIONS.has(reg.permission) || reg.permission === 'terminal' || reg.permission === 'git';
         if (needsConfirm) {
-          const detail = JSON.stringify(args, null, 2).slice(0, 500);
+          const raw = JSON.stringify(args, null, 2);
+          const detail = raw.length > 300 ? raw.slice(0, 300) + '\n…' : raw;
           const isDangerous = tc.function.name === 'delete_file' && args['recursive'] === true;
           const approved = await this.requestApproval(tc.function.name, detail, isDangerous);
           if (!approved) {
