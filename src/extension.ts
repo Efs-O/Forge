@@ -25,12 +25,7 @@ class SetupPlaceholderProvider implements vscode.WebviewViewProvider {
       <p style="margin-bottom:12px;">No <code>config.yaml</code> found.</p>
       <button onclick="acquireVsCodeApi().postMessage({type:'wizard'})"
         style="padding:8px 16px;cursor:pointer;">Run Setup Wizard</button>
-      <script>
-        const vscode = acquireVsCodeApi();
-        window.addEventListener('message', e => {
-          if (e.data.type === 'reload') location.reload();
-        });
-      </script>
+      <script>const vscode = acquireVsCodeApi();</script>
     </body></html>`;
     view.webview.onDidReceiveMessage((msg) => {
       if (msg.type === 'wizard') {
@@ -271,10 +266,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     }),
 
-    // v0.3 — first-run / setup wizard (manual trigger)
-    vscode.commands.registerCommand('forge.setupWizard', async () => {
-      await runFirstRunWizard(context);
-    }),
   );
 
   context.subscriptions.push({
