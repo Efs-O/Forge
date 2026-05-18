@@ -15,7 +15,7 @@ import {
 import type { ChatMessage } from '../llm/types';
 import type { AttachmentData } from './messageBridge';
 import { CheckpointStack } from '../checkpoint/CheckpointStack';
-import { ToolRegistry } from '../tools/ToolRegistry';
+import { ToolRegistry, FORGE_PERMISSIONS } from '../tools/ToolRegistry';
 import type { KeepUndoCodeLensProvider } from './KeepUndoCodeLens';
 import { ToolFailureTracker } from '../tools/StripTools';
 import { getLogger } from '../util/logger';
@@ -37,7 +37,6 @@ export type { SidebarProviderEvents };
 
 const log = getLogger();
 
-// System-prompt and chat-template overhead are not included — this is a lower-bound estimate.
 function estimateTokens(messages: ChatMessage[]): number {
   return messages.reduce((sum, m) => {
     let chars = 0;
@@ -69,7 +68,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private readonly pool: IBackendPool,
     private config: ForgeConfig,
     private readonly checkpoints: CheckpointStack,
-    toolRegistry: ToolRegistry,
+    private readonly toolRegistry: ToolRegistry,
     private readonly workspaceState: vscode.Memento,
     private readonly codeLens: KeepUndoCodeLensProvider,
     templateEngine?: TemplateEngine,
@@ -213,8 +212,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private persistSession(): void { saveSidebarSession(this.workspaceState, this.sidebar); }
 
   private postTokenBudget(): void {
-    const used = estimateTokens(this.activeMessages());
     const activeModel = this.config.models.find((m) => m.name === this.config.active_model);
+    const msgTokens = estimateTokens(this.activeMessages());
+    const toolTokens = Math.ceil(JSON.stringify(this.toolRegistry.definitions(FORGE_PERMISSIONS)).length / 4);
+    const SYSTEM_AND_TEMPLATE_OVERHEAD = 200;
+    const used = msgTokens + toolTokens + SYSTEM_AND_TEMPLATE_OVERHEAD;
     this.post({ type: 'tokenBudget', used, max: activeModel?.num_ctx ?? 0 });
   }
 
