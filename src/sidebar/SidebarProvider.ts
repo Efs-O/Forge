@@ -37,10 +37,21 @@ export type { SidebarProviderEvents };
 
 const log = getLogger();
 
+// System-prompt and chat-template overhead are not included — this is a lower-bound estimate.
 function estimateTokens(messages: ChatMessage[]): number {
   return messages.reduce((sum, m) => {
-    const len = typeof m.content === 'string' ? m.content.length : 0;
-    return sum + Math.ceil(len / 4);
+    let chars = 0;
+    if (typeof m.content === 'string') {
+      chars += m.content.length;
+    } else if (Array.isArray(m.content)) {
+      for (const part of m.content) {
+        if (part.type === 'text') chars += part.text.length;
+      }
+    } else if (m.content === null && m.tool_calls?.length) {
+      chars += JSON.stringify(m.tool_calls).length;
+    }
+    if (m.reasoning) chars += m.reasoning.length;
+    return sum + Math.ceil(chars / 4);
   }, 0);
 }
 
