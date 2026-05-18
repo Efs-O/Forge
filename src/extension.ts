@@ -134,7 +134,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     config,
     checkpoints,
     toolRegistry,
-    context.workspaceState,
+    context.globalState,
     codeLensProvider,
     templateEngine,
     {
