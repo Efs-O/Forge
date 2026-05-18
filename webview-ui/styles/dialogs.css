@@ -1,0 +1,108 @@
+/* ── Confirmation dialog ────────────────────────────────────────────────── */
+
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.confirm-dialog {
+  background: var(--vscode-editorWidget-background, #252526);
+  border: 1px solid var(--vscode-editorWidget-border, #454545);
+  border-radius: var(--forge-radius-lg);
+  padding: 18px;
+  max-width: 400px;
+  width: calc(100% - 32px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.confirm-dialog--dangerous {
+  border-color: var(--vscode-inputValidation-errorBorder, #be1100);
+}
+
+.confirm-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.confirm-warning-icon {
+  color: var(--vscode-editorWarning-foreground, #cca700);
+  flex-shrink: 0;
+  display: inline-flex;
+}
+
+.confirm-tool-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+}
+
+.confirm-dialog--dangerous .confirm-tool-name {
+  color: var(--vscode-errorForeground, #f48771);
+}
+
+.confirm-detail {
+  font-family: var(--vscode-editor-font-family, 'Cascadia Code', monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--vscode-textCodeBlock-background, #1e1e1e);
+  border: 1px solid var(--vscode-editorWidget-border, #454545);
+  border-radius: var(--forge-radius-sm);
+  padding: 8px 10px;
+  max-height: 180px;
+  overflow-y: auto;
+  color: var(--vscode-foreground);
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.confirm-btn-approve {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  border: none;
+  padding: 5px 16px;
+  cursor: pointer;
+  font-size: inherit;
+  font-family: inherit;
+  border-radius: var(--forge-radius-sm);
+  align-self: auto;
+  font-weight: 500;
+}
+.confirm-btn-approve:hover { background: var(--vscode-button-hoverBackground); }
+
+.confirm-dialog--dangerous .confirm-btn-approve {
+  background: var(--vscode-inputValidation-errorBorder, #be1100);
+  color: #fff;
+}
+.confirm-dialog--dangerous .confirm-btn-approve:hover {
+  background: color-mix(in srgb, var(--vscode-inputValidation-errorBorder, #be1100) 80%, #fff);
+}
+
+.confirm-btn-deny {
+  background: transparent;
+  color: var(--vscode-errorForeground, #f48771);
+  border: 1px solid var(--vscode-inputValidation-errorBorder, #be1100);
+  padding: 5px 16px;
+  cursor: pointer;
+  font-size: inherit;
+  font-family: inherit;
+  border-radius: var(--forge-radius-sm);
+  align-self: auto;
+}
+.confirm-btn-deny:hover {
+  background: color-mix(in srgb, var(--vscode-inputValidation-errorBackground, #5a1d1d) 60%, transparent);
+  color: var(--vscode-foreground);
+}

@@ -1,0 +1,33 @@
+/* ── Design tokens ──────────────────────────────────────────────────────── */
+:root {
+  --forge-radius-sm:   6px;
+  --forge-radius-md:   10px;
+  --forge-radius-lg:   14px;
+  --forge-radius-pill: 999px;
+  --forge-space-1: 4px;
+  --forge-space-2: 8px;
+  --forge-space-3: 12px;
+  --forge-space-4: 16px;
+  --forge-accent:    var(--vscode-focusBorder, #0090ff);
+  --forge-surface-1: var(--vscode-editorWidget-background, #252526);
+  --forge-surface-2: var(--vscode-editor-inactiveSelectionBackground, #3a3a3a);
+  --forge-border:    var(--vscode-widget-border, #444);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* ── Global button baseline ──────────────────────────────────────────────── */
+
+button {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  border: none;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: inherit;
+  font-family: inherit;
+  border-radius: var(--forge-radius-sm);
+  align-self: auto;
+}
+button:hover    { background: var(--vscode-button-hoverBackground); }
+button:disabled { opacity: 0.4; cursor: default; }

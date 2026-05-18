@@ -1,0 +1,84 @@
+/* ── Syntax highlighting (highlight.js / VS Code Dark+ palette) ─────────── */
+
+.hljs {
+  color: #d4d4d4;
+  background: transparent;
+}
+
+/* Keywords: blue */
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-tag { color: #569cd6; }
+
+/* Strings: warm orange */
+.hljs-string,
+.hljs-attr,
+.hljs-attribute,
+.hljs-template-variable,
+.hljs-template-tag { color: #ce9178; }
+
+/* Numbers, literals */
+.hljs-number,
+.hljs-literal,
+.hljs-symbol,
+.hljs-bullet { color: #b5cea8; }
+
+/* Comments: muted green */
+.hljs-comment,
+.hljs-quote { color: #6a9955; font-style: italic; }
+
+/* Functions / method names: yellow */
+.hljs-title,
+.hljs-title.function_,
+.hljs-section { color: #dcdcaa; }
+
+/* Types, classes: teal */
+.hljs-type,
+.hljs-class .hljs-title,
+.hljs-title.class_,
+.hljs-built_in { color: #4ec9b0; }
+
+/* Variables, params: light blue */
+.hljs-variable,
+.hljs-params,
+.hljs-name { color: #9cdcfe; }
+
+/* Operators, punctuation */
+.hljs-operator,
+.hljs-punctuation { color: #d4d4d4; }
+
+/* Decorators / meta */
+.hljs-meta { color: #c8c8c8; }
+
+/* Regexp */
+.hljs-regexp { color: #d16969; }
+
+/* Deleted lines — red tint */
+.hljs-deletion {
+  color: #f47067;
+  background: rgba(244, 112, 103, 0.12);
+  display: inline-block;
+  width: 100%;
+}
+
+/* Added lines — olive/green tint */
+.hljs-addition {
+  color: #89d185;
+  background: rgba(137, 209, 133, 0.12);
+  display: inline-block;
+  width: 100%;
+}
+
+/* Diff section headers (@@ ... @@) */
+.hljs-meta.hljs-diff { color: #4daafc; }
+
+/* Language label on fenced code blocks */
+.msg.assistant pre code[class*="language-"]::before {
+  content: attr(class);
+  display: block;
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+  padding-bottom: 4px;
+  opacity: 0.5;
+  text-transform: lowercase;
+}

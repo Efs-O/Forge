@@ -1,0 +1,246 @@
+/* ── Chats panel ─────────────────────────────────────────────────────────── */
+
+#chats-panel {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #333);
+  padding: 4px 8px 2px;
+  background: var(--vscode-sideBar-background);
+}
+
+#chats-loading {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  padding: 4px 0;
+}
+
+/* ── Tab strip ───────────────────────────────────────────────────────────── */
+
+#tab-strip-wrap {
+  flex-shrink: 0;
+}
+
+#tab-strip-scroll {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 2px 0 4px;
+  align-items: center;
+  scrollbar-width: none;
+}
+
+#tab-strip-scroll::-webkit-scrollbar { display: none; }
+
+.tab-chip {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  min-width: 0;
+  max-width: 180px;
+  border-radius: var(--forge-radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 2px 2px 2px 8px;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.tab-chip:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(90,90,90,0.15));
+  border-color: var(--forge-border);
+}
+
+.tab-chip-active {
+  background: var(--vscode-list-activeSelectionBackground, rgba(0,144,255,0.12));
+  border-color: var(--forge-accent);
+}
+
+.tab-chip-label {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 4px 0 0;
+  margin: 0;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.35;
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  background: transparent;
+  color: var(--vscode-foreground, #ddd);
+  border: none;
+  border-radius: 0;
+}
+
+.tab-chip-label:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.tab-chip-close {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 14px;
+  border-radius: var(--forge-radius-sm);
+  line-height: 1;
+  background: transparent;
+  border: none;
+  color: var(--vscode-descriptionForeground);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+
+.tab-chip:hover .tab-chip-close,
+.tab-chip:focus-within .tab-chip-close,
+.tab-chip-active .tab-chip-close {
+  opacity: 0.65;
+  pointer-events: auto;
+}
+
+.tab-chip-close:hover:not(:disabled) {
+  opacity: 1;
+  color: var(--vscode-foreground, #fff);
+  background: var(--vscode-toolbar-hoverBackground, rgba(90,90,90,0.28));
+}
+
+#tab-new-btn {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-family: inherit;
+  cursor: pointer;
+  border-radius: var(--forge-radius-sm);
+  border: 1px solid var(--forge-border);
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+#tab-new-btn:hover:not(:disabled) {
+  background: var(--vscode-toolbar-hoverBackground, rgba(90,90,90,0.2));
+  color: var(--vscode-foreground);
+  border-color: var(--forge-accent);
+}
+
+#tab-new-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── History panel ───────────────────────────────────────────────────────── */
+
+#history-panel {
+  margin-top: 6px;
+  border-top: 1px solid var(--vscode-sideBarSectionHeader-border, #333);
+  padding-top: 6px;
+}
+
+#history-toggle {
+  width: 100%;
+  padding: 2px 4px;
+  background: transparent;
+  border: none;
+  border-radius: var(--forge-radius-sm);
+  align-self: auto;
+  transition: background 0.1s ease;
+}
+
+#history-toggle:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(90,90,90,0.12));
+}
+
+#history-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+#history-toggle-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#history-heading {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--vscode-sideBarTitle-foreground, #bbb);
+}
+
+#history-chevron {
+  display: inline-flex;
+  align-items: center;
+  color: var(--vscode-descriptionForeground);
+}
+
+#history-count,
+#history-empty {
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+}
+
+#history-empty,
+#history-list-wrap {
+  margin-top: 6px;
+}
+
+#history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.history-item {
+  width: 100%;
+  padding: 5px 8px 5px 10px;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-radius: var(--forge-radius-sm);
+  border: none;
+  border-left: 2px solid transparent;
+  background: transparent;
+  align-self: auto;
+  transition: background 0.1s ease, border-color 0.1s ease;
+}
+
+.history-item:hover:not(:disabled) {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+  border-left-color: var(--forge-accent);
+}
+
+.history-item-title {
+  font-size: 12px;
+  color: var(--vscode-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-item-meta {
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+}
