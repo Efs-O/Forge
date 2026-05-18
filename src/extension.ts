@@ -1,9 +1,12 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { SidebarProvider } from './sidebar/SidebarProvider';
-import { DirectBackend } from './backend/DirectBackend';
+import { BackendPool } from './backend/BackendPool';
+import { SingleBackendPool } from './backend/SingleBackendPool';
 import { BridgeBackend } from './backend/BridgeBackend';
-import { loadConfig, findConfigPath, watchConfig } from './config/ConfigLoader';
+import type { ForgeConfig } from './config/types';
+import { resolveBridgeConfigPath } from './config/BridgeConfigLoader';
+import { loadConfig, findConfigPath, watchForgeConfigPaths } from './config/ConfigLoader';
 import { initLogger, getLogger } from './util/logger';
 import { ToolRegistry } from './tools/ToolRegistry';
 import { CheckpointStack } from './checkpoint/CheckpointStack';
@@ -11,6 +14,31 @@ import { KeepUndoCodeLensProvider } from './sidebar/KeepUndoCodeLens';
 import { TemplateEngine } from './llm/TemplateEngine';
 import { runFirstRunWizard } from './sidebar/FirstRunWizard';
 import { registerAllTools } from './tools/registerAllTools';
+import { BackendStatusBar } from './vscode/BackendStatusBar';
+import { ForgeCodeActionProvider } from './vscode/codeActions';
+import { registerNativeCommands } from './vscode/nativeCommands';
+
+class SetupPlaceholderProvider implements vscode.WebviewViewProvider {
+  resolveWebviewView(view: vscode.WebviewView): void {
+    view.webview.options = { enableScripts: true };
+    view.webview.html = `<!DOCTYPE html><html><body style="padding:20px;font-family:sans-serif;">
+      <p style="margin-bottom:12px;">No <code>config.yaml</code> found.</p>
+      <button onclick="acquireVsCodeApi().postMessage({type:'wizard'})"
+        style="padding:8px 16px;cursor:pointer;">Run Setup Wizard</button>
+      <script>
+        const vscode = acquireVsCodeApi();
+        window.addEventListener('message', e => {
+          if (e.data.type === 'reload') location.reload();
+        });
+      </script>
+    </body></html>`;
+    view.webview.onDidReceiveMessage((msg) => {
+      if (msg.type === 'wizard') {
+        void vscode.commands.executeCommand('forge.setupWizard');
+      }
+    });
+  }
+}
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   initLogger(context);
@@ -18,14 +46,31 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   log.info('Forge activating');
 
   const storagePath = context.globalStorageUri.fsPath;
+  const statusBar = new BackendStatusBar();
+  context.subscriptions.push(statusBar);
 
   // ── Find or create config ─────────────────────────────────────────────────
-  let configPath = findConfigPath(storagePath);
+  const explicitConfig = vscode.workspace.getConfiguration('forge').get<string>('configFile');
+  let configPath = findConfigPath(storagePath, explicitConfig);
 
   if (!configPath) {
+    statusBar.setNoConfig();
+    // Register placeholder so the sidebar panel is not blank
+    context.subscriptions.push(
+      vscode.window.registerWebviewViewProvider(
+        SidebarProvider.viewId,
+        new SetupPlaceholderProvider(),
+      ),
+    );
+    context.subscriptions.push(
+      vscode.commands.registerCommand('forge.setupWizard', async () => {
+        await runFirstRunWizard(context);
+      }),
+    );
     const wizardDone = await runFirstRunWizard(context);
     if (!wizardDone) {
-      const msg = 'Forge: No config.yaml found. Create .forge/config.yaml in your workspace.';
+      const msg =
+        'Forge: No config.yaml found. Create .forge/config.yaml, set forge.configFile to an absolute config path (shared dev setup), or use the setup wizard.';
       log.error(msg);
       void vscode.window.showErrorMessage(msg, 'Retry').then((choice) => {
         if (choice === 'Retry') void vscode.commands.executeCommand('workbench.action.reloadWindow');
@@ -33,10 +78,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
     return; // wizard asks user to reload; let activate re-run
   }
+  const activeConfigPath = configPath;
 
-  let config;
+  let config: ForgeConfig;
   try {
-    config = loadConfig(path.dirname(configPath));
+    config = loadConfig(path.dirname(activeConfigPath));
   } catch (err) {
     const msg = (err as Error).message;
     log.error(msg);
@@ -63,12 +109,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // ── Checkpoint stack ──────────────────────────────────────────────────────
   const checkpoints = new CheckpointStack();
 
-  // ── Backend ───────────────────────────────────────────────────────────────
-  const backend = config.bridge_mode
-    ? new BridgeBackend({
-        baseUrl: `http://${config.llama_server.host ?? '127.0.0.1'}:${config.llama_server.port ?? 8080}`,
-      })
-    : new DirectBackend(config);
+  // ── Backend pool ──────────────────────────────────────────────────────────
+  const pool = config.bridge_mode
+    ? new SingleBackendPool(
+        new BridgeBackend({
+          baseUrl: `http://${config.llama_server.host ?? '127.0.0.1'}:${config.llama_server.port ?? 8080}`,
+        }, config),
+      )
+    : new BackendPool(config);
 
   // ── KeepUndo CodeLens (v0.6) ──────────────────────────────────────────────
   // Declared before SidebarProvider so the provider can reference its methods
@@ -86,13 +134,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // ── Sidebar ───────────────────────────────────────────────────────────────
   sidebarProvider = new SidebarProvider(
     context.extensionUri,
-    backend,
+    pool,
     config,
     checkpoints,
     toolRegistry,
     context.workspaceState,
     codeLensProvider,
     templateEngine,
+    {
+      onGenerationStarted: (modelName) => statusBar.setGenerating(modelName),
+      onGenerationFinished: (modelName) => {
+        if (pool.isAnyReady()) statusBar.setReady(modelName);
+        else statusBar.setStopped(modelName);
+      },
+      onBackendError: (message) => statusBar.setError(message),
+      onBackendReady: (modelName) => statusBar.setReady(modelName),
+    },
   );
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(SidebarProvider.viewId, sidebarProvider, {
@@ -100,40 +157,73 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  backend.start().catch((err: Error) => {
-    log.error(`Backend start failed: ${err.message}`);
-    void vscode.window.showErrorMessage(`Forge: ${err.message}`);
-  });
+  log.info('[Forge] backend will start on first prompt');
+  statusBar.setStopped(config.active_model);
 
-  // ── Config hot-reload (v0.8) ──────────────────────────────────────────────
+  const bridgeWatchPaths: string[] = config.bridge_config
+    ? [resolveBridgeConfigPath(activeConfigPath, config.bridge_config)]
+    : [];
+
+  // ── Config hot-reload (v0.8+ bridge.yaml watch) ───────────────────────────
   context.subscriptions.push(
-    watchConfig(configPath, (newConfig, err) => {
+    watchForgeConfigPaths(activeConfigPath, bridgeWatchPaths, (newConfig, err) => {
       if (err) {
         void vscode.window.showErrorMessage(`Forge: config reload failed — ${err.message}`);
-      } else if (newConfig) {
-        const newUserDirs = newConfig.templates_dir ? [newConfig.templates_dir] : [];
-        templateEngine?.reload(newUserDirs);
-        log.info('Forge: config reloaded');
-        void vscode.window.showInformationMessage(
-          'Forge: config reloaded (restart backend to apply model changes)',
-        );
+        return;
       }
+      if (!newConfig) return;
+
+      const prevActive = config.active_model;
+      if (prevActive && newConfig.models.some((m) => m.name === prevActive)) {
+        newConfig.active_model = prevActive;
+      }
+
+      config = newConfig;
+      if (config.log_level) log.setLevel(config.log_level);
+
+      const newUserDirs = config.templates_dir ? [config.templates_dir] : [];
+      templateEngine?.reload(newUserDirs);
+
+      sidebarProvider.applyForgeConfig(config);
+      // pool.applyForgeConfig is called inside sidebarProvider.applyForgeConfig
+      statusBar.setStopped(config.active_model);
+
+      log.info('Forge: config reloaded');
+      void vscode.window.showInformationMessage(
+        'Forge: configuration reloaded (restart backend if you changed llama-server spawn settings)',
+      );
     }),
   );
 
   // ── Commands ──────────────────────────────────────────────────────────────
+  registerNativeCommands(context, {
+    backend: pool,
+    sidebar: sidebarProvider,
+    statusBar,
+    getConfig: () => config,
+    getConfigPath: () => activeConfigPath,
+    setConfig: (next) => {
+      config = next;
+      sidebarProvider.applyForgeConfig(config);
+      // pool.applyForgeConfig is called inside sidebarProvider.applyForgeConfig
+      statusBar.setStopped(config.active_model);
+    },
+  });
+  context.subscriptions.push(
+    vscode.languages.registerCodeActionsProvider(
+      { scheme: 'file' },
+      new ForgeCodeActionProvider(),
+      { providedCodeActionKinds: ForgeCodeActionProvider.providedCodeActionKinds },
+    ),
+  );
+
   context.subscriptions.push(
     vscode.commands.registerCommand('forge.openSidebar', () => {
       void vscode.commands.executeCommand('workbench.view.extension.forge-sidebar');
     }),
 
-    vscode.commands.registerCommand('forge.restartBackend', async () => {
-      try {
-        await backend.start();
-        void vscode.window.showInformationMessage('Forge: backend restarted');
-      } catch (err) {
-        void vscode.window.showErrorMessage(`Forge: ${(err as Error).message}`);
-      }
+    vscode.commands.registerCommand('forge.showBackendConsole', () => {
+      pool.showConsole();
     }),
 
     vscode.commands.registerCommand('forge.undo', () => {
@@ -157,20 +247,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
 
     vscode.commands.registerCommand('forge.newChat', () => {
-      sidebarProvider.newChat();
+      sidebarProvider.newConversation();
     }),
 
     // v0.2 — send active editor selection to sidebar input
-    vscode.commands.registerCommand('forge.sendSelection', () => {
-      const editor = vscode.window.activeTextEditor;
-      if (!editor || editor.selection.isEmpty) {
-        void vscode.window.showWarningMessage('Forge: no text selected');
-        return;
-      }
-      const text = editor.document.getText(editor.selection);
-      sidebarProvider.sendSelectionContent(text);
-    }),
-
     vscode.commands.registerCommand('forge.setSearchApiKey', async () => {
       if (!config.search) {
         void vscode.window.showErrorMessage(
@@ -197,7 +277,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   context.subscriptions.push({
-    dispose: () => { void backend.stop(); },
+    dispose: () => { void pool.stopAll(); },
   });
 
   log.info('Forge activated');

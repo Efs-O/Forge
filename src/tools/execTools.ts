@@ -13,6 +13,7 @@ import {
   resolveExecCwd,
   spawnAndWait,
 } from './execHelpers';
+import { checkDenyList, getBuiltinDenyList } from './DenyList';
 
 // ── run_terminal ───────────────────────────────────────────────────────────────
 
@@ -39,6 +40,13 @@ export function makeRunTerminalTool(): RegisteredTool {
     handler: async (args) => {
       const command = args['command'] as string;
       const cwd     = resolveExecCwd(args['cwd'] as string | undefined);
+
+      const denied = checkDenyList(command, [], getBuiltinDenyList());
+      if (denied) {
+        throw new Error(
+          `run_terminal: command matches denylist pattern "${denied.description}" — paste refused.`,
+        );
+      }
 
       const terminal = vscode.window.createTerminal({ name: 'Forge', cwd });
       terminal.show(false); // show but don't steal focus

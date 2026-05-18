@@ -16,7 +16,7 @@ export interface RegisteredTool {
 /**
  * Central catalog of available tools.
  * Tools are registered with a permission tier and a strict JSON Schema.
- * The Execute mode gate checks permission before dispatch.
+ * The unified Forge turn checks permission before dispatch.
  */
 export class ToolRegistry {
   private readonly tools = new Map<string, RegisteredTool>();
@@ -52,7 +52,7 @@ export class ToolRegistry {
     const tool = this.tools.get(name);
     if (!tool) throw new Error(`ToolRegistry: unknown tool "${name}"`);
     if (!allowed.has(tool.permission)) {
-      throw new Error(`ToolRegistry: tool "${name}" requires permission "${tool.permission}" which is not granted in current mode`);
+      throw new Error(`ToolRegistry: tool "${name}" requires permission "${tool.permission}" which is not granted for this Forge turn`);
     }
     return tool.handler(args);
   }
@@ -62,9 +62,11 @@ export class ToolRegistry {
   }
 }
 
-/** Permissions granted per mode. Execute gets everything; Ask/Plan are read-only. */
-export const MODE_PERMISSIONS: Record<string, Set<ToolPermission>> = {
-  ask:     new Set(['search']),
-  plan:    new Set(['read', 'search']),
-  execute: new Set(['read', 'write', 'delete', 'terminal', 'search', 'git']),
-};
+export const FORGE_PERMISSIONS = new Set<ToolPermission>([
+  'read',
+  'write',
+  'delete',
+  'terminal',
+  'search',
+  'git',
+]);
