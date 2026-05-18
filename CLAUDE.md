@@ -46,9 +46,10 @@ reliability, zero-friction GGUF loading, optional search, hallucination-aware.
 ---
 
 ## File Size Limit
-- 350 LOC max per source file where practical
+- 350 LOC max per source file — no exceptions for file type
 - Split into modules if exceeded
-- Does NOT apply to `.md`, `.json`, `.yaml`, `.toml`, config files, or generated files
+- Generated files are the only real exemption (files that should never be hand-edited)
+- `.md` docs, `.json`, `.yaml`, `.toml`, and `.css` are all subject to the same limit — a 1000-line stylesheet is as hard to navigate as a 1000-line TypeScript file
 
 ---
 
