@@ -6,25 +6,10 @@ import type { RegisteredTool } from './ToolRegistry';
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function resolveWorkspacePath(filePath: string): string {
-  const folders = vscode.workspace.workspaceFolders;
-  if (!folders?.length) throw new Error('No workspace folder open');
-  const root = folders[0].uri.fsPath;
-  const resolved = path.isAbsolute(filePath) ? filePath : path.join(root, filePath);
-  return resolved;
-}
-
-/** Throws if resolved path escapes the workspace root. */
-function guardWorkspacePath(resolved: string): void {
-  const folders = vscode.workspace.workspaceFolders;
-  if (!folders?.length) throw new Error('No workspace folder open');
-  const root = path.normalize(folders[0].uri.fsPath);
-  const normalized = path.normalize(resolved);
-  if (!normalized.startsWith(root + path.sep) && normalized !== root) {
-    throw new Error(
-      `Path "${resolved}" escapes the workspace root — operation blocked. ` +
-      `Use the terminal directly for operations outside the workspace.`,
-    );
-  }
+  if (path.isAbsolute(filePath)) return path.normalize(filePath);
+  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!root) throw new Error('No workspace folder open — use an absolute path');
+  return path.normalize(path.join(root, filePath));
 }
 
 // ── replace_in_file ────────────────────────────────────────────────────────────
@@ -52,7 +37,6 @@ export function makeReplaceInFileTool(): RegisteredTool {
     permission: 'write',
     handler: async (args) => {
       const filepath = resolveWorkspacePath(args['filepath'] as string);
-      guardWorkspacePath(filepath);
       const oldStr   = args['old_str'] as string;
       const newStr   = args['new_str'] as string;
 
@@ -98,7 +82,6 @@ export function makeCreateDirectoryTool(): RegisteredTool {
     handler: async (args) => {
       const dirPath     = args['path'] as string;
       const resolvedPath = resolveWorkspacePath(dirPath);
-      guardWorkspacePath(resolvedPath);
       fs.mkdirSync(resolvedPath, { recursive: true });
       return `Created: ${dirPath}`;
     },
@@ -129,8 +112,6 @@ export function makeMoveFileTool(): RegisteredTool {
     handler: async (args) => {
       const src = resolveWorkspacePath(args['source'] as string);
       const dst = resolveWorkspacePath(args['destination'] as string);
-      guardWorkspacePath(src);
-      guardWorkspacePath(dst);
       fs.mkdirSync(path.dirname(dst), { recursive: true });
       fs.renameSync(src, dst);
       return `Moved to ${args['destination'] as string}`;
@@ -162,7 +143,6 @@ export function makeDeleteFileTool(): RegisteredTool {
     handler: async (args) => {
       const filePath = args['path'] as string;
       const resolved = resolveWorkspacePath(filePath);
-      guardWorkspacePath(resolved);
       fs.rmSync(resolved, { recursive: args['recursive'] === true });
       return `Deleted: ${filePath}`;
     },
