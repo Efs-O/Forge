@@ -1,14 +1,11 @@
 import React from 'react';
-import type { Mode } from '../../../src/llm/types';
 
 interface Props {
   models: string[];
-  activeModel: string;
-  mode: Mode;
-  onModelChange: (name: string) => void;
-  onModeChange: (mode: Mode) => void;
-  onNewChat: () => void;
+  activeModel: string | null;
+  onModelChange: (name: string | null) => void;
   disabled: boolean;
+  streaming: boolean;
   tokenUsed: number;
   tokenMax: number;
 }
@@ -21,14 +18,17 @@ function budgetColor(used: number, max: number): string {
   return 'var(--vscode-progressBar-background, #0e70c0)';
 }
 
+function formatTokens(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
+
 export function Header({
   models,
   activeModel,
-  mode,
   onModelChange,
-  onModeChange,
-  onNewChat,
   disabled,
+  streaming,
   tokenUsed,
   tokenMax,
 }: Props): React.ReactElement {
@@ -40,41 +40,36 @@ export function Header({
       <div id="forge-header-selects">
         <select
           id="model-select"
-          value={activeModel}
+          value={activeModel ?? ''}
           disabled={disabled}
-          onChange={(e) => onModelChange(e.target.value)}
+          onChange={(e) => onModelChange(e.target.value || null)}
+          title={activeModel ?? 'No model selected'}
         >
+          <option value="">No model selected</option>
           {models.map((name) => (
             <option key={name} value={name}>{name}</option>
           ))}
         </select>
-        <select
-          id="mode-select"
-          value={mode}
-          disabled={disabled}
-          onChange={(e) => onModeChange(e.target.value as Mode)}
-        >
-          <option value="ask">Ask</option>
-          <option value="plan">Plan</option>
-          <option value="execute">Execute</option>
-        </select>
-        <button
-          id="new-chat-btn"
-          title="New Chat"
-          disabled={disabled}
-          onClick={onNewChat}
-        >+</button>
+        {streaming && (
+          <span id="forge-typing" title="Generating…" aria-label="Generating">
+            <span className="forge-typing-dot" />
+            <span className="forge-typing-dot" />
+            <span className="forge-typing-dot" />
+          </span>
+        )}
       </div>
 
       {showBudget && (
-        <div id="token-budget">
+        <div id="token-budget" title={`${tokenUsed.toLocaleString()} / ${tokenMax.toLocaleString()} tokens used`}>
           <div id="token-budget-bar-track">
             <div
               id="token-budget-bar-fill"
               style={{ width: `${fillPct}%`, background: budgetColor(tokenUsed, tokenMax) }}
             />
           </div>
-          <span id="token-budget-label">{tokenUsed}/{tokenMax} tok</span>
+          <span id="token-budget-label">
+            {formatTokens(tokenUsed)} / {formatTokens(tokenMax)}
+          </span>
         </div>
       )}
     </div>

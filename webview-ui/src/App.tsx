@@ -1,54 +1,76 @@
 import React, { useEffect, useReducer, useCallback, useState } from 'react';
-import type { HostToWebview } from '../../src/sidebar/messageBridge';
-import type { Mode } from '../../src/llm/types';
+import type {
+  AttachmentData,
+  ForgeSlashCommandId,
+  HostToWebview,
+  SessionHistoryMeta,
+  SessionTabMeta,
+} from '../../src/sidebar/messageBridge';
 import { vscode } from './vscode';
 import { Header } from './components/Header';
 import { MessageList } from './components/MessageList';
 import { CheckpointBar } from './components/CheckpointBar';
 import { InputRow } from './components/InputRow';
 import { ConfirmationDialog } from './components/ConfirmationDialog';
+import { TabStrip } from './components/TabStrip';
+import { HistoryList } from './components/HistoryList';
+import { SLASH_COMMANDS } from './slashCommands';
 
 export interface AppMessage {
   id: string;
   role: 'user' | 'assistant' | 'error' | 'system';
   content: string;
+  reasoning?: string | undefined;
 }
 
 interface State {
   messages: AppMessage[];
   streaming: boolean;
+  /** True from USER_SEND until DONE/ERROR/BACKEND_DOWN — covers backend startup + token streaming. */
+  generating: boolean;
   models: string[];
-  activeModel: string;
-  mode: Mode;
+  activeModel: string | null;
   backendReady: boolean;
   checkpointPending: boolean;
+  /** Set when host sends first sessionSync — tab row is authoritative for threads. */
+  sessionHydrated: boolean;
+  tabs: SessionTabMeta[];
+  history: SessionHistoryMeta[];
+  activeConversationId: string;
 }
 
 type Action =
   | { type: 'TOKEN'; text: string }
+  | { type: 'REASONING_TOKEN'; text: string }
   | { type: 'DONE' }
   | { type: 'ERROR'; message: string }
   | { type: 'READY' }
+  | { type: 'BACKEND_STARTING'; message: string }
   | { type: 'BACKEND_DOWN'; message: string }
-  | { type: 'MODELS'; names: string[]; active: string }
+  | { type: 'MODELS'; names: string[]; active: string | null }
   | { type: 'USER_SEND'; text: string }
-  | { type: 'SET_MODE'; mode: Mode }
-  | { type: 'SET_MODEL'; name: string }
+  | { type: 'SET_MODEL'; name: string | null }
   | { type: 'CHECKPOINT_READY' }
   | { type: 'CHECKPOINT_DISMISSED' }
-  | { type: 'NEW_CHAT' }
-  | { type: 'HISTORY_RESTORE'; messages: Array<{ role: 'user' | 'assistant'; content: string }> };
+  | {
+      type: 'SESSION_SYNC';
+      activeId: string;
+      tabs: SessionTabMeta[];
+      history: SessionHistoryMeta[];
+      messagesById: Record<string, Array<{ role: 'user' | 'assistant'; content: string; reasoning?: string | undefined }>>;
+    };
 
 function mkId(): string {
   return Math.random().toString(36).slice(2);
 }
 
-function reducer(state: State, action: Action): State {
+export function reducer(state: State, action: Action): State {
   switch (action.type) {
     case 'USER_SEND':
       return {
         ...state,
         streaming: true,
+        generating: true,
         checkpointPending: false,
         messages: [...state.messages, { id: mkId(), role: 'user', content: action.text }],
       };
@@ -70,13 +92,31 @@ function reducer(state: State, action: Action): State {
       };
     }
 
+    case 'REASONING_TOKEN': {
+      const last = state.messages[state.messages.length - 1];
+      if (last?.role === 'assistant') {
+        return {
+          ...state,
+          messages: [
+            ...state.messages.slice(0, -1),
+            { ...last, reasoning: (last.reasoning ?? '') + action.text },
+          ],
+        };
+      }
+      return {
+        ...state,
+        messages: [...state.messages, { id: mkId(), role: 'assistant', content: '', reasoning: action.text }],
+      };
+    }
+
     case 'DONE':
-      return { ...state, streaming: false };
+      return { ...state, streaming: false, generating: false };
 
     case 'ERROR':
       return {
         ...state,
         streaming: false,
+        generating: false,
         messages: [...state.messages, { id: mkId(), role: 'error', content: action.message }],
       };
 
@@ -87,9 +127,18 @@ function reducer(state: State, action: Action): State {
         messages: [...state.messages, { id: mkId(), role: 'system', content: 'Backend ready.' }],
       };
 
+    case 'BACKEND_STARTING':
+      return {
+        ...state,
+        backendReady: false,
+        messages: [...state.messages, { id: mkId(), role: 'system', content: action.message }],
+      };
+
     case 'BACKEND_DOWN':
       return {
         ...state,
+        streaming: false,
+        generating: false,
         backendReady: false,
         messages: [...state.messages, { id: mkId(), role: 'system', content: action.message }],
       };
@@ -97,11 +146,8 @@ function reducer(state: State, action: Action): State {
     case 'MODELS':
       return { ...state, models: action.names, activeModel: action.active };
 
-    case 'SET_MODE':
-      return { ...state, mode: action.mode };
-
     case 'SET_MODEL':
-      return { ...state, activeModel: action.name, messages: [], streaming: false, checkpointPending: false };
+      return { ...state, activeModel: action.name };
 
     case 'CHECKPOINT_READY':
       return { ...state, checkpointPending: true };
@@ -109,21 +155,22 @@ function reducer(state: State, action: Action): State {
     case 'CHECKPOINT_DISMISSED':
       return { ...state, checkpointPending: false };
 
-    case 'NEW_CHAT':
-      return {
-        ...state,
-        messages: [],
-        streaming: false,
-        checkpointPending: false,
-      };
-
-    case 'HISTORY_RESTORE': {
-      const restored: AppMessage[] = action.messages.map((m) => ({
+    case 'SESSION_SYNC': {
+      const rows = action.messagesById[action.activeId] ?? [];
+      const restored: AppMessage[] = rows.map((m) => ({
         id: mkId(),
         role: m.role,
         content: m.content,
+        reasoning: m.reasoning,
       }));
-      return { ...state, messages: restored };
+      return {
+        ...state,
+        sessionHydrated: true,
+        tabs: action.tabs,
+        history: action.history,
+        activeConversationId: action.activeId,
+        messages: restored,
+      };
     }
 
     default:
@@ -131,20 +178,23 @@ function reducer(state: State, action: Action): State {
   }
 }
 
-const initial: State = {
+export const initialState: State = {
   messages: [],
   streaming: false,
+  generating: false,
   models: [],
-  activeModel: '',
-  mode: 'ask',
+  activeModel: null,
   backendReady: false,
   checkpointPending: false,
+  sessionHydrated: false,
+  tabs: [],
+  history: [],
+  activeConversationId: '',
 };
 
 export function App(): React.ReactElement {
-  const [state, dispatch] = useReducer(reducer, initial);
+  const [state, dispatch] = useReducer(reducer, initialState);
 
-  // v0.2+ local state (not in the reducer to stay lightweight)
   const [confirmRequest, setConfirmRequest] = useState<{
     id: string;
     toolName: string;
@@ -152,26 +202,39 @@ export function App(): React.ReactElement {
   } | null>(null);
   const [tokenUsed, setTokenUsed] = useState(0);
   const [tokenMax, setTokenMax] = useState(0);
-  const [selectionPrefill, setSelectionPrefill] = useState('');
+  const [prefillText, setPrefillText] = useState<string | null>(null);
 
   useEffect(() => {
     function handler(event: MessageEvent): void {
       const msg = event.data as HostToWebview;
       switch (msg.type) {
         case 'token':               dispatch({ type: 'TOKEN', text: msg.text }); break;
+        case 'reasoningToken':      dispatch({ type: 'REASONING_TOKEN', text: msg.text }); break;
         case 'done':                dispatch({ type: 'DONE' }); break;
         case 'error':               dispatch({ type: 'ERROR', message: msg.message }); break;
         case 'ready':               dispatch({ type: 'READY' }); break;
+        case 'backendStarting':     dispatch({ type: 'BACKEND_STARTING', message: msg.message }); break;
         case 'backendDown':         dispatch({ type: 'BACKEND_DOWN', message: msg.message }); break;
         case 'models':              dispatch({ type: 'MODELS', names: msg.names, active: msg.active }); break;
         case 'checkpointReady':     dispatch({ type: 'CHECKPOINT_READY' }); break;
         case 'checkpointDismissed': dispatch({ type: 'CHECKPOINT_DISMISSED' }); break;
-        case 'newChat':             dispatch({ type: 'NEW_CHAT' }); break;
-        // v0.2+ messages
-        case 'selectionContent':    setSelectionPrefill(msg.text); break;
+        case 'sessionSync':
+          dispatch({
+            type: 'SESSION_SYNC',
+            activeId: msg.activeId,
+            tabs: msg.tabs,
+            history: msg.history,
+            messagesById: msg.messagesById,
+          });
+          break;
         case 'confirmRequest':      setConfirmRequest({ id: msg.id, toolName: msg.toolName, detail: msg.detail }); break;
         case 'tokenBudget':         setTokenUsed(msg.used); setTokenMax(msg.max); break;
-        case 'historyRestore':      dispatch({ type: 'HISTORY_RESTORE', messages: msg.messages }); break;
+        case 'setInput':
+          setPrefillText(msg.text);
+          break;
+        case 'historyRestore':
+        case 'newChat':
+          break;
       }
     }
     window.addEventListener('message', handler);
@@ -179,27 +242,34 @@ export function App(): React.ReactElement {
     return () => window.removeEventListener('message', handler);
   }, []);
 
-  const handleSend = useCallback((text: string) => {
+  const handleSend = useCallback((text: string, attachments: AttachmentData[]) => {
     dispatch({ type: 'USER_SEND', text });
-    vscode.postMessage({ type: 'send', text, mode: state.mode });
-  }, [state.mode]);
+    vscode.postMessage({ type: 'send', text, attachments: attachments.length ? attachments : undefined });
+  }, []);
 
   const handleCancel = useCallback(() => {
     vscode.postMessage({ type: 'cancel' });
   }, []);
 
-  const handleModelChange = useCallback((name: string) => {
+  const handleModelChange = useCallback((name: string | null) => {
     dispatch({ type: 'SET_MODEL', name });
     vscode.postMessage({ type: 'switchModel', name });
   }, []);
 
-  const handleModeChange = useCallback((mode: Mode) => {
-    dispatch({ type: 'SET_MODE', mode });
+  const handleNewConversation = useCallback(() => {
+    vscode.postMessage({ type: 'newConversation' });
   }, []);
 
-  const handleNewChat = useCallback(() => {
-    dispatch({ type: 'NEW_CHAT' });
-    vscode.postMessage({ type: 'newChat' });
+  const handleSwitchTab = useCallback((id: string) => {
+    vscode.postMessage({ type: 'switchConversation', id });
+  }, []);
+
+  const handleCloseTab = useCallback((id: string) => {
+    vscode.postMessage({ type: 'closeConversation', id });
+  }, []);
+
+  const handleRestoreConversation = useCallback((id: string) => {
+    vscode.postMessage({ type: 'restoreConversation', id });
   }, []);
 
   const handleConfirmApprove = useCallback(() => {
@@ -214,32 +284,54 @@ export function App(): React.ReactElement {
     setConfirmRequest(null);
   }, [confirmRequest]);
 
-  const handlePrefillConsumed = useCallback(() => {
-    setSelectionPrefill('');
+  const handleRunSlashCommand = useCallback((commandId: ForgeSlashCommandId) => {
+    vscode.postMessage({ type: 'runSlashCommand', commandId });
   }, []);
+
+  const uiBusy = state.generating;
 
   return (
     <div id="forge-root">
       <Header
         models={state.models}
         activeModel={state.activeModel}
-        mode={state.mode}
         onModelChange={handleModelChange}
-        onModeChange={handleModeChange}
-        onNewChat={handleNewChat}
-        disabled={state.streaming}
+        disabled={uiBusy}
+        streaming={state.streaming}
         tokenUsed={tokenUsed}
         tokenMax={tokenMax}
       />
-      <MessageList messages={state.messages} />
+      <aside id="chats-panel" aria-label="Forge chats">
+        {!state.sessionHydrated && (
+          <span id="chats-loading" role="status">Loading…</span>
+        )}
+        {state.sessionHydrated && (
+          <>
+            <TabStrip
+              tabs={state.tabs}
+              activeId={state.activeConversationId}
+              onSwitch={handleSwitchTab}
+              onNew={handleNewConversation}
+              onClose={handleCloseTab}
+            />
+            <HistoryList
+              items={state.history}
+              onRestore={handleRestoreConversation}
+            />
+          </>
+        )}
+      </aside>
+      <MessageList messages={state.messages} streaming={state.streaming} generating={state.generating} />
       <CheckpointBar visible={state.checkpointPending} />
       <InputRow
         onSend={handleSend}
         onCancel={handleCancel}
         streaming={state.streaming}
         backendReady={state.backendReady}
-        prefillText={selectionPrefill}
-        onPrefillConsumed={handlePrefillConsumed}
+        slashCommands={SLASH_COMMANDS}
+        onRunSlashCommand={handleRunSlashCommand}
+        prefillText={prefillText}
+        onPrefillConsumed={() => setPrefillText(null)}
       />
       {confirmRequest && (
         <ConfirmationDialog

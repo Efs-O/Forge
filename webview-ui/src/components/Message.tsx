@@ -1,36 +1,151 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AppMessage } from '../App';
 import { vscode } from '../vscode';
 
-export function Message({ role, content }: AppMessage): React.ReactElement {
+const FILE_LINK_SCHEME = 'forge-file://';
+
+const ChevronDown = (): React.ReactElement => (
+  <svg width="10" height="6" viewBox="0 0 10 6" fill="currentColor" aria-hidden="true">
+    <path d="M0 0l5 6 5-6z" />
+  </svg>
+);
+
+const ChevronRight = (): React.ReactElement => (
+  <svg width="6" height="10" viewBox="0 0 6 10" fill="currentColor" aria-hidden="true">
+    <path d="M0 0l6 5-6 5z" />
+  </svg>
+);
+
+const markdownComponents: React.ComponentProps<typeof Markdown>['components'] = {
+  a: ({ href, children, ...props }) => {
+    if (href?.startsWith(FILE_LINK_SCHEME)) {
+      const filePath = decodeURIComponent(href.slice(FILE_LINK_SCHEME.length));
+      return (
+        <a {...props} href={href} onClick={(e) => { e.preventDefault(); vscode.postMessage({ type: 'openFile', path: filePath }); }}>
+          {children}
+        </a>
+      );
+    }
+    return <a {...props} href={href}>{children}</a>;
+  },
+};
+
+function AssistantContent({ content, streaming }: { content: string; streaming?: boolean }): React.ReactElement {
+  const { settled, live } = useMemo(
+    () => streaming ? splitStreamingContent(content) : { settled: content, live: '' },
+    [content, streaming],
+  );
+
+  if (!streaming) {
+    return <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{content}</Markdown>;
+  }
+
+  return (
+    <>
+      {settled && (
+        <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{settled}</Markdown>
+      )}
+      <span className="streaming-tail">{live}</span>
+      <span className="streaming-cursor" aria-hidden="true" />
+    </>
+  );
+}
+
+interface MessageProps extends AppMessage {
+  streaming?: boolean;
+}
+
+/**
+ * Splits streaming content at the last paragraph boundary outside a code fence.
+ * "Settled" blocks are safe to render as markdown; the live tail is shown as plain text.
+ */
+function splitStreamingContent(content: string): { settled: string; live: string } {
+  let fenceOpen = false;
+  let lastSafeSplit = 0;
+  let i = 0;
+
+  while (i < content.length) {
+    if (content[i] === '`' && content[i + 1] === '`' && content[i + 2] === '`') {
+      fenceOpen = !fenceOpen;
+      i += 3;
+      while (i < content.length && content[i] !== '\n') i++;
+    } else if (!fenceOpen && content[i] === '\n' && content[i + 1] === '\n') {
+      lastSafeSplit = i + 2;
+      i += 2;
+    } else {
+      i++;
+    }
+  }
+
+  if (lastSafeSplit === 0 || lastSafeSplit >= content.length) {
+    return { settled: '', live: content };
+  }
+  return { settled: content.slice(0, lastSafeSplit), live: content.slice(lastSafeSplit) };
+}
+
+export function Message({ role, content, reasoning, streaming }: MessageProps): React.ReactElement {
+  const [thinkingOpen, setThinkingOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+
   const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(content).catch(() => {
-      // clipboard API may be unavailable in some webview contexts — silently ignore
-    });
+    navigator.clipboard.writeText(content).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }).catch(() => undefined);
   }, [content]);
 
-  const handleInsert = useCallback(() => {
-    vscode.postMessage({ type: 'insertAtCursor', text: content });
-  }, [content]);
+  if (role === 'system') {
+    return <div className="msg system">{content}</div>;
+  }
 
-  const handleReplace = useCallback(() => {
-    vscode.postMessage({ type: 'replaceSelection', text: content });
-  }, [content]);
-
-  if (role === 'assistant') {
+  if (role === 'error') {
     return (
-      <div className={`msg ${role}`}>
-        <Markdown remarkPlugins={[remarkGfm]}>{content}</Markdown>
-        <div className="msg-actions">
-          <button className="btn-action" title="Copy to clipboard" onClick={handleCopy}>Copy</button>
-          <button className="btn-action" title="Insert at cursor" onClick={handleInsert}>Insert</button>
-          <button className="btn-action" title="Replace selection" onClick={handleReplace}>Replace</button>
-        </div>
+      <div className="msg-wrapper">
+        <div className="msg error">{content}</div>
       </div>
     );
   }
 
-  return <div className={`msg ${role}`}>{content}</div>;
+  const roleLabel = role === 'user' ? 'You' : 'Forge';
+
+  return (
+    <div className="msg-wrapper">
+      <span className={`msg-role role-${role}`}>{roleLabel}</span>
+
+      <div className={`msg ${role}`}>
+        {role === 'assistant' && reasoning && (
+          <div className={`thinking-bubble${thinkingOpen ? ' thinking-bubble-open' : ''}`}>
+            <button
+              className="thinking-toggle"
+              type="button"
+              onClick={() => setThinkingOpen((open) => !open)}
+              aria-expanded={thinkingOpen}
+            >
+              <span>Thinking</span>
+              <span className="thinking-chevron">
+                {thinkingOpen ? <ChevronDown /> : <ChevronRight />}
+              </span>
+            </button>
+            {thinkingOpen && <pre className="thinking-content">{reasoning}</pre>}
+          </div>
+        )}
+
+        {role === 'assistant' && content ? (
+          <AssistantContent content={content} streaming={streaming} />
+        ) : role === 'user' ? (
+          content
+        ) : null}
+      </div>
+
+      {role === 'assistant' && content && (
+        <div className="msg-actions">
+          <button className="btn-action" onClick={handleCopy} type="button">
+            {copied ? '✓ Copied' : 'Copy'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
