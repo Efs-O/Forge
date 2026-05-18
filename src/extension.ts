@@ -55,7 +55,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   if (!configPath) {
     statusBar.setNoConfig();
-    // Register placeholder so the sidebar panel is not blank
     context.subscriptions.push(
       vscode.window.registerWebviewViewProvider(
         SidebarProvider.viewId,
@@ -64,19 +63,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
     context.subscriptions.push(
       vscode.commands.registerCommand('forge.setupWizard', async () => {
-        await runFirstRunWizard(context);
+        const done = await runFirstRunWizard(context);
+        if (done) void vscode.commands.executeCommand('workbench.action.reloadWindow');
       }),
     );
-    const wizardDone = await runFirstRunWizard(context);
-    if (!wizardDone) {
-      const msg =
-        'Forge: No config.yaml found. Create .forge/config.yaml, set forge.configFile to an absolute config path (shared dev setup), or use the setup wizard.';
-      log.error(msg);
-      void vscode.window.showErrorMessage(msg, 'Retry').then((choice) => {
-        if (choice === 'Retry') void vscode.commands.executeCommand('workbench.action.reloadWindow');
-      });
-    }
-    return; // wizard asks user to reload; let activate re-run
+    // Don't auto-launch the wizard — the window may not be focused yet (e.g.
+    // freshly opened by --install-extension), which causes showQuickPick to
+    // return undefined immediately. Show a notification instead; the sidebar
+    // placeholder also has a "Run Setup Wizard" button.
+    void vscode.window.showInformationMessage(
+      'Forge: No config found. Run the setup wizard to get started.',
+      'Setup',
+    ).then((choice) => {
+      if (choice === 'Setup') void vscode.commands.executeCommand('forge.setupWizard');
+    });
+    return;
   }
   const activeConfigPath = configPath;
 
