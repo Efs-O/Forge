@@ -1,3 +1,4 @@
+import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolDispatch, resolveToolPath } from '../../src/sidebar/ToolDispatch';
 import type { ToolCall } from '../../src/llm/types';
@@ -6,12 +7,14 @@ import type { KeepUndoCodeLensProvider } from '../../src/sidebar/KeepUndoCodeLen
 import type { ToolFailureTracker } from '../../src/tools/StripTools';
 import { ToolRegistry } from '../../src/tools/ToolRegistry';
 
+const WS = path.resolve('/workspace');
+
 // Mock vscode
 vi.mock('vscode', () => ({
   workspace: {
-    workspaceFolders: [{ uri: { fsPath: '/workspace' } }],
+    workspaceFolders: [{ uri: { fsPath: WS } }],
     openTextDocument: vi.fn().mockResolvedValue({}),
-    asRelativePath: vi.fn((p: string) => p.replace('/workspace/', '')),
+    asRelativePath: vi.fn((p: string) => p.replace(WS + path.sep, '')),
   },
   window: {
     showTextDocument: vi.fn().mockResolvedValue(undefined),
@@ -31,15 +34,16 @@ function makeToolCall(name: string, args: Record<string, unknown>): ToolCall {
 
 describe('resolveToolPath', () => {
   it('returns absolute paths unchanged', () => {
-    expect(resolveToolPath('/absolute/path/file.ts')).toBe('/absolute/path/file.ts');
+    const abs = path.resolve('/absolute/path/file.ts');
+    expect(resolveToolPath(abs)).toBe(abs);
   });
 
   it('resolves relative paths against workspace root', () => {
-    expect(resolveToolPath('src/file.ts')).toBe('/workspace/src/file.ts');
+    expect(resolveToolPath('src/file.ts')).toBe(path.join(WS, 'src/file.ts'));
   });
 
   it('normalizes paths', () => {
-    expect(resolveToolPath('./src/../file.ts')).toBe('/workspace/file.ts');
+    expect(resolveToolPath('./src/../file.ts')).toBe(path.join(WS, 'file.ts'));
   });
 });
 
