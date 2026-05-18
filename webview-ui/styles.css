@@ -604,6 +604,17 @@ body {
   word-break: break-word;
 }
 
+.streaming-label {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 0.72em;
+  color: var(--forge-accent, #0090ff);
+  opacity: 0.75;
+  vertical-align: middle;
+  animation: forge-cursor-blink 0.7s ease-in-out infinite;
+  user-select: none;
+}
+
 /* ── Markdown inside assistant messages ─────────────────────────────────── */
 
 .msg.assistant p          { margin: 0 0 8px; }
