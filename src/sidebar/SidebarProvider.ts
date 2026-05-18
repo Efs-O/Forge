@@ -343,7 +343,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async applyCloseConversation(id: string): Promise<void> {
-    await this.agentLoop.stopStreamingIfNeeded();
+    if (id === this.sidebar.activeConversationId) await this.agentLoop.stopStreamingIfNeeded();
     const result = opCloseConversation(this.sidebar, id);
     if (!result) return;
     this.sidebar = result.sidebar;
