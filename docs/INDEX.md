@@ -25,6 +25,11 @@ Also relevant at repo root:
 - **`llamabridge/`** — in-tree reference, removed before deploy
 - **`llamabridge/SLIM-RECOMMENDATIONS.md`** — slim instructions for the upstream `llamabridge` repo (apply elsewhere, not here)
 
+### Planning drafts
+
+- **[multi-tab-chat-plan.md](multi-tab-chat-plan.md)** — multiple sidebar conversation tabs and persistence migration path
+- **[offline-vscode-integration-plan.md](offline-vscode-integration-plan.md)** — low-code offline VS Code integration surfaces
+
 ---
 
 ## Locked Decisions

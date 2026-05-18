@@ -1,11 +1,11 @@
 {
   "name": "forge-llm",
   "displayName": "Forge LLM",
-  "description": "Local-LLM coding assistant — direct llama.cpp, strict tool schemas, Ask / Plan / Execute modes",
-  "version": "0.9.0",
-  "publisher": "efs-o",
+  "description": "Local-LLM coding assistant — direct llama.cpp, strict tool schemas, single execute-style workflow",
+  "version": "0.9.2",
+  "publisher": "Efsoo",
+  "icon": "assets/publisher-logo.png",
   "license": "Apache-2.0",
-  "private": true,
   "engines": {
     "vscode": "^1.90.0"
   },
@@ -55,26 +55,103 @@
     },
     "commands": [
       { "command": "forge.openSidebar",      "title": "Forge: Open Sidebar" },
+      { "command": "forge.startBackend",     "title": "Forge: Start Backend" },
+      { "command": "forge.stopBackend",      "title": "Forge: Stop Backend" },
+      { "command": "forge.showBackendConsole","title": "Forge: Show Backend Console" },
       { "command": "forge.restartBackend",   "title": "Forge: Restart Backend" },
+      { "command": "forge.openConfig",       "title": "Forge: Open Config" },
+      { "command": "forge.validateConfig",   "title": "Forge: Validate Config" },
+      { "command": "forge.pickModel",        "title": "Forge: Pick Model" },
+      { "command": "forge.pickGgufModelFile","title": "Forge: Pick GGUF Model File" },
+      { "command": "forge.clearChat",        "title": "Forge: Clear Active Chat" },
+      { "command": "forge.unloadModel",      "title": "Forge: Unload Model" },
+      { "command": "forge.explainSelection", "title": "Forge: Explain Selection" },
+      { "command": "forge.reviewSelection",  "title": "Forge: Review Selection" },
+      { "command": "forge.generateTestsForSelection", "title": "Forge: Generate Tests For Selection" },
+      { "command": "forge.refactorSelection","title": "Forge: Refactor Selection" },
+      { "command": "forge.runExplainSelection", "title": "Forge: Run Explain Selection" },
+      { "command": "forge.runReviewSelection", "title": "Forge: Run Review Selection" },
+      { "command": "forge.runGenerateTestsForSelection", "title": "Forge: Run Generate Tests For Selection" },
+      { "command": "forge.runRefactorSelection", "title": "Forge: Run Refactor Selection" },
+      { "command": "forge.explainDiagnostic","title": "Forge: Explain Diagnostic" },
+      { "command": "forge.fixDiagnostic",    "title": "Forge: Propose Fix For Diagnostic" },
+      { "command": "forge.runFixDiagnostic", "title": "Forge: Run Fix For Diagnostic" },
+      { "command": "forge.fixFileDiagnostics","title": "Forge: Propose Fix For File Diagnostics" },
+      { "command": "forge.useCurrentFile",   "title": "Forge: Use Current File As Context" },
+      { "command": "forge.useSelection",     "title": "Forge: Use Selection As Context" },
+      { "command": "forge.useOpenTabs",      "title": "Forge: Use Open Tabs As Context" },
+      { "command": "forge.pickContextFiles", "title": "Forge: Pick Files For Context" },
+      { "command": "forge.draftPlanScratch", "title": "Forge: Draft Plan In Scratch Document" },
+      { "command": "forge.draftReviewScratch","title": "Forge: Draft Review In Scratch Document" },
       { "command": "forge.newChat",          "title": "Forge: New Chat" },
       { "command": "forge.undo",             "title": "Forge: Undo Last Turn" },
       { "command": "forge.keep",             "title": "Forge: Keep Changes" },
       { "command": "forge.setSearchApiKey",  "title": "Forge: Set Search API Key" },
-      { "command": "forge.sendSelection",    "title": "Forge: Send Selection to Chat" },
       { "command": "forge.setupWizard",      "title": "Forge: Setup Wizard" }
     ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "forge.explainSelection",
+          "group": "forge@1",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "forge.reviewSelection",
+          "group": "forge@2",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "forge.generateTestsForSelection",
+          "group": "forge@3",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "forge.refactorSelection",
+          "group": "forge@4",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "forge.useCurrentFile",
+          "group": "forge@5"
+        },
+        {
+          "command": "forge.useSelection",
+          "group": "forge@6",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "forge.fixFileDiagnostics",
+          "group": "forge@7"
+        }
+      ],
+      "terminal/context": [
+        {
+          "command": "forge.showBackendConsole",
+          "group": "navigation"
+        },
+        {
+          "command": "forge.openSidebar",
+          "group": "navigation"
+        }
+      ],
+      "terminal/title/context": [
+        {
+          "command": "forge.showBackendConsole",
+          "group": "navigation"
+        },
+        {
+          "command": "forge.openSidebar",
+          "group": "navigation"
+        }
+      ]
+    },
     "keybindings": [
       {
         "command": "forge.newChat",
         "key": "ctrl+shift+n",
         "mac": "cmd+shift+n",
         "when": "focusedView == forge.sidebar"
-      },
-      {
-        "command": "forge.sendSelection",
-        "key": "ctrl+shift+e",
-        "mac": "cmd+shift+e",
-        "when": "editorHasSelection"
       },
       {
         "command": "forge.undo",
@@ -90,16 +167,6 @@
           "type": "string",
           "default": "",
           "description": "Override the llama-server endpoint (leave empty to use config.yaml)"
-        },
-        "forge.defaultMode": {
-          "type": "string",
-          "enum": [
-            "ask",
-            "plan",
-            "execute"
-          ],
-          "default": "ask",
-          "description": "Default mode on activation"
         },
         "forge.logLevel": {
           "type": "string",
@@ -122,12 +189,19 @@
           "type": "boolean",
           "default": false,
           "description": "Managed by extension — tracks first-run wizard state"
+        },
+        "forge.configFile": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "description": "Absolute path to config.yaml or to a folder containing it. When set, Forge loads this file in every workspace (instead of workspace .forge/config.yaml). Use one shared dev config so bridge.yaml merges stay in sync. Reload the window after changing this."
         }
       }
     }
   },
   "scripts": {
     "svg:png": "node scripts/svg-to-png.mjs",
+    "ping-ollama-cloud": "node scripts/ping-ollama-cloud-models.mjs",
     "build:ext": "node esbuild.config.mjs",
     "build:webview": "node esbuild.config.mjs --webview",
     "build": "node esbuild.config.mjs --all",
@@ -161,13 +235,13 @@
     "eslint": "^8.57.0",
     "eslint-config-prettier": "^9.0.0",
     "eslint-plugin-prettier": "^5.0.0",
-    "js-yaml": "^4.1.0",
     "prettier": "^3.0.0",
     "typescript": "^5.4.0",
     "vitest": "^1.0.0"
   },
   "dependencies": {
     "@mozilla/readability": "^0.5.0",
+    "js-yaml": "^4.1.0",
     "nunjucks": "^3.2.4",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",

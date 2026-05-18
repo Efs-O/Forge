@@ -68,7 +68,7 @@ dist/webview.js
 package.json
 README.md
 LICENSE
-config/config.example.yaml
+.forge/config.yaml
 ```
 
 No `node_modules/` in the package. `vsce` will warn if you ship
@@ -145,7 +145,7 @@ Run this checklist before every release, in order:
 
 - [ ] All lift-list items for this version are ported to `src/` (see [10-bridge-audit.md §6](10-bridge-audit.md))
 - [ ] `legacy/llamabridge/` deleted from the repo (v1.0 and beyond — see removal plan in [10-bridge-audit.md §9](10-bridge-audit.md))
-- [ ] `config/config.example.yaml` reflects current schema
+- [ ] `.forge/config.yaml` reflects the current supported schema
 - [ ] `README.md` updated — Path A and Path B documented, install instructions current
 - [ ] `package.json` `"version"` bumped, `"publisher"` set, `"engines.vscode"` pinned correctly
 - [ ] `CHANGELOG.md` updated with this version's changes

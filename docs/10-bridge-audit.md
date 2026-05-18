@@ -165,7 +165,7 @@ addressed: `replace_in_file`, `replace_selection`, `insert_at_cursor`,
 
 | From bridge file                          | To Forge                                                       | Effort  |
 | ----------------------------------------- | -------------------------------------------------------------- | ------- |
-| `config/bridge.example.yaml` schema       | `config/config.example.yaml` (rename keys to Forge vocab)      | 30 min  |
+| `config/bridge.example.yaml` schema       | `.forge/config.yaml` (rename keys to Forge vocab)      | 30 min  |
 | `sampling.py` rules                       | `src/llm/SamplingMerge.ts` (TS port, identical semantics)      | 1 hour  |
 | `_merge_system_prompt_into_messages`      | `src/llm/SystemPromptInjector.ts`                              | 30 min  |
 | `merge_reasoning_chat` (think mode)       | `src/llm/ThinkingMode.ts`                                      | 20 min  |
@@ -219,7 +219,7 @@ the bridge for users who want the Python path.
 Before publishing Forge to the marketplace:
 
 1. Confirm all listed lift-list items have been ported to `src/`
-2. Confirm `config/config.example.yaml` mirrors `llamabridge/config/bridge.example.yaml` semantics under Forge naming
+2. Confirm `.forge/config.yaml` mirrors `llamabridge/config/bridge.example.yaml` semantics under Forge naming
 3. Delete `llamabridge/` from this repo
 4. Update README to point users at the upstream `llamabridge` repo for Path B
 5. Tag the commit just before removal as `pre-bridge-removal` for archaeological reference

@@ -6,3 +6,21 @@ coverage/
 *.log
 .DS_Store
 Thumbs.db
+
+# Local machine config (hardcoded paths, secrets) — use bridge.example.yaml as template
+bridge.yaml
+
+# Claude Code local settings
+.claude/
+
+# Scratch / demo files
+fireworks.html
+
+# Internal planning docs — not user-facing
+docs/gui-code-comparison-report.md
+docs/metadata-and-thinking-plan.md
+docs/multi-tab-chat-plan.md
+docs/offline-vscode-integration-plan.md
+docs/ollama-support-plan.md
+docs/plan-backend-pool.md
+AUDIT_REPORT.md
