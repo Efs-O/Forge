@@ -141,6 +141,12 @@ export function App(): React.ReactElement {
         )}
       </aside>
       <MessageList messages={state.messages} streaming={state.streaming} generating={state.generating} />
+      {state.streaming && (
+        <div id="streaming-status" role="status" aria-live="polite">
+          <span className="streaming-status-dot" />
+          Eating tokens…
+        </div>
+      )}
       <CheckpointBar visible={state.checkpointPending} />
       <InputRow
         onSend={handleSend}

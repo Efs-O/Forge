@@ -77,13 +77,23 @@
   word-break: break-word;
 }
 
-.streaming-label {
-  display: inline-block;
-  margin-left: 6px;
-  font-size: 0.9em;
-  color: var(--forge-accent, #0090ff);
-  opacity: 0.75;
-  vertical-align: middle;
-  animation: forge-cursor-blink 0.7s ease-in-out infinite;
+#streaming-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  font-size: 0.78em;
+  color: var(--vscode-descriptionForeground, #888);
+  border-top: 1px solid var(--vscode-editorWidget-border, rgba(128,128,128,0.15));
   user-select: none;
+  letter-spacing: 0.02em;
+}
+
+.streaming-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--forge-accent, #0090ff);
+  flex-shrink: 0;
+  animation: forge-cursor-blink 0.9s ease-in-out infinite;
 }
