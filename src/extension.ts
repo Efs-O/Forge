@@ -11,6 +11,7 @@ import { initLogger, getLogger } from './util/logger';
 import { ToolRegistry } from './tools/ToolRegistry';
 import { CheckpointStack } from './checkpoint/CheckpointStack';
 import { KeepUndoCodeLensProvider } from './sidebar/KeepUndoCodeLens';
+import { DiffDecorations } from './sidebar/DiffDecorations';
 import { TemplateEngine } from './llm/TemplateEngine';
 import { runFirstRunWizard } from './sidebar/FirstRunWizard';
 import { SESSION_KEY_V1 } from './sidebar/sessionTypes';
@@ -115,13 +116,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       )
     : new BackendPool(config);
 
-  // ── KeepUndo CodeLens (v0.6) ──────────────────────────────────────────────
+  // ── KeepUndo CodeLens + Diff Decorations ─────────────────────────────────
   // Declared before SidebarProvider so the provider can reference its methods
   let sidebarProvider: SidebarProvider;
+
+  const diffDecorations = new DiffDecorations();
+  context.subscriptions.push(diffDecorations);
 
   const codeLensProvider = new KeepUndoCodeLensProvider(
     () => { sidebarProvider.keep(); },
     () => { sidebarProvider.undo(); },
+    diffDecorations,
   );
   context.subscriptions.push(
     vscode.languages.registerCodeLensProvider({ scheme: 'file' }, codeLensProvider),
@@ -146,6 +151,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     toolRegistry,
     context.globalState,
     codeLensProvider,
+    diffDecorations,
     templateEngine,
     {
       onGenerationStarted: (modelName) => statusBar.setGenerating(modelName),

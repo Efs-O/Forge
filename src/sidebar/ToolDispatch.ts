@@ -1,4 +1,3 @@
-import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { HostToWebview } from './messageBridge';
@@ -8,7 +7,7 @@ import type { KeepUndoCodeLensProvider } from './KeepUndoCodeLens';
 import type { ToolPermission } from '../tools/ToolRegistry';
 import { ToolRegistry } from '../tools/ToolRegistry';
 import { ToolFailureTracker } from '../tools/StripTools';
-import { computeDiff } from './DiffUtils';
+import type { DiffDecorations } from './DiffDecorations';
 
 const WRITE_PERMISSIONS = new Set<ToolPermission>(['write', 'delete']);
 
@@ -28,6 +27,7 @@ export class ToolDispatch {
     private readonly failureTracker: ToolFailureTracker,
     private readonly post: (msg: HostToWebview) => void,
     private readonly requestApproval: (toolName: string, detail: string, isDangerous?: boolean, convId?: string) => Promise<boolean>,
+    private readonly diffDecorations: DiffDecorations,
   ) {}
 
   async dispatch(
@@ -84,7 +84,7 @@ export class ToolDispatch {
           if (filePath) {
             const resolved = resolveToolPath(filePath);
             this.codeLens.markPending([resolved]);
-            this.postFileDiff(tc.function.name, resolved, convId);
+            this.applyDiffDecorations(tc.function.name, resolved);
           }
         }
       } catch (err) {
@@ -101,6 +101,16 @@ export class ToolDispatch {
     const uri = vscode.Uri.file(resolveToolPath(filePath));
     const doc = await vscode.workspace.openTextDocument(uri);
     await vscode.window.showTextDocument(doc, { preview: false, preserveFocus: false });
+  }
+
+  private applyDiffDecorations(toolName: string, resolvedPath: string): void {
+    const DIFF_TOOLS = new Set(['write_file', 'replace_in_file', 'delete_file']);
+    if (!DIFF_TOOLS.has(toolName)) return;
+
+    const beforeContent = this.checkpoints.readSnapshotContent(resolvedPath);
+    if (beforeContent === undefined) return;
+
+    this.diffDecorations.apply(resolvedPath, beforeContent);
   }
 
   private postResult(tc: ToolCall, result: string, args?: Record<string, unknown>, convId?: string): void {
@@ -125,24 +135,6 @@ export class ToolDispatch {
         : typeof args?.['filepath'] === 'string' ? args['filepath'] : null;
       if (rawPath) void this.openFile(rawPath);
     }
-  }
-
-  private postFileDiff(toolName: string, resolvedPath: string, convId?: string): void {
-    const FILE_DIFF_TOOLS = new Set(['write_file', 'replace_in_file', 'delete_file']);
-    if (!FILE_DIFF_TOOLS.has(toolName)) return;
-
-    const beforeContent = this.checkpoints.readSnapshotContent(resolvedPath);
-    if (beforeContent === undefined) return;
-
-    const isDeleted = !fs.existsSync(resolvedPath);
-    const afterContent = isDeleted ? '' : fs.readFileSync(resolvedPath, 'utf8');
-    const isNew = beforeContent === null;
-    const hunks = !isDeleted
-      ? computeDiff(beforeContent ?? '', afterContent)
-      : null;
-
-    const relPath = vscode.workspace.asRelativePath(resolvedPath, true);
-    this.post({ type: 'fileDiff', filePath: relPath, hunks, isNew, isDeleted, ...(convId ? { conversationId: convId } : {}) });
   }
 
   private buildFileLink(toolName: string, result: string, args?: Record<string, unknown>): string | null {

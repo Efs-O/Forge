@@ -1,17 +1,13 @@
 import type {
   SessionTabMeta,
   SessionHistoryMeta,
-  DiffHunk,
 } from '../../src/sidebar/messageBridge';
 
 export interface AppMessage {
   id: string;
-  role: 'user' | 'assistant' | 'error' | 'system' | 'tool' | 'diff';
+  role: 'user' | 'assistant' | 'error' | 'system' | 'tool';
   content: string;
   reasoning?: string | undefined;
-  diffHunks?: DiffHunk[] | null;
-  diffIsNew?: boolean;
-  diffIsDeleted?: boolean;
 }
 
 interface State {
@@ -53,7 +49,6 @@ export type Action =
   | { type: 'CHECKPOINT_READY'; convId?: string }
   | { type: 'CHECKPOINT_DISMISSED'; convId?: string }
   | { type: 'TOOL_ACTIVITY'; toolName: string; detail?: string; convId?: string }
-  | { type: 'FILE_DIFF'; filePath: string; hunks: DiffHunk[] | null; isNew: boolean; isDeleted: boolean; convId?: string }
   | {
       type: 'SESSION_SYNC';
       activeId: string;
@@ -197,18 +192,6 @@ export function reducer(state: State, action: Action): State {
         id: mkId(),
         role: 'tool' as const,
         content: action.detail ? `${action.toolName} → ${action.detail}` : action.toolName,
-      });
-    }
-
-    case 'FILE_DIFF': {
-      const cid = resolveConvId(state, action.convId);
-      return appendToConv(state, cid, {
-        id: mkId(),
-        role: 'diff' as const,
-        content: action.filePath,
-        diffHunks: action.hunks,
-        diffIsNew: action.isNew,
-        diffIsDeleted: action.isDeleted,
       });
     }
 

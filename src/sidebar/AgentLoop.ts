@@ -26,6 +26,7 @@ import { StructuredOutputStripper, stripStructuredOutputFromFullText } from '../
 import { getLogger } from '../util/logger';
 import { inspectRuntimeModelCapabilities, type RuntimeModelCapabilities } from '../backend/ModelCapabilities';
 import { ToolDispatch } from './ToolDispatch';
+import type { DiffDecorations } from './DiffDecorations';
 import { deriveTitle } from './sessionTypes';
 import { extractToolDetail } from './toolSummary';
 const log = getLogger();
@@ -60,6 +61,7 @@ export class AgentLoop {
     private readonly toolRegistry: ToolRegistry,
     private readonly checkpoints: CheckpointStack,
     codeLens: KeepUndoCodeLensProvider,
+    diffDecorations: DiffDecorations,
     private readonly failureTracker: ToolFailureTracker,
     private readonly events: SidebarProviderEvents,
     private readonly post: (msg: HostToWebview) => void,
@@ -73,6 +75,7 @@ export class AgentLoop {
       failureTracker,
       post,
       (name, detail, isDangerous, convId) => this.requestToolApproval(name, detail, isDangerous, convId),
+      diffDecorations,
     );
   }
 

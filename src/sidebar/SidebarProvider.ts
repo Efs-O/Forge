@@ -18,6 +18,7 @@ import type { AttachmentData } from './messageBridge';
 import { CheckpointStack } from '../checkpoint/CheckpointStack';
 import { ToolRegistry, FORGE_PERMISSIONS } from '../tools/ToolRegistry';
 import type { KeepUndoCodeLensProvider } from './KeepUndoCodeLens';
+import type { DiffDecorations } from './DiffDecorations';
 import { ToolFailureTracker } from '../tools/StripTools';
 import { getLogger } from '../util/logger';
 import type { TemplateEngine } from '../llm/TemplateEngine';
@@ -72,6 +73,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private readonly toolRegistry: ToolRegistry,
     private readonly workspaceState: vscode.Memento,
     private readonly codeLens: KeepUndoCodeLensProvider,
+    diffDecorations: DiffDecorations,
     templateEngine?: TemplateEngine,
     private readonly events: SidebarProviderEvents = {},
   ) {
@@ -82,6 +84,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       toolRegistry,
       checkpoints,
       codeLens,
+      diffDecorations,
       this.failureTracker,
       events,
       (msg) => this.post(msg),
