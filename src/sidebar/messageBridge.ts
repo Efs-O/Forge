@@ -6,6 +6,8 @@ export interface SessionTabMeta {
   updatedAt: number;
   messageCount?: number;
   active_model?: string;
+  /** True while an agent turn is streaming in this conversation. */
+  streaming?: boolean;
 }
 
 export interface SessionHistoryMeta {
@@ -31,21 +33,21 @@ export type ForgeSlashCommandId =
 
 // ── Host → Webview ────────────────────────────────────────────────────────────
 
-export interface TokenMsg          { type: 'token';              text: string }
-export interface ReasoningTokenMsg { type: 'reasoningToken';     text: string }
-export interface DoneMsg           { type: 'done';               finishReason: string | null }
-export interface ErrorMsg          { type: 'error';              message: string }
-export interface ReadyMsg          { type: 'ready' }
-export interface BackendStartingMsg { type: 'backendStarting';   message: string }
-export interface BackendDownMsg    { type: 'backendDown';        message: string }
+export interface TokenMsg          { type: 'token';              text: string;        conversationId?: string }
+export interface ReasoningTokenMsg { type: 'reasoningToken';     text: string;        conversationId?: string }
+export interface DoneMsg           { type: 'done';               finishReason: string | null; conversationId?: string }
+export interface ErrorMsg          { type: 'error';              message: string;     conversationId?: string }
+export interface ReadyMsg          { type: 'ready';                                   conversationId?: string }
+export interface BackendStartingMsg { type: 'backendStarting';   message: string;     conversationId?: string }
+export interface BackendDownMsg    { type: 'backendDown';        message: string;     conversationId?: string }
 export interface ModelsMsg         { type: 'models';             names: string[]; active: string | null }
-export interface CheckpointReadyMsg   { type: 'checkpointReady' }
-export interface CheckpointDismissedMsg { type: 'checkpointDismissed' }
+export interface CheckpointReadyMsg   { type: 'checkpointReady';                     conversationId?: string }
+export interface CheckpointDismissedMsg { type: 'checkpointDismissed';               conversationId?: string }
 /** @deprecated Prefer sessionSync — kept for compat with stale webviews. */
 export interface NewChatMsg        { type: 'newChat' }
 
-export interface ConfirmRequestMsg   { type: 'confirmRequest'; id: string; toolName: string; detail: string; isDangerous?: boolean }
-export interface ToolActivityMsg     { type: 'toolActivity';   toolName: string; detail?: string }
+export interface ConfirmRequestMsg   { type: 'confirmRequest'; id: string; toolName: string; detail: string; isDangerous?: boolean; conversationId?: string }
+export interface ToolActivityMsg     { type: 'toolActivity';   toolName: string; detail?: string;             conversationId?: string }
 export interface TokenBudgetMsg      { type: 'tokenBudget'; used: number; max: number }
 
 export type DiffLineKind = 'context' | 'added' | 'removed';
@@ -59,6 +61,7 @@ export interface FileDiffMsg {
   hunks: DiffHunk[] | null;
   isNew: boolean;
   isDeleted: boolean;
+  conversationId?: string;
 }
 export interface SetInputMsg         { type: 'setInput'; text: string }
 /** @deprecated Replaced by sessionSync on load. */

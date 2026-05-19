@@ -7,7 +7,7 @@ import type {
   SessionTabMeta,
 } from '../../src/sidebar/messageBridge';
 import { vscode } from './vscode';
-import { reducer, initialState } from './reducer';
+import { reducer, initialState, selectMessages, selectStreaming, selectGenerating } from './reducer';
 export type { AppMessage } from './reducer';
 import { Header } from './components/Header';
 import { MessageList } from './components/MessageList';
@@ -35,21 +35,21 @@ export function App(): React.ReactElement {
     function handler(event: MessageEvent): void {
       const msg = event.data as HostToWebview;
       switch (msg.type) {
-        case 'token':               dispatch({ type: 'TOKEN', text: msg.text }); break;
-        case 'reasoningToken':      dispatch({ type: 'REASONING_TOKEN', text: msg.text }); break;
-        case 'done':                dispatch({ type: 'DONE' }); break;
-        case 'error':               dispatch({ type: 'ERROR', message: msg.message }); break;
-        case 'ready':               dispatch({ type: 'READY' }); break;
-        case 'backendStarting':     dispatch({ type: 'BACKEND_STARTING', message: msg.message }); break;
-        case 'backendDown':         dispatch({ type: 'BACKEND_DOWN', message: msg.message }); break;
+        case 'token':               dispatch({ type: 'TOKEN', text: msg.text, convId: msg.conversationId }); break;
+        case 'reasoningToken':      dispatch({ type: 'REASONING_TOKEN', text: msg.text, convId: msg.conversationId }); break;
+        case 'done':                dispatch({ type: 'DONE', convId: msg.conversationId }); break;
+        case 'error':               dispatch({ type: 'ERROR', message: msg.message, convId: msg.conversationId }); break;
+        case 'ready':               dispatch({ type: 'READY', convId: msg.conversationId }); break;
+        case 'backendStarting':     dispatch({ type: 'BACKEND_STARTING', message: msg.message, convId: msg.conversationId }); break;
+        case 'backendDown':         dispatch({ type: 'BACKEND_DOWN', message: msg.message, convId: msg.conversationId }); break;
         case 'models':              dispatch({ type: 'MODELS', names: msg.names, active: msg.active }); break;
-        case 'checkpointReady':     dispatch({ type: 'CHECKPOINT_READY' }); break;
-        case 'checkpointDismissed': dispatch({ type: 'CHECKPOINT_DISMISSED' }); break;
+        case 'checkpointReady':     dispatch({ type: 'CHECKPOINT_READY', convId: msg.conversationId }); break;
+        case 'checkpointDismissed': dispatch({ type: 'CHECKPOINT_DISMISSED', convId: msg.conversationId }); break;
         case 'toolActivity':
-          dispatch({ type: 'TOOL_ACTIVITY', toolName: msg.toolName, detail: msg.detail });
+          dispatch({ type: 'TOOL_ACTIVITY', toolName: msg.toolName, detail: msg.detail, convId: msg.conversationId });
           break;
         case 'fileDiff':
-          dispatch({ type: 'FILE_DIFF', filePath: msg.filePath, hunks: msg.hunks, isNew: msg.isNew, isDeleted: msg.isDeleted });
+          dispatch({ type: 'FILE_DIFF', filePath: msg.filePath, hunks: msg.hunks, isNew: msg.isNew, isDeleted: msg.isDeleted, convId: msg.conversationId });
           break;
         case 'sessionSync':
           dispatch({
@@ -110,7 +110,10 @@ export function App(): React.ReactElement {
   void ([] as SessionTabMeta[]);
   void ([] as SessionHistoryMeta[]);
 
-  const uiBusy = state.generating;
+  const messages = selectMessages(state);
+  const streaming = selectStreaming(state);
+  const generating = selectGenerating(state);
+  const uiBusy = generating;
 
   return (
     <div id="forge-root">
@@ -119,7 +122,7 @@ export function App(): React.ReactElement {
         activeModel={state.activeModel}
         onModelChange={handleModelChange}
         disabled={uiBusy}
-        streaming={state.streaming}
+        streaming={streaming}
         tokenUsed={tokenUsed}
         tokenMax={tokenMax}
       />
@@ -140,8 +143,8 @@ export function App(): React.ReactElement {
           </>
         )}
       </aside>
-      <MessageList messages={state.messages} streaming={state.streaming} generating={state.generating} />
-      {state.streaming && (
+      <MessageList messages={messages} streaming={streaming} generating={generating} />
+      {streaming && (
         <div id="streaming-status" role="status" aria-live="polite">
           <span className="streaming-status-dot" />
           Eating tokens…
@@ -151,7 +154,7 @@ export function App(): React.ReactElement {
       <InputRow
         onSend={handleSend}
         onCancel={handleCancel}
-        streaming={state.streaming}
+        streaming={streaming}
         backendReady={state.backendReady}
         slashCommands={SLASH_COMMANDS}
         onRunSlashCommand={handleRunSlashCommand}

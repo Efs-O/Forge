@@ -159,8 +159,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   clearChat(): void { this.clearActiveMessages(); }
 
   async submitPrompt(text: string, attachments?: AttachmentData[]): Promise<void> {
-    if (this.agentLoop.streaming) {
-      throw new Error('Forge: wait for the current response to finish before starting another workflow.');
+    const activeId = this.sidebar.activeConversationId;
+    if (this.agentLoop.isStreamingConv(activeId)) {
+      throw new Error('Forge: this conversation is still generating. Switch to it and cancel, or open a new tab.');
     }
     await vscode.commands.executeCommand('workbench.view.extension.forge-sidebar');
     await this.handleSend(text, attachments);
@@ -202,7 +203,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.post({
       type: 'sessionSync',
       activeId: this.sidebar.activeConversationId,
-      tabs: tabMetasFromSession(this.sidebar),
+      tabs: tabMetasFromSession(this.sidebar, this.agentLoop.getStreamingIds()),
       history: historyMetasFromSession(this.sidebar),
       messagesById: slimMessagesById(this.sidebar),
     });
@@ -279,7 +280,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         break;
 
       case 'cancel':
-        this.agentLoop.cancel();
+        this.agentLoop.cancel(this.sidebar.activeConversationId);
         break;
 
       case 'switchModel':
@@ -331,7 +332,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async applySwitchConversation(id: string): Promise<void> {
-    if (id !== this.sidebar.activeConversationId) await this.agentLoop.stopStreamingIfNeeded();
     const result = opSwitchConversation(this.sidebar, id);
     if (!result) return;
     this.sidebar = result.sidebar;
@@ -342,7 +342,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async applyCloseConversation(id: string): Promise<void> {
-    if (id === this.sidebar.activeConversationId) await this.agentLoop.stopStreamingIfNeeded();
+    await this.agentLoop.stopStreamingIfNeeded(id);
     const result = opCloseConversation(this.sidebar, id);
     if (!result) return;
     this.sidebar = result.sidebar;
@@ -352,7 +352,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async applyRestoreConversation(id: string): Promise<void> {
-    if (id !== this.sidebar.activeConversationId) await this.agentLoop.stopStreamingIfNeeded();
+    await this.agentLoop.stopStreamingIfNeeded(this.sidebar.activeConversationId);
     const result = opRestoreConversation(this.sidebar, id);
     if ('atCap' in result && result.atCap) {
       void vscode.window.showWarningMessage('Forge: maximum open conversations. Close one tab before reopening history.');

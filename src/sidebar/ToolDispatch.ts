@@ -27,13 +27,14 @@ export class ToolDispatch {
     private readonly codeLens: KeepUndoCodeLensProvider,
     private readonly failureTracker: ToolFailureTracker,
     private readonly post: (msg: HostToWebview) => void,
-    private readonly requestApproval: (toolName: string, detail: string, isDangerous?: boolean) => Promise<boolean>,
+    private readonly requestApproval: (toolName: string, detail: string, isDangerous?: boolean, convId?: string) => Promise<boolean>,
   ) {}
 
   async dispatch(
     toolCalls: ToolCall[],
     allowed: Set<ToolPermission>,
     messages: ChatMessage[],
+    convId?: string,
   ): Promise<void> {
     for (const tc of toolCalls) {
       let result: string;
@@ -44,7 +45,7 @@ export class ToolDispatch {
         } catch {
           this.failureTracker.record();
           result = `Error: malformed tool arguments (invalid JSON)`;
-          this.postResult(tc, result);
+          this.postResult(tc, result, undefined, convId);
           messages.push({ role: 'tool', content: result, tool_call_id: tc.id, name: tc.function.name });
           continue;
         }
@@ -52,7 +53,7 @@ export class ToolDispatch {
         const reg = this.toolRegistry.get(tc.function.name);
         if (!reg) {
           result = `Error: unknown tool "${tc.function.name}"`;
-          this.postResult(tc, result);
+          this.postResult(tc, result, undefined, convId);
           messages.push({ role: 'tool', content: result, tool_call_id: tc.id, name: tc.function.name });
           continue;
         }
@@ -62,10 +63,10 @@ export class ToolDispatch {
           const raw = JSON.stringify(args, null, 2);
           const detail = raw.length > 300 ? raw.slice(0, 300) + '\n…' : raw;
           const isDangerous = tc.function.name === 'delete_file' && args['recursive'] === true;
-          const approved = await this.requestApproval(tc.function.name, detail, isDangerous);
+          const approved = await this.requestApproval(tc.function.name, detail, isDangerous, convId);
           if (!approved) {
             result = `User declined: ${tc.function.name}`;
-            this.postResult(tc, result);
+            this.postResult(tc, result, undefined, convId);
             messages.push({ role: 'tool', content: result, tool_call_id: tc.id, name: tc.function.name });
             continue;
           }
@@ -83,7 +84,7 @@ export class ToolDispatch {
           if (filePath) {
             const resolved = resolveToolPath(filePath);
             this.codeLens.markPending([resolved]);
-            this.postFileDiff(tc.function.name, resolved);
+            this.postFileDiff(tc.function.name, resolved, convId);
           }
         }
       } catch (err) {
@@ -91,7 +92,7 @@ export class ToolDispatch {
         result = `Error: ${(err as Error).message}`;
       }
 
-      this.postResult(tc, result, args);
+      this.postResult(tc, result, args, convId);
       messages.push({ role: 'tool', content: result, tool_call_id: tc.id, name: tc.function.name });
     }
   }
@@ -102,22 +103,23 @@ export class ToolDispatch {
     await vscode.window.showTextDocument(doc, { preview: false, preserveFocus: false });
   }
 
-  private postResult(tc: ToolCall, result: string, args?: Record<string, unknown>): void {
+  private postResult(tc: ToolCall, result: string, args?: Record<string, unknown>, convId?: string): void {
     const fileLink = this.buildFileLink(tc.function.name, result, args);
     const suffix = fileLink ? ` (${fileLink})` : '';
+    const cid = convId ? { conversationId: convId } : {};
 
     const READ_ONLY_TOOLS = new Set(['read_file', 'list_directory', 'search_code', 'get_diagnostics']);
     if (READ_ONLY_TOOLS.has(tc.function.name)) {
       const pathArg = typeof args?.['path'] === 'string' ? args['path']
         : typeof args?.['filepath'] === 'string' ? args['filepath'] : null;
       const label = pathArg ?? result.slice(0, 80).replace(/\r?\n/g, ' ');
-      this.post({ type: 'token', text: `\n\n> **${tc.function.name}** → \`${label}\`${suffix}\n\n` });
+      this.post({ type: 'token', text: `\n\n> **${tc.function.name}** → \`${label}\`${suffix}\n\n`, ...cid });
       return;
     }
 
     const truncated = result.length > 600 ? result.slice(0, 600) + '…' : result;
     const preview = truncated.replace(/\[(file|dir|staged)\]\s*/g, '').replace(/\r?\n/g, ' ');
-    this.post({ type: 'token', text: `\n\n> **${tc.function.name}** → \`${preview}\`${suffix}\n\n` });
+    this.post({ type: 'token', text: `\n\n> **${tc.function.name}** → \`${preview}\`${suffix}\n\n`, ...cid });
     if (fileLink) {
       const rawPath = typeof args?.['path'] === 'string' ? args['path']
         : typeof args?.['filepath'] === 'string' ? args['filepath'] : null;
@@ -125,7 +127,7 @@ export class ToolDispatch {
     }
   }
 
-  private postFileDiff(toolName: string, resolvedPath: string): void {
+  private postFileDiff(toolName: string, resolvedPath: string, convId?: string): void {
     const FILE_DIFF_TOOLS = new Set(['write_file', 'replace_in_file', 'delete_file']);
     if (!FILE_DIFF_TOOLS.has(toolName)) return;
 
@@ -140,7 +142,7 @@ export class ToolDispatch {
       : null;
 
     const relPath = vscode.workspace.asRelativePath(resolvedPath, true);
-    this.post({ type: 'fileDiff', filePath: relPath, hunks, isNew, isDeleted });
+    this.post({ type: 'fileDiff', filePath: relPath, hunks, isNew, isDeleted, ...(convId ? { conversationId: convId } : {}) });
   }
 
   private buildFileLink(toolName: string, result: string, args?: Record<string, unknown>): string | null {

@@ -243,7 +243,7 @@ export function saveSidebarSession(
 }
 
 /** Tab list + transcripts for authoritative webview sync. */
-export function tabMetasFromSession(session: SidebarRuntime): SessionTabMeta[] {
+export function tabMetasFromSession(session: SidebarRuntime, streamingIds?: ReadonlySet<string>): SessionTabMeta[] {
   return session.conversations.map((c) => {
     const slim = slimPersistMessages(c.messages);
     return {
@@ -253,6 +253,7 @@ export function tabMetasFromSession(session: SidebarRuntime): SessionTabMeta[] {
       updatedAt: c.updatedAt,
       messageCount: slim.length,
       ...(c.active_model !== undefined ? { active_model: c.active_model } : {}),
+      ...(streamingIds?.has(c.id) ? { streaming: true } : {}),
     };
   });
 }
