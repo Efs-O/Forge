@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { SidebarProvider } from './sidebar/SidebarProvider';
@@ -269,21 +270,50 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     // v0.2 — send active editor selection to sidebar input
     vscode.commands.registerCommand('forge.setSearchApiKey', async () => {
-      if (!config.search) {
-        void vscode.window.showErrorMessage(
-          'Forge: search not configured. Add a "search:" block to config.yaml first.',
+      // If search is already configured, use existing provider/key name.
+      // If not, ask the user to pick a provider and write the block to config.yaml.
+      let provider: string;
+      let secretKeyName: string;
+
+      if (config.search) {
+        provider = config.search.provider;
+        secretKeyName = config.search.secret_key_name;
+      } else {
+        const pick = await vscode.window.showQuickPick(
+          [
+            { label: 'Tavily', description: 'tavily.com — recommended', value: 'tavily' },
+            { label: 'Brave Search', description: 'brave.com/search/api', value: 'brave' },
+          ],
+          { title: 'Forge: Select Search Provider', placeHolder: 'Which search provider do you want to use?' },
         );
-        return;
+        if (!pick) return;
+        provider = pick.value;
+        secretKeyName = `forge.${provider}.apiKey`;
+
+        // Append search block to config.yaml
+        if (configPath) {
+          try {
+            const existing = fs.readFileSync(configPath, 'utf8');
+            const block = `\nsearch:\n  provider: ${provider}\n  secret_key_name: ${secretKeyName}\n  max_results: 5\n`;
+            if (!existing.includes('search:')) {
+              fs.appendFileSync(configPath, block, 'utf8');
+              void vscode.window.showInformationMessage(`Forge: search block added to config.yaml. Reload window to activate.`);
+            }
+          } catch {
+            void vscode.window.showWarningMessage('Forge: could not update config.yaml — add the search: block manually.');
+          }
+        }
       }
+
       const key = await vscode.window.showInputBox({
-        prompt: `Enter your ${config.search.provider} API key`,
+        prompt: `Enter your ${provider} API key`,
         password: true,
-        placeHolder: `Paste ${config.search.provider} API key here`,
+        placeHolder: `Paste ${provider} API key here`,
         ignoreFocusOut: true,
       });
       if (key) {
-        await context.secrets.store(config.search.secret_key_name, key);
-        void vscode.window.showInformationMessage(`Forge: ${config.search.provider} API key saved.`);
+        await context.secrets.store(secretKeyName, key);
+        void vscode.window.showInformationMessage(`Forge: ${provider} API key saved.`);
       }
     }),
 
