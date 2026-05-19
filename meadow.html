@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hypnotic Meadow Animation</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="meadowCanvas"></canvas>
+
+    <script>
+        // --- Configuration ---
+        const CANVAS = document.getElementById('meadowCanvas');
+        const CTX = CANVAS.getContext('2d');
+        const W = window.innerWidth;
+        const H = window.innerHeight;
+        CANVAS.width = W;
+        CANVAS.height = H;
+
+        // --- Global State ---
+        let time = 0;
+        let windSpeed = 0.0005;
+        let globalWind = 0;
+
+        // --- Utility Functions ---
+
+        /**
+         * Generates a random integer between min and max (inclusive).
+         * @param {number} min 
+         * @param {number} max 
+         */
+        function randInt(min, max) {
+            return Math.floor(Math.random() * (max - min + 1)) + min;
+        }
+
+        /**
+         * Generates a random float between min and max.
+         * @param {number} min 
+         * @param {number} max 
+         */
+        function randFloat(min, max) {
+            return Math.random() * (max - min) + min;
+        }
+
+        // --- Sky and Clouds ---
+
+        const SKY_GRADIENT = CTX.createLinearGradient(0, 0, 0, H * 0.6);
+        SKY_GRADIENT.addColorStop(0, 'rgba(135, 206, 235, 1)'); // Light Cyan (Horizon)
+        SKY_GRADIENT.addColorStop(1, 'rgba(100, 149, 237, 1)'); // Cornflower Blue (Top)
+
+        function drawSky() {
+            // 1. Sky Gradient
+            CTX.fillStyle = SKY_GRADIENT;
+            CTX.fillRect(0, 0, W, H * 0.6);
+
+            // 2. Clouds (Simple white circles/ovals)
+            const numClouds = 5;
+            for (let i = 0; i < numClouds; i++) {
+                const x = randFloat(0, W);
+                const y = randFloat(0, H * 0.3);
+                const size = randFloat(50, 150);
+                
+                CTX.save();
+                CTX.translate(x, y);
+                CTX.scale(1, 0.5); // Flatten the cloud
+                CTX.beginPath();
+                CTX.arc(0, 0, size * 0.6, 0, Math.PI * 2);
+                CTX.arc(size * 0.3, 0, size * 0.5, 0, Math.PI * 2);
+                CTX.arc(-size * 0.3, 0, size * 0.4, 0, Math.PI * 2);
+                CTX.closePath();
+                
+                // Soft white color with slight transparency
+                CTX.fillStyle = 'rgba(255, 255, 255, 0.7)';
+                CTX.fill();
+                CTX.restore();
+            }
+        }
+
+        // --- Grass Simulation ---
+
+        /**
+         * Calculates the displacement (wave effect) at a given point (x, y)
+         * based on time and global wind.
+         * @param {number} x 
+         * @param {number} y 
+         * @returns {number} Displacement value
+         */
+        function getWaveDisplacement(x, y) {
+            // Sine wave based on position and time for rippling effect
+            const wave1 = Math.sin((x * 0.01 + time * 0.001) * 1.5);
+            const wave2 = Math.cos((y * 0.005 + time * 0.0008) * 1.2);
+            
+            // Combine waves and apply global wind influence
+            let displacement = (wave1 * 0.5 + wave2 * 0.3) * Math.sin(x * 0.005 + time * 0.0003);
+            
+            // Amplify by wind
+            displacement *= (1 + globalWind * 2);
+            return displacement;
+        }
+
+        /**
+         * Draws a single grass blade segment.
+         * @param {number} x - Start X position.
+         * @param {number} y - Start Y position.
+         * @param {number} length - Length of the blade.
+         * @param {number} thickness - Thickness of the blade.
+         * @param {number} depthFactor - Controls color and fade.
+         * @param {number} offset - Horizontal offset for wave calculation.
+         */
+        function drawGrassBlade(x, y, length, thickness, depthFactor, offset) {
+            // Color calculation: closer to the camera (higher depthFactor) is brighter/more saturated
+            const baseGreen = 50 + (depthFactor * 50); // Darker for far, brighter for near
+            const green = Math.min(150, baseGreen + Math.floor(Math.random() * 30));
+            const blue = Math.min(100, 100 + Math.floor(Math.random() * 30));
+            const color = `rgb(${green}, ${Math.max(50, blue)}, 50)`;
+
+            // Calculate wave displacement
+            const displacement = getWaveDisplacement(x + offset, y + 100);
+            
+            CTX.beginPath();
+            CTX.moveTo(x, y);
+            
+            // The curve is complex, so we draw it as a series of connected lines/segments
+            let currentX = x;
+            let currentY = y;
+            
+            // Simple approximation: draw a curved line
+            CTX.quadraticCurveTo(
+                x + (Math.sin(time * 0.0005 + x * 0.01) * 20), 
+                y + 10, 
+                x + (Math.cos(time * 0.0005 + x * 0.01) * 20), 
+                y + length
+            );
+
+            // Use a simple, slightly curved line for performance
+            CTX.strokeStyle = color;
+            CTX.lineWidth = thickness * depthFactor * 0.5;
+            CTX.globalAlpha = 0.8 * depthFactor;
+            CTX.stroke();
+        }
+
+        function drawGrassLayer(startY, endY, count, depthFactor, horizontalScale) {
+            CTX.save();
+            CTX.globalAlpha = Math.min(0.8, depthFactor * 0.5);
+
+            for (let i = 0; i < count; i++) {
+                const x = randFloat(0, W);
+                const y = randFloat(startY, endY);
+                const length = randFloat(100, 250);
+                const thickness = randFloat(0.5, 1.5);
+                const offset = randFloat(-50, 50);
+
+                drawGrassBlade(x, y, length, thickness, depthFactor, offset);
+            }
+            CTX.restore();
+        }
+
+        // --- Wildflowers ---
+
+        function drawFlower(x, y, type, size, depthFactor) {
+            CTX.save();
+            CTX.translate(x, y);
+            CTX.scale(depthFactor, depthFactor);
+            CTX.globalAlpha = 0.8 * depthFactor;
+
+            // Base stem/leaves
+            CTX.fillStyle = `rgba(34, 139, 34, ${0.5 * depthFactor})`;
+            CTX.fillRect(0, 0, 1, size * 0.5);
+
+            // Flower head
+            let color;
+            let petals;
+            
+            switch(type) {
+                case 'poppy':
+                    color = `rgba(255, 0, 0, ${0.9 * depthFactor})`;
+                    petals = 5;
+                    break;
+                case 'daisy':
+                    color = `rgba(255, 255, 0, ${0.8 * depthFactor})`;
+                    petals = 10;
+                    break;
+                case 'lavender':
+                    color = `rgba(128, 0, 128, ${0.9 * depthFactor})`;
+                    petals = 6;
+                    break;
+                default:
+                    color = `rgba(100, 149, 237, ${0.9 * depthFactor})`;
+                    petals = 8;
+            }
+
+            // Draw petals (simple approximation)
+            for (let i = 0; i < petals; i++) {
+                const angle = (i / petals) * Math.PI * 2;
+                const x_petal = Math.cos(angle) * size * 0.8;
+                const y_petal = Math.sin(angle) * size * 0.8;
+                
+                CTX.fillStyle = color;
+                CTX.beginPath();
+                CTX.ellipse(x_petal, y_petal, size * 0.4, size * 0.6, angle, 0, Math.PI * 2);
+                CTX.fill();
+            }
+
+            CTX.restore();
+        }
+
+        function drawFlowerLayer(startY, endY, count, depthFactor) {
+            for (let i = 0; i < count; i++) {
+                const x = randFloat(0, W);
+                const y = randFloat(startY, endY);
+                const type = ['poppy', 'daisy', 'lavender', 'bluebells', 'cornflowers'][randInt(0, 4)];
+                const size = randFloat(30, 60);
+                drawFlower(x, y, type, size, depthFactor);
+            }
+        }
+
+        // --- Fauna (Butterflies and Dragonflies) ---
+
+        class Creature {
+            constructor(startX, startY, type) {
+                this.x = startX;
+                this.y = startY;
+                this.type = type;
+                this.size = randFloat(10, 25);
+                this.vx = randFloat(-1, 1);
+                this.vy = randFloat(-1, 1);
+                this.targetX = randFloat(0, W);
+                this.targetY = randFloat(0, H * 0.8);
+                this.wingAngle = 0;
+                this.wingSpeed = randFloat(0.1, 0.3);
+            }
+
+            update() {
+                // Simple movement towards target
+                const dx = this.targetX - this.x;
+                const dy = this.targetY - this.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (dist < 50 || Math.random() < 0.005) {
+                    // Re-randomize target or drift
+                    this.targetX = randFloat(0, W);
+                    this.targetY = randFloat(H * 0.2, H * 0.7);
+                }
+
+                this.vx = (dx / dist) * this.size * 0.01;
+                this.vy = (dy / dist) * this.size * 0.01;
+
+                this.x += this.vx;
+                this.y += this.vy;
+
+                // Wing animation
+                this.wingAngle += this.wingSpeed * Math.sign(this.type === 'dragonfly' ? 1 : 1);
+                if (this.wingAngle > Math.PI * 2) this.wingAngle -= Math.PI * 2;
+            }
+
+            draw() {
+                CTX.save();
+                CTX.translate(this.x, this.y);
+                
+                if (this.type === 'butterfly') {
+                    // Butterfly body
+                    CTX.fillStyle = 'rgba(150, 150, 150, 0.8)';
+                    CTX.beginPath();
+                    CTX.arc(0, 0, this.size * 0.1, 0, Math.PI * 2);
+                    CTX.fill();
+                    
+                    // Wings (simple flutter)
+                    CTX.fillStyle = 'rgba(200, 100, 200, 0.7)'; // Purple/pink
+                    CTX.rotate(Math.sin(this.wingAngle) * 0.5);
+                    CTX.beginPath();
+                    CTX.ellipse(0, 0, this.size * 0.6, this.size * 0.4, 0, 0, Math.PI * 2);
+                    CTX.fill();
+                    
+                    CTX.fillStyle = 'rgba(200, 100, 200, 0.7)';
+                    CTX.rotate(-Math.PI);
+                    CTX.beginPath();
+                    CTX.ellipse(0, 0, this.size * 0.6, this.size * 0.4, 0, 0, Math.PI * 2);
+                    CTX.fill();
+
+                } else if (this.type === 'dragonfly') {
+                    // Dragonfly body
+                    CTX.fillStyle = 'rgba(0, 0, 0, 0.8)';
+                    CTX.fillRect(-this.size * 0.1, 0, this.size * 0.2, 0);
+                    
+                    // Wings (fast, iridescent)
+                    CTX.fillStyle = 'rgba(100, 100, 255, 0.8)';
+                    CTX.rotate(Math.sin(this.wingAngle) * 0.8);
+                    CTX.beginPath();
+                    CTX.ellipse(0, 0, this.size * 0.8, this.size * 0.3, 0, 0, Math.PI * 2);
+                    CTX.fill();
+                }
+                CTX.restore();
+            }
+        }
+
+        let creatures = [];
+
+        function initializeCreatures() {
+            creatures = [];
+            for (let i = 0; i < 5; i++) {
+                creatures.push(new Creature(randFloat(0, W), randFloat(0, H * 0.8), 'butterfly'));
+            }
+            for (let i = 0; i < 3; i++) {
+                creatures.push(new Creature(randFloat(0, W), randFloat(0, H * 0.8), 'dragonfly'));
+            }
+        }
+
+        // --- Sunlight and Highlights ---
+        function drawSunlight(time) {
+            // Subtle moving highlight/glow effect
+            const gradient = CTX.createRadialGradient(W * 0.3, H * 0.3, 10, W * 0.3, H * 0.3, 300);
+            gradient.addColorStop(0, 'rgba(255, 220, 150, 0.1)');
+            gradient.addColorStop(0.5, 'rgba(255, 200, 100, 0.05)');
+            gradient.addColorStop(1, 'rgba(255, 200, 100, 0)');
+            
+            CTX.fillStyle = gradient;
+            CTX.fillRect(0, 0, W, H);
+        }
+
+        // --- Main Loop ---
+
+        function animate(timestamp) {
+            time = timestamp;
+            requestAnimationFrame(animate);
+
+            // 1. Clear Canvas
+            CTX.clearRect(0, 0, W, H);
+
+            // 2. Draw Sky and Clouds
+            drawSky();
+
+            // 3. Draw Grass (Background to Foreground)
+            const grassStartY = H * 0.6;
+            
+            // Layer 1: Distant (Faded, soft yellow/green)
+            drawGrassLayer(grassStartY, H * 0.8, 300, 0.3, 0.8); 
+            
+            // Layer 2: Midground (Slightly more detail)
+            drawGrassLayer(H * 0.8, H * 0.9, 500, 0.6, 1.0); 
+            
+            // Layer 3: Foreground (Detailed, bright green)
+            drawGrassLayer(H * 0.9, H, 800, 1.0, 1.2); 
+
+            // 4. Draw Wildflowers (Overlayed on grass)
+            drawFlowerLayer(H * 0.6, H * 0.8, 200, 0.5); // Background
+            drawFlowerLayer(H * 0.8, H * 0.9, 300, 0.8); // Midground
+            drawFlowerLayer(H * 0.9, H, 400, 1.0); // Foreground
+
+            // 5. Draw Sunlight/Highlights
+            drawSunlight(time);
+
+            // 6. Update and Draw Fauna
+            creatures.forEach(creature => {
+                creature.update();
+                creature.draw();
+            });
+        }
+
+        // --- Initialization ---
+        function init() {
+            // Set up initial global wind (makes the whole scene ripple)
+            globalWind = 0.5; 
+            initializeCreatures();
+            animate(0);
+        }
+
+        // Handle window resizing
+        window.addEventListener('resize', () => {
+            CANVAS.width = window.innerWidth;
+            CANVAS.height = window.innerHeight;
+            // Re-initialize if needed, but for simplicity, just let the loop handle the change
+        });
+
+        // Start the animation
+        init();
+    </script>
+</body>
+</html>
