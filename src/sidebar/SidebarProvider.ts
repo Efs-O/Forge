@@ -141,7 +141,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   canUndo(): boolean { return this.checkpoints.canUndo(); }
 
   async newConversation(): Promise<void> {
-    await this.agentLoop.stopStreamingIfNeeded();
     const result = opNewConversation(this.sidebar);
     if (result.atCap) {
       void vscode.window.showWarningMessage(`Forge: maximum ${MAX_CONVERSATIONS} conversations. Close one to add another.`);
@@ -332,7 +331,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async applySwitchConversation(id: string): Promise<void> {
-    await this.agentLoop.stopStreamingIfNeeded();
+    if (id !== this.sidebar.activeConversationId) await this.agentLoop.stopStreamingIfNeeded();
     const result = opSwitchConversation(this.sidebar, id);
     if (!result) return;
     this.sidebar = result.sidebar;
@@ -353,7 +352,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async applyRestoreConversation(id: string): Promise<void> {
-    await this.agentLoop.stopStreamingIfNeeded();
+    if (id !== this.sidebar.activeConversationId) await this.agentLoop.stopStreamingIfNeeded();
     const result = opRestoreConversation(this.sidebar, id);
     if ('atCap' in result && result.atCap) {
       void vscode.window.showWarningMessage('Forge: maximum open conversations. Close one tab before reopening history.');
