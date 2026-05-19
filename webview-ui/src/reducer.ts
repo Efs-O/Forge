@@ -1,13 +1,17 @@
 import type {
   SessionTabMeta,
   SessionHistoryMeta,
+  DiffHunk,
 } from '../../src/sidebar/messageBridge';
 
 export interface AppMessage {
   id: string;
-  role: 'user' | 'assistant' | 'error' | 'system' | 'tool';
+  role: 'user' | 'assistant' | 'error' | 'system' | 'tool' | 'diff';
   content: string;
   reasoning?: string | undefined;
+  diffHunks?: DiffHunk[] | null;
+  diffIsNew?: boolean;
+  diffIsDeleted?: boolean;
 }
 
 interface State {
@@ -49,6 +53,7 @@ export type Action =
   | { type: 'CHECKPOINT_READY'; convId?: string }
   | { type: 'CHECKPOINT_DISMISSED'; convId?: string }
   | { type: 'TOOL_ACTIVITY'; toolName: string; detail?: string; convId?: string }
+  | { type: 'FILE_DIFF'; filePath: string; hunks: DiffHunk[] | null; isNew: boolean; isDeleted: boolean; convId?: string }
   | {
       type: 'SESSION_SYNC';
       activeId: string;
@@ -97,7 +102,11 @@ export function reducer(state: State, action: Action): State {
       const cid = state.activeConversationId;
       const existing = state.messagesById[cid] ?? [];
       const last = existing[existing.length - 1];
-      const base = last?.role === 'assistant' && last.content === '' ? existing.slice(0, -1) : existing;
+      // Strip stale diff cards and trailing empty assistant placeholder from previous turn
+      const base = existing
+        .filter(m => m.role !== 'diff')
+        .filter((m, _i, arr) => !(m.role === 'assistant' && m.content === '' && m === arr[arr.length - 1]));
+      void last;
       return {
         ...state,
         streamingIds: new Set([...state.streamingIds, cid]),
@@ -195,6 +204,18 @@ export function reducer(state: State, action: Action): State {
       });
     }
 
+    case 'FILE_DIFF': {
+      const cid = resolveConvId(state, action.convId);
+      return appendToConv(state, cid, {
+        id: mkId(),
+        role: 'diff' as const,
+        content: action.filePath,
+        diffHunks: action.hunks,
+        diffIsNew: action.isNew,
+        diffIsDeleted: action.isDeleted,
+      });
+    }
+
     case 'CHECKPOINT_READY':
       return { ...state, checkpointPending: true };
 
@@ -204,12 +225,16 @@ export function reducer(state: State, action: Action): State {
     case 'SESSION_SYNC': {
       const messagesById: Record<string, AppMessage[]> = {};
       for (const [id, rows] of Object.entries(action.messagesById)) {
-        messagesById[id] = rows.map((m) => ({
+        const reconstructed = rows.map((m) => ({
           id: mkId(),
           role: m.role,
           content: m.content,
           reasoning: m.reasoning,
         }));
+        // Re-append any diff cards that were live in this conversation — they are not
+        // persisted server-side so SESSION_SYNC would otherwise wipe them.
+        const survivingDiffs = (state.messagesById[id] ?? []).filter(m => m.role === 'diff');
+        messagesById[id] = [...reconstructed, ...survivingDiffs];
       }
       return {
         ...state,

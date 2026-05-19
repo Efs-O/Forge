@@ -1,6 +1,8 @@
+import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { HostToWebview } from './messageBridge';
+import { computeDiff } from './DiffUtils';
 import type { ChatMessage, ToolCall } from '../llm/types';
 import type { CheckpointStack } from '../checkpoint/CheckpointStack';
 import type { KeepUndoCodeLensProvider } from './KeepUndoCodeLens';
@@ -85,6 +87,7 @@ export class ToolDispatch {
             const resolved = resolveToolPath(filePath);
             this.codeLens.markPending([resolved]);
             this.applyDiffDecorations(tc.function.name, resolved);
+            this.postFileDiff(tc.function.name, resolved, convId);
           }
         }
       } catch (err) {
@@ -101,6 +104,21 @@ export class ToolDispatch {
     const uri = vscode.Uri.file(resolveToolPath(filePath));
     const doc = await vscode.workspace.openTextDocument(uri);
     await vscode.window.showTextDocument(doc, { preview: false, preserveFocus: false });
+  }
+
+  private postFileDiff(toolName: string, resolvedPath: string, convId?: string): void {
+    const FILE_DIFF_TOOLS = new Set(['write_file', 'replace_in_file', 'delete_file']);
+    if (!FILE_DIFF_TOOLS.has(toolName)) return;
+
+    const beforeContent = this.checkpoints.readSnapshotContent(resolvedPath);
+    if (beforeContent === undefined) return;
+
+    const isDeleted = !fs.existsSync(resolvedPath);
+    const afterContent = isDeleted ? '' : fs.readFileSync(resolvedPath, 'utf8');
+    const isNew = beforeContent === null;
+    const hunks = !isDeleted ? computeDiff(beforeContent ?? '', afterContent) : null;
+    const relPath = vscode.workspace.asRelativePath(resolvedPath, true);
+    this.post({ type: 'fileDiff', filePath: relPath, hunks, isNew, isDeleted, ...(convId ? { conversationId: convId } : {}) });
   }
 
   private applyDiffDecorations(toolName: string, resolvedPath: string): void {

@@ -48,6 +48,9 @@ export function App(): React.ReactElement {
         case 'toolActivity':
           dispatch({ type: 'TOOL_ACTIVITY', toolName: msg.toolName, detail: msg.detail, convId: msg.conversationId });
           break;
+        case 'fileDiff':
+          dispatch({ type: 'FILE_DIFF', filePath: msg.filePath, hunks: msg.hunks, isNew: msg.isNew, isDeleted: msg.isDeleted, convId: msg.conversationId });
+          break;
         case 'sessionSync':
           dispatch({
             type: 'SESSION_SYNC',
