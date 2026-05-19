@@ -83,6 +83,6 @@ describe('webview App reducer', () => {
     });
 
     expect(synced.activeModel).toBeNull();
-    expect(synced.messages).toHaveLength(1);
+    expect(synced.messagesById['tab-1']).toHaveLength(1);
   });
 });

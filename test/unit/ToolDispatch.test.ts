@@ -146,7 +146,7 @@ describe('ToolDispatch', () => {
 
     await dispatch.dispatch(toolCalls, allowed, messages as never);
 
-    expect(requestApproval).toHaveBeenCalledWith('write_file', expect.stringContaining('hello'), false);
+    expect(requestApproval).toHaveBeenCalledWith('write_file', expect.stringContaining('hello'), false, undefined);
     expect(checkpoints.snapshotBefore).toHaveBeenCalled();
     expect(codeLens.markPending).toHaveBeenCalled();
   });
@@ -170,7 +170,7 @@ describe('ToolDispatch', () => {
 
     await dispatch.dispatch(toolCalls, allowed, messages as never);
 
-    expect(requestApproval).toHaveBeenCalledWith('delete_file', expect.any(String), false);
+    expect(requestApproval).toHaveBeenCalledWith('delete_file', expect.any(String), false, undefined);
   });
 
   it('requests approval for terminal tools', async () => {
@@ -192,7 +192,7 @@ describe('ToolDispatch', () => {
 
     await dispatch.dispatch(toolCalls, allowed, messages as never);
 
-    expect(requestApproval).toHaveBeenCalledWith('run_terminal', expect.any(String), false);
+    expect(requestApproval).toHaveBeenCalledWith('run_terminal', expect.any(String), false, undefined);
   });
 
   it('requests approval for git tools', async () => {
@@ -214,7 +214,7 @@ describe('ToolDispatch', () => {
 
     await dispatch.dispatch(toolCalls, allowed, messages as never);
 
-    expect(requestApproval).toHaveBeenCalledWith('git_commit', expect.any(String), false);
+    expect(requestApproval).toHaveBeenCalledWith('git_commit', expect.any(String), false, undefined);
   });
 
   it('flags delete_file with recursive=true as dangerous', async () => {
@@ -236,7 +236,7 @@ describe('ToolDispatch', () => {
 
     await dispatch.dispatch(toolCalls, allowed, messages as never);
 
-    expect(requestApproval).toHaveBeenCalledWith('delete_file', expect.any(String), true);
+    expect(requestApproval).toHaveBeenCalledWith('delete_file', expect.any(String), true, undefined);
   });
 
   it('skips execution when user declines approval', async () => {
