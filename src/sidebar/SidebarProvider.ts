@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { IBackendPool } from '../backend/BackendPool';
 import type { ForgeConfig } from '../config/types';
+import { isLocalModel } from '../backend/ModelHeuristics';
 import type { ForgeSlashCommandId, HostToWebview, WebviewToHost } from './messageBridge';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
 import {
@@ -342,6 +343,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async applyCloseConversation(id: string): Promise<void> {
+    const conv = this.sidebar.conversations.find((c) => c.id === id);
+    const modelName = conv?.active_model;
+
     await this.agentLoop.stopStreamingIfNeeded(id);
     const result = opCloseConversation(this.sidebar, id);
     if (!result) return;
@@ -349,7 +353,25 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.failureTracker.reset();
     this.persistSession();
     this.postSessionSync();
+
+    if (modelName) {
+      const modelConfig = this.config.models.find((m) => m.name === modelName);
+      const otherTabUsesModel = this.sidebar.conversations.some((c) => c.active_model === modelName);
+      if (!otherTabUsesModel && isLocalModel(modelConfig)) {
+        void vscode.window.showInformationMessage(
+          `"${modelName}" is still loaded in VRAM. Unload it to free memory?`,
+          'Unload Now',
+        ).then((choice) => {
+          if (choice !== 'Unload Now') return;
+          void this.pool.release(modelName).then(() => {
+            this.events.onBackendStopped?.(modelName);
+            this.post({ type: 'backendDown', message: `${modelName} unloaded.` });
+          });
+        });
+      }
+    }
   }
+
 
   private async applyRestoreConversation(id: string): Promise<void> {
     await this.agentLoop.stopStreamingIfNeeded(this.sidebar.activeConversationId);

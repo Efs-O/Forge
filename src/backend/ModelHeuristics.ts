@@ -1,5 +1,6 @@
 import * as path from 'path';
 import type { GgufCandidate } from './GgufScanner';
+import type { ModelConfig } from '../config/types';
 
 export type ModelFamily = 'qwen3' | 'gemma4' | 'llama' | 'mistral' | 'phi' | 'unknown';
 
@@ -12,6 +13,17 @@ export interface ModelSuggestion {
   temperature: number;
   topP: number;
   topK: number;
+}
+
+/** Returns true for models that consume local VRAM (llama.cpp always; Ollama on a local endpoint). */
+export function isLocalModel(model: ModelConfig | undefined): boolean {
+  if (!model) return false;
+  if (!model.provider || model.provider === 'llama.cpp') return true;
+  if (model.provider === 'ollama') {
+    const ep = (model.endpoint ?? '').toLowerCase();
+    return ep.includes('localhost') || ep.includes('127.0.0.1') || ep.includes('0.0.0.0');
+  }
+  return false;
 }
 
 export function detectFamily(filename: string): ModelFamily {

@@ -15,6 +15,8 @@ interface PoolSlot {
 
 export interface IBackendPool {
   acquire(modelName: string): Promise<BackendController>;
+  /** Stop and remove a single model's backend, freeing its VRAM / port slot. */
+  release(modelName: string): Promise<void>;
   stopAll(): Promise<void>;
   applyForgeConfig(next: ForgeConfig): void;
   showConsole(modelName?: string): void;
@@ -57,6 +59,25 @@ export class BackendPool implements IBackendPool {
     // Need a new slot
     const port = this.allocatePort();
     return this.startSlot(modelName, port);
+  }
+
+  async release(modelName: string): Promise<void> {
+    if (this.isOllamaModel(modelName)) {
+      const backend = this.ollamaSlots.get(modelName);
+      if (backend) {
+        await backend.stop().catch(() => {});
+        this.ollamaSlots.delete(modelName);
+      }
+    } else {
+      const slot = this.slots.get(modelName);
+      if (slot) {
+        if (slot.starting) await slot.starting.catch(() => {});
+        await slot.backend.stop().catch(() => {});
+        this.slots.delete(modelName);
+        this.freePorts.push(slot.port);
+      }
+    }
+    log.info(`[BackendPool] released: ${modelName}`);
   }
 
   async stopAll(): Promise<void> {

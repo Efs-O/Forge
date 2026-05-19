@@ -13,6 +13,10 @@ export class SingleBackendPool implements IBackendPool {
     return this.backend;
   }
 
+  async release(_modelName: string): Promise<void> {
+    // Bridge mode manages its own lifecycle — no per-model release.
+  }
+
   async stopAll(): Promise<void> {
     await this.backend.stop();
   }
