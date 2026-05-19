@@ -29,7 +29,8 @@ export type ForgeSlashCommandId =
   | 'compact'
   | 'undo'
   | 'keep'
-  | 'reloadWindow';
+  | 'reloadWindow'
+  | 'initForge';
 
 // ── Host → Webview ────────────────────────────────────────────────────────────
 

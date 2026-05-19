@@ -1,0 +1,43 @@
+# Project Instructions for Forge Agent
+# Copy this file to FORGE.md in your workspace root and fill it in.
+# Forge reads it automatically and injects it into every prompt.
+# Keep it focused — every token here costs context on every turn.
+
+## Stack
+<!-- What languages, frameworks, build tools, and runtimes this project uses -->
+TypeScript + Node.js. esbuild for bundling. Vitest for tests.
+
+## Workspace Layout
+<!-- Top-level directories the agent needs to know about -->
+src/          — all TypeScript source
+src/backend/  — backend lifecycle and adapters
+src/llm/      — LLM dispatch, templates, prompt injection
+src/tools/    — tool definitions and execution
+src/sidebar/  — VS Code webview and agent loop
+src/config/   — Zod config schema and loader
+config/       — user-facing config examples and templates
+tests/        — unit and integration tests
+
+## Key Files
+<!-- The single most important owner for each concern — agent starts here -->
+- Entry point:       src/extension.ts
+- Agent loop:        src/sidebar/AgentLoop.ts
+- LLM dispatch:      src/llm/ChatClient.ts
+- Tool definitions:  src/tools/registerAllTools.ts
+- Config schema:     src/config/schema.ts
+- System prompt:     src/templates/builtin/execute.njk
+
+## Navigation Rules
+- Grep before creating — check if a function or file already exists
+- New backend logic → src/backend/, new tools → src/tools/, new LLM logic → src/llm/
+- Do not put business logic in src/extension.ts — it is wiring only
+
+## Hard Stops
+- No destructive shell commands (rm -rf, git reset --hard) without explicit user confirmation
+- No cloud API calls or outbound network requests beyond what the user configured
+- No hardcoded paths, secrets, or API keys
+
+## Code Style
+- TypeScript strict mode — no `any` without a comment explaining why
+- Zod for all config and external input validation
+- Dispose VS Code resources in deactivate() or via context.subscriptions

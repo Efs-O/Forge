@@ -22,6 +22,7 @@ import type { DiffDecorations } from './DiffDecorations';
 import { ToolFailureTracker } from '../tools/StripTools';
 import { getLogger } from '../util/logger';
 import type { TemplateEngine } from '../llm/TemplateEngine';
+import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
 import { AgentLoop } from './AgentLoop';
 import type { SidebarProviderEvents } from './AgentLoop';
 import { SlashCommandHandler } from './SlashCommandHandler';
@@ -76,6 +77,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     diffDecorations: DiffDecorations,
     templateEngine?: TemplateEngine,
     private readonly events: SidebarProviderEvents = {},
+    forgeLoader?: ForgeInstructionsLoader,
   ) {
     this.sidebar = loadSidebarSession(workspaceState);
     this.agentLoop = new AgentLoop(
@@ -90,6 +92,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       (msg) => this.post(msg),
       () => this.view,
       templateEngine,
+      forgeLoader,
     );
 
     this.slashHandler = new SlashCommandHandler({

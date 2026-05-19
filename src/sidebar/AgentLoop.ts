@@ -10,6 +10,7 @@ import type { AttachmentData } from './messageBridge';
 import { buildUserContent } from './ConversationOps';
 import { injectSystemPrompt } from '../llm/SystemPromptInjector';
 import type { TemplateEngine } from '../llm/TemplateEngine';
+import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
 import { mergeSampling } from '../llm/SamplingMerge';
 import { normalizeRequestForModel } from '../llm/RequestNormalizer';
 import {
@@ -67,6 +68,7 @@ export class AgentLoop {
     private readonly post: (msg: HostToWebview) => void,
     private readonly getView: () => vscode.WebviewView | undefined,
     private readonly templateEngine?: TemplateEngine,
+    private readonly forgeLoader?: ForgeInstructionsLoader,
   ) {
     this.toolDispatch = new ToolDispatch(
       toolRegistry,
@@ -188,6 +190,8 @@ export class AgentLoop {
     const tmplCtx: Record<string, string> = {};
     if (activeFile) tmplCtx['activeFile'] = activeFile;
     if (config.custom_instructions) tmplCtx['customInstructions'] = config.custom_instructions;
+    if (this.forgeLoader?.root) tmplCtx['workspaceRoot'] = this.forgeLoader.root;
+    if (this.forgeLoader?.instructions) tmplCtx['forgeInstructions'] = this.forgeLoader.instructions;
 
     const messages = injectSystemPrompt(
       [{ role: 'user', content: text }],
@@ -256,6 +260,8 @@ export class AgentLoop {
       const tmplCtx: Record<string, string> = {};
       if (activeFile) tmplCtx['activeFile'] = activeFile;
       if (config.custom_instructions) tmplCtx['customInstructions'] = config.custom_instructions;
+      if (this.forgeLoader?.root) tmplCtx['workspaceRoot'] = this.forgeLoader.root;
+      if (this.forgeLoader?.instructions) tmplCtx['forgeInstructions'] = this.forgeLoader.instructions;
       const messages = injectSystemPrompt([...conv.messages], this.templateEngine, tmplCtx, activeModel.system_prompt);
 
       let toolDefs = this.toolRegistry.definitions(allowed);

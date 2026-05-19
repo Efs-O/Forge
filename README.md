@@ -24,6 +24,7 @@ Forge runs GGUF models directly on your machine via `llama-server`. No API key, 
 - **Thinking-channel stripping**: optionally hide `<think>` and related channel markup
 - **Strict tool schemas**: typed JSON Schema for every tool — no free-form string blobs
 - **Slash commands in chat**: type `/` to open built-in chat actions
+- **FORGE.md workspace instructions**: drop a `FORGE.md` in any project root to give the agent persistent navigation rules, stack context, and hard stops — auto-injected into every prompt
 - **Optional web search**: Tavily or Brave via user-supplied API key
 - **Bridge mode**: connect to any already-running OpenAI-compatible server
 
@@ -232,12 +233,55 @@ search:
 
 ---
 
+## FORGE.md — Workspace Instructions
+
+Drop a `FORGE.md` file in any project's root folder to give the Forge agent persistent context about that workspace: where things live, what the stack is, and what operations require confirmation.
+
+Forge injects it into the system prompt on every turn — the agent reads it automatically without you needing to re-explain the project.
+
+### Generate it automatically
+
+Type `/initForge` in the chat input. Forge will scan your workspace (directory layout, `package.json`, config files) and ask the active model to generate a `FORGE.md` tailored to that project. The file appears in your editor immediately after.
+
+You can also copy `FORGE.md.example` from the extension directory as a starting template and fill it in manually.
+
+### What to put in it
+
+```markdown
+## Stack
+TypeScript + Node.js. esbuild for bundling. Vitest for tests.
+
+## Workspace Layout
+src/        — all source code
+src/api/    — Express route handlers
+src/db/     — database models and migrations
+config/     — environment config files
+
+## Key Files
+- src/index.ts      — entry point
+- src/config.ts     — app-wide config
+- prisma/schema.prisma — database schema
+
+## Navigation Rules
+- All API routes live in src/api/ — never add routes elsewhere
+- Grep before creating — check for existing helpers first
+
+## Hard Stops
+- Never run database migrations without explicit user confirmation
+- Never delete files in /data — these are production assets
+```
+
+The file is watched for changes — edits take effect on the next message with no restart required.
+
+---
+
 ## Slash Commands
 
 Type `/` in the chat input to open the command list.
 
 | Command | Description |
 | --- | --- |
+| `/initForge` | Scan workspace and generate a `FORGE.md` agent instructions file |
 | `/newChat` | Start a new conversation tab |
 | `/clearChat` | Clear the current conversation |
 | `/undo` | Restore files from the last write turn |

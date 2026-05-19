@@ -4,9 +4,11 @@ import * as path from 'path';
 
 export interface TemplateContext {
   workspaceName?: string;
+  workspaceRoot?: string;
   activeFile?: string;
   selection?: string;
   customInstructions?: string;
+  forgeInstructions?: string;
 }
 
 export class TemplateEngine {

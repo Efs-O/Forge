@@ -62,4 +62,10 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     title: 'Reload Window',
     description: 'Run Reload Window (reloads Cursor / VS Code).',
   },
+  {
+    id: 'initForge',
+    trigger: 'initForge',
+    title: 'Init Forge',
+    description: 'Scan this workspace and generate a FORGE.md agent instructions file.',
+  },
 ];

@@ -13,6 +13,7 @@ import { CheckpointStack } from './checkpoint/CheckpointStack';
 import { KeepUndoCodeLensProvider } from './sidebar/KeepUndoCodeLens';
 import { DiffDecorations } from './sidebar/DiffDecorations';
 import { TemplateEngine } from './llm/TemplateEngine';
+import { createForgeInstructionsLoader } from './llm/ForgeInstructionsLoader';
 import { runFirstRunWizard } from './sidebar/FirstRunWizard';
 import { SESSION_KEY_V1 } from './sidebar/sessionTypes';
 import { registerAllTools } from './tools/registerAllTools';
@@ -143,6 +144,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }
 
   // ── Sidebar ───────────────────────────────────────────────────────────────
+  const forgeLoader = createForgeInstructionsLoader();
+  if (forgeLoader) context.subscriptions.push(forgeLoader);
+
   sidebarProvider = new SidebarProvider(
     context.extensionUri,
     pool,
@@ -162,6 +166,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       onBackendError: (message) => statusBar.setError(message),
       onBackendReady: (modelName) => statusBar.setReady(modelName),
     },
+    forgeLoader,
   );
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(SidebarProvider.viewId, sidebarProvider, {
