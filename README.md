@@ -1,5 +1,3 @@
-LLAMABRIDGE
-
 # Forge
 
 **Local-first AI coding assistant for VS Code powered by llama.cpp, zero cloud, zero telemetry.**
