@@ -9,14 +9,18 @@ Forge runs GGUF models directly on your machine via `llama-server`. No API key, 
 ## Features
 
 - **Single execute-style workflow**: no mode switching — one conversation, full tool access
-- **Multi-tab conversations**: run multiple independent chats in parallel
+- **Multi-tab concurrent streaming**: run multiple independent chats in parallel; switching tabs never cancels a running stream
+- **Inline diff viewer**: every file write shows a collapsible red/green diff block in the chat immediately after the tool runs
 - **Direct llama.cpp control**: Forge spawns and manages `llama-server`
-- **Ollama support**: use local Ollama models or Ollama cloud routing — auth handled by `ollama auth login`, not Forge
+- **Ollama support**: local Ollama models or Ollama cloud routing — auth via `ollama auth login`, not Forge
+- **Isolated backend pools**: llama.cpp and Ollama backends are tracked separately — switching to an Ollama model never stops a running llama-server
+- **VRAM management**: closing a tab with a local model prompts to unload it from VRAM immediately
 - **Hot model swap**: switch between GGUF or Ollama models without restarting VS Code
 - **Per-action confirmation gate**: approve or deny each tool call before it runs
 - **Per-turn checkpoints**: Undo or Keep after any turn that writes files
+- **Token budget bar**: live used/max context token estimate shown in the header
 - **Reasoning token display**: streamed thinking output shown inline when enabled
-- **Runtime template capability checks**: inspect llama.cpp metadata and warn on mismatched tool/thinking features
+- **Runtime capability checks**: inspect llama.cpp metadata and warn on mismatched tool/thinking features
 - **Thinking-channel stripping**: optionally hide `<think>` and related channel markup
 - **Strict tool schemas**: typed JSON Schema for every tool — no free-form string blobs
 - **Slash commands in chat**: type `/` to open built-in chat actions
@@ -52,11 +56,11 @@ Skip this step if you are using Ollama only.
 
 ### 3. Create config.yaml
 
-Forge uses a workspace config at:
+Forge looks for a config file at:
 
 `<your-project>/.forge/config.yaml`
 
-If the file is missing, open the sidebar and let the setup wizard generate it, or create it manually:
+If the file is missing, open the sidebar and the setup wizard will generate it, or create it manually:
 
 ```yaml
 active_model: my-model
@@ -81,6 +85,11 @@ models:
     flash_attn: true
     think: false
     strip_thinking_channels: true
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 64
+      max_tokens: 8192
 ```
 
 ### 4. Open the Forge sidebar
@@ -100,22 +109,62 @@ models:
     endpoint: http://127.0.0.1:11434
     num_ctx: 262144
     think: true
-    reasoning_effort: medium
+    reasoning_effort: medium       # low | medium | high
 
-  gemma4:26b-cloud:
+  deepseek-v4-flash:cloud:
     provider: ollama
     endpoint: http://127.0.0.1:11434
-    num_ctx: 262144
+    num_ctx: 1000000
     think: true
+    reasoning_effort: medium
 ```
 
-Forge merges GGUF and Ollama entries in a single model picker. Model selection does not unload anything — Forge releases the current model on the next `Send` if you switched targets.
+Forge merges GGUF and Ollama entries in a single model picker. Ollama backends are tracked in an isolated pool — selecting an Ollama model never stops a running `llama-server`, and vice versa.
+
+---
+
+## VRAM Management
+
+Forge keeps models loaded between prompts so the first message in a follow-up turn is instant. To free VRAM explicitly:
+
+- **Close a tab** — if the model is local (llama.cpp, or Ollama on a local endpoint) and no other open tab uses it, Forge shows a notification: **"[model] is still loaded in VRAM. Unload it to free memory?"** with an **Unload Now** button.
+- **`/unloadModel`** — stops all backends immediately and releases everything.
+- **`/restartBackend`** — stops then restarts the active llama-server.
+
+> **Note:** closing a tab while another tab uses the same model will not trigger the unload prompt — the model is still in use.
+
+---
+
+## Multi-Tab Concurrent Streaming
+
+Each conversation tab runs its own independent agent loop with a dedicated abort controller. You can:
+
+- Send a prompt in tab A and switch to tab B while it's still generating — tab A keeps streaming in the background
+- Cancel a specific tab without affecting others
+- See a live indicator on tabs that are currently generating
+
+Switching between tabs never cancels a running stream. Only closing a tab or pressing Cancel within it stops that conversation.
+
+`max_simultaneous_models` (default `1`) controls how many `llama-server` processes stay alive at once. If you open more conversations than the pool limit, the least-recently-used llama.cpp server is evicted when a new model needs to start. Ollama models are not subject to this limit.
+
+---
+
+## Inline Diff Viewer
+
+After every file write (`write_file`, `replace_in_file`, `delete_file`), Forge renders a collapsible diff block directly in the chat:
+
+- **Badge**: `new` / `modified` / `deleted`
+- **Path**: file path relative to the workspace root
+- **Hunks**: unified diff with 3 lines of context, green `+` for additions, red `−` for removals
+- Files over 500 lines fall back to a "file too large to diff inline" notice
+
+The diff uses the per-turn checkpoint snapshot as the before-state, so it always reflects exactly what the agent changed.
 
 ---
 
 ## Model Behavior
 
-Forge inspects llama.cpp runtime metadata (primarily via `/props`) before sending requests:
+Forge inspects llama.cpp runtime metadata (via `/props`) before sending requests:
 
 - whether the active model exposes a usable chat template
 - whether the template likely supports tool calling
@@ -125,12 +174,14 @@ When Forge detects a mismatch it warns in the UI and narrows the request rather 
 
 ---
 
-## Checkpoints
+## Checkpoints (Undo / Keep)
 
-After every turn that writes files, Forge shows an **Undo / Keep** bar in the editor.
+After every turn that writes files, Forge shows an **Undo / Keep** bar in the editor via CodeLens.
 
-- **Undo** restores all files modified in that turn
+- **Undo** restores all files modified in that turn to their state before the agent ran
 - **Keep** commits the checkpoint and clears the bar
+
+You can also use `/undo` and `/keep` from the chat input, or the command palette (`Forge: Undo Last Turn`, `Forge: Keep Changes`).
 
 ---
 
@@ -145,6 +196,8 @@ models:
 ```
 
 When `think: true`, reasoning tokens stream into a collapsible block in the UI. When `strip_thinking_channels: true` and `think: false`, Forge strips `<think>...</think>` markers from visible output.
+
+For Ollama models, use `reasoning_effort: low | medium | high` to control the reasoning budget.
 
 ---
 
@@ -192,7 +245,7 @@ Type `/` in the chat input to open the command list.
 | `/compact` | Summarize and compress conversation history |
 | `/review` | Run a code review on the current file or selection |
 | `/restartBackend` | Restart the managed llama-server process |
-| `/unloadModel` | Stop the backend and release the model from memory |
+| `/unloadModel` | Stop all backends and release models from memory |
 | `/reloadWindow` | Reload the VS Code window |
 
 ---
