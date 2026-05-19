@@ -187,7 +187,8 @@
       },
       {
         "command": "forge.setSearchApiKey",
-        "title": "Forge: Set Search API Key"
+        "title": "Forge: Set Search API Key",
+        "shortTitle": "Set Search Key"
       },
       {
         "command": "forge.setupWizard",

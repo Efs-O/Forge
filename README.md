@@ -220,9 +220,26 @@ In bridge mode Forge connects to the existing process but does not own it — re
 
 ## Web Search
 
-```text
-Command Palette → Forge: Set Search API Key
-```
+Forge supports [Tavily](https://tavily.com) and [Brave Search](https://brave.com/search/api/) as search providers. The API key is stored securely in VS Code's SecretStorage (OS keychain) — never in config files or git.
+
+### Setup (two steps)
+
+**1. Run the command**
+
+`Ctrl+Shift+P` → **`Forge: Set Search API Key`**
+
+- If no search provider is configured yet, Forge will ask you to pick **Tavily** or **Brave**, then automatically add the `search:` block to your `config.yaml`.
+- If a provider is already configured, it will just prompt for the key.
+
+**2. Reload the window**
+
+`Ctrl+Shift+P` → **`Developer: Reload Window`** — required only if the `search:` block was just added to `config.yaml` for the first time.
+
+That's it. The `web_search` tool becomes available to the agent on the next prompt.
+
+### Manual config (optional)
+
+If you prefer to configure the search block yourself before running the command:
 
 ```yaml
 search:
