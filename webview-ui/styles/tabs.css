@@ -144,6 +144,23 @@
   cursor: not-allowed;
 }
 
+/* ── Background-streaming tab indicator ──────────────────────────────────── */
+
+.tab-chip-streaming .tab-chip-label {
+  color: var(--forge-accent, #0090ff);
+}
+
+.tab-streaming-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--forge-accent, #0090ff);
+  flex-shrink: 0;
+  margin-right: 4px;
+  animation: forge-cursor-blink 0.9s ease-in-out infinite;
+}
+
 /* ── History panel ───────────────────────────────────────────────────────── */
 
 #history-panel {

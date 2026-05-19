@@ -135,6 +135,7 @@ export function App(): React.ReactElement {
             <TabStrip
               tabs={state.tabs}
               activeId={state.activeConversationId}
+              streamingIds={state.streamingIds}
               onSwitch={handleSwitchTab}
               onNew={handleNewConversation}
               onClose={handleCloseTab}

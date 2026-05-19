@@ -4,6 +4,7 @@ import type { SessionTabMeta } from '../../../src/sidebar/messageBridge';
 interface Props {
   tabs: SessionTabMeta[];
   activeId: string;
+  streamingIds: ReadonlySet<string>;
   onSwitch: (id: string) => void;
   onNew: () => void;
   onClose: (id: string) => void;
@@ -24,6 +25,7 @@ const PlusIcon = (): React.ReactElement => (
 export function TabStrip({
   tabs,
   activeId,
+  streamingIds,
   onSwitch,
   onNew,
   onClose,
@@ -33,13 +35,14 @@ export function TabStrip({
       <div id="tab-strip-scroll" role="tablist">
         {tabs.map((tab) => {
           const sel = tab.id === activeId;
+          const live = streamingIds.has(tab.id);
           const label = tab.title.length > 20 ? `${tab.title.slice(0, 20)}…` : tab.title;
           return (
             <div
               key={tab.id}
               role="tab"
               aria-selected={sel}
-              className={`tab-chip${sel ? ' tab-chip-active' : ''}`}
+              className={`tab-chip${sel ? ' tab-chip-active' : ''}${live && !sel ? ' tab-chip-streaming' : ''}`}
             >
               <button
                 type="button"
@@ -47,6 +50,7 @@ export function TabStrip({
                 title={tab.title}
                 onClick={() => onSwitch(tab.id)}
               >
+                {live && !sel && <span className="tab-streaming-dot" aria-label="generating" />}
                 {label}
               </button>
               <button
