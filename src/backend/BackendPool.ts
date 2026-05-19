@@ -23,6 +23,8 @@ export interface IBackendPool {
 
 export class BackendPool implements IBackendPool {
   private readonly slots = new Map<string, PoolSlot>();
+  // Ollama models connect to a pre-running daemon and don't consume a port slot.
+  private readonly ollamaSlots = new Map<string, DirectBackend>();
   private readonly freePorts: number[];
   private lastAcquiredModel: string | null = null;
 
@@ -33,6 +35,11 @@ export class BackendPool implements IBackendPool {
   }
 
   async acquire(modelName: string): Promise<BackendController> {
+    if (this.isOllamaModel(modelName)) {
+      this.lastAcquiredModel = modelName;
+      return this.acquireOllama(modelName);
+    }
+
     const existing = this.slots.get(modelName);
 
     if (existing) {
@@ -53,7 +60,7 @@ export class BackendPool implements IBackendPool {
   }
 
   async stopAll(): Promise<void> {
-    const stops = [...this.slots.values()].map(async (slot) => {
+    const slotStops = [...this.slots.values()].map(async (slot) => {
       try {
         if (slot.starting) await slot.starting.catch(() => {});
         await slot.backend.stop();
@@ -61,16 +68,19 @@ export class BackendPool implements IBackendPool {
         // best-effort
       }
     });
-    await Promise.all(stops);
+    const ollamaStops = [...this.ollamaSlots.values()].map(async (backend) => {
+      try { await backend.stop(); } catch { /* best-effort */ }
+    });
+    await Promise.all([...slotStops, ...ollamaStops]);
     this.slots.clear();
+    this.ollamaSlots.clear();
     log.info('[BackendPool] all slots stopped');
   }
 
   applyForgeConfig(next: ForgeConfig): void {
     this.config = next;
-    for (const slot of this.slots.values()) {
-      slot.backend.applyForgeConfig(next);
-    }
+    for (const slot of this.slots.values()) slot.backend.applyForgeConfig(next);
+    for (const backend of this.ollamaSlots.values()) backend.applyForgeConfig(next);
   }
 
   showConsole(modelName?: string): void {
@@ -85,7 +95,8 @@ export class BackendPool implements IBackendPool {
   }
 
   isAnyReady(): boolean {
-    return [...this.slots.values()].some((s) => s.backend.isReady());
+    return [...this.slots.values()].some((s) => s.backend.isReady())
+      || [...this.ollamaSlots.values()].some((b) => b.isReady());
   }
 
   // ── Private ───────────────────────────────────────────────────────────────
@@ -168,5 +179,29 @@ export class BackendPool implements IBackendPool {
       if (!recent || slot.lastUsed > recent.lastUsed) recent = slot;
     }
     return recent;
+  }
+
+  private isOllamaModel(modelName: string): boolean {
+    const model = this.config.models.find((m) => m.name === modelName);
+    return model?.provider === 'ollama';
+  }
+
+  private async acquireOllama(modelName: string): Promise<BackendController> {
+    const existing = this.ollamaSlots.get(modelName);
+    if (existing?.isReady()) return existing;
+
+    if (existing) {
+      // Was ready but health check lapsed — re-hotSwap without recreating
+      await existing.hotSwap(modelName);
+      return existing;
+    }
+
+    // Port is irrelevant for Ollama: DirectBackend.hotSwap overrides currentBaseUrl
+    // to model.endpoint, so the port value here is never used.
+    const backend = new DirectBackend(this.config, 0);
+    this.ollamaSlots.set(modelName, backend);
+    await backend.hotSwap(modelName);
+    log.info(`[BackendPool] ollama slot ready: ${modelName}`);
+    return backend;
   }
 }
