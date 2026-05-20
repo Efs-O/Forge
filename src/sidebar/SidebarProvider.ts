@@ -1,4 +1,7 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import type { IBackendPool } from '../backend/BackendPool';
 import type { ForgeConfig } from '../config/types';
 import { isLocalModel } from '../backend/ModelHeuristics';
@@ -55,6 +58,22 @@ function estimateTokens(messages: ChatMessage[]): number {
     if (m.reasoning) chars += m.reasoning.length;
     return sum + Math.ceil(chars / 4);
   }, 0);
+}
+
+function writeForgeBridge(model: string, usedTokens: number, maxTokens: number): void {
+  try {
+    const dir = path.join(os.homedir(), '.forge');
+    fs.mkdirSync(dir, { recursive: true });
+    const payload = JSON.stringify({
+      model,
+      used_tokens: usedTokens,
+      max_tokens: maxTokens,
+      timestamp_ms: Date.now(),
+    });
+    fs.writeFileSync(path.join(dir, 'hallumeter-bridge.json'), payload, 'utf8');
+  } catch {
+    // non-fatal — HalluMeter will simply show stale/unavailable
+  }
 }
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
@@ -224,7 +243,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const toolTokens = Math.ceil(JSON.stringify(this.toolRegistry.definitions(FORGE_PERMISSIONS)).length / 4);
     const SYSTEM_AND_TEMPLATE_OVERHEAD = 200;
     const used = msgTokens + toolTokens + SYSTEM_AND_TEMPLATE_OVERHEAD;
-    this.post({ type: 'tokenBudget', used, max: activeModel?.num_ctx ?? 0 });
+    const max = activeModel?.num_ctx ?? 0;
+    this.post({ type: 'tokenBudget', used, max });
+    if (this.config.active_model && max > 0) {
+      writeForgeBridge(this.config.active_model, used, max);
+    }
   }
 
   private getActive(): ConversationRuntime {
