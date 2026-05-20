@@ -63,8 +63,9 @@ export function App(): React.ReactElement {
         case 'confirmRequest':
           setConfirmRequest({ id: msg.id, toolName: msg.toolName, detail: msg.detail, isDangerous: msg.isDangerous });
           break;
-        case 'tokenBudget':   setTokenUsed(msg.used); setTokenMax(msg.max); break;
-        case 'setInput':      setPrefillText(msg.text); break;
+        case 'tokenBudget':    setTokenUsed(msg.used); setTokenMax(msg.max); break;
+        case 'setInput':       setPrefillText(msg.text); break;
+        case 'clankerChanged': dispatch({ type: 'CLANKER_CHANGED', enabled: msg.enabled }); break;
         case 'historyRestore':
         case 'newChat':
           break;
@@ -161,6 +162,7 @@ export function App(): React.ReactElement {
         onRunSlashCommand={handleRunSlashCommand}
         prefillText={prefillText}
         onPrefillConsumed={() => setPrefillText(null)}
+        clankerMode={state.clankerMode}
       />
       {confirmRequest && (
         <ConfirmationDialog

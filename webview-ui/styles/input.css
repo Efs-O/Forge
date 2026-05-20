@@ -157,6 +157,26 @@
   color: #fff;
 }
 
+/* ── Clanker mode pill ───────────────────────────────────────────────────── */
+
+#clanker-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 3px 8px;
+  border-radius: var(--forge-radius-pill);
+  background: #9a6700;
+  color: #fff;
+  opacity: 0.93;
+  user-select: none;
+  white-space: nowrap;
+  cursor: default;
+}
+
 /* ── Slash command menu ──────────────────────────────────────────────────── */
 
 #slash-menu {

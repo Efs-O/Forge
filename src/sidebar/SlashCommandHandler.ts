@@ -24,6 +24,7 @@ export interface SlashCommandDeps {
   postTokenBudget: () => void;
   runPromptToMarkdown: (text: string) => Promise<string>;
   isStreaming: () => boolean;
+  toggleClanker: () => boolean;
 }
 
 export class SlashCommandHandler {
@@ -100,6 +101,15 @@ export class SlashCommandHandler {
       case 'initForge':
         await this.initForge();
         return;
+
+      case 'clanker': {
+        const on = deps.toggleClanker();
+        deps.post({ type: 'token', text: on
+          ? '\n> ⚙ **Full Clanker ON** — no confirmation prompts until you run `/clanker` again. Recursive deletes still confirm.\n'
+          : '\n> ⚙ **Full Clanker OFF** — confirmation restored.\n',
+        });
+        return;
+      }
     }
   }
 

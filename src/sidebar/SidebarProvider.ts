@@ -132,6 +132,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       postTokenBudget: () => this.postTokenBudget(),
       runPromptToMarkdown: (text) => this.agentLoop.runPromptToMarkdown(text),
       isStreaming: () => this.agentLoop.streaming,
+      toggleClanker: () => this.agentLoop.toggleClanker(),
     });
   }
 
@@ -317,6 +318,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.post({ type: 'models', names: this.config.models.map((m) => m.name), active: this.config.active_model });
         this.postSessionSync();
         if (this.pool.isAnyReady()) this.post({ type: 'ready' });
+        this.post({ type: 'clankerChanged', enabled: this.agentLoop.getClankerMode() });
         break;
 
       case 'send':

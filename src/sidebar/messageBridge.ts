@@ -30,7 +30,8 @@ export type ForgeSlashCommandId =
   | 'undo'
   | 'keep'
   | 'reloadWindow'
-  | 'initForge';
+  | 'initForge'
+  | 'clanker';
 
 // ── Host → Webview ────────────────────────────────────────────────────────────
 
@@ -54,6 +55,8 @@ export interface TokenBudgetMsg      { type: 'tokenBudget'; used: number; max: n
 export type DiffLineKind = 'context' | 'added' | 'removed';
 export interface DiffLine  { kind: DiffLineKind; text: string }
 export interface DiffHunk  { oldStart: number; newStart: number; lines: DiffLine[] }
+
+export interface ClankerChangedMsg   { type: 'clankerChanged'; enabled: boolean }
 
 export interface FileDiffMsg {
   type: 'fileDiff';
@@ -95,7 +98,8 @@ export type HostToWebview =
   | SetInputMsg
   | HistoryRestoreMsg
   | SessionSyncMsg
-  | FileDiffMsg;
+  | FileDiffMsg
+  | ClankerChangedMsg;
 
 // ── Webview → Host ────────────────────────────────────────────────────────────
 

@@ -91,7 +91,7 @@ export function makeExecCommandTool(): RegisteredTool {
 
       checkShellOperators(cmdArgs);
       checkPowerShellBan(command, cmdArgs);
-      await guardExec(command, cmdArgs);
+      guardExec(command, cmdArgs);
 
       const result = await spawnAndWait(command, cmdArgs, cwd, timeoutMs);
       return formatOutput(result);
@@ -131,7 +131,7 @@ export function makeRunTestsTool(): RegisteredTool {
       if (pattern)  cmdArgs.push(pattern);
       if (reporter) cmdArgs.push('--reporter', reporter);
 
-      await guardExec(runner.command, cmdArgs);
+      guardExec(runner.command, cmdArgs);
 
       const result = await spawnAndWait(runner.command, cmdArgs, root, 60_000);
       return formatOutput(result);
@@ -183,7 +183,7 @@ export function makeRunBuildTool(): RegisteredTool {
       }
 
       const cmdArgs = ['run', script];
-      await guardExec('npm', cmdArgs);
+      guardExec('npm', cmdArgs);
 
       const result = await spawnAndWait('npm', cmdArgs, root, 120_000);
       const out    = result.stdout.slice(0, MAX_OUTPUT_CHARS);

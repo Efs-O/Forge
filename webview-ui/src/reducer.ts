@@ -26,6 +26,7 @@ interface State {
   tabs: SessionTabMeta[];
   history: SessionHistoryMeta[];
   activeConversationId: string;
+  clankerMode: boolean;
 }
 
 /** Derived view helpers — used by App.tsx */
@@ -54,6 +55,7 @@ export type Action =
   | { type: 'CHECKPOINT_DISMISSED'; convId?: string }
   | { type: 'TOOL_ACTIVITY'; toolName: string; detail?: string; convId?: string }
   | { type: 'FILE_DIFF'; filePath: string; hunks: DiffHunk[] | null; isNew: boolean; isDeleted: boolean; convId?: string }
+  | { type: 'CLANKER_CHANGED'; enabled: boolean }
   | {
       type: 'SESSION_SYNC';
       activeId: string;
@@ -78,6 +80,7 @@ export const initialState: State = {
   tabs: [],
   history: [],
   activeConversationId: '',
+  clankerMode: false,
 };
 
 function appendToConv(state: State, convId: string, msg: AppMessage): State {
@@ -221,6 +224,9 @@ export function reducer(state: State, action: Action): State {
 
     case 'CHECKPOINT_DISMISSED':
       return { ...state, checkpointPending: false };
+
+    case 'CLANKER_CHANGED':
+      return { ...state, clankerMode: action.enabled };
 
     case 'SESSION_SYNC': {
       const messagesById: Record<string, AppMessage[]> = {};

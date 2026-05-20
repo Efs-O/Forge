@@ -68,4 +68,10 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     title: 'Init Forge',
     description: 'Scan this workspace and generate a FORGE.md agent instructions file.',
   },
+  {
+    id: 'clanker',
+    trigger: 'clanker',
+    title: 'Full Clanker',
+    description: 'Toggle full-auto mode — no confirmation prompts until you run /clanker again. Recursive deletes still confirm.',
+  },
 ];

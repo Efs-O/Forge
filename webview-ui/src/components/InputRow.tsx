@@ -11,6 +11,7 @@ interface Props {
   onRunSlashCommand: (commandId: SlashCommand['id']) => void;
   prefillText: string | null;
   onPrefillConsumed: () => void;
+  clankerMode: boolean;
 }
 
 const SendIcon = (): React.ReactElement => (
@@ -40,6 +41,7 @@ export function InputRow({
   onRunSlashCommand,
   prefillText,
   onPrefillConsumed,
+  clankerMode,
 }: Props): React.ReactElement {
   const [text, setText] = useState('');
   const [attachments, setAttachments] = useState<AttachmentData[]>([]);
@@ -223,6 +225,11 @@ export function InputRow({
         />
 
         <div id="input-btn-col">
+          {clankerMode && (
+            <span id="clanker-pill" title="Full Clanker active — no confirmation prompts. Recursive deletes still confirm.">
+              ⚙ FULL CLANKER
+            </span>
+          )}
           {streaming ? (
             <button id="btn-stop" type="button" onClick={onCancel}>
               <StopIcon />

@@ -51,6 +51,7 @@ export class AgentLoop {
   private readonly capabilityWarningsShown = new Set<string>();
   private readonly pendingConfirmations = new Map<string, (approved: boolean) => void>();
   private readonly toolDispatch: ToolDispatch;
+  private clankerMode = false;
 
   get streaming(): boolean { return this.streamingConvIds.size > 0; }
   isStreamingConv(id: string): boolean { return this.streamingConvIds.has(id); }
@@ -106,6 +107,14 @@ export class AgentLoop {
       for (const backend of this.activeBackends.values()) void backend.stop();
     }
   }
+
+  toggleClanker(): boolean {
+    this.clankerMode = !this.clankerMode;
+    this.post({ type: 'clankerChanged', enabled: this.clankerMode });
+    return this.clankerMode;
+  }
+
+  getClankerMode(): boolean { return this.clankerMode; }
 
   resolveConfirmation(id: string, approved: boolean): void {
     const pending = this.pendingConfirmations.get(id);
@@ -389,6 +398,7 @@ export class AgentLoop {
   }
 
   private async requestToolApproval(toolName: string, detail: string, isDangerous?: boolean, convId?: string): Promise<boolean> {
+    if (this.clankerMode && !isDangerous) return true;
     const view = this.getView();
     if (!view) throw new Error(`Forge: sidebar is unavailable for tool approval (${toolName}).`);
     const id = `confirm-${Date.now()}-${Math.random().toString(36).slice(2)}`;

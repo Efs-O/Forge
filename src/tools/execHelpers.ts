@@ -3,7 +3,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { checkDenyList, getBuiltinDenyList } from './DenyList';
-import { confirmToolCall } from './ConfirmationGate';
 
 export const MAX_OUTPUT_CHARS = 10_000;
 
@@ -113,29 +112,12 @@ export function formatOutput(result: SpawnResult): string {
   return out;
 }
 
-// ── Denylist + confirmation flow ───────────────────────────────────────────────
+// ── Denylist guard ─────────────────────────────────────────────────────────────
 
-export async function guardExec(command: string, args: string[]): Promise<void> {
+export function guardExec(command: string, args: string[]): void {
   const denyEntry = checkDenyList(command, args, getBuiltinDenyList());
   if (denyEntry) {
-    const result = await confirmToolCall(
-      `${command} ${args.join(' ')}`,
-      `Blocked pattern: ${denyEntry.description}`,
-      true,
-    );
-    if (!result.approved) {
-      throw new Error(`exec_command: user denied dangerous command (${denyEntry.description})`);
-    }
-    return;
-  }
-
-  const result = await confirmToolCall(
-    `${command} ${args.join(' ')}`,
-    `Working directory: ${args.join(' ')}`,
-    false,
-  );
-  if (!result.approved) {
-    throw new Error('exec_command: user declined');
+    throw new Error(`exec_command: blocked — ${denyEntry.description}`);
   }
 }
 
