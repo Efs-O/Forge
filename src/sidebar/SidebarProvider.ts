@@ -28,6 +28,7 @@ import type { TemplateEngine } from '../llm/TemplateEngine';
 import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
 import { AgentLoop } from './AgentLoop';
 import type { SidebarProviderEvents } from './AgentLoop';
+import { SessionLogger } from './SessionLogger';
 import { SlashCommandHandler } from './SlashCommandHandler';
 import {
   opNewConversation,
@@ -82,6 +83,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private sidebar: SidebarRuntime;
   private readonly failureTracker = new ToolFailureTracker();
+  private readonly sessionLoggers = new Map<string, SessionLogger>();
   private readonly agentLoop: AgentLoop;
   private readonly slashHandler: SlashCommandHandler;
 
@@ -294,7 +296,19 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.persistSession();
       this.postSessionSync();
       this.postTokenBudget();
+      this.flushSessionLog(conv.id);
     }
+  }
+
+  private flushSessionLog(convId: string): void {
+    const conv = this.sidebar.conversations.find((c) => c.id === convId);
+    if (!conv || conv.messages.length === 0) return;
+    if (!this.sessionLoggers.has(convId)) {
+      this.sessionLoggers.set(convId, new SessionLogger(convId, conv.title, this.config.active_model ?? ''));
+    }
+    const logger = this.sessionLoggers.get(convId)!;
+    logger.updateTitle(conv.title);
+    logger.flush(conv.messages, this.config.active_model ?? '');
   }
 
   private handleMessage(msg: WebviewToHost): void {
