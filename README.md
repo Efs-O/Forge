@@ -16,7 +16,7 @@ Forge runs GGUF models directly on your machine via `llama-server`. No API key, 
 - **Isolated backend pools**: llama.cpp and Ollama backends are tracked separately — switching to an Ollama model never stops a running llama-server
 - **VRAM management**: closing a tab with a local model prompts to unload it from VRAM immediately
 - **Hot model swap**: switch between GGUF or Ollama models without restarting VS Code
-- **Per-action confirmation gate**: approve or deny each tool call before it runs
+- **Per-action confirmation gate**: approve or deny each tool call before it runs — or enable **Clanker Mode** (`/clanker`) to skip confirmations entirely for a session
 - **Per-turn checkpoints**: Undo or Keep after any turn that writes files
 - **Token budget bar**: live used/max context token estimate shown in the header
 - **Reasoning token display**: streamed thinking output shown inline when enabled
@@ -175,6 +175,20 @@ When Forge detects a mismatch it warns in the UI and narrows the request rather 
 
 ---
 
+## Clanker Mode
+
+By default Forge asks for confirmation before every file write, terminal command, and git operation. **Clanker Mode** disables that gate so the agent runs uninterrupted.
+
+Type `/clanker` in the chat input to toggle it on. A 💥 **CLANKER MODE** pill appears to the left of the Send button as a persistent reminder that confirmations are off.
+
+Run `/clanker` again to restore the confirmation gate.
+
+**What still confirms in Clanker Mode:** recursive deletes (`delete_file` with `recursive: true`) always prompt regardless — there is no silent mass-delete.
+
+Clanker Mode is session-scoped: it resets to off when VS Code is closed or the window is reloaded.
+
+---
+
 ## Checkpoints (Undo / Keep)
 
 After every turn that writes files, Forge shows an **Undo / Keep** bar in the editor via CodeLens.
@@ -307,6 +321,7 @@ Type `/` in the chat input to open the command list.
 | `/review` | Run a code review on the current file or selection |
 | `/restartBackend` | Restart the managed llama-server process |
 | `/unloadModel` | Stop all backends and release models from memory |
+| `/clanker` | Toggle Clanker Mode — skip all confirmation prompts for the session (recursive deletes still confirm) |
 | `/reloadWindow` | Reload the VS Code window |
 
 ---
