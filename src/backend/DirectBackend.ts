@@ -18,6 +18,7 @@ export class DirectBackend implements BackendController {
   private readonly port: number;
   private activeModel: ModelConfig | null = null;
   private currentBaseUrl: string;
+  private adoptPollTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(private config: ForgeConfig, portOverride?: number) {
     this.host = config.llama_server.host ?? '127.0.0.1';
@@ -58,6 +59,7 @@ export class DirectBackend implements BackendController {
     this.ready = false;
     this.startAbort?.abort();
     this.startAbort = null;
+    this.stopAdoptedMonitor();
 
     if (this.activeModel?.provider === 'ollama' && this.activeModel.endpoint) {
       await releaseOllamaModel(this.activeModel.endpoint, this.activeModel.name);
@@ -118,6 +120,12 @@ export class DirectBackend implements BackendController {
     // adopt it instead of spawning a second process and doubling VRAM usage.
     if (await probeHealthy(`http://${this.host}:${this.port}`)) {
       log.info(`[DirectBackend] port ${this.port} already healthy — adopting existing server`);
+      this.serverChannel ??= vscode.window.createOutputChannel('Forge - llama-server');
+      this.serverChannel.clear();
+      this.serverChannel.appendLine(`[Forge] Adopted existing llama-server on port ${this.port} (started by another VS Code window).`);
+      this.serverChannel.appendLine(`[Forge] Live output is in that window. Polling /health + /slots every 5 s...\n`);
+      this.serverChannel.show(true);
+      this.startAdoptedMonitor();
       return;
     }
 
@@ -155,6 +163,43 @@ export class DirectBackend implements BackendController {
     }
 
     log.info('[DirectBackend] ready');
+  }
+
+  private startAdoptedMonitor(): void {
+    if (this.adoptPollTimer) return;
+    const baseUrl = `http://${this.host}:${this.port}`;
+    this.adoptPollTimer = setInterval(async () => {
+      try {
+        const [healthRes, slotsRes] = await Promise.all([
+          fetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(3000) }),
+          fetch(`${baseUrl}/slots`, { signal: AbortSignal.timeout(3000) }),
+        ]);
+        if (!healthRes.ok) throw new Error(`HTTP ${healthRes.status}`);
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const slots: any[] = slotsRes.ok ? (await slotsRes.json() as any[]) : [];
+        const active = slots.filter((s) => s.state === 1).length;
+        const total = slots.length;
+        const ctx = slots[0] ? `${slots[0].n_past ?? 0}/${slots[0].n_ctx ?? '?'} ctx` : '';
+        const ts = new Date().toLocaleTimeString();
+        const line = [`[${ts}] llama-server healthy`, total ? `slots: ${active}/${total} active` : '', ctx]
+          .filter(Boolean)
+          .join(' | ');
+        this.serverChannel?.appendLine(line);
+      } catch {
+        const ts = new Date().toLocaleTimeString();
+        this.serverChannel?.appendLine(`\n[${ts}] llama-server stopped or unreachable.`);
+        this.ready = false;
+        this.stopAdoptedMonitor();
+      }
+    }, 5000);
+  }
+
+  private stopAdoptedMonitor(): void {
+    if (this.adoptPollTimer) {
+      clearInterval(this.adoptPollTimer);
+      this.adoptPollTimer = null;
+    }
   }
 
   private async stopLlamaServer(): Promise<void> {
