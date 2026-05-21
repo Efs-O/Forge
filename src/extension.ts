@@ -135,12 +135,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     codeLensProvider,
   );
 
-  // ── One-time migration: workspaceState → globalState (history now global) ──
-  if (!context.globalState.get<boolean>('forge.migrated.sessions.v1')) {
-    await context.globalState.update('forge.migrated.sessions.v1', true);
-    if (!context.globalState.get(SESSION_KEY_V1)) {
-      const wsSession = context.workspaceState.get(SESSION_KEY_V1);
-      if (wsSession) await context.globalState.update(SESSION_KEY_V1, wsSession);
+  // ── Migration v2: globalState → workspaceState (sessions now per-workspace) ──
+  if (!context.workspaceState.get<boolean>('forge.migrated.sessions.v2')) {
+    await context.workspaceState.update('forge.migrated.sessions.v2', true);
+    if (!context.workspaceState.get(SESSION_KEY_V1)) {
+      const globalSession = context.globalState.get(SESSION_KEY_V1);
+      if (globalSession) await context.workspaceState.update(SESSION_KEY_V1, globalSession);
     }
   }
 
@@ -154,7 +154,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     config,
     checkpoints,
     toolRegistry,
-    context.globalState,
+    context.workspaceState,
     codeLensProvider,
     diffDecorations,
     templateEngine,

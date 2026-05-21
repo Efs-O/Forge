@@ -231,8 +231,9 @@ export function reducer(state: State, action: Action): State {
     case 'SESSION_SYNC': {
       const messagesById: Record<string, AppMessage[]> = {};
       for (const [id, rows] of Object.entries(action.messagesById)) {
-        const reconstructed = rows.map((m) => ({
-          id: mkId(),
+        const existing = state.messagesById[id] ?? [];
+        const reconstructed = rows.map((m, i) => ({
+          id: existing[i]?.role === m.role ? existing[i].id : mkId(),
           role: m.role,
           content: m.content,
           reasoning: m.reasoning,

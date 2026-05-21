@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 import type { BackendController } from './BackendController';
 import type { ForgeConfig, ModelConfig } from '../config/types';
 import { composeLlamaServerArgs } from './LlamaServerArgs';
-import { waitForHealthy } from './HealthCheck';
+import { waitForHealthy, probeHealthy } from './HealthCheck';
 import { ensureOllamaReady, normalizeOllamaEndpoint, releaseOllamaModel } from './OllamaAdapter';
 import { getLogger } from '../util/logger';
 
@@ -113,6 +113,14 @@ export class DirectBackend implements BackendController {
     if (!binary) {
       throw new Error('llama_server.binary is not configured. Set bridge_mode: true to connect to a pre-running server.');
     }
+
+    // If a server is already running on this port (e.g. another VS Code window),
+    // adopt it instead of spawning a second process and doubling VRAM usage.
+    if (await probeHealthy(`http://${this.host}:${this.port}`)) {
+      log.info(`[DirectBackend] port ${this.port} already healthy — adopting existing server`);
+      return;
+    }
+
     const args = composeLlamaServerArgs(binary, model, this.config.llama_server, this.host, this.port);
 
     this.serverChannel ??= vscode.window.createOutputChannel('Forge - llama-server');
