@@ -39,6 +39,7 @@ export interface SidebarProviderEvents {
   onBackendError?: (message: string) => void;
   onBackendReady?: (modelName: string | null) => void;
   onBackendStopped?: (modelName: string | null) => void;
+  onConversationSwitched?: (modelName: string | null) => void;
 }
 
 export class AgentLoop {

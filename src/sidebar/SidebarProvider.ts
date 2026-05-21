@@ -385,6 +385,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.failureTracker.reset();
     this.persistSession();
     this.postSessionSync();
+    this.events.onConversationSwitched?.(this.config.active_model ?? null);
   }
 
   private async applyCloseConversation(id: string): Promise<void> {

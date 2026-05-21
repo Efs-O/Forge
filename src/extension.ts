@@ -166,6 +166,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       },
       onBackendError: (message) => statusBar.setError(message),
       onBackendReady: (modelName) => statusBar.setReady(modelName),
+      onConversationSwitched: (modelName) => {
+        if (pool.isAnyReady()) statusBar.setReady(modelName);
+        else statusBar.setStopped(modelName);
+      },
     },
     forgeLoader,
   );
