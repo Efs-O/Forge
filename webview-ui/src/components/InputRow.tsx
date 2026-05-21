@@ -226,8 +226,8 @@ export function InputRow({
 
         <div id="input-btn-col">
           {clankerMode && (
-            <span id="clanker-pill" title="Full Clanker active — no confirmation prompts. Recursive deletes still confirm.">
-              ⚙ FULL CLANKER
+            <span id="clanker-pill" title="Clanker Mode active — no confirmation prompts. Recursive deletes still confirm.">
+              💥 CLANKER MODE
             </span>
           )}
           {streaming ? (

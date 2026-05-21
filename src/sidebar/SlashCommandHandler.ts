@@ -105,8 +105,8 @@ export class SlashCommandHandler {
       case 'clanker': {
         const on = deps.toggleClanker();
         deps.post({ type: 'token', text: on
-          ? '\n> ⚙ **Full Clanker ON** — no confirmation prompts until you run `/clanker` again. Recursive deletes still confirm.\n'
-          : '\n> ⚙ **Full Clanker OFF** — confirmation restored.\n',
+          ? '\n> 💥 **Clanker Mode ON** — no confirmation prompts until you run `/clanker` again. Recursive deletes still confirm.\n'
+          : '\n> 💥 **Clanker Mode OFF** — confirmation restored.\n',
         });
         return;
       }
