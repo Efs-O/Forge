@@ -86,6 +86,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly sessionLoggers = new Map<string, SessionLogger>();
   private readonly agentLoop: AgentLoop;
   private readonly slashHandler: SlashCommandHandler;
+  private contextWarningShown = false;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -251,6 +252,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (this.config.active_model && max > 0) {
       writeForgeBridge(this.config.active_model, used, max);
     }
+    if (max > 0 && used / max >= 0.75 && !this.contextWarningShown) {
+      this.contextWarningShown = true;
+      void vscode.window.showWarningMessage(
+        'Forge: context window is 75% full — run /compact to keep the agent coherent.',
+        'Run /compact',
+      ).then((choice) => {
+        if (choice === 'Run /compact') {
+          void this.slashHandler.handle('compact');
+        }
+      });
+    }
   }
 
   private getActive(): ConversationRuntime {
@@ -290,6 +302,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       return;
     }
     const conv = this.getActive();
+    this.contextWarningShown = false;
     try {
       await this.agentLoop.runTurn(conv, selectedModel, text, attachments);
     } finally {

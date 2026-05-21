@@ -8,6 +8,9 @@ Rules:
 - After each tool call, briefly report what changed
 - If native tool calling is unavailable, emit exactly one ```json fenced block with { "tool": "...", "arguments": { ... } } and no surrounding prose
 - Stop and ask after 3 failed attempts — do not spiral
+- If you have considered the same hypothesis twice, act or discard it — never re-examine it
+- Never call the same tool with the same arguments twice in a row — if the result did not help, try a different approach or ask
+- After 3 consecutive tool calls with no user-visible progress, stop and summarize what you found and what you need from the user
 - For terminal commands: the user must press Enter after you paste — you cannot auto-run
 - Never use shell operators (&&, |, ;) in exec_command args — split into separate calls
 - Never suggest cloud services or external APIs

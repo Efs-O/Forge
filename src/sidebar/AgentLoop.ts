@@ -261,6 +261,8 @@ export class AgentLoop {
       void vscode.window.showWarningMessage('Forge: tool calls disabled after repeated failures. Restart chat to re-enable.');
     }
 
+    let lastToolSignature: string | null = null;
+
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       if (ctrl.signal.aborted) {
         postC({ type: 'done', finishReason: 'cancelled' });
@@ -329,6 +331,12 @@ export class AgentLoop {
       const assistantReasoning = stripThinkingChannels ? '' : this.sanitizeText(rawReasoningContent, false);
 
       if (toolCalls?.length) {
+        const sig = toolCalls.map((tc) => `${tc.function.name}:${tc.function.arguments}`).join('|');
+        if (sig === lastToolSignature) {
+          postC({ type: 'error', message: 'Forge: agent is repeating the same tool call — stopping to avoid a loop. Try rephrasing your request or use /compact if the context is full.' });
+          return;
+        }
+        lastToolSignature = sig;
         this.failureTracker.reset();
         for (const tc of toolCalls) {
           const detail = extractToolDetail(tc.function.arguments);
@@ -343,6 +351,12 @@ export class AgentLoop {
         ? extractFallbackToolCalls(rawAssistantContent)
         : null;
       if (fallbackToolCalls?.length) {
+        const sig = fallbackToolCalls.map((tc) => `${tc.function.name}:${tc.function.arguments}`).join('|');
+        if (sig === lastToolSignature) {
+          postC({ type: 'error', message: 'Forge: agent is repeating the same tool call — stopping to avoid a loop. Try rephrasing your request or use /compact if the context is full.' });
+          return;
+        }
+        lastToolSignature = sig;
         this.failureTracker.reset();
         for (const tc of fallbackToolCalls) {
           const detail = extractToolDetail(tc.function.arguments);
