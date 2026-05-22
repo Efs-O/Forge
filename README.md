@@ -1,8 +1,30 @@
+# Forge LLM — Official Repository
+
+> **This is the official Forge LLM extension by [Efsoo](https://github.com/Efs-O).**
+> Licensed under **Apache License 2.0**. Beware of copied or rebranded versions — always install from publisher **`Efsoo`** on the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=Efsoo.forge-llm).
+> If you fork this project: keep all copyright notices, the `LICENSE` and `NOTICE` files, and document significant changes.
+
+---
+
 # Forge
 
 **Local-first AI coding assistant for VS Code powered by llama.cpp, zero cloud, zero telemetry.**
 
 Forge runs GGUF models directly on your machine via `llama-server`. No API key, no subscription, no data leaves your box.
+
+![Forge agent loop in action](docs/assets/demo.gif)
+
+---
+
+## Screenshots
+
+| Agent loop + Clanker Mode | Model picker |
+|:---:|:---:|
+| ![Agent loop](docs/assets/agent-loop.jpg) | ![Model picker](docs/assets/model-picker.jpg) |
+
+| Slash commands | Marketplace |
+|:---:|:---:|
+| ![Slash commands](docs/assets/slash-commands.jpg) | ![Marketplace](docs/assets/marketplace.jpg) |
 
 ---
 

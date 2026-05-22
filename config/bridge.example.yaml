@@ -1,0 +1,479 @@
+# Forge bridge.example.yaml
+#
+# Copy this file to bridge.yaml and edit it before use.
+#
+# CHANGE THESE to match your machine:
+#   - llama_server.binary  — full path to your llama-server executable
+#   - gguf_path            — full path to each GGUF model file on your machine
+#   - mmproj_path          — full path to the multimodal projector file (vision models only)
+#
+# Ollama models (provider: ollama) need no path changes — the endpoint
+# http://127.0.0.1:11434 works as-is with a running local Ollama daemon.
+# Cloud models route through that same local daemon via `ollama auth login`.
+#
+# Reference this file from config.yaml with:
+#   bridge_config: /path/to/bridge.yaml
+
+api_key: "continue-local-change-me"
+bind_host: "127.0.0.1"
+bind_port: 9099
+# When true (default per model or here), strip channel/thought markup only if that model has think: false.
+# Models with think: true are never stripped. Per-model strip_thinking_channels: false disables stripping.
+strip_thinking_channels: true
+
+# Number of llama-server processes to keep alive simultaneously.
+# Each slot claims an incremental port (8080, 8081, …).
+# Requires enough VRAM/RAM for all loaded models. Default: 1 (current behaviour).
+max_simultaneous_models: 4
+
+llama_server:
+  binary: "/path/to/llama-server"      # CHANGE THIS — e.g. C:/llama.cpp/llama-server.exe
+  host: "127.0.0.1"
+  port: 8080
+  n_gpu_layers: -1
+  n_batch: 512
+  n_parallel: 1
+  type_k: 8
+  type_v: 8
+  default_num_ctx: 4096
+  flash_attn_default: true
+
+models:
+  # Keys must match the client "model" id (Continue, etc.).
+
+  # ---------------------------------------------------------------------------
+  # llama.cpp / GGUF models — change gguf_path and mmproj_path to your paths
+  # ---------------------------------------------------------------------------
+
+  gemma4-e4b-it-ud-q4kxl:
+    gguf_path: "/path/to/gemma-4-E4B-it-UD-Q4_K_XL.gguf"        # CHANGE THIS
+    mmproj_path: "/path/to/mmproj-F16.gguf"                       # CHANGE THIS (vision)
+    num_ctx: 98304
+    n_batch: 512
+    flash_attn: true
+    think: true
+    system_prompt: |
+      You are Forge, a local AI coding assistant running inside VS Code.
+      You have tools available: read_file, write_file, replace_in_file, list_directory, search_code, run_terminal, git_status, git_diff, and more.
+      ALWAYS use tools to accomplish tasks. Never describe what you would do — do it by calling the tools directly.
+      When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
+      After each tool result, continue calling tools until the task is complete, then give a short summary.
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 64
+      min_p: 0.0
+      seed: 0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+      repeat_last_n: 64
+      stop: "<|im_end|>"
+      max_tokens: 98304
+
+  gemma4-26b-a4b-it-iq3s:
+    gguf_path: "/path/to/gemma-4-26B-A4B-it-UD-IQ3_S.gguf"       # CHANGE THIS
+    mmproj_path: "/path/to/mmproj-F16.gguf"                       # CHANGE THIS (vision)
+    num_ctx: 98304
+    n_batch: 512
+    flash_attn: true
+    think: true
+    system_prompt: |
+      You are Forge, a local AI coding assistant running inside VS Code.
+      You have tools available: read_file, write_file, replace_in_file, list_directory, search_code, run_terminal, git_status, git_diff, and more.
+      ALWAYS use tools to accomplish tasks. Never describe what you would do — do it by calling the tools directly.
+      When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
+      After each tool result, continue calling tools until the task is complete, then give a short summary.
+    # strip_tools: true avoids llama-server 500s when the model outputs invalid tool-call JSON, but the IDE
+    # then has no tool definitions - Apply / save file / run terminal will not work. Use false for agent actions.
+    strip_tools: false
+    sampling:
+      # Google Gemma 4 defaults (model card + HF README): temperature 1.0, top_p 0.95, top_k 64 for broad use.
+      # For coding in an IDE, lower temperature reduces flippant or hallucinated code; 0.6 is a common compromise.
+      # Set temperature: 1.0 to match Google evals / maximum fluency, or 0.3-0.5 for stricter, more deterministic code.
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 64
+      min_p: 0.0
+      seed: 0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+      repeat_last_n: 64
+      stop: "<|im_end|>"
+      # Cap for responsiveness; 26B A4B is MoE-activated - very large outputs are rarely needed for edits.
+      max_tokens: 98304
+
+  gemma4-26b-a4b-it-iq4xs:
+    gguf_path: "/path/to/gemma-4-26B-A4B-it-UD-IQ4_XS.gguf"      # CHANGE THIS
+    mmproj_path: "/path/to/mmproj-F16.gguf"                       # CHANGE THIS (vision)
+    num_ctx: 98304
+    n_batch: 512
+    flash_attn: true
+    think: true
+    system_prompt: |
+      You are Forge, a local AI coding assistant running inside VS Code.
+      You have tools available: read_file, write_file, replace_in_file, list_directory, search_code, run_terminal, git_status, git_diff, and more.
+      ALWAYS use tools to accomplish tasks. Never describe what you would do — do it by calling the tools directly.
+      When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
+      After each tool result, continue calling tools until the task is complete, then give a short summary.
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 64
+      min_p: 0.0
+      seed: 0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+      repeat_last_n: 64
+      stop: "<|im_end|>"
+      max_tokens: 98304
+
+  gemma4-31b-it-q3ks:
+    gguf_path: "/path/to/gemma-4-31B-it-Q3_K_S.gguf"              # CHANGE THIS
+    mmproj_path: "/path/to/mmproj-F16.gguf"                       # CHANGE THIS (vision)
+    num_ctx: 98304
+    n_batch: 512
+    flash_attn: true
+    think: true
+    system_prompt: |
+      You are Forge, a local AI coding assistant running inside VS Code.
+      You have tools available: read_file, write_file, replace_in_file, list_directory, search_code, run_terminal, git_status, git_diff, and more.
+      ALWAYS use tools to accomplish tasks. Never describe what you would do — do it by calling the tools directly.
+      When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
+      After each tool result, continue calling tools until the task is complete, then give a short summary.
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 64
+      min_p: 0.0
+      seed: 0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+      repeat_last_n: 64
+      stop: "<|im_end|>"
+      max_tokens: 98304
+
+  qwen36-27b-q3km:
+    gguf_path: "/path/to/Qwen3.6-27B-Q3_K_M.gguf"                 # CHANGE THIS
+    num_ctx: 98304
+    n_batch: 512
+    flash_attn: true
+    think: true
+    extra_llama_server_args:
+      - "--reasoning-budget"
+      - "8192"
+    system_prompt: |
+      You are Forge, a local AI coding assistant running inside VS Code.
+      You have tools available: read_file, write_file, replace_in_file, list_directory, search_code, run_terminal, git_status, git_diff, and more.
+      ALWAYS use tools to accomplish tasks. Never describe what you would do — do it by calling the tools directly.
+      When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
+      After each tool result, continue calling tools until the task is complete, then give a short summary.
+    sampling:
+      # Matches --temp / --top-p / --top-k / --min-p / --presence-penalty / --repeat-penalty
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 20
+      min_p: 0.0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+      # OpenAI field; llama-server maps this to generation cap (--n-predict)
+      max_tokens: 98304
+      # Qwen3.6 coding/agent mode: preserve reasoning traces across turns when thinking is enabled.
+      preserve_thinking: true
+
+  qwen36-35b-a3b-iq3s:
+    gguf_path: "/path/to/Qwen3.6-35B-A3B-UD-IQ3_S.gguf"           # CHANGE THIS
+    num_ctx: 98304
+    n_batch: 512
+    flash_attn: true
+    think: true
+    extra_llama_server_args:
+      - "--reasoning-budget"
+      - "8192"
+    system_prompt: |
+      You are Forge, a local AI coding assistant running inside VS Code.
+      You have tools available: read_file, write_file, replace_in_file, list_directory, search_code, run_terminal, git_status, git_diff, and more.
+      ALWAYS use tools to accomplish tasks. Never describe what you would do — do it by calling the tools directly.
+      When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
+      After each tool result, continue calling tools until the task is complete, then give a short summary.
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 20
+      min_p: 0.0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+      max_tokens: 98304
+      # Qwen3.6 coding/agent mode: preserve reasoning traces across turns when thinking is enabled.
+      preserve_thinking: true
+
+  # ---------------------------------------------------------------------------
+  # Ollama models (provider: ollama). Forge sends each YAML key as OpenAI API
+  # "model"; use the exact tag from https://ollama.com/library for that variant.
+  # Local `ollama list` often does NOT enumerate everything the server can run:
+  # library / cloud routes may resolve on first chat request (pull or upstream),
+  # so absence from `ollama list` does not prove a tag is invalid.
+  # ---------------------------------------------------------------------------
+
+  gemma4:e2b:
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    # Ollama library: 128K context window. Note: Forge currently talks to Ollama via
+    # /v1/chat/completions, which cannot set num_ctx per request; this is descriptive
+    # unless the underlying Ollama model was created with the matching Modelfile setting.
+    num_ctx: 131072
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 131072
+
+  gemma4:26b:
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    # Ollama library: 256K context window.
+    num_ctx: 262144
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 131072
+
+  gemma4:31b:
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    # Ollama library: 256K context window.
+    num_ctx: 262144
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 131072
+
+  gemma4:e4b:
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    # Ollama library: 128K context window.
+    num_ctx: 131072
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 131072
+
+  qwen3.5:4b:
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    # Ollama library: 256K context window.
+    num_ctx: 262144
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 131072
+
+  qwen3.5:9b:
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    # Ollama library: 256K context window.
+    num_ctx: 262144
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 131072
+
+  # Cloud / upstream models (same tag as on ollama.com; usually not visible in
+  # `ollama list` until routed or synced — Forge still forwards the tag correctly).
+  deepseek-v4-flash:cloud:
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    # Ollama library: 1M context window.
+    num_ctx: 1000000
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 65536
+
+  deepseek-v4-pro:cloud:
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    # Ollama library: 1M context window.
+    num_ctx: 1000000
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 65536
+
+  kimi-k2.6:cloud:
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    # Ollama library: 256K context window.
+    num_ctx: 262144
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 131072
+
+  glm-4.6:cloud:
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    # Ollama library: 198K context window.
+    num_ctx: 198000
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 131072
+
+  glm-5.1:cloud:
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    # Ollama library: 198K context window.
+    num_ctx: 198000
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 131072
+
+  gemma4:31b-cloud:
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    # Ollama library: 256K context window.
+    num_ctx: 262144
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 131072
+
+  qwen3.5:397b-cloud:
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    # Ollama library: 256K context window.
+    num_ctx: 262144
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 65536
+
+  qwen3-coder:480b-cloud:
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    # Ollama library: 256K context window.
+    num_ctx: 262144
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 131072
+
+  qwen3-vl:235b-cloud:
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    # Ollama library: 256K context window.
+    num_ctx: 262144
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 65536
+
+  qwen3-vl:235b-instruct-cloud:
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    # Ollama library: 256K context window.
+    num_ctx: 262144
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 65536
+
+  gpt-oss:120b-cloud:
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    num_ctx: 131072
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 131072
+
+  gpt-oss:20b-cloud:
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    num_ctx: 131072
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 131072
+
+  deepseek-v3.1:671b-cloud:
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    # Ollama library: 160K context window.
+    num_ctx: 160000
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 32768
+
+  minimax-m2.7:cloud:
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    num_ctx: 200000
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 131072

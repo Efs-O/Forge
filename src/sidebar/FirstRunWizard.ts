@@ -60,16 +60,32 @@ active_model: ${modelName}
 `;
 }
 
-function writeConfigAndReload(configDir: string, yaml: string): void {
+function writeConfig(configDir: string, yaml: string): string {
   fs.mkdirSync(configDir, { recursive: true });
   const configPath = path.join(configDir, 'config.yaml');
   fs.writeFileSync(configPath, yaml, 'utf8');
+  return configPath;
 }
 
 function targetConfigDir(context: vscode.ExtensionContext): string {
   // Write to global storage so the config is found in any workspace.
   // Per-workspace override: create .forge/config.yaml in the workspace root.
   return context.globalStorageUri.fsPath;
+}
+
+async function promptGlobalPin(configPath: string): Promise<void> {
+  const choice = await vscode.window.showInformationMessage(
+    `Forge: Pin this config as the global config for all workspaces? (Sets forge.configFile in user settings)`,
+    'Pin globally',
+    'Skip',
+  );
+  if (choice === 'Pin globally') {
+    await vscode.workspace.getConfiguration('forge').update(
+      'configFile',
+      configPath,
+      vscode.ConfigurationTarget.Global,
+    );
+  }
 }
 
 async function promptReload(configPath: string): Promise<boolean> {
@@ -82,6 +98,12 @@ async function promptReload(configPath: string): Promise<boolean> {
     return true;
   }
   return false;
+}
+
+async function finishWizard(context: vscode.ExtensionContext, configPath: string): Promise<void> {
+  await context.globalState.update('forge.firstRun.shown', true);
+  await promptGlobalPin(configPath);
+  await promptReload(configPath);
 }
 
 // ── llama.cpp flow ────────────────────────────────────────────────────────────
@@ -152,9 +174,8 @@ async function runLlamaCppFlow(context: vscode.ExtensionContext): Promise<boolea
     suggestion,
   });
 
-  writeConfigAndReload(configDir, yaml);
-  await context.globalState.update('forge.firstRun.shown', true);
-  await promptReload(path.join(configDir, 'config.yaml'));
+  const configPath = writeConfig(configDir, yaml);
+  await finishWizard(context, configPath);
   return true;
 }
 
@@ -205,9 +226,8 @@ async function runOllamaFlow(context: vscode.ExtensionContext): Promise<boolean>
   if (!modelName) return false;
 
   const configDir = targetConfigDir(context);
-  writeConfigAndReload(configDir, generateOllamaConfig(endpoint, modelName));
-  await context.globalState.update('forge.firstRun.shown', true);
-  await promptReload(path.join(configDir, 'config.yaml'));
+  const configPath = writeConfig(configDir, generateOllamaConfig(endpoint, modelName));
+  await finishWizard(context, configPath);
   return true;
 }
 
@@ -259,9 +279,8 @@ async function runBridgeFlow(context: vscode.ExtensionContext): Promise<boolean>
   if (!modelName) return false;
 
   const configDir = targetConfigDir(context);
-  writeConfigAndReload(configDir, generateBridgeConfig(baseUrl, modelName));
-  await context.globalState.update('forge.firstRun.shown', true);
-  await promptReload(path.join(configDir, 'config.yaml'));
+  const configPath = writeConfig(configDir, generateBridgeConfig(baseUrl, modelName));
+  await finishWizard(context, configPath);
   return true;
 }
 
