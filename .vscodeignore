@@ -1,4 +1,6 @@
 docs/**
+gifs and screenshots/**
+ScreenShot*.jpg
 legacy/**
 .claude/**
 .cursor/**
