@@ -71,6 +71,7 @@ export class AgentLoop {
     private readonly getView: () => vscode.WebviewView | undefined,
     private readonly templateEngine?: TemplateEngine,
     private readonly forgeLoader?: ForgeInstructionsLoader,
+    private readonly secrets?: vscode.SecretStorage,
   ) {
     this.toolDispatch = new ToolDispatch(
       toolRegistry,
@@ -145,6 +146,38 @@ export class AgentLoop {
     const activeFile = vscode.window.activeTextEditor?.document.uri.fsPath;
     log.debug(`[AgentLoop] runTurn model=${model.name} conv=${convId}`);
 
+    // xAI: no local backend — resolve OAuth token and call API directly.
+    if (model.provider === 'xai') {
+      const apiKey = model.api_key_secret
+        ? ((await this.secrets?.get(model.api_key_secret)) ?? undefined)
+        : undefined;
+      if (!apiKey) {
+        postC({ type: 'error', message: 'xAI: bearer token not found. Run "Forge: Set API Key" with provider "xai" and paste your xAI OAuth token.' });
+        this.resolveStreamingLifecycle(convId);
+        return;
+      }
+      this.events.onBackendReady?.(model.name);
+      postC({ type: 'ready' });
+      const turnId = `turn-${Date.now()}`;
+      this.checkpoints.beginTurn(turnId);
+      this.streamingConvIds.add(convId);
+      this.events.onGenerationStarted?.(model.name);
+      try {
+        await this.runAgentLoop('https://api.x.ai', conv, model, activeFile, ctrl, postC, apiKey);
+      } catch (err) {
+        postC({ type: 'error', message: (err as Error).message });
+      } finally {
+        this.streamingConvIds.delete(convId);
+        conv.updatedAt = Date.now();
+        const depthBefore = this.checkpoints.depth();
+        this.checkpoints.commitTurn();
+        if (this.checkpoints.depth() > depthBefore) postC({ type: 'checkpointReady' });
+        this.events.onGenerationFinished?.(model.name);
+        this.resolveStreamingLifecycle(convId);
+      }
+      return;
+    }
+
     let backend: BackendController;
     try {
       postC({ type: 'backendStarting', message: 'Starting backend, please wait…' });
@@ -172,7 +205,7 @@ export class AgentLoop {
     this.streamingConvIds.add(convId);
     this.events.onGenerationStarted?.(model.name);
     try {
-      await this.runAgentLoop(backend, conv, model, activeFile, ctrl, postC);
+      await this.runAgentLoop(backend.baseUrl(), conv, model, activeFile, ctrl, postC);
     } catch (err) {
       postC({ type: 'error', message: (err as Error).message });
     } finally {
@@ -244,17 +277,18 @@ export class AgentLoop {
   }
 
   private async runAgentLoop(
-    backend: BackendController,
+    baseUrl: string,
     conv: ConversationRuntime,
     activeModel: ModelConfig,
     activeFile: string | undefined,
     ctrl: AbortController,
     postC: (msg: HostToWebview) => void,
+    apiKey?: string,
   ): Promise<void> {
     const config = this.getConfig();
     const allowed = FORGE_PERMISSIONS;
     const useStrip = this.failureTracker.shouldStrip();
-    const runtimeCaps = await this.getRuntimeCapabilities(activeModel, backend);
+    const runtimeCaps = await this.getRuntimeCapabilities(activeModel, baseUrl);
     const canUseThinkingKwargs = this.canUseThinkingKwargs(activeModel, runtimeCaps);
     const stripThinkingChannels = this.shouldStripThinking(activeModel);
     if (useStrip) {
@@ -310,7 +344,7 @@ export class AgentLoop {
       let rawAssistantContent = '';
       let rawReasoningContent = '';
 
-      const { finishReason, toolCalls } = await this.streamOnce(backend.baseUrl(), request, activeModel, (token) => {
+      const { finishReason, toolCalls } = await this.streamOnce(baseUrl, request, activeModel, (token) => {
         rawAssistantContent += token;
         const withoutToolMarkers = structuredOutputStripper.push(token);
         const withoutHtml = htmlStripper.push(withoutToolMarkers);
@@ -320,7 +354,7 @@ export class AgentLoop {
         if (stripThinkingChannels) return;
         rawReasoningContent += reasoningToken;
         postC({ type: 'reasoningToken', text: reasoningToken });
-      }, ctrl.signal);
+      }, ctrl.signal, apiKey);
 
       const trailingTool = structuredOutputStripper.flush();
       const trailingHtml = htmlStripper.push(trailingTool) + htmlStripper.flush();
@@ -380,10 +414,10 @@ export class AgentLoop {
     postC({ type: 'error', message: 'Forge: agent exceeded maximum tool rounds.' });
   }
 
-  private async getRuntimeCapabilities(model: ModelConfig, backend: BackendController): Promise<RuntimeModelCapabilities> {
+  private async getRuntimeCapabilities(model: ModelConfig, baseUrl: string): Promise<RuntimeModelCapabilities> {
     const cached = this.capabilityCache.get(model.name);
     if (cached) return cached;
-    const pending = inspectRuntimeModelCapabilities(backend.baseUrl(), model);
+    const pending = inspectRuntimeModelCapabilities(baseUrl, model);
     this.capabilityCache.set(model.name, pending);
     return pending;
   }
@@ -430,6 +464,7 @@ export class AgentLoop {
     onToken: (token: string) => void,
     onReasoning: (token: string) => void,
     signal?: AbortSignal,
+    apiKey?: string,
   ): Promise<{ finishReason: string | null; toolCalls: ToolCall[] | null }> {
     return new Promise((resolve, reject) => {
       let capturedToolCalls: ToolCall[] | null = null;
@@ -439,7 +474,7 @@ export class AgentLoop {
         onDone: (reason) => resolve({ finishReason: reason, toolCalls: capturedToolCalls }),
         onError: reject,
         onToolCalls: (calls) => { capturedToolCalls = calls; },
-      }, signal);
+      }, signal, apiKey);
     });
   }
 }

@@ -38,12 +38,15 @@ export async function streamChatCompletion(
   request: ChatCompletionRequest,
   handlers: StreamHandlers,
   signal?: AbortSignal,
+  apiKey?: string,
 ): Promise<void> {
   let response: Response;
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
   try {
     response = await fetch(`${baseUrl}/v1/chat/completions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(request),
       signal: signal ?? null,
     });

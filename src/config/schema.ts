@@ -14,7 +14,7 @@ const ActiveModelSchema = z.preprocess((value) => {
 
 const ModelConfigSchema = z.object({
   name: z.string().min(1),
-  provider: z.enum(['llama.cpp', 'ollama']).optional(),
+  provider: z.enum(['llama.cpp', 'ollama', 'xai']).optional(),
   gguf_path: z.string().min(1).optional(),
   endpoint: z.string().url().optional(),
   n_gpu_layers: z.number().int().optional(),
@@ -46,6 +46,7 @@ const ModelConfigSchema = z.object({
   think: z.boolean().optional(),
   reasoning_effort: ReasoningEffortSchema.optional(),
   strip_thinking_channels: z.boolean().optional(),
+  api_key_secret: z.string().min(1).optional(),
 }).superRefine((model, ctx) => {
   const provider = model.provider ?? 'llama.cpp';
   if (provider === 'llama.cpp' && !model.gguf_path) {
@@ -134,11 +135,12 @@ export const ForgeConfigSchema = z.object({
       message: 'At least one model is required unless bridge_config is provided',
     });
   }
-  if (!cfg.bridge_mode && !cfg.llama_server.binary) {
+  const hasLocalModel = cfg.models.some((m) => (m.provider ?? 'llama.cpp') === 'llama.cpp');
+  if (!cfg.bridge_mode && hasLocalModel && !cfg.llama_server.binary) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['llama_server', 'binary'],
-      message: 'llama_server.binary is required unless bridge_mode: true',
+      message: 'llama_server.binary is required unless bridge_mode: true or all models use a cloud provider',
     });
   }
 });

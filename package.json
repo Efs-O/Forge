@@ -191,6 +191,11 @@
         "shortTitle": "Set Search Key"
       },
       {
+        "command": "forge.setCloudToken",
+        "title": "Forge: Set Cloud Provider Token",
+        "shortTitle": "Set Cloud Token"
+      },
+      {
         "command": "forge.setupWizard",
         "title": "Forge: Setup Wizard"
       }
