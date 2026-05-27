@@ -5,6 +5,7 @@ import type { ForgeConfig, ModelConfig } from '../config/types';
 import type { HostToWebview } from './messageBridge';
 import type { ConversationRuntime } from './sessionTypes';
 import { streamModelChatCompletion } from '../llm/ChatClient';
+import { resolveXaiToken } from '../llm/XaiAuth';
 import type { ChatCompletionRequest, ToolCall } from '../llm/types';
 import type { AttachmentData } from './messageBridge';
 import { buildUserContent } from './ConversationOps';
@@ -148,11 +149,11 @@ export class AgentLoop {
 
     // xAI: no local backend — resolve OAuth token and call API directly.
     if (model.provider === 'xai') {
-      const apiKey = model.api_key_secret
-        ? ((await this.secrets?.get(model.api_key_secret)) ?? undefined)
-        : undefined;
-      if (!apiKey) {
-        postC({ type: 'error', message: 'xAI: bearer token not found. Run "Forge: Set API Key" with provider "xai" and paste your xAI OAuth token.' });
+      let apiKey: string;
+      try {
+        apiKey = await resolveXaiToken(model.api_key_secret, this.secrets);
+      } catch (err) {
+        postC({ type: 'error', message: (err as Error).message });
         this.resolveStreamingLifecycle(convId);
         return;
       }
