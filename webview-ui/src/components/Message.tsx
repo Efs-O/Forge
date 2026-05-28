@@ -68,7 +68,7 @@ function DiffBlock({ filePath, hunks, isNew, isDeleted }: {
       </div>
       {expanded && (
         <div className="diff-body">
-          {hunks === null && <div className="diff-toolarge">File too large to diff inline.</div>}
+          {hunks === null && <div className="diff-toolarge">Diff unavailable.</div>}
           {isDeleted && !hunks && <div className="diff-toolarge">File deleted.</div>}
           {hunks?.length === 0 && <div className="diff-toolarge">No changes.</div>}
           {hunks?.map((hunk, hi) => (
