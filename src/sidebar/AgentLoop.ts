@@ -152,8 +152,11 @@ export class AgentLoop {
       let apiKey: string;
       try {
         apiKey = await resolveXaiToken(model.api_key_secret, this.secrets);
+        log.info(`[AgentLoop] xAI token resolved for model=${model.name}`);
       } catch (err) {
-        postC({ type: 'error', message: (err as Error).message });
+        const msg = (err as Error).message;
+        log.error(`[AgentLoop] xAI token resolution failed: ${msg}`);
+        postC({ type: 'error', message: msg });
         this.resolveStreamingLifecycle(convId);
         return;
       }
@@ -166,6 +169,7 @@ export class AgentLoop {
       try {
         await this.runAgentLoop('https://api.x.ai', conv, model, activeFile, ctrl, postC, apiKey);
       } catch (err) {
+        log.error(`[AgentLoop] xAI agent loop error: ${(err as Error).message}`);
         postC({ type: 'error', message: (err as Error).message });
       } finally {
         this.streamingConvIds.delete(convId);
