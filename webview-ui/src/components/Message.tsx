@@ -36,11 +36,7 @@ const markdownComponents: React.ComponentProps<typeof Markdown>['components'] = 
 
 // ── Diff block ────────────────────────────────────────────────────────────────
 
-function hunkHeader(h: DiffHunk): string {
-  const oldCount = h.lines.filter(l => l.kind !== 'added').length;
-  const newCount = h.lines.filter(l => l.kind !== 'removed').length;
-  return `@@ -${h.oldStart},${oldCount} +${h.newStart},${newCount} @@`;
-}
+const DIFF_COLLAPSE_THRESHOLD = 50;
 
 function DiffBlock({ filePath, hunks, isNew, isDeleted }: {
   filePath: string;
@@ -48,23 +44,35 @@ function DiffBlock({ filePath, hunks, isNew, isDeleted }: {
   isNew?: boolean;
   isDeleted?: boolean;
 }): React.ReactElement {
-  const [collapsed, setCollapsed] = useState(false);
+  const allLines = useMemo(() => hunks?.flatMap(h => h.lines) ?? [], [hunks]);
+  const added    = allLines.filter(l => l.kind === 'added').length;
+  const removed  = allLines.filter(l => l.kind === 'removed').length;
+  const large    = allLines.length > DIFF_COLLAPSE_THRESHOLD;
+  const [expanded, setExpanded] = useState(!large);
+
   const badge = isDeleted ? 'deleted' : isNew ? 'new' : 'modified';
+
   return (
     <div className="diff-block">
-      <button className="diff-header" type="button" onClick={() => setCollapsed(c => !c)}>
+      <div className="diff-header">
+        <span className="diff-indicator">●</span>
         <span className={`diff-badge diff-badge-${badge}`}>{badge}</span>
         <span className="diff-filepath">{filePath}</span>
-        <span className="diff-chevron">{collapsed ? '›' : '‹'}</span>
-      </button>
-      {!collapsed && (
+        {added   > 0 && <span className="diff-stat diff-stat-added">+{added}</span>}
+        {removed > 0 && <span className="diff-stat diff-stat-removed">−{removed}</span>}
+        {large && (
+          <button className="diff-toggle" type="button" onClick={() => setExpanded(e => !e)}>
+            {expanded ? 'collapse' : `show ${allLines.length} lines`}
+          </button>
+        )}
+      </div>
+      {expanded && (
         <div className="diff-body">
           {hunks === null && <div className="diff-toolarge">File too large to diff inline.</div>}
           {isDeleted && !hunks && <div className="diff-toolarge">File deleted.</div>}
           {hunks?.length === 0 && <div className="diff-toolarge">No changes.</div>}
           {hunks?.map((hunk, hi) => (
             <div key={hi} className="diff-hunk">
-              <div className="diff-hunk-header">{hunkHeader(hunk)}</div>
               {hunk.lines.map((line, li) => (
                 <div key={li} className={`diff-line diff-line-${line.kind}`}>
                   <span className="diff-gutter">
@@ -164,6 +172,7 @@ export function Message({ role, content, reasoning, streaming, diffHunks, diffIs
     const detail = arrow !== -1 ? content.slice(arrow + 3) : '';
     return (
       <div className="msg-tool-row">
+        <span className="tool-row-indicator">●</span>
         <span className="tool-row-name">{name}</span>
         {detail && <span className="tool-row-detail">{detail}</span>}
       </div>

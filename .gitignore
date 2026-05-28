@@ -7,8 +7,6 @@ coverage/
 .DS_Store
 Thumbs.db
 
-# Local machine config (hardcoded paths, secrets) — use bridge.example.yaml as template
-bridge.yaml
 
 # Claude Code local settings
 .claude/

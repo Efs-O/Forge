@@ -1,9 +1,6 @@
 /* ── Diff block ─────────────────────────────────────────────────────────── */
 
 .diff-block {
-  border: 1px solid var(--vscode-editorWidget-border, #454545);
-  border-radius: var(--forge-radius-md);
-  overflow: hidden;
   margin: 2px 0;
   font-family: var(--vscode-editor-font-family, 'Cascadia Code', monospace);
   font-size: 11px;
@@ -12,19 +9,18 @@
 .diff-header {
   display: flex;
   align-items: center;
-  gap: 7px;
-  width: 100%;
-  padding: 4px 10px;
-  background: var(--vscode-editorWidget-background, #252526);
-  border: none;
-  cursor: pointer;
+  gap: 6px;
+  padding: 2px 0;
   color: var(--vscode-foreground);
-  text-align: left;
-  font-family: inherit;
   font-size: 11px;
 }
 
-.diff-header:hover { background: var(--vscode-list-hoverBackground, #2a2d2e); }
+.diff-indicator {
+  color: #4ec94e;
+  font-size: 8px;
+  flex-shrink: 0;
+  line-height: 1;
+}
 
 .diff-badge {
   font-size: 9px;
@@ -48,26 +44,40 @@
   white-space: nowrap;
 }
 
-.diff-chevron { color: var(--vscode-descriptionForeground); flex-shrink: 0; }
+.diff-stat {
+  font-size: 11px;
+  flex-shrink: 0;
+  font-weight: 600;
+}
+.diff-stat-added   { color: #4ec94e; }
+.diff-stat-removed { color: #f48771; }
+
+.diff-toggle {
+  background: transparent;
+  border: none;
+  color: var(--vscode-textLink-foreground, #4daafc);
+  font-size: 10px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 0 2px;
+  flex-shrink: 0;
+  align-self: auto;
+}
+.diff-toggle:hover { background: transparent; text-decoration: underline; }
 
 .diff-body {
   background: var(--vscode-textCodeBlock-background, #1e1e1e);
+  border-radius: var(--forge-radius-sm);
   overflow-x: auto;
   max-height: 320px;
   overflow-y: auto;
+  margin-top: 3px;
 }
 
 .diff-toolarge {
   padding: 6px 10px;
   color: var(--vscode-descriptionForeground);
   font-style: italic;
-}
-
-.diff-hunk-header {
-  padding: 2px 10px;
-  background: color-mix(in srgb, var(--vscode-editorWidget-background, #252526) 80%, #4da6ff 20%);
-  color: #7ec8e3;
-  user-select: none;
 }
 
 .diff-line {
@@ -163,11 +173,17 @@
 .msg-tool-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 2px 12px;
-  border-left: 2px solid var(--vscode-editorWidget-border, #454545);
+  gap: 6px;
+  padding: 2px 0;
   margin: 1px 0;
-  opacity: 0.75;
+  opacity: 0.8;
+}
+
+.tool-row-indicator {
+  color: var(--vscode-textLink-foreground, #4daafc);
+  font-size: 8px;
+  flex-shrink: 0;
+  line-height: 1;
 }
 
 .tool-row-name {
@@ -324,3 +340,4 @@
   text-align: left;
 }
 .msg.assistant th { background: var(--vscode-editor-inactiveSelectionBackground, #333); }
+.msg.assistant hr { display: none; }
