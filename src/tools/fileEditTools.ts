@@ -170,12 +170,16 @@ export function makeFormatFileTool(): RegisteredTool {
     },
     permission: 'write',
     handler: async (args) => {
-      const filePath = args['path'] as string;
-      const uri      = vscode.Uri.file(resolveWorkspacePath(filePath));
-      const doc      = await vscode.workspace.openTextDocument(uri);
+      const filePath    = args['path'] as string;
+      const uri         = vscode.Uri.file(resolveWorkspacePath(filePath));
+      const alreadyOpen = vscode.window.visibleTextEditors.some(e => e.document.uri.fsPath === uri.fsPath);
+      const doc         = await vscode.workspace.openTextDocument(uri);
       await vscode.window.showTextDocument(doc, { preview: false });
       await vscode.commands.executeCommand('editor.action.formatDocument');
       await doc.save();
+      if (!alreadyOpen) {
+        await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+      }
       return `Formatted: ${filePath}`;
     },
   };
