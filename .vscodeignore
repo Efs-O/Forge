@@ -27,3 +27,4 @@ scripts/**
 **/*.vsix
 bridge.yaml
 fireworks.html
+assets/.coordination/**
