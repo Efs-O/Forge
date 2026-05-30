@@ -83,3 +83,21 @@ models:
 #   provider: tavily
 #   secret_key_name: forge.tavily.apiKey
 #   max_results: 5
+
+# -------------------------------------------------------------------
+# Optional: local semantic code search
+# Requires a second local GGUF embedding model served by llama.cpp
+# -------------------------------------------------------------------
+# embeddings:
+#   enabled: true
+#   model_path: /path/to/embedding-model.gguf
+#   port: 8091
+#   auto_index_on_search: true
+#   max_file_size_kb: 256
+#   include_globs:
+#     - src/**
+#     - test/**
+#   exclude_globs:
+#     - "**/node_modules/**"
+#     - "**/dist/**"
+#     - "**/.git/**"

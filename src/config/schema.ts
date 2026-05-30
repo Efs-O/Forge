@@ -85,6 +85,16 @@ const SearchConfigSchema = z.object({
   max_results: z.number().int().positive().optional(),
 });
 
+const EmbeddingsConfigSchema = z.object({
+  enabled: z.boolean().optional(),
+  model_path: z.string().min(1).optional(),
+  port: z.number().int().min(1).max(65535).optional(),
+  auto_index_on_search: z.boolean().optional(),
+  max_file_size_kb: z.number().int().positive().optional(),
+  include_globs: z.array(z.string().min(1)).optional(),
+  exclude_globs: z.array(z.string().min(1)).optional(),
+}).optional();
+
 const PermissionsSchema = z.object({
   fs: z.object({
     read: z.boolean().default(true),
@@ -117,6 +127,7 @@ export const ForgeConfigSchema = z.object({
   llama_server: LlamaServerConfigSchema.default({}),
   bridge_mode: z.boolean().optional(),
   search: SearchConfigSchema.optional(),
+  embeddings: EmbeddingsConfigSchema,
   log_level: z.enum(['trace', 'debug', 'info', 'warn', 'error']).optional(),
   // v0.3 additions
   model_dirs: z.array(z.string()).optional(),
@@ -139,6 +150,20 @@ export const ForgeConfigSchema = z.object({
       code: z.ZodIssueCode.custom,
       path: ['llama_server', 'binary'],
       message: 'llama_server.binary is required unless bridge_mode: true',
+    });
+  }
+  if (cfg.embeddings?.enabled && !cfg.embeddings.model_path) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['embeddings', 'model_path'],
+      message: 'embeddings.model_path is required when embeddings.enabled: true',
+    });
+  }
+  if (cfg.embeddings?.enabled && !cfg.llama_server.binary) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['llama_server', 'binary'],
+      message: 'llama_server.binary is required when embeddings.enabled: true',
     });
   }
 });

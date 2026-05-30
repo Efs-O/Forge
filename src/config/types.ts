@@ -82,9 +82,19 @@ export interface LlamaServerConfig {
 
 export interface SearchConfig {
   provider: 'tavily' | 'brave';
-  /** Secret key name in VS Code SecretStorage — never a raw key. */
+  /** Secret key name in VS Code SecretStorage - never a raw key. */
   secret_key_name: string;
   max_results?: number;
+}
+
+export interface EmbeddingsConfig {
+  enabled?: boolean;
+  model_path?: string;
+  port?: number;
+  auto_index_on_search?: boolean;
+  max_file_size_kb?: number;
+  include_globs?: string[];
+  exclude_globs?: string[];
 }
 
 export interface ForgeConfig {
@@ -96,6 +106,7 @@ export interface ForgeConfig {
   /** When true, connect to a pre-running server instead of spawning llama-server. */
   bridge_mode?: boolean;
   search?: SearchConfig;
+  embeddings?: EmbeddingsConfig;
   log_level?: 'trace' | 'debug' | 'info' | 'warn' | 'error';
   /** Extra directories to scan for GGUF files (used by first-run wizard). */
   model_dirs?: string[];

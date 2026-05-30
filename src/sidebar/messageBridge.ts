@@ -23,6 +23,7 @@ export interface SessionHistoryMeta {
 export type ForgeSlashCommandId =
   | 'unloadModel'
   | 'restartBackend'
+  | 'reindex'
   | 'newChat'
   | 'clearChat'
   | 'review'

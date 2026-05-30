@@ -19,7 +19,7 @@ strip_thinking_channels: true
 max_simultaneous_models: 4
 
 llama_server:
-  binary: "C:/Program Files (x86)/Llamacpp/llama.cpp-b8929/llama-server.exe"
+  binary: "N:/downloads/llama.cpp-b9402/llama-server.exe"
   host: "127.0.0.1"
   port: 8080
   n_gpu_layers: -1
@@ -42,7 +42,7 @@ models:
     system_prompt: |
       You are Forge, a local AI coding assistant running inside VS Code.
       You have tools available: read_file, write_file, replace_in_file, list_directory, search_code, run_terminal, git_status, git_diff, and more.
-      ALWAYS use tools to accomplish tasks. Never describe what you would do — do it by calling the tools directly.
+      ALWAYS use tools to accomplish tasks. Never describe what you would do - do it by calling the tools directly.
       When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
       After each tool result, continue calling tools until the task is complete, then give a short summary.
     strip_tools: false
@@ -68,7 +68,7 @@ models:
     system_prompt: |
       You are Forge, a local AI coding assistant running inside VS Code.
       You have tools available: read_file, write_file, replace_in_file, list_directory, search_code, run_terminal, git_status, git_diff, and more.
-      ALWAYS use tools to accomplish tasks. Never describe what you would do — do it by calling the tools directly.
+      ALWAYS use tools to accomplish tasks. Never describe what you would do - do it by calling the tools directly.
       When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
       After each tool result, continue calling tools until the task is complete, then give a short summary.
     # strip_tools: true avoids llama-server 500s when the model outputs invalid tool-call JSON, but the IDE
@@ -100,7 +100,7 @@ models:
     system_prompt: |
       You are Forge, a local AI coding assistant running inside VS Code.
       You have tools available: read_file, write_file, replace_in_file, list_directory, search_code, run_terminal, git_status, git_diff, and more.
-      ALWAYS use tools to accomplish tasks. Never describe what you would do — do it by calling the tools directly.
+      ALWAYS use tools to accomplish tasks. Never describe what you would do - do it by calling the tools directly.
       When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
       After each tool result, continue calling tools until the task is complete, then give a short summary.
     strip_tools: false
@@ -126,7 +126,7 @@ models:
     system_prompt: |
       You are Forge, a local AI coding assistant running inside VS Code.
       You have tools available: read_file, write_file, replace_in_file, list_directory, search_code, run_terminal, git_status, git_diff, and more.
-      ALWAYS use tools to accomplish tasks. Never describe what you would do — do it by calling the tools directly.
+      ALWAYS use tools to accomplish tasks. Never describe what you would do - do it by calling the tools directly.
       When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
       After each tool result, continue calling tools until the task is complete, then give a short summary.
     strip_tools: false
@@ -154,7 +154,7 @@ models:
     system_prompt: |
       You are Forge, a local AI coding assistant running inside VS Code.
       You have tools available: read_file, write_file, replace_in_file, list_directory, search_code, run_terminal, git_status, git_diff, and more.
-      ALWAYS use tools to accomplish tasks. Never describe what you would do — do it by calling the tools directly.
+      ALWAYS use tools to accomplish tasks. Never describe what you would do - do it by calling the tools directly.
       When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
       After each tool result, continue calling tools until the task is complete, then give a short summary.
     sampling:
@@ -182,7 +182,7 @@ models:
     system_prompt: |
       You are Forge, a local AI coding assistant running inside VS Code.
       You have tools available: read_file, write_file, replace_in_file, list_directory, search_code, run_terminal, git_status, git_diff, and more.
-      ALWAYS use tools to accomplish tasks. Never describe what you would do — do it by calling the tools directly.
+      ALWAYS use tools to accomplish tasks. Never describe what you would do - do it by calling the tools directly.
       When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
       After each tool result, continue calling tools until the task is complete, then give a short summary.
     sampling:
@@ -194,6 +194,64 @@ models:
       repetition_penalty: 1.0
       max_tokens: 98304
       # Qwen3.6 coding/agent mode: preserve reasoning traces across turns when thinking is enabled.
+      preserve_thinking: true
+
+  qwen36-27b-mtp-q3km:
+    gguf_path: "N:/.cache/huggingface/models--unsloth--Qwen3.6-27B-MTP-GGUF/snapshots/5cb35eb3dcbf52dbce5f87dbc64df6aaffadcace/Qwen3.6-27B-Q3_K_M.gguf"
+    num_ctx: 98304
+    n_batch: 512
+    flash_attn: true
+    think: true
+    extra_llama_server_args:
+      - "--reasoning-budget"
+      - "8192"
+      - "--spec-type"
+      - "draft-mtp"
+      - "--spec-draft-n-max"
+      - "2"
+    system_prompt: |
+      You are Forge, a local AI coding assistant running inside VS Code.
+      You have tools available: read_file, write_file, replace_in_file, list_directory, search_code, run_terminal, git_status, git_diff, and more.
+      ALWAYS use tools to accomplish tasks. Never describe what you would do - do it by calling the tools directly.
+      When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
+      After each tool result, continue calling tools until the task is complete, then give a short summary.
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 20
+      min_p: 0.0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+      max_tokens: 98304
+      preserve_thinking: true
+
+  qwen36-35b-a3b-mtp-iq3s:
+    gguf_path: "N:/.cache/huggingface/models--unsloth--Qwen3.6-35B-A3B-MTP-GGUF/snapshots/5bc3e238d916f48a861bac2f8a1990a0e9b7e98d/Qwen3.6-35B-A3B-UD-IQ3_S.gguf"
+    num_ctx: 98304
+    n_batch: 512
+    flash_attn: true
+    think: true
+    extra_llama_server_args:
+      - "--reasoning-budget"
+      - "8192"
+      - "--spec-type"
+      - "draft-mtp"
+      - "--spec-draft-n-max"
+      - "2"
+    system_prompt: |
+      You are Forge, a local AI coding assistant running inside VS Code.
+      You have tools available: read_file, write_file, replace_in_file, list_directory, search_code, run_terminal, git_status, git_diff, and more.
+      ALWAYS use tools to accomplish tasks. Never describe what you would do - do it by calling the tools directly.
+      When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
+      After each tool result, continue calling tools until the task is complete, then give a short summary.
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 20
+      min_p: 0.0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+      max_tokens: 98304
       preserve_thinking: true
 
   # ---------------------------------------------------------------------------

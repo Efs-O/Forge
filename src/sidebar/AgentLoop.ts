@@ -93,7 +93,8 @@ export class AgentLoop {
     } else {
       for (const [id, ctrl] of this.cancelControllers) {
         ctrl.abort();
-        try { await this.activeBackends.get(id)?.stop(); } catch {}
+        try { await this.activeBackends.get(id)?.stop(); }
+        catch (err) { log.debug(`[AgentLoop] backend stop during cancel-all failed: ${(err as Error).message}`); }
       }
       await Promise.all([...this.streamingSettledMap.values()]);
     }
@@ -113,6 +114,10 @@ export class AgentLoop {
     this.clankerMode = !this.clankerMode;
     this.post({ type: 'clankerChanged', enabled: this.clankerMode });
     return this.clankerMode;
+  }
+
+  setClankerMode(on: boolean): void {
+    this.clankerMode = on;
   }
 
   getClankerMode(): boolean { return this.clankerMode; }

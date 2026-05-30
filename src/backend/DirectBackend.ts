@@ -1,8 +1,9 @@
-import { spawn, type ChildProcess } from 'child_process';
+import { type ChildProcess } from 'child_process';
 import * as vscode from 'vscode';
 import type { BackendController } from './BackendController';
 import type { ForgeConfig, ModelConfig } from '../config/types';
 import { composeLlamaServerArgs } from './LlamaServerArgs';
+import { spawnLlamaServer, killLlamaProcess } from './llamaProcess';
 import { waitForHealthy, probeHealthy } from './HealthCheck';
 import { ensureOllamaReady, normalizeOllamaEndpoint, releaseOllamaModel } from './OllamaAdapter';
 import { getLogger } from '../util/logger';
@@ -138,10 +139,7 @@ export class DirectBackend implements BackendController {
     this.serverChannel.show(true);
     log.info(`[DirectBackend] spawn: ${binary} ${args.join(' ')}`);
 
-    this.proc = spawn(binary, args, {
-      shell: false,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    this.proc = spawnLlamaServer(binary, args);
 
     this.proc.stdout?.on('data', (chunk: Buffer) => this.serverChannel?.append(chunk.toString()));
     this.proc.stderr?.on('data', (chunk: Buffer) => this.serverChannel?.append(chunk.toString()));
@@ -206,50 +204,7 @@ export class DirectBackend implements BackendController {
     if (!this.proc) return;
     const proc = this.proc;
     this.proc = null;
-
-    await new Promise<void>((resolve) => {
-      let settled = false;
-      const finish = (): void => {
-        if (settled) return;
-        settled = true;
-        resolve();
-      };
-
-      proc.once('exit', finish);
-      proc.once('error', finish);
-
-      if (process.platform === 'win32' && proc.pid) {
-        try {
-          proc.kill();
-        } catch {
-          // ignore and fall through to taskkill
-        }
-
-        const killer = spawn('taskkill', ['/PID', String(proc.pid), '/T', '/F'], {
-          shell: false,
-          stdio: 'ignore',
-        });
-        killer.once('exit', () => setTimeout(finish, 250));
-        killer.once('error', () => setTimeout(finish, 250));
-      } else {
-        try {
-          proc.kill('SIGTERM');
-        } catch {
-          finish();
-          return;
-        }
-
-        setTimeout(() => {
-          try {
-            proc.kill('SIGKILL');
-          } catch {
-            // process likely already exited
-          }
-        }, 5000);
-      }
-
-      setTimeout(finish, 6000);
-    });
+    await killLlamaProcess(proc);
   }
 
   private resolveModel(name: string): ModelConfig {

@@ -23,12 +23,15 @@ import {
   makeGitStatusTool, makeGitLogTool, makeGitDiffTool, makeGitBlameTool, makeGitShowTool,
   makeCreateBranchTool, makeSwitchBranchTool, makeStageTool, makeCommitTool,
 } from './gitTools';
+import { makeSearchCodebaseTool } from './semanticSearchTool';
+import type { IndexManager } from '../search/IndexManager';
 
 export function registerAllTools(
   registry: ToolRegistry,
   workspaceState: vscode.Memento,
   secrets: vscode.SecretStorage,
   searchConfig: SearchConfig | undefined,
+  indexManager: IndexManager,
 ): void {
   // v0.1 builtins
   registry.register(makeReadFileTool());
@@ -39,6 +42,7 @@ export function registerAllTools(
   // v0.5 read-only
   registry.register(makeListDirectoryTool());
   registry.register(makeSearchCodeTool());
+  registry.register(makeSearchCodebaseTool(indexManager));
   registry.register(makeGetDiagnosticsTool());
   registry.register(makeGetDocumentSymbolsTool());
   registry.register(makeGetWorkspaceSymbolsTool());
