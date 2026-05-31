@@ -135,6 +135,10 @@ export const ForgeConfigSchema = z.object({
   custom_instructions: z.string().optional(),
   strip_thinking_channels: z.boolean().optional(),
   max_simultaneous_models: z.number().int().min(1).max(8).optional(),
+  control_server: z.object({
+    enabled: z.boolean().optional(),
+    port: z.number().int().min(1).max(65535).optional(),
+  }).optional(),
   permissions: PermissionsSchema,
   exec: ExecConfigSchema,
 }).superRefine((cfg, ctx) => {

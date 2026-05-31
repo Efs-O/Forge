@@ -32,6 +32,16 @@ llama_server:
   flash_attn_default: true
 
 # -------------------------------------------------------------------
+# Control server (optional) — localhost API so an external orchestrator
+# can ask Forge to load the right model on demand and discover its
+# OpenAI-compatible endpoint. Bound to 127.0.0.1 only; off by default.
+#   GET  /healthz   GET /models   POST /ensure {model}   POST /release {model}
+# -------------------------------------------------------------------
+# control_server:
+#   enabled: true
+#   port: 8799
+
+# -------------------------------------------------------------------
 # Models (map-style — keys are the model IDs shown in the picker)
 # -------------------------------------------------------------------
 models:

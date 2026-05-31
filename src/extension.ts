@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import { SidebarProvider } from './sidebar/SidebarProvider';
 import { BackendPool } from './backend/BackendPool';
 import { SingleBackendPool } from './backend/SingleBackendPool';
+import { ControlServer } from './backend/ControlServer';
 import { BridgeBackend } from './backend/BridgeBackend';
 import type { ForgeConfig } from './config/types';
 import { resolveBridgeConfigPath } from './config/BridgeConfigLoader';
@@ -147,6 +148,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       )
     : new BackendPool(config);
 
+  // Optional localhost model-control API for external orchestrators.
+  let controlServer: ControlServer | undefined;
+  if (config.control_server?.enabled) {
+    controlServer = new ControlServer(pool, config);
+    controlServer.start();
+    context.subscriptions.push(controlServer);
+  }
+
   // ── KeepUndo CodeLens + Diff Decorations ─────────────────────────────────
   // Declared before SidebarProvider so the provider can reference its methods
   let sidebarProvider: SidebarProvider;
@@ -253,6 +262,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
       sidebarProvider.applyForgeConfig(config);
       // pool.applyForgeConfig is called inside sidebarProvider.applyForgeConfig
+      controlServer?.applyForgeConfig(config);
       statusBar.setStopped(config.active_model);
 
       log.info('Forge: config reloaded');

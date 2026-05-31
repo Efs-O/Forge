@@ -32,4 +32,9 @@ export class SingleBackendPool implements IBackendPool {
   isAnyReady(): boolean {
     return this.backend.isReady();
   }
+
+  loadedModelNames(): string[] {
+    const loaded = this.backend.loadedModel();
+    return loaded ? [loaded] : [];
+  }
 }

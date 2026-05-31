@@ -89,15 +89,22 @@ Forge (extension)                          Any consumer (separate process)
                    ─────────────────────────►  POST {baseUrl}/chat/completions
 ```
 
-### Forge-side tasks (all in this repo)
-- [ ] `src/backend/ControlServer.ts` — localhost-only HTTP server (config port,
-      e.g. 8799). Endpoints per the contract below.
-- [ ] `src/config/schema.ts` — add optional `control_server: { enabled, port }`.
-- [ ] `src/extension.ts` — start ControlServer when enabled (reuse the existing
-      `pool`), `context.subscriptions.push(...)` for disposal.
-- [ ] Bind 127.0.0.1 only; no outbound traffic. This is an *inbound* localhost
-      control surface, consistent with the no-new-outbound-endpoint rule.
-- [ ] Keep ControlServer.ts ≤ 350 LOC.
+### Forge-side tasks (all in this repo) — IMPLEMENTED (v0.12.6)
+- [x] `src/backend/ControlServer.ts` — localhost-only HTTP server (config port,
+      default 8799). Endpoints per the contract below. Ref-counts `/ensure`
+      holders and frees only *idle* slots, so an in-use model is never evicted
+      (returns 409 when capacity is full and all loaded models are in use).
+- [x] `IBackendPool.loadedModelNames()` added (BackendPool + SingleBackendPool)
+      for capacity/eviction decisions.
+- [x] `src/config/schema.ts` + `types.ts` — `control_server: { enabled, port }`.
+- [x] `src/extension.ts` — starts ControlServer when enabled (reuses the existing
+      `pool`), `context.subscriptions.push(...)`, updates on config reload.
+- [x] Bind 127.0.0.1 only; no outbound. Inbound localhost control surface.
+- [x] `test/unit/ControlServer.test.ts` — ensure/ref-count/409 guard covered.
+- [x] ControlServer.ts ≤ 350 LOC. Opt-in via `control_server.enabled`.
+
+The **consumer side** is implemented in the consumer's own repo against the
+contract below — out of scope for Forge.
 
 ### The contract (the only thing a consumer needs — no Forge paths)
 ```

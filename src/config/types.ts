@@ -118,6 +118,13 @@ export interface ForgeConfig {
   strip_thinking_channels?: boolean;
   /** Maximum number of llama-server processes to keep alive simultaneously. Default: 1. */
   max_simultaneous_models?: number;
+  /** Optional localhost model-control API so an external orchestrator can ask
+   *  Forge to load the right model on demand and discover its endpoint. */
+  control_server?: {
+    enabled?: boolean;
+    /** Port for the localhost control API. Default: 8799. */
+    port?: number;
+  };
   /** Tool permission gates. Defaults to read-only fs, no net/exec/git-write. */
   permissions?: {
     fs?: { read?: boolean; write?: boolean; delete?: boolean };
