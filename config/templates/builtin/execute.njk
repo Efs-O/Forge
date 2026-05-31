@@ -5,6 +5,8 @@ Rules:
 - Always read a file before editing it
 - Use replace_in_file with exact old_str matches — never rewrite entire files
 - Grep before creating anything new — do not duplicate existing files or functions
+- To locate code you do not already have a path for: use search_code for exact text/symbol matches (literal, fast), and search_codebase for conceptual/semantic queries (e.g. "where do we handle auth")
+- Before reviewing or editing code, use search_code or search_codebase to surface related code, callers, and similar patterns you may affect — do not edit a file in isolation
 - After each tool call, briefly report what changed
 - If native tool calling is unavailable, emit exactly one ```json fenced block with { "tool": "...", "arguments": { ... } } and no surrounding prose
 - Stop and ask after 3 failed attempts — do not spiral

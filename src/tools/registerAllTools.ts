@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import type { ToolRegistry } from './ToolRegistry';
 import type { SearchConfig } from '../config/types';
 import { makeReadFileTool, makeWriteFileTool, makeReplaceSelectionTool, makeInsertCodeTool } from './builtinTools';
-import { makeListDirectoryTool, makeSearchCodeTool } from './dirTools';
+import { makeListDirectoryTool, makeSearchCodeTool, makeFindFilesTool } from './dirTools';
 import {
   makeGetDiagnosticsTool, makeGetDocumentSymbolsTool, makeGetWorkspaceSymbolsTool,
   makeGetHoverTool, makeGoToDefinitionTool, makeFindReferencesTool,
@@ -41,6 +41,7 @@ export function registerAllTools(
 
   // v0.5 read-only
   registry.register(makeListDirectoryTool());
+  registry.register(makeFindFilesTool());
   registry.register(makeSearchCodeTool());
   registry.register(makeSearchCodebaseTool(indexManager));
   registry.register(makeGetDiagnosticsTool());

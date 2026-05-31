@@ -9,11 +9,13 @@ export function makeReadFileTool(): RegisteredTool {
       type: 'function',
       function: {
         name: 'read_file',
-        description: 'Read the full contents of a file. Use workspace-relative or absolute paths.',
+        description: 'Read a file\'s contents. Returns the whole file by default; pass start_line/end_line (1-based, inclusive) to read only a range — prefer a range for large files to save context.',
         parameters: {
           type: 'object',
           properties: {
             path: { type: 'string', description: 'File path (absolute or workspace-relative).' },
+            start_line: { type: 'integer', minimum: 1, description: 'Optional 1-based first line to read (inclusive).' },
+            end_line: { type: 'integer', minimum: 1, description: 'Optional 1-based last line to read (inclusive). Defaults to end of file.' },
           },
           required: ['path'],
           additionalProperties: false,
@@ -23,11 +25,24 @@ export function makeReadFileTool(): RegisteredTool {
     permission: 'read',
     handler: async (args) => {
       const filePath = resolveWorkspacePath(args['path'] as string);
+      let content: string;
       try {
-        return fs.readFileSync(filePath, 'utf8');
+        content = fs.readFileSync(filePath, 'utf8');
       } catch (err) {
         throw new Error(`read_file: ${(err as Error).message}`);
       }
+
+      const startLine = typeof args['start_line'] === 'number' ? args['start_line'] : undefined;
+      const endLine = typeof args['end_line'] === 'number' ? args['end_line'] : undefined;
+      if (startLine === undefined && endLine === undefined) return content;
+
+      const lines = content.split('\n');
+      const start = Math.max(1, startLine ?? 1);
+      const end = Math.min(lines.length, endLine ?? lines.length);
+      if (start > end) {
+        throw new Error(`read_file: start_line ${start} is past end_line ${end} (file has ${lines.length} lines).`);
+      }
+      return lines.slice(start - 1, end).join('\n');
     },
   };
 }

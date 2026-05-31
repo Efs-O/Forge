@@ -1,7 +1,30 @@
 import { spawn } from 'child_process';
+import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
+
+/**
+ * Resolve the ripgrep binary. VS Code (and forks like Cursor) bundle ripgrep
+ * under the host's appRoot but do not put it on PATH, so a bare `spawn('rg')`
+ * fails with ENOENT on most machines. Prefer the bundled binary; fall back to
+ * PATH `rg` only if it cannot be located.
+ */
+function resolveRipgrep(): string {
+  const exe = process.platform === 'win32' ? 'rg.exe' : 'rg';
+  const appRoot = vscode.env.appRoot;
+  if (appRoot) {
+    const candidates = [
+      path.join(appRoot, 'node_modules.asar.unpacked', '@vscode', 'ripgrep', 'bin', exe),
+      path.join(appRoot, 'node_modules', '@vscode', 'ripgrep', 'bin', exe),
+      path.join(appRoot, 'node_modules', 'vscode-ripgrep', 'bin', exe),
+    ];
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) return candidate;
+    }
+  }
+  return 'rg'; // last resort: rely on PATH
+}
 
 function resolveUri(p: string): vscode.Uri {
   if (path.isAbsolute(p)) return vscode.Uri.file(p);
@@ -50,6 +73,7 @@ export function makeListDirectoryTool(): RegisteredTool {
 const OUTPUT_LINE_LIMIT = 50;
 const CONTEXT_LINES = 2;
 const SEARCH_EXCLUDES = ['!.git/**', '!node_modules/**', '!dist/**', '!out/**'];
+const FIND_FILES_EXCLUDE = '{**/node_modules/**,**/dist/**,**/out/**,**/.git/**,**/.forge/**}';
 
 interface SearchCodeMatch {
   path: string;
@@ -88,6 +112,44 @@ function isMatchEvent(event: RipgrepEvent): event is { type: 'match'; data: Ripg
 
 function isContextEvent(event: RipgrepEvent): event is { type: 'context'; data: RipgrepContextData } {
   return event.type === 'context';
+}
+
+export function makeFindFilesTool(): RegisteredTool {
+  return {
+    definition: {
+      type: 'function',
+      function: {
+        name: 'find_files',
+        description: 'Find files by name or path using a glob pattern (e.g. "**/*.test.ts" or "src/**/index.*"). Returns matching workspace-relative paths. Matches file paths, not content — use search_code to search file contents.',
+        parameters: {
+          type: 'object',
+          properties: {
+            pattern:     { type: 'string',  description: 'Glob pattern to match against file paths, e.g. "**/*.ts".' },
+            max_results: { type: 'integer', description: 'Maximum number of files to return. Defaults to 100.' },
+          },
+          required: ['pattern'],
+          additionalProperties: false,
+        },
+      },
+    },
+    permission: 'read',
+    handler: async (args) => {
+      const pattern = args['pattern'];
+      if (typeof pattern !== 'string' || pattern.trim().length === 0) {
+        throw new Error('find_files: pattern must be a non-empty string.');
+      }
+      const maxResults = typeof args['max_results'] === 'number' ? args['max_results'] : 100;
+
+      const matches = await vscode.workspace.findFiles(pattern, FIND_FILES_EXCLUDE, maxResults);
+      if (matches.length === 0) return `No files match "${pattern}".`;
+
+      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      return matches
+        .map((uri) => (root ? path.relative(root, uri.fsPath).replace(/\\/g, '/') : uri.fsPath))
+        .sort()
+        .join('\n');
+    },
+  };
 }
 
 export function makeSearchCodeTool(): RegisteredTool {
@@ -158,7 +220,7 @@ async function searchWorkspaceText(query: string, include: string, maxResults: n
     let settled = false;
     let terminatedEarly = false;
 
-    const child = spawn('rg', args, {
+    const child = spawn(resolveRipgrep(), args, {
       cwd: folder.uri.fsPath,
       shell: false,
       stdio: ['ignore', 'pipe', 'pipe'],
