@@ -1,8 +1,9 @@
-# Multi-Worker Fleet — parallel workers + Forge↔AgentWatch bridge
+# Multi-Worker Fleet — parallel workers + local model-control API
 
-How Forge serves a small fleet of concurrent local workers (e.g. AgentWatch
-subagents dispatched by Claude Code / Codex), what shipped now, and the
-implementation plan for routing AgentWatch dispatch through Forge's backend pool.
+How Forge serves a small fleet of concurrent local workers (e.g. subagents
+dispatched by an external orchestrator), what shipped now, and the Forge-side
+implementation plan for a local control API that lets any consumer load the right
+model on demand. Consumer-side code lives in the consumer's own repo, not here.
 
 ---
 
@@ -58,77 +59,72 @@ Our target is case 1.
 
 ---
 
-## #3 — Forge↔AgentWatch lifecycle bridge (IMPLEMENTATION TODO)
+## #3 — Forge local model-control API (IMPLEMENTATION TODO)
+
+> **Scope: Forge only.** This is a generic, consumer-agnostic localhost API that
+> lets *any* external orchestrator ask Forge to load the right model on demand
+> and tell it where to send inference. Forge knows nothing about who the consumer
+> is. The consumer implementation (e.g. a worker dispatcher) lives in **its own
+> repo** and is out of scope here — it only needs the contract below, never a
+> path into Forge's source.
 
 ### Why
-Today AgentWatch is decoupled (`subagent.ts` "Decision #4"): it POSTs to fixed
-endpoints (`bridge:9099`, `ollama:11434`, `direct:8080`) and **never loads or
-swaps a model**. Consequences seen in the RPS log:
-- "fetch failed" when the server was down / mid-swap.
-- "wrong model loaded" — `direct` ignores the model id.
+An external dispatcher that POSTs to a fixed endpoint can't load or swap a model,
+so it hits two failure modes: the server may be down/mid-swap, and a single
+shared `llama-server` serves whatever is loaded and ignores the requested model
+id. Forge's `BackendPool.acquire(model)` already solves this: load/hot-swap the
+requested model, allocate a port per model, return its OpenAI-compatible
+`baseUrl()`, and evict LRU past `max_simultaneous_models`. A small control API
+exposes that so a consumer routes to the *right* model instead of guessing.
 
-Forge's `BackendPool.acquire(model)` already does exactly the missing piece:
-load/hot-swap the requested model, allocate a port per model, return its
-OpenAI-compatible `baseUrl()`, and evict LRU past `max_simultaneous_models`. The
-bridge makes AgentWatch *use* that instead of guessing.
-
-### Design — Forge exposes a localhost model-control endpoint
-Chosen over a VS Code command because AgentWatch's MCP server runs as a **separate
-process** (`mcpStdio.js`, spawned by Codex/Claude CLI), so it cannot call
-in-window `vscode.commands`. A localhost HTTP control surface reaches it.
+### Design — a localhost HTTP control surface
+HTTP (not a VS Code command) because the typical consumer runs as a **separate
+process** and can't call in-window `vscode.commands`. Localhost-only.
 
 ```
-Forge (extension)                         AgentWatch (MCP server / worker)
-  BackendPool ──┐                            dispatch_subagent(model=M)
-  ControlServer │  POST /ensure {model:M} ◄──── resolveModel: if forgeControlUrl set
-   :8799 (cfg)  └─ acquire(M) → {baseUrl, model, backend, port}
+Forge (extension)                          Any consumer (separate process)
+  BackendPool ──┐                            wants model M
+  ControlServer │  POST /ensure {model:M} ◄──── (consumer's own logic)
+   :8799 (cfg)  └─ acquire(M) → {baseUrl, model, backend}
                    ─────────────────────────►  POST {baseUrl}/chat/completions
 ```
 
-### Tasks
-
-**Forge side**
+### Forge-side tasks (all in this repo)
 - [ ] `src/backend/ControlServer.ts` — localhost-only HTTP server (config port,
-      e.g. 8799). Endpoints:
-      - `GET /healthz` → `{ ok: true }`
-      - `GET /models` → configured models + loaded state + ports (single source
-        of truth; AgentWatch `list_models` can consume this)
-      - `POST /ensure {model}` → `pool.acquire(model)` → `{ baseUrl, model, backend }`
-      - `POST /release {model}` → `pool.release(model)` (optional)
+      e.g. 8799). Endpoints per the contract below.
 - [ ] `src/config/schema.ts` — add optional `control_server: { enabled, port }`.
 - [ ] `src/extension.ts` — start ControlServer when enabled (reuse the existing
       `pool`), `context.subscriptions.push(...)` for disposal.
-- [ ] Bind 127.0.0.1 only; no outbound. Respect the "no new outbound endpoint"
-      rule (this is an inbound localhost control surface, not outbound traffic).
+- [ ] Bind 127.0.0.1 only; no outbound traffic. This is an *inbound* localhost
+      control surface, consistent with the no-new-outbound-endpoint rule.
 - [ ] Keep ControlServer.ts ≤ 350 LOC.
 
-**AgentWatch side**
-- [ ] `SubagentBackends.forgeControlUrl?: string` (e.g. `http://127.0.0.1:8799`).
-- [ ] `resolveModel` / dispatch: when `forgeControlUrl` is set, **pre-dispatch**
-      `POST /ensure {model}` → use the returned `baseUrl` instead of the fixed
-      `directUrl`. Fall back to the existing direct/ollama/bridge routing when
-      unset (keep decoupling optional).
-- [ ] `validateBackend` / `list_models`: prefer Forge `/models` when available.
+### The contract (the only thing a consumer needs — no Forge paths)
+```
+GET  /healthz            → { ok: true }
+GET  /models             → { models: [{ name, backend, loaded, baseUrl? }] }
+POST /ensure  {model}    → { baseUrl, model, backend }   # loads/swaps as needed
+POST /release {model}    → { released: bool }            # optional
+```
+A consumer (in its own repo) just needs the base URL (e.g. `http://127.0.0.1:8799`)
+and these shapes: call `/ensure`, then POST to the returned `baseUrl`. Keep it
+opt-in there so the consumer still works when Forge isn't running.
 
-### Edge cases to handle (do NOT skip — these are where it breaks)
+### Forge-side edge cases (do NOT skip — these are where it breaks)
 - [ ] **Eviction vs. in-use**: `max_simultaneous_models` LRU eviction must not
-      stop a model a worker is mid-dispatch on. Ref-count or tie eviction to
-      AgentWatch claims (a claimed/active worker pins its model).
-- [ ] **Port coordination**: AgentWatch must use the `baseUrl` returned by
-      `/ensure`, never a hardcoded `:8080` — the pool assigns 8080, 8081, …
+      stop a model that an `/ensure`-ed caller is mid-request on. Ref-count
+      ensured models; don't evict one with outstanding holders.
+- [ ] **Port coordination**: return the assigned `baseUrl` from `/ensure`; the
+      pool uses 8080, 8081, … — never assume a fixed port.
 - [ ] **Multi-window**: two VS Code windows each running a pool would collide on
-      the control port. Single-instance the control server, or per-workspace
-      port + discovery file. Mirror Forge's existing "adopt server already on
-      this port" pattern.
-- [ ] **Who stops models**: Forge owns lifecycle; AgentWatch only requests.
-      Define idle/TTL unload so an `/ensure`d model does not linger forever.
-- [ ] **Preflight already exists**: AgentWatch's `validateBackend` + `list_models`
-      stay as the reachability guard; the bridge upgrades them from "is something
-      up" to "is the *right* model up."
+      the control port. Single-instance it, or per-workspace port + discovery
+      file. Mirror Forge's existing "adopt server already on this port" pattern.
+- [ ] **Lifecycle ownership**: Forge owns load/unload; callers only request.
+      Define idle/TTL unload so an `/ensure`-ed model doesn't linger forever.
 
 ### Acceptance test (the real benchmark)
-Coordinator dispatches a multi-file change to 3-4 workers on **different** models
-via the bridge; verify: right model served per worker (no id-ignored mismatch),
+A consumer dispatches a multi-file change to 3-4 workers on **different** models
+via `/ensure`; verify: right model served per worker (no id-ignored mismatch),
 no eviction mid-task, tests green, and measured token cost vs. all-SOTA. This is
 the experiment that proves the heterogeneous-fleet thesis — run it before adding
 more surface area.
