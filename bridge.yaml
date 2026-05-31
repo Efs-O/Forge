@@ -24,10 +24,10 @@ llama_server:
   port: 8080
   n_gpu_layers: -1
   n_batch: 512
-  n_parallel: 1
+  n_parallel: 4
   type_k: 8
   type_v: 8
-  default_num_ctx: 4096
+  default_num_ctx: 131072            # 128k TOTAL, split across n_parallel → ~32k/worker
   flash_attn_default: true
 
 models:
@@ -35,7 +35,7 @@ models:
   gemma4-e4b-it-ud-q4kxl:
     gguf_path: "N:/GEMMA GGUF UNSLOTH/E4B/gemma-4-E4B-it-UD-Q4_K_XL.gguf"
     mmproj_path: "N:/GEMMA GGUF UNSLOTH/E4B/mmproj-F16.gguf"
-    num_ctx: 98304
+    num_ctx: 131072            # 128k TOTAL across n_parallel=4 → ~32k/worker
     n_batch: 512
     flash_attn: true
     think: true
@@ -61,7 +61,7 @@ models:
   gemma4-26b-a4b-it-iq3s:
     gguf_path: "N:/GEMMA GGUF UNSLOTH/26B/gemma-4-26B-A4B-it-UD-IQ3_S.gguf"
     mmproj_path: "N:/GEMMA GGUF UNSLOTH/26B/mmproj-F16.gguf"
-    num_ctx: 98304
+    num_ctx: 131072            # 128k TOTAL across n_parallel=4 → ~32k/worker
     n_batch: 512
     flash_attn: true
     think: true
@@ -93,7 +93,7 @@ models:
   gemma4-26b-a4b-it-iq4xs:
     gguf_path: "N:/GEMMA GGUF UNSLOTH/26B/gemma-4-26B-A4B-it-UD-IQ4_XS.gguf"
     mmproj_path: "N:/GEMMA GGUF UNSLOTH/26B/mmproj-F16.gguf"
-    num_ctx: 98304
+    num_ctx: 131072            # 128k TOTAL across n_parallel=4 → ~32k/worker
     n_batch: 512
     flash_attn: true
     think: true
@@ -119,7 +119,7 @@ models:
   gemma4-31b-it-q3ks:
     gguf_path: "N:/GEMMA GGUF UNSLOTH/31B/gemma-4-31B-it-Q3_K_S.gguf"
     mmproj_path: "N:/GEMMA GGUF UNSLOTH/31B/mmproj-F16.gguf"
-    num_ctx: 98304
+    num_ctx: 131072            # 128k TOTAL across n_parallel=4 → ~32k/worker
     n_batch: 512
     flash_attn: true
     think: true
@@ -144,7 +144,7 @@ models:
 
   qwen36-27b-q3km:
     gguf_path: "N:/.cache/huggingface/hub/models--unsloth--Qwen3.6-27B-GGUF/snapshots/82d411acf4a06cfb8d9b073a5211bf410bfc29bf/Qwen3.6-27B-Q3_K_M.gguf"
-    num_ctx: 98304
+    num_ctx: 131072            # 128k TOTAL across n_parallel=4 → ~32k/worker
     n_batch: 512
     flash_attn: true
     think: true
@@ -172,7 +172,7 @@ models:
 
   qwen36-35b-a3b-iq3s:
     gguf_path: "N:/.cache/huggingface/hub/models--unsloth--Qwen3.6-35B-A3B-GGUF/snapshots/a483e9e6cbd595906af30beda3187c2663a1118c/Qwen3.6-35B-A3B-UD-IQ3_S.gguf"
-    num_ctx: 98304
+    num_ctx: 131072            # 128k TOTAL across n_parallel=4 → ~32k/worker
     n_batch: 512
     flash_attn: true
     think: true
@@ -198,7 +198,7 @@ models:
 
   qwen36-27b-mtp-q3km:
     gguf_path: "N:/.cache/huggingface/models--unsloth--Qwen3.6-27B-MTP-GGUF/snapshots/5cb35eb3dcbf52dbce5f87dbc64df6aaffadcace/Qwen3.6-27B-Q3_K_M.gguf"
-    num_ctx: 98304
+    num_ctx: 131072            # 128k TOTAL across n_parallel=4 → ~32k/worker
     n_batch: 512
     flash_attn: true
     think: true
@@ -227,7 +227,7 @@ models:
 
   qwen36-35b-a3b-mtp-iq3s:
     gguf_path: "N:/.cache/huggingface/models--unsloth--Qwen3.6-35B-A3B-MTP-GGUF/snapshots/5bc3e238d916f48a861bac2f8a1990a0e9b7e98d/Qwen3.6-35B-A3B-UD-IQ3_S.gguf"
-    num_ctx: 98304
+    num_ctx: 131072            # 128k TOTAL across n_parallel=4 → ~32k/worker
     n_batch: 512
     flash_attn: true
     think: true
