@@ -17,9 +17,16 @@ llama_server:
   host: 127.0.0.1
   port: 8080
   n_gpu_layers: -1                   # -1 = all layers on GPU
-  default_num_ctx: 8192
+  default_num_ctx: 32768             # TOTAL context, SPLIT across n_parallel slots
+                                     #   per-worker ctx = default_num_ctx / n_parallel
+                                     #   (32768 / 4 = 8192 each). Raise this if you
+                                     #   raise n_parallel, or workers get starved.
   n_batch: 512
-  n_parallel: 1
+  n_parallel: 4                      # concurrent worker slots on ONE shared model
+                                     # load — lets a 3-4 worker fleet hit one
+                                     # llama-server. Costs ~n_parallel × KV cache
+                                     # VRAM (not × model weights). Set 1 for a
+                                     # single interactive agent on a small GPU.
   type_k: q8_0                       # KV cache quantization
   type_v: q8_0
   flash_attn_default: true
@@ -44,6 +51,9 @@ models:
       max_tokens: 8192
 
   # --- Ollama (local daemon) ---
+  # For concurrent same-model workers on Ollama, set the daemon env var
+  # OLLAMA_NUM_PARALLEL=4 (and OLLAMA_MAX_LOADED_MODELS if running several
+  # models). This is configured on the Ollama daemon, not here in Forge.
   # gemma4:26b:
   #   provider: ollama
   #   endpoint: http://127.0.0.1:11434
