@@ -4,7 +4,7 @@ import type { BackendController } from './BackendController';
 import type { ForgeConfig, ModelConfig } from '../config/types';
 import { composeLlamaServerArgs } from './LlamaServerArgs';
 import { spawnLlamaServer, killLlamaProcess } from './llamaProcess';
-import { waitForHealthy, probeHealthy } from './HealthCheck';
+import { waitForHealthy, probeHealthy, probeServedModel } from './HealthCheck';
 import { ensureOllamaReady, normalizeOllamaEndpoint, releaseOllamaModel } from './OllamaAdapter';
 import { getLogger } from '../util/logger';
 
@@ -119,8 +119,22 @@ export class DirectBackend implements BackendController {
 
     // If a server is already running on this port (e.g. another VS Code window),
     // adopt it instead of spawning a second process and doubling VRAM usage.
-    if (await probeHealthy(`http://${this.host}:${this.port}`)) {
-      log.info(`[DirectBackend] port ${this.port} already healthy — adopting existing server`);
+    // Adoption MUST be model-aware: every window computes the same fixed port
+    // set, so a healthy server on this port may be serving a DIFFERENT model.
+    // Adopting it blindly would silently answer requests with the wrong model.
+    const baseUrl = `http://${this.host}:${this.port}`;
+    if (await probeHealthy(baseUrl)) {
+      const served = await probeServedModel(baseUrl);
+      if (!this.servedModelMatches(served, model)) {
+        const servedLabel = served ?? 'an unidentifiable model';
+        throw new Error(
+          `Port ${this.port} is already serving ${servedLabel}, not "${model.name}" ` +
+            `(gguf: ${model.gguf_path ?? '?'}). Refusing to adopt it as the wrong model. ` +
+            `Another VS Code window likely owns this port — close that model there, or ` +
+            `route this load through the control server so it can free a slot.`,
+        );
+      }
+      log.info(`[DirectBackend] port ${this.port} already serving ${model.name} — adopting existing server`);
       this.serverChannel ??= vscode.window.createOutputChannel('Forge - llama-server');
       this.serverChannel.clear();
       this.serverChannel.appendLine(`[Forge] Adopted existing llama-server on port ${this.port} (started by another VS Code window).`);
@@ -205,6 +219,20 @@ export class DirectBackend implements BackendController {
     const proc = this.proc;
     this.proc = null;
     await killLlamaProcess(proc);
+  }
+
+  /**
+   * True when the identifier reported by a running server matches the model we
+   * want to load. llama-server reports the `-m` path, so we compare against the
+   * model's gguf_path by normalized full path and by basename (the server build
+   * may report either). Returns false when the served model is unknown — we
+   * refuse to adopt rather than risk serving the wrong model.
+   */
+  private servedModelMatches(served: string | null, model: ModelConfig): boolean {
+    if (!served || !model.gguf_path) return false;
+    const norm = (p: string): string => p.replace(/\\/g, '/').toLowerCase();
+    const base = (p: string): string => norm(p).split('/').pop() ?? norm(p);
+    return norm(served) === norm(model.gguf_path) || base(served) === base(model.gguf_path);
   }
 
   private resolveModel(name: string): ModelConfig {

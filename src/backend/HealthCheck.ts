@@ -10,6 +10,45 @@ export async function probeHealthy(baseUrl: string): Promise<boolean> {
   }
 }
 
+interface ModelsPayload {
+  data?: Array<{ id?: string }>;
+}
+
+interface PropsPayload {
+  model_path?: string;
+  default_generation_settings?: { model?: string };
+}
+
+/**
+ * Best-effort identification of the model a running server is serving, so a
+ * window can refuse to adopt a port that holds a DIFFERENT model than requested.
+ * llama-server (launched without --alias) reports the `-m` path as
+ * `/v1/models` data[0].id; `/props` exposes `model_path` as a fallback.
+ * Returns null when neither endpoint yields an identifier.
+ */
+export async function probeServedModel(baseUrl: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${baseUrl}/v1/models`, { signal: AbortSignal.timeout(2000) });
+    if (res.ok) {
+      const body = (await res.json()) as ModelsPayload;
+      const id = body.data?.[0]?.id;
+      if (id) return id;
+    }
+  } catch {
+    // fall through to /props
+  }
+  try {
+    const res = await fetch(`${baseUrl}/props`, { signal: AbortSignal.timeout(2000) });
+    if (res.ok) {
+      const body = (await res.json()) as PropsPayload;
+      return body.model_path ?? body.default_generation_settings?.model ?? null;
+    }
+  } catch {
+    // unavailable
+  }
+  return null;
+}
+
 export interface HealthCheckOptions {
   baseUrl: string;
   intervalMs?: number;
