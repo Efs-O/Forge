@@ -8,9 +8,15 @@ const log = getLogger();
 const DEFAULT_PORT = 8799;
 const MAX_BODY_BYTES = 64 * 1024;
 
-interface EnsureResult {
+export interface EnsureResult {
   status: number;
   body: { baseUrl: string; model: string; backend: 'llama.cpp' | 'ollama' } | { error: string };
+}
+
+export interface ControlStatus {
+  listening: boolean;
+  port: number;
+  models: Array<{ name: string; backend: string; loaded: boolean; holds: number }>;
 }
 
 /**
@@ -62,6 +68,33 @@ export class ControlServer implements vscode.Disposable {
   dispose(): void {
     this.server?.close();
     this.server = null;
+  }
+
+  // ── public API for in-process callers (command palette) ─────────────────────
+
+  /** Ensure a model is loaded + warm; same result shape as POST /ensure. */
+  ensureModel(model: string): Promise<EnsureResult> {
+    return this.serialize(() => this.ensure(model));
+  }
+
+  /** Release one hold on a model (mirror of POST /release). */
+  releaseHold(model: string): boolean {
+    return this.release(model);
+  }
+
+  /** Snapshot for status UI: listener state + per-model loaded/hold counts. */
+  status(): ControlStatus {
+    const loaded = new Set(this.pool.loadedModelNames());
+    return {
+      listening: this.server !== null,
+      port: this.port,
+      models: this.config.models.map((m) => ({
+        name: m.name,
+        backend: m.provider ?? 'llama.cpp',
+        loaded: loaded.has(m.name),
+        holds: this.holds.get(m.name) ?? 0,
+      })),
+    };
   }
 
   // ── request routing ─────────────────────────────────────────────────────────

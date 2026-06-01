@@ -2,7 +2,7 @@
   "name": "forge-llm",
   "displayName": "Forge LLM",
   "description": "Local-LLM coding assistant — direct llama.cpp, strict tool schemas, single execute-style workflow",
-  "version": "0.12.6",
+  "version": "0.12.7",
   "publisher": "Efsoo",
   "icon": "assets/publisher-logo.png",
   "galleryBanner": {
@@ -60,6 +60,18 @@
       {
         "command": "forge.openSidebar",
         "title": "Forge: Open Sidebar"
+      },
+      {
+        "command": "forge.ensureModel",
+        "title": "Forge: Ensure Model (load on demand)"
+      },
+      {
+        "command": "forge.releaseModel",
+        "title": "Forge: Release Model"
+      },
+      {
+        "command": "forge.controlServerStatus",
+        "title": "Forge: Control Server Status"
       },
       {
         "command": "forge.startBackend",
