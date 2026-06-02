@@ -84,9 +84,19 @@ export interface LlamaServerConfig {
 
 export interface SearchConfig {
   provider: 'tavily' | 'brave';
-  /** Secret key name in VS Code SecretStorage — never a raw key. */
+  /** Secret key name in VS Code SecretStorage - never a raw key. */
   secret_key_name: string;
   max_results?: number;
+}
+
+export interface EmbeddingsConfig {
+  enabled?: boolean;
+  model_path?: string;
+  port?: number;
+  auto_index_on_search?: boolean;
+  max_file_size_kb?: number;
+  include_globs?: string[];
+  exclude_globs?: string[];
 }
 
 export interface ForgeConfig {
@@ -98,6 +108,7 @@ export interface ForgeConfig {
   /** When true, connect to a pre-running server instead of spawning llama-server. */
   bridge_mode?: boolean;
   search?: SearchConfig;
+  embeddings?: EmbeddingsConfig;
   log_level?: 'trace' | 'debug' | 'info' | 'warn' | 'error';
   /** Extra directories to scan for GGUF files (used by first-run wizard). */
   model_dirs?: string[];
@@ -109,6 +120,13 @@ export interface ForgeConfig {
   strip_thinking_channels?: boolean;
   /** Maximum number of llama-server processes to keep alive simultaneously. Default: 1. */
   max_simultaneous_models?: number;
+  /** Optional localhost model-control API so an external orchestrator can ask
+   *  Forge to load the right model on demand and discover its endpoint. */
+  control_server?: {
+    enabled?: boolean;
+    /** Port for the localhost control API. Default: 8799. */
+    port?: number;
+  };
   /** Tool permission gates. Defaults to read-only fs, no net/exec/git-write. */
   permissions?: {
     fs?: { read?: boolean; write?: boolean; delete?: boolean };

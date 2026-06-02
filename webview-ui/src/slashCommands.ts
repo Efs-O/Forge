@@ -21,6 +21,12 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     description: 'Start or reconnect the llama-server / bridge connection.',
   },
   {
+    id: 'reindex',
+    trigger: 'reindex',
+    title: 'Reindex Codebase',
+    description: 'Rebuild the local semantic search index for search_codebase.',
+  },
+  {
     id: 'newChat',
     trigger: 'new',
     title: 'New Chat',

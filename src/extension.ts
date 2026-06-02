@@ -4,6 +4,8 @@ import * as vscode from 'vscode';
 import { SidebarProvider } from './sidebar/SidebarProvider';
 import { BackendPool } from './backend/BackendPool';
 import { SingleBackendPool } from './backend/SingleBackendPool';
+import { ControlServer } from './backend/ControlServer';
+import { registerControlServerCommands } from './vscode/controlCommands';
 import { BridgeBackend } from './backend/BridgeBackend';
 import type { ForgeConfig } from './config/types';
 import { resolveBridgeConfigPath } from './config/BridgeConfigLoader';
@@ -21,6 +23,8 @@ import { registerAllTools } from './tools/registerAllTools';
 import { BackendStatusBar } from './vscode/BackendStatusBar';
 import { ForgeCodeActionProvider } from './vscode/codeActions';
 import { registerNativeCommands } from './vscode/nativeCommands';
+import { EmbeddingBackend } from './backend/EmbeddingBackend';
+import { IndexManager } from './search/IndexManager';
 
 class SetupPlaceholderProvider implements vscode.WebviewViewProvider {
   resolveWebviewView(view: vscode.WebviewView): void {
@@ -39,6 +43,39 @@ class SetupPlaceholderProvider implements vscode.WebviewViewProvider {
   }
 }
 
+/**
+ * Drop the extension into setup mode: a placeholder sidebar with a "Run Setup
+ * Wizard" button plus an actionable notification. Used both when no config
+ * exists and when the global fallback config fails to load — the latter must
+ * not abort activation, or one stale global config bricks every workspace.
+ */
+function enterSetupMode(
+  context: vscode.ExtensionContext,
+  statusBar: BackendStatusBar,
+  message: string,
+): void {
+  statusBar.setNoConfig();
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      SidebarProvider.viewId,
+      new SetupPlaceholderProvider(),
+    ),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand('forge.setupWizard', async () => {
+      const done = await runFirstRunWizard(context);
+      if (done) void vscode.commands.executeCommand('workbench.action.reloadWindow');
+    }),
+  );
+  // Don't auto-launch the wizard — the window may not be focused yet (e.g.
+  // freshly opened by --install-extension), which causes showQuickPick to
+  // return undefined immediately. Show a notification instead; the sidebar
+  // placeholder also has a "Run Setup Wizard" button.
+  void vscode.window.showInformationMessage(message, 'Setup').then((choice) => {
+    if (choice === 'Setup') void vscode.commands.executeCommand('forge.setupWizard');
+  });
+}
+
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   initLogger(context);
   const log = getLogger();
@@ -53,29 +90,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   let configPath = findConfigPath(storagePath, explicitConfig);
 
   if (!configPath) {
-    statusBar.setNoConfig();
-    context.subscriptions.push(
-      vscode.window.registerWebviewViewProvider(
-        SidebarProvider.viewId,
-        new SetupPlaceholderProvider(),
-      ),
-    );
-    context.subscriptions.push(
-      vscode.commands.registerCommand('forge.setupWizard', async () => {
-        const done = await runFirstRunWizard(context);
-        if (done) void vscode.commands.executeCommand('workbench.action.reloadWindow');
-      }),
-    );
-    // Don't auto-launch the wizard — the window may not be focused yet (e.g.
-    // freshly opened by --install-extension), which causes showQuickPick to
-    // return undefined immediately. Show a notification instead; the sidebar
-    // placeholder also has a "Run Setup Wizard" button.
-    void vscode.window.showInformationMessage(
-      'Forge: No config found. Run the setup wizard to get started.',
-      'Setup',
-    ).then((choice) => {
-      if (choice === 'Setup') void vscode.commands.executeCommand('forge.setupWizard');
-    });
+    enterSetupMode(context, statusBar, 'Forge: No config found. Run the setup wizard to get started.');
     return;
   }
   const activeConfigPath = configPath;
@@ -86,7 +101,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   } catch (err) {
     const msg = (err as Error).message;
     log.error(msg);
-    void vscode.window.showErrorMessage(msg);
+    // A broken global fallback config must not brick every workspace. Surface
+    // the reason, then drop into setup mode rather than aborting activation.
+    // For an explicit/workspace config the user is actively editing, surface a
+    // hard error instead so the mistake is not masked.
+    const isGlobalFallback = activeConfigPath.startsWith(storagePath);
+    if (isGlobalFallback) {
+      enterSetupMode(
+        context,
+        statusBar,
+        `Forge: global config failed to load — ${msg}. Run setup or fix ${activeConfigPath}.`,
+      );
+    } else {
+      void vscode.window.showErrorMessage(msg);
+    }
     return;
   }
 
@@ -103,8 +131,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }
 
   // ── Tool registry ─────────────────────────────────────────────────────────
+  const embeddingBackend = new EmbeddingBackend(config);
+  context.subscriptions.push(embeddingBackend);
+  const indexManager = new IndexManager(config, embeddingBackend);
   const toolRegistry = new ToolRegistry();
-  registerAllTools(toolRegistry, context.workspaceState, context.secrets, config.search);
+  registerAllTools(toolRegistry, context.workspaceState, context.secrets, config.search, indexManager);
 
   // ── Checkpoint stack ──────────────────────────────────────────────────────
   const checkpoints = new CheckpointStack();
@@ -117,6 +148,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }, config),
       )
     : new BackendPool(config);
+
+  // Localhost model-control API for external orchestrators + the Forge command
+  // palette. Always instantiated (cheap); the HTTP listener opens only when enabled.
+  const controlServer = new ControlServer(pool, config);
+  if (config.control_server?.enabled) controlServer.start();
+  context.subscriptions.push(controlServer);
+  registerControlServerCommands(context, controlServer);
 
   // ── KeepUndo CodeLens + Diff Decorations ─────────────────────────────────
   // Declared before SidebarProvider so the provider can reference its methods
@@ -154,6 +192,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     config,
     checkpoints,
     toolRegistry,
+    indexManager,
     context.workspaceState,
     codeLensProvider,
     diffDecorations,
@@ -177,6 +216,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(SidebarProvider.viewId, sidebarProvider, {
       webviewOptions: { retainContextWhenHidden: true },
+    }),
+    vscode.workspace.onDidSaveTextDocument((document) => {
+      indexManager.markDirty(document.uri.fsPath);
+    }),
+    vscode.workspace.onDidCreateFiles((event) => {
+      for (const file of event.files) indexManager.markDirty(file.fsPath);
+    }),
+    vscode.workspace.onDidDeleteFiles((event) => {
+      for (const file of event.files) indexManager.removePath(file.fsPath);
+    }),
+    vscode.workspace.onDidRenameFiles((event) => {
+      for (const file of event.files) {
+        indexManager.removePath(file.oldUri.fsPath);
+        indexManager.markDirty(file.newUri.fsPath);
+      }
     }),
   );
 
@@ -209,6 +263,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
       sidebarProvider.applyForgeConfig(config);
       // pool.applyForgeConfig is called inside sidebarProvider.applyForgeConfig
+      controlServer.applyForgeConfig(config);
+      if (config.control_server?.enabled) controlServer.start();
       statusBar.setStopped(config.active_model);
 
       log.info('Forge: config reloaded');
@@ -300,7 +356,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           try {
             const existing = fs.readFileSync(configPath, 'utf8');
             const block = `\nsearch:\n  provider: ${provider}\n  secret_key_name: ${secretKeyName}\n  max_results: 5\n`;
-            if (!existing.includes('search:')) {
+            if (!/^search:/m.test(existing)) {
               fs.appendFileSync(configPath, block, 'utf8');
               void vscode.window.showInformationMessage(`Forge: search block added to config.yaml. Reload window to activate.`);
             }

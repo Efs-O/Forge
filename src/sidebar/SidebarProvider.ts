@@ -39,6 +39,7 @@ import {
 } from './ConversationOps';
 import { buildWebviewHtml } from './WebviewBuilder';
 import { resolveToolPath } from './ToolDispatch';
+import type { IndexManager } from '../search/IndexManager';
 
 export type { SidebarProviderEvents };
 
@@ -94,6 +95,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private config: ForgeConfig,
     private readonly checkpoints: CheckpointStack,
     private readonly toolRegistry: ToolRegistry,
+    private readonly indexManager: IndexManager,
     private readonly workspaceState: vscode.Memento,
     private readonly codeLens: KeepUndoCodeLensProvider,
     diffDecorations: DiffDecorations,
@@ -103,6 +105,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     secrets?: vscode.SecretStorage,
   ) {
     this.sidebar = loadSidebarSession(workspaceState);
+    const savedClanker = workspaceState.get<boolean>('forge.clankerMode', false);
     this.agentLoop = new AgentLoop(
       pool,
       () => this.config,
@@ -118,11 +121,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       forgeLoader,
       secrets,
     );
+    if (savedClanker) this.agentLoop.setClankerMode(true);
 
     this.slashHandler = new SlashCommandHandler({
       getConfig: () => this.config,
       pool,
       events,
+      reindexCodebase: () => this.reindexCodebase(),
       newConversation: () => this.newConversation(),
       clearMessages: () => this.clearActiveMessages(),
       submitPrompt: (text) => this.submitPrompt(text),
@@ -135,7 +140,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       postTokenBudget: () => this.postTokenBudget(),
       runPromptToMarkdown: (text) => this.agentLoop.runPromptToMarkdown(text),
       isStreaming: () => this.agentLoop.streaming,
-      toggleClanker: () => this.agentLoop.toggleClanker(),
+      toggleClanker: () => {
+        const on = this.agentLoop.toggleClanker();
+        void this.workspaceState.update('forge.clankerMode', on);
+        return on;
+      },
     });
   }
 
@@ -220,10 +229,31 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return this.agentLoop.runPromptToMarkdown(text);
   }
 
+  async reindexCodebase(): Promise<void> {
+    try {
+      const summary = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Forge: rebuilding semantic code index...',
+          cancellable: false,
+        },
+        async () => this.indexManager.reindex(),
+      );
+      const message = `Forge: semantic index rebuilt (${summary.filesIndexed} files, ${summary.chunksIndexed} chunks).`;
+      this.post({ type: 'token', text: `\n> ${message}\n` });
+      void vscode.window.showInformationMessage(message);
+    } catch (err) {
+      const message = `Forge: ${(err as Error).message}`;
+      this.post({ type: 'error', message });
+      void vscode.window.showErrorMessage(message);
+    }
+  }
+
   applyForgeConfig(next: ForgeConfig): void {
     this.config = next;
     this.agentLoop.clearCapabilityCache();
     this.pool.applyForgeConfig(next);
+    this.indexManager.applyForgeConfig(next);
     this.post({ type: 'models', names: this.config.models.map((m) => m.name), active: this.config.active_model });
   }
 

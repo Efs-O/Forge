@@ -66,6 +66,8 @@ export function App(): React.ReactElement {
         case 'tokenBudget':    setTokenUsed(msg.used); setTokenMax(msg.max); break;
         case 'setInput':       setPrefillText(msg.text); break;
         case 'clankerChanged': dispatch({ type: 'CLANKER_CHANGED', enabled: msg.enabled }); break;
+        case 'thread-stream-state-changed':
+        case 'thread-read-state-changed':
         case 'historyRestore':
         case 'newChat':
           break;

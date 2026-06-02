@@ -108,6 +108,33 @@ models:
     expect(config.active_model).toBeNull();
     expect(config.models.map((model) => model.name)).toEqual(['local-gguf']);
   });
+
+  it('loads optional embeddings config when enabled', () => {
+    const dir = mkTempDir();
+    fs.writeFileSync(path.join(dir, 'config.yaml'), `active_model: local-gguf
+llama_server:
+  binary: llama-server
+models:
+  - name: local-gguf
+    provider: llama.cpp
+    gguf_path: C:/models/local.gguf
+embeddings:
+  enabled: true
+  model_path: C:/models/embedding.gguf
+  port: 8091
+  auto_index_on_search: true
+  max_file_size_kb: 128
+`, 'utf8');
+
+    const config = loadConfig(dir);
+    expect(config.embeddings).toMatchObject({
+      enabled: true,
+      model_path: 'C:/models/embedding.gguf',
+      port: 8091,
+      auto_index_on_search: true,
+      max_file_size_kb: 128,
+    });
+  });
 });
 
 describe('resolveExplicitConfigPath', () => {

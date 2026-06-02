@@ -21,6 +21,10 @@ export interface IBackendPool {
   applyForgeConfig(next: ForgeConfig): void;
   showConsole(modelName?: string): void;
   isAnyReady(): boolean;
+  /** Names of models currently holding a port slot (llama.cpp/direct). Used by
+   *  the control server to make capacity/eviction decisions. Excludes Ollama,
+   *  which is daemon-backed and does not consume a slot. */
+  loadedModelNames(): string[];
 }
 
 export class BackendPool implements IBackendPool {
@@ -118,6 +122,11 @@ export class BackendPool implements IBackendPool {
   isAnyReady(): boolean {
     return [...this.slots.values()].some((s) => s.backend.isReady())
       || [...this.ollamaSlots.values()].some((b) => b.isReady());
+  }
+
+  loadedModelNames(): string[] {
+    // Port-consuming slots only; Ollama models are unbounded and never evicted.
+    return [...this.slots.keys()];
   }
 
   // ── Private ───────────────────────────────────────────────────────────────

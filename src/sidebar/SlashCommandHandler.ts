@@ -12,6 +12,7 @@ export interface SlashCommandDeps {
   getConfig: () => ForgeConfig;
   pool: IBackendPool;
   events: SidebarProviderEvents;
+  reindexCodebase: () => Promise<void>;
   newConversation: () => Promise<void>;
   clearMessages: () => void;
   submitPrompt: (text: string) => Promise<void>;
@@ -58,6 +59,10 @@ export class SlashCommandHandler {
         } catch (err) {
           void vscode.window.showErrorMessage(`Forge: ${(err as Error).message}`);
         }
+        return;
+
+      case 'reindex':
+        await deps.reindexCodebase();
         return;
 
       case 'newChat':

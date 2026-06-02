@@ -29,6 +29,7 @@ Also relevant at repo root:
 
 - **[multi-tab-chat-plan.md](multi-tab-chat-plan.md)** — multiple sidebar conversation tabs and persistence migration path
 - **[offline-vscode-integration-plan.md](offline-vscode-integration-plan.md)** — low-code offline VS Code integration surfaces
+- **[embedding-code-search-plan.md](embedding-code-search-plan.md)** — optional local embedding index and `search_codebase` implementation plan
 
 ---
 

@@ -45,7 +45,12 @@ export function composeLlamaServerArgs(
   const batch = model.n_batch ?? server.n_batch ?? 512;
   args.push('--batch-size', String(batch));
 
-  const parallel = server.n_parallel ?? 1;
+  // Default to 4 concurrent slots so a single shared model load can serve a
+  // small worker fleet (e.g. parallel subagents) without spawning extra servers.
+  // NOTE: --ctx-size below is the TOTAL context split across these slots, so each
+  // slot gets ctx / n_parallel — size default_num_ctx/num_ctx accordingly
+  // (per-worker-ctx × n_parallel).
+  const parallel = server.n_parallel ?? 4;
   args.push('--parallel', String(parallel));
 
   const typeK = model.type_k ?? server.type_k ?? 8;
