@@ -2,7 +2,7 @@
   "name": "forge-llm",
   "displayName": "Forge LLM",
   "description": "Local-LLM coding assistant — direct llama.cpp, strict tool schemas, single execute-style workflow",
-  "version": "0.12.8",
+  "version": "0.12.9",
   "publisher": "Efsoo",
   "icon": "assets/publisher-logo.png",
   "galleryBanner": {
