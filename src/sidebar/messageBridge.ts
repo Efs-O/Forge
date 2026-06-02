@@ -71,6 +71,8 @@ export interface FileDiffMsg {
 export interface SetInputMsg         { type: 'setInput'; text: string }
 /** @deprecated Replaced by sessionSync on load. */
 export interface HistoryRestoreMsg   { type: 'historyRestore'; messages: Array<{ role: 'user' | 'assistant'; content: string }> }
+export interface ThreadStreamStateChangedMsg { type: 'thread-stream-state-changed' }
+export interface ThreadReadStateChangedMsg   { type: 'thread-read-state-changed' }
 
 /** Authoritative multi-tab state (tabs + transcripts). */
 export interface SessionSyncMsg {
@@ -98,6 +100,8 @@ export type HostToWebview =
   | TokenBudgetMsg
   | SetInputMsg
   | HistoryRestoreMsg
+  | ThreadStreamStateChangedMsg
+  | ThreadReadStateChangedMsg
   | SessionSyncMsg
   | FileDiffMsg
   | ClankerChangedMsg;
