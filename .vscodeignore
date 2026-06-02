@@ -25,6 +25,6 @@ scripts/**
 .vscodeignore
 **/*.map
 **/*.vsix
-bridge.yaml
+.coordination/**
 fireworks.html
 assets/.coordination/**

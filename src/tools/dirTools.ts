@@ -1,8 +1,7 @@
+import { spawn } from 'child_process';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function resolveUri(p: string): vscode.Uri {
   if (path.isAbsolute(p)) return vscode.Uri.file(p);
@@ -10,8 +9,6 @@ function resolveUri(p: string): vscode.Uri {
   if (!folders?.length) throw new Error('No workspace folder open.');
   return vscode.Uri.file(path.join(folders[0].uri.fsPath, p));
 }
-
-// ── list_directory ────────────────────────────────────────────────────────────
 
 export function makeListDirectoryTool(): RegisteredTool {
   return {
@@ -50,10 +47,48 @@ export function makeListDirectoryTool(): RegisteredTool {
   };
 }
 
-// ── search_code ───────────────────────────────────────────────────────────────
-
 const OUTPUT_LINE_LIMIT = 50;
-const CONTEXT_LINES = 5;
+const CONTEXT_LINES = 2;
+const SEARCH_EXCLUDES = ['!.git/**', '!node_modules/**', '!dist/**', '!out/**'];
+
+interface SearchCodeMatch {
+  path: string;
+  snippets: string[];
+}
+
+interface RipgrepLineData {
+  text?: string;
+}
+
+interface RipgrepPathData {
+  text?: string;
+}
+
+interface RipgrepMatchData {
+  path?: RipgrepPathData;
+  lines?: RipgrepLineData;
+  line_number?: number;
+  submatches?: Array<{ start: number; end: number }>;
+}
+
+interface RipgrepContextData {
+  path?: RipgrepPathData;
+  lines?: RipgrepLineData;
+  line_number?: number;
+}
+
+type RipgrepEvent =
+  | { type: 'match'; data: RipgrepMatchData }
+  | { type: 'context'; data: RipgrepContextData }
+  | { type: string; data?: unknown };
+
+function isMatchEvent(event: RipgrepEvent): event is { type: 'match'; data: RipgrepMatchData } {
+  return event.type === 'match';
+}
+
+function isContextEvent(event: RipgrepEvent): event is { type: 'context'; data: RipgrepContextData } {
+  return event.type === 'context';
+}
 
 export function makeSearchCodeTool(): RegisteredTool {
   return {
@@ -76,62 +111,144 @@ export function makeSearchCodeTool(): RegisteredTool {
     },
     permission: 'read',
     handler: async (args) => {
-      const query      = args['query'] as string;
-      const include    = (args['include'] as string | undefined) ?? '**/*';
+      const query = args['query'] as string;
+      const include = (args['include'] as string | undefined) ?? '**/*';
       const maxResults = (args['max_results'] as number | undefined) ?? 20;
 
-      const exclude = '{**/node_modules/**,**/.git/**,**/dist/**,**/out/**}';
-      const uris = await vscode.workspace.findFiles(include, exclude, maxResults * 5);
+      const matches = await searchWorkspaceText(query, include, maxResults);
+      if (matches.length === 0) return `No matches found for "${query}".`;
 
       const outputLines: string[] = [];
-      let filesMatched = 0;
-
-      for (const uri of uris) {
-        if (filesMatched >= maxResults) break;
+      for (const match of matches) {
         if (outputLines.length >= OUTPUT_LINE_LIMIT) break;
-
-        let text: string;
-        try {
-          const bytes = await vscode.workspace.fs.readFile(uri);
-          text = Buffer.from(bytes).toString('utf8');
-        } catch {
-          continue; // skip unreadable files (binary, permissions, etc.)
-        }
-
-        const lines = text.split('\n');
-        const matchingLineNumbers: number[] = [];
-
-        for (let i = 0; i < lines.length; i++) {
-          if (lines[i].includes(query)) {
-            matchingLineNumbers.push(i);
-          }
-        }
-
-        if (!matchingLineNumbers.length) continue;
-
-        filesMatched++;
-        const relPath = vscode.workspace.asRelativePath(uri, true);
-        outputLines.push(`\n=== ${relPath} ===`);
-
-        // Emit context blocks (deduplicated)
-        const emitted = new Set<number>();
-        for (const lineNum of matchingLineNumbers) {
-          const start = Math.max(0, lineNum - Math.floor(CONTEXT_LINES / 2));
-          const end   = Math.min(lines.length - 1, lineNum + Math.floor(CONTEXT_LINES / 2));
-          for (let l = start; l <= end; l++) {
-            if (!emitted.has(l)) {
-              emitted.add(l);
-              const marker = l === lineNum ? '>' : ' ';
-              outputLines.push(`${marker} ${l + 1}: ${lines[l]}`);
-              if (outputLines.length >= OUTPUT_LINE_LIMIT) break;
-            }
-          }
+        outputLines.push(`\n=== ${match.path} ===`);
+        for (const snippet of match.snippets) {
+          outputLines.push(snippet);
           if (outputLines.length >= OUTPUT_LINE_LIMIT) break;
         }
       }
 
-      if (!filesMatched) return `No matches found for "${query}".`;
       return outputLines.join('\n');
     },
   };
+}
+
+async function searchWorkspaceText(query: string, include: string, maxResults: number): Promise<SearchCodeMatch[]> {
+  const folder = vscode.workspace.workspaceFolders?.[0];
+  if (!folder) throw new Error('No workspace folder open.');
+
+  const args = [
+    '--json',
+    '--fixed-strings',
+    '--line-number',
+    '--with-filename',
+    '--context',
+    String(CONTEXT_LINES),
+    '--glob',
+    include,
+    ...SEARCH_EXCLUDES.flatMap((glob) => ['--glob', glob]),
+    query,
+    '.',
+  ];
+
+  return new Promise<SearchCodeMatch[]>((resolve, reject) => {
+    const matches = new Map<string, SearchCodeMatch>();
+    let stdoutBuffer = '';
+    let stderr = '';
+    let settled = false;
+    let terminatedEarly = false;
+
+    const child = spawn('rg', args, {
+      cwd: folder.uri.fsPath,
+      shell: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    const finish = (result: SearchCodeMatch[] | Error): void => {
+      if (settled) return;
+      settled = true;
+      if (result instanceof Error) reject(result);
+      else resolve(result);
+    };
+
+    const stopIfEnoughMatches = (): void => {
+      if (matches.size < maxResults || child.killed) return;
+      terminatedEarly = true;
+      child.kill();
+    };
+
+    const appendEvent = (event: RipgrepEvent): void => {
+      const data = isMatchEvent(event)
+        ? event.data
+        : isContextEvent(event)
+          ? event.data
+          : null;
+      if (!data) return;
+
+      const filePath = data.path?.text;
+      const line = data.lines?.text;
+      const lineNumber = data.line_number;
+      if (!filePath || line === undefined || lineNumber === undefined) return;
+
+      const normalizedPath = filePath.replace(/\\/g, '/').replace(/^\.\//, '');
+      let entry = matches.get(normalizedPath);
+      if (!entry) {
+        if (matches.size >= maxResults) {
+          stopIfEnoughMatches();
+          return;
+        }
+        entry = { path: normalizedPath, snippets: [] };
+        matches.set(normalizedPath, entry);
+      }
+
+      const marker = event.type === 'match' ? '>' : ' ';
+      const snippet = `${marker} ${lineNumber}: ${line.replace(/\r?\n$/, '')}`;
+      if (!entry.snippets.includes(snippet)) entry.snippets.push(snippet);
+      stopIfEnoughMatches();
+    };
+
+    const flushStdout = (): void => {
+      const lines = stdoutBuffer.split(/\r?\n/);
+      stdoutBuffer = lines.pop() ?? '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          appendEvent(JSON.parse(trimmed) as RipgrepEvent);
+        } catch {
+          // Ignore malformed rg output and continue parsing subsequent lines.
+        }
+      }
+    };
+
+    child.stdout?.on('data', (chunk: Buffer) => {
+      stdoutBuffer += chunk.toString('utf8');
+      flushStdout();
+    });
+    child.stderr?.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString('utf8');
+    });
+    child.once('error', (err) => {
+      finish(new Error(`search_code: failed to start ripgrep: ${err.message}`));
+    });
+    child.once('close', (code) => {
+      flushStdout();
+      if (stdoutBuffer.trim().length > 0) {
+        try {
+          appendEvent(JSON.parse(stdoutBuffer.trim()) as RipgrepEvent);
+        } catch {
+          // Ignore malformed trailing output.
+        }
+      }
+
+      if (settled) return;
+      if (terminatedEarly || code === 0 || code === 1) {
+        finish(Array.from(matches.values()));
+        return;
+      }
+
+      const detail = stderr.trim() || `ripgrep exited with code ${code}`;
+      finish(new Error(`search_code: ${detail}`));
+    });
+  });
 }
