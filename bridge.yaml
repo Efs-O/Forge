@@ -577,3 +577,33 @@ models:
       temperature: 0.7
       max_tokens: 30000
 
+  # ---------------------------------------------------------------------------
+  # OpenRouter models (provider: openrouter). OpenAI-compatible cloud gateway.
+  # Auth via VS Code SecretStorage — run "Forge: Set Cloud Provider Token",
+  # key name "openrouter", paste your key from https://openrouter.ai/keys.
+  # No local backend; Forge calls https://openrouter.ai/api/v1 directly.
+  # Model ids: copy the exact slug from https://openrouter.ai/models — free
+  # variants carry the ":free" suffix and share ONE account-wide rate limit
+  # (~20 req/min + a daily cap), so route only heavy jobs here.
+  # ---------------------------------------------------------------------------
+
+  openai/gpt-oss-120b:free:
+    provider: openrouter
+    api_key_secret: openrouter
+    capabilities: [tool-call]
+    num_ctx: 131072
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 32768
+
+  openai/gpt-oss-20b:free:
+    provider: openrouter
+    api_key_secret: openrouter
+    capabilities: [tool-call]
+    num_ctx: 131072
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 32768
+

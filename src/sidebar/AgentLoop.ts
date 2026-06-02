@@ -152,15 +152,27 @@ export class AgentLoop {
     const activeFile = vscode.window.activeTextEditor?.document.uri.fsPath;
     log.debug(`[AgentLoop] runTurn model=${model.name} conv=${convId}`);
 
-    // xAI: no local backend — resolve OAuth token and call API directly.
-    if (model.provider === 'xai') {
+    // Cloud providers (xai, openrouter): no local backend — resolve token and call the API directly.
+    if (model.provider === 'xai' || model.provider === 'openrouter') {
       let apiKey: string;
       try {
-        apiKey = await resolveXaiToken(model.api_key_secret, this.secrets);
-        log.info(`[AgentLoop] xAI token resolved for model=${model.name}`);
+        if (model.provider === 'xai') {
+          apiKey = await resolveXaiToken(model.api_key_secret, this.secrets);
+        } else {
+          const keyName = model.api_key_secret;
+          const stored = keyName ? await this.secrets?.get(keyName) : undefined;
+          if (!stored) {
+            throw new Error(
+              `OpenRouter: no API key in SecretStorage (key: ${keyName ?? 'unset'}). ` +
+                'Run "Forge: Set Cloud Provider Token" and set api_key_secret in bridge.yaml.',
+            );
+          }
+          apiKey = stored;
+        }
+        log.info(`[AgentLoop] ${model.provider} token resolved for model=${model.name}`);
       } catch (err) {
         const msg = (err as Error).message;
-        log.error(`[AgentLoop] xAI token resolution failed: ${msg}`);
+        log.error(`[AgentLoop] ${model.provider} token resolution failed: ${msg}`);
         postC({ type: 'error', message: msg });
         this.resolveStreamingLifecycle(convId);
         return;
@@ -171,10 +183,11 @@ export class AgentLoop {
       this.checkpoints.beginTurn(turnId);
       this.streamingConvIds.add(convId);
       this.events.onGenerationStarted?.(model.name);
+      const cloudBaseUrl = model.provider === 'xai' ? 'https://api.x.ai' : 'https://openrouter.ai/api';
       try {
-        await this.runAgentLoop('https://api.x.ai', conv, model, activeFile, ctrl, postC, apiKey);
+        await this.runAgentLoop(cloudBaseUrl, conv, model, activeFile, ctrl, postC, apiKey);
       } catch (err) {
-        log.error(`[AgentLoop] xAI agent loop error: ${(err as Error).message}`);
+        log.error(`[AgentLoop] ${model.provider} agent loop error: ${(err as Error).message}`);
         postC({ type: 'error', message: (err as Error).message });
       } finally {
         this.streamingConvIds.delete(convId);

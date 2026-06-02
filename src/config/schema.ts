@@ -14,7 +14,7 @@ const ActiveModelSchema = z.preprocess((value) => {
 
 const ModelConfigSchema = z.object({
   name: z.string().min(1),
-  provider: z.enum(['llama.cpp', 'ollama', 'xai']).optional(),
+  provider: z.enum(['llama.cpp', 'ollama', 'xai', 'openrouter']).optional(),
   gguf_path: z.string().min(1).optional(),
   endpoint: z.string().url().optional(),
   n_gpu_layers: z.number().int().optional(),

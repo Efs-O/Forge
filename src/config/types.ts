@@ -2,7 +2,7 @@ export interface ModelConfig {
   /** Display name shown in the sidebar model picker. */
   name: string;
   /** Runtime provider for this model entry. */
-  provider?: 'llama.cpp' | 'ollama' | 'xai';
+  provider?: 'llama.cpp' | 'ollama' | 'xai' | 'openrouter';
   /** Absolute path to the .gguf file. Required for llama.cpp models. */
   gguf_path?: string;
   /** Optional path to the vision projector .gguf (mmproj). Enables multimodal image input. */
@@ -51,7 +51,7 @@ export interface ModelConfig {
   reasoning_effort?: 'high' | 'medium' | 'low' | 'none';
   /** When true, strip visible thinking/channel markup when think is explicitly false. */
   strip_thinking_channels?: boolean;
-  /** SecretStorage key holding the bearer token for cloud providers (e.g. xAI OAuth token). */
+  /** SecretStorage key holding the bearer token for cloud providers (xAI OAuth token, or OpenRouter API key). */
   api_key_secret?: string;
 }
 
