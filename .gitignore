@@ -11,6 +11,10 @@ Thumbs.db
 # Claude Code local settings
 .claude/
 
+# AgentWatch coordination runtime artifacts — never track these
+.coordination/
+assets/.coordination/
+
 # Scratch / demo files
 fireworks.html
 
