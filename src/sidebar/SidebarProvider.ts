@@ -102,6 +102,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     templateEngine?: TemplateEngine,
     private readonly events: SidebarProviderEvents = {},
     forgeLoader?: ForgeInstructionsLoader,
+    secrets?: vscode.SecretStorage,
   ) {
     this.sidebar = loadSidebarSession(workspaceState);
     const savedClanker = workspaceState.get<boolean>('forge.clankerMode', false);
@@ -118,6 +119,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       () => this.view,
       templateEngine,
       forgeLoader,
+      secrets,
     );
     if (savedClanker) this.agentLoop.setClankerMode(true);
 

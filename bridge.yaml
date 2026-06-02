@@ -523,3 +523,121 @@ models:
       top_p: 0.95
       max_tokens: 131072
 
+
+  # ---------------------------------------------------------------------------
+  # xAI / Grok models (provider: xai). Auth via VS Code SecretStorage —
+  # run "Forge: Set API Key", provider "xai", paste your xAI OAuth token.
+  # No local backend needed; Forge calls https://api.x.ai directly.
+  # ---------------------------------------------------------------------------
+
+  grok-build-0.1:
+    provider: xai
+    api_key_secret: xai
+    capabilities: [tool-call]
+    num_ctx: 256000
+    sampling:
+      temperature: 0.7
+      max_tokens: 65536
+
+  grok-4.3:
+    provider: xai
+    api_key_secret: xai
+    capabilities: [tool-call]
+    num_ctx: 1000000
+    sampling:
+      temperature: 0.7
+      max_tokens: 30000
+
+  grok-4.20-0309-non-reasoning:
+    provider: xai
+    api_key_secret: xai
+    capabilities: [tool-call]
+    num_ctx: 2000000
+    sampling:
+      temperature: 0.7
+      max_tokens: 30000
+
+  grok-4.20-0309-reasoning:
+    provider: xai
+    api_key_secret: xai
+    capabilities: [tool-call]
+    think: true
+    num_ctx: 2000000
+    sampling:
+      temperature: 0.7
+      max_tokens: 30000
+
+  # No tool_call support — chat only
+  grok-4.20-multi-agent-0309:
+    provider: xai
+    api_key_secret: xai
+    strip_tools: true
+    num_ctx: 2000000
+    sampling:
+      temperature: 0.7
+      max_tokens: 30000
+
+  # ---------------------------------------------------------------------------
+  # OpenRouter models (provider: openrouter). OpenAI-compatible cloud gateway.
+  # Auth via VS Code SecretStorage — run "Forge: Set Cloud Provider Token",
+  # key name "openrouter", paste your key from https://openrouter.ai/keys.
+  # No local backend; Forge calls https://openrouter.ai/api/v1 directly.
+  # Model ids: copy the exact slug from https://openrouter.ai/models — free
+  # variants carry the ":free" suffix and share ONE account-wide rate limit
+  # (~20 req/min + a daily cap), so route only heavy jobs here. The YAML key IS
+  # the slug sent to OpenRouter, so it must match exactly (a wrong slug = 404).
+  # Slugs below verified against https://openrouter.ai/api/v1/models on
+  # 2026-06-02 (all support tool-calling); free models come and go, so re-check
+  # if a model starts returning 404.
+  # ---------------------------------------------------------------------------
+
+  nvidia/nemotron-3-super-120b-a12b:free:
+    provider: openrouter
+    api_key_secret: openrouter
+    capabilities: [tool-call, long-context]
+    num_ctx: 262144
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 16384
+
+  moonshotai/kimi-k2.6:free:
+    provider: openrouter
+    api_key_secret: openrouter
+    capabilities: [tool-call, long-context]
+    num_ctx: 262144
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 16384
+
+  poolside/laguna-m.1:free:
+    provider: openrouter
+    api_key_secret: openrouter
+    capabilities: [tool-call, long-context]
+    num_ctx: 262144
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 16384
+
+  google/gemma-4-31b-it:free:
+    provider: openrouter
+    api_key_secret: openrouter
+    capabilities: [tool-call, long-context]
+    num_ctx: 262144
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 16384
+
+  google/gemma-4-26b-a4b-it:free:
+    provider: openrouter
+    api_key_secret: openrouter
+    capabilities: [tool-call, long-context]
+    num_ctx: 262144
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 16384
+

@@ -211,6 +211,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       },
     },
     forgeLoader,
+    context.secrets,
   );
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(SidebarProvider.viewId, sidebarProvider, {
@@ -374,6 +375,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (key) {
         await context.secrets.store(secretKeyName, key);
         void vscode.window.showInformationMessage(`Forge: ${provider} API key saved.`);
+      }
+    }),
+
+    vscode.commands.registerCommand('forge.setCloudToken', async () => {
+      const secretKey = await vscode.window.showInputBox({
+        prompt: 'Secret key name (must match api_key_secret in bridge.yaml, e.g. "xai")',
+        placeHolder: 'xai',
+        ignoreFocusOut: true,
+      });
+      if (!secretKey?.trim()) return;
+      const token = await vscode.window.showInputBox({
+        prompt: `Paste bearer token for "${secretKey.trim()}"`,
+        password: true,
+        placeHolder: 'eyJ...',
+        ignoreFocusOut: true,
+      });
+      if (token?.trim()) {
+        await context.secrets.store(secretKey.trim(), token.trim());
+        void vscode.window.showInformationMessage(`Forge: token saved under key "${secretKey.trim()}".`);
       }
     }),
 

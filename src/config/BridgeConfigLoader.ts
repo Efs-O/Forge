@@ -21,6 +21,7 @@ interface BridgeModelEntry {
   think?: unknown;
   reasoning_effort?: unknown;
   strip_thinking_channels?: unknown;
+  api_key_secret?: unknown;
 }
 
 const REASONING_EFFORTS = new Set(['high', 'medium', 'low', 'none']);
@@ -86,8 +87,8 @@ function maybeReasoningEffort(
   return effort as ModelConfig['reasoning_effort'];
 }
 
-function normalizeProvider(entry: BridgeModelEntry): 'llama.cpp' | 'ollama' {
-  if (entry.provider === 'llama.cpp' || entry.provider === 'ollama') {
+function normalizeProvider(entry: BridgeModelEntry): 'llama.cpp' | 'ollama' | 'xai' {
+  if (entry.provider === 'llama.cpp' || entry.provider === 'ollama' || entry.provider === 'xai') {
     return entry.provider;
   }
   if (typeof entry.gguf_path === 'string' && entry.gguf_path.trim()) {
@@ -167,6 +168,7 @@ export function loadBridgeModels(bridgeConfigPath: string): ModelConfig[] {
       think: maybeBoolean(entry.think, `models.${name}.think`),
       reasoning_effort: maybeReasoningEffort(entry.reasoning_effort, `models.${name}.reasoning_effort`),
       strip_thinking_channels: maybeBoolean(entry.strip_thinking_channels, `models.${name}.strip_thinking_channels`),
+      api_key_secret: maybeString(entry.api_key_secret, `models.${name}.api_key_secret`),
     };
     return Object.fromEntries(
       Object.entries(model).filter(([, fieldValue]) => fieldValue !== undefined),

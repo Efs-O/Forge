@@ -1,4 +1,7 @@
 import type { ChatCompletionRequest, StreamChunk, ToolCall } from './types';
+import { getLogger } from '../util/logger';
+
+const log = getLogger();
 
 export type TokenHandler = (token: string) => void;
 export type ReasoningHandler = (token: string) => void;
@@ -38,12 +41,15 @@ export async function streamChatCompletion(
   request: ChatCompletionRequest,
   handlers: StreamHandlers,
   signal?: AbortSignal,
+  apiKey?: string,
 ): Promise<void> {
   let response: Response;
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
   try {
     response = await fetch(`${baseUrl}/v1/chat/completions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(request),
       signal: signal ?? null,
     });
@@ -58,7 +64,9 @@ export async function streamChatCompletion(
 
   if (!response.ok) {
     const body = await response.text().catch(() => '');
-    handlers.onError(new Error(`HTTP ${response.status}: ${body}`));
+    const msg = `HTTP ${response.status}: ${body}`;
+    log.error(`[OpenAIClient] ${baseUrl} — ${msg}`);
+    handlers.onError(new Error(msg));
     return;
   }
 

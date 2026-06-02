@@ -19,7 +19,9 @@ Backends: llama.cpp (GGUF, direct spawn), Python bridge
 routing — auth handled by `ollama auth login`, not Forge). Optional web search
 via Tavily / Brave (user-supplied key). Slash commands: `/review`, `/compact`,
 `/undo`, `/keep`, `/newChat`, `/clearChat`, `/restartBackend`, `/unloadModel`,
-`/reloadWindow`. No direct cloud LLM calls from Forge itself, ever.
+`/reloadWindow`. No direct cloud LLM calls from Forge except opt-in,
+user-configured OpenAI-compatible providers (xAI, OpenRouter) with the key held
+in VS Code SecretStorage.
 
 The wedge: first-class llama.cpp control, tools tuned for local-model
 reliability, zero-friction GGUF loading, optional search, hallucination-aware.
@@ -27,7 +29,7 @@ reliability, zero-friction GGUF loading, optional search, hallucination-aware.
 ---
 
 ## Hard Stops - Never Do These
-- No direct cloud LLM calls from Forge — Ollama cloud routing via local daemon is the only exception (auth stays in Ollama, not Forge)
+- No direct cloud LLM calls from Forge **except** explicitly user-configured, opt-in OpenAI-compatible cloud providers (currently `xai`, `openrouter`) and Ollama cloud routing via local daemon. For these: the API key/token lives in VS Code SecretStorage only (never in `config.yaml`/`bridge.yaml`/git), no telemetry, and errors surface to the user. Do not add any other outbound LLM traffic.
 - No telemetry, no auto-update pings, no analytics
 - No hardcoded secrets, API keys, or OS paths
 - No destructive commands (`rm -rf`, `DROP TABLE`, `git reset --hard`) without explicit user confirmation
@@ -166,8 +168,8 @@ instead.
 - All LLM dispatch goes through `src/llm/ChatClient.ts` — it routes to `OpenAIClient` or `OllamaNativeClient` based on provider
 - Ollama cloud models route through the local Ollama daemon at `localhost:11434`; Forge sends no auth headers — auth is handled by `ollama auth login` on the user's machine
 - Tool calls use strict JSON Schema — never expose a free-form `string` blob arg
-- Network calls are limited to user-configured search/fetch endpoints — no other outbound traffic from Forge, ever
-- API keys (Tavily, Brave) live in VS Code `SecretStorage`, never in `config.yaml` or git
+- Network calls are limited to user-configured search/fetch endpoints and opt-in cloud LLM providers (xAI, OpenRouter, Ollama-cloud-via-daemon) — no other outbound traffic from Forge, ever
+- API keys/tokens (Tavily, Brave, xAI, OpenRouter) live in VS Code `SecretStorage`, never in `config.yaml`, `bridge.yaml`, or git
 - Webview ↔ host messages go through a single typed message bridge with discriminated unions (`src/sidebar/messageBridge.ts`)
 - Per-turn checkpoints snapshot before any agent write; Keep/Undo decorations land before any write tool ships
 - Keep dependencies minimal unless the user explicitly asks

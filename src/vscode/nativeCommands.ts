@@ -76,6 +76,12 @@ export function registerNativeCommands(context: vscode.ExtensionContext, deps: N
       );
       if (!pick) return;
       config.active_model = pick.modelName;
+      const selectedModel = config.models.find((m) => m.name === pick.modelName);
+      if (selectedModel?.provider === 'xai') {
+        deps.statusBar.setReady(pick.modelName);
+        void vscode.window.showInformationMessage(`Forge: switched to ${pick.modelName} (xAI)`);
+        return;
+      }
       deps.statusBar.setStarting(pick.modelName);
       try {
         await deps.backend.acquire(pick.modelName);
