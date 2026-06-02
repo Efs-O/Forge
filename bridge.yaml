@@ -584,26 +584,60 @@ models:
   # No local backend; Forge calls https://openrouter.ai/api/v1 directly.
   # Model ids: copy the exact slug from https://openrouter.ai/models — free
   # variants carry the ":free" suffix and share ONE account-wide rate limit
-  # (~20 req/min + a daily cap), so route only heavy jobs here.
+  # (~20 req/min + a daily cap), so route only heavy jobs here. The YAML key IS
+  # the slug sent to OpenRouter, so it must match exactly (a wrong slug = 404).
+  # Slugs below verified against https://openrouter.ai/api/v1/models on
+  # 2026-06-02 (all support tool-calling); free models come and go, so re-check
+  # if a model starts returning 404.
   # ---------------------------------------------------------------------------
 
-  openai/gpt-oss-120b:free:
+  nvidia/nemotron-3-super-120b-a12b:free:
     provider: openrouter
     api_key_secret: openrouter
-    capabilities: [tool-call]
-    num_ctx: 131072
+    capabilities: [tool-call, long-context]
+    num_ctx: 262144
     sampling:
       temperature: 0.6
       top_p: 0.95
-      max_tokens: 32768
+      max_tokens: 16384
 
-  openai/gpt-oss-20b:free:
+  moonshotai/kimi-k2.6:free:
     provider: openrouter
     api_key_secret: openrouter
-    capabilities: [tool-call]
-    num_ctx: 131072
+    capabilities: [tool-call, long-context]
+    num_ctx: 262144
     sampling:
       temperature: 0.6
       top_p: 0.95
-      max_tokens: 32768
+      max_tokens: 16384
+
+  poolside/laguna-m.1:free:
+    provider: openrouter
+    api_key_secret: openrouter
+    capabilities: [tool-call, long-context]
+    num_ctx: 262144
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 16384
+
+  google/gemma-4-31b-it:free:
+    provider: openrouter
+    api_key_secret: openrouter
+    capabilities: [tool-call, long-context]
+    num_ctx: 262144
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 16384
+
+  google/gemma-4-26b-a4b-it:free:
+    provider: openrouter
+    api_key_secret: openrouter
+    capabilities: [tool-call, long-context]
+    num_ctx: 262144
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 16384
 
