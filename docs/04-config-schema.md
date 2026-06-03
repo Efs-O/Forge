@@ -24,7 +24,7 @@ backend:
   mode: direct                        # 'direct' (default) | 'bridge'
   llama_server_binary: auto           # 'auto' (PATH lookup) | absolute path
   bridge_url: http://127.0.0.1:9099   # only used when mode: bridge
-  bridge_command: continue-llamacpp-bridge  # only used when mode: bridge AND we should spawn it
+  bridge_command: forge-llamacpp-bridge  # only used when mode: bridge AND we should spawn it
   bridge_config: ./config/bridge.yaml       # bridge YAML path (only mode: bridge)
   host: 127.0.0.1
   port: auto                          # 'auto' = pick free port; otherwise integer

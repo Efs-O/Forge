@@ -12,7 +12,7 @@
 - Direct `llama-server` integration (Path A, the default).
 - Every `llama-server` flag exposable in `config.yaml` — `n_gpu_layers`, `cache_type_k/v`, `flash_attn`, `n_batch`, `n_parallel`, `extra_llama_server_args`, etc.
 - Hot-swap GGUFs based on the requested model id.
-- Already proven in production via `continue-llamacpp-bridge`. Forge ports the bridge semantics to TypeScript so end users don't need Python.
+- Already proven in production via `forge-llamacpp-bridge`. Forge ports the bridge semantics to TypeScript so end users don't need Python.
 - Ollama is **not** a backend. Ollama bundles llama.cpp but hides flags; Forge takes the opposite stance.
 
 ### 2. Tools tuned for local-model reliability

@@ -14,7 +14,7 @@
 # Reference this file from config.yaml with:
 #   bridge_config: /path/to/bridge.yaml
 
-api_key: "continue-local-change-me"
+api_key: "forge-local-change-me"
 bind_host: "127.0.0.1"
 bind_port: 9099
 # When true (default per model or here), strip channel/thought markup only if that model has think: false.
@@ -39,7 +39,7 @@ llama_server:
   flash_attn_default: true
 
 models:
-  # Keys must match the client "model" id (Continue, etc.).
+  # Keys must match the client "model" id (Forge, etc.).
 
   # ---------------------------------------------------------------------------
   # llama.cpp / GGUF models — change gguf_path and mmproj_path to your paths

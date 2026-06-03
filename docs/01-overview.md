@@ -12,7 +12,7 @@ posture. No cloud LLM endpoints, ever.
 - Privacy- and air-gap-conscious developers who can't or won't send code to cloud LLMs
 - Local-LLM enthusiasts who want first-class llama.cpp control instead of Ollama-mediated abstraction
 - Users running models on consumer GPUs (Qwen3, Gemma 4 families, 3-bit quants, ~100k context)
-- Power users of `continue-llamacpp-bridge` who want a sidebar UX instead of (or alongside) Continue
+- Power users of `forge-llamacpp-bridge` who want a sidebar UX instead of (or alongside) Continue
 
 ## What It Is Not
 
@@ -29,7 +29,7 @@ VS Code Extension (TypeScript)
     ├── Sidebar (WebviewViewProvider)         user-facing chat + mode + actions
     ├── BackendController                     mode-agnostic interface
     │       ├── DirectBackend  (default)      spawns llama-server itself
-    │       └── BridgeBackend  (opt-in)       talks to continue-llamacpp-bridge
+    │       └── BridgeBackend  (opt-in)       talks to forge-llamacpp-bridge
     ├── OpenAIClient                          streaming /v1/chat/completions
     ├── ToolRegistry                          dispatch + capability/permission gating
     ├── CheckpointStack                       per-turn snapshots + Keep/Undo decorations

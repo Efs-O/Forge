@@ -15,7 +15,7 @@ confirmation gate, per-turn checkpoint/Keep/Undo for file changes, reasoning
 token display, and image+file attachment support.
 
 Backends: llama.cpp (GGUF, direct spawn), Python bridge
-(continue-llamacpp-bridge, opt-in), and Ollama (local models + Ollama cloud
+(forge-llamacpp-bridge, opt-in), and Ollama (local models + Ollama cloud
 routing — auth handled by `ollama auth login`, not Forge). Optional web search
 via Tavily / Brave (user-supplied key). Slash commands: `/review`, `/compact`,
 `/undo`, `/keep`, `/newChat`, `/clearChat`, `/restartBackend`, `/unloadModel`,

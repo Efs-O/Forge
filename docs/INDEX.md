@@ -41,7 +41,7 @@ These are settled. Do not relitigate without flagging.
 | ------------------------- | --------------------------------------------------------------------- |
 | Project name              | **Forge**                                                             |
 | Backend default           | **Path A — Direct** (TS spawns `llama-server`, no Python required)    |
-| Backend alternative       | Path B — Bridge mode (opt-in, for users running `continue-llamacpp-bridge`) |
+| Backend alternative       | Path B — Bridge mode (opt-in, for users running `forge-llamacpp-bridge`) |
 | Backend protocol          | OpenAI-compatible HTTP (`/v1/chat/completions`)                       |
 | Ollama as backend         | **Dropped** — llama.cpp only                                          |
 | Target models             | Qwen3 family + Gemma 4 family (3-bit, ~100k ctx default)              |

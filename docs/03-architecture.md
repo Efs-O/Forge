@@ -115,7 +115,7 @@ the extension is mode-agnostic.
 
 ### Path B — Bridge (opt-in)
 
-- Extension expects `continue-llamacpp-bridge` running on a user-configured URL (or spawns it if `bridge_command` set).
+- Extension expects `forge-llamacpp-bridge` running on a user-configured URL (or spawns it if `bridge_command` set).
 - Forge talks to the bridge over the same OpenAI-compatible HTTP protocol.
 - Hot-swap, sampling-merge, system-prompt injection all happen bridge-side.
 - For users who already run the bridge with Continue.

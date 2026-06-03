@@ -1,12 +1,12 @@
 # Bridge YAML for local testing (paths on this machine).
 #
 # Run:
-#   continue-llamacpp-bridge config/bridge.yaml
+#   forge-llamacpp-bridge config/bridge.yaml
 #
-# Continue: apiBase http://127.0.0.1:9099/v1, apiKey = api_key below,
-# model id = one of the keys under models: (must match ~/.continue/config.yaml).
+# Forge (bridge mode): apiBase http://127.0.0.1:9099/v1, apiKey = api_key below,
+# model id = one of the keys under models: (referenced via bridge_config in config.yaml).
 
-api_key: "continue-local-change-me"
+api_key: "forge-local-change-me"
 bind_host: "127.0.0.1"
 bind_port: 9099
 # When true (default per model or here), strip channel/thought markup only if that model has think: false.
@@ -31,7 +31,7 @@ llama_server:
   flash_attn_default: true
 
 models:
-  # Keys must match the client "model" id (Continue,etc.).
+  # Keys must match the client "model" id (Forge, etc.).
   gemma4-e4b-it-ud-q4kxl:
     gguf_path: "N:/GEMMA GGUF UNSLOTH/E4B/gemma-4-E4B-it-UD-Q4_K_XL.gguf"
     mmproj_path: "N:/GEMMA GGUF UNSLOTH/E4B/mmproj-F16.gguf"
