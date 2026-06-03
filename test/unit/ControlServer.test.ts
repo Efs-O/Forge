@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { ControlServer } from '../../src/backend/ControlServer';
+import { ControlServer, type ControlServerDeps } from '../../src/backend/ControlServer';
 import type { IBackendPool } from '../../src/backend/BackendPool';
 import type { BackendController } from '../../src/backend/BackendController';
 import type { ForgeConfig } from '../../src/config/types';
@@ -19,7 +19,10 @@ function fakeController(model: string): BackendController {
 
 class FakePool implements IBackendPool {
   readonly loaded = new Map<string, BackendController>();
+  /** When set, acquire waits this long — lets concurrent /ensure calls overlap. */
+  acquireDelayMs = 0;
   async acquire(name: string): Promise<BackendController> {
+    if (this.acquireDelayMs) await new Promise((r) => setTimeout(r, this.acquireDelayMs));
     if (!this.loaded.has(name)) this.loaded.set(name, fakeController(name));
     return this.loaded.get(name)!;
   }
@@ -31,7 +34,7 @@ class FakePool implements IBackendPool {
   loadedModelNames(): string[] { return [...this.loaded.keys()]; }
 }
 
-function makeConfig(port: number): ForgeConfig {
+function makeConfig(port: number, maxModels = 1): ForgeConfig {
   return {
     models: [
       { name: 'A', provider: 'llama.cpp', gguf_path: '/a.gguf' },
@@ -39,10 +42,20 @@ function makeConfig(port: number): ForgeConfig {
     ],
     active_model: 'A',
     llama_server: {},
-    max_simultaneous_models: 1,
+    max_simultaneous_models: maxModels,
     control_server: { enabled: true, port },
   } as ForgeConfig;
 }
+
+// Default test deps: probe always passes instantly, no eviction grace. Individual
+// tests override what they exercise (slow/failing probe, grace window).
+const testDeps = (over: ControlServerDeps = {}): ControlServerDeps => ({
+  probe: async () => true,
+  readinessIntervalMs: 5,
+  readinessTimeoutMs: 500,
+  evictionGraceMs: 0,
+  ...over,
+});
 
 async function waitReady(base: string): Promise<void> {
   for (let i = 0; i < 50; i++) {
@@ -63,7 +76,7 @@ describe('ControlServer', () => {
     const port = 18799;
     const base = `http://127.0.0.1:${port}`;
     const pool = new FakePool();
-    server = new ControlServer(pool, makeConfig(port));
+    server = new ControlServer(pool, makeConfig(port), testDeps());
     server.start();
     await waitReady(base);
 
@@ -88,11 +101,105 @@ describe('ControlServer', () => {
   it('404s an unknown model and an unknown route', async () => {
     const port = 18800;
     const base = `http://127.0.0.1:${port}`;
-    server = new ControlServer(new FakePool(), makeConfig(port));
+    server = new ControlServer(new FakePool(), makeConfig(port), testDeps());
     server.start();
     await waitReady(base);
 
     expect((await post(base, 'Z')).status).toBe(404);
     expect((await fetch(`${base}/nope`)).status).toBe(404);
+  });
+
+  it('/ensure blocks until the readiness probe passes (cold load)', async () => {
+    const port = 18801;
+    const base = `http://127.0.0.1:${port}`;
+    let serving = false;
+    server = new ControlServer(new FakePool(), makeConfig(port), testDeps({
+      probe: async () => serving,
+      readinessTimeoutMs: 2000,
+    }));
+    server.start();
+    await waitReady(base);
+
+    const inflight = post(base, 'A');
+    // Backend not serving yet → request stays pending.
+    await new Promise((r) => setTimeout(r, 50));
+    let settled = false;
+    void inflight.then(() => { settled = true; });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(settled).toBe(false);
+
+    serving = true;
+    const res = await inflight;
+    expect(res.status).toBe(200);
+  });
+
+  it('/ensure returns 502 when the backend never becomes ready', async () => {
+    const port = 18802;
+    const base = `http://127.0.0.1:${port}`;
+    server = new ControlServer(new FakePool(), makeConfig(port), testDeps({
+      probe: async () => false,
+      readinessTimeoutMs: 60,
+    }));
+    server.start();
+    await waitReady(base);
+
+    const res = await post(base, 'A');
+    expect(res.status).toBe(502);
+    expect((await res.json()).error).toMatch(/loaded but not ready/);
+  });
+
+  it('serializes concurrent /ensure + /release; holds never goes negative', async () => {
+    const port = 18803;
+    const base = `http://127.0.0.1:${port}`;
+    const pool = new FakePool();
+    pool.acquireDelayMs = 10; // force the ensure calls to overlap
+    server = new ControlServer(pool, makeConfig(port, 4), testDeps());
+    server.start();
+    await waitReady(base);
+
+    // 4 concurrent same-model ensures interleaved with releases.
+    const ensures = Array.from({ length: 4 }, () => post(base, 'A'));
+    const releases = Array.from({ length: 4 }, () => post(base, 'A', 'release'));
+    const results = await Promise.all([...ensures, ...releases]);
+
+    for (const r of results) expect([200, 409].includes(r.status)).toBe(true);
+    // After the dust settles, drain remaining holds; release must never report
+    // a hold that was never granted beyond the count of successful ensures.
+    const holds = server.status().models.find((m) => m.name === 'A')!.holds;
+    expect(holds).toBeGreaterThanOrEqual(0);
+    expect(holds).toBeLessThanOrEqual(4);
+  });
+
+  it('does not evict a model acquired within the eviction grace window', async () => {
+    const port = 18804;
+    const base = `http://127.0.0.1:${port}`;
+    const pool = new FakePool();
+    server = new ControlServer(pool, makeConfig(port, 1), testDeps({ evictionGraceMs: 10_000 }));
+    server.start();
+    await waitReady(base);
+
+    // Acquire A then immediately release it → holds 0 but lastAcquiredAt is fresh.
+    expect((await post(base, 'A')).status).toBe(200);
+    expect((await (await post(base, 'A', 'release')).json()).released).toBe(true);
+
+    // /ensure B at capacity must NOT evict the just-acquired A (grace window).
+    const busy = await post(base, 'B');
+    expect(busy.status).toBe(409);
+    expect((await busy.json()).error).toMatch(/recently active/);
+    expect(pool.loadedModelNames()).toEqual(['A']);
+  });
+
+  it('exposes per-model holds on GET /models', async () => {
+    const port = 18805;
+    const base = `http://127.0.0.1:${port}`;
+    server = new ControlServer(new FakePool(), makeConfig(port), testDeps());
+    server.start();
+    await waitReady(base);
+
+    await post(base, 'A');
+    const { models } = await (await fetch(`${base}/models`)).json();
+    const a = models.find((m: { name: string }) => m.name === 'A');
+    expect(a.holds).toBe(1);
+    expect(a.loaded).toBe(true);
   });
 });

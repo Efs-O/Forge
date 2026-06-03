@@ -50,7 +50,7 @@ export function registerControlServerCommands(
       );
       if (!pick) return;
 
-      const released = controlServer.releaseHold(pick.label);
+      const released = await controlServer.releaseHold(pick.label);
       void vscode.window.showInformationMessage(
         released ? `Forge: released one hold on ${pick.label}` : `Forge: ${pick.label} had no active holds`,
       );
