@@ -641,3 +641,16 @@ models:
       top_p: 0.95
       max_tokens: 16384
 
+  # Paid route (no :free) — draws on your OpenRouter credit, skips the shared
+  # free-tier rate limit. Confirm the slug + price at https://openrouter.ai/models
+  # (a slug with no paid provider returns 404).
+  google/gemma-4-26b-a4b-it:
+    provider: openrouter
+    api_key_secret: openrouter
+    capabilities: [tool-call, long-context]
+    num_ctx: 262144
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 16384
+
