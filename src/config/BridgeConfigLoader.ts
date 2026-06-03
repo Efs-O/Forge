@@ -87,8 +87,13 @@ function maybeReasoningEffort(
   return effort as ModelConfig['reasoning_effort'];
 }
 
-function normalizeProvider(entry: BridgeModelEntry): 'llama.cpp' | 'ollama' | 'xai' {
-  if (entry.provider === 'llama.cpp' || entry.provider === 'ollama' || entry.provider === 'xai') {
+function normalizeProvider(entry: BridgeModelEntry): 'llama.cpp' | 'ollama' | 'xai' | 'openrouter' {
+  if (
+    entry.provider === 'llama.cpp' ||
+    entry.provider === 'ollama' ||
+    entry.provider === 'xai' ||
+    entry.provider === 'openrouter'
+  ) {
     return entry.provider;
   }
   if (typeof entry.gguf_path === 'string' && entry.gguf_path.trim()) {
