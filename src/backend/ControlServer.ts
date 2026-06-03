@@ -61,7 +61,11 @@ export class ControlServer implements vscode.Disposable {
   private readonly readinessIntervalMs: number;
   private readonly evictionGraceMs: number;
 
-  constructor(private readonly pool: IBackendPool, private config: ForgeConfig, deps: ControlServerDeps = {}) {
+  constructor(
+    private readonly pool: IBackendPool,
+    private config: ForgeConfig,
+    deps: ControlServerDeps = {},
+  ) {
     this.port = config.control_server?.port ?? DEFAULT_PORT;
     this.probe = deps.probe ?? probeHealthy;
     this.readinessTimeoutMs = deps.readinessTimeoutMs ?? READINESS_TIMEOUT_MS;
@@ -75,10 +79,14 @@ export class ControlServer implements vscode.Disposable {
 
   start(): void {
     if (this.server) return;
-    const server = http.createServer((req, res) => { void this.handle(req, res); });
+    const server = http.createServer((req, res) => {
+      void this.handle(req, res);
+    });
     server.on('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'EADDRINUSE') {
-        log.warn(`[ControlServer] port ${this.port} in use — another Forge window likely owns it; not starting a second.`);
+        log.warn(
+          `[ControlServer] port ${this.port} in use — another Forge window likely owns it; not starting a second.`,
+        );
       } else {
         log.error(`[ControlServer] ${err.message}`);
       }
@@ -195,7 +203,9 @@ export class ControlServer implements vscode.Disposable {
       if (!isOllama && !(await this.waitReady(backend.baseUrl()))) {
         return {
           status: 502,
-          body: { error: `"${model}" loaded but not ready: no HTTP response within ${this.readinessTimeoutMs}ms` },
+          body: {
+            error: `"${model}" loaded but not ready: no HTTP response within ${this.readinessTimeoutMs}ms`,
+          },
         };
       }
       this.holds.set(model, (this.holds.get(model) ?? 0) + 1);
@@ -242,15 +252,17 @@ export class ControlServer implements vscode.Disposable {
     // read from a consistent snapshot inside this critical section.
     const now = Date.now();
     const idle = loaded.filter(
-      (m) => (this.holds.get(m) ?? 0) === 0
-        && now - (this.lastAcquiredAt.get(m) ?? 0) >= this.evictionGraceMs,
+      (m) =>
+        (this.holds.get(m) ?? 0) === 0 &&
+        now - (this.lastAcquiredAt.get(m) ?? 0) >= this.evictionGraceMs,
     );
     if (idle.length === 0) {
       return {
         status: 409,
         body: {
-          error: `busy: ${loaded.length} model(s) loaded and all in use or recently active; cannot load "${model}". `
-            + 'Release a worker or raise max_simultaneous_models (needs the VRAM).',
+          error:
+            `busy: ${loaded.length} model(s) loaded and all in use or recently active; cannot load "${model}". ` +
+            'Release a worker or raise max_simultaneous_models (needs the VRAM).',
         },
       };
     }
@@ -273,7 +285,10 @@ export class ControlServer implements vscode.Disposable {
 
   private serialize<T>(fn: () => Promise<T>): Promise<T> {
     const run = this.chain.then(fn, fn);
-    this.chain = run.then(() => undefined, () => undefined);
+    this.chain = run.then(
+      () => undefined,
+      () => undefined,
+    );
     return run;
   }
 
@@ -302,13 +317,20 @@ function readJson(req: http.IncomingMessage): Promise<Record<string, unknown>> {
     let size = 0;
     req.on('data', (chunk: Buffer) => {
       size += chunk.length;
-      if (size > MAX_BODY_BYTES) { req.destroy(); reject(new Error('request body too large')); return; }
+      if (size > MAX_BODY_BYTES) {
+        req.destroy();
+        reject(new Error('request body too large'));
+        return;
+      }
       data += chunk.toString();
     });
     req.on('end', () => {
       if (!data.trim()) return resolve({});
-      try { resolve(JSON.parse(data) as Record<string, unknown>); }
-      catch { reject(new Error('invalid JSON body')); }
+      try {
+        resolve(JSON.parse(data) as Record<string, unknown>);
+      } catch {
+        reject(new Error('invalid JSON body'));
+      }
     });
     req.on('error', reject);
   });
