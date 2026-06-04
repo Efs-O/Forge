@@ -1,4 +1,3 @@
-# Bridge YAML for local testing (paths on this machine).
 #
 # Run:
 #   forge-llamacpp-bridge config/bridge.yaml
@@ -24,10 +23,14 @@ llama_server:
   port: 8080
   n_gpu_layers: -1
   n_batch: 512
-  n_parallel: 4
+  # Concurrent worker slots per spawned llama-server (--parallel). GLOBAL: applies
+  # to every model. Per-worker context = that model's num_ctx / n_parallel, so size
+  # each model's num_ctx as (desired-per-worker × n_parallel). At 8, a model needs
+  # num_ctx: 262144 to keep ~32k/worker; models left at 131072 run 8 × ~16k/worker.
+  n_parallel: 8
   type_k: 8
   type_v: 8
-  default_num_ctx: 131072            # 128k TOTAL, split across n_parallel → ~32k/worker
+  default_num_ctx: 131072            # 128k TOTAL, split across n_parallel=8 → ~16k/worker
   flash_attn_default: true
 
 models:
@@ -94,6 +97,65 @@ models:
     gguf_path: "N:/GEMMA GGUF UNSLOTH/26B/gemma-4-26B-A4B-it-UD-IQ4_XS.gguf"
     mmproj_path: "N:/GEMMA GGUF UNSLOTH/26B/mmproj-F16.gguf"
     num_ctx: 131072            # 128k TOTAL across n_parallel=4 → ~32k/worker
+    n_batch: 512
+    flash_attn: true
+    think: true
+    system_prompt: |
+      You are Forge, a local AI coding assistant running inside VS Code.
+      You have tools available: read_file, write_file, replace_in_file, list_directory, search_code, run_terminal, git_status, git_diff, and more.
+      ALWAYS use tools to accomplish tasks. Never describe what you would do - do it by calling the tools directly.
+      When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
+      After each tool result, continue calling tools until the task is complete, then give a short summary.
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 64
+      min_p: 0.0
+      seed: 0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+      repeat_last_n: 64
+      stop: "<|im_end|>"
+      max_tokens: 98304
+
+  # Dense 12B (Gemma 4 Unified, 256K ctx, text+image+audio). Sized for a DOUBLE
+  # worker fleet vs the 26B: num_ctx 262144 / n_parallel 8 = ~32k/worker × 8.
+  # Weights (~8.6GB at Q5) load once and are shared by all 8 slots, so only the
+  # KV cache scales with total context. Swap the filename to UD-Q4_K_XL (~7.4GB)
+  # for more KV headroom, or UD-Q6_K_XL (~10.7GB) for higher fidelity.
+  gemma4-12b-it-ud-q5kxl:
+    gguf_path: "N:/GEMMA GGUF UNSLOTH/12B/gemma-4-12b-it-UD-Q5_K_XL.gguf"
+    mmproj_path: "N:/GEMMA GGUF UNSLOTH/12B/mmproj-F16.gguf"
+    num_ctx: 262144            # 256k TOTAL across n_parallel=8 → ~32k/worker
+    n_batch: 512
+    flash_attn: true
+    think: true
+    system_prompt: |
+      You are Forge, a local AI coding assistant running inside VS Code.
+      You have tools available: read_file, write_file, replace_in_file, list_directory, search_code, run_terminal, git_status, git_diff, and more.
+      ALWAYS use tools to accomplish tasks. Never describe what you would do - do it by calling the tools directly.
+      When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
+      After each tool result, continue calling tools until the task is complete, then give a short summary.
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 64
+      min_p: 0.0
+      seed: 0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+      repeat_last_n: 64
+      stop: "<|im_end|>"
+      max_tokens: 98304
+
+  # Same 12B at 4-bit (~7.4GB). ~1.2GB lighter than Q5 → more KV headroom for the
+  # 8-worker fleet. Test against the Q5 above for the quality/throughput tradeoff.
+  gemma4-12b-it-ud-q4kxl:
+    gguf_path: "N:/GEMMA GGUF UNSLOTH/12B/gemma-4-12b-it-UD-Q4_K_XL.gguf"
+    mmproj_path: "N:/GEMMA GGUF UNSLOTH/12B/mmproj-F16.gguf"
+    num_ctx: 262144            # 256k TOTAL across n_parallel=8 → ~32k/worker
     n_batch: 512
     flash_attn: true
     think: true
