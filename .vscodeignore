@@ -4,6 +4,7 @@ ScreenShot*.jpg
 legacy/**
 .claude/**
 .cursor/**
+.vscode/**
 .forge/**
 test/**
 **/*.test.ts
@@ -27,7 +28,9 @@ scripts/**
 **/*.vsix
 .coordination/**
 fireworks.html
+aurora_glass.html
 3d_glass_particles.html
 meadow.html
 meadow_v2.html
+particle_network.html
 assets/.coordination/**

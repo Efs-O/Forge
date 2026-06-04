@@ -14,7 +14,7 @@ const ActiveModelSchema = z.preprocess((value) => {
 
 const ModelConfigSchema = z.object({
   name: z.string().min(1),
-  provider: z.enum(['llama.cpp', 'ollama', 'xai', 'openrouter']).optional(),
+  provider: z.enum(['llama.cpp', 'ollama', 'xai', 'openrouter', 'openai', 'openai-compatible']).optional(),
   gguf_path: z.string().min(1).optional(),
   endpoint: z.string().url().optional(),
   n_gpu_layers: z.number().int().optional(),
@@ -61,6 +61,23 @@ const ModelConfigSchema = z.object({
       code: z.ZodIssueCode.custom,
       path: ['endpoint'],
       message: 'endpoint is required for provider: ollama',
+    });
+  }
+  if (provider === 'openai-compatible' && !model.endpoint) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['endpoint'],
+      message: 'endpoint is required for provider: openai-compatible',
+    });
+  }
+  if (
+    (provider === 'xai' || provider === 'openrouter' || provider === 'openai' || provider === 'openai-compatible') &&
+    !model.api_key_secret
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['api_key_secret'],
+      message: `api_key_secret is required for provider: ${provider}`,
     });
   }
 });

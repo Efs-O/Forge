@@ -588,8 +588,10 @@ models:
 
   # ---------------------------------------------------------------------------
   # xAI / Grok models (provider: xai). Auth via VS Code SecretStorage —
-  # run "Forge: Set API Key", provider "xai", paste your xAI OAuth token.
-  # No local backend needed; Forge calls https://api.x.ai directly.
+  # run "Forge: Set Cloud Provider Token", key name "xai", then paste your
+  # xAI bearer token. This uses an OpenAI-compatible API shape, but it is not
+  # the same credential as an OpenAI API key. No local backend needed; Forge
+  # calls https://api.x.ai directly.
   # ---------------------------------------------------------------------------
 
   grok-build-0.1:
@@ -715,4 +717,33 @@ models:
       temperature: 0.6
       top_p: 0.95
       max_tokens: 16384
+
+  # ---------------------------------------------------------------------------
+  # OpenAI-compatible providers:
+  # - provider: openai uses https://api.openai.com
+  # - provider: openai-compatible uses your custom endpoint
+  # Both require api_key_secret and the token can be stored with
+  # "Forge: Set Cloud Provider Token".
+  # ---------------------------------------------------------------------------
+
+  codex:
+    provider: openai
+    api_key_secret: openai
+    capabilities: [tool-call, long-context]
+    num_ctx: 400000
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 16384
+
+  claude-via-gateway:
+    provider: openai-compatible
+    endpoint: https://your-openai-compatible-gateway.example.com
+    api_key_secret: gateway
+    capabilities: [tool-call, long-context]
+    num_ctx: 200000
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 12000
 

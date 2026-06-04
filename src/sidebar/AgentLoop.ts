@@ -5,6 +5,7 @@ import type { ForgeConfig, ModelConfig } from '../config/types';
 import type { HostToWebview } from './messageBridge';
 import type { ConversationRuntime } from './sessionTypes';
 import { streamModelChatCompletion } from '../llm/ChatClient';
+import { getCloudBaseUrl, getCloudProviderLabel, isCloudProvider } from '../llm/CloudProviders';
 import { resolveXaiToken } from '../llm/XaiAuth';
 import type { ChatCompletionRequest, ToolCall } from '../llm/types';
 import type { AttachmentData } from './messageBridge';
@@ -153,7 +154,7 @@ export class AgentLoop {
     log.debug(`[AgentLoop] runTurn model=${model.name} conv=${convId}`);
 
     // Cloud providers (xai, openrouter): no local backend — resolve token and call the API directly.
-    if (model.provider === 'xai' || model.provider === 'openrouter') {
+    if (isCloudProvider(model.provider)) {
       let apiKey: string;
       try {
         if (model.provider === 'xai') {
@@ -163,7 +164,7 @@ export class AgentLoop {
           const stored = keyName ? await this.secrets?.get(keyName) : undefined;
           if (!stored) {
             throw new Error(
-              `OpenRouter: no API key in SecretStorage (key: ${keyName ?? 'unset'}). ` +
+              `${getCloudProviderLabel(model.provider)}: no bearer token in SecretStorage (key: ${keyName ?? 'unset'}). ` +
                 'Run "Forge: Set Cloud Provider Token" and set api_key_secret in bridge.yaml.',
             );
           }
@@ -183,7 +184,7 @@ export class AgentLoop {
       this.checkpoints.beginTurn(turnId);
       this.streamingConvIds.add(convId);
       this.events.onGenerationStarted?.(model.name);
-      const cloudBaseUrl = model.provider === 'xai' ? 'https://api.x.ai' : 'https://openrouter.ai/api';
+      const cloudBaseUrl = getCloudBaseUrl(model);
       try {
         await this.runAgentLoop(cloudBaseUrl, conv, model, activeFile, ctrl, postC, apiKey);
       } catch (err) {

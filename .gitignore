@@ -28,3 +28,11 @@ docs/plan-backend-pool.md
 AUDIT_REPORT.md
 FORGE_REPORT.md
 AGENTS.md
+README.codex.local.md
+.vscode/settings.json
+CLAUDE.md
+CODEX_NOISE_REPORT.md
+CUSTOM_VS_STDLIB_AUDIT.md
+DIFF_LARGE_FALLBACK.md
+MULTIWINDOW_PORT_AUDIT.md
+TODO-control-server-concurrency-hardening.md

@@ -1,11 +1,8 @@
 import type { ModelConfig } from '../config/types';
+import { getCloudBaseUrl, isCloudProvider } from './CloudProviders';
 import { streamChatCompletion, type StreamHandlers } from './OpenAIClient';
 import { streamOllamaChatCompletion } from './OllamaNativeClient';
 import type { ChatCompletionRequest } from './types';
-
-const XAI_BASE_URL = 'https://api.x.ai';
-// OpenRouter is OpenAI-compatible; OpenAIClient appends "/v1/chat/completions".
-const OPENROUTER_BASE_URL = 'https://openrouter.ai/api';
 
 export async function streamModelChatCompletion(
   baseUrl: string,
@@ -19,11 +16,6 @@ export async function streamModelChatCompletion(
     await streamOllamaChatCompletion(baseUrl, request, model, handlers, signal);
     return;
   }
-  const url =
-    model?.provider === 'xai'
-      ? XAI_BASE_URL
-      : model?.provider === 'openrouter'
-        ? OPENROUTER_BASE_URL
-        : baseUrl;
+  const url = model && isCloudProvider(model.provider) ? getCloudBaseUrl(model) : baseUrl;
   await streamChatCompletion(url, request, handlers, signal, apiKey);
 }

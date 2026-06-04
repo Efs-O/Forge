@@ -380,8 +380,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     vscode.commands.registerCommand('forge.setCloudToken', async () => {
       const secretKey = await vscode.window.showInputBox({
-        prompt: 'Secret key name (must match api_key_secret in bridge.yaml, e.g. "xai")',
-        placeHolder: 'xai',
+        prompt: 'Secret key name (must match api_key_secret in bridge.yaml, e.g. "xai", "openai", "openrouter")',
+        placeHolder: 'openai',
         ignoreFocusOut: true,
       });
       if (!secretKey?.trim()) return;

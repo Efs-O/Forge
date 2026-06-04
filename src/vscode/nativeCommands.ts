@@ -77,9 +77,14 @@ export function registerNativeCommands(context: vscode.ExtensionContext, deps: N
       if (!pick) return;
       config.active_model = pick.modelName;
       const selectedModel = config.models.find((m) => m.name === pick.modelName);
-      if (selectedModel?.provider === 'xai') {
+      if (
+        selectedModel?.provider === 'xai' ||
+        selectedModel?.provider === 'openrouter' ||
+        selectedModel?.provider === 'openai' ||
+        selectedModel?.provider === 'openai-compatible'
+      ) {
         deps.statusBar.setReady(pick.modelName);
-        void vscode.window.showInformationMessage(`Forge: switched to ${pick.modelName} (xAI)`);
+        void vscode.window.showInformationMessage(`Forge: switched to ${pick.modelName} (${selectedModel.provider})`);
         return;
       }
       deps.statusBar.setStarting(pick.modelName);

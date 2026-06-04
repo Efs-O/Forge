@@ -135,6 +135,55 @@ embeddings:
       max_file_size_kb: 128,
     });
   });
+
+  it('loads generic openai-compatible cloud models from bridge.yaml', () => {
+    const dir = mkTempDir();
+    fs.writeFileSync(path.join(dir, 'config.yaml'), `active_model: codex
+bridge_config: bridge.yaml
+llama_server:
+  binary: llama-server
+models: []
+`, 'utf8');
+    fs.writeFileSync(path.join(dir, 'bridge.yaml'), `models:
+  codex:
+    provider: openai
+    api_key_secret: openai
+  claude-via-gateway:
+    provider: openai-compatible
+    endpoint: https://gateway.example.com
+    api_key_secret: gateway
+`, 'utf8');
+
+    const config = loadConfig(dir);
+    expect(config.models).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'codex', provider: 'openai', api_key_secret: 'openai' }),
+        expect.objectContaining({
+          name: 'claude-via-gateway',
+          provider: 'openai-compatible',
+          endpoint: 'https://gateway.example.com',
+          api_key_secret: 'gateway',
+        }),
+      ]),
+    );
+  });
+
+  it('rejects openai-compatible models without endpoint', () => {
+    const dir = mkTempDir();
+    fs.writeFileSync(path.join(dir, 'config.yaml'), `active_model: bad
+bridge_config: bridge.yaml
+llama_server:
+  binary: llama-server
+models: []
+`, 'utf8');
+    fs.writeFileSync(path.join(dir, 'bridge.yaml'), `models:
+  bad:
+    provider: openai-compatible
+    api_key_secret: gateway
+`, 'utf8');
+
+    expect(() => loadConfig(dir)).toThrow(/endpoint is required for provider: openai-compatible/i);
+  });
 });
 
 describe('resolveExplicitConfigPath', () => {

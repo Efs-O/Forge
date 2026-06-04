@@ -87,12 +87,16 @@ function maybeReasoningEffort(
   return effort as ModelConfig['reasoning_effort'];
 }
 
-function normalizeProvider(entry: BridgeModelEntry): 'llama.cpp' | 'ollama' | 'xai' | 'openrouter' {
+function normalizeProvider(
+  entry: BridgeModelEntry,
+): 'llama.cpp' | 'ollama' | 'xai' | 'openrouter' | 'openai' | 'openai-compatible' {
   if (
     entry.provider === 'llama.cpp' ||
     entry.provider === 'ollama' ||
     entry.provider === 'xai' ||
-    entry.provider === 'openrouter'
+    entry.provider === 'openrouter' ||
+    entry.provider === 'openai' ||
+    entry.provider === 'openai-compatible'
   ) {
     return entry.provider;
   }
@@ -153,6 +157,13 @@ export function loadBridgeModels(bridgeConfigPath: string): ModelConfig[] {
     if (provider === 'ollama' && !endpoint) {
       throw new Error(`Forge: bridge.yaml models.${name}.endpoint is required for provider: ollama`);
     }
+    if (provider === 'openai-compatible' && !endpoint) {
+      throw new Error(`Forge: bridge.yaml models.${name}.endpoint is required for provider: openai-compatible`);
+    }
+    const apiKeySecret = maybeString(entry.api_key_secret, `models.${name}.api_key_secret`);
+    if ((provider === 'xai' || provider === 'openrouter' || provider === 'openai' || provider === 'openai-compatible') && !apiKeySecret) {
+      throw new Error(`Forge: bridge.yaml models.${name}.api_key_secret is required for provider: ${provider}`);
+    }
 
     const model = {
       name,
@@ -173,7 +184,7 @@ export function loadBridgeModels(bridgeConfigPath: string): ModelConfig[] {
       think: maybeBoolean(entry.think, `models.${name}.think`),
       reasoning_effort: maybeReasoningEffort(entry.reasoning_effort, `models.${name}.reasoning_effort`),
       strip_thinking_channels: maybeBoolean(entry.strip_thinking_channels, `models.${name}.strip_thinking_channels`),
-      api_key_secret: maybeString(entry.api_key_secret, `models.${name}.api_key_secret`),
+      api_key_secret: apiKeySecret,
     };
     return Object.fromEntries(
       Object.entries(model).filter(([, fieldValue]) => fieldValue !== undefined),
