@@ -144,11 +144,8 @@ export class AgentLoop {
     this.streamingSettledMap.set(convId, settled);
     const postC = (msg: HostToWebview): void => this.post({ ...msg, conversationId: convId } as HostToWebview);
 
-    const priorUserCount = conv.messages.filter((m) => m.role === 'user').length;
     conv.active_model = model.name;
     conv.updatedAt = Date.now();
-    conv.messages.push({ role: 'user', content: buildUserContent(text, attachments) });
-    if (priorUserCount === 0) conv.title = deriveTitle(text.split('\n')[0] ?? text);
 
     const activeFile = vscode.window.activeTextEditor?.document.uri.fsPath;
     log.debug(`[AgentLoop] runTurn model=${model.name} conv=${convId}`);
@@ -178,6 +175,7 @@ export class AgentLoop {
         this.resolveStreamingLifecycle(convId);
         return;
       }
+      this.commitUserPrompt(conv, text, attachments);
       this.events.onBackendReady?.(model.name);
       postC({ type: 'ready' });
       const turnId = `turn-${Date.now()}`;
@@ -213,6 +211,7 @@ export class AgentLoop {
         this.resolveStreamingLifecycle(convId);
         return;
       }
+      this.commitUserPrompt(conv, text, attachments);
       postC({ type: 'ready' });
     } catch (err) {
       const msg = ctrl.signal.aborted
@@ -242,6 +241,13 @@ export class AgentLoop {
       this.events.onGenerationFinished?.(model.name);
       this.resolveStreamingLifecycle(convId);
     }
+  }
+
+  private commitUserPrompt(conv: ConversationRuntime, text: string, attachments?: AttachmentData[]): void {
+    const priorUserCount = conv.messages.filter((m) => m.role === 'user').length;
+    conv.messages.push({ role: 'user', content: buildUserContent(text, attachments) });
+    conv.updatedAt = Date.now();
+    if (priorUserCount === 0) conv.title = deriveTitle(text.split('\n')[0] ?? text);
   }
 
   async runPromptToMarkdown(text: string): Promise<string> {

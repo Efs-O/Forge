@@ -1,89 +1,127 @@
-# Forge LLM — Official Repository
+# Forge LLM - Official Repository
 
-> **This is the official Forge LLM extension by [Efsoo](https://github.com/Efs-O).**
-> Licensed under **Apache License 2.0**. Beware of copied or rebranded versions — always install from publisher **`Efsoo`** on the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=Efsoo.forge-llm).
-> If you fork this project: keep all copyright notices, the `LICENSE` and `NOTICE` files, and document significant changes.
-
----
+> This is the official Forge LLM extension by [Efsoo](https://github.com/Efs-O).
+> Licensed under Apache License 2.0. If you fork this project, keep the copyright notices, `LICENSE`, and `NOTICE`, and document significant changes.
 
 # Forge
 
-**Local-first AI coding assistant for VS Code powered by llama.cpp, zero cloud, zero telemetry.**
+Forge is a local-first AI coding assistant for VS Code.
 
-Forge runs GGUF models directly on your machine via `llama-server`. No API key, no subscription, no data leaves your box.
+Its default and strongest path is still local: GGUF models through `llama-server`, local Ollama models, strict tool schemas, per-action confirmation, and per-turn undo. Forge now also supports optional cloud or OpenAI-compatible providers for users who explicitly configure them. Telemetry remains none.
 
 ![Forge agent loop in action](docs/assets/demo.gif)
-
----
 
 ## Screenshots
 
 | Agent loop + Clanker Mode | Model picker |
-|:---:|:---:|
+| :---: | :---: |
 | ![Agent loop](docs/assets/agent-loop.jpg) | ![Model picker](docs/assets/model-picker.jpg) |
 
 | Slash commands | Marketplace |
-|:---:|:---:|
+| :---: | :---: |
 | ![Slash commands](docs/assets/slash-commands.jpg) | ![Marketplace](docs/assets/marketplace.jpg) |
 
----
+## Current Positioning
 
-## Features
+- Local-first by default.
+- `llama.cpp` and local Ollama remain first-class.
+- Optional cloud and OpenAI-compatible backends exist for users who opt in.
+- No telemetry, analytics, or auto-update pings.
+- Search and fetch stay explicit and user-configured.
 
-- **Single execute-style workflow**: no mode switching — one conversation, full tool access
-- **Multi-tab concurrent streaming**: run multiple independent chats in parallel; switching tabs never cancels a running stream
-- **Inline diff viewer**: every file write shows a collapsible red/green diff block in the chat immediately after the tool runs
-- **Direct llama.cpp control**: Forge spawns and manages `llama-server`
-- **Ollama support**: local Ollama models or Ollama cloud routing — auth via `ollama auth login`, not Forge
-- **Isolated backend pools**: llama.cpp and Ollama backends are tracked separately — switching to an Ollama model never stops a running llama-server
-- **VRAM management**: closing a tab with a local model prompts to unload it from VRAM immediately
-- **Hot model swap**: switch between GGUF or Ollama models without restarting VS Code
-- **Per-action confirmation gate**: approve or deny each tool call before it runs — or enable **Clanker Mode** (`/clanker`) to skip confirmations entirely for a session
-- **Per-turn checkpoints**: Undo or Keep after any turn that writes files
-- **Token budget bar**: live used/max context token estimate shown in the header
-- **Reasoning token display**: streamed thinking output shown inline when enabled
-- **Runtime capability checks**: inspect llama.cpp metadata and warn on mismatched tool/thinking features
-- **Thinking-channel stripping**: optionally hide `<think>` and related channel markup
-- **Strict tool schemas**: typed JSON Schema for every tool — no free-form string blobs
-- **Slash commands in chat**: type `/` to open built-in chat actions
-- **FORGE.md workspace instructions**: drop a `FORGE.md` in any project root to give the agent persistent navigation rules, stack context, and hard stops — auto-injected into every prompt
-- **Optional web search**: Tavily or Brave via user-supplied API key
-- **Bridge mode**: connect to any already-running OpenAI-compatible server
+## Highlights
 
----
+- Single execute-style workflow with no mode switching
+- Multi-tab chat with independent streaming per tab
+- Per-action confirmation gate, plus `/clanker` full-auto mode
+- Per-turn checkpoints with Keep and Undo
+- Inline chat diffs after write tools
+- Direct `llama-server` lifecycle management
+- Ollama local and Ollama cloud routing through the local daemon
+- Optional bridge mode for an already-running OpenAI-compatible server
+- Optional cloud providers: `xai`, `openrouter`, `openai`, `openai-compatible`
+- Localhost control server for external orchestrators and worker fleets
+- Reasoning token display and optional thinking-channel stripping
+- Optional Tavily or Brave web search with keys stored in VS Code SecretStorage
+- Local semantic code search and reindex support
+
+## What's New Since v0.12.3
+
+- Added OpenAI-compatible cloud-provider support, including `xai`, `openrouter`, `openai`, and generic `openai-compatible`
+- Added automatic xAI token resolution and refresh support
+- Added localhost control-server support for load-on-demand model orchestration
+- Added control-server commands in VS Code for ensure, release, and status
+- Expanded Ollama support, including local daemon usage and cloud routing through the local Ollama daemon
+- Added multi-worker and concurrency-oriented config examples
+- Hardened backend lifecycle, readiness, and release behavior
+- Added semantic code search reindexing flow and slash command support
+- Improved diff display, checkpoint handling, and multi-tab chat behavior
 
 ## Requirements
 
 - VS Code 1.90 or later
-- [`llama-server`](https://github.com/ggerganov/llama.cpp) (for direct GGUF mode)
-- One or more local GGUF files, or a running Ollama daemon
+- One of:
+  - `llama-server` plus one or more GGUF files
+  - a running Ollama daemon
+  - an already-running OpenAI-compatible server
+  - an explicitly configured cloud provider model
 
----
+## Backend Modes
+
+### 1. Direct GGUF mode
+
+Forge starts and manages `llama-server` itself.
+
+Best for:
+- local GGUF workflows
+- direct control over server args
+- keeping everything on your own machine
+
+### 2. Ollama mode
+
+Forge talks to the local Ollama daemon at `http://127.0.0.1:11434`.
+
+Best for:
+- local Ollama models
+- Ollama cloud routes after `ollama auth login`
+- users who want model management outside Forge
+
+### 3. Bridge mode
+
+Forge connects to an already-running OpenAI-compatible endpoint instead of spawning `llama-server`.
+
+Best for:
+- pre-managed local servers
+- custom wrappers
+- external infra you already operate
+
+### 4. Optional cloud providers
+
+Forge can also call explicitly configured cloud or hosted OpenAI-compatible providers.
+
+Supported provider values:
+- `xai`
+- `openrouter`
+- `openai`
+- `openai-compatible`
+
+This is opt-in. Nothing uses a cloud provider unless you configure a model that points to one and provide its token through VS Code SecretStorage.
 
 ## Quick Start
 
 ### 1. Install the extension
 
-Install **Forge** from the VS Code Marketplace or via the Extensions panel.
+Install Forge from the VS Code Marketplace or load the packaged VSIX.
 
-### 2. Build llama-server (direct GGUF mode)
+### 2. Create `.forge/config.yaml`
 
-```bash
-git clone https://github.com/ggerganov/llama.cpp
-cd llama.cpp
-cmake -B build -DGGML_CUDA=ON
-cmake --build build --config Release -j $(nproc)
-```
+Forge looks for:
 
-Skip this step if you are using Ollama only.
+`<workspace>/.forge/config.yaml`
 
-### 3. Create config.yaml
+The setup wizard can generate it for you, or you can start from [`config/config.example.yaml`](config/config.example.yaml).
 
-Forge looks for a config file at:
-
-`<your-project>/.forge/config.yaml`
-
-If the file is missing, open the sidebar and the setup wizard will generate it, or create it manually:
+Minimal direct GGUF example:
 
 ```yaml
 active_model: my-model
@@ -93,9 +131,9 @@ llama_server:
   host: 127.0.0.1
   port: 8080
   n_gpu_layers: -1
-  default_num_ctx: 8192
+  default_num_ctx: 32768
   n_batch: 512
-  n_parallel: 1
+  n_parallel: 4
   type_k: q8_0
   type_v: q8_0
   flash_attn_default: true
@@ -103,7 +141,6 @@ llama_server:
 models:
   my-model:
     gguf_path: /path/to/model.gguf
-    n_gpu_layers: -1
     num_ctx: 8192
     flash_attn: true
     think: false
@@ -115,15 +152,7 @@ models:
       max_tokens: 8192
 ```
 
-### 4. Open the Forge sidebar
-
-Click the Forge icon in the Activity Bar. The backend starts on the first prompt.
-
----
-
-## Ollama
-
-Add Ollama models alongside GGUF models in the same config. Auth is handled by `ollama auth login` on your machine — Forge sends no credentials.
+Ollama example:
 
 ```yaml
 models:
@@ -132,115 +161,10 @@ models:
     endpoint: http://127.0.0.1:11434
     num_ctx: 262144
     think: true
-    reasoning_effort: medium       # low | medium | high
-
-  deepseek-v4-flash:cloud:
-    provider: ollama
-    endpoint: http://127.0.0.1:11434
-    num_ctx: 1000000
-    think: true
     reasoning_effort: medium
 ```
 
-Forge merges GGUF and Ollama entries in a single model picker. Ollama backends are tracked in an isolated pool — selecting an Ollama model never stops a running `llama-server`, and vice versa.
-
----
-
-## VRAM Management
-
-Forge keeps models loaded between prompts so the first message in a follow-up turn is instant. To free VRAM explicitly:
-
-- **Close a tab** — if the model is local (llama.cpp, or Ollama on a local endpoint) and no other open tab uses it, Forge shows a notification: **"[model] is still loaded in VRAM. Unload it to free memory?"** with an **Unload Now** button.
-- **`/unloadModel`** — stops all backends immediately and releases everything.
-- **`/restartBackend`** — stops then restarts the active llama-server.
-
-> **Note:** closing a tab while another tab uses the same model will not trigger the unload prompt — the model is still in use.
-
----
-
-## Multi-Tab Concurrent Streaming
-
-Each conversation tab runs its own independent agent loop with a dedicated abort controller. You can:
-
-- Send a prompt in tab A and switch to tab B while it's still generating — tab A keeps streaming in the background
-- Cancel a specific tab without affecting others
-- See a live indicator on tabs that are currently generating
-
-Switching between tabs never cancels a running stream. Only closing a tab or pressing Cancel within it stops that conversation.
-
-`max_simultaneous_models` (default `1`) controls how many `llama-server` processes stay alive at once. If you open more conversations than the pool limit, the least-recently-used llama.cpp server is evicted when a new model needs to start. Ollama models are not subject to this limit.
-
----
-
-## Inline Diff Viewer
-
-After every file write (`write_file`, `replace_in_file`, `delete_file`), Forge renders a collapsible diff block directly in the chat:
-
-- **Badge**: `new` / `modified` / `deleted`
-- **Path**: file path relative to the workspace root
-- **Hunks**: unified diff with 3 lines of context, green `+` for additions, red `−` for removals
-- Files over 500 lines fall back to a "file too large to diff inline" notice
-
-The diff uses the per-turn checkpoint snapshot as the before-state, so it always reflects exactly what the agent changed.
-
----
-
-## Model Behavior
-
-Forge inspects llama.cpp runtime metadata (via `/props`) before sending requests:
-
-- whether the active model exposes a usable chat template
-- whether the template likely supports tool calling
-- whether the template supports thinking toggles (`enable_thinking`, `preserve_thinking`)
-
-When Forge detects a mismatch it warns in the UI and narrows the request rather than sending incompatible fields. These checks are advisory — GGUF metadata and community templates can still be incomplete.
-
----
-
-## Clanker Mode
-
-By default Forge asks for confirmation before every file write, terminal command, and git operation. **Clanker Mode** disables that gate so the agent runs uninterrupted.
-
-Type `/clanker` in the chat input to toggle it on. A 💥 **CLANKER MODE** pill appears to the left of the Send button as a persistent reminder that confirmations are off.
-
-Run `/clanker` again to restore the confirmation gate.
-
-**What still confirms in Clanker Mode:** recursive deletes (`delete_file` with `recursive: true`) always prompt regardless — there is no silent mass-delete.
-
-Clanker Mode is session-scoped: it resets to off when VS Code is closed or the window is reloaded.
-
----
-
-## Checkpoints (Undo / Keep)
-
-After every turn that writes files, Forge shows an **Undo / Keep** bar in the editor via CodeLens.
-
-- **Undo** restores all files modified in that turn to their state before the agent ran
-- **Keep** commits the checkpoint and clears the bar
-
-You can also use `/undo` and `/keep` from the chat input, or the command palette (`Forge: Undo Last Turn`, `Forge: Keep Changes`).
-
----
-
-## Thinking Output
-
-```yaml
-models:
-  my-model:
-    gguf_path: /path/to/model.gguf
-    think: true
-    strip_thinking_channels: false   # show reasoning inline
-```
-
-When `think: true`, reasoning tokens stream into a collapsible block in the UI. When `strip_thinking_channels: true` and `think: false`, Forge strips `<think>...</think>` markers from visible output.
-
-For Ollama models, use `reasoning_effort: low | medium | high` to control the reasoning budget.
-
----
-
-## Bridge Mode
-
-If you already run your own `llama-server` or any OpenAI-compatible server:
+Bridge-mode example:
 
 ```yaml
 bridge_mode: true
@@ -250,138 +174,183 @@ llama_server:
   port: 8080
 ```
 
-In bridge mode Forge connects to the existing process but does not own it — releasing a model from memory is the bridge's responsibility.
+For larger examples, including control-server and cloud-provider patterns, use:
+- [`config/config.example.yaml`](config/config.example.yaml)
+- [`config/bridge.example.yaml`](config/bridge.example.yaml)
 
----
+### 3. Open the sidebar
 
-## Web Search
+Click the Forge icon in the activity bar and send a prompt.
 
-Forge supports [Tavily](https://tavily.com) and [Brave Search](https://brave.com/search/api/) as search providers. The API key is stored securely in VS Code's SecretStorage (OS keychain) — never in config files or git.
+If the config is missing or invalid, Forge will guide you through setup instead of silently failing.
 
-### Setup (two steps)
+## Cloud and Token Setup
 
-**1. Run the command**
+Cloud or hosted OpenAI-compatible providers are explicit and credentialed through SecretStorage, not YAML.
 
-`Ctrl+Shift+P` → **`Forge: Set Search API Key`**
+- Use `Forge: Set Cloud Provider Token` to store a bearer token.
+- Set `api_key_secret` on the model entry in `bridge.yaml` or your merged config path.
+- For `openai-compatible`, also set `endpoint`.
 
-- If no search provider is configured yet, Forge will ask you to pick **Tavily** or **Brave**, then automatically add the `search:` block to your `config.yaml`.
-- If a provider is already configured, it will just prompt for the key.
-
-**2. Reload the window**
-
-`Ctrl+Shift+P` → **`Developer: Reload Window`** — required only if the `search:` block was just added to `config.yaml` for the first time.
-
-That's it. The `web_search` tool becomes available to the agent on the next prompt.
-
-### Manual config (optional)
-
-If you prefer to configure the search block yourself before running the command:
+Example:
 
 ```yaml
-search:
-  provider: tavily        # or brave
-  secret_key_name: forge.tavily.apiKey
-  max_results: 5
+models:
+  grok-code-fast:
+    provider: xai
+    api_key_secret: xai
+
+  hosted-coder:
+    provider: openai-compatible
+    endpoint: https://example-host/v1
+    api_key_secret: hosted-coder-token
 ```
 
----
+## Control Server
 
-## FORGE.md — Workspace Instructions
+Forge can expose a localhost model-control API so an external orchestrator can ask it to load a model and report the active endpoint.
 
-Drop a `FORGE.md` file in any project's root folder to give the Forge agent persistent context about that workspace: where things live, what the stack is, and what operations require confirmation.
+Example:
 
-Forge injects it into the system prompt on every turn — the agent reads it automatically without you needing to re-explain the project.
-
-### Generate it automatically
-
-Type `/initForge` in the chat input. Forge will scan your workspace (directory layout, `package.json`, config files) and ask the active model to generate a `FORGE.md` tailored to that project. The file appears in your editor immediately after.
-
-You can also copy `FORGE.md.example` from the extension directory as a starting template and fill it in manually.
-
-### What to put in it
-
-```markdown
-## Stack
-TypeScript + Node.js. esbuild for bundling. Vitest for tests.
-
-## Workspace Layout
-src/        — all source code
-src/api/    — Express route handlers
-src/db/     — database models and migrations
-config/     — environment config files
-
-## Key Files
-- src/index.ts      — entry point
-- src/config.ts     — app-wide config
-- prisma/schema.prisma — database schema
-
-## Navigation Rules
-- All API routes live in src/api/ — never add routes elsewhere
-- Grep before creating — check for existing helpers first
-
-## Hard Stops
-- Never run database migrations without explicit user confirmation
-- Never delete files in /data — these are production assets
+```yaml
+control_server:
+  enabled: true
+  port: 8799
 ```
 
-The file is watched for changes — edits take effect on the next message with no restart required.
+Routes:
 
----
+- `GET /healthz`
+- `GET /models`
+- `POST /ensure` with `{ "model": "..." }`
+- `POST /release` with `{ "model": "..." }`
+
+This is especially useful for multi-worker local fleets where an external process needs Forge to warm or release a model on demand.
+
+## Search and Semantic Code Search
+
+Forge supports:
+
+- Tavily search
+- Brave Search
+- local semantic code search with a separate embedding model
+
+Search API keys are stored in VS Code SecretStorage.
+
+Use:
+- `Forge: Set Search API Key`
+- `/reindex` to rebuild the semantic index
 
 ## Slash Commands
 
-Type `/` in the chat input to open the command list.
+Type `/` in chat to open the built-in command list.
+
+| Slash command | What it does |
+| --- | --- |
+| `/unload` | Stop all backends and release loaded models |
+| `/restart` | Restart or reconnect the backend |
+| `/reindex` | Rebuild the local semantic search index |
+| `/new` | Open a new conversation tab |
+| `/clear` | Clear the active tab only |
+| `/review` | Run an immediate review prompt |
+| `/compact` | Summarize and compress the current chat |
+| `/undo` | Restore files from the last checkpoint |
+| `/keep` | Keep current checkpoint changes |
+| `/reload` | Reload the VS Code window |
+| `/initForge` | Generate a workspace `FORGE.md` |
+| `/clanker` | Toggle full-auto mode for confirmations |
+
+## VS Code Commands
+
+These commands are currently contributed by the extension.
+
+### Core sidebar and backend
 
 | Command | Description |
 | --- | --- |
-| `/initForge` | Scan workspace and generate a `FORGE.md` agent instructions file |
-| `/newChat` | Start a new conversation tab |
-| `/clearChat` | Clear the current conversation |
-| `/undo` | Restore files from the last write turn |
-| `/keep` | Commit the current checkpoint |
-| `/compact` | Summarize and compress conversation history |
-| `/review` | Run a code review on the current file or selection |
-| `/restartBackend` | Restart the managed llama-server process |
-| `/unloadModel` | Stop all backends and release models from memory |
-| `/clanker` | Toggle Clanker Mode — skip all confirmation prompts for the session (recursive deletes still confirm) |
-| `/reloadWindow` | Reload the VS Code window |
-
----
-
-## Commands
-
-| Command | Description |
-| --- | --- |
-| `Forge: Open Sidebar` | Open the Forge panel |
-| `Forge: Restart Backend` | Restart `llama-server` |
+| `Forge: Open Sidebar` | Open the Forge sidebar |
+| `Forge: Start Backend` | Start the active backend |
+| `Forge: Stop Backend` | Stop the active backend |
+| `Forge: Show Backend Console` | Reveal backend logs or console |
+| `Forge: Restart Backend` | Restart the managed backend |
+| `Forge: Open Config` | Open the active config file |
+| `Forge: Validate Config` | Validate the active config |
+| `Forge: Pick Model` | Pick the active model |
+| `Forge: Pick GGUF Model File` | Pick a GGUF file during setup |
+| `Forge: Setup Wizard` | Run the first-run or repair flow |
+| `Forge: Unload Model` | Stop all backends and release models |
 | `Forge: New Chat` | Open a new conversation tab |
-| `Forge: Undo Last Turn` | Restore files from the last write turn |
-| `Forge: Keep Changes` | Commit the current checkpoint |
-| `Forge: Send Selection to Chat` | Prefill the prompt with the active editor selection |
+| `Forge: Clear Active Chat` | Clear the active tab |
+| `Forge: Undo Last Turn` | Restore the previous checkpoint |
+| `Forge: Keep Changes` | Accept the current checkpoint |
+
+### Control-server commands
+
+| Command | Description |
+| --- | --- |
+| `Forge: Ensure Model (load on demand)` | Ask the control server to load a model |
+| `Forge: Release Model` | Ask the control server to release a model |
+| `Forge: Control Server Status` | Show control-server status and active models |
+
+### Tokens, search, and setup helpers
+
+| Command | Description |
+| --- | --- |
 | `Forge: Set Search API Key` | Store a Tavily or Brave API key |
+| `Forge: Set Cloud Provider Token` | Store a cloud-provider bearer token |
 
----
+### Editor and review helpers
 
-## Settings
+| Command | Description |
+| --- | --- |
+| `Forge: Explain Selection` | Explain the active selection |
+| `Forge: Review Selection` | Review the active selection |
+| `Forge: Generate Tests For Selection` | Draft tests for the selection |
+| `Forge: Refactor Selection` | Refactor the selection |
+| `Forge: Run Explain Selection` | Execute the explain flow immediately |
+| `Forge: Run Review Selection` | Execute the review flow immediately |
+| `Forge: Run Generate Tests For Selection` | Execute the test-generation flow immediately |
+| `Forge: Run Refactor Selection` | Execute the refactor flow immediately |
+| `Forge: Explain Diagnostic` | Explain an editor diagnostic |
+| `Forge: Propose Fix For Diagnostic` | Draft a fix for a diagnostic |
+| `Forge: Run Fix For Diagnostic` | Execute a fix flow for a diagnostic |
+| `Forge: Propose Fix For File Diagnostics` | Review diagnostics across the active file |
+| `Forge: Use Current File As Context` | Prefill context with the current file |
+| `Forge: Use Selection As Context` | Prefill context with the selection |
+| `Forge: Use Open Tabs As Context` | Prefill context from open tabs |
+| `Forge: Pick Files For Context` | Pick context files manually |
+| `Forge: Draft Plan In Scratch Document` | Generate a planning scratch doc |
+| `Forge: Draft Review In Scratch Document` | Generate a review scratch doc |
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `forge.logLevel` | `info` | Log verbosity (`debug`, `info`, `warn`, `error`) |
-| `forge.sidebar.retainContextWhenHidden` | `true` | Keep webview state when the panel is hidden |
+## Checkpoints, Diffs, and Clanker Mode
 
----
+- Every write turn can produce a checkpoint that you can Keep or Undo.
+- File writes produce inline diff cards in the chat.
+- Confirmation gates protect writes, terminal actions, and git actions.
+- `/clanker` disables those prompts for the session, except recursive deletes which still require approval.
 
 ## Privacy
 
-Forge makes no outbound network calls except to:
+Forge does not send telemetry, analytics, or auto-update pings.
 
-- `llama-server` on your configured host
-- The local Ollama daemon (`localhost:11434`) when Ollama models are selected
-- Your configured search provider when search is enabled and you send a query
+Outbound traffic is limited to the endpoints you explicitly use:
 
-There is no telemetry, no analytics, and no auto-update pinging.
+- local `llama-server`
+- local Ollama daemon
+- an explicitly configured bridge endpoint
+- an explicitly configured cloud-provider endpoint
+- Tavily or Brave if search is enabled
+- user-approved fetch targets
 
----
+## Development
+
+Quality gates:
+
+```bash
+npx tsc --noEmit
+npx vitest run
+npm run package
+```
 
 ## License
 
