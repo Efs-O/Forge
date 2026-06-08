@@ -24,12 +24,47 @@ export function loadConfig(storagePath: string): ForgeConfig {
   if (bridgeConfigValue) {
     const bridgeConfigPath = resolveBridgeConfigPath(filePath, bridgeConfigValue);
     const bridgeDoc = loadBridgeConfigDocument(bridgeConfigPath);
-    if (parsed.llama_server === undefined && bridgeDoc.llama_server !== undefined) {
-      parsed.llama_server = bridgeDoc.llama_server;
+
+    if (bridgeDoc.config_version === 2) {
+      // v2 schema: binary and server settings are under providers.llama_cpp
+      if (parsed.llama_server === undefined) {
+        const providers = bridgeDoc.providers as Record<string, unknown> | undefined;
+        const llamaCpp = providers?.llama_cpp as Record<string, unknown> | undefined;
+        if (llamaCpp) {
+          const rtDefs = bridgeDoc.runtime_defaults as Record<string, unknown> | undefined;
+          const rtLlamaCpp = rtDefs?.llama_cpp as Record<string, unknown> | undefined;
+          parsed.llama_server = {
+            binary: llamaCpp.binary,
+            host: llamaCpp.host,
+            port: llamaCpp.base_port,
+            ...(rtLlamaCpp && {
+              n_gpu_layers: rtLlamaCpp.n_gpu_layers,
+              n_batch: rtLlamaCpp.n_batch,
+              type_k: rtLlamaCpp.type_k,
+              type_v: rtLlamaCpp.type_v,
+              flash_attn_default: rtLlamaCpp.flash_attn,
+            }),
+          };
+        }
+      }
+      // v2: bridge-level settings live under the bridge: section
+      const bridgeSec = bridgeDoc.bridge as Record<string, unknown> | undefined;
+      if (parsed.strip_thinking_channels === undefined && bridgeSec?.strip_thinking_channels !== undefined) {
+        parsed.strip_thinking_channels = bridgeSec.strip_thinking_channels;
+      }
+      if (parsed.max_simultaneous_models === undefined && typeof bridgeSec?.max_simultaneous_models === 'number') {
+        parsed.max_simultaneous_models = bridgeSec.max_simultaneous_models;
+      }
+    } else {
+      // v1 schema: settings at top level of bridge doc
+      if (parsed.llama_server === undefined && bridgeDoc.llama_server !== undefined) {
+        parsed.llama_server = bridgeDoc.llama_server;
+      }
+      if (parsed.strip_thinking_channels === undefined && bridgeDoc.strip_thinking_channels !== undefined) {
+        parsed.strip_thinking_channels = bridgeDoc.strip_thinking_channels;
+      }
     }
-    if (parsed.strip_thinking_channels === undefined && bridgeDoc.strip_thinking_channels !== undefined) {
-      parsed.strip_thinking_channels = bridgeDoc.strip_thinking_channels;
-    }
+
     if (parsed.models === undefined) {
       parsed.models = [];
     }

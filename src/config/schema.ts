@@ -24,6 +24,7 @@ const ModelConfigSchema = z.object({
   type_v: CacheTypeSchema.optional(),
   flash_attn: z.boolean().optional(),
   extra_llama_server_args: z.array(z.string()).optional(),
+  n_parallel: z.number().int().positive().optional(),
   // v0.3 additions
   sampling: z.object({
     temperature: z.number().optional(),

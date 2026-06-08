@@ -50,7 +50,7 @@ export function composeLlamaServerArgs(
   // NOTE: --ctx-size below is the TOTAL context split across these slots, so each
   // slot gets ctx / n_parallel — size default_num_ctx/num_ctx accordingly
   // (per-worker-ctx × n_parallel).
-  const parallel = server.n_parallel ?? 4;
+  const parallel = model.n_parallel ?? server.n_parallel ?? 4;
   args.push('--parallel', String(parallel));
 
   const typeK = model.type_k ?? server.type_k ?? 8;
