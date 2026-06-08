@@ -254,7 +254,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.agentLoop.clearCapabilityCache();
     this.pool.applyForgeConfig(next);
     this.indexManager.applyForgeConfig(next);
-    this.post({ type: 'models', names: this.config.models.map((m) => m.name), active: this.config.active_model });
+    this.post({ type: 'models', models: this.config.models.map((m) => ({ name: m.name, provider: m.provider ?? 'llama.cpp' })), active: this.config.active_model });
   }
 
   // ── Internal ──────────────────────────────────────────────────────────────
@@ -360,7 +360,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private handleMessage(msg: WebviewToHost): void {
     switch (msg.type) {
       case 'webviewReady':
-        this.post({ type: 'models', names: this.config.models.map((m) => m.name), active: this.config.active_model });
+        this.post({ type: 'models', models: this.config.models.map((m) => ({ name: m.name, provider: m.provider ?? 'llama.cpp' })), active: this.config.active_model });
         this.postSessionSync();
         if (this.pool.isAnyReady()) this.post({ type: 'ready' });
         this.post({ type: 'clankerChanged', enabled: this.agentLoop.getClankerMode() });
@@ -376,7 +376,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
       case 'switchModel':
         this.config.active_model = msg.name;
-        this.post({ type: 'models', names: this.config.models.map((m) => m.name), active: this.config.active_model });
+        this.post({ type: 'models', models: this.config.models.map((m) => ({ name: m.name, provider: m.provider ?? 'llama.cpp' })), active: this.config.active_model });
         break;
 
       case 'undo':

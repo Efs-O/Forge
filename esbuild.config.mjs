@@ -41,6 +41,7 @@ const CSS_PARTIALS = [
   'webview-ui/styles/highlight.css',
   'webview-ui/styles/input.css',
   'webview-ui/styles/dialogs.css',
+  'webview-ui/styles/model-selector.css',
 ];
 
 function copyWebviewAssets() {

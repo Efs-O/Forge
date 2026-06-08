@@ -43,7 +43,8 @@ export interface ErrorMsg          { type: 'error';              message: string
 export interface ReadyMsg          { type: 'ready';                                   conversationId?: string }
 export interface BackendStartingMsg { type: 'backendStarting';   message: string;     conversationId?: string }
 export interface BackendDownMsg    { type: 'backendDown';        message: string;     conversationId?: string }
-export interface ModelsMsg         { type: 'models';             names: string[]; active: string | null }
+export interface ModelEntry        { name: string; provider: string }
+export interface ModelsMsg         { type: 'models';             models: ModelEntry[]; active: string | null }
 export interface CheckpointReadyMsg   { type: 'checkpointReady';                     conversationId?: string }
 export interface CheckpointDismissedMsg { type: 'checkpointDismissed';               conversationId?: string }
 /** @deprecated Prefer sessionSync — kept for compat with stale webviews. */

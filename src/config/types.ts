@@ -23,6 +23,8 @@ export interface ModelConfig {
   flash_attn?: boolean;
   /** Extra argv tokens appended verbatim after all computed args. */
   extra_llama_server_args?: string[];
+  /** Parallel request slots for this model's llama-server instance (--parallel). Resolved from runtime profile. */
+  n_parallel?: number;
   /** Per-model sampling parameter overrides. */
   sampling?: {
     temperature?: number;

@@ -2,6 +2,7 @@ import type {
   SessionTabMeta,
   SessionHistoryMeta,
   DiffHunk,
+  ModelEntry,
 } from '../../src/sidebar/messageBridge';
 
 export interface AppMessage {
@@ -18,7 +19,7 @@ interface State {
   messagesById: Record<string, AppMessage[]>;
   streamingIds: Set<string>;
   generatingIds: Set<string>;
-  models: string[];
+  models: ModelEntry[];
   activeModel: string | null;
   backendReady: boolean;
   checkpointPending: boolean;
@@ -48,7 +49,7 @@ export type Action =
   | { type: 'READY'; convId?: string }
   | { type: 'BACKEND_STARTING'; message: string; convId?: string }
   | { type: 'BACKEND_DOWN'; message: string; convId?: string }
-  | { type: 'MODELS'; names: string[]; active: string | null }
+  | { type: 'MODELS'; models: ModelEntry[]; active: string | null }
   | { type: 'USER_SEND'; text: string }
   | { type: 'SET_MODEL'; name: string | null }
   | { type: 'CHECKPOINT_READY'; convId?: string }
@@ -193,7 +194,7 @@ export function reducer(state: State, action: Action): State {
     }
 
     case 'MODELS':
-      return { ...state, models: action.names, activeModel: action.active };
+      return { ...state, models: action.models, activeModel: action.active };
 
     case 'SET_MODEL':
       return { ...state, activeModel: action.name };

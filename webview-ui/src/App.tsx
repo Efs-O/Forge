@@ -42,7 +42,7 @@ export function App(): React.ReactElement {
         case 'ready':               dispatch({ type: 'READY', convId: msg.conversationId }); break;
         case 'backendStarting':     dispatch({ type: 'BACKEND_STARTING', message: msg.message, convId: msg.conversationId }); break;
         case 'backendDown':         dispatch({ type: 'BACKEND_DOWN', message: msg.message, convId: msg.conversationId }); break;
-        case 'models':              dispatch({ type: 'MODELS', names: msg.names, active: msg.active }); break;
+        case 'models':              dispatch({ type: 'MODELS', models: msg.models, active: msg.active }); break;
         case 'checkpointReady':     dispatch({ type: 'CHECKPOINT_READY', convId: msg.conversationId }); break;
         case 'checkpointDismissed': dispatch({ type: 'CHECKPOINT_DISMISSED', convId: msg.conversationId }); break;
         case 'toolActivity':
