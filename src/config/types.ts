@@ -58,7 +58,7 @@ export interface ModelConfig {
 }
 
 export interface LlamaServerConfig {
-  /** Path to the llama-server binary. Required unless bridge_mode is true. */
+  /** Path to the llama-server binary. Required when any model uses provider: llama.cpp. */
   binary?: string;
   /** Default GPU layers when the model doesn't override. -1 = all. */
   n_gpu_layers?: number;
@@ -104,11 +104,7 @@ export interface EmbeddingsConfig {
 export interface ForgeConfig {
   models: ModelConfig[];
   active_model: string | null;
-  /** Optional path to a bridge-style YAML file whose models are merged into the selector. */
-  bridge_config?: string;
   llama_server: LlamaServerConfig;
-  /** When true, connect to a pre-running server instead of spawning llama-server. */
-  bridge_mode?: boolean;
   search?: SearchConfig;
   embeddings?: EmbeddingsConfig;
   log_level?: 'trace' | 'debug' | 'info' | 'warn' | 'error';

@@ -23,24 +23,21 @@ describe('loadConfig', () => {
     }
   });
 
-  it('merges bridge.yaml models and sorts the combined selector alphabetically', () => {
+  it('sorts models alphabetically', () => {
     const dir = mkTempDir();
     fs.writeFileSync(path.join(dir, 'config.yaml'), `active_model: z-cloud
-bridge_config: bridge.yaml
 llama_server:
   binary: llama-server
 models:
+  - name: z-cloud
+    provider: ollama
+    endpoint: http://127.0.0.1:11434
+  - name: alpha-cloud
+    provider: ollama
+    endpoint: http://127.0.0.1:11434
   - name: local-gguf
     provider: llama.cpp
     gguf_path: C:/models/local.gguf
-`, 'utf8');
-    fs.writeFileSync(path.join(dir, 'bridge.yaml'), `models:
-  z-cloud:
-    provider: ollama
-    endpoint: http://127.0.0.1:11434
-  alpha-cloud:
-    provider: ollama
-    endpoint: http://127.0.0.1:11434
 `, 'utf8');
 
     const config = loadConfig(dir);
@@ -52,40 +49,16 @@ models:
     expect(config.active_model).toBe('z-cloud');
   });
 
-  it('inherits llama_server settings from bridge.yaml for thin workspace configs', () => {
-    const dir = mkTempDir();
-    fs.writeFileSync(path.join(dir, 'config.yaml'), `active_model: z-cloud
-bridge_config: bridge.yaml
-models: []
-`, 'utf8');
-    fs.writeFileSync(path.join(dir, 'bridge.yaml'), `llama_server:
-  binary: C:/llama/llama-server.exe
-  host: 127.0.0.1
-  port: 8080
-models:
-  z-cloud:
-    provider: ollama
-    endpoint: http://127.0.0.1:11434
-`, 'utf8');
-
-    const config = loadConfig(dir);
-    expect(config.llama_server.binary).toBe('C:/llama/llama-server.exe');
-    expect(config.models.map((model) => model.name)).toEqual(['z-cloud']);
-  });
-
-  it('rejects duplicate model names across config.yaml and bridge.yaml', () => {
+  it('rejects duplicate model names in config.yaml', () => {
     const dir = mkTempDir();
     fs.writeFileSync(path.join(dir, 'config.yaml'), `active_model: duplicate
-bridge_config: bridge.yaml
 llama_server:
   binary: llama-server
 models:
   - name: duplicate
     provider: llama.cpp
     gguf_path: C:/models/local.gguf
-`, 'utf8');
-    fs.writeFileSync(path.join(dir, 'bridge.yaml'), `models:
-  duplicate:
+  - name: duplicate
     provider: ollama
     endpoint: http://127.0.0.1:11434
 `, 'utf8');
@@ -136,19 +109,14 @@ embeddings:
     });
   });
 
-  it('loads generic openai-compatible cloud models from bridge.yaml', () => {
+  it('loads openai-compatible cloud models from config.yaml', () => {
     const dir = mkTempDir();
     fs.writeFileSync(path.join(dir, 'config.yaml'), `active_model: codex
-bridge_config: bridge.yaml
-llama_server:
-  binary: llama-server
-models: []
-`, 'utf8');
-    fs.writeFileSync(path.join(dir, 'bridge.yaml'), `models:
-  codex:
+models:
+  - name: codex
     provider: openai
     api_key_secret: openai
-  claude-via-gateway:
+  - name: claude-via-gateway
     provider: openai-compatible
     endpoint: https://gateway.example.com
     api_key_secret: gateway
@@ -171,13 +139,8 @@ models: []
   it('rejects openai-compatible models without endpoint', () => {
     const dir = mkTempDir();
     fs.writeFileSync(path.join(dir, 'config.yaml'), `active_model: bad
-bridge_config: bridge.yaml
-llama_server:
-  binary: llama-server
-models: []
-`, 'utf8');
-    fs.writeFileSync(path.join(dir, 'bridge.yaml'), `models:
-  bad:
+models:
+  - name: bad
     provider: openai-compatible
     api_key_secret: gateway
 `, 'utf8');

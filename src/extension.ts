@@ -3,12 +3,9 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { SidebarProvider } from './sidebar/SidebarProvider';
 import { BackendPool } from './backend/BackendPool';
-import { SingleBackendPool } from './backend/SingleBackendPool';
 import { ControlServer } from './backend/ControlServer';
 import { registerControlServerCommands } from './vscode/controlCommands';
-import { BridgeBackend } from './backend/BridgeBackend';
 import type { ForgeConfig } from './config/types';
-import { resolveBridgeConfigPath } from './config/BridgeConfigLoader';
 import { loadConfig, findConfigPath, watchForgeConfigPaths } from './config/ConfigLoader';
 import { initLogger, getLogger } from './util/logger';
 import { ToolRegistry } from './tools/ToolRegistry';
@@ -141,13 +138,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const checkpoints = new CheckpointStack();
 
   // ── Backend pool ──────────────────────────────────────────────────────────
-  const pool = config.bridge_mode
-    ? new SingleBackendPool(
-        new BridgeBackend({
-          baseUrl: `http://${config.llama_server.host ?? '127.0.0.1'}:${config.llama_server.port ?? 8080}`,
-        }, config),
-      )
-    : new BackendPool(config);
+  const pool = new BackendPool(config);
 
   // Localhost model-control API for external orchestrators + the Forge command
   // palette. Always instantiated (cheap); the HTTP listener opens only when enabled.
@@ -237,13 +228,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   log.info('[Forge] backend will start on first prompt');
   statusBar.setStopped(config.active_model);
 
-  const bridgeWatchPaths: string[] = config.bridge_config
-    ? [resolveBridgeConfigPath(activeConfigPath, config.bridge_config)]
-    : [];
-
-  // ── Config hot-reload (v0.8+ bridge.yaml watch) ───────────────────────────
+  // ── Config hot-reload ────────────────────────────────────────────────────
   context.subscriptions.push(
-    watchForgeConfigPaths(activeConfigPath, bridgeWatchPaths, (newConfig, err) => {
+    watchForgeConfigPaths(activeConfigPath, [], (newConfig, err) => {
       if (err) {
         void vscode.window.showErrorMessage(`Forge: config reload failed — ${err.message}`);
         return;
@@ -380,7 +367,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     vscode.commands.registerCommand('forge.setCloudToken', async () => {
       const secretKey = await vscode.window.showInputBox({
-        prompt: 'Secret key name (must match api_key_secret in bridge.yaml, e.g. "xai", "openai", "openrouter")',
+        prompt: 'Secret key name (must match api_key_secret in config.yaml, e.g. "xai", "openai", "openrouter")',
         placeHolder: 'openai',
         ignoreFocusOut: true,
       });

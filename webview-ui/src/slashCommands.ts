@@ -18,7 +18,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     id: 'restartBackend',
     trigger: 'restart',
     title: 'Restart Backend',
-    description: 'Start or reconnect the llama-server / bridge connection.',
+    description: 'Start or reconnect the llama-server connection.',
   },
   {
     id: 'reindex',

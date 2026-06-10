@@ -142,9 +142,7 @@ const ExecConfigSchema = z.object({
 export const ForgeConfigSchema = z.object({
   models: z.array(ModelConfigSchema).default([]),
   active_model: ActiveModelSchema.default(null),
-  bridge_config: z.string().min(1).optional(),
   llama_server: LlamaServerConfigSchema.default({}),
-  bridge_mode: z.boolean().optional(),
   search: SearchConfigSchema.optional(),
   embeddings: EmbeddingsConfigSchema,
   log_level: z.enum(['trace', 'debug', 'info', 'warn', 'error']).optional(),
@@ -161,19 +159,19 @@ export const ForgeConfigSchema = z.object({
   permissions: PermissionsSchema,
   exec: ExecConfigSchema,
 }).superRefine((cfg, ctx) => {
-  if (cfg.models.length === 0 && !cfg.bridge_config) {
+  if (cfg.models.length === 0) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['models'],
-      message: 'At least one model is required unless bridge_config is provided',
+      message: 'At least one model is required',
     });
   }
   const hasLocalModel = cfg.models.some((m) => (m.provider ?? 'llama.cpp') === 'llama.cpp');
-  if (!cfg.bridge_mode && hasLocalModel && !cfg.llama_server.binary) {
+  if (hasLocalModel && !cfg.llama_server.binary) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['llama_server', 'binary'],
-      message: 'llama_server.binary is required unless bridge_mode: true or all models use a cloud provider',
+      message: 'llama_server.binary is required when any model uses provider: llama.cpp',
     });
   }
   if (cfg.embeddings?.enabled && !cfg.embeddings.model_path) {

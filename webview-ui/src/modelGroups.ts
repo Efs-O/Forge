@@ -29,7 +29,7 @@ function groupLabel(entry: ModelEntry): string {
   return p;
 }
 
-/** Groups models by provider, preserving bridge.yaml order within each group. */
+/** Groups models by provider, preserving config.yaml order within each group. */
 export function groupModels(models: ModelEntry[]): ModelGroup[] {
   const map = new Map<string, ModelEntry[]>();
   for (const entry of models) {

@@ -88,14 +88,6 @@ models:
   #     max_tokens: 65536
 
 # -------------------------------------------------------------------
-# Optional: bridge mode (connect to an already-running server)
-# -------------------------------------------------------------------
-# bridge_mode: true
-# llama_server:
-#   host: 127.0.0.1
-#   port: 8080
-
-# -------------------------------------------------------------------
 # Optional: web search (Tavily or Brave)
 # Store the key with: Command Palette → Forge: Set Search API Key
 # -------------------------------------------------------------------

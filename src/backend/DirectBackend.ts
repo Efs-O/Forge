@@ -114,7 +114,7 @@ export class DirectBackend implements BackendController {
   private async startLlamaServer(model: ModelConfig): Promise<void> {
     const binary = this.config.llama_server.binary;
     if (!binary) {
-      throw new Error('llama_server.binary is not configured. Set bridge_mode: true to connect to a pre-running server.');
+      throw new Error('llama_server.binary is not configured. Set llama_server.binary in config.yaml to point to your llama-server executable.');
     }
 
     // If a server is already running on this port (e.g. another VS Code window),

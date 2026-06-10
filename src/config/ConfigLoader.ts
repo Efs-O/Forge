@@ -4,7 +4,6 @@ import * as yaml from 'js-yaml';
 import * as vscode from 'vscode';
 import { ForgeConfigSchema } from './schema';
 import type { ForgeConfig } from './types';
-import { loadBridgeConfigDocument, loadBridgeModels, resolveBridgeConfigPath } from './BridgeConfigLoader';
 
 const CONFIG_FILENAME = 'config.yaml';
 
@@ -20,55 +19,6 @@ export function loadConfig(storagePath: string): ForgeConfig {
 
   const raw = fs.readFileSync(filePath, 'utf8');
   const parsed = (yaml.load(raw) ?? {}) as Record<string, unknown>;
-  const bridgeConfigValue = typeof parsed.bridge_config === 'string' ? parsed.bridge_config : undefined;
-  if (bridgeConfigValue) {
-    const bridgeConfigPath = resolveBridgeConfigPath(filePath, bridgeConfigValue);
-    const bridgeDoc = loadBridgeConfigDocument(bridgeConfigPath);
-
-    if (bridgeDoc.config_version === 2) {
-      // v2 schema: binary and server settings are under providers.llama_cpp
-      if (parsed.llama_server === undefined) {
-        const providers = bridgeDoc.providers as Record<string, unknown> | undefined;
-        const llamaCpp = providers?.llama_cpp as Record<string, unknown> | undefined;
-        if (llamaCpp) {
-          const rtDefs = bridgeDoc.runtime_defaults as Record<string, unknown> | undefined;
-          const rtLlamaCpp = rtDefs?.llama_cpp as Record<string, unknown> | undefined;
-          parsed.llama_server = {
-            binary: llamaCpp.binary,
-            host: llamaCpp.host,
-            port: llamaCpp.base_port,
-            ...(rtLlamaCpp && {
-              n_gpu_layers: rtLlamaCpp.n_gpu_layers,
-              n_batch: rtLlamaCpp.n_batch,
-              type_k: rtLlamaCpp.type_k,
-              type_v: rtLlamaCpp.type_v,
-              flash_attn_default: rtLlamaCpp.flash_attn,
-            }),
-          };
-        }
-      }
-      // v2: bridge-level settings live under the bridge: section
-      const bridgeSec = bridgeDoc.bridge as Record<string, unknown> | undefined;
-      if (parsed.strip_thinking_channels === undefined && bridgeSec?.strip_thinking_channels !== undefined) {
-        parsed.strip_thinking_channels = bridgeSec.strip_thinking_channels;
-      }
-      if (parsed.max_simultaneous_models === undefined && typeof bridgeSec?.max_simultaneous_models === 'number') {
-        parsed.max_simultaneous_models = bridgeSec.max_simultaneous_models;
-      }
-    } else {
-      // v1 schema: settings at top level of bridge doc
-      if (parsed.llama_server === undefined && bridgeDoc.llama_server !== undefined) {
-        parsed.llama_server = bridgeDoc.llama_server;
-      }
-      if (parsed.strip_thinking_channels === undefined && bridgeDoc.strip_thinking_channels !== undefined) {
-        parsed.strip_thinking_channels = bridgeDoc.strip_thinking_channels;
-      }
-    }
-
-    if (parsed.models === undefined) {
-      parsed.models = [];
-    }
-  }
 
   const result = ForgeConfigSchema.safeParse(parsed);
   if (!result.success) {
@@ -79,26 +29,19 @@ export function loadConfig(storagePath: string): ForgeConfig {
   }
 
   const config = result.data as ForgeConfig;
-  const bridgeModels = config.bridge_config
-    ? loadBridgeModels(resolveBridgeConfigPath(filePath, config.bridge_config))
-    : [];
-  const mergedModels = [...config.models, ...bridgeModels];
-  if (mergedModels.length === 0) {
-    throw new Error('Forge: no models configured after merging config.yaml and bridge.yaml');
-  }
   const seen = new Set<string>();
-  for (const model of mergedModels) {
+  for (const model of config.models) {
     if (seen.has(model.name)) {
-      throw new Error(`Forge: duplicate model name "${model.name}" across config.yaml and bridge.yaml`);
+      throw new Error(`Forge: duplicate model name "${model.name}" in config.yaml`);
     }
     seen.add(model.name);
   }
-  if (config.active_model && !mergedModels.some((model) => model.name === config.active_model)) {
+  if (config.active_model && !config.models.some((model) => model.name === config.active_model)) {
     throw new Error(
-      `Forge: active_model "${config.active_model}" does not match any entry in merged models (${mergedModels.map((m) => m.name).join(', ')})`,
+      `Forge: active_model "${config.active_model}" does not match any configured model (${config.models.map((m) => m.name).join(', ')})`,
     );
   }
-  config.models = mergedModels.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  config.models = config.models.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
   return config;
 }
 
@@ -143,7 +86,7 @@ export function findConfigPath(globalStoragePath: string, explicitConfigPathSett
 }
 
 /**
- * Watch workspace `config.yaml` and optional extra absolute paths (e.g. merged `bridge.yaml`).
+ * Watch workspace `config.yaml` and optional extra absolute paths.
  * Debounces so saves that touch multiple files produce one reload.
  */
 export function watchForgeConfigPaths(
