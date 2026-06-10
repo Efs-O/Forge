@@ -26,18 +26,18 @@ in flat format.
 ## TODO
 
 - [x] Create this plan file
-- [ ] Migrate bridge.yaml models → .forge/config.yaml (flat, all references resolved)
-- [ ] Delete bridge files: `BridgeBackend.ts`, `BridgeConfigLoader.ts`, `SingleBackendPool.ts`, `bridge.yaml`
-- [ ] `src/config/schema.ts` — remove `bridge_config`, `bridge_mode` fields + superRefine blocks
-- [ ] `src/config/types.ts` — remove `bridge_config?`, `bridge_mode?` from ForgeConfig
-- [ ] `src/config/ConfigLoader.ts` — remove bridge loading + merging logic
-- [ ] `src/extension.ts` — remove bridge imports + conditional pool instantiation
-- [ ] `src/backend/DirectBackend.ts` — update stale error message
-- [ ] `src/sidebar/FirstRunWizard.ts` — remove bridge wizard path
-- [ ] Minor: `webview-ui/src/modelGroups.ts`, `webview-ui/src/slashCommands.ts`, `config/config.example.yaml`
-- [ ] `test/unit/ConfigLoader.test.ts` — remove bridge test cases
-- [ ] Run `npx tsc --noEmit` + `npx vitest run`, fix any failures
-- [ ] Commit
+- [x] Migrate bridge.yaml models → .forge/config.yaml (flat, all references resolved, array notation)
+- [x] Delete bridge files: `BridgeBackend.ts`, `BridgeConfigLoader.ts`, `SingleBackendPool.ts`, `bridge.yaml`, `config/bridge.example.yaml`
+- [x] `src/config/schema.ts` — remove `bridge_config`, `bridge_mode` fields + superRefine blocks
+- [x] `src/config/types.ts` — remove `bridge_config?`, `bridge_mode?` from ForgeConfig
+- [x] `src/config/ConfigLoader.ts` — remove bridge loading + merging logic
+- [x] `src/extension.ts` — remove bridge imports + conditional pool instantiation
+- [x] `src/backend/DirectBackend.ts` — update stale error message
+- [x] `src/sidebar/FirstRunWizard.ts` — remove bridge wizard path
+- [x] Minor: `webview-ui/src/modelGroups.ts`, `webview-ui/src/slashCommands.ts`, `config/config.example.yaml`
+- [x] `test/unit/ConfigLoader.test.ts` — remove bridge test cases
+- [x] `npx tsc --noEmit` — clean, `npx vitest run` — 84/84 passed
+- [x] Committed
 
 ---
 
