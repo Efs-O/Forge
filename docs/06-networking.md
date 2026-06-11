@@ -168,17 +168,18 @@ with the same skepticism you'd apply to a stranger's email."**
 
 ---
 
-## Bridge mode networking notes (Path B)
+## Backend endpoint networking notes
 
-When `backend.mode: bridge`:
-- Forge → bridge URL is `127.0.0.1:<bridge_port>` (loopback only by default).
-- Bridge → llama-server is also loopback.
-- All network rules above (search/fetch policy) apply to Forge's outbound,
-  not the bridge's internal traffic.
+> The Python bridge mode this section originally covered was removed in
+> 2026-06; these notes now apply to `provider: ollama` and
+> `provider: openai-compatible` endpoints.
 
-If a user explicitly configures a non-loopback bridge URL (e.g. running the
-bridge on another machine on the LAN), Forge surfaces a warning at
-activation: "Backend endpoint is not loopback — confirm this is intended."
+- llama-server (Direct mode) and the Ollama daemon are loopback by default.
+- A user can explicitly point `endpoint` at a non-loopback address (e.g. a
+  server on the LAN); that is their opt-in choice, visible in `config.yaml`.
+- All network rules above (search/fetch policy) apply to Forge's outbound
+  traffic; opt-in cloud providers (`xai`, `openrouter`, `openai`,
+  `openai-compatible`) are the only other permitted LLM endpoints.
 
 ---
 

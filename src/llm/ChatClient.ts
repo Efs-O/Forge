@@ -1,9 +1,13 @@
 import type { ModelConfig } from '../config/types';
-import { getCloudBaseUrl, isCloudProvider } from './CloudProviders';
 import { streamChatCompletion, type StreamHandlers } from './OpenAIClient';
 import { streamOllamaChatCompletion } from './OllamaNativeClient';
 import type { ChatCompletionRequest } from './types';
 
+/**
+ * Routes a streaming chat request to the right client for the model's
+ * provider. `baseUrl` is authoritative — for cloud providers the caller
+ * resolves it via getCloudBaseUrl (AgentLoop owns that).
+ */
 export async function streamModelChatCompletion(
   baseUrl: string,
   request: ChatCompletionRequest,
@@ -16,6 +20,5 @@ export async function streamModelChatCompletion(
     await streamOllamaChatCompletion(baseUrl, request, model, handlers, signal);
     return;
   }
-  const url = model && isCloudProvider(model.provider) ? getCloudBaseUrl(model) : baseUrl;
-  await streamChatCompletion(url, request, handlers, signal, apiKey);
+  await streamChatCompletion(baseUrl, request, handlers, signal, apiKey);
 }

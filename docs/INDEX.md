@@ -8,7 +8,7 @@ Single navigational entry point. **Start here.**
 
 1. **[01-overview.md](01-overview.md)** — what Forge is, target users, scope
 2. **[02-wedge-and-positioning.md](02-wedge-and-positioning.md)** — the four pillars; how Forge differs from Continue/Cline/Cursor
-3. **[03-architecture.md](03-architecture.md)** — backend (Direct + Bridge), repo layout, lifecycle, llama-server detection
+3. **[03-architecture.md](03-architecture.md)** — backend (Direct + Ollama), repo layout, lifecycle, llama-server detection
 4. **[04-config-schema.md](04-config-schema.md)** — `config.yaml` schema, `settings.json` split, capability/permission system
 5. **[05-tools.md](05-tools.md)** — full tool catalog, v0.5 implementation set, tool-design rules
 6. **[06-networking.md](06-networking.md)** — search/fetch policy, SSRF guard, prompt-injection mitigation
@@ -22,8 +22,6 @@ Single navigational entry point. **Start here.**
 
 Also relevant at repo root:
 - **`CLAUDE.md`** / **`AGENTS.md`** — agent rules (hard stops, single-point-of-truth, code quality gates)
-- **`llamabridge/`** — in-tree reference, removed before deploy
-- **`llamabridge/SLIM-RECOMMENDATIONS.md`** — slim instructions for the upstream `llamabridge` repo (apply elsewhere, not here)
 
 ### Planning drafts
 
@@ -40,13 +38,14 @@ These are settled. Do not relitigate without flagging.
 | Area                      | Decision                                                              |
 | ------------------------- | --------------------------------------------------------------------- |
 | Project name              | **Forge**                                                             |
-| Backend default           | **Path A — Direct** (TS spawns `llama-server`, no Python required)    |
-| Backend alternative       | Path B — Bridge mode (opt-in, for users running `forge-llamacpp-bridge`) |
-| Backend protocol          | OpenAI-compatible HTTP (`/v1/chat/completions`)                       |
-| Ollama as backend         | **Dropped** — llama.cpp only                                          |
+| Backend default           | **Direct** (TS spawns `llama-server`, no Python required)             |
+| Backend alternative       | Native Ollama (local daemon + Ollama cloud routing). Python bridge mode **removed** (2026-06) |
+| Backend protocol          | OpenAI-compatible HTTP (`/v1/chat/completions`) + Ollama native `/api/chat` |
+| Ollama as backend         | First-class backend (revised from the original "dropped" decision)    |
+| Cloud providers           | Opt-in only: `xai`, `openrouter`, `openai`, `openai-compatible` — tokens in SecretStorage |
 | Target models             | Qwen3 family + Gemma 4 family (3-bit, ~100k ctx default)              |
 | UI                        | `WebviewViewProvider` sidebar (not Copilot Chat API)                  |
-| Modes                     | Ask / Plan / Execute                                                  |
+| Modes                     | Single execute-style workflow (Ask/Plan modes dropped)                |
 | Streaming + cancellation  | From v0.1                                                             |
 | Templating                | Nunjucks (Jinja2-compatible)                                          |
 | Config (models/templates) | `config.yaml`                                                         |
@@ -63,11 +62,9 @@ These are settled. Do not relitigate without flagging.
 | `run_terminal` send policy | `sendText(cmd, false)` only — command pasted but not submitted; user presses Enter |
 | Terminal untrusted-content | Commands from fetched/searched content never dispatched — origin check in ToolRegistry |
 | Search providers          | Tavily (default, free 1k/mo) + Brave (alt)                            |
-| Outbound network          | Only `web_search` + `web_fetch`. Both opt-in via API key/explicit enable |
+| Outbound network          | `web_search` + `web_fetch` (opt-in via API key) + opt-in cloud LLM providers. Nothing else |
 | Editor target             | VS Code first; Cursor compatibility post-v1.0                         |
-| `llamabridge/` location   | In-tree reference; **removed before deploy**                          |
-| Bridge logic source       | TS port (no Python runtime dep for end users)                         |
-| README posture (v1.0)     | Document both Path A (default) and Path B; link to upstream `llamabridge` repo for Path B users |
+| Bridge logic source       | TS port (no Python runtime dep for end users); the bridge itself is fully removed |
 | `llama-server` binary     | Detect on PATH or absolute path in config; **no bundling pre-v1.0**   |
 | HalluMeter integration    | **Deferred** — decide post-v0.5 dogfooding                            |
 | Test framework            | vitest (unit) + @vscode/test-electron (integration); 80% line/function coverage floor |
@@ -90,4 +87,6 @@ If two docs disagree, this is the precedence order:
 ## Status
 
 - ✅ Planning complete
-- ⏳ v0.1 implementation pending — gate is final read-through + sign-off on this docs set
+- ✅ Implemented and shipping (v0.12.x on the Marketplace)
+- Note: docs `01`–`14` are largely planning-era; where they conflict with the
+  code or `CLAUDE.md`, the code and `CLAUDE.md` win.

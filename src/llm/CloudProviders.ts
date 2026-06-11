@@ -39,7 +39,7 @@ export function getCloudBaseUrl(model: ModelConfig): string {
   if (model.provider === 'openai-compatible') {
     if (!model.endpoint) {
       throw new Error(
-        `Forge: model "${model.name}" uses provider openai-compatible and requires endpoint in bridge.yaml`,
+        `Forge: model "${model.name}" uses provider openai-compatible and requires endpoint in config.yaml`,
       );
     }
     return normalizeOpenAiCompatibleBaseUrl(model.endpoint);

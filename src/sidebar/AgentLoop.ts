@@ -54,6 +54,7 @@ export class AgentLoop {
   private readonly capabilityWarningsShown = new Set<string>();
   private readonly pendingConfirmations = new Map<string, (approved: boolean) => void>();
   private readonly toolDispatch: ToolDispatch;
+  private promptRunCtrl: AbortController | null = null;
   private clankerMode = false;
 
   get streaming(): boolean { return this.streamingConvIds.size > 0; }
@@ -108,6 +109,7 @@ export class AgentLoop {
       this.cancelControllers.get(convId)?.abort();
       void this.activeBackends.get(convId)?.stop();
     } else {
+      this.promptRunCtrl?.abort();
       for (const ctrl of this.cancelControllers.values()) ctrl.abort();
       for (const backend of this.activeBackends.values()) void backend.stop();
     }
@@ -153,7 +155,9 @@ export class AgentLoop {
     // Cloud providers (xai, openrouter): no local backend — resolve token and call the API directly.
     if (isCloudProvider(model.provider)) {
       let apiKey: string;
+      let cloudBaseUrl: string;
       try {
+        cloudBaseUrl = getCloudBaseUrl(model);
         if (model.provider === 'xai') {
           apiKey = await resolveXaiToken(model.api_key_secret, this.secrets);
         } else {
@@ -162,7 +166,7 @@ export class AgentLoop {
           if (!stored) {
             throw new Error(
               `${getCloudProviderLabel(model.provider)}: no bearer token in SecretStorage (key: ${keyName ?? 'unset'}). ` +
-                'Run "Forge: Set Cloud Provider Token" and set api_key_secret in bridge.yaml.',
+                'Run "Forge: Set Cloud Provider Token" and set api_key_secret in config.yaml.',
             );
           }
           apiKey = stored;
@@ -170,7 +174,7 @@ export class AgentLoop {
         log.info(`[AgentLoop] ${model.provider} token resolved for model=${model.name}`);
       } catch (err) {
         const msg = (err as Error).message;
-        log.error(`[AgentLoop] ${model.provider} token resolution failed: ${msg}`);
+        log.error(`[AgentLoop] ${model.provider} setup failed: ${msg}`);
         postC({ type: 'error', message: msg });
         this.resolveStreamingLifecycle(convId);
         return;
@@ -182,7 +186,6 @@ export class AgentLoop {
       this.checkpoints.beginTurn(turnId);
       this.streamingConvIds.add(convId);
       this.events.onGenerationStarted?.(model.name);
-      const cloudBaseUrl = getCloudBaseUrl(model);
       try {
         await this.runAgentLoop(cloudBaseUrl, conv, model, activeFile, ctrl, postC, apiKey);
       } catch (err) {
@@ -279,6 +282,8 @@ export class AgentLoop {
     );
 
     this.events.onGenerationStarted?.(selectedModel.name);
+    const ctrl = new AbortController();
+    this.promptRunCtrl = ctrl;
     let content = '';
     try {
       await new Promise<void>((resolve, reject) => {
@@ -288,13 +293,14 @@ export class AgentLoop {
           onDone: () => resolve(),
           onError: reject,
           onToolCalls: () => {},
-        });
+        }, ctrl.signal);
       });
       return this.sanitizeText(content, this.shouldStripThinking(selectedModel));
     } catch (err) {
       this.events.onBackendError?.((err as Error).message);
       throw err;
     } finally {
+      if (this.promptRunCtrl === ctrl) this.promptRunCtrl = null;
       this.events.onGenerationFinished?.(backend.loadedModel());
     }
   }
@@ -326,6 +332,25 @@ export class AgentLoop {
     }
 
     let lastToolSignature: string | null = null;
+
+    // Shared by the native and fallback tool-call paths. Returns 'stop' when
+    // the model repeats the exact same call batch (loop guard).
+    const dispatchToolCalls = async (toolCalls: ToolCall[]): Promise<'continue' | 'stop'> => {
+      const sig = toolCalls.map((tc) => `${tc.function.name}:${tc.function.arguments}`).join('|');
+      if (sig === lastToolSignature) {
+        postC({ type: 'error', message: 'Forge: agent is repeating the same tool call — stopping to avoid a loop. Try rephrasing your request or use /compact if the context is full.' });
+        return 'stop';
+      }
+      lastToolSignature = sig;
+      this.failureTracker.reset();
+      for (const tc of toolCalls) {
+        const detail = extractToolDetail(tc.function.arguments);
+        postC({ type: 'toolActivity', toolName: tc.function.name, ...(detail ? { detail } : {}) });
+      }
+      conv.messages.push({ role: 'assistant', content: null, tool_calls: toolCalls });
+      await this.toolDispatch.dispatch(toolCalls, allowed, conv.messages, conv.id);
+      return 'continue';
+    };
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       if (ctrl.signal.aborted) {
@@ -395,19 +420,7 @@ export class AgentLoop {
       const assistantReasoning = stripThinkingChannels ? '' : this.sanitizeText(rawReasoningContent, false);
 
       if (toolCalls?.length) {
-        const sig = toolCalls.map((tc) => `${tc.function.name}:${tc.function.arguments}`).join('|');
-        if (sig === lastToolSignature) {
-          postC({ type: 'error', message: 'Forge: agent is repeating the same tool call — stopping to avoid a loop. Try rephrasing your request or use /compact if the context is full.' });
-          return;
-        }
-        lastToolSignature = sig;
-        this.failureTracker.reset();
-        for (const tc of toolCalls) {
-          const detail = extractToolDetail(tc.function.arguments);
-          postC({ type: 'toolActivity', toolName: tc.function.name, ...(detail ? { detail } : {}) });
-        }
-        conv.messages.push({ role: 'assistant', content: null, tool_calls: toolCalls });
-        await this.toolDispatch.dispatch(toolCalls, allowed, conv.messages, conv.id);
+        if (await dispatchToolCalls(toolCalls) === 'stop') return;
         continue;
       }
 
@@ -415,19 +428,7 @@ export class AgentLoop {
         ? extractFallbackToolCalls(rawAssistantContent)
         : null;
       if (fallbackToolCalls?.length) {
-        const sig = fallbackToolCalls.map((tc) => `${tc.function.name}:${tc.function.arguments}`).join('|');
-        if (sig === lastToolSignature) {
-          postC({ type: 'error', message: 'Forge: agent is repeating the same tool call — stopping to avoid a loop. Try rephrasing your request or use /compact if the context is full.' });
-          return;
-        }
-        lastToolSignature = sig;
-        this.failureTracker.reset();
-        for (const tc of fallbackToolCalls) {
-          const detail = extractToolDetail(tc.function.arguments);
-          postC({ type: 'toolActivity', toolName: tc.function.name, ...(detail ? { detail } : {}) });
-        }
-        conv.messages.push({ role: 'assistant', content: null, tool_calls: fallbackToolCalls });
-        await this.toolDispatch.dispatch(fallbackToolCalls, allowed, conv.messages, conv.id);
+        if (await dispatchToolCalls(fallbackToolCalls) === 'stop') return;
         continue;
       }
 

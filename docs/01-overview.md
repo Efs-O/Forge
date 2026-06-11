@@ -12,11 +12,11 @@ posture. No cloud LLM endpoints, ever.
 - Privacy- and air-gap-conscious developers who can't or won't send code to cloud LLMs
 - Local-LLM enthusiasts who want first-class llama.cpp control instead of Ollama-mediated abstraction
 - Users running models on consumer GPUs (Qwen3, Gemma 4 families, 3-bit quants, ~100k context)
-- Power users of `forge-llamacpp-bridge` who want a sidebar UX instead of (or alongside) Continue
+- Ollama users who want an agentic sidebar over their local daemon (or Ollama cloud routing)
 
 ## What It Is Not
 
-- A frontier-model client — Forge does not connect to OpenAI, Anthropic, Google, etc.
+- A cloud-first client — local is the default; cloud providers (`xai`, `openrouter`, `openai`, `openai-compatible`) are strictly opt-in and user-configured
 - A general-purpose chat app — it's scoped to coding workflows in VS Code
 - A Continue fork — semantics inherited from `llamabridge`, code reimplemented in TypeScript
 - A model server — Forge runs `llama-server`, doesn't replace it
@@ -29,7 +29,7 @@ VS Code Extension (TypeScript)
     ├── Sidebar (WebviewViewProvider)         user-facing chat + mode + actions
     ├── BackendController                     mode-agnostic interface
     │       ├── DirectBackend  (default)      spawns llama-server itself
-    │       └── BridgeBackend  (opt-in)       talks to forge-llamacpp-bridge
+    │       └── OllamaAdapter                 talks to the local Ollama daemon
     ├── OpenAIClient                          streaming /v1/chat/completions
     ├── ToolRegistry                          dispatch + capability/permission gating
     ├── CheckpointStack                       per-turn snapshots + Keep/Undo decorations
@@ -44,7 +44,7 @@ VS Code Extension (TypeScript)
 1. **First-class llama.cpp control** — every `llama-server` flag exposable in `config.yaml`. Bridge logic ported to TS so no Python runtime is required.
 2. **Tools tuned for local-model reliability** — strict JSON schemas, dual tool-call path (native + structured-output fallback), per-model system prompts.
 3. **Zero-friction GGUF loading** — autodetect from HuggingFace cache + user-configured directories; sane per-model launch defaults.
-4. **Optional search, fully opt-in** — Tavily (default) and Brave, user-supplied API key in `SecretStorage`. Search and fetch are the only outbound network calls. No telemetry.
+4. **Optional search, fully opt-in** — Tavily (default) and Brave, user-supplied API key in `SecretStorage`. Outbound network calls are limited to search/fetch and explicitly configured opt-in cloud providers. No telemetry.
 
 (See **[02-wedge-and-positioning.md](02-wedge-and-positioning.md)** for full positioning.)
 

@@ -51,8 +51,8 @@ forge/
 │   │   └── cancellation.ts              AbortController plumbing
 │   ├── backend/
 │   │   ├── BackendController.ts         Mode-agnostic interface
-│   │   ├── DirectBackend.ts             Path A — spawns llama-server
-│   │   ├── BridgeBackend.ts             Path B — connects to existing bridge
+│   │   ├── DirectBackend.ts             spawns llama-server
+│   │   ├── OllamaAdapter.ts             Ollama endpoint normalization + health
 │   │   ├── LlamaServerArgs.ts           Compose CLI argv (TS port of bridge _compose_cmd)
 │   │   └── HealthCheck.ts               GET /health, retry, ready-state
 │   ├── config/
@@ -92,7 +92,6 @@ forge/
 │   ├── unit/                            vitest
 │   └── integration/                     @vscode/test-electron
 │
-└── llamabridge/                         In-tree reference, removed before deploy
 ```
 
 ## Backend modes
@@ -113,23 +112,17 @@ the extension is mode-agnostic.
 - Switch model: kill existing process (`SIGTERM` 5s grace, then `SIGKILL`), respawn with new `-m`.
 - No Python required.
 
-### Path B — Bridge (opt-in)
+### Path B — Ollama
 
-- Extension expects `forge-llamacpp-bridge` running on a user-configured URL (or spawns it if `bridge_command` set).
-- Forge talks to the bridge over the same OpenAI-compatible HTTP protocol.
-- Hot-swap, sampling-merge, system-prompt injection all happen bridge-side.
-- For users who already run the bridge with Continue.
+> The original Path B (Python `forge-llamacpp-bridge`) was removed in 2026-06;
+> all models are configured in `config.yaml` and `BridgeBackend.ts` no longer
+> exists. Already-running OpenAI-compatible servers are reached via the
+> `openai-compatible` provider on a model entry instead.
 
-### Switching modes
+- Models with `provider: ollama` talk to the local Ollama daemon (default `http://127.0.0.1:11434`) via the native `/api/chat` protocol.
+- Ollama cloud models route through the same local daemon; auth is `ollama auth login`, never Forge.
 
-Single config field:
-
-```yaml
-backend:
-  mode: direct                         # or 'bridge'
-```
-
-The same `config.yaml` `models:` block works for both modes.
+The same `config.yaml` `models:` block hosts both drivers — the per-model `provider` field selects the path.
 
 ## llama-server detection (Direct mode)
 
@@ -149,7 +142,7 @@ Resolution order:
 
 ### Activation
 1. Read `config.yaml` (Zod-validated). Surface errors early.
-2. Read `settings.json` (endpoint URL if Bridge mode, search API keys via `SecretStorage`).
+2. Read `settings.json` (`forge.*` keys; search API keys via `SecretStorage`).
 3. Register `SidebarProvider` (`viewsContainers` + `views` contributions).
 4. Lazy-init `BackendController` — do not start `llama-server` until first request (avoids blocking activation on a 30s model load).
 

@@ -38,7 +38,7 @@ Consolidated risk register. Read alongside [02-wedge-and-positioning.md](02-wedg
 | 19  | Command injection via `exec_command` args                         | `spawn` with arg array, `shell: false`; shell operators in args → `ToolError`; Windows built-ins require explicit `cmd.exe`/`powershell.exe` as `command`; `-Command`/`-EncodedCommand` PowerShell flags banned |
 | 19b | `run_terminal` shell-string risk (all platforms)                  | `sendText(cmd, false)` only — user must press Enter; show-before-execute + denylist are the sole guards; no arg-array protection available for interactive terminals |
 | 19c | Windows PowerShell destructive commands not in Unix denylist       | Platform-aware denylist: `Remove-Item -Recurse -Force`, `Invoke-Expression`/`iex`, `Format-Volume`, `Stop-Computer`, `-EncodedCommand` added alongside Unix patterns; checked on all platforms |
-| 20  | Bridge mode pointing at non-loopback URL                          | Surface warning at activation if `bridge_url` is not `127.0.0.1`/`localhost`; require explicit confirmation |
+| 20  | Model `endpoint` pointing at non-loopback URL                     | Endpoints are explicit in `config.yaml` (no hidden defaults); non-loopback use is a visible, user-owned choice |
 | 21  | Webview script injection                                          | Strict CSP in webview HTML; sanitize all rendered model output (assume hostile); no `innerHTML` from model strings without sanitization |
 | 22  | Untrusted GGUF execution surface                                  | GGUFs are model weights, not executables; risk is mostly hallucination not RCE. Document HF source recommendation; do not auto-download from arbitrary URLs |
 

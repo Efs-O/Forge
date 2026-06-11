@@ -322,6 +322,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async handleSend(text: string, attachments?: AttachmentData[]): Promise<void> {
+    if (this.agentLoop.isStreamingConv(this.sidebar.activeConversationId)) {
+      this.post({ type: 'error', message: 'Forge: this conversation is still generating. Cancel it first or open a new tab.' });
+      return;
+    }
     if (!this.config.active_model) {
       const message = 'Forge: no active model selected. Pick a model before sending.';
       this.events.onBackendError?.(message);

@@ -1,7 +1,7 @@
 import type { ForgeConfig } from '../config/types';
 
 export interface BackendController {
-  /** Start the backend (spawn server or connect to bridge). Resolves when ready. */
+  /** Start the backend (spawn llama-server or connect to Ollama). Resolves when ready. */
   start(): Promise<void>;
   /** Stop the backend and release all resources. */
   stop(): Promise<void>;

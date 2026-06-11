@@ -168,6 +168,10 @@ export async function streamChatCompletion(
         }
       }
     }
+    // Stream ended without [DONE] or a terminal finish_reason (server crash or
+    // dropped connection) — settle anyway so the agent loop never hangs.
+    flushAccumulatedToolCalls();
+    handlers.onDone(null);
   } catch (err) {
     if ((err as Error)?.name === 'AbortError') {
       handlers.onDone('cancelled');

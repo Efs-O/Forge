@@ -38,8 +38,7 @@ Its default and strongest path is still local: GGUF models through `llama-server
 - Inline chat diffs after write tools
 - Direct `llama-server` lifecycle management
 - Ollama local and Ollama cloud routing through the local daemon
-- Optional bridge mode for an already-running OpenAI-compatible server
-- Optional cloud providers: `xai`, `openrouter`, `openai`, `openai-compatible`
+- Optional cloud or self-hosted providers: `xai`, `openrouter`, `openai`, `openai-compatible`
 - Localhost control server for external orchestrators and worker fleets
 - Reasoning token display and optional thinking-channel stripping
 - Optional Tavily or Brave web search with keys stored in VS Code SecretStorage
@@ -86,18 +85,12 @@ Best for:
 - Ollama cloud routes after `ollama auth login`
 - users who want model management outside Forge
 
-### 3. Bridge mode
+### 3. Optional cloud / OpenAI-compatible providers
 
-Forge connects to an already-running OpenAI-compatible endpoint instead of spawning `llama-server`.
-
-Best for:
-- pre-managed local servers
-- custom wrappers
-- external infra you already operate
-
-### 4. Optional cloud providers
-
-Forge can also call explicitly configured cloud or hosted OpenAI-compatible providers.
+Forge can also call explicitly configured cloud providers, or any
+already-running OpenAI-compatible server (pre-managed local servers, custom
+wrappers, external infra) via the `openai-compatible` provider with an
+`endpoint`.
 
 Supported provider values:
 - `xai`
@@ -164,19 +157,18 @@ models:
     reasoning_effort: medium
 ```
 
-Bridge-mode example:
+Already-running OpenAI-compatible server example:
 
 ```yaml
-bridge_mode: true
-
-llama_server:
-  host: 127.0.0.1
-  port: 8080
+models:
+  my-local-server:
+    provider: openai-compatible
+    endpoint: http://127.0.0.1:8080/v1
+    api_key_secret: my-local-server-token   # only if the server requires one
 ```
 
-For larger examples, including control-server and cloud-provider patterns, use:
-- [`config/config.example.yaml`](config/config.example.yaml)
-- [`config/bridge.example.yaml`](config/bridge.example.yaml)
+For larger examples, including control-server and cloud-provider patterns, use
+[`config/config.example.yaml`](config/config.example.yaml).
 
 ### 3. Open the sidebar
 
@@ -189,7 +181,7 @@ If the config is missing or invalid, Forge will guide you through setup instead 
 Cloud or hosted OpenAI-compatible providers are explicit and credentialed through SecretStorage, not YAML.
 
 - Use `Forge: Set Cloud Provider Token` to store a bearer token.
-- Set `api_key_secret` on the model entry in `bridge.yaml` or your merged config path.
+- Set `api_key_secret` on the model entry in `config.yaml`.
 - For `openai-compatible`, also set `endpoint`.
 
 Example:
@@ -337,8 +329,7 @@ Outbound traffic is limited to the endpoints you explicitly use:
 
 - local `llama-server`
 - local Ollama daemon
-- an explicitly configured bridge endpoint
-- an explicitly configured cloud-provider endpoint
+- an explicitly configured cloud or OpenAI-compatible provider endpoint
 - Tavily or Brave if search is enabled
 - user-approved fetch targets
 

@@ -1,12 +1,18 @@
 # 04 — Config Schema
 
+> **Planning-era doc.** The authoritative schema is `src/config/schema.ts`
+> (Zod) and the live example is `config/config.example.yaml`. Notable drift:
+> there is no top-level `backend:` block in the real schema — the binary,
+> host, and port live under `llama_server:`, and the Python bridge mode was
+> removed entirely (per-model `provider` selects llama.cpp / ollama / cloud).
+
 Forge has **two configuration sources**, by concern:
 
 | Source                 | Lives at                                                | Owns                                                |
 | ---------------------- | ------------------------------------------------------- | --------------------------------------------------- |
 | `config.yaml`          | `<workspace>/.forge/config.yaml` (preferred) or `~/.forge/config.yaml` | Models, llama-server flags, sampling, templates    |
-| VS Code `settings.json`| `forge.*` keys                                          | UI prefs, endpoint URL (Bridge mode), feature toggles |
-| VS Code `SecretStorage`| (managed by VS Code)                                    | API keys (Tavily, Brave) — **never in `config.yaml`** |
+| VS Code `settings.json`| `forge.*` keys                                          | UI prefs, feature toggles                           |
+| VS Code `SecretStorage`| (managed by VS Code)                                    | API keys/tokens (Tavily, Brave, cloud providers) — **never in `config.yaml`** |
 
 Workspace `config.yaml` overrides global; both validated with Zod at load.
 
@@ -19,18 +25,11 @@ Workspace `config.yaml` overrides global; both validated with Zod at load.
 # Forge — config.yaml
 # ---------------------------------------------------------------
 
-# Backend mode + binary
-backend:
-  mode: direct                        # 'direct' (default) | 'bridge'
-  llama_server_binary: auto           # 'auto' (PATH lookup) | absolute path
-  bridge_url: http://127.0.0.1:9099   # only used when mode: bridge
-  bridge_command: forge-llamacpp-bridge  # only used when mode: bridge AND we should spawn it
-  bridge_config: ./config/bridge.yaml       # bridge YAML path (only mode: bridge)
-  host: 127.0.0.1
-  port: auto                          # 'auto' = pick free port; otherwise integer
-
 # llama-server defaults (Direct mode only)
 llama_server:
+  binary: /path/to/llama-server       # required when any model uses provider: llama.cpp
+  host: 127.0.0.1
+  port: 8080
   n_gpu_layers: -1                    # -1 = offload all
   n_batch: 512
   n_parallel: 1
@@ -201,10 +200,10 @@ Unknown keys raise a Zod validation error — silent drops are not allowed.
 | ----------------------- | ---------------------------------------------- |
 | `forge.tavily.apiKey`   | Tavily API key (user-supplied)                 |
 | `forge.brave.apiKey`    | Brave Search API key (user-supplied)           |
-| `forge.bridge.apiKey`   | Bridge mode bearer token                       |
+| `<api_key_secret>`      | Cloud provider bearer token (key name set per model in `config.yaml`) |
 
-Set via the **Forge: Set API Key** command palette entry, never via direct file
-edit.
+Set via the **Forge: Set Search API Key** / **Forge: Set Cloud Provider Token**
+command palette entries, never via direct file edit.
 
 ---
 

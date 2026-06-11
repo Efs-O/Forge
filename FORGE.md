@@ -11,13 +11,12 @@ TypeScript + VS Code Extension API, built with esbuild, tested with Vitest, lint
 - **scripts/** — Build and automation scripts
 - **test/** — Test suites
 - **assets/** — Static assets and resources
-- **legacy/** — Deprecated code preserved for reference
 
 ## Key Files
 - **src/extension.ts** — Extension entry point
 - **package.json** — Dependencies, scripts, and extension manifest
 - **tsconfig.json** — TypeScript compiler configuration
-- **bridge.yaml** — Bridge architecture configuration
+- **config/config.example.yaml** — User-facing config example
 - **esbuild.config.mjs** — Build bundler configuration
 - **vitest.config.ts** — Test runner configuration
 
@@ -29,5 +28,4 @@ TypeScript + VS Code Extension API, built with esbuild, tested with Vitest, lint
 
 ## Hard Stops
 - **Building .vsix packages** — Running `vsce package` or similar generates distributable extension files; confirm before executing
-- **Modifying bridge.yaml** — Changes to the bridge config can break extension communication; review impact before editing
-- **Deleting legacy/** — Contains deprecated code that may be needed for rollback or reference; confirm before removal
+- **Modifying the config schema** (`src/config/schema.ts`) in a way that breaks existing `config.yaml` files — review impact before editing
