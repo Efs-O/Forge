@@ -2,7 +2,9 @@ node_modules/
 dist/
 *.vsix
 coverage/
-.forge/
+.forge/*
+!.forge/
+!.forge/config.yaml
 *.log
 .DS_Store
 Thumbs.db
@@ -19,12 +21,7 @@ assets/.coordination/
 fireworks.html
 
 # Internal planning docs — not user-facing
-docs/gui-code-comparison-report.md
-docs/metadata-and-thinking-plan.md
-docs/multi-tab-chat-plan.md
-docs/offline-vscode-integration-plan.md
-docs/ollama-support-plan.md
-docs/plan-backend-pool.md
+docs/
 AUDIT_REPORT.md
 FORGE_REPORT.md
 AGENTS.md
@@ -39,3 +36,6 @@ TODO-control-server-concurrency-hardening.md
 
 BRIDGE_REFACTOR_INSTRUCTIONS.md
 PUSH_EXCLUSION_CANDIDATES.md
+BRIDGE_REMOVAL.md
+RELAY_DISPATCH_FINDINGS.md
+TODO.md

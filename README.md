@@ -9,17 +9,17 @@ Forge is a local-first AI coding assistant for VS Code.
 
 Its default and strongest path is still local: GGUF models through `llama-server`, local Ollama models, strict tool schemas, per-action confirmation, and per-turn undo. Forge now also supports optional cloud or OpenAI-compatible providers for users who explicitly configure them. Telemetry remains none.
 
-![Forge agent loop in action](docs/assets/demo.gif)
+![Forge agent loop in action](assets/readme/demo.gif)
 
 ## Screenshots
 
 | Agent loop + Clanker Mode | Model picker |
 | :---: | :---: |
-| ![Agent loop](docs/assets/agent-loop.jpg) | ![Model picker](docs/assets/model-picker.jpg) |
+| ![Agent loop](assets/readme/agent-loop.jpg) | ![Model picker](assets/readme/model-picker.jpg) |
 
 | Slash commands | Marketplace |
 | :---: | :---: |
-| ![Slash commands](docs/assets/slash-commands.jpg) | ![Marketplace](docs/assets/marketplace.jpg) |
+| ![Slash commands](assets/readme/slash-commands.jpg) | ![Marketplace](assets/readme/marketplace.jpg) |
 
 ## Current Positioning
 

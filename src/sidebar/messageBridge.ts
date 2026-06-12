@@ -1,4 +1,4 @@
-/** Tab row mirrored for host + webview (docs/multi-tab-chat-plan.md). */
+/** Tab row mirrored for host + webview. */
 export interface SessionTabMeta {
   id: string;
   title: string;

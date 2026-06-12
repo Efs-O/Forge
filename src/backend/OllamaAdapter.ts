@@ -68,9 +68,16 @@ function ollamaLaunchCandidates(configured?: string): SpawnCandidate[] {
 function trySpawnServe(candidate: SpawnCandidate): Promise<boolean> {
   return new Promise((resolve) => {
     try {
-      // windowsHide: a detached console exe otherwise opens a visible DOS
-      // window on Windows (and its child runners flash more of them).
-      const child = spawn(candidate.exe, candidate.args, { detached: true, stdio: 'ignore', windowsHide: true });
+      // Windows: do NOT detach — a detached process has no console, so every
+      // console child ollama spawns (runners, GPU probes) flashes its own DOS
+      // window. Non-detached + windowsHide gives the daemon one HIDDEN console
+      // that all its children inherit. Orphaned children survive extension
+      // host exit on Windows, so the daemon outlives reloads anyway.
+      const child = spawn(candidate.exe, candidate.args, {
+        detached: process.platform !== 'win32',
+        stdio: 'ignore',
+        windowsHide: true,
+      });
       child.once('error', () => resolve(false));
       child.once('spawn', () => {
         child.unref();

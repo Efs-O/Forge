@@ -1,0 +1,954 @@
+# Forge workspace config
+
+active_model: gemma4-26b-a4b-it-iq3s
+
+llama_server:
+  binary: "N:/downloads/llama.cpp-b9402/llama-server.exe"
+  host: "127.0.0.1"
+  port: 8080
+
+max_simultaneous_models: 4
+
+control_server:
+  enabled: true
+  port: 8799
+
+search:
+  provider: tavily
+  secret_key_name: forge.tavily.apiKey
+  max_results: 5
+
+models:
+
+  # ---------------------------------------------------------------------------
+  # llama.cpp local models
+  # ---------------------------------------------------------------------------
+
+  - name: gemma4-e4b-it-ud-q4kxl
+    gguf_path: "N:/GEMMA GGUF UNSLOTH/E4B/gemma-4-E4B-it-UD-Q4_K_XL.gguf"
+    mmproj_path: "N:/GEMMA GGUF UNSLOTH/E4B/mmproj-F16.gguf"
+    n_parallel: 8
+    num_ctx: 262144
+    n_gpu_layers: -1
+    n_batch: 512
+    type_k: 8
+    type_v: 8
+    flash_attn: true
+    think: true
+    strip_tools: false
+    system_prompt: |
+      You are Forge, a local AI coding assistant running inside VS Code.
+      You have tools available: read_file, write_file, replace_in_file, list_directory, search_code, run_terminal, git_status, git_diff, and more.
+      ALWAYS use tools to accomplish tasks. Never describe what you would do - do it by calling the tools directly.
+      When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
+      After each tool result, continue calling tools until the task is complete, then give a short summary.
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 64
+      min_p: 0.0
+      seed: 0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+      repeat_last_n: 64
+      stop: "<|im_end|>"
+      max_tokens: 98304
+    extra_llama_server_args:
+      - "--reasoning-budget"
+      - "2048"
+
+  - name: gemma4-26b-a4b-it-iq3s
+    gguf_path: "N:/GEMMA GGUF UNSLOTH/26B/gemma-4-26B-A4B-it-UD-IQ3_S.gguf"
+    mmproj_path: "N:/GEMMA GGUF UNSLOTH/26B/mmproj-F16.gguf"
+    n_parallel: 4
+    num_ctx: 131072
+    n_gpu_layers: -1
+    n_batch: 512
+    type_k: 8
+    type_v: 8
+    flash_attn: true
+    think: true
+    strip_tools: false
+    system_prompt: |
+      You are Forge, a local AI coding assistant running inside VS Code.
+      You have tools available: read_file, write_file, replace_in_file, list_directory, search_code, run_terminal, git_status, git_diff, and more.
+      ALWAYS use tools to accomplish tasks. Never describe what you would do - do it by calling the tools directly.
+      When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
+      After each tool result, continue calling tools until the task is complete, then give a short summary.
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 64
+      min_p: 0.0
+      seed: 0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+      repeat_last_n: 64
+      stop: "<|im_end|>"
+      max_tokens: 98304
+    extra_llama_server_args:
+      - "--reasoning-budget"
+      - "4096"
+
+  - name: gemma4-26b-a4b-it-iq4xs
+    gguf_path: "N:/GEMMA GGUF UNSLOTH/26B/gemma-4-26B-A4B-it-UD-IQ4_XS.gguf"
+    mmproj_path: "N:/GEMMA GGUF UNSLOTH/26B/mmproj-F16.gguf"
+    n_parallel: 4
+    num_ctx: 131072
+    n_gpu_layers: -1
+    n_batch: 512
+    type_k: 8
+    type_v: 8
+    flash_attn: true
+    think: true
+    strip_tools: false
+    system_prompt: |
+      You are Forge, a local AI coding assistant running inside VS Code.
+      You have tools available: read_file, write_file, replace_in_file, list_directory, search_code, run_terminal, git_status, git_diff, and more.
+      ALWAYS use tools to accomplish tasks. Never describe what you would do - do it by calling the tools directly.
+      When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
+      After each tool result, continue calling tools until the task is complete, then give a short summary.
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 64
+      min_p: 0.0
+      seed: 0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+      repeat_last_n: 64
+      stop: "<|im_end|>"
+      max_tokens: 98304
+    extra_llama_server_args:
+      - "--reasoning-budget"
+      - "4096"
+
+  - name: gemma4-26b-a4b-it-iq4xs-coding
+    gguf_path: "N:/GEMMA GGUF UNSLOTH/26B/gemma-4-26B-A4B-it-UD-IQ4_XS.gguf"
+    n_parallel: 1
+    num_ctx: 131072
+    n_gpu_layers: -1
+    n_batch: 512
+    type_k: 8
+    type_v: 8
+    flash_attn: true
+    think: true
+    strip_tools: false
+    capabilities: [tool-call]
+    system_prompt: |
+      You are Forge, a local AI coding assistant running inside VS Code.
+      You have tools available: read_file, write_file, replace_in_file, list_directory, search_code, run_terminal, git_status, git_diff, and more.
+      ALWAYS use tools to accomplish tasks. Never describe what you would do - do it by calling the tools directly.
+      When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
+      After each tool result, continue calling tools until the task is complete, then give a short summary.
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 64
+      min_p: 0.0
+      seed: 0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+      repeat_last_n: 64
+      stop: "<|im_end|>"
+      max_tokens: 98304
+    extra_llama_server_args:
+      - "--reasoning-budget"
+      - "4096"
+
+  - name: gemma4-26b-a4b-it-iq4xs-vision
+    gguf_path: "N:/GEMMA GGUF UNSLOTH/26B/gemma-4-26B-A4B-it-UD-IQ4_XS.gguf"
+    mmproj_path: "N:/GEMMA GGUF UNSLOTH/26B/mmproj-F16.gguf"
+    n_parallel: 1
+    num_ctx: 32768
+    n_gpu_layers: -1
+    n_batch: 512
+    type_k: 8
+    type_v: 8
+    flash_attn: true
+    think: true
+    strip_tools: false
+    capabilities: [tool-call, vision]
+    system_prompt: |
+      You are Forge, a local AI coding assistant running inside VS Code.
+      You have tools available: read_file, write_file, replace_in_file, list_directory, search_code, run_terminal, git_status, git_diff, and more.
+      ALWAYS use tools to accomplish tasks. Never describe what you would do - do it by calling the tools directly.
+      When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
+      After each tool result, continue calling tools until the task is complete, then give a short summary.
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 64
+      min_p: 0.0
+      seed: 0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+      repeat_last_n: 64
+      stop: "<|im_end|>"
+      max_tokens: 98304
+    extra_llama_server_args:
+      - "--reasoning-budget"
+      - "4096"
+
+  - name: gemma4-26b-a4b-it-iq4xs-worker
+    gguf_path: "N:/GEMMA GGUF UNSLOTH/26B/gemma-4-26B-A4B-it-UD-IQ4_XS.gguf"
+    n_parallel: 4
+    num_ctx: 131072
+    n_gpu_layers: -1
+    n_batch: 512
+    type_k: 8
+    type_v: 8
+    flash_attn: true
+    think: true
+    strip_tools: false
+    capabilities: [tool-call]
+    extra_llama_server_args:
+      - "--reasoning-budget"
+      - "4096"
+
+  - name: gemma4-12b-it-ud-q5kxl
+    gguf_path: "N:/GEMMA GGUF UNSLOTH/12B/gemma-4-12b-it-UD-Q5_K_XL.gguf"
+    mmproj_path: "N:/GEMMA GGUF UNSLOTH/12B/mmproj-F16.gguf"
+    n_parallel: 8
+    num_ctx: 262144
+    n_gpu_layers: -1
+    n_batch: 512
+    type_k: 8
+    type_v: 8
+    flash_attn: true
+    think: true
+    strip_tools: false
+    system_prompt: |
+      You are Forge, a local AI coding assistant running inside VS Code.
+      You have tools available: read_file, write_file, replace_in_file, list_directory, search_code, run_terminal, git_status, git_diff, and more.
+      ALWAYS use tools to accomplish tasks. Never describe what you would do - do it by calling the tools directly.
+      When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
+      After each tool result, continue calling tools until the task is complete, then give a short summary.
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 64
+      min_p: 0.0
+      seed: 0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+      repeat_last_n: 64
+      stop: "<|im_end|>"
+      max_tokens: 98304
+    extra_llama_server_args:
+      - "--reasoning-budget"
+      - "4096"
+
+  - name: gemma4-12b-it-ud-q4kxl
+    gguf_path: "N:/GEMMA GGUF UNSLOTH/12B/gemma-4-12b-it-UD-Q4_K_XL.gguf"
+    mmproj_path: "N:/GEMMA GGUF UNSLOTH/12B/mmproj-F16.gguf"
+    n_parallel: 8
+    num_ctx: 262144
+    n_gpu_layers: -1
+    n_batch: 512
+    type_k: 8
+    type_v: 8
+    flash_attn: true
+    think: true
+    strip_tools: false
+    system_prompt: |
+      You are Forge, a local AI coding assistant running inside VS Code.
+      You have tools available: read_file, write_file, replace_in_file, list_directory, search_code, run_terminal, git_status, git_diff, and more.
+      ALWAYS use tools to accomplish tasks. Never describe what you would do - do it by calling the tools directly.
+      When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
+      After each tool result, continue calling tools until the task is complete, then give a short summary.
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 64
+      min_p: 0.0
+      seed: 0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+      repeat_last_n: 64
+      stop: "<|im_end|>"
+      max_tokens: 98304
+    extra_llama_server_args:
+      - "--reasoning-budget"
+      - "2048"
+
+  - name: gemma4-12b-it-ud-q4kxl-coding
+    gguf_path: "N:/GEMMA GGUF UNSLOTH/12B/gemma-4-12b-it-UD-Q4_K_XL.gguf"
+    n_parallel: 1
+    num_ctx: 131072
+    n_gpu_layers: -1
+    n_batch: 512
+    type_k: 8
+    type_v: 8
+    flash_attn: true
+    think: true
+    strip_tools: false
+    capabilities: [tool-call]
+    system_prompt: |
+      You are Forge, a local AI coding assistant running inside VS Code.
+      You have tools available: read_file, write_file, replace_in_file, list_directory, search_code, run_terminal, git_status, git_diff, and more.
+      ALWAYS use tools to accomplish tasks. Never describe what you would do - do it by calling the tools directly.
+      When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
+      After each tool result, continue calling tools until the task is complete, then give a short summary.
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 64
+      min_p: 0.0
+      seed: 0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+      repeat_last_n: 64
+      stop: "<|im_end|>"
+      max_tokens: 98304
+    extra_llama_server_args:
+      - "--reasoning-budget"
+      - "2048"
+
+  - name: gemma4-12b-it-ud-q4kxl-vision
+    gguf_path: "N:/GEMMA GGUF UNSLOTH/12B/gemma-4-12b-it-UD-Q4_K_XL.gguf"
+    mmproj_path: "N:/GEMMA GGUF UNSLOTH/12B/mmproj-F16.gguf"
+    n_parallel: 1
+    num_ctx: 32768
+    n_gpu_layers: -1
+    n_batch: 512
+    type_k: 8
+    type_v: 8
+    flash_attn: true
+    think: true
+    strip_tools: false
+    capabilities: [tool-call, vision]
+    system_prompt: |
+      You are Forge, a local AI coding assistant running inside VS Code.
+      You have tools available: read_file, write_file, replace_in_file, list_directory, search_code, run_terminal, git_status, git_diff, and more.
+      ALWAYS use tools to accomplish tasks. Never describe what you would do - do it by calling the tools directly.
+      When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
+      After each tool result, continue calling tools until the task is complete, then give a short summary.
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 64
+      min_p: 0.0
+      seed: 0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+      repeat_last_n: 64
+      stop: "<|im_end|>"
+      max_tokens: 98304
+    extra_llama_server_args:
+      - "--reasoning-budget"
+      - "2048"
+
+  - name: gemma4-12b-it-ud-q4kxl-worker
+    gguf_path: "N:/GEMMA GGUF UNSLOTH/12B/gemma-4-12b-it-UD-Q4_K_XL.gguf"
+    n_parallel: 8
+    num_ctx: 262144
+    n_gpu_layers: -1
+    n_batch: 512
+    type_k: 8
+    type_v: 8
+    flash_attn: true
+    think: true
+    strip_tools: false
+    capabilities: [tool-call]
+    extra_llama_server_args:
+      - "--reasoning-budget"
+      - "2048"
+
+  - name: gemma4-31b-it-q3ks
+    gguf_path: "N:/GEMMA GGUF UNSLOTH/31B/gemma-4-31B-it-Q3_K_S.gguf"
+    mmproj_path: "N:/GEMMA GGUF UNSLOTH/31B/mmproj-F16.gguf"
+    n_parallel: 4
+    num_ctx: 131072
+    n_gpu_layers: -1
+    n_batch: 512
+    type_k: 8
+    type_v: 8
+    flash_attn: true
+    think: true
+    strip_tools: false
+    system_prompt: |
+      You are Forge, a local AI coding assistant running inside VS Code.
+      You have tools available: read_file, write_file, replace_in_file, list_directory, search_code, run_terminal, git_status, git_diff, and more.
+      ALWAYS use tools to accomplish tasks. Never describe what you would do - do it by calling the tools directly.
+      When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
+      After each tool result, continue calling tools until the task is complete, then give a short summary.
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 64
+      min_p: 0.0
+      seed: 0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+      repeat_last_n: 64
+      stop: "<|im_end|>"
+      max_tokens: 98304
+    extra_llama_server_args:
+      - "--reasoning-budget"
+      - "4096"
+
+  - name: qwen36-27b-q3km
+    gguf_path: "N:/.cache/huggingface/hub/models--unsloth--Qwen3.6-27B-GGUF/snapshots/82d411acf4a06cfb8d9b073a5211bf410bfc29bf/Qwen3.6-27B-Q3_K_M.gguf"
+    n_parallel: 1
+    num_ctx: 131072
+    n_gpu_layers: -1
+    n_batch: 512
+    type_k: 8
+    type_v: 8
+    flash_attn: true
+    think: true
+    system_prompt: |
+      You are Forge, a local AI coding assistant running inside VS Code.
+      You have tools available: read_file, write_file, replace_in_file, list_directory, search_code, run_terminal, git_status, git_diff, and more.
+      ALWAYS use tools to accomplish tasks. Never describe what you would do - do it by calling the tools directly.
+      When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
+      After each tool result, continue calling tools until the task is complete, then give a short summary.
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 20
+      min_p: 0.0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+      max_tokens: 98304
+      preserve_thinking: true
+    extra_llama_server_args:
+      - "--reasoning-budget"
+      - "8192"
+
+  - name: qwen36-27b-q3km-coding
+    gguf_path: "N:/.cache/huggingface/hub/models--unsloth--Qwen3.6-27B-GGUF/snapshots/82d411acf4a06cfb8d9b073a5211bf410bfc29bf/Qwen3.6-27B-Q3_K_M.gguf"
+    n_parallel: 1
+    num_ctx: 131072
+    n_gpu_layers: -1
+    n_batch: 512
+    type_k: 8
+    type_v: 8
+    flash_attn: true
+    think: true
+    capabilities: [tool-call, long-context]
+    system_prompt: |
+      You are Forge, a local AI coding assistant running inside VS Code.
+      You have tools available: read_file, write_file, replace_in_file, list_directory, search_code, run_terminal, git_status, git_diff, and more.
+      ALWAYS use tools to accomplish tasks. Never describe what you would do - do it by calling the tools directly.
+      When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
+      After each tool result, continue calling tools until the task is complete, then give a short summary.
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 20
+      min_p: 0.0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+      max_tokens: 98304
+      preserve_thinking: true
+    extra_llama_server_args:
+      - "--reasoning-budget"
+      - "8192"
+
+  - name: qwen36-27b-q3km-worker
+    gguf_path: "N:/.cache/huggingface/hub/models--unsloth--Qwen3.6-27B-GGUF/snapshots/82d411acf4a06cfb8d9b073a5211bf410bfc29bf/Qwen3.6-27B-Q3_K_M.gguf"
+    n_parallel: 4
+    num_ctx: 131072
+    n_gpu_layers: -1
+    n_batch: 512
+    type_k: 8
+    type_v: 8
+    flash_attn: true
+    think: true
+    capabilities: [tool-call]
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 20
+      min_p: 0.0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+      max_tokens: 98304
+      preserve_thinking: true
+    extra_llama_server_args:
+      - "--reasoning-budget"
+      - "8192"
+
+  - name: qwen36-35b-a3b-iq3s
+    gguf_path: "N:/.cache/huggingface/hub/models--unsloth--Qwen3.6-35B-A3B-GGUF/snapshots/a483e9e6cbd595906af30beda3187c2663a1118c/Qwen3.6-35B-A3B-UD-IQ3_S.gguf"
+    n_parallel: 1
+    num_ctx: 131072
+    n_gpu_layers: -1
+    n_batch: 512
+    type_k: 8
+    type_v: 8
+    flash_attn: true
+    think: true
+    system_prompt: |
+      You are Forge, a local AI coding assistant running inside VS Code.
+      You have tools available: read_file, write_file, replace_in_file, list_directory, search_code, run_terminal, git_status, git_diff, and more.
+      ALWAYS use tools to accomplish tasks. Never describe what you would do - do it by calling the tools directly.
+      When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
+      After each tool result, continue calling tools until the task is complete, then give a short summary.
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 20
+      min_p: 0.0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+      max_tokens: 98304
+      preserve_thinking: true
+    extra_llama_server_args:
+      - "--reasoning-budget"
+      - "8192"
+
+  - name: qwen36-27b-mtp-q3km
+    gguf_path: "N:/.cache/huggingface/models--unsloth--Qwen3.6-27B-MTP-GGUF/snapshots/5cb35eb3dcbf52dbce5f87dbc64df6aaffadcace/Qwen3.6-27B-Q3_K_M.gguf"
+    n_parallel: 4
+    num_ctx: 131072
+    n_gpu_layers: -1
+    n_batch: 512
+    type_k: 8
+    type_v: 8
+    flash_attn: true
+    think: true
+    system_prompt: |
+      You are Forge, a local AI coding assistant running inside VS Code.
+      You have tools available: read_file, write_file, replace_in_file, list_directory, search_code, run_terminal, git_status, git_diff, and more.
+      ALWAYS use tools to accomplish tasks. Never describe what you would do - do it by calling the tools directly.
+      When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
+      After each tool result, continue calling tools until the task is complete, then give a short summary.
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 20
+      min_p: 0.0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+      max_tokens: 98304
+      preserve_thinking: true
+    extra_llama_server_args:
+      - "--reasoning-budget"
+      - "8192"
+      - "--spec-type"
+      - "draft-mtp"
+      - "--spec-draft-n-max"
+      - "2"
+
+  - name: qwen36-35b-a3b-mtp-iq3s
+    gguf_path: "N:/.cache/huggingface/models--unsloth--Qwen3.6-35B-A3B-MTP-GGUF/snapshots/5bc3e238d916f48a861bac2f8a1990a0e9b7e98d/Qwen3.6-35B-A3B-UD-IQ3_S.gguf"
+    n_parallel: 4
+    num_ctx: 131072
+    n_gpu_layers: -1
+    n_batch: 512
+    type_k: 8
+    type_v: 8
+    flash_attn: true
+    think: true
+    system_prompt: |
+      You are Forge, a local AI coding assistant running inside VS Code.
+      You have tools available: read_file, write_file, replace_in_file, list_directory, search_code, run_terminal, git_status, git_diff, and more.
+      ALWAYS use tools to accomplish tasks. Never describe what you would do - do it by calling the tools directly.
+      When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
+      After each tool result, continue calling tools until the task is complete, then give a short summary.
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 20
+      min_p: 0.0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+      max_tokens: 98304
+      preserve_thinking: true
+    extra_llama_server_args:
+      - "--reasoning-budget"
+      - "8192"
+      - "--spec-type"
+      - "draft-mtp"
+      - "--spec-draft-n-max"
+      - "2"
+
+  # ---------------------------------------------------------------------------
+  # Ollama local models
+  # ---------------------------------------------------------------------------
+
+  - name: "gemma4:e2b"
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    num_ctx: 131072
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 131072
+
+  - name: "gemma4:26b"
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    num_ctx: 262144
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 131072
+
+  - name: "gemma4:31b"
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    num_ctx: 262144
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 131072
+
+  - name: "gemma4:e4b"
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    num_ctx: 131072
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 131072
+
+  - name: "qwen3.5:4b"
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    num_ctx: 262144
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 131072
+
+  - name: "qwen3.5:9b"
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    num_ctx: 262144
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 131072
+
+  # ---------------------------------------------------------------------------
+  # Ollama cloud models (routed via local Ollama daemon)
+  # ---------------------------------------------------------------------------
+
+  - name: "deepseek-v4-flash:cloud"
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    num_ctx: 1000000
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 65536
+
+  - name: "deepseek-v4-pro:cloud"
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    num_ctx: 1000000
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 65536
+
+  - name: "kimi-k2.6:cloud"
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    num_ctx: 262144
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 131072
+
+  - name: "glm-4.6:cloud"
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    num_ctx: 198000
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 131072
+
+  - name: "glm-5.1:cloud"
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    num_ctx: 198000
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 131072
+
+  - name: "gemma4:31b-cloud"
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    num_ctx: 262144
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 131072
+
+  - name: "qwen3.5:397b-cloud"
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    num_ctx: 262144
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 65536
+
+  - name: "qwen3-coder:480b-cloud"
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    num_ctx: 262144
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 131072
+
+  - name: "qwen3-vl:235b-cloud"
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    num_ctx: 262144
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 65536
+
+  - name: "qwen3-vl:235b-instruct-cloud"
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    num_ctx: 262144
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 65536
+
+  - name: "gpt-oss:120b-cloud"
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    num_ctx: 131072
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 131072
+
+  - name: "gpt-oss:20b-cloud"
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    num_ctx: 131072
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 131072
+
+  - name: "deepseek-v3.1:671b-cloud"
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    num_ctx: 160000
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 32768
+
+  - name: "minimax-m2.7:cloud"
+    provider: ollama
+    endpoint: "http://127.0.0.1:11434"
+    num_ctx: 200000
+    think: true
+    reasoning_effort: medium
+    strip_tools: false
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 131072
+
+  # ---------------------------------------------------------------------------
+  # xAI / Grok. Auth: "Forge: Set Cloud Provider Token" → key "xai"
+  # ---------------------------------------------------------------------------
+
+  - name: grok-build-0.1
+    provider: xai
+    api_key_secret: xai
+    capabilities: [tool-call]
+    num_ctx: 256000
+    sampling:
+      temperature: 0.7
+      max_tokens: 65536
+
+  - name: grok-4.3
+    provider: xai
+    api_key_secret: xai
+    capabilities: [tool-call]
+    num_ctx: 1000000
+    sampling:
+      temperature: 0.7
+      max_tokens: 30000
+
+  - name: grok-4.20-0309-non-reasoning
+    provider: xai
+    api_key_secret: xai
+    capabilities: [tool-call]
+    num_ctx: 2000000
+    sampling:
+      temperature: 0.7
+      max_tokens: 30000
+
+  - name: grok-4.20-0309-reasoning
+    provider: xai
+    api_key_secret: xai
+    capabilities: [tool-call]
+    think: true
+    num_ctx: 2000000
+    sampling:
+      temperature: 0.7
+      max_tokens: 30000
+
+  - name: grok-4.20-multi-agent-0309
+    provider: xai
+    api_key_secret: xai
+    strip_tools: true
+    num_ctx: 2000000
+    sampling:
+      temperature: 0.7
+      max_tokens: 30000
+
+  # ---------------------------------------------------------------------------
+  # OpenRouter. Auth: "Forge: Set Cloud Provider Token" → key "openrouter"
+  # ---------------------------------------------------------------------------
+
+  - name: "openrouter/free"
+    provider: openrouter
+    api_key_secret: openrouter
+    capabilities: [tool-call, long-context]
+    num_ctx: 262144
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 16384
+
+  - name: "nvidia/nemotron-3-super-120b-a12b:free"
+    provider: openrouter
+    api_key_secret: openrouter
+    capabilities: [tool-call, long-context]
+    num_ctx: 262144
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 16384
+
+  - name: "poolside/laguna-m.1:free"
+    provider: openrouter
+    api_key_secret: openrouter
+    capabilities: [tool-call, long-context]
+    num_ctx: 262144
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 16384
+
+  - name: "google/gemma-4-31b-it:free"
+    provider: openrouter
+    api_key_secret: openrouter
+    capabilities: [tool-call, long-context]
+    num_ctx: 262144
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 16384
+
+  - name: "google/gemma-4-26b-a4b-it:free"
+    provider: openrouter
+    api_key_secret: openrouter
+    capabilities: [tool-call, long-context]
+    num_ctx: 262144
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 16384
+
+  - name: "google/gemma-4-26b-a4b-it"
+    provider: openrouter
+    api_key_secret: openrouter
+    capabilities: [tool-call, long-context]
+    num_ctx: 262144
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 16384
+
+  # ---------------------------------------------------------------------------
+  # OpenAI / OpenAI-compatible
+  # ---------------------------------------------------------------------------
+
+  - name: codex
+    provider: openai
+    api_key_secret: openai
+    capabilities: [tool-call, long-context]
+    num_ctx: 400000
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 16384
+
+  - name: claude-via-gateway
+    provider: openai-compatible
+    endpoint: https://your-openai-compatible-gateway.example.com
+    api_key_secret: gateway
+    capabilities: [tool-call, long-context]
+    num_ctx: 200000
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 12000
