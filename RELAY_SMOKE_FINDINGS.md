@@ -120,10 +120,33 @@ what the entries actually declare, so any capability-filtered catalog
 
 - [ ] Make `capabilities` explicit and correct on EVERY entry (derive
       vision from `mmproj_path` presence at load if absent).
-- [ ] Consider variant-of grouping in the schema (`variant_of: <base>`)
-      so catalogs can collapse duplicates of the same GGUF.
-- [ ] Fix gemma stop tokens; set `think: false` (or minimal budget) on
-      `-worker` variants and point Relay's worker tier at them.
+- [ ] Fix gemma stop tokens (`<end_of_turn>`, not `<|im_end|>`); set
+      `think: false` (or minimal budget) on `-worker` variants and point
+      Relay's worker tier at them. (Interim mitigation until redesign.)
+
+**DECIDED resolution — models vs profiles redesign:**
+
+Roles become request-time *profiles* applied to models, not name-suffixed
+model clones. Rationale: nearly everything that distinguishes the current
+`-coding`/`-vision`/`-worker` variants (system_prompt, sampling, thinking
+policy) is request-time and does not require its own llama-server spawn;
+one loaded GGUF can serve subcoordinator AND worker roles simultaneously.
+
+- `models:` — one entry per GGUF/endpoint, facts only (`gguf_path`,
+  `mmproj_path`, `spawn: { num_ctx, n_parallel, kv types }`).
+  Capabilities auto-derived (vision ⇐ mmproj present; tool-call ⇐
+  `ModelCapabilities.ts` runtime detection).
+- `profiles:` — named role presets (`main`, `subcoordinator`, `worker`,
+  …) holding request-time config; applied to any model. Dispatch names a
+  pair: `gemma4-26b-iq3s@worker`.
+- Spawn-time variation (e.g. long-context) stays as explicit per-model
+  `spawn_profiles:` overrides — the exception; profile switch within the
+  same spawn settings never respawns. F4 eviction handles real respawns.
+- Shared system prompt / sampling defaults collapse to one `defaults:`
+  block (~950-line config → ~300).
+- Breaking schema change: `schema.ts`, `ConfigLoader`, `LlamaServerArgs`,
+  control-server catalog; ship with alias layer so current suffixed names
+  keep resolving during migration. Sequenced AFTER F4/F5.
 
 ### Minor (Relay UX)
 
