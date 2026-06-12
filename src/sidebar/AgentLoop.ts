@@ -25,6 +25,7 @@ import { FORGE_PERMISSIONS, ToolRegistry } from '../tools/ToolRegistry';
 import type { KeepUndoCodeLensProvider } from './KeepUndoCodeLens';
 import { ToolFailureTracker, stripTools } from '../tools/StripTools';
 import { extractFallbackToolCalls } from '../tools/ToolCallFallback';
+import { buildFallbackToolInstructions } from '../tools/FallbackToolPrompt';
 import { StructuredOutputStripper, stripStructuredOutputFromFullText } from '../tools/StructuredOutputParser';
 import { getLogger } from '../util/logger';
 import { inspectRuntimeModelCapabilities, type RuntimeModelCapabilities } from '../backend/ModelCapabilities';
@@ -365,21 +366,25 @@ export class AgentLoop {
       if (this.forgeLoader?.instructions) tmplCtx['forgeInstructions'] = this.forgeLoader.instructions;
       const messages = injectSystemPrompt([...conv.messages], this.templateEngine, tmplCtx, activeModel.system_prompt);
 
-      let toolDefs = this.toolRegistry.definitions(allowed);
-      if (activeModel.strip_tools) toolDefs = [];
-      if (toolDefs.length > 0 && runtimeCaps?.likelySupportsTools === false) {
+      const availableToolDefs = this.toolRegistry.definitions(allowed);
+      let nativeToolDefs = activeModel.strip_tools || useStrip ? [] : availableToolDefs;
+      if (nativeToolDefs.length > 0 && runtimeCaps?.likelySupportsTools === false) {
         this.warnOnce(`${activeModel.name}:tools`, `Forge: model "${activeModel.name}" does not appear to have a tool-aware chat template. Tools will be omitted for this request.`);
-        toolDefs = [];
+        nativeToolDefs = [];
       }
       if (runtimeCaps?.hasChatTemplate === false) {
         this.warnOnce(`${activeModel.name}:template`, `Forge: model "${activeModel.name}" does not expose a usable chat template. Prompt formatting may be mismatched.`);
       }
 
+      const fallbackMessages = availableToolDefs.length > 0
+        ? [...messages, { role: 'system' as const, content: buildFallbackToolInstructions(availableToolDefs) }]
+        : messages;
+      const requestMessages = nativeToolDefs.length > 0 ? messages : fallbackMessages;
       let base: ChatCompletionRequest = {
         model: activeModel.name,
-        messages,
+        messages: requestMessages,
         stream: true,
-        ...(toolDefs.length > 0 && !useStrip ? { tools: toolDefs } : {}),
+        ...(nativeToolDefs.length > 0 ? { tools: nativeToolDefs } : {}),
         ...(canUseThinkingKwargs && activeModel.think !== undefined
           ? { chat_template_kwargs: {
               ...(activeModel.sampling?.preserve_thinking !== undefined ? { preserve_thinking: activeModel.sampling.preserve_thinking } : {}),
@@ -393,23 +398,52 @@ export class AgentLoop {
       const merged = mergeSampling(base, activeModel, { allowPreserveThinking: canUseThinkingKwargs });
       const request = normalizeRequestForModel(useStrip ? stripTools(merged) : merged, activeModel);
 
-      const thinkingStripper = stripThinkingChannels ? new ThinkingChannelStripper() : null;
-      const structuredOutputStripper = new StructuredOutputStripper();
-      const htmlStripper = new HtmlDocumentBoilerplateStripper();
+      let thinkingStripper = stripThinkingChannels ? new ThinkingChannelStripper() : null;
+      let structuredOutputStripper = new StructuredOutputStripper();
+      let htmlStripper = new HtmlDocumentBoilerplateStripper();
       let rawAssistantContent = '';
       let rawReasoningContent = '';
 
-      const { finishReason, toolCalls } = await this.streamOnce(baseUrl, request, activeModel, (token) => {
-        rawAssistantContent += token;
-        const withoutToolMarkers = structuredOutputStripper.push(token);
-        const withoutHtml = htmlStripper.push(withoutToolMarkers);
-        const visible = thinkingStripper ? thinkingStripper.push(withoutHtml) : withoutHtml;
-        if (visible) postC({ type: 'token', text: visible });
-      }, (reasoningToken) => {
-        if (stripThinkingChannels) return;
-        rawReasoningContent += reasoningToken;
-        postC({ type: 'reasoningToken', text: reasoningToken });
-      }, ctrl.signal, apiKey);
+      let streamResult: { finishReason: string | null; toolCalls: ToolCall[] | null };
+      try {
+        streamResult = await this.streamOnce(baseUrl, request, activeModel, (token) => {
+          rawAssistantContent += token;
+          const withoutToolMarkers = structuredOutputStripper.push(token);
+          const withoutHtml = htmlStripper.push(withoutToolMarkers);
+          const visible = thinkingStripper ? thinkingStripper.push(withoutHtml) : withoutHtml;
+          if (visible) postC({ type: 'token', text: visible });
+        }, (reasoningToken) => {
+          if (stripThinkingChannels) return;
+          rawReasoningContent += reasoningToken;
+          postC({ type: 'reasoningToken', text: reasoningToken });
+        }, ctrl.signal, apiKey);
+      } catch (err) {
+        if (!this.isNativeToolJsonParseError(err) || nativeToolDefs.length === 0) throw err;
+        this.failureTracker.record();
+        this.warnOnce(`${activeModel.name}:native-tool-json`, `Forge: llama-server rejected this model's native tool-call JSON. Retrying with Forge's JSON fallback tool format.`);
+        rawAssistantContent = '';
+        rawReasoningContent = '';
+        thinkingStripper = stripThinkingChannels ? new ThinkingChannelStripper() : null;
+        structuredOutputStripper = new StructuredOutputStripper();
+        htmlStripper = new HtmlDocumentBoilerplateStripper();
+        const fallbackBase: ChatCompletionRequest = {
+          ...base,
+          messages: fallbackMessages,
+        };
+        const fallbackRequest = normalizeRequestForModel(stripTools(fallbackBase), activeModel);
+        streamResult = await this.streamOnce(baseUrl, fallbackRequest, activeModel, (token) => {
+          rawAssistantContent += token;
+          const withoutToolMarkers = structuredOutputStripper.push(token);
+          const withoutHtml = htmlStripper.push(withoutToolMarkers);
+          const visible = thinkingStripper ? thinkingStripper.push(withoutHtml) : withoutHtml;
+          if (visible) postC({ type: 'token', text: visible });
+        }, (reasoningToken) => {
+          if (stripThinkingChannels) return;
+          rawReasoningContent += reasoningToken;
+          postC({ type: 'reasoningToken', text: reasoningToken });
+        }, ctrl.signal, apiKey);
+      }
+      const { finishReason, toolCalls } = streamResult;
 
       const trailingTool = structuredOutputStripper.flush();
       const trailingHtml = htmlStripper.push(trailingTool) + htmlStripper.flush();
@@ -424,7 +458,7 @@ export class AgentLoop {
         continue;
       }
 
-      const fallbackToolCalls = !useStrip && toolDefs.length > 0 && rawAssistantContent
+      const fallbackToolCalls = availableToolDefs.length > 0 && rawAssistantContent
         ? extractFallbackToolCalls(rawAssistantContent)
         : null;
       if (fallbackToolCalls?.length) {
@@ -475,6 +509,11 @@ export class AgentLoop {
     const withoutThinking = stripThinking ? stripThinkingFromFullText(text) : text;
     const withoutStructured = stripStructuredOutputFromFullText(withoutThinking);
     return stripHtmlDocumentBoilerplateFromFullText(withoutStructured);
+  }
+
+  private isNativeToolJsonParseError(err: unknown): boolean {
+    const message = err instanceof Error ? err.message : String(err);
+    return message.includes('Failed to parse tool call arguments as JSON');
   }
 
   private async requestToolApproval(toolName: string, detail: string, isDangerous?: boolean, convId?: string): Promise<boolean> {

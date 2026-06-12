@@ -2,7 +2,7 @@
   "name": "forge-llm",
   "displayName": "Forge LLM",
   "description": "Local-LLM coding assistant — direct llama.cpp, strict tool schemas, single execute-style workflow",
-  "version": "0.12.20",
+  "version": "0.12.21",
   "publisher": "Efsoo",
   "icon": "assets/publisher-logo.png",
   "galleryBanner": {
@@ -336,6 +336,7 @@
     "lint": "eslint src webview-ui --ext .ts",
     "lint:fix": "eslint src webview-ui --ext .ts --fix",
     "test": "vitest run",
+    "test:local-tools": "node scripts/test-local-tools.mjs",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "package": "npm run build:release && vsce package --no-dependencies",
