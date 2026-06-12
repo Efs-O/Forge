@@ -6,6 +6,7 @@ import type { ForgeConfig } from '../../src/config/types';
 // test settles by hand, so we can interleave release() with a failing boot.
 const harness = vi.hoisted(() => ({
   pending: [] as Array<{ resolve: () => void; reject: (err: unknown) => void }>,
+  exitCbs: [] as Array<() => void>,
 }));
 
 vi.mock('../../src/backend/DirectBackend', () => {
@@ -27,6 +28,7 @@ vi.mock('../../src/backend/DirectBackend', () => {
     applyForgeConfig(): void {}
     showConsole(): void {}
     async start(): Promise<void> {}
+    onUnexpectedExit(cb: () => void): void { harness.exitCbs.push(cb); }
   }
   return { DirectBackend: FakeDirectBackend };
 });
@@ -48,7 +50,29 @@ const freePortsOf = (pool: BackendPool): number[] =>
   (pool as unknown as { freePorts: number[] }).freePorts;
 
 describe('BackendPool port accounting', () => {
-  beforeEach(() => { harness.pending.length = 0; });
+  beforeEach(() => { harness.pending.length = 0; harness.exitCbs.length = 0; });
+
+  it('frees the slot when a ready backend dies unexpectedly (F5 reconcile)', async () => {
+    const pool = new BackendPool(makeConfig(1)); // freePorts [8080]
+
+    const acquireA = pool.acquire('A');
+    harness.pending[0].resolve();
+    await acquireA;
+    expect(pool.loadedModelNames()).toEqual(['A']);
+    expect(pool.isLoaded('A')).toBe(true);
+
+    // External kill: the process exit handler fires the reconcile callback.
+    harness.exitCbs[0]();
+    expect(pool.loadedModelNames()).toEqual([]);
+    expect(pool.isLoaded('A')).toBe(false);
+    expect(freePortsOf(pool)).toEqual([8080]);
+
+    // The freed port is immediately reusable for a different model.
+    const acquireB = pool.acquire('B');
+    harness.pending[1].resolve();
+    await acquireB;
+    expect(pool.loadedModelNames()).toEqual(['B']);
+  });
 
   it('release() racing a failed boot frees the port exactly once', async () => {
     const pool = new BackendPool(makeConfig(2)); // freePorts [8080, 8081]

@@ -32,6 +32,7 @@ class FakePool implements IBackendPool {
   showConsole(): void {}
   isAnyReady(): boolean { return this.loaded.size > 0; }
   loadedModelNames(): string[] { return [...this.loaded.keys()]; }
+  isLoaded(name: string): boolean { return this.loaded.has(name); }
 }
 
 function makeConfig(port: number, maxModels = 1): ForgeConfig {
@@ -220,6 +221,56 @@ describe('ControlServer', () => {
     const { models } = await (await fetch(`${base}/models`)).json();
     const byName = Object.fromEntries(models.map((m: { name: string; servable: boolean }) => [m.name, m.servable]));
     expect(byName).toEqual({ A: true, B: true, grok: false });
+  });
+
+  it('evicts ALL idle local models before loading a different one, even under capacity', async () => {
+    const port = 18808;
+    const base = `http://127.0.0.1:${port}`;
+    const pool = new FakePool();
+    // capacity 4: slots are NOT the constraint — VRAM-policy eviction must
+    // still unload idle A before spawning B (RELAY_SMOKE_FINDINGS.md F4).
+    server = new ControlServer(pool, makeConfig(port, 4), testDeps());
+    server.start();
+    await waitReady(base);
+
+    expect((await post(base, 'A')).status).toBe(200);
+    expect((await (await post(base, 'A', 'release')).json()).released).toBe(true);
+
+    expect((await post(base, 'B')).status).toBe(200);
+    expect(pool.loadedModelNames()).toEqual(['B']);
+
+    // Re-ensuring the already-loaded model must NOT evict it.
+    expect((await post(base, 'B')).status).toBe(200);
+    expect(pool.loadedModelNames()).toEqual(['B']);
+  });
+
+  it('POST /unload tears down an idle model, refuses a held one, 422s cloud', async () => {
+    const port = 18809;
+    const base = `http://127.0.0.1:${port}`;
+    const pool = new FakePool();
+    server = new ControlServer(pool, makeConfig(port, 4), testDeps());
+    server.start();
+    await waitReady(base);
+
+    // Held → 409, still loaded.
+    expect((await post(base, 'A')).status).toBe(200);
+    const held = await post(base, 'A', 'unload');
+    expect(held.status).toBe(409);
+    expect((await held.json()).error).toMatch(/active holds/);
+    expect(pool.loadedModelNames()).toEqual(['A']);
+
+    // Released → unload actually frees it (unlike /release, which is bookkeeping).
+    expect((await (await post(base, 'A', 'release')).json()).released).toBe(true);
+    expect(pool.loadedModelNames()).toEqual(['A']);
+    const ok = await post(base, 'A', 'unload');
+    expect(ok.status).toBe(200);
+    expect((await ok.json()).unloaded).toBe(true);
+    expect(pool.loadedModelNames()).toEqual([]);
+
+    // Not loaded → 200 unloaded:false; cloud → 422; unknown → 404.
+    expect((await (await post(base, 'A', 'unload')).json()).unloaded).toBe(false);
+    expect((await post(base, 'grok', 'unload')).status).toBe(422);
+    expect((await post(base, 'Z', 'unload')).status).toBe(404);
   });
 
   it('exposes per-model holds on GET /models', async () => {

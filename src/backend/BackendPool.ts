@@ -26,6 +26,8 @@ export interface IBackendPool {
    *  the control server to make capacity/eviction decisions. Excludes Ollama,
    *  which is daemon-backed and does not consume a slot. */
   loadedModelNames(): string[];
+  /** Whether the model currently has a live backend (llama.cpp slot OR ollama). */
+  isLoaded(modelName: string): boolean;
 }
 
 export class BackendPool implements IBackendPool {
@@ -131,6 +133,10 @@ export class BackendPool implements IBackendPool {
     return [...this.slots.keys()];
   }
 
+  isLoaded(modelName: string): boolean {
+    return this.slots.has(modelName) || this.ollamaSlots.has(modelName);
+  }
+
   // ── Private ───────────────────────────────────────────────────────────────
 
   private allocatePort(): number {
@@ -150,6 +156,7 @@ export class BackendPool implements IBackendPool {
   private startSlot(modelName: string, port: number): Promise<BackendController> {
     const backend = new DirectBackend(this.config, port);
     let resolveStart!: () => void;
+    backend.onUnexpectedExit(() => this.reconcileDeadSlot(modelName));
     let rejectStart!: (err: unknown) => void;
     const starting = new Promise<void>((res, rej) => {
       resolveStart = res;
@@ -193,6 +200,19 @@ export class BackendPool implements IBackendPool {
       rejectStart(err);
       throw err;
     }
+  }
+
+  /**
+   * A ready backend's process died without Forge stopping it (external kill,
+   * crash). Free the slot so /models and capacity decisions reflect reality
+   * (RELAY_SMOKE_FINDINGS.md F5). Skipped while a restart is in flight —
+   * restartSlot owns the slot during `starting` and frees it itself on failure.
+   */
+  private reconcileDeadSlot(modelName: string): void {
+    const slot = this.slots.get(modelName);
+    if (!slot || slot.starting) return;
+    log.warn(`[BackendPool] backend for "${modelName}" died — freeing slot on port ${slot.port}`);
+    this.freeSlot(modelName, slot);
   }
 
   /**

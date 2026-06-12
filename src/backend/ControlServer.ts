@@ -4,11 +4,11 @@ import type { IBackendPool } from './BackendPool';
 import type { ForgeConfig } from '../config/types';
 import { isCloudProvider, getCloudProviderLabel } from '../llm/CloudProviders';
 import { probeHealthy } from './HealthCheck';
+import { sendJson, requireModel, readJson, delay, toOpenAiBase, errText } from './controlHttp';
 import { getLogger } from '../util/logger';
 
 const log = getLogger();
 const DEFAULT_PORT = 8799;
-const MAX_BODY_BYTES = 64 * 1024;
 /** Upper bound on how long /ensure waits for a cold-loaded backend to answer. */
 const READINESS_TIMEOUT_MS = 60_000;
 /** Gap between readiness probes while a backend is warming up. */
@@ -46,7 +46,8 @@ export interface ControlStatus {
  *   GET  /healthz         → { ok: true }
  *   GET  /models          → { models: [{ name, backend, loaded }] }
  *   POST /ensure  {model} → { baseUrl, model, backend }  (loads/swaps as needed)
- *   POST /release {model} → { released: boolean }
+ *   POST /release {model} → { released: boolean }        (hold bookkeeping only)
+ *   POST /unload  {model} → { unloaded: boolean }        (eager teardown; 409 if held)
  */
 export class ControlServer implements vscode.Disposable {
   private server: http.Server | null = null;
@@ -135,40 +136,40 @@ export class ControlServer implements vscode.Disposable {
       const path = (req.url ?? '/').split('?')[0];
 
       if (method === 'GET' && path === '/healthz') {
-        return this.json(res, 200, { ok: true });
+        return sendJson(res, 200, { ok: true });
       }
       if (method === 'GET' && path === '/models') {
-        return this.json(res, 200, { models: this.modelList() });
+        return sendJson(res, 200, { models: this.modelList() });
       }
       if (method === 'POST' && path === '/ensure') {
-        const model = this.requireModel(await readJson(req));
-        if (!model) return this.json(res, 400, { error: 'model is required' });
+        const model = requireModel(await readJson(req));
+        if (!model) return sendJson(res, 400, { error: 'model is required' });
         const result = await this.serialize(() => this.ensure(model));
-        return this.json(res, result.status, result.body);
+        return sendJson(res, result.status, result.body);
       }
       if (method === 'POST' && path === '/release') {
-        const model = this.requireModel(await readJson(req));
-        if (!model) return this.json(res, 400, { error: 'model is required' });
+        const model = requireModel(await readJson(req));
+        if (!model) return sendJson(res, 400, { error: 'model is required' });
         const released = await this.serialize(async () => this.release(model));
-        return this.json(res, 200, { released });
+        return sendJson(res, 200, { released });
       }
-      return this.json(res, 404, { error: `no route for ${method} ${path}` });
+      if (method === 'POST' && path === '/unload') {
+        const model = requireModel(await readJson(req));
+        if (!model) return sendJson(res, 400, { error: 'model is required' });
+        const result = await this.serialize(() => this.unload(model));
+        return sendJson(res, result.status, result.body);
+      }
+      return sendJson(res, 404, { error: `no route for ${method} ${path}` });
     } catch (err) {
-      this.json(res, 500, { error: err instanceof Error ? err.message : String(err) });
+      sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
     }
   }
 
-  private requireModel(body: Record<string, unknown>): string | null {
-    const model = typeof body['model'] === 'string' ? body['model'].trim() : '';
-    return model || null;
-  }
-
   private modelList(): ControlStatus['models'] {
-    const loaded = new Set(this.pool.loadedModelNames());
     return this.config.models.map((m) => ({
       name: m.name,
       backend: m.provider ?? 'llama.cpp',
-      loaded: loaded.has(m.name),
+      loaded: this.pool.isLoaded(m.name),
       holds: this.holds.get(m.name) ?? 0,
       // Cloud-provider models are called via their HTTP API from inside the
       // extension (key in SecretStorage) — the control server cannot serve them.
@@ -247,45 +248,48 @@ export class ControlServer implements vscode.Disposable {
   }
 
   /**
-   * If loading `model` would exceed capacity, free an *idle* slot first so the
-   * pool never LRU-evicts a model a worker is mid-request on. Returns a 409
-   * result if every loaded model is in use; null if there is room.
+   * Free idle slots before loading `model`. VRAM — not the slot count — is the
+   * binding constraint on local models (RELAY_SMOKE_FINDINGS.md F4): spawning a
+   * second GGUF while an idle one still holds VRAM starves the new server until
+   * its health timeout. So EVERY idle local model is released before the spawn,
+   * not only when the slot table is full. Evictable = no holders AND not
+   * acquired within the grace window (which stops a model whose ref-count
+   * momentarily reads 0 between one worker's /release and the next /ensure from
+   * being torn out from under a live request). Returns 409 when the in-use
+   * models that remain already fill capacity; null when it is safe to proceed.
    */
   private async makeRoom(model: string): Promise<EnsureResult | null> {
     const loaded = this.pool.loadedModelNames();
     if (loaded.includes(model)) return null;
 
-    const capacity = this.config.max_simultaneous_models ?? 1;
-    if (loaded.length < capacity) return null;
-
-    // Evictable = no holders AND not acquired within the grace window. The grace
-    // window stops a model whose ref-count momentarily reads 0 (between one
-    // worker's /release and the next worker's /ensure) from being torn out from
-    // under a live request. Combined with serialized /release, holds is always
-    // read from a consistent snapshot inside this critical section.
     const now = Date.now();
     const idle = loaded.filter(
       (m) =>
         (this.holds.get(m) ?? 0) === 0 &&
         now - (this.lastAcquiredAt.get(m) ?? 0) >= this.evictionGraceMs,
     );
-    if (idle.length === 0) {
+    for (const victim of idle) {
+      this.lastAcquiredAt.delete(victim);
+      // Await each release: it frees the slot/port only after backend.stop()
+      // resolves. Fire-and-forget here let the subsequent acquire race it —
+      // allocatePort would LRU-evict the same slot and reuse its port, then the
+      // in-flight release pushed that port back while the new slot occupied it.
+      await this.pool.release(victim);
+      log.info(`[ControlServer] released idle "${victim}" to make room for "${model}"`);
+    }
+
+    const remaining = loaded.length - idle.length;
+    const capacity = this.config.max_simultaneous_models ?? 1;
+    if (remaining >= capacity) {
       return {
         status: 409,
         body: {
           error:
-            `busy: ${loaded.length} model(s) loaded and all in use or recently active; cannot load "${model}". ` +
+            `busy: ${remaining} model(s) loaded and all in use or recently active; cannot load "${model}". ` +
             'Release a worker or raise max_simultaneous_models (needs the VRAM).',
         },
       };
     }
-    this.lastAcquiredAt.delete(idle[0]);
-    // Await the release: it frees the slot/port only after backend.stop()
-    // resolves. Fire-and-forget here let the subsequent acquire race it —
-    // allocatePort would LRU-evict the same slot and reuse its port, then the
-    // in-flight release pushed that port back while the new slot occupied it.
-    await this.pool.release(idle[0]);
-    log.info(`[ControlServer] released idle "${idle[0]}" to make room for "${model}"`);
     return null;
   }
 
@@ -296,6 +300,26 @@ export class ControlServer implements vscode.Disposable {
     if (next === 0) this.holds.delete(model);
     else this.holds.set(model, next);
     return true;
+  }
+
+  /** Eager teardown (POST /unload): refuses while holds exist; otherwise stops
+   *  the backend and frees its VRAM/slot. `release` stays pure bookkeeping. */
+  private async unload(model: string): Promise<EnsureResult | { status: number; body: { unloaded: boolean } }> {
+    const known = this.config.models.find((m) => m.name === model);
+    if (!known) {
+      return { status: 404, body: { error: `unknown model "${model}" — not in config` } };
+    }
+    if (isCloudProvider(known.provider)) {
+      return { status: 422, body: { error: `"${model}" is a cloud-provider model — nothing local to unload` } };
+    }
+    if ((this.holds.get(model) ?? 0) > 0) {
+      return { status: 409, body: { error: `"${model}" has active holds — POST /release them first` } };
+    }
+    const wasLoaded = this.pool.isLoaded(model);
+    this.lastAcquiredAt.delete(model);
+    await this.pool.release(model);
+    if (wasLoaded) log.info(`[ControlServer] unloaded "${model}"`);
+    return { status: 200, body: { unloaded: wasLoaded } };
   }
 
   // ── helpers ─────────────────────────────────────────────────────────────────
@@ -309,46 +333,4 @@ export class ControlServer implements vscode.Disposable {
     return run;
   }
 
-  private json(res: http.ServerResponse, status: number, body: unknown): void {
-    res.writeHead(status, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(body));
-  }
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function toOpenAiBase(baseUrl: string): string {
-  const u = baseUrl.replace(/\/+$/, '');
-  return /\/v1$/.test(u) ? u : `${u}/v1`;
-}
-
-function errText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
-
-function readJson(req: http.IncomingMessage): Promise<Record<string, unknown>> {
-  return new Promise((resolve, reject) => {
-    let data = '';
-    let size = 0;
-    req.on('data', (chunk: Buffer) => {
-      size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
-        req.destroy();
-        reject(new Error('request body too large'));
-        return;
-      }
-      data += chunk.toString();
-    });
-    req.on('end', () => {
-      if (!data.trim()) return resolve({});
-      try {
-        resolve(JSON.parse(data) as Record<string, unknown>);
-      } catch {
-        reject(new Error('invalid JSON body'));
-      }
-    });
-    req.on('error', reject);
-  });
 }

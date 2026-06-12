@@ -21,6 +21,7 @@ export class DirectBackend implements BackendController {
   private activeModel: ModelConfig | null = null;
   private currentBaseUrl: string;
   private adoptPollTimer: ReturnType<typeof setInterval> | null = null;
+  private onExitCb: (() => void) | null = null;
 
   constructor(private config: ForgeConfig, portOverride?: number) {
     this.host = config.llama_server.host ?? '127.0.0.1';
@@ -48,6 +49,14 @@ export class DirectBackend implements BackendController {
 
   loadedModel(): string | null {
     return this.activeModel?.name ?? null;
+  }
+
+  /** Fired when a ready llama-server dies WITHOUT Forge stopping it (external
+   *  kill, crash, adopted server vanishing) — never on stop()/hotSwap(). Lets
+   *  the pool reconcile its slot table instead of reporting loaded=true for a
+   *  dead process (RELAY_SMOKE_FINDINGS.md F5). */
+  onUnexpectedExit(cb: () => void): void {
+    this.onExitCb = cb;
   }
 
   async start(): Promise<void> {
@@ -189,6 +198,18 @@ export class DirectBackend implements BackendController {
       throw new Error(`llama-server failed to start: ${result.message}`);
     }
 
+    // Reconcile on external death: stopLlamaServer nulls this.proc BEFORE
+    // killing, so an intentional stop/swap never reaches the callback.
+    const proc = this.proc;
+    proc?.once('exit', (code) => {
+      if (this.proc !== proc) return;
+      this.proc = null;
+      this.ready = false;
+      log.warn(`[DirectBackend] llama-server exited unexpectedly (code ${code ?? '?'})`);
+      this.serverChannel?.appendLine(`\n[Forge] llama-server exited unexpectedly (code ${code ?? '?'}).`);
+      this.onExitCb?.();
+    });
+
     log.info('[DirectBackend] ready');
   }
 
@@ -218,6 +239,7 @@ export class DirectBackend implements BackendController {
         this.serverChannel?.appendLine(`\n[${ts}] llama-server stopped or unreachable.`);
         this.ready = false;
         this.stopAdoptedMonitor();
+        this.onExitCb?.();
       }
     }, 5000);
   }

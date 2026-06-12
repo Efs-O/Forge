@@ -87,6 +87,7 @@ function makePool(acquireImpl?: (modelName: string) => Promise<BackendController
     showConsole: () => {},
     isAnyReady: () => false,
     loadedModelNames: () => [],
+    isLoaded: () => false,
   };
 }
 

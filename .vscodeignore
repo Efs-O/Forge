@@ -27,6 +27,8 @@ scripts/**
 **/*.map
 **/*.vsix
 .coordination/**
+smoke3d/**
+.mcp.json
 fireworks.html
 aurora_glass.html
 3d_glass_particles.html
