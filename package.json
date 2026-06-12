@@ -35,7 +35,9 @@
   },
   "homepage": "https://github.com/Efs-O/Forge#readme",
   "main": "./dist/extension.js",
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "contributes": {
     "viewsContainers": {
       "activitybar": [

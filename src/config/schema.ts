@@ -152,6 +152,10 @@ export const ForgeConfigSchema = z.object({
   custom_instructions: z.string().optional(),
   strip_thinking_channels: z.boolean().optional(),
   max_simultaneous_models: z.number().int().min(1).max(8).optional(),
+  ollama: z.object({
+    auto_start: z.boolean().optional(),
+    executable: z.string().min(1).optional(),
+  }).optional(),
   control_server: z.object({
     enabled: z.boolean().optional(),
     port: z.number().int().min(1).max(65535).optional(),

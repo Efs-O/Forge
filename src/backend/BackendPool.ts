@@ -1,5 +1,6 @@
 import type { BackendController } from './BackendController';
 import { DirectBackend } from './DirectBackend';
+import { probeHealthy } from './HealthCheck';
 import type { ForgeConfig } from '../config/types';
 import { getLogger } from '../util/logger';
 
@@ -31,6 +32,8 @@ export class BackendPool implements IBackendPool {
   private readonly slots = new Map<string, PoolSlot>();
   // Ollama models connect to a pre-running daemon and don't consume a port slot.
   private readonly ollamaSlots = new Map<string, DirectBackend>();
+  /** model → in-flight ollama acquire, so concurrent acquires share one hotSwap. */
+  private readonly ollamaStarting = new Map<string, Promise<BackendController>>();
   private readonly freePorts: number[];
   private lastAcquiredModel: string | null = null;
 
@@ -77,8 +80,7 @@ export class BackendPool implements IBackendPool {
       if (slot) {
         if (slot.starting) await slot.starting.catch(() => {});
         await slot.backend.stop().catch(() => {});
-        this.slots.delete(modelName);
-        this.freePorts.push(slot.port);
+        this.freeSlot(modelName, slot);
       }
     }
     log.info(`[BackendPool] released: ${modelName}`);
@@ -163,8 +165,7 @@ export class BackendPool implements IBackendPool {
       resolveStart();
       log.info(`[BackendPool] slot ready: ${modelName} on port ${port}`);
     }).catch((err: unknown) => {
-      this.slots.delete(modelName);
-      this.freePorts.push(port);
+      this.freeSlot(modelName, slot);
       rejectStart(err);
     });
 
@@ -188,11 +189,22 @@ export class BackendPool implements IBackendPool {
       resolveStart();
       return slot.backend;
     } catch (err) {
-      this.slots.delete(modelName);
-      this.freePorts.push(slot.port);
+      this.freeSlot(modelName, slot);
       rejectStart(err);
       throw err;
     }
+  }
+
+  /**
+   * Remove a slot and return its port to the free list — only if `slot` still
+   * owns the map entry. A failed boot, an LRU eviction, or a concurrent
+   * release may have freed it already while a caller was awaiting; pushing the
+   * port twice would let two future models spawn on the same port.
+   */
+  private freeSlot(modelName: string, slot: PoolSlot): void {
+    if (this.slots.get(modelName) !== slot) return;
+    this.slots.delete(modelName);
+    this.freePorts.push(slot.port);
   }
 
   private getLruEntry(): [string, PoolSlot] | undefined {
@@ -216,22 +228,33 @@ export class BackendPool implements IBackendPool {
     return model?.provider === 'ollama';
   }
 
-  private async acquireOllama(modelName: string): Promise<BackendController> {
+  private acquireOllama(modelName: string): Promise<BackendController> {
+    const inFlight = this.ollamaStarting.get(modelName);
+    if (inFlight) return inFlight;
+
     const existing = this.ollamaSlots.get(modelName);
-    if (existing?.isReady()) return existing;
 
-    if (existing) {
-      // Was ready but health check lapsed — re-hotSwap without recreating
-      await existing.hotSwap(modelName);
-      return existing;
-    }
-
-    // Port is irrelevant for Ollama: DirectBackend.hotSwap overrides currentBaseUrl
-    // to model.endpoint, so the port value here is never used.
-    const backend = new DirectBackend(this.config, 0);
-    this.ollamaSlots.set(modelName, backend);
-    await backend.hotSwap(modelName);
-    log.info(`[BackendPool] ollama slot ready: ${modelName}`);
-    return backend;
+    const start = (async (): Promise<BackendController> => {
+      // `isReady` can be stale: the daemon may have died since the last use.
+      // Re-verify before trusting the cached slot; a dead endpoint falls
+      // through to hotSwap, which re-ensures (and may auto-start) the daemon.
+      if (existing?.isReady() && (await probeHealthy(existing.baseUrl()))) {
+        return existing;
+      }
+      if (existing) {
+        // Stale or never finished — re-hotSwap without recreating
+        await existing.hotSwap(modelName);
+        return existing;
+      }
+      // Port is irrelevant for Ollama: DirectBackend.hotSwap overrides currentBaseUrl
+      // to model.endpoint, so the port value here is never used.
+      const backend = new DirectBackend(this.config, 0);
+      this.ollamaSlots.set(modelName, backend);
+      await backend.hotSwap(modelName);
+      log.info(`[BackendPool] ollama slot ready: ${modelName}`);
+      return backend;
+    })();
+    this.ollamaStarting.set(modelName, start);
+    return start.finally(() => this.ollamaStarting.delete(modelName));
   }
 }

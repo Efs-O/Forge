@@ -39,6 +39,7 @@ function makeConfig(port: number, maxModels = 1): ForgeConfig {
     models: [
       { name: 'A', provider: 'llama.cpp', gguf_path: '/a.gguf' },
       { name: 'B', provider: 'llama.cpp', gguf_path: '/b.gguf' },
+      { name: 'grok', provider: 'xai', api_key_secret: 'forge.xai' },
     ],
     active_model: 'A',
     llama_server: {},
@@ -187,6 +188,38 @@ describe('ControlServer', () => {
     expect(busy.status).toBe(409);
     expect((await busy.json()).error).toMatch(/recently active/);
     expect(pool.loadedModelNames()).toEqual(['A']);
+  });
+
+  it('422s a cloud-provider model with the reason, without evicting a loaded local model', async () => {
+    const port = 18806;
+    const base = `http://127.0.0.1:${port}`;
+    const pool = new FakePool();
+    server = new ControlServer(pool, makeConfig(port, 1), testDeps());
+    server.start();
+    await waitReady(base);
+
+    // Load A, release the hold → A is idle and would be evictable.
+    expect((await post(base, 'A')).status).toBe(200);
+    expect((await (await post(base, 'A', 'release')).json()).released).toBe(true);
+
+    // Dispatching the xai model must fail with the reason — and must NOT have
+    // evicted idle A as collateral.
+    const res = await post(base, 'grok');
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toMatch(/cloud-provider model.*cannot serve/s);
+    expect(pool.loadedModelNames()).toEqual(['A']);
+  });
+
+  it('marks cloud-provider models servable: false on GET /models', async () => {
+    const port = 18807;
+    const base = `http://127.0.0.1:${port}`;
+    server = new ControlServer(new FakePool(), makeConfig(port), testDeps());
+    server.start();
+    await waitReady(base);
+
+    const { models } = await (await fetch(`${base}/models`)).json();
+    const byName = Object.fromEntries(models.map((m: { name: string; servable: boolean }) => [m.name, m.servable]));
+    expect(byName).toEqual({ A: true, B: true, grok: false });
   });
 
   it('exposes per-model holds on GET /models', async () => {

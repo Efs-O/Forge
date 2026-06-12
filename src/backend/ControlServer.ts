@@ -2,6 +2,7 @@ import * as http from 'http';
 import type * as vscode from 'vscode';
 import type { IBackendPool } from './BackendPool';
 import type { ForgeConfig } from '../config/types';
+import { isCloudProvider, getCloudProviderLabel } from '../llm/CloudProviders';
 import { probeHealthy } from './HealthCheck';
 import { getLogger } from '../util/logger';
 
@@ -32,7 +33,7 @@ export interface EnsureResult {
 export interface ControlStatus {
   listening: boolean;
   port: number;
-  models: Array<{ name: string; backend: string; loaded: boolean; holds: number }>;
+  models: Array<{ name: string; backend: string; loaded: boolean; holds: number; servable: boolean }>;
 }
 
 /**
@@ -119,16 +120,10 @@ export class ControlServer implements vscode.Disposable {
 
   /** Snapshot for status UI: listener state + per-model loaded/hold counts. */
   status(): ControlStatus {
-    const loaded = new Set(this.pool.loadedModelNames());
     return {
       listening: this.server !== null,
       port: this.port,
-      models: this.config.models.map((m) => ({
-        name: m.name,
-        backend: m.provider ?? 'llama.cpp',
-        loaded: loaded.has(m.name),
-        holds: this.holds.get(m.name) ?? 0,
-      })),
+      models: this.modelList(),
     };
   }
 
@@ -168,13 +163,16 @@ export class ControlServer implements vscode.Disposable {
     return model || null;
   }
 
-  private modelList(): Array<{ name: string; backend: string; loaded: boolean; holds: number }> {
+  private modelList(): ControlStatus['models'] {
     const loaded = new Set(this.pool.loadedModelNames());
     return this.config.models.map((m) => ({
       name: m.name,
       backend: m.provider ?? 'llama.cpp',
       loaded: loaded.has(m.name),
       holds: this.holds.get(m.name) ?? 0,
+      // Cloud-provider models are called via their HTTP API from inside the
+      // extension (key in SecretStorage) — the control server cannot serve them.
+      servable: !isCloudProvider(m.provider),
     }));
   }
 
@@ -185,12 +183,27 @@ export class ControlServer implements vscode.Disposable {
     if (!known) {
       return { status: 404, body: { error: `unknown model "${model}" — not in config` } };
     }
+    // Cloud-provider models have no local backend to load. Reject with the
+    // reason BEFORE the capacity guard, so a bad dispatch can never evict a
+    // loaded local model as collateral.
+    if (isCloudProvider(known.provider)) {
+      return {
+        status: 422,
+        body: {
+          error:
+            `"${model}" is a ${getCloudProviderLabel(known.provider)} cloud-provider model — ` +
+            `the control server cannot serve it. Its API key lives in VS Code SecretStorage, so it is ` +
+            `only callable from inside the Forge extension (sidebar). External callers must use the ` +
+            `provider's API directly. GET /models marks such entries "servable": false.`,
+        },
+      };
+    }
     const isOllama = known.provider === 'ollama';
 
     // Capacity guard applies only to port-consuming (llama.cpp) models. Ollama is
     // daemon-backed and unbounded, so it never needs a slot freed.
     if (!isOllama) {
-      const guard = this.makeRoom(model);
+      const guard = await this.makeRoom(model);
       if (guard) return guard;
     }
 
@@ -238,7 +251,7 @@ export class ControlServer implements vscode.Disposable {
    * pool never LRU-evicts a model a worker is mid-request on. Returns a 409
    * result if every loaded model is in use; null if there is room.
    */
-  private makeRoom(model: string): EnsureResult | null {
+  private async makeRoom(model: string): Promise<EnsureResult | null> {
     const loaded = this.pool.loadedModelNames();
     if (loaded.includes(model)) return null;
 
@@ -267,7 +280,11 @@ export class ControlServer implements vscode.Disposable {
       };
     }
     this.lastAcquiredAt.delete(idle[0]);
-    void this.pool.release(idle[0]);
+    // Await the release: it frees the slot/port only after backend.stop()
+    // resolves. Fire-and-forget here let the subsequent acquire race it —
+    // allocatePort would LRU-evict the same slot and reuse its port, then the
+    // in-flight release pushed that port back while the new slot occupied it.
+    await this.pool.release(idle[0]);
     log.info(`[ControlServer] released idle "${idle[0]}" to make room for "${model}"`);
     return null;
   }

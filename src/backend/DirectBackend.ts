@@ -5,7 +5,8 @@ import type { ForgeConfig, ModelConfig } from '../config/types';
 import { composeLlamaServerArgs } from './LlamaServerArgs';
 import { spawnLlamaServer, killLlamaProcess } from './llamaProcess';
 import { waitForHealthy, probeHealthy, probeServedModel } from './HealthCheck';
-import { ensureOllamaReady, normalizeOllamaEndpoint, releaseOllamaModel } from './OllamaAdapter';
+import { ensureOllamaReady, normalizeOllamaEndpoint, probeOllamaModel, releaseOllamaModel } from './OllamaAdapter';
+import { isCloudProvider } from '../llm/CloudProviders';
 import { getLogger } from '../util/logger';
 
 const log = getLogger();
@@ -62,10 +63,7 @@ export class DirectBackend implements BackendController {
     this.startAbort = null;
     this.stopAdoptedMonitor();
 
-    if (this.activeModel?.provider === 'ollama' && this.activeModel.endpoint) {
-      await releaseOllamaModel(this.activeModel.endpoint, this.activeModel.name);
-    }
-
+    await this.releaseActiveOllamaModel();
     await this.stopLlamaServer();
     this.activeModel = null;
     this.currentBaseUrl = `http://${this.host}:${this.port}`;
@@ -74,14 +72,28 @@ export class DirectBackend implements BackendController {
 
   async hotSwap(modelName: string): Promise<void> {
     const nextModel = this.resolveModel(modelName);
+    if (isCloudProvider(nextModel.provider)) {
+      throw new Error(
+        `Model "${nextModel.name}" is a ${nextModel.provider} cloud-provider model — it has no local ` +
+          `backend to load. It is called directly via the provider's API from the Forge sidebar.`,
+      );
+    }
     if (this.activeModel?.name === nextModel.name && this.ready) {
-      this.config.active_model = nextModel.name;
-      return;
+      // `ready` can be stale for daemon-backed models: the ollama server may
+      // have died since. Re-verify cheaply; if dead, fall through to the full
+      // re-ensure (which can auto-start the daemon).
+      if (nextModel.provider !== 'ollama' || (await probeHealthy(this.currentBaseUrl))) {
+        this.config.active_model = nextModel.name;
+        return;
+      }
+      this.ready = false;
     }
 
-    if (this.activeModel?.provider === 'ollama' && this.activeModel.endpoint) {
-      await releaseOllamaModel(this.activeModel.endpoint, this.activeModel.name);
-    }
+    // Old-model teardown is best-effort: a dead/hung daemon must never block
+    // swapping AWAY from it. The adopted-server poll timer dies with the swap
+    // too, so it cannot later flip `ready` for the wrong backend.
+    this.stopAdoptedMonitor();
+    await this.releaseActiveOllamaModel();
 
     if (this.activeModel?.provider === 'llama.cpp' || this.proc) {
       await this.stopLlamaServer();
@@ -94,7 +106,10 @@ export class DirectBackend implements BackendController {
       if (!nextModel.endpoint) {
         throw new Error(`Model "${nextModel.name}" is missing an Ollama endpoint.`);
       }
-      await ensureOllamaReady(nextModel.endpoint, this.startAbort.signal);
+      await ensureOllamaReady(nextModel.endpoint, this.startAbort.signal, this.config.ollama);
+      // Fail fast with the daemon's own reason (unknown model, entitlement
+      // gate) instead of at first chat call.
+      await probeOllamaModel(nextModel.endpoint, nextModel.name, this.startAbort.signal);
       this.activeModel = nextModel;
       this.currentBaseUrl = normalizeOllamaEndpoint(nextModel.endpoint);
       this.ready = true;
@@ -211,6 +226,20 @@ export class DirectBackend implements BackendController {
     if (this.adoptPollTimer) {
       clearInterval(this.adoptPollTimer);
       this.adoptPollTimer = null;
+    }
+  }
+
+  /** Best-effort keep_alive:0 release of the active Ollama model. Never throws:
+   *  an unreachable daemon must not wedge stop()/hotSwap(). */
+  private async releaseActiveOllamaModel(): Promise<void> {
+    if (this.activeModel?.provider !== 'ollama' || !this.activeModel.endpoint) return;
+    try {
+      await releaseOllamaModel(this.activeModel.endpoint, this.activeModel.name);
+    } catch (err) {
+      log.warn(
+        `[DirectBackend] best-effort ollama release of "${this.activeModel.name}" failed: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 

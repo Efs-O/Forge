@@ -118,6 +118,15 @@ export interface ForgeConfig {
   strip_thinking_channels?: boolean;
   /** Maximum number of llama-server processes to keep alive simultaneously. Default: 1. */
   max_simultaneous_models?: number;
+  /** Ollama daemon supervision. When a model's local Ollama endpoint refuses
+   *  connection, Forge can start `ollama serve` itself (default: on). */
+  ollama?: {
+    /** Auto-start `ollama serve` when a local endpoint is down. Default: true. */
+    auto_start?: boolean;
+    /** Explicit path to the ollama executable. Default: `ollama` on PATH,
+     *  then the standard install location under %LOCALAPPDATA% on Windows. */
+    executable?: string;
+  };
   /** Optional localhost model-control API so an external orchestrator can ask
    *  Forge to load the right model on demand and discover its endpoint. */
   control_server?: {
