@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import { SidebarProvider } from './sidebar/SidebarProvider';
 import { BackendPool } from './backend/BackendPool';
 import { ControlServer } from './backend/ControlServer';
+import { buildControlChatProxy } from './llm/ControlChatProxy';
 import { registerControlServerCommands } from './vscode/controlCommands';
 import type { ForgeConfig } from './config/types';
 import { loadConfig, findConfigPath, watchForgeConfigPaths } from './config/ConfigLoader';
@@ -142,7 +143,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Localhost model-control API for external orchestrators + the Forge command
   // palette. Always instantiated (cheap); the HTTP listener opens only when enabled.
-  const controlServer = new ControlServer(pool, config);
+  const controlServer = new ControlServer(pool, config, {
+    chatProxy: buildControlChatProxy(() => config, context.secrets),
+  });
   if (config.control_server?.enabled) controlServer.start();
   context.subscriptions.push(controlServer);
   registerControlServerCommands(context, controlServer);

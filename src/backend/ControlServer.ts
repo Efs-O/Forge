@@ -4,7 +4,9 @@ import type { IBackendPool } from './BackendPool';
 import type { ForgeConfig } from '../config/types';
 import { isCloudProvider, getCloudProviderLabel } from '../llm/CloudProviders';
 import { probeHealthy } from './HealthCheck';
-import { sendJson, requireModel, readJson, delay, toOpenAiBase, errText } from './controlHttp';
+// prettier-ignore
+import { sendJson, requireModel, readJson, delay, toOpenAiBase, errText, handleChat, CHAT_BODY_BYTES } from './controlHttp';
+import type { ChatProxyFn } from '../llm/ControlChatProxy';
 import { getLogger } from '../util/logger';
 
 const log = getLogger();
@@ -23,6 +25,9 @@ export interface ControlServerDeps {
   readinessTimeoutMs?: number;
   readinessIntervalMs?: number;
   evictionGraceMs?: number;
+  /** Runs a buffered cloud-provider completion inside the extension host (where
+   *  SecretStorage is readable). Absent ⇒ POST /chat returns 501. */
+  chatProxy?: ChatProxyFn;
 }
 
 export interface EnsureResult {
@@ -48,6 +53,7 @@ export interface ControlStatus {
  *   POST /ensure  {model} → { baseUrl, model, backend }  (loads/swaps as needed)
  *   POST /release {model} → { released: boolean }        (hold bookkeeping only)
  *   POST /unload  {model} → { unloaded: boolean }        (eager teardown; 409 if held)
+ *   POST /chat    {model, messages, …} → { content, finish_reason }  (buffered cloud completion)
  */
 export class ControlServer implements vscode.Disposable {
   private server: http.Server | null = null;
@@ -62,6 +68,7 @@ export class ControlServer implements vscode.Disposable {
   private readonly readinessTimeoutMs: number;
   private readonly readinessIntervalMs: number;
   private readonly evictionGraceMs: number;
+  private readonly chatProxy?: ChatProxyFn;
 
   constructor(
     private readonly pool: IBackendPool,
@@ -73,6 +80,7 @@ export class ControlServer implements vscode.Disposable {
     this.readinessTimeoutMs = deps.readinessTimeoutMs ?? READINESS_TIMEOUT_MS;
     this.readinessIntervalMs = deps.readinessIntervalMs ?? READINESS_INTERVAL_MS;
     this.evictionGraceMs = deps.evictionGraceMs ?? EVICTION_GRACE_MS;
+    if (deps.chatProxy) this.chatProxy = deps.chatProxy;
   }
 
   applyForgeConfig(next: ForgeConfig): void {
@@ -158,6 +166,12 @@ export class ControlServer implements vscode.Disposable {
         if (!model) return sendJson(res, 400, { error: 'model is required' });
         const result = await this.serialize(() => this.unload(model));
         return sendJson(res, result.status, result.body);
+      }
+      if (method === 'POST' && path === '/chat') {
+        // Not serialized: /chat neither loads nor evicts a local backend, so it
+        // must run concurrently rather than block behind /ensure or /release.
+        const { status, body } = await handleChat(this.chatProxy, await readJson(req, CHAT_BODY_BYTES));
+        return sendJson(res, status, body);
       }
       return sendJson(res, 404, { error: `no route for ${method} ${path}` });
     } catch (err) {

@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { ControlServer, type ControlServerDeps } from '../../src/backend/ControlServer';
+import { ProxyError } from '../../src/llm/ControlChatProxy';
 import type { IBackendPool } from '../../src/backend/BackendPool';
 import type { BackendController } from '../../src/backend/BackendController';
 import type { ForgeConfig } from '../../src/config/types';
@@ -285,5 +286,54 @@ describe('ControlServer', () => {
     const a = models.find((m: { name: string }) => m.name === 'A');
     expect(a.holds).toBe(1);
     expect(a.loaded).toBe(true);
+  });
+
+  const chat = (base: string, body: unknown): Promise<Response> =>
+    fetch(`${base}/chat`, { method: 'POST', body: JSON.stringify(body) });
+
+  it('POST /chat 501s when no chatProxy is wired', async () => {
+    const port = 18810;
+    const base = `http://127.0.0.1:${port}`;
+    server = new ControlServer(new FakePool(), makeConfig(port), testDeps());
+    server.start();
+    await waitReady(base);
+
+    const res = await chat(base, { model: 'grok', messages: [{ role: 'user', content: 'hi' }] });
+    expect(res.status).toBe(501);
+  });
+
+  it('POST /chat validates model and messages, then delegates to the proxy', async () => {
+    const port = 18811;
+    const base = `http://127.0.0.1:${port}`;
+    const chatProxy = async (req: { model: string; messages: unknown[] }) => ({
+      content: `echo:${req.model}:${req.messages.length}`,
+      reasoning: '',
+      finishReason: 'stop',
+    });
+    server = new ControlServer(new FakePool(), makeConfig(port), testDeps({ chatProxy }));
+    server.start();
+    await waitReady(base);
+
+    expect((await chat(base, { messages: [{ role: 'user', content: 'x' }] })).status).toBe(400);
+    expect((await chat(base, { model: 'grok' })).status).toBe(400);
+    expect((await chat(base, { model: 'grok', messages: [] })).status).toBe(400);
+
+    const ok = await chat(base, { model: 'grok', messages: [{ role: 'user', content: 'x' }] });
+    expect(ok.status).toBe(200);
+    const body = await ok.json();
+    expect(body).toMatchObject({ model: 'grok', content: 'echo:grok:1', finish_reason: 'stop' });
+  });
+
+  it('POST /chat maps a ProxyError status faithfully', async () => {
+    const port = 18812;
+    const base = `http://127.0.0.1:${port}`;
+    const chatProxy = async () => { throw new ProxyError(422, 'use /ensure for local models'); };
+    server = new ControlServer(new FakePool(), makeConfig(port), testDeps({ chatProxy }));
+    server.start();
+    await waitReady(base);
+
+    const res = await chat(base, { model: 'A', messages: [{ role: 'user', content: 'x' }] });
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toContain('/ensure');
   });
 });

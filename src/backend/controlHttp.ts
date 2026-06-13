@@ -1,4 +1,6 @@
 import type * as http from 'http';
+import type { ChatMessage } from '../llm/types';
+import { ProxyError, type ChatProxyFn } from '../llm/ControlChatProxy';
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -28,13 +30,81 @@ export function errText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-export function readJson(req: http.IncomingMessage): Promise<Record<string, unknown>> {
+/** Upper bound for POST /chat bodies — worker prompts carry large context. */
+export const CHAT_BODY_BYTES = 1024 * 1024;
+
+export interface ParsedChatRequest {
+  model: string;
+  messages: ChatMessage[];
+  temperature?: number;
+  top_p?: number;
+  max_tokens?: number;
+  reasoning_effort?: 'high' | 'medium' | 'low' | 'none';
+  stop?: string | string[];
+}
+
+const REASONING_EFFORTS = ['high', 'medium', 'low', 'none'] as const;
+
+/** Validate a POST /chat body. Returns the parsed request or an error string
+ *  (caller maps to 400). Strict — unknown fields are ignored, never blobbed. */
+export function parseChatRequest(body: Record<string, unknown>): ParsedChatRequest | string {
+  const model = requireModel(body);
+  if (!model) return 'model is required';
+  const messages = body['messages'];
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return 'messages must be a non-empty array';
+  }
+  const out: ParsedChatRequest = { model, messages: messages as ChatMessage[] };
+  for (const k of ['temperature', 'top_p', 'max_tokens'] as const) {
+    if (typeof body[k] === 'number') out[k] = body[k] as number;
+  }
+  const effort = body['reasoning_effort'];
+  if (typeof effort === 'string' && (REASONING_EFFORTS as readonly string[]).includes(effort)) {
+    out.reasoning_effort = effort as 'high' | 'medium' | 'low' | 'none';
+  }
+  const stop = body['stop'];
+  if (typeof stop === 'string' || (Array.isArray(stop) && stop.every((s) => typeof s === 'string'))) {
+    out.stop = stop as string | string[];
+  }
+  return out;
+}
+
+/** Run a POST /chat body through the proxy, mapping every outcome to an HTTP
+ *  status. Kept here so ControlServer.ts stays within its file-size budget. */
+export async function handleChat(
+  proxy: ChatProxyFn | undefined,
+  body: Record<string, unknown>,
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  if (!proxy) return { status: 501, body: { error: 'chat proxy not configured' } };
+  const parsed = parseChatRequest(body);
+  if (typeof parsed === 'string') return { status: 400, body: { error: parsed } };
+  try {
+    const out = await proxy(parsed);
+    return {
+      status: 200,
+      body: {
+        model: parsed.model,
+        content: out.content,
+        reasoning: out.reasoning,
+        finish_reason: out.finishReason,
+      },
+    };
+  } catch (err) {
+    if (err instanceof ProxyError) return { status: err.status, body: { error: err.message } };
+    return { status: 502, body: { error: errText(err) } };
+  }
+}
+
+export function readJson(
+  req: http.IncomingMessage,
+  maxBytes: number = MAX_BODY_BYTES,
+): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     let data = '';
     let size = 0;
     req.on('data', (chunk: Buffer) => {
       size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
+      if (size > maxBytes) {
         req.destroy();
         reject(new Error('request body too large'));
         return;
