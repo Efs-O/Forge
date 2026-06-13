@@ -1,43 +1,52 @@
-# F6 — Models-vs-Profiles Redesign (Forge side)
+# F6 — Models-vs-Profiles Redesign (Forge side) — FULL IMPLEMENTATION PLAN
 
-Status: PLAN (awaiting sign-off — breaking schema change)
-Owner files: `src/config/schema.ts`, `src/config/types.ts`,
-`src/config/ConfigLoader.ts`, `src/backend/LlamaServerArgs.ts`,
-`src/backend/ControlServer.ts` + catalog, `src/backend/ModelCapabilities.ts`.
+Status: PLAN (implement in a fresh session). Breaking schema change.
 Reference format: `F3_CHAT_PROXY_PLAN.md`. Findings: `RELAY_SMOKE_FINDINGS.md` §F6.
+Relay counterpart: `forge-relay/F6_RELAY_PROFILES_PLAN.md`.
+User decisions (2026-06-13): migrate live `.forge/config.yaml` in place (+ `.bak`);
+`config.yaml` is LOC-exempt; default cadence is plan→implement, but this one is
+large so it was deliberately deferred to its own session.
 
 ---
 
-## Problem (from the smoke test)
+## 1. Problem (smoke test §F6)
 
-The current `config.yaml` registers the *same* GGUF 4–5× as name-suffixed
-clones (`-coding` / `-vision` / `-worker`) that differ only in request-time
-fields (`system_prompt`, `sampling`, `think`, `reasoning_effort`). Concrete
-defects this causes:
+The same GGUF is registered 4–5× as name-suffixed clones (`-coding` / `-vision`
+/ `-worker`) differing only in request-time fields. Defects:
 
-1. Capabilities are wrong/misleading: base entries declare no `capabilities`,
-   suffixed twins declare `[tool-call]`, yet a base model tool-called fine.
-2. `-vision` is fake: bases also set `mmproj_path` (vision-capable) without
-   the `vision` capability — **and** `mmproj_path` is not even in `schema.ts`,
-   so Zod strips it and `LlamaServerArgs.ts:71` never sees it. Latent dead path.
-3. The flat `/models` catalog shows 4–5 near-identical rows → confusing on the
-   board and in pickers.
-4. `-worker` variants keep `think: true` + large reasoning budget — the
-   opposite of worker needs.
-5. Stop-token bug: every gemma llama.cpp entry sets `stop: "<|im_end|>"`
-   (ChatML/Qwen); gemma's stop is `<end_of_turn>`, so the stop never fires.
+1. Capabilities wrong: bases declare none, suffixed twins declare `[tool-call]`,
+   yet bases tool-call fine.
+2. `-vision` fake: bases also set `mmproj_path` (vision-capable) without the
+   `vision` cap — **and `mmproj_path` is not in `schema.ts`, so Zod strips it**
+   and `LlamaServerArgs.ts:71` never sees it. Latent dead path. (`types.ts:9`
+   declares it, but schema drops it at parse → fix this too.)
+3. Flat `/models` catalog shows 4–5 near-identical rows (confusing on board/pickers).
+4. `-worker` variants keep `think:true` + large reasoning budget (wrong for workers).
+5. Stop-token bug: every gemma llama.cpp entry sets `stop:"<|im_end|>"` (ChatML/Qwen);
+   gemma's is `<end_of_turn>` — stop never fires.
 
-## Decided design (RELAY_SMOKE_FINDINGS.md §F6)
+## 2. Design — two resolution flavors (the crux)
 
-Roles become **request-time profiles** applied to models, not name-suffixed
-clones. One loaded GGUF serves subcoordinator AND worker roles at once;
-nothing that distinguishes the variants needs its own llama-server spawn.
+Roles become request-time **profiles** applied to models; one loaded GGUF serves
+many roles. The key insight from the call-site audit: there are **two** distinct
+resolutions, and conflating them is the trap.
+
+- **Spawn-time resolution** (for `BackendPool` / `DirectBackend` / `LlamaServerArgs`):
+  base model facts + `spawn` block (+ optional `spawn_profile`). Keyed by **base
+  model name** so the profile suffix never forces a respawn. Profiles do NOT
+  affect spawn.
+- **Request-time resolution** (for `AgentLoop` / `ControlChatProxy`): base +
+  `defaults` + named `profile` (system_prompt, sampling, think, reasoning_effort,
+  strip_tools, strip_thinking_channels). Applied per request, no respawn.
+
+Both flavors return a **flattened legacy `ModelConfig`** so every existing
+consumer keeps working unchanged. This is what bounds the blast radius.
 
 ### New schema shape
 
 ```yaml
-defaults:                      # shared request-time defaults (NEW, optional)
-  system_prompt: "<main system prompt>"
+defaults:                      # NEW, optional — shared request-time defaults
+  system_prompt: "<main prompt>"
   sampling: { temperature: 0.6, top_p: 0.95, max_tokens: 4096 }
   think: false
   reasoning_effort: low
@@ -46,101 +55,154 @@ models:                        # one entry per GGUF/endpoint — FACTS ONLY
   - name: gemma4-26b-iq3s
     provider: llama.cpp
     gguf_path: /models/gemma4-26b-a4b-it-iq3s.gguf
-    mmproj_path: /models/gemma4-mmproj.gguf      # vision auto-derived
-    spawn:                     # spawn-time facts (move from flat fields)
+    mmproj_path: /models/gemma4-mmproj.gguf     # vision auto-derived
+    spawn:                     # spawn-time facts (replaces flat num_ctx/etc.)
       num_ctx: 32768
       n_parallel: 4
       type_k: q8_0
       type_v: q8_0
       flash_attn: true
       n_gpu_layers: -1
+      n_batch: 512
+      extra_llama_server_args: []
     spawn_profiles:            # rare spawn-time overrides (the exception)
       long-context: { num_ctx: 131072, n_parallel: 1 }
   - name: grok-code
     provider: xai
     api_key_secret: xai
 
-profiles:                      # NEW — named request-time role presets
+profiles:                      # NEW — request-time role presets
   main:           { system_prompt: "...", think: true, reasoning_effort: medium }
   subcoordinator: { system_prompt: "...", think: true }
   worker:         { think: false, reasoning_effort: none,
-                    sampling: { temperature: 0.2 }, strip_tools: false }
+                    sampling: { temperature: 0.2, stop: "<end_of_turn>" } }
 
-active_model: gemma4-26b-iq3s@main      # model@profile pair (profile optional)
+active_model: gemma4-26b-iq3s@main     # model@profile (profile optional)
 
-aliases:                       # NEW — migration shim, removable later
+aliases:                       # NEW — migration shim (removable later)
   gemma4-26b-a4b-it-iq3s-worker: gemma4-26b-iq3s@worker
   gemma4-26b-a4b-it-iq3s-coding: gemma4-26b-iq3s@main
+  gemma4-26b-a4b-it-iq3s-vision: gemma4-26b-iq3s@main   # vision is a capability, not a role
 ```
 
-### Resolution order (the core rule)
+### Merge precedence
 
-A request names a `model@profile` pair. Effective config =
-`defaults` < `models[].` (facts) < `profiles[profile]` (request-time) <
-optional `spawn_profiles[…]` (spawn-time only). Profile changes that touch
-**only** request-time fields never respawn — the loaded GGUF is reused.
-Only `spawn` / `spawn_profiles` differences force a respawn (F4 eviction
-already handles that).
+Request-time: `defaults` < base facts (request-time fields if any) < `profiles[p]`.
+Spawn-time:  base `spawn` < `spawn_profiles[sp]`.
+Capabilities: explicit `capabilities:` override > derived (`vision` ⇐ `mmproj_path`;
+`tool-call` ⇐ `ModelCapabilities` runtime detection; `long-context` ⇐ a
+`long-context` spawn_profile exists or num_ctx ≥ threshold).
 
-### Capability derivation (auto, not declared)
+## 3. New file — `src/config/ConfigResolver.ts` (~140 LOC, keeps loader/schema under cap)
 
-- `vision` ⇐ `mmproj_path` present.
-- `tool-call` ⇐ `ModelCapabilities.ts` runtime detection (already exists).
-- `long-context` ⇐ presence of a `long-context` spawn_profile (or num_ctx
-  threshold). Explicit `capabilities:` still allowed as an override.
+Exports:
+- `splitModelProfile(id: string): { base: string; profile?: string }` — strip a
+  trailing `@<profile>` (`[A-Za-z0-9_-]+`); leave internal text intact.
+- `expandAlias(config, id): string` — if `id`'s base matches an alias key, return
+  the alias target (carrying through any explicit `@profile`); log once on hit.
+- `resolveRequestModel(config, id): ModelConfig` — request-time flatten
+  (defaults+base+profile). Unknown profile ⇒ throw; unknown base ⇒ throw.
+- `resolveSpawnModel(config, base, spawnProfile?): ModelConfig` — spawn-time
+  flatten (base facts + spawn(+spawn_profile) → flat `num_ctx`/`n_parallel`/
+  `type_k`/`type_v`/`flash_attn`/`n_gpu_layers`/`n_batch`/`extra_llama_server_args`).
+- `deriveStaticCapabilities(facts): ('tool-call'|'vision'|'long-context')[]` —
+  vision from mmproj; tool-call/long-context as above.
+- `listProfiles(config): string[]` and `availableProfilesFor(config, base): string[]`.
 
----
+Legacy fallback: a model with no `spawn` block reads its flat fields (current
+behavior). A config with no `defaults`/`profiles` and a bare `active_model`
+resolves to today's behavior exactly (regression-test this).
 
-## Files & estimated LOC
+## 4. Schema + types changes
 
-| File | Change | ~LOC |
+`src/config/schema.ts` (+~90):
+- `ModelConfigSchema`: add `mmproj_path: z.string().optional()` (fixes the stripped
+  field), `spawn: SpawnSchema.optional()`, `spawn_profiles: z.record(SpawnSchema.partial()).optional()`.
+  Keep all current flat fields (deprecated-but-accepted).
+- `SpawnSchema`: num_ctx, n_parallel, n_batch, type_k, type_v, flash_attn,
+  n_gpu_layers, extra_llama_server_args (all optional).
+- `ProfileSchema`: system_prompt, sampling (reuse existing sampling object),
+  think, reasoning_effort, strip_tools, strip_thinking_channels, capabilities.
+- Top level: `defaults: ProfileSchema.partial().optional()`,
+  `profiles: z.record(ProfileSchema).optional()`,
+  `aliases: z.record(z.string()).optional()`.
+- `active_model` stays a string but may carry `@profile`.
+
+`src/config/types.ts` (+~40): `SpawnConfig`, `ProfileConfig`, add `spawn?`,
+`spawn_profiles?` to `ModelConfig`; add `defaults?`, `profiles?`, `aliases?` to
+`ForgeConfig`. (`mmproj_path` already on the type.)
+
+## 5. Integration points (audited call sites — thread the resolver here)
+
+| Site | Today | Change |
 |---|---|---|
-| `src/config/schema.ts` | Add `mmproj_path`, `spawn`, `spawn_profiles` to model; new `defaults`, `profiles`, `aliases` top-level; keep flat fields as deprecated-but-accepted | +90 |
-| `src/config/types.ts` | New `ProfileConfig`, `SpawnConfig`, `ModelFacts`; extend `ForgeConfig` | +40 |
-| `src/config/ConfigResolver.ts` (NEW) | `resolveModelProfile(cfg, "model@profile") → EffectiveModel` merge + alias expansion + `splitModelProfile()` | +120 |
-| `src/config/ConfigLoader.ts` | Call resolver for `active_model`; validate profile names + alias targets exist; keep dup-name guard | +25 |
-| `src/backend/LlamaServerArgs.ts` | Read from `model.spawn.*` (fallback to flat fields for back-comp); gemma stop-token note | +15 |
-| `src/backend/ControlServer.ts` + catalog | `/models` lists base models once with derived caps + available profiles; `/ensure`/`/chat` accept `model@profile` | +30 |
-| `src/backend/ModelCapabilities.ts` | Expose `deriveStaticCapabilities(facts)` (vision from mmproj) | +20 |
-| `config/config.example.yaml` | Rewrite to new shape (defaults + models + profiles) | rewrite |
+| `ConfigLoader.ts:39` | active_model must equal a model name | validate `splitModelProfile(active_model).base` ∈ models; validate profile ∈ profiles; validate every alias target resolves | 
+| `ConfigLoader.ts:44` | sort models | unchanged (sort base models) |
+| `AgentLoop.ts:259` | `models.find(name===active_model)` | `resolveRequestModel(config, config.active_model)` |
+| `ControlChatProxy.ts:74` | `models.find(name===req.model)` | `resolveRequestModel(config, req.model)` (req.model may be `base@profile`); cloud key/provider come from base facts |
+| `BackendPool.ts:247` | `models.find(name===modelName)` | `resolveSpawnModel(config, splitModelProfile(modelName).base)`; pool key = base name |
+| `DirectBackend.ts:290` | `models.find(name===name)` | same spawn-time resolve; `:63/:95/:125/:134` active_model bookkeeping stores **base** name |
+| `ControlServer.ts:183` (modelList) | one row per model | one row per **base** model; add `profiles: availableProfilesFor()` + derived `capabilities`; `servable` unchanged |
+| `ControlServer.ts:197` (ensure) | `models.find(name===model)` | ensure on `splitModelProfile(model).base`; spawn-time resolve |
+| `ControlServer.ts:322` (unload) | find by name | strip profile → base |
+| `nativeCommands.ts:70/79` (picker) | list model names | list `base@profile` pairs (or base + profile quick-pick); set `active_model` to the pair |
+| `extension.ts:244` | preserve prev active if name still present | compare on base name |
+| `FirstRunWizard.ts:25/43` | emits `active_model: <name>` + flat model | emit new shape (defaults + one model + minimal profiles) — keep wizard output valid under new schema |
 
-New file `ConfigResolver.ts` keeps `ConfigLoader.ts` and `schema.ts` under the
-350-LOC cap.
+`LlamaServerArgs.ts`: no change if `resolveSpawnModel` outputs flat fields
+(it already reads `model.num_ctx`/`type_k`/`mmproj_path`/etc.). Add a regression
+test that args are identical from `spawn` block vs legacy flat.
 
-## Back-compat / alias layer (required)
+`ChatClient` / `OpenAIClient` / `OllamaNativeClient` / `SamplingMerge` /
+`SystemPromptInjector`: unchanged — they receive an already-flattened `ModelConfig`.
 
-- Old flat model fields (`num_ctx`, `system_prompt`, `sampling`, …) still parse
-  and map onto the new shape, so an un-migrated config keeps working.
-- `aliases:` maps old suffixed names → `model@profile`. `active_model`,
-  `/ensure`, `/chat`, and Relay dispatch all run the name through alias
-  expansion first. Logged once at load when an alias is hit (migration nudge).
-- No silent fallbacks beyond this documented shim (CLAUDE.md "no fallbacks").
+## 6. Catalog / control API shape
 
-## Test plan (vitest)
+`GET /models` rows gain `profiles: string[]` and corrected `capabilities`.
+`/ensure` and `/unload` accept `base` or `base@profile` (strip profile). `/chat`
+already takes `model`; `resolveRequestModel` handles `base@profile`. Relay's
+`list_models` + `@profile` dispatch consume these (see relay plan).
 
-- `ConfigResolver`: merge precedence (defaults<model<profile), `model@profile`
-  split, bare `model` ⇒ default profile, alias expansion, unknown profile ⇒
-  error, unknown alias target ⇒ error.
-- `schema`: new shape parses; legacy flat shape still parses; `mmproj_path`
-  now survives parse (regression for the stripped-field bug).
+## 7. Live config migration (`.forge/config.yaml`, 954 → ~300)
+
+1. `cp .forge/config.yaml .forge/config.yaml.bak` first.
+2. Collapse each GGUF's 4–5 suffixed clones into one base `models:` entry (facts
+   + `spawn`), move shared `system_prompt`/sampling to `defaults:`, define
+   `profiles: {main, subcoordinator, worker}`.
+3. Add `aliases:` for every old suffixed name → `base@profile` so existing
+   dispatches/`active_model` keep resolving.
+4. Fix gemma stop tokens to `<end_of_turn>` in the worker/relevant profile.
+5. Reload Forge; verify `/models` lists bases + profiles, a llama.cpp model loads,
+   and an alias name still resolves.
+
+## 8. Test plan (vitest)
+
+- `ConfigResolver`: split (bare / `@worker` / `forge:`-style untouched / internal
+  colon kept); request merge precedence; spawn merge + spawn_profile; alias
+  expansion; unknown profile/base/alias-target ⇒ error; legacy-flat regression.
+- `schema`: new shape parses; legacy flat parses; `mmproj_path` survives parse.
 - capability derivation: vision from mmproj; explicit override wins.
-- `LlamaServerArgs`: args identical whether spawn facts come from `spawn` block
-  or legacy flat fields.
-- gemma stop-token: example config uses `<end_of_turn>`.
-- Run gates: `npx tsc --noEmit`, `npx vitest run`, `npm run package`.
+- `LlamaServerArgs` parity: spawn-block vs flat produce identical argv.
+- catalog: `/models` row has `profiles` + derived caps; ensure/unload strip `@profile`.
+- Gates: `npx tsc --noEmit`, `npx vitest run`, `npm run package`.
 
-## Live config migration (DECISION NEEDED)
+## 9. Back-compat & no-fallback discipline
 
-`.forge/config.yaml` (954 lines, gitignored, the user's real models) must be
-rewritten to the new shape to get the full benefit. Options:
-- (A) I migrate it in place to ~300 lines and the user verifies models still
-  load. Higher value, touches their working local file.
-- (B) Ship schema + alias layer + new `config.example.yaml` only; the old
-  954-line config keeps working untouched via back-compat; migrate later.
+- Alias layer is the ONLY name-rewrite; logged once per hit (migration nudge).
+- No silent defaults beyond documented legacy-flat reading.
+- Surface unknown-profile / unknown-alias-target as load-time errors.
 
-## Out of scope
+## 10. Out of scope
 
-- F2 (worker-N board identity) — independent, already resolved.
+- F2 (worker-N identity) — done. Relay `@profile` parsing + daemon supervisor —
+  relay plan. Async-dispatch "return immediately" — separate Minor item.
 - Removing the alias layer (later cleanup once migrated).
-- Relay-side `@profile` dispatch parsing — see `forge-relay/F6_RELAY_PROFILES_PLAN.md`.
-- Async-dispatch fix (RELAY_SMOKE_FINDINGS "Minor").
+
+## 11. Suggested commit sequence (feature branch `feature/f6-profiles`)
+
+1. schema + types + `ConfigResolver` + resolver/schema tests (no consumer wiring).
+2. Thread spawn-time resolve (BackendPool, DirectBackend, ControlServer ensure/unload) + tests.
+3. Thread request-time resolve (AgentLoop, ControlChatProxy) + catalog `profiles` + tests.
+4. Picker + wizard + extension active-model bookkeeping.
+5. `config.example.yaml` rewrite; migrate live `.forge/config.yaml` (+ .bak).
+6. Gates; bump version; merge to main.
