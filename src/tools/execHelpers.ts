@@ -75,6 +75,9 @@ export function spawnAndWait(
     const proc = child_process.spawn(command, args, {
       shell: false,
       cwd,
+      // Suppress terminal color at the source so most tools (vitest, npm, …)
+      // emit no ANSI. NOT CI=true — that changes some runners' semantics.
+      env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' },
     });
 
     const timer = setTimeout(() => {
@@ -101,12 +104,27 @@ export function spawnAndWait(
   });
 }
 
+// ── ANSI stripping ───────────────────────────────────────────────────────────
+
+// CSI escape matcher: ESC [ <params> <final-letter>. Covers SGR color (…m) and
+// cursor/erase codes (…K, …G) that tools like vitest emit on stdout/stderr; left
+// unstripped they pollute both the board display and the model's context.
+// Written as a regex literal so the ESC byte is an escape, never a raw control char.
+// eslint-disable-next-line no-control-regex
+const ANSI_PATTERN = /\x1b\[[0-9;]*[A-Za-z]/g;
+
+export function stripAnsi(s: string): string {
+  return s.replace(ANSI_PATTERN, '');
+}
+
 // ── Output formatter ───────────────────────────────────────────────────────────
 
 export function formatOutput(result: SpawnResult): string {
-  let out = result.stdout.slice(0, MAX_OUTPUT_CHARS);
+  // Strip ANSI BEFORE slicing: codes inflate the char count and a mid-escape
+  // slice would leave dangling garbage.
+  let out = stripAnsi(result.stdout).slice(0, MAX_OUTPUT_CHARS);
   if (result.stderr) {
-    out += `\n[stderr]\n${result.stderr.slice(0, MAX_OUTPUT_CHARS)}`;
+    out += `\n[stderr]\n${stripAnsi(result.stderr).slice(0, MAX_OUTPUT_CHARS)}`;
   }
   out += `\n[exit code: ${result.exitCode ?? 'null'}]`;
   return out;
