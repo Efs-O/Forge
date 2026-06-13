@@ -1,5 +1,5 @@
 import type * as http from 'http';
-import type { ChatMessage } from '../llm/types';
+import type { ChatMessage, ToolDefinition } from '../llm/types';
 import { ProxyError, type ChatProxyFn } from '../llm/ControlChatProxy';
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -41,9 +41,28 @@ export interface ParsedChatRequest {
   max_tokens?: number;
   reasoning_effort?: 'high' | 'medium' | 'low' | 'none';
   stop?: string | string[];
+  tools?: ToolDefinition[];
 }
 
 const REASONING_EFFORTS = ['high', 'medium', 'low', 'none'] as const;
+
+/** Minimal structural check — tools must be function-typed with a name, never a
+ *  free-form blob (CLAUDE.md hard stop). Unknown-shaped entries reject the body. */
+function isToolDefinitionArray(value: unknown): value is ToolDefinition[] {
+  return (
+    Array.isArray(value) &&
+    value.every((t) => {
+      if (typeof t !== 'object' || t === null) return false;
+      const fn = (t as { type?: unknown; function?: unknown }).function;
+      return (
+        (t as { type?: unknown }).type === 'function' &&
+        typeof fn === 'object' &&
+        fn !== null &&
+        typeof (fn as { name?: unknown }).name === 'string'
+      );
+    })
+  );
+}
 
 /** Validate a POST /chat body. Returns the parsed request or an error string
  *  (caller maps to 400). Strict — unknown fields are ignored, never blobbed. */
@@ -66,6 +85,11 @@ export function parseChatRequest(body: Record<string, unknown>): ParsedChatReque
   if (typeof stop === 'string' || (Array.isArray(stop) && stop.every((s) => typeof s === 'string'))) {
     out.stop = stop as string | string[];
   }
+  const tools = body['tools'];
+  if (tools !== undefined) {
+    if (!isToolDefinitionArray(tools)) return 'tools must be an array of function tool definitions';
+    out.tools = tools;
+  }
   return out;
 }
 
@@ -80,13 +104,24 @@ export async function handleChat(
   if (typeof parsed === 'string') return { status: 400, body: { error: parsed } };
   try {
     const out = await proxy(parsed);
+    // OpenAI-compatible response shape so Relay reuses its `postChat` parsing
+    // (choices[0].message.tool_calls) verbatim for cloud agentic workers.
     return {
       status: 200,
       body: {
         model: parsed.model,
-        content: out.content,
-        reasoning: out.reasoning,
-        finish_reason: out.finishReason,
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: out.content,
+              reasoning: out.reasoning,
+              ...(out.toolCalls ? { tool_calls: out.toolCalls } : {}),
+            },
+            finish_reason: out.finishReason,
+          },
+        ],
       },
     };
   } catch (err) {

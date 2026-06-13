@@ -46,6 +46,31 @@ describe('buildControlChatProxy', () => {
     expect(out).toEqual({ content: 'Hello world', reasoning: 'think ', finishReason: 'stop' });
   });
 
+  it('forwards tools and buffers tool_calls into the result', async () => {
+    const calls = [
+      { id: 'c1', type: 'function' as const, function: { name: 'read_file', arguments: '{}' } },
+    ];
+    streamMock.mockImplementation(async (...args: unknown[]) => {
+      const h = handlersOf(args);
+      h.onToolCalls?.(calls);
+      h.onDone('tool_calls');
+    });
+    const tools = [
+      { type: 'function' as const, function: { name: 'read_file', description: 'd', parameters: {} } },
+    ];
+    const proxy = buildControlChatProxy(config, secrets);
+    const out = await proxy({ model: 'router', messages: [{ role: 'user', content: 'hi' }], tools });
+    // tools reach the streaming client...
+    expect((streamMock.mock.calls[0][1] as { tools?: unknown }).tools).toEqual(tools);
+    // ...and tool_calls are surfaced on the result.
+    expect(out).toEqual({
+      content: '',
+      reasoning: '',
+      finishReason: 'tool_calls',
+      toolCalls: calls,
+    });
+  });
+
   it('passes the resolved xAI key + cloud baseUrl to the client', async () => {
     streamMock.mockImplementation(async (...args: unknown[]) => handlersOf(args).onDone('stop'));
     const proxy = buildControlChatProxy(config, secrets);

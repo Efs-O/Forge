@@ -321,7 +321,45 @@ describe('ControlServer', () => {
     const ok = await chat(base, { model: 'grok', messages: [{ role: 'user', content: 'x' }] });
     expect(ok.status).toBe(200);
     const body = await ok.json();
-    expect(body).toMatchObject({ model: 'grok', content: 'echo:grok:1', finish_reason: 'stop' });
+    expect(body).toMatchObject({
+      model: 'grok',
+      choices: [{ index: 0, message: { role: 'assistant', content: 'echo:grok:1' }, finish_reason: 'stop' }],
+    });
+  });
+
+  it('POST /chat forwards tools and returns buffered tool_calls in OpenAI shape', async () => {
+    const port = 18813;
+    const base = `http://127.0.0.1:${port}`;
+    const toolCalls = [
+      { id: 'c1', type: 'function' as const, function: { name: 'read_file', arguments: '{}' } },
+    ];
+    const chatProxy = async (req: { tools?: unknown }) => ({
+      content: '',
+      reasoning: '',
+      finishReason: 'tool_calls',
+      // echo back whether tools were forwarded by populating tool_calls only then.
+      ...(req.tools ? { toolCalls } : {}),
+    });
+    server = new ControlServer(new FakePool(), makeConfig(port), testDeps({ chatProxy }));
+    server.start();
+    await waitReady(base);
+
+    const tools = [
+      { type: 'function', function: { name: 'read_file', description: 'd', parameters: {} } },
+    ];
+    const res = await chat(base, { model: 'grok', messages: [{ role: 'user', content: 'x' }], tools });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.choices[0].message.tool_calls).toEqual(toolCalls);
+    expect(body.choices[0].finish_reason).toBe('tool_calls');
+
+    // a malformed tools array is rejected, never blobbed.
+    const bad = await chat(base, {
+      model: 'grok',
+      messages: [{ role: 'user', content: 'x' }],
+      tools: ['not-a-tool'],
+    });
+    expect(bad.status).toBe(400);
   });
 
   it('POST /chat maps a ProxyError status faithfully', async () => {
