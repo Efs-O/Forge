@@ -1,4 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <!-- Forge glow: molten orange -> amber, like metal heated in a forge -->
+    <linearGradient id="forgeGlow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffd24a"/>
+      <stop offset="0.45" stop-color="#ff9a1f"/>
+      <stop offset="1" stop-color="#e8530e"/>
+    </linearGradient>
+    <radialGradient id="emberCore" cx="0.5" cy="0.42" r="0.62">
+      <stop offset="0" stop-color="#ffe79a"/>
+      <stop offset="0.5" stop-color="#ffae33"/>
+      <stop offset="1" stop-color="#ff7a14"/>
+    </radialGradient>
+    <filter id="soften" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="1.1"/>
+    </filter>
+  </defs>
+
   <!-- Background -->
   <rect width="128" height="128" rx="20" fill="#ffffff"/>
   <!-- Frame -->
@@ -8,48 +25,62 @@
   <rect x="32" y="32" width="64" height="64" rx="6" fill="#111111" stroke="#111111" stroke-width="2"/>
 
   <!-- Pins — top -->
-  <rect x="40" y="20" width="6" height="14" rx="2" fill="#111111"/>
-  <rect x="54" y="20" width="6" height="14" rx="2" fill="#111111"/>
-  <rect x="68" y="20" width="6" height="14" rx="2" fill="#111111"/>
-  <rect x="82" y="20" width="6" height="14" rx="2" fill="#111111"/>
+  <rect x="40" y="20" width="6" height="14" rx="2" fill="url(#forgeGlow)"/>
+  <rect x="54" y="20" width="6" height="14" rx="2" fill="url(#forgeGlow)"/>
+  <rect x="68" y="20" width="6" height="14" rx="2" fill="url(#forgeGlow)"/>
+  <rect x="82" y="20" width="6" height="14" rx="2" fill="url(#forgeGlow)"/>
 
   <!-- Pins — bottom -->
-  <rect x="40" y="94" width="6" height="14" rx="2" fill="#111111"/>
-  <rect x="54" y="94" width="6" height="14" rx="2" fill="#111111"/>
-  <rect x="68" y="94" width="6" height="14" rx="2" fill="#111111"/>
-  <rect x="82" y="94" width="6" height="14" rx="2" fill="#111111"/>
+  <rect x="40" y="94" width="6" height="14" rx="2" fill="url(#forgeGlow)"/>
+  <rect x="54" y="94" width="6" height="14" rx="2" fill="url(#forgeGlow)"/>
+  <rect x="68" y="94" width="6" height="14" rx="2" fill="url(#forgeGlow)"/>
+  <rect x="82" y="94" width="6" height="14" rx="2" fill="url(#forgeGlow)"/>
 
   <!-- Pins — left -->
-  <rect x="20" y="40" width="14" height="6" rx="2" fill="#111111"/>
-  <rect x="20" y="54" width="14" height="6" rx="2" fill="#111111"/>
-  <rect x="20" y="68" width="14" height="6" rx="2" fill="#111111"/>
-  <rect x="20" y="82" width="14" height="6" rx="2" fill="#111111"/>
+  <rect x="20" y="40" width="14" height="6" rx="2" fill="url(#forgeGlow)"/>
+  <rect x="20" y="54" width="14" height="6" rx="2" fill="url(#forgeGlow)"/>
+  <rect x="20" y="68" width="14" height="6" rx="2" fill="url(#forgeGlow)"/>
+  <rect x="20" y="82" width="14" height="6" rx="2" fill="url(#forgeGlow)"/>
 
   <!-- Pins — right -->
-  <rect x="94" y="40" width="14" height="6" rx="2" fill="#111111"/>
-  <rect x="94" y="54" width="14" height="6" rx="2" fill="#111111"/>
-  <rect x="94" y="68" width="14" height="6" rx="2" fill="#111111"/>
-  <rect x="94" y="82" width="14" height="6" rx="2" fill="#111111"/>
+  <rect x="94" y="40" width="14" height="6" rx="2" fill="url(#forgeGlow)"/>
+  <rect x="94" y="54" width="14" height="6" rx="2" fill="url(#forgeGlow)"/>
+  <rect x="94" y="68" width="14" height="6" rx="2" fill="url(#forgeGlow)"/>
+  <rect x="94" y="82" width="14" height="6" rx="2" fill="url(#forgeGlow)"/>
 
   <!-- Corner notch -->
   <circle cx="38" cy="38" r="4" fill="#ffffff"/>
 
-  <!-- Pixel-art ? (5×7 grid, 7px pitch, 6×6 px blocks, silver) -->
+  <!-- Soft glow behind the glyph so it reads as heated metal -->
+  <g filter="url(#soften)" opacity="0.55">
+    <rect x="54" y="40" width="6" height="6" fill="#ff8a1e"/>
+    <rect x="61" y="40" width="6" height="6" fill="#ff8a1e"/>
+    <rect x="68" y="40" width="6" height="6" fill="#ff8a1e"/>
+    <rect x="47" y="47" width="6" height="6" fill="#ff8a1e"/>
+    <rect x="75" y="47" width="6" height="6" fill="#ff8a1e"/>
+    <rect x="75" y="54" width="6" height="6" fill="#ff8a1e"/>
+    <rect x="61" y="61" width="6" height="6" fill="#ff8a1e"/>
+    <rect x="68" y="61" width="6" height="6" fill="#ff8a1e"/>
+    <rect x="61" y="68" width="6" height="6" fill="#ff8a1e"/>
+    <rect x="61" y="82" width="6" height="6" fill="#ff8a1e"/>
+  </g>
+
+  <!-- Pixel-art ? (5×7 grid, 7px pitch, 6×6 px blocks, forge ember) -->
   <!-- Row 0: . X X X . -->
-  <rect x="54" y="40" width="6" height="6" fill="#a8a8a8"/>
-  <rect x="61" y="40" width="6" height="6" fill="#a8a8a8"/>
-  <rect x="68" y="40" width="6" height="6" fill="#a8a8a8"/>
+  <rect x="54" y="40" width="6" height="6" fill="url(#emberCore)"/>
+  <rect x="61" y="40" width="6" height="6" fill="url(#emberCore)"/>
+  <rect x="68" y="40" width="6" height="6" fill="url(#emberCore)"/>
   <!-- Row 1: X . . . X -->
-  <rect x="47" y="47" width="6" height="6" fill="#a8a8a8"/>
-  <rect x="75" y="47" width="6" height="6" fill="#a8a8a8"/>
+  <rect x="47" y="47" width="6" height="6" fill="url(#emberCore)"/>
+  <rect x="75" y="47" width="6" height="6" fill="url(#emberCore)"/>
   <!-- Row 2: . . . . X -->
-  <rect x="75" y="54" width="6" height="6" fill="#a8a8a8"/>
+  <rect x="75" y="54" width="6" height="6" fill="url(#emberCore)"/>
   <!-- Row 3: . . X X . -->
-  <rect x="61" y="61" width="6" height="6" fill="#a8a8a8"/>
-  <rect x="68" y="61" width="6" height="6" fill="#a8a8a8"/>
+  <rect x="61" y="61" width="6" height="6" fill="url(#emberCore)"/>
+  <rect x="68" y="61" width="6" height="6" fill="url(#emberCore)"/>
   <!-- Row 4: . . X . . -->
-  <rect x="61" y="68" width="6" height="6" fill="#a8a8a8"/>
+  <rect x="61" y="68" width="6" height="6" fill="url(#emberCore)"/>
   <!-- Row 5: (gap) -->
   <!-- Row 6: . . X . . -->
-  <rect x="61" y="82" width="6" height="6" fill="#a8a8a8"/>
+  <rect x="61" y="82" width="6" height="6" fill="url(#emberCore)"/>
 </svg>
