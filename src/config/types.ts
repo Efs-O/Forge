@@ -1,3 +1,43 @@
+/** Sampling parameter overrides shared by models, profiles, and defaults. */
+export interface SamplingConfig {
+  temperature?: number;
+  top_p?: number;
+  top_k?: number;
+  min_p?: number;
+  max_tokens?: number;
+  seed?: number;
+  presence_penalty?: number;
+  frequency_penalty?: number;
+  repetition_penalty?: number;
+  repeat_penalty?: number;
+  repeat_last_n?: number;
+  stop?: string | string[];
+  preserve_thinking?: boolean;
+}
+
+/** Spawn-time facts for a llama.cpp model — fed to LlamaServerArgs. */
+export interface SpawnConfig {
+  num_ctx?: number;
+  n_parallel?: number;
+  n_batch?: number;
+  type_k?: number | string;
+  type_v?: number | string;
+  flash_attn?: boolean;
+  n_gpu_layers?: number;
+  extra_llama_server_args?: string[];
+}
+
+/** Request-time role preset applied to a base model per request. */
+export interface ProfileConfig {
+  system_prompt?: string;
+  sampling?: SamplingConfig;
+  think?: boolean;
+  reasoning_effort?: 'high' | 'medium' | 'low' | 'none';
+  strip_tools?: boolean;
+  strip_thinking_channels?: boolean;
+  capabilities?: ('tool-call' | 'vision' | 'long-context')[];
+}
+
 export interface ModelConfig {
   /** Display name shown in the sidebar model picker. */
   name: string;
@@ -55,6 +95,10 @@ export interface ModelConfig {
   strip_thinking_channels?: boolean;
   /** SecretStorage key holding the bearer token for OpenAI-compatible cloud providers (for example xAI, OpenAI, or OpenRouter). */
   api_key_secret?: string;
+  /** Spawn-time facts (F6). When present, overrides flat fields at spawn resolution. */
+  spawn?: SpawnConfig;
+  /** Rare spawn-time overrides keyed by spawn-profile name (F6). */
+  spawn_profiles?: Record<string, SpawnConfig>;
 }
 
 export interface LlamaServerConfig {
@@ -104,6 +148,12 @@ export interface EmbeddingsConfig {
 export interface ForgeConfig {
   models: ModelConfig[];
   active_model: string | null;
+  /** Shared request-time defaults applied beneath base facts and profiles (F6). */
+  defaults?: ProfileConfig;
+  /** Named request-time role presets (F6). Referenced via `model@profile`. */
+  profiles?: Record<string, ProfileConfig>;
+  /** Migration shim: old suffixed model name → `base@profile` (F6). */
+  aliases?: Record<string, string>;
   llama_server: LlamaServerConfig;
   search?: SearchConfig;
   embeddings?: EmbeddingsConfig;
