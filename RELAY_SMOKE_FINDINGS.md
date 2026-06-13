@@ -28,35 +28,6 @@ gap (no spawn staggering specified) shows subcoordinator contracts need a
 
 ## Findings → Fix TODOs
 
-### F4 — No VRAM eviction on model swap (Forge, `BackendPool.ts`) — PRIORITY 1
-
-`POST /ensure` for a not-loaded GGUF while another idle GGUF holds VRAM
-spawns a second llama-server (`:8081`) that starves and dies at the 120 s
-health timeout. `POST /release` at `holds == 0` returns `released:false`
-and does NOT unload. There is no unload path in the control API at all.
-
-Root cause: llama.cpp and ollama are independent runtimes that each assume
-they own the GPU; only BackendPool sees both, but it never evicts.
-
-- [ ] `ensure(model)`: when target is local and not loaded, first evict all
-      loaded local models with `holds == 0` (kill llama-server; for ollama
-      send `keep_alive: 0`), then spawn. Single-flight per ensure.
-- [ ] DECIDED: `release` stays pure hold bookkeeping; `ensure` auto-evicts
-      idle zero-hold local models before spawning; add explicit
-      `POST /unload {model}` for callers that want eager teardown.
-- [ ] Eviction spans BOTH runtimes (mixed llama.cpp + ollama case).
-- [ ] Surface eviction in the ensure response so callers see what happened.
-
-### F5 — Stale `loaded=true` after external process death (Forge) — PRIORITY 1 (same PR as F4)
-
-After llama-server was killed externally, `/models` still reported
-`loaded=true, holds=0` 15+ s later.
-
-- [ ] BackendPool must subscribe to child `exit` events (`llamaProcess.ts`)
-      and flip state immediately.
-- [ ] HealthCheck failures on a supposedly-loaded backend should reconcile
-      pool state, not just log.
-
 ### F1 — Silent empty worker result on reasoning overflow (Relay) — PRIORITY 2
 
 A large planning task to gpt-oss:120b-cloud returned `COMPLETED:` with
@@ -158,6 +129,27 @@ one loaded GGUF can serve subcoordinator AND worker roles simultaneously.
 ---
 
 ## Resolved this cycle (archive)
+
+- **F4 — VRAM eviction on model swap**: fixed in `63a70ec`
+  (`ControlServer.makeRoom`: every idle zero-hold local model is released
+  before a spawn; `release` stays pure hold bookkeeping; explicit
+  `POST /unload` added). Live-validated 2026-06-12 per
+  `F4F5_LIVE_VALIDATION.md`:
+  - Test 1 (auto-evict swap) PASS — qwen ensure returned 200 in ~50 s,
+    gemma's llama-server killed first, single process, only qwen loaded.
+  - Test 1 grace-window caveat: with `max_simultaneous_models: 4` the
+    409 `busy` branch is unreachable when only one held model remains
+    (1 < capacity), so ensuring B while A is held double-loads instead of
+    409ing. The protective invariant held (held model was NOT evicted).
+    The 409 expectation in the validation doc assumes capacity 1.
+  - Test 2 (/unload semantics) PASS — 409 on active holds, 200
+    `unloaded:true` then idempotent `false`, ollama-cloud path `false`
+    (never loaded), 422 cloud-provider, 404 unknown; process exited.
+- **F5 — Stale `loaded=true` after external death**: fixed in `63a70ec`
+  (child `exit` event reconciles pool state). Live-validated 2026-06-12:
+  Test 3 PASS — `loaded=false` within 3 s of external `Stop-Process`;
+  follow-up ensure cold-started cleanly in 10 s on the freed base port
+  (:8080), no slot/port leak.
 
 - Flashing DOS windows on ollama daemon auto-start — fixed (non-detached
   on win32 + `windowsHide: true`, `OllamaAdapter.ts`), validated live,

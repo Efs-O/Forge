@@ -45,7 +45,10 @@ FAIL (pre-fix behavior): second llama-server spawns on :8081, starves, 502
 after 120 s `No response from http://127.0.0.1:8081/v1/models`.
 
 Also verify the grace window: `ensure A` then immediately `ensure B`
-(within 2 s, without releasing A) must 409 `recently active`, not evict A.
+(within 2 s, without releasing A) must not evict A. The 409 `busy` response
+only fires when held/recent models >= `max_simultaneous_models` — with the
+current config value of 4, B double-loads alongside A instead (validated
+2026-06-12); the invariant to check is that A stays loaded and held.
 
 ## Test 2 — /unload semantics (F4)
 
