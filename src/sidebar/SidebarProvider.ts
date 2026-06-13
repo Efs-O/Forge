@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import type { IBackendPool } from '../backend/BackendPool';
 import type { ForgeConfig } from '../config/types';
+import { resolveRequestModel } from '../config/ConfigResolver';
 import { isLocalModel } from '../backend/ModelHeuristics';
 import type { ForgeSlashCommandId, HostToWebview, WebviewToHost } from './messageBridge';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
@@ -332,9 +333,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.post({ type: 'error', message });
       return;
     }
-    const selectedModel = this.config.models.find((m) => m.name === this.config.active_model);
-    if (!selectedModel) {
-      this.post({ type: 'error', message: `Model "${this.config.active_model}" not found in config.` });
+    // Request-time resolution: active_model may carry @profile (F6). Flattens
+    // defaults + base + profile into a legacy ModelConfig for the agent loop.
+    let selectedModel;
+    try {
+      selectedModel = resolveRequestModel(this.config, this.config.active_model, (m) => log.info(m));
+    } catch (err) {
+      this.post({ type: 'error', message: (err as Error).message });
       return;
     }
     const conv = this.getActive();

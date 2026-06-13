@@ -5,6 +5,7 @@ import { streamModelChatCompletion } from './ChatClient';
 import { getCloudBaseUrl, getCloudProviderLabel, isCloudProvider } from './CloudProviders';
 import { resolveXaiToken } from './XaiAuth';
 import { mergeSampling } from './SamplingMerge';
+import { resolveRequestModel } from '../config/ConfigResolver';
 import type { ChatCompletionRequest, ToolCall, ToolDefinition } from './types';
 
 /** A single buffered (non-streaming) chat request handled inside the extension
@@ -71,8 +72,15 @@ export function buildControlChatProxy(
   secrets: vscode.SecretStorage | undefined,
 ): ChatProxyFn {
   return async (req: ChatProxyRequest): Promise<ChatProxyResult> => {
-    const model = getConfig().models.find((m) => m.name === req.model);
-    if (!model) throw new ProxyError(404, `unknown model "${req.model}" — not in config`);
+    // Request-time resolution: req.model may be `base@profile` (F6). The profile
+    // contributes sampling / reasoning_effort defaults; cloud key + provider come
+    // from the flattened base facts.
+    let model: ModelConfig;
+    try {
+      model = resolveRequestModel(getConfig(), req.model);
+    } catch (err) {
+      throw new ProxyError(404, (err as Error).message);
+    }
     if (!isCloudProvider(model.provider)) {
       throw new ProxyError(
         422,
@@ -95,7 +103,12 @@ export function buildControlChatProxy(
       ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
       ...(req.top_p !== undefined ? { top_p: req.top_p } : {}),
       ...(req.max_tokens !== undefined ? { max_tokens: req.max_tokens } : {}),
-      ...(req.reasoning_effort !== undefined ? { reasoning_effort: req.reasoning_effort } : {}),
+      // Request wins; otherwise fall back to the resolved profile/base default (F6).
+      ...(req.reasoning_effort !== undefined
+        ? { reasoning_effort: req.reasoning_effort }
+        : model.reasoning_effort !== undefined
+          ? { reasoning_effort: model.reasoning_effort }
+          : {}),
       ...(req.stop !== undefined ? { stop: req.stop } : {}),
       ...(req.tools !== undefined ? { tools: req.tools } : {}),
     };

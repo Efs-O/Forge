@@ -98,6 +98,25 @@ describe('buildControlChatProxy', () => {
     await expect(proxy2({ model: 'router', messages: [] })).rejects.toMatchObject({ status: 422 });
   });
 
+  it('resolves base@profile and applies the profile reasoning_effort + sampling (F6)', async () => {
+    streamMock.mockImplementation(async (...args: unknown[]) => handlersOf(args).onDone('stop'));
+    const cfg = (): ForgeConfig => ({
+      ...config(),
+      profiles: { worker: { reasoning_effort: 'none', sampling: { temperature: 0.2 } } },
+    } as ForgeConfig);
+    const proxy = buildControlChatProxy(cfg, secrets);
+    await proxy({ model: 'router@worker', messages: [{ role: 'user', content: 'hi' }] });
+    const request = streamMock.mock.calls[0][1] as { model: string; reasoning_effort?: string; temperature?: number };
+    expect(request.model).toBe('router'); // base name sent upstream
+    expect(request.reasoning_effort).toBe('none');
+    expect(request.temperature).toBe(0.2);
+  });
+
+  it('404s an unknown profile on a known base (F6)', async () => {
+    const proxy = buildControlChatProxy(config, secrets);
+    await expect(proxy({ model: 'router@nope', messages: [] })).rejects.toMatchObject({ status: 404 });
+  });
+
   it('rejects when the stream errors', async () => {
     streamMock.mockImplementation(async (...args: unknown[]) =>
       handlersOf(args).onError(new Error('upstream 500')),
