@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import type { IBackendPool } from '../backend/BackendPool';
 import type { ForgeConfig } from '../config/types';
+import { expandAlias, resolveRequestModel, splitModelProfile } from '../config/ConfigResolver';
 import { isLocalModel } from '../backend/ModelHeuristics';
 import type { ForgeSlashCommandId, HostToWebview, WebviewToHost } from './messageBridge';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
@@ -273,13 +274,20 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private persistSession(): void { saveSidebarSession(this.workspaceState, this.sidebar); }
 
+  /** Strip @profile + expand aliases to the base model name (F6). */
+  private baseOf(id: string | null | undefined): string | null {
+    if (!id) return null;
+    return splitModelProfile(expandAlias(this.config, id)).base;
+  }
+
   private postTokenBudget(): void {
-    const activeModel = this.config.models.find((m) => m.name === this.config.active_model);
+    const activeBase = this.baseOf(this.config.active_model);
+    const activeModel = this.config.models.find((m) => m.name === activeBase);
     const msgTokens = estimateTokens(this.activeMessages());
     const toolTokens = Math.ceil(JSON.stringify(this.toolRegistry.definitions(FORGE_PERMISSIONS)).length / 4);
     const SYSTEM_AND_TEMPLATE_OVERHEAD = 200;
     const used = msgTokens + toolTokens + SYSTEM_AND_TEMPLATE_OVERHEAD;
-    const max = activeModel?.num_ctx ?? 0;
+    const max = activeModel?.spawn?.num_ctx ?? activeModel?.num_ctx ?? 0;
     this.post({ type: 'tokenBudget', used, max });
     if (this.config.active_model && max > 0) {
       writeForgeBridge(this.config.active_model, used, max);
@@ -332,12 +340,19 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.post({ type: 'error', message });
       return;
     }
-    const selectedModel = this.config.models.find((m) => m.name === this.config.active_model);
-    if (!selectedModel) {
-      this.post({ type: 'error', message: `Model "${this.config.active_model}" not found in config.` });
+    // Request-time resolution: active_model may carry @profile (F6). Flattens
+    // defaults + base + profile into a legacy ModelConfig for the agent loop.
+    let selectedModel;
+    try {
+      selectedModel = resolveRequestModel(this.config, this.config.active_model, (m) => log.info(m));
+    } catch (err) {
+      this.post({ type: 'error', message: (err as Error).message });
       return;
     }
     const conv = this.getActive();
+    // Persist the full selection (incl. @profile) on the conversation so tab
+    // switches restore the same profile, not just the base model (F6).
+    conv.active_model = this.config.active_model;
     this.contextWarningShown = false;
     try {
       await this.agentLoop.runTurn(conv, selectedModel, text, attachments);
@@ -450,17 +465,20 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.postSessionSync();
 
     if (modelName) {
-      const modelConfig = this.config.models.find((m) => m.name === modelName);
-      const otherTabUsesModel = this.sidebar.conversations.some((c) => c.active_model === modelName);
+      // Compare on the base model: two tabs on the same GGUF (different @profile)
+      // share one loaded backend, so the prompt must key by base (F6).
+      const base = this.baseOf(modelName) ?? modelName;
+      const modelConfig = this.config.models.find((m) => m.name === base);
+      const otherTabUsesModel = this.sidebar.conversations.some((c) => this.baseOf(c.active_model) === base);
       if (!otherTabUsesModel && isLocalModel(modelConfig)) {
         void vscode.window.showInformationMessage(
-          `"${modelName}" is still loaded in VRAM. Unload it to free memory?`,
+          `"${base}" is still loaded in VRAM. Unload it to free memory?`,
           'Unload Now',
         ).then((choice) => {
           if (choice !== 'Unload Now') return;
-          void this.pool.release(modelName).then(() => {
-            this.events.onBackendStopped?.(modelName);
-            this.post({ type: 'backendDown', message: `${modelName} unloaded.` });
+          void this.pool.release(base).then(() => {
+            this.events.onBackendStopped?.(base);
+            this.post({ type: 'backendDown', message: `${base} unloaded.` });
           });
         });
       }

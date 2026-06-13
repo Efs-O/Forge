@@ -101,6 +101,45 @@ describe('ControlServer', () => {
     expect(pool.loadedModelNames()).toEqual(['B']);
   });
 
+  it('strips @profile / expands aliases on /ensure and keys holds by base (F6)', async () => {
+    const port = 18820;
+    const base = `http://127.0.0.1:${port}`;
+    const pool = new FakePool();
+    const cfg = makeConfig(port);
+    cfg.profiles = { main: {}, worker: {} };
+    cfg.aliases = { 'A-legacy': 'A@worker' };
+    server = new ControlServer(pool, cfg, testDeps());
+    server.start();
+    await waitReady(base);
+
+    // @profile resolves to base A for loading.
+    const r = await (await post(base, 'A@main')).json();
+    expect(r.model).toBe('A');
+    expect(pool.loadedModelNames()).toEqual(['A']);
+
+    // Alias holds key by base too — two holders on A, none on "A@main"/"A-legacy".
+    await post(base, 'A-legacy');
+    // releasing the base once leaves one hold (409 on unload), proving base keying.
+    const unload = await post(base, 'A@worker', 'unload');
+    expect(unload.status).toBe(409);
+  });
+
+  it('/models lists profiles and derived capabilities per base (F6)', async () => {
+    const port = 18821;
+    const base = `http://127.0.0.1:${port}`;
+    const cfg = makeConfig(port);
+    cfg.profiles = { main: {}, worker: {} };
+    cfg.models[0].mmproj_path = '/a-mmproj.gguf'; // A → vision
+    server = new ControlServer(new FakePool(), cfg, testDeps());
+    server.start();
+    await waitReady(base);
+
+    const { models } = await (await fetch(`${base}/models`)).json();
+    const a = models.find((m: { name: string }) => m.name === 'A');
+    expect(a.profiles.sort()).toEqual(['main', 'worker']);
+    expect(a.capabilities).toContain('vision');
+  });
+
   it('404s an unknown model and an unknown route', async () => {
     const port = 18800;
     const base = `http://127.0.0.1:${port}`;

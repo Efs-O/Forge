@@ -7,6 +7,7 @@ import { spawnLlamaServer, killLlamaProcess } from './llamaProcess';
 import { waitForHealthy, probeHealthy, probeServedModel } from './HealthCheck';
 import { ensureOllamaReady, normalizeOllamaEndpoint, probeOllamaModel, releaseOllamaModel } from './OllamaAdapter';
 import { isCloudProvider } from '../llm/CloudProviders';
+import { expandAlias, resolveSpawnModel, splitModelProfile } from '../config/ConfigResolver';
 import { getLogger } from '../util/logger';
 
 const log = getLogger();
@@ -92,7 +93,7 @@ export class DirectBackend implements BackendController {
       // have died since. Re-verify cheaply; if dead, fall through to the full
       // re-ensure (which can auto-start the daemon).
       if (nextModel.provider !== 'ollama' || (await probeHealthy(this.currentBaseUrl))) {
-        this.config.active_model = nextModel.name;
+        this.config.active_model = modelName;
         return;
       }
       this.ready = false;
@@ -122,7 +123,7 @@ export class DirectBackend implements BackendController {
       this.activeModel = nextModel;
       this.currentBaseUrl = normalizeOllamaEndpoint(nextModel.endpoint);
       this.ready = true;
-      this.config.active_model = nextModel.name;
+      this.config.active_model = modelName;
       log.info(`[DirectBackend] switched to Ollama model ${modelName}`);
       return;
     }
@@ -131,7 +132,7 @@ export class DirectBackend implements BackendController {
     this.activeModel = nextModel;
     this.currentBaseUrl = `http://${this.host}:${this.port}`;
     this.ready = true;
-    this.config.active_model = nextModel.name;
+    this.config.active_model = modelName;
     log.info(`[DirectBackend] switched to llama.cpp model ${modelName}`);
   }
 
@@ -287,8 +288,11 @@ export class DirectBackend implements BackendController {
   }
 
   private resolveModel(name: string): ModelConfig {
-    const model = this.config.models.find((entry) => entry.name === name);
-    if (!model) throw new Error(`Model "${name}" not found in config`);
+    // Spawn-time resolution: a trailing @profile never forces a respawn, so we
+    // key on the base model and flatten its spawn facts (F6). Profiles are
+    // request-time only and are applied later by the agent loop / chat proxy.
+    const { base } = splitModelProfile(expandAlias(this.config, name));
+    const model = resolveSpawnModel(this.config, base);
     return {
       ...model,
       provider: model.provider ?? 'llama.cpp',

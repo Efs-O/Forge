@@ -75,7 +75,19 @@ export function registerNativeCommands(context: vscode.ExtensionContext, deps: N
         { placeHolder: 'Pick the Forge model to use' },
       );
       if (!pick) return;
-      config.active_model = pick.modelName;
+      // F6: when request-time profiles exist, offer them as a second step. The
+      // chosen base@profile becomes active_model; loading still keys on the base.
+      const profileNames = Object.keys(config.profiles ?? {});
+      let selectedId = pick.modelName;
+      if (profileNames.length > 0) {
+        const profilePick = await vscode.window.showQuickPick(
+          [{ label: '(no profile)', profile: '' }, ...profileNames.map((p) => ({ label: p, profile: p }))],
+          { placeHolder: `Pick a profile for ${pick.modelName}` },
+        );
+        if (!profilePick) return;
+        if (profilePick.profile) selectedId = `${pick.modelName}@${profilePick.profile}`;
+      }
+      config.active_model = selectedId;
       const selectedModel = config.models.find((m) => m.name === pick.modelName);
       if (
         selectedModel?.provider === 'xai' ||
@@ -83,15 +95,15 @@ export function registerNativeCommands(context: vscode.ExtensionContext, deps: N
         selectedModel?.provider === 'openai' ||
         selectedModel?.provider === 'openai-compatible'
       ) {
-        deps.statusBar.setReady(pick.modelName);
-        void vscode.window.showInformationMessage(`Forge: switched to ${pick.modelName} (${selectedModel.provider})`);
+        deps.statusBar.setReady(selectedId);
+        void vscode.window.showInformationMessage(`Forge: switched to ${selectedId} (${selectedModel.provider})`);
         return;
       }
-      deps.statusBar.setStarting(pick.modelName);
+      deps.statusBar.setStarting(selectedId);
       try {
-        await deps.backend.acquire(pick.modelName);
-        deps.statusBar.setReady(pick.modelName);
-        void vscode.window.showInformationMessage(`Forge: switched to ${pick.modelName}`);
+        await deps.backend.acquire(selectedId);
+        deps.statusBar.setReady(selectedId);
+        void vscode.window.showInformationMessage(`Forge: switched to ${selectedId}`);
       } catch (err) {
         const message = (err as Error).message;
         deps.statusBar.setError(message);

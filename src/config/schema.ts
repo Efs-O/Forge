@@ -12,10 +12,52 @@ const ActiveModelSchema = z.preprocess((value) => {
   return value;
 }, z.union([z.string().min(1), z.null()]));
 
+const SamplingSchema = z.object({
+  temperature: z.number().optional(),
+  top_p: z.number().optional(),
+  top_k: z.number().int().optional(),
+  min_p: z.number().optional(),
+  max_tokens: z.number().int().optional(),
+  seed: z.number().int().optional(),
+  presence_penalty: z.number().optional(),
+  frequency_penalty: z.number().optional(),
+  repetition_penalty: z.number().optional(),
+  repeat_penalty: z.number().optional(),
+  repeat_last_n: z.number().int().optional(),
+  stop: z.union([z.string(), z.array(z.string())]).optional(),
+  preserve_thinking: z.boolean().optional(),
+});
+
+const CapabilitiesSchema = z.array(z.enum(['tool-call', 'vision', 'long-context']));
+
+// Spawn-time facts (F6). All optional — present-block overrides flat fields.
+const SpawnSchema = z.object({
+  num_ctx: z.number().int().positive().optional(),
+  n_parallel: z.number().int().positive().optional(),
+  n_batch: z.number().int().positive().optional(),
+  type_k: CacheTypeSchema.optional(),
+  type_v: CacheTypeSchema.optional(),
+  flash_attn: z.boolean().optional(),
+  n_gpu_layers: z.number().int().optional(),
+  extra_llama_server_args: z.array(z.string()).optional(),
+});
+
+// Request-time role preset (F6).
+const ProfileSchema = z.object({
+  system_prompt: z.string().optional(),
+  sampling: SamplingSchema.optional(),
+  think: z.boolean().optional(),
+  reasoning_effort: ReasoningEffortSchema.optional(),
+  strip_tools: z.boolean().optional(),
+  strip_thinking_channels: z.boolean().optional(),
+  capabilities: CapabilitiesSchema.optional(),
+});
+
 const ModelConfigSchema = z.object({
   name: z.string().min(1),
   provider: z.enum(['llama.cpp', 'ollama', 'xai', 'openrouter', 'openai', 'openai-compatible']).optional(),
   gguf_path: z.string().min(1).optional(),
+  mmproj_path: z.string().min(1).optional(),
   endpoint: z.string().url().optional(),
   n_gpu_layers: z.number().int().optional(),
   num_ctx: z.number().int().positive().optional(),
@@ -26,28 +68,17 @@ const ModelConfigSchema = z.object({
   extra_llama_server_args: z.array(z.string()).optional(),
   n_parallel: z.number().int().positive().optional(),
   // v0.3 additions
-  sampling: z.object({
-    temperature: z.number().optional(),
-    top_p: z.number().optional(),
-    top_k: z.number().int().optional(),
-    min_p: z.number().optional(),
-    max_tokens: z.number().int().optional(),
-    seed: z.number().int().optional(),
-    presence_penalty: z.number().optional(),
-    frequency_penalty: z.number().optional(),
-    repetition_penalty: z.number().optional(),
-    repeat_penalty: z.number().optional(),
-    repeat_last_n: z.number().int().optional(),
-    stop: z.union([z.string(), z.array(z.string())]).optional(),
-    preserve_thinking: z.boolean().optional(),
-  }).optional(),
-  capabilities: z.array(z.enum(['tool-call', 'vision', 'long-context'])).optional(),
+  sampling: SamplingSchema.optional(),
+  capabilities: CapabilitiesSchema.optional(),
   strip_tools: z.boolean().optional(),
   system_prompt: z.string().optional(),
   think: z.boolean().optional(),
   reasoning_effort: ReasoningEffortSchema.optional(),
   strip_thinking_channels: z.boolean().optional(),
   api_key_secret: z.string().min(1).optional(),
+  // F6 additions
+  spawn: SpawnSchema.optional(),
+  spawn_profiles: z.record(z.string(), SpawnSchema.partial()).optional(),
 }).superRefine((model, ctx) => {
   const provider = model.provider ?? 'llama.cpp';
   if (provider === 'llama.cpp' && !model.gguf_path) {
@@ -142,6 +173,10 @@ const ExecConfigSchema = z.object({
 export const ForgeConfigSchema = z.object({
   models: z.array(ModelConfigSchema).default([]),
   active_model: ActiveModelSchema.default(null),
+  // F6 additions
+  defaults: ProfileSchema.partial().optional(),
+  profiles: z.record(z.string(), ProfileSchema).optional(),
+  aliases: z.record(z.string(), z.string().min(1)).optional(),
   llama_server: LlamaServerConfigSchema.default({}),
   search: SearchConfigSchema.optional(),
   embeddings: EmbeddingsConfigSchema,

@@ -1,13 +1,23 @@
-# Forge config example
+# Forge config example — F6 models-vs-profiles shape
 #
 # Copy this file to <your-project>/.forge/config.yaml and edit.
 # The setup wizard (first run) can also generate this file for you.
 #
 # All paths are absolute or relative to the workspace root.
 # API keys are stored in VS Code SecretStorage — never put them here.
+#
+# THREE layers decide what a request looks like:
+#   models:   one entry per GGUF/endpoint — FACTS ONLY. Spawn-time facts for
+#             llama.cpp live under `spawn:`. Vision is auto-derived from
+#             `mmproj_path` (no `capabilities: [vision]` needed).
+#   defaults: request-time fields shared by every model (system_prompt, sampling).
+#   profiles: request-time role presets, selected via `active_model: name@profile`.
+#
+# Merge precedence (request-time): defaults < model fields < profile.
+# Spawn-time:                      model flat/spawn < spawn_profiles[<name>].
 
-# Model to activate on startup (must match a key under models:)
-active_model: my-model
+# Model to activate on startup. `name` or `name@profile` (profile optional).
+active_model: my-model@main
 
 # -------------------------------------------------------------------
 # llama-server settings (direct GGUF mode)
@@ -17,92 +27,124 @@ llama_server:
   host: 127.0.0.1
   port: 8080
   n_gpu_layers: -1                   # -1 = all layers on GPU
-  default_num_ctx: 32768             # TOTAL context, SPLIT across n_parallel slots
-                                     #   per-worker ctx = default_num_ctx / n_parallel
-                                     #   (32768 / 4 = 8192 each). Raise this if you
-                                     #   raise n_parallel, or workers get starved.
+  default_num_ctx: 32768             # fallback when a model omits num_ctx/spawn.num_ctx
   n_batch: 512
-  n_parallel: 4                      # concurrent worker slots on ONE shared model
-                                     # load — lets a 3-4 worker fleet hit one
-                                     # llama-server. Costs ~n_parallel × KV cache
-                                     # VRAM (not × model weights). Set 1 for a
-                                     # single interactive agent on a small GPU.
+  n_parallel: 4                      # default concurrent worker slots
   type_k: q8_0                       # KV cache quantization
   type_v: q8_0
   flash_attn_default: true
 
 # -------------------------------------------------------------------
-# Control server (optional) — localhost API so an external orchestrator
-# can ask Forge to load the right model on demand and discover its
-# OpenAI-compatible endpoint. Bound to 127.0.0.1 only; off by default.
-#   GET  /healthz   GET /models   POST /ensure {model}   POST /release {model}
+# Request-time defaults — applied beneath each model's own fields and profile.
+# -------------------------------------------------------------------
+defaults:
+  system_prompt: |
+    You are Forge, a local AI coding assistant running inside VS Code.
+    ALWAYS use tools to accomplish tasks. Never just describe what you would do.
+    After each tool result, continue until the task is complete, then summarize.
+  sampling:
+    temperature: 0.6
+    top_p: 0.95
+    max_tokens: 8192
+
+# -------------------------------------------------------------------
+# Request-time role presets. One loaded GGUF serves every role.
+# -------------------------------------------------------------------
+profiles:
+  main:                              # interactive coding driver
+    think: true
+    reasoning_effort: medium
+  subcoordinator:                    # plans + delegates
+    think: true
+    reasoning_effort: low
+  worker:                            # headless fleet worker — no reasoning
+    think: false
+    reasoning_effort: none
+    sampling:
+      temperature: 0.2
+
+# -------------------------------------------------------------------
+# Optional back-compat aliases: old name -> base@profile.
+# -------------------------------------------------------------------
+# aliases:
+#   my-model-worker: my-model@worker
+
+# -------------------------------------------------------------------
+# Control server (optional) — localhost API so an external orchestrator can
+# load models on demand and discover the OpenAI-compatible endpoint.
+#   GET /healthz  GET /models  POST /ensure {model}  POST /release {model}
+#   POST /unload {model}  POST /chat {model, messages}   (model may be name@profile)
 # -------------------------------------------------------------------
 # control_server:
 #   enabled: true
 #   port: 8799
 
 # -------------------------------------------------------------------
-# Ollama daemon supervision (optional) — when a model's LOCAL Ollama
-# endpoint refuses connection, Forge starts the daemon itself by
-# launching "ollama serve" (resolution: this setting > ollama.exe in
-# the standard %LOCALAPPDATA% install > "ollama" on PATH > the tray
-# app as last resort). Candidates are tried in sequence until the
-# daemon answers. NOTE: "ollama serve" reads env vars only — if you
-# use a custom model directory, set OLLAMA_MODELS system-wide; the
-# Ollama app's own setting does not apply to a CLI-started server.
-# Remote endpoints are never auto-started.
+# Ollama daemon supervision (optional) — when a model's LOCAL Ollama endpoint
+# refuses connection, Forge can start "ollama serve" itself. Remote endpoints
+# are never auto-started.
 # -------------------------------------------------------------------
 # ollama:
 #   auto_start: true                   # default: true
-#   executable: C:\path\to\ollama.exe  # only for non-standard installs;
-#                                      # a path containing "app" is launched
-#                                      # as the tray app (no "serve" arg)
+#   executable: C:\path\to\ollama.exe  # only for non-standard installs
 
 # -------------------------------------------------------------------
-# Models (map-style — keys are the model IDs shown in the picker)
+# Models — array form. `name` is the id shown in the picker.
 # -------------------------------------------------------------------
 models:
 
   # --- GGUF / direct llama-server ---
-  my-model:
+  - name: my-model
     gguf_path: /path/to/model.gguf
-    n_gpu_layers: -1
-    num_ctx: 8192
-    flash_attn: true
-    think: false                     # set true for reasoning models
-    strip_thinking_channels: true    # hide <think>...</think> in output
+    mmproj_path: /path/to/mmproj-F16.gguf   # optional → enables vision
+    spawn:
+      num_ctx: 32768
+      n_parallel: 4
+      n_batch: 512
+      type_k: q8_0
+      type_v: q8_0
+      flash_attn: true
+      n_gpu_layers: -1
+      # extra_llama_server_args: ["--reasoning-budget", "4096"]
+    # Rare spawn-time overrides (force a respawn when selected, e.g. via tools):
+    # spawn_profiles:
+    #   long-context: { num_ctx: 131072, n_parallel: 1 }
     sampling:
-      temperature: 0.6
-      top_p: 0.95
       top_k: 64
-      max_tokens: 8192
+      stop: "<end_of_turn>"          # gemma stop token (qwen/ChatML use <|im_end|>)
 
   # --- Ollama (local daemon) ---
   # For concurrent same-model workers on Ollama, set the daemon env var
-  # OLLAMA_NUM_PARALLEL=4 (and OLLAMA_MAX_LOADED_MODELS if running several
-  # models). This is configured on the Ollama daemon, not here in Forge.
-  # gemma4:26b:
+  # OLLAMA_NUM_PARALLEL=4 (configured on the daemon, not here in Forge).
+  # - name: "gemma4:26b"
   #   provider: ollama
   #   endpoint: http://127.0.0.1:11434
   #   num_ctx: 262144
   #   think: true
-  #   reasoning_effort: medium       # low | medium | high
-  #   sampling:
-  #     temperature: 0.6
-  #     top_p: 0.95
-  #     max_tokens: 131072
+  #   reasoning_effort: medium
+  #   sampling: { max_tokens: 131072 }
 
-  # --- Ollama cloud (routed through local daemon) ---
-  # deepseek-v4-flash:cloud:
+  # --- Ollama cloud (routed through local daemon; auth via `ollama auth login`) ---
+  # - name: "deepseek-v4-flash:cloud"
   #   provider: ollama
   #   endpoint: http://127.0.0.1:11434
   #   num_ctx: 1000000
   #   think: true
-  #   reasoning_effort: medium
-  #   sampling:
-  #     temperature: 0.6
-  #     top_p: 0.95
-  #     max_tokens: 65536
+  #   sampling: { max_tokens: 65536 }
+
+  # --- Cloud OpenAI-compatible providers (key in SecretStorage) ---
+  # Set the token with: Command Palette -> Forge: Set Cloud Provider Token
+  # - name: grok-4.3
+  #   provider: xai                  # xai | openrouter | openai | openai-compatible
+  #   api_key_secret: xai
+  #   capabilities: [tool-call]
+  #   num_ctx: 1000000
+  #   sampling: { temperature: 0.7, max_tokens: 30000 }
+  # - name: claude-via-gateway
+  #   provider: openai-compatible
+  #   endpoint: https://your-openai-compatible-gateway.example.com
+  #   api_key_secret: gateway
+  #   capabilities: [tool-call, long-context]
 
 # -------------------------------------------------------------------
 # Optional: web search (Tavily or Brave)
@@ -123,10 +165,5 @@ models:
 #   port: 8091
 #   auto_index_on_search: true
 #   max_file_size_kb: 256
-#   include_globs:
-#     - src/**
-#     - test/**
-#   exclude_globs:
-#     - "**/node_modules/**"
-#     - "**/dist/**"
-#     - "**/.git/**"
+#   include_globs: ["src/**", "test/**"]
+#   exclude_globs: ["**/node_modules/**", "**/dist/**", "**/.git/**"]

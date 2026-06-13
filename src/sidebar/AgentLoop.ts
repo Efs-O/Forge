@@ -14,6 +14,7 @@ import { injectSystemPrompt } from '../llm/SystemPromptInjector';
 import type { TemplateEngine } from '../llm/TemplateEngine';
 import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
 import { mergeSampling } from '../llm/SamplingMerge';
+import { resolveRequestModel } from '../config/ConfigResolver';
 import { normalizeRequestForModel } from '../llm/RequestNormalizer';
 import {
   HtmlDocumentBoilerplateStripper,
@@ -147,7 +148,9 @@ export class AgentLoop {
     this.streamingSettledMap.set(convId, settled);
     const postC = (msg: HostToWebview): void => this.post({ ...msg, conversationId: convId } as HostToWebview);
 
-    conv.active_model = model.name;
+    // conv.active_model is set by the caller (SidebarProvider) to the full
+    // selection id, incl. any @profile — don't clobber it with the base name (F6).
+    conv.active_model ??= model.name;
     conv.updatedAt = Date.now();
 
     const activeFile = vscode.window.activeTextEditor?.document.uri.fsPath;
@@ -256,8 +259,9 @@ export class AgentLoop {
 
   async runPromptToMarkdown(text: string): Promise<string> {
     const config = this.getConfig();
-    const selectedModel = config.models.find((m) => m.name === config.active_model);
-    if (!selectedModel) throw new Error('Forge: no active model selected.');
+    if (!config.active_model) throw new Error('Forge: no active model selected.');
+    // Request-time resolution (defaults + base + @profile, F6).
+    const selectedModel = resolveRequestModel(config, config.active_model, (m) => log.info(m));
 
     const backend = await this.pool.acquire(selectedModel.name);
     if (!backend.isReady()) await backend.start();

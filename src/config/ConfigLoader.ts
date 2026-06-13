@@ -4,6 +4,7 @@ import * as yaml from 'js-yaml';
 import * as vscode from 'vscode';
 import { ForgeConfigSchema } from './schema';
 import type { ForgeConfig } from './types';
+import { splitModelProfile } from './ConfigResolver';
 
 const CONFIG_FILENAME = 'config.yaml';
 
@@ -36,11 +37,37 @@ export function loadConfig(storagePath: string): ForgeConfig {
     }
     seen.add(model.name);
   }
-  if (config.active_model && !config.models.some((model) => model.name === config.active_model)) {
-    throw new Error(
-      `Forge: active_model "${config.active_model}" does not match any configured model (${config.models.map((m) => m.name).join(', ')})`,
-    );
+  const modelNames = new Set(config.models.map((m) => m.name));
+  const profileNames = new Set(Object.keys(config.profiles ?? {}));
+
+  // active_model may carry a trailing @profile (F6). Aliases are resolved at use
+  // time, so an active_model that is an alias key is valid too.
+  if (config.active_model) {
+    const { base, profile } = splitModelProfile(config.active_model);
+    const isAlias = Boolean(config.aliases?.[base]);
+    if (!isAlias && !modelNames.has(base)) {
+      throw new Error(
+        `Forge: active_model "${config.active_model}" does not match any configured model (${config.models.map((m) => m.name).join(', ')})`,
+      );
+    }
+    if (!isAlias && profile && !profileNames.has(profile)) {
+      throw new Error(
+        `Forge: active_model "${config.active_model}" references unknown profile "${profile}" (available: ${[...profileNames].join(', ') || 'none'})`,
+      );
+    }
   }
+
+  // Every alias target must resolve to a known base (+ known profile if present).
+  for (const [key, target] of Object.entries(config.aliases ?? {})) {
+    const { base, profile } = splitModelProfile(target);
+    if (!modelNames.has(base)) {
+      throw new Error(`Forge: alias "${key}" → "${target}" targets unknown model "${base}"`);
+    }
+    if (profile && !profileNames.has(profile)) {
+      throw new Error(`Forge: alias "${key}" → "${target}" references unknown profile "${profile}"`);
+    }
+  }
+
   config.models = config.models.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
   return config;
 }

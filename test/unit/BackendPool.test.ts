@@ -91,6 +91,26 @@ describe('BackendPool port accounting', () => {
     expect(pool.loadedModelNames()).toEqual([]);
   });
 
+  it('keys slots by base model: @profile and aliases never force a second spawn (F6)', async () => {
+    const cfg = makeConfig(1); // freePorts [8080]
+    cfg.profiles = { main: {}, worker: {} };
+    cfg.aliases = { 'A-legacy': 'A@worker' };
+    const pool = new BackendPool(cfg);
+
+    const acquireA = pool.acquire('A@worker');
+    harness.pending[0].resolve();
+    await acquireA;
+    expect(pool.loadedModelNames()).toEqual(['A']); // base key, not "A@worker"
+
+    // A different profile + the alias must reuse the same ready slot — no new
+    // hotSwap deferred is created (harness.pending stays length 1).
+    await pool.acquire('A@main');
+    await pool.acquire('A-legacy');
+    expect(harness.pending).toHaveLength(1);
+    expect(pool.isLoaded('A@main')).toBe(true);
+    expect(pool.isLoaded('A-legacy')).toBe(true);
+  });
+
   it('normal lifecycle returns the port once and reuses it', async () => {
     const pool = new BackendPool(makeConfig(1)); // freePorts [8080]
 

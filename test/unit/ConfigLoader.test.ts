@@ -147,6 +147,106 @@ models:
 
     expect(() => loadConfig(dir)).toThrow(/endpoint is required for provider: openai-compatible/i);
   });
+
+  it('parses the F6 shape: defaults, profiles, spawn, aliases, mmproj_path', () => {
+    const dir = mkTempDir();
+    fs.writeFileSync(path.join(dir, 'config.yaml'), `active_model: gemma@main
+llama_server:
+  binary: llama-server
+defaults:
+  system_prompt: shared
+  sampling: { temperature: 0.6 }
+profiles:
+  main: { think: true, reasoning_effort: medium }
+  worker: { think: false, sampling: { stop: "<end_of_turn>" } }
+models:
+  - name: gemma
+    provider: llama.cpp
+    gguf_path: C:/models/gemma.gguf
+    mmproj_path: C:/models/gemma-mmproj.gguf
+    spawn:
+      num_ctx: 32768
+      n_parallel: 4
+      type_k: q8_0
+    spawn_profiles:
+      long-context: { num_ctx: 131072 }
+aliases:
+  gemma-worker: gemma@worker
+`, 'utf8');
+
+    const config = loadConfig(dir);
+    expect(config.defaults?.system_prompt).toBe('shared');
+    expect(Object.keys(config.profiles ?? {}).sort()).toEqual(['main', 'worker']);
+    const gemma = config.models.find((m) => m.name === 'gemma');
+    expect(gemma?.mmproj_path).toBe('C:/models/gemma-mmproj.gguf'); // survives parse
+    expect(gemma?.spawn?.num_ctx).toBe(32768);
+    expect(gemma?.spawn_profiles?.['long-context']?.num_ctx).toBe(131072);
+    expect(config.aliases?.['gemma-worker']).toBe('gemma@worker');
+  });
+
+  it('accepts active_model carrying an @profile', () => {
+    const dir = mkTempDir();
+    fs.writeFileSync(path.join(dir, 'config.yaml'), `active_model: gemma@main
+llama_server:
+  binary: llama-server
+profiles:
+  main: { think: true }
+models:
+  - name: gemma
+    provider: llama.cpp
+    gguf_path: C:/models/gemma.gguf
+`, 'utf8');
+    const config = loadConfig(dir);
+    expect(config.active_model).toBe('gemma@main');
+  });
+
+  it('rejects active_model with an unknown @profile', () => {
+    const dir = mkTempDir();
+    fs.writeFileSync(path.join(dir, 'config.yaml'), `active_model: gemma@nope
+llama_server:
+  binary: llama-server
+profiles:
+  main: { think: true }
+models:
+  - name: gemma
+    provider: llama.cpp
+    gguf_path: C:/models/gemma.gguf
+`, 'utf8');
+    expect(() => loadConfig(dir)).toThrow(/unknown profile "nope"/i);
+  });
+
+  it('rejects an alias targeting an unknown model', () => {
+    const dir = mkTempDir();
+    fs.writeFileSync(path.join(dir, 'config.yaml'), `active_model: gemma
+llama_server:
+  binary: llama-server
+models:
+  - name: gemma
+    provider: llama.cpp
+    gguf_path: C:/models/gemma.gguf
+aliases:
+  old: missing@main
+`, 'utf8');
+    expect(() => loadConfig(dir)).toThrow(/targets unknown model "missing"/i);
+  });
+
+  it('accepts active_model that is an alias key', () => {
+    const dir = mkTempDir();
+    fs.writeFileSync(path.join(dir, 'config.yaml'), `active_model: old-name
+llama_server:
+  binary: llama-server
+profiles:
+  worker: { think: false }
+models:
+  - name: gemma
+    provider: llama.cpp
+    gguf_path: C:/models/gemma.gguf
+aliases:
+  old-name: gemma@worker
+`, 'utf8');
+    const config = loadConfig(dir);
+    expect(config.active_model).toBe('old-name');
+  });
 });
 
 describe('resolveExplicitConfigPath', () => {
