@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { composeLlamaServerArgs } from '../../src/backend/LlamaServerArgs';
-import type { ModelConfig, LlamaServerConfig } from '../../src/config/types';
+import { resolveSpawnModel } from '../../src/config/ConfigResolver';
+import type { ForgeConfig, ModelConfig, LlamaServerConfig } from '../../src/config/types';
 
 const serverDefaults: LlamaServerConfig = {
   binary: '/usr/local/bin/llama-server',
@@ -88,5 +89,31 @@ describe('composeLlamaServerArgs', () => {
     const args = composeLlamaServerArgs('', baseModel, server, '127.0.0.1', 8080);
     expect(args).toContain('--threads');
     expect(args[args.indexOf('--threads') + 1]).toBe('8');
+  });
+
+  // F6 parity: a model declared with the new `spawn` block must produce the
+  // exact same argv as the legacy flat fields once resolveSpawnModel flattens it.
+  it('produces identical argv from a spawn block vs legacy flat fields', () => {
+    const flatCfg: ForgeConfig = {
+      models: [{
+        name: 'm', provider: 'llama.cpp', gguf_path: '/models/test.gguf',
+        num_ctx: 8192, n_parallel: 2, n_batch: 256, type_k: 'q8_0', type_v: 'q8_0',
+        flash_attn: false, n_gpu_layers: 32, extra_llama_server_args: ['--verbose'],
+      }],
+      active_model: 'm', llama_server: serverDefaults,
+    };
+    const spawnCfg: ForgeConfig = {
+      models: [{
+        name: 'm', provider: 'llama.cpp', gguf_path: '/models/test.gguf',
+        spawn: {
+          num_ctx: 8192, n_parallel: 2, n_batch: 256, type_k: 'q8_0', type_v: 'q8_0',
+          flash_attn: false, n_gpu_layers: 32, extra_llama_server_args: ['--verbose'],
+        },
+      }],
+      active_model: 'm', llama_server: serverDefaults,
+    };
+    const flatArgs = composeLlamaServerArgs('', resolveSpawnModel(flatCfg, 'm'), serverDefaults, '127.0.0.1', 8080);
+    const spawnArgs = composeLlamaServerArgs('', resolveSpawnModel(spawnCfg, 'm'), serverDefaults, '127.0.0.1', 8080);
+    expect(spawnArgs).toEqual(flatArgs);
   });
 });

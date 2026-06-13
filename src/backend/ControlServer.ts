@@ -3,6 +3,7 @@ import type * as vscode from 'vscode';
 import type { IBackendPool } from './BackendPool';
 import type { ForgeConfig } from '../config/types';
 import { isCloudProvider, getCloudProviderLabel } from '../llm/CloudProviders';
+import { availableProfilesFor, deriveStaticCapabilities, expandAlias, splitModelProfile } from '../config/ConfigResolver';
 import { probeHealthy } from './HealthCheck';
 // prettier-ignore
 import { sendJson, requireModel, readJson, delay, toOpenAiBase, errText, handleChat, CHAT_BODY_BYTES } from './controlHttp';
@@ -38,7 +39,7 @@ export interface EnsureResult {
 export interface ControlStatus {
   listening: boolean;
   port: number;
-  models: Array<{ name: string; backend: string; loaded: boolean; holds: number; servable: boolean }>;
+  models: Array<{ name: string; backend: string; loaded: boolean; holds: number; servable: boolean; profiles: string[]; capabilities: string[] }>;
 }
 
 /**
@@ -188,15 +189,27 @@ export class ControlServer implements vscode.Disposable {
       // Cloud-provider models are called via their HTTP API from inside the
       // extension (key in SecretStorage) — the control server cannot serve them.
       servable: !isCloudProvider(m.provider),
+      // F6: request-time roles applicable to this base model + derived caps.
+      profiles: availableProfilesFor(this.config, m.name),
+      capabilities: deriveStaticCapabilities(m),
     }));
+  }
+
+  /** Normalize a control-API model id to the base model name: aliases expand and
+   *  a trailing @profile is stripped (profiles are request-time only, F6). */
+  private baseName(model: string): string {
+    return splitModelProfile(expandAlias(this.config, model)).base;
   }
 
   // ── core: ensure the requested model is loaded + warm ───────────────────────
 
-  private async ensure(model: string): Promise<EnsureResult> {
+  private async ensure(requested: string): Promise<EnsureResult> {
+    // Profiles never change which GGUF is loaded — resolve to the base model
+    // for all loading/capacity bookkeeping (F6).
+    const model = this.baseName(requested);
     const known = this.config.models.find((m) => m.name === model);
     if (!known) {
-      return { status: 404, body: { error: `unknown model "${model}" — not in config` } };
+      return { status: 404, body: { error: `unknown model "${requested}" — not in config` } };
     }
     // Cloud-provider models have no local backend to load. Reject with the
     // reason BEFORE the capacity guard, so a bad dispatch can never evict a
@@ -307,7 +320,8 @@ export class ControlServer implements vscode.Disposable {
     return null;
   }
 
-  private release(model: string): boolean {
+  private release(requested: string): boolean {
+    const model = this.baseName(requested);
     const current = this.holds.get(model) ?? 0;
     if (current <= 0) return false;
     const next = current - 1;
@@ -318,10 +332,11 @@ export class ControlServer implements vscode.Disposable {
 
   /** Eager teardown (POST /unload): refuses while holds exist; otherwise stops
    *  the backend and frees its VRAM/slot. `release` stays pure bookkeeping. */
-  private async unload(model: string): Promise<EnsureResult | { status: number; body: { unloaded: boolean } }> {
+  private async unload(requested: string): Promise<EnsureResult | { status: number; body: { unloaded: boolean } }> {
+    const model = this.baseName(requested);
     const known = this.config.models.find((m) => m.name === model);
     if (!known) {
-      return { status: 404, body: { error: `unknown model "${model}" — not in config` } };
+      return { status: 404, body: { error: `unknown model "${requested}" — not in config` } };
     }
     if (isCloudProvider(known.provider)) {
       return { status: 422, body: { error: `"${model}" is a cloud-provider model — nothing local to unload` } };

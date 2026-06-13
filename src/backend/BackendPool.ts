@@ -2,6 +2,7 @@ import type { BackendController } from './BackendController';
 import { DirectBackend } from './DirectBackend';
 import { probeHealthy } from './HealthCheck';
 import type { ForgeConfig } from '../config/types';
+import { expandAlias, splitModelProfile } from '../config/ConfigResolver';
 import { getLogger } from '../util/logger';
 
 const log = getLogger();
@@ -45,47 +46,55 @@ export class BackendPool implements IBackendPool {
     this.freePorts = Array.from({ length: max }, (_, i) => base + i);
   }
 
+  /** Pool slots are keyed by base model name: a trailing @profile (or an alias)
+   *  is request-time only and must never force a separate spawn (F6). */
+  private poolKey(modelName: string): string {
+    return splitModelProfile(expandAlias(this.config, modelName)).base;
+  }
+
   async acquire(modelName: string): Promise<BackendController> {
-    if (this.isOllamaModel(modelName)) {
-      this.lastAcquiredModel = modelName;
-      return this.acquireOllama(modelName);
+    const key = this.poolKey(modelName);
+    if (this.isOllamaModel(key)) {
+      this.lastAcquiredModel = key;
+      return this.acquireOllama(key);
     }
 
-    const existing = this.slots.get(modelName);
+    const existing = this.slots.get(key);
 
     if (existing) {
       // Already starting up — wait for it
       if (existing.starting) await existing.starting;
       if (existing.backend.isReady()) {
         existing.lastUsed = Date.now();
-        this.lastAcquiredModel = modelName;
+        this.lastAcquiredModel = key;
         return existing.backend;
       }
       // Was ready but crashed — restart in the same slot
-      return this.restartSlot(modelName, existing);
+      return this.restartSlot(key, existing);
     }
 
     // Need a new slot
     const port = this.allocatePort();
-    return this.startSlot(modelName, port);
+    return this.startSlot(key, port);
   }
 
   async release(modelName: string): Promise<void> {
-    if (this.isOllamaModel(modelName)) {
-      const backend = this.ollamaSlots.get(modelName);
+    const key = this.poolKey(modelName);
+    if (this.isOllamaModel(key)) {
+      const backend = this.ollamaSlots.get(key);
       if (backend) {
         await backend.stop().catch(() => {});
-        this.ollamaSlots.delete(modelName);
+        this.ollamaSlots.delete(key);
       }
     } else {
-      const slot = this.slots.get(modelName);
+      const slot = this.slots.get(key);
       if (slot) {
         if (slot.starting) await slot.starting.catch(() => {});
         await slot.backend.stop().catch(() => {});
-        this.freeSlot(modelName, slot);
+        this.freeSlot(key, slot);
       }
     }
-    log.info(`[BackendPool] released: ${modelName}`);
+    log.info(`[BackendPool] released: ${key}`);
   }
 
   async stopAll(): Promise<void> {
@@ -134,7 +143,8 @@ export class BackendPool implements IBackendPool {
   }
 
   isLoaded(modelName: string): boolean {
-    return this.slots.has(modelName) || this.ollamaSlots.has(modelName);
+    const key = this.poolKey(modelName);
+    return this.slots.has(key) || this.ollamaSlots.has(key);
   }
 
   // ── Private ───────────────────────────────────────────────────────────────
