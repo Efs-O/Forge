@@ -8,6 +8,7 @@ import { buildControlChatProxy } from './llm/ControlChatProxy';
 import { registerControlServerCommands } from './vscode/controlCommands';
 import type { ForgeConfig } from './config/types';
 import { loadConfig, findConfigPath, watchForgeConfigPaths } from './config/ConfigLoader';
+import { expandAlias, splitModelProfile } from './config/ConfigResolver';
 import { initLogger, getLogger } from './util/logger';
 import { ToolRegistry } from './tools/ToolRegistry';
 import { CheckpointStack } from './checkpoint/CheckpointStack';
@@ -241,7 +242,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (!newConfig) return;
 
       const prevActive = config.active_model;
-      if (prevActive && newConfig.models.some((m) => m.name === prevActive)) {
+      // Preserve the previous selection (incl. any @profile) across reloads if
+      // its base model still exists in the new config (F6).
+      const prevBase = prevActive ? splitModelProfile(expandAlias(newConfig, prevActive)).base : null;
+      if (prevActive && prevBase && newConfig.models.some((m) => m.name === prevBase)) {
         newConfig.active_model = prevActive;
       }
 

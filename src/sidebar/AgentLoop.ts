@@ -148,7 +148,9 @@ export class AgentLoop {
     this.streamingSettledMap.set(convId, settled);
     const postC = (msg: HostToWebview): void => this.post({ ...msg, conversationId: convId } as HostToWebview);
 
-    conv.active_model = model.name;
+    // conv.active_model is set by the caller (SidebarProvider) to the full
+    // selection id, incl. any @profile — don't clobber it with the base name (F6).
+    conv.active_model ??= model.name;
     conv.updatedAt = Date.now();
 
     const activeFile = vscode.window.activeTextEditor?.document.uri.fsPath;
