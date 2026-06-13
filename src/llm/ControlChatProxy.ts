@@ -5,7 +5,7 @@ import { streamModelChatCompletion } from './ChatClient';
 import { getCloudBaseUrl, getCloudProviderLabel, isCloudProvider } from './CloudProviders';
 import { resolveXaiToken } from './XaiAuth';
 import { mergeSampling } from './SamplingMerge';
-import type { ChatCompletionRequest } from './types';
+import type { ChatCompletionRequest, ToolCall, ToolDefinition } from './types';
 
 /** A single buffered (non-streaming) chat request handled inside the extension
  *  host. Used by ControlServer's POST /chat so external orchestrators can reach
@@ -18,6 +18,8 @@ export interface ChatProxyRequest {
   max_tokens?: number;
   reasoning_effort?: 'high' | 'medium' | 'low' | 'none';
   stop?: string | string[];
+  /** When set, the model may emit tool_calls — Relay reuses this for full agentic cloud workers. */
+  tools?: ToolDefinition[];
   signal?: AbortSignal;
 }
 
@@ -25,6 +27,8 @@ export interface ChatProxyResult {
   content: string;
   reasoning: string;
   finishReason: string | null;
+  /** Buffered tool calls from the completed stream, when the model emitted any. */
+  toolCalls?: ToolCall[];
 }
 
 /** Carries an HTTP status so the route can map proxy failures faithfully. */
@@ -93,11 +97,13 @@ export function buildControlChatProxy(
       ...(req.max_tokens !== undefined ? { max_tokens: req.max_tokens } : {}),
       ...(req.reasoning_effort !== undefined ? { reasoning_effort: req.reasoning_effort } : {}),
       ...(req.stop !== undefined ? { stop: req.stop } : {}),
+      ...(req.tools !== undefined ? { tools: req.tools } : {}),
     };
     const request = mergeSampling(base, model);
 
     let content = '';
     let reasoning = '';
+    let toolCalls: ToolCall[] | undefined;
     return new Promise<ChatProxyResult>((resolve, reject) => {
       void streamModelChatCompletion(
         baseUrl,
@@ -110,7 +116,11 @@ export function buildControlChatProxy(
           onReasoning: (t) => {
             reasoning += t;
           },
-          onDone: (finishReason) => resolve({ content, reasoning, finishReason }),
+          onToolCalls: (calls) => {
+            toolCalls = calls;
+          },
+          onDone: (finishReason) =>
+            resolve({ content, reasoning, finishReason, ...(toolCalls ? { toolCalls } : {}) }),
           onError: (err) => reject(err),
         },
         req.signal,
