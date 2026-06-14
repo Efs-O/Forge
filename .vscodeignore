@@ -29,6 +29,7 @@ scripts/**
 .coordination/**
 smoke3d/**
 prodtest-md2html/**
+prodtest-*/**
 .mcp.json
 fireworks.html
 aurora_glass.html
