@@ -3,7 +3,7 @@
     "forgerelay": {
       "command": "node",
       "args": [
-        "c:/Users/efso office/.vscode/extensions/efsoo.forge-relay-0.3.19/out/mcpStdio.js",
+        "c:/Users/efso office/.vscode/extensions/efsoo.forge-relay-0.3.22/out/mcpStdio.js",
         "--repoRoot",
         "n:/vs code apps/Forge"
       ],
@@ -12,7 +12,9 @@
         "FORGERELAY_OLLAMA_URL": "http://127.0.0.1:11434/v1",
         "FORGERELAY_DIRECT_URL": "http://127.0.0.1:8080/v1",
         "FORGERELAY_DEFAULT_BACKEND": "ollama",
-        "FORGERELAY_DEFAULT_MODE": "async"
+        "FORGERELAY_DEFAULT_MODE": "async",
+        "FORGERELAY_OLLAMA_AUTO_START": "1",
+        "FORGERELAY_OLLAMA_EXECUTABLE": "C:/Users/efso office/AppData/Local/Programs/Ollama/ollama.exe"
       }
     }
   }
