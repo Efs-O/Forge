@@ -17,6 +17,9 @@ Thumbs.db
 .coordination/
 assets/.coordination/
 
+# Machine-local MCP config (personal paths) — never track
+.mcp.json
+
 # Scratch / demo files
 fireworks.html
 
