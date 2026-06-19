@@ -279,6 +279,31 @@ models:
       repetition_penalty: 1.0
       preserve_thinking: true
 
+  # Worker spawn-fork of qwen36-27b-mtp-q3km. On this MTP GGUF, MTP draft +
+  # reasoning-budget leaves the final `content` empty (output lands in
+  # reasoning_content), so workers must launch with `--reasoning off` — a
+  # spawn-time fact, not a request param. Same GGUF as the main entry; it just
+  # loads as a separate llama-server slot. Dispatch this name directly for fleet
+  # workers (request-time think:false is baked in, so no @worker needed).
+  - name: qwen36-27b-mtp-q3km-worker
+    gguf_path: "N:/.cache/huggingface/models--unsloth--Qwen3.6-27B-MTP-GGUF/snapshots/5cb35eb3dcbf52dbce5f87dbc64df6aaffadcace/Qwen3.6-27B-Q3_K_M.gguf"
+    think: false
+    spawn:
+      num_ctx: 131072
+      n_parallel: 4
+      n_batch: 512
+      type_k: 8
+      type_v: 8
+      flash_attn: true
+      n_gpu_layers: -1
+      extra_llama_server_args: ["--reasoning", "off", "--spec-type", "draft-mtp", "--spec-draft-n-max", "2"]
+    sampling:
+      top_k: 20
+      min_p: 0.0
+      temperature: 0.2
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+
   - name: qwen36-35b-a3b-mtp-iq3s
     gguf_path: "N:/.cache/huggingface/models--unsloth--Qwen3.6-35B-A3B-MTP-GGUF/snapshots/5bc3e238d916f48a861bac2f8a1990a0e9b7e98d/Qwen3.6-35B-A3B-UD-IQ3_S.gguf"
     think: true
@@ -297,6 +322,30 @@ models:
       presence_penalty: 0.0
       repetition_penalty: 1.0
       preserve_thinking: true
+
+  # Worker spawn-fork of qwen36-35b-a3b-mtp-iq3s (the model where this was first
+  # observed on llama-server b9402). MTP draft + reasoning-budget leaves the
+  # final `content` empty, so workers launch with `--reasoning off` — a
+  # spawn-time fact. Same GGUF as the main entry; loads as a separate slot.
+  # Dispatch this name directly for fleet workers (think:false baked in).
+  - name: qwen36-35b-a3b-mtp-iq3s-worker
+    gguf_path: "N:/.cache/huggingface/models--unsloth--Qwen3.6-35B-A3B-MTP-GGUF/snapshots/5bc3e238d916f48a861bac2f8a1990a0e9b7e98d/Qwen3.6-35B-A3B-UD-IQ3_S.gguf"
+    think: false
+    spawn:
+      num_ctx: 131072
+      n_parallel: 4
+      n_batch: 512
+      type_k: 8
+      type_v: 8
+      flash_attn: true
+      n_gpu_layers: -1
+      extra_llama_server_args: ["--reasoning", "off", "--spec-type", "draft-mtp", "--spec-draft-n-max", "2"]
+    sampling:
+      top_k: 20
+      min_p: 0.0
+      temperature: 0.2
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
 
   # ---------------------------------------------------------------------------
   # Ollama local models

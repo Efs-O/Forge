@@ -113,6 +113,19 @@ models:
       top_k: 64
       stop: "<end_of_turn>"          # gemma stop token (qwen/ChatML use <|im_end|>)
 
+  # Need the SAME GGUF launched two different ways (e.g. one server with
+  # reasoning on for the agent, one with `--reasoning off` for headless workers)?
+  # Don't reach for spawn_profiles — just add a SECOND model entry with the same
+  # gguf_path and the different launch args. Two entries = two independent
+  # llama-server slots / holds / pool keys with zero special-casing; dispatch the
+  # name you want. (A trailing @profile is request-time ONLY and never changes
+  # the launch command, so it can't flip a spawn flag like --reasoning.)
+  # - name: my-model-worker
+  #   gguf_path: /path/to/model.gguf        # same file as my-model
+  #   think: false
+  #   spawn:
+  #     extra_llama_server_args: ["--reasoning", "off"]
+
   # --- Ollama (local daemon) ---
   # For concurrent same-model workers on Ollama, set the daemon env var
   # OLLAMA_NUM_PARALLEL=4 (configured on the daemon, not here in Forge).
