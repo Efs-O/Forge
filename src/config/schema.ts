@@ -197,6 +197,11 @@ export const ForgeConfigSchema = z.object({
   }).optional(),
   permissions: PermissionsSchema,
   exec: ExecConfigSchema,
+  mcp_servers: z.array(z.object({
+    name: z.string().min(1),
+    command: z.string().min(1),
+    args: z.array(z.string()).optional(),
+  })).optional(),
 }).superRefine((cfg, ctx) => {
   if (cfg.models.length === 0) {
     ctx.addIssue({

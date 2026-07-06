@@ -19,6 +19,7 @@ import { createForgeInstructionsLoader } from './llm/ForgeInstructionsLoader';
 import { runFirstRunWizard } from './sidebar/FirstRunWizard';
 import { SESSION_KEY_V1 } from './sidebar/sessionTypes';
 import { registerAllTools } from './tools/registerAllTools';
+import { connectMcpServers } from './tools/mcpBridge';
 import { BackendStatusBar } from './vscode/BackendStatusBar';
 import { ForgeCodeActionProvider } from './vscode/codeActions';
 import { registerNativeCommands } from './vscode/nativeCommands';
@@ -135,6 +136,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const indexManager = new IndexManager(config, embeddingBackend);
   const toolRegistry = new ToolRegistry();
   registerAllTools(toolRegistry, context.workspaceState, context.secrets, config.search, indexManager);
+
+  // External MCP stdio servers (e.g. halluscribe-mcp). Bridged as a
+  // non-blocking background task: ToolRegistry.definitions() is re-read every
+  // agent turn (see AgentLoop.ts), so a slow or missing server binary never
+  // delays activation — its tools simply appear on a later turn once
+  // connected, and connectMcpServers never throws out of this call.
+  if (config.mcp_servers?.length) {
+    void connectMcpServers(config.mcp_servers, toolRegistry, log)
+      .then((disposable) => context.subscriptions.push(disposable))
+      .catch((err) => log.error('MCP bridge failed unexpectedly', err));
+  }
 
   // ── Checkpoint stack ──────────────────────────────────────────────────────
   const checkpoints = new CheckpointStack();

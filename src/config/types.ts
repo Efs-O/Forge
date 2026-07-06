@@ -196,4 +196,16 @@ export interface ForgeConfig {
     timeout_ms?: number;
     denylist_extra?: string[];
   };
+  /** External MCP stdio servers whose tools are bridged into the tool registry. */
+  mcp_servers?: McpServerConfig[];
+}
+
+/** One external MCP stdio server to spawn and bridge tools from. */
+export interface McpServerConfig {
+  /** Display name, used as a log/warning label. Does not prefix tool names. */
+  name: string;
+  /** Executable to spawn (absolute path recommended). */
+  command: string;
+  /** Command-line arguments passed to the executable. */
+  args?: string[];
 }

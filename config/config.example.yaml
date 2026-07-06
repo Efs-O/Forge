@@ -169,6 +169,15 @@ models:
 #   max_results: 5
 
 # -------------------------------------------------------------------
+# Optional: external MCP stdio servers — their tools are bridged into the
+# Forge tool registry (read-only permission) on activation, after the config
+# has loaded. A slow or missing server binary never blocks Forge startup.
+# -------------------------------------------------------------------
+# mcp_servers:
+#   - name: halluscribe
+#     command: C:/Users/you/.halluscribe-mcp/halluscribe-mcp.exe
+
+# -------------------------------------------------------------------
 # Optional: local semantic code search
 # Requires a second local GGUF embedding model served by llama.cpp
 # -------------------------------------------------------------------
