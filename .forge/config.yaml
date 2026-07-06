@@ -18,7 +18,7 @@ llama_server:
   host: "127.0.0.1"
   port: 8080
 
-max_simultaneous_models: 2
+max_simultaneous_models: 4
 
 control_server:
   enabled: true
