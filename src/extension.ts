@@ -397,6 +397,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     dispose: () => { void pool.stopAll(); },
   });
 
+  // If a Cerebras API key is provided via environment (for automation/testing),
+  // persist it into SecretStorage under the key "cerebras" so Forge can use it.
+  // This is intentionally tolerant and only runs when the env var is set.
+  if (process.env.CEREBRAS_API_KEY?.trim()) {
+    try {
+      await context.secrets.store('cerebras', process.env.CEREBRAS_API_KEY.trim());
+      void vscode.window.showInformationMessage('Forge: stored CEREBRAS_API_KEY into SecretStorage as "cerebras".');
+    } catch (err) {
+      // Do not fail activation if secret storage write fails; surface a log entry.
+      log.warn(`Failed to store CEREBRAS_API_KEY into SecretStorage: ${(err as Error).message}`);
+    }
+  }
+
   log.info('Forge activated');
 }
 

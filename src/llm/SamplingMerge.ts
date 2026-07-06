@@ -61,13 +61,24 @@ function modelSamplingOverrides(
   };
 }
 
-const SAMPLING_DEFAULTS: SamplingDefaults = {
-  temperature: 0.15,
-  top_p: 0.9,
-  top_k: 20,
-  min_p: 0.05,
-  max_tokens: 4096,
-};
+function getSamplingDefaults(model?: ModelConfig): SamplingDefaults {
+  const baseDefaults: SamplingDefaults = {
+    temperature: 0.15,
+    top_p: 0.9,
+    max_tokens: 4096,
+  };
+
+  const cloudLikeProviders = new Set(['openai', 'openai-compatible', 'xai', 'openrouter']);
+  if (cloudLikeProviders.has(model?.provider ?? '')) {
+    return baseDefaults;
+  }
+
+  return {
+    ...baseDefaults,
+    top_k: 20,
+    min_p: 0.05,
+  };
+}
 
 /**
  * Merges sampling parameters in priority order:
@@ -81,7 +92,7 @@ export function mergeSampling(
 ): ChatCompletionRequest {
   const modelOverrides = modelSamplingOverrides(model, opts);
   return {
-    ...SAMPLING_DEFAULTS,
+    ...getSamplingDefaults(model),
     ...modelOverrides,
     ...Object.fromEntries(
       Object.entries(request).filter(([, v]) => v !== undefined),

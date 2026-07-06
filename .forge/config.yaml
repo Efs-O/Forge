@@ -619,3 +619,35 @@ models:
     capabilities: [tool-call, long-context]
     num_ctx: 200000
     sampling: { max_tokens: 12000 }
+
+  # -------------------------------------------------------------------------
+  # Cerebras Cloud (OpenAI-compatible)
+  # Store the key with: Command Palette -> Forge: Set Cloud Provider Token
+  # Use the secret name `cerebras` (or choose your own and set `api_key_secret`).
+  # -------------------------------------------------------------------------
+  - name: gpt-oss-120b
+    provider: openai-compatible
+    endpoint: https://api.cerebras.ai
+    api_key_secret: cerebras
+    model: gpt-oss-120b
+    sampling:
+      max_tokens: 32768
+      temperature: 0.7
+
+  - name: gemma-4-31b
+    provider: openai-compatible
+    endpoint: https://api.cerebras.ai
+    api_key_secret: cerebras
+    model: gemma-4-31b
+    sampling:
+      max_tokens: 32768
+      temperature: 0.7
+
+  - name: zai-glm-4.7
+    provider: openai-compatible
+    endpoint: https://api.cerebras.ai
+    api_key_secret: cerebras
+    model: zai-glm-4.7
+    sampling:
+      max_tokens: 32768
+      temperature: 0.7
