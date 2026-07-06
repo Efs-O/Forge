@@ -208,4 +208,10 @@ export interface McpServerConfig {
   command: string;
   /** Command-line arguments passed to the executable. */
   args?: string[];
+  /**
+   * Cap on each tool result's length in chars before it enters the
+   * conversation; oversized results are truncated with a visible marker.
+   * Defaults to DEFAULT_MAX_RESULT_CHARS in mcpBridge.
+   */
+  max_result_chars?: number;
 }

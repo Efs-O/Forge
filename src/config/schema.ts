@@ -201,6 +201,7 @@ export const ForgeConfigSchema = z.object({
     name: z.string().min(1),
     command: z.string().min(1),
     args: z.array(z.string()).optional(),
+    max_result_chars: z.number().int().positive().optional(),
   })).optional(),
 }).superRefine((cfg, ctx) => {
   if (cfg.models.length === 0) {

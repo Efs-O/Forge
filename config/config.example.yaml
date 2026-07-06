@@ -176,6 +176,7 @@ models:
 # mcp_servers:
 #   - name: halluscribe
 #     command: C:/Users/you/.halluscribe-mcp/halluscribe-mcp.exe
+#     max_result_chars: 24000   # truncate oversized tool results (default 24000)
 
 # -------------------------------------------------------------------
 # Optional: local semantic code search

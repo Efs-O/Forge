@@ -24,6 +24,20 @@ export interface McpCallToolResult {
   isError?: boolean;
 }
 
+/**
+ * Default cap on a tool result fed back into the conversation. MCP servers can
+ * return arbitrarily large payloads (whole profiles, documents); uncapped they
+ * blow past the per-slot context window of a local model and llama-server
+ * rejects the next request outright.
+ */
+export const DEFAULT_MAX_RESULT_CHARS = 24000;
+
+/** Truncates oversized tool output, appending a visible marker so the model knows. */
+export function capResultText(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars)}\n\n[truncated by Forge MCP bridge — showing ${maxChars} of ${text.length} chars]`;
+}
+
 /** Joins every text content part (in order) with newlines; ignores non-text parts. */
 export function extractTextContent(content: McpCallToolResult['content']): string {
   if (!content) return '';
@@ -41,6 +55,7 @@ export function mcpToolToRegisteredTool(
   serverName: string,
   tool: McpToolListing,
   callTool: (args: Record<string, unknown>) => Promise<McpCallToolResult>,
+  maxResultChars: number = DEFAULT_MAX_RESULT_CHARS,
 ): RegisteredTool {
   return {
     definition: {
@@ -58,7 +73,7 @@ export function mcpToolToRegisteredTool(
       if (result.isError) {
         throw new Error(text || `MCP tool "${tool.name}" on server "${serverName}" returned an error`);
       }
-      return text;
+      return capResultText(text, maxResultChars);
     },
   };
 }
@@ -94,8 +109,11 @@ async function connectOne(
     for (const tool of tools) {
       try {
         registry.register(
-          mcpToolToRegisteredTool(server.name, tool, (args) =>
-            client.callTool({ name: tool.name, arguments: args }) as Promise<McpCallToolResult>,
+          mcpToolToRegisteredTool(
+            server.name,
+            tool,
+            (args) => client.callTool({ name: tool.name, arguments: args }) as Promise<McpCallToolResult>,
+            server.max_result_chars ?? DEFAULT_MAX_RESULT_CHARS,
           ),
         );
         bridged += 1;
