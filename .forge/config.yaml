@@ -18,7 +18,7 @@ llama_server:
   host: "127.0.0.1"
   port: 8080
 
-max_simultaneous_models: 4
+max_simultaneous_models: 2
 
 control_server:
   enabled: true
@@ -112,7 +112,9 @@ models:
     think: true
     spawn:
       num_ctx: 131072
-      n_parallel: 4
+      # 2 slots × 65536 ctx each — 4×32768 was too tight for chat turns that
+      # carry large MCP tool results (profile payloads) in history.
+      n_parallel: 2
       n_batch: 512
       type_k: 8
       type_v: 8
