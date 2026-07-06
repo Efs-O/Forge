@@ -43,6 +43,7 @@ Its default and strongest path is still local: GGUF models through `llama-server
 - Reasoning token display and optional thinking-channel stripping
 - Optional Tavily or Brave web search with keys stored in VS Code SecretStorage
 - Local semantic code search and reindex support
+- External MCP tool servers: bridge read-only tools from any MCP stdio server into the agent's tool catalog
 
 ## What's New Since v0.12.3
 
@@ -55,6 +56,8 @@ Its default and strongest path is still local: GGUF models through `llama-server
 - Hardened backend lifecycle, readiness, and release behavior
 - Added semantic code search reindexing flow and slash command support
 - Improved diff display, checkpoint handling, and multi-tab chat behavior
+- Added an MCP client bridge (`mcp_servers` in `config.yaml`): tools from external MCP stdio servers are auto-discovered and offered to the model as read-only tools
+- Verified Cerebras Cloud as an `openai-compatible` provider (per-model `endpoint: https://api.cerebras.ai`) and split sampling defaults so cloud providers no longer receive local-only params (`top_k`, `min_p`)
 
 ## Requirements
 
@@ -97,6 +100,10 @@ Supported provider values:
 - `openrouter`
 - `openai`
 - `openai-compatible`
+
+`openai-compatible` covers any endpoint that speaks the OpenAI chat API — for
+example Cerebras Cloud (`endpoint: https://api.cerebras.ai`, key stored in
+SecretStorage under the name you set as `api_key_secret`).
 
 This is opt-in. Nothing uses a cloud provider unless you configure a model that points to one and provide its token through VS Code SecretStorage.
 
@@ -233,6 +240,19 @@ Use:
 - `Forge: Set Search API Key`
 - `/reindex` to rebuild the semantic index
 
+## MCP Tool Servers
+
+Forge can consume tools from external [MCP](https://modelcontextprotocol.io) stdio servers. Configure them in `config.yaml`:
+
+```yaml
+mcp_servers:
+  - name: halluscribe
+    command: C:/Users/you/.halluscribe-mcp/halluscribe-mcp.exe
+    # args: [--flag]        # optional
+```
+
+On activation Forge spawns each server, auto-discovers its tools via the MCP handshake, and registers them under the read-only permission tier — no per-server code needed. Connection happens in the background: a slow or missing server binary never delays startup; its tools simply appear on the next chat turn once connected. A server that fails to connect logs an error and shows a warning toast, and duplicate tool names are skipped. Spawned server processes are stdio children of Forge (no network) and are terminated on extension deactivation.
+
 ## Slash Commands
 
 Type `/` in chat to open the built-in command list.
@@ -332,6 +352,8 @@ Outbound traffic is limited to the endpoints you explicitly use:
 - an explicitly configured cloud or OpenAI-compatible provider endpoint
 - Tavily or Brave if search is enabled
 - user-approved fetch targets
+
+Configured MCP servers run as local stdio child processes — Forge sends them no network traffic.
 
 ## Development
 

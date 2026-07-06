@@ -42,3 +42,10 @@ PUSH_EXCLUSION_CANDIDATES.md
 BRIDGE_REMOVAL.md
 RELAY_DISPATCH_FINDINGS.md
 TODO.md
+
+# Production-test artifact dirs + local plan/diagnostic scratch (machine-local paths)
+prodtest-*/
+F6_SPAWN_PROFILES_FOLLOWUP_PLAN.md
+PRODTEST_SEMVER_PLAN.md
+scripts/LLM_STRESS_TEST.md
+scripts/llm-stress-test.ps1
