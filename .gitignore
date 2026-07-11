@@ -24,7 +24,8 @@ assets/.coordination/
 fireworks.html
 
 # Internal planning docs — not user-facing
-docs/
+docs/*
+!docs/OWNERS.md
 AUDIT_REPORT.md
 FORGE_REPORT.md
 AGENTS.md
