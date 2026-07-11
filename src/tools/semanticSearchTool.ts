@@ -7,13 +7,22 @@ export function makeSearchCodebaseTool(indexManager: IndexManager): RegisteredTo
       type: 'function',
       function: {
         name: 'search_codebase',
-        description: 'Search the indexed workspace semantically and return the most relevant code snippets.',
+        description:
+          'Search the indexed workspace semantically and return the most relevant code snippets.',
         parameters: {
           type: 'object',
           properties: {
             query: { type: 'string', description: 'Natural-language or code query to search for.' },
-            top_k: { type: 'integer', minimum: 1, maximum: 20, description: 'Maximum number of results to return. Defaults to 5.' },
-            scope_glob: { type: 'string', description: 'Optional file glob to narrow the search scope.' },
+            top_k: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 20,
+              description: 'Maximum number of results to return. Defaults to 5.',
+            },
+            scope_glob: {
+              type: 'string',
+              description: 'Optional file glob to narrow the search scope.',
+            },
           },
           required: ['query'],
           additionalProperties: false,
@@ -32,12 +41,14 @@ export function makeSearchCodebaseTool(indexManager: IndexManager): RegisteredTo
       if (hits.length === 0) {
         return `No semantic matches found for "${query}".`;
       }
-      return hits.map((hit, index) => {
-        const score = hit.score.toFixed(3);
-        const header = `${index + 1}. ${hit.path}:${hit.startLine}-${hit.endLine} (score ${score})`;
-        const symbol = hit.symbolName ? `Symbol: ${hit.symbolName}\n` : '';
-        return `${header}\n${symbol}${hit.snippet.trim()}`;
-      }).join('\n\n');
+      return hits
+        .map((hit, index) => {
+          const score = hit.score.toFixed(3);
+          const header = `${index + 1}. ${hit.path}:${hit.startLine}-${hit.endLine} (score ${score})`;
+          const symbol = hit.symbolName ? `Symbol: ${hit.symbolName}\n` : '';
+          return `${header}\n${symbol}${hit.snippet.trim()}`;
+        })
+        .join('\n\n');
     },
   };
 }

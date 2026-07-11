@@ -22,14 +22,21 @@ import {
 } from '../llm/HtmlDocumentBoilerplateStripper';
 import { ThinkingChannelStripper, stripThinkingFromFullText } from '../llm/ThinkingChannelStripper';
 import { CheckpointStack } from '../checkpoint/CheckpointStack';
-import { FORGE_PERMISSIONS, ToolRegistry } from '../tools/ToolRegistry';
+import { ToolRegistry } from '../tools/ToolRegistry';
+import { resolveToolPermissions } from '../tools/PermissionResolver';
 import type { KeepUndoCodeLensProvider } from './KeepUndoCodeLens';
 import { ToolFailureTracker, stripTools } from '../tools/StripTools';
 import { extractFallbackToolCalls } from '../tools/ToolCallFallback';
 import { buildFallbackToolInstructions } from '../tools/FallbackToolPrompt';
-import { StructuredOutputStripper, stripStructuredOutputFromFullText } from '../tools/StructuredOutputParser';
+import {
+  StructuredOutputStripper,
+  stripStructuredOutputFromFullText,
+} from '../tools/StructuredOutputParser';
 import { getLogger } from '../util/logger';
-import { inspectRuntimeModelCapabilities, type RuntimeModelCapabilities } from '../backend/ModelCapabilities';
+import {
+  inspectRuntimeModelCapabilities,
+  type RuntimeModelCapabilities,
+} from '../backend/ModelCapabilities';
 import { ToolDispatch } from './ToolDispatch';
 import type { DiffDecorations } from './DiffDecorations';
 import { deriveTitle } from './sessionTypes';
@@ -59,9 +66,15 @@ export class AgentLoop {
   private promptRunCtrl: AbortController | null = null;
   private clankerMode = false;
 
-  get streaming(): boolean { return this.streamingConvIds.size > 0; }
-  isStreamingConv(id: string): boolean { return this.streamingConvIds.has(id); }
-  getStreamingIds(): ReadonlySet<string> { return this.streamingConvIds; }
+  get streaming(): boolean {
+    return this.streamingConvIds.size > 0;
+  }
+  isStreamingConv(id: string): boolean {
+    return this.streamingConvIds.has(id);
+  }
+  getStreamingIds(): ReadonlySet<string> {
+    return this.streamingConvIds;
+  }
 
   constructor(
     private readonly pool: IBackendPool,
@@ -84,7 +97,8 @@ export class AgentLoop {
       codeLens,
       failureTracker,
       post,
-      (name, detail, isDangerous, convId) => this.requestToolApproval(name, detail, isDangerous, convId),
+      (name, detail, isDangerous, convId) =>
+        this.requestToolApproval(name, detail, isDangerous, convId),
       diffDecorations,
     );
   }
@@ -94,13 +108,20 @@ export class AgentLoop {
       const ctrl = this.cancelControllers.get(convId);
       if (!ctrl) return;
       ctrl.abort();
-      try { await this.activeBackends.get(convId)?.stop(); } catch { /* abort is authoritative */ }
+      try {
+        await this.activeBackends.get(convId)?.stop();
+      } catch {
+        /* abort is authoritative */
+      }
       await this.streamingSettledMap.get(convId);
     } else {
       for (const [id, ctrl] of this.cancelControllers) {
         ctrl.abort();
-        try { await this.activeBackends.get(id)?.stop(); }
-        catch (err) { log.debug(`[AgentLoop] backend stop during cancel-all failed: ${(err as Error).message}`); }
+        try {
+          await this.activeBackends.get(id)?.stop();
+        } catch (err) {
+          log.debug(`[AgentLoop] backend stop during cancel-all failed: ${(err as Error).message}`);
+        }
       }
       await Promise.all([...this.streamingSettledMap.values()]);
     }
@@ -127,7 +148,9 @@ export class AgentLoop {
     this.clankerMode = on;
   }
 
-  getClankerMode(): boolean { return this.clankerMode; }
+  getClankerMode(): boolean {
+    return this.clankerMode;
+  }
 
   resolveConfirmation(id: string, approved: boolean): void {
     const pending = this.pendingConfirmations.get(id);
@@ -136,17 +159,30 @@ export class AgentLoop {
     pending(approved);
   }
 
-  clearCapabilityCache(): void { this.capabilityCache.clear(); this.capabilityWarningsShown.clear(); }
+  clearCapabilityCache(): void {
+    this.capabilityCache.clear();
+    this.capabilityWarningsShown.clear();
+  }
 
-  async openFile(filePath: string): Promise<void> { return this.toolDispatch.openFile(filePath); }
+  async openFile(filePath: string): Promise<void> {
+    return this.toolDispatch.openFile(filePath);
+  }
 
-  async runTurn(conv: ConversationRuntime, model: ModelConfig, text: string, attachments?: AttachmentData[]): Promise<void> {
+  async runTurn(
+    conv: ConversationRuntime,
+    model: ModelConfig,
+    text: string,
+    attachments?: AttachmentData[],
+  ): Promise<void> {
     const convId = conv.id;
     const ctrl = new AbortController();
     this.cancelControllers.set(convId, ctrl);
-    const settled = new Promise<void>((resolve) => { this.resolveSettledMap.set(convId, resolve); });
+    const settled = new Promise<void>((resolve) => {
+      this.resolveSettledMap.set(convId, resolve);
+    });
     this.streamingSettledMap.set(convId, settled);
-    const postC = (msg: HostToWebview): void => this.post({ ...msg, conversationId: convId } as HostToWebview);
+    const postC = (msg: HostToWebview): void =>
+      this.post({ ...msg, conversationId: convId } as HostToWebview);
 
     // conv.active_model is set by the caller (SidebarProvider) to the full
     // selection id, incl. any @profile — don't clobber it with the base name (F6).
@@ -250,7 +286,11 @@ export class AgentLoop {
     }
   }
 
-  private commitUserPrompt(conv: ConversationRuntime, text: string, attachments?: AttachmentData[]): void {
+  private commitUserPrompt(
+    conv: ConversationRuntime,
+    text: string,
+    attachments?: AttachmentData[],
+  ): void {
     const priorUserCount = conv.messages.filter((m) => m.role === 'user').length;
     conv.messages.push({ role: 'user', content: buildUserContent(text, attachments) });
     conv.updatedAt = Date.now();
@@ -272,7 +312,8 @@ export class AgentLoop {
     if (activeFile) tmplCtx['activeFile'] = activeFile;
     if (config.custom_instructions) tmplCtx['customInstructions'] = config.custom_instructions;
     if (this.forgeLoader?.root) tmplCtx['workspaceRoot'] = this.forgeLoader.root;
-    if (this.forgeLoader?.instructions) tmplCtx['forgeInstructions'] = this.forgeLoader.instructions;
+    if (this.forgeLoader?.instructions)
+      tmplCtx['forgeInstructions'] = this.forgeLoader.instructions;
 
     const messages = injectSystemPrompt(
       [{ role: 'user', content: text }],
@@ -292,13 +333,21 @@ export class AgentLoop {
     let content = '';
     try {
       await new Promise<void>((resolve, reject) => {
-        streamModelChatCompletion(backend.baseUrl(), request, selectedModel, {
-          onToken: (token) => { content += token; },
-          onReasoning: () => {},
-          onDone: () => resolve(),
-          onError: reject,
-          onToolCalls: () => {},
-        }, ctrl.signal);
+        streamModelChatCompletion(
+          backend.baseUrl(),
+          request,
+          selectedModel,
+          {
+            onToken: (token) => {
+              content += token;
+            },
+            onReasoning: () => {},
+            onDone: () => resolve(),
+            onError: reject,
+            onToolCalls: () => {},
+          },
+          ctrl.signal,
+        );
       });
       return this.sanitizeText(content, this.shouldStripThinking(selectedModel));
     } catch (err) {
@@ -327,13 +376,15 @@ export class AgentLoop {
     apiKey?: string,
   ): Promise<void> {
     const config = this.getConfig();
-    const allowed = FORGE_PERMISSIONS;
+    const allowed = resolveToolPermissions(config);
     const useStrip = this.failureTracker.shouldStrip();
     const runtimeCaps = await this.getRuntimeCapabilities(activeModel, baseUrl);
     const canUseThinkingKwargs = this.canUseThinkingKwargs(activeModel, runtimeCaps);
     const stripThinkingChannels = this.shouldStripThinking(activeModel);
     if (useStrip) {
-      void vscode.window.showWarningMessage('Forge: tool calls disabled after repeated failures. Restart chat to re-enable.');
+      void vscode.window.showWarningMessage(
+        'Forge: tool calls disabled after repeated failures. Restart chat to re-enable.',
+      );
     }
 
     let lastToolSignature: string | null = null;
@@ -343,7 +394,11 @@ export class AgentLoop {
     const dispatchToolCalls = async (toolCalls: ToolCall[]): Promise<'continue' | 'stop'> => {
       const sig = toolCalls.map((tc) => `${tc.function.name}:${tc.function.arguments}`).join('|');
       if (sig === lastToolSignature) {
-        postC({ type: 'error', message: 'Forge: agent is repeating the same tool call — stopping to avoid a loop. Try rephrasing your request or use /compact if the context is full.' });
+        postC({
+          type: 'error',
+          message:
+            'Forge: agent is repeating the same tool call — stopping to avoid a loop. Try rephrasing your request or use /compact if the context is full.',
+        });
         return 'stop';
       }
       lastToolSignature = sig;
@@ -367,39 +422,70 @@ export class AgentLoop {
       if (activeFile) tmplCtx['activeFile'] = activeFile;
       if (config.custom_instructions) tmplCtx['customInstructions'] = config.custom_instructions;
       if (this.forgeLoader?.root) tmplCtx['workspaceRoot'] = this.forgeLoader.root;
-      if (this.forgeLoader?.instructions) tmplCtx['forgeInstructions'] = this.forgeLoader.instructions;
-      const messages = injectSystemPrompt([...conv.messages], this.templateEngine, tmplCtx, activeModel.system_prompt);
+      if (this.forgeLoader?.instructions)
+        tmplCtx['forgeInstructions'] = this.forgeLoader.instructions;
+      const messages = injectSystemPrompt(
+        [...conv.messages],
+        this.templateEngine,
+        tmplCtx,
+        activeModel.system_prompt,
+      );
 
       const availableToolDefs = this.toolRegistry.definitions(allowed);
       let nativeToolDefs = activeModel.strip_tools || useStrip ? [] : availableToolDefs;
       if (nativeToolDefs.length > 0 && runtimeCaps?.likelySupportsTools === false) {
-        this.warnOnce(`${activeModel.name}:tools`, `Forge: model "${activeModel.name}" does not appear to have a tool-aware chat template. Tools will be omitted for this request.`);
+        this.warnOnce(
+          `${activeModel.name}:tools`,
+          `Forge: model "${activeModel.name}" does not appear to have a tool-aware chat template. Tools will be omitted for this request.`,
+        );
         nativeToolDefs = [];
       }
       if (runtimeCaps?.hasChatTemplate === false) {
-        this.warnOnce(`${activeModel.name}:template`, `Forge: model "${activeModel.name}" does not expose a usable chat template. Prompt formatting may be mismatched.`);
+        this.warnOnce(
+          `${activeModel.name}:template`,
+          `Forge: model "${activeModel.name}" does not expose a usable chat template. Prompt formatting may be mismatched.`,
+        );
       }
 
-      const fallbackMessages = availableToolDefs.length > 0
-        ? [...messages, { role: 'system' as const, content: buildFallbackToolInstructions(availableToolDefs) }]
-        : messages;
+      const fallbackMessages =
+        availableToolDefs.length > 0
+          ? [
+              ...messages,
+              {
+                role: 'system' as const,
+                content: buildFallbackToolInstructions(availableToolDefs),
+              },
+            ]
+          : messages;
       const requestMessages = nativeToolDefs.length > 0 ? messages : fallbackMessages;
-      let base: ChatCompletionRequest = {
+      const base: ChatCompletionRequest = {
         model: activeModel.name,
         messages: requestMessages,
         stream: true,
         ...(nativeToolDefs.length > 0 ? { tools: nativeToolDefs } : {}),
         ...(canUseThinkingKwargs && activeModel.think !== undefined
-          ? { chat_template_kwargs: {
-              ...(activeModel.sampling?.preserve_thinking !== undefined ? { preserve_thinking: activeModel.sampling.preserve_thinking } : {}),
-              enable_thinking: activeModel.think,
-            } }
+          ? {
+              chat_template_kwargs: {
+                ...(activeModel.sampling?.preserve_thinking !== undefined
+                  ? { preserve_thinking: activeModel.sampling.preserve_thinking }
+                  : {}),
+                enable_thinking: activeModel.think,
+              },
+            }
           : {}),
       };
-      if (!canUseThinkingKwargs && (activeModel.think !== undefined || activeModel.sampling?.preserve_thinking !== undefined)) {
-        this.warnOnce(`${activeModel.name}:thinking`, `Forge: model "${activeModel.name}" does not appear to support thinking template toggles. Thinking kwargs will be omitted for this request.`);
+      if (
+        !canUseThinkingKwargs &&
+        (activeModel.think !== undefined || activeModel.sampling?.preserve_thinking !== undefined)
+      ) {
+        this.warnOnce(
+          `${activeModel.name}:thinking`,
+          `Forge: model "${activeModel.name}" does not appear to support thinking template toggles. Thinking kwargs will be omitted for this request.`,
+        );
       }
-      const merged = mergeSampling(base, activeModel, { allowPreserveThinking: canUseThinkingKwargs });
+      const merged = mergeSampling(base, activeModel, {
+        allowPreserveThinking: canUseThinkingKwargs,
+      });
       const request = normalizeRequestForModel(useStrip ? stripTools(merged) : merged, activeModel);
 
       let thinkingStripper = stripThinkingChannels ? new ThinkingChannelStripper() : null;
@@ -410,21 +496,32 @@ export class AgentLoop {
 
       let streamResult: { finishReason: string | null; toolCalls: ToolCall[] | null };
       try {
-        streamResult = await this.streamOnce(baseUrl, request, activeModel, (token) => {
-          rawAssistantContent += token;
-          const withoutToolMarkers = structuredOutputStripper.push(token);
-          const withoutHtml = htmlStripper.push(withoutToolMarkers);
-          const visible = thinkingStripper ? thinkingStripper.push(withoutHtml) : withoutHtml;
-          if (visible) postC({ type: 'token', text: visible });
-        }, (reasoningToken) => {
-          if (stripThinkingChannels) return;
-          rawReasoningContent += reasoningToken;
-          postC({ type: 'reasoningToken', text: reasoningToken });
-        }, ctrl.signal, apiKey);
+        streamResult = await this.streamOnce(
+          baseUrl,
+          request,
+          activeModel,
+          (token) => {
+            rawAssistantContent += token;
+            const withoutToolMarkers = structuredOutputStripper.push(token);
+            const withoutHtml = htmlStripper.push(withoutToolMarkers);
+            const visible = thinkingStripper ? thinkingStripper.push(withoutHtml) : withoutHtml;
+            if (visible) postC({ type: 'token', text: visible });
+          },
+          (reasoningToken) => {
+            if (stripThinkingChannels) return;
+            rawReasoningContent += reasoningToken;
+            postC({ type: 'reasoningToken', text: reasoningToken });
+          },
+          ctrl.signal,
+          apiKey,
+        );
       } catch (err) {
         if (!this.isNativeToolJsonParseError(err) || nativeToolDefs.length === 0) throw err;
         this.failureTracker.record();
-        this.warnOnce(`${activeModel.name}:native-tool-json`, `Forge: llama-server rejected this model's native tool-call JSON. Retrying with Forge's JSON fallback tool format.`);
+        this.warnOnce(
+          `${activeModel.name}:native-tool-json`,
+          `Forge: llama-server rejected this model's native tool-call JSON. Retrying with Forge's JSON fallback tool format.`,
+        );
         rawAssistantContent = '';
         rawReasoningContent = '';
         thinkingStripper = stripThinkingChannels ? new ThinkingChannelStripper() : null;
@@ -435,17 +532,25 @@ export class AgentLoop {
           messages: fallbackMessages,
         };
         const fallbackRequest = normalizeRequestForModel(stripTools(fallbackBase), activeModel);
-        streamResult = await this.streamOnce(baseUrl, fallbackRequest, activeModel, (token) => {
-          rawAssistantContent += token;
-          const withoutToolMarkers = structuredOutputStripper.push(token);
-          const withoutHtml = htmlStripper.push(withoutToolMarkers);
-          const visible = thinkingStripper ? thinkingStripper.push(withoutHtml) : withoutHtml;
-          if (visible) postC({ type: 'token', text: visible });
-        }, (reasoningToken) => {
-          if (stripThinkingChannels) return;
-          rawReasoningContent += reasoningToken;
-          postC({ type: 'reasoningToken', text: reasoningToken });
-        }, ctrl.signal, apiKey);
+        streamResult = await this.streamOnce(
+          baseUrl,
+          fallbackRequest,
+          activeModel,
+          (token) => {
+            rawAssistantContent += token;
+            const withoutToolMarkers = structuredOutputStripper.push(token);
+            const withoutHtml = htmlStripper.push(withoutToolMarkers);
+            const visible = thinkingStripper ? thinkingStripper.push(withoutHtml) : withoutHtml;
+            if (visible) postC({ type: 'token', text: visible });
+          },
+          (reasoningToken) => {
+            if (stripThinkingChannels) return;
+            rawReasoningContent += reasoningToken;
+            postC({ type: 'reasoningToken', text: reasoningToken });
+          },
+          ctrl.signal,
+          apiKey,
+        );
       }
       const { finishReason, toolCalls } = streamResult;
 
@@ -455,18 +560,21 @@ export class AgentLoop {
       if (trailing) postC({ type: 'token', text: trailing });
 
       const assistantContent = this.sanitizeText(rawAssistantContent, stripThinkingChannels);
-      const assistantReasoning = stripThinkingChannels ? '' : this.sanitizeText(rawReasoningContent, false);
+      const assistantReasoning = stripThinkingChannels
+        ? ''
+        : this.sanitizeText(rawReasoningContent, false);
 
       if (toolCalls?.length) {
-        if (await dispatchToolCalls(toolCalls) === 'stop') return;
+        if ((await dispatchToolCalls(toolCalls)) === 'stop') return;
         continue;
       }
 
-      const fallbackToolCalls = availableToolDefs.length > 0 && rawAssistantContent
-        ? extractFallbackToolCalls(rawAssistantContent)
-        : null;
+      const fallbackToolCalls =
+        availableToolDefs.length > 0 && rawAssistantContent
+          ? extractFallbackToolCalls(rawAssistantContent)
+          : null;
       if (fallbackToolCalls?.length) {
-        if (await dispatchToolCalls(fallbackToolCalls) === 'stop') return;
+        if ((await dispatchToolCalls(fallbackToolCalls)) === 'stop') return;
         continue;
       }
 
@@ -483,7 +591,10 @@ export class AgentLoop {
     postC({ type: 'error', message: 'Forge: agent exceeded maximum tool rounds.' });
   }
 
-  private async getRuntimeCapabilities(model: ModelConfig, baseUrl: string): Promise<RuntimeModelCapabilities> {
+  private async getRuntimeCapabilities(
+    model: ModelConfig,
+    baseUrl: string,
+  ): Promise<RuntimeModelCapabilities> {
     const cached = this.capabilityCache.get(model.name);
     if (cached) return cached;
     const pending = inspectRuntimeModelCapabilities(baseUrl, model);
@@ -491,7 +602,10 @@ export class AgentLoop {
     return pending;
   }
 
-  private canUseThinkingKwargs(model: ModelConfig | undefined, runtimeCaps: RuntimeModelCapabilities | undefined): boolean {
+  private canUseThinkingKwargs(
+    model: ModelConfig | undefined,
+    runtimeCaps: RuntimeModelCapabilities | undefined,
+  ): boolean {
     if (!model) return false;
     if (runtimeCaps?.likelySupportsThinking === false) return false;
     return model.think !== undefined || model.sampling?.preserve_thinking !== undefined;
@@ -520,14 +634,28 @@ export class AgentLoop {
     return message.includes('Failed to parse tool call arguments as JSON');
   }
 
-  private async requestToolApproval(toolName: string, detail: string, isDangerous?: boolean, convId?: string): Promise<boolean> {
+  private async requestToolApproval(
+    toolName: string,
+    detail: string,
+    isDangerous?: boolean,
+    convId?: string,
+  ): Promise<boolean> {
     if (this.clankerMode && !isDangerous) return true;
     const view = this.getView();
     if (!view) throw new Error(`Forge: sidebar is unavailable for tool approval (${toolName}).`);
     const id = `confirm-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const approved = new Promise<boolean>((resolve) => { this.pendingConfirmations.set(id, resolve); });
+    const approved = new Promise<boolean>((resolve) => {
+      this.pendingConfirmations.set(id, resolve);
+    });
     await vscode.commands.executeCommand('workbench.view.extension.forge-sidebar');
-    this.post({ type: 'confirmRequest', id, toolName, detail, ...(isDangerous ? { isDangerous: true } : {}), ...(convId ? { conversationId: convId } : {}) });
+    this.post({
+      type: 'confirmRequest',
+      id,
+      toolName,
+      detail,
+      ...(isDangerous ? { isDangerous: true } : {}),
+      ...(convId ? { conversationId: convId } : {}),
+    });
     return approved;
   }
 
@@ -542,13 +670,22 @@ export class AgentLoop {
   ): Promise<{ finishReason: string | null; toolCalls: ToolCall[] | null }> {
     return new Promise((resolve, reject) => {
       let capturedToolCalls: ToolCall[] | null = null;
-      streamModelChatCompletion(baseUrl, request, model, {
-        onToken,
-        onReasoning,
-        onDone: (reason) => resolve({ finishReason: reason, toolCalls: capturedToolCalls }),
-        onError: reject,
-        onToolCalls: (calls) => { capturedToolCalls = calls; },
-      }, signal, apiKey);
+      streamModelChatCompletion(
+        baseUrl,
+        request,
+        model,
+        {
+          onToken,
+          onReasoning,
+          onDone: (reason) => resolve({ finishReason: reason, toolCalls: capturedToolCalls }),
+          onError: reject,
+          onToolCalls: (calls) => {
+            capturedToolCalls = calls;
+          },
+        },
+        signal,
+        apiKey,
+      );
     });
   }
 }

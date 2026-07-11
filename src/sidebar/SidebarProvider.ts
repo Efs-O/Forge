@@ -20,7 +20,8 @@ import {
 import type { ChatMessage } from '../llm/types';
 import type { AttachmentData } from './messageBridge';
 import { CheckpointStack } from '../checkpoint/CheckpointStack';
-import { ToolRegistry, FORGE_PERMISSIONS } from '../tools/ToolRegistry';
+import { ToolRegistry } from '../tools/ToolRegistry';
+import { resolveToolPermissions } from '../tools/PermissionResolver';
 import type { KeepUndoCodeLensProvider } from './KeepUndoCodeLens';
 import type { DiffDecorations } from './DiffDecorations';
 import { ToolFailureTracker } from '../tools/StripTools';
@@ -180,12 +181,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.post({ type: 'checkpointDismissed' });
   }
 
-  canUndo(): boolean { return this.checkpoints.canUndo(); }
+  canUndo(): boolean {
+    return this.checkpoints.canUndo();
+  }
 
   async newConversation(): Promise<void> {
     const result = opNewConversation(this.sidebar);
     if (result.atCap) {
-      void vscode.window.showWarningMessage(`Forge: maximum ${MAX_CONVERSATIONS} conversations. Close one to add another.`);
+      void vscode.window.showWarningMessage(
+        `Forge: maximum ${MAX_CONVERSATIONS} conversations. Close one to add another.`,
+      );
       return;
     }
     this.sidebar = result.sidebar;
@@ -196,14 +201,20 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   /** @deprecated Use newConversation — kept for command registration compatibility. */
-  newChat(): void { void this.newConversation(); }
+  newChat(): void {
+    void this.newConversation();
+  }
 
-  clearChat(): void { this.clearActiveMessages(); }
+  clearChat(): void {
+    this.clearActiveMessages();
+  }
 
   async submitPrompt(text: string, attachments?: AttachmentData[]): Promise<void> {
     const activeId = this.sidebar.activeConversationId;
     if (this.agentLoop.isStreamingConv(activeId)) {
-      throw new Error('Forge: this conversation is still generating. Switch to it and cancel, or open a new tab.');
+      throw new Error(
+        'Forge: this conversation is still generating. Switch to it and cancel, or open a new tab.',
+      );
     }
     await vscode.commands.executeCommand('workbench.view.extension.forge-sidebar');
     await this.handleSend(text, attachments);
@@ -212,7 +223,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   async unloadModels(): Promise<void> {
     await this.pool.stopAll();
     this.events.onBackendStopped?.(this.config.active_model);
-    this.post({ type: 'backendDown', message: 'All models unloaded. Send a prompt to start the backend again.' });
+    this.post({
+      type: 'backendDown',
+      message: 'All models unloaded. Send a prompt to start the backend again.',
+    });
   }
 
   notifyBackendError(message: string): void {
@@ -255,12 +269,21 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.agentLoop.clearCapabilityCache();
     this.pool.applyForgeConfig(next);
     this.indexManager.applyForgeConfig(next);
-    this.post({ type: 'models', models: this.config.models.map((m) => ({ name: m.name, provider: m.provider ?? 'llama.cpp' })), active: this.config.active_model });
+    this.post({
+      type: 'models',
+      models: this.config.models.map((m) => ({
+        name: m.name,
+        provider: m.provider ?? 'llama.cpp',
+      })),
+      active: this.config.active_model,
+    });
   }
 
   // ── Internal ──────────────────────────────────────────────────────────────
 
-  private post(msg: HostToWebview): void { this.view?.webview.postMessage(msg); }
+  private post(msg: HostToWebview): void {
+    this.view?.webview.postMessage(msg);
+  }
 
   private postSessionSync(): void {
     this.post({
@@ -272,7 +295,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  private persistSession(): void { saveSidebarSession(this.workspaceState, this.sidebar); }
+  private persistSession(): void {
+    saveSidebarSession(this.workspaceState, this.sidebar);
+  }
 
   /** Strip @profile + expand aliases to the base model name (F6). */
   private baseOf(id: string | null | undefined): string | null {
@@ -284,7 +309,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const activeBase = this.baseOf(this.config.active_model);
     const activeModel = this.config.models.find((m) => m.name === activeBase);
     const msgTokens = estimateTokens(this.activeMessages());
-    const toolTokens = Math.ceil(JSON.stringify(this.toolRegistry.definitions(FORGE_PERMISSIONS)).length / 4);
+    const allowed = resolveToolPermissions(this.config);
+    const toolTokens = Math.ceil(JSON.stringify(this.toolRegistry.definitions(allowed)).length / 4);
     const SYSTEM_AND_TEMPLATE_OVERHEAD = 200;
     const used = msgTokens + toolTokens + SYSTEM_AND_TEMPLATE_OVERHEAD;
     const max = activeModel?.spawn?.num_ctx ?? activeModel?.num_ctx ?? 0;
@@ -294,14 +320,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
     if (max > 0 && used / max >= 0.75 && !this.contextWarningShown) {
       this.contextWarningShown = true;
-      void vscode.window.showWarningMessage(
-        'Forge: context window is 75% full — run /compact to keep the agent coherent.',
-        'Run /compact',
-      ).then((choice) => {
-        if (choice === 'Run /compact') {
-          void this.slashHandler.handle('compact');
-        }
-      });
+      void vscode.window
+        .showWarningMessage(
+          'Forge: context window is 75% full — run /compact to keep the agent coherent.',
+          'Run /compact',
+        )
+        .then((choice) => {
+          if (choice === 'Run /compact') {
+            void this.slashHandler.handle('compact');
+          }
+        });
     }
   }
 
@@ -319,7 +347,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return conv;
   }
 
-  private activeMessages(): ChatMessage[] { return this.getActive().messages; }
+  private activeMessages(): ChatMessage[] {
+    return this.getActive().messages;
+  }
 
   private clearActiveMessages(): void {
     if (this.agentLoop.streaming) return;
@@ -331,7 +361,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private async handleSend(text: string, attachments?: AttachmentData[]): Promise<void> {
     if (this.agentLoop.isStreamingConv(this.sidebar.activeConversationId)) {
-      this.post({ type: 'error', message: 'Forge: this conversation is still generating. Cancel it first or open a new tab.' });
+      this.post({
+        type: 'error',
+        message: 'Forge: this conversation is still generating. Cancel it first or open a new tab.',
+      });
       return;
     }
     if (!this.config.active_model) {
@@ -344,7 +377,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     // defaults + base + profile into a legacy ModelConfig for the agent loop.
     let selectedModel;
     try {
-      selectedModel = resolveRequestModel(this.config, this.config.active_model, (m) => log.info(m));
+      selectedModel = resolveRequestModel(this.config, this.config.active_model, (m) =>
+        log.info(m),
+      );
     } catch (err) {
       this.post({ type: 'error', message: (err as Error).message });
       return;
@@ -369,7 +404,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const conv = this.sidebar.conversations.find((c) => c.id === convId);
     if (!conv || conv.messages.length === 0) return;
     if (!this.sessionLoggers.has(convId)) {
-      this.sessionLoggers.set(convId, new SessionLogger(convId, conv.title, this.config.active_model ?? ''));
+      this.sessionLoggers.set(
+        convId,
+        new SessionLogger(convId, conv.title, this.config.active_model ?? ''),
+      );
     }
     const logger = this.sessionLoggers.get(convId)!;
     logger.updateTitle(conv.title);
@@ -379,7 +417,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private handleMessage(msg: WebviewToHost): void {
     switch (msg.type) {
       case 'webviewReady':
-        this.post({ type: 'models', models: this.config.models.map((m) => ({ name: m.name, provider: m.provider ?? 'llama.cpp' })), active: this.config.active_model });
+        this.post({
+          type: 'models',
+          models: this.config.models.map((m) => ({
+            name: m.name,
+            provider: m.provider ?? 'llama.cpp',
+          })),
+          active: this.config.active_model,
+        });
         this.postSessionSync();
         if (this.pool.isAnyReady()) this.post({ type: 'ready' });
         this.post({ type: 'clankerChanged', enabled: this.agentLoop.getClankerMode() });
@@ -395,19 +440,34 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
       case 'switchModel':
         this.config.active_model = msg.name;
-        this.post({ type: 'models', models: this.config.models.map((m) => ({ name: m.name, provider: m.provider ?? 'llama.cpp' })), active: this.config.active_model });
+        this.post({
+          type: 'models',
+          models: this.config.models.map((m) => ({
+            name: m.name,
+            provider: m.provider ?? 'llama.cpp',
+          })),
+          active: this.config.active_model,
+        });
         break;
 
       case 'undo':
         try {
           const restored = this.undo();
-          this.post({ type: 'token', text: `\n\n> ↩ Undid last turn — restored ${restored.length} file(s).\n\n` });
-        } catch (err) { this.post({ type: 'error', message: (err as Error).message }); }
+          this.post({
+            type: 'token',
+            text: `\n\n> ↩ Undid last turn — restored ${restored.length} file(s).\n\n`,
+          });
+        } catch (err) {
+          this.post({ type: 'error', message: (err as Error).message });
+        }
         break;
 
       case 'keep':
-        try { this.keep(); }
-        catch (err) { this.post({ type: 'error', message: (err as Error).message }); }
+        try {
+          this.keep();
+        } catch (err) {
+          this.post({ type: 'error', message: (err as Error).message });
+        }
         break;
 
       case 'newChat':
@@ -469,28 +529,33 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       // share one loaded backend, so the prompt must key by base (F6).
       const base = this.baseOf(modelName) ?? modelName;
       const modelConfig = this.config.models.find((m) => m.name === base);
-      const otherTabUsesModel = this.sidebar.conversations.some((c) => this.baseOf(c.active_model) === base);
+      const otherTabUsesModel = this.sidebar.conversations.some(
+        (c) => this.baseOf(c.active_model) === base,
+      );
       if (!otherTabUsesModel && isLocalModel(modelConfig)) {
-        void vscode.window.showInformationMessage(
-          `"${base}" is still loaded in VRAM. Unload it to free memory?`,
-          'Unload Now',
-        ).then((choice) => {
-          if (choice !== 'Unload Now') return;
-          void this.pool.release(base).then(() => {
-            this.events.onBackendStopped?.(base);
-            this.post({ type: 'backendDown', message: `${base} unloaded.` });
+        void vscode.window
+          .showInformationMessage(
+            `"${base}" is still loaded in VRAM. Unload it to free memory?`,
+            'Unload Now',
+          )
+          .then((choice) => {
+            if (choice !== 'Unload Now') return;
+            void this.pool.release(base).then(() => {
+              this.events.onBackendStopped?.(base);
+              this.post({ type: 'backendDown', message: `${base} unloaded.` });
+            });
           });
-        });
       }
     }
   }
-
 
   private async applyRestoreConversation(id: string): Promise<void> {
     await this.agentLoop.stopStreamingIfNeeded(this.sidebar.activeConversationId);
     const result = opRestoreConversation(this.sidebar, id);
     if ('atCap' in result && result.atCap) {
-      void vscode.window.showWarningMessage('Forge: maximum open conversations. Close one tab before reopening history.');
+      void vscode.window.showWarningMessage(
+        'Forge: maximum open conversations. Close one tab before reopening history.',
+      );
       return;
     }
     if ('notFound' in result) return;

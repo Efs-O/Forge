@@ -1,27 +1,56 @@
 import * as vscode from 'vscode';
 import type { ToolRegistry } from './ToolRegistry';
 import type { SearchConfig } from '../config/types';
-import { makeReadFileTool, makeWriteFileTool, makeReplaceSelectionTool, makeInsertCodeTool } from './builtinTools';
+import {
+  makeReadFileTool,
+  makeWriteFileTool,
+  makeReplaceSelectionTool,
+  makeInsertCodeTool,
+} from './builtinTools';
 import { makeListDirectoryTool, makeSearchCodeTool, makeFindFilesTool } from './dirTools';
 import {
-  makeGetDiagnosticsTool, makeGetDocumentSymbolsTool, makeGetWorkspaceSymbolsTool,
-  makeGetHoverTool, makeGoToDefinitionTool, makeFindReferencesTool,
+  makeGetDiagnosticsTool,
+  makeGetDocumentSymbolsTool,
+  makeGetWorkspaceSymbolsTool,
+  makeGetHoverTool,
+  makeGoToDefinitionTool,
+  makeFindReferencesTool,
 } from './lspTools';
 import {
-  makeShowDiffTool, makeAskUserTool, makeShowNotificationTool,
-  makeCopyToClipboardTool, makeReadClipboardTool, makeOpenUrlTool,
+  makeShowDiffTool,
+  makeAskUserTool,
+  makeShowNotificationTool,
+  makeCopyToClipboardTool,
+  makeReadClipboardTool,
+  makeOpenUrlTool,
 } from './uxTools';
 import { makeWebFetchTool } from './fetchTool';
 import { makeWebSearchTool } from './searchTool';
 import { makeRememberTool, makeRecallTool, makeListMemoriesTool } from './memoryTools';
 import {
-  makeReplaceInFileTool, makeCreateDirectoryTool, makeMoveFileTool,
-  makeDeleteFileTool, makeFormatFileTool, makeRenameSymbolTool,
+  makeReplaceInFileTool,
+  makeCreateDirectoryTool,
+  makeMoveFileTool,
+  makeDeleteFileTool,
+  makeFormatFileTool,
+  makeRenameSymbolTool,
 } from './fileEditTools';
-import { makeRunTerminalTool, makeExecCommandTool, makeRunTestsTool, makeRunBuildTool } from './execTools';
 import {
-  makeGitStatusTool, makeGitLogTool, makeGitDiffTool, makeGitBlameTool, makeGitShowTool,
-  makeCreateBranchTool, makeSwitchBranchTool, makeStageTool, makeCommitTool,
+  makeRunTerminalTool,
+  makeExecCommandTool,
+  makeRunTestsTool,
+  makeRunBuildTool,
+} from './execTools';
+import {
+  makeGitStatusTool,
+  makeGitLogTool,
+  makeGitDiffTool,
+  makeGitBlameTool,
+  makeGitShowTool,
+  makeCreateBranchTool,
+  makeSwitchBranchTool,
+  makeStageTool,
+  makeCommitTool,
 } from './gitTools';
 import { makeSearchCodebaseTool } from './semanticSearchTool';
 import type { IndexManager } from '../search/IndexManager';

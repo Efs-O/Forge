@@ -15,7 +15,7 @@ export function makeShowDiffTool(): RegisteredTool {
           properties: {
             original_path: { type: 'string', description: 'Path to the original (left) file.' },
             modified_path: { type: 'string', description: 'Path to the modified (right) file.' },
-            title:         { type: 'string', description: 'Optional title for the diff tab.' },
+            title: { type: 'string', description: 'Optional title for the diff tab.' },
           },
           required: ['original_path', 'modified_path'],
           additionalProperties: false,
@@ -24,8 +24,8 @@ export function makeShowDiffTool(): RegisteredTool {
     },
     permission: 'read',
     handler: async (args) => {
-      const uri1  = resolveUri(args['original_path'] as string);
-      const uri2  = resolveUri(args['modified_path'] as string);
+      const uri1 = resolveUri(args['original_path'] as string);
+      const uri2 = resolveUri(args['modified_path'] as string);
       const title = (args['title'] as string | undefined) ?? 'Forge Diff';
       await vscode.commands.executeCommand('vscode.diff', uri1, uri2, title);
       return 'Diff opened.';
@@ -45,9 +45,16 @@ export function makeAskUserTool(): RegisteredTool {
         parameters: {
           type: 'object',
           properties: {
-            prompt:      { type: 'string',                description: 'Question or prompt shown to the user.' },
-            placeholder: { type: 'string',                description: 'Placeholder text for a free-text input box.' },
-            options:     { type: 'array', items: { type: 'string' }, description: 'If provided, shows a quick-pick list instead of a free-text box.' },
+            prompt: { type: 'string', description: 'Question or prompt shown to the user.' },
+            placeholder: {
+              type: 'string',
+              description: 'Placeholder text for a free-text input box.',
+            },
+            options: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'If provided, shows a quick-pick list instead of a free-text box.',
+            },
           },
           required: ['prompt'],
           additionalProperties: false,
@@ -56,9 +63,9 @@ export function makeAskUserTool(): RegisteredTool {
     },
     permission: 'read',
     handler: async (args) => {
-      const prompt      = args['prompt']      as string;
+      const prompt = args['prompt'] as string;
       const placeholder = args['placeholder'] as string | undefined;
-      const options     = args['options']     as string[] | undefined;
+      const options = args['options'] as string[] | undefined;
 
       let answer: string | undefined;
       if (options?.length) {
@@ -88,7 +95,11 @@ export function makeShowNotificationTool(): RegisteredTool {
           type: 'object',
           properties: {
             message: { type: 'string', description: 'Notification text.' },
-            level:   { type: 'string', enum: ['info', 'warning', 'error'], description: 'Severity level. Defaults to "info".' },
+            level: {
+              type: 'string',
+              enum: ['info', 'warning', 'error'],
+              description: 'Severity level. Defaults to "info".',
+            },
           },
           required: ['message'],
           additionalProperties: false,
@@ -98,7 +109,7 @@ export function makeShowNotificationTool(): RegisteredTool {
     permission: 'read',
     handler: async (args) => {
       const message = args['message'] as string;
-      const level   = (args['level'] as NotifLevel | undefined) ?? 'info';
+      const level = (args['level'] as NotifLevel | undefined) ?? 'info';
       if (level === 'error') {
         vscode.window.showErrorMessage(message);
       } else if (level === 'warning') {
@@ -174,7 +185,10 @@ export function makeOpenUrlTool(): RegisteredTool {
         parameters: {
           type: 'object',
           properties: {
-            url: { type: 'string', description: 'URL to open. Must start with https:// or http://.' },
+            url: {
+              type: 'string',
+              description: 'URL to open. Must start with https:// or http://.',
+            },
           },
           required: ['url'],
           additionalProperties: false,
@@ -185,7 +199,9 @@ export function makeOpenUrlTool(): RegisteredTool {
     handler: async (args) => {
       const url = args['url'] as string;
       if (!url.startsWith('https://') && !url.startsWith('http://')) {
-        throw new Error(`open_url_in_browser: URL must start with https:// or http://. Got: ${url}`);
+        throw new Error(
+          `open_url_in_browser: URL must start with https:// or http://. Got: ${url}`,
+        );
       }
       await vscode.env.openExternal(vscode.Uri.parse(url));
       return 'Opened.';

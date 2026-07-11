@@ -1,16 +1,37 @@
 import type { ToolDefinition } from '../llm/types';
 
-export type ToolPermission = 'read' | 'write' | 'delete' | 'terminal' | 'search' | 'git';
+export type ToolPermission =
+  | 'read'
+  | 'write'
+  | 'delete'
+  | 'terminal'
+  | 'headless'
+  | 'search'
+  | 'fetch'
+  | 'git-read'
+  | 'git-write';
 
 export interface ToolHandler {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- tool args are schema-validated at call site
-  (args: Record<string, unknown>): Promise<string>;
+  (args: Record<string, unknown>, context?: ToolHandlerContext): Promise<string>;
+}
+
+export interface ToolHandlerContext {
+  beforeMutate(paths: string[]): void;
+}
+
+export interface ToolMutation {
+  /** Paths known from arguments/editor state before the handler executes. */
+  paths(args: Record<string, unknown>): string[];
+  /** Whether Forge should render file diffs for these paths. */
+  showDiff?: boolean;
 }
 
 export interface RegisteredTool {
   definition: ToolDefinition;
   permission: ToolPermission;
   handler: ToolHandler;
+  mutation?: ToolMutation;
 }
 
 /**
@@ -25,6 +46,9 @@ export class ToolRegistry {
     const name = tool.definition.function.name;
     if (this.tools.has(name)) {
       throw new Error(`ToolRegistry: duplicate tool name "${name}"`);
+    }
+    if ((tool.permission === 'write' || tool.permission === 'delete') && !tool.mutation) {
+      throw new Error(`ToolRegistry: mutating tool "${name}" must declare mutation metadata`);
     }
     this.tools.set(name, tool);
   }
@@ -48,25 +72,19 @@ export class ToolRegistry {
     name: string,
     args: Record<string, unknown>,
     allowed: Set<ToolPermission>,
+    context?: ToolHandlerContext,
   ): Promise<string> {
     const tool = this.tools.get(name);
     if (!tool) throw new Error(`ToolRegistry: unknown tool "${name}"`);
     if (!allowed.has(tool.permission)) {
-      throw new Error(`ToolRegistry: tool "${name}" requires permission "${tool.permission}" which is not granted for this Forge turn`);
+      throw new Error(
+        `ToolRegistry: tool "${name}" requires permission "${tool.permission}" which is not granted for this Forge turn`,
+      );
     }
-    return tool.handler(args);
+    return tool.handler(args, context);
   }
 
   names(): string[] {
     return [...this.tools.keys()];
   }
 }
-
-export const FORGE_PERMISSIONS = new Set<ToolPermission>([
-  'read',
-  'write',
-  'delete',
-  'terminal',
-  'search',
-  'git',
-]);

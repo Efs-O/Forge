@@ -85,8 +85,12 @@ export function spawnAndWait(
       proc.kill();
     }, timeoutMs);
 
-    proc.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
-    proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+    proc.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    proc.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
 
     proc.on('error', (err) => {
       clearTimeout(timer);
@@ -166,7 +170,7 @@ export function detectTestRunner(workspaceRoot: string): TestRunnerConfig {
   };
 
   if (allDeps['vitest']) return { command: 'npx', baseArgs: ['vitest', 'run'] };
-  if (allDeps['jest'])   return { command: 'npx', baseArgs: ['jest', '--no-coverage'] };
-  if (allDeps['mocha'])  return { command: 'npx', baseArgs: ['mocha'] };
+  if (allDeps['jest']) return { command: 'npx', baseArgs: ['jest', '--no-coverage'] };
+  if (allDeps['mocha']) return { command: 'npx', baseArgs: ['mocha'] };
   return { command: 'npm', baseArgs: ['test'] };
 }

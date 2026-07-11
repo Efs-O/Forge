@@ -71,7 +71,9 @@ export function mcpToolToRegisteredTool(
       const result = await callTool(args);
       const text = extractTextContent(result.content);
       if (result.isError) {
-        throw new Error(text || `MCP tool "${tool.name}" on server "${serverName}" returned an error`);
+        throw new Error(
+          text || `MCP tool "${tool.name}" on server "${serverName}" returned an error`,
+        );
       }
       return capResultText(text, maxResultChars);
     },
@@ -99,7 +101,9 @@ async function connectOne(
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     log.error(`MCP server "${server.name}": failed to connect`, err);
-    void vscode.window.showWarningMessage(`Forge: MCP server "${server.name}" failed to connect — ${reason}`);
+    void vscode.window.showWarningMessage(
+      `Forge: MCP server "${server.name}" failed to connect — ${reason}`,
+    );
     return undefined;
   }
 
@@ -112,7 +116,8 @@ async function connectOne(
           mcpToolToRegisteredTool(
             server.name,
             tool,
-            (args) => client.callTool({ name: tool.name, arguments: args }) as Promise<McpCallToolResult>,
+            (args) =>
+              client.callTool({ name: tool.name, arguments: args }) as Promise<McpCallToolResult>,
             server.max_result_chars ?? DEFAULT_MAX_RESULT_CHARS,
           ),
         );
@@ -120,7 +125,9 @@ async function connectOne(
       } catch (err) {
         // ToolRegistry.register throws on a duplicate name — skip that one
         // tool rather than failing the whole server.
-        log.warn(`MCP server "${server.name}": skipping tool "${tool.name}" — ${(err as Error).message}`);
+        log.warn(
+          `MCP server "${server.name}": skipping tool "${tool.name}" — ${(err as Error).message}`,
+        );
       }
     }
     log.info(`MCP server "${server.name}": connected, bridged ${bridged}/${tools.length} tool(s)`);
@@ -128,7 +135,9 @@ async function connectOne(
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     log.error(`MCP server "${server.name}": listTools failed`, err);
-    void vscode.window.showWarningMessage(`Forge: MCP server "${server.name}" failed to list tools — ${reason}`);
+    void vscode.window.showWarningMessage(
+      `Forge: MCP server "${server.name}" failed to list tools — ${reason}`,
+    );
     await client.close().catch(() => undefined);
     return undefined;
   }

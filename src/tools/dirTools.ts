@@ -39,11 +39,15 @@ export function makeListDirectoryTool(): RegisteredTool {
       type: 'function',
       function: {
         name: 'list_directory',
-        description: 'List entries in a directory. Returns each entry prefixed with [file] or [dir].',
+        description:
+          'List entries in a directory. Returns each entry prefixed with [file] or [dir].',
         parameters: {
           type: 'object',
           properties: {
-            path: { type: 'string', description: 'Directory path (absolute or workspace-relative).' },
+            path: {
+              type: 'string',
+              description: 'Directory path (absolute or workspace-relative).',
+            },
           },
           required: ['path'],
           additionalProperties: false,
@@ -110,7 +114,9 @@ function isMatchEvent(event: RipgrepEvent): event is { type: 'match'; data: Ripg
   return event.type === 'match';
 }
 
-function isContextEvent(event: RipgrepEvent): event is { type: 'context'; data: RipgrepContextData } {
+function isContextEvent(
+  event: RipgrepEvent,
+): event is { type: 'context'; data: RipgrepContextData } {
   return event.type === 'context';
 }
 
@@ -120,12 +126,19 @@ export function makeFindFilesTool(): RegisteredTool {
       type: 'function',
       function: {
         name: 'find_files',
-        description: 'Find files by name or path using a glob pattern (e.g. "**/*.test.ts" or "src/**/index.*"). Returns matching workspace-relative paths. Matches file paths, not content — use search_code to search file contents.',
+        description:
+          'Find files by name or path using a glob pattern (e.g. "**/*.test.ts" or "src/**/index.*"). Returns matching workspace-relative paths. Matches file paths, not content — use search_code to search file contents.',
         parameters: {
           type: 'object',
           properties: {
-            pattern:     { type: 'string',  description: 'Glob pattern to match against file paths, e.g. "**/*.ts".' },
-            max_results: { type: 'integer', description: 'Maximum number of files to return. Defaults to 100.' },
+            pattern: {
+              type: 'string',
+              description: 'Glob pattern to match against file paths, e.g. "**/*.ts".',
+            },
+            max_results: {
+              type: 'integer',
+              description: 'Maximum number of files to return. Defaults to 100.',
+            },
           },
           required: ['pattern'],
           additionalProperties: false,
@@ -158,13 +171,20 @@ export function makeSearchCodeTool(): RegisteredTool {
       type: 'function',
       function: {
         name: 'search_code',
-        description: 'Search for a string/pattern across workspace files. Returns matching file paths and surrounding context lines.',
+        description:
+          'Search for a string/pattern across workspace files. Returns matching file paths and surrounding context lines.',
         parameters: {
           type: 'object',
           properties: {
-            query:       { type: 'string',  description: 'Text to search for (literal string).' },
-            include:     { type: 'string',  description: 'Glob pattern of files to include, e.g. "**/*.ts". Defaults to "**/*".' },
-            max_results: { type: 'integer', description: 'Maximum number of matching files to return. Defaults to 20.' },
+            query: { type: 'string', description: 'Text to search for (literal string).' },
+            include: {
+              type: 'string',
+              description: 'Glob pattern of files to include, e.g. "**/*.ts". Defaults to "**/*".',
+            },
+            max_results: {
+              type: 'integer',
+              description: 'Maximum number of matching files to return. Defaults to 20.',
+            },
           },
           required: ['query'],
           additionalProperties: false,
@@ -195,7 +215,11 @@ export function makeSearchCodeTool(): RegisteredTool {
   };
 }
 
-async function searchWorkspaceText(query: string, include: string, maxResults: number): Promise<SearchCodeMatch[]> {
+async function searchWorkspaceText(
+  query: string,
+  include: string,
+  maxResults: number,
+): Promise<SearchCodeMatch[]> {
   const folder = vscode.workspace.workspaceFolders?.[0];
   if (!folder) throw new Error('No workspace folder open.');
 
@@ -240,11 +264,7 @@ async function searchWorkspaceText(query: string, include: string, maxResults: n
     };
 
     const appendEvent = (event: RipgrepEvent): void => {
-      const data = isMatchEvent(event)
-        ? event.data
-        : isContextEvent(event)
-          ? event.data
-          : null;
+      const data = isMatchEvent(event) ? event.data : isContextEvent(event) ? event.data : null;
       if (!data) return;
 
       const filePath = data.path?.text;

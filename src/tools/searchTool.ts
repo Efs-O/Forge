@@ -53,7 +53,7 @@ export function makeWebSearchTool(
       if (!apiKey) {
         throw new Error(
           `Forge search: API key not found in SecretStorage under "${cfg.secret_key_name}". ` +
-          `Run "Forge: Set Search API Key" to store it.`,
+            `Run "Forge: Set Search API Key" to store it.`,
         );
       }
 
@@ -72,7 +72,12 @@ async function searchTavily(query: string, apiKey: string, maxResults: number): 
   const response = await fetch('https://api.tavily.com/search', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ api_key: apiKey, query, max_results: maxResults, search_depth: 'basic' }),
+    body: JSON.stringify({
+      api_key: apiKey,
+      query,
+      max_results: maxResults,
+      search_depth: 'basic',
+    }),
   });
 
   if (!response.ok) {
@@ -84,7 +89,10 @@ async function searchTavily(query: string, apiKey: string, maxResults: number): 
   if (!results.length) return 'No results found.';
 
   return results
-    .map((r, i) => `${i + 1}. **${r.title ?? 'Untitled'}** — <${r.url ?? ''}>\n   ${r.content?.slice(0, 300) ?? ''}`)
+    .map(
+      (r, i) =>
+        `${i + 1}. **${r.title ?? 'Untitled'}** — <${r.url ?? ''}>\n   ${r.content?.slice(0, 300) ?? ''}`,
+    )
     .join('\n\n');
 }
 
@@ -94,7 +102,7 @@ async function searchBrave(query: string, apiKey: string, maxResults: number): P
   const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${maxResults}`;
   const response = await fetch(url, {
     headers: {
-      'Accept': 'application/json',
+      Accept: 'application/json',
       'X-Subscription-Token': apiKey,
     },
   });
@@ -108,6 +116,9 @@ async function searchBrave(query: string, apiKey: string, maxResults: number): P
   if (!results.length) return 'No results found.';
 
   return results
-    .map((r, i) => `${i + 1}. **${r.title ?? 'Untitled'}** — <${r.url ?? ''}>\n   ${r.description?.slice(0, 300) ?? ''}`)
+    .map(
+      (r, i) =>
+        `${i + 1}. **${r.title ?? 'Untitled'}** — <${r.url ?? ''}>\n   ${r.description?.slice(0, 300) ?? ''}`,
+    )
     .join('\n\n');
 }

@@ -24,18 +24,18 @@ function ssrfCheck(url: string): string | null {
     return 'Invalid URL.';
   }
 
-  const loopback   = ['localhost', '127.0.0.1', '::1', '0.0.0.0'];
-  const linkLocal  = '169.254.';
+  const loopback = ['localhost', '127.0.0.1', '::1', '0.0.0.0'];
+  const linkLocal = '169.254.';
   if (loopback.includes(hostname)) return `Blocked loopback host: ${hostname}`;
   if (hostname.startsWith(linkLocal)) return `Blocked link-local address: ${hostname}`;
 
   // Private IPv4 ranges
-  if (hostname.startsWith('10.'))    return `Blocked private range: ${hostname}`;
+  if (hostname.startsWith('10.')) return `Blocked private range: ${hostname}`;
   if (hostname.startsWith('192.168.')) return `Blocked private range: ${hostname}`;
   if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname)) return `Blocked private range: ${hostname}`;
 
   // Must look like a real domain (contains a dot, not pure digits/colons)
-  if (!hostname.includes('.'))  return `Blocked: hostname has no dot: ${hostname}`;
+  if (!hostname.includes('.')) return `Blocked: hostname has no dot: ${hostname}`;
   if (/^[\d.:]+$/.test(hostname)) return `Blocked: raw IP address not permitted: ${hostname}`;
 
   return null; // OK
@@ -72,17 +72,20 @@ export function makeWebFetchTool(): RegisteredTool {
         parameters: {
           type: 'object',
           properties: {
-            url:       { type: 'string',  description: 'URL to fetch (must be https:// or http://).' },
-            max_chars: { type: 'integer', description: 'Maximum characters of content to return. Defaults to 30000.' },
+            url: { type: 'string', description: 'URL to fetch (must be https:// or http://).' },
+            max_chars: {
+              type: 'integer',
+              description: 'Maximum characters of content to return. Defaults to 30000.',
+            },
           },
           required: ['url'],
           additionalProperties: false,
         },
       },
     },
-    permission: 'search',
+    permission: 'fetch',
     handler: async (args) => {
-      const url      = args['url']       as string;
+      const url = args['url'] as string;
       const maxChars = (args['max_chars'] as number | undefined) ?? 30000;
 
       const blocked = ssrfCheck(url);

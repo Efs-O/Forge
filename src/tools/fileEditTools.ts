@@ -25,9 +25,15 @@ export function makeReplaceInFileTool(): RegisteredTool {
         parameters: {
           type: 'object',
           properties: {
-            filepath: { type: 'string', description: 'File path (absolute or workspace-relative).' },
-            old_str:  { type: 'string', description: 'Exact string to find (whitespace-sensitive).' },
-            new_str:  { type: 'string', description: 'Replacement string.' },
+            filepath: {
+              type: 'string',
+              description: 'File path (absolute or workspace-relative).',
+            },
+            old_str: {
+              type: 'string',
+              description: 'Exact string to find (whitespace-sensitive).',
+            },
+            new_str: { type: 'string', description: 'Replacement string.' },
           },
           required: ['filepath', 'old_str', 'new_str'],
           additionalProperties: false,
@@ -35,10 +41,11 @@ export function makeReplaceInFileTool(): RegisteredTool {
       },
     },
     permission: 'write',
+    mutation: { paths: (args) => [args['filepath'] as string], showDiff: true },
     handler: async (args) => {
       const filepath = resolveWorkspacePath(args['filepath'] as string);
-      const oldStr   = args['old_str'] as string;
-      const newStr   = args['new_str'] as string;
+      const oldStr = args['old_str'] as string;
+      const newStr = args['new_str'] as string;
 
       let content: string;
       try {
@@ -71,7 +78,10 @@ export function makeCreateDirectoryTool(): RegisteredTool {
         parameters: {
           type: 'object',
           properties: {
-            path: { type: 'string', description: 'Directory path (absolute or workspace-relative).' },
+            path: {
+              type: 'string',
+              description: 'Directory path (absolute or workspace-relative).',
+            },
           },
           required: ['path'],
           additionalProperties: false,
@@ -79,8 +89,9 @@ export function makeCreateDirectoryTool(): RegisteredTool {
       },
     },
     permission: 'write',
+    mutation: { paths: (args) => [args['path'] as string] },
     handler: async (args) => {
-      const dirPath     = args['path'] as string;
+      const dirPath = args['path'] as string;
       const resolvedPath = resolveWorkspacePath(dirPath);
       fs.mkdirSync(resolvedPath, { recursive: true });
       return `Created: ${dirPath}`;
@@ -96,12 +107,19 @@ export function makeMoveFileTool(): RegisteredTool {
       type: 'function',
       function: {
         name: 'move_file',
-        description: 'Move or rename a file. Destination parent directories are created automatically.',
+        description:
+          'Move or rename a file. Destination parent directories are created automatically.',
         parameters: {
           type: 'object',
           properties: {
-            source:      { type: 'string', description: 'Source file path (absolute or workspace-relative).' },
-            destination: { type: 'string', description: 'Destination file path (absolute or workspace-relative).' },
+            source: {
+              type: 'string',
+              description: 'Source file path (absolute or workspace-relative).',
+            },
+            destination: {
+              type: 'string',
+              description: 'Destination file path (absolute or workspace-relative).',
+            },
           },
           required: ['source', 'destination'],
           additionalProperties: false,
@@ -109,6 +127,10 @@ export function makeMoveFileTool(): RegisteredTool {
       },
     },
     permission: 'write',
+    mutation: {
+      paths: (args) => [args['source'] as string, args['destination'] as string],
+      showDiff: true,
+    },
     handler: async (args) => {
       const src = resolveWorkspacePath(args['source'] as string);
       const dst = resolveWorkspacePath(args['destination'] as string);
@@ -127,12 +149,19 @@ export function makeDeleteFileTool(): RegisteredTool {
       type: 'function',
       function: {
         name: 'delete_file',
-        description: 'Delete a file or directory. Set recursive=true to delete a non-empty directory.',
+        description:
+          'Delete a file or directory. Set recursive=true to delete a non-empty directory.',
         parameters: {
           type: 'object',
           properties: {
-            path:      { type: 'string',  description: 'Path to delete (absolute or workspace-relative).' },
-            recursive: { type: 'boolean', description: 'If true, delete directory and all its contents. Default false.' },
+            path: {
+              type: 'string',
+              description: 'Path to delete (absolute or workspace-relative).',
+            },
+            recursive: {
+              type: 'boolean',
+              description: 'If true, delete directory and all its contents. Default false.',
+            },
           },
           required: ['path'],
           additionalProperties: false,
@@ -140,6 +169,7 @@ export function makeDeleteFileTool(): RegisteredTool {
       },
     },
     permission: 'delete',
+    mutation: { paths: (args) => [args['path'] as string], showDiff: true },
     handler: async (args) => {
       const filePath = args['path'] as string;
       const resolved = resolveWorkspacePath(filePath);
@@ -157,7 +187,8 @@ export function makeFormatFileTool(): RegisteredTool {
       type: 'function',
       function: {
         name: 'format_file',
-        description: 'Format a file using the VS Code document formatter (e.g. Prettier, ESLint fix, etc.).',
+        description:
+          'Format a file using the VS Code document formatter (e.g. Prettier, ESLint fix, etc.).',
         parameters: {
           type: 'object',
           properties: {
@@ -169,11 +200,14 @@ export function makeFormatFileTool(): RegisteredTool {
       },
     },
     permission: 'write',
+    mutation: { paths: (args) => [args['path'] as string], showDiff: true },
     handler: async (args) => {
-      const filePath    = args['path'] as string;
-      const uri         = vscode.Uri.file(resolveWorkspacePath(filePath));
-      const alreadyOpen = vscode.window.visibleTextEditors.some(e => e.document.uri.fsPath === uri.fsPath);
-      const doc         = await vscode.workspace.openTextDocument(uri);
+      const filePath = args['path'] as string;
+      const uri = vscode.Uri.file(resolveWorkspacePath(filePath));
+      const alreadyOpen = vscode.window.visibleTextEditors.some(
+        (e) => e.document.uri.fsPath === uri.fsPath,
+      );
+      const doc = await vscode.workspace.openTextDocument(uri);
       await vscode.window.showTextDocument(doc, { preview: false });
       await vscode.commands.executeCommand('editor.action.formatDocument');
       await doc.save();
@@ -193,14 +227,18 @@ export function makeRenameSymbolTool(): RegisteredTool {
       type: 'function',
       function: {
         name: 'rename_symbol',
-        description: 'Rename a symbol at the given position using the language server rename provider.',
+        description:
+          'Rename a symbol at the given position using the language server rename provider.',
         parameters: {
           type: 'object',
           properties: {
-            path:      { type: 'string',  description: 'File path (absolute or workspace-relative).' },
-            line:      { type: 'integer', description: 'Zero-based line number of the symbol.' },
-            character: { type: 'integer', description: 'Zero-based character offset of the symbol.' },
-            new_name:  { type: 'string',  description: 'New name for the symbol.' },
+            path: { type: 'string', description: 'File path (absolute or workspace-relative).' },
+            line: { type: 'integer', description: 'Zero-based line number of the symbol.' },
+            character: {
+              type: 'integer',
+              description: 'Zero-based character offset of the symbol.',
+            },
+            new_name: { type: 'string', description: 'New name for the symbol.' },
           },
           required: ['path', 'line', 'character', 'new_name'],
           additionalProperties: false,
@@ -208,10 +246,11 @@ export function makeRenameSymbolTool(): RegisteredTool {
       },
     },
     permission: 'write',
-    handler: async (args) => {
+    mutation: { paths: (args) => [args['path'] as string], showDiff: true },
+    handler: async (args, context) => {
       const filePath = args['path'] as string;
-      const newName  = args['new_name'] as string;
-      const uri      = vscode.Uri.file(resolveWorkspacePath(filePath));
+      const newName = args['new_name'] as string;
+      const uri = vscode.Uri.file(resolveWorkspacePath(filePath));
       const position = new vscode.Position(args['line'] as number, args['character'] as number);
 
       const edit = await vscode.commands.executeCommand<vscode.WorkspaceEdit>(
@@ -222,6 +261,7 @@ export function makeRenameSymbolTool(): RegisteredTool {
       );
 
       if (!edit) throw new Error('rename_symbol: no rename provider available for this file type');
+      context?.beforeMutate(edit.entries().map(([target]) => target.fsPath));
       const applied = await vscode.workspace.applyEdit(edit);
       if (!applied) throw new Error('rename_symbol: workspace edit was rejected');
       return `Renamed to ${newName}`;

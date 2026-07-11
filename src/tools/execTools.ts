@@ -29,7 +29,10 @@ export function makeRunTerminalTool(): RegisteredTool {
           type: 'object',
           properties: {
             command: { type: 'string', description: 'Shell command to paste.' },
-            cwd:     { type: 'string', description: 'Working directory (absolute or workspace-relative). Optional.' },
+            cwd: {
+              type: 'string',
+              description: 'Working directory (absolute or workspace-relative). Optional.',
+            },
           },
           required: ['command'],
           additionalProperties: false,
@@ -39,7 +42,7 @@ export function makeRunTerminalTool(): RegisteredTool {
     permission: 'terminal',
     handler: async (args) => {
       const command = args['command'] as string;
-      const cwd     = resolveExecCwd(args['cwd'] as string | undefined);
+      const cwd = resolveExecCwd(args['cwd'] as string | undefined);
 
       const denied = checkDenyList(command, [], getBuiltinDenyList());
       if (denied) {
@@ -72,9 +75,9 @@ export function makeExecCommandTool(): RegisteredTool {
         parameters: {
           type: 'object',
           properties: {
-            command:    { type: 'string',  description: 'Binary to run (no shell).' },
-            args:       { type: 'array',   items: { type: 'string' }, description: 'Arguments array.' },
-            cwd:        { type: 'string',  description: 'Working directory. Optional.' },
+            command: { type: 'string', description: 'Binary to run (no shell).' },
+            args: { type: 'array', items: { type: 'string' }, description: 'Arguments array.' },
+            cwd: { type: 'string', description: 'Working directory. Optional.' },
             timeout_ms: { type: 'integer', description: 'Timeout in ms. Default 30000.' },
           },
           required: ['command', 'args'],
@@ -82,11 +85,11 @@ export function makeExecCommandTool(): RegisteredTool {
         },
       },
     },
-    permission: 'terminal',
+    permission: 'headless',
     handler: async (args) => {
-      const command   = args['command'] as string;
-      const cmdArgs   = (args['args'] as string[]) ?? [];
-      const cwd       = resolveExecCwd(args['cwd'] as string | undefined);
+      const command = args['command'] as string;
+      const cmdArgs = (args['args'] as string[]) ?? [];
+      const cwd = resolveExecCwd(args['cwd'] as string | undefined);
       const timeoutMs = (args['timeout_ms'] as number | undefined) ?? 30_000;
 
       checkShellOperators(cmdArgs);
@@ -107,11 +110,15 @@ export function makeRunTestsTool(): RegisteredTool {
       type: 'function',
       function: {
         name: 'run_tests',
-        description: 'Run the project test suite. Auto-detects vitest, jest, or mocha via package.json.',
+        description:
+          'Run the project test suite. Auto-detects vitest, jest, or mocha via package.json.',
         parameters: {
           type: 'object',
           properties: {
-            pattern:  { type: 'string', description: 'File or test name pattern to filter. Optional.' },
+            pattern: {
+              type: 'string',
+              description: 'File or test name pattern to filter. Optional.',
+            },
             reporter: { type: 'string', description: 'Reporter name (e.g. verbose). Optional.' },
           },
           required: [],
@@ -119,16 +126,16 @@ export function makeRunTestsTool(): RegisteredTool {
         },
       },
     },
-    permission: 'terminal',
+    permission: 'headless',
     handler: async (args) => {
-      const root    = getWorkspaceRoot();
-      const runner  = detectTestRunner(root);
+      const root = getWorkspaceRoot();
+      const runner = detectTestRunner(root);
       const cmdArgs = [...runner.baseArgs];
 
-      const pattern  = args['pattern'] as string | undefined;
+      const pattern = args['pattern'] as string | undefined;
       const reporter = args['reporter'] as string | undefined;
 
-      if (pattern)  cmdArgs.push(pattern);
+      if (pattern) cmdArgs.push(pattern);
       if (reporter) cmdArgs.push('--reporter', reporter);
 
       guardExec(runner.command, cmdArgs);
@@ -147,7 +154,8 @@ export function makeRunBuildTool(): RegisteredTool {
       type: 'function',
       function: {
         name: 'run_build',
-        description: 'Run an npm script (default: "build"). Reads package.json to verify the script exists.',
+        description:
+          'Run an npm script (default: "build"). Reads package.json to verify the script exists.',
         parameters: {
           type: 'object',
           properties: {
@@ -158,9 +166,9 @@ export function makeRunBuildTool(): RegisteredTool {
         },
       },
     },
-    permission: 'terminal',
+    permission: 'headless',
     handler: async (args) => {
-      const root   = getWorkspaceRoot();
+      const root = getWorkspaceRoot();
       const script = (args['script'] as string | undefined) ?? 'build';
 
       // Verify script exists in package.json
@@ -186,7 +194,7 @@ export function makeRunBuildTool(): RegisteredTool {
       guardExec('npm', cmdArgs);
 
       const result = await spawnAndWait('npm', cmdArgs, root, 120_000);
-      const out    = result.stdout.slice(0, MAX_OUTPUT_CHARS);
+      const out = result.stdout.slice(0, MAX_OUTPUT_CHARS);
       let formatted = out;
       if (result.stderr) formatted += `\n[stderr]\n${result.stderr.slice(0, MAX_OUTPUT_CHARS)}`;
       formatted += `\n[exit code: ${result.exitCode ?? 'null'}]`;

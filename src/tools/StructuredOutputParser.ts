@@ -102,13 +102,11 @@ export class StructuredOutputStripper {
 }
 
 export function stripStructuredOutputFromFullText(text: string): string {
-  const withoutMarkers = text
-    .replace(OLLAMA_TOOL_CALL_RE, '')
-    .replace(OLLAMA_TOOL_WRAPPER_RE, '');
+  const withoutMarkers = text.replace(OLLAMA_TOOL_CALL_RE, '').replace(OLLAMA_TOOL_WRAPPER_RE, '');
 
-  return withoutMarkers.replace(JSON_FENCE_RE, (match, body: string) => (
-    parseJsonToolObject(body.trim()) ? '' : match
-  ));
+  return withoutMarkers.replace(JSON_FENCE_RE, (match, body: string) =>
+    parseJsonToolObject(body.trim()) ? '' : match,
+  );
 }
 
 function collectJsonFenceToolCalls(text: string, results: ParsedToolCall[]): void {
@@ -200,7 +198,9 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function findNextToolMarker(content: string): [number, (typeof OLLAMA_TOOL_MARKERS)[number]] | null {
+function findNextToolMarker(
+  content: string,
+): [number, (typeof OLLAMA_TOOL_MARKERS)[number]] | null {
   let best: [number, (typeof OLLAMA_TOOL_MARKERS)[number]] | null = null;
   for (const marker of OLLAMA_TOOL_MARKERS) {
     const pos = content.indexOf(marker);

@@ -3,8 +3,8 @@ import type { RegisteredTool } from './ToolRegistry';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const KEY_PREFIX  = 'forge.memory.';
-const KEYS_INDEX  = 'forge.memory.__keys__';
+const KEY_PREFIX = 'forge.memory.';
+const KEYS_INDEX = 'forge.memory.__keys__';
 
 // ── remember ──────────────────────────────────────────────────────────────────
 
@@ -18,7 +18,7 @@ export function makeRememberTool(state: vscode.Memento): RegisteredTool {
         parameters: {
           type: 'object',
           properties: {
-            key:   { type: 'string', description: 'Memory key (used to recall later).' },
+            key: { type: 'string', description: 'Memory key (used to recall later).' },
             value: { type: 'string', description: 'Value to store.' },
           },
           required: ['key', 'value'],
@@ -28,7 +28,7 @@ export function makeRememberTool(state: vscode.Memento): RegisteredTool {
     },
     permission: 'read', // non-destructive: no file/terminal side-effects
     handler: async (args) => {
-      const key   = args['key']   as string;
+      const key = args['key'] as string;
       const value = args['value'] as string;
 
       await state.update(KEY_PREFIX + key, value);

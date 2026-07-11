@@ -13,11 +13,16 @@ function resolveUri(p: string): vscode.Uri {
 
 function severityLabel(s: vscode.DiagnosticSeverity): string {
   switch (s) {
-    case vscode.DiagnosticSeverity.Error:       return 'error';
-    case vscode.DiagnosticSeverity.Warning:     return 'warning';
-    case vscode.DiagnosticSeverity.Information: return 'info';
-    case vscode.DiagnosticSeverity.Hint:        return 'hint';
-    default: return 'unknown';
+    case vscode.DiagnosticSeverity.Error:
+      return 'error';
+    case vscode.DiagnosticSeverity.Warning:
+      return 'warning';
+    case vscode.DiagnosticSeverity.Information:
+      return 'info';
+    case vscode.DiagnosticSeverity.Hint:
+      return 'hint';
+    default:
+      return 'unknown';
   }
 }
 
@@ -37,11 +42,16 @@ export function makeGetDiagnosticsTool(): RegisteredTool {
       type: 'function',
       function: {
         name: 'get_diagnostics',
-        description: 'Get language diagnostics (errors, warnings) for a file or the whole workspace.',
+        description:
+          'Get language diagnostics (errors, warnings) for a file or the whole workspace.',
         parameters: {
           type: 'object',
           properties: {
-            path: { type: 'string', description: 'File path (absolute or workspace-relative). Omit for all workspace diagnostics.' },
+            path: {
+              type: 'string',
+              description:
+                'File path (absolute or workspace-relative). Omit for all workspace diagnostics.',
+            },
           },
           required: [],
           additionalProperties: false,
@@ -63,7 +73,9 @@ export function makeGetDiagnosticsTool(): RegisteredTool {
       for (const [uri, diags] of pairs) {
         for (const d of diags) {
           const rel = vscode.workspace.asRelativePath(uri);
-          lines.push(`${rel}:${d.range.start.line + 1}: ${severityLabel(d.severity)}: ${d.message}`);
+          lines.push(
+            `${rel}:${d.range.start.line + 1}: ${severityLabel(d.severity)}: ${d.message}`,
+          );
         }
       }
       return lines.length ? lines.join('\n') : 'No diagnostics found.';
@@ -76,7 +88,9 @@ export function makeGetDiagnosticsTool(): RegisteredTool {
 function formatSymbolTree(symbols: vscode.DocumentSymbol[], indent = 0): string[] {
   const lines: string[] = [];
   for (const sym of symbols) {
-    lines.push(`${'  '.repeat(indent)}${symbolKindLabel(sym.kind)} ${sym.name} (line ${sym.range.start.line + 1})`);
+    lines.push(
+      `${'  '.repeat(indent)}${symbolKindLabel(sym.kind)} ${sym.name} (line ${sym.range.start.line + 1})`,
+    );
     if (sym.children?.length) {
       lines.push(...formatSymbolTree(sym.children, indent + 1));
     }
@@ -90,7 +104,8 @@ export function makeGetDocumentSymbolsTool(): RegisteredTool {
       type: 'function',
       function: {
         name: 'get_document_symbols',
-        description: 'List all symbols (functions, classes, variables, etc.) in a file as an indented tree.',
+        description:
+          'List all symbols (functions, classes, variables, etc.) in a file as an indented tree.',
         parameters: {
           type: 'object',
           properties: {
@@ -105,7 +120,8 @@ export function makeGetDocumentSymbolsTool(): RegisteredTool {
     handler: async (args) => {
       const uri = resolveUri(args['path'] as string);
       const result = await vscode.commands.executeCommand<vscode.DocumentSymbol[] | undefined>(
-        'vscode.executeDocumentSymbolProvider', uri,
+        'vscode.executeDocumentSymbolProvider',
+        uri,
       );
       if (!result?.length) return 'No symbols found.';
       return formatSymbolTree(result).join('\n');
@@ -136,11 +152,15 @@ export function makeGetWorkspaceSymbolsTool(): RegisteredTool {
     handler: async (args) => {
       const query = args['query'] as string;
       const result = await vscode.commands.executeCommand<vscode.SymbolInformation[] | undefined>(
-        'vscode.executeWorkspaceSymbolProvider', query,
+        'vscode.executeWorkspaceSymbolProvider',
+        query,
       );
       if (!result?.length) return 'No symbols found.';
       return result
-        .map((s) => `${symbolKindLabel(s.kind)} ${s.name} — ${vscode.workspace.asRelativePath(s.location.uri)}:${s.location.range.start.line + 1}`)
+        .map(
+          (s) =>
+            `${symbolKindLabel(s.kind)} ${s.name} — ${vscode.workspace.asRelativePath(s.location.uri)}:${s.location.range.start.line + 1}`,
+        )
         .join('\n');
     },
   };
@@ -158,8 +178,8 @@ export function makeGetHoverTool(): RegisteredTool {
         parameters: {
           type: 'object',
           properties: {
-            path:      { type: 'string',  description: 'File path (absolute or workspace-relative).' },
-            line:      { type: 'integer', description: 'Zero-based line number.' },
+            path: { type: 'string', description: 'File path (absolute or workspace-relative).' },
+            line: { type: 'integer', description: 'Zero-based line number.' },
             character: { type: 'integer', description: 'Zero-based character offset.' },
           },
           required: ['path', 'line', 'character'],
@@ -169,10 +189,12 @@ export function makeGetHoverTool(): RegisteredTool {
     },
     permission: 'read',
     handler: async (args) => {
-      const uri      = resolveUri(args['path'] as string);
+      const uri = resolveUri(args['path'] as string);
       const position = new vscode.Position(args['line'] as number, args['character'] as number);
-      const result   = await vscode.commands.executeCommand<vscode.Hover[] | undefined>(
-        'vscode.executeHoverProvider', uri, position,
+      const result = await vscode.commands.executeCommand<vscode.Hover[] | undefined>(
+        'vscode.executeHoverProvider',
+        uri,
+        position,
       );
       if (!result?.length) return 'No hover information available.';
       const parts: string[] = [];
@@ -202,8 +224,8 @@ export function makeGoToDefinitionTool(): RegisteredTool {
         parameters: {
           type: 'object',
           properties: {
-            path:      { type: 'string',  description: 'File path (absolute or workspace-relative).' },
-            line:      { type: 'integer', description: 'Zero-based line number.' },
+            path: { type: 'string', description: 'File path (absolute or workspace-relative).' },
+            line: { type: 'integer', description: 'Zero-based line number.' },
             character: { type: 'integer', description: 'Zero-based character offset.' },
           },
           required: ['path', 'line', 'character'],
@@ -213,10 +235,12 @@ export function makeGoToDefinitionTool(): RegisteredTool {
     },
     permission: 'read',
     handler: async (args) => {
-      const uri      = resolveUri(args['path'] as string);
+      const uri = resolveUri(args['path'] as string);
       const position = new vscode.Position(args['line'] as number, args['character'] as number);
-      const result   = await vscode.commands.executeCommand<vscode.Location[] | undefined>(
-        'vscode.executeDefinitionProvider', uri, position,
+      const result = await vscode.commands.executeCommand<vscode.Location[] | undefined>(
+        'vscode.executeDefinitionProvider',
+        uri,
+        position,
       );
       if (!result?.length) return 'No definition found.';
       return result.map(locationToString).join('\n');
@@ -236,8 +260,8 @@ export function makeFindReferencesTool(): RegisteredTool {
         parameters: {
           type: 'object',
           properties: {
-            path:      { type: 'string',  description: 'File path (absolute or workspace-relative).' },
-            line:      { type: 'integer', description: 'Zero-based line number.' },
+            path: { type: 'string', description: 'File path (absolute or workspace-relative).' },
+            line: { type: 'integer', description: 'Zero-based line number.' },
             character: { type: 'integer', description: 'Zero-based character offset.' },
           },
           required: ['path', 'line', 'character'],
@@ -247,10 +271,12 @@ export function makeFindReferencesTool(): RegisteredTool {
     },
     permission: 'read',
     handler: async (args) => {
-      const uri      = resolveUri(args['path'] as string);
+      const uri = resolveUri(args['path'] as string);
       const position = new vscode.Position(args['line'] as number, args['character'] as number);
-      const result   = await vscode.commands.executeCommand<vscode.Location[] | undefined>(
-        'vscode.executeReferenceProvider', uri, position,
+      const result = await vscode.commands.executeCommand<vscode.Location[] | undefined>(
+        'vscode.executeReferenceProvider',
+        uri,
+        position,
       );
       if (!result?.length) return 'No references found.';
       return result.slice(0, 50).map(locationToString).join('\n');

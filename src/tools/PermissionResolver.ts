@@ -1,0 +1,37 @@
+import type { ForgeConfig } from '../config/types';
+import type { ToolPermission } from './ToolRegistry';
+
+const ALL_PERMISSIONS: readonly ToolPermission[] = [
+  'read',
+  'write',
+  'delete',
+  'terminal',
+  'headless',
+  'search',
+  'fetch',
+  'git-read',
+  'git-write',
+];
+
+/**
+ * Resolve config switches into the exact capabilities exposed to the model.
+ * An omitted permissions block preserves pre-permissions Forge behavior.
+ * Once a group is present, its schema defaults and explicit values are
+ * authoritative for every capability in that group.
+ */
+export function resolveToolPermissions(config: ForgeConfig): Set<ToolPermission> {
+  const configured = config.permissions;
+  if (!configured) return new Set(ALL_PERMISSIONS);
+
+  const allowed = new Set<ToolPermission>();
+  if (configured.fs?.read ?? true) allowed.add('read');
+  if (configured.fs?.write ?? true) allowed.add('write');
+  if (configured.fs?.delete ?? false) allowed.add('delete');
+  if (configured.net?.search ?? false) allowed.add('search');
+  if (configured.net?.fetch ?? false) allowed.add('fetch');
+  if (configured.exec?.terminal ?? false) allowed.add('terminal');
+  if (configured.exec?.headless ?? false) allowed.add('headless');
+  if (configured.git?.read ?? true) allowed.add('git-read');
+  if (configured.git?.write ?? false) allowed.add('git-write');
+  return allowed;
+}

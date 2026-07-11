@@ -60,7 +60,15 @@ describe('ToolDispatch', () => {
   let post: ReturnType<typeof vi.fn>;
   let requestApproval: ReturnType<typeof vi.fn>;
   let dispatch: ToolDispatch;
-  const allowed = new Set(['read', 'write', 'delete', 'terminal', 'git'] as const);
+  const allowed = new Set([
+    'read',
+    'write',
+    'delete',
+    'terminal',
+    'headless',
+    'git-read',
+    'git-write',
+  ] as const);
 
   beforeEach(() => {
     toolRegistry = new ToolRegistry();
@@ -116,7 +124,8 @@ describe('ToolDispatch', () => {
       handler: vi.fn().mockResolvedValue('file contents'),
     });
 
-    const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> = [];
+    const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> =
+      [];
     const toolCalls = [makeToolCall('read_file', { path: 'test.txt' })];
 
     await dispatch.dispatch(toolCalls, allowed, messages as never);
@@ -138,15 +147,22 @@ describe('ToolDispatch', () => {
         },
       },
       permission: 'write',
+      mutation: { paths: (args) => [args['path'] as string], showDiff: true },
       handler: vi.fn().mockResolvedValue('written'),
     });
 
-    const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> = [];
+    const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> =
+      [];
     const toolCalls = [makeToolCall('write_file', { path: 'test.txt', content: 'hello' })];
 
     await dispatch.dispatch(toolCalls, allowed, messages as never);
 
-    expect(requestApproval).toHaveBeenCalledWith('write_file', expect.stringContaining('hello'), false, undefined);
+    expect(requestApproval).toHaveBeenCalledWith(
+      'write_file',
+      expect.stringContaining('hello'),
+      false,
+      undefined,
+    );
     expect(checkpoints.snapshotBefore).toHaveBeenCalled();
     expect(codeLens.markPending).toHaveBeenCalled();
   });
@@ -162,15 +178,22 @@ describe('ToolDispatch', () => {
         },
       },
       permission: 'delete',
+      mutation: { paths: (args) => [args['path'] as string], showDiff: true },
       handler: vi.fn().mockResolvedValue('deleted'),
     });
 
-    const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> = [];
+    const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> =
+      [];
     const toolCalls = [makeToolCall('delete_file', { path: 'test.txt' })];
 
     await dispatch.dispatch(toolCalls, allowed, messages as never);
 
-    expect(requestApproval).toHaveBeenCalledWith('delete_file', expect.any(String), false, undefined);
+    expect(requestApproval).toHaveBeenCalledWith(
+      'delete_file',
+      expect.any(String),
+      false,
+      undefined,
+    );
   });
 
   it('requests approval for terminal tools', async () => {
@@ -187,12 +210,18 @@ describe('ToolDispatch', () => {
       handler: vi.fn().mockResolvedValue('done'),
     });
 
-    const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> = [];
+    const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> =
+      [];
     const toolCalls = [makeToolCall('run_terminal', { command: 'echo hello' })];
 
     await dispatch.dispatch(toolCalls, allowed, messages as never);
 
-    expect(requestApproval).toHaveBeenCalledWith('run_terminal', expect.any(String), false, undefined);
+    expect(requestApproval).toHaveBeenCalledWith(
+      'run_terminal',
+      expect.any(String),
+      false,
+      undefined,
+    );
   });
 
   it('requests approval for git tools', async () => {
@@ -205,16 +234,22 @@ describe('ToolDispatch', () => {
           parameters: { type: 'object' },
         },
       },
-      permission: 'git',
+      permission: 'git-write',
       handler: vi.fn().mockResolvedValue('committed'),
     });
 
-    const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> = [];
+    const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> =
+      [];
     const toolCalls = [makeToolCall('git_commit', { message: 'test' })];
 
     await dispatch.dispatch(toolCalls, allowed, messages as never);
 
-    expect(requestApproval).toHaveBeenCalledWith('git_commit', expect.any(String), false, undefined);
+    expect(requestApproval).toHaveBeenCalledWith(
+      'git_commit',
+      expect.any(String),
+      false,
+      undefined,
+    );
   });
 
   it('flags delete_file with recursive=true as dangerous', async () => {
@@ -228,15 +263,22 @@ describe('ToolDispatch', () => {
         },
       },
       permission: 'delete',
+      mutation: { paths: (args) => [args['path'] as string], showDiff: true },
       handler: vi.fn().mockResolvedValue('deleted'),
     });
 
-    const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> = [];
+    const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> =
+      [];
     const toolCalls = [makeToolCall('delete_file', { path: 'src/', recursive: true })];
 
     await dispatch.dispatch(toolCalls, allowed, messages as never);
 
-    expect(requestApproval).toHaveBeenCalledWith('delete_file', expect.any(String), true, undefined);
+    expect(requestApproval).toHaveBeenCalledWith(
+      'delete_file',
+      expect.any(String),
+      true,
+      undefined,
+    );
   });
 
   it('skips execution when user declines approval', async () => {
@@ -250,12 +292,14 @@ describe('ToolDispatch', () => {
         },
       },
       permission: 'write',
+      mutation: { paths: (args) => [args['path'] as string], showDiff: true },
       handler: vi.fn().mockResolvedValue('written'),
     });
 
     requestApproval.mockResolvedValue(false);
 
-    const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> = [];
+    const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> =
+      [];
     const toolCalls = [makeToolCall('write_file', { path: 'test.txt', content: 'hello' })];
 
     await dispatch.dispatch(toolCalls, allowed, messages as never);
@@ -265,12 +309,15 @@ describe('ToolDispatch', () => {
   });
 
   it('handles malformed JSON arguments', async () => {
-    const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> = [];
-    const toolCalls: ToolCall[] = [{
-      id: 'call-bad',
-      type: 'function',
-      function: { name: 'read_file', arguments: 'not json' },
-    }];
+    const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> =
+      [];
+    const toolCalls: ToolCall[] = [
+      {
+        id: 'call-bad',
+        type: 'function',
+        function: { name: 'read_file', arguments: 'not json' },
+      },
+    ];
 
     await dispatch.dispatch(toolCalls, allowed, messages as never);
 
@@ -279,7 +326,8 @@ describe('ToolDispatch', () => {
   });
 
   it('handles unknown tools gracefully', async () => {
-    const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> = [];
+    const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> =
+      [];
     const toolCalls = [makeToolCall('unknown_tool', {})];
 
     await dispatch.dispatch(toolCalls, allowed, messages as never);
@@ -301,7 +349,8 @@ describe('ToolDispatch', () => {
       handler: vi.fn().mockRejectedValue(new Error('boom')),
     });
 
-    const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> = [];
+    const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> =
+      [];
     const toolCalls = [makeToolCall('broken_tool', {})];
 
     await dispatch.dispatch(toolCalls, allowed, messages as never);
@@ -324,7 +373,8 @@ describe('ToolDispatch', () => {
       handler: vi.fn().mockResolvedValue('contents'),
     });
 
-    const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> = [];
+    const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> =
+      [];
     const toolCalls = [
       makeToolCall('read_file', { path: 'a.txt' }),
       makeToolCall('read_file', { path: 'b.txt' }),
@@ -348,11 +398,18 @@ describe('ToolDispatch', () => {
         },
       },
       permission: 'write',
+      mutation: {
+        paths: (args) => [args['path'] as string, args['filepath'] as string],
+        showDiff: true,
+      },
       handler: vi.fn().mockResolvedValue('written'),
     });
 
-    const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> = [];
-    const toolCalls = [makeToolCall('write_file', { path: 'a.txt', filepath: 'b.txt', content: 'x' })];
+    const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> =
+      [];
+    const toolCalls = [
+      makeToolCall('write_file', { path: 'a.txt', filepath: 'b.txt', content: 'x' }),
+    ];
 
     await dispatch.dispatch(toolCalls, allowed, messages as never);
 
@@ -373,14 +430,17 @@ describe('ToolDispatch', () => {
       handler: vi.fn().mockResolvedValue('file contents here'),
     });
 
-    const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> = [];
+    const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> =
+      [];
     const toolCalls = [makeToolCall('read_file', { path: 'test.txt' })];
 
     await dispatch.dispatch(toolCalls, allowed, messages as never);
 
-    expect(post).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'token',
-      text: expect.stringContaining('read_file'),
-    }));
+    expect(post).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'token',
+        text: expect.stringContaining('read_file'),
+      }),
+    );
   });
 });

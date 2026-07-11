@@ -5,12 +5,10 @@ import type { ChatCompletionRequest } from '../llm/types';
  * Used as a fallback when a model fails tool calls repeatedly.
  */
 export function stripTools(request: ChatCompletionRequest): ChatCompletionRequest {
-  const {
-    tools: _tools,
-    tool_choice: _tc,
-    ...rest
-  } = request as ChatCompletionRequest & { tools?: unknown; tool_choice?: unknown };
-  return rest as ChatCompletionRequest;
+  const stripped: ChatCompletionRequest & { tool_choice?: unknown } = { ...request };
+  delete stripped.tools;
+  delete stripped.tool_choice;
+  return stripped;
 }
 
 /**
