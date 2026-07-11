@@ -3,6 +3,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { ToolRegistry, RegisteredTool } from './ToolRegistry';
 import type { McpServerConfig } from '../config/types';
+import { DEFAULT_MAX_RESULT_CHARS, capResultText } from './resultCap';
 
 /** Minimal logging surface — matches util/logger's Logger so callers can pass getLogger() directly. */
 export interface McpBridgeLogger {
@@ -22,20 +23,6 @@ export interface McpToolListing {
 export interface McpCallToolResult {
   content?: Array<{ type: string; text?: string }>;
   isError?: boolean;
-}
-
-/**
- * Default cap on a tool result fed back into the conversation. MCP servers can
- * return arbitrarily large payloads (whole profiles, documents); uncapped they
- * blow past the per-slot context window of a local model and llama-server
- * rejects the next request outright.
- */
-export const DEFAULT_MAX_RESULT_CHARS = 24000;
-
-/** Truncates oversized tool output, appending a visible marker so the model knows. */
-export function capResultText(text: string, maxChars: number): string {
-  if (text.length <= maxChars) return text;
-  return `${text.slice(0, maxChars)}\n\n[truncated by Forge MCP bridge — showing ${maxChars} of ${text.length} chars]`;
 }
 
 /** Joins every text content part (in order) with newlines; ignores non-text parts. */

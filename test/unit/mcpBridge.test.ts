@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  capResultText,
-  extractTextContent,
-  mcpToolToRegisteredTool,
-  DEFAULT_MAX_RESULT_CHARS,
-} from '../../src/tools/mcpBridge';
+import { extractTextContent, mcpToolToRegisteredTool } from '../../src/tools/mcpBridge';
 
 describe('extractTextContent', () => {
   it('joins text parts with newlines and ignores non-text parts', () => {
@@ -91,19 +86,5 @@ describe('mcpToolToRegisteredTool', () => {
     expect(out).toBe(
       `${'a'.repeat(10)}\n\n[truncated by Forge MCP bridge — showing 10 of 50 chars]`,
     );
-  });
-});
-
-describe('capResultText', () => {
-  it('returns short text unchanged', () => {
-    expect(capResultText('hello', 10)).toBe('hello');
-  });
-
-  it('returns text exactly at the cap unchanged', () => {
-    expect(capResultText('a'.repeat(10), 10)).toBe('a'.repeat(10));
-  });
-
-  it('has a sane default cap', () => {
-    expect(DEFAULT_MAX_RESULT_CHARS).toBe(24000);
   });
 });

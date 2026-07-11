@@ -87,6 +87,7 @@ overlaps with an existing owner, extend the owner instead.
 | Tool call JSON-fence fallback converter    | `src/tools/ToolCallFallback.ts`        |
 | Semantic codebase search tool              | `src/tools/semanticSearchTool.ts`      |
 | MCP client bridge (external MCP servers)   | `src/tools/mcpBridge.ts`               |
+| Tool-result size capping                   | `src/tools/resultCap.ts`               |
 
 ## Semantic Search
 
