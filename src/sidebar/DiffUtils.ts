@@ -21,7 +21,7 @@ export const MAX_LINES = 500;
  */
 export function computeDiff(before: string, after: string): DiffHunk[] | null {
   const a = before === '' ? [] : before.split('\n');
-  const b = after  === '' ? [] : after.split('\n');
+  const b = after === '' ? [] : after.split('\n');
 
   if (a.length > MAX_LINES || b.length > MAX_LINES) return null;
 
@@ -32,23 +32,26 @@ export function computeDiff(before: string, after: string): DiffHunk[] | null {
   const dp: Uint32Array[] = Array.from({ length: m + 1 }, () => new Uint32Array(n + 1));
   for (let i = m - 1; i >= 0; i--) {
     for (let j = n - 1; j >= 0; j--) {
-      dp[i][j] = a[i] === b[j]
-        ? 1 + dp[i + 1][j + 1]
-        : Math.max(dp[i + 1][j], dp[i][j + 1]);
+      dp[i][j] = a[i] === b[j] ? 1 + dp[i + 1][j + 1] : Math.max(dp[i + 1][j], dp[i][j + 1]);
     }
   }
 
   // Backtrack to produce a flat edit list
   type Edit = { kind: 'eq' | 'add' | 'del'; ai: number; bi: number; text: string };
   const edits: Edit[] = [];
-  let i = 0, j = 0;
+  let i = 0,
+    j = 0;
   while (i < m || j < n) {
     if (i < m && j < n && a[i] === b[j]) {
-      edits.push({ kind: 'eq',  ai: i, bi: j, text: a[i] }); i++; j++;
+      edits.push({ kind: 'eq', ai: i, bi: j, text: a[i] });
+      i++;
+      j++;
     } else if (j < n && (i >= m || dp[i][j + 1] >= dp[i + 1][j])) {
-      edits.push({ kind: 'add', ai: i, bi: j, text: b[j] }); j++;
+      edits.push({ kind: 'add', ai: i, bi: j, text: b[j] });
+      j++;
     } else {
-      edits.push({ kind: 'del', ai: i, bi: j, text: a[i] }); i++;
+      edits.push({ kind: 'del', ai: i, bi: j, text: a[i] });
+      i++;
     }
   }
 
@@ -66,14 +69,17 @@ export function computeDiff(before: string, after: string): DiffHunk[] | null {
   const hunks: DiffHunk[] = [];
   let k = 0;
   while (k < edits.length) {
-    if (!inHunk[k]) { k++; continue; }
+    if (!inHunk[k]) {
+      k++;
+      continue;
+    }
     const start = k;
     while (k < edits.length && inHunk[k]) k++;
     const chunk = edits.slice(start, k);
     hunks.push({
       oldStart: chunk[0].ai + 1,
       newStart: chunk[0].bi + 1,
-      lines: chunk.map(e => ({
+      lines: chunk.map((e) => ({
         kind: e.kind === 'eq' ? 'context' : e.kind === 'add' ? 'added' : 'removed',
         text: e.text,
       })),
@@ -100,7 +106,7 @@ export function parseUnifiedDiff(patch: string): DiffHunk[] {
     }
     if (!hunk) continue;
     if (line.startsWith('+') && !line.startsWith('+++')) {
-      hunk.lines.push({ kind: 'added',   text: line.slice(1) });
+      hunk.lines.push({ kind: 'added', text: line.slice(1) });
     } else if (line.startsWith('-') && !line.startsWith('---')) {
       hunk.lines.push({ kind: 'removed', text: line.slice(1) });
     } else if (line.startsWith(' ')) {
