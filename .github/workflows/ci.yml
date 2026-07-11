@@ -23,14 +23,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Type-check (extension)
-        run: npx tsc --noEmit
-
-      - name: Type-check (webview)
-        run: npx tsc -p webview-ui/tsconfig.json --noEmit
-
-      - name: Tests
-        run: npx vitest run
+      - name: Quality gates
+        run: npm run ci
 
       - name: Release build + package
         run: npm run package

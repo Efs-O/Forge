@@ -108,6 +108,10 @@
         "title": "Forge: Pick GGUF Model File"
       },
       {
+        "command": "forge.addModel",
+        "title": "Forge: Add Models"
+      },
+      {
         "command": "forge.clearChat",
         "title": "Forge: Clear Active Chat"
       },
@@ -333,15 +337,15 @@
     "build:release": "node esbuild.config.mjs --all --release",
     "watch": "node esbuild.config.mjs --watch",
     "type-check": "tsc --noEmit && tsc -p webview-ui/tsconfig.json --noEmit",
-    "lint": "eslint src webview-ui --ext .ts",
-    "lint:fix": "eslint src webview-ui --ext .ts --fix",
+    "lint": "eslint src webview-ui --ext .ts,.tsx",
+    "lint:fix": "eslint src webview-ui --ext .ts,.tsx --fix",
     "test": "vitest run",
     "test:local-tools": "node scripts/test-local-tools.mjs",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "package": "npm run build:release && vsce package --no-dependencies",
     "publish": "npm run build:release && vsce publish --no-dependencies",
-    "ci": "npm run type-check && npm run lint && npm run test:coverage && npm run build"
+    "ci": "npm run type-check && npm run lint && npm test && npm run build"
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",

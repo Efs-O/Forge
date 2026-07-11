@@ -2,9 +2,7 @@ node_modules/
 dist/
 *.vsix
 coverage/
-.forge/*
-!.forge/
-!.forge/config.yaml
+.forge/
 *.log
 .DS_Store
 Thumbs.db
