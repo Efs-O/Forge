@@ -9,7 +9,8 @@ export type ToolPermission =
   | 'search'
   | 'fetch'
   | 'git-read'
-  | 'git-write';
+  | 'git-write'
+  | 'delegate';
 
 export interface ToolHandler {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- tool args are schema-validated at call site

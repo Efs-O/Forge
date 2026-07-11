@@ -41,4 +41,17 @@ describe('resolveToolPermissions', () => {
     );
     expect([...allowed]).toEqual(['delete', 'search', 'terminal', 'git-write']);
   });
+
+  it('never grants delegate via the legacy fallback or group defaults', () => {
+    expect(resolveToolPermissions(configWith()).has('delegate')).toBe(false);
+    expect(resolveToolPermissions(configWith({})).has('delegate')).toBe(false);
+    expect(resolveToolPermissions(configWith({ agents: {} })).has('delegate')).toBe(false);
+  });
+
+  it('grants delegate only on an explicit agents.delegate: true', () => {
+    const allowed = resolveToolPermissions(configWith({ agents: { delegate: true } }));
+    expect(allowed.has('delegate')).toBe(true);
+    // delegation opt-in must not widen any other group past its defaults
+    expect([...allowed]).toEqual(['read', 'write', 'git-read', 'delegate']);
+  });
 });

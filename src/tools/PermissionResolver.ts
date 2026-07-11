@@ -1,7 +1,10 @@
 import type { ForgeConfig } from '../config/types';
 import type { ToolPermission } from './ToolRegistry';
 
-const ALL_PERMISSIONS: readonly ToolPermission[] = [
+// Pre-permissions legacy surface for configs with no permissions block.
+// 'delegate' is deliberately absent: delegation is opt-in even for legacy
+// configs and is only granted via an explicit agents.delegate: true.
+const LEGACY_PERMISSIONS: readonly ToolPermission[] = [
   'read',
   'write',
   'delete',
@@ -21,7 +24,7 @@ const ALL_PERMISSIONS: readonly ToolPermission[] = [
  */
 export function resolveToolPermissions(config: ForgeConfig): Set<ToolPermission> {
   const configured = config.permissions;
-  if (!configured) return new Set(ALL_PERMISSIONS);
+  if (!configured) return new Set(LEGACY_PERMISSIONS);
 
   const allowed = new Set<ToolPermission>();
   if (configured.fs?.read ?? true) allowed.add('read');
@@ -33,5 +36,6 @@ export function resolveToolPermissions(config: ForgeConfig): Set<ToolPermission>
   if (configured.exec?.headless ?? false) allowed.add('headless');
   if (configured.git?.read ?? true) allowed.add('git-read');
   if (configured.git?.write ?? false) allowed.add('git-write');
+  if (configured.agents?.delegate ?? false) allowed.add('delegate');
   return allowed;
 }

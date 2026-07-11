@@ -181,6 +181,11 @@ const PermissionsSchema = z
         write: z.boolean().default(false),
       })
       .optional(),
+    agents: z
+      .object({
+        delegate: z.boolean().default(false),
+      })
+      .optional(),
   })
   .optional();
 

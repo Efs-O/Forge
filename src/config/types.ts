@@ -190,6 +190,7 @@ export interface ForgeConfig {
     net?: { search?: boolean; fetch?: boolean };
     exec?: { terminal?: boolean; headless?: boolean };
     git?: { read?: boolean; write?: boolean };
+    agents?: { delegate?: boolean };
   };
   /** Execution sandbox settings. */
   exec?: {
