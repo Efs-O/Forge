@@ -1,0 +1,16 @@
+# Forge starter config — Ollama
+# Replace the model tag with one shown by `ollama list`, then validate.
+
+active_model: qwen3.5:9b
+
+models:
+  - name: qwen3.5:9b
+    provider: ollama
+    endpoint: http://127.0.0.1:11434
+    num_ctx: 32768
+
+permissions:
+  fs: { read: true, write: true, delete: false }
+  net: { search: false, fetch: false }
+  exec: { terminal: false, headless: false }
+  git: { read: true, write: false }

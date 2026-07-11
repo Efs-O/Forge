@@ -1,0 +1,18 @@
+# Forge starter config — OpenAI-compatible provider
+# Replace the endpoint and model name. Store the token with
+# "Forge: Set Cloud Provider Token" using the secret name below.
+
+active_model: provider-model-name
+
+models:
+  - name: provider-model-name
+    provider: openai-compatible
+    endpoint: https://REPLACE-WITH-PROVIDER-ENDPOINT.example.com
+    api_key_secret: my-provider
+    capabilities: [tool-call]
+
+permissions:
+  fs: { read: true, write: true, delete: false }
+  net: { search: false, fetch: false }
+  exec: { terminal: false, headless: false }
+  git: { read: true, write: false }

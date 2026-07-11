@@ -79,17 +79,19 @@ export function slimPersistMessages(messages: ChatMessage[]): SlimPersistMessage
     .map((m) => ({
       role: m.role as 'user' | 'assistant',
       content: m.content as string,
-      ...(typeof m.reasoning === 'string' && m.reasoning.length > 0 ? { reasoning: m.reasoning } : {}),
+      ...(typeof m.reasoning === 'string' && m.reasoning.length > 0
+        ? { reasoning: m.reasoning }
+        : {}),
     }));
 }
 
-export function chatMessagesFromSlim(
-  slim: SlimPersistMessage[],
-): ChatMessage[] {
+export function chatMessagesFromSlim(slim: SlimPersistMessage[]): ChatMessage[] {
   return slim.map((m) => ({
     role: m.role,
     content: m.content,
-    ...(typeof m.reasoning === 'string' && m.reasoning.length > 0 ? { reasoning: m.reasoning } : {}),
+    ...(typeof m.reasoning === 'string' && m.reasoning.length > 0
+      ? { reasoning: m.reasoning }
+      : {}),
   }));
 }
 
@@ -212,10 +214,7 @@ export function loadSidebarSession(workspaceState: Memento): SidebarRuntime {
     let activeId = d.activeConversationId;
     if (!activeOk) activeId = d.conversations[0].id;
 
-    void workspaceState.update(
-      HISTORY_KEY_LEGACY,
-      undefined as unknown as string,
-    );
+    void workspaceState.update(HISTORY_KEY_LEGACY, undefined as unknown as string);
     return {
       activeConversationId: activeId,
       conversations: d.conversations.map(persistedToRuntime),
@@ -235,15 +234,15 @@ export function loadSidebarSession(workspaceState: Memento): SidebarRuntime {
   return createDefaultSession();
 }
 
-export function saveSidebarSession(
-  workspaceState: Memento,
-  session: SidebarRuntime,
-): void {
+export function saveSidebarSession(workspaceState: Memento, session: SidebarRuntime): void {
   void workspaceState.update(SESSION_KEY_V1, runtimeToPersisted(session));
 }
 
 /** Tab list + transcripts for authoritative webview sync. */
-export function tabMetasFromSession(session: SidebarRuntime, streamingIds?: ReadonlySet<string>): SessionTabMeta[] {
+export function tabMetasFromSession(
+  session: SidebarRuntime,
+  streamingIds?: ReadonlySet<string>,
+): SessionTabMeta[] {
   return session.conversations.map((c) => {
     const slim = slimPersistMessages(c.messages);
     return {
@@ -276,9 +275,7 @@ export function historyMetasFromSession(session: SidebarRuntime): SessionHistory
     });
 }
 
-export function slimMessagesById(
-  session: SidebarRuntime,
-): Record<string, SlimPersistMessage[]> {
+export function slimMessagesById(session: SidebarRuntime): Record<string, SlimPersistMessage[]> {
   const out: Record<string, SlimPersistMessage[]> = {};
   for (const c of session.conversations) {
     out[c.id] = slimPersistMessages(c.messages);

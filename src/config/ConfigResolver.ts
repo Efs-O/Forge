@@ -81,7 +81,11 @@ function withDefined(base: ModelConfig, overrides: Record<string, unknown>): Mod
  * Spawn-time facts pass through from the base untouched. Throws on unknown
  * base or unknown profile.
  */
-export function resolveRequestModel(config: ForgeConfig, id: string, log?: (msg: string) => void): ModelConfig {
+export function resolveRequestModel(
+  config: ForgeConfig,
+  id: string,
+  log?: (msg: string) => void,
+): ModelConfig {
   const expanded = expandAlias(config, id, log);
   const { base, profile } = splitModelProfile(expanded);
   const model = findBase(config, base);
@@ -104,7 +108,11 @@ export function resolveRequestModel(config: ForgeConfig, id: string, log?: (msg:
     think: pick(d.think, model.think, p.think),
     reasoning_effort: pick(d.reasoning_effort, model.reasoning_effort, p.reasoning_effort),
     strip_tools: pick(d.strip_tools, model.strip_tools, p.strip_tools),
-    strip_thinking_channels: pick(d.strip_thinking_channels, model.strip_thinking_channels, p.strip_thinking_channels),
+    strip_thinking_channels: pick(
+      d.strip_thinking_channels,
+      model.strip_thinking_channels,
+      p.strip_thinking_channels,
+    ),
     capabilities: pick(d.capabilities, model.capabilities, p.capabilities),
   });
 }
@@ -114,7 +122,11 @@ export function resolveRequestModel(config: ForgeConfig, id: string, log?: (msg:
  * Output is a flat `ModelConfig` (num_ctx/n_parallel/type_k/…), so
  * `LlamaServerArgs` is unchanged. Throws on unknown base / unknown spawn profile.
  */
-export function resolveSpawnModel(config: ForgeConfig, base: string, spawnProfile?: string): ModelConfig {
+export function resolveSpawnModel(
+  config: ForgeConfig,
+  base: string,
+  spawnProfile?: string,
+): ModelConfig {
   const model = findBase(config, base);
   const spawn: SpawnConfig = model.spawn ?? {};
   let sp: SpawnConfig = {};
@@ -136,7 +148,11 @@ export function resolveSpawnModel(config: ForgeConfig, base: string, spawnProfil
     type_v: pick(model.type_v, spawn.type_v, sp.type_v),
     flash_attn: pick(model.flash_attn, spawn.flash_attn, sp.flash_attn),
     n_gpu_layers: pick(model.n_gpu_layers, spawn.n_gpu_layers, sp.n_gpu_layers),
-    extra_llama_server_args: pick(model.extra_llama_server_args, spawn.extra_llama_server_args, sp.extra_llama_server_args),
+    extra_llama_server_args: pick(
+      model.extra_llama_server_args,
+      spawn.extra_llama_server_args,
+      sp.extra_llama_server_args,
+    ),
   });
 }
 

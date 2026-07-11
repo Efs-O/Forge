@@ -36,29 +36,97 @@ export type ForgeSlashCommandId =
 
 // ── Host → Webview ────────────────────────────────────────────────────────────
 
-export interface TokenMsg          { type: 'token';              text: string;        conversationId?: string }
-export interface ReasoningTokenMsg { type: 'reasoningToken';     text: string;        conversationId?: string }
-export interface DoneMsg           { type: 'done';               finishReason: string | null; conversationId?: string }
-export interface ErrorMsg          { type: 'error';              message: string;     conversationId?: string }
-export interface ReadyMsg          { type: 'ready';                                   conversationId?: string }
-export interface BackendStartingMsg { type: 'backendStarting';   message: string;     conversationId?: string }
-export interface BackendDownMsg    { type: 'backendDown';        message: string;     conversationId?: string }
-export interface ModelEntry        { name: string; provider: string }
-export interface ModelsMsg         { type: 'models';             models: ModelEntry[]; active: string | null }
-export interface CheckpointReadyMsg   { type: 'checkpointReady';                     conversationId?: string }
-export interface CheckpointDismissedMsg { type: 'checkpointDismissed';               conversationId?: string }
+export interface TokenMsg {
+  type: 'token';
+  text: string;
+  conversationId?: string;
+}
+export interface ReasoningTokenMsg {
+  type: 'reasoningToken';
+  text: string;
+  conversationId?: string;
+}
+export interface DoneMsg {
+  type: 'done';
+  finishReason: string | null;
+  conversationId?: string;
+}
+export interface ErrorMsg {
+  type: 'error';
+  message: string;
+  conversationId?: string;
+}
+export interface ReadyMsg {
+  type: 'ready';
+  conversationId?: string;
+}
+export interface BackendStartingMsg {
+  type: 'backendStarting';
+  message: string;
+  conversationId?: string;
+}
+export interface BackendDownMsg {
+  type: 'backendDown';
+  message: string;
+  conversationId?: string;
+}
+export interface ModelEntry {
+  name: string;
+  provider: string;
+}
+export interface ModelsMsg {
+  type: 'models';
+  models: ModelEntry[];
+  active: string | null;
+}
+export interface CheckpointReadyMsg {
+  type: 'checkpointReady';
+  conversationId?: string;
+}
+export interface CheckpointDismissedMsg {
+  type: 'checkpointDismissed';
+  conversationId?: string;
+}
 /** @deprecated Prefer sessionSync — kept for compat with stale webviews. */
-export interface NewChatMsg        { type: 'newChat' }
+export interface NewChatMsg {
+  type: 'newChat';
+}
 
-export interface ConfirmRequestMsg   { type: 'confirmRequest'; id: string; toolName: string; detail: string; isDangerous?: boolean; conversationId?: string }
-export interface ToolActivityMsg     { type: 'toolActivity';   toolName: string; detail?: string;             conversationId?: string }
-export interface TokenBudgetMsg      { type: 'tokenBudget'; used: number; max: number }
+export interface ConfirmRequestMsg {
+  type: 'confirmRequest';
+  id: string;
+  toolName: string;
+  detail: string;
+  isDangerous?: boolean;
+  conversationId?: string;
+}
+export interface ToolActivityMsg {
+  type: 'toolActivity';
+  toolName: string;
+  detail?: string;
+  conversationId?: string;
+}
+export interface TokenBudgetMsg {
+  type: 'tokenBudget';
+  used: number;
+  max: number;
+}
 
 export type DiffLineKind = 'context' | 'added' | 'removed';
-export interface DiffLine  { kind: DiffLineKind; text: string }
-export interface DiffHunk  { oldStart: number; newStart: number; lines: DiffLine[] }
+export interface DiffLine {
+  kind: DiffLineKind;
+  text: string;
+}
+export interface DiffHunk {
+  oldStart: number;
+  newStart: number;
+  lines: DiffLine[];
+}
 
-export interface ClankerChangedMsg   { type: 'clankerChanged'; enabled: boolean }
+export interface ClankerChangedMsg {
+  type: 'clankerChanged';
+  enabled: boolean;
+}
 
 export interface FileDiffMsg {
   type: 'fileDiff';
@@ -69,11 +137,21 @@ export interface FileDiffMsg {
   conversationId?: string;
 }
 
-export interface SetInputMsg         { type: 'setInput'; text: string }
+export interface SetInputMsg {
+  type: 'setInput';
+  text: string;
+}
 /** @deprecated Replaced by sessionSync on load. */
-export interface HistoryRestoreMsg   { type: 'historyRestore'; messages: Array<{ role: 'user' | 'assistant'; content: string }> }
-export interface ThreadStreamStateChangedMsg { type: 'thread-stream-state-changed' }
-export interface ThreadReadStateChangedMsg   { type: 'thread-read-state-changed' }
+export interface HistoryRestoreMsg {
+  type: 'historyRestore';
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+}
+export interface ThreadStreamStateChangedMsg {
+  type: 'thread-stream-state-changed';
+}
+export interface ThreadReadStateChangedMsg {
+  type: 'thread-read-state-changed';
+}
 
 /** Authoritative multi-tab state (tabs + transcripts). */
 export interface SessionSyncMsg {
@@ -81,7 +159,10 @@ export interface SessionSyncMsg {
   activeId: string;
   tabs: SessionTabMeta[];
   history: SessionHistoryMeta[];
-  messagesById: Record<string, Array<{ role: 'user' | 'assistant'; content: string; reasoning?: string | undefined }>>;
+  messagesById: Record<
+    string,
+    Array<{ role: 'user' | 'assistant'; content: string; reasoning?: string | undefined }>
+  >;
 }
 
 export type HostToWebview =
@@ -117,23 +198,61 @@ export interface AttachmentData {
   data: string;
 }
 
-export interface SendMsg           { type: 'send'; text: string; attachments?: AttachmentData[] }
-export interface CancelMsg         { type: 'cancel' }
-export interface SwitchModelMsg    { type: 'switchModel';      name: string | null }
-export interface WebviewReadyMsg   { type: 'webviewReady' }
-export interface UndoMsg           { type: 'undo' }
-export interface KeepMsg           { type: 'keep' }
+export interface SendMsg {
+  type: 'send';
+  text: string;
+  attachments?: AttachmentData[];
+}
+export interface CancelMsg {
+  type: 'cancel';
+}
+export interface SwitchModelMsg {
+  type: 'switchModel';
+  name: string | null;
+}
+export interface WebviewReadyMsg {
+  type: 'webviewReady';
+}
+export interface UndoMsg {
+  type: 'undo';
+}
+export interface KeepMsg {
+  type: 'keep';
+}
 /** @deprecated Maps to newConversation on host. */
-export interface NewChatRequestMsg { type: 'newChat' }
-export interface NewConversationMsg { type: 'newConversation' }
-export interface SwitchConversationMsg { type: 'switchConversation'; id: string }
-export interface CloseConversationMsg { type: 'closeConversation'; id: string }
-export interface RestoreConversationMsg { type: 'restoreConversation'; id: string }
+export interface NewChatRequestMsg {
+  type: 'newChat';
+}
+export interface NewConversationMsg {
+  type: 'newConversation';
+}
+export interface SwitchConversationMsg {
+  type: 'switchConversation';
+  id: string;
+}
+export interface CloseConversationMsg {
+  type: 'closeConversation';
+  id: string;
+}
+export interface RestoreConversationMsg {
+  type: 'restoreConversation';
+  id: string;
+}
 
 // v0.2+ additions
-export interface ConfirmResponseMsg { type: 'confirmResponse'; id: string; approved: boolean }
-export interface RunSlashCommandMsg { type: 'runSlashCommand'; commandId: ForgeSlashCommandId }
-export interface OpenFileMsg       { type: 'openFile'; path: string }
+export interface ConfirmResponseMsg {
+  type: 'confirmResponse';
+  id: string;
+  approved: boolean;
+}
+export interface RunSlashCommandMsg {
+  type: 'runSlashCommand';
+  commandId: ForgeSlashCommandId;
+}
+export interface OpenFileMsg {
+  type: 'openFile';
+  path: string;
+}
 
 export type WebviewToHost =
   | SendMsg

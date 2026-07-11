@@ -14,7 +14,7 @@ export function loadConfig(storagePath: string): ForgeConfig {
   if (!fs.existsSync(filePath)) {
     throw new Error(
       `Forge: config.yaml not found at ${filePath}.\n` +
-      `Create .forge/config.yaml in your workspace or use the setup wizard to generate one.`,
+        `Create .forge/config.yaml in your workspace or use the setup wizard to generate one.`,
     );
   }
 
@@ -64,11 +64,15 @@ export function loadConfig(storagePath: string): ForgeConfig {
       throw new Error(`Forge: alias "${key}" → "${target}" targets unknown model "${base}"`);
     }
     if (profile && !profileNames.has(profile)) {
-      throw new Error(`Forge: alias "${key}" → "${target}" references unknown profile "${profile}"`);
+      throw new Error(
+        `Forge: alias "${key}" → "${target}" references unknown profile "${profile}"`,
+      );
     }
   }
 
-  config.models = config.models.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  config.models = config.models.sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
+  );
   return config;
 }
 
@@ -83,7 +87,9 @@ export function resolveExplicitConfigPath(raw: string): string | null {
   if (!fs.existsSync(normalized)) return null;
   const stat = fs.statSync(normalized);
   if (stat.isFile()) {
-    return path.basename(normalized).toLowerCase() === CONFIG_FILENAME.toLowerCase() ? normalized : null;
+    return path.basename(normalized).toLowerCase() === CONFIG_FILENAME.toLowerCase()
+      ? normalized
+      : null;
   }
   if (stat.isDirectory()) {
     const candidate = path.join(normalized, CONFIG_FILENAME);
@@ -96,8 +102,13 @@ export function resolveExplicitConfigPath(raw: string): string | null {
  * Find config.yaml: optional absolute override (settings), then workspace .forge/, then global storage.
  * Returns the path if found, null otherwise.
  */
-export function findConfigPath(globalStoragePath: string, explicitConfigPathSetting?: string | null): string | null {
-  const fromSetting = explicitConfigPathSetting ? resolveExplicitConfigPath(explicitConfigPathSetting) : null;
+export function findConfigPath(
+  globalStoragePath: string,
+  explicitConfigPathSetting?: string | null,
+): string | null {
+  const fromSetting = explicitConfigPathSetting
+    ? resolveExplicitConfigPath(explicitConfigPathSetting)
+    : null;
   if (fromSetting) return fromSetting;
 
   // Check workspace root first

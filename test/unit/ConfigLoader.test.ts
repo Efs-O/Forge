@@ -25,7 +25,9 @@ describe('loadConfig', () => {
 
   it('sorts models alphabetically', () => {
     const dir = mkTempDir();
-    fs.writeFileSync(path.join(dir, 'config.yaml'), `active_model: z-cloud
+    fs.writeFileSync(
+      path.join(dir, 'config.yaml'),
+      `active_model: z-cloud
 llama_server:
   binary: llama-server
 models:
@@ -38,7 +40,9 @@ models:
   - name: local-gguf
     provider: llama.cpp
     gguf_path: C:/models/local.gguf
-`, 'utf8');
+`,
+      'utf8',
+    );
 
     const config = loadConfig(dir);
     expect(config.models.map((model) => model.name)).toEqual([
@@ -51,7 +55,9 @@ models:
 
   it('rejects duplicate model names in config.yaml', () => {
     const dir = mkTempDir();
-    fs.writeFileSync(path.join(dir, 'config.yaml'), `active_model: duplicate
+    fs.writeFileSync(
+      path.join(dir, 'config.yaml'),
+      `active_model: duplicate
 llama_server:
   binary: llama-server
 models:
@@ -61,21 +67,27 @@ models:
   - name: duplicate
     provider: ollama
     endpoint: http://127.0.0.1:11434
-`, 'utf8');
+`,
+      'utf8',
+    );
 
     expect(() => loadConfig(dir)).toThrow(/duplicate model name/i);
   });
 
   it('allows no active model when config uses active_model: none', () => {
     const dir = mkTempDir();
-    fs.writeFileSync(path.join(dir, 'config.yaml'), `active_model: none
+    fs.writeFileSync(
+      path.join(dir, 'config.yaml'),
+      `active_model: none
 llama_server:
   binary: llama-server
 models:
   - name: local-gguf
     provider: llama.cpp
     gguf_path: C:/models/local.gguf
-`, 'utf8');
+`,
+      'utf8',
+    );
 
     const config = loadConfig(dir);
     expect(config.active_model).toBeNull();
@@ -84,7 +96,9 @@ models:
 
   it('loads optional embeddings config when enabled', () => {
     const dir = mkTempDir();
-    fs.writeFileSync(path.join(dir, 'config.yaml'), `active_model: local-gguf
+    fs.writeFileSync(
+      path.join(dir, 'config.yaml'),
+      `active_model: local-gguf
 llama_server:
   binary: llama-server
 models:
@@ -97,7 +111,9 @@ embeddings:
   port: 8091
   auto_index_on_search: true
   max_file_size_kb: 128
-`, 'utf8');
+`,
+      'utf8',
+    );
 
     const config = loadConfig(dir);
     expect(config.embeddings).toMatchObject({
@@ -111,7 +127,9 @@ embeddings:
 
   it('loads openai-compatible cloud models from config.yaml', () => {
     const dir = mkTempDir();
-    fs.writeFileSync(path.join(dir, 'config.yaml'), `active_model: codex
+    fs.writeFileSync(
+      path.join(dir, 'config.yaml'),
+      `active_model: codex
 models:
   - name: codex
     provider: openai
@@ -120,7 +138,9 @@ models:
     provider: openai-compatible
     endpoint: https://gateway.example.com
     api_key_secret: gateway
-`, 'utf8');
+`,
+      'utf8',
+    );
 
     const config = loadConfig(dir);
     expect(config.models).toEqual(
@@ -138,19 +158,25 @@ models:
 
   it('rejects openai-compatible models without endpoint', () => {
     const dir = mkTempDir();
-    fs.writeFileSync(path.join(dir, 'config.yaml'), `active_model: bad
+    fs.writeFileSync(
+      path.join(dir, 'config.yaml'),
+      `active_model: bad
 models:
   - name: bad
     provider: openai-compatible
     api_key_secret: gateway
-`, 'utf8');
+`,
+      'utf8',
+    );
 
     expect(() => loadConfig(dir)).toThrow(/endpoint is required for provider: openai-compatible/i);
   });
 
   it('parses the F6 shape: defaults, profiles, spawn, aliases, mmproj_path', () => {
     const dir = mkTempDir();
-    fs.writeFileSync(path.join(dir, 'config.yaml'), `active_model: gemma@main
+    fs.writeFileSync(
+      path.join(dir, 'config.yaml'),
+      `active_model: gemma@main
 llama_server:
   binary: llama-server
 defaults:
@@ -172,7 +198,9 @@ models:
       long-context: { num_ctx: 131072 }
 aliases:
   gemma-worker: gemma@worker
-`, 'utf8');
+`,
+      'utf8',
+    );
 
     const config = loadConfig(dir);
     expect(config.defaults?.system_prompt).toBe('shared');
@@ -186,7 +214,9 @@ aliases:
 
   it('accepts active_model carrying an @profile', () => {
     const dir = mkTempDir();
-    fs.writeFileSync(path.join(dir, 'config.yaml'), `active_model: gemma@main
+    fs.writeFileSync(
+      path.join(dir, 'config.yaml'),
+      `active_model: gemma@main
 llama_server:
   binary: llama-server
 profiles:
@@ -195,14 +225,18 @@ models:
   - name: gemma
     provider: llama.cpp
     gguf_path: C:/models/gemma.gguf
-`, 'utf8');
+`,
+      'utf8',
+    );
     const config = loadConfig(dir);
     expect(config.active_model).toBe('gemma@main');
   });
 
   it('rejects active_model with an unknown @profile', () => {
     const dir = mkTempDir();
-    fs.writeFileSync(path.join(dir, 'config.yaml'), `active_model: gemma@nope
+    fs.writeFileSync(
+      path.join(dir, 'config.yaml'),
+      `active_model: gemma@nope
 llama_server:
   binary: llama-server
 profiles:
@@ -211,13 +245,17 @@ models:
   - name: gemma
     provider: llama.cpp
     gguf_path: C:/models/gemma.gguf
-`, 'utf8');
+`,
+      'utf8',
+    );
     expect(() => loadConfig(dir)).toThrow(/unknown profile "nope"/i);
   });
 
   it('rejects an alias targeting an unknown model', () => {
     const dir = mkTempDir();
-    fs.writeFileSync(path.join(dir, 'config.yaml'), `active_model: gemma
+    fs.writeFileSync(
+      path.join(dir, 'config.yaml'),
+      `active_model: gemma
 llama_server:
   binary: llama-server
 models:
@@ -226,13 +264,17 @@ models:
     gguf_path: C:/models/gemma.gguf
 aliases:
   old: missing@main
-`, 'utf8');
+`,
+      'utf8',
+    );
     expect(() => loadConfig(dir)).toThrow(/targets unknown model "missing"/i);
   });
 
   it('accepts active_model that is an alias key', () => {
     const dir = mkTempDir();
-    fs.writeFileSync(path.join(dir, 'config.yaml'), `active_model: old-name
+    fs.writeFileSync(
+      path.join(dir, 'config.yaml'),
+      `active_model: old-name
 llama_server:
   binary: llama-server
 profiles:
@@ -243,7 +285,9 @@ models:
     gguf_path: C:/models/gemma.gguf
 aliases:
   old-name: gemma@worker
-`, 'utf8');
+`,
+      'utf8',
+    );
     const config = loadConfig(dir);
     expect(config.active_model).toBe('old-name');
   });
@@ -265,7 +309,11 @@ describe('resolveExplicitConfigPath', () => {
 
   it('accepts absolute path to directory containing config.yaml', () => {
     const dir = mkTempDir();
-    fs.writeFileSync(path.join(dir, 'config.yaml'), 'active_model: a\nmodels:\n  - name: a\n', 'utf8');
+    fs.writeFileSync(
+      path.join(dir, 'config.yaml'),
+      'active_model: a\nmodels:\n  - name: a\n',
+      'utf8',
+    );
     expect(resolveExplicitConfigPath(dir)).toBe(path.join(dir, 'config.yaml'));
   });
 

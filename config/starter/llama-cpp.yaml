@@ -1,0 +1,22 @@
+# Forge starter config — llama.cpp
+# Replace the two marked paths, then run "Forge: Validate Config".
+
+active_model: local-model
+
+llama_server:
+  binary: /REPLACE/WITH/PATH/TO/llama-server
+
+models:
+  - name: local-model
+    provider: llama.cpp
+    gguf_path: /REPLACE/WITH/PATH/TO/model.gguf
+    spawn:
+      num_ctx: 32768
+      n_gpu_layers: -1
+      flash_attn: true
+
+permissions:
+  fs: { read: true, write: true, delete: false }
+  net: { search: false, fetch: false }
+  exec: { terminal: false, headless: false }
+  git: { read: true, write: false }

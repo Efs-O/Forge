@@ -169,6 +169,16 @@ models:
 #   max_results: 5
 
 # -------------------------------------------------------------------
+# Tool permissions. Once this block is present, these switches are
+# authoritative for both tool advertising and dispatch.
+# -------------------------------------------------------------------
+permissions:
+  fs: { read: true, write: true, delete: false }
+  net: { search: false, fetch: false }
+  exec: { terminal: false, headless: false }
+  git: { read: true, write: false }
+
+# -------------------------------------------------------------------
 # Optional: external MCP stdio servers — their tools are bridged into the
 # Forge tool registry (read-only permission) on activation, after the config
 # has loaded. A slow or missing server binary never blocks Forge startup.

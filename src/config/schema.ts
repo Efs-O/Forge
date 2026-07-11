@@ -1,16 +1,16 @@
 import { z } from 'zod';
 
-const CacheTypeSchema = z.union([
-  z.number().int().min(0).max(8),
-  z.string().min(1),
-]);
+const CacheTypeSchema = z.union([z.number().int().min(0).max(8), z.string().min(1)]);
 
 const ReasoningEffortSchema = z.enum(['high', 'medium', 'low', 'none']);
-const ActiveModelSchema = z.preprocess((value) => {
-  if (value === undefined || value === null) return null;
-  if (typeof value === 'string' && value.trim().toLowerCase() === 'none') return null;
-  return value;
-}, z.union([z.string().min(1), z.null()]));
+const ActiveModelSchema = z.preprocess(
+  (value) => {
+    if (value === undefined || value === null) return null;
+    if (typeof value === 'string' && value.trim().toLowerCase() === 'none') return null;
+    return value;
+  },
+  z.union([z.string().min(1), z.null()]),
+);
 
 const SamplingSchema = z.object({
   temperature: z.number().optional(),
@@ -53,66 +53,73 @@ const ProfileSchema = z.object({
   capabilities: CapabilitiesSchema.optional(),
 });
 
-const ModelConfigSchema = z.object({
-  name: z.string().min(1),
-  provider: z.enum(['llama.cpp', 'ollama', 'xai', 'openrouter', 'openai', 'openai-compatible']).optional(),
-  gguf_path: z.string().min(1).optional(),
-  mmproj_path: z.string().min(1).optional(),
-  endpoint: z.string().url().optional(),
-  n_gpu_layers: z.number().int().optional(),
-  num_ctx: z.number().int().positive().optional(),
-  n_batch: z.number().int().positive().optional(),
-  type_k: CacheTypeSchema.optional(),
-  type_v: CacheTypeSchema.optional(),
-  flash_attn: z.boolean().optional(),
-  extra_llama_server_args: z.array(z.string()).optional(),
-  n_parallel: z.number().int().positive().optional(),
-  // v0.3 additions
-  sampling: SamplingSchema.optional(),
-  capabilities: CapabilitiesSchema.optional(),
-  strip_tools: z.boolean().optional(),
-  system_prompt: z.string().optional(),
-  think: z.boolean().optional(),
-  reasoning_effort: ReasoningEffortSchema.optional(),
-  strip_thinking_channels: z.boolean().optional(),
-  api_key_secret: z.string().min(1).optional(),
-  // F6 additions
-  spawn: SpawnSchema.optional(),
-  spawn_profiles: z.record(z.string(), SpawnSchema.partial()).optional(),
-}).superRefine((model, ctx) => {
-  const provider = model.provider ?? 'llama.cpp';
-  if (provider === 'llama.cpp' && !model.gguf_path) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['gguf_path'],
-      message: 'gguf_path is required for provider: llama.cpp',
-    });
-  }
-  if (provider === 'ollama' && !model.endpoint) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['endpoint'],
-      message: 'endpoint is required for provider: ollama',
-    });
-  }
-  if (provider === 'openai-compatible' && !model.endpoint) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['endpoint'],
-      message: 'endpoint is required for provider: openai-compatible',
-    });
-  }
-  if (
-    (provider === 'xai' || provider === 'openrouter' || provider === 'openai' || provider === 'openai-compatible') &&
-    !model.api_key_secret
-  ) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['api_key_secret'],
-      message: `api_key_secret is required for provider: ${provider}`,
-    });
-  }
-});
+const ModelConfigSchema = z
+  .object({
+    name: z.string().min(1),
+    provider: z
+      .enum(['llama.cpp', 'ollama', 'xai', 'openrouter', 'openai', 'openai-compatible'])
+      .optional(),
+    gguf_path: z.string().min(1).optional(),
+    mmproj_path: z.string().min(1).optional(),
+    endpoint: z.string().url().optional(),
+    n_gpu_layers: z.number().int().optional(),
+    num_ctx: z.number().int().positive().optional(),
+    n_batch: z.number().int().positive().optional(),
+    type_k: CacheTypeSchema.optional(),
+    type_v: CacheTypeSchema.optional(),
+    flash_attn: z.boolean().optional(),
+    extra_llama_server_args: z.array(z.string()).optional(),
+    n_parallel: z.number().int().positive().optional(),
+    // v0.3 additions
+    sampling: SamplingSchema.optional(),
+    capabilities: CapabilitiesSchema.optional(),
+    strip_tools: z.boolean().optional(),
+    system_prompt: z.string().optional(),
+    think: z.boolean().optional(),
+    reasoning_effort: ReasoningEffortSchema.optional(),
+    strip_thinking_channels: z.boolean().optional(),
+    api_key_secret: z.string().min(1).optional(),
+    // F6 additions
+    spawn: SpawnSchema.optional(),
+    spawn_profiles: z.record(z.string(), SpawnSchema.partial()).optional(),
+  })
+  .superRefine((model, ctx) => {
+    const provider = model.provider ?? 'llama.cpp';
+    if (provider === 'llama.cpp' && !model.gguf_path) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['gguf_path'],
+        message: 'gguf_path is required for provider: llama.cpp',
+      });
+    }
+    if (provider === 'ollama' && !model.endpoint) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['endpoint'],
+        message: 'endpoint is required for provider: ollama',
+      });
+    }
+    if (provider === 'openai-compatible' && !model.endpoint) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['endpoint'],
+        message: 'endpoint is required for provider: openai-compatible',
+      });
+    }
+    if (
+      (provider === 'xai' ||
+        provider === 'openrouter' ||
+        provider === 'openai' ||
+        provider === 'openai-compatible') &&
+      !model.api_key_secret
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['api_key_secret'],
+        message: `api_key_secret is required for provider: ${provider}`,
+      });
+    }
+  });
 
 const LlamaServerConfigSchema = z.object({
   binary: z.string().min(1).optional(),
@@ -135,104 +142,128 @@ const SearchConfigSchema = z.object({
   max_results: z.number().int().positive().optional(),
 });
 
-const EmbeddingsConfigSchema = z.object({
-  enabled: z.boolean().optional(),
-  model_path: z.string().min(1).optional(),
-  port: z.number().int().min(1).max(65535).optional(),
-  auto_index_on_search: z.boolean().optional(),
-  max_file_size_kb: z.number().int().positive().optional(),
-  include_globs: z.array(z.string().min(1)).optional(),
-  exclude_globs: z.array(z.string().min(1)).optional(),
-}).optional();
-
-const PermissionsSchema = z.object({
-  fs: z.object({
-    read: z.boolean().default(true),
-    write: z.boolean().default(true),
-    delete: z.boolean().default(false),
-  }).optional(),
-  net: z.object({
-    search: z.boolean().default(false),
-    fetch: z.boolean().default(false),
-  }).optional(),
-  exec: z.object({
-    terminal: z.boolean().default(false),
-    headless: z.boolean().default(false),
-  }).optional(),
-  git: z.object({
-    read: z.boolean().default(true),
-    write: z.boolean().default(false),
-  }).optional(),
-}).optional();
-
-const ExecConfigSchema = z.object({
-  timeout_ms: z.number().int().positive().default(30000),
-  denylist_extra: z.array(z.string()).optional(),
-}).optional();
-
-export const ForgeConfigSchema = z.object({
-  models: z.array(ModelConfigSchema).default([]),
-  active_model: ActiveModelSchema.default(null),
-  // F6 additions
-  defaults: ProfileSchema.partial().optional(),
-  profiles: z.record(z.string(), ProfileSchema).optional(),
-  aliases: z.record(z.string(), z.string().min(1)).optional(),
-  llama_server: LlamaServerConfigSchema.default({}),
-  search: SearchConfigSchema.optional(),
-  embeddings: EmbeddingsConfigSchema,
-  log_level: z.enum(['trace', 'debug', 'info', 'warn', 'error']).optional(),
-  // v0.3 additions
-  model_dirs: z.array(z.string()).optional(),
-  templates_dir: z.string().optional(),
-  custom_instructions: z.string().optional(),
-  strip_thinking_channels: z.boolean().optional(),
-  max_simultaneous_models: z.number().int().min(1).max(8).optional(),
-  ollama: z.object({
-    auto_start: z.boolean().optional(),
-    executable: z.string().min(1).optional(),
-  }).optional(),
-  control_server: z.object({
+const EmbeddingsConfigSchema = z
+  .object({
     enabled: z.boolean().optional(),
+    model_path: z.string().min(1).optional(),
     port: z.number().int().min(1).max(65535).optional(),
-  }).optional(),
-  permissions: PermissionsSchema,
-  exec: ExecConfigSchema,
-  mcp_servers: z.array(z.object({
-    name: z.string().min(1),
-    command: z.string().min(1),
-    args: z.array(z.string()).optional(),
-    max_result_chars: z.number().int().positive().optional(),
-  })).optional(),
-}).superRefine((cfg, ctx) => {
-  if (cfg.models.length === 0) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['models'],
-      message: 'At least one model is required',
-    });
-  }
-  const hasLocalModel = cfg.models.some((m) => (m.provider ?? 'llama.cpp') === 'llama.cpp');
-  if (hasLocalModel && !cfg.llama_server.binary) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['llama_server', 'binary'],
-      message: 'llama_server.binary is required when any model uses provider: llama.cpp',
-    });
-  }
-  if (cfg.embeddings?.enabled && !cfg.embeddings.model_path) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['embeddings', 'model_path'],
-      message: 'embeddings.model_path is required when embeddings.enabled: true',
-    });
-  }
-  if (cfg.embeddings?.enabled && !cfg.llama_server.binary) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['llama_server', 'binary'],
-      message: 'llama_server.binary is required when embeddings.enabled: true',
-    });
-  }
-});
+    auto_index_on_search: z.boolean().optional(),
+    max_file_size_kb: z.number().int().positive().optional(),
+    include_globs: z.array(z.string().min(1)).optional(),
+    exclude_globs: z.array(z.string().min(1)).optional(),
+  })
+  .optional();
+
+const PermissionsSchema = z
+  .object({
+    fs: z
+      .object({
+        read: z.boolean().default(true),
+        write: z.boolean().default(true),
+        delete: z.boolean().default(false),
+      })
+      .optional(),
+    net: z
+      .object({
+        search: z.boolean().default(false),
+        fetch: z.boolean().default(false),
+      })
+      .optional(),
+    exec: z
+      .object({
+        terminal: z.boolean().default(false),
+        headless: z.boolean().default(false),
+      })
+      .optional(),
+    git: z
+      .object({
+        read: z.boolean().default(true),
+        write: z.boolean().default(false),
+      })
+      .optional(),
+  })
+  .optional();
+
+const ExecConfigSchema = z
+  .object({
+    timeout_ms: z.number().int().positive().default(30000),
+    denylist_extra: z.array(z.string()).optional(),
+  })
+  .optional();
+
+export const ForgeConfigSchema = z
+  .object({
+    models: z.array(ModelConfigSchema).default([]),
+    active_model: ActiveModelSchema.default(null),
+    // F6 additions
+    defaults: ProfileSchema.partial().optional(),
+    profiles: z.record(z.string(), ProfileSchema).optional(),
+    aliases: z.record(z.string(), z.string().min(1)).optional(),
+    llama_server: LlamaServerConfigSchema.default({}),
+    search: SearchConfigSchema.optional(),
+    embeddings: EmbeddingsConfigSchema,
+    log_level: z.enum(['trace', 'debug', 'info', 'warn', 'error']).optional(),
+    // v0.3 additions
+    model_dirs: z.array(z.string()).optional(),
+    templates_dir: z.string().optional(),
+    custom_instructions: z.string().optional(),
+    strip_thinking_channels: z.boolean().optional(),
+    max_simultaneous_models: z.number().int().min(1).max(8).optional(),
+    ollama: z
+      .object({
+        auto_start: z.boolean().optional(),
+        executable: z.string().min(1).optional(),
+      })
+      .optional(),
+    control_server: z
+      .object({
+        enabled: z.boolean().optional(),
+        port: z.number().int().min(1).max(65535).optional(),
+      })
+      .optional(),
+    permissions: PermissionsSchema,
+    exec: ExecConfigSchema,
+    mcp_servers: z
+      .array(
+        z.object({
+          name: z.string().min(1),
+          command: z.string().min(1),
+          args: z.array(z.string()).optional(),
+          max_result_chars: z.number().int().positive().optional(),
+        }),
+      )
+      .optional(),
+  })
+  .superRefine((cfg, ctx) => {
+    if (cfg.models.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['models'],
+        message: 'At least one model is required',
+      });
+    }
+    const hasLocalModel = cfg.models.some((m) => (m.provider ?? 'llama.cpp') === 'llama.cpp');
+    if (hasLocalModel && !cfg.llama_server.binary) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['llama_server', 'binary'],
+        message: 'llama_server.binary is required when any model uses provider: llama.cpp',
+      });
+    }
+    if (cfg.embeddings?.enabled && !cfg.embeddings.model_path) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['embeddings', 'model_path'],
+        message: 'embeddings.model_path is required when embeddings.enabled: true',
+      });
+    }
+    if (cfg.embeddings?.enabled && !cfg.llama_server.binary) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['llama_server', 'binary'],
+        message: 'llama_server.binary is required when embeddings.enabled: true',
+      });
+    }
+  });
 
 export type ForgeConfigInput = z.input<typeof ForgeConfigSchema>;

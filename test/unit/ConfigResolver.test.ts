@@ -38,7 +38,11 @@ function baseConfig(): ForgeConfig {
     },
     profiles: {
       main: { system_prompt: 'main prompt', think: true, reasoning_effort: 'medium' },
-      worker: { think: false, reasoning_effort: 'none', sampling: { temperature: 0.2, stop: '<end_of_turn>' } },
+      worker: {
+        think: false,
+        reasoning_effort: 'none',
+        sampling: { temperature: 0.2, stop: '<end_of_turn>' },
+      },
     },
     aliases: {
       'gemma4-26b-a4b-it-iq3s-worker': 'gemma4-26b-iq3s@worker',
@@ -151,7 +155,15 @@ describe('resolveSpawnModel', () => {
 
   it('legacy-flat model with no spawn block reads its flat fields', () => {
     const cfg: ForgeConfig = {
-      models: [{ name: 'legacy', provider: 'llama.cpp', gguf_path: '/m.gguf', num_ctx: 4096, n_parallel: 2 }],
+      models: [
+        {
+          name: 'legacy',
+          provider: 'llama.cpp',
+          gguf_path: '/m.gguf',
+          num_ctx: 4096,
+          n_parallel: 2,
+        },
+      ],
       active_model: 'legacy',
       llama_server: { binary: 'llama-server' },
     };
@@ -162,7 +174,9 @@ describe('resolveSpawnModel', () => {
 
   it('throws on unknown spawn profile', () => {
     const cfg = baseConfig();
-    expect(() => resolveSpawnModel(cfg, 'gemma4-26b-iq3s', 'nope')).toThrow(/unknown spawn profile/i);
+    expect(() => resolveSpawnModel(cfg, 'gemma4-26b-iq3s', 'nope')).toThrow(
+      /unknown spawn profile/i,
+    );
   });
 });
 
