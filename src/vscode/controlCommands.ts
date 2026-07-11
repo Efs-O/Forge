@@ -18,7 +18,10 @@ export function registerControlServerCommands(
           label: m.name,
           description: `${m.backend}${m.loaded ? ' • loaded' : ''}${m.holds ? ` • held×${m.holds}` : ''}`,
         })),
-        { title: 'Forge: Ensure Model (load on demand)', placeHolder: 'Select a model to load + warm' },
+        {
+          title: 'Forge: Ensure Model (load on demand)',
+          placeHolder: 'Select a model to load + warm',
+        },
       );
       if (!pick) return;
 
@@ -29,7 +32,9 @@ export function registerControlServerCommands(
           if ('error' in res.body) {
             void vscode.window.showErrorMessage(`Forge: ${res.body.error}`);
           } else {
-            void vscode.window.showInformationMessage(`Forge: ${res.body.model} ready at ${res.body.baseUrl}`);
+            void vscode.window.showInformationMessage(
+              `Forge: ${res.body.model} ready at ${res.body.baseUrl}`,
+            );
           }
         },
       );
@@ -52,7 +57,9 @@ export function registerControlServerCommands(
 
       const released = await controlServer.releaseHold(pick.label);
       void vscode.window.showInformationMessage(
-        released ? `Forge: released one hold on ${pick.label}` : `Forge: ${pick.label} had no active holds`,
+        released
+          ? `Forge: released one hold on ${pick.label}`
+          : `Forge: ${pick.label} had no active holds`,
       );
     }),
 

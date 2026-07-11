@@ -17,6 +17,7 @@ import {
   relativePath,
 } from './editorContext';
 import { openMarkdownScratch } from './scratchDocuments';
+import { runAddModelWizard } from '../sidebar/AddModelWizard';
 
 interface NativeCommandDeps {
   backend: IBackendPool;
@@ -27,15 +28,33 @@ interface NativeCommandDeps {
   setConfig: (config: ForgeConfig) => void;
 }
 
-export function registerNativeCommands(context: vscode.ExtensionContext, deps: NativeCommandDeps): void {
+export function registerNativeCommands(
+  context: vscode.ExtensionContext,
+  deps: NativeCommandDeps,
+): void {
   context.subscriptions.push(
     vscode.commands.registerCommand('forge.startBackend', async () => {
       const modelName = deps.getConfig().active_model;
-      if (!modelName) { void vscode.window.showErrorMessage('Forge: no active model selected.'); return; }
-      await runBackendAction(deps, 'starting', async () => { await deps.backend.acquire(modelName); }, 'Forge: backend started');
+      if (!modelName) {
+        void vscode.window.showErrorMessage('Forge: no active model selected.');
+        return;
+      }
+      await runBackendAction(
+        deps,
+        'starting',
+        async () => {
+          await deps.backend.acquire(modelName);
+        },
+        'Forge: backend started',
+      );
     }),
     vscode.commands.registerCommand('forge.stopBackend', async () => {
-      await runBackendAction(deps, 'stopping', async () => deps.backend.stopAll(), 'Forge: backend stopped');
+      await runBackendAction(
+        deps,
+        'stopping',
+        async () => deps.backend.stopAll(),
+        'Forge: backend stopped',
+      );
     }),
     vscode.commands.registerCommand('forge.restartBackend', async () => {
       const modelName = deps.getConfig().active_model;
@@ -81,7 +100,10 @@ export function registerNativeCommands(context: vscode.ExtensionContext, deps: N
       let selectedId = pick.modelName;
       if (profileNames.length > 0) {
         const profilePick = await vscode.window.showQuickPick(
-          [{ label: '(no profile)', profile: '' }, ...profileNames.map((p) => ({ label: p, profile: p }))],
+          [
+            { label: '(no profile)', profile: '' },
+            ...profileNames.map((p) => ({ label: p, profile: p })),
+          ],
           { placeHolder: `Pick a profile for ${pick.modelName}` },
         );
         if (!profilePick) return;
@@ -96,7 +118,9 @@ export function registerNativeCommands(context: vscode.ExtensionContext, deps: N
         selectedModel?.provider === 'openai-compatible'
       ) {
         deps.statusBar.setReady(selectedId);
-        void vscode.window.showInformationMessage(`Forge: switched to ${selectedId} (${selectedModel.provider})`);
+        void vscode.window.showInformationMessage(
+          `Forge: switched to ${selectedId} (${selectedModel.provider})`,
+        );
         return;
       }
       deps.statusBar.setStarting(selectedId);
@@ -126,6 +150,16 @@ export function registerNativeCommands(context: vscode.ExtensionContext, deps: N
         `Forge: selected ${picked.fsPath}. Add it to config.yaml under models[].model_path.`,
       );
     }),
+    vscode.commands.registerCommand('forge.addModel', async () => {
+      try {
+        const next = await runAddModelWizard(deps.getConfig(), deps.getConfigPath());
+        if (!next) return;
+        deps.setConfig(next);
+        void vscode.window.showInformationMessage('Forge: models added successfully.');
+      } catch (err) {
+        void vscode.window.showErrorMessage(`Forge: ${(err as Error).message}`);
+      }
+    }),
     vscode.commands.registerCommand('forge.clearChat', () => {
       deps.sidebar.clearChat();
       void vscode.window.showInformationMessage('Forge: active chat cleared');
@@ -143,40 +177,115 @@ export function registerNativeCommands(context: vscode.ExtensionContext, deps: N
         void vscode.window.showErrorMessage(`Forge: ${message}`);
       }
     }),
-    vscode.commands.registerCommand('forge.explainSelection', () => prefillSelection(deps.sidebar, 'Explain this code clearly. Mention behavior, inputs, outputs, side effects, and risks.')),
-    vscode.commands.registerCommand('forge.reviewSelection', () => prefillSelection(deps.sidebar, 'Review this code. Focus on bugs, edge cases, maintainability, and missing tests.')),
-    vscode.commands.registerCommand('forge.generateTestsForSelection', () => prefillSelection(deps.sidebar, 'Generate focused tests for this code. Prefer the project testing style and explain where the tests should live.')),
-    vscode.commands.registerCommand('forge.refactorSelection', () => prefillSelection(deps.sidebar, 'Propose a minimal refactor for this code. Preserve behavior and avoid broad unrelated changes.')),
+    vscode.commands.registerCommand('forge.explainSelection', () =>
+      prefillSelection(
+        deps.sidebar,
+        'Explain this code clearly. Mention behavior, inputs, outputs, side effects, and risks.',
+      ),
+    ),
+    vscode.commands.registerCommand('forge.reviewSelection', () =>
+      prefillSelection(
+        deps.sidebar,
+        'Review this code. Focus on bugs, edge cases, maintainability, and missing tests.',
+      ),
+    ),
+    vscode.commands.registerCommand('forge.generateTestsForSelection', () =>
+      prefillSelection(
+        deps.sidebar,
+        'Generate focused tests for this code. Prefer the project testing style and explain where the tests should live.',
+      ),
+    ),
+    vscode.commands.registerCommand('forge.refactorSelection', () =>
+      prefillSelection(
+        deps.sidebar,
+        'Propose a minimal refactor for this code. Preserve behavior and avoid broad unrelated changes.',
+      ),
+    ),
     vscode.commands.registerCommand('forge.runExplainSelection', async () => {
-      await runSelectionPrompt(deps, 'Explain this code clearly. Mention behavior, inputs, outputs, side effects, and risks.');
-    }),
-    vscode.commands.registerCommand('forge.runReviewSelection', async () => {
-      await runSelectionPrompt(deps, 'Review this code. Focus on bugs, edge cases, maintainability, and missing tests.');
-    }),
-    vscode.commands.registerCommand('forge.runGenerateTestsForSelection', async () => {
-      await runSelectionPrompt(deps, 'Generate focused tests for this code. Prefer the project testing style and explain where the tests should live.');
-    }),
-    vscode.commands.registerCommand('forge.runRefactorSelection', async () => {
-      await runSelectionPrompt(deps, 'Propose a minimal refactor for this code. Preserve behavior and avoid broad unrelated changes.');
-    }),
-    vscode.commands.registerCommand('forge.useCurrentFile', () => prefillBlocks(deps.sidebar, 'Use this file as context for the next answer.', activeFileBlock())),
-    vscode.commands.registerCommand('forge.useSelection', () => prefillBlocks(deps.sidebar, 'Use this selection as context for the next answer.', activeSelectionBlock())),
-    vscode.commands.registerCommand('forge.useOpenTabs', () => prefillManyBlocks(deps.sidebar, 'Use these open tabs as context for the next answer.', openTabBlocks())),
-    vscode.commands.registerCommand('forge.pickContextFiles', async () => prefillManyBlocks(deps.sidebar, 'Use these files as context for the next answer.', await pickFileBlocks())),
-    vscode.commands.registerCommand('forge.explainDiagnostic', async (uri?: vscode.Uri, diagnostic?: vscode.Diagnostic) => {
-      await prefillDiagnostic(deps.sidebar, 'Explain this diagnostic and the likely root cause. Do not edit files.', uri, diagnostic);
-    }),
-    vscode.commands.registerCommand('forge.fixDiagnostic', async (uri?: vscode.Uri, diagnostic?: vscode.Diagnostic) => {
-      await prefillDiagnostic(deps.sidebar, 'Propose a minimal fix for this diagnostic. Do not edit files unless I explicitly ask you to execute the fix.', uri, diagnostic);
-    }),
-    vscode.commands.registerCommand('forge.runFixDiagnostic', async (uri?: vscode.Uri, diagnostic?: vscode.Diagnostic) => {
-      await runDiagnosticPrompt(
+      await runSelectionPrompt(
         deps,
-        'Propose a minimal fix for this diagnostic. Edit files if needed, but keep the change narrow and explain the root cause first.',
-        uri,
-        diagnostic,
+        'Explain this code clearly. Mention behavior, inputs, outputs, side effects, and risks.',
       );
     }),
+    vscode.commands.registerCommand('forge.runReviewSelection', async () => {
+      await runSelectionPrompt(
+        deps,
+        'Review this code. Focus on bugs, edge cases, maintainability, and missing tests.',
+      );
+    }),
+    vscode.commands.registerCommand('forge.runGenerateTestsForSelection', async () => {
+      await runSelectionPrompt(
+        deps,
+        'Generate focused tests for this code. Prefer the project testing style and explain where the tests should live.',
+      );
+    }),
+    vscode.commands.registerCommand('forge.runRefactorSelection', async () => {
+      await runSelectionPrompt(
+        deps,
+        'Propose a minimal refactor for this code. Preserve behavior and avoid broad unrelated changes.',
+      );
+    }),
+    vscode.commands.registerCommand('forge.useCurrentFile', () =>
+      prefillBlocks(
+        deps.sidebar,
+        'Use this file as context for the next answer.',
+        activeFileBlock(),
+      ),
+    ),
+    vscode.commands.registerCommand('forge.useSelection', () =>
+      prefillBlocks(
+        deps.sidebar,
+        'Use this selection as context for the next answer.',
+        activeSelectionBlock(),
+      ),
+    ),
+    vscode.commands.registerCommand('forge.useOpenTabs', () =>
+      prefillManyBlocks(
+        deps.sidebar,
+        'Use these open tabs as context for the next answer.',
+        openTabBlocks(),
+      ),
+    ),
+    vscode.commands.registerCommand('forge.pickContextFiles', async () =>
+      prefillManyBlocks(
+        deps.sidebar,
+        'Use these files as context for the next answer.',
+        await pickFileBlocks(),
+      ),
+    ),
+    vscode.commands.registerCommand(
+      'forge.explainDiagnostic',
+      async (uri?: vscode.Uri, diagnostic?: vscode.Diagnostic) => {
+        await prefillDiagnostic(
+          deps.sidebar,
+          'Explain this diagnostic and the likely root cause. Do not edit files.',
+          uri,
+          diagnostic,
+        );
+      },
+    ),
+    vscode.commands.registerCommand(
+      'forge.fixDiagnostic',
+      async (uri?: vscode.Uri, diagnostic?: vscode.Diagnostic) => {
+        await prefillDiagnostic(
+          deps.sidebar,
+          'Propose a minimal fix for this diagnostic. Do not edit files unless I explicitly ask you to execute the fix.',
+          uri,
+          diagnostic,
+        );
+      },
+    ),
+    vscode.commands.registerCommand(
+      'forge.runFixDiagnostic',
+      async (uri?: vscode.Uri, diagnostic?: vscode.Diagnostic) => {
+        await runDiagnosticPrompt(
+          deps,
+          'Propose a minimal fix for this diagnostic. Edit files if needed, but keep the change narrow and explain the root cause first.',
+          uri,
+          diagnostic,
+        );
+      },
+    ),
     vscode.commands.registerCommand('forge.fixFileDiagnostics', async () => {
       const diagnostics = diagnosticsForActiveFile();
       const block = activeFileBlock();
@@ -184,19 +293,27 @@ export function registerNativeCommands(context: vscode.ExtensionContext, deps: N
         void vscode.window.showInformationMessage('Forge: no diagnostics in the active file');
         return;
       }
-      const summary = diagnostics.map((diagnostic) => {
-        const code = diagnostic.code === undefined ? '' : ` code=${String(diagnostic.code)}`;
-        return `- ${diagnostic.message}${code} at line ${diagnostic.range.start.line + 1}`;
-      }).join('\n');
+      const summary = diagnostics
+        .map((diagnostic) => {
+          const code = diagnostic.code === undefined ? '' : ` code=${String(diagnostic.code)}`;
+          return `- ${diagnostic.message}${code} at line ${diagnostic.range.start.line + 1}`;
+        })
+        .join('\n');
       deps.sidebar.prefillInput(
         `Propose a minimal plan to fix these diagnostics. Do not edit files unless I explicitly ask you to execute the fix.\n\nDiagnostics:\n${summary}\n\n${formatContextBlocks([block])}`,
       );
     }),
     vscode.commands.registerCommand('forge.draftPlanScratch', async () => {
-      await draftScratch(deps, 'Write a concise Markdown implementation plan for the current workspace context.');
+      await draftScratch(
+        deps,
+        'Write a concise Markdown implementation plan for the current workspace context.',
+      );
     }),
     vscode.commands.registerCommand('forge.draftReviewScratch', async () => {
-      await draftScratch(deps, 'Write a Markdown code review for the current selection or active file. Lead with findings, then risks and test gaps.');
+      await draftScratch(
+        deps,
+        'Write a Markdown code review for the current selection or active file. Lead with findings, then risks and test gaps.',
+      );
     }),
   );
 }
@@ -231,7 +348,11 @@ function prefillSelection(sidebar: SidebarProvider, instruction: string): void {
   sidebar.prefillInput(`${instruction}\n\n${formatContextBlocks([block])}`);
 }
 
-function prefillBlocks(sidebar: SidebarProvider, instruction: string, block: ReturnType<typeof activeFileBlock>): void {
+function prefillBlocks(
+  sidebar: SidebarProvider,
+  instruction: string,
+  block: ReturnType<typeof activeFileBlock>,
+): void {
   if (!block) {
     void vscode.window.showInformationMessage('Forge: no active editor context found');
     return;
@@ -239,13 +360,19 @@ function prefillBlocks(sidebar: SidebarProvider, instruction: string, block: Ret
   sidebar.prefillInput(`${instruction}\n\n${formatContextBlocks([block])}`);
 }
 
-function prefillManyBlocks(sidebar: SidebarProvider, instruction: string, blocks: NonNullable<ReturnType<typeof activeFileBlock>>[]): void {
+function prefillManyBlocks(
+  sidebar: SidebarProvider,
+  instruction: string,
+  blocks: NonNullable<ReturnType<typeof activeFileBlock>>[],
+): void {
   if (blocks.length === 0) {
     void vscode.window.showInformationMessage('Forge: no files selected for context');
     return;
   }
   if (blocks.some((block) => block.truncated)) {
-    void vscode.window.showWarningMessage('Forge: some context was truncated before adding it to the prompt');
+    void vscode.window.showWarningMessage(
+      'Forge: some context was truncated before adding it to the prompt',
+    );
   }
   sidebar.prefillInput(`${instruction}\n\n${formatContextBlocks(blocks)}`);
 }
@@ -268,7 +395,8 @@ async function prefillDiagnostic(
   }
   const document = await vscode.workspace.openTextDocument(targetUri);
   const source = targetDiagnostic.source ? `\nSource: ${targetDiagnostic.source}` : '';
-  const code = targetDiagnostic.code === undefined ? '' : `\nCode: ${String(targetDiagnostic.code)}`;
+  const code =
+    targetDiagnostic.code === undefined ? '' : `\nCode: ${String(targetDiagnostic.code)}`;
   sidebar.prefillInput(
     `${instruction}\n\nFile: ${relativePath(targetUri)}\nDiagnostic: ${targetDiagnostic.message}${source}${code}\nRange: ${targetDiagnostic.range.start.line + 1}:${targetDiagnostic.range.start.character + 1}-${targetDiagnostic.range.end.line + 1}:${targetDiagnostic.range.end.character + 1}\n\nRelevant code:\n\`\`\`${document.languageId}\n${diagnosticSnippet(document, targetDiagnostic)}\n\`\`\``,
   );
@@ -330,7 +458,8 @@ async function runDiagnosticPrompt(
   }
   const document = await vscode.workspace.openTextDocument(targetUri);
   const source = targetDiagnostic.source ? `\nSource: ${targetDiagnostic.source}` : '';
-  const code = targetDiagnostic.code === undefined ? '' : `\nCode: ${String(targetDiagnostic.code)}`;
+  const code =
+    targetDiagnostic.code === undefined ? '' : `\nCode: ${String(targetDiagnostic.code)}`;
   deps.statusBar.setGenerating(deps.getConfig().active_model);
   try {
     await deps.sidebar.submitPrompt(

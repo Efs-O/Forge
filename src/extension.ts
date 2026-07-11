@@ -1,4 +1,3 @@
-import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { SidebarProvider } from './sidebar/SidebarProvider';
@@ -16,7 +15,6 @@ import { KeepUndoCodeLensProvider } from './sidebar/KeepUndoCodeLens';
 import { DiffDecorations } from './sidebar/DiffDecorations';
 import { TemplateEngine } from './llm/TemplateEngine';
 import { createForgeInstructionsLoader } from './llm/ForgeInstructionsLoader';
-import { runFirstRunWizard } from './sidebar/FirstRunWizard';
 import { SESSION_KEY_V1 } from './sidebar/sessionTypes';
 import { registerAllTools } from './tools/registerAllTools';
 import { connectMcpServers } from './tools/mcpBridge';
@@ -25,56 +23,8 @@ import { ForgeCodeActionProvider } from './vscode/codeActions';
 import { registerNativeCommands } from './vscode/nativeCommands';
 import { EmbeddingBackend } from './backend/EmbeddingBackend';
 import { IndexManager } from './search/IndexManager';
-
-class SetupPlaceholderProvider implements vscode.WebviewViewProvider {
-  resolveWebviewView(view: vscode.WebviewView): void {
-    view.webview.options = { enableScripts: true };
-    view.webview.html = `<!DOCTYPE html><html><body style="padding:20px;font-family:sans-serif;">
-      <p style="margin-bottom:12px;">No <code>config.yaml</code> found.</p>
-      <button onclick="acquireVsCodeApi().postMessage({type:'wizard'})"
-        style="padding:8px 16px;cursor:pointer;">Run Setup Wizard</button>
-      <script>const vscode = acquireVsCodeApi();</script>
-    </body></html>`;
-    view.webview.onDidReceiveMessage((msg) => {
-      if (msg.type === 'wizard') {
-        void vscode.commands.executeCommand('forge.setupWizard');
-      }
-    });
-  }
-}
-
-/**
- * Drop the extension into setup mode: a placeholder sidebar with a "Run Setup
- * Wizard" button plus an actionable notification. Used both when no config
- * exists and when the global fallback config fails to load — the latter must
- * not abort activation, or one stale global config bricks every workspace.
- */
-function enterSetupMode(
-  context: vscode.ExtensionContext,
-  statusBar: BackendStatusBar,
-  message: string,
-): void {
-  statusBar.setNoConfig();
-  context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(
-      SidebarProvider.viewId,
-      new SetupPlaceholderProvider(),
-    ),
-  );
-  context.subscriptions.push(
-    vscode.commands.registerCommand('forge.setupWizard', async () => {
-      const done = await runFirstRunWizard(context);
-      if (done) void vscode.commands.executeCommand('workbench.action.reloadWindow');
-    }),
-  );
-  // Don't auto-launch the wizard — the window may not be focused yet (e.g.
-  // freshly opened by --install-extension), which causes showQuickPick to
-  // return undefined immediately. Show a notification instead; the sidebar
-  // placeholder also has a "Run Setup Wizard" button.
-  void vscode.window.showInformationMessage(message, 'Setup').then((choice) => {
-    if (choice === 'Setup') void vscode.commands.executeCommand('forge.setupWizard');
-  });
-}
+import { registerSecretCommands } from './vscode/secretCommands';
+import { enterSetupMode } from './sidebar/SetupMode';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   initLogger(context);
@@ -87,10 +37,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // ── Find or create config ─────────────────────────────────────────────────
   const explicitConfig = vscode.workspace.getConfiguration('forge').get<string>('configFile');
-  let configPath = findConfigPath(storagePath, explicitConfig);
+  const configPath = findConfigPath(storagePath, explicitConfig);
 
   if (!configPath) {
-    enterSetupMode(context, statusBar, 'Forge: No config found. Run the setup wizard to get started.');
+    enterSetupMode(
+      context,
+      statusBar,
+      'Forge: No config found. Run the setup wizard to get started.',
+    );
     return;
   }
   const activeConfigPath = configPath;
@@ -135,7 +89,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(embeddingBackend);
   const indexManager = new IndexManager(config, embeddingBackend);
   const toolRegistry = new ToolRegistry();
-  registerAllTools(toolRegistry, context.workspaceState, context.secrets, config.search, indexManager);
+  registerAllTools(
+    toolRegistry,
+    context.workspaceState,
+    context.secrets,
+    config.search,
+    indexManager,
+  );
 
   // External MCP stdio servers (e.g. halluscribe-mcp). Bridged as a
   // non-blocking background task: ToolRegistry.definitions() is re-read every
@@ -165,14 +125,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // ── KeepUndo CodeLens + Diff Decorations ─────────────────────────────────
   // Declared before SidebarProvider so the provider can reference its methods
+  // Assigned after CodeLens construction; callbacks only run after activation completes.
+  // eslint-disable-next-line prefer-const
   let sidebarProvider: SidebarProvider;
 
   const diffDecorations = new DiffDecorations();
   context.subscriptions.push(diffDecorations);
 
   const codeLensProvider = new KeepUndoCodeLensProvider(
-    () => { sidebarProvider.keep(); },
-    () => { sidebarProvider.undo(); },
+    () => {
+      sidebarProvider.keep();
+    },
+    () => {
+      sidebarProvider.undo();
+    },
     diffDecorations,
   );
   context.subscriptions.push(
@@ -256,7 +222,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const prevActive = config.active_model;
       // Preserve the previous selection (incl. any @profile) across reloads if
       // its base model still exists in the new config (F6).
-      const prevBase = prevActive ? splitModelProfile(expandAlias(newConfig, prevActive)).base : null;
+      const prevBase = prevActive
+        ? splitModelProfile(expandAlias(newConfig, prevActive)).base
+        : null;
       if (prevActive && prevBase && newConfig.models.some((m) => m.name === prevBase)) {
         newConfig.active_model = prevActive;
       }
@@ -294,6 +262,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       statusBar.setStopped(config.active_model);
     },
   });
+  registerSecretCommands(context, () => config, activeConfigPath);
   context.subscriptions.push(
     vscode.languages.registerCodeActionsProvider(
       { scheme: 'file' },
@@ -334,93 +303,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('forge.newChat', () => {
       sidebarProvider.newConversation();
     }),
-
-    // v0.2 — send active editor selection to sidebar input
-    vscode.commands.registerCommand('forge.setSearchApiKey', async () => {
-      // If search is already configured, use existing provider/key name.
-      // If not, ask the user to pick a provider and write the block to config.yaml.
-      let provider: string;
-      let secretKeyName: string;
-
-      if (config.search) {
-        provider = config.search.provider;
-        secretKeyName = config.search.secret_key_name;
-      } else {
-        const pick = await vscode.window.showQuickPick(
-          [
-            { label: 'Tavily', description: 'tavily.com — recommended', value: 'tavily' },
-            { label: 'Brave Search', description: 'brave.com/search/api', value: 'brave' },
-          ],
-          { title: 'Forge: Select Search Provider', placeHolder: 'Which search provider do you want to use?' },
-        );
-        if (!pick) return;
-        provider = pick.value;
-        secretKeyName = `forge.${provider}.apiKey`;
-
-        // Append search block to config.yaml
-        if (configPath) {
-          try {
-            const existing = fs.readFileSync(configPath, 'utf8');
-            const block = `\nsearch:\n  provider: ${provider}\n  secret_key_name: ${secretKeyName}\n  max_results: 5\n`;
-            if (!/^search:/m.test(existing)) {
-              fs.appendFileSync(configPath, block, 'utf8');
-              void vscode.window.showInformationMessage(`Forge: search block added to config.yaml. Reload window to activate.`);
-            }
-          } catch {
-            void vscode.window.showWarningMessage('Forge: could not update config.yaml — add the search: block manually.');
-          }
-        }
-      }
-
-      const key = await vscode.window.showInputBox({
-        prompt: `Enter your ${provider} API key`,
-        password: true,
-        placeHolder: `Paste ${provider} API key here`,
-        ignoreFocusOut: true,
-      });
-      if (key) {
-        await context.secrets.store(secretKeyName, key);
-        void vscode.window.showInformationMessage(`Forge: ${provider} API key saved.`);
-      }
-    }),
-
-    vscode.commands.registerCommand('forge.setCloudToken', async () => {
-      const secretKey = await vscode.window.showInputBox({
-        prompt: 'Secret key name (must match api_key_secret in config.yaml, e.g. "xai", "openai", "openrouter")',
-        placeHolder: 'openai',
-        ignoreFocusOut: true,
-      });
-      if (!secretKey?.trim()) return;
-      const token = await vscode.window.showInputBox({
-        prompt: `Paste bearer token for "${secretKey.trim()}"`,
-        password: true,
-        placeHolder: 'eyJ...',
-        ignoreFocusOut: true,
-      });
-      if (token?.trim()) {
-        await context.secrets.store(secretKey.trim(), token.trim());
-        void vscode.window.showInformationMessage(`Forge: token saved under key "${secretKey.trim()}".`);
-      }
-    }),
-
   );
 
   context.subscriptions.push({
-    dispose: () => { void pool.stopAll(); },
+    dispose: () => {
+      void pool.stopAll();
+    },
   });
-
-  // If a Cerebras API key is provided via environment (for automation/testing),
-  // persist it into SecretStorage under the key "cerebras" so Forge can use it.
-  // This is intentionally tolerant and only runs when the env var is set.
-  if (process.env.CEREBRAS_API_KEY?.trim()) {
-    try {
-      await context.secrets.store('cerebras', process.env.CEREBRAS_API_KEY.trim());
-      void vscode.window.showInformationMessage('Forge: stored CEREBRAS_API_KEY into SecretStorage as "cerebras".');
-    } catch (err) {
-      // Do not fail activation if secret storage write fails; surface a log entry.
-      log.warn(`Failed to store CEREBRAS_API_KEY into SecretStorage: ${(err as Error).message}`);
-    }
-  }
 
   log.info('Forge activated');
 }

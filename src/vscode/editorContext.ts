@@ -38,7 +38,11 @@ export function openTabBlocks(): ContextBlock[] {
 }
 
 export async function pickFileBlocks(): Promise<ContextBlock[]> {
-  const files = await vscode.workspace.findFiles('**/*', '**/{.git,node_modules,dist,out,build,coverage}/**', 200);
+  const files = await vscode.workspace.findFiles(
+    '**/*',
+    '**/{.git,node_modules,dist,out,build,coverage}/**',
+    200,
+  );
   const picks = await vscode.window.showQuickPick(
     files.map((uri) => ({
       label: relativePath(uri),
@@ -67,12 +71,14 @@ export function nearestDiagnostic(
   if (!position) return diagnostics[0] ?? null;
   const containing = diagnostics.find((diagnostic) => diagnostic.range.contains(position));
   if (containing) return containing;
-  return diagnostics
-    .map((diagnostic) => ({
-      diagnostic,
-      distance: Math.abs(diagnostic.range.start.line - position.line),
-    }))
-    .sort((a, b) => a.distance - b.distance)[0]?.diagnostic ?? null;
+  return (
+    diagnostics
+      .map((diagnostic) => ({
+        diagnostic,
+        distance: Math.abs(diagnostic.range.start.line - position.line),
+      }))
+      .sort((a, b) => a.distance - b.distance)[0]?.diagnostic ?? null
+  );
 }
 
 export function diagnosticsForActiveFile(): vscode.Diagnostic[] {
@@ -80,7 +86,10 @@ export function diagnosticsForActiveFile(): vscode.Diagnostic[] {
   return uri ? vscode.languages.getDiagnostics(uri) : [];
 }
 
-export function diagnosticSnippet(document: vscode.TextDocument, diagnostic: vscode.Diagnostic): string {
+export function diagnosticSnippet(
+  document: vscode.TextDocument,
+  diagnostic: vscode.Diagnostic,
+): string {
   const start = Math.max(0, diagnostic.range.start.line - 4);
   const end = Math.min(document.lineCount - 1, diagnostic.range.end.line + 4);
   return document.getText(new vscode.Range(start, 0, end, document.lineAt(end).text.length));
@@ -91,10 +100,12 @@ export function formatContextBlocks(blocks: ContextBlock[]): string {
     .filter((block) => block.truncated)
     .map((block) => `- ${block.label}`)
     .join('\n');
-  const body = blocks.map((block) => {
-    const note = block.truncated ? '\n[truncated]\n' : '\n';
-    return `File: ${block.label}${note}\`\`\`${block.languageId}\n${block.text}\n\`\`\``;
-  }).join('\n\n');
+  const body = blocks
+    .map((block) => {
+      const note = block.truncated ? '\n[truncated]\n' : '\n';
+      return `File: ${block.label}${note}\`\`\`${block.languageId}\n${block.text}\n\`\`\``;
+    })
+    .join('\n\n');
   return truncation ? `Some context was truncated:\n${truncation}\n\n${body}` : body;
 }
 
