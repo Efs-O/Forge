@@ -55,14 +55,24 @@ export type Action =
   | { type: 'CHECKPOINT_READY'; convId?: string }
   | { type: 'CHECKPOINT_DISMISSED'; convId?: string }
   | { type: 'TOOL_ACTIVITY'; toolName: string; detail?: string; convId?: string }
-  | { type: 'FILE_DIFF'; filePath: string; hunks: DiffHunk[] | null; isNew: boolean; isDeleted: boolean; convId?: string }
+  | {
+      type: 'FILE_DIFF';
+      filePath: string;
+      hunks: DiffHunk[] | null;
+      isNew: boolean;
+      isDeleted: boolean;
+      convId?: string;
+    }
   | { type: 'CLANKER_CHANGED'; enabled: boolean }
   | {
       type: 'SESSION_SYNC';
       activeId: string;
       tabs: SessionTabMeta[];
       history: SessionHistoryMeta[];
-      messagesById: Record<string, Array<{ role: 'user' | 'assistant'; content: string; reasoning?: string | undefined }>>;
+      messagesById: Record<
+        string,
+        Array<{ role: 'user' | 'assistant'; content: string; reasoning?: string | undefined }>
+      >;
     };
 
 function mkId(): string {
@@ -89,7 +99,11 @@ function appendToConv(state: State, convId: string, msg: AppMessage): State {
   return { ...state, messagesById: { ...state.messagesById, [convId]: [...existing, msg] } };
 }
 
-function updateLastInConv(state: State, convId: string, updater: (last: AppMessage) => AppMessage): State {
+function updateLastInConv(
+  state: State,
+  convId: string,
+  updater: (last: AppMessage) => AppMessage,
+): State {
   const existing = state.messagesById[convId] ?? [];
   if (existing.length === 0) return state;
   const updated = [...existing.slice(0, -1), updater(existing[existing.length - 1]!)];
@@ -108,15 +122,21 @@ export function reducer(state: State, action: Action): State {
       const last = existing[existing.length - 1];
       // Strip stale diff cards and trailing empty assistant placeholder from previous turn
       const base = existing
-        .filter(m => m.role !== 'diff')
-        .filter((m, _i, arr) => !(m.role === 'assistant' && m.content === '' && m === arr[arr.length - 1]));
+        .filter((m) => m.role !== 'diff')
+        .filter(
+          (m, _i, arr) =>
+            !(m.role === 'assistant' && m.content === '' && m === arr[arr.length - 1]),
+        );
       void last;
       return {
         ...state,
         streamingIds: new Set([...state.streamingIds, cid]),
         generatingIds: new Set([...state.generatingIds, cid]),
         checkpointPending: false,
-        messagesById: { ...state.messagesById, [cid]: [...base, { id: mkId(), role: 'user', content: action.text }] },
+        messagesById: {
+          ...state.messagesById,
+          [cid]: [...base, { id: mkId(), role: 'user', content: action.text }],
+        },
       };
     }
 
@@ -135,9 +155,17 @@ export function reducer(state: State, action: Action): State {
       const existing = state.messagesById[cid] ?? [];
       const last = existing[existing.length - 1];
       if (last?.role === 'assistant') {
-        return updateLastInConv(state, cid, (m) => ({ ...m, reasoning: (m.reasoning ?? '') + action.text }));
+        return updateLastInConv(state, cid, (m) => ({
+          ...m,
+          reasoning: (m.reasoning ?? '') + action.text,
+        }));
       }
-      return appendToConv(state, cid, { id: mkId(), role: 'assistant', content: '', reasoning: action.text });
+      return appendToConv(state, cid, {
+        id: mkId(),
+        role: 'assistant',
+        content: '',
+        reasoning: action.text,
+      });
     }
 
     case 'DONE': {
@@ -164,20 +192,20 @@ export function reducer(state: State, action: Action): State {
 
     case 'READY': {
       const cid = resolveConvId(state, action.convId);
-      return appendToConv(
-        { ...state, backendReady: true },
-        cid,
-        { id: mkId(), role: 'system', content: 'Backend ready.' },
-      );
+      return appendToConv({ ...state, backendReady: true }, cid, {
+        id: mkId(),
+        role: 'system',
+        content: 'Backend ready.',
+      });
     }
 
     case 'BACKEND_STARTING': {
       const cid = resolveConvId(state, action.convId);
-      return appendToConv(
-        { ...state, backendReady: false },
-        cid,
-        { id: mkId(), role: 'system', content: action.message },
-      );
+      return appendToConv({ ...state, backendReady: false }, cid, {
+        id: mkId(),
+        role: 'system',
+        content: action.message,
+      });
     }
 
     case 'BACKEND_DOWN': {
@@ -241,7 +269,7 @@ export function reducer(state: State, action: Action): State {
         }));
         // Re-append any diff cards that were live in this conversation — they are not
         // persisted server-side so SESSION_SYNC would otherwise wipe them.
-        const survivingDiffs = (state.messagesById[id] ?? []).filter(m => m.role === 'diff');
+        const survivingDiffs = (state.messagesById[id] ?? []).filter((m) => m.role === 'diff');
         messagesById[id] = [...reconstructed, ...survivingDiffs];
       }
       return {

@@ -27,13 +27,23 @@ class FakePool implements IBackendPool {
     if (!this.loaded.has(name)) this.loaded.set(name, fakeController(name));
     return this.loaded.get(name)!;
   }
-  async release(name: string): Promise<void> { this.loaded.delete(name); }
-  async stopAll(): Promise<void> { this.loaded.clear(); }
+  async release(name: string): Promise<void> {
+    this.loaded.delete(name);
+  }
+  async stopAll(): Promise<void> {
+    this.loaded.clear();
+  }
   applyForgeConfig(): void {}
   showConsole(): void {}
-  isAnyReady(): boolean { return this.loaded.size > 0; }
-  loadedModelNames(): string[] { return [...this.loaded.keys()]; }
-  isLoaded(name: string): boolean { return this.loaded.has(name); }
+  isAnyReady(): boolean {
+    return this.loaded.size > 0;
+  }
+  loadedModelNames(): string[] {
+    return [...this.loaded.keys()];
+  }
+  isLoaded(name: string): boolean {
+    return this.loaded.has(name);
+  }
 }
 
 function makeConfig(port: number, maxModels = 1): ForgeConfig {
@@ -62,7 +72,11 @@ const testDeps = (over: ControlServerDeps = {}): ControlServerDeps => ({
 
 async function waitReady(base: string): Promise<void> {
   for (let i = 0; i < 50; i++) {
-    try { if ((await fetch(`${base}/healthz`)).ok) return; } catch { /* not up yet */ }
+    try {
+      if ((await fetch(`${base}/healthz`)).ok) return;
+    } catch {
+      /* not up yet */
+    }
     await new Promise((r) => setTimeout(r, 20));
   }
   throw new Error('control server did not start');
@@ -73,7 +87,10 @@ const post = (base: string, model: string, route = 'ensure'): Promise<Response> 
 
 describe('ControlServer', () => {
   let server: ControlServer | undefined;
-  afterEach(() => { server?.dispose(); server = undefined; });
+  afterEach(() => {
+    server?.dispose();
+    server = undefined;
+  });
 
   it('ensures a model, ref-counts holders, and guards capacity against in-use eviction', async () => {
     const port = 18799;
@@ -155,10 +172,14 @@ describe('ControlServer', () => {
     const port = 18801;
     const base = `http://127.0.0.1:${port}`;
     let serving = false;
-    server = new ControlServer(new FakePool(), makeConfig(port), testDeps({
-      probe: async () => serving,
-      readinessTimeoutMs: 2000,
-    }));
+    server = new ControlServer(
+      new FakePool(),
+      makeConfig(port),
+      testDeps({
+        probe: async () => serving,
+        readinessTimeoutMs: 2000,
+      }),
+    );
     server.start();
     await waitReady(base);
 
@@ -166,7 +187,9 @@ describe('ControlServer', () => {
     // Backend not serving yet → request stays pending.
     await new Promise((r) => setTimeout(r, 50));
     let settled = false;
-    void inflight.then(() => { settled = true; });
+    void inflight.then(() => {
+      settled = true;
+    });
     await new Promise((r) => setTimeout(r, 0));
     expect(settled).toBe(false);
 
@@ -178,10 +201,14 @@ describe('ControlServer', () => {
   it('/ensure returns 502 when the backend never becomes ready', async () => {
     const port = 18802;
     const base = `http://127.0.0.1:${port}`;
-    server = new ControlServer(new FakePool(), makeConfig(port), testDeps({
-      probe: async () => false,
-      readinessTimeoutMs: 60,
-    }));
+    server = new ControlServer(
+      new FakePool(),
+      makeConfig(port),
+      testDeps({
+        probe: async () => false,
+        readinessTimeoutMs: 60,
+      }),
+    );
     server.start();
     await waitReady(base);
 
@@ -259,7 +286,9 @@ describe('ControlServer', () => {
     await waitReady(base);
 
     const { models } = await (await fetch(`${base}/models`)).json();
-    const byName = Object.fromEntries(models.map((m: { name: string; servable: boolean }) => [m.name, m.servable]));
+    const byName = Object.fromEntries(
+      models.map((m: { name: string; servable: boolean }) => [m.name, m.servable]),
+    );
     expect(byName).toEqual({ A: true, B: true, grok: false });
   });
 
@@ -362,7 +391,9 @@ describe('ControlServer', () => {
     const body = await ok.json();
     expect(body).toMatchObject({
       model: 'grok',
-      choices: [{ index: 0, message: { role: 'assistant', content: 'echo:grok:1' }, finish_reason: 'stop' }],
+      choices: [
+        { index: 0, message: { role: 'assistant', content: 'echo:grok:1' }, finish_reason: 'stop' },
+      ],
     });
   });
 
@@ -386,7 +417,11 @@ describe('ControlServer', () => {
     const tools = [
       { type: 'function', function: { name: 'read_file', description: 'd', parameters: {} } },
     ];
-    const res = await chat(base, { model: 'grok', messages: [{ role: 'user', content: 'x' }], tools });
+    const res = await chat(base, {
+      model: 'grok',
+      messages: [{ role: 'user', content: 'x' }],
+      tools,
+    });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.choices[0].message.tool_calls).toEqual(toolCalls);
@@ -404,7 +439,9 @@ describe('ControlServer', () => {
   it('POST /chat maps a ProxyError status faithfully', async () => {
     const port = 18812;
     const base = `http://127.0.0.1:${port}`;
-    const chatProxy = async () => { throw new ProxyError(422, 'use /ensure for local models'); };
+    const chatProxy = async () => {
+      throw new ProxyError(422, 'use /ensure for local models');
+    };
     server = new ControlServer(new FakePool(), makeConfig(port), testDeps({ chatProxy }));
     server.start();
     await waitReady(base);

@@ -85,7 +85,11 @@ export async function waitForHealthy(
     // Fail immediately if the process exits before we get healthy.
     if (proc) {
       proc.once('exit', (code) => {
-        done({ ok: false, reason: 'process_exit', message: `llama-server exited with code ${code}` });
+        done({
+          ok: false,
+          reason: 'process_exit',
+          message: `llama-server exited with code ${code}`,
+        });
       });
       proc.once('error', (err) => {
         done({ ok: false, reason: 'process_error', message: err.message });
@@ -101,7 +105,11 @@ export async function waitForHealthy(
     const probe = async (): Promise<void> => {
       if (settled) return;
       if (Date.now() >= deadline) {
-        done({ ok: false, reason: 'timeout', message: `No response from ${url} after ${timeoutMs}ms` });
+        done({
+          ok: false,
+          reason: 'timeout',
+          message: `No response from ${url} after ${timeoutMs}ms`,
+        });
         return;
       }
       try {

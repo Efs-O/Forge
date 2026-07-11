@@ -34,7 +34,10 @@ export interface ChatProxyResult {
 
 /** Carries an HTTP status so the route can map proxy failures faithfully. */
 export class ProxyError extends Error {
-  constructor(readonly status: number, message: string) {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
     super(message);
     this.name = 'ProxyError';
   }

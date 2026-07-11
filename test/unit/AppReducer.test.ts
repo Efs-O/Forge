@@ -36,7 +36,10 @@ interface AppModule {
             messageCount: number;
             active_model?: string;
           }>;
-          messagesById: Record<string, Array<{ role: 'user' | 'assistant'; content: string; reasoning?: string }>>;
+          messagesById: Record<
+            string,
+            Array<{ role: 'user' | 'assistant'; content: string; reasoning?: string }>
+          >;
         },
   ) => AppModule['initialState'];
 }
@@ -44,15 +47,21 @@ interface AppModule {
 let appModule: AppModule;
 
 beforeAll(async () => {
-  (globalThis as typeof globalThis & {
-    acquireVsCodeApi?: () => { postMessage: () => void; getState: () => unknown; setState: () => void };
-  }).acquireVsCodeApi = () => ({
+  (
+    globalThis as typeof globalThis & {
+      acquireVsCodeApi?: () => {
+        postMessage: () => void;
+        getState: () => unknown;
+        setState: () => void;
+      };
+    }
+  ).acquireVsCodeApi = () => ({
     postMessage: () => undefined,
     getState: () => undefined,
     setState: () => undefined,
   });
 
-  appModule = await import('../../webview-ui/src/reducer') as AppModule;
+  appModule = (await import('../../webview-ui/src/reducer')) as AppModule;
 });
 
 describe('webview App reducer', () => {

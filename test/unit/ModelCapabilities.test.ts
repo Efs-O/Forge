@@ -14,13 +14,16 @@ describe('inspectRuntimeModelCapabilities', () => {
   });
 
   it('uses runtime props when available', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        chat_template: '{{ enable_thinking }} {{ tool_calls }}',
-        chat_template_caps: { supports_tools: true, supports_thinking: true },
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          chat_template: '{{ enable_thinking }} {{ tool_calls }}',
+          chat_template_caps: { supports_tools: true, supports_thinking: true },
+        }),
       }),
-    }));
+    );
 
     const caps = await inspectRuntimeModelCapabilities('http://127.0.0.1:8080', model);
     expect(caps.source).toBe('runtime');
@@ -40,13 +43,16 @@ describe('inspectRuntimeModelCapabilities', () => {
   });
 
   it('marks missing runtime templates as unsupported for template-driven features', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        chat_template: '',
-        chat_template_caps: {},
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          chat_template: '',
+          chat_template_caps: {},
+        }),
       }),
-    }));
+    );
 
     const caps = await inspectRuntimeModelCapabilities('http://127.0.0.1:8080', {
       name: 'plain-base-model',

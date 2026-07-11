@@ -7,7 +7,13 @@ import type {
   SessionTabMeta,
 } from '../../src/sidebar/messageBridge';
 import { vscode } from './vscode';
-import { reducer, initialState, selectMessages, selectStreaming, selectGenerating } from './reducer';
+import {
+  reducer,
+  initialState,
+  selectMessages,
+  selectStreaming,
+  selectGenerating,
+} from './reducer';
 export type { AppMessage } from './reducer';
 import { Header } from './components/Header';
 import { MessageList } from './components/MessageList';
@@ -35,21 +41,53 @@ export function App(): React.ReactElement {
     function handler(event: MessageEvent): void {
       const msg = event.data as HostToWebview;
       switch (msg.type) {
-        case 'token':               dispatch({ type: 'TOKEN', text: msg.text, convId: msg.conversationId }); break;
-        case 'reasoningToken':      dispatch({ type: 'REASONING_TOKEN', text: msg.text, convId: msg.conversationId }); break;
-        case 'done':                dispatch({ type: 'DONE', convId: msg.conversationId }); break;
-        case 'error':               dispatch({ type: 'ERROR', message: msg.message, convId: msg.conversationId }); break;
-        case 'ready':               dispatch({ type: 'READY', convId: msg.conversationId }); break;
-        case 'backendStarting':     dispatch({ type: 'BACKEND_STARTING', message: msg.message, convId: msg.conversationId }); break;
-        case 'backendDown':         dispatch({ type: 'BACKEND_DOWN', message: msg.message, convId: msg.conversationId }); break;
-        case 'models':              dispatch({ type: 'MODELS', models: msg.models, active: msg.active }); break;
-        case 'checkpointReady':     dispatch({ type: 'CHECKPOINT_READY', convId: msg.conversationId }); break;
-        case 'checkpointDismissed': dispatch({ type: 'CHECKPOINT_DISMISSED', convId: msg.conversationId }); break;
+        case 'token':
+          dispatch({ type: 'TOKEN', text: msg.text, convId: msg.conversationId });
+          break;
+        case 'reasoningToken':
+          dispatch({ type: 'REASONING_TOKEN', text: msg.text, convId: msg.conversationId });
+          break;
+        case 'done':
+          dispatch({ type: 'DONE', convId: msg.conversationId });
+          break;
+        case 'error':
+          dispatch({ type: 'ERROR', message: msg.message, convId: msg.conversationId });
+          break;
+        case 'ready':
+          dispatch({ type: 'READY', convId: msg.conversationId });
+          break;
+        case 'backendStarting':
+          dispatch({ type: 'BACKEND_STARTING', message: msg.message, convId: msg.conversationId });
+          break;
+        case 'backendDown':
+          dispatch({ type: 'BACKEND_DOWN', message: msg.message, convId: msg.conversationId });
+          break;
+        case 'models':
+          dispatch({ type: 'MODELS', models: msg.models, active: msg.active });
+          break;
+        case 'checkpointReady':
+          dispatch({ type: 'CHECKPOINT_READY', convId: msg.conversationId });
+          break;
+        case 'checkpointDismissed':
+          dispatch({ type: 'CHECKPOINT_DISMISSED', convId: msg.conversationId });
+          break;
         case 'toolActivity':
-          dispatch({ type: 'TOOL_ACTIVITY', toolName: msg.toolName, detail: msg.detail, convId: msg.conversationId });
+          dispatch({
+            type: 'TOOL_ACTIVITY',
+            toolName: msg.toolName,
+            detail: msg.detail,
+            convId: msg.conversationId,
+          });
           break;
         case 'fileDiff':
-          dispatch({ type: 'FILE_DIFF', filePath: msg.filePath, hunks: msg.hunks, isNew: msg.isNew, isDeleted: msg.isDeleted, convId: msg.conversationId });
+          dispatch({
+            type: 'FILE_DIFF',
+            filePath: msg.filePath,
+            hunks: msg.hunks,
+            isNew: msg.isNew,
+            isDeleted: msg.isDeleted,
+            convId: msg.conversationId,
+          });
           break;
         case 'sessionSync':
           dispatch({
@@ -61,11 +99,23 @@ export function App(): React.ReactElement {
           });
           break;
         case 'confirmRequest':
-          setConfirmRequest({ id: msg.id, toolName: msg.toolName, detail: msg.detail, isDangerous: msg.isDangerous });
+          setConfirmRequest({
+            id: msg.id,
+            toolName: msg.toolName,
+            detail: msg.detail,
+            isDangerous: msg.isDangerous,
+          });
           break;
-        case 'tokenBudget':    setTokenUsed(msg.used); setTokenMax(msg.max); break;
-        case 'setInput':       setPrefillText(msg.text); break;
-        case 'clankerChanged': dispatch({ type: 'CLANKER_CHANGED', enabled: msg.enabled }); break;
+        case 'tokenBudget':
+          setTokenUsed(msg.used);
+          setTokenMax(msg.max);
+          break;
+        case 'setInput':
+          setPrefillText(msg.text);
+          break;
+        case 'clankerChanged':
+          dispatch({ type: 'CLANKER_CHANGED', enabled: msg.enabled });
+          break;
         case 'thread-stream-state-changed':
         case 'thread-read-state-changed':
         case 'historyRestore':
@@ -80,18 +130,32 @@ export function App(): React.ReactElement {
 
   const handleSend = useCallback((text: string, attachments: AttachmentData[]) => {
     dispatch({ type: 'USER_SEND', text });
-    vscode.postMessage({ type: 'send', text, attachments: attachments.length ? attachments : undefined });
+    vscode.postMessage({
+      type: 'send',
+      text,
+      attachments: attachments.length ? attachments : undefined,
+    });
   }, []);
 
-  const handleCancel    = useCallback(() => { vscode.postMessage({ type: 'cancel' }); }, []);
+  const handleCancel = useCallback(() => {
+    vscode.postMessage({ type: 'cancel' });
+  }, []);
   const handleModelChange = useCallback((name: string | null) => {
     dispatch({ type: 'SET_MODEL', name });
     vscode.postMessage({ type: 'switchModel', name });
   }, []);
-  const handleNewConversation   = useCallback(() => { vscode.postMessage({ type: 'newConversation' }); }, []);
-  const handleSwitchTab         = useCallback((id: string) => { vscode.postMessage({ type: 'switchConversation', id }); }, []);
-  const handleCloseTab          = useCallback((id: string) => { vscode.postMessage({ type: 'closeConversation', id }); }, []);
-  const handleRestoreConversation = useCallback((id: string) => { vscode.postMessage({ type: 'restoreConversation', id }); }, []);
+  const handleNewConversation = useCallback(() => {
+    vscode.postMessage({ type: 'newConversation' });
+  }, []);
+  const handleSwitchTab = useCallback((id: string) => {
+    vscode.postMessage({ type: 'switchConversation', id });
+  }, []);
+  const handleCloseTab = useCallback((id: string) => {
+    vscode.postMessage({ type: 'closeConversation', id });
+  }, []);
+  const handleRestoreConversation = useCallback((id: string) => {
+    vscode.postMessage({ type: 'restoreConversation', id });
+  }, []);
 
   const handleConfirmApprove = useCallback(() => {
     if (!confirmRequest) return;
@@ -131,7 +195,9 @@ export function App(): React.ReactElement {
       />
       <aside id="chats-panel" aria-label="Forge chats">
         {!state.sessionHydrated && (
-          <span id="chats-loading" role="status">Loading…</span>
+          <span id="chats-loading" role="status">
+            Loading…
+          </span>
         )}
         {state.sessionHydrated && (
           <>

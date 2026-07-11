@@ -19,6 +19,8 @@ overlaps with an existing owner, extend the owner instead.
 | Webview HTML builder                       | `src/sidebar/WebviewBuilder.ts`        |
 | Multi-conversation session types + persist | `src/sidebar/sessionTypes.ts`          |
 | First-run setup wizard                     | `src/sidebar/FirstRunWizard.ts`        |
+| Add-model setup wizard                     | `src/sidebar/AddModelWizard.ts`        |
+| Missing-config setup mode                  | `src/sidebar/SetupMode.ts`             |
 | Keep/Undo CodeLens decorations             | `src/sidebar/KeepUndoCodeLens.ts`      |
 | Typed webview ↔ host message contract      | `src/sidebar/messageBridge.ts`         |
 | In-editor green/red diff decorations       | `src/sidebar/DiffDecorations.ts`       |
@@ -65,6 +67,7 @@ overlaps with an existing owner, extend the owner instead.
 | Concern                                    | Owner                                  |
 | ------------------------------------------ | -------------------------------------- |
 | Tool dispatch + capability/permission gate | `src/tools/ToolRegistry.ts`            |
+| Config-to-tool permission resolution       | `src/tools/PermissionResolver.ts`      |
 | Tool registration entry point              | `src/tools/registerAllTools.ts`        |
 | Built-in tool definitions                  | `src/tools/builtinTools.ts`            |
 | File read/write tools                      | `src/tools/fileEditTools.ts`           |
@@ -103,6 +106,7 @@ overlaps with an existing owner, extend the owner instead.
 | Config load + validation                   | `src/config/ConfigLoader.ts`           |
 | Two-flavor model/profile/alias resolver    | `src/config/ConfigResolver.ts`         |
 | Config + model types                       | `src/config/types.ts`                  |
+| Validated config backup + safe writer      | `src/config/ConfigWriter.ts`           |
 | User-facing config example                 | `config/config.example.yaml`           |
 
 ## VS Code Integration
@@ -111,6 +115,7 @@ overlaps with an existing owner, extend the owner instead.
 | ------------------------------------------ | -------------------------------------- |
 | Status bar (backend state indicator)       | `src/vscode/BackendStatusBar.ts`       |
 | Native VS Code commands                    | `src/vscode/nativeCommands.ts`         |
+| SecretStorage setup commands               | `src/vscode/secretCommands.ts`         |
 | Model-control palette commands             | `src/vscode/controlCommands.ts`        |
 | Code action provider (quick fixes)         | `src/vscode/codeActions.ts`            |
 | Editor context collector                   | `src/vscode/editorContext.ts`          |

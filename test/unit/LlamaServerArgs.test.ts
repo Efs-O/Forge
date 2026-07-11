@@ -95,25 +95,59 @@ describe('composeLlamaServerArgs', () => {
   // exact same argv as the legacy flat fields once resolveSpawnModel flattens it.
   it('produces identical argv from a spawn block vs legacy flat fields', () => {
     const flatCfg: ForgeConfig = {
-      models: [{
-        name: 'm', provider: 'llama.cpp', gguf_path: '/models/test.gguf',
-        num_ctx: 8192, n_parallel: 2, n_batch: 256, type_k: 'q8_0', type_v: 'q8_0',
-        flash_attn: false, n_gpu_layers: 32, extra_llama_server_args: ['--verbose'],
-      }],
-      active_model: 'm', llama_server: serverDefaults,
+      models: [
+        {
+          name: 'm',
+          provider: 'llama.cpp',
+          gguf_path: '/models/test.gguf',
+          num_ctx: 8192,
+          n_parallel: 2,
+          n_batch: 256,
+          type_k: 'q8_0',
+          type_v: 'q8_0',
+          flash_attn: false,
+          n_gpu_layers: 32,
+          extra_llama_server_args: ['--verbose'],
+        },
+      ],
+      active_model: 'm',
+      llama_server: serverDefaults,
     };
     const spawnCfg: ForgeConfig = {
-      models: [{
-        name: 'm', provider: 'llama.cpp', gguf_path: '/models/test.gguf',
-        spawn: {
-          num_ctx: 8192, n_parallel: 2, n_batch: 256, type_k: 'q8_0', type_v: 'q8_0',
-          flash_attn: false, n_gpu_layers: 32, extra_llama_server_args: ['--verbose'],
+      models: [
+        {
+          name: 'm',
+          provider: 'llama.cpp',
+          gguf_path: '/models/test.gguf',
+          spawn: {
+            num_ctx: 8192,
+            n_parallel: 2,
+            n_batch: 256,
+            type_k: 'q8_0',
+            type_v: 'q8_0',
+            flash_attn: false,
+            n_gpu_layers: 32,
+            extra_llama_server_args: ['--verbose'],
+          },
         },
-      }],
-      active_model: 'm', llama_server: serverDefaults,
+      ],
+      active_model: 'm',
+      llama_server: serverDefaults,
     };
-    const flatArgs = composeLlamaServerArgs('', resolveSpawnModel(flatCfg, 'm'), serverDefaults, '127.0.0.1', 8080);
-    const spawnArgs = composeLlamaServerArgs('', resolveSpawnModel(spawnCfg, 'm'), serverDefaults, '127.0.0.1', 8080);
+    const flatArgs = composeLlamaServerArgs(
+      '',
+      resolveSpawnModel(flatCfg, 'm'),
+      serverDefaults,
+      '127.0.0.1',
+      8080,
+    );
+    const spawnArgs = composeLlamaServerArgs(
+      '',
+      resolveSpawnModel(spawnCfg, 'm'),
+      serverDefaults,
+      '127.0.0.1',
+      8080,
+    );
     expect(spawnArgs).toEqual(flatArgs);
   });
 });

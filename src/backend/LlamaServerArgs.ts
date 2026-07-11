@@ -29,12 +29,7 @@ export function composeLlamaServerArgs(
   if (!model.gguf_path) {
     throw new Error(`Model "${model.name}" is missing gguf_path for llama.cpp`);
   }
-  const args: string[] = [
-    '-m', model.gguf_path,
-    '--host', host,
-    '--port', String(port),
-    '--jinja',
-  ];
+  const args: string[] = ['-m', model.gguf_path, '--host', host, '--port', String(port), '--jinja'];
 
   const gpuLayers = model.n_gpu_layers ?? server.n_gpu_layers ?? -1;
   args.push('--n-gpu-layers', String(gpuLayers));

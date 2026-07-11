@@ -1,7 +1,9 @@
 import type { ModelConfig } from '../config/types';
 import type { ChatCompletionRequest } from './types';
 
-function ollamaReasoningEffort(model: ModelConfig): ChatCompletionRequest['reasoning_effort'] | undefined {
+function ollamaReasoningEffort(
+  model: ModelConfig,
+): ChatCompletionRequest['reasoning_effort'] | undefined {
   if (model.think === false) return 'none';
   if (model.think === true) return model.reasoning_effort ?? 'medium';
   return model.reasoning_effort;

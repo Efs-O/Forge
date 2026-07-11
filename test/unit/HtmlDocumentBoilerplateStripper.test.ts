@@ -19,7 +19,9 @@ describe('stripHtmlDocumentBoilerplateFromFullText', () => {
 </body>
 </html>`;
 
-    expect(stripHtmlDocumentBoilerplateFromFullText(input)).toBe('<canvas id="fireworks"></canvas>');
+    expect(stripHtmlDocumentBoilerplateFromFullText(input)).toBe(
+      '<canvas id="fireworks"></canvas>',
+    );
   });
 
   it('leaves normal markdown untouched', () => {
@@ -32,7 +34,9 @@ describe('HtmlDocumentBoilerplateStripper', () => {
   it('suppresses document boilerplate while streaming', () => {
     const stripper = new HtmlDocumentBoilerplateStripper();
 
-    expect(stripper.push('<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"></head>')).toBe('');
+    expect(
+      stripper.push('<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"></head>'),
+    ).toBe('');
     expect(stripper.push('<body><div>Hello</div>')).toBe('<div>Hello</div>');
     expect(stripper.push('</body></html>')).toBe('');
     expect(stripper.flush()).toBe('');

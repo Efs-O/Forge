@@ -1,7 +1,13 @@
 export type Role = 'system' | 'user' | 'assistant' | 'tool';
 
-export interface ContentPartText  { type: 'text';      text: string }
-export interface ContentPartImage { type: 'image_url'; image_url: { url: string } }
+export interface ContentPartText {
+  type: 'text';
+  text: string;
+}
+export interface ContentPartImage {
+  type: 'image_url';
+  image_url: { url: string };
+}
 export type ContentPart = ContentPartText | ContentPartImage;
 
 export interface ChatMessage {

@@ -40,9 +40,8 @@ function modelSamplingOverrides(
   } = model.sampling;
 
   const allowPreserveThinking = opts.allowPreserveThinking ?? true;
-  const chatTemplateKwargs = !allowPreserveThinking || preserve_thinking === undefined
-    ? undefined
-    : { preserve_thinking };
+  const chatTemplateKwargs =
+    !allowPreserveThinking || preserve_thinking === undefined ? undefined : { preserve_thinking };
 
   return {
     ...(temperature !== undefined ? { temperature } : {}),
@@ -94,8 +93,6 @@ export function mergeSampling(
   return {
     ...getSamplingDefaults(model),
     ...modelOverrides,
-    ...Object.fromEntries(
-      Object.entries(request).filter(([, v]) => v !== undefined),
-    ),
+    ...Object.fromEntries(Object.entries(request).filter(([, v]) => v !== undefined)),
   } as ChatCompletionRequest;
 }

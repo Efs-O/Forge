@@ -8,6 +8,8 @@ export function extractToolDetail(argsJson: string): string {
     if (typeof cmd === 'string') return cmd.length > 50 ? cmd.slice(0, 50) + '…' : cmd;
     const short = args['query'] ?? args['pattern'] ?? args['message'] ?? args['text'];
     if (typeof short === 'string') return short.length > 50 ? short.slice(0, 50) + '…' : short;
-  } catch { /* malformed args — show nothing */ }
+  } catch {
+    /* malformed args — show nothing */
+  }
   return '';
 }

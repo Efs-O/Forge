@@ -19,8 +19,12 @@ export class ForgeInstructionsLoader implements vscode.Disposable {
     this.watch();
   }
 
-  get instructions(): string | undefined { return this.content; }
-  get root(): string { return this.workspaceRoot; }
+  get instructions(): string | undefined {
+    return this.content;
+  }
+  get root(): string {
+    return this.workspaceRoot;
+  }
 
   private load(): void {
     try {
@@ -51,7 +55,10 @@ export class ForgeInstructionsLoader implements vscode.Disposable {
 
   private watch(): void {
     try {
-      const pattern = new vscode.RelativePattern(path.dirname(this.filePath), path.basename(this.filePath));
+      const pattern = new vscode.RelativePattern(
+        path.dirname(this.filePath),
+        path.basename(this.filePath),
+      );
       const watcher = vscode.workspace.createFileSystemWatcher(pattern);
       const scheduleLoad = (): void => {
         if (this.debounceTimer !== undefined) clearTimeout(this.debounceTimer);

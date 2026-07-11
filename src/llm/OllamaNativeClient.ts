@@ -36,7 +36,11 @@ interface OllamaChatMessage {
 function toOllamaThink(model: ModelConfig): boolean | 'high' | 'medium' | 'low' | undefined {
   if (model.think === false || model.reasoning_effort === 'none') return false;
   if (model.think === true) {
-    if (model.reasoning_effort === 'high' || model.reasoning_effort === 'medium' || model.reasoning_effort === 'low') {
+    if (
+      model.reasoning_effort === 'high' ||
+      model.reasoning_effort === 'medium' ||
+      model.reasoning_effort === 'low'
+    ) {
       return model.reasoning_effort;
     }
     return true;
@@ -112,9 +116,16 @@ function toOllamaMessage(message: ChatMessage): OllamaChatMessage {
   };
 }
 
-function buildOllamaOptions(request: ChatCompletionRequest, model: ModelConfig): Record<string, unknown> | undefined {
+function buildOllamaOptions(
+  request: ChatCompletionRequest,
+  model: ModelConfig,
+): Record<string, unknown> | undefined {
   const repeatPenalty = request.repeat_penalty ?? request.repetition_penalty;
-  const stop = Array.isArray(request.stop) ? request.stop : request.stop !== undefined ? [request.stop] : undefined;
+  const stop = Array.isArray(request.stop)
+    ? request.stop
+    : request.stop !== undefined
+      ? [request.stop]
+      : undefined;
   const options = {
     ...(model.num_ctx !== undefined ? { num_ctx: model.num_ctx } : {}),
     ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
@@ -123,8 +134,12 @@ function buildOllamaOptions(request: ChatCompletionRequest, model: ModelConfig):
     ...(request.min_p !== undefined ? { min_p: request.min_p } : {}),
     ...(request.max_tokens !== undefined ? { num_predict: request.max_tokens } : {}),
     ...(request.seed !== undefined ? { seed: request.seed } : {}),
-    ...(request.presence_penalty !== undefined ? { presence_penalty: request.presence_penalty } : {}),
-    ...(request.frequency_penalty !== undefined ? { frequency_penalty: request.frequency_penalty } : {}),
+    ...(request.presence_penalty !== undefined
+      ? { presence_penalty: request.presence_penalty }
+      : {}),
+    ...(request.frequency_penalty !== undefined
+      ? { frequency_penalty: request.frequency_penalty }
+      : {}),
     ...(repeatPenalty !== undefined ? { repeat_penalty: repeatPenalty } : {}),
     ...(request.repeat_last_n !== undefined ? { repeat_last_n: request.repeat_last_n } : {}),
     ...(stop !== undefined ? { stop } : {}),
@@ -144,9 +159,10 @@ function accumulateToolCalls(
     const acc = toolAccum.get(index)!;
     if (toolCall.function?.name) acc.name += toolCall.function.name;
     if (toolCall.function?.arguments !== undefined) {
-      acc.arguments += typeof toolCall.function.arguments === 'string'
-        ? toolCall.function.arguments
-        : JSON.stringify(toolCall.function.arguments);
+      acc.arguments +=
+        typeof toolCall.function.arguments === 'string'
+          ? toolCall.function.arguments
+          : JSON.stringify(toolCall.function.arguments);
     }
   });
 }
@@ -262,7 +278,10 @@ export async function streamOllamaChatCompletion(
     if (buffer.trim()) {
       try {
         const trailing = JSON.parse(buffer.trim()) as OllamaStreamChunk;
-        if (typeof trailing.message?.thinking === 'string' && trailing.message.thinking.length > 0) {
+        if (
+          typeof trailing.message?.thinking === 'string' &&
+          trailing.message.thinking.length > 0
+        ) {
           if (handlers.onReasoning) handlers.onReasoning(trailing.message.thinking);
           else handlers.onToken(trailing.message.thinking);
         }

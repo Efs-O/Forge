@@ -20,7 +20,10 @@ function relativeTime(ts: number): string {
 
 function absoluteTime(ts: number): string {
   return new Date(ts).toLocaleString([], {
-    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
   });
 }
 
@@ -52,7 +55,9 @@ export function HistoryList({ items, onRestore }: Props): React.ReactElement {
         type="button"
         aria-expanded={showBody}
         aria-controls="history-list-wrap"
-        onClick={() => { if (items.length > 0) setExpanded((v) => !v); }}
+        onClick={() => {
+          if (items.length > 0) setExpanded((v) => !v);
+        }}
       >
         <span id="history-heading-row">
           <span id="history-heading">History</span>
@@ -65,8 +70,8 @@ export function HistoryList({ items, onRestore }: Props): React.ReactElement {
         </span>
       </button>
 
-      {showBody && (
-        items.length === 0 ? (
+      {showBody &&
+        (items.length === 0 ? (
           <p id="history-empty">Closed chats appear here.</p>
         ) : (
           <div id="history-list-wrap">
@@ -87,8 +92,7 @@ export function HistoryList({ items, onRestore }: Props): React.ReactElement {
               ))}
             </div>
           </div>
-        )
-      )}
+        ))}
     </section>
   );
 }

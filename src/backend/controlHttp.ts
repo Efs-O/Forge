@@ -82,7 +82,10 @@ export function parseChatRequest(body: Record<string, unknown>): ParsedChatReque
     out.reasoning_effort = effort as 'high' | 'medium' | 'low' | 'none';
   }
   const stop = body['stop'];
-  if (typeof stop === 'string' || (Array.isArray(stop) && stop.every((s) => typeof s === 'string'))) {
+  if (
+    typeof stop === 'string' ||
+    (Array.isArray(stop) && stop.every((s) => typeof s === 'string'))
+  ) {
     out.stop = stop as string | string[];
   }
   const tools = body['tools'];

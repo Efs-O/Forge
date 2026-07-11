@@ -19,9 +19,7 @@ interface TokenResponse {
   expires_in: number;
 }
 
-const OPENCODE_AUTH_PATH = path.join(
-  os.homedir(), '.local', 'share', 'opencode', 'auth.json',
-);
+const OPENCODE_AUTH_PATH = path.join(os.homedir(), '.local', 'share', 'opencode', 'auth.json');
 
 const XAI_TOKEN_ENDPOINT = 'https://auth.x.ai/oauth2/token';
 const XAI_CLIENT_ID = 'b1a00492-073a-47ea-816f-4c329264a828';
@@ -49,7 +47,7 @@ async function refreshAndPersist(entry: OpenCodeXaiEntry): Promise<string> {
     throw new Error(msg);
   }
 
-  const tokens = await res.json() as TokenResponse;
+  const tokens = (await res.json()) as TokenResponse;
   log.info(`[xAI] Token refreshed successfully, valid for ${tokens.expires_in / 3600}h`);
 
   try {
@@ -72,7 +70,9 @@ async function refreshAndPersist(entry: OpenCodeXaiEntry): Promise<string> {
 
 function jwtExpired(token: string): boolean {
   try {
-    const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString()) as { exp?: number };
+    const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString()) as {
+      exp?: number;
+    };
     return typeof payload.exp === 'number' && Date.now() / 1000 > payload.exp - 60;
   } catch {
     return false; // can't decode — assume valid, let the API reject it if not
@@ -105,15 +105,19 @@ export async function resolveXaiToken(
     const raw = fs.readFileSync(OPENCODE_AUTH_PATH, 'utf8');
     const auth = JSON.parse(raw) as Record<string, OpenCodeXaiEntry>;
     entry = auth['xai'] ?? {};
-    log.debug(`[xAI] auth.json loaded — expires=${entry.expires ? new Date(entry.expires).toISOString() : 'none'}`);
+    log.debug(
+      `[xAI] auth.json loaded — expires=${entry.expires ? new Date(entry.expires).toISOString() : 'none'}`,
+    );
   } catch (err) {
-    const msg = 'xAI: OpenCode auth file not found. Connect xAI in OpenCode first, or run "Forge: Set Cloud Provider Token" (key: xai).';
+    const msg =
+      'xAI: OpenCode auth file not found. Connect xAI in OpenCode first, or run "Forge: Set Cloud Provider Token" (key: xai).';
     log.error(`[xAI] ${msg} (${(err as Error).message})`);
     throw new Error(msg);
   }
 
   if (!entry.access) {
-    const msg = 'xAI: no token in OpenCode auth file. Connect xAI in OpenCode first, or run "Forge: Set Cloud Provider Token" (key: xai).';
+    const msg =
+      'xAI: no token in OpenCode auth file. Connect xAI in OpenCode first, or run "Forge: Set Cloud Provider Token" (key: xai).';
     log.error(`[xAI] ${msg}`);
     throw new Error(msg);
   }

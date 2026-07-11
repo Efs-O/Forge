@@ -10,7 +10,13 @@ import type { SearchChunk, SearchHit, SearchIndexFile, SearchResultSummary } fro
 
 const INDEX_VERSION = 1;
 const DEFAULT_INCLUDE_GLOBS = ['**/*'];
-const DEFAULT_EXCLUDE_GLOBS = ['**/node_modules/**', '**/dist/**', '**/out/**', '**/.git/**', '**/.forge/**'];
+const DEFAULT_EXCLUDE_GLOBS = [
+  '**/node_modules/**',
+  '**/dist/**',
+  '**/out/**',
+  '**/.git/**',
+  '**/.forge/**',
+];
 const DEFAULT_MAX_FILE_SIZE_KB = 256;
 const EMBEDDING_BATCH_SIZE = 24;
 
@@ -21,7 +27,10 @@ export class IndexManager {
   private readonly dirtyPaths = new Set<string>();
   private pendingSave = false;
 
-  constructor(private config: ForgeConfig, private readonly backend: EmbeddingBackend) {
+  constructor(
+    private config: ForgeConfig,
+    private readonly backend: EmbeddingBackend,
+  ) {
     this.client = new EmbeddingClient(() => this.backend.baseUrl());
   }
 
@@ -109,7 +118,9 @@ export class IndexManager {
 
     if (this.index) return;
     if (this.config.embeddings?.auto_index_on_search === false) {
-      throw new Error('Forge: semantic index missing. Run /reindex or Forge: Reindex Codebase Search Index first.');
+      throw new Error(
+        'Forge: semantic index missing. Run /reindex or Forge: Reindex Codebase Search Index first.',
+      );
     }
     await this.reindex();
   }
@@ -222,17 +233,21 @@ export class IndexManager {
   }
 
   private isCompatibleIndex(index: SearchIndexFile): boolean {
-    return index.version === INDEX_VERSION
-      && index.workspaceRoot === this.workspaceRoot()
-      && index.modelPath === this.modelPath()
-      && JSON.stringify(index.includeGlobs) === JSON.stringify(this.includeGlobs())
-      && JSON.stringify(index.excludeGlobs) === JSON.stringify(this.excludeGlobs())
-      && index.maxFileSizeKb === this.maxFileSizeKb();
+    return (
+      index.version === INDEX_VERSION &&
+      index.workspaceRoot === this.workspaceRoot() &&
+      index.modelPath === this.modelPath() &&
+      JSON.stringify(index.includeGlobs) === JSON.stringify(this.includeGlobs()) &&
+      JSON.stringify(index.excludeGlobs) === JSON.stringify(this.excludeGlobs()) &&
+      index.maxFileSizeKb === this.maxFileSizeKb()
+    );
   }
 
   private ensureEmbeddingsEnabled(): void {
     if (!this.config.embeddings?.enabled) {
-      throw new Error('Forge: embeddings are disabled. Enable the embeddings block in config.yaml first.');
+      throw new Error(
+        'Forge: embeddings are disabled. Enable the embeddings block in config.yaml first.',
+      );
     }
     if (!this.config.embeddings.model_path) {
       throw new Error('Forge: embeddings.model_path is required.');

@@ -13,11 +13,7 @@ interface PropsPayload {
   chat_template_caps?: unknown;
 }
 
-const TOOL_HINTS = [
-  'tool',
-  'function',
-  'parallel_tool_calls',
-] as const;
+const TOOL_HINTS = ['tool', 'function', 'parallel_tool_calls'] as const;
 
 const THINKING_HINTS = [
   'think',
@@ -68,7 +64,9 @@ function containsHint(value: unknown, hints: readonly string[]): boolean {
   if (value && typeof value === 'object') {
     return Object.entries(value as Record<string, unknown>).some(([key, entry]) => {
       const lowerKey = key.toLowerCase();
-      return hints.some((hint) => lowerKey.includes(hint)) ? Boolean(entry ?? true) : containsHint(entry, hints);
+      return hints.some((hint) => lowerKey.includes(hint))
+        ? Boolean(entry ?? true)
+        : containsHint(entry, hints);
     });
   }
   return false;
@@ -82,7 +80,10 @@ function mergeCapabilityValues(
 }
 
 function deriveHeuristicCapabilities(model?: ModelConfig): RuntimeModelCapabilities {
-  const probe = [model?.name, model?.gguf_path, model?.endpoint].filter(Boolean).join(' ').toLowerCase();
+  const probe = [model?.name, model?.gguf_path, model?.endpoint]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
   if (!probe) {
     return {
       source: 'unknown',
@@ -94,9 +95,8 @@ function deriveHeuristicCapabilities(model?: ModelConfig): RuntimeModelCapabilit
   }
 
   const explicitTools = model?.capabilities?.includes('tool-call') ? true : null;
-  const likelySupportsTools = explicitTools ?? (
-    TOOL_TEMPLATE_HINTS.some((hint) => probe.includes(hint)) ? true : null
-  );
+  const likelySupportsTools =
+    explicitTools ?? (TOOL_TEMPLATE_HINTS.some((hint) => probe.includes(hint)) ? true : null);
   const likelySupportsThinking = THINKING_HINTS.some((hint) => probe.includes(hint)) ? true : null;
 
   return {
@@ -114,22 +114,28 @@ function deriveRuntimeCapabilities(
 ): RuntimeModelCapabilities {
   const chatTemplate = asNonEmptyString(props.chat_template);
   const caps = props.chat_template_caps;
-  const runtimeTools = containsHint(caps, TOOL_HINTS) || containsHint(chatTemplate, TOOL_HINTS)
-    ? true
-    : chatTemplate === null && props.chat_template !== ''
-      ? null
-      : false;
-  const runtimeThinking = containsHint(caps, THINKING_HINTS) || containsHint(chatTemplate, THINKING_HINTS)
-    ? true
-    : chatTemplate === null && props.chat_template !== ''
-      ? null
-      : false;
+  const runtimeTools =
+    containsHint(caps, TOOL_HINTS) || containsHint(chatTemplate, TOOL_HINTS)
+      ? true
+      : chatTemplate === null && props.chat_template !== ''
+        ? null
+        : false;
+  const runtimeThinking =
+    containsHint(caps, THINKING_HINTS) || containsHint(chatTemplate, THINKING_HINTS)
+      ? true
+      : chatTemplate === null && props.chat_template !== ''
+        ? null
+        : false;
 
   return {
     source: 'runtime',
-    hasChatTemplate: typeof props.chat_template === 'string' ? chatTemplate !== null : heuristic.hasChatTemplate,
+    hasChatTemplate:
+      typeof props.chat_template === 'string' ? chatTemplate !== null : heuristic.hasChatTemplate,
     likelySupportsTools: mergeCapabilityValues(runtimeTools, heuristic.likelySupportsTools),
-    likelySupportsThinking: mergeCapabilityValues(runtimeThinking, heuristic.likelySupportsThinking),
+    likelySupportsThinking: mergeCapabilityValues(
+      runtimeThinking,
+      heuristic.likelySupportsThinking,
+    ),
     chatTemplate,
   };
 }
@@ -137,7 +143,7 @@ function deriveRuntimeCapabilities(
 async function fetchProps(baseUrl: string): Promise<PropsPayload | null> {
   const response = await fetch(`${baseUrl}/props`);
   if (!response.ok) return null;
-  const payload = await response.json() as unknown;
+  const payload = (await response.json()) as unknown;
   if (!payload || typeof payload !== 'object') return null;
   return payload as PropsPayload;
 }

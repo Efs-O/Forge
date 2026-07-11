@@ -1,15 +1,6 @@
-const THINK_OPEN_MARKERS = [
-  'thought<|channel>',
-  '<|channel>',
-  '<|thinking|>',
-  '<think>',
-] as const;
+const THINK_OPEN_MARKERS = ['thought<|channel>', '<|channel>', '<|thinking|>', '<think>'] as const;
 
-const THINK_CLOSE_MARKERS = [
-  '<channel|>',
-  '</|thinking|>',
-  '</think>',
-] as const;
+const THINK_CLOSE_MARKERS = ['<channel|>', '</|thinking|>', '</think>'] as const;
 
 type Marker = (typeof THINK_OPEN_MARKERS)[number] | (typeof THINK_CLOSE_MARKERS)[number];
 

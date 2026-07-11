@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { ThinkingChannelStripper, stripThinkingFromFullText } from '../../src/llm/ThinkingChannelStripper';
+import {
+  ThinkingChannelStripper,
+  stripThinkingFromFullText,
+} from '../../src/llm/ThinkingChannelStripper';
 
 describe('ThinkingChannelStripper', () => {
   it('strips inline thinking segments from a full response', () => {

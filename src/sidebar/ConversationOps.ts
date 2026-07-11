@@ -22,7 +22,13 @@ export function opNewConversation(sidebar: SidebarRuntime): NewConvResult {
   if (sidebar.conversations.length >= MAX_CONVERSATIONS) return { atCap: true };
   const id = newConversationId();
   const now = Date.now();
-  const conv: ConversationRuntime = { id, title: 'Chat', createdAt: now, updatedAt: now, messages: [] };
+  const conv: ConversationRuntime = {
+    id,
+    title: 'Chat',
+    createdAt: now,
+    updatedAt: now,
+    messages: [],
+  };
   const updated: SidebarRuntime = {
     ...sidebar,
     conversations: [...sidebar.conversations, conv],
@@ -53,12 +59,18 @@ export function opCloseConversation(
   if (ix < 0) return null;
   const conv = sidebar.conversations[ix]!;
   const shouldArchive = slimPersistMessages(conv.messages).length > 0;
-  let updated = { ...sidebar, conversations: [...sidebar.conversations] };
+  const updated = { ...sidebar, conversations: [...sidebar.conversations] };
 
   if (updated.conversations.length === 1) {
     if (shouldArchive) upsertHistoryConversation(updated, conv);
     const freshId = newConversationId();
-    updated.conversations[0] = { id: freshId, title: 'Chat', createdAt: Date.now(), updatedAt: Date.now(), messages: [] };
+    updated.conversations[0] = {
+      id: freshId,
+      title: 'Chat',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      messages: [],
+    };
     updated.activeConversationId = freshId;
     return { sidebar: updated, newActiveId: freshId };
   }
@@ -80,7 +92,9 @@ export function opRestoreConversation(sidebar: SidebarRuntime, id: string): Rest
       ok: true as const,
       sidebar: { ...sidebar, activeConversationId: id },
       newActiveId: id,
-      ...(existing.active_model !== undefined ? { activeModelOverride: existing.active_model } : {}),
+      ...(existing.active_model !== undefined
+        ? { activeModelOverride: existing.active_model }
+        : {}),
     };
   }
 
@@ -88,7 +102,11 @@ export function opRestoreConversation(sidebar: SidebarRuntime, id: string): Rest
   if (!archived) return { notFound: true };
   if (sidebar.conversations.length >= MAX_CONVERSATIONS) return { atCap: true };
 
-  const restored: ConversationRuntime = { ...archived, messages: [...archived.messages], updatedAt: Date.now() };
+  const restored: ConversationRuntime = {
+    ...archived,
+    messages: [...archived.messages],
+    updatedAt: Date.now(),
+  };
   const updated: SidebarRuntime = {
     ...sidebar,
     conversations: [...sidebar.conversations, restored],
@@ -111,13 +129,19 @@ export function opClearMessages(conv: ConversationRuntime): void {
   delete conv.active_model;
 }
 
-export function buildUserContent(text: string, attachments?: AttachmentData[]): string | ContentPart[] {
+export function buildUserContent(
+  text: string,
+  attachments?: AttachmentData[],
+): string | ContentPart[] {
   if (!attachments?.length) return text;
   const parts: ContentPart[] = [];
   if (text.trim()) parts.push({ type: 'text', text });
   for (const att of attachments) {
     if (att.mediaType.startsWith('image/')) {
-      parts.push({ type: 'image_url', image_url: { url: `data:${att.mediaType};base64,${att.data}` } });
+      parts.push({
+        type: 'image_url',
+        image_url: { url: `data:${att.mediaType};base64,${att.data}` },
+      });
     } else {
       parts.push({ type: 'text', text: `\`\`\`${att.name}\n${att.data}\n\`\`\`` });
     }

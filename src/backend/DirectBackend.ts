@@ -5,7 +5,12 @@ import type { ForgeConfig, ModelConfig } from '../config/types';
 import { composeLlamaServerArgs } from './LlamaServerArgs';
 import { spawnLlamaServer, killLlamaProcess } from './llamaProcess';
 import { waitForHealthy, probeHealthy, probeServedModel } from './HealthCheck';
-import { ensureOllamaReady, normalizeOllamaEndpoint, probeOllamaModel, releaseOllamaModel } from './OllamaAdapter';
+import {
+  ensureOllamaReady,
+  normalizeOllamaEndpoint,
+  probeOllamaModel,
+  releaseOllamaModel,
+} from './OllamaAdapter';
 import { isCloudProvider } from '../llm/CloudProviders';
 import { expandAlias, resolveSpawnModel, splitModelProfile } from '../config/ConfigResolver';
 import { getLogger } from '../util/logger';
@@ -24,7 +29,10 @@ export class DirectBackend implements BackendController {
   private adoptPollTimer: ReturnType<typeof setInterval> | null = null;
   private onExitCb: (() => void) | null = null;
 
-  constructor(private config: ForgeConfig, portOverride?: number) {
+  constructor(
+    private config: ForgeConfig,
+    portOverride?: number,
+  ) {
     this.host = config.llama_server.host ?? '127.0.0.1';
     this.port = portOverride ?? config.llama_server.port ?? 8080;
     this.currentBaseUrl = `http://${this.host}:${this.port}`;
@@ -139,7 +147,9 @@ export class DirectBackend implements BackendController {
   private async startLlamaServer(model: ModelConfig): Promise<void> {
     const binary = this.config.llama_server.binary;
     if (!binary) {
-      throw new Error('llama_server.binary is not configured. Set llama_server.binary in config.yaml to point to your llama-server executable.');
+      throw new Error(
+        'llama_server.binary is not configured. Set llama_server.binary in config.yaml to point to your llama-server executable.',
+      );
     }
 
     // If a server is already running on this port (e.g. another VS Code window),
@@ -159,17 +169,29 @@ export class DirectBackend implements BackendController {
             `route this load through the control server so it can free a slot.`,
         );
       }
-      log.info(`[DirectBackend] port ${this.port} already serving ${model.name} — adopting existing server`);
+      log.info(
+        `[DirectBackend] port ${this.port} already serving ${model.name} — adopting existing server`,
+      );
       this.serverChannel ??= vscode.window.createOutputChannel('Forge - llama-server');
       this.serverChannel.clear();
-      this.serverChannel.appendLine(`[Forge] Adopted existing llama-server on port ${this.port} (started by another VS Code window).`);
-      this.serverChannel.appendLine(`[Forge] Live output is in that window. Polling /health + /slots every 5 s...\n`);
+      this.serverChannel.appendLine(
+        `[Forge] Adopted existing llama-server on port ${this.port} (started by another VS Code window).`,
+      );
+      this.serverChannel.appendLine(
+        `[Forge] Live output is in that window. Polling /health + /slots every 5 s...\n`,
+      );
       this.serverChannel.show(true);
       this.startAdoptedMonitor();
       return;
     }
 
-    const args = composeLlamaServerArgs(binary, model, this.config.llama_server, this.host, this.port);
+    const args = composeLlamaServerArgs(
+      binary,
+      model,
+      this.config.llama_server,
+      this.host,
+      this.port,
+    );
 
     this.serverChannel ??= vscode.window.createOutputChannel('Forge - llama-server');
     this.serverChannel.clear();
@@ -207,7 +229,9 @@ export class DirectBackend implements BackendController {
       this.proc = null;
       this.ready = false;
       log.warn(`[DirectBackend] llama-server exited unexpectedly (code ${code ?? '?'})`);
-      this.serverChannel?.appendLine(`\n[Forge] llama-server exited unexpectedly (code ${code ?? '?'}).`);
+      this.serverChannel?.appendLine(
+        `\n[Forge] llama-server exited unexpectedly (code ${code ?? '?'}).`,
+      );
       this.onExitCb?.();
     });
 
@@ -226,12 +250,16 @@ export class DirectBackend implements BackendController {
         if (!healthRes.ok) throw new Error(`HTTP ${healthRes.status}`);
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const slots: any[] = slotsRes.ok ? (await slotsRes.json() as any[]) : [];
+        const slots: any[] = slotsRes.ok ? ((await slotsRes.json()) as any[]) : [];
         const active = slots.filter((s) => s.state === 1).length;
         const total = slots.length;
         const ctx = slots[0] ? `${slots[0].n_past ?? 0}/${slots[0].n_ctx ?? '?'} ctx` : '';
         const ts = new Date().toLocaleTimeString();
-        const line = [`[${ts}] llama-server healthy`, total ? `slots: ${active}/${total} active` : '', ctx]
+        const line = [
+          `[${ts}] llama-server healthy`,
+          total ? `slots: ${active}/${total} active` : '',
+          ctx,
+        ]
           .filter(Boolean)
           .join(' | ');
         this.serverChannel?.appendLine(line);

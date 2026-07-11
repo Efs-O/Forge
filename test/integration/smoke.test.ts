@@ -19,8 +19,7 @@ function startServer(handler: Handler): Promise<{ url: string; close: () => Prom
     srv.listen(0, '127.0.0.1', () => {
       const { port } = srv.address() as AddressInfo;
       const url = `http://127.0.0.1:${port}`;
-      const close = () =>
-        new Promise<void>((res, rej) => srv.close((e) => (e ? rej(e) : res())));
+      const close = () => new Promise<void>((res, rej) => srv.close((e) => (e ? rej(e) : res())));
       resolve({ url, close });
     });
   });
@@ -40,7 +39,10 @@ function makeChunk(content: string, finishReason: string | null = null): string 
 }
 
 /** SSE chunk with arbitrary delta (tests Ollama-style empty `finish_reason` or `reasoning_content`). */
-function makeDeltaChunk(delta: Record<string, unknown>, finishReason: string | null = null): string {
+function makeDeltaChunk(
+  delta: Record<string, unknown>,
+  finishReason: string | null = null,
+): string {
   const choice: Record<string, unknown> = {
     index: 0,
     delta,
@@ -93,8 +95,12 @@ describe('streamChatCompletion — basic token streaming', () => {
 
     await streamChatCompletion(url, baseRequest, {
       onToken: (t) => tokens.push(t),
-      onDone: (r) => { doneReason = r; },
-      onError: (e) => { throw e; },
+      onDone: (r) => {
+        doneReason = r;
+      },
+      onError: (e) => {
+        throw e;
+      },
     });
 
     expect(tokens).toEqual(['Hello', ', world!']);
@@ -125,8 +131,12 @@ describe('streamChatCompletion — empty-string finish_reason (Ollama interim ch
 
     await streamChatCompletion(url, baseRequest, {
       onToken: (t) => tokens.push(t),
-      onDone: (r) => { doneReason = r; },
-      onError: (e) => { throw e; },
+      onDone: (r) => {
+        doneReason = r;
+      },
+      onError: (e) => {
+        throw e;
+      },
     });
 
     expect(tokens).toEqual(['Visible']);
@@ -156,7 +166,9 @@ describe('streamChatCompletion — reasoning_content when content is absent', ()
     await streamChatCompletion(url, baseRequest, {
       onToken: (t) => tokens.push(t),
       onDone: () => {},
-      onError: (e) => { throw e; },
+      onError: (e) => {
+        throw e;
+      },
     });
 
     expect(tokens).toEqual(['Step one. ', 'Done.']);
@@ -185,7 +197,9 @@ describe('streamChatCompletion — Ollama reasoning when content is absent', () 
     await streamChatCompletion(url, baseRequest, {
       onToken: (t) => tokens.push(t),
       onDone: () => {},
-      onError: (e) => { throw e; },
+      onError: (e) => {
+        throw e;
+      },
     });
 
     expect(tokens).toEqual(['Think first. ', 'Done.']);
@@ -202,7 +216,7 @@ describe('streamChatCompletion — tool_calls round-trip', () => {
       // Single tool call streamed in two delta fragments, then finish.
       const body = sseBody([
         makeToolChunk(0, 'call-1', 'read_file', '{"path":"/tmp/f'),
-        makeToolChunk(0, '',       '',          'ile.txt"}', 'tool_calls'),
+        makeToolChunk(0, '', '', 'ile.txt"}', 'tool_calls'),
       ]);
       res.end(body);
     }));
@@ -217,10 +231,18 @@ describe('streamChatCompletion — tool_calls round-trip', () => {
 
     await streamChatCompletion(url, baseRequest, {
       onToken: (t) => tokens.push(t),
-      onDone: (r) => { doneReason = r; },
-      onError: (e) => { throw e; },
+      onDone: (r) => {
+        doneReason = r;
+      },
+      onError: (e) => {
+        throw e;
+      },
       onToolCalls: (calls) => {
-        toolCalls = calls.map((c) => ({ id: c.id, name: c.function.name, arguments: c.function.arguments }));
+        toolCalls = calls.map((c) => ({
+          id: c.id,
+          name: c.function.name,
+          arguments: c.function.arguments,
+        }));
       },
     });
 
@@ -258,10 +280,18 @@ describe('streamChatCompletion — Ollama-style tool deltas with finish_reason s
 
     await streamChatCompletion(url, baseRequest, {
       onToken: () => {},
-      onDone: (r) => { doneReason = r; },
-      onError: (e) => { throw e; },
+      onDone: (r) => {
+        doneReason = r;
+      },
+      onError: (e) => {
+        throw e;
+      },
       onToolCalls: (calls) => {
-        toolCalls = calls.map((c) => ({ id: c.id, name: c.function.name, arguments: c.function.arguments }));
+        toolCalls = calls.map((c) => ({
+          id: c.id,
+          name: c.function.name,
+          arguments: c.function.arguments,
+        }));
       },
     });
 
@@ -293,7 +323,9 @@ describe('streamChatCompletion — HTTP error surface', () => {
     await streamChatCompletion(url, baseRequest, {
       onToken: () => {},
       onDone: () => {},
-      onError: (e) => { errorMsg = e.message; },
+      onError: (e) => {
+        errorMsg = e.message;
+      },
     });
     expect(errorMsg).toMatch(/503/);
   });
@@ -317,11 +349,20 @@ describe('streamChatCompletion — AbortSignal cancellation', () => {
     const ac = new AbortController();
     let doneReason: string | null = null;
 
-    const promise = streamChatCompletion(url, baseRequest, {
-      onToken: () => {},
-      onDone: (r) => { doneReason = r; },
-      onError: (e) => { throw e; },
-    }, ac.signal);
+    const promise = streamChatCompletion(
+      url,
+      baseRequest,
+      {
+        onToken: () => {},
+        onDone: (r) => {
+          doneReason = r;
+        },
+        onError: (e) => {
+          throw e;
+        },
+      },
+      ac.signal,
+    );
 
     // Abort immediately.
     ac.abort();
@@ -366,8 +407,13 @@ describe('ToolRegistry — registration and dispatch', () => {
       permission: 'write',
       definition: {
         type: 'function',
-        function: { name: 'w', description: '', parameters: { type: 'object', properties: {}, required: [] } },
+        function: {
+          name: 'w',
+          description: '',
+          parameters: { type: 'object', properties: {}, required: [] },
+        },
       },
+      mutation: { paths: () => [] },
       handler: async () => 'ok',
     });
 
@@ -378,12 +424,27 @@ describe('ToolRegistry — registration and dispatch', () => {
     const registry = new ToolRegistry();
     registry.register({
       permission: 'read',
-      definition: { type: 'function', function: { name: 'r', description: '', parameters: { type: 'object', properties: {}, required: [] } } },
+      definition: {
+        type: 'function',
+        function: {
+          name: 'r',
+          description: '',
+          parameters: { type: 'object', properties: {}, required: [] },
+        },
+      },
       handler: async () => '',
     });
     registry.register({
       permission: 'write',
-      definition: { type: 'function', function: { name: 'w', description: '', parameters: { type: 'object', properties: {}, required: [] } } },
+      definition: {
+        type: 'function',
+        function: {
+          name: 'w',
+          description: '',
+          parameters: { type: 'object', properties: {}, required: [] },
+        },
+      },
+      mutation: { paths: () => [] },
       handler: async () => '',
     });
 

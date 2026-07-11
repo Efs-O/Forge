@@ -54,12 +54,14 @@ export function InputRow({
     ? []
     : !slashQuery
       ? slashCommands
-      : slashCommands.filter((cmd) =>
-          cmd.trigger.includes(slashQuery) || cmd.title.toLowerCase().includes(slashQuery),
+      : slashCommands.filter(
+          (cmd) => cmd.trigger.includes(slashQuery) || cmd.title.toLowerCase().includes(slashQuery),
         );
   const showSlashMenu = !streaming && slashMatches.length > 0 && text.startsWith('/');
 
-  useEffect(() => { setSelectedCommandIndex(0); }, [text]);
+  useEffect(() => {
+    setSelectedCommandIndex(0);
+  }, [text]);
 
   useEffect(() => {
     if (prefillText === null) return;
@@ -104,42 +106,48 @@ export function InputRow({
     setAttachments((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
-  const runSlashCommand = useCallback((command: SlashCommand) => {
-    if (streaming) return;
-    onRunSlashCommand(command.id);
-    setText('');
-    setSelectedCommandIndex(0);
-    textareaRef.current?.focus();
-  }, [onRunSlashCommand, streaming]);
+  const runSlashCommand = useCallback(
+    (command: SlashCommand) => {
+      if (streaming) return;
+      onRunSlashCommand(command.id);
+      setText('');
+      setSelectedCommandIndex(0);
+      textareaRef.current?.focus();
+    },
+    [onRunSlashCommand, streaming],
+  );
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (showSlashMenu) {
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setSelectedCommandIndex((i) => (i + 1) % slashMatches.length);
-        return;
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (showSlashMenu) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setSelectedCommandIndex((i) => (i + 1) % slashMatches.length);
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setSelectedCommandIndex((i) => (i - 1 + slashMatches.length) % slashMatches.length);
+          return;
+        }
+        if (e.key === 'Tab' || e.key === 'Enter') {
+          e.preventDefault();
+          runSlashCommand(slashMatches[selectedCommandIndex] ?? slashMatches[0]);
+          return;
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          setText('');
+          return;
+        }
       }
-      if (e.key === 'ArrowUp') {
+      if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        setSelectedCommandIndex((i) => (i - 1 + slashMatches.length) % slashMatches.length);
-        return;
+        submit();
       }
-      if (e.key === 'Tab' || e.key === 'Enter') {
-        e.preventDefault();
-        runSlashCommand(slashMatches[selectedCommandIndex] ?? slashMatches[0]);
-        return;
-      }
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        setText('');
-        return;
-      }
-    }
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      submit();
-    }
-  }, [runSlashCommand, selectedCommandIndex, showSlashMenu, slashMatches, submit]);
+    },
+    [runSlashCommand, selectedCommandIndex, showSlashMenu, slashMatches, submit],
+  );
 
   const canSend = (text.trim().length > 0 || attachments.length > 0) && !streaming;
   const placeholder = backendReady
@@ -226,7 +234,10 @@ export function InputRow({
 
         <div id="input-btn-col">
           {clankerMode && (
-            <span id="clanker-pill" title="Clanker Mode active — no confirmation prompts. Recursive deletes still confirm.">
+            <span
+              id="clanker-pill"
+              title="Clanker Mode active — no confirmation prompts. Recursive deletes still confirm."
+            >
               💥 CLANKER MODE
             </span>
           )}
@@ -236,12 +247,7 @@ export function InputRow({
               Stop
             </button>
           ) : (
-            <button
-              id="btn-send"
-              type="button"
-              onClick={submit}
-              disabled={!canSend}
-            >
+            <button id="btn-send" type="button" onClick={submit} disabled={!canSend}>
               <SendIcon />
               Send
             </button>

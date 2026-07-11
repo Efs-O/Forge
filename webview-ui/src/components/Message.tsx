@@ -25,12 +25,23 @@ const markdownComponents: React.ComponentProps<typeof Markdown>['components'] = 
     if (href?.startsWith(FILE_LINK_SCHEME)) {
       const filePath = decodeURIComponent(href.slice(FILE_LINK_SCHEME.length));
       return (
-        <a {...props} href={href} onClick={(e) => { e.preventDefault(); vscode.postMessage({ type: 'openFile', path: filePath }); }}>
+        <a
+          {...props}
+          href={href}
+          onClick={(e) => {
+            e.preventDefault();
+            vscode.postMessage({ type: 'openFile', path: filePath });
+          }}
+        >
           {children}
         </a>
       );
     }
-    return <a {...props} href={href}>{children}</a>;
+    return (
+      <a {...props} href={href}>
+        {children}
+      </a>
+    );
   },
 };
 
@@ -38,16 +49,21 @@ const markdownComponents: React.ComponentProps<typeof Markdown>['components'] = 
 
 const DIFF_COLLAPSE_THRESHOLD = 50;
 
-function DiffBlock({ filePath, hunks, isNew, isDeleted }: {
+function DiffBlock({
+  filePath,
+  hunks,
+  isNew,
+  isDeleted,
+}: {
   filePath: string;
   hunks: DiffHunk[] | null | undefined;
   isNew?: boolean;
   isDeleted?: boolean;
 }): React.ReactElement {
-  const allLines = useMemo(() => hunks?.flatMap(h => h.lines) ?? [], [hunks]);
-  const added    = allLines.filter(l => l.kind === 'added').length;
-  const removed  = allLines.filter(l => l.kind === 'removed').length;
-  const large    = allLines.length > DIFF_COLLAPSE_THRESHOLD;
+  const allLines = useMemo(() => hunks?.flatMap((h) => h.lines) ?? [], [hunks]);
+  const added = allLines.filter((l) => l.kind === 'added').length;
+  const removed = allLines.filter((l) => l.kind === 'removed').length;
+  const large = allLines.length > DIFF_COLLAPSE_THRESHOLD;
   const [expanded, setExpanded] = useState(!large);
 
   const badge = isDeleted ? 'deleted' : isNew ? 'new' : 'modified';
@@ -58,10 +74,10 @@ function DiffBlock({ filePath, hunks, isNew, isDeleted }: {
         <span className="diff-indicator">●</span>
         <span className={`diff-badge diff-badge-${badge}`}>{badge}</span>
         <span className="diff-filepath">{filePath}</span>
-        {added   > 0 && <span className="diff-stat diff-stat-added">+{added}</span>}
+        {added > 0 && <span className="diff-stat diff-stat-added">+{added}</span>}
         {removed > 0 && <span className="diff-stat diff-stat-removed">−{removed}</span>}
         {large && (
-          <button className="diff-toggle" type="button" onClick={() => setExpanded(e => !e)}>
+          <button className="diff-toggle" type="button" onClick={() => setExpanded((e) => !e)}>
             {expanded ? 'collapse' : `show ${allLines.length} lines`}
           </button>
         )}
@@ -89,20 +105,40 @@ function DiffBlock({ filePath, hunks, isNew, isDeleted }: {
   );
 }
 
-function AssistantContent({ content, streaming }: { content: string; streaming?: boolean }): React.ReactElement {
+function AssistantContent({
+  content,
+  streaming,
+}: {
+  content: string;
+  streaming?: boolean;
+}): React.ReactElement {
   const { settled, live } = useMemo(
-    () => streaming ? splitStreamingContent(content) : { settled: content, live: '' },
+    () => (streaming ? splitStreamingContent(content) : { settled: content, live: '' }),
     [content, streaming],
   );
 
   if (!streaming) {
-    return <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={markdownComponents}>{content}</Markdown>;
+    return (
+      <Markdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeHighlight]}
+        components={markdownComponents}
+      >
+        {content}
+      </Markdown>
+    );
   }
 
   return (
     <>
       {settled && (
-        <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={markdownComponents}>{settled}</Markdown>
+        <Markdown
+          remarkPlugins={[remarkGfm]}
+          rehypePlugins={[rehypeHighlight]}
+          components={markdownComponents}
+        >
+          {settled}
+        </Markdown>
       )}
       <span className="streaming-tail">{live}</span>
     </>
@@ -144,25 +180,31 @@ function splitStreamingContent(content: string): { settled: string; live: string
   return { settled: content.slice(0, lastSafeSplit), live: content.slice(lastSafeSplit) };
 }
 
-export function Message({ role, content, reasoning, streaming, diffHunks, diffIsNew, diffIsDeleted }: MessageProps): React.ReactElement {
+export function Message({
+  role,
+  content,
+  reasoning,
+  streaming,
+  diffHunks,
+  diffIsNew,
+  diffIsDeleted,
+}: MessageProps): React.ReactElement {
   const [thinkingOpen, setThinkingOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(content).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    }).catch(() => undefined);
+    navigator.clipboard
+      .writeText(content)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => undefined);
   }, [content]);
 
   if (role === 'diff') {
     return (
-      <DiffBlock
-        filePath={content}
-        hunks={diffHunks}
-        isNew={diffIsNew}
-        isDeleted={diffIsDeleted}
-      />
+      <DiffBlock filePath={content} hunks={diffHunks} isNew={diffIsNew} isDeleted={diffIsDeleted} />
     );
   }
 

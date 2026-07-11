@@ -6,7 +6,11 @@ import type { ForgeConfig } from '../config/types';
 import type { HostToWebview, ForgeSlashCommandId } from './messageBridge';
 import type { ConversationRuntime } from './sessionTypes';
 import type { SidebarProviderEvents } from './AgentLoop';
-import { activeFileBlock, activeSelectionBlock, formatContextBlocks } from '../vscode/editorContext';
+import {
+  activeFileBlock,
+  activeSelectionBlock,
+  formatContextBlocks,
+} from '../vscode/editorContext';
 
 export interface SlashCommandDeps {
   getConfig: () => ForgeConfig;
@@ -38,9 +42,15 @@ export class SlashCommandHandler {
         try {
           await deps.pool.stopAll();
           deps.events.onBackendStopped?.(deps.getConfig().active_model);
-          deps.post({ type: 'backendDown', message: 'All models unloaded. Send a prompt to start the backend again.' });
+          deps.post({
+            type: 'backendDown',
+            message: 'All models unloaded. Send a prompt to start the backend again.',
+          });
         } catch (err) {
-          deps.post({ type: 'error', message: `Failed to unload models: ${(err as Error).message}` });
+          deps.post({
+            type: 'error',
+            message: `Failed to unload models: ${(err as Error).message}`,
+          });
         }
         return;
 
@@ -53,9 +63,11 @@ export class SlashCommandHandler {
             await deps.pool.acquire(modelName);
             deps.events.onBackendReady?.(modelName);
           }
-          void vscode.window.showInformationMessage(modelName
-            ? 'Forge: backend restarted.'
-            : 'Forge: all backends stopped. Pick a model to start again.');
+          void vscode.window.showInformationMessage(
+            modelName
+              ? 'Forge: backend restarted.'
+              : 'Forge: all backends stopped. Pick a model to start again.',
+          );
         } catch (err) {
           void vscode.window.showErrorMessage(`Forge: ${(err as Error).message}`);
         }
@@ -84,7 +96,9 @@ export class SlashCommandHandler {
       case 'undo':
         try {
           const restored = deps.undo();
-          void vscode.window.showInformationMessage(`Forge: undid last turn, restored ${restored.length} file(s)`);
+          void vscode.window.showInformationMessage(
+            `Forge: undid last turn, restored ${restored.length} file(s)`,
+          );
         } catch (err) {
           void vscode.window.showErrorMessage(`Forge: ${(err as Error).message}`);
         }
@@ -109,9 +123,11 @@ export class SlashCommandHandler {
 
       case 'clanker': {
         const on = deps.toggleClanker();
-        deps.post({ type: 'token', text: on
-          ? '\n> 💥 **Clanker Mode ON** — no confirmation prompts until you run `/clanker` again. Recursive deletes still confirm.\n'
-          : '\n> 💥 **Clanker Mode OFF** — confirmation restored.\n',
+        deps.post({
+          type: 'token',
+          text: on
+            ? '\n> 💥 **Clanker Mode ON** — no confirmation prompts until you run `/clanker` again. Recursive deletes still confirm.\n'
+            : '\n> 💥 **Clanker Mode OFF** — confirmation restored.\n',
         });
         return;
       }
@@ -120,9 +136,11 @@ export class SlashCommandHandler {
 
   private buildReviewPrompt(): string {
     const selection = activeSelectionBlock();
-    if (selection) return `Review this code. Lead with findings, then risks and test gaps.\n\n${formatContextBlocks([selection])}`;
+    if (selection)
+      return `Review this code. Lead with findings, then risks and test gaps.\n\n${formatContextBlocks([selection])}`;
     const file = activeFileBlock();
-    if (file) return `Review this file. Lead with findings, then risks and test gaps.\n\n${formatContextBlocks([file])}`;
+    if (file)
+      return `Review this file. Lead with findings, then risks and test gaps.\n\n${formatContextBlocks([file])}`;
     return 'Review the current workspace changes. Start by inspecting the most relevant files or git diff. Lead with findings, then risks and test gaps.';
   }
 
@@ -130,14 +148,17 @@ export class SlashCommandHandler {
     const { deps } = this;
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (!root) {
-      void vscode.window.showWarningMessage('Forge: no workspace folder open — cannot generate FORGE.md.');
+      void vscode.window.showWarningMessage(
+        'Forge: no workspace folder open — cannot generate FORGE.md.',
+      );
       return;
     }
     const forgePath = path.join(root, 'FORGE.md');
     if (fs.existsSync(forgePath)) {
       const answer = await vscode.window.showWarningMessage(
         'Forge: FORGE.md already exists. Overwrite it?',
-        'Overwrite', 'Cancel',
+        'Overwrite',
+        'Cancel',
       );
       if (answer !== 'Overwrite') return;
     }
@@ -145,20 +166,28 @@ export class SlashCommandHandler {
     let content: string;
     try {
       content = await vscode.window.withProgress(
-        { location: vscode.ProgressLocation.Notification, title: 'Forge: scanning workspace and generating FORGE.md…', cancellable: false },
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Forge: scanning workspace and generating FORGE.md…',
+          cancellable: false,
+        },
         async () => {
           const context = this.collectWorkspaceContext(root);
           return deps.runPromptToMarkdown(this.buildInitForgePrompt(root, context));
         },
       );
     } catch (err) {
-      void vscode.window.showErrorMessage(`Forge: failed to generate FORGE.md — ${(err as Error).message}`);
+      void vscode.window.showErrorMessage(
+        `Forge: failed to generate FORGE.md — ${(err as Error).message}`,
+      );
       return;
     }
 
     const trimmed = this.extractMarkdownFromToolCall(content.trim());
     if (!trimmed) {
-      void vscode.window.showWarningMessage('Forge: model returned empty content — FORGE.md not written.');
+      void vscode.window.showWarningMessage(
+        'Forge: model returned empty content — FORGE.md not written.',
+      );
       return;
     }
 
@@ -168,11 +197,15 @@ export class SlashCommandHandler {
         new TextEncoder().encode(trimmed + '\n'),
       );
     } catch (err) {
-      void vscode.window.showErrorMessage(`Forge: could not write FORGE.md — ${(err as Error).message}`);
+      void vscode.window.showErrorMessage(
+        `Forge: could not write FORGE.md — ${(err as Error).message}`,
+      );
       return;
     }
 
-    void vscode.window.showInformationMessage('Forge: FORGE.md created. The agent will use it from the next message.');
+    void vscode.window.showInformationMessage(
+      'Forge: FORGE.md created. The agent will use it from the next message.',
+    );
   }
 
   private extractMarkdownFromToolCall(raw: string): string {
@@ -189,23 +222,41 @@ export class SlashCommandHandler {
       if (typeof argContent === 'string' && argContent.trim()) {
         return argContent.trim().replace(/\\n/g, '\n');
       }
-    } catch { /* not JSON — use as-is */ }
+    } catch {
+      /* not JSON — use as-is */
+    }
 
     return inner;
   }
 
   private collectWorkspaceContext(root: string): string {
-    const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'out', '.next', '.turbo', 'coverage', '__pycache__', '.venv', 'venv']);
+    const SKIP_DIRS = new Set([
+      'node_modules',
+      '.git',
+      'dist',
+      'build',
+      'out',
+      '.next',
+      '.turbo',
+      'coverage',
+      '__pycache__',
+      '.venv',
+      'venv',
+    ]);
     const lines: string[] = [];
 
     // Top-level directory listing
     try {
       const entries = fs.readdirSync(root, { withFileTypes: true });
-      const dirs = entries.filter((e) => e.isDirectory() && !SKIP_DIRS.has(e.name)).map((e) => e.name);
+      const dirs = entries
+        .filter((e) => e.isDirectory() && !SKIP_DIRS.has(e.name))
+        .map((e) => e.name);
       const files = entries.filter((e) => e.isFile()).map((e) => e.name);
       lines.push(`Top-level dirs: ${dirs.join(', ') || '(none)'}`);
       lines.push(`Top-level files: ${files.join(', ') || '(none)'}`);
-    } catch { /* unreadable root */ }
+    } catch {
+      /* unreadable root */
+    }
 
     // package.json — name, scripts keys, dependency names
     const pkgPath = path.join(root, 'package.json');
@@ -217,12 +268,25 @@ export class SlashCommandHandler {
         lines.push(`package name: ${pkg.name ?? '(unnamed)'}`);
         if (pkg.scripts) lines.push(`scripts: ${Object.keys(pkg.scripts as object).join(', ')}`);
         const deps = Object.keys({ ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) });
-        if (deps.length) lines.push(`dependencies: ${deps.slice(0, 30).join(', ')}${deps.length > 30 ? '…' : ''}`);
-      } catch { /* malformed JSON */ }
+        if (deps.length)
+          lines.push(`dependencies: ${deps.slice(0, 30).join(', ')}${deps.length > 30 ? '…' : ''}`);
+      } catch {
+        /* malformed JSON */
+      }
     }
 
     // Detect common config files that indicate stack
-    const indicators = ['tsconfig.json', 'pyproject.toml', 'Cargo.toml', 'go.mod', 'pom.xml', 'build.gradle', '.eslintrc', 'vite.config.ts', 'webpack.config.js'];
+    const indicators = [
+      'tsconfig.json',
+      'pyproject.toml',
+      'Cargo.toml',
+      'go.mod',
+      'pom.xml',
+      'build.gradle',
+      '.eslintrc',
+      'vite.config.ts',
+      'webpack.config.js',
+    ];
     const found = indicators.filter((f) => fs.existsSync(path.join(root, f)));
     if (found.length) lines.push(`config files present: ${found.join(', ')}`);
 
@@ -235,7 +299,9 @@ export class SlashCommandHandler {
         const srcFiles = srcEntries.filter((e) => e.isFile()).map((e) => e.name);
         if (srcDirs.length) lines.push(`src/ subdirs: ${srcDirs.join(', ')}`);
         if (srcFiles.length) lines.push(`src/ files: ${srcFiles.join(', ')}`);
-      } catch { /* unreadable */ }
+      } catch {
+        /* unreadable */
+      }
     }
 
     return lines.join('\n');
@@ -274,28 +340,43 @@ Be specific and factual. Do not invent paths or names not present in the scan re
   private async compact(): Promise<void> {
     const { deps } = this;
     if (deps.isStreaming()) {
-      void vscode.window.showInformationMessage('Forge: wait for the current response to finish before compacting.');
+      void vscode.window.showInformationMessage(
+        'Forge: wait for the current response to finish before compacting.',
+      );
       return;
     }
     const conv = deps.getActiveConv();
-    const compactable = conv.messages.filter((m) => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string');
+    const compactable = conv.messages.filter(
+      (m) => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string',
+    );
     if (compactable.length < 2) {
-      void vscode.window.showInformationMessage('Forge: not enough conversation history to compact.');
+      void vscode.window.showInformationMessage(
+        'Forge: not enough conversation history to compact.',
+      );
       return;
     }
-    const transcript = compactable.map((m) => {
-      const reasoning = m.reasoning ? `\nReasoning summary:\n${m.reasoning}` : '';
-      return `${m.role.toUpperCase()}:\n${m.content}${reasoning}`;
-    }).join('\n\n');
+    const transcript = compactable
+      .map((m) => {
+        const reasoning = m.reasoning ? `\nReasoning summary:\n${m.reasoning}` : '';
+        return `${m.role.toUpperCase()}:\n${m.content}${reasoning}`;
+      })
+      .join('\n\n');
 
     const summary = await deps.runPromptToMarkdown(
       `Summarize this conversation for continued work in the same repository.\n\nRequirements:\n- Preserve user goals, constraints, decisions, open questions, and unfinished tasks.\n- Mention relevant files, commands, errors, and risks.\n- Keep it concise but specific.\n- Do not add facts not present in the conversation.\n\nConversation:\n${transcript}`,
     );
     const trimmed = summary.trim();
-    if (!trimmed) { void vscode.window.showWarningMessage('Forge: compaction returned no summary.'); return; }
+    if (!trimmed) {
+      void vscode.window.showWarningMessage('Forge: compaction returned no summary.');
+      return;
+    }
 
     conv.messages = [
-      { role: 'user', content: 'Conversation summary. Use this as the working context for future turns in this chat.' },
+      {
+        role: 'user',
+        content:
+          'Conversation summary. Use this as the working context for future turns in this chat.',
+      },
       { role: 'assistant', content: trimmed },
     ];
     conv.updatedAt = Date.now();

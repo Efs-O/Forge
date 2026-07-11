@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { capResultText, extractTextContent, mcpToolToRegisteredTool, DEFAULT_MAX_RESULT_CHARS } from '../../src/tools/mcpBridge';
+import {
+  capResultText,
+  extractTextContent,
+  mcpToolToRegisteredTool,
+  DEFAULT_MAX_RESULT_CHARS,
+} from '../../src/tools/mcpBridge';
 
 describe('extractTextContent', () => {
   it('joins text parts with newlines and ignores non-text parts', () => {
@@ -38,13 +43,20 @@ describe('mcpToolToRegisteredTool', () => {
   });
 
   it('defaults description to empty string when the MCP tool omits it', () => {
-    const registered = mcpToolToRegisteredTool('halluscribe', { name: 'x', inputSchema: {} }, async () => ({ content: [] }));
+    const registered = mcpToolToRegisteredTool(
+      'halluscribe',
+      { name: 'x', inputSchema: {} },
+      async () => ({ content: [] }),
+    );
     expect(registered.definition.function.description).toBe('');
   });
 
   it('handler returns concatenated text content on success', async () => {
     const registered = mcpToolToRegisteredTool('halluscribe', tool, async () => ({
-      content: [{ type: 'text', text: 'result A' }, { type: 'text', text: 'result B' }],
+      content: [
+        { type: 'text', text: 'result A' },
+        { type: 'text', text: 'result B' },
+      ],
     }));
     await expect(registered.handler({ query: 'x' })).resolves.toBe('result A\nresult B');
   });
@@ -58,18 +70,27 @@ describe('mcpToolToRegisteredTool', () => {
   });
 
   it('handler throws a fallback message when isError has no text content', async () => {
-    const registered = mcpToolToRegisteredTool('halluscribe', tool, async () => ({ isError: true }));
+    const registered = mcpToolToRegisteredTool('halluscribe', tool, async () => ({
+      isError: true,
+    }));
     await expect(registered.handler({ query: 'x' })).rejects.toThrow(
       'MCP tool "search_sessions" on server "halluscribe" returned an error',
     );
   });
 
   it('handler truncates oversized results at the given cap with a visible marker', async () => {
-    const registered = mcpToolToRegisteredTool('halluscribe', tool, async () => ({
-      content: [{ type: 'text', text: 'a'.repeat(50) }],
-    }), 10);
+    const registered = mcpToolToRegisteredTool(
+      'halluscribe',
+      tool,
+      async () => ({
+        content: [{ type: 'text', text: 'a'.repeat(50) }],
+      }),
+      10,
+    );
     const out = await registered.handler({ query: 'x' });
-    expect(out).toBe(`${'a'.repeat(10)}\n\n[truncated by Forge MCP bridge — showing 10 of 50 chars]`);
+    expect(out).toBe(
+      `${'a'.repeat(10)}\n\n[truncated by Forge MCP bridge — showing 10 of 50 chars]`,
+    );
   });
 });
 

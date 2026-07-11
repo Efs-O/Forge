@@ -135,10 +135,7 @@ export async function streamChatCompletion(
         ) {
           if (handlers.onReasoning) handlers.onReasoning(delta.reasoning_content);
           else handlers.onToken(delta.reasoning_content);
-        } else if (
-          typeof delta?.reasoning === 'string' &&
-          delta.reasoning.length > 0
-        ) {
+        } else if (typeof delta?.reasoning === 'string' && delta.reasoning.length > 0) {
           if (handlers.onReasoning) handlers.onReasoning(delta.reasoning);
           else handlers.onToken(delta.reasoning);
         }

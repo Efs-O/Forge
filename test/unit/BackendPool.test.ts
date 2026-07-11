@@ -12,23 +12,39 @@ const harness = vi.hoisted(() => ({
 vi.mock('../../src/backend/DirectBackend', () => {
   class FakeDirectBackend {
     private ready = false;
-    constructor(_config: unknown, private readonly port: number) {}
+    constructor(
+      _config: unknown,
+      private readonly port: number,
+    ) {}
     hotSwap(): Promise<void> {
       return new Promise<void>((resolve, reject) => {
         harness.pending.push({
-          resolve: () => { this.ready = true; resolve(); },
+          resolve: () => {
+            this.ready = true;
+            resolve();
+          },
           reject,
         });
       });
     }
-    async stop(): Promise<void> { this.ready = false; }
-    isReady(): boolean { return this.ready; }
-    baseUrl(): string { return `http://127.0.0.1:${this.port}`; }
-    loadedModel(): string | null { return null; }
+    async stop(): Promise<void> {
+      this.ready = false;
+    }
+    isReady(): boolean {
+      return this.ready;
+    }
+    baseUrl(): string {
+      return `http://127.0.0.1:${this.port}`;
+    }
+    loadedModel(): string | null {
+      return null;
+    }
     applyForgeConfig(): void {}
     showConsole(): void {}
     async start(): Promise<void> {}
-    onUnexpectedExit(cb: () => void): void { harness.exitCbs.push(cb); }
+    onUnexpectedExit(cb: () => void): void {
+      harness.exitCbs.push(cb);
+    }
   }
   return { DirectBackend: FakeDirectBackend };
 });
@@ -50,7 +66,10 @@ const freePortsOf = (pool: BackendPool): number[] =>
   (pool as unknown as { freePorts: number[] }).freePorts;
 
 describe('BackendPool port accounting', () => {
-  beforeEach(() => { harness.pending.length = 0; harness.exitCbs.length = 0; });
+  beforeEach(() => {
+    harness.pending.length = 0;
+    harness.exitCbs.length = 0;
+  });
 
   it('frees the slot when a ready backend dies unexpectedly (F5 reconcile)', async () => {
     const pool = new BackendPool(makeConfig(1)); // freePorts [8080]

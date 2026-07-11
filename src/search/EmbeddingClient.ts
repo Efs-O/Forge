@@ -15,10 +15,12 @@ export class EmbeddingClient {
 
     if (!response.ok) {
       const detail = await response.text().catch(() => '');
-      throw new Error(`Embedding request failed: HTTP ${response.status}${detail ? ` - ${detail}` : ''}`);
+      throw new Error(
+        `Embedding request failed: HTTP ${response.status}${detail ? ` - ${detail}` : ''}`,
+      );
     }
 
-    const payload = await response.json() as {
+    const payload = (await response.json()) as {
       data?: Array<{ index?: number; embedding?: number[] }>;
     };
     if (!Array.isArray(payload.data)) {

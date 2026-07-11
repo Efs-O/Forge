@@ -3,7 +3,12 @@ import type * as vscode from 'vscode';
 import type { IBackendPool } from './BackendPool';
 import type { ForgeConfig } from '../config/types';
 import { isCloudProvider, getCloudProviderLabel } from '../llm/CloudProviders';
-import { availableProfilesFor, deriveStaticCapabilities, expandAlias, splitModelProfile } from '../config/ConfigResolver';
+import {
+  availableProfilesFor,
+  deriveStaticCapabilities,
+  expandAlias,
+  splitModelProfile,
+} from '../config/ConfigResolver';
 import { probeHealthy } from './HealthCheck';
 // prettier-ignore
 import { sendJson, requireModel, readJson, delay, toOpenAiBase, errText, handleChat, CHAT_BODY_BYTES } from './controlHttp';
@@ -39,7 +44,15 @@ export interface EnsureResult {
 export interface ControlStatus {
   listening: boolean;
   port: number;
-  models: Array<{ name: string; backend: string; loaded: boolean; holds: number; servable: boolean; profiles: string[]; capabilities: string[] }>;
+  models: Array<{
+    name: string;
+    backend: string;
+    loaded: boolean;
+    holds: number;
+    servable: boolean;
+    profiles: string[];
+    capabilities: string[];
+  }>;
 }
 
 /**
@@ -171,7 +184,10 @@ export class ControlServer implements vscode.Disposable {
       if (method === 'POST' && path === '/chat') {
         // Not serialized: /chat neither loads nor evicts a local backend, so it
         // must run concurrently rather than block behind /ensure or /release.
-        const { status, body } = await handleChat(this.chatProxy, await readJson(req, CHAT_BODY_BYTES));
+        const { status, body } = await handleChat(
+          this.chatProxy,
+          await readJson(req, CHAT_BODY_BYTES),
+        );
         return sendJson(res, status, body);
       }
       return sendJson(res, 404, { error: `no route for ${method} ${path}` });
@@ -332,17 +348,25 @@ export class ControlServer implements vscode.Disposable {
 
   /** Eager teardown (POST /unload): refuses while holds exist; otherwise stops
    *  the backend and frees its VRAM/slot. `release` stays pure bookkeeping. */
-  private async unload(requested: string): Promise<EnsureResult | { status: number; body: { unloaded: boolean } }> {
+  private async unload(
+    requested: string,
+  ): Promise<EnsureResult | { status: number; body: { unloaded: boolean } }> {
     const model = this.baseName(requested);
     const known = this.config.models.find((m) => m.name === model);
     if (!known) {
       return { status: 404, body: { error: `unknown model "${requested}" — not in config` } };
     }
     if (isCloudProvider(known.provider)) {
-      return { status: 422, body: { error: `"${model}" is a cloud-provider model — nothing local to unload` } };
+      return {
+        status: 422,
+        body: { error: `"${model}" is a cloud-provider model — nothing local to unload` },
+      };
     }
     if ((this.holds.get(model) ?? 0) > 0) {
-      return { status: 409, body: { error: `"${model}" has active holds — POST /release them first` } };
+      return {
+        status: 409,
+        body: { error: `"${model}" has active holds — POST /release them first` },
+      };
     }
     const wasLoaded = this.pool.isLoaded(model);
     this.lastAcquiredAt.delete(model);
@@ -361,5 +385,4 @@ export class ControlServer implements vscode.Disposable {
     );
     return run;
   }
-
 }

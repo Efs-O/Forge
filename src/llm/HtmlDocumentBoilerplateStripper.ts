@@ -1,4 +1,5 @@
-const HTML_DOC_START_RE = /^\s*(?:<!DOCTYPE\s+html\b[^>]*>\s*)?(?:<html\b[^>]*>|<head\b[^>]*>|<meta\b[^>]*(?:charset|viewport)[^>]*>|<title\b[^>]*>)/i;
+const HTML_DOC_START_RE =
+  /^\s*(?:<!DOCTYPE\s+html\b[^>]*>\s*)?(?:<html\b[^>]*>|<head\b[^>]*>|<meta\b[^>]*(?:charset|viewport)[^>]*>|<title\b[^>]*>)/i;
 const BODY_OPEN_RE = /<body\b[^>]*>/i;
 const BODY_CLOSE_RE = /\s*<\/body>\s*<\/html>\s*$/i;
 const HTML_CLOSE_RE = /\s*<\/html>\s*$/i;

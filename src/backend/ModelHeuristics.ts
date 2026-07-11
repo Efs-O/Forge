@@ -32,14 +32,23 @@ export function detectFamily(filename: string): ModelFamily {
   if (lower.includes('gemma-4') || lower.includes('gemma4')) return 'gemma4';
   if (lower.includes('llama-3') || lower.includes('llama3')) return 'llama';
   if (lower.includes('mistral')) return 'mistral';
-  if (lower.includes('phi-3') || lower.includes('phi-4') || lower.includes('phi3') || lower.includes('phi4')) return 'phi';
+  if (
+    lower.includes('phi-3') ||
+    lower.includes('phi-4') ||
+    lower.includes('phi3') ||
+    lower.includes('phi4')
+  )
+    return 'phi';
   return 'unknown';
 }
 
 export function deriveModelSuggestion(candidate: GgufCandidate): ModelSuggestion {
   const family = detectFamily(candidate.ggufPath);
   const base = path.basename(candidate.ggufPath, '.gguf');
-  const suggestedName = base.replace(/[^a-zA-Z0-9-_]/g, '-').toLowerCase().slice(0, 40);
+  const suggestedName = base
+    .replace(/[^a-zA-Z0-9-_]/g, '-')
+    .toLowerCase()
+    .slice(0, 40);
 
   const defaults: ModelSuggestion = {
     family,

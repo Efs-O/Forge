@@ -27,10 +27,18 @@ class Logger {
     this.channel.appendLine(`[${ts}] [${level.toUpperCase()}] ${msg}`);
   }
 
-  trace(msg: string): void { this.log('trace', msg); }
-  debug(msg: string): void { this.log('debug', msg); }
-  info(msg: string): void  { this.log('info', msg); }
-  warn(msg: string): void  { this.log('warn', msg); }
+  trace(msg: string): void {
+    this.log('trace', msg);
+  }
+  debug(msg: string): void {
+    this.log('debug', msg);
+  }
+  info(msg: string): void {
+    this.log('info', msg);
+  }
+  warn(msg: string): void {
+    this.log('warn', msg);
+  }
   error(msg: string, err?: unknown): void {
     const detail = err instanceof Error ? ` — ${err.message}` : '';
     this.log('error', `${msg}${detail}`);
@@ -51,4 +59,6 @@ export const logger = new Logger();
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function initLogger(_context: unknown): void {}
 
-export function getLogger(): Logger { return logger; }
+export function getLogger(): Logger {
+  return logger;
+}

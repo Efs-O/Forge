@@ -48,7 +48,12 @@ interface SelectorProps {
   disabled: boolean;
 }
 
-function ModelSelector({ models, activeModel, onModelChange, disabled }: SelectorProps): React.ReactElement {
+function ModelSelector({
+  models,
+  activeModel,
+  onModelChange,
+  disabled,
+}: SelectorProps): React.ReactElement {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -74,16 +79,24 @@ function ModelSelector({ models, activeModel, onModelChange, disabled }: Selecto
     <div className="ms-root" ref={rootRef}>
       <button
         className="ms-trigger"
-        onClick={() => { if (!disabled) setOpen((o) => !o); }}
+        onClick={() => {
+          if (!disabled) setOpen((o) => !o);
+        }}
         disabled={disabled}
         title={activeModel ?? 'No model selected'}
         aria-haspopup="listbox"
         aria-expanded={open}
       >
         <span className="ms-trigger-name">
-          {activeModel ? <ModelName name={activeModel} /> : <span className="ms-placeholder">No model selected</span>}
+          {activeModel ? (
+            <ModelName name={activeModel} />
+          ) : (
+            <span className="ms-placeholder">No model selected</span>
+          )}
         </span>
-        <span className="ms-chevron" aria-hidden="true">▾</span>
+        <span className="ms-chevron" aria-hidden="true">
+          ▾
+        </span>
       </button>
 
       {open && (
@@ -92,21 +105,29 @@ function ModelSelector({ models, activeModel, onModelChange, disabled }: Selecto
             className={`ms-item${!activeModel ? ' ms-item--active' : ''}`}
             role="option"
             aria-selected={!activeModel}
-            onClick={() => { onModelChange(null); setOpen(false); }}
+            onClick={() => {
+              onModelChange(null);
+              setOpen(false);
+            }}
           >
             <span className="ms-placeholder">No model selected</span>
           </div>
 
           {groups.map(({ label, entries }) => (
             <div key={label} className="ms-group">
-              <div className="ms-group-header" aria-hidden="true">{label}</div>
+              <div className="ms-group-header" aria-hidden="true">
+                {label}
+              </div>
               {entries.map((m) => (
                 <div
                   key={m.name}
                   className={`ms-item${m.name === activeModel ? ' ms-item--active' : ''}`}
                   role="option"
                   aria-selected={m.name === activeModel}
-                  onClick={() => { onModelChange(m.name); setOpen(false); }}
+                  onClick={() => {
+                    onModelChange(m.name);
+                    setOpen(false);
+                  }}
                 >
                   <ModelName name={m.name} />
                 </div>
@@ -150,7 +171,10 @@ export function Header({
       </div>
 
       {showBudget && (
-        <div id="token-budget" title={`${tokenUsed.toLocaleString()} / ${tokenMax.toLocaleString()} tokens used`}>
+        <div
+          id="token-budget"
+          title={`${tokenUsed.toLocaleString()} / ${tokenMax.toLocaleString()} tokens used`}
+        >
           <div id="token-budget-bar-track">
             <div
               id="token-budget-bar-fill"

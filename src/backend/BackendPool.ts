@@ -107,7 +107,11 @@ export class BackendPool implements IBackendPool {
       }
     });
     const ollamaStops = [...this.ollamaSlots.values()].map(async (backend) => {
-      try { await backend.stop(); } catch { /* best-effort */ }
+      try {
+        await backend.stop();
+      } catch {
+        /* best-effort */
+      }
     });
     await Promise.all([...slotStops, ...ollamaStops]);
     this.slots.clear();
@@ -133,8 +137,10 @@ export class BackendPool implements IBackendPool {
   }
 
   isAnyReady(): boolean {
-    return [...this.slots.values()].some((s) => s.backend.isReady())
-      || [...this.ollamaSlots.values()].some((b) => b.isReady());
+    return (
+      [...this.slots.values()].some((s) => s.backend.isReady()) ||
+      [...this.ollamaSlots.values()].some((b) => b.isReady())
+    );
   }
 
   loadedModelNames(): string[] {
@@ -175,16 +181,19 @@ export class BackendPool implements IBackendPool {
     const slot: PoolSlot = { backend, port, lastUsed: Date.now(), starting };
     this.slots.set(modelName, slot);
 
-    const boot = backend.hotSwap(modelName).then(() => {
-      slot.starting = null;
-      slot.lastUsed = Date.now();
-      this.lastAcquiredModel = modelName;
-      resolveStart();
-      log.info(`[BackendPool] slot ready: ${modelName} on port ${port}`);
-    }).catch((err: unknown) => {
-      this.freeSlot(modelName, slot);
-      rejectStart(err);
-    });
+    const boot = backend
+      .hotSwap(modelName)
+      .then(() => {
+        slot.starting = null;
+        slot.lastUsed = Date.now();
+        this.lastAcquiredModel = modelName;
+        resolveStart();
+        log.info(`[BackendPool] slot ready: ${modelName} on port ${port}`);
+      })
+      .catch((err: unknown) => {
+        this.freeSlot(modelName, slot);
+        rejectStart(err);
+      });
 
     void boot;
     return starting.then(() => backend);

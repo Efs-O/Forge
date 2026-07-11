@@ -112,7 +112,9 @@ export async function ensureOllamaReady(
       log.info(`[OllamaAdapter] daemon down at ${baseUrl} — launched "${label}"`);
       const result = await waitForHealthy({ baseUrl, timeoutMs: 15_000 }, undefined, signal);
       if (result.ok) return;
-      log.warn(`[OllamaAdapter] "${label}" spawned but ${baseUrl} still down — trying next candidate`);
+      log.warn(
+        `[OllamaAdapter] "${label}" spawned but ${baseUrl} still down — trying next candidate`,
+      );
     }
   }
 
@@ -136,7 +138,11 @@ export async function ensureOllamaReady(
  * unknown / unpulled / entitlement-gated models fail at ensure time with the
  * daemon's own reason instead of at first chat call.
  */
-export async function probeOllamaModel(endpoint: string, model: string, signal?: AbortSignal): Promise<void> {
+export async function probeOllamaModel(
+  endpoint: string,
+  model: string,
+  signal?: AbortSignal,
+): Promise<void> {
   // Always bound the probe: a hung daemon must not stall hotSwap even when
   // the caller supplied its own abort signal.
   const timeout = AbortSignal.timeout(10_000);

@@ -41,7 +41,9 @@ export class EmbeddingBackend implements vscode.Disposable {
     const cfg = this.config.embeddings;
     const binary = this.config.llama_server.binary;
     if (!cfg?.enabled) {
-      throw new Error('Forge: embeddings are disabled. Set embeddings.enabled: true in config.yaml.');
+      throw new Error(
+        'Forge: embeddings are disabled. Set embeddings.enabled: true in config.yaml.',
+      );
     }
     if (!cfg.model_path) {
       throw new Error('Forge: embeddings.model_path is not configured.');
@@ -77,7 +79,11 @@ export class EmbeddingBackend implements vscode.Disposable {
     this.proc.stdout?.on('data', (chunk: Buffer) => this.output?.append(chunk.toString()));
     this.proc.stderr?.on('data', (chunk: Buffer) => this.output?.append(chunk.toString()));
 
-    const result = await waitForHealthy({ baseUrl: this.baseUrl() }, this.proc, this.startAbort.signal);
+    const result = await waitForHealthy(
+      { baseUrl: this.baseUrl() },
+      this.proc,
+      this.startAbort.signal,
+    );
     if (!result.ok) {
       await this.stop();
       throw new Error(`Embedding server failed to start: ${result.message}`);
@@ -117,12 +123,7 @@ function composeEmbeddingServerArgs(config: ForgeConfig): string[] {
 
   const host = config.llama_server.host ?? '127.0.0.1';
   const port = config.embeddings?.port ?? 8091;
-  const args = [
-    '-m', modelPath,
-    '--host', host,
-    '--port', String(port),
-    '--embedding',
-  ];
+  const args = ['-m', modelPath, '--host', host, '--port', String(port), '--embedding'];
 
   const gpuLayers = config.llama_server.n_gpu_layers;
   if (gpuLayers !== undefined) args.push('--n-gpu-layers', String(gpuLayers));
@@ -137,7 +138,8 @@ function composeEmbeddingServerArgs(config: ForgeConfig): string[] {
   if (threads !== undefined && threads > 0) args.push('--threads', String(threads));
 
   const threadsBatch = config.llama_server.n_threads_batch;
-  if (threadsBatch !== undefined && threadsBatch > 0) args.push('--threads-batch', String(threadsBatch));
+  if (threadsBatch !== undefined && threadsBatch > 0)
+    args.push('--threads-batch', String(threadsBatch));
 
   return args;
 }

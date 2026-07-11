@@ -5,7 +5,7 @@ import * as os from 'os';
 
 export interface GgufCandidate {
   ggufPath: string;
-  modelName: string;  // derived from filename
+  modelName: string; // derived from filename
   sizeBytes: number;
   familyHint: string; // 'qwen3' | 'gemma4' | 'llama' | 'mistral' | 'phi' | 'unknown'
 }
@@ -26,13 +26,22 @@ function deriveFamily(filename: string): string {
   if (lower.includes('gemma-4') || lower.includes('gemma4')) return 'gemma4';
   if (lower.includes('llama-3') || lower.includes('llama3')) return 'llama';
   if (lower.includes('mistral')) return 'mistral';
-  if (lower.includes('phi-3') || lower.includes('phi-4') || lower.includes('phi3') || lower.includes('phi4')) return 'phi';
+  if (
+    lower.includes('phi-3') ||
+    lower.includes('phi-4') ||
+    lower.includes('phi3') ||
+    lower.includes('phi4')
+  )
+    return 'phi';
   return 'unknown';
 }
 
 function deriveModelName(filePath: string): string {
   const base = path.basename(filePath, '.gguf');
-  return base.replace(/[^a-zA-Z0-9-_]/g, '-').toLowerCase().slice(0, 40);
+  return base
+    .replace(/[^a-zA-Z0-9-_]/g, '-')
+    .toLowerCase()
+    .slice(0, 40);
 }
 
 /** Resolve true if `target` exists within `timeoutMs`, false otherwise (never throws, never hangs). */
@@ -41,7 +50,10 @@ async function pathExistsWithin(target: string, timeoutMs: number): Promise<bool
   const timeout = new Promise<boolean>((resolve) => {
     timer = setTimeout(() => resolve(false), timeoutMs);
   });
-  const probe = fsp.access(target).then(() => true, () => false);
+  const probe = fsp.access(target).then(
+    () => true,
+    () => false,
+  );
   try {
     return await Promise.race([probe, timeout]);
   } finally {
@@ -172,9 +184,8 @@ export async function scanForGgufs(extraDirs: string[] = []): Promise<GgufCandid
     await scanDirectory(dir, results, visitedDirs, deadline);
   }
 
-  return Array.from(results.values())
-    .sort((a, b) => {
-      if (b.sizeBytes !== a.sizeBytes) return b.sizeBytes - a.sizeBytes;
-      return a.ggufPath.localeCompare(b.ggufPath, undefined, { sensitivity: 'base' });
-    });
+  return Array.from(results.values()).sort((a, b) => {
+    if (b.sizeBytes !== a.sizeBytes) return b.sizeBytes - a.sizeBytes;
+    return a.ggufPath.localeCompare(b.ggufPath, undefined, { sensitivity: 'base' });
+  });
 }

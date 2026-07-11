@@ -15,16 +15,27 @@ export class SessionLogger {
     private title: string,
     _model: string,
   ) {
-    try { fs.mkdirSync(SESSIONS_DIR, { recursive: true }); } catch { /* non-fatal */ }
+    try {
+      fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+    } catch {
+      /* non-fatal */
+    }
     this.filePath = path.join(SESSIONS_DIR, `${sessionId}.jsonl`);
   }
 
-  updateTitle(title: string): void { this.title = title; }
+  updateTitle(title: string): void {
+    this.title = title;
+  }
 
   flush(messages: ChatMessage[], model: string): void {
-
     if (!this.headerWritten) {
-      this.append({ type: 'session_start', session_id: this.sessionId, title: this.title, model, timestamp_ms: Date.now() });
+      this.append({
+        type: 'session_start',
+        session_id: this.sessionId,
+        title: this.title,
+        model,
+        timestamp_ms: Date.now(),
+      });
       this.headerWritten = true;
     }
 
@@ -39,7 +50,13 @@ export class SessionLogger {
           content: null,
           tool_calls: msg.tool_calls.map((tc) => ({
             name: tc.function.name,
-            input: (() => { try { return JSON.parse(tc.function.arguments) as unknown; } catch { return {}; } })(),
+            input: (() => {
+              try {
+                return JSON.parse(tc.function.arguments) as unknown;
+              } catch {
+                return {};
+              }
+            })(),
           })),
           timestamp_ms: Date.now(),
           model,
@@ -59,13 +76,22 @@ export class SessionLogger {
 
       if (!content) continue;
 
-      const line: Record<string, unknown> = { role: msg.role, content, timestamp_ms: Date.now(), model };
+      const line: Record<string, unknown> = {
+        role: msg.role,
+        content,
+        timestamp_ms: Date.now(),
+        model,
+      };
       if (msg.reasoning) line['reasoning'] = msg.reasoning;
       this.append(line);
     }
   }
 
   private append(obj: Record<string, unknown>): void {
-    try { fs.appendFileSync(this.filePath, JSON.stringify(obj) + '\n', 'utf8'); } catch { /* non-fatal */ }
+    try {
+      fs.appendFileSync(this.filePath, JSON.stringify(obj) + '\n', 'utf8');
+    } catch {
+      /* non-fatal */
+    }
   }
 }

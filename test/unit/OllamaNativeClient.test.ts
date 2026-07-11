@@ -32,7 +32,8 @@ describe('streamOllamaChatCompletion', () => {
       JSON.stringify({ message: { thinking: 'plan ' }, done: false }),
       JSON.stringify({ message: { content: 'done' }, done: true, done_reason: 'stop' }),
     ].join('\n');
-    const read = vi.fn()
+    const read = vi
+      .fn()
       .mockResolvedValueOnce({ done: false, value: new TextEncoder().encode(lines) })
       .mockResolvedValueOnce({ done: true, value: undefined });
     const fetchMock = vi.fn().mockResolvedValue({
@@ -54,7 +55,9 @@ describe('streamOllamaChatCompletion', () => {
       onToken: tokens,
       onReasoning: reasoning,
       onDone: done,
-      onError: (err) => { throw err; },
+      onError: (err) => {
+        throw err;
+      },
     });
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
