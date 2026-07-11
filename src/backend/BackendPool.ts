@@ -15,8 +15,20 @@ interface PoolSlot {
   starting: Promise<void> | null;
 }
 
+export interface DelegationCheck {
+  safe: boolean;
+  reason?: string;
+  /** Ollama targets: the daemon owns VRAM, so non-eviction cannot be
+   *  guaranteed — delegation proceeds best-effort (plan: "Ollama targets"). */
+  bestEffort?: boolean;
+}
+
 export interface IBackendPool {
   acquire(modelName: string): Promise<BackendController>;
+  /** Read-only capacity query: would delegating from `primaryModel` to
+   *  `targetModel` be possible without evicting any loaded backend? Never
+   *  mutates pool state and never triggers the LRU eviction in acquire(). */
+  canDelegate(primaryModel: string, targetModel: string): DelegationCheck;
   /** Stop and remove a single model's backend, freeing its VRAM / port slot. */
   release(modelName: string): Promise<void>;
   stopAll(): Promise<void>;
@@ -50,6 +62,22 @@ export class BackendPool implements IBackendPool {
    *  is request-time only and must never force a separate spawn (F6). */
   private poolKey(modelName: string): string {
     return splitModelProfile(expandAlias(this.config, modelName)).base;
+  }
+
+  canDelegate(primaryModel: string, targetModel: string): DelegationCheck {
+    const primaryKey = this.poolKey(primaryModel);
+    const targetKey = this.poolKey(targetModel);
+
+    if (primaryKey === targetKey) return { safe: true };
+    if (this.isOllamaModel(targetKey)) return { safe: true, bestEffort: true };
+    if (this.slots.has(targetKey) || this.freePorts.length > 0) return { safe: true };
+
+    return {
+      safe: false,
+      reason:
+        `Loading delegation target "${targetKey}" would evict a resident model. ` +
+        'Increase max_simultaneous_models and ensure sufficient RAM/VRAM is available.',
+    };
   }
 
   async acquire(modelName: string): Promise<BackendController> {

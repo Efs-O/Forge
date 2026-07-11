@@ -55,6 +55,7 @@ function makeConfig(maxModels: number): ForgeConfig {
       { name: 'A', provider: 'llama.cpp', gguf_path: '/a.gguf' },
       { name: 'B', provider: 'llama.cpp', gguf_path: '/b.gguf' },
       { name: 'C', provider: 'llama.cpp', gguf_path: '/c.gguf' },
+      { name: 'ollama-local', provider: 'ollama', model: 'local:latest' },
     ],
     active_model: 'A',
     llama_server: { port: 8080 },
@@ -147,5 +148,55 @@ describe('BackendPool port accounting', () => {
     await acquireB;
     expect(pool.loadedModelNames()).toEqual(['B']);
     expect(freePortsOf(pool)).toEqual([]);
+  });
+});
+
+describe('BackendPool delegation safety', () => {
+  beforeEach(() => {
+    harness.pending.length = 0;
+    harness.exitCbs.length = 0;
+  });
+
+  it('rejects a second llama.cpp model at capacity without starting or evicting', async () => {
+    const pool = new BackendPool(makeConfig(1));
+    const acquireA = pool.acquire('A');
+    harness.pending[0].resolve();
+    await acquireA;
+
+    const result = pool.canDelegate('A', 'B');
+
+    expect(result.safe).toBe(false);
+    expect(result.reason).toContain('B');
+    expect(result.reason).toContain('max_simultaneous_models');
+    expect(result.reason).toContain('VRAM');
+    expect(pool.loadedModelNames()).toEqual(['A']);
+    expect(harness.pending).toHaveLength(1);
+  });
+
+  it('allows a second llama.cpp model when a port is free', async () => {
+    const pool = new BackendPool(makeConfig(2));
+    const acquireA = pool.acquire('A');
+    harness.pending[0].resolve();
+    await acquireA;
+
+    expect(pool.canDelegate('A', 'B')).toEqual({ safe: true });
+  });
+
+  it('allows the same base model across profiles', () => {
+    const config = makeConfig(1);
+    config.profiles = { main: {}, worker: {} };
+    const pool = new BackendPool(config);
+
+    expect(pool.canDelegate('A', 'A')).toEqual({ safe: true });
+    expect(pool.canDelegate('A@main', 'A@worker')).toEqual({ safe: true });
+  });
+
+  it('allows an Ollama target on a best-effort basis', () => {
+    const pool = new BackendPool(makeConfig(1));
+
+    expect(pool.canDelegate('A', 'ollama-local')).toEqual({
+      safe: true,
+      bestEffort: true,
+    });
   });
 });
