@@ -34,6 +34,7 @@ overlaps with an existing owner, extend the owner instead.
 | ------------------------------------------ | -------------------------------------- |
 | Mode-agnostic backend interface            | `src/backend/BackendController.ts`     |
 | Multi-backend lifecycle + port allocation  | `src/backend/BackendPool.ts`           |
+| Delegation capacity check + eviction pins  | `src/backend/DelegationGate.ts`        |
 | Direct mode (llama-server spawn)           | `src/backend/DirectBackend.ts`         |
 | llama-server child-process spawn/teardown  | `src/backend/llamaProcess.ts`          |
 | Embedding llama-server (semantic search)   | `src/backend/EmbeddingBackend.ts`      |

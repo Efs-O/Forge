@@ -200,3 +200,174 @@ describe('BackendPool delegation safety', () => {
     });
   });
 });
+
+describe('BackendPool delegation holds', () => {
+  beforeEach(() => {
+    harness.pending.length = 0;
+    harness.exitCbs.length = 0;
+  });
+
+  async function loadPrimary(pool: BackendPool, name = 'A'): Promise<void> {
+    const acquireP = pool.acquire(name);
+    harness.pending[harness.pending.length - 1].resolve();
+    await acquireP;
+  }
+
+  it('at capacity rejects a different llama.cpp target without starting or evicting', async () => {
+    const pool = new BackendPool(makeConfig(1));
+    await loadPrimary(pool);
+
+    await expect(pool.acquireForDelegation('A', 'B')).rejects.toThrow('max_simultaneous_models');
+    expect(pool.loadedModelNames()).toEqual(['A']);
+    expect(harness.pending).toHaveLength(1); // no hotSwap was ever started
+  });
+
+  it('starts the target when a slot is free', async () => {
+    const pool = new BackendPool(makeConfig(2));
+    await loadPrimary(pool);
+
+    const holdP = pool.acquireForDelegation('A', 'B');
+    harness.pending[1].resolve();
+    const hold = await holdP;
+
+    expect(hold.targetKey).toBe('B');
+    expect(hold.bestEffort).toBe(false);
+    expect(pool.loadedModelNames().sort()).toEqual(['A', 'B']);
+    hold.release();
+  });
+
+  it('reuses the same backend across profiles of one base model', async () => {
+    const cfg = makeConfig(1);
+    cfg.profiles = { main: {}, worker: {} };
+    const pool = new BackendPool(cfg);
+    await loadPrimary(pool, 'A@main');
+
+    const hold = await pool.acquireForDelegation('A@main', 'A@worker');
+    expect(harness.pending).toHaveLength(1); // no second spawn
+    expect(hold.targetKey).toBe('A');
+    hold.release();
+  });
+
+  it('reuses an already loaded target', async () => {
+    const pool = new BackendPool(makeConfig(2));
+    await loadPrimary(pool, 'A');
+    await loadPrimary(pool, 'B');
+
+    const hold = await pool.acquireForDelegation('A', 'B');
+    expect(harness.pending).toHaveLength(2); // no new hotSwap
+    hold.release();
+  });
+
+  it('a live hold pins primary and target against concurrent eviction; release unpins', async () => {
+    const pool = new BackendPool(makeConfig(2));
+    await loadPrimary(pool);
+    const holdP = pool.acquireForDelegation('A', 'B');
+    harness.pending[1].resolve();
+    const hold = await holdP;
+
+    // Concurrent acquire of a third model finds no eviction candidate.
+    await expect(pool.acquire('C')).rejects.toThrow('delegation holds');
+    expect(pool.loadedModelNames().sort()).toEqual(['A', 'B']);
+
+    hold.release();
+    hold.release(); // idempotent — extra calls are no-ops
+
+    // After release, normal LRU eviction applies again.
+    const acquireC = pool.acquire('C');
+    harness.pending[2].resolve();
+    await acquireC;
+    expect(pool.loadedModelNames()).toContain('C');
+  });
+
+  it.each(['success', 'cancellation', 'failure'] as const)(
+    'releases the hold after delegated request %s',
+    async (outcome) => {
+      const pool = new BackendPool(makeConfig(2));
+      await loadPrimary(pool);
+      const holdP = pool.acquireForDelegation('A', 'B');
+      harness.pending[1].resolve();
+      const hold = await holdP;
+
+      try {
+        if (outcome === 'cancellation') throw new DOMException('cancelled', 'AbortError');
+        if (outcome === 'failure') throw new Error('request failed');
+      } catch {
+        // The service owns propagation; this test exercises its required finally path.
+      } finally {
+        hold.release();
+      }
+
+      const acquireC = pool.acquire('C');
+      harness.pending[2].resolve();
+      await acquireC;
+      expect(pool.loadedModelNames()).toContain('C');
+    },
+  );
+
+  it('pins apply during the in-flight target boot (TOCTOU window)', async () => {
+    const pool = new BackendPool(makeConfig(2));
+    await loadPrimary(pool);
+    const holdP = pool.acquireForDelegation('A', 'B'); // boot parked
+
+    await expect(pool.acquire('C')).rejects.toThrow('delegation holds');
+
+    harness.pending[1].resolve();
+    const hold = await holdP;
+    expect(pool.loadedModelNames().sort()).toEqual(['A', 'B']);
+    hold.release();
+  });
+
+  it('a failed target boot rejects and unpins the primary', async () => {
+    const pool = new BackendPool(makeConfig(2));
+    await loadPrimary(pool);
+    const holdP = pool.acquireForDelegation('A', 'B');
+    holdP.catch(() => {});
+
+    harness.pending[1].reject(new Error('boot boom'));
+    await expect(holdP).rejects.toThrow('boot boom');
+
+    // A is unpinned again: release() would throw if a hold still pinned it.
+    await pool.release('A');
+    expect(pool.loadedModelNames()).toEqual([]);
+  });
+
+  it('release() refuses to stop a model pinned by a live hold', async () => {
+    const pool = new BackendPool(makeConfig(2));
+    await loadPrimary(pool);
+    const holdP = pool.acquireForDelegation('A', 'B');
+    harness.pending[1].resolve();
+    const hold = await holdP;
+
+    await expect(pool.release('A')).rejects.toThrow('delegation hold');
+    await expect(pool.release('B')).rejects.toThrow('delegation hold');
+
+    hold.release();
+    await pool.release('B');
+    expect(pool.loadedModelNames()).toEqual(['A']);
+  });
+
+  it('Ollama targets produce best-effort holds', async () => {
+    const pool = new BackendPool(makeConfig(1)); // ollama needs no port slot
+    await loadPrimary(pool);
+
+    const holdP = pool.acquireForDelegation('A', 'ollama-local');
+    harness.pending[1].resolve();
+    const hold = await holdP;
+    expect(hold.bestEffort).toBe(true);
+    expect(hold.targetKey).toBe('ollama-local');
+    hold.release();
+  });
+
+  it('surfaces an Ollama daemon load failure clearly and unpins', async () => {
+    const pool = new BackendPool(makeConfig(1));
+    await loadPrimary(pool);
+    const holdP = pool.acquireForDelegation('A', 'ollama-local');
+    holdP.catch(() => {});
+
+    harness.pending[1].reject(new Error('daemon stalled'));
+    await expect(holdP).rejects.toThrow(
+      'Ollama daemon failed to load delegation target "ollama-local": daemon stalled',
+    );
+    await pool.release('A'); // primary unpinned again
+  });
+});

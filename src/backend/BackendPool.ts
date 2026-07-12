@@ -3,7 +3,11 @@ import { DirectBackend } from './DirectBackend';
 import { probeHealthy } from './HealthCheck';
 import type { ForgeConfig } from '../config/types';
 import { expandAlias, splitModelProfile } from '../config/ConfigResolver';
+import { DelegationGate } from './DelegationGate';
+import type { DelegationCheck, DelegationHold } from './DelegationGate';
 import { getLogger } from '../util/logger';
+
+export type { DelegationCheck, DelegationHold } from './DelegationGate';
 
 const log = getLogger();
 
@@ -15,20 +19,16 @@ interface PoolSlot {
   starting: Promise<void> | null;
 }
 
-export interface DelegationCheck {
-  safe: boolean;
-  reason?: string;
-  /** Ollama targets: the daemon owns VRAM, so non-eviction cannot be
-   *  guaranteed — delegation proceeds best-effort (plan: "Ollama targets"). */
-  bestEffort?: boolean;
-}
-
 export interface IBackendPool {
   acquire(modelName: string): Promise<BackendController>;
   /** Read-only capacity query: would delegating from `primaryModel` to
    *  `targetModel` be possible without evicting any loaded backend? Never
    *  mutates pool state and never triggers the LRU eviction in acquire(). */
   canDelegate(primaryModel: string, targetModel: string): DelegationCheck;
+  /** Atomic non-evicting target acquire. Pins primary and target until release —
+   *  closes the canDelegate→acquire TOCTOU race. Release exactly once on
+   *  success, cancellation, and failure paths (extra calls are no-ops). */
+  acquireForDelegation(primaryModel: string, targetModel: string): Promise<DelegationHold>;
   /** Stop and remove a single model's backend, freeing its VRAM / port slot. */
   release(modelName: string): Promise<void>;
   stopAll(): Promise<void>;
@@ -50,12 +50,21 @@ export class BackendPool implements IBackendPool {
   /** model → in-flight ollama acquire, so concurrent acquires share one hotSwap. */
   private readonly ollamaStarting = new Map<string, Promise<BackendController>>();
   private readonly freePorts: number[];
+  private readonly gate: DelegationGate;
   private lastAcquiredModel: string | null = null;
 
   constructor(private config: ForgeConfig) {
     const max = config.max_simultaneous_models ?? 1;
     const base = config.llama_server.port ?? 8080;
     this.freePorts = Array.from({ length: max }, (_, i) => base + i);
+    this.gate = new DelegationGate({
+      poolKey: (name) => this.poolKey(name),
+      isOllama: (key) => this.isOllamaModel(key),
+      hasSlot: (key) => this.slots.has(key),
+      freeSlotCount: () => this.freePorts.length,
+      maxSlots: () => this.config.max_simultaneous_models ?? 1,
+      acquireNonEvicting: (key) => this.acquireByKey(key, false),
+    });
   }
 
   /** Pool slots are keyed by base model name: a trailing @profile (or an alias)
@@ -65,23 +74,21 @@ export class BackendPool implements IBackendPool {
   }
 
   canDelegate(primaryModel: string, targetModel: string): DelegationCheck {
-    const primaryKey = this.poolKey(primaryModel);
-    const targetKey = this.poolKey(targetModel);
-
-    if (primaryKey === targetKey) return { safe: true };
-    if (this.isOllamaModel(targetKey)) return { safe: true, bestEffort: true };
-    if (this.slots.has(targetKey) || this.freePorts.length > 0) return { safe: true };
-
-    return {
-      safe: false,
-      reason:
-        `Loading delegation target "${targetKey}" would evict a resident model. ` +
-        'Increase max_simultaneous_models and ensure sufficient RAM/VRAM is available.',
-    };
+    return this.gate.check(primaryModel, targetModel);
   }
 
-  async acquire(modelName: string): Promise<BackendController> {
-    const key = this.poolKey(modelName);
+  acquireForDelegation(primaryModel: string, targetModel: string): Promise<DelegationHold> {
+    return this.gate.acquire(primaryModel, targetModel);
+  }
+
+  acquire(modelName: string): Promise<BackendController> {
+    return this.acquireByKey(this.poolKey(modelName), true);
+  }
+
+  /** `key` must already be a pool key. `allowEvict: false` never evicts —
+   *  used by DelegationGate, whose synchronous capacity check must stay valid
+   *  through the synchronous slot claim below. */
+  private async acquireByKey(key: string, allowEvict: boolean): Promise<BackendController> {
     if (this.isOllamaModel(key)) {
       this.lastAcquiredModel = key;
       return this.acquireOllama(key);
@@ -102,12 +109,15 @@ export class BackendPool implements IBackendPool {
     }
 
     // Need a new slot
-    const port = this.allocatePort();
+    const port = this.allocatePort(allowEvict);
     return this.startSlot(key, port);
   }
 
   async release(modelName: string): Promise<void> {
     const key = this.poolKey(modelName);
+    if (this.gate.isPinned(key)) {
+      throw new Error(`Cannot release "${key}": an active delegation hold is using it.`);
+    }
     if (this.isOllamaModel(key)) {
       const backend = this.ollamaSlots.get(key);
       if (backend) {
@@ -181,15 +191,22 @@ export class BackendPool implements IBackendPool {
     return this.slots.has(key) || this.ollamaSlots.has(key);
   }
 
-  // ── Private ───────────────────────────────────────────────────────────────
-
-  private allocatePort(): number {
+  private allocatePort(allowEvict: boolean): number {
     if (this.freePorts.length > 0) {
       return this.freePorts.shift()!;
     }
-    // Evict LRU slot
+    if (!allowEvict) {
+      // Unreachable via DelegationGate (it pre-checks synchronously); kept as
+      // a hard guard so a non-evicting acquire can never evict.
+      throw new Error('BackendPool: no free slot for a non-evicting acquire');
+    }
+    // Evict LRU slot — models pinned by delegation holds are not candidates.
     const lruEntry = this.getLruEntry();
-    if (!lruEntry) throw new Error('BackendPool: no slots available and no eviction candidate');
+    if (!lruEntry)
+      throw new Error(
+        'BackendPool: no free slot and no eviction candidate — all resident models ' +
+          'are pinned by active delegation holds. Retry after delegation completes.',
+      );
     const [lruModel, lruSlot] = lruEntry;
     log.info(`[BackendPool] evicting LRU slot: ${lruModel} on port ${lruSlot.port}`);
     void lruSlot.backend.stop().catch(() => {});
@@ -277,6 +294,7 @@ export class BackendPool implements IBackendPool {
   private getLruEntry(): [string, PoolSlot] | undefined {
     let lru: [string, PoolSlot] | undefined;
     for (const entry of this.slots.entries()) {
+      if (this.gate.isPinned(entry[0])) continue;
       if (!lru || entry[1].lastUsed < lru[1].lastUsed) lru = entry;
     }
     return lru;
