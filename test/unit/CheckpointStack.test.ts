@@ -62,4 +62,36 @@ describe('CheckpointStack', () => {
     expect(fs.readFileSync(source, 'utf8')).toBe('source');
     expect(fs.existsSync(destination)).toBe(false);
   });
+
+  it('retains the original state when the same file is snapshotted repeatedly', () => {
+    const target = path.join(root, 'repeat.txt');
+    fs.writeFileSync(target, 'original');
+    checkpoints.snapshotBefore(target);
+    fs.writeFileSync(target, 'first write');
+    checkpoints.snapshotBefore(target);
+    fs.writeFileSync(target, 'second write');
+    checkpoints.commitTurn();
+    checkpoints.undo();
+    expect(fs.readFileSync(target, 'utf8')).toBe('original');
+  });
+
+  it('keeps exactly the most recent completed turn', () => {
+    const first = path.join(root, 'first.txt');
+    fs.writeFileSync(first, 'before first');
+    checkpoints.snapshotBefore(first);
+    fs.writeFileSync(first, 'after first');
+    checkpoints.commitTurn();
+
+    checkpoints.beginTurn('turn-2');
+    const second = path.join(root, 'second.txt');
+    fs.writeFileSync(second, 'before second');
+    checkpoints.snapshotBefore(second);
+    fs.writeFileSync(second, 'after second');
+    checkpoints.commitTurn();
+
+    checkpoints.keep();
+    checkpoints.undo();
+    expect(fs.readFileSync(first, 'utf8')).toBe('before first');
+    expect(fs.readFileSync(second, 'utf8')).toBe('after second');
+  });
 });

@@ -350,6 +350,7 @@ These commands are currently contributed by the extension.
 ## Checkpoints, Diffs, and Clanker Mode
 
 - Every write turn can produce a checkpoint that you can Keep or Undo.
+- Undo restores each requested mutation path to its state at the start of the turn. For tools that create missing parent directories, those empty implementation-created parents may remain after undo; requested files and directories are restored or removed exactly.
 - File writes produce inline diff cards in the chat.
 - Confirmation gates protect writes, terminal actions, and git actions.
 - `/clanker` disables those prompts for the session, except recursive deletes which still require approval.
