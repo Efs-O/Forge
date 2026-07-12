@@ -7,6 +7,13 @@ import { writeConfigSafely } from '../config/ConfigWriter';
 import type { ForgeConfig, ModelConfig } from '../config/types';
 import { fetchOllamaModels } from './FirstRunWizard';
 
+/** Adds only new model names while preserving every other config field. */
+export function mergeAddedModels(config: ForgeConfig, additions: ModelConfig[]): ForgeConfig {
+  const existing = new Set(config.models.map((model) => model.name));
+  const unique = additions.filter((model) => !existing.has(model.name));
+  return unique.length === 0 ? config : { ...config, models: [...config.models, ...unique] };
+}
+
 /** Add discovered models to an existing config after preview/confirmation. */
 export async function runAddModelWizard(
   config: ForgeConfig,
@@ -21,8 +28,8 @@ export async function runAddModelWizard(
   const additions = backend === 'llama.cpp' ? await pickGgufModels() : await pickOllamaModels();
   if (!additions.length) return null;
 
-  const existing = new Set(config.models.map((model) => model.name));
-  const unique = additions.filter((model) => !existing.has(model.name));
+  const next = mergeAddedModels(config, additions);
+  const unique = next.models.slice(config.models.length);
   if (!unique.length) {
     void vscode.window.showInformationMessage('Forge: all selected models already exist.');
     return null;
@@ -33,7 +40,6 @@ export async function runAddModelWizard(
     'Add models',
   );
   if (choice !== 'Add models') return null;
-  const next = { ...config, models: [...config.models, ...unique] };
   writeConfigSafely(configPath, next);
   return next;
 }
