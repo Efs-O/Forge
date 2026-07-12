@@ -2,6 +2,11 @@
 export function extractToolDetail(argsJson: string): string {
   try {
     const args = JSON.parse(argsJson) as Record<string, unknown>;
+    const model = args['model'];
+    if (typeof model === 'string') {
+      const focus = args['focus'];
+      return typeof focus === 'string' ? `${model} · ${focus}` : model;
+    }
     const path = args['path'] ?? args['file_path'] ?? args['directory'];
     if (typeof path === 'string') return path.split(/[\\/]/).pop() ?? path;
     const cmd = args['command'];
