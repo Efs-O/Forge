@@ -32,6 +32,25 @@ export function getCloudProviderLabel(provider: CloudProvider): string {
   return CLOUD_PROVIDER_LABELS[provider];
 }
 
+/**
+ * Human-readable provider name for display (e.g. in a consumer's model list).
+ * For `openai-compatible` the generic label says nothing useful, so derive the
+ * name from the endpoint host: `https://api.cerebras.ai` → `cerebras`.
+ */
+export function getProviderDisplayName(model: ModelConfig): string {
+  if (model.provider === 'openai-compatible' && model.endpoint) {
+    try {
+      const host = new URL(model.endpoint).hostname;
+      const label = host.replace(/^(api|www)\./, '').split('.')[0];
+      if (label) return label;
+    } catch {
+      /* fall through to the generic label */
+    }
+  }
+  if (isCloudProvider(model.provider)) return getCloudProviderLabel(model.provider);
+  return model.provider ?? 'llama.cpp';
+}
+
 export function getCloudBaseUrl(model: ModelConfig): string {
   if (!isCloudProvider(model.provider)) {
     throw new Error(`Forge: ${model.name} is not a cloud provider model`);

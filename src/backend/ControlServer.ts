@@ -2,7 +2,7 @@ import * as http from 'http';
 import type * as vscode from 'vscode';
 import type { IBackendPool } from './BackendPool';
 import type { ForgeConfig } from '../config/types';
-import { isCloudProvider, getCloudProviderLabel } from '../llm/CloudProviders';
+import { isCloudProvider, getCloudProviderLabel, getProviderDisplayName } from '../llm/CloudProviders';
 import {
   availableProfilesFor,
   deriveStaticCapabilities,
@@ -14,6 +14,7 @@ import { probeHealthy } from './HealthCheck';
 import { sendJson, requireModel, readJson, delay, toOpenAiBase, errText, handleChat, CHAT_BODY_BYTES } from './controlHttp';
 import type { ChatProxyFn } from '../llm/ControlChatProxy';
 import { getLogger } from '../util/logger';
+import type { IControlServerRegistry } from './ControlServerRegistry';
 
 const log = getLogger();
 const DEFAULT_PORT = 8799;
@@ -34,6 +35,8 @@ export interface ControlServerDeps {
   /** Runs a buffered cloud-provider completion inside the extension host (where
    *  SecretStorage is readable). Absent ⇒ POST /chat returns 501. */
   chatProxy?: ChatProxyFn;
+  registry?: IControlServerRegistry;
+  version?: string;
 }
 
 export interface EnsureResult {
@@ -47,6 +50,8 @@ export interface ControlStatus {
   models: Array<{
     name: string;
     backend: string;
+    /** Human-readable provider name for display, e.g. "cerebras", "ollama". */
+    provider: string;
     loaded: boolean;
     holds: number;
     servable: boolean;
@@ -83,6 +88,8 @@ export class ControlServer implements vscode.Disposable {
   private readonly readinessIntervalMs: number;
   private readonly evictionGraceMs: number;
   private readonly chatProxy?: ChatProxyFn;
+  private readonly registry?: IControlServerRegistry;
+  private readonly version: string;
 
   constructor(
     private readonly pool: IBackendPool,
@@ -95,6 +102,8 @@ export class ControlServer implements vscode.Disposable {
     this.readinessIntervalMs = deps.readinessIntervalMs ?? READINESS_INTERVAL_MS;
     this.evictionGraceMs = deps.evictionGraceMs ?? EVICTION_GRACE_MS;
     if (deps.chatProxy) this.chatProxy = deps.chatProxy;
+    if (deps.registry) this.registry = deps.registry;
+    this.version = deps.version ?? 'unknown';
   }
 
   applyForgeConfig(next: ForgeConfig): void {
@@ -118,7 +127,19 @@ export class ControlServer implements vscode.Disposable {
     });
     // 127.0.0.1 only — never expose beyond localhost.
     server.listen(this.port, '127.0.0.1', () => {
-      log.info(`[ControlServer] listening on http://127.0.0.1:${this.port}`);
+      const url = `http://127.0.0.1:${this.port}`;
+      log.info(`[ControlServer] listening on ${url}`);
+      try {
+        this.registry?.publish({
+          url,
+          pid: process.pid,
+          startedAt: new Date().toISOString(),
+          version: this.version,
+        });
+        if (this.registry) log.info(`[ControlServer] published discovery record for ${url}`);
+      } catch (err) {
+        log.error('[ControlServer] failed to publish discovery record', err);
+      }
     });
     this.server = server;
   }
@@ -126,6 +147,11 @@ export class ControlServer implements vscode.Disposable {
   dispose(): void {
     this.server?.close();
     this.server = null;
+    try {
+      this.registry?.removeIfOwned(process.pid);
+    } catch (err) {
+      log.error('[ControlServer] failed to remove discovery record', err);
+    }
   }
 
   // ── public API for in-process callers (command palette) ─────────────────────
@@ -200,6 +226,7 @@ export class ControlServer implements vscode.Disposable {
     return this.config.models.map((m) => ({
       name: m.name,
       backend: m.provider ?? 'llama.cpp',
+      provider: getProviderDisplayName(m),
       loaded: this.pool.isLoaded(m.name),
       holds: this.holds.get(m.name) ?? 0,
       // Cloud-provider models are called via their HTTP API from inside the
