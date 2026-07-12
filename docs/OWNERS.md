@@ -46,6 +46,14 @@ overlaps with an existing owner, extend the owner instead.
 | Model family heuristics                    | `src/backend/ModelHeuristics.ts`       |
 | Runtime model capability detection         | `src/backend/ModelCapabilities.ts`     |
 
+## Delegation
+
+| Concern                                    | Owner                                      |
+| ------------------------------------------ | ------------------------------------------ |
+| Local delegation orchestration             | `src/delegation/LocalDelegationService.ts` |
+| Local delegation target eligibility        | `src/delegation/eligibility.ts`            |
+| Local delegation limits + prompt contract  | `src/delegation/limits.ts`                 |
+
 ## LLM / Inference
 
 | Concern                                    | Owner                                  |

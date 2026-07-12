@@ -48,10 +48,32 @@ function gitDiffLarge(before: string, after: string): DiffHunk[] | null {
   }
 }
 
-export function resolveToolPath(filePath: string): string {
-  if (path.isAbsolute(filePath)) return path.normalize(filePath);
+export interface ResolveToolPathOptions {
+  workspaceRoot?: string;
+  mustBeInsideWorkspace?: boolean;
+}
+
+export function resolveToolPath(filePath: string, opts: ResolveToolPathOptions = {}): string {
   const folder = vscode.workspace.workspaceFolders?.[0];
-  return folder ? path.normalize(path.join(folder.uri.fsPath, filePath)) : path.normalize(filePath);
+  const workspaceRoot = opts.workspaceRoot ?? folder?.uri.fsPath;
+  const resolved = path.isAbsolute(filePath)
+    ? path.normalize(filePath)
+    : workspaceRoot
+      ? path.normalize(path.join(workspaceRoot, filePath))
+      : path.normalize(filePath);
+
+  if (opts.mustBeInsideWorkspace) {
+    if (!workspaceRoot) throw new Error('No workspace folder open');
+    const root = path.resolve(workspaceRoot);
+    const candidate = path.resolve(resolved);
+    const relative = path.relative(root, candidate);
+    if (relative !== '' && (relative.startsWith('..') || path.isAbsolute(relative))) {
+      throw new Error(`Path is outside the workspace: ${filePath}`);
+    }
+    return candidate;
+  }
+
+  return resolved;
 }
 
 export class ToolDispatch {
@@ -136,11 +158,11 @@ export class ToolDispatch {
           }
         }
 
-        const mutationPaths = reg.mutation?.paths(args).map(resolveToolPath) ?? [];
+        const mutationPaths = reg.mutation?.paths(args).map((p) => resolveToolPath(p)) ?? [];
         this.snapshotPaths(mutationPaths);
 
         result = await this.toolRegistry.dispatch(tc.function.name, args, allowed, {
-          beforeMutate: (paths) => this.snapshotPaths(paths.map(resolveToolPath)),
+          beforeMutate: (paths) => this.snapshotPaths(paths.map((p) => resolveToolPath(p))),
         });
 
         if (reg.mutation) {
