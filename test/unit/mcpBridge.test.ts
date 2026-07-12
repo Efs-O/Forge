@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { extractTextContent, mcpToolToRegisteredTool } from '../../src/tools/mcpBridge';
+import { resolve } from 'node:path';
+import { ForgeConfigSchema } from '../../src/config/schema';
+import { connectMcpServers, extractTextContent, mcpToolToRegisteredTool } from '../../src/tools/mcpBridge';
+import { ToolRegistry } from '../../src/tools/ToolRegistry';
+
+const testLog = {
+  info: (): void => undefined,
+  warn: (): void => undefined,
+  error: (): void => undefined,
+};
 
 describe('extractTextContent', () => {
   it('joins text parts with newlines and ignores non-text parts', () => {
@@ -24,7 +33,14 @@ describe('mcpToolToRegisteredTool', () => {
     inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
   };
 
-  it('builds a read-permission tool definition from the MCP listing', () => {
+  it('assigns a configured delegate permission to a bridged tool', () => {
+    const registered = mcpToolToRegisteredTool('forgerelay', tool, async () => ({ content: [] }), {
+      search_sessions: 'delegate',
+    });
+    expect(registered.permission).toBe('delegate');
+  });
+
+  it('defaults an unlisted bridged tool to read permission', () => {
     const registered = mcpToolToRegisteredTool('halluscribe', tool, async () => ({ content: [] }));
     expect(registered.permission).toBe('read');
     expect(registered.definition).toEqual({
@@ -80,11 +96,85 @@ describe('mcpToolToRegisteredTool', () => {
       async () => ({
         content: [{ type: 'text', text: 'a'.repeat(50) }],
       }),
+      {},
       10,
     );
     const out = await registered.handler({ query: 'x' });
     expect(out).toBe(
       `${'a'.repeat(10)}\n\n[truncated by Forge MCP bridge — showing 10 of 50 chars]`,
     );
+  });
+
+  it('hides and blocks delegate tools unless delegate permission is granted', async () => {
+    const registry = new ToolRegistry();
+    registry.register(
+      mcpToolToRegisteredTool(
+        'forgerelay',
+        { name: 'dispatch_subagent', inputSchema: { type: 'object' } },
+        async () => ({ content: [{ type: 'text', text: 'delegated result' }] }),
+        { dispatch_subagent: 'delegate' },
+      ),
+    );
+
+    expect(registry.definitions(new Set(['read']))).toEqual([]);
+    expect(registry.definitions(new Set(['delegate']))).toEqual([
+      expect.objectContaining({ function: expect.objectContaining({ name: 'dispatch_subagent' }) }),
+    ]);
+    await expect(registry.dispatch('dispatch_subagent', {}, new Set(['read']))).rejects.toThrow(
+      'requires permission "delegate"',
+    );
+    await expect(registry.dispatch('dispatch_subagent', {}, new Set(['delegate']))).resolves.toBe(
+      'delegated result',
+    );
+  });
+
+  it('enforces delegate permission after bridging a real stdio MCP server', async () => {
+    const registry = new ToolRegistry();
+    const connection = await connectMcpServers(
+      [
+        {
+          name: 'stub-delegation-server',
+          command: process.execPath,
+          args: [resolve(process.cwd(), 'test/fixtures/mcp-delegate-server.mjs')],
+          tool_permissions: { dispatch_subagent: 'delegate' },
+        },
+      ],
+      registry,
+      testLog,
+    );
+
+    try {
+      expect(registry.definitions(new Set(['read']))).toEqual([]);
+      await expect(registry.dispatch('dispatch_subagent', {}, new Set(['read']))).rejects.toThrow(
+        'requires permission "delegate"',
+      );
+      await expect(registry.dispatch('dispatch_subagent', {}, new Set(['delegate']))).resolves.toBe(
+        'delegated result',
+      );
+    } finally {
+      connection.dispose();
+    }
+  });
+});
+
+describe('MCP tool permission config validation', () => {
+  it('rejects invalid tool permission values', () => {
+    const result = ForgeConfigSchema.safeParse({
+      active_model: 'local-model',
+      llama_server: { binary: 'llama-server' },
+      models: [{ name: 'local-model', gguf_path: 'C:/models/local.gguf' }],
+      mcp_servers: [
+        {
+          name: 'forgerelay',
+          command: 'forgerelay-mcp',
+          tool_permissions: { dispatch_subagent: 'unrestricted' },
+        },
+      ],
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.message).toContain('MCP tool permission must be one of');
+    }
   });
 });

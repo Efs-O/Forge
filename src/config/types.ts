@@ -1,3 +1,5 @@
+import type { ToolPermission } from '../tools/ToolRegistry';
+
 /** Sampling parameter overrides shared by models, profiles, and defaults. */
 export interface SamplingConfig {
   temperature?: number;
@@ -215,4 +217,6 @@ export interface McpServerConfig {
    * Defaults to DEFAULT_MAX_RESULT_CHARS in mcpBridge.
    */
   max_result_chars?: number;
+  /** Per-tool capability classification; unlisted MCP tools default to read. */
+  tool_permissions?: Record<string, ToolPermission>;
 }

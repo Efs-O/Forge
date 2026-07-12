@@ -180,12 +180,15 @@ permissions:
 
 # -------------------------------------------------------------------
 # Optional: external MCP stdio servers — their tools are bridged into the
-# Forge tool registry (read-only permission) on activation, after the config
-# has loaded. A slow or missing server binary never blocks Forge startup.
+# Forge tool registry on activation, after the config has loaded. Unlisted MCP
+# tools default to `read`; classify sensitive tools explicitly. A slow or
+# missing server binary never blocks Forge startup.
 # -------------------------------------------------------------------
 # mcp_servers:
-#   - name: halluscribe
-#     command: C:/Users/you/.halluscribe-mcp/halluscribe-mcp.exe
+#   - name: forgerelay
+#     command: C:/path/to/forgerelay-mcp.exe
+#     tool_permissions:
+#       dispatch_subagent: delegate  # requires permissions.agents.delegate: true
 #     max_result_chars: 24000   # truncate oversized tool results (default 24000)
 
 # -------------------------------------------------------------------

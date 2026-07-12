@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import type { ToolRegistry, RegisteredTool } from './ToolRegistry';
+import type { ToolPermission, ToolRegistry, RegisteredTool } from './ToolRegistry';
 import type { McpServerConfig } from '../config/types';
 import { DEFAULT_MAX_RESULT_CHARS, capResultText } from './resultCap';
 
@@ -42,6 +42,7 @@ export function mcpToolToRegisteredTool(
   serverName: string,
   tool: McpToolListing,
   callTool: (args: Record<string, unknown>) => Promise<McpCallToolResult>,
+  toolPermissions: Record<string, ToolPermission> = {},
   maxResultChars: number = DEFAULT_MAX_RESULT_CHARS,
 ): RegisteredTool {
   return {
@@ -53,7 +54,7 @@ export function mcpToolToRegisteredTool(
         parameters: (tool.inputSchema ?? {}) as Record<string, unknown>,
       },
     },
-    permission: 'read',
+    permission: toolPermissions[tool.name] ?? 'read',
     handler: async (args) => {
       const result = await callTool(args);
       const text = extractTextContent(result.content);
@@ -105,6 +106,7 @@ async function connectOne(
             tool,
             (args) =>
               client.callTool({ name: tool.name, arguments: args }) as Promise<McpCallToolResult>,
+            server.tool_permissions,
             server.max_result_chars ?? DEFAULT_MAX_RESULT_CHARS,
           ),
         );
@@ -132,7 +134,8 @@ async function connectOne(
 
 /**
  * Connects every configured MCP stdio server and bridges their tools into
- * `registry` (read permission). Runs servers concurrently; one server's
+ * `registry` using each server's configured per-tool permission (read by
+ * default). Runs servers concurrently; one server's
  * failure never blocks the others. Returns a disposable that closes every
  * successfully-connected client (which kills its child process).
  *

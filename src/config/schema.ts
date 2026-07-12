@@ -3,6 +3,24 @@ import { z } from 'zod';
 const CacheTypeSchema = z.union([z.number().int().min(0).max(8), z.string().min(1)]);
 
 const ReasoningEffortSchema = z.enum(['high', 'medium', 'low', 'none']);
+const ToolPermissionSchema = z.enum(
+  [
+    'read',
+    'write',
+    'delete',
+    'terminal',
+    'headless',
+    'search',
+    'fetch',
+    'git-read',
+    'git-write',
+    'delegate',
+  ],
+  {
+    error:
+      'MCP tool permission must be one of: read, write, delete, terminal, headless, search, fetch, git-read, git-write, delegate',
+  },
+);
 const ActiveModelSchema = z.preprocess(
   (value) => {
     if (value === undefined || value === null) return null;
@@ -235,6 +253,7 @@ export const ForgeConfigSchema = z
           command: z.string().min(1),
           args: z.array(z.string()).optional(),
           max_result_chars: z.number().int().positive().optional(),
+          tool_permissions: z.record(z.string(), ToolPermissionSchema).optional(),
         }),
       )
       .optional(),
