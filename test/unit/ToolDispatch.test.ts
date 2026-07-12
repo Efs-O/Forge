@@ -387,6 +387,29 @@ describe('ToolDispatch', () => {
     expect(messages[1].content).toBe('contents');
   });
 
+  it('does not start a mutation after the caller cancels the turn', async () => {
+    const handler = vi.fn().mockResolvedValue('written');
+    toolRegistry.register({
+      definition: {
+        type: 'function',
+        function: { name: 'write_file', description: 'Write a file', parameters: { type: 'object' } },
+      },
+      permission: 'write',
+      mutation: { paths: (args) => [args['path'] as string], showDiff: true },
+      handler,
+    });
+    const ctrl = new AbortController();
+    ctrl.abort();
+    const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> =
+      [];
+
+    await dispatch.dispatch([makeToolCall('write_file', { path: 'cancelled.txt' })], allowed, messages as never, undefined, ctrl.signal);
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(checkpoints.snapshotBefore).not.toHaveBeenCalled();
+    expect(messages[0]?.content).toBe('Error: tool execution cancelled');
+  });
+
   it('snapshots both path and filepath args', async () => {
     toolRegistry.register({
       definition: {

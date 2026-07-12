@@ -103,6 +103,17 @@ export class ToolDispatch {
       let result: string;
       let args: Record<string, unknown> | undefined;
       try {
+        if (signal?.aborted) {
+          result = 'Error: tool execution cancelled';
+          this.postResult(tc, result, undefined, convId);
+          messages.push({
+            role: 'tool',
+            content: result,
+            tool_call_id: tc.id,
+            name: tc.function.name,
+          });
+          continue;
+        }
         try {
           args = JSON.parse(tc.function.arguments) as Record<string, unknown>;
         } catch {
