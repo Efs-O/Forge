@@ -48,7 +48,8 @@ export function makeLocalAgentTool(
         description:
           'Delegate an analysis task to a secondary local model (no tools). Use for second opinions, ' +
           'security reviews, test suggestions, or correctness checks. The delegated model receives only ' +
-          'the task and optional context files — it cannot run code, read files, or edit anything.',
+          'the task and optional context files — it cannot run code, read files, or edit anything. ' +
+          'This tool requires only the delegate permission; do not request terminal, write, or other permissions.',
         parameters: {
           type: 'object',
           properties: {

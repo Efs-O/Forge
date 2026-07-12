@@ -134,6 +134,12 @@ describe('ask_local_agent schema', () => {
     const tool = makeLocalAgentTool(service, () => localConfig);
     expect(tool.permission).toBe('delegate');
   });
+
+  it('states that delegation does not require terminal permission', () => {
+    const { service } = makeMockService();
+    const tool = makeLocalAgentTool(service, () => localConfig);
+    expect(tool.definition.function.description).toContain('only the delegate permission');
+  });
 });
 
 // ── Advertisement ───────────────────────────────────────────────────────────
