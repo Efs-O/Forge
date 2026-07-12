@@ -1,4 +1,5 @@
 import type { ModelConfig } from '../config/types';
+import { getLogger } from '../util/logger';
 import type { ChatCompletionRequest, ChatMessage, ContentPart, ToolCall } from './types';
 import type { StreamHandlers } from './OpenAIClient';
 
@@ -7,6 +8,14 @@ interface OllamaToolCallChunk {
     name?: string;
     arguments?: Record<string, unknown> | string;
   };
+}
+
+const log = getLogger();
+
+function safeResponseBody(body: string): string {
+  return body
+    .replace(/(authorization|api[_-]?key|token|secret)(["'\s:=]+)[^\s,"'}]+/gi, '$1$2[REDACTED]')
+    .slice(0, 4_000);
 }
 
 interface OllamaStreamChunk {
@@ -213,14 +222,23 @@ export async function streamOllamaChatCompletion(
     if ((err as Error)?.name === 'AbortError') {
       handlers.onDone('cancelled');
     } else {
-      handlers.onError(err instanceof Error ? err : new Error(String(err)));
+      const error = err instanceof Error ? err : new Error(String(err));
+      log.error(
+        `[OllamaNativeClient] request failed endpoint=${baseUrl}/api/chat model=${request.model}: ${error.message}`,
+      );
+      handlers.onError(error);
     }
     return;
   }
 
   if (!response.ok) {
     const body = await response.text().catch(() => '');
-    handlers.onError(new Error(`HTTP ${response.status}: ${body}`));
+    const safeBody = safeResponseBody(body);
+    const message = `HTTP ${response.status}: ${safeBody}`;
+    log.error(
+      `[OllamaNativeClient] request failed endpoint=${baseUrl}/api/chat model=${request.model}: ${message}`,
+    );
+    handlers.onError(new Error(message));
     return;
   }
 

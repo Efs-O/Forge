@@ -217,7 +217,7 @@ export function reducer(state: State, action: Action): State {
       return appendToConv(
         { ...state, streamingIds: newStreaming, generatingIds: newGenerating, backendReady: false },
         cid,
-        { id: mkId(), role: 'system', content: action.message },
+        { id: mkId(), role: 'error', content: action.message },
       );
     }
 
@@ -270,7 +270,11 @@ export function reducer(state: State, action: Action): State {
         // Re-append any diff cards that were live in this conversation — they are not
         // persisted server-side so SESSION_SYNC would otherwise wipe them.
         const survivingDiffs = (state.messagesById[id] ?? []).filter((m) => m.role === 'diff');
-        messagesById[id] = [...reconstructed, ...survivingDiffs];
+        // Errors are host/UI state rather than persisted chat messages. Keep
+        // them across the post-turn SESSION_SYNC so actionable failures do not
+        // flash briefly and disappear during reconciliation.
+        const survivingErrors = (state.messagesById[id] ?? []).filter((m) => m.role === 'error');
+        messagesById[id] = [...reconstructed, ...survivingErrors, ...survivingDiffs];
       }
       return {
         ...state,

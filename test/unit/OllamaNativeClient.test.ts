@@ -81,4 +81,32 @@ describe('streamOllamaChatCompletion', () => {
     expect(done).toHaveBeenCalledWith('stop');
     vi.unstubAllGlobals();
   });
+
+  it('submits an unlisted cloud alias exactly and tolerates a normalized response model', async () => {
+    const cloudId = 'qwen3-coder:480b-cloud';
+    const line = JSON.stringify({
+      model: 'qwen3-coder:480b',
+      message: { content: 'ok' },
+      done: true,
+      done_reason: 'stop',
+    });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      body: new Response(`${line}\n`).body,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const done = vi.fn();
+    await streamOllamaChatCompletion(
+      'http://127.0.0.1:11434',
+      { ...baseRequest, model: cloudId },
+      { ...baseModel, name: cloudId },
+      { onToken: vi.fn(), onDone: done, onError: vi.fn(), onToolCalls: vi.fn() },
+    );
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({ model: cloudId });
+    expect(done).toHaveBeenCalledWith('stop');
+    vi.unstubAllGlobals();
+  });
 });

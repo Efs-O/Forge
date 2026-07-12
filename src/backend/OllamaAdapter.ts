@@ -133,32 +133,6 @@ export async function ensureOllamaReady(
   }
 }
 
-/**
- * Ask the daemon whether it can actually serve `model` (POST /api/show), so
- * unknown / unpulled / entitlement-gated models fail at ensure time with the
- * daemon's own reason instead of at first chat call.
- */
-export async function probeOllamaModel(
-  endpoint: string,
-  model: string,
-  signal?: AbortSignal,
-): Promise<void> {
-  // Always bound the probe: a hung daemon must not stall hotSwap even when
-  // the caller supplied its own abort signal.
-  const timeout = AbortSignal.timeout(10_000);
-  const response = await fetch(`${nativeApiBase(endpoint)}/show`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    // older daemons expect "name", newer accept "model" — send both
-    body: JSON.stringify({ model, name: model }),
-    signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-  });
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(`Ollama cannot serve "${model}": HTTP ${response.status} ${body}`.trim());
-  }
-}
-
 export async function releaseOllamaModel(endpoint: string, model: string): Promise<void> {
   const response = await fetch(`${nativeApiBase(endpoint)}/generate`, {
     method: 'POST',

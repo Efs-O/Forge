@@ -5,12 +5,7 @@ import type { ForgeConfig, ModelConfig } from '../config/types';
 import { composeLlamaServerArgs } from './LlamaServerArgs';
 import { spawnLlamaServer, killLlamaProcess } from './llamaProcess';
 import { waitForHealthy, probeHealthy, probeServedModel } from './HealthCheck';
-import {
-  ensureOllamaReady,
-  normalizeOllamaEndpoint,
-  probeOllamaModel,
-  releaseOllamaModel,
-} from './OllamaAdapter';
+import { ensureOllamaReady, normalizeOllamaEndpoint, releaseOllamaModel } from './OllamaAdapter';
 import { isCloudProvider } from '../llm/CloudProviders';
 import { expandAlias, resolveSpawnModel, splitModelProfile } from '../config/ConfigResolver';
 import { getLogger } from '../util/logger';
@@ -125,9 +120,9 @@ export class DirectBackend implements BackendController {
         throw new Error(`Model "${nextModel.name}" is missing an Ollama endpoint.`);
       }
       await ensureOllamaReady(nextModel.endpoint, this.startAbort.signal, this.config.ollama);
-      // Fail fast with the daemon's own reason (unknown model, entitlement
-      // gate) instead of at first chat call.
-      await probeOllamaModel(nextModel.endpoint, nextModel.name, this.startAbort.signal);
+      // Do not gate chat on /api/show or a model catalog. Ollama cloud aliases
+      // can be callable through /api/chat while absent from local metadata.
+      // The real chat request is the authoritative availability check.
       this.activeModel = nextModel;
       this.currentBaseUrl = normalizeOllamaEndpoint(nextModel.endpoint);
       this.ready = true;

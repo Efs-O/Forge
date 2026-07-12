@@ -273,7 +273,10 @@ export class AgentLoop {
     try {
       await this.runAgentLoop(backend.baseUrl(), conv, model, activeFile, ctrl, postC);
     } catch (err) {
-      postC({ type: 'error', message: (err as Error).message });
+      const message = err instanceof Error ? err.message : String(err);
+      log.error(`[AgentLoop] ${model.provider} chat failed model=${model.name}: ${message}`);
+      this.events.onBackendError?.(message);
+      postC({ type: 'error', message });
     } finally {
       this.streamingConvIds.delete(convId);
       this.activeBackends.delete(convId);

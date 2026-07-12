@@ -2,8 +2,9 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 interface AppModule {
   initialState: {
-    messages: unknown[];
-    streaming: boolean;
+    messagesById: Record<string, Array<{ role: string; content: string }>>;
+    streamingIds: Set<string>;
+    generatingIds: Set<string>;
     models: string[];
     activeModel: string | null;
     backendReady: boolean;
@@ -17,6 +18,7 @@ interface AppModule {
     state: AppModule['initialState'],
     action:
       | { type: 'MODELS'; names: string[]; active: string | null }
+      | { type: 'ERROR'; message: string; convId?: string }
       | {
           type: 'SESSION_SYNC';
           activeId: string;
@@ -93,5 +95,33 @@ describe('webview App reducer', () => {
 
     expect(synced.activeModel).toBeNull();
     expect(synced.messagesById['tab-1']).toHaveLength(1);
+  });
+
+  it('keeps an actionable chat error through session reconciliation', () => {
+    const hydrated = appModule.reducer(appModule.initialState, {
+      type: 'SESSION_SYNC',
+      activeId: 'tab-1',
+      tabs: [],
+      history: [],
+      messagesById: { 'tab-1': [{ role: 'user', content: 'hello' }] },
+    });
+    const failed = appModule.reducer(hydrated, {
+      type: 'ERROR',
+      convId: 'tab-1',
+      message: 'HTTP 404: cloud model unavailable',
+    });
+    const reconciled = appModule.reducer(failed, {
+      type: 'SESSION_SYNC',
+      activeId: 'tab-1',
+      tabs: [],
+      history: [],
+      messagesById: { 'tab-1': [{ role: 'user', content: 'hello' }] },
+    });
+
+    expect(reconciled.messagesById['tab-1']).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: 'error', content: 'HTTP 404: cloud model unavailable' }),
+      ]),
+    );
   });
 });
