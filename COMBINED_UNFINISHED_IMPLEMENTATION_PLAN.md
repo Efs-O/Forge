@@ -36,6 +36,26 @@ Remaining release verification requires interaction in a VS Code extension host:
 - native `ask_local_agent` UI smoke cases (same model/profile, two direct
   models, capacity rejection, and Stop during a consultation).
 
+### Live UI finding — 2026-07-13
+
+`permissions.agents.delegate: true` was enabled in the workspace config and
+validated. The configured local targets were eligible, and direct llama.cpp
+plus local Ollama chat requests were both smoke-tested successfully. However,
+two primary models tested in the Extension Development Host (a local Gemma and
+Qwen-3 Coder 480B through the local Ollama daemon) replied that they lacked
+`ask_local_agent` access instead of emitting a native or fallback tool call.
+They also incorrectly claimed terminal permission was required; it is not.
+
+This does not invalidate the service, schema, permission, or dispatch tests,
+which are green. It does mean tool selection by the primary model is not a
+reliable manual entry point for this feature. Before calling native delegation
+production-ready, choose one of these follow-ups:
+
+- add a direct, user-invoked `Ask Local Agent` command/UI that calls the
+  existing `LocalDelegationService` and retains the same `delegate` gate; or
+- qualify and document one primary model/template that reliably calls the
+  existing native tool.
+
 ## Current Baseline
 
 Forge already has the following delegation prerequisites:
