@@ -19,6 +19,8 @@ export interface ToolHandler {
 
 export interface ToolHandlerContext {
   beforeMutate(paths: string[]): void;
+  /** Caller's AbortSignal, threaded through for long-running tools (e.g. ask_local_agent). */
+  abortSignal?: AbortSignal;
 }
 
 export interface ToolMutation {
@@ -33,6 +35,8 @@ export interface RegisteredTool {
   permission: ToolPermission;
   handler: ToolHandler;
   mutation?: ToolMutation;
+  /** When present, called during definitions() to suppress advertisement without removing the tool. */
+  advertise?: () => boolean;
 }
 
 /**
@@ -58,10 +62,10 @@ export class ToolRegistry {
     return this.tools.get(name);
   }
 
-  /** Returns definitions for all tools the current permission set allows. */
+  /** Returns definitions for all tools the current permission set allows and that pass their advertise predicate. */
   definitions(allowed: Set<ToolPermission>): ToolDefinition[] {
     return [...this.tools.values()]
-      .filter((t) => allowed.has(t.permission))
+      .filter((t) => allowed.has(t.permission) && (t.advertise === undefined || t.advertise()))
       .map((t) => t.definition);
   }
 

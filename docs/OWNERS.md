@@ -97,6 +97,7 @@ overlaps with an existing owner, extend the owner instead.
 | Semantic codebase search tool              | `src/tools/semanticSearchTool.ts`      |
 | MCP client bridge (external MCP servers)   | `src/tools/mcpBridge.ts`               |
 | Tool-result size capping                   | `src/tools/resultCap.ts`               |
+| Local agent delegation tool                | `src/tools/localAgentTool.ts`          |
 
 ## Semantic Search
 

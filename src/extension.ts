@@ -26,6 +26,7 @@ import { EmbeddingBackend } from './backend/EmbeddingBackend';
 import { IndexManager } from './search/IndexManager';
 import { registerSecretCommands } from './vscode/secretCommands';
 import { enterSetupMode } from './sidebar/SetupMode';
+import { LocalDelegationService } from './delegation/LocalDelegationService';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   initLogger(context);
@@ -85,10 +86,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     log.warn(`[TemplateEngine] init failed, using hardcoded prompts: ${(err as Error).message}`);
   }
 
+  // ── Backend pool ──────────────────────────────────────────────────────────
+  // Created before the tool registry so LocalDelegationService can be injected.
+  const pool = new BackendPool(config);
+
   // ── Tool registry ─────────────────────────────────────────────────────────
   const embeddingBackend = new EmbeddingBackend(config);
   context.subscriptions.push(embeddingBackend);
   const indexManager = new IndexManager(config, embeddingBackend);
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+  const delegationService = new LocalDelegationService({
+    getConfig: () => config,
+    backendPool: pool,
+    workspaceRoot,
+  });
   const toolRegistry = new ToolRegistry();
   registerAllTools(
     toolRegistry,
@@ -96,6 +107,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     context.secrets,
     config.search,
     indexManager,
+    delegationService,
+    () => config,
   );
 
   // External MCP stdio servers (e.g. halluscribe-mcp). Bridged as a
@@ -111,9 +124,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // ── Checkpoint stack ──────────────────────────────────────────────────────
   const checkpoints = new CheckpointStack();
-
-  // ── Backend pool ──────────────────────────────────────────────────────────
-  const pool = new BackendPool(config);
 
   // Localhost model-control API for external orchestrators + the Forge command
   // palette. Always instantiated (cheap); the HTTP listener opens only when enabled.

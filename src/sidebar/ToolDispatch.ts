@@ -97,6 +97,7 @@ export class ToolDispatch {
     allowed: Set<ToolPermission>,
     messages: ChatMessage[],
     convId?: string,
+    signal?: AbortSignal,
   ): Promise<void> {
     for (const tc of toolCalls) {
       let result: string;
@@ -163,6 +164,7 @@ export class ToolDispatch {
 
         result = await this.toolRegistry.dispatch(tc.function.name, args, allowed, {
           beforeMutate: (paths) => this.snapshotPaths(paths.map((p) => resolveToolPath(p))),
+          ...(signal !== undefined ? { abortSignal: signal } : {}),
         });
 
         if (reg.mutation) {

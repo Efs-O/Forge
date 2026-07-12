@@ -411,7 +411,7 @@ export class AgentLoop {
         postC({ type: 'toolActivity', toolName: tc.function.name, ...(detail ? { detail } : {}) });
       }
       conv.messages.push({ role: 'assistant', content: null, tool_calls: toolCalls });
-      await this.toolDispatch.dispatch(toolCalls, allowed, conv.messages, conv.id);
+      await this.toolDispatch.dispatch(toolCalls, allowed, conv.messages, conv.id, ctrl.signal);
       return 'continue';
     };
 

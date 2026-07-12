@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import type { ToolRegistry } from './ToolRegistry';
-import type { SearchConfig } from '../config/types';
+import type { SearchConfig, ForgeConfig } from '../config/types';
+import type { LocalDelegationService } from '../delegation/LocalDelegationService';
+import { makeLocalAgentTool } from './localAgentTool';
 import {
   makeReadFileTool,
   makeWriteFileTool,
@@ -61,6 +63,8 @@ export function registerAllTools(
   secrets: vscode.SecretStorage,
   searchConfig: SearchConfig | undefined,
   indexManager: IndexManager,
+  delegationService?: LocalDelegationService,
+  getConfig?: () => ForgeConfig,
 ): void {
   // v0.1 builtins
   registry.register(makeReadFileTool());
@@ -115,4 +119,9 @@ export function registerAllTools(
   registry.register(makeSwitchBranchTool());
   registry.register(makeStageTool());
   registry.register(makeCommitTool());
+
+  // delegation — only registered when a LocalDelegationService is wired in
+  if (delegationService && getConfig) {
+    registry.register(makeLocalAgentTool(delegationService, getConfig));
+  }
 }
