@@ -1,9 +1,10 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ControlServer, type ControlServerDeps } from '../../src/backend/ControlServer';
 import { ProxyError } from '../../src/llm/ControlChatProxy';
 import type { IBackendPool } from '../../src/backend/BackendPool';
 import type { BackendController } from '../../src/backend/BackendController';
 import type { ForgeConfig } from '../../src/config/types';
+import type { IControlServerRegistry } from '../../src/backend/ControlServerRegistry';
 
 function fakeController(model: string): BackendController {
   return {
@@ -89,6 +90,29 @@ describe('ControlServer', () => {
   let server: ControlServer | undefined;
   afterEach(() => {
     server?.dispose();
+    server = undefined;
+  });
+
+  it('publishes discovery after listening and removes only its PID on disposal', async () => {
+    const port = 18822;
+    const base = `http://127.0.0.1:${port}`;
+    const registry: IControlServerRegistry = {
+      publish: vi.fn(),
+      removeIfOwned: vi.fn(),
+    };
+    server = new ControlServer(
+      new FakePool(),
+      makeConfig(port),
+      testDeps({ registry, version: '0.12.27' }),
+    );
+    server.start();
+    await waitReady(base);
+
+    expect(registry.publish).toHaveBeenCalledWith(
+      expect.objectContaining({ url: base, pid: process.pid, version: '0.12.27' }),
+    );
+    server.dispose();
+    expect(registry.removeIfOwned).toHaveBeenCalledWith(process.pid);
     server = undefined;
   });
 
