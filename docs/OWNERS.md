@@ -90,7 +90,7 @@ overlaps with an existing owner, extend the owner instead.
 | In-memory workspace memory tool            | `src/tools/memoryTools.ts`             |
 | UX tools (show_diff, open_file)            | `src/tools/uxTools.ts`                 |
 | Denylist (dangerous command filter)        | `src/tools/DenyList.ts`                |
-| User confirmation gate                     | `src/tools/ConfirmationGate.ts`        |
+| User confirmation request + response flow  | `src/sidebar/AgentLoop.ts`             |
 | Tool strip (remove tools from request)     | `src/tools/StripTools.ts`              |
 | Structured output / fallback tool parser   | `src/tools/StructuredOutputParser.ts`  |
 | Tool call JSON-fence fallback converter    | `src/tools/ToolCallFallback.ts`        |

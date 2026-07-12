@@ -177,6 +177,13 @@ permissions:
   net: { search: false, fetch: false }
   exec: { terminal: false, headless: false }
   git: { read: true, write: false }
+  agents: { delegate: false }  # set true to expose ask_local_agent
+
+# Native local delegation is advisory and read-only: the secondary model can
+# analyze supplied context but receives no tools and cannot edit or execute.
+# To consult two different direct llama.cpp models, set this to at least 2;
+# slots prevent eviction but do not guarantee sufficient RAM/VRAM.
+# max_simultaneous_models: 2
 
 # -------------------------------------------------------------------
 # Optional: external MCP stdio servers — their tools are bridged into the

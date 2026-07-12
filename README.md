@@ -43,7 +43,7 @@ Its default and strongest path is still local: GGUF models through `llama-server
 - Reasoning token display and optional thinking-channel stripping
 - Optional Tavily or Brave web search with keys stored in VS Code SecretStorage
 - Local semantic code search and reindex support
-- External MCP tool servers: bridge read-only tools from any MCP stdio server into the agent's tool catalog
+- External MCP tool servers: bridge tools from any MCP stdio server into the agent's tool catalog with explicit capability classification
 
 ## What's New Since v0.12.3
 
@@ -56,7 +56,7 @@ Its default and strongest path is still local: GGUF models through `llama-server
 - Hardened backend lifecycle, readiness, and release behavior
 - Added semantic code search reindexing flow and slash command support
 - Improved diff display, checkpoint handling, and multi-tab chat behavior
-- Added an MCP client bridge (`mcp_servers` in `config.yaml`): tools from external MCP stdio servers are auto-discovered and offered to the model as read-only tools
+- Added an MCP client bridge (`mcp_servers` in `config.yaml`): tools from external MCP stdio servers are auto-discovered with read-only access by default and can be explicitly classified for sensitive capabilities
 - Verified Cerebras Cloud as an `openai-compatible` provider (per-model `endpoint: https://api.cerebras.ai`) and split sampling defaults so cloud providers no longer receive local-only params (`top_k`, `min_p`)
 
 ## Requirements
@@ -246,15 +246,25 @@ Forge can consume tools from external [MCP](https://modelcontextprotocol.io) std
 
 ```yaml
 mcp_servers:
-  - name: halluscribe
-    command: C:/Users/you/.halluscribe-mcp/halluscribe-mcp.exe
+  - name: my-mcp-server
+    command: C:/path/to/my-mcp-server.exe
     # args: [--flag]              # optional
     # max_result_chars: 24000     # optional; default 24000
+    # tool_permissions:           # optional; unlisted tools are read-only
+    #   dispatch_subagent: delegate
 ```
 
-On activation Forge spawns each server, auto-discovers its tools via the MCP handshake, and registers them under the read-only permission tier — no per-server code needed. Connection happens in the background: a slow or missing server binary never delays startup; its tools simply appear on the next chat turn once connected. A server that fails to connect logs an error and shows a warning toast, and duplicate tool names are skipped. Spawned server processes are stdio children of Forge (no network) and are terminated on extension deactivation.
+On activation Forge spawns each server, auto-discovers its tools via the MCP handshake, and registers unclassified tools under the read-only permission tier — no per-server code needed. Classify a sensitive tool with `tool_permissions`; for example, `delegate` requires `permissions.agents.delegate: true` before the tool is advertised or dispatched. Connection happens in the background: a slow or missing server binary never delays startup; its tools simply appear on the next chat turn once connected. A server that fails to connect logs an error and shows a warning toast, and duplicate tool names are skipped. Spawned server processes are stdio children of Forge (no network) and are terminated on extension deactivation.
 
 Tool results are capped at `max_result_chars` (default 24000) before entering the conversation — oversized payloads are truncated with a visible marker so a verbose MCP server cannot overflow a local model's per-slot context window (`num_ctx / n_parallel` in direct llama.cpp mode).
+
+## Local Delegation
+
+Set `permissions.agents.delegate: true` to let the primary agent use `ask_local_agent` for a bounded, read-only consultation with another configured local model. The delegated model receives only the task and selected workspace files, has no tools, and cannot edit files or run commands; its response is advisory analysis returned to the primary conversation.
+
+Only direct llama.cpp models and local Ollama daemon models are eligible. Ollama targets are best-effort because the daemon manages loading; cloud-routed Ollama tags and all direct cloud providers are rejected. A profile such as `model@reviewer` shares the same underlying backend as `model`.
+
+To consult a different direct llama.cpp model without evicting the primary model, configure enough slots, for example `max_simultaneous_models: 2`. Slot availability prevents Forge from evicting the primary backend, but it does not guarantee the machine has enough RAM or VRAM to load the second model. Delegation is limited to 120 seconds and returned analysis is capped at 24,000 characters.
 
 ## Slash Commands
 
