@@ -2,7 +2,11 @@ import * as http from 'http';
 import type * as vscode from 'vscode';
 import type { IBackendPool } from './BackendPool';
 import type { ForgeConfig } from '../config/types';
-import { isCloudProvider, getCloudProviderLabel, getProviderDisplayName } from '../llm/CloudProviders';
+import {
+  isCloudProvider,
+  getCloudProviderLabel,
+  getProviderDisplayName,
+} from '../llm/CloudProviders';
 import {
   availableProfilesFor,
   deriveStaticCapabilities,
