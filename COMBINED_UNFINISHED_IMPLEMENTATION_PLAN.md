@@ -138,26 +138,26 @@ the 350 LOC limit:
 
 Create the canonical service module and inject its dependencies. It must:
 
-- [ ] Resolve aliases and `model@profile` through the existing config resolver.
-- [ ] Accept configured local llama.cpp and local Ollama targets only.
-- [ ] Reject xAI, OpenAI, OpenRouter, generic OpenAI-compatible, Ollama cloud,
+- [x] Resolve aliases and `model@profile` through the existing config resolver.
+- [x] Accept configured local llama.cpp and local Ollama targets only.
+- [x] Reject xAI, OpenAI, OpenRouter, generic OpenAI-compatible, Ollama cloud,
       unknown, and otherwise ineligible targets with clear errors.
-- [ ] Identify the primary base model separately from its request-time profile.
-- [ ] Call the backend pool's non-mutating safety query before acquisition.
-- [ ] Acquire/reuse a backend without evicting the primary backend.
-- [ ] Read only explicitly requested, workspace-contained context files.
-- [ ] Reuse the existing path-containment guard rather than creating a second
+- [x] Identify the primary base model separately from its request-time profile.
+- [x] Call the backend pool's non-mutating safety query before acquisition.
+- [x] Acquire/reuse a backend without evicting the primary backend.
+- [x] Read only explicitly requested, workspace-contained context files.
+- [x] Reuse the existing path-containment guard rather than creating a second
       implementation.
-- [ ] Build a consultation system prompt requiring analysis only, no tool calls,
+- [x] Build a consultation system prompt requiring analysis only, no tool calls,
       no claims of edits/execution, and filename citations for supplied context.
-- [ ] Dispatch through the existing chat/request-normalization/streaming owners.
-- [ ] Send no tool definitions to the delegated model.
-- [ ] Stream internally into a bounded result buffer.
-- [ ] Cap returned text through `src/tools/resultCap.ts`.
-- [ ] Propagate the primary turn's cancellation signal through startup and
+- [x] Dispatch through the existing chat/request-normalization/streaming owners.
+- [x] Send no tool definitions to the delegated model.
+- [x] Stream internally into a bounded result buffer.
+- [x] Cap returned text through `src/tools/resultCap.ts`.
+- [x] Propagate the primary turn's cancellation signal through startup and
       streaming.
-- [ ] Enforce one named delegation timeout and abort timed-out work.
-- [ ] Surface capacity, startup, template, timeout, cancellation, and provider
+- [x] Enforce one named delegation timeout and abort timed-out work.
+- [x] Surface capacity, startup, template, timeout, cancellation, and provider
       errors in the primary conversation.
 
 Named, tested limits:
@@ -175,20 +175,20 @@ Named, tested limits:
 
 ### A3. Add the native `ask_local_agent` tool
 
-- [ ] Create `src/tools/localAgentTool.ts`.
-- [ ] Define a strict JSON schema with `additionalProperties: false`.
-- [ ] Require `model` and a length-bounded `task`.
-- [ ] Support optional bounded `context_files`, `focus`, and
+- [x] Create `src/tools/localAgentTool.ts`.
+- [x] Define a strict JSON schema with `additionalProperties: false`.
+- [x] Require `model` and a length-bounded `task`.
+- [x] Support optional bounded `context_files`, `focus`, and
       `max_output_tokens`.
-- [ ] Restrict `focus` to a small enum: `correctness`, `security`, `tests`,
+- [x] Restrict `focus` to a small enum: `correctness`, `security`, `tests`,
       `architecture`, `performance`, and `second-opinion`.
-- [ ] Assign the tool the existing `delegate` permission.
-- [ ] Inject `LocalDelegationService` through `registerAllTools`; do not access
+- [x] Assign the tool the existing `delegate` permission.
+- [x] Inject `LocalDelegationService` through `registerAllTools`; do not access
       global extension state from the handler.
-- [ ] Advertise the tool only when delegation is enabled and at least one
+- [x] Advertise the tool only when delegation is enabled and at least one
       eligible local target exists.
-- [ ] Ensure native and fallback tool-call paths enforce the same permission.
-- [ ] Keep the delegated request tool-free so recursion is structurally
+- [x] Ensure native and fallback tool-call paths enforce the same permission.
+- [x] Keep the delegated request tool-free so recursion is structurally
       impossible.
 
 ### A4. Close the MCP permission bypass
@@ -196,9 +196,9 @@ Named, tested limits:
 External MCP delegation is separate from the native feature, but it must not
 bypass the same capability gate.
 
-- [ ] Extend each `mcp_servers` entry with optional per-tool permission
+- [x] Extend each `mcp_servers` entry with optional per-tool permission
       classification, defaulting to `read` for backward compatibility.
-- [ ] Support configuration such as:
+- [x] Support configuration such as:
 
 ```yaml
 mcp_servers:
@@ -207,54 +207,54 @@ mcp_servers:
       dispatch_subagent: delegate
 ```
 
-- [ ] Validate permission values at the config boundary.
-- [ ] Resolve the classification through the canonical permission mechanism.
-- [ ] Stop registering every bridged MCP tool unconditionally as `read`.
-- [ ] Test that a delegation-classified MCP tool is hidden and blocked unless
+- [x] Validate permission values at the config boundary.
+- [x] Resolve the classification through the canonical permission mechanism.
+- [x] Stop registering every bridged MCP tool unconditionally as `read`.
+- [x] Test that a delegation-classified MCP tool is hidden and blocked unless
       `permissions.agents.delegate: true`. The test must use a stub/fake MCP
       server — the suite must not depend on Forge Relay running.
 
 ### A5. Delegation conversation UX
 
-- [ ] Show the target model and consultation focus in the existing tool-activity
+- [x] Show the target model and consultation focus in the existing tool-activity
       card.
-- [ ] Label returned text clearly as delegated analysis.
-- [ ] Store only the final tool result in the primary conversation history.
-- [ ] Do not create a separate tab or expose the delegated internal exchange.
-- [ ] Ensure stopping the primary turn cancels delegated startup and streaming.
-- [ ] Make all resource and model errors visible rather than leaving a spinner.
+- [x] Label returned text clearly as delegated analysis.
+- [x] Store only the final tool result in the primary conversation history.
+- [x] Do not create a separate tab or expose the delegated internal exchange.
+- [x] Ensure stopping the primary turn cancels delegated startup and streaming.
+- [x] Make all resource and model errors visible rather than leaving a spinner.
 
 ### A6. Delegation tests
 
-- [ ] Alias and profile resolution.
-- [ ] Same-model/profile delegation.
-- [ ] Different-model delegation with capacity available.
-- [ ] Rejection when delegation would evict the primary model.
-- [ ] Atomic protection against check/acquire races.
-- [ ] Local Ollama and direct llama.cpp routing.
-- [ ] Rejection of Ollama cloud and all direct cloud providers.
-- [ ] Permission disabled/enabled advertisement and dispatch behavior.
-- [ ] Native and fallback call-path permission enforcement.
-- [ ] MCP per-tool delegation permission enforcement.
-- [ ] Workspace traversal and out-of-workspace symlink rejection.
-- [ ] File-count, per-file-size, combined-size, task, result, and token limits.
-- [ ] Cancellation during backend startup and response streaming.
-- [ ] Timeout behavior.
-- [ ] Delegated requests contain no tool definitions.
-- [ ] Recursive delegation is impossible.
-- [ ] Backend holds are released after success, cancellation, timeout, and error.
+- [x] Alias and profile resolution.
+- [x] Same-model/profile delegation.
+- [x] Different-model delegation with capacity available.
+- [x] Rejection when delegation would evict the primary model.
+- [x] Atomic protection against check/acquire races.
+- [x] Local Ollama and direct llama.cpp routing.
+- [x] Rejection of Ollama cloud and all direct cloud providers.
+- [x] Permission disabled/enabled advertisement and dispatch behavior.
+- [x] Native and fallback call-path permission enforcement.
+- [x] MCP per-tool delegation permission enforcement.
+- [x] Workspace traversal and out-of-workspace symlink rejection.
+- [x] File-count, per-file-size, combined-size, task, result, and token limits.
+- [x] Cancellation during backend startup and response streaming.
+- [x] Timeout behavior.
+- [x] Delegated requests contain no tool definitions.
+- [x] Recursive delegation is impossible.
+- [x] Backend holds are released after success, cancellation, timeout, and error.
 
 ### A7. Delegation documentation and configuration
 
-- [ ] Add a disabled native-delegation example to
+- [x] Add a disabled native-delegation example to
       `config/config.example.yaml`.
-- [ ] Document that delegation is advisory and read-only.
-- [ ] Explain that profiles of one base model share a backend.
-- [ ] Explain `max_simultaneous_models`, RAM/VRAM requirements, and the fact that
+- [x] Document that delegation is advisory and read-only.
+- [x] Explain that profiles of one base model share a backend.
+- [x] Explain `max_simultaneous_models`, RAM/VRAM requirements, and the fact that
       slot availability does not guarantee sufficient memory.
-- [ ] Document Ollama targets as best-effort.
-- [ ] Document MCP per-tool permission classification.
-- [ ] Add the delegation service and tool to `docs/OWNERS.md` only after their
+- [x] Document Ollama targets as best-effort.
+- [x] Document MCP per-tool permission classification.
+- [x] Add the delegation service and tool to `docs/OWNERS.md` only after their
       canonical modules exist.
 
 ## Workstream B: Remaining Hardening and Onboarding Work
@@ -264,33 +264,33 @@ mcp_servers:
 Current known failure: `npm run ci` stops at Prettier linting in
 `src/backend/ControlServer.ts` near the import on line 5.
 
-- [ ] Triage and commit the pre-existing uncommitted worktree changes first
+- [x] Triage and commit the pre-existing uncommitted worktree changes first
       (the Ollama cloud-alias probe removal + chat-error surfacing work across
       `DirectBackend`, `OllamaAdapter`, `OllamaNativeClient`, `AgentLoop`,
       `reducer`, and tests) as their own commit, so the CI baseline is
       established against a known tree.
-- [ ] Fix the formatting violation without changing behavior.
-- [ ] Run the complete `npm run ci` command so tests and the normal build run,
+- [x] Fix the formatting violation without changing behavior.
+- [x] Run the complete `npm run ci` command so tests and the normal build run,
       rather than relying on the earlier type-check-only portion.
-- [ ] Keep `npm run package` passing.
-- [ ] Confirm the worktree's pre-existing unrelated changes are preserved.
+- [x] Keep `npm run package` passing.
+- [x] Confirm the worktree's pre-existing unrelated changes are preserved.
 
 ### B2. Finish first-run config-generation architecture
 
 Multi-model selection and `Forge: Add Model` exist, but first-run generation is
 still embedded in `FirstRunWizard.ts`.
 
-- [ ] Extract first-run config generation into a small canonical tested module.
-- [ ] Generate structured config data, validate with `ForgeConfigSchema`, and
+- [x] Extract first-run config generation into a small canonical tested module.
+- [x] Generate structured config data, validate with `ForgeConfigSchema`, and
       write through `ConfigWriter` rather than maintaining a separate raw-YAML
       write path.
-- [ ] Reuse model heuristics for conservative llama.cpp suggestions.
-- [ ] Add focused tests for multi-model llama.cpp and Ollama generation.
-- [ ] Verify both global and current-workspace destinations are offered
+- [x] Reuse model heuristics for conservative llama.cpp suggestions.
+- [x] Add focused tests for multi-model llama.cpp and Ollama generation.
+- [x] Verify both global and current-workspace destinations are offered
       explicitly during first-run and add-model workflows.
-- [ ] Verify conflict handling requires confirmation and never removes existing
+- [x] Verify conflict handling requires confirmation and never removes existing
       profiles, aliases, or models.
-- [ ] Evaluate comment preservation for merges; if it cannot be guaranteed,
+- [x] Evaluate comment preservation for merges; if it cannot be guaranteed,
       retain preview plus backup behavior and document the limitation.
 
 ### B3. Complete Keep/Undo acceptance coverage
@@ -298,27 +298,27 @@ still embedded in `FirstRunWizard.ts`.
 Mutation metadata and checkpoint plumbing exist. Complete or verify the edge
 cases before declaring the plan done.
 
-- [ ] Audit every registered `write` and `delete` tool for mutation metadata.
-- [ ] Verify every mutation reports all affected paths before its first write,
+- [x] Audit every registered `write` and `delete` tool for mutation metadata.
+- [x] Verify every mutation reports all affected paths before its first write,
       including editor-derived paths supplied through `beforeMutate`.
-- [ ] Define and document directory creation/deletion rollback semantics.
-- [ ] Add or confirm tests for partial failure after one of several paths changes.
-- [ ] Add or confirm cancellation tests during mutation.
-- [ ] Add or confirm repeated writes to the same file in one turn snapshot only
+- [x] Define and document directory creation/deletion rollback semantics.
+- [x] Add or confirm tests for partial failure after one of several paths changes.
+- [x] Add or confirm cancellation tests during mutation.
+- [x] Add or confirm repeated writes to the same file in one turn snapshot only
       the original state.
-- [ ] Add or confirm new-file, deleted-file, move source/destination, format,
+- [x] Add or confirm new-file, deleted-file, move source/destination, format,
       rename, selection insertion, and multi-file rollback tests.
-- [ ] Verify Keep removes exactly one completed turn checkpoint.
-- [ ] Verify diff cards, editor decorations, and checkpoint paths use the same
+- [x] Verify Keep removes exactly one completed turn checkpoint.
+- [x] Verify diff cards, editor decorations, and checkpoint paths use the same
       mutation metadata.
 
 ### B4. Complete onboarding/release verification
 
-- [ ] Verify generated configs contain no API keys or machine-specific
+- [x] Verify generated configs contain no API keys or machine-specific
       maintainer paths.
-- [ ] Verify starter templates remain minimal, sanitized, and schema-valid.
-- [ ] Run the planned one-time repository-history secret scan before release.
-- [ ] Rewrite history only if a real secret is found and credential rotation is
+- [x] Verify starter templates remain minimal, sanitized, and schema-valid.
+- [x] Run the planned one-time repository-history secret scan before release.
+- [x] Rewrite history only if a real secret is found and credential rotation is
       coordinated.
 - [ ] Manually smoke-test first-run setup for several GGUF files.
 - [ ] Manually smoke-test first-run setup for several Ollama tags.
@@ -326,12 +326,12 @@ cases before declaring the plan done.
 
 ## Workstream C: Ownership Map Corrections
 
-- [ ] Resolve the stale `src/tools/ConfirmationGate.ts` entry in
+- [x] Resolve the stale `src/tools/ConfirmationGate.ts` entry in
       `docs/OWNERS.md`: either point the concern to the actual confirmation-gate
       owner or create the module only if a real extraction boundary requires it.
-- [ ] Recheck every documented owner path after delegation modules are added.
-- [ ] Keep `src/tools/resultCap.ts` as the single result-capping owner.
-- [ ] Add no delegation owner entries before the corresponding implementation
+- [x] Recheck every documented owner path after delegation modules are added.
+- [x] Keep `src/tools/resultCap.ts` as the single result-capping owner.
+- [x] Add no delegation owner entries before the corresponding implementation
       exists.
 
 ## Recommended Implementation Order
