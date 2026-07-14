@@ -18,6 +18,8 @@ interface AppModule {
     state: AppModule['initialState'],
     action:
       | { type: 'MODELS'; names: string[]; active: string | null }
+      | { type: 'GENERATION_STARTED'; convId?: string }
+      | { type: 'DONE'; convId?: string }
       | { type: 'ERROR'; message: string; convId?: string }
       | {
           type: 'SESSION_SYNC';
@@ -67,6 +69,19 @@ beforeAll(async () => {
 });
 
 describe('webview App reducer', () => {
+  it('tracks command-started generation until completion', () => {
+    const running = appModule.reducer(appModule.initialState, {
+      type: 'GENERATION_STARTED',
+      convId: 'tab-1',
+    });
+    expect(running.streamingIds.has('tab-1')).toBe(true);
+    expect(running.generatingIds.has('tab-1')).toBe(true);
+
+    const done = appModule.reducer(running, { type: 'DONE', convId: 'tab-1' });
+    expect(done.streamingIds.has('tab-1')).toBe(false);
+    expect(done.generatingIds.has('tab-1')).toBe(false);
+  });
+
   it('keeps the model selector empty when restoring tabs', () => {
     const withNoActiveModel = appModule.reducer(appModule.initialState, {
       type: 'MODELS',

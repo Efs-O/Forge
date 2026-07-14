@@ -54,4 +54,14 @@ describe('resolveToolPermissions', () => {
     // delegation opt-in must not widen any other group past its defaults
     expect([...allowed]).toEqual(['read', 'write', 'git-read', 'delegate']);
   });
+
+  it('grants cloud-worker only on an explicit cloud worker opt-in', () => {
+    expect(resolveToolPermissions(configWith({ agents: { delegate: true } })).has('cloud-worker')).toBe(
+      false,
+    );
+    const allowed = resolveToolPermissions(
+      configWith({ agents: { delegate: true, cloud_workers: true } }),
+    );
+    expect(allowed.has('cloud-worker')).toBe(true);
+  });
 });

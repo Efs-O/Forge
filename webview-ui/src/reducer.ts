@@ -44,6 +44,7 @@ export function selectGenerating(state: State): boolean {
 export type Action =
   | { type: 'TOKEN'; text: string; convId?: string }
   | { type: 'REASONING_TOKEN'; text: string; convId?: string }
+  | { type: 'GENERATION_STARTED'; convId?: string }
   | { type: 'DONE'; convId?: string }
   | { type: 'ERROR'; message: string; convId?: string }
   | { type: 'READY'; convId?: string }
@@ -116,6 +117,15 @@ function resolveConvId(state: State, convId?: string): string {
 
 export function reducer(state: State, action: Action): State {
   switch (action.type) {
+    case 'GENERATION_STARTED': {
+      const cid = resolveConvId(state, action.convId);
+      return {
+        ...state,
+        streamingIds: new Set([...state.streamingIds, cid]),
+        generatingIds: new Set([...state.generatingIds, cid]),
+      };
+    }
+
     case 'USER_SEND': {
       const cid = state.activeConversationId;
       const existing = state.messagesById[cid] ?? [];

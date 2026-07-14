@@ -31,33 +31,77 @@ export interface Checkpoint {
   createdAt: number;
 }
 
-/** In-memory, per-turn snapshots used by the Keep/Undo workflow. */
-export class CheckpointStack {
-  private readonly stack: Checkpoint[] = [];
-  private currentTurnId: string | null = null;
-  private pendingSnapshots: FileSnapshot[] = [];
+export class CheckpointSession {
+  private readonly pendingSnapshots: FileSnapshot[] = [];
+  private committed = false;
 
-  beginTurn(turnId: string): void {
-    this.currentTurnId = turnId;
-    this.pendingSnapshots = [];
-  }
+  constructor(
+    readonly turnId: string,
+    private readonly captureState: (target: string) => SnapshotState,
+    private readonly onCommit: (session: CheckpointSession) => void,
+  ) {}
 
   snapshotBefore(filePath: string): void {
+    if (this.committed) throw new Error('CheckpointSession: turn already committed');
     const abs = path.resolve(filePath);
     if (this.pendingSnapshots.some((snapshot) => snapshot.filePath === abs)) return;
-    this.pendingSnapshots.push({ filePath: abs, originalState: this.capture(abs) });
+    this.pendingSnapshots.push({ filePath: abs, originalState: this.captureState(abs) });
     log.debug(`[CheckpointStack] snapshotted ${abs}`);
   }
 
-  commitTurn(): void {
-    if (!this.currentTurnId || this.pendingSnapshots.length === 0) return;
+  readSnapshotContent(filePath: string): string | null | undefined {
+    const abs = path.resolve(filePath);
+    const snapshot = this.pendingSnapshots.find((candidate) => candidate.filePath === abs);
+    if (!snapshot) return undefined;
+    if (snapshot.originalState.kind === 'missing') return null;
+    if (snapshot.originalState.kind === 'file')
+      return snapshot.originalState.content.toString('utf8');
+    return undefined;
+  }
+
+  commit(): void {
+    if (this.committed) return;
+    this.committed = true;
+    this.onCommit(this);
+  }
+
+  snapshots(): readonly FileSnapshot[] {
+    return this.pendingSnapshots;
+  }
+}
+
+/** In-memory, per-turn snapshots used by the Keep/Undo workflow. */
+export class CheckpointStack {
+  private readonly stack: Checkpoint[] = [];
+  private legacySession: CheckpointSession | null = null;
+
+  beginTurn(turnId: string): CheckpointSession {
+    const session = new CheckpointSession(
+      turnId,
+      (target) => this.capture(target),
+      (completed) => this.commitSession(completed),
+    );
+    this.legacySession = session;
+    return session;
+  }
+
+  snapshotBefore(filePath: string): void {
+    if (!this.legacySession) throw new Error('CheckpointStack: no active turn');
+    this.legacySession.snapshotBefore(filePath);
+  }
+
+  commitTurn(session: CheckpointSession | null = this.legacySession): void {
+    session?.commit();
+    if (this.legacySession === session) this.legacySession = null;
+  }
+
+  private commitSession(session: CheckpointSession): void {
+    if (session.snapshots().length === 0) return;
     this.stack.push({
-      turnId: this.currentTurnId,
-      snapshots: [...this.pendingSnapshots],
+      turnId: session.turnId,
+      snapshots: [...session.snapshots()],
       createdAt: Date.now(),
     });
-    this.pendingSnapshots = [];
-    this.currentTurnId = null;
     log.debug(`[CheckpointStack] committed, depth=${this.stack.length}`);
   }
 
@@ -88,13 +132,7 @@ export class CheckpointStack {
   }
 
   readSnapshotContent(filePath: string): string | null | undefined {
-    const abs = path.resolve(filePath);
-    const snapshot = this.pendingSnapshots.find((candidate) => candidate.filePath === abs);
-    if (!snapshot) return undefined;
-    if (snapshot.originalState.kind === 'missing') return null;
-    if (snapshot.originalState.kind === 'file')
-      return snapshot.originalState.content.toString('utf8');
-    return undefined;
+    return this.legacySession?.readSnapshotContent(filePath);
   }
 
   depth(): number {

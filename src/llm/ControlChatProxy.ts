@@ -2,8 +2,8 @@ import type * as vscode from 'vscode';
 import type { ForgeConfig, ModelConfig } from '../config/types';
 import type { ChatMessage } from './types';
 import { streamModelChatCompletion } from './ChatClient';
-import { getCloudBaseUrl, getCloudProviderLabel, isCloudProvider } from './CloudProviders';
-import { resolveXaiToken } from './XaiAuth';
+import { isCloudProvider } from './CloudProviders';
+import { resolveCloudRequestTarget } from './CloudRequestResolver';
 import { mergeSampling } from './SamplingMerge';
 import { resolveRequestModel } from '../config/ConfigResolver';
 import type { ChatCompletionRequest, ToolCall, ToolDefinition } from './types';
@@ -45,26 +45,6 @@ export class ProxyError extends Error {
 
 export type ChatProxyFn = (req: ChatProxyRequest) => Promise<ChatProxyResult>;
 
-async function resolveKey(
-  model: ModelConfig,
-  secrets: vscode.SecretStorage | undefined,
-): Promise<string> {
-  if (model.provider === 'xai') {
-    return resolveXaiToken(model.api_key_secret, secrets);
-  }
-  const keyName = model.api_key_secret;
-  const stored = keyName ? await secrets?.get(keyName) : undefined;
-  if (!stored) {
-    throw new ProxyError(
-      422,
-      `${getCloudProviderLabel(model.provider as 'openrouter')}: no bearer token in SecretStorage ` +
-        `(key: ${keyName ?? 'unset'}). Run "Forge: Set Cloud Provider Token" and set ` +
-        `api_key_secret in config.yaml.`,
-    );
-  }
-  return stored;
-}
-
 /**
  * Builds the chatProxy function injected into ControlServer. Closes over a
  * config getter (so reloads are picked up) and SecretStorage. Routes only
@@ -92,8 +72,13 @@ export function buildControlChatProxy(
       );
     }
 
-    const baseUrl = getCloudBaseUrl(model);
-    const apiKey = await resolveKey(model, secrets);
+    let baseUrl: string;
+    let apiKey: string;
+    try {
+      ({ baseUrl, apiKey } = await resolveCloudRequestTarget(model, secrets));
+    } catch (err) {
+      throw new ProxyError(422, (err as Error).message);
+    }
 
     // Apply the model's config defaults (sampling + reasoning_effort) — Relay's
     // direct-to-baseUrl dispatch bypassed this, which is the F1 root cause.

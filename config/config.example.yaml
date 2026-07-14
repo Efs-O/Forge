@@ -177,7 +177,9 @@ permissions:
   net: { search: false, fetch: false }
   exec: { terminal: false, headless: false }
   git: { read: true, write: false }
-  agents: { delegate: false }  # set true to expose ask_local_agent
+  agents:
+    delegate: false       # set true to expose delegation tools
+    cloud_workers: false  # explicit opt-in; cloud worker launches always require approval
 
 # Native local delegation is advisory and read-only: the secondary model can
 # analyze supplied context but receives no tools and cannot edit or execute.

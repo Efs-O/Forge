@@ -27,6 +27,7 @@ import { IndexManager } from './search/IndexManager';
 import { registerSecretCommands } from './vscode/secretCommands';
 import { enterSetupMode } from './sidebar/SetupMode';
 import { LocalDelegationService } from './delegation/LocalDelegationService';
+import { registerWorkerCommands } from './vscode/workerCommands';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   initLogger(context);
@@ -201,6 +202,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
     forgeLoader,
     context.secrets,
+    workspaceRoot,
   );
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(SidebarProvider.viewId, sidebarProvider, {
@@ -279,6 +281,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
   });
   registerSecretCommands(context, () => config, activeConfigPath);
+  registerWorkerCommands(context, sidebarProvider, () => config);
   context.subscriptions.push(
     vscode.languages.registerCodeActionsProvider(
       { scheme: 'file' },

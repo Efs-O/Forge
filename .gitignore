@@ -24,6 +24,7 @@ fireworks.html
 # Internal planning docs — not user-facing
 docs/*
 !docs/OWNERS.md
+!docs/SAFE_WORKER_TOOL_UPGRADE_PLAN.md
 AUDIT_REPORT.md
 FORGE_REPORT.md
 AGENTS.md

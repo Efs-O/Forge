@@ -1,6 +1,6 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { resolveToolPath } from '../sidebar/ToolDispatch';
+import { resolveWorkspacePath } from '../util/WorkspacePaths';
 import type { ForgeConfig, ModelConfig } from '../config/types';
 import type { IBackendPool } from '../backend/BackendPool';
 import type { DelegationHold } from '../backend/DelegationGate';
@@ -103,7 +103,7 @@ export class LocalDelegationService {
     this.resolvePath =
       deps.resolvePath ??
       ((filePath, workspaceRoot) =>
-        resolveToolPath(filePath, { workspaceRoot, mustBeInsideWorkspace: true }));
+        resolveWorkspacePath(filePath, { workspaceRoot, mustBeInsideWorkspace: true }));
     this.realPath = deps.realPath ?? ((filePath) => fs.realpath(filePath));
     this.streamChat = deps.streamChat ?? streamModelChatCompletion;
     this.makeTimeoutSignal =

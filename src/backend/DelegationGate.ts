@@ -24,6 +24,14 @@ export interface DelegationHold {
   release(): void;
 }
 
+export interface DelegationGroupHold {
+  /** Backends aligned with the target-model order passed to acquireGroup. */
+  backends: readonly BackendController[];
+  targetKeys: readonly string[];
+  bestEffort: boolean;
+  release(): void;
+}
+
 /**
  * Narrow view of BackendPool that the gate operates through. Alias and
  * model@profile normalization stay owned by ConfigResolver/BackendPool
@@ -80,53 +88,74 @@ export class DelegationGate {
    * releases are safe no-ops).
    */
   async acquire(primaryModel: string, targetModel: string): Promise<DelegationHold> {
-    const primaryKey = this.ops.poolKey(primaryModel);
-    const targetKey = this.ops.poolKey(targetModel);
-    const bestEffort = this.ops.isOllama(targetKey);
-    const keys = primaryKey === targetKey ? [primaryKey] : [primaryKey, targetKey];
-
-    if (
-      !bestEffort &&
-      targetKey !== primaryKey &&
-      !this.ops.hasSlot(targetKey) &&
-      this.ops.freeSlotCount() === 0
-    ) {
-      throw new Error(this.noFreeSlotReason(targetKey));
+    const group = await this.acquireGroup(primaryModel, [targetModel]);
+    const backend = group.backends[0];
+    const targetKey = group.targetKeys[0];
+    if (!backend || !targetKey) {
+      group.release();
+      throw new Error('Delegation group acquisition returned no target backend.');
     }
-
-    for (const key of keys) this.pin(key);
-    try {
-      const backend = await this.ops.acquireNonEvicting(targetKey);
-      log.info(`[DelegationGate] hold acquired: ${targetKey} (primary: ${primaryKey})`);
-      return this.makeHold(backend, keys, targetKey, bestEffort);
-    } catch (err) {
-      for (const key of keys) this.unpin(key);
-      if (bestEffort) {
-        const msg = err instanceof Error ? err.message : String(err);
-        throw new Error(`Ollama daemon failed to load delegation target "${targetKey}": ${msg}`);
-      }
-      throw err;
-    }
-  }
-
-  private makeHold(
-    backend: BackendController,
-    keys: string[],
-    targetKey: string,
-    bestEffort: boolean,
-  ): DelegationHold {
-    let released = false;
     return {
       backend,
       targetKey,
-      bestEffort,
-      release: () => {
-        if (released) return;
-        released = true;
-        for (const key of keys) this.unpin(key);
-        log.info(`[DelegationGate] hold released: ${targetKey}`);
-      },
+      bestEffort: group.bestEffort,
+      release: group.release,
     };
+  }
+
+  async acquireGroup(
+    primaryModel: string,
+    targetModels: readonly string[],
+  ): Promise<DelegationGroupHold> {
+    if (targetModels.length === 0)
+      throw new Error('Delegation group requires at least one target.');
+    const primaryKey = this.ops.poolKey(primaryModel);
+    const targetKeys = targetModels.map((target) => this.ops.poolKey(target));
+    const uniqueTargets = [...new Set(targetKeys)];
+    const directSlotsNeeded = uniqueTargets.filter(
+      (key) => !this.ops.isOllama(key) && !this.ops.hasSlot(key),
+    );
+    if (directSlotsNeeded.length > this.ops.freeSlotCount()) {
+      throw new Error(this.noFreeSlotReason(directSlotsNeeded[0] ?? uniqueTargets[0] ?? 'unknown'));
+    }
+    const pinKeys = [
+      ...new Set([...(this.ops.hasSlot(primaryKey) ? [primaryKey] : []), ...uniqueTargets]),
+    ];
+    for (const key of pinKeys) this.pin(key);
+    try {
+      const acquired = await Promise.all(
+        uniqueTargets.map(async (key) => [key, await this.ops.acquireNonEvicting(key)] as const),
+      );
+      const byKey = new Map(acquired);
+      const backends = targetKeys.map((key) => {
+        const backend = byKey.get(key);
+        if (!backend) throw new Error(`Delegation backend missing after acquisition: ${key}`);
+        return backend;
+      });
+      const bestEffort = uniqueTargets.some((key) => this.ops.isOllama(key));
+      log.info(`[DelegationGate] group hold acquired: ${uniqueTargets.join(', ')}`);
+      let released = false;
+      return {
+        backends,
+        targetKeys,
+        bestEffort,
+        release: () => {
+          if (released) return;
+          released = true;
+          for (const key of pinKeys) this.unpin(key);
+          log.info(`[DelegationGate] group hold released: ${uniqueTargets.join(', ')}`);
+        },
+      };
+    } catch (err) {
+      for (const key of pinKeys) this.unpin(key);
+      if (uniqueTargets.some((key) => this.ops.isOllama(key))) {
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new Error(
+          `Ollama daemon failed to load delegation target "${uniqueTargets.find((key) => this.ops.isOllama(key)) ?? 'unknown'}": ${msg}`,
+        );
+      }
+      throw err;
+    }
   }
 
   private pin(key: string): void {

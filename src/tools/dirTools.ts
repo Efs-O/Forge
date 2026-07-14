@@ -1,37 +1,9 @@
 import { spawn } from 'child_process';
-import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
-
-/**
- * Resolve the ripgrep binary. VS Code (and forks like Cursor) bundle ripgrep
- * under the host's appRoot but do not put it on PATH, so a bare `spawn('rg')`
- * fails with ENOENT on most machines. Prefer the bundled binary; fall back to
- * PATH `rg` only if it cannot be located.
- */
-function resolveRipgrep(): string {
-  const exe = process.platform === 'win32' ? 'rg.exe' : 'rg';
-  const appRoot = vscode.env.appRoot;
-  if (appRoot) {
-    const candidates = [
-      path.join(appRoot, 'node_modules.asar.unpacked', '@vscode', 'ripgrep', 'bin', exe),
-      path.join(appRoot, 'node_modules', '@vscode', 'ripgrep', 'bin', exe),
-      path.join(appRoot, 'node_modules', 'vscode-ripgrep', 'bin', exe),
-    ];
-    for (const candidate of candidates) {
-      if (fs.existsSync(candidate)) return candidate;
-    }
-  }
-  return 'rg'; // last resort: rely on PATH
-}
-
-function resolveUri(p: string): vscode.Uri {
-  if (path.isAbsolute(p)) return vscode.Uri.file(p);
-  const folders = vscode.workspace.workspaceFolders;
-  if (!folders?.length) throw new Error('No workspace folder open.');
-  return vscode.Uri.file(path.join(folders[0].uri.fsPath, p));
-}
+import { resolveWorkspaceUri } from '../util/WorkspacePaths';
+import { resolveRipgrepBinary } from './RipgrepResolver';
 
 export function makeListDirectoryTool(): RegisteredTool {
   return {
@@ -56,7 +28,7 @@ export function makeListDirectoryTool(): RegisteredTool {
     },
     permission: 'read',
     handler: async (args) => {
-      const uri = resolveUri(args['path'] as string);
+      const uri = resolveWorkspaceUri(args['path'] as string);
       let entries: [string, vscode.FileType][];
       try {
         entries = await vscode.workspace.fs.readDirectory(uri);
@@ -146,7 +118,8 @@ export function makeFindFilesTool(): RegisteredTool {
       },
     },
     permission: 'read',
-    handler: async (args) => {
+    handler: async (args, context) => {
+      context?.abortSignal?.throwIfAborted();
       const pattern = args['pattern'];
       if (typeof pattern !== 'string' || pattern.trim().length === 0) {
         throw new Error('find_files: pattern must be a non-empty string.');
@@ -154,6 +127,7 @@ export function makeFindFilesTool(): RegisteredTool {
       const maxResults = typeof args['max_results'] === 'number' ? args['max_results'] : 100;
 
       const matches = await vscode.workspace.findFiles(pattern, FIND_FILES_EXCLUDE, maxResults);
+      context?.abortSignal?.throwIfAborted();
       if (matches.length === 0) return `No files match "${pattern}".`;
 
       const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -192,12 +166,12 @@ export function makeSearchCodeTool(): RegisteredTool {
       },
     },
     permission: 'read',
-    handler: async (args) => {
+    handler: async (args, context) => {
       const query = args['query'] as string;
       const include = (args['include'] as string | undefined) ?? '**/*';
       const maxResults = (args['max_results'] as number | undefined) ?? 20;
 
-      const matches = await searchWorkspaceText(query, include, maxResults);
+      const matches = await searchWorkspaceText(query, include, maxResults, context?.abortSignal);
       if (matches.length === 0) return `No matches found for "${query}".`;
 
       const outputLines: string[] = [];
@@ -219,7 +193,9 @@ async function searchWorkspaceText(
   query: string,
   include: string,
   maxResults: number,
+  signal?: AbortSignal,
 ): Promise<SearchCodeMatch[]> {
+  signal?.throwIfAborted();
   const folder = vscode.workspace.workspaceFolders?.[0];
   if (!folder) throw new Error('No workspace folder open.');
 
@@ -244,18 +220,26 @@ async function searchWorkspaceText(
     let settled = false;
     let terminatedEarly = false;
 
-    const child = spawn(resolveRipgrep(), args, {
+    const child = spawn(resolveRipgrepBinary(vscode.env.appRoot), args, {
       cwd: folder.uri.fsPath,
       shell: false,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
+    const onAbort = (): void => {
+      child.kill();
+      finish(new Error('search_code: cancelled'));
+    };
+
     const finish = (result: SearchCodeMatch[] | Error): void => {
       if (settled) return;
       settled = true;
+      signal?.removeEventListener('abort', onAbort);
       if (result instanceof Error) reject(result);
       else resolve(result);
     };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) onAbort();
 
     const stopIfEnoughMatches = (): void => {
       if (matches.size < maxResults || child.killed) return;

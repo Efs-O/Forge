@@ -56,6 +56,7 @@ import {
 } from './gitTools';
 import { makeSearchCodebaseTool } from './semanticSearchTool';
 import type { IndexManager } from '../search/IndexManager';
+import { makeDispatchWorkersTool, makeListWorkerModelsTool } from './dispatchWorkersTool';
 
 export function registerAllTools(
   registry: ToolRegistry,
@@ -123,5 +124,7 @@ export function registerAllTools(
   // delegation — only registered when a LocalDelegationService is wired in
   if (delegationService && getConfig) {
     registry.register(makeLocalAgentTool(delegationService, getConfig));
+    registry.register(makeListWorkerModelsTool(getConfig));
+    registry.register(makeDispatchWorkersTool(getConfig));
   }
 }

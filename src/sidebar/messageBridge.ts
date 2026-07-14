@@ -46,6 +46,10 @@ export interface ReasoningTokenMsg {
   text: string;
   conversationId?: string;
 }
+export interface GenerationStartedMsg {
+  type: 'generationStarted';
+  conversationId?: string;
+}
 export interface DoneMsg {
   type: 'done';
   finishReason: string | null;
@@ -104,6 +108,18 @@ export interface ToolActivityMsg {
   type: 'toolActivity';
   toolName: string;
   detail?: string;
+  conversationId?: string;
+}
+export interface WorkerStatusMsg {
+  type: 'workerStatus';
+  runId: string;
+  stage: 'run-started' | 'worker-started' | 'worker-finished' | 'review-started';
+  workerId?: string;
+  model?: string;
+  status?: string;
+  executionMode?: 'parallel' | 'serial' | 'best-effort';
+  elapsedMs: number;
+  changedPaths?: string[];
   conversationId?: string;
 }
 export interface TokenBudgetMsg {
@@ -168,6 +184,7 @@ export interface SessionSyncMsg {
 export type HostToWebview =
   | TokenMsg
   | ReasoningTokenMsg
+  | GenerationStartedMsg
   | DoneMsg
   | ErrorMsg
   | ReadyMsg
@@ -179,6 +196,7 @@ export type HostToWebview =
   | NewChatMsg
   | ConfirmRequestMsg
   | ToolActivityMsg
+  | WorkerStatusMsg
   | TokenBudgetMsg
   | SetInputMsg
   | HistoryRestoreMsg

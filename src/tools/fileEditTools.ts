@@ -2,15 +2,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
+import { resolveWorkspacePath } from '../util/WorkspacePaths';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-
-function resolveWorkspacePath(filePath: string): string {
-  if (path.isAbsolute(filePath)) return path.normalize(filePath);
-  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!root) throw new Error('No workspace folder open — use an absolute path');
-  return path.normalize(path.join(root, filePath));
-}
 
 // ── replace_in_file ────────────────────────────────────────────────────────────
 

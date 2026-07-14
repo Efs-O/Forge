@@ -24,6 +24,7 @@ import { ToolRegistry } from '../tools/ToolRegistry';
 import { resolveToolPermissions } from '../tools/PermissionResolver';
 import type { KeepUndoCodeLensProvider } from './KeepUndoCodeLens';
 import type { DiffDecorations } from './DiffDecorations';
+import type { WorkerRunRequest, WorkerRunResult } from '../workers/types';
 import { ToolFailureTracker } from '../tools/StripTools';
 import { getLogger } from '../util/logger';
 import type { TemplateEngine } from '../llm/TemplateEngine';
@@ -40,7 +41,6 @@ import {
   opClearMessages,
 } from './ConversationOps';
 import { buildWebviewHtml } from './WebviewBuilder';
-import { resolveToolPath } from './ToolDispatch';
 import type { IndexManager } from '../search/IndexManager';
 
 export type { SidebarProviderEvents };
@@ -105,6 +105,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private readonly events: SidebarProviderEvents = {},
     forgeLoader?: ForgeInstructionsLoader,
     secrets?: vscode.SecretStorage,
+    workspaceRoot?: string,
   ) {
     this.sidebar = loadSidebarSession(workspaceState);
     const savedClanker = workspaceState.get<boolean>('forge.clankerMode', false);
@@ -122,6 +123,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       templateEngine,
       forgeLoader,
       secrets,
+      workspaceRoot,
     );
     if (savedClanker) this.agentLoop.setClankerMode(true);
 
@@ -183,6 +185,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   canUndo(): boolean {
     return this.checkpoints.canUndo();
+  }
+
+  async dispatchWorkerRun(request: WorkerRunRequest): Promise<WorkerRunResult> {
+    const conv = this.getActive();
+    const selected = conv.active_model ?? this.config.active_model;
+    if (!selected) throw new Error('Forge: no active coordinator model selected.');
+    const model = resolveRequestModel(this.config, selected);
+    const result = await this.agentLoop.runWorkerTurn(conv, model, request);
+    this.persistSession();
+    return result;
   }
 
   async newConversation(): Promise<void> {
@@ -569,5 +581,5 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 }
 
-// Re-export resolveToolPath for consumers that previously imported from here
-export { resolveToolPath };
+// Compatibility export; canonical implementation lives in util/WorkspacePaths.
+export { resolveWorkspacePath as resolveToolPath } from '../util/WorkspacePaths';

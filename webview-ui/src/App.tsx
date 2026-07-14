@@ -41,6 +41,9 @@ export function App(): React.ReactElement {
     function handler(event: MessageEvent): void {
       const msg = event.data as HostToWebview;
       switch (msg.type) {
+        case 'generationStarted':
+          dispatch({ type: 'GENERATION_STARTED', convId: msg.conversationId });
+          break;
         case 'token':
           dispatch({ type: 'TOKEN', text: msg.text, convId: msg.conversationId });
           break;
@@ -79,6 +82,19 @@ export function App(): React.ReactElement {
             convId: msg.conversationId,
           });
           break;
+        case 'workerStatus': {
+          const worker = [msg.workerId, msg.model].filter(Boolean).join(' / ');
+          const mode = msg.executionMode ? ` (${msg.executionMode})` : '';
+          const status = msg.status ? `: ${msg.status}` : '';
+          const paths = msg.changedPaths?.length ? ` → ${msg.changedPaths.join(', ')}` : '';
+          dispatch({
+            type: 'TOOL_ACTIVITY',
+            toolName: worker || 'workers',
+            detail: `${msg.stage}${mode}${status} · ${msg.elapsedMs}ms${paths}`,
+            convId: msg.conversationId,
+          });
+          break;
+        }
         case 'fileDiff':
           dispatch({
             type: 'FILE_DIFF',

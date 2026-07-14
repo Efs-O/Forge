@@ -1,6 +1,7 @@
 import type { ForgeConfig, ModelConfig } from '../config/types';
 import { expandAlias, resolveRequestModel, splitModelProfile } from '../config/ConfigResolver';
 import { isCloudProvider, getCloudProviderLabel } from '../llm/CloudProviders';
+import { isOllamaCloudModel } from '../llm/ModelRouteClassifier';
 
 export interface DelegationTarget {
   requested: string;
@@ -53,7 +54,7 @@ export function resolveDelegationTarget(config: ForgeConfig, requested: string):
     // execute remotely; only their "-cloud"/":cloud" tag suffix marks them
     // (the model name is what gets sent to the daemon). The endpoint check
     // above cannot catch them.
-    if (/[-:]cloud$/.test(model.name.toLowerCase())) {
+    if (isOllamaCloudModel(model)) {
       throw new Error(
         `Delegation target "${requested}" is an Ollama cloud-routed model ("${model.name}"); only local Ollama daemon targets are allowed.`,
       );

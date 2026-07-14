@@ -37,5 +37,6 @@ export function resolveToolPermissions(config: ForgeConfig): Set<ToolPermission>
   if (configured.git?.read ?? true) allowed.add('git-read');
   if (configured.git?.write ?? false) allowed.add('git-write');
   if (configured.agents?.delegate ?? false) allowed.add('delegate');
+  if (configured.agents?.cloud_workers ?? false) allowed.add('cloud-worker');
   return allowed;
 }

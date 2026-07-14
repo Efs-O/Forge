@@ -8,11 +8,14 @@ import { computeDiff, parseUnifiedDiff } from './DiffUtils';
 import type { DiffHunk } from './messageBridge';
 import type { ChatMessage, ToolCall } from '../llm/types';
 import type { CheckpointStack } from '../checkpoint/CheckpointStack';
+import type { CheckpointSession } from '../checkpoint/CheckpointStack';
 import type { KeepUndoCodeLensProvider } from './KeepUndoCodeLens';
 import type { ToolPermission } from '../tools/ToolRegistry';
 import { ToolRegistry } from '../tools/ToolRegistry';
 import { ToolFailureTracker } from '../tools/StripTools';
 import type { DiffDecorations } from './DiffDecorations';
+import type { WorkerRunContext, WorkerRunRequest, WorkerRunResult } from '../workers/types';
+import { resolveWorkspacePath, type ResolveWorkspacePathOptions } from '../util/WorkspacePaths';
 
 const WRITE_PERMISSIONS = new Set<ToolPermission>(['write', 'delete']);
 
@@ -48,35 +51,15 @@ function gitDiffLarge(before: string, after: string): DiffHunk[] | null {
   }
 }
 
-export interface ResolveToolPathOptions {
-  workspaceRoot?: string;
-  mustBeInsideWorkspace?: boolean;
-}
-
-export function resolveToolPath(filePath: string, opts: ResolveToolPathOptions = {}): string {
-  const folder = vscode.workspace.workspaceFolders?.[0];
-  const workspaceRoot = opts.workspaceRoot ?? folder?.uri.fsPath;
-  const resolved = path.isAbsolute(filePath)
-    ? path.normalize(filePath)
-    : workspaceRoot
-      ? path.normalize(path.join(workspaceRoot, filePath))
-      : path.normalize(filePath);
-
-  if (opts.mustBeInsideWorkspace) {
-    if (!workspaceRoot) throw new Error('No workspace folder open');
-    const root = path.resolve(workspaceRoot);
-    const candidate = path.resolve(resolved);
-    const relative = path.relative(root, candidate);
-    if (relative !== '' && (relative.startsWith('..') || path.isAbsolute(relative))) {
-      throw new Error(`Path is outside the workspace: ${filePath}`);
-    }
-    return candidate;
-  }
-
-  return resolved;
-}
+export type ResolveToolPathOptions = ResolveWorkspacePathOptions;
+export const resolveToolPath = resolveWorkspacePath;
 
 export class ToolDispatch {
+  private workerRunner?: (
+    request: WorkerRunRequest,
+    context: WorkerRunContext,
+  ) => Promise<WorkerRunResult>;
+
   constructor(
     private readonly toolRegistry: ToolRegistry,
     private readonly checkpoints: CheckpointStack,
@@ -88,9 +71,16 @@ export class ToolDispatch {
       detail: string,
       isDangerous?: boolean,
       convId?: string,
+      signal?: AbortSignal,
     ) => Promise<boolean>,
     private readonly diffDecorations: DiffDecorations,
   ) {}
+
+  setWorkerRunner(
+    runner: (request: WorkerRunRequest, context: WorkerRunContext) => Promise<WorkerRunResult>,
+  ): void {
+    this.workerRunner = runner;
+  }
 
   async dispatch(
     toolCalls: ToolCall[],
@@ -98,6 +88,9 @@ export class ToolDispatch {
     messages: ChatMessage[],
     convId?: string,
     signal?: AbortSignal,
+    scope?: import('../tools/ToolRegistry').ToolScope,
+    checkpoint?: CheckpointSession,
+    coordinatorModel?: string,
   ): Promise<void> {
     for (const tc of toolCalls) {
       let result: string;
@@ -141,22 +134,31 @@ export class ToolDispatch {
           });
           continue;
         }
+        if (scope && !scope.allowedNames.has(tc.function.name)) {
+          throw new Error(`Tool "${tc.function.name}" is outside the active worker scope`);
+        }
+        scope?.validate?.(reg, args);
 
+        const requiredPermissions = this.toolRegistry.requiredPermissions(reg, args);
+        const approvalMetadata = reg.approval?.(args);
         const needsConfirm =
-          WRITE_PERMISSIONS.has(reg.permission) ||
-          reg.permission === 'terminal' ||
-          reg.permission === 'headless' ||
-          reg.permission === 'git-write';
+          requiredPermissions.some(
+            (permission) =>
+              WRITE_PERMISSIONS.has(permission) ||
+              permission === 'terminal' ||
+              permission === 'headless' ||
+              permission === 'git-write',
+          ) || approvalMetadata !== undefined;
         if (needsConfirm) {
           const raw = JSON.stringify(args, null, 2);
-          const detail = raw.length > 300 ? raw.slice(0, 300) + '\n…' : raw;
-          const isDangerous = tc.function.name === 'delete_file' && args['recursive'] === true;
-          const approved = await this.requestApproval(
-            tc.function.name,
-            detail,
-            isDangerous,
-            convId,
-          );
+          const fallbackDetail = raw.length > 300 ? raw.slice(0, 300) + '\n…' : raw;
+          const detail = approvalMetadata?.detail ?? fallbackDetail;
+          const isDangerous =
+            approvalMetadata?.dangerous ??
+            (tc.function.name === 'delete_file' && args['recursive'] === true);
+          const approved = signal
+            ? await this.requestApproval(tc.function.name, detail, isDangerous, convId, signal)
+            : await this.requestApproval(tc.function.name, detail, isDangerous, convId);
           if (!approved) {
             result = `User declined: ${tc.function.name}`;
             this.postResult(tc, result, undefined, convId);
@@ -170,13 +172,39 @@ export class ToolDispatch {
           }
         }
 
-        const mutationPaths = reg.mutation?.paths(args).map((p) => resolveToolPath(p)) ?? [];
-        this.snapshotPaths(mutationPaths);
+        const rawMutationPaths = reg.mutation?.paths(args) ?? [];
+        scope?.validateMutationPaths?.(rawMutationPaths);
+        const mutationPaths = rawMutationPaths.map((p) => resolveToolPath(p));
+        this.snapshotPaths(mutationPaths, checkpoint);
 
-        result = await this.toolRegistry.dispatch(tc.function.name, args, allowed, {
-          beforeMutate: (paths) => this.snapshotPaths(paths.map((p) => resolveToolPath(p))),
-          ...(signal !== undefined ? { abortSignal: signal } : {}),
-        });
+        result = await this.toolRegistry.dispatch(
+          tc.function.name,
+          args,
+          allowed,
+          {
+            beforeMutate: (paths) => {
+              scope?.validateMutationPaths?.(paths);
+              const resolved = paths.map((p) => resolveToolPath(p));
+              this.snapshotPaths(resolved, checkpoint);
+            },
+            ...(signal !== undefined ? { abortSignal: signal } : {}),
+            ...(this.workerRunner && checkpoint && convId && signal
+              ? {
+                  runWorkers: (request: WorkerRunRequest) =>
+                    this.workerRunner?.(request, {
+                      checkpoint,
+                      conversationId: convId,
+                      abortSignal: signal,
+                      toolDispatch: this,
+                      ...(coordinatorModel ? { coordinatorModel } : {}),
+                    }) ?? Promise.reject(new Error('Worker runner unavailable')),
+                }
+              : {}),
+          },
+          scope,
+          true,
+        );
+        scope?.onResult?.(reg, args, result);
 
         if (reg.mutation) {
           this.codeLens.markPending(mutationPaths);
@@ -203,8 +231,11 @@ export class ToolDispatch {
     await vscode.window.showTextDocument(doc, { preview: false, preserveFocus: false });
   }
 
-  private snapshotPaths(paths: string[]): void {
-    for (const filePath of paths) this.checkpoints.snapshotBefore(filePath);
+  private snapshotPaths(paths: string[], checkpoint?: CheckpointSession): void {
+    for (const filePath of paths) {
+      if (checkpoint) checkpoint.snapshotBefore(filePath);
+      else this.checkpoints.snapshotBefore(filePath);
+    }
   }
 
   private postFileDiff(resolvedPath: string, convId?: string): void {

@@ -1,15 +1,5 @@
-export type DiffLineKind = 'context' | 'added' | 'removed';
-
-export interface DiffLine {
-  kind: DiffLineKind;
-  text: string;
-}
-
-export interface DiffHunk {
-  oldStart: number;
-  newStart: number;
-  lines: DiffLine[];
-}
+import type { DiffHunk } from './messageBridge';
+export type { DiffHunk, DiffLine, DiffLineKind } from './messageBridge';
 
 const CONTEXT_SIZE = 3;
 export const MAX_LINES = 500;

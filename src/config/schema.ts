@@ -15,10 +15,11 @@ const ToolPermissionSchema = z.enum(
     'git-read',
     'git-write',
     'delegate',
+    'cloud-worker',
   ],
   {
     error:
-      'MCP tool permission must be one of: read, write, delete, terminal, headless, search, fetch, git-read, git-write, delegate',
+      'MCP tool permission must be one of: read, write, delete, terminal, headless, search, fetch, git-read, git-write, delegate, cloud-worker',
   },
 );
 const ActiveModelSchema = z.preprocess(
@@ -202,6 +203,7 @@ const PermissionsSchema = z
     agents: z
       .object({
         delegate: z.boolean().default(false),
+        cloud_workers: z.boolean().default(false),
       })
       .optional(),
   })

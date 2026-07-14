@@ -13,12 +13,12 @@ Its default and strongest path is still local: GGUF models through `llama-server
 
 ## Screenshots
 
-| Agent loop + Clanker Mode | Model picker |
-| :---: | :---: |
+|          Agent loop + Clanker Mode          |                  Model picker                   |
+| :-----------------------------------------: | :---------------------------------------------: |
 | ![Agent loop](assets/readme/agent-loop.jpg) | ![Model picker](assets/readme/model-picker.jpg) |
 
-| Slash commands | Marketplace |
-| :---: | :---: |
+|                   Slash commands                    |                  Marketplace                  |
+| :-------------------------------------------------: | :-------------------------------------------: |
 | ![Slash commands](assets/readme/slash-commands.jpg) | ![Marketplace](assets/readme/marketplace.jpg) |
 
 ## Current Positioning
@@ -75,6 +75,7 @@ Its default and strongest path is still local: GGUF models through `llama-server
 Forge starts and manages `llama-server` itself.
 
 Best for:
+
 - local GGUF workflows
 - direct control over server args
 - keeping everything on your own machine
@@ -84,6 +85,7 @@ Best for:
 Forge talks to the local Ollama daemon at `http://127.0.0.1:11434`.
 
 Best for:
+
 - local Ollama models
 - Ollama cloud routes after `ollama auth login`
 - users who want model management outside Forge
@@ -96,6 +98,7 @@ wrappers, external infra) via the `openai-compatible` provider with an
 `endpoint`.
 
 Supported provider values:
+
 - `xai`
 - `openrouter`
 - `openai`
@@ -171,7 +174,7 @@ models:
   my-local-server:
     provider: openai-compatible
     endpoint: http://127.0.0.1:8080/v1
-    api_key_secret: my-local-server-token   # only if the server requires one
+    api_key_secret: my-local-server-token # only if the server requires one
 ```
 
 For larger examples, including control-server and cloud-provider patterns, use
@@ -237,6 +240,7 @@ Forge supports:
 Search API keys are stored in VS Code SecretStorage.
 
 Use:
+
 - `Forge: Set Search API Key`
 - `/reindex` to rebuild the semantic index
 
@@ -262,7 +266,21 @@ Tool results are capped at `max_result_chars` (default 24000) before entering th
 
 Set `permissions.agents.delegate: true` to let the primary agent use `ask_local_agent` for a bounded, read-only consultation with another configured local model. The delegated model receives only the task and selected workspace files, has no tools, and cannot edit files or run commands; its response is advisory analysis returned to the primary conversation.
 
-Only direct llama.cpp models and local Ollama daemon models are eligible. Ollama targets are best-effort because the daemon manages loading; cloud-routed Ollama tags and all direct cloud providers are rejected. A profile such as `model@reviewer` shares the same underlying backend as `model`.
+Forge also supports bounded coding workers through `dispatch_workers` and the
+`Forge: Dispatch Workers` command. Each worker receives an independent task,
+workspace-wide bounded read access, plus optional write access only to the exact
+files assigned to it. Read-only runs require `permissions.agents.delegate` and
+`permissions.fs.read`; `permissions.fs.write` is required only when at least one
+worker has `access: write`. Workers can read/list files and use bounded file/code
+search, document symbols, and file-scoped diagnostics. Cloud-routed workers additionally require the explicit
+`permissions.agents.cloud_workers: true` opt-in and always show a non-bypassable
+approval before any task or workspace content is sent to the configured provider.
+
+The coordinator can call `list_worker_models` to discover exact configured model
+names instead of asking you to construct worker arguments. Ollama targets are
+best-effort because the daemon manages loading. Opt-in OpenAI-compatible models
+and Ollama cloud routes are catalogued only when cloud workers are enabled. A
+profile such as `model@reviewer` shares the same underlying backend as `model`.
 
 To consult a different direct llama.cpp model without evicting the primary model, configure enough slots, for example `max_simultaneous_models: 2`. Slot availability prevents Forge from evicting the primary backend, but it does not guarantee the machine has enough RAM or VRAM to load the second model. Delegation is limited to 120 seconds and returned analysis is capped at 24,000 characters.
 
@@ -270,20 +288,20 @@ To consult a different direct llama.cpp model without evicting the primary model
 
 Type `/` in chat to open the built-in command list.
 
-| Slash command | What it does |
-| --- | --- |
-| `/unload` | Stop all backends and release loaded models |
-| `/restart` | Restart or reconnect the backend |
-| `/reindex` | Rebuild the local semantic search index |
-| `/new` | Open a new conversation tab |
-| `/clear` | Clear the active tab only |
-| `/review` | Run an immediate review prompt |
-| `/compact` | Summarize and compress the current chat |
-| `/undo` | Restore files from the last checkpoint |
-| `/keep` | Keep current checkpoint changes |
-| `/reload` | Reload the VS Code window |
-| `/initForge` | Generate a workspace `FORGE.md` |
-| `/clanker` | Toggle full-auto mode for confirmations |
+| Slash command | What it does                                |
+| ------------- | ------------------------------------------- |
+| `/unload`     | Stop all backends and release loaded models |
+| `/restart`    | Restart or reconnect the backend            |
+| `/reindex`    | Rebuild the local semantic search index     |
+| `/new`        | Open a new conversation tab                 |
+| `/clear`      | Clear the active tab only                   |
+| `/review`     | Run an immediate review prompt              |
+| `/compact`    | Summarize and compress the current chat     |
+| `/undo`       | Restore files from the last checkpoint      |
+| `/keep`       | Keep current checkpoint changes             |
+| `/reload`     | Reload the VS Code window                   |
+| `/initForge`  | Generate a workspace `FORGE.md`             |
+| `/clanker`    | Toggle full-auto mode for confirmations     |
 
 ## VS Code Commands
 
@@ -291,61 +309,61 @@ These commands are currently contributed by the extension.
 
 ### Core sidebar and backend
 
-| Command | Description |
-| --- | --- |
-| `Forge: Open Sidebar` | Open the Forge sidebar |
-| `Forge: Start Backend` | Start the active backend |
-| `Forge: Stop Backend` | Stop the active backend |
-| `Forge: Show Backend Console` | Reveal backend logs or console |
-| `Forge: Restart Backend` | Restart the managed backend |
-| `Forge: Open Config` | Open the active config file |
-| `Forge: Validate Config` | Validate the active config |
-| `Forge: Pick Model` | Pick the active model |
-| `Forge: Pick GGUF Model File` | Pick a GGUF file during setup |
-| `Forge: Setup Wizard` | Run the first-run or repair flow |
-| `Forge: Unload Model` | Stop all backends and release models |
-| `Forge: New Chat` | Open a new conversation tab |
-| `Forge: Clear Active Chat` | Clear the active tab |
-| `Forge: Undo Last Turn` | Restore the previous checkpoint |
-| `Forge: Keep Changes` | Accept the current checkpoint |
+| Command                       | Description                          |
+| ----------------------------- | ------------------------------------ |
+| `Forge: Open Sidebar`         | Open the Forge sidebar               |
+| `Forge: Start Backend`        | Start the active backend             |
+| `Forge: Stop Backend`         | Stop the active backend              |
+| `Forge: Show Backend Console` | Reveal backend logs or console       |
+| `Forge: Restart Backend`      | Restart the managed backend          |
+| `Forge: Open Config`          | Open the active config file          |
+| `Forge: Validate Config`      | Validate the active config           |
+| `Forge: Pick Model`           | Pick the active model                |
+| `Forge: Pick GGUF Model File` | Pick a GGUF file during setup        |
+| `Forge: Setup Wizard`         | Run the first-run or repair flow     |
+| `Forge: Unload Model`         | Stop all backends and release models |
+| `Forge: New Chat`             | Open a new conversation tab          |
+| `Forge: Clear Active Chat`    | Clear the active tab                 |
+| `Forge: Undo Last Turn`       | Restore the previous checkpoint      |
+| `Forge: Keep Changes`         | Accept the current checkpoint        |
 
 ### Control-server commands
 
-| Command | Description |
-| --- | --- |
-| `Forge: Ensure Model (load on demand)` | Ask the control server to load a model |
-| `Forge: Release Model` | Ask the control server to release a model |
-| `Forge: Control Server Status` | Show control-server status and active models |
+| Command                                | Description                                  |
+| -------------------------------------- | -------------------------------------------- |
+| `Forge: Ensure Model (load on demand)` | Ask the control server to load a model       |
+| `Forge: Release Model`                 | Ask the control server to release a model    |
+| `Forge: Control Server Status`         | Show control-server status and active models |
 
 ### Tokens, search, and setup helpers
 
-| Command | Description |
-| --- | --- |
-| `Forge: Set Search API Key` | Store a Tavily or Brave API key |
+| Command                           | Description                         |
+| --------------------------------- | ----------------------------------- |
+| `Forge: Set Search API Key`       | Store a Tavily or Brave API key     |
 | `Forge: Set Cloud Provider Token` | Store a cloud-provider bearer token |
 
 ### Editor and review helpers
 
-| Command | Description |
-| --- | --- |
-| `Forge: Explain Selection` | Explain the active selection |
-| `Forge: Review Selection` | Review the active selection |
-| `Forge: Generate Tests For Selection` | Draft tests for the selection |
-| `Forge: Refactor Selection` | Refactor the selection |
-| `Forge: Run Explain Selection` | Execute the explain flow immediately |
-| `Forge: Run Review Selection` | Execute the review flow immediately |
+| Command                                   | Description                                  |
+| ----------------------------------------- | -------------------------------------------- |
+| `Forge: Explain Selection`                | Explain the active selection                 |
+| `Forge: Review Selection`                 | Review the active selection                  |
+| `Forge: Generate Tests For Selection`     | Draft tests for the selection                |
+| `Forge: Refactor Selection`               | Refactor the selection                       |
+| `Forge: Run Explain Selection`            | Execute the explain flow immediately         |
+| `Forge: Run Review Selection`             | Execute the review flow immediately          |
 | `Forge: Run Generate Tests For Selection` | Execute the test-generation flow immediately |
-| `Forge: Run Refactor Selection` | Execute the refactor flow immediately |
-| `Forge: Explain Diagnostic` | Explain an editor diagnostic |
-| `Forge: Propose Fix For Diagnostic` | Draft a fix for a diagnostic |
-| `Forge: Run Fix For Diagnostic` | Execute a fix flow for a diagnostic |
-| `Forge: Propose Fix For File Diagnostics` | Review diagnostics across the active file |
-| `Forge: Use Current File As Context` | Prefill context with the current file |
-| `Forge: Use Selection As Context` | Prefill context with the selection |
-| `Forge: Use Open Tabs As Context` | Prefill context from open tabs |
-| `Forge: Pick Files For Context` | Pick context files manually |
-| `Forge: Draft Plan In Scratch Document` | Generate a planning scratch doc |
-| `Forge: Draft Review In Scratch Document` | Generate a review scratch doc |
+| `Forge: Run Refactor Selection`           | Execute the refactor flow immediately        |
+| `Forge: Explain Diagnostic`               | Explain an editor diagnostic                 |
+| `Forge: Propose Fix For Diagnostic`       | Draft a fix for a diagnostic                 |
+| `Forge: Run Fix For Diagnostic`           | Execute a fix flow for a diagnostic          |
+| `Forge: Propose Fix For File Diagnostics` | Review diagnostics across the active file    |
+| `Forge: Use Current File As Context`      | Prefill context with the current file        |
+| `Forge: Use Selection As Context`         | Prefill context with the selection           |
+| `Forge: Use Open Tabs As Context`         | Prefill context from open tabs               |
+| `Forge: Pick Files For Context`           | Pick context files manually                  |
+| `Forge: Draft Plan In Scratch Document`   | Generate a planning scratch doc              |
+| `Forge: Draft Review In Scratch Document` | Generate a review scratch doc                |
 
 ## Checkpoints, Diffs, and Clanker Mode
 

@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
+import { resolveWorkspaceUri } from '../util/WorkspacePaths';
 
 // ── show_diff ─────────────────────────────────────────────────────────────────
 
@@ -24,8 +25,8 @@ export function makeShowDiffTool(): RegisteredTool {
     },
     permission: 'read',
     handler: async (args) => {
-      const uri1 = resolveUri(args['original_path'] as string);
-      const uri2 = resolveUri(args['modified_path'] as string);
+      const uri1 = resolveWorkspaceUri(args['original_path'] as string);
+      const uri2 = resolveWorkspaceUri(args['modified_path'] as string);
       const title = (args['title'] as string | undefined) ?? 'Forge Diff';
       await vscode.commands.executeCommand('vscode.diff', uri1, uri2, title);
       return 'Diff opened.';
@@ -210,12 +211,3 @@ export function makeOpenUrlTool(): RegisteredTool {
 }
 
 // ── Internal helper ───────────────────────────────────────────────────────────
-
-import * as path from 'path';
-
-function resolveUri(p: string): vscode.Uri {
-  if (path.isAbsolute(p)) return vscode.Uri.file(p);
-  const folders = vscode.workspace.workspaceFolders;
-  if (!folders?.length) throw new Error('No workspace folder open.');
-  return vscode.Uri.file(path.join(folders[0].uri.fsPath, p));
-}

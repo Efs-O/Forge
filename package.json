@@ -216,6 +216,10 @@
       {
         "command": "forge.setupWizard",
         "title": "Forge: Setup Wizard"
+      },
+      {
+        "command": "forge.dispatchLocalWorkers",
+        "title": "Forge: Dispatch Workers"
       }
     ],
     "menus": {

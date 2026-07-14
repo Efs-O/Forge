@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
+import { resolveWorkspacePath } from '../util/WorkspacePaths';
 
 export function makeReadFileTool(): RegisteredTool {
   return {
@@ -160,11 +161,4 @@ export function makeInsertCodeTool(): RegisteredTool {
       return `Inserted at line ${line}.`;
     },
   };
-}
-
-function resolveWorkspacePath(filePath: string): string {
-  if (path.isAbsolute(filePath)) return filePath;
-  const folders = vscode.workspace.workspaceFolders;
-  if (!folders?.length) throw new Error('No workspace folder open');
-  return path.join(folders[0].uri.fsPath, filePath);
 }

@@ -5,9 +5,9 @@ import type { ForgeConfig, ModelConfig } from '../config/types';
 import type { HostToWebview } from './messageBridge';
 import type { ConversationRuntime } from './sessionTypes';
 import { streamModelChatCompletion } from '../llm/ChatClient';
-import { getCloudBaseUrl, getCloudProviderLabel, isCloudProvider } from '../llm/CloudProviders';
-import { resolveXaiToken } from '../llm/XaiAuth';
-import type { ChatCompletionRequest, ToolCall } from '../llm/types';
+import { isCloudProvider } from '../llm/CloudProviders';
+import { resolveCloudRequestTarget } from '../llm/CloudRequestResolver';
+import type { ChatCompletionRequest } from '../llm/types';
 import type { AttachmentData } from './messageBridge';
 import { buildUserContent } from './ConversationOps';
 import { injectSystemPrompt } from '../llm/SystemPromptInjector';
@@ -16,22 +16,14 @@ import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
 import { mergeSampling } from '../llm/SamplingMerge';
 import { resolveRequestModel } from '../config/ConfigResolver';
 import { normalizeRequestForModel } from '../llm/RequestNormalizer';
-import {
-  HtmlDocumentBoilerplateStripper,
-  stripHtmlDocumentBoilerplateFromFullText,
-} from '../llm/HtmlDocumentBoilerplateStripper';
-import { ThinkingChannelStripper, stripThinkingFromFullText } from '../llm/ThinkingChannelStripper';
-import { CheckpointStack } from '../checkpoint/CheckpointStack';
+import { stripThinkingFromFullText } from '../llm/ThinkingChannelStripper';
+import { stripHtmlDocumentBoilerplateFromFullText } from '../llm/HtmlDocumentBoilerplateStripper';
+import { CheckpointStack, type CheckpointSession } from '../checkpoint/CheckpointStack';
 import { ToolRegistry } from '../tools/ToolRegistry';
 import { resolveToolPermissions } from '../tools/PermissionResolver';
 import type { KeepUndoCodeLensProvider } from './KeepUndoCodeLens';
-import { ToolFailureTracker, stripTools } from '../tools/StripTools';
-import { extractFallbackToolCalls } from '../tools/ToolCallFallback';
-import { buildFallbackToolInstructions } from '../tools/FallbackToolPrompt';
-import {
-  StructuredOutputStripper,
-  stripStructuredOutputFromFullText,
-} from '../tools/StructuredOutputParser';
+import { ToolFailureTracker } from '../tools/StripTools';
+import { stripStructuredOutputFromFullText } from '../tools/StructuredOutputParser';
 import { getLogger } from '../util/logger';
 import {
   inspectRuntimeModelCapabilities,
@@ -41,6 +33,11 @@ import { ToolDispatch } from './ToolDispatch';
 import type { DiffDecorations } from './DiffDecorations';
 import { deriveTitle } from './sessionTypes';
 import { extractToolDetail } from './toolSummary';
+import { ToolApprovalService } from './ToolApprovalService';
+import { WorkerOrchestrationService } from '../workers/WorkerOrchestrationService';
+import type { WorkerRunRequest, WorkerRunResult } from '../workers/types';
+import { addWorkerDelegationInstructions, buildWorkerReviewPrompt } from '../workers/WorkerPrompts';
+import { runToolCallingLoop } from '../agent/ToolCallingLoop';
 const log = getLogger();
 const MAX_TOOL_ROUNDS = 20;
 
@@ -61,10 +58,10 @@ export class AgentLoop {
   private readonly resolveSettledMap = new Map<string, () => void>();
   private readonly capabilityCache = new Map<string, Promise<RuntimeModelCapabilities>>();
   private readonly capabilityWarningsShown = new Set<string>();
-  private readonly pendingConfirmations = new Map<string, (approved: boolean) => void>();
   private readonly toolDispatch: ToolDispatch;
+  private readonly approvals: ToolApprovalService;
+  private readonly workerService: WorkerOrchestrationService;
   private promptRunCtrl: AbortController | null = null;
-  private clankerMode = false;
 
   get streaming(): boolean {
     return this.streamingConvIds.size > 0;
@@ -86,20 +83,34 @@ export class AgentLoop {
     private readonly failureTracker: ToolFailureTracker,
     private readonly events: SidebarProviderEvents,
     private readonly post: (msg: HostToWebview) => void,
-    private readonly getView: () => vscode.WebviewView | undefined,
+    getView: () => vscode.WebviewView | undefined,
     private readonly templateEngine?: TemplateEngine,
     private readonly forgeLoader?: ForgeInstructionsLoader,
     private readonly secrets?: vscode.SecretStorage,
+    workspaceRoot?: string,
   ) {
+    this.approvals = new ToolApprovalService(post, getView);
     this.toolDispatch = new ToolDispatch(
       toolRegistry,
       checkpoints,
       codeLens,
       failureTracker,
       post,
-      (name, detail, isDangerous, convId) =>
-        this.requestToolApproval(name, detail, isDangerous, convId),
+      (name, detail, isDangerous, convId, signal) =>
+        this.approvals.request(name, detail, isDangerous, convId, signal),
       diffDecorations,
+    );
+    this.workerService = new WorkerOrchestrationService({
+      getConfig,
+      pool,
+      registry: toolRegistry,
+      workspaceRoot: workspaceRoot ?? forgeLoader?.root ?? '',
+      ...(secrets ? { secrets } : {}),
+      onActivity: (activity, conversationId) =>
+        this.post({ type: 'workerStatus', ...activity, conversationId }),
+    });
+    this.toolDispatch.setWorkerRunner((request, context) =>
+      this.workerService.run(request, context),
     );
   }
 
@@ -128,6 +139,7 @@ export class AgentLoop {
   }
 
   cancel(convId?: string): void {
+    this.approvals.cancelConversation(convId);
     if (convId) {
       this.cancelControllers.get(convId)?.abort();
       void this.activeBackends.get(convId)?.stop();
@@ -139,24 +151,19 @@ export class AgentLoop {
   }
 
   toggleClanker(): boolean {
-    this.clankerMode = !this.clankerMode;
-    this.post({ type: 'clankerChanged', enabled: this.clankerMode });
-    return this.clankerMode;
+    return this.approvals.toggleClankerMode();
   }
 
   setClankerMode(on: boolean): void {
-    this.clankerMode = on;
+    this.approvals.setClankerMode(on);
   }
 
   getClankerMode(): boolean {
-    return this.clankerMode;
+    return this.approvals.getClankerMode();
   }
 
   resolveConfirmation(id: string, approved: boolean): void {
-    const pending = this.pendingConfirmations.get(id);
-    if (!pending) return;
-    this.pendingConfirmations.delete(id);
-    pending(approved);
+    this.approvals.resolve(id, approved);
   }
 
   clearCapabilityCache(): void {
@@ -166,6 +173,105 @@ export class AgentLoop {
 
   async openFile(filePath: string): Promise<void> {
     return this.toolDispatch.openFile(filePath);
+  }
+
+  async runWorkerTurn(
+    conv: ConversationRuntime,
+    model: ModelConfig,
+    request: WorkerRunRequest,
+  ): Promise<WorkerRunResult> {
+    const convId = conv.id;
+    const ctrl = new AbortController();
+    this.cancelControllers.set(convId, ctrl);
+    const settled = new Promise<void>((resolve) => this.resolveSettledMap.set(convId, resolve));
+    this.streamingSettledMap.set(convId, settled);
+    this.streamingConvIds.add(convId);
+    const checkpoint = this.checkpoints.beginTurn(`workers-${Date.now()}`);
+    const postC = (message: HostToWebview): void =>
+      this.post({ ...message, conversationId: convId } as HostToWebview);
+    postC({ type: 'generationStarted' });
+    try {
+      const dispatchTool = this.toolRegistry.get('dispatch_workers');
+      if (!dispatchTool) throw new Error('Forge: dispatch_workers is unavailable.');
+      this.toolRegistry.assertAllowed(
+        dispatchTool,
+        resolveToolPermissions(this.getConfig()),
+        request as unknown as Record<string, unknown>,
+      );
+      if (this.workerService.hasCloudTargets(request)) {
+        const approved = await this.approvals.request(
+          'dispatch_workers',
+          'Cloud workers may send their tasks and workspace file contents to configured providers.',
+          true,
+          convId,
+          ctrl.signal,
+        );
+        if (!approved) throw new Error('Cloud worker launch declined.');
+      }
+      postC({ type: 'toolActivity', toolName: 'dispatch_workers', detail: 'starting workers' });
+      const result = await this.workerService.run(request, {
+        checkpoint,
+        conversationId: convId,
+        abortSignal: ctrl.signal,
+        toolDispatch: this.toolDispatch,
+        coordinatorModel: model.name,
+      });
+      this.commitUserPrompt(conv, buildWorkerReviewPrompt(result, request.review_task));
+      postC({
+        type: 'workerStatus',
+        runId: result.runId,
+        stage: 'review-started',
+        elapsedMs: 0,
+      });
+      await this.runCoordinatorReview(conv, model, ctrl, checkpoint, postC);
+      return result;
+    } catch (err) {
+      postC({ type: 'error', message: err instanceof Error ? err.message : String(err) });
+      throw err;
+    } finally {
+      const depthBefore = this.checkpoints.depth();
+      this.checkpoints.commitTurn(checkpoint);
+      if (this.checkpoints.depth() > depthBefore) postC({ type: 'checkpointReady' });
+      this.activeBackends.delete(convId);
+      this.streamingConvIds.delete(convId);
+      this.resolveStreamingLifecycle(convId);
+    }
+  }
+
+  private async runCoordinatorReview(
+    conv: ConversationRuntime,
+    model: ModelConfig,
+    ctrl: AbortController,
+    checkpoint: CheckpointSession,
+    postC: (msg: HostToWebview) => void,
+  ): Promise<void> {
+    const activeFile = vscode.window.activeTextEditor?.document.uri.fsPath;
+    if (isCloudProvider(model.provider)) {
+      const target = await resolveCloudRequestTarget(model, this.secrets);
+      await this.runAgentLoop(
+        target.baseUrl,
+        conv,
+        model,
+        activeFile,
+        ctrl,
+        postC,
+        target.apiKey,
+        checkpoint,
+      );
+      return;
+    }
+    const backend = await this.pool.acquire(model.name);
+    this.activeBackends.set(conv.id, backend);
+    await this.runAgentLoop(
+      backend.baseUrl(),
+      conv,
+      model,
+      activeFile,
+      ctrl,
+      postC,
+      undefined,
+      checkpoint,
+    );
   }
 
   async runTurn(
@@ -197,20 +303,7 @@ export class AgentLoop {
       let apiKey: string;
       let cloudBaseUrl: string;
       try {
-        cloudBaseUrl = getCloudBaseUrl(model);
-        if (model.provider === 'xai') {
-          apiKey = await resolveXaiToken(model.api_key_secret, this.secrets);
-        } else {
-          const keyName = model.api_key_secret;
-          const stored = keyName ? await this.secrets?.get(keyName) : undefined;
-          if (!stored) {
-            throw new Error(
-              `${getCloudProviderLabel(model.provider)}: no bearer token in SecretStorage (key: ${keyName ?? 'unset'}). ` +
-                'Run "Forge: Set Cloud Provider Token" and set api_key_secret in config.yaml.',
-            );
-          }
-          apiKey = stored;
-        }
+        ({ baseUrl: cloudBaseUrl, apiKey } = await resolveCloudRequestTarget(model, this.secrets));
         log.info(`[AgentLoop] ${model.provider} token resolved for model=${model.name}`);
       } catch (err) {
         const msg = (err as Error).message;
@@ -223,11 +316,20 @@ export class AgentLoop {
       this.events.onBackendReady?.(model.name);
       postC({ type: 'ready' });
       const turnId = `turn-${Date.now()}`;
-      this.checkpoints.beginTurn(turnId);
+      const checkpoint = this.checkpoints.beginTurn(turnId);
       this.streamingConvIds.add(convId);
       this.events.onGenerationStarted?.(model.name);
       try {
-        await this.runAgentLoop(cloudBaseUrl, conv, model, activeFile, ctrl, postC, apiKey);
+        await this.runAgentLoop(
+          cloudBaseUrl,
+          conv,
+          model,
+          activeFile,
+          ctrl,
+          postC,
+          apiKey,
+          checkpoint,
+        );
       } catch (err) {
         log.error(`[AgentLoop] ${model.provider} agent loop error: ${(err as Error).message}`);
         postC({ type: 'error', message: (err as Error).message });
@@ -235,7 +337,7 @@ export class AgentLoop {
         this.streamingConvIds.delete(convId);
         conv.updatedAt = Date.now();
         const depthBefore = this.checkpoints.depth();
-        this.checkpoints.commitTurn();
+        this.checkpoints.commitTurn(checkpoint);
         if (this.checkpoints.depth() > depthBefore) postC({ type: 'checkpointReady' });
         this.events.onGenerationFinished?.(model.name);
         this.resolveStreamingLifecycle(convId);
@@ -267,11 +369,20 @@ export class AgentLoop {
     }
 
     const turnId = `turn-${Date.now()}`;
-    this.checkpoints.beginTurn(turnId);
+    const checkpoint = this.checkpoints.beginTurn(turnId);
     this.streamingConvIds.add(convId);
     this.events.onGenerationStarted?.(model.name);
     try {
-      await this.runAgentLoop(backend.baseUrl(), conv, model, activeFile, ctrl, postC);
+      await this.runAgentLoop(
+        backend.baseUrl(),
+        conv,
+        model,
+        activeFile,
+        ctrl,
+        postC,
+        undefined,
+        checkpoint,
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       log.error(`[AgentLoop] ${model.provider} chat failed model=${model.name}: ${message}`);
@@ -282,7 +393,7 @@ export class AgentLoop {
       this.activeBackends.delete(convId);
       conv.updatedAt = Date.now();
       const depthBefore = this.checkpoints.depth();
-      this.checkpoints.commitTurn();
+      this.checkpoints.commitTurn(checkpoint);
       if (this.checkpoints.depth() > depthBefore) postC({ type: 'checkpointReady' });
       this.events.onGenerationFinished?.(model.name);
       this.resolveStreamingLifecycle(convId);
@@ -377,6 +488,7 @@ export class AgentLoop {
     ctrl: AbortController,
     postC: (msg: HostToWebview) => void,
     apiKey?: string,
+    checkpoint?: CheckpointSession,
   ): Promise<void> {
     const config = this.getConfig();
     const allowed = resolveToolPermissions(config);
@@ -390,208 +502,92 @@ export class AgentLoop {
       );
     }
 
-    let lastToolSignature: string | null = null;
-
-    // Shared by the native and fallback tool-call paths. Returns 'stop' when
-    // the model repeats the exact same call batch (loop guard).
-    const dispatchToolCalls = async (toolCalls: ToolCall[]): Promise<'continue' | 'stop'> => {
-      const sig = toolCalls.map((tc) => `${tc.function.name}:${tc.function.arguments}`).join('|');
-      if (sig === lastToolSignature) {
+    if (
+      !canUseThinkingKwargs &&
+      (activeModel.think !== undefined || activeModel.sampling?.preserve_thinking !== undefined)
+    ) {
+      this.warnOnce(
+        `${activeModel.name}:thinking`,
+        `Forge: model "${activeModel.name}" does not appear to support thinking template toggles. Thinking kwargs will be omitted for this request.`,
+      );
+    }
+    if (runtimeCaps?.hasChatTemplate === false) {
+      this.warnOnce(
+        `${activeModel.name}:template`,
+        `Forge: model "${activeModel.name}" does not expose a usable chat template. Prompt formatting may be mismatched.`,
+      );
+    }
+    const toolDefinitions = this.toolRegistry.definitions(allowed);
+    const nativeTools = runtimeCaps?.likelySupportsTools !== false;
+    if (toolDefinitions.length > 0 && !nativeTools) {
+      this.warnOnce(
+        `${activeModel.name}:tools`,
+        `Forge: model "${activeModel.name}" does not appear to have a tool-aware chat template. Forge will use its fallback tool format.`,
+      );
+    }
+    await runToolCallingLoop({
+      baseUrl,
+      model: activeModel,
+      messages: conv.messages,
+      toolDefinitions,
+      signal: ctrl.signal,
+      maxRounds: MAX_TOOL_ROUNDS,
+      nativeTools,
+      stripAllTools: useStrip || activeModel.strip_tools === true,
+      canUseThinkingKwargs,
+      stripThinkingChannels,
+      failureTracker: this.failureTracker,
+      ...(apiKey ? { apiKey } : {}),
+      prepareMessages: (messages) => {
+        const tmplCtx: Record<string, string> = {};
+        if (activeFile) tmplCtx['activeFile'] = activeFile;
+        if (config.custom_instructions) tmplCtx['customInstructions'] = config.custom_instructions;
+        if (this.forgeLoader?.root) tmplCtx['workspaceRoot'] = this.forgeLoader.root;
+        if (this.forgeLoader?.instructions)
+          tmplCtx['forgeInstructions'] = this.forgeLoader.instructions;
+        const injected = injectSystemPrompt(
+          messages,
+          this.templateEngine,
+          tmplCtx,
+          activeModel.system_prompt,
+        );
+        return addWorkerDelegationInstructions(injected, allowed.has('delegate'));
+      },
+      dispatchToolCalls: async (toolCalls, messages) => {
+        for (const call of toolCalls) {
+          const detail = extractToolDetail(call.function.arguments);
+          postC({
+            type: 'toolActivity',
+            toolName: call.function.name,
+            ...(detail ? { detail } : {}),
+          });
+        }
+        await this.toolDispatch.dispatch(
+          toolCalls,
+          allowed,
+          messages,
+          conv.id,
+          ctrl.signal,
+          undefined,
+          checkpoint,
+          activeModel.name,
+        );
+      },
+      onToken: (text) => postC({ type: 'token', text }),
+      onReasoning: (text) => postC({ type: 'reasoningToken', text }),
+      onDone: (finishReason) => postC({ type: 'done', finishReason }),
+      onRepeatedCall: () =>
         postC({
           type: 'error',
           message:
             'Forge: agent is repeating the same tool call — stopping to avoid a loop. Try rephrasing your request or use /compact if the context is full.',
-        });
-        return 'stop';
-      }
-      lastToolSignature = sig;
-      this.failureTracker.reset();
-      for (const tc of toolCalls) {
-        const detail = extractToolDetail(tc.function.arguments);
-        postC({ type: 'toolActivity', toolName: tc.function.name, ...(detail ? { detail } : {}) });
-      }
-      conv.messages.push({ role: 'assistant', content: null, tool_calls: toolCalls });
-      await this.toolDispatch.dispatch(toolCalls, allowed, conv.messages, conv.id, ctrl.signal);
-      return 'continue';
-    };
-
-    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      if (ctrl.signal.aborted) {
-        postC({ type: 'done', finishReason: 'cancelled' });
-        return;
-      }
-
-      const tmplCtx: Record<string, string> = {};
-      if (activeFile) tmplCtx['activeFile'] = activeFile;
-      if (config.custom_instructions) tmplCtx['customInstructions'] = config.custom_instructions;
-      if (this.forgeLoader?.root) tmplCtx['workspaceRoot'] = this.forgeLoader.root;
-      if (this.forgeLoader?.instructions)
-        tmplCtx['forgeInstructions'] = this.forgeLoader.instructions;
-      const messages = injectSystemPrompt(
-        [...conv.messages],
-        this.templateEngine,
-        tmplCtx,
-        activeModel.system_prompt,
-      );
-
-      const availableToolDefs = this.toolRegistry.definitions(allowed);
-      let nativeToolDefs = activeModel.strip_tools || useStrip ? [] : availableToolDefs;
-      if (nativeToolDefs.length > 0 && runtimeCaps?.likelySupportsTools === false) {
-        this.warnOnce(
-          `${activeModel.name}:tools`,
-          `Forge: model "${activeModel.name}" does not appear to have a tool-aware chat template. Tools will be omitted for this request.`,
-        );
-        nativeToolDefs = [];
-      }
-      if (runtimeCaps?.hasChatTemplate === false) {
-        this.warnOnce(
-          `${activeModel.name}:template`,
-          `Forge: model "${activeModel.name}" does not expose a usable chat template. Prompt formatting may be mismatched.`,
-        );
-      }
-
-      const fallbackMessages =
-        availableToolDefs.length > 0
-          ? [
-              ...messages,
-              {
-                role: 'system' as const,
-                content: buildFallbackToolInstructions(availableToolDefs),
-              },
-            ]
-          : messages;
-      const requestMessages = nativeToolDefs.length > 0 ? messages : fallbackMessages;
-      const base: ChatCompletionRequest = {
-        model: activeModel.name,
-        messages: requestMessages,
-        stream: true,
-        ...(nativeToolDefs.length > 0 ? { tools: nativeToolDefs } : {}),
-        ...(canUseThinkingKwargs && activeModel.think !== undefined
-          ? {
-              chat_template_kwargs: {
-                ...(activeModel.sampling?.preserve_thinking !== undefined
-                  ? { preserve_thinking: activeModel.sampling.preserve_thinking }
-                  : {}),
-                enable_thinking: activeModel.think,
-              },
-            }
-          : {}),
-      };
-      if (
-        !canUseThinkingKwargs &&
-        (activeModel.think !== undefined || activeModel.sampling?.preserve_thinking !== undefined)
-      ) {
-        this.warnOnce(
-          `${activeModel.name}:thinking`,
-          `Forge: model "${activeModel.name}" does not appear to support thinking template toggles. Thinking kwargs will be omitted for this request.`,
-        );
-      }
-      const merged = mergeSampling(base, activeModel, {
-        allowPreserveThinking: canUseThinkingKwargs,
-      });
-      const request = normalizeRequestForModel(useStrip ? stripTools(merged) : merged, activeModel);
-
-      let thinkingStripper = stripThinkingChannels ? new ThinkingChannelStripper() : null;
-      let structuredOutputStripper = new StructuredOutputStripper();
-      let htmlStripper = new HtmlDocumentBoilerplateStripper();
-      let rawAssistantContent = '';
-      let rawReasoningContent = '';
-
-      let streamResult: { finishReason: string | null; toolCalls: ToolCall[] | null };
-      try {
-        streamResult = await this.streamOnce(
-          baseUrl,
-          request,
-          activeModel,
-          (token) => {
-            rawAssistantContent += token;
-            const withoutToolMarkers = structuredOutputStripper.push(token);
-            const withoutHtml = htmlStripper.push(withoutToolMarkers);
-            const visible = thinkingStripper ? thinkingStripper.push(withoutHtml) : withoutHtml;
-            if (visible) postC({ type: 'token', text: visible });
-          },
-          (reasoningToken) => {
-            if (stripThinkingChannels) return;
-            rawReasoningContent += reasoningToken;
-            postC({ type: 'reasoningToken', text: reasoningToken });
-          },
-          ctrl.signal,
-          apiKey,
-        );
-      } catch (err) {
-        if (!this.isNativeToolJsonParseError(err) || nativeToolDefs.length === 0) throw err;
-        this.failureTracker.record();
+        }),
+      onNativeFallback: () =>
         this.warnOnce(
           `${activeModel.name}:native-tool-json`,
           `Forge: llama-server rejected this model's native tool-call JSON. Retrying with Forge's JSON fallback tool format.`,
-        );
-        rawAssistantContent = '';
-        rawReasoningContent = '';
-        thinkingStripper = stripThinkingChannels ? new ThinkingChannelStripper() : null;
-        structuredOutputStripper = new StructuredOutputStripper();
-        htmlStripper = new HtmlDocumentBoilerplateStripper();
-        const fallbackBase: ChatCompletionRequest = {
-          ...base,
-          messages: fallbackMessages,
-        };
-        const fallbackRequest = normalizeRequestForModel(stripTools(fallbackBase), activeModel);
-        streamResult = await this.streamOnce(
-          baseUrl,
-          fallbackRequest,
-          activeModel,
-          (token) => {
-            rawAssistantContent += token;
-            const withoutToolMarkers = structuredOutputStripper.push(token);
-            const withoutHtml = htmlStripper.push(withoutToolMarkers);
-            const visible = thinkingStripper ? thinkingStripper.push(withoutHtml) : withoutHtml;
-            if (visible) postC({ type: 'token', text: visible });
-          },
-          (reasoningToken) => {
-            if (stripThinkingChannels) return;
-            rawReasoningContent += reasoningToken;
-            postC({ type: 'reasoningToken', text: reasoningToken });
-          },
-          ctrl.signal,
-          apiKey,
-        );
-      }
-      const { finishReason, toolCalls } = streamResult;
-
-      const trailingTool = structuredOutputStripper.flush();
-      const trailingHtml = htmlStripper.push(trailingTool) + htmlStripper.flush();
-      const trailing = thinkingStripper ? thinkingStripper.push(trailingHtml) : trailingHtml;
-      if (trailing) postC({ type: 'token', text: trailing });
-
-      const assistantContent = this.sanitizeText(rawAssistantContent, stripThinkingChannels);
-      const assistantReasoning = stripThinkingChannels
-        ? ''
-        : this.sanitizeText(rawReasoningContent, false);
-
-      if (toolCalls?.length) {
-        if ((await dispatchToolCalls(toolCalls)) === 'stop') return;
-        continue;
-      }
-
-      const fallbackToolCalls =
-        availableToolDefs.length > 0 && rawAssistantContent
-          ? extractFallbackToolCalls(rawAssistantContent)
-          : null;
-      if (fallbackToolCalls?.length) {
-        if ((await dispatchToolCalls(fallbackToolCalls)) === 'stop') return;
-        continue;
-      }
-
-      if (assistantContent || assistantReasoning) {
-        conv.messages.push({
-          role: 'assistant',
-          content: assistantContent,
-          ...(assistantReasoning ? { reasoning: assistantReasoning } : {}),
-        });
-      }
-      postC({ type: 'done', finishReason });
-      return;
-    }
-    postC({ type: 'error', message: 'Forge: agent exceeded maximum tool rounds.' });
+        ),
+    });
   }
 
   private async getRuntimeCapabilities(
@@ -630,65 +626,5 @@ export class AgentLoop {
     const withoutThinking = stripThinking ? stripThinkingFromFullText(text) : text;
     const withoutStructured = stripStructuredOutputFromFullText(withoutThinking);
     return stripHtmlDocumentBoilerplateFromFullText(withoutStructured);
-  }
-
-  private isNativeToolJsonParseError(err: unknown): boolean {
-    const message = err instanceof Error ? err.message : String(err);
-    return message.includes('Failed to parse tool call arguments as JSON');
-  }
-
-  private async requestToolApproval(
-    toolName: string,
-    detail: string,
-    isDangerous?: boolean,
-    convId?: string,
-  ): Promise<boolean> {
-    if (this.clankerMode && !isDangerous) return true;
-    const view = this.getView();
-    if (!view) throw new Error(`Forge: sidebar is unavailable for tool approval (${toolName}).`);
-    const id = `confirm-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const approved = new Promise<boolean>((resolve) => {
-      this.pendingConfirmations.set(id, resolve);
-    });
-    await vscode.commands.executeCommand('workbench.view.extension.forge-sidebar');
-    this.post({
-      type: 'confirmRequest',
-      id,
-      toolName,
-      detail,
-      ...(isDangerous ? { isDangerous: true } : {}),
-      ...(convId ? { conversationId: convId } : {}),
-    });
-    return approved;
-  }
-
-  private streamOnce(
-    baseUrl: string,
-    request: ChatCompletionRequest,
-    model: ModelConfig,
-    onToken: (token: string) => void,
-    onReasoning: (token: string) => void,
-    signal?: AbortSignal,
-    apiKey?: string,
-  ): Promise<{ finishReason: string | null; toolCalls: ToolCall[] | null }> {
-    return new Promise((resolve, reject) => {
-      let capturedToolCalls: ToolCall[] | null = null;
-      streamModelChatCompletion(
-        baseUrl,
-        request,
-        model,
-        {
-          onToken,
-          onReasoning,
-          onDone: (reason) => resolve({ finishReason: reason, toolCalls: capturedToolCalls }),
-          onError: reject,
-          onToolCalls: (calls) => {
-            capturedToolCalls = calls;
-          },
-        },
-        signal,
-        apiKey,
-      );
-    });
   }
 }

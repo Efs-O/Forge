@@ -2,12 +2,12 @@ import type { BackendController } from './BackendController';
 import { DirectBackend } from './DirectBackend';
 import { probeHealthy } from './HealthCheck';
 import type { ForgeConfig } from '../config/types';
-import { expandAlias, splitModelProfile } from '../config/ConfigResolver';
+import { expandAlias, resolveRequestModel, splitModelProfile } from '../config/ConfigResolver';
 import { DelegationGate } from './DelegationGate';
-import type { DelegationCheck, DelegationHold } from './DelegationGate';
+import type { DelegationCheck, DelegationGroupHold, DelegationHold } from './DelegationGate';
 import { getLogger } from '../util/logger';
 
-export type { DelegationCheck, DelegationHold } from './DelegationGate';
+export type { DelegationCheck, DelegationGroupHold, DelegationHold } from './DelegationGate';
 
 const log = getLogger();
 
@@ -29,6 +29,11 @@ export interface IBackendPool {
    *  closes the canDelegate→acquire TOCTOU race. Release exactly once on
    *  success, cancellation, and failure paths (extra calls are no-ops). */
   acquireForDelegation(primaryModel: string, targetModel: string): Promise<DelegationHold>;
+  acquireGroupForDelegation(
+    primaryModel: string,
+    targetModels: readonly string[],
+  ): Promise<DelegationGroupHold>;
+  parallelCapacity(modelName: string): number;
   /** Stop and remove a single model's backend, freeing its VRAM / port slot. */
   release(modelName: string): Promise<void>;
   stopAll(): Promise<void>;
@@ -79,6 +84,18 @@ export class BackendPool implements IBackendPool {
 
   acquireForDelegation(primaryModel: string, targetModel: string): Promise<DelegationHold> {
     return this.gate.acquire(primaryModel, targetModel);
+  }
+
+  acquireGroupForDelegation(
+    primaryModel: string,
+    targetModels: readonly string[],
+  ): Promise<DelegationGroupHold> {
+    return this.gate.acquireGroup(primaryModel, targetModels);
+  }
+
+  parallelCapacity(modelName: string): number {
+    const model = resolveRequestModel(this.config, modelName);
+    return model?.n_parallel ?? this.config.llama_server.n_parallel ?? 4;
   }
 
   acquire(modelName: string): Promise<BackendController> {

@@ -17,6 +17,13 @@ The implementation and automated verification portions of this plan are now
 complete. The checklist below is retained as the original planning baseline;
 the completed work is represented by commits `b91b516` through `3680efd`.
 
+This completion statement applies to bounded read-only consultation and the
+hardening work in this document. Writable parallel worker orchestration is a
+separate feature tracked in `docs/AGENT_WORKER_ORCHESTRATION_REPORT.md`; its
+implementation is now present in the current worktree and awaits the documented
+manual Extension Development Host smoke matrix. Do not reopen or duplicate the
+completed consultation work.
+
 Completed after the original baseline:
 
 - native local delegation (A1–A3), including primary-turn cancellation;
@@ -56,9 +63,10 @@ production-ready, choose one of these follow-ups:
 - qualify and document one primary model/template that reliably calls the
   existing native tool.
 
-## Current Baseline
+## Original Baseline (before the completed implementation commits)
 
-Forge already has the following delegation prerequisites:
+At the time this baseline was written, Forge had the following delegation
+prerequisites:
 
 - `permissions.agents.delegate`, defaulting to `false`;
 - the `delegate` `ToolPermission` capability;
@@ -72,8 +80,9 @@ Forge already has the following delegation prerequisites:
 Historical clarification: commit `6af836b` added the opt-in delegation
 permission. It did not add `BackendPool.canDelegate`, which already existed.
 
-Native delegation is not usable yet. There is no `ask_local_agent` tool or
-`LocalDelegationService`.
+At that baseline, native delegation was not usable yet: there was no
+`ask_local_agent` tool or `LocalDelegationService`. The status update above
+records their subsequent completion.
 
 ## Scope and Version-One Contract
 

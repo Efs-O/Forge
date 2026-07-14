@@ -1,15 +1,8 @@
-import * as path from 'path';
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
+import { resolveWorkspaceUri } from '../util/WorkspacePaths';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function resolveUri(p: string): vscode.Uri {
-  if (path.isAbsolute(p)) return vscode.Uri.file(p);
-  const folders = vscode.workspace.workspaceFolders;
-  if (!folders?.length) throw new Error('No workspace folder open.');
-  return vscode.Uri.file(path.join(folders[0].uri.fsPath, p));
-}
 
 function severityLabel(s: vscode.DiagnosticSeverity): string {
   switch (s) {
@@ -59,15 +52,17 @@ export function makeGetDiagnosticsTool(): RegisteredTool {
       },
     },
     permission: 'read',
-    handler: async (args) => {
+    handler: async (args, context) => {
+      context?.abortSignal?.throwIfAborted();
       const p = args['path'] as string | undefined;
       let pairs: [vscode.Uri, vscode.Diagnostic[]][];
       if (p) {
-        const uri = resolveUri(p);
+        const uri = resolveWorkspaceUri(p);
         pairs = [[uri, vscode.languages.getDiagnostics(uri)]];
       } else {
         pairs = vscode.languages.getDiagnostics();
       }
+      context?.abortSignal?.throwIfAborted();
 
       const lines: string[] = [];
       for (const [uri, diags] of pairs) {
@@ -117,12 +112,14 @@ export function makeGetDocumentSymbolsTool(): RegisteredTool {
       },
     },
     permission: 'read',
-    handler: async (args) => {
-      const uri = resolveUri(args['path'] as string);
+    handler: async (args, context) => {
+      context?.abortSignal?.throwIfAborted();
+      const uri = resolveWorkspaceUri(args['path'] as string);
       const result = await vscode.commands.executeCommand<vscode.DocumentSymbol[] | undefined>(
         'vscode.executeDocumentSymbolProvider',
         uri,
       );
+      context?.abortSignal?.throwIfAborted();
       if (!result?.length) return 'No symbols found.';
       return formatSymbolTree(result).join('\n');
     },
@@ -189,7 +186,7 @@ export function makeGetHoverTool(): RegisteredTool {
     },
     permission: 'read',
     handler: async (args) => {
-      const uri = resolveUri(args['path'] as string);
+      const uri = resolveWorkspaceUri(args['path'] as string);
       const position = new vscode.Position(args['line'] as number, args['character'] as number);
       const result = await vscode.commands.executeCommand<vscode.Hover[] | undefined>(
         'vscode.executeHoverProvider',
@@ -235,7 +232,7 @@ export function makeGoToDefinitionTool(): RegisteredTool {
     },
     permission: 'read',
     handler: async (args) => {
-      const uri = resolveUri(args['path'] as string);
+      const uri = resolveWorkspaceUri(args['path'] as string);
       const position = new vscode.Position(args['line'] as number, args['character'] as number);
       const result = await vscode.commands.executeCommand<vscode.Location[] | undefined>(
         'vscode.executeDefinitionProvider',
@@ -271,7 +268,7 @@ export function makeFindReferencesTool(): RegisteredTool {
     },
     permission: 'read',
     handler: async (args) => {
-      const uri = resolveUri(args['path'] as string);
+      const uri = resolveWorkspaceUri(args['path'] as string);
       const position = new vscode.Position(args['line'] as number, args['character'] as number);
       const result = await vscode.commands.executeCommand<vscode.Location[] | undefined>(
         'vscode.executeReferenceProvider',
