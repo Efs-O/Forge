@@ -46,6 +46,9 @@ export class WorkerLoop {
           spec.access === 'write'
             ? `Writable files (exact paths only):\n${spec.allowed_paths?.map((p) => `- ${p}`).join('\n')}`
             : 'This is a read-only task. You have no write tools and must not claim to modify files.',
+          spec.access === 'write'
+            ? 'For multiple precise changes in one file, prefer apply_line_edits after reading the current lines; expected_lines must match exactly.'
+            : '',
           'Use tool calls for every write. You may read and list only inside the workspace.',
           'Do not claim a file changed unless a write tool succeeded. Do not call unavailable tools.',
           'Finish with a concise summary of work actually completed.',

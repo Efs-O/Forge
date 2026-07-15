@@ -1,13 +1,13 @@
 # Safe Worker and Tool Upgrade Implementation Plan
 
-Status: Phases 0–5 are implemented and covered by automated tests. Phase 6
-remains intentionally unimplemented because it requires separate approval after
-observing real `replace_in_file` failure rates. Installed-VSIX smoke validation
-from the verification matrix remains manual.
+Status: Phases 0–6 are implemented and covered by automated tests. Phase 6 was
+separately approved after the validated Phases 0–5 checkpoint commit. Installed-
+VSIX smoke validation from the verification matrix remains manual.
 
 ## Status
 
-**Proposal for review only. No implementation is authorized by this document.**
+**Implementation record. Phases 0–6 have been implemented; the installed-VSIX
+smoke matrix below remains a manual release-validation responsibility.**
 
 This plan upgrades the existing worker workflow without weakening Forge's
 workspace boundary, exact-write ownership, permission gate, cloud-egress gate,
@@ -323,12 +323,12 @@ Tests:
 
 ## Phase 6 — Structured Editing Reliability
 
-Owner: `src/tools/fileEditTools.ts`; worker enforcement remains in
+Owner: `src/tools/structuredEditTool.ts`; worker enforcement remains in
 `src/workers/WorkerAccessPolicy.ts`.
 
-Only after discovery and read-only work are stable, add a strict structured
-multi-edit operation or extend the existing canonical edit owner. Proposed
-shape:
+After discovery and read-only work are stable, add a strict structured
+multi-edit operation. The implemented contract also requires `expected_lines`
+for stale-content detection:
 
 ```json
 {
@@ -336,7 +336,8 @@ shape:
   "operations": [
     {
       "start_line": 12,
-      "end_line": 14,
+      "end_line": 12,
+      "expected_lines": ["const enabled = false;"],
       "replacement_lines": ["const enabled = true;"]
     }
   ]
@@ -353,8 +354,8 @@ Rules:
 - Return a bounded structured summary with verified mutation metadata.
 - No raw unified-diff or shell-command blob argument.
 
-This phase is optional and should be approved separately after observing
-`replace_in_file` failure rates on small local workers.
+This phase was separately approved after Phases 0–5 were committed. The tool is
+implemented as `apply_line_edits`; ranges are one-based and inclusive.
 
 ## Explicit Non-Goals
 

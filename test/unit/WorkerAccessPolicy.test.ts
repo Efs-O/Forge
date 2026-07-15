@@ -84,6 +84,23 @@ describe('WorkerAccessPolicy', () => {
     );
   });
 
+  it('allows structured edits only on the exact assigned path', () => {
+    const scope = new WorkerAccessPolicy(root, 'write', ['src/write.ts']).scope();
+    expect(scope.allowedNames.has('apply_line_edits')).toBe(true);
+    expect(() =>
+      scope.validate?.(tool('apply_line_edits', true), {
+        path: 'src/write.ts',
+        operations: [],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      scope.validate?.(tool('apply_line_edits', true), {
+        path: 'src/other.ts',
+        operations: [],
+      }),
+    ).toThrow('not assigned');
+  });
+
   it('permits bounded workspace discovery for read-only workers', () => {
     const scope = new WorkerAccessPolicy(root, 'read', []).scope();
     expect(() =>

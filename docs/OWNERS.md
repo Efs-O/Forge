@@ -84,6 +84,7 @@ overlaps with an existing owner, extend the owner instead.
 | Tool registration entry point              | `src/tools/registerAllTools.ts`       |
 | Built-in tool definitions                  | `src/tools/builtinTools.ts`           |
 | File read/write tools                      | `src/tools/fileEditTools.ts`          |
+| Structured line-edit validation + tool     | `src/tools/structuredEditTool.ts`     |
 | Directory listing tools                    | `src/tools/dirTools.ts`               |
 | Terminal + headless exec tools             | `src/tools/execTools.ts`              |
 | Exec child-process helpers                 | `src/tools/execHelpers.ts`            |

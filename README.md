@@ -282,6 +282,11 @@ best-effort because the daemon manages loading. Opt-in OpenAI-compatible models
 and Ollama cloud routes are catalogued only when cloud workers are enabled. A
 profile such as `model@reviewer` shares the same underlying backend as `model`.
 
+Writable workers also receive `apply_line_edits`, a bounded structured editing
+tool for multiple changes to one assigned file. It uses one-based inclusive line
+ranges and requires exact `expected_lines`; stale, overlapping, out-of-range, or
+oversized edits are rejected before the file is written.
+
 To consult a different direct llama.cpp model without evicting the primary model, configure enough slots, for example `max_simultaneous_models: 2`. Slot availability prevents Forge from evicting the primary backend, but it does not guarantee the machine has enough RAM or VRAM to load the second model. Delegation is limited to 120 seconds and returned analysis is capped at 24,000 characters.
 
 ## Slash Commands

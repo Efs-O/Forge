@@ -57,6 +57,7 @@ import {
 import { makeSearchCodebaseTool } from './semanticSearchTool';
 import type { IndexManager } from '../search/IndexManager';
 import { makeDispatchWorkersTool, makeListWorkerModelsTool } from './dispatchWorkersTool';
+import { makeApplyLineEditsTool } from './structuredEditTool';
 
 export function registerAllTools(
   registry: ToolRegistry,
@@ -100,6 +101,7 @@ export function registerAllTools(
 
   // v0.6 write tools
   registry.register(makeReplaceInFileTool());
+  registry.register(makeApplyLineEditsTool());
   registry.register(makeCreateDirectoryTool());
   registry.register(makeMoveFileTool());
   registry.register(makeDeleteFileTool());

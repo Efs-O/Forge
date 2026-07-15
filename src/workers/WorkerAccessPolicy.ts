@@ -21,7 +21,7 @@ const WORKER_READ_TOOL_NAMES = [
   'get_document_symbols',
   'get_diagnostics',
 ] as const;
-const WORKER_WRITE_TOOL_NAMES = ['write_file', 'replace_in_file'] as const;
+const WORKER_WRITE_TOOL_NAMES = ['write_file', 'replace_in_file', 'apply_line_edits'] as const;
 
 function realContainedPath(
   input: string,

@@ -1,5 +1,21 @@
 # Forge — Recent Changes
 
+## 0.12.28 — Worker orchestration and safe structured editing
+
+- Added bounded one- or two-worker coding orchestration across configured local
+  and explicitly enabled cloud models.
+- Added exact read/write worker access contracts, workspace discovery budgets,
+  cancellation, backend admission, typed activity status, and coordinator
+  review of verified changes.
+- Added `apply_line_edits`, a strict atomic multi-edit tool with exact stale-line
+  checks, bounded ordered operations, checkpoint integration, and exact worker
+  path enforcement.
+- Added opt-in local-agent consultation, MCP per-tool permission enforcement,
+  non-evicting backend holds, and cancellation propagation.
+- Hardened first-run configuration, Add Model preservation, permission gates,
+  mutation metadata, and Keep/Undo coverage.
+- Expanded the automated suite to 289 tests across 40 test files.
+
 ## Session JSONL Logging (HalluMeter + HalluScribe integration)
 
 ### What changed

@@ -180,6 +180,12 @@ models call tools far more reliably with an inline example.
 `dispatch_workers`, reports exact configured names plus route/profile/alias
 metadata, and omits cloud routes unless `cloud_workers` is enabled.
 
+Writable workers additionally receive `apply_line_edits`. It applies up to 20
+ordered, non-overlapping one-based inclusive ranges to one assigned file. Each
+operation supplies exact `expected_lines` for stale-content rejection and a
+bounded `replacement_lines` array. Tool mutation metadata triggers one
+checkpoint snapshot, and `WorkerAccessPolicy` re-checks the exact assigned path.
+
 ## Runtime Limits (`src/workers/limits.ts`)
 
 | Limit | Value |

@@ -6,6 +6,7 @@ import type { CheckpointStack } from '../../src/checkpoint/CheckpointStack';
 import type { KeepUndoCodeLensProvider } from '../../src/sidebar/KeepUndoCodeLens';
 import type { ToolFailureTracker } from '../../src/tools/StripTools';
 import { ToolRegistry } from '../../src/tools/ToolRegistry';
+import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
 
 // vi.mock is hoisted — compute WS inside the factory using require
 vi.mock('vscode', () => {
@@ -165,6 +166,35 @@ describe('ToolDispatch', () => {
     );
     expect(checkpoints.snapshotBefore).toHaveBeenCalled();
     expect(codeLens.markPending).toHaveBeenCalled();
+  });
+
+  it('snapshots a structured multi-edit exactly once before its handler', async () => {
+    const structuredEdit = makeApplyLineEditsTool();
+    structuredEdit.handler = vi.fn().mockResolvedValue('{"operationsApplied":2}');
+    toolRegistry.register(structuredEdit);
+    const messages: Array<{ role: string; content: string }> = [];
+
+    await dispatch.dispatch(
+      [
+        makeToolCall('apply_line_edits', {
+          path: 'src/a.ts',
+          operations: [
+            {
+              start_line: 1,
+              end_line: 1,
+              expected_lines: ['old'],
+              replacement_lines: ['new'],
+            },
+          ],
+        }),
+      ],
+      allowed,
+      messages as never,
+    );
+
+    expect(checkpoints.snapshotBefore).toHaveBeenCalledOnce();
+    expect(checkpoints.snapshotBefore).toHaveBeenCalledWith(path.join(WS, 'src/a.ts'));
+    expect(structuredEdit.handler).toHaveBeenCalledOnce();
   });
 
   it('requests approval for delete tools', async () => {
@@ -392,7 +422,11 @@ describe('ToolDispatch', () => {
     toolRegistry.register({
       definition: {
         type: 'function',
-        function: { name: 'write_file', description: 'Write a file', parameters: { type: 'object' } },
+        function: {
+          name: 'write_file',
+          description: 'Write a file',
+          parameters: { type: 'object' },
+        },
       },
       permission: 'write',
       mutation: { paths: (args) => [args['path'] as string], showDiff: true },
@@ -403,7 +437,13 @@ describe('ToolDispatch', () => {
     const messages: Array<{ role: string; content: string; tool_call_id?: string; name?: string }> =
       [];
 
-    await dispatch.dispatch([makeToolCall('write_file', { path: 'cancelled.txt' })], allowed, messages as never, undefined, ctrl.signal);
+    await dispatch.dispatch(
+      [makeToolCall('write_file', { path: 'cancelled.txt' })],
+      allowed,
+      messages as never,
+      undefined,
+      ctrl.signal,
+    );
 
     expect(handler).not.toHaveBeenCalled();
     expect(checkpoints.snapshotBefore).not.toHaveBeenCalled();
