@@ -47,7 +47,7 @@ describe('WorkerAccessPolicy', () => {
       'outside the workspace',
     );
     scope.onResult?.(tool('write_file', true), { path: 'src/write.ts' }, 'Wrote file');
-    expect(policy.changedPaths()).toEqual([path.join(root, 'src', 'write.ts')]);
+    expect(policy.changedPaths()).toEqual([path.join(fs.realpathSync(root), 'src', 'write.ts')]);
   });
 
   it('caps directory listings before returning them to a worker', () => {
