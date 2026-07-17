@@ -14,6 +14,7 @@ import {
 import { extractFallbackToolCalls } from '../tools/ToolCallFallback';
 import { stripThinkingFromFullText } from '../llm/ThinkingChannelStripper';
 import { stripHtmlDocumentBoilerplateFromFullText } from '../llm/HtmlDocumentBoilerplateStripper';
+import { ToolLoopDetectedError, ToolLoopGuard } from './ToolLoopGuard';
 
 export interface ToolCallingLoopOptions {
   baseUrl: string;
@@ -36,6 +37,7 @@ export interface ToolCallingLoopOptions {
   onDone?: (finishReason: string | null) => void;
   onRepeatedCall?: () => void;
   onNativeFallback?: () => void;
+  isMutatingTool?: (name: string) => boolean;
 }
 
 export interface ToolCallingLoopResult {
@@ -87,8 +89,8 @@ async function streamOnce(
 export async function runToolCallingLoop(
   options: ToolCallingLoopOptions,
 ): Promise<ToolCallingLoopResult> {
-  let lastToolSignature: string | null = null;
   let finalText = '';
+  const loopGuard = new ToolLoopGuard();
 
   for (let round = 0; round < options.maxRounds; round++) {
     options.signal.throwIfAborted();
@@ -184,22 +186,22 @@ export async function runToolCallingLoop(
         ? extractFallbackToolCalls(rawAssistant)
         : null;
     if (calls?.length) {
-      const signature = calls
-        .map((call) => `${call.function.name}:${call.function.arguments}`)
-        .join('|');
-      if (signature === lastToolSignature) {
+      try {
+        loopGuard.beforeRound(calls, options.isMutatingTool);
+      } catch (error) {
         options.onRepeatedCall?.();
-        return {
-          finishReason: streamed.finishReason,
-          finalText,
-          rounds: round + 1,
-          repeatedCall: true,
-        };
+        throw error;
       }
-      lastToolSignature = signature;
       options.failureTracker?.reset();
       options.messages.push({ role: 'assistant', content: null, tool_calls: calls });
+      const beforeDispatch = options.messages.length;
       await options.dispatchToolCalls(calls, options.messages);
+      try {
+        loopGuard.afterRound(calls, options.messages.slice(beforeDispatch));
+      } catch (error) {
+        if (error instanceof ToolLoopDetectedError) options.onRepeatedCall?.();
+        throw error;
+      }
       continue;
     }
 

@@ -43,3 +43,24 @@ export class RelativePattern {
 export const Uri = {
   file: (fsPath: string) => ({ fsPath }),
 };
+
+export class Position {
+  constructor(
+    public readonly line: number,
+    public readonly character: number,
+  ) {}
+}
+
+export class Range {
+  public readonly start: Position;
+  public readonly end: Position;
+
+  constructor(start: Position, end: Position) {
+    this.start = start;
+    this.end = end;
+  }
+}
+
+export const commands = {
+  executeCommand: async (): Promise<unknown> => undefined,
+};

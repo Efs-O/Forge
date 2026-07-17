@@ -2,23 +2,15 @@ import * as http from 'http';
 import type * as vscode from 'vscode';
 import type { IBackendPool } from './BackendPool';
 import type { ForgeConfig } from '../config/types';
-import {
-  isCloudProvider,
-  getCloudProviderLabel,
-  getProviderDisplayName,
-} from '../llm/CloudProviders';
-import {
-  availableProfilesFor,
-  deriveStaticCapabilities,
-  expandAlias,
-  splitModelProfile,
-} from '../config/ConfigResolver';
+import { isCloudProvider, getCloudProviderLabel } from '../llm/CloudProviders';
+import { expandAlias, splitModelProfile } from '../config/ConfigResolver';
 import { probeHealthy } from './HealthCheck';
 // prettier-ignore
 import { sendJson, requireModel, readJson, delay, toOpenAiBase, errText, handleChat, CHAT_BODY_BYTES } from './controlHttp';
 import type { ChatProxyFn } from '../llm/ControlChatProxy';
 import { getLogger } from '../util/logger';
 import type { IControlServerRegistry } from './ControlServerRegistry';
+import { buildControlModelCatalog, type ControlModelCatalogEntry } from './ControlModelCatalog';
 
 const log = getLogger();
 const DEFAULT_PORT = 8799;
@@ -51,17 +43,9 @@ export interface EnsureResult {
 export interface ControlStatus {
   listening: boolean;
   port: number;
-  models: Array<{
-    name: string;
-    backend: string;
-    /** Human-readable provider name for display, e.g. "cerebras", "ollama". */
-    provider: string;
-    loaded: boolean;
-    holds: number;
-    servable: boolean;
-    profiles: string[];
-    capabilities: string[];
-  }>;
+  contractVersion: number;
+  catalogVersion: string;
+  models: ControlModelCatalogEntry[];
 }
 
 /**
@@ -84,6 +68,8 @@ export class ControlServer implements vscode.Disposable {
   private readonly holds = new Map<string, number>();
   /** model → epoch ms of its last successful acquire (eviction grace window). */
   private readonly lastAcquiredAt = new Map<string, number>();
+  /** Models between acquire start and readiness completion. */
+  private readonly loadingModels = new Set<string>();
   /** Serializes /ensure AND /release so capacity/eviction decisions are atomic. */
   private chain: Promise<unknown> = Promise.resolve();
   private readonly port: number;
@@ -173,10 +159,11 @@ export class ControlServer implements vscode.Disposable {
 
   /** Snapshot for status UI: listener state + per-model loaded/hold counts. */
   status(): ControlStatus {
+    const catalog = this.modelCatalog();
     return {
       listening: this.server !== null,
       port: this.port,
-      models: this.modelList(),
+      ...catalog,
     };
   }
 
@@ -191,7 +178,7 @@ export class ControlServer implements vscode.Disposable {
         return sendJson(res, 200, { ok: true });
       }
       if (method === 'GET' && path === '/models') {
-        return sendJson(res, 200, { models: this.modelList() });
+        return sendJson(res, 200, this.modelCatalog());
       }
       if (method === 'POST' && path === '/ensure') {
         const model = requireModel(await readJson(req));
@@ -226,20 +213,16 @@ export class ControlServer implements vscode.Disposable {
     }
   }
 
-  private modelList(): ControlStatus['models'] {
-    return this.config.models.map((m) => ({
-      name: m.name,
-      backend: m.provider ?? 'llama.cpp',
-      provider: getProviderDisplayName(m),
-      loaded: this.pool.isLoaded(m.name),
-      holds: this.holds.get(m.name) ?? 0,
-      // Cloud-provider models are called via their HTTP API from inside the
-      // extension (key in SecretStorage) — the control server cannot serve them.
-      servable: !isCloudProvider(m.provider),
-      // F6: request-time roles applicable to this base model + derived caps.
-      profiles: availableProfilesFor(this.config, m.name),
-      capabilities: deriveStaticCapabilities(m),
-    }));
+  private modelCatalog(): Pick<ControlStatus, 'contractVersion' | 'catalogVersion' | 'models'> {
+    return buildControlModelCatalog({
+      config: this.config,
+      pool: this.pool,
+      holds: this.holds,
+      loadingModels: this.loadingModels,
+      lastAcquiredAt: this.lastAcquiredAt,
+      evictionGraceMs: this.evictionGraceMs,
+      chatAvailable: this.chatProxy !== undefined,
+    });
   }
 
   /** Normalize a control-API model id to the base model name: aliases expand and
@@ -282,6 +265,7 @@ export class ControlServer implements vscode.Disposable {
       if (guard) return guard;
     }
 
+    this.loadingModels.add(model);
     try {
       const backend = await this.pool.acquire(model);
       // Readiness gate: the process can be spawned but not yet accepting HTTP
@@ -308,6 +292,8 @@ export class ControlServer implements vscode.Disposable {
       };
     } catch (err) {
       return { status: 502, body: { error: `failed to load "${model}": ${errText(err)}` } };
+    } finally {
+      this.loadingModels.delete(model);
     }
   }
 

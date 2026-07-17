@@ -115,6 +115,20 @@ function resolveConvId(state: State, convId?: string): string {
   return convId ?? state.activeConversationId;
 }
 
+function clearRecoveredBackendStartErrors(state: State, convId: string): State {
+  const existing = state.messagesById[convId] ?? [];
+  const remaining = existing.filter(
+    (message) =>
+      message.role !== 'error' ||
+      !(
+        message.content.startsWith('Backend failed to start:') ||
+        message.content === 'Backend start cancelled.'
+      ),
+  );
+  if (remaining.length === existing.length) return state;
+  return { ...state, messagesById: { ...state.messagesById, [convId]: remaining } };
+}
+
 export function reducer(state: State, action: Action): State {
   switch (action.type) {
     case 'GENERATION_STARTED': {
@@ -202,11 +216,15 @@ export function reducer(state: State, action: Action): State {
 
     case 'READY': {
       const cid = resolveConvId(state, action.convId);
-      return appendToConv({ ...state, backendReady: true }, cid, {
-        id: mkId(),
-        role: 'system',
-        content: 'Backend ready.',
-      });
+      return appendToConv(
+        { ...clearRecoveredBackendStartErrors(state, cid), backendReady: true },
+        cid,
+        {
+          id: mkId(),
+          role: 'system',
+          content: 'Backend ready.',
+        },
+      );
     }
 
     case 'BACKEND_STARTING': {

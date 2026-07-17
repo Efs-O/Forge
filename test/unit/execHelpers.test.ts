@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { stripAnsi, formatOutput } from '../../src/tools/execHelpers';
+import {
+  ExecCommandError,
+  formatExecCommandOutput,
+  formatOutput,
+  spawnAndWait,
+  stripAnsi,
+} from '../../src/tools/execHelpers';
 
 const ESC = String.fromCharCode(27);
 
@@ -28,5 +34,28 @@ describe('formatOutput', () => {
     });
     expect(out).toBe('ok\n[stderr]\nwarn\n[exit code: 0]');
     expect(out.includes(ESC)).toBe(false);
+  });
+});
+
+describe('structured exec_command outcomes', () => {
+  it('distinguishes success from non-zero exit', () => {
+    expect(
+      JSON.parse(formatExecCommandOutput('tool', { stdout: 'ok', stderr: '', exitCode: 0 })),
+    ).toMatchObject({ kind: 'success', program: 'tool', exitCode: 0 });
+    expect(
+      JSON.parse(formatExecCommandOutput('tool', { stdout: '', stderr: 'bad', exitCode: 2 })),
+    ).toMatchObject({ kind: 'non_zero_exit', program: 'tool', exitCode: 2, stderr: 'bad' });
+  });
+
+  it('classifies a missing executable', async () => {
+    await expect(
+      spawnAndWait('forge-definitely-missing-executable', [], process.cwd(), 1_000),
+    ).rejects.toMatchObject<Partial<ExecCommandError>>({ kind: 'missing_executable' });
+  });
+
+  it('classifies a timeout', async () => {
+    await expect(
+      spawnAndWait(process.execPath, ['-e', 'setTimeout(() => {}, 1000)'], process.cwd(), 10),
+    ).rejects.toMatchObject<Partial<ExecCommandError>>({ kind: 'timeout' });
   });
 });

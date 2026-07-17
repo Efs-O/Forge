@@ -302,18 +302,102 @@ describe('ControlServer', () => {
     expect(pool.loadedModelNames()).toEqual(['A']);
   });
 
-  it('marks cloud-provider models servable: false on GET /models', async () => {
+  it('publishes a versioned execution and availability contract on GET /models', async () => {
     const port = 18807;
     const base = `http://127.0.0.1:${port}`;
     server = new ControlServer(new FakePool(), makeConfig(port), testDeps());
     server.start();
     await waitReady(base);
 
-    const { models } = await (await fetch(`${base}/models`)).json();
-    const byName = Object.fromEntries(
-      models.map((m: { name: string; servable: boolean }) => [m.name, m.servable]),
-    );
-    expect(byName).toEqual({ A: true, B: true, grok: false });
+    const catalog = await (await fetch(`${base}/models`)).json();
+    expect(catalog.contractVersion).toBe(1);
+    expect(catalog.catalogVersion).toMatch(/^[a-f0-9]{16}$/);
+    const { models } = catalog;
+    const byName = Object.fromEntries(models.map((m: { name: string }) => [m.name, m]));
+    expect(byName.A).toMatchObject({
+      id: 'A',
+      baseModel: 'A',
+      route: 'ensure',
+      action: 'ensure',
+      availability: 'loadable',
+      servable: true,
+    });
+    expect(byName.grok).toMatchObject({
+      id: 'grok',
+      baseModel: 'grok',
+      route: 'chat',
+      action: 'configure',
+      availability: 'unavailable',
+      reason: 'chat_proxy_unavailable',
+      servable: false,
+    });
+  });
+
+  it('changes catalog revision and reports capacity-busy models', async () => {
+    const port = 18823;
+    const base = `http://127.0.0.1:${port}`;
+    server = new ControlServer(new FakePool(), makeConfig(port), testDeps());
+    server.start();
+    await waitReady(base);
+
+    const initial = await (await fetch(`${base}/models`)).json();
+    expect((await post(base, 'A')).status).toBe(200);
+    const held = await (await fetch(`${base}/models`)).json();
+    expect(held.catalogVersion).not.toBe(initial.catalogVersion);
+    expect(held.models.find((m: { name: string }) => m.name === 'A')).toMatchObject({
+      availability: 'ready',
+      action: 'ensure',
+      holds: 1,
+    });
+    expect(held.models.find((m: { name: string }) => m.name === 'B')).toMatchObject({
+      availability: 'busy',
+      action: 'wait',
+      reason: 'capacity_full',
+    });
+
+    expect((await (await post(base, 'A', 'release')).json()).released).toBe(true);
+    const released = await (await fetch(`${base}/models`)).json();
+    expect(released.catalogVersion).not.toBe(held.catalogVersion);
+    expect(released.models.find((m: { name: string }) => m.name === 'B')).toMatchObject({
+      availability: 'loadable',
+      action: 'ensure',
+    });
+  });
+
+  it('reports loading while a backend acquisition is in flight', async () => {
+    const port = 18824;
+    const base = `http://127.0.0.1:${port}`;
+    const pool = new FakePool();
+    pool.acquireDelayMs = 100;
+    server = new ControlServer(pool, makeConfig(port), testDeps());
+    server.start();
+    await waitReady(base);
+
+    const pending = post(base, 'A');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const catalog = await (await fetch(`${base}/models`)).json();
+    expect(catalog.models.find((m: { name: string }) => m.name === 'A')).toMatchObject({
+      availability: 'loading',
+      action: 'wait',
+      reason: 'backend_loading',
+    });
+    expect((await pending).status).toBe(200);
+  });
+
+  it('reports cloud chat as ready when the in-host proxy is available', async () => {
+    const port = 18825;
+    const base = `http://127.0.0.1:${port}`;
+    const chatProxy = async () => ({ content: '', reasoning: '', finishReason: 'stop' });
+    server = new ControlServer(new FakePool(), makeConfig(port), testDeps({ chatProxy }));
+    server.start();
+    await waitReady(base);
+
+    const catalog = await (await fetch(`${base}/models`)).json();
+    expect(catalog.models.find((m: { name: string }) => m.name === 'grok')).toMatchObject({
+      route: 'chat',
+      availability: 'ready',
+      action: 'dispatch',
+    });
   });
 
   it('evicts ALL idle local models before loading a different one, even under capacity', async () => {

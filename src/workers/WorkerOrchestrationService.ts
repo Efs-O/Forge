@@ -51,7 +51,7 @@ export class WorkerOrchestrationService {
   private readonly loop: WorkerLoop;
 
   constructor(private readonly deps: WorkerOrchestrationDeps) {
-    this.loop = new WorkerLoop(deps.getConfig, deps.registry);
+    this.loop = new WorkerLoop(deps.getConfig, deps.registry, deps.workspaceRoot);
   }
 
   hasCloudTargets(request: WorkerRunRequest): boolean {

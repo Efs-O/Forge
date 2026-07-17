@@ -6,6 +6,8 @@ import {
   checkShellOperators,
   checkPowerShellBan,
   detectTestRunner,
+  ExecCommandError,
+  formatExecCommandOutput,
   formatOutput,
   getWorkspaceRoot,
   guardExec,
@@ -92,12 +94,28 @@ export function makeExecCommandTool(): RegisteredTool {
       const cwd = resolveExecCwd(args['cwd'] as string | undefined);
       const timeoutMs = (args['timeout_ms'] as number | undefined) ?? 30_000;
 
-      checkShellOperators(cmdArgs);
-      checkPowerShellBan(command, cmdArgs);
-      guardExec(command, cmdArgs);
+      try {
+        checkShellOperators(cmdArgs);
+      } catch (error) {
+        throw new ExecCommandError(
+          'invalid_shell_syntax',
+          command,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      try {
+        checkPowerShellBan(command, cmdArgs);
+        guardExec(command, cmdArgs);
+      } catch (error) {
+        throw new ExecCommandError(
+          'policy_refusal',
+          command,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
 
       const result = await spawnAndWait(command, cmdArgs, cwd, timeoutMs);
-      return formatOutput(result);
+      return formatExecCommandOutput(command, result);
     },
   };
 }

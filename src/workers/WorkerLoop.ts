@@ -12,6 +12,7 @@ import {
 } from './limits';
 import type { WorkerResult, WorkerRunContext, WorkerSpec } from './types';
 import type { WorkerAccessPolicy } from './WorkerAccessPolicy';
+import { ToolLoopDetectedError } from '../agent/ToolLoopGuard';
 
 export interface WorkerExecutionTarget {
   model: ModelConfig;
@@ -23,10 +24,30 @@ export interface WorkerExecutionTarget {
 class WorkerDeclinedError extends Error {}
 class WorkerToolError extends Error {}
 
+export function buildWorkerSystemPrompt(spec: WorkerSpec, workspaceRoot: string): string {
+  return [
+    'You are a Forge coding worker. Complete only the assigned task.',
+    `Execution context: repo_root=${workspaceRoot}; platform=${process.platform}; arch=${process.arch}; path_style=${process.platform === 'win32' ? 'windows' : 'posix'}; command_contract=executable-plus-argv; no shell operators.`,
+    process.platform === 'win32'
+      ? 'Valid command example: exec_command {"command":"npm.cmd","args":["test"]}. Do not send PowerShell syntax as argv.'
+      : 'Valid command example: exec_command {"command":"npm","args":["test"]}. Do not send pipes or redirects as argv.',
+    spec.access === 'write'
+      ? `Writable files (exact paths only):\n${spec.allowed_paths?.map((path) => `- ${path}`).join('\n')}`
+      : 'This is a read-only task. You have no write tools and must not claim to modify files.',
+    spec.access === 'write'
+      ? 'For multiple precise changes in one file, prefer apply_line_edits after reading the current lines; expected_lines must match exactly.'
+      : '',
+    'Use tool calls for every write. You may read and list only inside the workspace.',
+    'Do not claim a file changed unless a write tool succeeded. Do not call unavailable tools.',
+    'Finish with a concise summary of work actually completed.',
+  ].join('\n');
+}
+
 export class WorkerLoop {
   constructor(
     private readonly getConfig: () => ForgeConfig,
     private readonly registry: ToolRegistry,
+    private readonly workspaceRoot: string,
   ) {}
 
   async run(
@@ -41,18 +62,7 @@ export class WorkerLoop {
     const messages: ChatMessage[] = [
       {
         role: 'system',
-        content: [
-          'You are a Forge coding worker. Complete only the assigned task.',
-          spec.access === 'write'
-            ? `Writable files (exact paths only):\n${spec.allowed_paths?.map((p) => `- ${p}`).join('\n')}`
-            : 'This is a read-only task. You have no write tools and must not claim to modify files.',
-          spec.access === 'write'
-            ? 'For multiple precise changes in one file, prefer apply_line_edits after reading the current lines; expected_lines must match exactly.'
-            : '',
-          'Use tool calls for every write. You may read and list only inside the workspace.',
-          'Do not claim a file changed unless a write tool succeeded. Do not call unavailable tools.',
-          'Finish with a concise summary of work actually completed.',
-        ].join('\n'),
+        content: buildWorkerSystemPrompt(spec, this.workspaceRoot),
       },
       {
         role: 'user',
@@ -79,6 +89,7 @@ export class WorkerLoop {
         nativeTools: !target.model.strip_tools,
         stripAllTools: false,
         stripThinkingChannels: target.model.think === false,
+        isMutatingTool: (name) => this.registry.get(name)?.mutation !== undefined,
         ...(target.apiKey ? { apiKey: target.apiKey } : {}),
         dispatchToolCalls: async (calls, history) => {
           toolCalls += calls.length;
@@ -110,6 +121,17 @@ export class WorkerLoop {
           if (declined) throw new WorkerDeclinedError('Worker write was declined by the user.');
         },
       });
+      if (result.finishReason === 'length' && !result.finalText.trim()) {
+        return {
+          id: spec.id,
+          model: spec.model,
+          status: 'exhausted_tokens',
+          summary: '',
+          changedPaths: policy.changedPaths(),
+          error: 'Worker produced no output before reaching its completion-token limit.',
+          ...(target.bestEffort ? { bestEffort: true } : {}),
+        };
+      }
       const changedPaths = policy.changedPaths();
       return {
         id: spec.id,
@@ -130,9 +152,13 @@ export class WorkerLoop {
             ? 'declined'
             : aborted
               ? 'cancelled'
-              : err instanceof WorkerToolError
-                ? 'failed_tool'
-                : 'failed_model',
+              : err instanceof ToolLoopDetectedError
+                ? 'failed_loop'
+                : /exceeded maximum tool rounds/.test(message)
+                  ? 'exhausted_steps'
+                  : err instanceof WorkerToolError
+                    ? 'failed_tool'
+                    : 'failed_model',
         summary: '',
         changedPaths: policy.changedPaths(),
         error: message,

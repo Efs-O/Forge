@@ -61,6 +61,24 @@ export interface SpawnResult {
   exitCode: number | null;
 }
 
+export type ExecCommandErrorKind =
+  | 'missing_executable'
+  | 'timeout'
+  | 'spawn_error'
+  | 'invalid_shell_syntax'
+  | 'policy_refusal';
+
+export class ExecCommandError extends Error {
+  constructor(
+    readonly kind: ExecCommandErrorKind,
+    readonly program: string,
+    detail: string,
+  ) {
+    super(JSON.stringify({ kind, program, detail }));
+    this.name = 'ExecCommandError';
+  }
+}
+
 export function spawnAndWait(
   command: string,
   args: string[],
@@ -92,15 +110,21 @@ export function spawnAndWait(
       stderr += chunk.toString();
     });
 
-    proc.on('error', (err) => {
+    proc.on('error', (err: NodeJS.ErrnoException) => {
       clearTimeout(timer);
-      reject(new Error(`exec_command: spawn error — ${err.message}`));
+      reject(
+        new ExecCommandError(
+          err.code === 'ENOENT' ? 'missing_executable' : 'spawn_error',
+          command,
+          err.message,
+        ),
+      );
     });
 
     proc.on('close', (code) => {
       clearTimeout(timer);
       if (timedOut) {
-        reject(new Error(`exec_command: process timed out after ${timeoutMs}ms`));
+        reject(new ExecCommandError('timeout', command, `process timed out after ${timeoutMs}ms`));
         return;
       }
       resolve({ stdout, stderr, exitCode: code });
@@ -132,6 +156,16 @@ export function formatOutput(result: SpawnResult): string {
   }
   out += `\n[exit code: ${result.exitCode ?? 'null'}]`;
   return out;
+}
+
+export function formatExecCommandOutput(program: string, result: SpawnResult): string {
+  return JSON.stringify({
+    kind: result.exitCode === 0 ? 'success' : 'non_zero_exit',
+    program,
+    exitCode: result.exitCode,
+    stdout: stripAnsi(result.stdout).slice(0, MAX_OUTPUT_CHARS),
+    stderr: stripAnsi(result.stderr).slice(0, MAX_OUTPUT_CHARS),
+  });
 }
 
 // ── Denylist guard ─────────────────────────────────────────────────────────────

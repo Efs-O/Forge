@@ -26,7 +26,10 @@ export type WorkerStatus =
   | 'timed_out'
   | 'failed_startup'
   | 'failed_model'
-  | 'failed_tool';
+  | 'failed_tool'
+  | 'failed_loop'
+  | 'exhausted_steps'
+  | 'exhausted_tokens';
 
 export interface WorkerResult {
   id: string;

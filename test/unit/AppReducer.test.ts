@@ -21,6 +21,8 @@ interface AppModule {
       | { type: 'GENERATION_STARTED'; convId?: string }
       | { type: 'DONE'; convId?: string }
       | { type: 'ERROR'; message: string; convId?: string }
+      | { type: 'READY'; convId?: string }
+      | { type: 'BACKEND_DOWN'; message: string; convId?: string }
       | {
           type: 'SESSION_SYNC';
           activeId: string;
@@ -134,6 +136,31 @@ describe('webview App reducer', () => {
     });
 
     expect(reconciled.messagesById['tab-1']).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: 'error', content: 'HTTP 404: cloud model unavailable' }),
+      ]),
+    );
+  });
+
+  it('clears a recovered backend-start error without removing chat errors', () => {
+    const failed = appModule.reducer(appModule.initialState, {
+      type: 'BACKEND_DOWN',
+      convId: 'tab-1',
+      message: 'Backend failed to start: llama-server exited with code 1',
+    });
+    const withChatError = appModule.reducer(failed, {
+      type: 'ERROR',
+      convId: 'tab-1',
+      message: 'HTTP 404: cloud model unavailable',
+    });
+    const recovered = appModule.reducer(withChatError, { type: 'READY', convId: 'tab-1' });
+
+    expect(recovered.messagesById['tab-1']).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: 'error', content: expect.stringContaining('Backend failed') }),
+      ]),
+    );
+    expect(recovered.messagesById['tab-1']).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ role: 'error', content: 'HTTP 404: cloud model unavailable' }),
       ]),
