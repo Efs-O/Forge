@@ -104,6 +104,7 @@ export function resolveRequestModel(
 
   return withDefined(model, {
     system_prompt: pick(d.system_prompt, model.system_prompt, p.system_prompt),
+    system_prompt_mode: pick(d.system_prompt_mode, model.system_prompt_mode, p.system_prompt_mode),
     sampling: mergeSampling(d.sampling, model.sampling, p.sampling),
     think: pick(d.think, model.think, p.think),
     reasoning_effort: pick(d.reasoning_effort, model.reasoning_effort, p.reasoning_effort),

@@ -124,6 +124,7 @@ overlaps with an existing owner, extend the owner instead.
 | ---------------------------------------- | ------------------------------- |
 | Index build/update + query orchestration | `src/search/IndexManager.ts`    |
 | Embedding HTTP client (/v1/embeddings)   | `src/search/EmbeddingClient.ts` |
+| Embedding task-prefix formatting         | `src/search/embeddingPrompts.ts` |
 | File chunking + chunk hashing            | `src/search/chunking.ts`        |
 | Vector math (cosine similarity)          | `src/search/semanticMath.ts`    |
 | Search index types                       | `src/search/types.ts`           |

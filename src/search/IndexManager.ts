@@ -6,9 +6,10 @@ import { EmbeddingBackend } from '../backend/EmbeddingBackend';
 import { EmbeddingClient } from './EmbeddingClient';
 import { buildChunkSeeds } from './chunking';
 import { cosineSimilarity } from './semanticMath';
+import { DEFAULT_PROMPT_STYLE, type EmbeddingPromptStyle } from './embeddingPrompts';
 import type { SearchChunk, SearchHit, SearchIndexFile, SearchResultSummary } from './types';
 
-const INDEX_VERSION = 1;
+const INDEX_VERSION = 2;
 const DEFAULT_INCLUDE_GLOBS = ['**/*'];
 const DEFAULT_EXCLUDE_GLOBS = [
   '**/node_modules/**',
@@ -31,7 +32,10 @@ export class IndexManager {
     private config: ForgeConfig,
     private readonly backend: EmbeddingBackend,
   ) {
-    this.client = new EmbeddingClient(() => this.backend.baseUrl());
+    this.client = new EmbeddingClient(
+      () => this.backend.baseUrl(),
+      () => this.promptStyle(),
+    );
   }
 
   applyForgeConfig(next: ForgeConfig): void {
@@ -69,6 +73,7 @@ export class IndexManager {
       includeGlobs: this.includeGlobs(),
       excludeGlobs: this.excludeGlobs(),
       maxFileSizeKb: this.maxFileSizeKb(),
+      promptStyle: this.promptStyle(),
       builtAt: Date.now(),
       chunks,
     };
@@ -94,7 +99,7 @@ export class IndexManager {
       if (this.pendingSave) await this.saveIndex();
     }
 
-    const queryEmbedding = await this.client.embedOne(query);
+    const queryEmbedding = await this.client.embedQuery(query);
     const scopedPaths = scopeGlob ? await this.findScopedPaths(scopeGlob) : null;
     return this.index.chunks
       .filter((chunk) => scopedPaths === null || scopedPaths.has(chunk.path))
@@ -159,7 +164,7 @@ export class IndexManager {
       const seeds = await buildChunkSeeds(doc, relPath);
       for (let offset = 0; offset < seeds.length; offset += EMBEDDING_BATCH_SIZE) {
         const batch = seeds.slice(offset, offset + EMBEDDING_BATCH_SIZE);
-        const embeddings = await this.client.embedMany(batch.map((seed) => seed.text));
+        const embeddings = await this.client.embedDocuments(batch.map((seed) => seed.text));
         batch.forEach((seed, index) => {
           const embedding = embeddings[index];
           if (!embedding) return;
@@ -239,8 +244,15 @@ export class IndexManager {
       index.modelPath === this.modelPath() &&
       JSON.stringify(index.includeGlobs) === JSON.stringify(this.includeGlobs()) &&
       JSON.stringify(index.excludeGlobs) === JSON.stringify(this.excludeGlobs()) &&
-      index.maxFileSizeKb === this.maxFileSizeKb()
+      index.maxFileSizeKb === this.maxFileSizeKb() &&
+      // Vectors are only comparable within one prompt style. An index written
+      // before prompt_style existed has `undefined` here and correctly rebuilds.
+      index.promptStyle === this.promptStyle()
     );
+  }
+
+  private promptStyle(): EmbeddingPromptStyle {
+    return this.config.embeddings?.prompt_style ?? DEFAULT_PROMPT_STYLE;
   }
 
   private ensureEmbeddingsEnabled(): void {

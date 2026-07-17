@@ -1,5 +1,6 @@
 import type { ChatMessage } from './types';
 import type { TemplateEngine, TemplateContext } from './TemplateEngine';
+import type { SystemPromptMode } from '../config/types';
 
 // Hardcoded fallbacks used when no TemplateEngine is provided or rendering fails.
 const FORGE_TEMPLATE = 'execute';
@@ -14,13 +15,31 @@ If you have considered the same hypothesis twice, act or discard it - never re-e
  * Prepends the Forge system prompt to a message list.
  * Uses TemplateEngine when provided; falls back to hardcoded strings.
  * If messages already starts with a system message, it is replaced.
+ *
+ * `mode: 'replace'` sends `modelSystemPrompt` alone and skips the template
+ * entirely — the template is a strong coding-agent persona ("You are Forge",
+ * "ALWAYS use tools"), which a model with a different purpose must not receive.
+ * Replacing also drops the template's fenced-JSON tool-call fallback, so a
+ * model using it should not be relying on that format.
  */
 export function injectSystemPrompt(
   messages: ChatMessage[],
   templateEngine?: TemplateEngine,
   context?: Partial<TemplateContext>,
   modelSystemPrompt?: string,
+  mode: SystemPromptMode = 'append',
 ): ChatMessage[] {
+  const override = modelSystemPrompt?.trim();
+
+  // `replace` without a prompt would send an empty system message — fall
+  // through to the template instead.
+  if (mode === 'replace' && override) {
+    const systemMsg: ChatMessage = { role: 'system', content: override };
+    return messages[0]?.role === 'system'
+      ? [systemMsg, ...messages.slice(1)]
+      : [systemMsg, ...messages];
+  }
+
   let content: string;
 
   if (templateEngine) {
@@ -34,8 +53,8 @@ export function injectSystemPrompt(
     content = SYSTEM_PROMPT;
   }
 
-  if (modelSystemPrompt?.trim()) {
-    content = `${content}\n\n${modelSystemPrompt.trim()}`;
+  if (override) {
+    content = `${content}\n\n${override}`;
   }
 
   const systemMsg: ChatMessage = { role: 'system', content };

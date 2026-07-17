@@ -1,7 +1,31 @@
-export class EmbeddingClient {
-  constructor(private readonly baseUrlProvider: () => string) {}
+import {
+  DEFAULT_PROMPT_STYLE,
+  formatDocument,
+  formatQuery,
+  type EmbeddingPromptStyle,
+} from './embeddingPrompts';
 
-  async embedMany(inputs: string[]): Promise<number[][]> {
+export class EmbeddingClient {
+  constructor(
+    private readonly baseUrlProvider: () => string,
+    private readonly promptStyleProvider: () => EmbeddingPromptStyle = () => DEFAULT_PROMPT_STYLE,
+  ) {}
+
+  /** Embed indexed content. Documents and queries take different prefixes. */
+  async embedDocuments(texts: string[]): Promise<number[][]> {
+    const style = this.promptStyleProvider();
+    return this.post(texts.map((text) => formatDocument(text, style)));
+  }
+
+  /** Embed a search query. Must use the same style the index was built with. */
+  async embedQuery(text: string): Promise<number[]> {
+    const style = this.promptStyleProvider();
+    const [embedding] = await this.post([formatQuery(text, style)]);
+    if (!embedding) throw new Error('Embedding response returned no vector.');
+    return embedding;
+  }
+
+  private async post(inputs: string[]): Promise<number[][]> {
     if (inputs.length === 0) return [];
 
     const response = await fetch(`${this.baseUrlProvider()}/v1/embeddings`, {
@@ -35,11 +59,5 @@ export class EmbeddingClient {
         }
         return item.embedding;
       });
-  }
-
-  async embedOne(input: string): Promise<number[]> {
-    const [embedding] = await this.embedMany([input]);
-    if (!embedding) throw new Error('Embedding response returned no vector.');
-    return embedding;
   }
 }

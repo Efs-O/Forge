@@ -38,6 +38,12 @@ llama_server:
 # Request-time defaults — applied beneath each model's own fields and profile.
 # -------------------------------------------------------------------
 defaults:
+  # NOTE: this is APPENDED beneath Forge's built-in template (execute.njk),
+  # which already establishes the coding-agent persona and tool rules. To send
+  # a prompt INSTEAD of the template — e.g. for a fine-tune that must not be
+  # told it is Forge — set `system_prompt_mode: replace` on that model.
+  # Caveat: `replace` also drops the template's fenced-JSON tool-call fallback,
+  # so pair it with `strip_tools: true` or a natively tool-calling model.
   system_prompt: |
     You are Forge, a local AI coding assistant running inside VS Code.
     ALWAYS use tools to accomplish tasks. Never just describe what you would do.
@@ -208,6 +214,16 @@ permissions:
 #   enabled: true
 #   model_path: /path/to/embedding-model.gguf
 #   port: 8091
+#   # Embedding model's context window (default 2048). Also pins llama-server's
+#   # --batch-size/--ubatch-size: an embedding input cannot be split across
+#   # physical batches, so this must exceed your largest chunk or requests fail
+#   # with HTTP 500 "input is too large to process".
+#   n_ctx: 2048
+#   # Task prefixes for documents and queries. `gemma` is correct ONLY for
+#   # EmbeddingGemma (measured on a 2679-chunk index: MRR 0.384 -> 0.634); it
+#   # would corrupt nomic-embed/bge results. Default `none`. Changing this
+#   # invalidates the stored index and forces a rebuild.
+#   prompt_style: gemma
 #   auto_index_on_search: true
 #   max_file_size_kb: 256
 #   include_globs: ["src/**", "test/**"]

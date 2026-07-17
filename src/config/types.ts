@@ -1,4 +1,5 @@
 import type { ToolPermission } from '../tools/ToolRegistry';
+import type { EmbeddingPromptStyle } from '../search/embeddingPrompts';
 
 /** Sampling parameter overrides shared by models, profiles, and defaults. */
 export interface SamplingConfig {
@@ -29,9 +30,19 @@ export interface SpawnConfig {
   extra_llama_server_args?: string[];
 }
 
+/**
+ * How a `system_prompt` combines with Forge's own template.
+ * - `append` (default): template first, then the prompt beneath it.
+ * - `replace`: send only the prompt; the template is not rendered. For models
+ *   that must not be told they are Forge — e.g. a personal-recall fine-tune
+ *   that would otherwise answer as a codebase assistant.
+ */
+export type SystemPromptMode = 'append' | 'replace';
+
 /** Request-time role preset applied to a base model per request. */
 export interface ProfileConfig {
   system_prompt?: string;
+  system_prompt_mode?: SystemPromptMode;
   sampling?: SamplingConfig;
   think?: boolean;
   reasoning_effort?: 'high' | 'medium' | 'low' | 'none';
@@ -87,8 +98,13 @@ export interface ModelConfig {
   capabilities?: ('tool-call' | 'vision' | 'long-context')[];
   /** When true, strip tool definitions from the request for this model. */
   strip_tools?: boolean;
-  /** Per-model system prompt override (takes precedence over template). */
+  /**
+   * Per-model system prompt. By default this is APPENDED beneath Forge's
+   * template — set `system_prompt_mode: 'replace'` to send it alone.
+   */
   system_prompt?: string;
+  /** Whether `system_prompt` extends Forge's template or replaces it. */
+  system_prompt_mode?: SystemPromptMode;
   /** When true, enable thinking/reasoning tokens for this model. */
   think?: boolean;
   /** Ollama reasoning effort level when think is enabled. */
@@ -141,6 +157,8 @@ export interface EmbeddingsConfig {
   enabled?: boolean;
   model_path?: string;
   port?: number;
+  n_ctx?: number;
+  prompt_style?: EmbeddingPromptStyle;
   auto_index_on_search?: boolean;
   max_file_size_kb?: number;
   include_globs?: string[];

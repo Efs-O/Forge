@@ -64,6 +64,9 @@ const SpawnSchema = z.object({
 // Request-time role preset (F6).
 const ProfileSchema = z.object({
   system_prompt: z.string().optional(),
+  // 'replace' sends system_prompt INSTEAD of the Forge template. Default
+  // 'append' keeps the template and adds system_prompt beneath it.
+  system_prompt_mode: z.enum(['append', 'replace']).optional(),
   sampling: SamplingSchema.optional(),
   think: z.boolean().optional(),
   reasoning_effort: ReasoningEffortSchema.optional(),
@@ -94,6 +97,7 @@ const ModelConfigSchema = z
     capabilities: CapabilitiesSchema.optional(),
     strip_tools: z.boolean().optional(),
     system_prompt: z.string().optional(),
+    system_prompt_mode: z.enum(['append', 'replace']).optional(),
     think: z.boolean().optional(),
     reasoning_effort: ReasoningEffortSchema.optional(),
     strip_thinking_channels: z.boolean().optional(),
@@ -166,6 +170,13 @@ const EmbeddingsConfigSchema = z
     enabled: z.boolean().optional(),
     model_path: z.string().min(1).optional(),
     port: z.number().int().min(1).max(65535).optional(),
+    // Embedding model's context window. Also pins --batch-size/--ubatch-size,
+    // which must be >= the largest chunk or llama.cpp rejects it (HTTP 500).
+    n_ctx: z.number().int().positive().optional(),
+    // Task prefixes applied to documents and queries. `gemma` is correct for
+    // EmbeddingGemma only — it would corrupt nomic-embed/bge results. Changing
+    // this invalidates the stored index and forces a rebuild.
+    prompt_style: z.enum(['gemma', 'none']).optional(),
     auto_index_on_search: z.boolean().optional(),
     max_file_size_kb: z.number().int().positive().optional(),
     include_globs: z.array(z.string().min(1)).optional(),

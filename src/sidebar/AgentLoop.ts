@@ -434,6 +434,7 @@ export class AgentLoop {
       this.templateEngine,
       tmplCtx,
       selectedModel.system_prompt,
+      selectedModel.system_prompt_mode,
     );
     const base: ChatCompletionRequest = { model: selectedModel.name, messages, stream: true };
     const request = normalizeRequestForModel(
@@ -550,6 +551,7 @@ export class AgentLoop {
           this.templateEngine,
           tmplCtx,
           activeModel.system_prompt,
+          activeModel.system_prompt_mode,
         );
         return addWorkerDelegationInstructions(injected, allowed.has('delegate'));
       },

@@ -5,6 +5,9 @@ import type { ForgeConfig } from '../config/types';
 import { spawnLlamaServer, killLlamaProcess } from './llamaProcess';
 import { waitForHealthy, probeHealthy } from './HealthCheck';
 
+/** EmbeddingGemma 300M's trained context window. Override via embeddings.n_ctx. */
+const DEFAULT_EMBEDDING_CTX = 2048;
+
 export class EmbeddingBackend implements vscode.Disposable {
   private proc: ChildProcess | null = null;
   private ready = false;
@@ -117,7 +120,7 @@ export class EmbeddingBackend implements vscode.Disposable {
   }
 }
 
-function composeEmbeddingServerArgs(config: ForgeConfig): string[] {
+export function composeEmbeddingServerArgs(config: ForgeConfig): string[] {
   const modelPath = config.embeddings?.model_path;
   if (!modelPath) throw new Error('Forge: embeddings.model_path is not configured.');
 
@@ -128,11 +131,17 @@ function composeEmbeddingServerArgs(config: ForgeConfig): string[] {
   const gpuLayers = config.llama_server.n_gpu_layers;
   if (gpuLayers !== undefined) args.push('--n-gpu-layers', String(gpuLayers));
 
-  const ctx = config.llama_server.default_num_ctx;
-  if (ctx !== undefined) args.push('--ctx-size', String(ctx));
-
-  const batch = config.llama_server.n_batch;
-  if (batch !== undefined) args.push('--batch-size', String(batch));
+  // Embedding inputs are pooled non-causally, so llama.cpp cannot split one
+  // input across physical batches: the whole chunk must fit in n_ubatch or the
+  // request fails with HTTP 500 "input is too large to process". Chunks from
+  // chunking.ts run to 120 lines (well over llama.cpp's 512 default), so ctx,
+  // batch and ubatch are pinned together to the embedding model's own window.
+  // The chat model's llama_server ctx/batch are deliberately NOT inherited —
+  // they describe a different model with a different window.
+  const ctx = config.embeddings?.n_ctx ?? DEFAULT_EMBEDDING_CTX;
+  args.push('--ctx-size', String(ctx));
+  args.push('--batch-size', String(ctx));
+  args.push('--ubatch-size', String(ctx));
 
   const threads = config.llama_server.n_threads;
   if (threads !== undefined && threads > 0) args.push('--threads', String(threads));
