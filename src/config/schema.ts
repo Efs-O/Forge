@@ -1,8 +1,15 @@
 import { z } from 'zod';
+import {
+  CacheTypeSchema,
+  CapabilitiesSchema,
+  GroupSchema,
+  ProviderSchema,
+  ReasoningEffortSchema,
+  SamplingSchema,
+  SpawnSchema,
+  ToolCallLimitsSchema,
+} from './schemaShared';
 
-const CacheTypeSchema = z.union([z.number().int().min(0).max(8), z.string().min(1)]);
-
-const ReasoningEffortSchema = z.enum(['high', 'medium', 'low', 'none']);
 const ToolPermissionSchema = z.enum(
   [
     'read',
@@ -31,36 +38,6 @@ const ActiveModelSchema = z.preprocess(
   z.union([z.string().min(1), z.null()]),
 );
 
-const SamplingSchema = z.object({
-  temperature: z.number().optional(),
-  top_p: z.number().optional(),
-  top_k: z.number().int().optional(),
-  min_p: z.number().optional(),
-  max_tokens: z.number().int().optional(),
-  seed: z.number().int().optional(),
-  presence_penalty: z.number().optional(),
-  frequency_penalty: z.number().optional(),
-  repetition_penalty: z.number().optional(),
-  repeat_penalty: z.number().optional(),
-  repeat_last_n: z.number().int().optional(),
-  stop: z.union([z.string(), z.array(z.string())]).optional(),
-  preserve_thinking: z.boolean().optional(),
-});
-
-const CapabilitiesSchema = z.array(z.enum(['tool-call', 'vision', 'long-context']));
-
-// Spawn-time facts (F6). All optional — present-block overrides flat fields.
-const SpawnSchema = z.object({
-  num_ctx: z.number().int().positive().optional(),
-  n_parallel: z.number().int().positive().optional(),
-  n_batch: z.number().int().positive().optional(),
-  type_k: CacheTypeSchema.optional(),
-  type_v: CacheTypeSchema.optional(),
-  flash_attn: z.boolean().optional(),
-  n_gpu_layers: z.number().int().optional(),
-  extra_llama_server_args: z.array(z.string()).optional(),
-});
-
 // Request-time role preset (F6).
 const ProfileSchema = z.object({
   system_prompt: z.string().optional(),
@@ -75,74 +52,70 @@ const ProfileSchema = z.object({
   capabilities: CapabilitiesSchema.optional(),
 });
 
-const ModelConfigSchema = z
-  .object({
-    name: z.string().min(1),
-    provider: z
-      .enum(['llama.cpp', 'ollama', 'xai', 'openrouter', 'openai', 'openai-compatible'])
-      .optional(),
-    gguf_path: z.string().min(1).optional(),
-    mmproj_path: z.string().min(1).optional(),
-    endpoint: z.string().url().optional(),
-    n_gpu_layers: z.number().int().optional(),
-    num_ctx: z.number().int().positive().optional(),
-    n_batch: z.number().int().positive().optional(),
-    type_k: CacheTypeSchema.optional(),
-    type_v: CacheTypeSchema.optional(),
-    flash_attn: z.boolean().optional(),
-    extra_llama_server_args: z.array(z.string()).optional(),
-    n_parallel: z.number().int().positive().optional(),
-    // v0.3 additions
-    sampling: SamplingSchema.optional(),
-    capabilities: CapabilitiesSchema.optional(),
-    strip_tools: z.boolean().optional(),
-    system_prompt: z.string().optional(),
-    system_prompt_mode: z.enum(['append', 'replace']).optional(),
-    think: z.boolean().optional(),
-    reasoning_effort: ReasoningEffortSchema.optional(),
-    strip_thinking_channels: z.boolean().optional(),
-    api_key_secret: z.string().min(1).optional(),
-    // F6 additions
-    spawn: SpawnSchema.optional(),
-    spawn_profiles: z.record(z.string(), SpawnSchema.partial()).optional(),
-  })
-  .superRefine((model, ctx) => {
-    const provider = model.provider ?? 'llama.cpp';
-    if (provider === 'llama.cpp' && !model.gguf_path) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['gguf_path'],
-        message: 'gguf_path is required for provider: llama.cpp',
-      });
-    }
-    if (provider === 'ollama' && !model.endpoint) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['endpoint'],
-        message: 'endpoint is required for provider: ollama',
-      });
-    }
-    if (provider === 'openai-compatible' && !model.endpoint) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['endpoint'],
-        message: 'endpoint is required for provider: openai-compatible',
-      });
-    }
-    if (
-      (provider === 'xai' ||
-        provider === 'openrouter' ||
-        provider === 'openai' ||
-        provider === 'openai-compatible') &&
-      !model.api_key_secret
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['api_key_secret'],
-        message: `api_key_secret is required for provider: ${provider}`,
-      });
-    }
-  });
+const ModelConfigSchema = z.object({
+  name: z.string().min(1),
+  provider: ProviderSchema.optional(),
+  cli: z.string().min(1).optional(),
+  cli_model: z.string().min(1).optional(),
+  gguf_path: z.string().min(1).optional(),
+  mmproj_path: z.string().min(1).optional(),
+  endpoint: z.string().url().optional(),
+  n_gpu_layers: z.number().int().optional(),
+  num_ctx: z.number().int().positive().optional(),
+  n_batch: z.number().int().positive().optional(),
+  type_k: CacheTypeSchema.optional(),
+  type_v: CacheTypeSchema.optional(),
+  flash_attn: z.boolean().optional(),
+  extra_llama_server_args: z.array(z.string()).optional(),
+  n_parallel: z.number().int().positive().optional(),
+  // v0.3 additions
+  sampling: SamplingSchema.optional(),
+  capabilities: CapabilitiesSchema.optional(),
+  strip_tools: z.boolean().optional(),
+  system_prompt: z.string().optional(),
+  system_prompt_mode: z.enum(['append', 'replace']).optional(),
+  think: z.boolean().optional(),
+  reasoning_effort: ReasoningEffortSchema.optional(),
+  strip_thinking_channels: z.boolean().optional(),
+  api_key_secret: z.string().min(1).optional(),
+  // F6 additions
+  spawn: SpawnSchema.optional(),
+  spawn_profiles: z.record(z.string(), SpawnSchema.partial()).optional(),
+  // F7 additions (groups + fuzzy resolution + model manager identity fields)
+  group: z.string().min(1).optional(),
+  groups: z.array(z.string().min(1)).optional(),
+  short_name: z.string().min(1).optional(),
+  category: z.string().min(1).optional(),
+  comment: z.string().optional(),
+  tools: z.array(z.string().min(1)).optional(),
+  tool_call_limits: ToolCallLimitsSchema.optional(),
+  max_output_tokens: z.number().int().positive().optional(),
+});
+
+// Provider-requiredness checks (gguf_path/cli/endpoint/api_key_secret) live at
+// the top-level ForgeConfigSchema refine (see below), not here — `provider`
+// and `endpoint` are both fields a model may inherit from a referenced
+// `group` (F7 §2.1), and a per-model refine has no visibility into `groups`.
+// gguf_path/cli/api_key_secret are never group-suppliable (GroupSchema omits
+// them), so they still resolve purely from the model itself.
+type ModelConfigLike = z.infer<typeof ModelConfigSchema>;
+
+/** Last group in the model's `group`/`groups` list that defines `field`
+ *  wins — matches ConfigResolver.mergeGroupsIntoModel's merge order. */
+function effectiveGroupField<K extends 'provider' | 'endpoint'>(
+  model: ModelConfigLike,
+  groups: Record<string, z.infer<typeof GroupSchema>> | undefined,
+  field: K,
+): ModelConfigLike[K] | undefined {
+  const names = model.groups ?? (model.group ? [model.group] : []);
+  let value: ModelConfigLike[K] | undefined;
+  for (const name of names) {
+    const group = groups?.[name];
+    const fieldValue = group?.[field];
+    if (fieldValue !== undefined) value = fieldValue as ModelConfigLike[K];
+  }
+  return value;
+}
 
 const LlamaServerConfigSchema = z.object({
   binary: z.string().min(1).optional(),
@@ -231,6 +204,8 @@ export const ForgeConfigSchema = z
   .object({
     models: z.array(ModelConfigSchema).default([]),
     active_model: ActiveModelSchema.default(null),
+    // F7 addition
+    groups: z.record(z.string(), GroupSchema).optional(),
     // F6 additions
     defaults: ProfileSchema.partial().optional(),
     profiles: z.record(z.string(), ProfileSchema).optional(),
@@ -279,7 +254,50 @@ export const ForgeConfigSchema = z
         message: 'At least one model is required',
       });
     }
-    const hasLocalModel = cfg.models.some((m) => (m.provider ?? 'llama.cpp') === 'llama.cpp');
+    cfg.models.forEach((model, index) => {
+      const provider =
+        model.provider ?? effectiveGroupField(model, cfg.groups, 'provider') ?? 'llama.cpp';
+      const endpoint = model.endpoint ?? effectiveGroupField(model, cfg.groups, 'endpoint');
+      if (provider === 'llama.cpp' && !model.gguf_path) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['models', index, 'gguf_path'],
+          message: 'gguf_path is required for provider: llama.cpp',
+        });
+      }
+      if (provider === 'cli' && !model.cli) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['models', index, 'cli'],
+          message: 'cli is required for provider: cli',
+        });
+      }
+      if ((provider === 'ollama' || provider === 'openai-compatible') && !endpoint) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['models', index, 'endpoint'],
+          message: `endpoint is required for provider: ${provider} (directly, or via a referenced group)`,
+        });
+      }
+      if (
+        (provider === 'xai' ||
+          provider === 'openrouter' ||
+          provider === 'openai' ||
+          provider === 'openai-compatible') &&
+        !model.api_key_secret
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['models', index, 'api_key_secret'],
+          message: `api_key_secret is required for provider: ${provider}`,
+        });
+      }
+    });
+    const hasLocalModel = cfg.models.some(
+      (m) =>
+        (m.provider ?? effectiveGroupField(m, cfg.groups, 'provider') ?? 'llama.cpp') ===
+        'llama.cpp',
+    );
     if (hasLocalModel && !cfg.llama_server.binary) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

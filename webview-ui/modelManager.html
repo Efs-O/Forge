@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src ${cspSource} 'nonce-${nonce}'; style-src ${cspSource} 'unsafe-inline'; img-src data: blob: ${cspSource};">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Forge: Model Manager</title>
+  <link rel="stylesheet" href="${cssUri}">
+</head>
+<body>
+  <div id="app"></div>
+  <script nonce="${nonce}">
+    (() => {
+      const renderError = (message) => {
+        const app = document.getElementById('app');
+        if (!app) return;
+        app.innerHTML =
+          '<div style="padding:12px;font-family:var(--vscode-font-family, monospace);color:var(--vscode-errorForeground, #f48771);white-space:pre-wrap;">' +
+          message +
+          '</div>';
+      };
+
+      window.addEventListener('error', (event) => {
+        renderError('Forge Model Manager failed to load:\\n' + (event.error?.stack || event.message || 'Unknown error'));
+      });
+
+      window.addEventListener('unhandledrejection', (event) => {
+        const reason = event.reason;
+        renderError('Forge Model Manager failed to load:\\n' + (reason?.stack || reason?.message || String(reason)));
+      });
+
+      window.setTimeout(() => {
+        const app = document.getElementById('app');
+        if (app && !app.hasChildNodes()) {
+          renderError('Forge Model Manager did not initialize. Open Developer Tools and check the console.');
+        }
+      }, 2000);
+    })();
+  </script>
+  <script nonce="${nonce}" src="${jsUri}"></script>
+</body>
+</html>

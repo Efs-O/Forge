@@ -32,6 +32,14 @@ export interface ControlModelCatalogEntry {
   action: ModelCatalogAction;
   availability: ModelAvailability;
   reason?: string;
+  /** Short, memorable fuzzy-resolution identifier (step-1 schema field). Omitted when unset. */
+  short_name?: string;
+  /** Single group ("board") this model inherits from. Omitted when unset. */
+  group?: string;
+  /** Multiple groups this model inherits from, merge order. Omitted when unset. */
+  groups?: string[];
+  /** Free-tag category for the Model Manager UI. Omitted when unset. */
+  category?: string;
 }
 
 export interface ControlModelCatalog {
@@ -102,6 +110,10 @@ function entryFor(model: ModelConfig, state: CatalogState): ControlModelCatalogE
     profiles: availableProfilesFor(state.config, model.name),
     capabilities: deriveStaticCapabilities(model),
     route: cloud ? 'chat' : 'ensure',
+    ...(model.short_name ? { short_name: model.short_name } : {}),
+    ...(model.group ? { group: model.group } : {}),
+    ...(model.groups ? { groups: model.groups } : {}),
+    ...(model.category ? { category: model.category } : {}),
     ...execution,
   };
 }

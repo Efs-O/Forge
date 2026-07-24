@@ -270,6 +270,152 @@ aliases:
     expect(() => loadConfig(dir)).toThrow(/targets unknown model "missing"/i);
   });
 
+  it('accepts a groups-based config and validates group references (F7)', () => {
+    const dir = mkTempDir();
+    fs.writeFileSync(
+      path.join(dir, 'config.yaml'),
+      `active_model: gemma
+llama_server:
+  binary: llama-server
+groups:
+  llamacpp-gemma:
+    spawn: { n_batch: 512 }
+    num_ctx: 32768
+models:
+  - name: gemma
+    provider: llama.cpp
+    gguf_path: C:/models/gemma.gguf
+    group: llamacpp-gemma
+`,
+      'utf8',
+    );
+    const config = loadConfig(dir);
+    expect(Object.keys(config.groups ?? {})).toEqual(['llamacpp-gemma']);
+    expect(config.models[0]?.group).toBe('llamacpp-gemma');
+  });
+
+  it('rejects a model referencing an unknown group', () => {
+    const dir = mkTempDir();
+    fs.writeFileSync(
+      path.join(dir, 'config.yaml'),
+      `active_model: gemma
+llama_server:
+  binary: llama-server
+models:
+  - name: gemma
+    provider: llama.cpp
+    gguf_path: C:/models/gemma.gguf
+    group: missing-group
+`,
+      'utf8',
+    );
+    expect(() => loadConfig(dir)).toThrow(/references unknown group "missing-group"/i);
+  });
+
+  it('rejects a model referencing an unknown group via the groups array', () => {
+    const dir = mkTempDir();
+    fs.writeFileSync(
+      path.join(dir, 'config.yaml'),
+      `active_model: gemma
+llama_server:
+  binary: llama-server
+groups:
+  ok: { think: false }
+models:
+  - name: gemma
+    provider: llama.cpp
+    gguf_path: C:/models/gemma.gguf
+    groups: [ok, nope]
+`,
+      'utf8',
+    );
+    expect(() => loadConfig(dir)).toThrow(/references unknown group "nope"/i);
+  });
+
+  it('rejects a short_name colliding with another configured model name', () => {
+    const dir = mkTempDir();
+    fs.writeFileSync(
+      path.join(dir, 'config.yaml'),
+      `active_model: gemma
+llama_server:
+  binary: llama-server
+models:
+  - name: gemma
+    provider: llama.cpp
+    gguf_path: C:/models/gemma.gguf
+    short_name: qwen
+  - name: qwen
+    provider: llama.cpp
+    gguf_path: C:/models/qwen.gguf
+`,
+      'utf8',
+    );
+    expect(() => loadConfig(dir)).toThrow(/short_name "qwen".*collides with a configured model name/i);
+  });
+
+  it('rejects a short_name colliding with an alias key', () => {
+    const dir = mkTempDir();
+    fs.writeFileSync(
+      path.join(dir, 'config.yaml'),
+      `active_model: gemma
+llama_server:
+  binary: llama-server
+models:
+  - name: gemma
+    provider: llama.cpp
+    gguf_path: C:/models/gemma.gguf
+    short_name: worker
+aliases:
+  worker: gemma
+`,
+      'utf8',
+    );
+    expect(() => loadConfig(dir)).toThrow(/short_name "worker".*collides with alias/i);
+  });
+
+  it('rejects two models sharing the same short_name', () => {
+    const dir = mkTempDir();
+    fs.writeFileSync(
+      path.join(dir, 'config.yaml'),
+      `active_model: gemma-a
+llama_server:
+  binary: llama-server
+models:
+  - name: gemma-a
+    provider: llama.cpp
+    gguf_path: C:/models/a.gguf
+    short_name: gemma4
+  - name: gemma-b
+    provider: llama.cpp
+    gguf_path: C:/models/b.gguf
+    short_name: gemma4
+`,
+      'utf8',
+    );
+    expect(() => loadConfig(dir)).toThrow(
+      /short_name "gemma4" is used by both "gemma-a" and "gemma-b"/i,
+    );
+  });
+
+  it('accepts a unique short_name', () => {
+    const dir = mkTempDir();
+    fs.writeFileSync(
+      path.join(dir, 'config.yaml'),
+      `active_model: gemma-26b-a4b-it-iq3s
+llama_server:
+  binary: llama-server
+models:
+  - name: gemma-26b-a4b-it-iq3s
+    provider: llama.cpp
+    gguf_path: C:/models/gemma.gguf
+    short_name: gemma4
+`,
+      'utf8',
+    );
+    const config = loadConfig(dir);
+    expect(config.models[0]?.short_name).toBe('gemma4');
+  });
+
   it('accepts active_model that is an alias key', () => {
     const dir = mkTempDir();
     fs.writeFileSync(

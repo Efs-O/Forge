@@ -1,0 +1,60 @@
+/* Model Manager detail drawer + modal dialogs (F7/§2.3). Split from
+ * model-manager.css to stay under the 350-line per-file limit. */
+
+.mm-drawer {
+  width: 420px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--forge-border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--forge-surface-1);
+}
+.mm-drawer-header { display: flex; align-items: center; justify-content: space-between; padding: var(--forge-space-2) var(--forge-space-3); border-bottom: 1px solid var(--forge-border); }
+.mm-drawer-header h2 { font-size: 1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mm-close-btn { background: transparent; }
+.mm-drawer-actions { display: flex; gap: 4px; flex-wrap: wrap; padding: var(--forge-space-2) var(--forge-space-3); border-bottom: 1px solid var(--forge-border); }
+
+.mm-tab-nav { display: flex; gap: 2px; padding: var(--forge-space-2) var(--forge-space-3) 0; border-bottom: 1px solid var(--forge-border); flex-wrap: wrap; }
+.mm-tab-nav button { background: transparent; border-radius: var(--forge-radius-sm) var(--forge-radius-sm) 0 0; }
+.mm-tab-nav button.mm-tab-active { background: var(--forge-surface-2); font-weight: 600; }
+
+.mm-tab-body { flex: 1; overflow-y: auto; padding: var(--forge-space-3); }
+.mm-tab-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--forge-space-3); align-items: start; }
+
+.mm-field { display: flex; flex-direction: column; gap: 2px; font-size: 0.9em; }
+.mm-field label, .mm-field > span { opacity: 0.75; }
+.mm-field input, .mm-field textarea {
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--forge-border);
+  border-radius: var(--forge-radius-sm);
+  padding: 4px 6px;
+  font-family: inherit;
+  font-size: inherit;
+}
+.mm-field textarea { min-height: 60px; resize: vertical; }
+.mm-field--wide { grid-column: 1 / -1; }
+.mm-field--bool { flex-direction: row; align-items: center; gap: 6px; }
+.mm-field--readonly input { opacity: 0.7; }
+.mm-field--inherited input, .mm-field--inherited textarea { opacity: 0.55; font-style: italic; }
+.mm-field--error input, .mm-field--error textarea { border-color: var(--vscode-inputValidation-errorBorder, #be1100); }
+
+.mm-reveal-btn { grid-column: 1 / -1; justify-self: start; }
+
+/* ── Modals (scan / groups editor / purge confirm) ──────────────────── */
+.mm-modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.mm-modal { background: var(--forge-surface-1); border: 1px solid var(--forge-border); border-radius: var(--forge-radius-md); padding: var(--forge-space-4); max-width: 480px; width: 90%; max-height: 80vh; overflow-y: auto; }
+.mm-modal--wide { max-width: 720px; }
+.mm-modal h3 { margin-bottom: var(--forge-space-2); }
+.mm-modal p { margin-bottom: var(--forge-space-2); opacity: 0.85; }
+.mm-modal input { width: 100%; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--forge-border); border-radius: var(--forge-radius-sm); padding: 4px 8px; margin-bottom: var(--forge-space-2); }
+.mm-modal-actions { display: flex; gap: var(--forge-space-2); align-items: center; margin-top: var(--forge-space-2); flex-wrap: wrap; }
+
+.mm-scan-list, .mm-groups-list { list-style: none; margin-top: var(--forge-space-2); }
+.mm-scan-list li { display: flex; align-items: center; gap: var(--forge-space-2); padding: 4px 0; border-bottom: 1px solid var(--forge-border); }
+.mm-scan-row--configured { opacity: 0.5; }
+.mm-scan-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.mm-group-row { padding: var(--forge-space-2) 0; border-bottom: 1px solid var(--forge-border); }
+.mm-group-row-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--forge-space-2); }

@@ -1,4 +1,11 @@
-import type { ForgeConfig, ModelConfig, ProfileConfig, SamplingConfig, SpawnConfig } from './types';
+import type {
+  ForgeConfig,
+  GroupConfig,
+  ModelConfig,
+  ProfileConfig,
+  SamplingConfig,
+  SpawnConfig,
+} from './types';
 
 /**
  * F6 — model/profile resolution. Two flavors, both flattening to legacy
@@ -6,7 +13,27 @@ import type { ForgeConfig, ModelConfig, ProfileConfig, SamplingConfig, SpawnConf
  *   - request-time: defaults < base request fields < named profile
  *   - spawn-time:   base flat/spawn < spawn_profile
  * See `F6_PROFILES_PLAN.md`.
+ *
+ * F7 — `groups` ("boards") and fuzzy model-name resolution layer on top:
+ * precedence is `defaults < group(s) < model fields < profile`. Groups are
+ * merged into the base model once, in `findBase`, so both request-time and
+ * spawn-time flattening automatically see group-derived fields as if they
+ * were declared directly on the model. See CONFIG_OVERHAUL_PLAN.md §2.1/§2.2.
  */
+
+/** Thrown when a fuzzy model lookup matches more than one configured model.
+ *  Callers must never guess between candidates — surface this to the user. */
+export class AmbiguousModelError extends Error {
+  readonly query: string;
+  readonly candidates: string[];
+
+  constructor(query: string, candidates: string[]) {
+    super(`Ambiguous model "${query}": matches ${candidates.join(', ')}`);
+    this.name = 'AmbiguousModelError';
+    this.query = query;
+    this.candidates = candidates;
+  }
+}
 
 /** num_ctx at/above which a model is tagged `long-context` when deriving caps. */
 const LONG_CONTEXT_CTX = 131072;
@@ -36,25 +63,136 @@ export function expandAlias(config: ForgeConfig, id: string, log?: (msg: string)
   return target;
 }
 
+/**
+ * Deterministic fuzzy model-name resolver, single owner for every lookup
+ * that accepts a user- or model-supplied identifier (chat picker, delegation,
+ * workers, control server). Matching order, first non-empty stage wins:
+ *   1. exact name
+ *   2. exact alias key
+ *   3. exact short_name
+ *   4. case-insensitive exact (name / alias / short_name)
+ *   5. unique prefix match (name / short_name)
+ *   6. unique substring match (name / short_name)
+ * A stage yielding more than one candidate throws `AmbiguousModelError`
+ * listing every candidate — never guesses between matches. `query` must
+ * already have any `@profile` suffix stripped by the caller.
+ */
+export function resolveModelName(config: ForgeConfig, query: string): string {
+  const models = config.models;
+
+  const exactName = models.find((m) => m.name === query);
+  if (exactName) return exactName.name;
+
+  const aliasTarget = config.aliases?.[query];
+  if (aliasTarget) return splitModelProfile(aliasTarget).base;
+
+  const exactShort = models.find((m) => m.short_name === query);
+  if (exactShort) return exactShort.name;
+
+  const lowerQuery = query.toLowerCase();
+
+  const ciCandidates = new Set<string>();
+  for (const m of models) {
+    if (m.name.toLowerCase() === lowerQuery) ciCandidates.add(m.name);
+    if (m.short_name?.toLowerCase() === lowerQuery) ciCandidates.add(m.name);
+  }
+  for (const [key, target] of Object.entries(config.aliases ?? {})) {
+    if (key.toLowerCase() === lowerQuery) ciCandidates.add(splitModelProfile(target).base);
+  }
+  if (ciCandidates.size === 1) return [...ciCandidates][0];
+  if (ciCandidates.size > 1) throw new AmbiguousModelError(query, [...ciCandidates].sort());
+
+  const prefixCandidates = new Set<string>();
+  for (const m of models) {
+    if (m.name.toLowerCase().startsWith(lowerQuery)) prefixCandidates.add(m.name);
+    else if (m.short_name?.toLowerCase().startsWith(lowerQuery)) prefixCandidates.add(m.name);
+  }
+  if (prefixCandidates.size === 1) return [...prefixCandidates][0];
+  if (prefixCandidates.size > 1) throw new AmbiguousModelError(query, [...prefixCandidates].sort());
+
+  const substringCandidates = new Set<string>();
+  for (const m of models) {
+    if (m.name.toLowerCase().includes(lowerQuery)) substringCandidates.add(m.name);
+    else if (m.short_name?.toLowerCase().includes(lowerQuery)) substringCandidates.add(m.name);
+  }
+  if (substringCandidates.size === 1) return [...substringCandidates][0];
+  if (substringCandidates.size > 1) {
+    throw new AmbiguousModelError(query, [...substringCandidates].sort());
+  }
+
+  throw new Error(
+    `Forge: unknown model "${query}" (configured: ${models.map((m) => m.name).join(', ') || 'none'})`,
+  );
+}
+
 function findBase(config: ForgeConfig, base: string): ModelConfig {
-  const model = config.models.find((m) => m.name === base);
+  const exact = config.models.find((m) => m.name === base);
+  const model = exact ?? config.models.find((m) => m.name === resolveModelName(config, base));
   if (!model) {
     throw new Error(
       `Forge: unknown model "${base}" (configured: ${config.models.map((m) => m.name).join(', ') || 'none'})`,
     );
   }
-  return model;
+  return mergeGroupsIntoModel(config, model);
+}
+
+/** Shallow key-by-key merge across ordered layers (higher index wins per key). */
+function mergeRecord<T extends object>(...layers: (T | undefined)[]): T | undefined {
+  let merged: T | undefined;
+  for (const layer of layers) {
+    if (!layer) continue;
+    merged = { ...(merged ?? ({} as T)), ...layer };
+  }
+  return merged;
 }
 
 function mergeSampling(...layers: (SamplingConfig | undefined)[]): SamplingConfig | undefined {
-  const merged: SamplingConfig = {};
-  let any = false;
-  for (const layer of layers) {
-    if (!layer) continue;
-    any = true;
-    Object.assign(merged, layer);
+  return mergeRecord<SamplingConfig>(...layers);
+}
+
+/**
+ * Fold a model's `group`/`groups` into itself: group(s) apply beneath the
+ * model's own explicit fields (defaults < group(s) < model fields). Groups
+ * are merged left-to-right when `groups` lists more than one (later wins).
+ * `sampling`, `spawn`, and `tool_call_limits` are merged key-by-key across
+ * every layer; every other field is a plain override (higher layer wins
+ * wholesale, matching the existing `pick()` semantics used elsewhere).
+ */
+export function mergeGroupsIntoModel(config: ForgeConfig, model: ModelConfig): ModelConfig {
+  const groupNames = model.groups ?? (model.group ? [model.group] : []);
+  if (groupNames.length === 0) return model;
+
+  const groups = groupNames
+    .map((name) => config.groups?.[name])
+    .filter((g): g is GroupConfig => Boolean(g));
+  if (groups.length === 0) return model;
+
+  let groupFields: Record<string, unknown> = {};
+  const samplingLayers: (SamplingConfig | undefined)[] = [];
+  const spawnLayers: (SpawnConfig | undefined)[] = [];
+  const limitLayers: (Record<string, number> | undefined)[] = [];
+  for (const g of groups) {
+    const { sampling, spawn, tool_call_limits, ...rest } = g;
+    groupFields = { ...groupFields, ...rest };
+    samplingLayers.push(sampling);
+    spawnLayers.push(spawn);
+    limitLayers.push(tool_call_limits);
   }
-  return any ? merged : undefined;
+  samplingLayers.push(model.sampling);
+  spawnLayers.push(model.spawn);
+  limitLayers.push(model.tool_call_limits);
+
+  const merged: Record<string, unknown> = { ...groupFields, ...model };
+  const mergedSampling = mergeSampling(...samplingLayers);
+  const mergedSpawn = mergeRecord<SpawnConfig>(...spawnLayers);
+  const mergedLimits = mergeRecord<Record<string, number>>(...limitLayers);
+  if (mergedSampling) merged['sampling'] = mergedSampling;
+  else delete merged['sampling'];
+  if (mergedSpawn) merged['spawn'] = mergedSpawn;
+  else delete merged['spawn'];
+  if (mergedLimits) merged['tool_call_limits'] = mergedLimits;
+  else delete merged['tool_call_limits'];
+  return merged as unknown as ModelConfig;
 }
 
 /** Highest-precedence defined value across layers ordered low→high. */

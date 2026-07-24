@@ -70,6 +70,45 @@ export function loadConfig(storagePath: string): ForgeConfig {
     }
   }
 
+  // Every model's group/groups reference must resolve to a defined group (F7).
+  const groupNames = new Set(Object.keys(config.groups ?? {}));
+  for (const model of config.models) {
+    const referenced = model.groups ?? (model.group ? [model.group] : []);
+    for (const name of referenced) {
+      if (!groupNames.has(name)) {
+        throw new Error(
+          `Forge: model "${model.name}" references unknown group "${name}" (defined: ${[...groupNames].join(', ') || 'none'})`,
+        );
+      }
+    }
+  }
+
+  // short_name must be globally unique against every model name, alias key,
+  // and other short_name (F7) — the fuzzy resolver depends on this.
+  const aliasKeys = Object.keys(config.aliases ?? {});
+  const seenShortNames = new Map<string, string>();
+  for (const model of config.models) {
+    if (!model.short_name) continue;
+    const short = model.short_name;
+    if (modelNames.has(short) && short !== model.name) {
+      throw new Error(
+        `Forge: short_name "${short}" on model "${model.name}" collides with a configured model name`,
+      );
+    }
+    if (aliasKeys.includes(short)) {
+      throw new Error(
+        `Forge: short_name "${short}" on model "${model.name}" collides with alias "${short}"`,
+      );
+    }
+    const owner = seenShortNames.get(short);
+    if (owner) {
+      throw new Error(
+        `Forge: short_name "${short}" is used by both "${owner}" and "${model.name}" — short_name must be unique`,
+      );
+    }
+    seenShortNames.set(short, model.name);
+  }
+
   config.models = config.models.sort((a, b) =>
     a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
   );

@@ -159,11 +159,20 @@ models:
   #   capabilities: [tool-call]
   #   num_ctx: 1000000
   #   sampling: { temperature: 0.7, max_tokens: 30000 }
-  # - name: claude-via-gateway
-  #   provider: openai-compatible
-  #   endpoint: https://your-openai-compatible-gateway.example.com
-  #   api_key_secret: gateway
-  #   capabilities: [tool-call, long-context]
+  # --- External CLI agents via existing subscriptions (no API key in Forge) ---
+  # Forge spawns the already-logged-in CLI locally; auth is entirely the CLI's
+  # own login (`claude login` / `codex login`), never a key in config.yaml.
+  # These are FULL-RIGHTS external agents using their OWN tools. They can be
+  # selected for direct sidebar chat and used as dispatch_workers or
+  # ask_local_agent targets.
+  # - name: claude-code
+  #   provider: cli
+  #   cli: claude          # bare name resolved on PATH, or an absolute path
+  #   cli_model: opus      # optional explicit override; omit to use the CLI's configured/default model
+  #   group: external-agents
+  # - name: codex
+  #   provider: cli
+  #   cli: codex
 
 # -------------------------------------------------------------------
 # Optional: web search (Tavily or Brave)

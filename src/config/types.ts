@@ -39,6 +39,42 @@ export interface SpawnConfig {
  */
 export type SystemPromptMode = 'append' | 'replace';
 
+/** Runtime provider for a model or group entry. */
+export type ModelProvider =
+  | 'llama.cpp'
+  | 'ollama'
+  | 'xai'
+  | 'openrouter'
+  | 'openai'
+  | 'openai-compatible'
+  | 'cli';
+
+/**
+ * A named bundle of shared config ("board") that models opt into via
+ * `group`/`groups`. Purely additive — precedence is
+ * `defaults < group(s) < model fields < profile` (ConfigResolver owns the
+ * merge). See CONFIG_OVERHAUL_PLAN.md §2.1.
+ */
+export interface GroupConfig {
+  provider?: ModelProvider;
+  endpoint?: string;
+  spawn?: SpawnConfig;
+  sampling?: SamplingConfig;
+  num_ctx?: number;
+  think?: boolean;
+  reasoning_effort?: 'high' | 'medium' | 'low' | 'none';
+  strip_tools?: boolean;
+  strip_thinking_channels?: boolean;
+  system_prompt?: string;
+  system_prompt_mode?: SystemPromptMode;
+  capabilities?: ('tool-call' | 'vision' | 'long-context')[];
+  max_output_tokens?: number;
+  /** Tool-name allowlist for models in this group. */
+  tools?: string[];
+  /** Per-tool max invocations per turn for models in this group. */
+  tool_call_limits?: Record<string, number>;
+}
+
 /** Request-time role preset applied to a base model per request. */
 export interface ProfileConfig {
   system_prompt?: string;
@@ -55,7 +91,11 @@ export interface ModelConfig {
   /** Display name shown in the sidebar model picker. */
   name: string;
   /** Runtime provider for this model entry. */
-  provider?: 'llama.cpp' | 'ollama' | 'xai' | 'openrouter' | 'openai' | 'openai-compatible';
+  provider?: ModelProvider;
+  /** Executable name or absolute path for provider: cli (e.g. `claude`, `codex`). */
+  cli?: string;
+  /** Model name or alias passed directly to the external CLI (e.g. `opus`). */
+  cli_model?: string;
   /** Absolute path to the .gguf file. Required for llama.cpp models. */
   gguf_path?: string;
   /** Optional path to the vision projector .gguf (mmproj). Enables multimodal image input. */
@@ -117,6 +157,22 @@ export interface ModelConfig {
   spawn?: SpawnConfig;
   /** Rare spawn-time overrides keyed by spawn-profile name (F6). */
   spawn_profiles?: Record<string, SpawnConfig>;
+  /** Single group ("board") this model inherits shared config from. Ignored when `groups` is set. */
+  group?: string;
+  /** Multiple groups merged in listed order (later wins); each group must exist in `ForgeConfig.groups`. */
+  groups?: string[];
+  /** Short, memorable identifier for fuzzy worker/chat-picker resolution (e.g. `gemma4`). Must be globally unique against all names/aliases/short_names. */
+  short_name?: string;
+  /** Free-tag category for the Model Manager UI (e.g. coding, vision, worker, cloud). */
+  category?: string;
+  /** User-authored note, first-class so it survives YAML rewrites without depending on comments. */
+  comment?: string;
+  /** Per-model tool-name allowlist override. Overrides any inherited group allowlist. */
+  tools?: string[];
+  /** Per-model tool-call budget override, merged over any inherited group budget. */
+  tool_call_limits?: Record<string, number>;
+  /** Per-model output-token cap override, merged over any inherited group value. */
+  max_output_tokens?: number;
 }
 
 export interface LlamaServerConfig {
@@ -168,6 +224,8 @@ export interface EmbeddingsConfig {
 export interface ForgeConfig {
   models: ModelConfig[];
   active_model: string | null;
+  /** Named shared config bundles ("boards") models opt into via `group`/`groups`. */
+  groups?: Record<string, GroupConfig>;
   /** Shared request-time defaults applied beneath base facts and profiles (F6). */
   defaults?: ProfileConfig;
   /** Named request-time role presets (F6). Referenced via `model@profile`. */

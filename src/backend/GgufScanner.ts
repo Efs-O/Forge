@@ -8,6 +8,25 @@ export interface GgufCandidate {
   modelName: string; // derived from filename
   sizeBytes: number;
   familyHint: string; // 'qwen3' | 'gemma4' | 'llama' | 'mistral' | 'phi' | 'unknown'
+  /** Quant token parsed from the filename (e.g. `Q4_K_M`, `IQ3_S`), if recognizable. */
+  quant?: string;
+  /** Sibling `mmproj-*.gguf` found in the same directory, auto-suggested as `mmproj_path`. */
+  mmprojPath?: string;
+}
+
+const QUANT_RE = /\b(IQ[1-4]_[A-Z0-9_]+|Q[2-8]_[A-Z0-9_]+|F16|BF16|F32)\b/i;
+
+/** Extract a recognizable quant token from a GGUF filename (F7/§2.5). Returns
+ *  undefined for names that don't match a known quant naming convention. */
+export function extractQuant(filename: string): string | undefined {
+  const m = QUANT_RE.exec(filename);
+  return m ? m[1].toUpperCase() : undefined;
+}
+
+/** True for `mmproj-*.gguf` / `*-mmproj.gguf` vision-projector files — these
+ *  are never model candidates themselves, only sibling attachments (F7/§2.5). */
+export function isMmprojFile(filename: string): boolean {
+  return filename.toLowerCase().includes('mmproj');
 }
 
 const MAX_DEPTH = 5;
@@ -66,6 +85,7 @@ async function scanDirectory(
   results: Map<string, GgufCandidate>,
   visitedDirs: Set<string>,
   deadline: number,
+  mmprojByDir: Map<string, string[]>,
 ): Promise<void> {
   const pending: Array<{ dir: string; depth: number }> = [{ dir: rootDir, depth: 0 }];
 
@@ -108,6 +128,16 @@ async function scanDirectory(
       if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.gguf')) continue;
 
       const resolved = path.resolve(fullPath);
+
+      // mmproj files are never model candidates — collect them per-directory
+      // so a later pass can attach the sibling to any model found alongside it.
+      if (isMmprojFile(entry.name)) {
+        const list = mmprojByDir.get(dir) ?? [];
+        list.push(resolved);
+        mmprojByDir.set(dir, list);
+        continue;
+      }
+
       if (results.has(resolved)) continue;
 
       let stat: fs.Stats;
@@ -117,11 +147,13 @@ async function scanDirectory(
         continue;
       }
 
+      const quant = extractQuant(entry.name);
       results.set(resolved, {
         ggufPath: resolved,
         modelName: deriveModelName(resolved),
         sizeBytes: stat.size,
         familyHint: deriveFamily(entry.name),
+        ...(quant !== undefined ? { quant } : {}),
       });
     }
   }
@@ -169,6 +201,7 @@ export async function scanForGgufs(extraDirs: string[] = []): Promise<GgufCandid
 
   const results = new Map<string, GgufCandidate>();
   const visitedDirs = new Set<string>();
+  const mmprojByDir = new Map<string, string[]>();
 
   for (const dir of dirsToSearch) {
     if (results.size >= MAX_RESULTS || Date.now() > deadline) break;
@@ -181,7 +214,14 @@ export async function scanForGgufs(extraDirs: string[] = []): Promise<GgufCandid
     }
     if (!stat.isDirectory()) continue;
 
-    await scanDirectory(dir, results, visitedDirs, deadline);
+    await scanDirectory(dir, results, visitedDirs, deadline, mmprojByDir);
+  }
+
+  // Attach the first sibling mmproj file found in the same directory (F7/§2.5).
+  for (const candidate of results.values()) {
+    const dir = path.dirname(candidate.ggufPath);
+    const siblings = mmprojByDir.get(dir);
+    if (siblings?.[0]) candidate.mmprojPath = siblings[0];
   }
 
   return Array.from(results.values()).sort((a, b) => {

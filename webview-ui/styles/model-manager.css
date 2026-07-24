@@ -1,0 +1,69 @@
+/* Model Manager webview panel — layout + list (F7/§2.3). Detail-drawer and
+ * modal styles live in model-manager-detail.css to stay under the 350-line
+ * per-file limit. Reuses base.css's --forge-* tokens (VS Code theme vars). */
+
+html, body { height: 100%; background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size, 13px); }
+
+.mm-root { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+.mm-error-banner {
+  background: var(--vscode-inputValidation-errorBackground, #5a1d1d);
+  border: 1px solid var(--vscode-inputValidation-errorBorder, #be1100);
+  color: var(--vscode-errorForeground, #f48771);
+  padding: var(--forge-space-2) var(--forge-space-3);
+  cursor: pointer;
+}
+
+/* ── Toolbar ─────────────────────────────────────────────────────────── */
+.mm-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--forge-space-2);
+  padding: var(--forge-space-2) var(--forge-space-3);
+  border-bottom: 1px solid var(--forge-border);
+  flex-wrap: wrap;
+}
+.mm-toolbar-summary { opacity: 0.85; }
+.mm-filter { flex: 1 1 220px; min-width: 160px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--forge-border); border-radius: var(--forge-radius-sm); padding: 4px 8px; }
+.mm-sort-group { display: flex; gap: 4px; }
+.mm-unused-toggle { display: flex; align-items: center; gap: 4px; }
+
+/* ── Body / list ─────────────────────────────────────────────────────── */
+.mm-body { flex: 1; display: flex; overflow: hidden; }
+
+.mm-list { list-style: none; overflow-y: auto; flex: 1; }
+.mm-row {
+  display: grid;
+  grid-template-columns: auto auto minmax(140px, 2fr) auto auto auto auto auto auto;
+  align-items: center;
+  gap: var(--forge-space-2);
+  padding: 6px var(--forge-space-3);
+  border-bottom: 1px solid var(--forge-border);
+  cursor: pointer;
+}
+.mm-row:hover { background: var(--forge-surface-2); }
+.mm-row--focused { outline: 2px solid var(--forge-accent); outline-offset: -2px; }
+.mm-row--selected { background: var(--vscode-list-inactiveSelectionBackground, #37373d); }
+
+.mm-dot { width: 8px; height: 8px; border-radius: 50%; background: #666; }
+.mm-dot--loaded { background: #3fb950; }
+.mm-dot--active { background: #d29922; }
+.mm-dot--idle { background: #555; }
+
+.mm-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mm-warn { color: var(--vscode-errorForeground, #f48771); margin-right: 4px; }
+.mm-badge { font-size: 0.85em; padding: 1px 6px; border-radius: var(--forge-radius-pill); background: var(--forge-surface-2); }
+.mm-size, .mm-used { font-variant-numeric: tabular-nums; opacity: 0.85; white-space: nowrap; }
+.mm-group, .mm-category { opacity: 0.7; font-size: 0.85em; white-space: nowrap; }
+.mm-try-btn { font-size: 0.85em; }
+.mm-empty { padding: var(--forge-space-4); opacity: 0.6; text-align: center; }
+
+/* ── Orphans ─────────────────────────────────────────────────────────── */
+.mm-orphans { border-top: 1px solid var(--forge-border); padding: var(--forge-space-2) var(--forge-space-3); max-height: 160px; overflow-y: auto; }
+.mm-orphans h3 { margin-bottom: 4px; font-size: 0.95em; opacity: 0.85; }
+.mm-orphans ul { list-style: none; }
+.mm-orphans li { display: flex; align-items: center; gap: var(--forge-space-2); padding: 3px 0; }
+.mm-orphan-path { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--vscode-editor-font-family, monospace); font-size: 0.85em; }
+
+.mm-danger-btn { background: var(--vscode-inputValidation-errorBackground, #5a1d1d); color: var(--vscode-errorForeground, #f48771); }
+.mm-danger-btn:hover { background: var(--vscode-inputValidation-errorBorder, #be1100); }
