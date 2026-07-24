@@ -84,6 +84,23 @@ describe('WorkerAccessPolicy', () => {
     );
   });
 
+  it('advertises exactly the documented nine tools to write workers', () => {
+    const scope = new WorkerAccessPolicy(root, 'write', ['src/write.ts']).scope();
+    expect(scope.allowedNames).toEqual(
+      new Set([
+        'read_file',
+        'list_directory',
+        'find_files',
+        'search_code',
+        'get_document_symbols',
+        'get_diagnostics',
+        'write_file',
+        'replace_in_file',
+        'apply_line_edits',
+      ]),
+    );
+  });
+
   it('allows structured edits only on the exact assigned path', () => {
     const scope = new WorkerAccessPolicy(root, 'write', ['src/write.ts']).scope();
     expect(scope.allowedNames.has('apply_line_edits')).toBe(true);

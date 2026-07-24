@@ -88,13 +88,19 @@ export class WorkerOrchestrationService {
     const timeout = AbortSignal.timeout(WORKER_RUN_TIMEOUT_MS);
     const signal = AbortSignal.any([context.abortSignal, timeout]);
     const runContext = { ...context, abortSignal: signal };
-    const local = resolved.filter((worker) => worker.route !== 'direct-cloud');
+    // Neither direct-cloud (own HTTP client) nor cli-agent (own spawned
+    // process) go through the local llama.cpp/Ollama backend pool.
+    const local = resolved.filter(
+      (worker) => worker.route !== 'direct-cloud' && worker.route !== 'cli-agent',
+    );
     const primary = context.coordinatorModel ?? this.deps.getConfig().active_model ?? '';
     const group =
       local.length > 0
         ? await this.deps.pool.acquireGroupForDelegation(
             primary,
-            local.map((worker) => worker.spec.model),
+            // Canonical resolved name, not the raw (possibly fuzzy/short_name)
+            // request — BackendPool's pool key is exact-alias-aware only.
+            local.map((worker) => worker.model.name),
           )
         : undefined;
     try {
@@ -178,7 +184,16 @@ export class WorkerOrchestrationService {
       model: worker.spec.model,
       elapsedMs: Date.now() - startedAt,
     });
-    const result = await this.loop.run(worker.spec, target, worker.policy, runContext);
+    const result = await this.loop.run(worker.spec, target, worker.policy, runContext, (line) =>
+      this.emit(originalContext, {
+        runId,
+        stage: 'worker-progress',
+        workerId: worker.spec.id,
+        model: worker.spec.model,
+        elapsedMs: Date.now() - startedAt,
+        detail: line,
+      }),
+    );
     this.emit(originalContext, {
       runId,
       stage: 'worker-finished',
@@ -220,6 +235,9 @@ export class WorkerOrchestrationService {
     const localIndex = new Map(local.map((worker, index) => [worker.spec.id, index]));
     return Promise.all(
       workers.map(async (worker) => {
+        if (worker.route === 'cli-agent') {
+          return { model: worker.model, kind: 'cli' as const, bestEffort: false };
+        }
         if (worker.route === 'direct-cloud') {
           const cloud = await resolveCloudRequestTarget(worker.model, this.deps.secrets);
           return { model: worker.model, ...cloud, bestEffort: false };

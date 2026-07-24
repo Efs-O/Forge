@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { isDeepStrictEqual } from 'util';
 import { getLogger } from '../util/logger';
 
 const log = getLogger();
@@ -49,6 +50,17 @@ export class CheckpointSession {
     log.debug(`[CheckpointStack] snapshotted ${abs}`);
   }
 
+  /** Records a path that did not exist when the turn began. This is used for
+   * processes whose writes happen outside Forge's tool dispatcher: after the
+   * process exits, newly-created top-level paths can still be removed by Undo. */
+  snapshotMissingBefore(filePath: string): void {
+    if (this.committed) throw new Error('CheckpointSession: turn already committed');
+    const abs = path.resolve(filePath);
+    if (this.pendingSnapshots.some((snapshot) => snapshot.filePath === abs)) return;
+    this.pendingSnapshots.push({ filePath: abs, originalState: { kind: 'missing' } });
+    log.debug(`[CheckpointStack] recorded missing-before ${abs}`);
+  }
+
   readSnapshotContent(filePath: string): string | null | undefined {
     const abs = path.resolve(filePath);
     const snapshot = this.pendingSnapshots.find((candidate) => candidate.filePath === abs);
@@ -96,10 +108,19 @@ export class CheckpointStack {
   }
 
   private commitSession(session: CheckpointSession): void {
-    if (session.snapshots().length === 0) return;
+    const changed = session.snapshots().filter((snapshot) => {
+      try {
+        return !isDeepStrictEqual(snapshot.originalState, this.capture(snapshot.filePath));
+      } catch {
+        // If the current path cannot be inspected, retain the original state so
+        // Undo remains the safe operation.
+        return true;
+      }
+    });
+    if (changed.length === 0) return;
     this.stack.push({
       turnId: session.turnId,
-      snapshots: [...session.snapshots()],
+      snapshots: changed,
       createdAt: Date.now(),
     });
     log.debug(`[CheckpointStack] committed, depth=${this.stack.length}`);

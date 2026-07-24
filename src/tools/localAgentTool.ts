@@ -46,9 +46,11 @@ export function makeLocalAgentTool(
       function: {
         name: 'ask_local_agent',
         description:
-          'Delegate an analysis task to a secondary local model (no tools). Use for second opinions, ' +
-          'security reviews, test suggestions, or correctness checks. The delegated model receives only ' +
-          'the task and optional context files — it cannot run code, read files, or edit anything. ' +
+          'Delegate an analysis task to a secondary local model or a provider: cli external agent ' +
+          '(Claude Code, Codex). Use for second opinions, security reviews, test suggestions, or ' +
+          'correctness checks. Regular models receive only the task and optional context files — they ' +
+          'have no tools. A cli target instead runs read-only with ITS OWN tools (it can read/list files ' +
+          'itself) but is instructed not to modify anything. ' +
           'This tool requires only the delegate permission; do not request terminal, write, or other permissions.',
         parameters: {
           type: 'object',
@@ -56,7 +58,7 @@ export function makeLocalAgentTool(
             model: {
               type: 'string',
               description:
-                'Local model name or alias to delegate to (must be a local llama.cpp or local Ollama daemon target).',
+                'Local model name or alias to delegate to (must be a local llama.cpp target, a local Ollama daemon target, or a provider: cli external agent).',
             },
             task: {
               type: 'string',

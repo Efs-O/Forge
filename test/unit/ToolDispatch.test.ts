@@ -7,6 +7,7 @@ import type { KeepUndoCodeLensProvider } from '../../src/sidebar/KeepUndoCodeLen
 import type { ToolFailureTracker } from '../../src/tools/StripTools';
 import { ToolRegistry } from '../../src/tools/ToolRegistry';
 import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
+import { ToolBudget } from '../../src/tools/ToolBudget';
 
 // vi.mock is hoisted — compute WS inside the factory using require
 vi.mock('vscode', () => {
@@ -505,5 +506,121 @@ describe('ToolDispatch', () => {
         text: expect.stringContaining('read_file'),
       }),
     );
+  });
+
+  describe('tool budget (allowlist + per-turn call limits)', () => {
+    beforeEach(() => {
+      toolRegistry.register({
+        definition: {
+          type: 'function',
+          function: {
+            name: 'run_terminal',
+            description: 'Run in terminal',
+            parameters: { type: 'object' },
+          },
+        },
+        permission: 'terminal',
+        handler: vi.fn().mockResolvedValue('ran'),
+      });
+      toolRegistry.register({
+        definition: {
+          type: 'function',
+          function: { name: 'read_file', description: 'Read a file', parameters: { type: 'object' } },
+        },
+        permission: 'read',
+        handler: vi.fn().mockResolvedValue('contents'),
+      });
+    });
+
+    it('returns a structured error and never calls the handler for a non-allowlisted tool', async () => {
+      const budget = new ToolBudget({ tools: ['read_file'] });
+      const handler = toolRegistry.get('run_terminal')?.handler;
+      const messages: Array<{ role: string; content: string }> = [];
+
+      await dispatch.dispatch(
+        [makeToolCall('run_terminal', { command: 'echo hi' })],
+        allowed,
+        messages as never,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        budget,
+      );
+
+      expect(handler).not.toHaveBeenCalled();
+      expect(messages[0]?.content).toBe('Tool run_terminal is not available for this model.');
+    });
+
+    it('still enforces the permission gate even when the allowlist would allow the tool', async () => {
+      const budget = new ToolBudget({ tools: ['run_terminal'] });
+      const noTerminalPermission = new Set(['read', 'write'] as const);
+      const messages: Array<{ role: string; content: string }> = [];
+
+      await dispatch.dispatch(
+        [makeToolCall('run_terminal', { command: 'echo hi' })],
+        noTerminalPermission,
+        messages as never,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        budget,
+      );
+
+      expect(messages[0]?.content).toMatch(/permission "terminal"/);
+    });
+
+    it('returns the wrap-up message once a per-tool budget is exhausted, without crashing the turn', async () => {
+      const budget = new ToolBudget({ tool_call_limits: { run_terminal: 1 } });
+      const handler = toolRegistry.get('run_terminal')?.handler;
+      const messages: Array<{ role: string; content: string }> = [];
+
+      await dispatch.dispatch(
+        [makeToolCall('run_terminal', { command: 'echo one' })],
+        allowed,
+        messages as never,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        budget,
+      );
+      await dispatch.dispatch(
+        [makeToolCall('run_terminal', { command: 'echo two' })],
+        allowed,
+        messages as never,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        budget,
+      );
+
+      expect(handler).toHaveBeenCalledOnce();
+      expect(messages[0]?.content).toBe('ran');
+      expect(messages[1]?.content).toBe(
+        'Budget exhausted: run_terminal was limited to 1 calls this turn (1 used). ' +
+          'Do not call it again; wrap up with what you have.',
+      );
+    });
+
+    it('does not budget-limit calls when no budget is passed (backwards compatible)', async () => {
+      const handler = toolRegistry.get('read_file')?.handler;
+      const messages: Array<{ role: string; content: string }> = [];
+
+      await dispatch.dispatch(
+        [makeToolCall('read_file', { path: 'a.txt' })],
+        allowed,
+        messages as never,
+      );
+
+      expect(handler).toHaveBeenCalledOnce();
+      expect(messages[0]?.content).toBe('contents');
+    });
   });
 });

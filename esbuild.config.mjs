@@ -32,6 +32,22 @@ const webviewConfig = {
   jsxImportSource: 'react',
 };
 
+// Second webview entry point — the Model Manager editor-area panel
+// (F7/§2.3). Separate bundle/CSS/HTML so it shares no state with the
+// sidebar chat webview; see src/sidebar/modelManager/panelHtml.ts.
+const modelManagerConfig = {
+  entryPoints: ['webview-ui/src/modelManager/index.tsx'],
+  bundle: true,
+  outfile: 'dist/webview/modelManager.js',
+  format: 'iife',
+  platform: 'browser',
+  target: 'es2022',
+  sourcemap: !release,
+  minify: release,
+  jsx: 'automatic',
+  jsxImportSource: 'react',
+};
+
 const CSS_PARTIALS = [
   'webview-ui/styles/base.css',
   'webview-ui/styles/animations.css',
@@ -44,18 +60,29 @@ const CSS_PARTIALS = [
   'webview-ui/styles/model-selector.css',
 ];
 
+const MODEL_MANAGER_CSS_PARTIALS = [
+  'webview-ui/styles/base.css',
+  'webview-ui/styles/model-manager.css',
+  'webview-ui/styles/model-manager-detail.css',
+];
+
 function copyWebviewAssets() {
   mkdirSync('dist/webview', { recursive: true });
   const css = CSS_PARTIALS.map((f) => readFileSync(f, 'utf8')).join('\n');
   writeFileSync('dist/webview/styles.css', css);
   copyFileSync('webview-ui/index.html', 'dist/webview/index.html');
+
+  const modelManagerCss = MODEL_MANAGER_CSS_PARTIALS.map((f) => readFileSync(f, 'utf8')).join('\n');
+  writeFileSync('dist/webview/modelManager.css', modelManagerCss);
+  copyFileSync('webview-ui/modelManager.html', 'dist/webview/modelManager.html');
 }
 
 async function build() {
   if (watchMode) {
     const extCtx = await esbuild.context(extensionConfig);
     const webCtx = await esbuild.context(webviewConfig);
-    await Promise.all([extCtx.watch(), webCtx.watch()]);
+    const mmCtx = await esbuild.context(modelManagerConfig);
+    await Promise.all([extCtx.watch(), webCtx.watch(), mmCtx.watch()]);
     copyWebviewAssets();
     console.log('Watching for changes…');
     return;
@@ -63,6 +90,7 @@ async function build() {
 
   if (webviewOnly) {
     await esbuild.build(webviewConfig);
+    await esbuild.build(modelManagerConfig);
     copyWebviewAssets();
     console.log('Webview built.');
     return;
@@ -73,6 +101,7 @@ async function build() {
 
   if (buildAll) {
     await esbuild.build(webviewConfig);
+    await esbuild.build(modelManagerConfig);
     copyWebviewAssets();
     console.log('Webview built.');
   }

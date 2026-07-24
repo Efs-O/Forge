@@ -113,7 +113,12 @@ export interface ToolActivityMsg {
 export interface WorkerStatusMsg {
   type: 'workerStatus';
   runId: string;
-  stage: 'run-started' | 'worker-started' | 'worker-finished' | 'review-started';
+  stage:
+    | 'run-started'
+    | 'worker-started'
+    | 'worker-finished'
+    | 'review-started'
+    | 'worker-progress';
   workerId?: string;
   model?: string;
   status?: string;
@@ -121,6 +126,9 @@ export interface WorkerStatusMsg {
   elapsedMs: number;
   changedPaths?: string[];
   conversationId?: string;
+  /** 'worker-progress' only — a concise status/text line from a `provider: cli`
+   *  external agent, relayed to the sidebar worker status surface as it streams. */
+  detail?: string;
 }
 export interface TokenBudgetMsg {
   type: 'tokenBudget';

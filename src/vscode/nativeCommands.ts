@@ -18,6 +18,7 @@ import {
 } from './editorContext';
 import { openMarkdownScratch } from './scratchDocuments';
 import { runAddModelWizard } from '../sidebar/AddModelWizard';
+import { migrateConfig } from '../config/ConfigMigrator';
 
 interface NativeCommandDeps {
   backend: IBackendPool;
@@ -111,6 +112,13 @@ export function registerNativeCommands(
       }
       config.active_model = selectedId;
       const selectedModel = config.models.find((m) => m.name === pick.modelName);
+      if (selectedModel?.provider === 'cli') {
+        deps.statusBar.setReady(selectedId);
+        void vscode.window.showInformationMessage(
+          `Forge: switched to ${selectedId} (external CLI agent)`,
+        );
+        return;
+      }
       if (
         selectedModel?.provider === 'xai' ||
         selectedModel?.provider === 'openrouter' ||
@@ -158,6 +166,27 @@ export function registerNativeCommands(
         void vscode.window.showInformationMessage('Forge: models added successfully.');
       } catch (err) {
         void vscode.window.showErrorMessage(`Forge: ${(err as Error).message}`);
+      }
+    }),
+    vscode.commands.registerCommand('forge.compactConfig', () => {
+      const configPath = deps.getConfigPath();
+      try {
+        const result = migrateConfig(configPath);
+        if (!result.migrated) {
+          const detail = result.diffs?.length ? `\n${result.diffs.join('\n')}` : '';
+          void vscode.window.showErrorMessage(
+            `Forge: compact config aborted — ${result.reason}${detail}`,
+          );
+          return;
+        }
+        deps.setConfig(loadConfig(path.dirname(configPath)));
+        void vscode.window.showInformationMessage(
+          `Forge: compacted config.yaml into ${result.groupCount} group(s) (${result.linesBefore} → ${result.linesAfter} lines). Backup: ${result.backupPath}`,
+        );
+      } catch (err) {
+        void vscode.window.showErrorMessage(
+          `Forge: compact config failed — ${(err as Error).message}`,
+        );
       }
     }),
     vscode.commands.registerCommand('forge.clearChat', () => {

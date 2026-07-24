@@ -13,6 +13,7 @@ import {
   guardExec,
   MAX_OUTPUT_CHARS,
   resolveExecCwd,
+  resolvePackageRunnerInvocation,
   spawnAndWait,
 } from './execHelpers';
 import { checkDenyList, getBuiltinDenyList } from './DenyList';
@@ -158,7 +159,13 @@ export function makeRunTestsTool(): RegisteredTool {
 
       guardExec(runner.command, cmdArgs);
 
-      const result = await spawnAndWait(runner.command, cmdArgs, root, 60_000);
+      const invocation = resolvePackageRunnerInvocation(runner.command as 'npm' | 'npx');
+      const result = await spawnAndWait(
+        invocation.command,
+        [...invocation.argsPrefix, ...cmdArgs],
+        root,
+        60_000,
+      );
       return formatOutput(result);
     },
   };
@@ -211,7 +218,13 @@ export function makeRunBuildTool(): RegisteredTool {
       const cmdArgs = ['run', script];
       guardExec('npm', cmdArgs);
 
-      const result = await spawnAndWait('npm', cmdArgs, root, 120_000);
+      const invocation = resolvePackageRunnerInvocation('npm');
+      const result = await spawnAndWait(
+        invocation.command,
+        [...invocation.argsPrefix, ...cmdArgs],
+        root,
+        120_000,
+      );
       const out = result.stdout.slice(0, MAX_OUTPUT_CHARS);
       let formatted = out;
       if (result.stderr) formatted += `\n[stderr]\n${result.stderr.slice(0, MAX_OUTPUT_CHARS)}`;

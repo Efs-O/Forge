@@ -13,6 +13,7 @@ import type { KeepUndoCodeLensProvider } from './KeepUndoCodeLens';
 import type { ToolPermission } from '../tools/ToolRegistry';
 import { ToolRegistry } from '../tools/ToolRegistry';
 import { ToolFailureTracker } from '../tools/StripTools';
+import type { ToolBudget } from '../tools/ToolBudget';
 import type { DiffDecorations } from './DiffDecorations';
 import type { WorkerRunContext, WorkerRunRequest, WorkerRunResult } from '../workers/types';
 import { resolveWorkspacePath, type ResolveWorkspacePathOptions } from '../util/WorkspacePaths';
@@ -91,6 +92,7 @@ export class ToolDispatch {
     scope?: import('../tools/ToolRegistry').ToolScope,
     checkpoint?: CheckpointSession,
     coordinatorModel?: string,
+    budget?: ToolBudget,
   ): Promise<void> {
     for (const tc of toolCalls) {
       let result: string;
@@ -136,6 +138,17 @@ export class ToolDispatch {
         }
         if (scope && !scope.allowedNames.has(tc.function.name)) {
           throw new Error(`Tool "${tc.function.name}" is outside the active worker scope`);
+        }
+        const budgetBlock = budget?.check(tc.function.name);
+        if (budgetBlock) {
+          this.postResult(tc, budgetBlock, undefined, convId);
+          messages.push({
+            role: 'tool',
+            content: budgetBlock,
+            tool_call_id: tc.id,
+            name: tc.function.name,
+          });
+          continue;
         }
         scope?.validate?.(reg, args);
 

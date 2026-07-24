@@ -10,6 +10,8 @@ import { normalizeRequestForModel } from '../llm/RequestNormalizer';
 import type { ChatCompletionRequest } from '../llm/types';
 import type { StreamHandlers } from '../llm/OpenAIClient';
 import { capResultText } from '../tools/resultCap';
+import { CliAgentDriver } from '../agents/CliAgentDriver';
+import { runCliDelegation } from './CliDelegationRunner';
 import { resolveDelegationTarget } from './eligibility';
 import {
   DELEGATION_TIMEOUT_MS,
@@ -51,6 +53,8 @@ export interface LocalDelegationServiceDeps {
   realPath?: (filePath: string) => Promise<string>;
   streamChat?: typeof streamModelChatCompletion;
   makeTimeoutSignal?: (timeoutMs: number) => AbortSignal;
+  /** Test-only injection point for the `provider: cli` branch. */
+  cliDriver?: CliAgentDriver;
 }
 
 class DelegationError extends Error {
@@ -96,6 +100,7 @@ export class LocalDelegationService {
   private readonly realPath: (filePath: string) => Promise<string>;
   private readonly streamChat: typeof streamModelChatCompletion;
   private readonly makeTimeoutSignal: (timeoutMs: number) => AbortSignal;
+  private readonly cliDriver: CliAgentDriver;
 
   constructor(private readonly deps: LocalDelegationServiceDeps) {
     this.readFile = deps.readFile ?? defaultReadFile;
@@ -108,6 +113,7 @@ export class LocalDelegationService {
     this.streamChat = deps.streamChat ?? streamModelChatCompletion;
     this.makeTimeoutSignal =
       deps.makeTimeoutSignal ?? ((timeoutMs) => AbortSignal.timeout(timeoutMs));
+    this.cliDriver = deps.cliDriver ?? new CliAgentDriver();
   }
 
   canDelegate(primaryModel: string, targetModel: string): { ok: boolean; reason?: string } {
@@ -126,6 +132,29 @@ export class LocalDelegationService {
     const signal = composeSignals(
       request.signal ? [request.signal, timeoutSignal] : [timeoutSignal],
     );
+
+    if (target.model.provider === 'cli') {
+      try {
+        return await runCliDelegation(
+          request,
+          target,
+          this.cliDriver,
+          this.deps.workspaceRoot,
+          signal,
+        );
+      } catch (err) {
+        if (signal.aborted) {
+          const kind = abortKind(signal, timeoutSignal);
+          throw new DelegationError(
+            kind === 'timeout'
+              ? `Delegation timeout: exceeded ${DELEGATION_TIMEOUT_MS}ms.`
+              : 'Delegation cancelled by caller.',
+          );
+        }
+        if (err instanceof DelegationError) throw err;
+        throw new DelegationError(`Delegation provider error: ${(err as Error).message}`);
+      }
+    }
 
     const check = this.deps.backendPool.canDelegate(request.primaryModel, target.resolvedId);
     if (!check.safe) {

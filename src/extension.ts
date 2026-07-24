@@ -28,6 +28,7 @@ import { registerSecretCommands } from './vscode/secretCommands';
 import { enterSetupMode } from './sidebar/SetupMode';
 import { LocalDelegationService } from './delegation/LocalDelegationService';
 import { registerWorkerCommands } from './vscode/workerCommands';
+import { ModelManagerPanel } from './sidebar/modelManager/ModelManagerPanel';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   initLogger(context);
@@ -203,6 +204,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     forgeLoader,
     context.secrets,
     workspaceRoot,
+    () => activeConfigPath,
   );
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(SidebarProvider.viewId, sidebarProvider, {
@@ -258,6 +260,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       controlServer.applyForgeConfig(config);
       if (config.control_server?.enabled) controlServer.start();
       statusBar.setStopped(config.active_model);
+      ModelManagerPanel.current?.refresh();
 
       log.info('Forge: config reloaded');
       void vscode.window.showInformationMessage(
@@ -293,6 +296,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand('forge.openSidebar', () => {
       void vscode.commands.executeCommand('workbench.view.extension.forge-sidebar');
+    }),
+
+    vscode.commands.registerCommand('forge.modelManager', () => {
+      const panel = ModelManagerPanel.createOrShow(
+        context.extensionUri,
+        pool,
+        () => config,
+        () => activeConfigPath,
+      );
+      panel.refresh();
     }),
 
     vscode.commands.registerCommand('forge.showBackendConsole', () => {

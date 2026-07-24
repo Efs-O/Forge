@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveWorkspaceUri } from '../util/WorkspacePaths';
-import { resolveRipgrepBinary } from './RipgrepResolver';
+import { resolveRipgrep, type RipgrepResolution } from './RipgrepResolver';
 
 export function makeListDirectoryTool(): RegisteredTool {
   return {
@@ -139,7 +139,9 @@ export function makeFindFilesTool(): RegisteredTool {
   };
 }
 
-export function makeSearchCodeTool(): RegisteredTool {
+export function makeSearchCodeTool(
+  resolveCommand: () => RipgrepResolution = () => resolveRipgrep(vscode.env.appRoot),
+): RegisteredTool {
   return {
     definition: {
       type: 'function',
@@ -171,7 +173,13 @@ export function makeSearchCodeTool(): RegisteredTool {
       const include = (args['include'] as string | undefined) ?? '**/*';
       const maxResults = (args['max_results'] as number | undefined) ?? 20;
 
-      const matches = await searchWorkspaceText(query, include, maxResults, context?.abortSignal);
+      const matches = await searchWorkspaceText(
+        query,
+        include,
+        maxResults,
+        resolveCommand(),
+        context?.abortSignal,
+      );
       if (matches.length === 0) return `No matches found for "${query}".`;
 
       const outputLines: string[] = [];
@@ -193,6 +201,7 @@ async function searchWorkspaceText(
   query: string,
   include: string,
   maxResults: number,
+  resolution: RipgrepResolution,
   signal?: AbortSignal,
 ): Promise<SearchCodeMatch[]> {
   signal?.throwIfAborted();
@@ -220,7 +229,7 @@ async function searchWorkspaceText(
     let settled = false;
     let terminatedEarly = false;
 
-    const child = spawn(resolveRipgrepBinary(vscode.env.appRoot), args, {
+    const child = spawn(resolution.command, [...(resolution.argsPrefix ?? []), ...args], {
       cwd: folder.uri.fsPath,
       shell: false,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -295,7 +304,15 @@ async function searchWorkspaceText(
       stderr += chunk.toString('utf8');
     });
     child.once('error', (err) => {
-      finish(new Error(`search_code: failed to start ripgrep: ${err.message}`));
+      const attempted = resolution.candidates.length
+        ? resolution.candidates.join(', ')
+        : '(VS Code app root unavailable)';
+      finish(
+        new Error(
+          `search_code: failed to start ripgrep command "${resolution.command}": ${err.message}. ` +
+            `Bundled candidates checked: ${attempted}`,
+        ),
+      );
     });
     child.once('close', (code) => {
       flushStdout();

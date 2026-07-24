@@ -61,6 +61,28 @@ function makeConfig(port: number, maxModels = 1): ForgeConfig {
   } as ForgeConfig;
 }
 
+/** Config with a short_name/category on one model and two prefix-ambiguous
+ *  models for exercising step-8 fuzzy resolution on the control endpoints. */
+function makeFuzzyConfig(port: number, maxModels = 4): ForgeConfig {
+  return {
+    models: [
+      {
+        name: 'gemma4-26b-a4b-it-iq3s',
+        provider: 'llama.cpp',
+        gguf_path: '/gemma.gguf',
+        short_name: 'gemma4',
+        category: 'coding',
+      },
+      { name: 'gemma4-12b', provider: 'llama.cpp', gguf_path: '/gemma12.gguf' },
+      { name: 'B', provider: 'llama.cpp', gguf_path: '/b.gguf' },
+    ],
+    active_model: 'B',
+    llama_server: {},
+    max_simultaneous_models: maxModels,
+    control_server: { enabled: true, port },
+  } as ForgeConfig;
+}
+
 // Default test deps: probe always passes instantly, no eviction grace. Individual
 // tests override what they exercise (slow/failing probe, grace window).
 const testDeps = (over: ControlServerDeps = {}): ControlServerDeps => ({
@@ -300,6 +322,91 @@ describe('ControlServer', () => {
     expect(res.status).toBe(422);
     expect((await res.json()).error).toMatch(/cloud-provider model.*cannot serve/s);
     expect(pool.loadedModelNames()).toEqual(['A']);
+  });
+
+  it('GET /models golden shape: every pre-existing field survives, new fields are additive-only', async () => {
+    const port = 18826;
+    const base = `http://127.0.0.1:${port}`;
+    server = new ControlServer(new FakePool(), makeFuzzyConfig(port), testDeps());
+    server.start();
+    await waitReady(base);
+
+    const catalog = await (await fetch(`${base}/models`)).json();
+    expect(catalog.contractVersion).toBe(1);
+    expect(typeof catalog.catalogVersion).toBe('string');
+    const { models } = catalog;
+    const byName = Object.fromEntries(models.map((m: { name: string }) => [m.name, m]));
+
+    // Every pre-existing field is still present (relay-consumed subset, per
+    // CONFIG_OVERHAUL_PLAN §2.6/§4 step 8: name, backend, provider, loaded,
+    // holds, servable, profiles, route, action, availability + id/baseModel/
+    // capabilities/reason as applicable).
+    const PRE_EXISTING_FIELDS = [
+      'id',
+      'baseModel',
+      'name',
+      'backend',
+      'provider',
+      'loaded',
+      'holds',
+      'servable',
+      'profiles',
+      'capabilities',
+      'route',
+      'action',
+      'availability',
+    ];
+    for (const field of PRE_EXISTING_FIELDS) {
+      expect(byName['gemma4-26b-a4b-it-iq3s']).toHaveProperty(field);
+      expect(byName.B).toHaveProperty(field);
+    }
+
+    // New optional fields appear only where configured — never invented, never
+    // renaming/removing an existing field.
+    expect(byName['gemma4-26b-a4b-it-iq3s'].short_name).toBe('gemma4');
+    expect(byName['gemma4-26b-a4b-it-iq3s'].category).toBe('coding');
+    expect(byName.B.short_name).toBeUndefined();
+    expect(byName.B.category).toBeUndefined();
+    expect(byName.B.group).toBeUndefined();
+    expect(byName.B.groups).toBeUndefined();
+    expect('short_name' in byName.B).toBe(false);
+    expect('category' in byName.B).toBe(false);
+  });
+
+  it('/ensure and /unload accept a fuzzy short_name and resolve to the base model', async () => {
+    const port = 18827;
+    const base = `http://127.0.0.1:${port}`;
+    const pool = new FakePool();
+    server = new ControlServer(pool, makeFuzzyConfig(port), testDeps());
+    server.start();
+    await waitReady(base);
+
+    // "gemma4" is an exact short_name — resolves unambiguously even though
+    // another configured model ("gemma4-12b") shares the prefix.
+    const r = await (await post(base, 'gemma4')).json();
+    expect(r.model).toBe('gemma4-26b-a4b-it-iq3s');
+    expect(pool.loadedModelNames()).toEqual(['gemma4-26b-a4b-it-iq3s']);
+
+    expect((await (await post(base, 'gemma4', 'release')).json()).released).toBe(true);
+    const unload = await post(base, 'gemma4', 'unload');
+    expect(unload.status).toBe(200);
+    expect((await unload.json()).unloaded).toBe(true);
+  });
+
+  it('/ensure, /release, and /unload 400 with candidates on an ambiguous fuzzy name', async () => {
+    const port = 18828;
+    const base = `http://127.0.0.1:${port}`;
+    server = new ControlServer(new FakePool(), makeFuzzyConfig(port), testDeps());
+    server.start();
+    await waitReady(base);
+
+    for (const route of ['ensure', 'release', 'unload'] as const) {
+      const res = await post(base, 'gemma4-', route);
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toMatch(/Ambiguous model/);
+      expect(body.candidates).toEqual(['gemma4-12b', 'gemma4-26b-a4b-it-iq3s']);
+    }
   });
 
   it('publishes a versioned execution and availability contract on GET /models', async () => {

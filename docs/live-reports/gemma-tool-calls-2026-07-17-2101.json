@@ -1,0 +1,1338 @@
+{
+  "generatedAt": "2026-07-17T17:59:55.779Z",
+  "forgeVersion": "0.12.28",
+  "endpoint": "http://127.0.0.1:8080",
+  "model": "gemma4-26b-a4b-it-iq3s",
+  "modelCapabilities": {
+    "configAvailable": true,
+    "modelFound": true,
+    "visionProjectorConfigured": true,
+    "declaredCapabilities": []
+  },
+  "llamaServer": {
+    "version": "b9402-19e92c33e",
+    "buildInfo": "b9402-19e92c33e"
+  },
+  "attemptsPerTool": 2,
+  "requestTimeoutMs": 60000,
+  "executionMode": "schema-emission-only",
+  "strictArguments": true,
+  "inventory": {
+    "native": 48,
+    "mcp": 6
+  },
+  "results": [
+    {
+      "tool": "apply_line_edits",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "apply_line_edits",
+      "emittedArguments": {
+        "operations": [
+          {
+            "end_line": 1,
+            "expected_lines": [
+              "Forge tool-call smoke test"
+            ],
+            "replacement_lines": [
+              "Forge tool-call smoke test updated"
+            ],
+            "start_line": 1
+          }
+        ],
+        "path": ".forge/tool-test-write.txt"
+      },
+      "expectedArgs": {
+        "path": ".forge/tool-test-write.txt",
+        "operations": [
+          {
+            "start_line": 1,
+            "end_line": 1,
+            "expected_lines": [
+              "Forge tool-call smoke test"
+            ],
+            "replacement_lines": [
+              "Forge tool-call smoke test updated"
+            ]
+          }
+        ]
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "ask_local_agent",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "ask_local_agent",
+      "emittedArguments": {
+        "model": "secondary-local-model",
+        "task": "Review ToolRegistry permissions."
+      },
+      "expectedArgs": {
+        "model": "secondary-local-model",
+        "task": "Review ToolRegistry permissions."
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "ask_user",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "ask_user",
+      "emittedArguments": {
+        "placeholder": "test",
+        "prompt": "Forge tool-call smoke test prompt"
+      },
+      "expectedArgs": {
+        "prompt": "Forge tool-call smoke test prompt",
+        "placeholder": "test"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "commit",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "commit",
+      "emittedArguments": {
+        "message": "Forge tool-call smoke test"
+      },
+      "expectedArgs": {
+        "message": "Forge tool-call smoke test"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "copy_to_clipboard",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "copy_to_clipboard",
+      "emittedArguments": {
+        "text": "Forge tool-call smoke test"
+      },
+      "expectedArgs": {
+        "text": "Forge tool-call smoke test"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "create_branch",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "create_branch",
+      "emittedArguments": {
+        "from": "HEAD",
+        "name": "forge-tool-test-branch"
+      },
+      "expectedArgs": {
+        "name": "forge-tool-test-branch",
+        "from": "HEAD"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "create_directory",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "create_directory",
+      "emittedArguments": {
+        "path": ".forge/tool-test-dir"
+      },
+      "expectedArgs": {
+        "path": ".forge/tool-test-dir"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "delete_file",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "delete_file",
+      "emittedArguments": {
+        "path": ".forge/tool-test-dir/tool-test-write.txt",
+        "recursive": false
+      },
+      "expectedArgs": {
+        "path": ".forge/tool-test-dir/tool-test-write.txt",
+        "recursive": false
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "dispatch_workers",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "dispatch_workers",
+      "emittedArguments": {
+        "workers": [
+          {
+            "access": "read",
+            "id": "audit-reader",
+            "model": "local-model",
+            "task": "Inspect ToolRegistry."
+          }
+        ]
+      },
+      "expectedArgs": {
+        "workers": [
+          {
+            "id": "audit-reader",
+            "model": "local-model",
+            "task": "Inspect ToolRegistry.",
+            "access": "read"
+          }
+        ]
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "exec_command",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "exec_command",
+      "emittedArguments": {
+        "args": [
+          "--version"
+        ],
+        "command": "node",
+        "cwd": ".",
+        "timeout_ms": 10000
+      },
+      "expectedArgs": {
+        "command": "node",
+        "args": [
+          "--version"
+        ],
+        "cwd": ".",
+        "timeout_ms": 10000
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "find_files",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "find_files",
+      "emittedArguments": {
+        "max_results": 5,
+        "pattern": "src/**/*.ts"
+      },
+      "expectedArgs": {
+        "pattern": "src/**/*.ts",
+        "max_results": 5
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "find_references",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "find_references",
+      "emittedArguments": {
+        "character": 13,
+        "line": 16,
+        "path": "src/tools/ToolRegistry.ts"
+      },
+      "expectedArgs": {
+        "path": "src/tools/ToolRegistry.ts",
+        "line": 16,
+        "character": 13
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "format_file",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "format_file",
+      "emittedArguments": {
+        "path": "package.json"
+      },
+      "expectedArgs": {
+        "path": "package.json"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "get_diagnostics",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "get_diagnostics",
+      "emittedArguments": {
+        "path": "src/extension.ts"
+      },
+      "expectedArgs": {
+        "path": "src/extension.ts"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "get_digest",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "get_digest",
+      "emittedArguments": {
+        "max_chars": 0,
+        "offset": 0,
+        "scope": "test_scope"
+      },
+      "expectedArgs": {
+        "max_chars": 0,
+        "offset": 0,
+        "scope": "test_scope"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "get_document_symbols",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "get_document_symbols",
+      "emittedArguments": {
+        "path": "src/tools/ToolRegistry.ts"
+      },
+      "expectedArgs": {
+        "path": "src/tools/ToolRegistry.ts"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "get_hover",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "get_hover",
+      "emittedArguments": {
+        "character": 13,
+        "line": 16,
+        "path": "src/tools/ToolRegistry.ts"
+      },
+      "expectedArgs": {
+        "path": "src/tools/ToolRegistry.ts",
+        "line": 16,
+        "character": 13
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "get_profile",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "get_profile",
+      "emittedArguments": {
+        "scope": "test_scope"
+      },
+      "expectedArgs": {
+        "scope": "test_scope"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "get_workspace_symbols",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "get_workspace_symbols",
+      "emittedArguments": {
+        "query": "ToolRegistry"
+      },
+      "expectedArgs": {
+        "query": "ToolRegistry"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "git_blame",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "git_blame",
+      "emittedArguments": {
+        "path": "src/tools/ToolRegistry.ts"
+      },
+      "expectedArgs": {
+        "path": "src/tools/ToolRegistry.ts"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "git_diff",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "git_diff",
+      "emittedArguments": {
+        "path": "src/sidebar/AgentLoop.ts",
+        "staged": false
+      },
+      "expectedArgs": {
+        "path": "src/sidebar/AgentLoop.ts",
+        "staged": false
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "git_log",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "git_log",
+      "emittedArguments": {
+        "max_entries": 3
+      },
+      "expectedArgs": {
+        "max_entries": 3
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "git_show",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "git_show",
+      "emittedArguments": {
+        "ref": "HEAD"
+      },
+      "expectedArgs": {
+        "ref": "HEAD"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "git_status",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "git_status",
+      "emittedArguments": {},
+      "expectedArgs": {},
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "go_to_definition",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "go_to_definition",
+      "emittedArguments": {
+        "character": 13,
+        "line": 16,
+        "path": "src/tools/ToolRegistry.ts"
+      },
+      "expectedArgs": {
+        "path": "src/tools/ToolRegistry.ts",
+        "line": 16,
+        "character": 13
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "insert_code",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "insert_code",
+      "emittedArguments": {
+        "line": 0,
+        "text": "// Forge tool-call smoke test"
+      },
+      "expectedArgs": {
+        "text": "// Forge tool-call smoke test",
+        "line": 0
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "list_directory",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "list_directory",
+      "emittedArguments": {
+        "path": "src"
+      },
+      "expectedArgs": {
+        "path": "src"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "list_memories",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "list_memories",
+      "emittedArguments": {},
+      "expectedArgs": {},
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "list_worker_models",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "list_worker_models",
+      "emittedArguments": {},
+      "expectedArgs": {},
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "move_file",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "move_file",
+      "emittedArguments": {
+        "destination": ".forge/tool-test-dir/tool-test-write.txt",
+        "source": ".forge/tool-test-write.txt"
+      },
+      "expectedArgs": {
+        "source": ".forge/tool-test-write.txt",
+        "destination": ".forge/tool-test-dir/tool-test-write.txt"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "open_url_in_browser",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "open_url_in_browser",
+      "emittedArguments": {
+        "url": "https://example.com/"
+      },
+      "expectedArgs": {
+        "url": "https://example.com/"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "read_clipboard",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "read_clipboard",
+      "emittedArguments": {},
+      "expectedArgs": {},
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "read_file",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "read_file",
+      "emittedArguments": {
+        "end_line": 20,
+        "path": "package.json",
+        "start_line": 1
+      },
+      "expectedArgs": {
+        "path": "package.json",
+        "start_line": 1,
+        "end_line": 20
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "read_raw_session",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "read_raw_session",
+      "emittedArguments": {
+        "session_id": "test_session_id"
+      },
+      "expectedArgs": {
+        "session_id": "test_session_id"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "read_session",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "read_session",
+      "emittedArguments": {
+        "session_id": "test_session_id"
+      },
+      "expectedArgs": {
+        "session_id": "test_session_id"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "recall",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "recall",
+      "emittedArguments": {
+        "key": "tool-test"
+      },
+      "expectedArgs": {
+        "key": "tool-test"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "remember",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "remember",
+      "emittedArguments": {
+        "key": "tool-test",
+        "value": "Forge tool-call smoke test"
+      },
+      "expectedArgs": {
+        "key": "tool-test",
+        "value": "Forge tool-call smoke test"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "rename_symbol",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "rename_symbol",
+      "emittedArguments": {
+        "character": 13,
+        "line": 16,
+        "new_name": "ToolRegistryRenamedForTest",
+        "path": "src/tools/ToolRegistry.ts"
+      },
+      "expectedArgs": {
+        "path": "src/tools/ToolRegistry.ts",
+        "line": 16,
+        "character": 13,
+        "new_name": "ToolRegistryRenamedForTest"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "replace_in_file",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "replace_in_file",
+      "emittedArguments": {
+        "filepath": ".forge/tool-test-write.txt",
+        "new_str": "Forge tool-call smoke test updated",
+        "old_str": "Forge tool-call smoke test"
+      },
+      "expectedArgs": {
+        "filepath": ".forge/tool-test-write.txt",
+        "old_str": "Forge tool-call smoke test",
+        "new_str": "Forge tool-call smoke test updated"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "replace_selection",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "replace_selection",
+      "emittedArguments": {
+        "text": "Forge tool-call smoke test"
+      },
+      "expectedArgs": {
+        "text": "Forge tool-call smoke test"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "run_build",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "run_build",
+      "emittedArguments": {
+        "script": "build"
+      },
+      "expectedArgs": {
+        "script": "build"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "run_terminal",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "run_terminal",
+      "emittedArguments": {
+        "command": "npm run type-check",
+        "cwd": "."
+      },
+      "expectedArgs": {
+        "command": "npm run type-check",
+        "cwd": "."
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "run_tests",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "run_tests",
+      "emittedArguments": {
+        "pattern": "test/unit/ToolCallFallback.test.ts",
+        "reporter": "verbose"
+      },
+      "expectedArgs": {
+        "pattern": "test/unit/ToolCallFallback.test.ts",
+        "reporter": "verbose"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "search_code",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "search_code",
+      "emittedArguments": {
+        "include": "src/**/*.ts",
+        "max_results": 5,
+        "query": "ToolRegistry"
+      },
+      "expectedArgs": {
+        "query": "ToolRegistry",
+        "include": "src/**/*.ts",
+        "max_results": 5
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "search_codebase",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "search_codebase",
+      "emittedArguments": {
+        "query": "tool registry dispatch",
+        "scope_glob": "src/**/*.ts",
+        "top_k": 3
+      },
+      "expectedArgs": {
+        "query": "tool registry dispatch",
+        "top_k": 3,
+        "scope_glob": "src/**/*.ts"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "search_raw_transcripts",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "search_raw_transcripts",
+      "emittedArguments": {
+        "query": "Forge tool-call test"
+      },
+      "expectedArgs": {
+        "query": "Forge tool-call test"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "search_sessions",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "search_sessions",
+      "emittedArguments": {
+        "date_from": "test_date_from",
+        "date_to": "test_date_to",
+        "limit": 0,
+        "offset": 0,
+        "project": "test_project",
+        "query": "Forge tool-call test",
+        "tags": [
+          "test_tags"
+        ],
+        "tool": "test_tool"
+      },
+      "expectedArgs": {
+        "date_from": "test_date_from",
+        "date_to": "test_date_to",
+        "limit": 0,
+        "offset": 0,
+        "project": "test_project",
+        "query": "Forge tool-call test",
+        "tags": [
+          "test_tags"
+        ],
+        "tool": "test_tool"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "show_diff",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "show_diff",
+      "emittedArguments": {
+        "modified_path": "package.json",
+        "original_path": "package.json",
+        "title": "Forge Tool Test"
+      },
+      "expectedArgs": {
+        "original_path": "package.json",
+        "modified_path": "package.json",
+        "title": "Forge Tool Test"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "show_notification",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "show_notification",
+      "emittedArguments": {
+        "level": "info",
+        "message": "Forge tool-call smoke test"
+      },
+      "expectedArgs": {
+        "message": "Forge tool-call smoke test",
+        "level": "info"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "stage",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "stage",
+      "emittedArguments": {
+        "paths": [
+          "src/tools/ToolRegistry.ts"
+        ]
+      },
+      "expectedArgs": {
+        "paths": [
+          "src/tools/ToolRegistry.ts"
+        ]
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "switch_branch",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "switch_branch",
+      "emittedArguments": {
+        "name": "main"
+      },
+      "expectedArgs": {
+        "name": "main"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "web_fetch",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "web_fetch",
+      "emittedArguments": {
+        "max_chars": 1000,
+        "url": "https://example.com/"
+      },
+      "expectedArgs": {
+        "url": "https://example.com/",
+        "max_chars": 1000
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "web_search",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "web_search",
+      "emittedArguments": {
+        "query": "Forge LLM local model tool calling"
+      },
+      "expectedArgs": {
+        "query": "Forge LLM local model tool calling"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    },
+    {
+      "tool": "write_file",
+      "ok": true,
+      "attempt": 1,
+      "status": 200,
+      "error": "",
+      "emittedName": "write_file",
+      "emittedArguments": {
+        "content": "Forge tool-call smoke test\n",
+        "path": ".forge/tool-test-write.txt"
+      },
+      "expectedArgs": {
+        "path": ".forge/tool-test-write.txt",
+        "content": "Forge tool-call smoke test\n"
+      },
+      "exactArgs": true,
+      "nativeCallEmitted": true,
+      "expectedToolName": true,
+      "argumentsJsonValid": true,
+      "argumentsStructurallyEqual": true,
+      "schemaValid": true,
+      "schemaErrors": [],
+      "finishReason": "tool_calls"
+    }
+  ]
+}

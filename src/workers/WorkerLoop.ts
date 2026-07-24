@@ -4,6 +4,9 @@ import type { ChatMessage } from '../llm/types';
 import type { ToolRegistry } from '../tools/ToolRegistry';
 import { capResultText } from '../tools/resultCap';
 import { resolveToolPermissions } from '../tools/PermissionResolver';
+import { ToolBudget } from '../tools/ToolBudget';
+import { runCliWorker } from '../agents/CliWorkerRunner';
+import { inferCliAgentName } from '../agents/types';
 import {
   MAX_WORKER_FINAL_CHARS,
   MAX_WORKER_TOOL_CALLS,
@@ -16,7 +19,10 @@ import { ToolLoopDetectedError } from '../agent/ToolLoopGuard';
 
 export interface WorkerExecutionTarget {
   model: ModelConfig;
-  baseUrl: string;
+  /** Set to 'cli' for `provider: cli` workers — bypasses the LLM tool-calling
+   *  loop entirely and runs CliAgentDriver instead (baseUrl/apiKey unused). */
+  kind?: 'cli';
+  baseUrl?: string;
   apiKey?: string;
   bestEffort: boolean;
 }
@@ -55,10 +61,28 @@ export class WorkerLoop {
     target: WorkerExecutionTarget,
     policy: WorkerAccessPolicy,
     context: WorkerRunContext,
+    onProgress?: (line: string) => void,
   ): Promise<WorkerResult> {
+    if (target.kind === 'cli') {
+      const timeoutMs = this.getConfig().exec?.timeout_ms;
+      return runCliWorker({
+        spec,
+        cliName: inferCliAgentName(target.model.cli ?? target.model.name),
+        cliExecutable: target.model.cli ?? target.model.name,
+        workspaceRoot: this.workspaceRoot,
+        writablePaths: policy.writablePaths(),
+        checkpoint: context.checkpoint,
+        abortSignal: context.abortSignal,
+        ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+        ...(onProgress ? { onProgress } : {}),
+      });
+    }
     const scope = policy.scope();
     const allowed = resolveToolPermissions(this.getConfig());
-    const toolDefinitions = this.registry.definitions(allowed, scope);
+    // One budget per worker run — target.model is already resolveRequestModel()'d
+    // (group tools/tool_call_limits merged) by WorkerOrchestrationService.
+    const budget = new ToolBudget(target.model);
+    const toolDefinitions = budget.filterDefinitions(this.registry.definitions(allowed, scope));
     const messages: ChatMessage[] = [
       {
         role: 'system',
@@ -78,8 +102,10 @@ export class WorkerLoop {
     ];
     let toolCalls = 0;
     try {
+      // target.kind !== 'cli' was already handled above — every non-cli
+      // target is built with a real baseUrl (WorkerOrchestrationService.buildTargets).
       const result = await runToolCallingLoop({
-        baseUrl: target.baseUrl,
+        baseUrl: target.baseUrl as string,
         model: target.model,
         messages,
         toolDefinitions,
@@ -106,6 +132,8 @@ export class WorkerLoop {
               context.abortSignal,
               scope,
               context.checkpoint,
+              undefined,
+              budget,
             );
           } catch (err) {
             throw new WorkerToolError(err instanceof Error ? err.message : String(err));

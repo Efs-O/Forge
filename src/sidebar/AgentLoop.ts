@@ -14,13 +14,14 @@ import { injectSystemPrompt } from '../llm/SystemPromptInjector';
 import type { TemplateEngine } from '../llm/TemplateEngine';
 import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
 import { mergeSampling } from '../llm/SamplingMerge';
-import { resolveRequestModel } from '../config/ConfigResolver';
+import { deriveStaticCapabilities, resolveRequestModel } from '../config/ConfigResolver';
 import { normalizeRequestForModel } from '../llm/RequestNormalizer';
 import { stripThinkingFromFullText } from '../llm/ThinkingChannelStripper';
 import { stripHtmlDocumentBoilerplateFromFullText } from '../llm/HtmlDocumentBoilerplateStripper';
 import { CheckpointStack, type CheckpointSession } from '../checkpoint/CheckpointStack';
 import { ToolRegistry } from '../tools/ToolRegistry';
 import { resolveToolPermissions } from '../tools/PermissionResolver';
+import { ToolBudget } from '../tools/ToolBudget';
 import type { KeepUndoCodeLensProvider } from './KeepUndoCodeLens';
 import { ToolFailureTracker } from '../tools/StripTools';
 import { stripStructuredOutputFromFullText } from '../tools/StructuredOutputParser';
@@ -36,8 +37,15 @@ import { extractToolDetail } from './toolSummary';
 import { ToolApprovalService } from './ToolApprovalService';
 import { WorkerOrchestrationService } from '../workers/WorkerOrchestrationService';
 import type { WorkerRunRequest, WorkerRunResult } from '../workers/types';
-import { addWorkerDelegationInstructions, buildWorkerReviewPrompt } from '../workers/WorkerPrompts';
+import {
+  addWorkerDelegationInstructions,
+  buildWorkerCatalog,
+  buildWorkerReviewPrompt,
+} from '../workers/WorkerPrompts';
 import { runToolCallingLoop } from '../agent/ToolCallingLoop';
+import { recordModelUsage } from './modelManager/usageTracker';
+import { CliAgentDriver } from '../agents/CliAgentDriver';
+import { prepareCliChatAgent, runCliChat } from '../agents/CliChatRunner';
 const log = getLogger();
 const MAX_TOOL_ROUNDS = 20;
 
@@ -61,6 +69,7 @@ export class AgentLoop {
   private readonly toolDispatch: ToolDispatch;
   private readonly approvals: ToolApprovalService;
   private readonly workerService: WorkerOrchestrationService;
+  private readonly workspaceRoot: string;
   private promptRunCtrl: AbortController | null = null;
 
   get streaming(): boolean {
@@ -88,7 +97,10 @@ export class AgentLoop {
     private readonly forgeLoader?: ForgeInstructionsLoader,
     private readonly secrets?: vscode.SecretStorage,
     workspaceRoot?: string,
+    private readonly getConfigPath?: () => string,
+    private readonly cliDriver?: CliAgentDriver,
   ) {
+    this.workspaceRoot = workspaceRoot ?? forgeLoader?.root ?? '';
     this.approvals = new ToolApprovalService(post, getView);
     this.toolDispatch = new ToolDispatch(
       toolRegistry,
@@ -104,7 +116,7 @@ export class AgentLoop {
       getConfig,
       pool,
       registry: toolRegistry,
-      workspaceRoot: workspaceRoot ?? forgeLoader?.root ?? '',
+      workspaceRoot: this.workspaceRoot,
       ...(secrets ? { secrets } : {}),
       onActivity: (activity, conversationId) =>
         this.post({ type: 'workerStatus', ...activity, conversationId }),
@@ -281,15 +293,29 @@ export class AgentLoop {
     attachments?: AttachmentData[],
   ): Promise<void> {
     const convId = conv.id;
+    const postC = (msg: HostToWebview): void =>
+      this.post({ ...msg, conversationId: convId } as HostToWebview);
+    const hasImage = attachments?.some((attachment) => attachment.mediaType.startsWith('image/'));
+    if (hasImage && !deriveStaticCapabilities(model).includes('vision')) {
+      postC({
+        type: 'error',
+        message:
+          `Forge: model "${model.name}" is not configured for image input. ` +
+          'Choose a vision-capable model. For llama.cpp, set mmproj_path to its compatible ' +
+          'projector; for other providers, declare the vision capability only when supported.',
+      });
+      return;
+    }
+    if (model.provider === 'cli') {
+      await this.runCliTurn(conv, model, text, attachments, postC);
+      return;
+    }
     const ctrl = new AbortController();
     this.cancelControllers.set(convId, ctrl);
     const settled = new Promise<void>((resolve) => {
       this.resolveSettledMap.set(convId, resolve);
     });
     this.streamingSettledMap.set(convId, settled);
-    const postC = (msg: HostToWebview): void =>
-      this.post({ ...msg, conversationId: convId } as HostToWebview);
-
     // conv.active_model is set by the caller (SidebarProvider) to the full
     // selection id, incl. any @profile — don't clobber it with the base name (F6).
     conv.active_model ??= model.name;
@@ -297,6 +323,10 @@ export class AgentLoop {
 
     const activeFile = vscode.window.activeTextEditor?.document.uri.fsPath;
     log.debug(`[AgentLoop] runTurn model=${model.name} conv=${convId}`);
+    // Usage tracking (F7/§2.3): single choke point for every provider — fire
+    // and forget, debounced, never throws into the request path.
+    const configPath = this.getConfigPath?.();
+    if (configPath) recordModelUsage(configPath, model.name);
 
     // Cloud providers (xai, openrouter): no local backend — resolve token and call the API directly.
     if (isCloudProvider(model.provider)) {
@@ -400,6 +430,88 @@ export class AgentLoop {
     }
   }
 
+  private async runCliTurn(
+    conv: ConversationRuntime,
+    model: ModelConfig,
+    text: string,
+    attachments: AttachmentData[] | undefined,
+    postC: (msg: HostToWebview) => void,
+  ): Promise<void> {
+    const convId = conv.id;
+    let prepared;
+    try {
+      postC({ type: 'backendStarting', message: `Starting ${model.name}…` });
+      prepared = await prepareCliChatAgent(model, this.workspaceRoot);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.events.onBackendError?.(message);
+      postC({ type: 'backendDown', message });
+      return;
+    }
+
+    const ctrl = new AbortController();
+    this.cancelControllers.set(convId, ctrl);
+    this.streamingSettledMap.set(
+      convId,
+      new Promise<void>((resolve) => this.resolveSettledMap.set(convId, resolve)),
+    );
+    conv.active_model ??= model.name;
+    conv.updatedAt = Date.now();
+    const configPath = this.getConfigPath?.();
+    if (configPath) recordModelUsage(configPath, model.name);
+
+    this.commitUserPrompt(conv, text, attachments);
+    const checkpoint = this.checkpoints.beginTurn(`cli-chat-${Date.now()}`);
+    this.streamingConvIds.add(convId);
+    this.events.onBackendReady?.(model.name);
+    this.events.onGenerationStarted?.(model.name);
+    postC({ type: 'ready' });
+    postC({ type: 'generationStarted' });
+
+    try {
+      const sessionId = conv.cli_sessions?.[model.name];
+      const result = await runCliChat({
+        prepared,
+        model,
+        messages: conv.messages,
+        workspaceRoot: this.workspaceRoot,
+        checkpoint,
+        signal: ctrl.signal,
+        onText: (chunk) => postC({ type: 'token', text: chunk }),
+        onStatus: (detail) => postC({ type: 'toolActivity', toolName: prepared.cliName, detail }),
+        ...(sessionId ? { sessionId } : {}),
+        ...(this.cliDriver ? { driver: this.cliDriver } : {}),
+      });
+      if (result.sessionId) {
+        conv.cli_sessions = { ...conv.cli_sessions, [model.name]: result.sessionId };
+      }
+      if (result.assistantText) {
+        conv.messages.push({ role: 'assistant', content: result.assistantText });
+      }
+      if (result.status !== 'completed' && result.status !== 'cancelled') {
+        postC({ type: 'error', message: result.error ?? `${model.name} failed.` });
+      }
+      postC({
+        type: 'done',
+        finishReason: result.status === 'completed' ? 'stop' : result.status,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.error(`[AgentLoop] cli chat failed model=${model.name}: ${message}`);
+      this.events.onBackendError?.(message);
+      postC({ type: 'error', message });
+      postC({ type: 'done', finishReason: 'error' });
+    } finally {
+      this.streamingConvIds.delete(convId);
+      conv.updatedAt = Date.now();
+      const depthBefore = this.checkpoints.depth();
+      this.checkpoints.commitTurn(checkpoint);
+      if (this.checkpoints.depth() > depthBefore) postC({ type: 'checkpointReady' });
+      this.events.onGenerationFinished?.(model.name);
+      this.resolveStreamingLifecycle(convId);
+    }
+  }
+
   private commitUserPrompt(
     conv: ConversationRuntime,
     text: string,
@@ -493,6 +605,9 @@ export class AgentLoop {
   ): Promise<void> {
     const config = this.getConfig();
     const allowed = resolveToolPermissions(config);
+    // One budget per turn — activeModel is already resolveRequestModel()'d
+    // (group tools/tool_call_limits merged) by the caller.
+    const budget = new ToolBudget(activeModel);
     const useStrip = this.failureTracker.shouldStrip();
     const runtimeCaps = await this.getRuntimeCapabilities(activeModel, baseUrl);
     const canUseThinkingKwargs = this.canUseThinkingKwargs(activeModel, runtimeCaps);
@@ -518,7 +633,7 @@ export class AgentLoop {
         `Forge: model "${activeModel.name}" does not expose a usable chat template. Prompt formatting may be mismatched.`,
       );
     }
-    const toolDefinitions = this.toolRegistry.definitions(allowed);
+    const toolDefinitions = budget.filterDefinitions(this.toolRegistry.definitions(allowed));
     const nativeTools = runtimeCaps?.likelySupportsTools !== false;
     if (toolDefinitions.length > 0 && !nativeTools) {
       this.warnOnce(
@@ -553,7 +668,11 @@ export class AgentLoop {
           activeModel.system_prompt,
           activeModel.system_prompt_mode,
         );
-        return addWorkerDelegationInstructions(injected, allowed.has('delegate'));
+        const delegateEnabled = allowed.has('delegate');
+        const catalog = delegateEnabled
+          ? buildWorkerCatalog(config, allowed.has('cloud-worker'))
+          : undefined;
+        return addWorkerDelegationInstructions(injected, delegateEnabled, catalog);
       },
       dispatchToolCalls: async (toolCalls, messages) => {
         for (const call of toolCalls) {
@@ -573,6 +692,7 @@ export class AgentLoop {
           undefined,
           checkpoint,
           activeModel.name,
+          budget,
         );
       },
       onToken: (text) => postC({ type: 'token', text }),

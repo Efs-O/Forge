@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { resolve } from 'node:path';
 import { ForgeConfigSchema } from '../../src/config/schema';
-import { connectMcpServers, extractTextContent, mcpToolToRegisteredTool } from '../../src/tools/mcpBridge';
+import {
+  connectMcpServers,
+  extractTextContent,
+  mcpToolToRegisteredTool,
+} from '../../src/tools/mcpBridge';
 import { ToolRegistry } from '../../src/tools/ToolRegistry';
 
 const testLog = {
@@ -126,6 +130,22 @@ describe('mcpToolToRegisteredTool', () => {
     await expect(registry.dispatch('dispatch_subagent', {}, new Set(['delegate']))).resolves.toBe(
       'delegated result',
     );
+  });
+
+  it('hides and blocks default read-classified tools without read permission', async () => {
+    const registry = new ToolRegistry();
+    registry.register(
+      mcpToolToRegisteredTool('halluscribe', tool, async () => ({
+        content: [{ type: 'text', text: 'result' }],
+      })),
+    );
+    expect(registry.definitions(new Set(['delegate']))).toEqual([]);
+    await expect(
+      registry.dispatch('search_sessions', { query: 'x' }, new Set(['delegate'])),
+    ).rejects.toThrow('requires permission "read"');
+    await expect(
+      registry.dispatch('search_sessions', { query: 'x' }, new Set(['read'])),
+    ).resolves.toBe('result');
   });
 
   it('enforces delegate permission after bridging a real stdio MCP server', async () => {

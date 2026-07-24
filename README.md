@@ -39,6 +39,7 @@ Its default and strongest path is still local: GGUF models through `llama-server
 - Direct `llama-server` lifecycle management
 - Ollama local and Ollama cloud routing through the local daemon
 - Optional cloud or self-hosted providers: `xai`, `openrouter`, `openai`, `openai-compatible`
+- External CLI agents (`provider: cli` — Claude Code, Codex) as full-rights worker/delegation targets via existing subscriptions, no API key
 - Localhost control server for external orchestrators and worker fleets
 - Reasoning token display and optional thinking-channel stripping
 - Optional Tavily or Brave web search with keys stored in VS Code SecretStorage
@@ -244,6 +245,53 @@ Use:
 - `Forge: Set Search API Key`
 - `/reindex` to rebuild the semantic index
 
+## Image attachments
+
+Image input requires a vision-capable model. For llama.cpp models, configure a
+compatible `mmproj_path`; for other providers, declare the `vision` capability
+only when that model accepts images. Forge stops before starting a request and
+shows this setup guidance when an image is attached to a text-only model.
+
+## Local tool-schema audit
+
+Forge includes an opt-in local-model harness that advertises the same native
+tool constructors assembled by `registerAllTools.ts`. It asks the configured
+model to emit calls but does not execute handlers or side effects.
+
+```powershell
+npm run test:local-tools -- --list
+npm run test:local-tools -- --base-url http://127.0.0.1:8080 --strict-args
+```
+
+`--strict-args` uses structural comparison, so JSON object-key order is
+irrelevant while array order remains significant. External MCP processes are
+never started by default. Use `--include-mcp` explicitly (and optionally
+`--config <path>`) to include configured MCP schemas in the inventory or model
+sweep. Reports identify native versus MCP tools and state that the mode is
+schema emission only.
+
+Generate the canonical native/MCP coverage matrix by merging dated evidence:
+
+```powershell
+npm run test:local-tools -- --list --include-mcp `
+  --coverage-report docs/TOOL_COVERAGE.md `
+  --model-evidence docs/live-reports/<dated-tool-report>.json `
+  --capability-evidence docs/live-reports/<dated-capability-report>.json
+```
+
+The coordinator, worker, advisory, vision, and semantic-search checks are
+hardware-dependent and skipped in ordinary CI. Run them explicitly against a
+local model and embedding endpoint:
+
+```powershell
+$env:FORGE_LIVE_CAPABILITIES = '1'
+$env:FORGE_LIVE_ENDPOINT = 'http://127.0.0.1:8080'
+$env:FORGE_LIVE_EMBEDDING_ENDPOINT = 'http://127.0.0.1:8091'
+$env:FORGE_LIVE_MODEL = '<configured-model-name>'
+$env:FORGE_LIVE_REPORT = 'docs/live-reports/capabilities-YYYY-MM-DD-HHMM.json'
+npx vitest run test/live/GemmaCapabilities.live.test.ts --reporter=verbose
+```
+
 ## MCP Tool Servers
 
 Forge can consume tools from external [MCP](https://modelcontextprotocol.io) stdio servers. Configure them in `config.yaml`:
@@ -288,6 +336,8 @@ ranges and requires exact `expected_lines`; stale, overlapping, out-of-range, or
 oversized edits are rejected before the file is written.
 
 To consult a different direct llama.cpp model without evicting the primary model, configure enough slots, for example `max_simultaneous_models: 2`. Slot availability prevents Forge from evicting the primary backend, but it does not guarantee the machine has enough RAM or VRAM to load the second model. Delegation is limited to 120 seconds and returned analysis is capped at 24,000 characters.
+
+A model configured with `provider: cli` (Claude Code, Codex) is a full-rights external agent: Forge spawns the CLI locally with the conversation, and it runs with its OWN tools — Forge does not inject its tool registry or run its own tool loop for it. Auth is entirely the CLI's own login (`claude`/`codex`), never a key stored in Forge. `cli` models can be selected for direct sidebar chat and are also valid `dispatch_workers`/`ask_local_agent` targets. Direct CLI chats persist and resume the Claude session or Codex thread per Forge conversation. By default Forge passes no model override, so the CLI resolves its own configured/default model. Set optional `cli_model` only when an explicit per-entry override is wanted. A separate extension's per-chat model picker is private state and is not treated as configuration. Direct chat checkpoints the workspace before launch so Keep/Undo covers source-file edits; worker write access checkpoints its assigned paths.
 
 ## Slash Commands
 

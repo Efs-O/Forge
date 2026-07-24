@@ -19,6 +19,8 @@ interface WorkerModelCatalogEntry {
   cloud: boolean;
   profiles: string[];
   aliases: string[];
+  short_name?: string;
+  category?: string;
 }
 
 function hasWriteWorker(args: Record<string, unknown>): boolean {
@@ -41,7 +43,7 @@ export function makeListWorkerModelsTool(getConfig: () => ForgeConfig): Register
       function: {
         name: 'list_worker_models',
         description:
-          'List exact configured Forge model names eligible for worker dispatch. Call this before dispatch_workers when the user did not provide an exact configured model name.',
+          'List configured Forge model names eligible for worker dispatch, with short_name/alias/category hints. Call this before dispatch_workers when the user did not provide an exact configured model name (dispatch_workers also accepts short_name and unambiguous partial names directly).',
         parameters: {
           type: 'object',
           properties: {},
@@ -63,7 +65,17 @@ export function makeListWorkerModelsTool(getConfig: () => ForgeConfig): Register
         const aliases = Object.entries(config.aliases ?? {})
           .filter(([, target]) => target.split('@', 1)[0] === model.name)
           .map(([alias]) => alias);
-        return [{ name: model.name, route, cloud, profiles, aliases }];
+        return [
+          {
+            name: model.name,
+            route,
+            cloud,
+            profiles,
+            aliases,
+            ...(model.short_name ? { short_name: model.short_name } : {}),
+            ...(model.category ? { category: model.category } : {}),
+          },
+        ];
       });
       return JSON.stringify(entries);
     },
@@ -129,6 +141,20 @@ export function makeDispatchWorkersTool(getConfig: () => ForgeConfig): Registere
     approval: (args) => {
       const request = args as unknown as WorkerRunRequest;
       const config = getConfig();
+      const cliNames = (request.workers ?? []).flatMap((worker) => {
+        try {
+          const resolved = resolveRequestModel(config, worker.model);
+          return resolved.provider === 'cli' ? [resolved.cli ?? resolved.name] : [];
+        } catch {
+          return [];
+        }
+      });
+      if (cliNames.length > 0) {
+        return {
+          dangerous: true,
+          detail: `External CLI agent (${cliNames.join(', ')}) will run with its own tools in this workspace`,
+        };
+      }
       const cloud = request.workers?.filter((worker) => {
         try {
           return isCloudModelRoute(classifyModelRoute(resolveRequestModel(config, worker.model)));

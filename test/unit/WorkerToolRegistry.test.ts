@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { ForgeConfig } from '../../src/config/types';
-import { makeListWorkerModelsTool } from '../../src/tools/dispatchWorkersTool';
+import {
+  makeDispatchWorkersTool,
+  makeListWorkerModelsTool,
+} from '../../src/tools/dispatchWorkersTool';
 import { ToolRegistry, type RegisteredTool } from '../../src/tools/ToolRegistry';
 
 function workerTool(): RegisteredTool {
@@ -32,6 +35,37 @@ function workerTool(): RegisteredTool {
 }
 
 describe('worker tool registry enforcement', () => {
+  it('executes the real dispatch handler through the injected worker runner', async () => {
+    const config: ForgeConfig = {
+      active_model: 'local-model',
+      llama_server: {},
+      models: [{ name: 'local-model', gguf_path: '/local.gguf' }],
+    };
+    const runWorkers = async () => ({
+      runId: 'run-1',
+      status: 'completed' as const,
+      executionMode: 'parallel' as const,
+      workers: [
+        {
+          id: 'reader',
+          model: 'local-model',
+          status: 'completed' as const,
+          summary: 'reviewed',
+          changedPaths: [],
+        },
+      ],
+    });
+    const result = JSON.parse(
+      await makeDispatchWorkersTool(() => config).handler(
+        {
+          workers: [{ id: 'reader', model: 'local-model', task: 'Review files', access: 'read' }],
+        },
+        { beforeMutate: () => undefined, runWorkers },
+      ),
+    ) as Record<string, unknown>;
+    expect(result).toMatchObject({ runId: 'run-1', status: 'completed' });
+  });
+
   it('lists exact eligible worker models without sensitive config fields', async () => {
     const config: ForgeConfig = {
       active_model: 'local-model',
@@ -69,6 +103,40 @@ describe('worker tool registry enforcement', () => {
     ]);
     expect(JSON.stringify(result)).not.toContain('secret');
     expect(JSON.stringify(result)).not.toContain('.gguf');
+  });
+
+  it('includes short_name and category in list_worker_models entries when set', async () => {
+    const config: ForgeConfig = {
+      active_model: 'gemma',
+      llama_server: {},
+      permissions: { agents: { delegate: true, cloud_workers: false } },
+      models: [
+        {
+          name: 'gemma4-26b-a4b-it-iq3s',
+          gguf_path: '/g.gguf',
+          short_name: 'gemma4',
+          category: 'coding',
+        },
+        { name: 'plain-model', gguf_path: '/p.gguf' },
+      ],
+    };
+    const registry = new ToolRegistry();
+    registry.register(makeListWorkerModelsTool(() => config));
+    const result = JSON.parse(
+      await registry.dispatch('list_worker_models', {}, new Set(['delegate'])),
+    ) as Array<Record<string, unknown>>;
+    expect(result).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'gemma4-26b-a4b-it-iq3s',
+          short_name: 'gemma4',
+          category: 'coding',
+        }),
+      ]),
+    );
+    const plain = result.find((entry) => entry['name'] === 'plain-model');
+    expect(plain).not.toHaveProperty('short_name');
+    expect(plain).not.toHaveProperty('category');
   });
 
   it('keeps model catalog advertisement and results live across config reloads', async () => {
@@ -121,5 +189,34 @@ describe('worker tool registry enforcement', () => {
         allowedNames: new Set(['read_file']),
       }),
     ).rejects.toThrow('outside the active tool scope');
+  });
+
+  it('marks provider:cli workers dangerous with the external-agent detail message', () => {
+    const config: ForgeConfig = {
+      active_model: 'claude-code',
+      llama_server: {},
+      models: [{ name: 'claude-code', provider: 'cli', cli: 'claude' }],
+    };
+    const approval = makeDispatchWorkersTool(() => config).approval;
+    const result = approval?.({
+      workers: [{ id: 'agent', model: 'claude-code', task: 'review', access: 'read' }],
+    });
+    expect(result).toEqual({
+      dangerous: true,
+      detail: 'External CLI agent (claude) will run with its own tools in this workspace',
+    });
+  });
+
+  it('does not flag ordinary local workers as dangerous', () => {
+    const config: ForgeConfig = {
+      active_model: 'local-model',
+      llama_server: {},
+      models: [{ name: 'local-model', gguf_path: '/local.gguf' }],
+    };
+    const approval = makeDispatchWorkersTool(() => config).approval;
+    const result = approval?.({
+      workers: [{ id: 'reader', model: 'local-model', task: 'review', access: 'read' }],
+    });
+    expect(result).toEqual({});
   });
 });

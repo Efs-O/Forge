@@ -184,6 +184,40 @@ export interface TestRunnerConfig {
   baseArgs: string[];
 }
 
+export interface PackageRunnerInvocation {
+  command: string;
+  argsPrefix: string[];
+}
+
+/**
+ * npm and npx are .cmd shims on Windows, which cannot be passed to spawn with
+ * shell:false. Resolve the shim to its adjacent node.exe and npm CLI script so
+ * project scripts remain shell-free and user arguments cannot become shell syntax.
+ */
+export function resolvePackageRunnerInvocation(
+  runner: 'npm' | 'npx',
+  platform: NodeJS.Platform = process.platform,
+): PackageRunnerInvocation {
+  if (platform !== 'win32') return { command: runner, argsPrefix: [] };
+
+  const lookup = child_process.spawnSync('where.exe', [`${runner}.cmd`], { encoding: 'utf8' });
+  const shim = lookup.stdout
+    ?.split(/\r?\n/u)
+    .map((entry) => entry.trim())
+    .find((entry) => entry.toLowerCase().endsWith(`${runner}.cmd`));
+  if (!shim) throw new Error(`${runner}: Windows command shim was not found on PATH`);
+
+  const installRoot = path.dirname(shim);
+  const node = path.join(installRoot, 'node.exe');
+  const cli = path.join(installRoot, 'node_modules', 'npm', 'bin', `${runner}-cli.js`);
+  if (!fs.existsSync(node) || !fs.existsSync(cli)) {
+    throw new Error(
+      `${runner}: expected node executable and CLI beside the resolved shim (${installRoot})`,
+    );
+  }
+  return { command: node, argsPrefix: [cli] };
+}
+
 export function detectTestRunner(workspaceRoot: string): TestRunnerConfig {
   const pkgPath = path.join(workspaceRoot, 'package.json');
   if (!fs.existsSync(pkgPath)) {

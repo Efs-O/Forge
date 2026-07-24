@@ -82,4 +82,51 @@ describe('WorkerLoop', () => {
       status: 'failed_loop',
     });
   });
+
+  it('honors the resolved worker model tools allowlist when building tool definitions', async () => {
+    runToolCallingLoop.mockResolvedValue({
+      finishReason: 'stop',
+      finalText: 'done',
+      rounds: 1,
+      repeatedCall: false,
+    });
+    const registry = new ToolRegistry();
+    registry.register({
+      definition: {
+        type: 'function',
+        function: { name: 'read_file', description: 'read', parameters: { type: 'object' } },
+      },
+      permission: 'read',
+      handler: vi.fn().mockResolvedValue('ok'),
+    });
+    registry.register({
+      definition: {
+        type: 'function',
+        function: { name: 'run_terminal', description: 'exec', parameters: { type: 'object' } },
+      },
+      permission: 'terminal',
+      handler: vi.fn().mockResolvedValue('ok'),
+    });
+    const config = {
+      models: [{ name: 'local', provider: 'llama.cpp' }],
+      llama_server: {},
+      permissions: {
+        fs: { read: true },
+        exec: { terminal: true },
+        agents: { delegate: true },
+      },
+    } as ForgeConfig;
+    const loop = new WorkerLoop(() => config, registry, 'C:\\workspace');
+    const scopedTarget = {
+      model: { name: 'local', provider: 'llama.cpp' as const, tools: ['read_file'] },
+      baseUrl: 'http://127.0.0.1:8080',
+      bestEffort: false,
+    };
+
+    await loop.run(spec, scopedTarget, policy, context);
+
+    const lastCall = runToolCallingLoop.mock.calls.at(-1);
+    const options = lastCall?.[0] as { toolDefinitions: { function: { name: string } }[] };
+    expect(options.toolDefinitions.map((d) => d.function.name)).toEqual(['read_file']);
+  });
 });

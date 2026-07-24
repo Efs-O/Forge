@@ -1,5 +1,56 @@
+import * as fs from 'fs/promises';
+import * as path from 'path';
+
+export enum FileType {
+  Unknown = 0,
+  File = 1,
+  Directory = 2,
+}
+
+export enum DiagnosticSeverity {
+  Error = 0,
+  Warning = 1,
+  Information = 2,
+  Hint = 3,
+}
+
+export enum SymbolKind {
+  File = 0,
+  Module = 1,
+  Namespace = 2,
+  Package = 3,
+  Class = 4,
+  Method = 5,
+  Property = 6,
+  Field = 7,
+  Constructor = 8,
+  Enum = 9,
+  Interface = 10,
+  Function = 11,
+  Variable = 12,
+}
+
 export const workspace = {
-  workspaceFolders: [],
+  workspaceFolders: [] as Array<{ uri: { fsPath: string } }>,
+  fs: {
+    async readDirectory(uri: { fsPath: string }): Promise<Array<[string, FileType]>> {
+      const entries = await fs.readdir(uri.fsPath, { withFileTypes: true });
+      return entries.map((entry) => [
+        entry.name,
+        entry.isDirectory() ? FileType.Directory : FileType.File,
+      ]);
+    },
+  },
+  findFiles: async (): Promise<Array<{ fsPath: string }>> => [],
+  asRelativePath: (uri: { fsPath: string }): string => {
+    const root = workspace.workspaceFolders[0]?.uri.fsPath;
+    return root ? path.relative(root, uri.fsPath).replace(/\\/g, '/') : uri.fsPath;
+  },
+  openTextDocument: async (uri: { fsPath: string }) => ({
+    uri,
+    save: async () => true,
+  }),
+  applyEdit: async () => true,
   createFileSystemWatcher: () => ({
     onDidChange: () => undefined,
     onDidCreate: () => undefined,
@@ -9,6 +60,8 @@ export const workspace = {
 };
 
 export const window = {
+  activeTextEditor: undefined as unknown,
+  visibleTextEditors: [] as Array<{ document: { uri: { fsPath: string } } }>,
   createOutputChannel: () => ({
     appendLine: () => undefined,
     show: () => undefined,
@@ -17,6 +70,30 @@ export const window = {
   showWarningMessage: async () => undefined,
   showInformationMessage: async () => undefined,
   showErrorMessage: async () => undefined,
+  showQuickPick: async (): Promise<string | undefined> => undefined,
+  showInputBox: async (): Promise<string | undefined> => undefined,
+  showTextDocument: async (document: unknown) => document,
+  createTerminal: () => ({ show: () => undefined, sendText: () => undefined }),
+};
+
+let clipboardText = '';
+export const env = {
+  appRoot: undefined as string | undefined,
+  clipboard: {
+    writeText: async (value: string): Promise<void> => {
+      clipboardText = value;
+    },
+    readText: async (): Promise<string> => clipboardText,
+  },
+  openExternal: async (): Promise<boolean> => true,
+};
+
+export const languages = {
+  getDiagnostics: (_uri?: unknown): unknown => [],
+};
+
+export const extensions = {
+  getExtension: (_id: string): unknown => undefined,
 };
 
 export class Disposable {
@@ -42,6 +119,7 @@ export class RelativePattern {
 
 export const Uri = {
   file: (fsPath: string) => ({ fsPath }),
+  parse: (value: string) => ({ fsPath: value, toString: () => value }),
 };
 
 export class Position {

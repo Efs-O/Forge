@@ -160,6 +160,31 @@ describe('delegation eligibility', () => {
     expect(target.baseModel).toBe('llama');
     expect(target.model.sampling?.temperature).toBe(0.2);
   });
+
+  it('resolves a fuzzy short_name to the correct baseModel and resolvedId (F7)', () => {
+    const cfg = config();
+    cfg.models = cfg.models.map((m) => (m.name === 'llama' ? { ...m, short_name: 'll' } : m));
+    const target = resolveDelegationTarget(cfg, 'll');
+    expect(target.baseModel).toBe('llama');
+    expect(target.resolvedId).toBe('llama');
+    expect(target.model.name).toBe('llama');
+  });
+
+  it('resolves a fuzzy short_name with @profile to the correct resolvedId (F7)', () => {
+    const cfg = config();
+    cfg.models = cfg.models.map((m) => (m.name === 'llama' ? { ...m, short_name: 'll' } : m));
+    const target = resolveDelegationTarget(cfg, 'll@reviewer');
+    expect(target.baseModel).toBe('llama');
+    expect(target.resolvedId).toBe('llama@reviewer');
+    expect(target.model.sampling?.temperature).toBe(0.2);
+  });
+
+  it('rejects an ambiguous fuzzy target with a structured candidate list', () => {
+    const cfg = config();
+    // Both "xai-model" and "xai-model-2" would prefix-match "xai".
+    cfg.models = [...cfg.models, model('xai-model-2', 'xai')];
+    expect(() => resolveDelegationTarget(cfg, 'xai')).toThrow(/Ambiguous model "xai"/);
+  });
 });
 
 describe('LocalDelegationService limits and dispatch', () => {

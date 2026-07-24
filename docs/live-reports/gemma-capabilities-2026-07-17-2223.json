@@ -1,0 +1,73 @@
+{
+  "generatedAt": "2026-07-17T19:46:20.233Z",
+  "forgeVersion": "0.12.28",
+  "model": "gemma4-26b-a4b-it-iq3s",
+  "endpoint": "http://127.0.0.1:8080",
+  "embeddingEndpoint": "http://127.0.0.1:8091",
+  "modelCapabilities": {
+    "nativeToolCalling": true,
+    "visionProjector": true,
+    "embeddingPromptStyle": "gemma"
+  },
+  "llamaServerVersion": "b9402-19e92c33e",
+  "attemptsPerRequest": 1,
+  "executionMode": "live-capability",
+  "results": [
+    {
+      "check": "coordinator-loop",
+      "passed": true,
+      "calls": [
+        "read_file",
+        "search_code",
+        "replace_in_file",
+        "run_tests"
+      ],
+      "checkpointUndo": true
+    },
+    {
+      "check": "workers",
+      "passed": true,
+      "readToolCount": 6,
+      "writeToolCount": 9,
+      "readCalls": [
+        "list_directory",
+        "read_file"
+      ],
+      "writeCalls": [
+        "write_file",
+        "replace_in_file"
+      ]
+    },
+    {
+      "check": "advisory-delegation",
+      "passed": true,
+      "toolDefinitionCount": 0
+    },
+    {
+      "check": "vision",
+      "passed": true,
+      "groundedTerms": [
+        "blue",
+        "triangle",
+        "FORGE 7"
+      ]
+    },
+    {
+      "check": "semantic-search",
+      "passed": true,
+      "promptStyle": "gemma",
+      "topDocument": 0
+    },
+    {
+      "check": "prompt-variants-and-fallback",
+      "passed": true,
+      "promptVariantsPerSchema": 3,
+      "representativeTools": [
+        "git_status",
+        "read_file",
+        "dispatch_workers"
+      ],
+      "fallbackFormat": true
+    }
+  ]
+}

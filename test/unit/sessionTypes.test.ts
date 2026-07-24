@@ -68,6 +68,18 @@ describe('sessionTypes', () => {
     ]);
   });
 
+  it('persists external CLI sessions with their Forge conversation', () => {
+    const session = createDefaultSession();
+    session.conversations[0].cli_sessions = {
+      'claude-code': 'claude-session',
+      codex: 'codex-thread',
+    };
+    const persisted = sidebarSessionPersistedSchema.parse(runtimeToPersisted(session));
+    const store: Record<string, unknown> = { [SESSION_KEY_V1]: persisted };
+    const loaded = loadSidebarSession(makeMemento(store));
+    expect(loaded.conversations[0].cli_sessions).toEqual(session.conversations[0].cli_sessions);
+  });
+
   it('runtimeToPersisted includes archived history conversations', () => {
     const s = createDefaultSession();
     s.conversations[0].messages.push(

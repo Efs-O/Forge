@@ -64,6 +64,10 @@
         "title": "Forge: Open Sidebar"
       },
       {
+        "command": "forge.modelManager",
+        "title": "Forge: Model Manager"
+      },
+      {
         "command": "forge.ensureModel",
         "title": "Forge: Ensure Model (load on demand)"
       },
@@ -110,6 +114,10 @@
       {
         "command": "forge.addModel",
         "title": "Forge: Add Models"
+      },
+      {
+        "command": "forge.compactConfig",
+        "title": "Forge: Compact config into groups"
       },
       {
         "command": "forge.clearChat",
@@ -369,6 +377,7 @@
     "eslint": "^8.57.0",
     "eslint-config-prettier": "^9.0.0",
     "eslint-plugin-prettier": "^5.0.0",
+    "jsdom": "^29.1.1",
     "prettier": "^3.0.0",
     "typescript": "^5.4.0",
     "vitest": "^1.0.0"
@@ -385,6 +394,7 @@
     "rehype-highlight": "^7.0.2",
     "remark-gfm": "^4.0.1",
     "turndown": "^7.2.0",
+    "yaml": "^2.9.0",
     "zod": "^4.3.6"
   }
 }

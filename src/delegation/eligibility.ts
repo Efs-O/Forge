@@ -8,7 +8,7 @@ export interface DelegationTarget {
   resolvedId: string;
   baseModel: string;
   model: ModelConfig;
-  provider: 'llama.cpp' | 'ollama';
+  provider: 'llama.cpp' | 'ollama' | 'cli';
 }
 
 function isLocalOllamaEndpoint(endpoint: string | undefined): boolean {
@@ -31,13 +31,19 @@ export function resolveDelegationTarget(config: ForgeConfig, requested: string):
   let model: ModelConfig;
   let resolvedId: string;
   try {
-    resolvedId = expandAlias(config, requested);
     model = resolveRequestModel(config, requested);
+    // `model.name` is the fuzzy resolver's canonical match (ConfigResolver),
+    // which may differ from the alias-only expansion below when `requested`
+    // was a short_name/prefix/substring rather than an exact name or alias —
+    // rebuild resolvedId from the canonical name so downstream BackendPool
+    // keying (which only expands exact aliases) stays correct.
+    const { profile } = splitModelProfile(expandAlias(config, requested));
+    resolvedId = profile ? `${model.name}@${profile}` : model.name;
   } catch (err) {
     throw new Error(`Unknown delegation target "${requested}": ${(err as Error).message}`);
   }
 
-  const { base } = splitModelProfile(resolvedId);
+  const base = model.name;
   const provider = model.provider ?? 'llama.cpp';
 
   if (provider === 'llama.cpp') {
@@ -59,6 +65,12 @@ export function resolveDelegationTarget(config: ForgeConfig, requested: string):
         `Delegation target "${requested}" is an Ollama cloud-routed model ("${model.name}"); only local Ollama daemon targets are allowed.`,
       );
     }
+    return { requested, resolvedId, baseModel: base, model, provider };
+  }
+
+  if (provider === 'cli') {
+    // Local by definition — the CLI handles its own subscription auth, never
+    // Forge's backend pool. No capacity check needed: it spawns its own process.
     return { requested, resolvedId, baseModel: base, model, provider };
   }
 

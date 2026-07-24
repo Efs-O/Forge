@@ -33,6 +33,7 @@ const conversationPersistedSchema = z.object({
   updatedAt: z.number(),
   messages: z.array(slimMsgSchema),
   active_model: z.string().optional(),
+  cli_sessions: z.record(z.string(), z.string().min(1)).optional(),
 });
 
 export const sidebarSessionPersistedSchema = z.object({
@@ -51,6 +52,8 @@ export interface ConversationRuntime {
   updatedAt: number;
   messages: ChatMessage[];
   active_model?: string;
+  /** Persistent external CLI sessions keyed by configured Forge model name. */
+  cli_sessions?: Record<string, string>;
 }
 
 export interface SidebarRuntime {
@@ -125,6 +128,7 @@ function persistedToRuntime(p: ConversationPersisted): ConversationRuntime {
     updatedAt: p.updatedAt,
     messages: chatMessagesFromSlim(p.messages),
     ...(p.active_model !== undefined ? { active_model: p.active_model } : {}),
+    ...(p.cli_sessions !== undefined ? { cli_sessions: { ...p.cli_sessions } } : {}),
   };
 }
 
@@ -138,6 +142,7 @@ export function runtimeToPersisted(session: SidebarRuntime): SidebarSessionPersi
       updatedAt: c.updatedAt,
       messages: slimPersistMessages(c.messages),
       ...(c.active_model !== undefined ? { active_model: c.active_model } : {}),
+      ...(c.cli_sessions !== undefined ? { cli_sessions: { ...c.cli_sessions } } : {}),
     })),
     history: session.history.map((c) => ({
       id: c.id,
@@ -146,6 +151,7 @@ export function runtimeToPersisted(session: SidebarRuntime): SidebarSessionPersi
       updatedAt: c.updatedAt,
       messages: slimPersistMessages(c.messages),
       ...(c.active_model !== undefined ? { active_model: c.active_model } : {}),
+      ...(c.cli_sessions !== undefined ? { cli_sessions: { ...c.cli_sessions } } : {}),
     })),
   };
 }

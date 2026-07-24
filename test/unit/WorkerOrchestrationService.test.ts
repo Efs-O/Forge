@@ -171,4 +171,25 @@ describe('WorkerOrchestrationService validation', () => {
     await expect(valid).rejects.toThrow('must not acquire');
     expect(pool.acquireGroupForDelegation).toHaveBeenCalledOnce();
   });
+
+  it('routes provider:cli workers around the backend pool entirely', async () => {
+    const forgeConfig = config([
+      {
+        name: 'claude-code',
+        provider: 'cli',
+        cli: 'forge-test-cli-that-does-not-exist',
+      },
+    ]);
+    const result = await service(forgeConfig).run(
+      {
+        workers: [{ id: 'agent', model: 'claude-code', task: 'review the auth module', access: 'read' }],
+      },
+      context(),
+    );
+    // A deliberately nonexistent CLI resolves to failed_startup rather than
+    // asking the backend pool for a local llama.cpp/Ollama slot.
+    expect(pool.acquireGroupForDelegation).not.toHaveBeenCalled();
+    expect(result.workers[0]?.status).toBe('failed_startup');
+    expect(result.workers[0]?.error).toContain('install it and log in');
+  });
 });

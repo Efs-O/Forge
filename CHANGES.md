@@ -1,5 +1,30 @@
 # Forge — Recent Changes
 
+## Unreleased — Tool audit hardening
+
+- Fixed `search_code` startup on current VS Code distributions by resolving the
+  platform-specific `@vscode/ripgrep-universal` binary while retaining legacy
+  layouts and the final `PATH` fallback.
+- Expanded ripgrep startup errors with the resolved command and bundled
+  candidates checked, making Extension Host layout failures actionable.
+- Reworked `npm run test:local-tools` to derive all 48 native schemas from
+  `registerAllTools.ts`, including structured-edit and delegation tools.
+- Made strict tool-argument checks structural: reordered object keys now pass,
+  while array order and changed values remain significant.
+- Added explicit `--include-mcp` discovery, separate native/MCP origin labels,
+  schema-emission-only reporting, and exact coordinator/worker catalog tests.
+- Added isolated successful handler execution for every native tool group using
+  temporary workspaces, repositories, controlled VS Code adapters, and mocked
+  network providers; ordinary CI requires no model, GPU, secret, or internet.
+- Added opt-in coordinator, worker, tool-free advisory, vision, and semantic
+  capability checks with non-overwriting dated reports and a canonical
+  native/MCP coverage matrix.
+- Added an image-input preflight that explains how to select a vision model or
+  configure a compatible llama.cpp `mmproj_path` instead of sending images to a
+  text-only model.
+- Fixed `run_tests` and `run_build` on Windows by resolving npm/npx shims to
+  their adjacent Node CLI without enabling shell execution.
+
 ## 0.12.28 — Worker orchestration and safe structured editing
 
 - Added bounded one- or two-worker coding orchestration across configured local
@@ -40,6 +65,7 @@ Called from `SidebarProvider` after every turn completes (in the `finally` block
 ```
 
 Rules:
+
 - First line is always `session_start` (written once when the first turn completes)
 - `system` role messages are skipped
 - Tool call messages have `content: null` and a `tool_calls` array
@@ -59,7 +85,12 @@ Rules:
 `postTokenBudget()` also writes `~/.forge/hallumeter-bridge.json` on every token budget update:
 
 ```json
-{"model":"gemma4-e4b-it-ud-q4kxl","used_tokens":12500,"max_tokens":98304,"timestamp_ms":1747000000000}
+{
+  "model": "gemma4-e4b-it-ud-q4kxl",
+  "used_tokens": 12500,
+  "max_tokens": 98304,
+  "timestamp_ms": 1747000000000
+}
 ```
 
 This is a single file, always overwritten. HalluMeter polls it every 5 seconds to show the live ring indicator.
@@ -71,10 +102,10 @@ Added `writeForgeBridge()` standalone function before the class definition.
 
 ### What depends on this
 
-| App | What it reads | Purpose |
-|-----|--------------|---------|
-| HalluMeter | `~/.forge/hallumeter-bridge.json` | Live context fill % for ring indicator |
-| HalluScribe | `~/.forge/sessions/*.jsonl` | Nightly sweep → Gemma summarization → archive |
+| App         | What it reads                     | Purpose                                       |
+| ----------- | --------------------------------- | --------------------------------------------- |
+| HalluMeter  | `~/.forge/hallumeter-bridge.json` | Live context fill % for ring indicator        |
+| HalluScribe | `~/.forge/sessions/*.jsonl`       | Nightly sweep → Gemma summarization → archive |
 
 ### Build note
 

@@ -50,13 +50,16 @@ export interface WorkerRunResult {
 
 export interface WorkerActivity {
   runId: string;
-  stage: 'run-started' | 'worker-started' | 'worker-finished';
+  stage: 'run-started' | 'worker-started' | 'worker-finished' | 'worker-progress';
   workerId?: string;
   model?: string;
   status?: WorkerStatus;
   executionMode?: WorkerRunResult['executionMode'];
   elapsedMs: number;
   changedPaths?: string[];
+  /** 'worker-progress' only — a concise status/text line from a `provider: cli`
+   *  external agent (e.g. "[claude: Edit src/foo.ts]"), relayed as it streams. */
+  detail?: string;
 }
 
 export interface WorkerRunContext {

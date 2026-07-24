@@ -29,6 +29,23 @@ overlaps with an existing owner, extend the owner instead.
 | Session transcript logging (~/.forge)      | `src/sidebar/SessionLogger.ts`       |
 | Tool-call argument summary labels          | `src/sidebar/toolSummary.ts`         |
 
+## Model Manager (F7/§2.3)
+
+| Concern                                        | Owner                                            |
+| ----------------------------------------------- | ------------------------------------------------ |
+| Typed webview ↔ host message contract           | `src/sidebar/modelManager/messages.ts`            |
+| Panel lifecycle + message dispatch (singleton)  | `src/sidebar/modelManager/ModelManagerPanel.ts`   |
+| Panel HTML/CSP/nonce builder                    | `src/sidebar/modelManager/panelHtml.ts`           |
+| Full-state assembly (stateless view contract)   | `src/sidebar/modelManager/modelSnapshot.ts`       |
+| Group/defaults merge + inherited-key detection  | `src/sidebar/modelManager/resolvedView.ts`        |
+| Field edit / remove / purge write path          | `src/sidebar/modelManager/editOps.ts`             |
+| Scan → candidate list → auto-generated entries  | `src/sidebar/modelManager/scanOps.ts`             |
+| Groups ("boards") editor write path             | `src/sidebar/modelManager/groupsOps.ts`           |
+| `last_used` tracking (.forge/state.json)        | `src/sidebar/modelManager/usageTracker.ts`        |
+| Webview entry point + master-detail shell       | `webview-ui/src/modelManager/App.tsx`             |
+| Webview state reducer                           | `webview-ui/src/modelManager/reducer.ts`          |
+| Webview host bridge wrapper                     | `webview-ui/src/modelManager/vscode.ts`           |
+
 ## Backend
 
 | Concern                                   | Owner                              |
@@ -54,6 +71,20 @@ overlaps with an existing owner, extend the owner instead.
 | Local delegation orchestration            | `src/delegation/LocalDelegationService.ts` |
 | Local delegation target eligibility       | `src/delegation/eligibility.ts`            |
 | Local delegation limits + prompt contract | `src/delegation/limits.ts`                 |
+| `ask_local_agent` for `provider: cli` targets | `src/delegation/CliDelegationRunner.ts` |
+
+## CLI Agents (`provider: cli` — F7/§2.4)
+
+| Concern                                              | Owner                                 |
+| ----------------------------------------------------- | -------------------------------------- |
+| Shared types (adapter contract, event/result shapes)  | `src/agents/types.ts`                  |
+| Spawn/stream/cancel/timeout lifecycle                 | `src/agents/CliAgentDriver.ts`         |
+| PATH/absolute-path executable resolution              | `src/agents/resolveCliExecutable.ts`   |
+| Structured driver error type                          | `src/agents/CliAgentError.ts`          |
+| Per-CLI adapter registry                              | `src/agents/adapters/index.ts`         |
+| Claude Code stream-json adapter                       | `src/agents/adapters/claudeAdapter.ts` |
+| Codex JSONL adapter                                   | `src/agents/adapters/codexAdapter.ts`  |
+| `dispatch_workers` cli-provider run (checkpoint + task prompt) | `src/agents/CliWorkerRunner.ts` |
 
 ## LLM / Inference
 
@@ -105,6 +136,7 @@ overlaps with an existing owner, extend the owner instead.
 | Bundled ripgrep executable resolution      | `src/tools/RipgrepResolver.ts`        |
 | Local agent delegation tool                | `src/tools/localAgentTool.ts`         |
 | Worker orchestration model tool            | `src/tools/dispatchWorkersTool.ts`    |
+| Per-turn tool allowlist + call-budget      | `src/tools/ToolBudget.ts`             |
 
 ## Coding Workers
 
@@ -134,10 +166,14 @@ overlaps with an existing owner, extend the owner instead.
 | Concern                                 | Owner                          |
 | --------------------------------------- | ------------------------------ |
 | `config.yaml` schema (Zod)              | `src/config/schema.ts`         |
+| Shared Zod primitives (groups/spawn/sampling) | `src/config/schemaShared.ts` |
 | Config load + validation                | `src/config/ConfigLoader.ts`   |
 | Two-flavor model/profile/alias resolver | `src/config/ConfigResolver.ts` |
 | Config + model types                    | `src/config/types.ts`          |
-| Validated config backup + safe writer   | `src/config/ConfigWriter.ts`   |
+| Comment-preserving config writer (entry point) | `src/config/ConfigWriter.ts` |
+| YAML Document mutation helpers (set/add/remove) | `src/config/ConfigWriterHelpers.ts` |
+| Groups migration orchestration + resolved-diff verifier | `src/config/ConfigMigrator.ts` |
+| Groups migration clustering/lifting heuristic | `src/config/ConfigGroupHeuristic.ts` |
 | User-facing config example              | `config/config.example.yaml`   |
 
 ## VS Code Integration

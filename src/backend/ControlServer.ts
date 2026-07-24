@@ -3,7 +3,12 @@ import type * as vscode from 'vscode';
 import type { IBackendPool } from './BackendPool';
 import type { ForgeConfig } from '../config/types';
 import { isCloudProvider, getCloudProviderLabel } from '../llm/CloudProviders';
-import { expandAlias, splitModelProfile } from '../config/ConfigResolver';
+import {
+  expandAlias,
+  splitModelProfile,
+  resolveModelName,
+  AmbiguousModelError,
+} from '../config/ConfigResolver';
 import { probeHealthy } from './HealthCheck';
 // prettier-ignore
 import { sendJson, requireModel, readJson, delay, toOpenAiBase, errText, handleChat, CHAT_BODY_BYTES } from './controlHttp';
@@ -37,7 +42,9 @@ export interface ControlServerDeps {
 
 export interface EnsureResult {
   status: number;
-  body: { baseUrl: string; model: string; backend: 'llama.cpp' | 'ollama' } | { error: string };
+  body:
+    | { baseUrl: string; model: string; backend: 'llama.cpp' | 'ollama' }
+    | { error: string; candidates?: string[] };
 }
 
 export interface ControlStatus {
@@ -152,9 +159,18 @@ export class ControlServer implements vscode.Disposable {
   }
 
   /** Release one hold on a model (mirror of POST /release). Serialized so it
-   *  cannot interleave with an in-flight /ensure mid-`holds` mutation. */
+   *  cannot interleave with an in-flight /ensure mid-`holds` mutation. Throws
+   *  `AmbiguousModelError` when a fuzzy name matches more than one model —
+   *  callers must never guess between candidates. */
   releaseHold(model: string): Promise<boolean> {
-    return this.serialize(async () => this.release(model));
+    return this.serialize(async () => {
+      const resolved = this.resolveBase(model);
+      if (!('name' in resolved)) {
+        const body = resolved.body as { error: string; candidates?: string[] };
+        throw new AmbiguousModelError(model, body.candidates ?? []);
+      }
+      return this.releaseBase(resolved.name);
+    });
   }
 
   /** Snapshot for status UI: listener state + per-model loaded/hold counts. */
@@ -189,7 +205,9 @@ export class ControlServer implements vscode.Disposable {
       if (method === 'POST' && path === '/release') {
         const model = requireModel(await readJson(req));
         if (!model) return sendJson(res, 400, { error: 'model is required' });
-        const released = await this.serialize(async () => this.release(model));
+        const resolved = this.resolveBase(model);
+        if (!('name' in resolved)) return sendJson(res, resolved.status, resolved.body);
+        const released = await this.serialize(async () => this.releaseBase(resolved.name));
         return sendJson(res, 200, { released });
       }
       if (method === 'POST' && path === '/unload') {
@@ -231,12 +249,37 @@ export class ControlServer implements vscode.Disposable {
     return splitModelProfile(expandAlias(this.config, model)).base;
   }
 
+  /**
+   * Resolve a control-API model id (possibly fuzzy/short, per CONFIG_OVERHAUL_PLAN
+   * §4 step 8) to a base config model name. Alias expansion and @profile
+   * stripping run first (F6); if the result isn't an exact model name, the F7
+   * fuzzy resolver (name/alias/short_name, prefix, substring) runs on it. An
+   * ambiguous fuzzy match returns a 400 with every candidate — never guesses.
+   * A name that resolves to nothing (truly unknown) is passed through
+   * unchanged so the existing per-route 404 handling stays in charge of the
+   * "unknown model" response shape.
+   */
+  private resolveBase(requested: string): { name: string } | EnsureResult {
+    const base = this.baseName(requested);
+    if (this.config.models.some((m) => m.name === base)) return { name: base };
+    try {
+      return { name: resolveModelName(this.config, base) };
+    } catch (err) {
+      if (err instanceof AmbiguousModelError) {
+        return { status: 400, body: { error: err.message, candidates: err.candidates } };
+      }
+      return { name: base };
+    }
+  }
+
   // ── core: ensure the requested model is loaded + warm ───────────────────────
 
   private async ensure(requested: string): Promise<EnsureResult> {
     // Profiles never change which GGUF is loaded — resolve to the base model
-    // for all loading/capacity bookkeeping (F6).
-    const model = this.baseName(requested);
+    // for all loading/capacity bookkeeping (F6). Fuzzy/short names resolve here too.
+    const resolved = this.resolveBase(requested);
+    if (!('name' in resolved)) return resolved;
+    const model = resolved.name;
     const known = this.config.models.find((m) => m.name === model);
     if (!known) {
       return { status: 404, body: { error: `unknown model "${requested}" — not in config` } };
@@ -353,8 +396,10 @@ export class ControlServer implements vscode.Disposable {
     return null;
   }
 
-  private release(requested: string): boolean {
-    const model = this.baseName(requested);
+  /** Release a hold on an already-resolved base model name. Fuzzy/alias/@profile
+   *  resolution happens once in `resolveBase` at the route boundary — this
+   *  never re-resolves, so it stays pure bookkeeping. */
+  private releaseBase(model: string): boolean {
     const current = this.holds.get(model) ?? 0;
     if (current <= 0) return false;
     const next = current - 1;
@@ -368,7 +413,9 @@ export class ControlServer implements vscode.Disposable {
   private async unload(
     requested: string,
   ): Promise<EnsureResult | { status: number; body: { unloaded: boolean } }> {
-    const model = this.baseName(requested);
+    const resolved = this.resolveBase(requested);
+    if (!('name' in resolved)) return resolved;
+    const model = resolved.name;
     const known = this.config.models.find((m) => m.name === model);
     if (!known) {
       return { status: 404, body: { error: `unknown model "${requested}" — not in config` } };

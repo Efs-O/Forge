@@ -23,6 +23,9 @@ fireworks.html
 
 # Internal planning docs — not user-facing
 docs/*
+!docs/TOOL_COVERAGE.md
+!docs/live-reports/
+!docs/live-reports/*.json
 !docs/OWNERS.md
 !docs/SAFE_WORKER_TOOL_UPGRADE_PLAN.md
 AUDIT_REPORT.md

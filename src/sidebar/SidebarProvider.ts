@@ -106,6 +106,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     forgeLoader?: ForgeInstructionsLoader,
     secrets?: vscode.SecretStorage,
     workspaceRoot?: string,
+    getConfigPath?: () => string,
   ) {
     this.sidebar = loadSidebarSession(workspaceState);
     const savedClanker = workspaceState.get<boolean>('forge.clankerMode', false);
@@ -124,6 +125,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       forgeLoader,
       secrets,
       workspaceRoot,
+      getConfigPath,
     );
     if (savedClanker) this.agentLoop.setClankerMode(true);
 
@@ -562,7 +564,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async applyRestoreConversation(id: string): Promise<void> {
-    await this.agentLoop.stopStreamingIfNeeded(this.sidebar.activeConversationId);
     const result = opRestoreConversation(this.sidebar, id);
     if ('atCap' in result && result.atCap) {
       void vscode.window.showWarningMessage(
