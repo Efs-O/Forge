@@ -46,6 +46,15 @@ overlaps with an existing owner, extend the owner instead.
 | Webview state reducer                           | `webview-ui/src/modelManager/reducer.ts`          |
 | Webview host bridge wrapper                     | `webview-ui/src/modelManager/vscode.ts`           |
 
+## CLI agent lifecycle
+
+| Concern                                      | Owner                                |
+| -------------------------------------------- | ------------------------------------ |
+| Shared CLI spawn and process-tree cleanup    | `src/agents/cliProcess.ts`            |
+| One-shot worker/delegation CLI execution     | `src/agents/CliAgentDriver.ts`        |
+| Warm direct-chat CLI process lifecycle       | `src/agents/CliAgentSession.ts`       |
+| Conversation/model ownership, cap, and idle eviction | `src/agents/CliSessionRegistry.ts` |
+
 ## Backend
 
 | Concern                                   | Owner                              |

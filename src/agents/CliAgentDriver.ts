@@ -1,7 +1,6 @@
-import { spawn, type ChildProcess } from 'child_process';
 import * as readline from 'readline';
 import { getCliAdapter } from './adapters';
-import { buildWindowsCmdShellInvocation, needsWindowsCmdShellWrap } from './windowsCmdShim';
+import { spawnCliProcess, terminateCliProcessTree, waitForCliProcessExit } from './cliProcess';
 import type {
   CliAccessMode,
   CliAgentEvent,
@@ -29,52 +28,6 @@ export interface CliAgentRunOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
   onEvent?: (event: CliAgentEvent) => void;
-}
-
-/** Kills a spawned CLI agent's process tree. Mirrors DirectBackend's
- *  killLlamaProcess convention (backend/llamaProcess.ts): Windows uses
- *  best-effort kill() then `taskkill /T /F`; POSIX sends SIGTERM then
- *  SIGKILL after a grace period. Never hangs past a 6s overall deadline. */
-function killCliProcessTree(proc: ChildProcess): Promise<void> {
-  return new Promise<void>((resolve) => {
-    let settled = false;
-    const finish = (): void => {
-      if (settled) return;
-      settled = true;
-      resolve();
-    };
-    proc.once('exit', finish);
-    proc.once('error', finish);
-
-    if (process.platform === 'win32' && proc.pid) {
-      try {
-        proc.kill();
-      } catch {
-        // ignore and fall through to taskkill
-      }
-      const killer = spawn('taskkill', ['/PID', String(proc.pid), '/T', '/F'], {
-        shell: false,
-        stdio: 'ignore',
-      });
-      killer.once('exit', () => setTimeout(finish, 250));
-      killer.once('error', () => setTimeout(finish, 250));
-    } else {
-      try {
-        proc.kill('SIGTERM');
-      } catch {
-        finish();
-        return;
-      }
-      setTimeout(() => {
-        try {
-          proc.kill('SIGKILL');
-        } catch {
-          // process likely already exited
-        }
-      }, 5000);
-    }
-    setTimeout(finish, 6000);
-  });
 }
 
 /**
@@ -114,19 +67,10 @@ export class CliAgentDriver {
       }),
     ];
 
-    // npm-installed claude/codex ship as .cmd shims on Windows, which Node
-    // cannot CreateProcess directly (unlike llama-server, a real .exe — see
-    // DirectBackend). Route those through cmd.exe with a manually quoted
-    // command line — see windowsCmdShim.ts for why shell:true is unsafe here.
-    const wrap = process.platform === 'win32' && needsWindowsCmdShellWrap(options.executable);
-    const { file: spawnFile, args: spawnArgs } = wrap
-      ? buildWindowsCmdShellInvocation(options.executable, args)
-      : { file: options.executable, args };
-    const child = spawn(spawnFile, spawnArgs, {
+    const child = spawnCliProcess({
+      executable: options.executable,
+      args,
       cwd: options.cwd,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-      ...(wrap ? { windowsVerbatimArguments: true } : {}),
     });
 
     child.stderr?.on('data', (chunk: Buffer) => {
@@ -149,31 +93,28 @@ export class CliAgentDriver {
     const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const timer = setTimeout(() => {
       timedOut = true;
-      void killCliProcessTree(child);
+      void terminateCliProcessTree(child);
     }, timeoutMs);
 
     const onAbort = (): void => {
       cancelled = true;
-      void killCliProcessTree(child);
+      void terminateCliProcessTree(child);
     };
     if (options.signal?.aborted) onAbort();
     else options.signal?.addEventListener('abort', onAbort, { once: true });
 
-    const exit = await new Promise<{ code: number | null; err?: Error }>((resolve) => {
-      child.once('exit', (code) => resolve({ code }));
-      child.once('error', (err) => resolve({ code: null, err }));
-    });
+    const exit = await waitForCliProcessExit(child);
     clearTimeout(timer);
     options.signal?.removeEventListener('abort', onAbort);
     rl?.close();
 
     const stderrTail = stderrChunks.join('').slice(-STDERR_TAIL_CHARS);
 
-    if (exit.err) {
+    if (exit.error) {
       return {
         status: 'failed',
         finalText: '',
-        error: `${options.cliName} CLI failed to start: ${exit.err.message}`,
+        error: `${options.cliName} CLI failed to start: ${exit.error.message}`,
         ...(sessionId ? { sessionId } : {}),
       };
     }

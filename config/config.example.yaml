@@ -202,6 +202,11 @@ permissions:
 # slots prevent eviction but do not guarantee sufficient RAM/VRAM.
 # max_simultaneous_models: 2
 
+# Warm direct-chat Claude/Codex process limits. Worker and delegation CLI runs
+# remain one-shot and do not consume these slots.
+# max_cli_agents: 4
+# cli_idle_timeout_ms: 900000
+
 # -------------------------------------------------------------------
 # Optional: external MCP stdio servers — their tools are bridged into the
 # Forge tool registry on activation, after the config has loaded. Unlisted MCP

@@ -2,6 +2,8 @@ import type { ModelConfig } from '../config/types';
 import type { ChatMessage, ContentPart } from '../llm/types';
 import type { CheckpointSession } from '../checkpoint/CheckpointStack';
 import { CliAgentDriver } from './CliAgentDriver';
+import type { CliAgentSessionOptions } from './CliAgentSession';
+import { CliSessionRegistry, type CliSessionKey } from './CliSessionRegistry';
 import { resolveCliExecutable } from './resolveCliExecutable';
 import { inferCliAgentName, type CliAgentName, type CliAgentRunResult } from './types';
 import { snapshotWorkspaceBefore } from './WorkspaceCheckpoint';
@@ -26,6 +28,11 @@ export interface RunCliChatOptions {
 
 export interface CliChatResult extends CliAgentRunResult {
   assistantText: string;
+}
+
+export interface RunWarmCliChatOptions extends Omit<RunCliChatOptions, 'driver'> {
+  registry: CliSessionRegistry;
+  key: CliSessionKey;
 }
 
 function contentText(content: string | ContentPart[] | null): string {
@@ -108,6 +115,44 @@ export async function runCliChat(options: RunCliChatOptions): Promise<CliChatRes
     capture.finish();
   }
 
+  const assistantText = appendFinalText(streamed, result.finalText);
+  if (assistantText.length > streamed.length) options.onText(assistantText.slice(streamed.length));
+  return { ...result, assistantText };
+}
+
+export async function runWarmCliChat(options: RunWarmCliChatOptions): Promise<CliChatResult> {
+  const capture = snapshotWorkspaceBefore(options.checkpoint, options.workspaceRoot);
+  let streamed = '';
+  let result: CliAgentRunResult;
+  const confirmedId = options.registry.getConfirmedSessionId(options.key) ?? options.sessionId;
+  const sessionOptions: CliAgentSessionOptions = {
+    cliName: options.prepared.cliName,
+    executable: options.prepared.executable,
+    access: 'full',
+    cwd: options.workspaceRoot,
+    ...(options.model.cli_model ? { model: options.model.cli_model } : {}),
+    ...(confirmedId ? { confirmedSessionId: confirmedId } : {}),
+  };
+  try {
+    result = await options.registry.run(
+      options.key,
+      sessionOptions,
+      confirmedId ? buildCliResumeTask(options.messages) : buildCliChatTask(options.messages),
+      {
+        signal: options.signal,
+        onEvent: (event) => {
+          if (event.kind === 'status') {
+            options.onStatus(event.text);
+            return;
+          }
+          streamed += event.text;
+          options.onText(event.text);
+        },
+      },
+    );
+  } finally {
+    capture.finish();
+  }
   const assistantText = appendFinalText(streamed, result.finalText);
   if (assistantText.length > streamed.length) options.onText(assistantText.slice(streamed.length));
   return { ...result, assistantText };

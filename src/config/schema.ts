@@ -220,6 +220,8 @@ export const ForgeConfigSchema = z
     custom_instructions: z.string().optional(),
     strip_thinking_channels: z.boolean().optional(),
     max_simultaneous_models: z.number().int().min(1).max(8).optional(),
+    max_cli_agents: z.number().int().min(1).max(32).optional(),
+    cli_idle_timeout_ms: z.number().int().min(1000).optional(),
     ollama: z
       .object({
         auto_start: z.boolean().optional(),

@@ -39,7 +39,7 @@ Its default and strongest path is still local: GGUF models through `llama-server
 - Direct `llama-server` lifecycle management
 - Ollama local and Ollama cloud routing through the local daemon
 - Optional cloud or self-hosted providers: `xai`, `openrouter`, `openai`, `openai-compatible`
-- External CLI agents (`provider: cli` — Claude Code, Codex) as full-rights worker/delegation targets via existing subscriptions, no API key
+- External CLI agents (`provider: cli` — Claude Code, Codex) as full-rights direct-chat and worker/delegation targets via existing subscriptions, no API key
 - Localhost control server for external orchestrators and worker fleets
 - Reasoning token display and optional thinking-channel stripping
 - Optional Tavily or Brave web search with keys stored in VS Code SecretStorage
@@ -59,6 +59,7 @@ Its default and strongest path is still local: GGUF models through `llama-server
 - Improved diff display, checkpoint handling, and multi-tab chat behavior
 - Added an MCP client bridge (`mcp_servers` in `config.yaml`): tools from external MCP stdio servers are auto-discovered with read-only access by default and can be explicitly classified for sensitive capabilities
 - Verified Cerebras Cloud as an `openai-compatible` provider (per-model `endpoint: https://api.cerebras.ai`) and split sampling defaults so cloud providers no longer receive local-only params (`top_k`, `min_p`)
+- Added persistent direct-chat CLI sessions: Claude stream-json and Codex app-server processes stay warm per conversation/model, with isolated concurrent tabs, protocol-aware cancellation, cold resume, LRU capacity control, and idle cleanup
 
 ## Requirements
 
@@ -68,6 +69,7 @@ Its default and strongest path is still local: GGUF models through `llama-server
   - a running Ollama daemon
   - an already-running OpenAI-compatible server
   - an explicitly configured cloud provider model
+  - an authenticated Claude Code or Codex CLI for `provider: cli`
 
 ## Backend Modes
 
@@ -337,7 +339,13 @@ oversized edits are rejected before the file is written.
 
 To consult a different direct llama.cpp model without evicting the primary model, configure enough slots, for example `max_simultaneous_models: 2`. Slot availability prevents Forge from evicting the primary backend, but it does not guarantee the machine has enough RAM or VRAM to load the second model. Delegation is limited to 120 seconds and returned analysis is capped at 24,000 characters.
 
-A model configured with `provider: cli` (Claude Code, Codex) is a full-rights external agent: Forge spawns the CLI locally with the conversation, and it runs with its OWN tools — Forge does not inject its tool registry or run its own tool loop for it. Auth is entirely the CLI's own login (`claude`/`codex`), never a key stored in Forge. `cli` models can be selected for direct sidebar chat and are also valid `dispatch_workers`/`ask_local_agent` targets. Direct CLI chats persist and resume the Claude session or Codex thread per Forge conversation. By default Forge passes no model override, so the CLI resolves its own configured/default model. Set optional `cli_model` only when an explicit per-entry override is wanted. A separate extension's per-chat model picker is private state and is not treated as configuration. Direct chat checkpoints the workspace before launch so Keep/Undo covers source-file edits; worker write access checkpoints its assigned paths.
+A model configured with `provider: cli` (Claude Code, Codex) is a full-rights external agent: Forge spawns the already-authenticated CLI locally, and it runs with its OWN tools — Forge does not inject its tool registry or run its own tool loop for it. `cli` models can be selected for direct sidebar chat and are also valid `dispatch_workers`/`ask_local_agent` targets.
+
+Direct CLI chat owns one warm process per conversation/model. Claude uses its stream-json stdin protocol; Codex uses `app-server --stdio`. Tabs remain isolated and may generate concurrently. A completed turn confirms the persistent Claude session ID or Codex thread ID. Claude cancellation terminates its process and cold-resumes the last confirmed session on the next turn; Codex uses `turn/interrupt` and keeps a cleanly interrupted app-server warm. Forge never silently replays a failed turn. Closing a conversation, idle eviction, or extension shutdown disposes the processes it owns. Workers and delegation deliberately remain one-shot.
+
+Warm direct-chat processes are capped by `max_cli_agents` (default `4`, per VS Code window) and idle processes are disposed after `cli_idle_timeout_ms` (default `900000`, or 15 minutes). When the cap is full, Forge evicts only the least-recently-used idle session; if every session is busy, it surfaces a capacity error. By default Forge passes no model override, so the CLI resolves its own configured/default model. Set optional `cli_model` only when an explicit per-entry override is wanted. A separate extension's per-chat model picker is private state and is not treated as configuration.
+
+Authentication is entirely the CLI's own login (`claude`/`codex`), never a key stored in Forge. Direct chat checkpoints the workspace before each turn so Keep/Undo covers source-file edits; worker write access checkpoints its assigned paths. Forge always excludes `.forge` and `.forge-*` from workspace checkpoints.
 
 ## Slash Commands
 

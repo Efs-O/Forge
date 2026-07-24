@@ -206,6 +206,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     workspaceRoot,
     () => activeConfigPath,
   );
+  context.subscriptions.push({
+    dispose: () => {
+      void sidebarProvider.dispose();
+    },
+  });
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(SidebarProvider.viewId, sidebarProvider, {
       webviewOptions: { retainContextWhenHidden: true },

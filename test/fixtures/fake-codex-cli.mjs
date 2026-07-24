@@ -1,13 +1,72 @@
 // Fake `codex exec <task> --json` for tests. Never spawns the real CLI — see
 // CliAgentDriver.test.ts. Behavior is chosen by a sentinel substring anywhere
 // in argv, independent of exact flag position.
+import readline from 'node:readline';
+
 const argv = process.argv.slice(2).join(' ');
 
 function line(obj) {
   process.stdout.write(`${JSON.stringify(obj)}\n`);
 }
 
-if (argv.includes('TRIGGER_SLOW')) {
+if (process.argv.includes('app-server')) {
+  const input = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+  let threadId = 'fixture-thread-id';
+  let turn = 0;
+  let activeTurn;
+  input.on('line', (raw) => {
+    const message = JSON.parse(raw);
+    if (message.method === 'initialized') return;
+    if (message.method === 'initialize') {
+      line({ id: message.id, result: { userAgent: 'fake-codex' } });
+      return;
+    }
+    if (message.method === 'thread/start') {
+      line({ id: message.id, result: { thread: { id: threadId } } });
+      return;
+    }
+    if (message.method === 'thread/resume') {
+      threadId = message.params.threadId;
+      line({ id: message.id, result: { thread: { id: threadId } } });
+      return;
+    }
+    if (message.method === 'turn/start') {
+      turn += 1;
+      activeTurn = `turn-${turn}`;
+      const text = message.params.input[0].text;
+      line({ id: message.id, result: { turn: { id: activeTurn } } });
+      line({
+        method: 'turn/started',
+        params: { threadId, turn: { id: activeTurn, status: 'inProgress' } },
+      });
+      if (text.includes('TRIGGER_PROTOCOL')) {
+        process.stdout.write('{broken json\n');
+        return;
+      }
+      if (text.includes('TRIGGER_SLOW')) return;
+      line({
+        method: 'item/started',
+        params: { threadId, turnId: activeTurn, item: { type: 'commandExecution' } },
+      });
+      line({
+        method: 'item/agentMessage/delta',
+        params: { threadId, turnId: activeTurn, delta: `Done codex turn ${turn}` },
+      });
+      line({
+        method: 'turn/completed',
+        params: { threadId, turn: { id: activeTurn, status: 'completed' } },
+      });
+      return;
+    }
+    if (message.method === 'turn/interrupt') {
+      line({ id: message.id, result: {} });
+      line({
+        method: 'turn/completed',
+        params: { threadId, turn: { id: activeTurn, status: 'interrupted' } },
+      });
+    }
+  });
+} else if (argv.includes('TRIGGER_SLOW')) {
   setInterval(() => {}, 1000);
 } else if (argv.includes('TRIGGER_FAIL')) {
   process.stderr.write('codex: boom, something broke\n');

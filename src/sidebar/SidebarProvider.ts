@@ -531,6 +531,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const modelName = conv?.active_model;
 
     await this.agentLoop.stopStreamingIfNeeded(id);
+    await this.agentLoop.disposeConversation(id);
     const result = opCloseConversation(this.sidebar, id);
     if (!result) return;
     this.sidebar = result.sidebar;
@@ -561,6 +562,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           });
       }
     }
+  }
+
+  async dispose(): Promise<void> {
+    await this.agentLoop.dispose();
   }
 
   private async applyRestoreConversation(id: string): Promise<void> {

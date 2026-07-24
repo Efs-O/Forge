@@ -246,6 +246,10 @@ export interface ForgeConfig {
   strip_thinking_channels?: boolean;
   /** Maximum number of llama-server processes to keep alive simultaneously. Default: 1. */
   max_simultaneous_models?: number;
+  /** Maximum warm direct-chat CLI processes. Default: 4. */
+  max_cli_agents?: number;
+  /** Dispose an idle direct-chat CLI process after this many milliseconds. Default: 900000. */
+  cli_idle_timeout_ms?: number;
   /** Ollama daemon supervision. When a model's local Ollama endpoint refuses
    *  connection, Forge can start `ollama serve` itself (default: on). */
   ollama?: {

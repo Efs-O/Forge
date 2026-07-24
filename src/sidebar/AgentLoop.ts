@@ -45,9 +45,12 @@ import {
 import { runToolCallingLoop } from '../agent/ToolCallingLoop';
 import { recordModelUsage } from './modelManager/usageTracker';
 import { CliAgentDriver } from '../agents/CliAgentDriver';
-import { prepareCliChatAgent, runCliChat } from '../agents/CliChatRunner';
+import { prepareCliChatAgent, runCliChat, runWarmCliChat } from '../agents/CliChatRunner';
+import { CliSessionRegistry } from '../agents/CliSessionRegistry';
 const log = getLogger();
 const MAX_TOOL_ROUNDS = 20;
+const DEFAULT_MAX_CLI_AGENTS = 4;
+const DEFAULT_CLI_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 
 export interface SidebarProviderEvents {
   onGenerationStarted?: (modelName: string | null) => void;
@@ -70,6 +73,7 @@ export class AgentLoop {
   private readonly approvals: ToolApprovalService;
   private readonly workerService: WorkerOrchestrationService;
   private readonly workspaceRoot: string;
+  private readonly cliSessions: CliSessionRegistry;
   private promptRunCtrl: AbortController | null = null;
 
   get streaming(): boolean {
@@ -99,8 +103,16 @@ export class AgentLoop {
     workspaceRoot?: string,
     private readonly getConfigPath?: () => string,
     private readonly cliDriver?: CliAgentDriver,
+    cliSessions?: CliSessionRegistry,
   ) {
     this.workspaceRoot = workspaceRoot ?? forgeLoader?.root ?? '';
+    const config = getConfig();
+    this.cliSessions =
+      cliSessions ??
+      new CliSessionRegistry(
+        config.max_cli_agents ?? DEFAULT_MAX_CLI_AGENTS,
+        config.cli_idle_timeout_ms ?? DEFAULT_CLI_IDLE_TIMEOUT_MS,
+      );
     this.approvals = new ToolApprovalService(post, getView);
     this.toolDispatch = new ToolDispatch(
       toolRegistry,
@@ -124,6 +136,14 @@ export class AgentLoop {
     this.toolDispatch.setWorkerRunner((request, context) =>
       this.workerService.run(request, context),
     );
+  }
+
+  disposeConversation(id: string): Promise<void> {
+    return this.cliSessions.disposeConversation(id);
+  }
+
+  dispose(): Promise<void> {
+    return this.cliSessions.dispose();
   }
 
   async stopStreamingIfNeeded(convId?: string): Promise<void> {
@@ -470,18 +490,25 @@ export class AgentLoop {
 
     try {
       const sessionId = conv.cli_sessions?.[model.name];
-      const result = await runCliChat({
+      const common = {
         prepared,
         model,
         messages: conv.messages,
         workspaceRoot: this.workspaceRoot,
         checkpoint,
         signal: ctrl.signal,
-        onText: (chunk) => postC({ type: 'token', text: chunk }),
-        onStatus: (detail) => postC({ type: 'toolActivity', toolName: prepared.cliName, detail }),
+        onText: (chunk: string) => postC({ type: 'token', text: chunk }),
+        onStatus: (detail: string) =>
+          postC({ type: 'toolActivity', toolName: prepared.cliName, detail }),
         ...(sessionId ? { sessionId } : {}),
-        ...(this.cliDriver ? { driver: this.cliDriver } : {}),
-      });
+      };
+      const result = this.cliDriver
+        ? await runCliChat({ ...common, driver: this.cliDriver })
+        : await runWarmCliChat({
+            ...common,
+            registry: this.cliSessions,
+            key: { conversationId: conv.id, modelName: model.name },
+          });
       if (result.sessionId) {
         conv.cli_sessions = { ...conv.cli_sessions, [model.name]: result.sessionId };
       }
