@@ -1,6 +1,23 @@
 # Forge — Recent Changes
 
-## Unreleased — Tool audit hardening
+## 0.12.29 — Config overhaul, Model Manager, CLI subscription agents
+
+- Added schema-v2 config `groups` ("boards") that share tools, context, tool-call
+  budgets, and sampling across model sets, layered under existing
+  defaults/profiles/aliases, plus a v1→v2 config migrator (backup on write) and
+  comment-preserving config writes.
+- Added the Model Manager webview: scan a chosen directory, per-parameter tabs,
+  model-path view, keyboard navigation, autosave, and delete-from-config or
+  delete-from-disk (both confirmed).
+- Added deterministic fuzzy worker resolution so short names like "gemma4"
+  dispatch to the right model instead of failing on exact-name lookup.
+- Added Claude Code and Codex as `provider: cli` agents that run through their own
+  subscription login (no API key, no keys stored in Forge).
+- Added persistent warm CLI sessions: one reused process per conversation tab
+  (bounded pool with idle eviction) so only the first turn pays process startup,
+  with checkpoint coverage and disposal on tab close and deactivate.
+
+### Tool audit hardening
 
 - Fixed `search_code` startup on current VS Code distributions by resolving the
   platform-specific `@vscode/ripgrep-universal` binary while retaining legacy
