@@ -1,19 +1,26 @@
+import * as path from 'path';
 import { describe, expect, it, vi } from 'vitest';
 import { resolveCliExecutable } from '../../src/agents/resolveCliExecutable';
+
+// Paths must be absolute on the *running* platform: production uses the
+// platform's path.isAbsolute, so a hardcoded `C:\...` is not absolute on POSIX
+// CI runners. path.resolve yields a platform-correct absolute path.
+const absClaude = path.resolve(path.sep, 'tools', 'claude.exe');
+const absMissing = path.resolve(path.sep, 'tools', 'missing.exe');
 
 describe('resolveCliExecutable', () => {
   it('returns an absolute path unchanged when it exists on disk', async () => {
     const exists = vi.fn(() => true);
-    const result = await resolveCliExecutable('C:\\tools\\claude.exe', 'claude', { exists });
-    expect(result).toBe('C:\\tools\\claude.exe');
-    expect(exists).toHaveBeenCalledWith('C:\\tools\\claude.exe');
+    const result = await resolveCliExecutable(absClaude, 'claude', { exists });
+    expect(result).toBe(absClaude);
+    expect(exists).toHaveBeenCalledWith(absClaude);
   });
 
   it('throws a clear error for a configured absolute path that does not exist', async () => {
     const exists = vi.fn(() => false);
     await expect(
-      resolveCliExecutable('C:\\tools\\missing.exe', 'codex', { exists }),
-    ).rejects.toThrow('codex CLI not found at configured path "C:\\tools\\missing.exe" — install it and log in.');
+      resolveCliExecutable(absMissing, 'codex', { exists }),
+    ).rejects.toThrow(`codex CLI not found at configured path "${absMissing}" — install it and log in.`);
   });
 
   it('resolves a bare name via the PATH lookup dependency', async () => {
