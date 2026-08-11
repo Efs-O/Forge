@@ -172,21 +172,21 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   // ── Public API ────────────────────────────────────────────────────────────
 
-  undo(): string[] {
-    const restored = this.checkpoints.undo();
+  async undo(): Promise<string[]> {
+    const restored = await this.checkpoints.undo(this.sidebar.activeConversationId);
     this.codeLens.clearPending();
     this.post({ type: 'checkpointDismissed' });
     return restored;
   }
 
-  keep(): void {
-    this.checkpoints.keep();
+  async keep(): Promise<void> {
+    await this.checkpoints.keep(this.sidebar.activeConversationId);
     this.codeLens.clearPending();
     this.post({ type: 'checkpointDismissed' });
   }
 
   canUndo(): boolean {
-    return this.checkpoints.canUndo();
+    return this.checkpoints.canUndo(this.sidebar.activeConversationId);
   }
 
   async dispatchWorkerRun(request: WorkerRunRequest): Promise<WorkerRunResult> {
@@ -465,23 +465,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         break;
 
       case 'undo':
-        try {
-          const restored = this.undo();
-          this.post({
-            type: 'token',
-            text: `\n\n> ↩ Undid last turn — restored ${restored.length} file(s).\n\n`,
-          });
-        } catch (err) {
-          this.post({ type: 'error', message: (err as Error).message });
-        }
+        void this.undo()
+          .then((restored) =>
+            this.post({
+              type: 'token',
+              text: `\n\n> ↩ Undid last turn — restored ${restored.length} file(s).\n\n`,
+            }),
+          )
+          .catch((err: Error) => this.post({ type: 'error', message: err.message }));
         break;
 
       case 'keep':
-        try {
-          this.keep();
-        } catch (err) {
-          this.post({ type: 'error', message: (err as Error).message });
-        }
+        void this.keep().catch((err: Error) => this.post({ type: 'error', message: err.message }));
         break;
 
       case 'newChat':
@@ -532,6 +527,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     await this.agentLoop.stopStreamingIfNeeded(id);
     await this.agentLoop.disposeConversation(id);
+    await this.checkpoints.disposeConversation(id);
     const result = opCloseConversation(this.sidebar, id);
     if (!result) return;
     this.sidebar = result.sidebar;
@@ -566,6 +562,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   async dispose(): Promise<void> {
     await this.agentLoop.dispose();
+    await this.checkpoints.dispose();
   }
 
   private async applyRestoreConversation(id: string): Promise<void> {

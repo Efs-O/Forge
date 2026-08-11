@@ -223,8 +223,8 @@ export class ToolDispatch {
           this.codeLens.markPending(mutationPaths);
           if (reg.mutation.showDiff) {
             for (const resolved of mutationPaths) {
-              this.applyDiffDecorations(resolved);
-              this.postFileDiff(resolved, convId);
+              this.applyDiffDecorations(resolved, checkpoint);
+              this.postFileDiff(resolved, convId, checkpoint);
             }
           }
         }
@@ -251,8 +251,14 @@ export class ToolDispatch {
     }
   }
 
-  private postFileDiff(resolvedPath: string, convId?: string): void {
-    const beforeContent = this.checkpoints.readSnapshotContent(resolvedPath);
+  private postFileDiff(
+    resolvedPath: string,
+    convId?: string,
+    checkpoint?: CheckpointSession,
+  ): void {
+    const beforeContent = checkpoint
+      ? checkpoint.readSnapshotContent(resolvedPath)
+      : this.checkpoints.readSnapshotContent(resolvedPath);
     if (beforeContent === undefined) return;
 
     const isDeleted = !fs.existsSync(resolvedPath);
@@ -271,8 +277,10 @@ export class ToolDispatch {
     });
   }
 
-  private applyDiffDecorations(resolvedPath: string): void {
-    const beforeContent = this.checkpoints.readSnapshotContent(resolvedPath);
+  private applyDiffDecorations(resolvedPath: string, checkpoint?: CheckpointSession): void {
+    const beforeContent = checkpoint
+      ? checkpoint.readSnapshotContent(resolvedPath)
+      : this.checkpoints.readSnapshotContent(resolvedPath);
     if (beforeContent === undefined) return;
 
     this.diffDecorations.apply(resolvedPath, beforeContent);

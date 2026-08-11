@@ -8,9 +8,15 @@ function fakeDriver(run: CliAgentDriver['run']): CliAgentDriver {
   return { run } as unknown as CliAgentDriver;
 }
 
-function fakeCheckpoint(): { checkpoint: CheckpointSession; snapshotBefore: ReturnType<typeof vi.fn> } {
-  const snapshotBefore = vi.fn();
-  return { checkpoint: { snapshotBefore } as unknown as CheckpointSession, snapshotBefore };
+function fakeCheckpoint(): {
+  checkpoint: CheckpointSession;
+  preparePaths: ReturnType<typeof vi.fn>;
+} {
+  const preparePaths = vi.fn(async () => ({
+    finish: vi.fn(async () => {}),
+    discard: vi.fn(async () => {}),
+  }));
+  return { checkpoint: { preparePaths } as unknown as CheckpointSession, preparePaths };
 }
 
 const readSpec: WorkerSpec = {
@@ -31,8 +37,14 @@ const writeSpec: WorkerSpec = {
 describe('runCliWorker', () => {
   it('resolves the executable, snapshots writable paths BEFORE spawning, then runs the driver', async () => {
     const order: string[] = [];
-    const { checkpoint, snapshotBefore } = fakeCheckpoint();
-    snapshotBefore.mockImplementation(() => order.push('snapshot'));
+    const { checkpoint, preparePaths } = fakeCheckpoint();
+    preparePaths.mockImplementation(async () => {
+      order.push('snapshot');
+      return {
+        finish: vi.fn(async () => order.push('finalize')),
+        discard: vi.fn(async () => {}),
+      };
+    });
     const run = vi.fn(async () => {
       order.push('spawn');
       return { status: 'completed' as const, finalText: 'Done: updated src/foo.ts' };
@@ -49,15 +61,20 @@ describe('runCliWorker', () => {
       driver: fakeDriver(run),
     });
 
-    expect(order).toEqual(['snapshot', 'spawn']);
-    expect(snapshotBefore).toHaveBeenCalledWith('C:\\workspace\\src\\foo.ts');
+    expect(order).toEqual(['snapshot', 'spawn', 'finalize']);
+    expect(preparePaths).toHaveBeenCalledWith(
+      'C:\\workspace',
+      ['C:\\workspace\\src\\foo.ts'],
+      expect.any(AbortSignal),
+      expect.any(Function),
+    );
     expect(result.status).toBe('completed');
     expect(result.summary).toBe('Done: updated src/foo.ts');
     expect(result.changedPaths).toEqual([]);
   });
 
   it('never snapshots for read-access workers', async () => {
-    const { checkpoint, snapshotBefore } = fakeCheckpoint();
+    const { checkpoint, preparePaths } = fakeCheckpoint();
     const run = vi.fn(async () => ({ status: 'completed' as const, finalText: 'analysis' }));
 
     await runCliWorker({
@@ -71,7 +88,7 @@ describe('runCliWorker', () => {
       driver: fakeDriver(run),
     });
 
-    expect(snapshotBefore).not.toHaveBeenCalled();
+    expect(preparePaths).not.toHaveBeenCalled();
   });
 
   it('maps driver statuses onto WorkerStatus', async () => {
@@ -98,7 +115,7 @@ describe('runCliWorker', () => {
   });
 
   it('returns failed_startup with a clear message when the executable cannot be resolved, and never spawns', async () => {
-    const { checkpoint, snapshotBefore } = fakeCheckpoint();
+    const { checkpoint, preparePaths } = fakeCheckpoint();
     const run = vi.fn();
 
     const result = await runCliWorker({
@@ -115,6 +132,6 @@ describe('runCliWorker', () => {
     expect(result.status).toBe('failed_startup');
     expect(result.error).toContain('install it and log in');
     expect(run).not.toHaveBeenCalled();
-    expect(snapshotBefore).not.toHaveBeenCalled();
+    expect(preparePaths).not.toHaveBeenCalled();
   });
 });

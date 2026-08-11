@@ -345,7 +345,9 @@ Direct CLI chat owns one warm process per conversation/model. Claude uses its st
 
 Warm direct-chat processes are capped by `max_cli_agents` (default `4`, per VS Code window) and idle processes are disposed after `cli_idle_timeout_ms` (default `900000`, or 15 minutes). When the cap is full, Forge evicts only the least-recently-used idle session; if every session is busy, it surfaces a capacity error. By default Forge passes no model override, so the CLI resolves its own configured/default model. Set optional `cli_model` only when an explicit per-entry override is wanted. A separate extension's per-chat model picker is private state and is not treated as configuration.
 
-Authentication is entirely the CLI's own login (`claude`/`codex`), never a key stored in Forge. Direct chat checkpoints the workspace before each turn so Keep/Undo covers source-file edits; worker write access checkpoints its assigned paths. Forge always excludes `.forge` and `.forge-*` from workspace checkpoints.
+Authentication is entirely the CLI's own login (`claude`/`codex`), never a key stored in Forge. Before an unrestricted direct-chat CLI starts, Forge inventories the eligible workspace and streams a rollback baseline to Forge-owned disk storage in bounded chunks; it does not retain the workspace as an extension-host memory snapshot. Write-capable CLI workers use the same engine over their assigned paths. Finalization hashes covered files and retains only preimages needed for changed paths. Forge always excludes `.forge` and `.forge-*` from workspace checkpoints.
+
+External CLI checkpoint controls are explicit VS Code settings. `forge.checkpoint.externalCliEnabled` defaults to `true`, `forge.checkpoint.maxBytes` defaults to 2 GiB, `forge.checkpoint.maxFiles` defaults to 100,000 files, and `forge.checkpoint.storagePath` optionally selects an absolute storage directory outside the workspace. Forge checks capacity before launch and refuses the turn with a measured error when safe rollback coverage cannot be established. As an explicit temporary opt-out, setting `forge.checkpoint.externalCliEnabled` to `false` skips the external CLI scan and checkpoint; Forge displays a warning and Keep/Undo cannot restore that CLI's changes. Forge-native tools retain per-file checkpoints. Reload the VS Code window after changing these settings.
 
 ## Slash Commands
 
@@ -431,6 +433,10 @@ These commands are currently contributed by the extension.
 ## Checkpoints, Diffs, and Clanker Mode
 
 - Every write turn can produce a checkpoint that you can Keep or Undo.
+- External Claude/Codex turns become backend-ready only after their rollback checkpoint is safely prepared. Preparation and finalization progress appears in the chat activity stream.
+- When `forge.checkpoint.externalCliEnabled` is explicitly disabled, external Claude/Codex turns start without scanning the workspace and without Forge Keep/Undo coverage; the chat activity stream displays a warning.
+- External CLI checkpoints are isolated by conversation, stored outside the workspace, and removed on Keep, successful Undo, conversation close, or normal extension shutdown.
+- If workspace contents change concurrently while Forge is preparing or finalizing a checkpoint, Forge stops and surfaces the conflict rather than claiming unsafe rollback coverage.
 - Undo restores each requested mutation path to its state at the start of the turn. For tools that create missing parent directories, those empty implementation-created parents may remain after undo; requested files and directories are restored or removed exactly.
 - File writes produce inline diff cards in the chat.
 - Confirmation gates protect writes, terminal actions, and git actions.

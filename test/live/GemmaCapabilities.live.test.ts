@@ -137,7 +137,7 @@ describe.skipIf(!LIVE)(
         expect.arrayContaining(['read_file', 'search_code', 'replace_in_file', 'run_tests']),
       );
       expect(fs.readFileSync(target, 'utf8')).toBe('STATUS=done\n');
-      expect(checkpoints.undo()).toEqual([target]);
+      await expect(checkpoints.undo()).resolves.toEqual([target]);
       expect(fs.readFileSync(target, 'utf8')).toBe('STATUS=old\n');
       results.push({
         check: 'coordinator-loop',

@@ -336,6 +336,32 @@
           "default": "",
           "scope": "application",
           "description": "Absolute path to config.yaml or to a folder containing it. When set, Forge loads this file in every workspace (instead of workspace .forge/config.yaml). Use one shared dev config so bridge.yaml merges stay in sync. Reload the window after changing this."
+        },
+        "forge.checkpoint.maxBytes": {
+          "type": "number",
+          "default": 2147483648,
+          "minimum": 1048576,
+          "scope": "application",
+          "description": "Maximum logical workspace bytes Forge may capture for an external CLI rollback checkpoint. The CLI is not started when this limit is exceeded. Reload the window after changing this."
+        },
+        "forge.checkpoint.externalCliEnabled": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "description": "Protect external Claude/Codex turns with disk-backed rollback checkpoints. Disable only as an explicit temporary opt-out: external CLI changes will not support Forge Keep/Undo. Reload the window after changing this."
+        },
+        "forge.checkpoint.maxFiles": {
+          "type": "number",
+          "default": 100000,
+          "minimum": 1,
+          "scope": "application",
+          "description": "Maximum number of files Forge may capture for an external CLI rollback checkpoint. The CLI is not started when this limit is exceeded. Reload the window after changing this."
+        },
+        "forge.checkpoint.storagePath": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "description": "Optional absolute directory for disk-backed rollback checkpoints. Empty uses VS Code extension storage. This directory must be outside the workspace. Reload the window after changing this."
         }
       }
     }

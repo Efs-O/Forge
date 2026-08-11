@@ -20,8 +20,8 @@ export interface SlashCommandDeps {
   newConversation: () => Promise<void>;
   clearMessages: () => void;
   submitPrompt: (text: string) => Promise<void>;
-  undo: () => string[];
-  keep: () => void;
+  undo: () => Promise<string[]>;
+  keep: () => Promise<void>;
   post: (msg: HostToWebview) => void;
   getActiveConv: () => ConversationRuntime;
   persistSession: () => void;
@@ -95,7 +95,7 @@ export class SlashCommandHandler {
 
       case 'undo':
         try {
-          const restored = deps.undo();
+          const restored = await deps.undo();
           void vscode.window.showInformationMessage(
             `Forge: undid last turn, restored ${restored.length} file(s)`,
           );
@@ -106,7 +106,7 @@ export class SlashCommandHandler {
 
       case 'keep':
         try {
-          deps.keep();
+          await deps.keep();
           void vscode.window.showInformationMessage('Forge: changes kept');
         } catch (err) {
           void vscode.window.showErrorMessage(`Forge: ${(err as Error).message}`);

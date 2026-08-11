@@ -218,7 +218,7 @@ export class AgentLoop {
     const settled = new Promise<void>((resolve) => this.resolveSettledMap.set(convId, resolve));
     this.streamingSettledMap.set(convId, settled);
     this.streamingConvIds.add(convId);
-    const checkpoint = this.checkpoints.beginTurn(`workers-${Date.now()}`);
+    const checkpoint = this.checkpoints.beginTurn(`workers-${Date.now()}`, convId);
     const postC = (message: HostToWebview): void =>
       this.post({ ...message, conversationId: convId } as HostToWebview);
     postC({ type: 'generationStarted' });
@@ -261,9 +261,9 @@ export class AgentLoop {
       postC({ type: 'error', message: err instanceof Error ? err.message : String(err) });
       throw err;
     } finally {
-      const depthBefore = this.checkpoints.depth();
+      const depthBefore = this.checkpoints.depth(convId);
       this.checkpoints.commitTurn(checkpoint);
-      if (this.checkpoints.depth() > depthBefore) postC({ type: 'checkpointReady' });
+      if (this.checkpoints.depth(convId) > depthBefore) postC({ type: 'checkpointReady' });
       this.activeBackends.delete(convId);
       this.streamingConvIds.delete(convId);
       this.resolveStreamingLifecycle(convId);
@@ -366,7 +366,7 @@ export class AgentLoop {
       this.events.onBackendReady?.(model.name);
       postC({ type: 'ready' });
       const turnId = `turn-${Date.now()}`;
-      const checkpoint = this.checkpoints.beginTurn(turnId);
+      const checkpoint = this.checkpoints.beginTurn(turnId, convId);
       this.streamingConvIds.add(convId);
       this.events.onGenerationStarted?.(model.name);
       try {
@@ -386,9 +386,9 @@ export class AgentLoop {
       } finally {
         this.streamingConvIds.delete(convId);
         conv.updatedAt = Date.now();
-        const depthBefore = this.checkpoints.depth();
+        const depthBefore = this.checkpoints.depth(convId);
         this.checkpoints.commitTurn(checkpoint);
-        if (this.checkpoints.depth() > depthBefore) postC({ type: 'checkpointReady' });
+        if (this.checkpoints.depth(convId) > depthBefore) postC({ type: 'checkpointReady' });
         this.events.onGenerationFinished?.(model.name);
         this.resolveStreamingLifecycle(convId);
       }
@@ -419,7 +419,7 @@ export class AgentLoop {
     }
 
     const turnId = `turn-${Date.now()}`;
-    const checkpoint = this.checkpoints.beginTurn(turnId);
+    const checkpoint = this.checkpoints.beginTurn(turnId, convId);
     this.streamingConvIds.add(convId);
     this.events.onGenerationStarted?.(model.name);
     try {
@@ -442,9 +442,9 @@ export class AgentLoop {
       this.streamingConvIds.delete(convId);
       this.activeBackends.delete(convId);
       conv.updatedAt = Date.now();
-      const depthBefore = this.checkpoints.depth();
+      const depthBefore = this.checkpoints.depth(convId);
       this.checkpoints.commitTurn(checkpoint);
-      if (this.checkpoints.depth() > depthBefore) postC({ type: 'checkpointReady' });
+      if (this.checkpoints.depth(convId) > depthBefore) postC({ type: 'checkpointReady' });
       this.events.onGenerationFinished?.(model.name);
       this.resolveStreamingLifecycle(convId);
     }
@@ -458,9 +458,12 @@ export class AgentLoop {
     postC: (msg: HostToWebview) => void,
   ): Promise<void> {
     const convId = conv.id;
+    // Only the first prompt in a conversation actually starts the CLI agent;
+    // later turns resume the warm session, so suppress the start/ready chatter.
+    const firstCliPrompt = !conv.cli_sessions?.[model.name];
     let prepared;
     try {
-      postC({ type: 'backendStarting', message: `Starting ${model.name}…` });
+      if (firstCliPrompt) postC({ type: 'backendStarting', message: `Starting ${model.name}…` });
       prepared = await prepareCliChatAgent(model, this.workspaceRoot);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -480,13 +483,9 @@ export class AgentLoop {
     const configPath = this.getConfigPath?.();
     if (configPath) recordModelUsage(configPath, model.name);
 
-    this.commitUserPrompt(conv, text, attachments);
-    const checkpoint = this.checkpoints.beginTurn(`cli-chat-${Date.now()}`);
+    const checkpoint = this.checkpoints.beginTurn(`cli-chat-${Date.now()}`, convId);
     this.streamingConvIds.add(convId);
-    this.events.onBackendReady?.(model.name);
-    this.events.onGenerationStarted?.(model.name);
-    postC({ type: 'ready' });
-    postC({ type: 'generationStarted' });
+    let generationStarted = false;
 
     try {
       const sessionId = conv.cli_sessions?.[model.name];
@@ -500,6 +499,15 @@ export class AgentLoop {
         onText: (chunk: string) => postC({ type: 'token', text: chunk }),
         onStatus: (detail: string) =>
           postC({ type: 'toolActivity', toolName: prepared.cliName, detail }),
+        onPrepared: () => {
+          this.commitUserPrompt(conv, text, attachments);
+          generationStarted = true;
+          this.events.onBackendReady?.(model.name);
+          this.events.onGenerationStarted?.(model.name);
+          if (firstCliPrompt) postC({ type: 'ready' });
+          postC({ type: 'generationStarted' });
+        },
+        announceRollback: firstCliPrompt,
         ...(sessionId ? { sessionId } : {}),
       };
       const result = this.cliDriver
@@ -531,10 +539,10 @@ export class AgentLoop {
     } finally {
       this.streamingConvIds.delete(convId);
       conv.updatedAt = Date.now();
-      const depthBefore = this.checkpoints.depth();
+      const depthBefore = this.checkpoints.depth(convId);
       this.checkpoints.commitTurn(checkpoint);
-      if (this.checkpoints.depth() > depthBefore) postC({ type: 'checkpointReady' });
-      this.events.onGenerationFinished?.(model.name);
+      if (this.checkpoints.depth(convId) > depthBefore) postC({ type: 'checkpointReady' });
+      if (generationStarted) this.events.onGenerationFinished?.(model.name);
       this.resolveStreamingLifecycle(convId);
     }
   }

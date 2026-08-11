@@ -16,6 +16,17 @@
 - Added persistent warm CLI sessions: one reused process per conversation tab
   (bounded pool with idle eviction) so only the first turn pays process startup,
   with checkpoint coverage and disposal on tab close and deactivate.
+- Replaced eager whole-workspace CLI `Buffer` snapshots with bounded,
+  disk-backed checkpoints, exact hash finalization, byte/file/free-space gates,
+  per-conversation Keep/Undo stacks, and rollback preparation before
+  `Backend ready`. Large workspaces are now refused safely instead of exhausting
+  the VS Code extension host.
+- Added the explicit `forge.checkpoint.externalCliEnabled` temporary opt-out.
+  Disabling it skips external CLI workspace scans and clearly warns that those
+  changes have no Forge Keep/Undo coverage; native Forge tools remain protected.
+- Surfaced the CLI `Starting…`/`Backend ready`/disabled-rollback warning only on
+  the first turn of a conversation, since later turns resume the warm session
+  rather than restarting it; streaming state still updates every turn.
 
 ### Tool audit hardening
 

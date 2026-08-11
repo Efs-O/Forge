@@ -125,7 +125,34 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }
 
   // ── Checkpoint stack ──────────────────────────────────────────────────────
-  const checkpoints = new CheckpointStack();
+  const checkpointConfig = vscode.workspace.getConfiguration('forge.checkpoint');
+  const externalCliRollbackEnabled = checkpointConfig.get<boolean>('externalCliEnabled');
+  const checkpointMaxBytes = checkpointConfig.get<number>('maxBytes');
+  const checkpointMaxFiles = checkpointConfig.get<number>('maxFiles');
+  const checkpointStorageSetting = checkpointConfig.get<string>('storagePath');
+  if (
+    typeof externalCliRollbackEnabled !== 'boolean' ||
+    !Number.isSafeInteger(checkpointMaxBytes) ||
+    checkpointMaxBytes === undefined ||
+    checkpointMaxBytes < 1 ||
+    !Number.isSafeInteger(checkpointMaxFiles) ||
+    checkpointMaxFiles === undefined ||
+    checkpointMaxFiles < 1 ||
+    checkpointStorageSetting === undefined
+  ) {
+    throw new Error('Forge checkpoint settings are invalid. Review forge.checkpoint.* settings.');
+  }
+  const checkpointStorageRoot = checkpointStorageSetting.trim()
+    ? path.resolve(checkpointStorageSetting.trim())
+    : path.join(context.globalStorageUri.fsPath, 'checkpoints');
+  if (checkpointStorageSetting.trim() && !path.isAbsolute(checkpointStorageSetting.trim())) {
+    throw new Error('forge.checkpoint.storagePath must be an absolute path when configured.');
+  }
+  const checkpoints = new CheckpointStack({
+    storageRoot: checkpointStorageRoot,
+    limits: { maxBytes: checkpointMaxBytes, maxFiles: checkpointMaxFiles },
+    externalCliRollbackEnabled,
+  });
 
   // Localhost model-control API for external orchestrators + the Forge command
   // palette. Always instantiated (cheap); the HTTP listener opens only when enabled.
@@ -152,10 +179,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const codeLensProvider = new KeepUndoCodeLensProvider(
     () => {
-      sidebarProvider.keep();
+      void sidebarProvider.keep();
     },
     () => {
-      sidebarProvider.undo();
+      void sidebarProvider.undo();
     },
     diffDecorations,
   );
@@ -317,9 +344,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       pool.showConsole();
     }),
 
-    vscode.commands.registerCommand('forge.undo', () => {
+    vscode.commands.registerCommand('forge.undo', async () => {
       try {
-        const restored = sidebarProvider.undo();
+        const restored = await sidebarProvider.undo();
         void vscode.window.showInformationMessage(
           `Forge: undid last turn, restored ${restored.length} file(s)`,
         );
@@ -328,9 +355,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     }),
 
-    vscode.commands.registerCommand('forge.keep', () => {
+    vscode.commands.registerCommand('forge.keep', async () => {
       try {
-        sidebarProvider.keep();
+        await sidebarProvider.keep();
         void vscode.window.showInformationMessage('Forge: changes kept');
       } catch (err) {
         void vscode.window.showErrorMessage(`Forge: ${(err as Error).message}`);

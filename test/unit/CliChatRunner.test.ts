@@ -3,11 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CheckpointStack } from '../../src/checkpoint/CheckpointStack';
-import {
-  buildCliChatTask,
-  buildCliResumeTask,
-  runCliChat,
-} from '../../src/agents/CliChatRunner';
+import { buildCliChatTask, buildCliResumeTask, runCliChat } from '../../src/agents/CliChatRunner';
 import type { CliAgentDriver } from '../../src/agents/CliAgentDriver';
 
 const roots: string[] = [];
@@ -76,7 +72,7 @@ describe('CliChatRunner', () => {
 
     stack.commitTurn(checkpoint);
     expect(stack.canUndo()).toBe(true);
-    stack.undo();
+    await stack.undo();
     expect(fs.readFileSync(path.join(root, 'existing.txt'), 'utf8')).toBe('before');
     expect(fs.existsSync(path.join(root, 'created.txt'))).toBe(false);
     expect(fs.readFileSync(path.join(root, '.forge', 'config.yaml'), 'utf8')).toBe(
@@ -120,5 +116,40 @@ describe('CliChatRunner', () => {
     expect(run).toHaveBeenCalledWith(
       expect.objectContaining({ task: 'New request', sessionId: 'session-1', model: 'opus' }),
     );
+  });
+
+  it('runs without scanning when external CLI rollback is explicitly disabled', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-cli-no-rollback-'));
+    roots.push(root);
+    const target = path.join(root, 'large.txt');
+    fs.writeFileSync(target, '12345');
+    const stack = new CheckpointStack({
+      limits: { maxBytes: 4, maxFiles: 100 },
+      externalCliRollbackEnabled: false,
+    });
+    const checkpoint = stack.beginTurn('turn-no-rollback');
+    const onStatus = vi.fn();
+    const run = vi.fn(async () => {
+      fs.writeFileSync(target, 'changed');
+      return { status: 'completed' as const, finalText: 'Done.' };
+    });
+
+    await runCliChat({
+      prepared: { cliName: 'claude', executable: 'claude' },
+      model: { name: 'claude-code', provider: 'cli', cli: 'claude' },
+      messages: [{ role: 'user', content: 'hello' }],
+      workspaceRoot: root,
+      checkpoint,
+      signal: new AbortController().signal,
+      onText: vi.fn(),
+      onStatus,
+      driver: { run } as unknown as CliAgentDriver,
+    });
+
+    stack.commitTurn(checkpoint);
+    expect(run).toHaveBeenCalledOnce();
+    expect(onStatus).toHaveBeenCalledWith(expect.stringMatching(/rollback protection is disabled/i));
+    expect(stack.canUndo()).toBe(false);
+    expect(fs.readFileSync(target, 'utf8')).toBe('changed');
   });
 });

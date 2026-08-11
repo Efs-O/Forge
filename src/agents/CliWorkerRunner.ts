@@ -73,24 +73,27 @@ export async function runCliWorker(options: RunCliWorkerOptions): Promise<Worker
     };
   }
 
-  if (spec.access === 'write') {
-    for (const target of options.writablePaths) options.checkpoint.snapshotBefore(target);
-  }
+  const capture = spec.access === 'write' ? await prepareWorkerCheckpoint(options) : undefined;
 
   const driver = options.driver ?? new CliAgentDriver();
   const task = buildTaskPrompt(spec, options.workspaceRoot, options.writablePaths);
-  const result = await driver.run({
-    cliName: options.cliName,
-    executable,
-    task,
-    access: spec.access,
-    cwd: options.workspaceRoot,
-    ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
-    signal: options.abortSignal,
-    onEvent: (event) => {
-      if (event.kind === 'status') options.onProgress?.(event.text);
-    },
-  });
+  let result;
+  try {
+    result = await driver.run({
+      cliName: options.cliName,
+      executable,
+      task,
+      access: spec.access,
+      cwd: options.workspaceRoot,
+      ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+      signal: options.abortSignal,
+      onEvent: (event) => {
+        if (event.kind === 'status') options.onProgress?.(event.text);
+      },
+    });
+  } finally {
+    await capture?.finish();
+  }
 
   const summary = capResultText(result.finalText, MAX_WORKER_FINAL_CHARS);
   return {
@@ -103,4 +106,23 @@ export async function runCliWorker(options: RunCliWorkerOptions): Promise<Worker
     // it actually touched.
     ...(result.error ? { error: result.error } : {}),
   };
+}
+
+async function prepareWorkerCheckpoint(
+  options: RunCliWorkerOptions,
+): Promise<import('../checkpoint/CheckpointStack').WorkspaceCheckpointCapture> {
+  if (!options.checkpoint.externalCliRollbackEnabled) {
+    options.onProgress?.(
+      'Warning: external CLI rollback protection is disabled; worker changes cannot be undone by Forge.',
+    );
+  }
+  return options.checkpoint.preparePaths(
+    options.workspaceRoot,
+    options.writablePaths,
+    options.abortSignal,
+    (progress) =>
+      options.onProgress?.(
+        `${progress.phase} checkpoint ${progress.completedFiles}/${progress.totalFiles || progress.completedFiles} files`,
+      ),
+  );
 }

@@ -98,16 +98,23 @@ function makeLoop(
   post: (message: unknown) => void = vi.fn(),
   registry: ToolRegistry = new ToolRegistry(),
   cliDriver?: CliAgentDriver,
+  checkpointsOverride?: CheckpointStack,
 ): AgentLoop {
   const checkpoint = {
     snapshotBefore: vi.fn(),
     snapshotMissingBefore: vi.fn(),
+    prepareWorkspace: vi.fn(async () => ({
+      finish: vi.fn(async () => {}),
+      discard: vi.fn(async () => {}),
+    })),
   };
-  const checkpoints = {
-    beginTurn: vi.fn(() => checkpoint),
-    commitTurn: vi.fn(),
-    depth: vi.fn().mockReturnValue(0),
-  } as unknown as CheckpointStack;
+  const checkpoints =
+    checkpointsOverride ??
+    ({
+      beginTurn: vi.fn(() => checkpoint),
+      commitTurn: vi.fn(),
+      depth: vi.fn().mockReturnValue(0),
+    } as unknown as CheckpointStack);
 
   const codeLens = {
     markPending: vi.fn(),
@@ -235,6 +242,34 @@ describe('AgentLoop', () => {
     );
   });
 
+  it('does not commit or launch a CLI prompt when rollback preparation fails', async () => {
+    const run = vi.fn();
+    const driver = { run } as unknown as CliAgentDriver;
+    const config = makeConfig({ provider: 'cli', cli: process.execPath });
+    const conv = makeConversation();
+    const post = vi.fn();
+    const checkpoint = {
+      prepareWorkspace: vi.fn(async () => {
+        throw new Error('checkpoint limit exceeded');
+      }),
+    };
+    const checkpoints = {
+      beginTurn: vi.fn(() => checkpoint),
+      commitTurn: vi.fn(),
+      depth: vi.fn().mockReturnValue(0),
+    } as unknown as CheckpointStack;
+    const loop = makeLoop(makePool(), config, post, new ToolRegistry(), driver, checkpoints);
+
+    await loop.runTurn(conv, config.models[0]!, 'do not record this');
+
+    expect(run).not.toHaveBeenCalled();
+    expect(conv.messages).toEqual([]);
+    expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ready' }));
+    expect(post).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'error', message: 'checkpoint limit exceeded' }),
+    );
+  });
+
   it('reuses the CLI session for later turns in the same Forge conversation', async () => {
     const run = vi
       .fn()
@@ -270,6 +305,49 @@ describe('AgentLoop', () => {
         model: 'opus',
       }),
     );
+  });
+
+  it('announces backend start/ready only on the first CLI turn, not on resumes', async () => {
+    const run = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 'completed' as const,
+        finalText: 'First answer',
+        sessionId: 'warm-session',
+      })
+      .mockResolvedValueOnce({ status: 'completed' as const, finalText: 'Second answer' });
+    const config = makeConfig({ provider: 'cli', cli: process.execPath, cli_model: 'opus' });
+    const conv = makeConversation();
+    const post = vi.fn();
+    const loop = makeLoop(
+      makePool(vi.fn(async () => makeBackend())),
+      config,
+      post,
+      new ToolRegistry(),
+      { run } as unknown as CliAgentDriver,
+    );
+
+    const countType = (type: string): number =>
+      post.mock.calls.filter(([m]) => (m as { type?: string }).type === type).length;
+    const countRollbackWarnings = (): number =>
+      post.mock.calls.filter(([m]) =>
+        /rollback protection is disabled/i.test((m as { detail?: string }).detail ?? ''),
+      ).length;
+
+    await loop.runTurn(conv, config.models[0]!, 'first prompt');
+    const startsAfterFirst = countType('backendStarting');
+    const readysAfterFirst = countType('ready');
+    const warningsAfterFirst = countRollbackWarnings();
+
+    await loop.runTurn(conv, config.models[0]!, 'second prompt');
+
+    expect(startsAfterFirst).toBe(1);
+    expect(readysAfterFirst).toBe(1);
+    expect(warningsAfterFirst).toBe(1);
+    // Resumed turn adds no further start/ready/rollback chatter.
+    expect(countType('backendStarting')).toBe(1);
+    expect(countType('ready')).toBe(1);
+    expect(countRollbackWarnings()).toBe(1);
   });
 
   it('runs a second CLI conversation while the first conversation is still waiting', async () => {

@@ -22,8 +22,13 @@ export interface RunCliChatOptions {
   signal: AbortSignal;
   onText(text: string): void;
   onStatus(text: string): void;
+  onPrepared?(): void;
   driver?: CliAgentDriver;
   sessionId?: string;
+  /** When false, suppress the disabled-rollback warning — used for resumed
+   *  warm turns that already surfaced it on the first prompt. Defaults to
+   *  announcing so one-shot callers keep the warning. */
+  announceRollback?: boolean;
 }
 
 export interface CliChatResult extends CliAgentRunResult {
@@ -87,10 +92,17 @@ function appendFinalText(streamed: string, finalText: string): string {
 }
 
 export async function runCliChat(options: RunCliChatOptions): Promise<CliChatResult> {
-  const capture = snapshotWorkspaceBefore(options.checkpoint, options.workspaceRoot);
+  reportDisabledRollback(options);
+  const capture = await snapshotWorkspaceBefore(
+    options.checkpoint,
+    options.workspaceRoot,
+    options.signal,
+    checkpointProgressReporter(options.onStatus),
+  );
   let streamed = '';
   let result: CliAgentRunResult;
   try {
+    options.onPrepared?.();
     result = await (options.driver ?? new CliAgentDriver()).run({
       cliName: options.prepared.cliName,
       executable: options.prepared.executable,
@@ -112,7 +124,7 @@ export async function runCliChat(options: RunCliChatOptions): Promise<CliChatRes
       },
     });
   } finally {
-    capture.finish();
+    await capture.finish();
   }
 
   const assistantText = appendFinalText(streamed, result.finalText);
@@ -121,7 +133,13 @@ export async function runCliChat(options: RunCliChatOptions): Promise<CliChatRes
 }
 
 export async function runWarmCliChat(options: RunWarmCliChatOptions): Promise<CliChatResult> {
-  const capture = snapshotWorkspaceBefore(options.checkpoint, options.workspaceRoot);
+  reportDisabledRollback(options);
+  const capture = await snapshotWorkspaceBefore(
+    options.checkpoint,
+    options.workspaceRoot,
+    options.signal,
+    checkpointProgressReporter(options.onStatus),
+  );
   let streamed = '';
   let result: CliAgentRunResult;
   const confirmedId = options.registry.getConfirmedSessionId(options.key) ?? options.sessionId;
@@ -134,6 +152,7 @@ export async function runWarmCliChat(options: RunWarmCliChatOptions): Promise<Cl
     ...(confirmedId ? { confirmedSessionId: confirmedId } : {}),
   };
   try {
+    options.onPrepared?.();
     result = await options.registry.run(
       options.key,
       sessionOptions,
@@ -151,9 +170,36 @@ export async function runWarmCliChat(options: RunWarmCliChatOptions): Promise<Cl
       },
     );
   } finally {
-    capture.finish();
+    await capture.finish();
   }
   const assistantText = appendFinalText(streamed, result.finalText);
   if (assistantText.length > streamed.length) options.onText(assistantText.slice(streamed.length));
   return { ...result, assistantText };
+}
+
+function checkpointProgressReporter(
+  onStatus: (text: string) => void,
+): (progress: import('../checkpoint/DiskCheckpointStore').CheckpointProgress) => void {
+  let lastReport = 0;
+  return (progress) => {
+    const now = Date.now();
+    const complete = progress.totalFiles > 0 && progress.completedFiles >= progress.totalFiles;
+    if (!complete && now - lastReport < 500) return;
+    lastReport = now;
+    const detail = `${progress.completedFiles}/${progress.totalFiles || progress.completedFiles} files`;
+    onStatus(
+      progress.phase === 'finalize'
+        ? `Finalizing rollback checkpoint (${detail})`
+        : `Preparing rollback checkpoint (${detail})`,
+    );
+  };
+}
+
+function reportDisabledRollback(options: RunCliChatOptions): void {
+  if (options.announceRollback === false) return;
+  if (!options.checkpoint.externalCliRollbackEnabled) {
+    options.onStatus(
+      'Warning: external CLI rollback protection is disabled. Keep/Undo will not cover CLI file changes.',
+    );
+  }
 }
