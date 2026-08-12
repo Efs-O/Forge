@@ -1,4 +1,4 @@
-import React, { useEffect, useReducer, useCallback, useState } from 'react';
+import React, { useEffect, useReducer, useCallback, useRef, useState } from 'react';
 import type {
   AttachmentData,
   ForgeSlashCommandId,
@@ -24,6 +24,12 @@ import { TabStrip } from './components/TabStrip';
 import { HistoryList } from './components/HistoryList';
 import { SLASH_COMMANDS } from './slashCommands';
 
+interface QueuedPrompt {
+  conversationId: string;
+  text: string;
+  attachments: AttachmentData[];
+}
+
 export function App(): React.ReactElement {
   const [state, dispatch] = useReducer(reducer, initialState);
 
@@ -36,6 +42,10 @@ export function App(): React.ReactElement {
   const [tokenUsed, setTokenUsed] = useState(0);
   const [tokenMax, setTokenMax] = useState(0);
   const [prefillText, setPrefillText] = useState<string | null>(null);
+  // Keep queued requests outside React state. Draining the previous state-backed
+  // queue from an effect both changed local state and dispatched a new prompt,
+  // which could re-enter rendering while an input change was in progress.
+  const queuedPrompts = useRef<QueuedPrompt[]>([]);
 
   useEffect(() => {
     function handler(event: MessageEvent): void {
@@ -144,14 +154,37 @@ export function App(): React.ReactElement {
     return () => window.removeEventListener('message', handler);
   }, []);
 
-  const handleSend = useCallback((text: string, attachments: AttachmentData[]) => {
-    dispatch({ type: 'USER_SEND', text });
+  const postPrompt = useCallback((prompt: QueuedPrompt) => {
+    dispatch({ type: 'USER_SEND', text: prompt.text, convId: prompt.conversationId });
     vscode.postMessage({
       type: 'send',
-      text,
-      attachments: attachments.length ? attachments : undefined,
+      text: prompt.text,
+      attachments: prompt.attachments.length ? prompt.attachments : undefined,
+      conversationId: prompt.conversationId,
     });
   }, []);
+
+  const handleSend = useCallback(
+    (text: string, attachments: AttachmentData[]) => {
+      const prompt = { conversationId: state.activeConversationId, text, attachments };
+      if (state.streamingIds.has(prompt.conversationId)) {
+        queuedPrompts.current.push(prompt);
+        return;
+      }
+      postPrompt(prompt);
+    },
+    [postPrompt, state.activeConversationId, state.streamingIds],
+  );
+
+  useEffect(() => {
+    const nextIndex = queuedPrompts.current.findIndex(
+      (prompt) => !state.streamingIds.has(prompt.conversationId),
+    );
+    if (nextIndex < 0) return;
+    const [next] = queuedPrompts.current.splice(nextIndex, 1);
+    if (!next) return;
+    postPrompt(next);
+  }, [postPrompt, state.streamingIds]);
 
   const handleCancel = useCallback(() => {
     vscode.postMessage({ type: 'cancel' });
