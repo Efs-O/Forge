@@ -83,6 +83,22 @@ function makeFuzzyConfig(port: number, maxModels = 4): ForgeConfig {
   } as ForgeConfig;
 }
 
+function makeGroupedProviderConfig(port: number): ForgeConfig {
+  return {
+    models: [
+      { name: 'local-ollama', group: 'ollama-local' },
+      { name: 'cloud-grok', group: 'xai-cloud', api_key_secret: 'forge.xai' },
+    ],
+    groups: {
+      'ollama-local': { provider: 'ollama', endpoint: 'http://127.0.0.1:11434' },
+      'xai-cloud': { provider: 'xai' },
+    },
+    active_model: 'local-ollama',
+    llama_server: {},
+    control_server: { enabled: true, port },
+  } as ForgeConfig;
+}
+
 // Default test deps: probe always passes instantly, no eviction grace. Individual
 // tests override what they exercise (slow/failing probe, grace window).
 const testDeps = (over: ControlServerDeps = {}): ControlServerDeps => ({
@@ -436,6 +452,31 @@ describe('ControlServer', () => {
       action: 'configure',
       availability: 'unavailable',
       reason: 'chat_proxy_unavailable',
+      servable: false,
+    });
+  });
+
+  it('resolves group-inherited providers before publishing model routing metadata', async () => {
+    const port = 18829;
+    const base = `http://127.0.0.1:${port}`;
+    server = new ControlServer(new FakePool(), makeGroupedProviderConfig(port), testDeps());
+    server.start();
+    await waitReady(base);
+
+    const catalog = await (await fetch(`${base}/models`)).json();
+    const byName = Object.fromEntries(catalog.models.map((m: { name: string }) => [m.name, m]));
+    expect(byName['local-ollama']).toMatchObject({
+      backend: 'ollama',
+      provider: 'ollama',
+      route: 'ensure',
+      action: 'ensure',
+      servable: true,
+    });
+    expect(byName['cloud-grok']).toMatchObject({
+      backend: 'xai',
+      provider: 'xAI',
+      route: 'chat',
+      action: 'configure',
       servable: false,
     });
   });

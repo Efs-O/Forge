@@ -19,6 +19,7 @@ interface AppModule {
     action:
       | { type: 'MODELS'; names: string[]; active: string | null }
       | { type: 'GENERATION_STARTED'; convId?: string }
+      | { type: 'USER_SEND'; text: string; convId?: string }
       | { type: 'DONE'; convId?: string }
       | { type: 'ERROR'; message: string; convId?: string }
       | { type: 'READY'; convId?: string }
@@ -82,6 +83,27 @@ describe('webview App reducer', () => {
     const done = appModule.reducer(running, { type: 'DONE', convId: 'tab-1' });
     expect(done.streamingIds.has('tab-1')).toBe(false);
     expect(done.generatingIds.has('tab-1')).toBe(false);
+  });
+
+  it('adds a queued prompt to its original conversation rather than the active tab', () => {
+    const state = {
+      ...appModule.initialState,
+      activeConversationId: 'tab-2',
+      messagesById: { 'tab-1': [{ role: 'assistant', content: 'Working…' }] },
+    };
+
+    const queued = appModule.reducer(state, {
+      type: 'USER_SEND',
+      text: 'Follow up when you finish.',
+      convId: 'tab-1',
+    });
+
+    expect(queued.messagesById['tab-1']).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: 'user', content: 'Follow up when you finish.' }),
+      ]),
+    );
+    expect(queued.messagesById['tab-2']).toBeUndefined();
   });
 
   it('keeps the model selector empty when restoring tabs', () => {

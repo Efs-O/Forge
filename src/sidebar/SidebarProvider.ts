@@ -373,15 +373,27 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.postSessionSync();
   }
 
-  private async handleSend(text: string, attachments?: AttachmentData[]): Promise<void> {
-    if (this.agentLoop.isStreamingConv(this.sidebar.activeConversationId)) {
+  private async handleSend(
+    text: string,
+    attachments?: AttachmentData[],
+    conversationId?: string,
+  ): Promise<void> {
+    const conv = conversationId
+      ? this.sidebar.conversations.find((candidate) => candidate.id === conversationId)
+      : this.getActive();
+    if (!conv) {
+      this.post({ type: 'error', message: 'Forge: the queued conversation is no longer open.' });
+      return;
+    }
+    if (this.agentLoop.isStreamingConv(conv.id)) {
       this.post({
         type: 'error',
         message: 'Forge: this conversation is still generating. Cancel it first or open a new tab.',
       });
       return;
     }
-    if (!this.config.active_model) {
+    const modelName = conv.active_model ?? this.config.active_model;
+    if (!modelName) {
       const message = 'Forge: no active model selected. Pick a model before sending.';
       this.events.onBackendError?.(message);
       this.post({ type: 'error', message });
@@ -391,17 +403,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     // defaults + base + profile into a legacy ModelConfig for the agent loop.
     let selectedModel;
     try {
-      selectedModel = resolveRequestModel(this.config, this.config.active_model, (m) =>
-        log.info(m),
-      );
+      selectedModel = resolveRequestModel(this.config, modelName, (m) => log.info(m));
     } catch (err) {
       this.post({ type: 'error', message: (err as Error).message });
       return;
     }
-    const conv = this.getActive();
     // Persist the full selection (incl. @profile) on the conversation so tab
     // switches restore the same profile, not just the base model (F6).
-    conv.active_model = this.config.active_model;
+    conv.active_model = modelName;
     this.contextWarningShown = false;
     try {
       await this.agentLoop.runTurn(conv, selectedModel, text, attachments);
@@ -420,12 +429,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (!this.sessionLoggers.has(convId)) {
       this.sessionLoggers.set(
         convId,
-        new SessionLogger(convId, conv.title, this.config.active_model ?? ''),
+        new SessionLogger(convId, conv.title, conv.active_model ?? ''),
       );
     }
     const logger = this.sessionLoggers.get(convId)!;
     logger.updateTitle(conv.title);
-    logger.flush(conv.messages, this.config.active_model ?? '');
+    logger.flush(conv.messages, conv.active_model ?? '');
   }
 
   private handleMessage(msg: WebviewToHost): void {
@@ -445,7 +454,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         break;
 
       case 'send':
-        void this.handleSend(msg.text, msg.attachments);
+        void this.handleSend(msg.text, msg.attachments, msg.conversationId);
         break;
 
       case 'cancel':

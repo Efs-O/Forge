@@ -1,6 +1,10 @@
 import { createHash } from 'crypto';
 import type { ForgeConfig, ModelConfig } from '../config/types';
-import { availableProfilesFor, deriveStaticCapabilities } from '../config/ConfigResolver';
+import {
+  availableProfilesFor,
+  deriveStaticCapabilities,
+  mergeGroupsIntoModel,
+} from '../config/ConfigResolver';
 import { getProviderDisplayName, isCloudProvider } from '../llm/CloudProviders';
 import type { IBackendPool } from './BackendPool';
 
@@ -88,7 +92,12 @@ function localAvailability(
 }
 
 function entryFor(model: ModelConfig, state: CatalogState): ControlModelCatalogEntry {
-  const cloud = isCloudProvider(model.provider);
+  // The control catalog is consumed before any dispatch occurs, so it must use
+  // the same group-resolved runtime facts as ChatClient and BackendPool. Using
+  // the raw model here made entries that inherit `provider` from a group appear
+  // as the default llama.cpp provider.
+  const resolvedModel = mergeGroupsIntoModel(state.config, model);
+  const cloud = isCloudProvider(resolvedModel.provider);
   const execution = cloud
     ? state.chatAvailable
       ? ({ availability: 'ready', action: 'dispatch' } as const)
@@ -102,13 +111,13 @@ function entryFor(model: ModelConfig, state: CatalogState): ControlModelCatalogE
     id: model.name,
     baseModel: model.name,
     name: model.name,
-    backend: model.provider ?? 'llama.cpp',
-    provider: getProviderDisplayName(model),
+    backend: resolvedModel.provider ?? 'llama.cpp',
+    provider: getProviderDisplayName(resolvedModel),
     loaded: state.pool.isLoaded(model.name),
     holds: state.holds.get(model.name) ?? 0,
     servable: !cloud,
     profiles: availableProfilesFor(state.config, model.name),
-    capabilities: deriveStaticCapabilities(model),
+    capabilities: deriveStaticCapabilities(resolvedModel),
     route: cloud ? 'chat' : 'ensure',
     ...(model.short_name ? { short_name: model.short_name } : {}),
     ...(model.group ? { group: model.group } : {}),

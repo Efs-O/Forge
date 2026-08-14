@@ -5,6 +5,7 @@ import rehypeHighlight from 'rehype-highlight';
 import type { AppMessage } from '../App';
 import type { DiffHunk } from '../../../src/sidebar/messageBridge';
 import { vscode } from '../vscode';
+import { normalizeMarkdownForRender } from '../markdown';
 
 const FILE_LINK_SCHEME = 'forge-file://';
 
@@ -112,9 +113,10 @@ function AssistantContent({
   content: string;
   streaming?: boolean;
 }): React.ReactElement {
+  const renderContent = useMemo(() => normalizeMarkdownForRender(content), [content]);
   const { settled, live } = useMemo(
-    () => (streaming ? splitStreamingContent(content) : { settled: content, live: '' }),
-    [content, streaming],
+    () => (streaming ? splitStreamingContent(renderContent) : { settled: renderContent, live: '' }),
+    [renderContent, streaming],
   );
 
   if (!streaming) {
@@ -124,7 +126,7 @@ function AssistantContent({
         rehypePlugins={[rehypeHighlight]}
         components={markdownComponents}
       >
-        {content}
+        {renderContent}
       </Markdown>
     );
   }

@@ -11,9 +11,11 @@ function line(obj) {
 
 if (process.argv.includes('app-server')) {
   const input = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+  const hasForgeFullAccessOverride = process.argv.includes('sandbox_mode="danger-full-access"');
   let threadId = 'fixture-thread-id';
   let turn = 0;
   let activeTurn;
+  let historyOnlyFinalMessage;
   input.on('line', (raw) => {
     const message = JSON.parse(raw);
     if (message.method === 'initialized') return;
@@ -22,6 +24,13 @@ if (process.argv.includes('app-server')) {
       return;
     }
     if (message.method === 'thread/start') {
+      if (
+        process.argv.includes('REQUIRE_FORGE_FULL_ACCESS') &&
+        !hasForgeFullAccessOverride
+      ) {
+        line({ id: message.id, error: { message: 'missing Forge full-access override' } });
+        return;
+      }
       line({ id: message.id, result: { thread: { id: threadId } } });
       return;
     }
@@ -30,10 +39,37 @@ if (process.argv.includes('app-server')) {
       line({ id: message.id, result: { thread: { id: threadId } } });
       return;
     }
+    if (message.method === 'thread/read') {
+      line({
+        id: message.id,
+        result: {
+          thread: {
+            turns: [
+              {
+                id: activeTurn,
+                items: historyOnlyFinalMessage
+                  ? [
+                      {
+                        type: 'agentMessage',
+                        id: `history-message-${turn}`,
+                        text: historyOnlyFinalMessage,
+                      },
+                    ]
+                  : [],
+              },
+            ],
+          },
+        },
+      });
+      return;
+    }
     if (message.method === 'turn/start') {
       turn += 1;
       activeTurn = `turn-${turn}`;
       const text = message.params.input[0].text;
+      historyOnlyFinalMessage = text.includes('TRIGGER_HISTORY_ONLY_MESSAGE')
+        ? ' The command completed successfully from history.'
+        : undefined;
       line({ id: message.id, result: { turn: { id: activeTurn } } });
       line({
         method: 'turn/started',
@@ -50,8 +86,43 @@ if (process.argv.includes('app-server')) {
       });
       line({
         method: 'item/agentMessage/delta',
-        params: { threadId, turnId: activeTurn, delta: `Done codex turn ${turn}` },
+        params: {
+          threadId,
+          turnId: activeTurn,
+          itemId: text.includes('TRIGGER_MISMATCHED_DELTA_ITEM')
+            ? `streamed-message-${turn}`
+            : `message-${turn}`,
+          delta: `Done codex turn ${turn}`,
+        },
       });
+      if (text.includes('TRIGGER_MISMATCHED_DELTA_ITEM')) {
+        line({
+          method: 'item/completed',
+          params: {
+            threadId,
+            turnId: activeTurn,
+            item: {
+              type: 'agentMessage',
+              id: `completed-message-${turn}`,
+              text: `Done codex turn ${turn}`,
+            },
+          },
+        });
+      }
+      if (text.includes('TRIGGER_COMPLETED_MESSAGE')) {
+        line({
+          method: 'item/completed',
+          params: {
+            threadId,
+            turnId: activeTurn,
+            item: {
+              type: 'agentMessage',
+              id: `final-message-${turn}`,
+              text: ' The command completed successfully.',
+            },
+          },
+        });
+      }
       line({
         method: 'turn/completed',
         params: { threadId, turn: { id: activeTurn, status: 'completed' } },

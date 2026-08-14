@@ -228,6 +228,8 @@ export interface SendMsg {
   type: 'send';
   text: string;
   attachments?: AttachmentData[];
+  /** Set by the standby-prompt queue so it stays with the conversation that queued it. */
+  conversationId?: string;
 }
 export interface CancelMsg {
   type: 'cancel';

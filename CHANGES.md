@@ -1,5 +1,13 @@
 # Forge — Recent Changes
 
+## 0.12.31 — Shared runtimes, resilient Codex sessions, and queueing
+
+- Added opt-in compatible llama.cpp runtime sharing between Forge VS Code windows.
+- Hardened Codex app-server streaming and final-message recovery after command execution.
+- Added queueing for a follow-up prompt while a conversation is streaming, preserving its tab.
+- Corrected the control catalog so group-inherited Ollama and cloud providers report their
+  actual provider and route.
+
 ## 0.12.29 — Config overhaul, Model Manager, CLI subscription agents
 
 - Added schema-v2 config `groups` ("boards") that share tools, context, tool-call

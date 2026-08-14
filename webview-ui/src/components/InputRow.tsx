@@ -72,7 +72,7 @@ export function InputRow({
 
   const submit = useCallback(() => {
     const trimmed = text.trim();
-    if ((!trimmed && attachments.length === 0) || streaming) return;
+    if (!trimmed && attachments.length === 0) return;
     onSend(trimmed, attachments);
     setText('');
     setAttachments([]);
@@ -149,7 +149,7 @@ export function InputRow({
     [runSlashCommand, selectedCommandIndex, showSlashMenu, slashMatches, submit],
   );
 
-  const canSend = (text.trim().length > 0 || attachments.length > 0) && !streaming;
+  const canSend = text.trim().length > 0 || attachments.length > 0;
   const placeholder = backendReady
     ? 'Ask anything… (Shift+Enter for newline)'
     : 'Ask anything… first send starts the backend';
@@ -200,24 +200,21 @@ export function InputRow({
       )}
 
       <div id="prompt-area">
-        {!streaming && (
-          <button
-            id="attach-btn"
-            type="button"
-            title="Attach image or file"
-            aria-label="Attach file"
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <PaperclipIcon />
-          </button>
-        )}
+        <button
+          id="attach-btn"
+          type="button"
+          title="Attach image or file"
+          aria-label="Attach file"
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <PaperclipIcon />
+        </button>
 
         <textarea
           ref={textareaRef}
           id="prompt"
           value={text}
           placeholder={placeholder}
-          disabled={streaming}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
           rows={2}
@@ -242,10 +239,16 @@ export function InputRow({
             </span>
           )}
           {streaming ? (
-            <button id="btn-stop" type="button" onClick={onCancel}>
-              <StopIcon />
-              Stop
-            </button>
+            <>
+              <button id="btn-send" type="button" onClick={submit} disabled={!canSend}>
+                <SendIcon />
+                Queue
+              </button>
+              <button id="btn-stop" type="button" onClick={onCancel}>
+                <StopIcon />
+                Stop
+              </button>
+            </>
           ) : (
             <button id="btn-send" type="button" onClick={submit} disabled={!canSend}>
               <SendIcon />

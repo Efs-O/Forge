@@ -51,7 +51,7 @@ export type Action =
   | { type: 'BACKEND_STARTING'; message: string; convId?: string }
   | { type: 'BACKEND_DOWN'; message: string; convId?: string }
   | { type: 'MODELS'; models: ModelEntry[]; active: string | null }
-  | { type: 'USER_SEND'; text: string }
+  | { type: 'USER_SEND'; text: string; convId?: string }
   | { type: 'SET_MODEL'; name: string | null }
   | { type: 'CHECKPOINT_READY'; convId?: string }
   | { type: 'CHECKPOINT_DISMISSED'; convId?: string }
@@ -141,7 +141,7 @@ export function reducer(state: State, action: Action): State {
     }
 
     case 'USER_SEND': {
-      const cid = state.activeConversationId;
+      const cid = resolveConvId(state, action.convId);
       const existing = state.messagesById[cid] ?? [];
       const last = existing[existing.length - 1];
       // Strip stale diff cards and trailing empty assistant placeholder from previous turn

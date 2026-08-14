@@ -132,6 +132,8 @@ const LlamaServerConfigSchema = z.object({
   port: z.number().int().min(1).max(65535).optional(),
 });
 
+const SharedRuntimeSchema = z.object({ enabled: z.boolean() }).optional();
+
 const SearchConfigSchema = z.object({
   provider: z.enum(['tavily', 'brave']),
   secret_key_name: z.string().min(1),
@@ -211,6 +213,7 @@ export const ForgeConfigSchema = z
     profiles: z.record(z.string(), ProfileSchema).optional(),
     aliases: z.record(z.string(), z.string().min(1)).optional(),
     llama_server: LlamaServerConfigSchema.default({}),
+    shared_runtime: SharedRuntimeSchema,
     search: SearchConfigSchema.optional(),
     embeddings: EmbeddingsConfigSchema,
     log_level: z.enum(['trace', 'debug', 'info', 'warn', 'error']).optional(),

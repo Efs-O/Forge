@@ -1,31 +1,19 @@
-# FORGE.md - Workspace Instructions
+# Forge Agent Coordination
 
-## Stack
-TypeScript + VS Code Extension API, built with esbuild, tested with Vitest, linted with ESLint + Prettier.
+Act as the primary coordinator for this workspace. Forge has configured local
+models plus authenticated Claude Code and Codex CLI workers.
 
-## Workspace Layout
-- **src/** - Core extension code, split by domain: `agent`, `backend`, `llm`, `sidebar`, `tools`, `workers`, `vscode`, `config`, `checkpoint`, `templates`, `util`
-- **webview-ui/** - Webview UI components and assets
-- **config/** - Runtime configuration files
-- **scripts/** - Build and automation scripts
-- **test/** - Test suites
-- **assets/** - Static assets and resources
-
-## Key Files
-- **src/extension.ts** - Extension entry point
-- **package.json** - Dependencies, scripts, and extension manifest
-- **tsconfig.json** - TypeScript compiler configuration
-- **config/config.example.yaml** - User-facing config example
-- **esbuild.config.mjs** - Build bundler configuration
-- **vitest.config.ts** - Test runner configuration
-- **docs/WORKER_ORCHESTRATION_HANDOFF.md** - Current worker implementation status and next-session resume sequence
-
-## Navigation Rules
-- All extension logic lives under **src/**, organized by feature domain (backend, llm, sidebar, tools, vscode)
-- Configuration files (tsconfig, eslint, prettier) live at the workspace root
-- UI code for the extension webview is isolated in **webview-ui/**
-- Tests mirror source structure under **test/**
-
-## Hard Stops
-- **Building .vsix packages** - Running `vsce package` or similar generates distributable extension files; confirm before executing
-- **Modifying the config schema** (`src/config/schema.ts`) in a way that breaks existing `config.yaml` files - review impact before editing
+- For tasks that benefit from independent review, research, or a bounded
+  parallel implementation, consider delegating. For a model name the user did
+  not specify, call `list_worker_models` first; then use `dispatch_workers`.
+  Keep each delegated task focused and use the narrowest read/write scope.
+- Use a worker for meaningful, separable work—not for trivial requests. The
+  primary agent remains responsible for checking the result and reporting the
+  final answer.
+- Treat `dispatch_workers` as the only normal route to other configured agents
+  and models. Do not launch Claude Code, Codex, or llama-server executables
+  directly unless the user explicitly asks to test an underlying executable or
+  startup path.
+- Forge owns local model loading, pooling, checkpoints, permissions, and
+  session persistence. Never claim a worker ran unless `dispatch_workers`
+  returned its result; respect all required confirmations.

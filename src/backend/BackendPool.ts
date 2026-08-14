@@ -6,6 +6,7 @@ import { expandAlias, resolveRequestModel, splitModelProfile } from '../config/C
 import { DelegationGate } from './DelegationGate';
 import type { DelegationCheck, DelegationGroupHold, DelegationHold } from './DelegationGate';
 import { getLogger } from '../util/logger';
+import { SharedRuntimeRegistry, sharedRuntimeKey } from './SharedRuntimeRegistry';
 
 export type { DelegationCheck, DelegationGroupHold, DelegationHold } from './DelegationGate';
 
@@ -50,6 +51,12 @@ export interface IBackendPool {
 
 export class BackendPool implements IBackendPool {
   private readonly slots = new Map<string, PoolSlot>();
+  /** Compatible servers owned by another Forge window; never consume our ports. */
+  private readonly sharedSlots = new Map<
+    string,
+    { backend: DirectBackend; key: string; leaseId: string }
+  >();
+  private readonly sharedRegistry = new SharedRuntimeRegistry();
   // Ollama models connect to a pre-running daemon and don't consume a port slot.
   private readonly ollamaSlots = new Map<string, DirectBackend>();
   /** model → in-flight ollama acquire, so concurrent acquires share one hotSwap. */
@@ -125,6 +132,13 @@ export class BackendPool implements IBackendPool {
       return this.restartSlot(key, existing);
     }
 
+    const borrowed = this.sharedSlots.get(key);
+    if (borrowed?.backend.isReady()) return borrowed.backend;
+    if (this.config.shared_runtime?.enabled) {
+      const borrowedBackend = await this.borrowSharedRuntime(key);
+      if (borrowedBackend) return borrowedBackend;
+    }
+
     // Need a new slot
     const port = this.allocatePort(allowEvict);
     return this.startSlot(key, port);
@@ -141,19 +155,43 @@ export class BackendPool implements IBackendPool {
         await backend.stop().catch(() => {});
         this.ollamaSlots.delete(key);
       }
+    } else if (this.sharedSlots.has(key)) {
+      const shared = this.sharedSlots.get(key)!;
+      await shared.backend.stop();
+      this.sharedRegistry.releaseLease(shared.key, shared.leaseId);
+      this.sharedSlots.delete(key);
     } else {
       const slot = this.slots.get(key);
       if (slot) {
+        const runtimeKey = this.runtimeKey(key);
+        if (this.config.shared_runtime?.enabled && this.sharedRegistry.hasBorrowers(runtimeKey)) {
+          throw new Error(
+            `Cannot unload "${key}": another Forge workspace is using this shared runtime.`,
+          );
+        }
         if (slot.starting) await slot.starting.catch(() => {});
         await slot.backend.stop().catch(() => {});
         this.freeSlot(key, slot);
+        if (this.config.shared_runtime?.enabled) this.sharedRegistry.removeOwner(runtimeKey);
       }
     }
     log.info(`[BackendPool] released: ${key}`);
   }
 
   async stopAll(): Promise<void> {
-    const slotStops = [...this.slots.values()].map(async (slot) => {
+    for (const [model, shared] of this.sharedSlots) {
+      await shared.backend.stop().catch(() => {});
+      this.sharedRegistry.releaseLease(shared.key, shared.leaseId);
+      this.sharedSlots.delete(model);
+    }
+    const slotStops = [...this.slots.entries()].map(async ([model, slot]) => {
+      if (
+        this.config.shared_runtime?.enabled &&
+        this.sharedRegistry.hasBorrowers(this.runtimeKey(model))
+      ) {
+        log.info(`[BackendPool] retained shared runtime: ${model}`);
+        return;
+      }
       try {
         if (slot.starting) await slot.starting.catch(() => {});
         await slot.backend.stop();
@@ -169,7 +207,15 @@ export class BackendPool implements IBackendPool {
       }
     });
     await Promise.all([...slotStops, ...ollamaStops]);
-    this.slots.clear();
+    for (const model of [...this.slots.keys()]) {
+      if (
+        !this.config.shared_runtime?.enabled ||
+        !this.sharedRegistry.hasBorrowers(this.runtimeKey(model))
+      ) {
+        this.sharedRegistry.removeOwner(this.runtimeKey(model));
+        this.slots.delete(model);
+      }
+    }
     this.ollamaSlots.clear();
     log.info('[BackendPool] all slots stopped');
   }
@@ -200,12 +246,12 @@ export class BackendPool implements IBackendPool {
 
   loadedModelNames(): string[] {
     // Port-consuming slots only; Ollama models are unbounded and never evicted.
-    return [...this.slots.keys()];
+    return [...this.slots.keys(), ...this.sharedSlots.keys()];
   }
 
   isLoaded(modelName: string): boolean {
     const key = this.poolKey(modelName);
-    return this.slots.has(key) || this.ollamaSlots.has(key);
+    return this.slots.has(key) || this.sharedSlots.has(key) || this.ollamaSlots.has(key);
   }
 
   private allocatePort(allowEvict: boolean): number {
@@ -249,6 +295,15 @@ export class BackendPool implements IBackendPool {
         slot.starting = null;
         slot.lastUsed = Date.now();
         this.lastAcquiredModel = modelName;
+        if (this.config.shared_runtime?.enabled) {
+          this.sharedRegistry.publish({
+            key: this.runtimeKey(modelName),
+            model: modelName,
+            endpoint: backend.baseUrl(),
+            ownerPid: process.pid,
+            createdAt: new Date().toISOString(),
+          });
+        }
         resolveStart();
         log.info(`[BackendPool] slot ready: ${modelName} on port ${port}`);
       })
@@ -328,6 +383,26 @@ export class BackendPool implements IBackendPool {
   private isOllamaModel(modelName: string): boolean {
     const model = this.config.models.find((m) => m.name === modelName);
     return model?.provider === 'ollama';
+  }
+
+  private runtimeKey(modelName: string): string {
+    return sharedRuntimeKey(resolveRequestModel(this.config, modelName));
+  }
+
+  private async borrowSharedRuntime(modelName: string): Promise<BackendController | undefined> {
+    const key = this.runtimeKey(modelName);
+    const record = this.sharedRegistry.find(key);
+    if (!record || !(await probeHealthy(record.endpoint))) return undefined;
+    const port = Number(new URL(record.endpoint).port);
+    if (!Number.isInteger(port) || port < 1) return undefined;
+    const backend = new DirectBackend(this.config, port);
+    await backend.hotSwap(modelName);
+    const leaseId = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    this.sharedRegistry.acquireLease(key, leaseId);
+    this.sharedSlots.set(modelName, { backend, key, leaseId });
+    this.lastAcquiredModel = modelName;
+    log.info(`[BackendPool] borrowed shared runtime: ${modelName} at ${record.endpoint}`);
+    return backend;
   }
 
   private acquireOllama(modelName: string): Promise<BackendController> {

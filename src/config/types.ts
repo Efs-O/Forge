@@ -202,6 +202,11 @@ export interface LlamaServerConfig {
   port?: number;
 }
 
+/** Opt-in machine-wide reuse for compatible direct llama.cpp servers. */
+export interface SharedRuntimeConfig {
+  enabled: boolean;
+}
+
 export interface SearchConfig {
   provider: 'tavily' | 'brave';
   /** Secret key name in VS Code SecretStorage - never a raw key. */
@@ -233,6 +238,7 @@ export interface ForgeConfig {
   /** Migration shim: old suffixed model name → `base@profile` (F6). */
   aliases?: Record<string, string>;
   llama_server: LlamaServerConfig;
+  shared_runtime?: SharedRuntimeConfig;
   search?: SearchConfig;
   embeddings?: EmbeddingsConfig;
   log_level?: 'trace' | 'debug' | 'info' | 'warn' | 'error';

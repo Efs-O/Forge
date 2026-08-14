@@ -15,6 +15,9 @@ interface PendingRequest {
 
 interface ActiveTurn {
   text: string;
+  /** Text already received per app-server agent-message item. */
+  readonly agentMessageText: Map<string, string>;
+  sawCommandExecution: boolean;
   turnId?: string;
   interrupted: boolean;
   interruptSent: boolean;
@@ -60,6 +63,8 @@ export class CodexAppServerSession {
       };
       const active: ActiveTurn = {
         text: '',
+        agentMessageText: new Map(),
+        sawCommandExecution: false,
         interrupted: false,
         interruptSent: false,
         resolve,
@@ -101,6 +106,11 @@ export class CodexAppServerSession {
         '--stdio',
         '-c',
         'analytics.enabled=false',
+        // Apply the policy to the Forge-owned app-server process as well as the
+        // thread. This prevents a persisted local Codex setting from causing a
+        // resumed warm session to enter the Windows sandbox.
+        '-c',
+        'sandbox_mode="danger-full-access"',
       ],
       cwd: this.options.cwd,
       stdin: 'pipe',
@@ -231,18 +241,65 @@ export class CodexAppServerSession {
         void this.failProtocol('Codex agent-message delta had no text.');
         return;
       }
-      active.text += params['delta'];
-      active.onEvent?.({ kind: 'text', text: params['delta'] });
+      const itemId = params['itemId'];
+      this.appendAgentText(
+        active,
+        typeof itemId === 'string' ? itemId : undefined,
+        params['delta'],
+      );
       return;
     }
     if (method === 'item/started') {
       const item = params['item'];
       const type =
         item && typeof item === 'object' ? (item as Record<string, unknown>)['type'] : undefined;
+      if (type === 'commandExecution') active.sawCommandExecution = true;
       active.onEvent?.({ kind: 'status', text: `[codex: ${String(type ?? 'item')}]` });
       return;
     }
-    if (method === 'turn/completed') this.finishFromTerminal(params);
+    if (method === 'item/completed') {
+      this.captureCompletedAgentMessage(active, params);
+      return;
+    }
+    if (method === 'turn/completed') void this.finishFromTerminal(params);
+  }
+
+  private appendAgentText(active: ActiveTurn, itemId: string | undefined, text: string): void {
+    if (!text) return;
+    active.text += text;
+    if (itemId) {
+      active.agentMessageText.set(itemId, `${active.agentMessageText.get(itemId) ?? ''}${text}`);
+    }
+    active.onEvent?.({ kind: 'text', text });
+  }
+
+  /**
+   * Recent Codex app-server versions may deliver an assistant's final message
+   * only in item/completed, after the command item. Capture its unstreamed
+   * suffix without duplicating text that arrived through delta notifications.
+   */
+  private captureCompletedAgentMessage(active: ActiveTurn, params: Record<string, unknown>): void {
+    const item = params['item'];
+    const record = item && typeof item === 'object' ? (item as Record<string, unknown>) : undefined;
+    if (!record) return;
+    this.captureAgentMessage(active, record);
+  }
+
+  private captureAgentMessage(active: ActiveTurn, record: Record<string, unknown>): void {
+    if (record['type'] !== 'agentMessage' || typeof record['text'] !== 'string') return;
+    const itemId = typeof record['id'] === 'string' ? record['id'] : undefined;
+    const completed = record['text'];
+    const streamed = itemId ? active.agentMessageText.get(itemId) : undefined;
+    if (streamed !== undefined && completed.startsWith(streamed)) {
+      this.appendAgentText(active, itemId, completed.slice(streamed.length));
+      return;
+    }
+    // Some app-server builds omit or change the delta's item id. Do not treat
+    // an empty per-item buffer as a full-prefix match: completed.startsWith('')
+    // is always true and would append the already streamed reply a second time.
+    if (active.text.includes(completed)) return;
+    const overlap = trailingPrefixOverlap(active.text, completed);
+    this.appendAgentText(active, itemId, completed.slice(overlap));
   }
 
   private captureTurnId(result: unknown): void {
@@ -273,7 +330,7 @@ export class CodexAppServerSession {
     }).catch((error) => this.failProtocol(error.message));
   }
 
-  private finishFromTerminal(params: Record<string, unknown>): void {
+  private async finishFromTerminal(params: Record<string, unknown>): Promise<void> {
     const turn = params['turn'];
     const record = turn && typeof turn === 'object' ? (turn as Record<string, unknown>) : undefined;
     const id = record?.['id'];
@@ -283,6 +340,18 @@ export class CodexAppServerSession {
       return;
     }
     const active = this.active;
+    if (active.sawCommandExecution && this.threadId) {
+      try {
+        const result = await this.request('thread/read', {
+          threadId: this.threadId,
+          includeTurns: true,
+        });
+        this.captureTerminalTurnMessages(active, result);
+      } catch {
+        // The streamed response remains usable if the optional history read fails.
+      }
+    }
+    if (this.active !== active) return;
     this.clearActive(active);
     this.currentState = 'idle';
     active.resolve({
@@ -294,6 +363,32 @@ export class CodexAppServerSession {
         : {}),
       ...(this.threadId ? { sessionId: this.threadId } : {}),
     });
+  }
+
+  /**
+   * Some app-server builds omit item/completed for the final message after a
+   * command. The completed turn history is the authoritative fallback.
+   */
+  private captureTerminalTurnMessages(active: ActiveTurn, result: unknown): void {
+    const root =
+      result && typeof result === 'object' ? (result as Record<string, unknown>) : undefined;
+    const thread = root?.['thread'];
+    const threadRecord =
+      thread && typeof thread === 'object' ? (thread as Record<string, unknown>) : undefined;
+    const turns = threadRecord?.['turns'];
+    if (!Array.isArray(turns)) return;
+    const turn = turns.find(
+      (value) =>
+        value &&
+        typeof value === 'object' &&
+        (value as Record<string, unknown>)['id'] === active.turnId,
+    ) as Record<string, unknown> | undefined;
+    const items = turn?.['items'];
+    if (!Array.isArray(items)) return;
+    for (const item of items) {
+      if (!item || typeof item !== 'object') continue;
+      this.captureAgentMessage(active, item as Record<string, unknown>);
+    }
   }
 
   private validateThreadResult(result: unknown, method: string): string {
@@ -338,4 +433,13 @@ export class CodexAppServerSession {
     active.signal?.removeEventListener('abort', active.onAbort);
     if (this.active === active) this.active = undefined;
   }
+}
+
+/** Length of the longest suffix of `existing` that is a prefix of `next`. */
+function trailingPrefixOverlap(existing: string, next: string): number {
+  const limit = Math.min(existing.length, next.length);
+  for (let length = limit; length > 0; length -= 1) {
+    if (existing.endsWith(next.slice(0, length))) return length;
+  }
+  return 0;
 }

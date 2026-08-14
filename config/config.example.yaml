@@ -26,6 +26,12 @@ llama_server:
   binary: /path/to/llama-server      # required for direct mode
   host: 127.0.0.1
   port: 8080
+
+# Opt-in: let other Forge VS Code windows borrow a compatible direct
+# llama.cpp runtime. Unload releases this workspace's lease; the owner will
+# not stop while another workspace is borrowing it.
+# shared_runtime:
+#   enabled: true
   n_gpu_layers: -1                   # -1 = all layers on GPU
   default_num_ctx: 32768             # fallback when a model omits num_ctx/spawn.num_ctx
   n_batch: 512

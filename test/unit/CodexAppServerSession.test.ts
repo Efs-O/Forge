@@ -58,4 +58,38 @@ describe('CodexAppServerSession', () => {
     expect(result.sessionId).toBe('persisted-thread');
     await current.dispose();
   });
+
+  it('enforces full access for the Forge-owned app-server process', async () => {
+    const current = new CodexAppServerSession({
+      cliName: 'codex',
+      executable: process.execPath,
+      argsPrefix: [fixture, 'REQUIRE_FORGE_FULL_ACCESS'],
+      access: 'full',
+      cwd: process.cwd(),
+    });
+    const result = await current.send('verify global sandbox policy');
+    expect(result.status).toBe('completed');
+    await current.dispose();
+  });
+
+  it('keeps a final assistant message delivered only on item completion', async () => {
+    const current = session();
+    const result = await current.send('TRIGGER_COMPLETED_MESSAGE');
+    expect(result.finalText).toBe('Done codex turn 1 The command completed successfully.');
+    await current.dispose();
+  });
+
+  it('does not duplicate a completed message when its delta uses another item id', async () => {
+    const current = session();
+    const result = await current.send('TRIGGER_MISMATCHED_DELTA_ITEM');
+    expect(result.finalText).toBe('Done codex turn 1');
+    await current.dispose();
+  });
+
+  it('recovers a post-command final message from completed turn history', async () => {
+    const current = session();
+    const result = await current.send('TRIGGER_HISTORY_ONLY_MESSAGE');
+    expect(result.finalText).toBe('Done codex turn 1 The command completed successfully from history.');
+    await current.dispose();
+  });
 });
