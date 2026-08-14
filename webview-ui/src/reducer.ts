@@ -147,6 +147,10 @@ export function reducer(state: State, action: Action): State {
       // Strip stale diff cards and trailing empty assistant placeholder from previous turn
       const base = existing
         .filter((m) => m.role !== 'diff')
+        // A new prompt is an explicit retry or a model switch. The previous
+        // provider failure remains useful until then, but must not look like
+        // it is being replayed by the newly selected model.
+        .filter((m) => m.role !== 'error')
         .filter(
           (m, _i, arr) =>
             !(m.role === 'assistant' && m.content === '' && m === arr[arr.length - 1]),

@@ -129,6 +129,25 @@ export function opClearMessages(conv: ConversationRuntime): void {
   delete conv.active_model;
 }
 
+/**
+ * Make the model picker selection apply to the current conversation as well
+ * as the global default. Conversations deliberately retain their selected
+ * model across tab switches, so changing only config.active_model would leave
+ * an already-used conversation pinned to its previous provider.
+ */
+export function opSetActiveConversationModel(
+  sidebar: SidebarRuntime,
+  modelName: string | null,
+): void {
+  const conversation = sidebar.conversations.find(
+    (candidate) => candidate.id === sidebar.activeConversationId,
+  );
+  if (!conversation) return;
+  if (modelName) conversation.active_model = modelName;
+  else delete conversation.active_model;
+  conversation.updatedAt = Date.now();
+}
+
 export function buildUserContent(
   text: string,
   attachments?: AttachmentData[],

@@ -192,12 +192,8 @@ export class BackendPool implements IBackendPool {
         log.info(`[BackendPool] retained shared runtime: ${model}`);
         return;
       }
-      try {
-        if (slot.starting) await slot.starting.catch(() => {});
-        await slot.backend.stop();
-      } catch {
-        // best-effort
-      }
+      if (slot.starting) await slot.starting.catch(() => {});
+      await slot.backend.stop();
     });
     const ollamaStops = [...this.ollamaSlots.values()].map(async (backend) => {
       try {
@@ -206,7 +202,13 @@ export class BackendPool implements IBackendPool {
         /* best-effort */
       }
     });
-    await Promise.all([...slotStops, ...ollamaStops]);
+    const results = await Promise.allSettled([...slotStops, ...ollamaStops]);
+    const failures = results
+      .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+      .map((result) =>
+        result.reason instanceof Error ? result.reason.message : String(result.reason),
+      );
+    if (failures.length) throw new Error(failures.join('\n'));
     for (const model of [...this.slots.keys()]) {
       if (
         !this.config.shared_runtime?.enabled ||

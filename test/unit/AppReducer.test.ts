@@ -106,6 +106,26 @@ describe('webview App reducer', () => {
     expect(queued.messagesById['tab-2']).toBeUndefined();
   });
 
+  it('clears a prior provider error when a user retries with another model', () => {
+    const failed = appModule.reducer(appModule.initialState, {
+      type: 'ERROR',
+      convId: 'tab-1',
+      message: 'Claude usage limit reached',
+    });
+
+    const retried = appModule.reducer(failed, {
+      type: 'USER_SEND',
+      convId: 'tab-1',
+      text: 'Try this with Codex instead.',
+    });
+
+    expect(retried.messagesById['tab-1']).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: 'error', content: 'Claude usage limit reached' }),
+      ]),
+    );
+  });
+
   it('keeps the model selector empty when restoring tabs', () => {
     const withNoActiveModel = appModule.reducer(appModule.initialState, {
       type: 'MODELS',

@@ -23,6 +23,9 @@ export class DirectBackend implements BackendController {
   private activeModel: ModelConfig | null = null;
   private currentBaseUrl: string;
   private adoptPollTimer: ReturnType<typeof setInterval> | null = null;
+  /** A compatible server started by another Forge window. It can be used, but
+   * this backend has no child-process handle and must never kill it on unload. */
+  private adoptedServer = false;
   private onExitCb: (() => void) | null = null;
 
   constructor(
@@ -79,6 +82,7 @@ export class DirectBackend implements BackendController {
 
     await this.releaseActiveOllamaModel();
     await this.stopLlamaServer();
+    this.adoptedServer = false;
     this.activeModel = null;
     this.currentBaseUrl = `http://${this.host}:${this.port}`;
     log.info('[DirectBackend] stopped');
@@ -177,6 +181,7 @@ export class DirectBackend implements BackendController {
         `[Forge] Live output is in that window. Polling /health + /slots every 5 s...\n`,
       );
       this.serverChannel.show(true);
+      this.adoptedServer = true;
       this.startAdoptedMonitor();
       return;
     }
@@ -202,6 +207,7 @@ export class DirectBackend implements BackendController {
     log.info(`[DirectBackend] spawn: ${binary} ${args.join(' ')}`);
 
     this.proc = spawnLlamaServer(binary, args);
+    this.adoptedServer = false;
 
     this.proc.stdout?.on('data', (chunk: Buffer) => this.serverChannel?.append(chunk.toString()));
     this.proc.stderr?.on('data', (chunk: Buffer) => this.serverChannel?.append(chunk.toString()));
@@ -313,7 +319,15 @@ export class DirectBackend implements BackendController {
   }
 
   private async stopLlamaServer(): Promise<void> {
-    if (!this.proc) return;
+    if (!this.proc) {
+      if (this.adoptedServer) {
+        throw new Error(
+          `Cannot unload the llama-server on port ${this.port}: it is owned by another Forge window. ` +
+            'Close that window or unload the model there to release its VRAM.',
+        );
+      }
+      return;
+    }
     const proc = this.proc;
     this.proc = null;
     await killLlamaProcess(proc);

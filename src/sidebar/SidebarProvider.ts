@@ -39,6 +39,7 @@ import {
   opCloseConversation,
   opRestoreConversation,
   opClearMessages,
+  opSetActiveConversationModel,
 } from './ConversationOps';
 import { buildWebviewHtml } from './WebviewBuilder';
 import type { IndexManager } from '../search/IndexManager';
@@ -463,6 +464,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
       case 'switchModel':
         this.config.active_model = msg.name;
+        // A conversation keeps its own model selection so it can be restored
+        // when changing tabs. Update that selection too; otherwise a failed
+        // CLI model (for example a usage-limited Claude/Codex session) remains
+        // pinned and is retried despite the picker showing another model.
+        opSetActiveConversationModel(this.sidebar, msg.name);
+        this.persistSession();
         this.post({
           type: 'models',
           models: this.config.models.map((m) => ({
@@ -471,6 +478,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           })),
           active: this.config.active_model,
         });
+        this.postSessionSync();
         break;
 
       case 'undo':
