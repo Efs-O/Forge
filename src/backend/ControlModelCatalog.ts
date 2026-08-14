@@ -98,15 +98,26 @@ function entryFor(model: ModelConfig, state: CatalogState): ControlModelCatalogE
   // as the default llama.cpp provider.
   const resolvedModel = mergeGroupsIntoModel(state.config, model);
   const cloud = isCloudProvider(resolvedModel.provider);
-  const execution = cloud
-    ? state.chatAvailable
-      ? ({ availability: 'ready', action: 'dispatch' } as const)
-      : ({
-          availability: 'unavailable',
-          action: 'configure',
-          reason: 'chat_proxy_unavailable',
-        } as const)
-    : localAvailability(model, state);
+  // CLI agents (codex, claude-code) are driven in-process only — as sidebar
+  // sessions, `ask_local_agent` delegation, or worker orchestration — never over
+  // the HTTP control API. Neither /ensure (llama.cpp loader) nor /chat (cloud
+  // proxy) can serve them, so the catalog must not advertise them as servable.
+  const cli = resolvedModel.provider === 'cli';
+  const execution = cli
+    ? ({
+        availability: 'unavailable',
+        action: 'none',
+        reason: 'cli_agent_in_process_only',
+      } as const)
+    : cloud
+      ? state.chatAvailable
+        ? ({ availability: 'ready', action: 'dispatch' } as const)
+        : ({
+            availability: 'unavailable',
+            action: 'configure',
+            reason: 'chat_proxy_unavailable',
+          } as const)
+      : localAvailability(model, state);
   return {
     id: model.name,
     baseModel: model.name,
@@ -115,7 +126,7 @@ function entryFor(model: ModelConfig, state: CatalogState): ControlModelCatalogE
     provider: getProviderDisplayName(resolvedModel),
     loaded: state.pool.isLoaded(model.name),
     holds: state.holds.get(model.name) ?? 0,
-    servable: !cloud,
+    servable: !cloud && !cli,
     profiles: availableProfilesFor(state.config, model.name),
     capabilities: deriveStaticCapabilities(resolvedModel),
     route: cloud ? 'chat' : 'ensure',

@@ -481,6 +481,34 @@ describe('ControlServer', () => {
     });
   });
 
+  it('marks CLI agents unservable — they are driven in-process, not over the control API', async () => {
+    const port = 18831;
+    const base = `http://127.0.0.1:${port}`;
+    const config = {
+      models: [
+        { name: 'A', provider: 'llama.cpp', gguf_path: '/a.gguf' },
+        { name: 'codex', provider: 'cli', cli: 'codex' },
+      ],
+      active_model: 'A',
+      llama_server: {},
+      max_simultaneous_models: 1,
+      control_server: { enabled: true, port },
+    } as ForgeConfig;
+    server = new ControlServer(new FakePool(), config, testDeps());
+    server.start();
+    await waitReady(base);
+
+    const catalog = await (await fetch(`${base}/models`)).json();
+    const byName = Object.fromEntries(catalog.models.map((m: { name: string }) => [m.name, m]));
+    expect(byName.codex).toMatchObject({
+      backend: 'cli',
+      servable: false,
+      action: 'none',
+      availability: 'unavailable',
+      reason: 'cli_agent_in_process_only',
+    });
+  });
+
   it('changes catalog revision and reports capacity-busy models', async () => {
     const port = 18823;
     const base = `http://127.0.0.1:${port}`;

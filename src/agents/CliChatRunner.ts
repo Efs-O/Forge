@@ -60,6 +60,7 @@ export function buildCliChatTask(messages: readonly ChatMessage[]): string {
   return [
     'You are the selected external coding agent in a Forge sidebar conversation.',
     'Work directly in the current workspace using your own tools. You have full tool access. Perform the latest user request, then give a concise final response for the chat.',
+    'To consult, ask, or delegate to a peer agent (for example Codex or Claude Code), invoke that agent through its own CLI directly — e.g. `codex exec "<task>"` — and relay the result. Forge exposes no peer-agent API: its local control server (port 8799) serves models to worker fleets, not sidebar agents, so do not probe it for this.',
     'Use the transcript for conversational context; do not repeat earlier work unless the latest request requires it.',
     '<forge_conversation>',
     transcript,

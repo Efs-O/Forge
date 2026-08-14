@@ -1,4 +1,5 @@
 import { type ChildProcess } from 'child_process';
+import { existsSync } from 'fs';
 import * as vscode from 'vscode';
 import type { BackendController } from './BackendController';
 import type { ForgeConfig, ModelConfig } from '../config/types';
@@ -180,6 +181,11 @@ export class DirectBackend implements BackendController {
       return;
     }
 
+    // Fail fast with the real cause when a configured file is absent. Otherwise
+    // llama-server just exits with code 1 and the user only sees a generic
+    // "failed to start", burying the fact that the GGUF path is wrong/missing.
+    this.assertModelFilesExist(model);
+
     const args = composeLlamaServerArgs(
       binary,
       model,
@@ -231,6 +237,23 @@ export class DirectBackend implements BackendController {
     });
 
     log.info('[DirectBackend] ready');
+  }
+
+  /** Fail with a clear, specific message when a configured GGUF/mmproj file is
+   *  absent — llama-server would otherwise exit code 1 and bury the cause. */
+  private assertModelFilesExist(model: ModelConfig): void {
+    const files: Array<readonly [string, string | undefined]> = [
+      ['gguf_path', model.gguf_path],
+      ['mmproj_path', model.mmproj_path],
+    ];
+    for (const [field, filePath] of files) {
+      if (filePath && !existsSync(filePath)) {
+        throw new Error(
+          `Model "${model.name}": ${field} not found on disk: ${filePath}. ` +
+            `Fix the path in config.yaml or restore the file.`,
+        );
+      }
+    }
   }
 
   private startAdoptedMonitor(): void {
