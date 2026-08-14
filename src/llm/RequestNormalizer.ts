@@ -13,7 +13,27 @@ export function normalizeRequestForModel(
   request: ChatCompletionRequest,
   model: ModelConfig | undefined,
 ): ChatCompletionRequest {
-  if (!model || (model.provider ?? 'llama.cpp') !== 'ollama') {
+  if (!model) {
+    return request;
+  }
+
+  const provider = model.provider ?? 'llama.cpp';
+  if (provider === 'llama.cpp') {
+    // Qwen 3.8's GGUF Jinja template defaults to xhigh unless this kwarg is
+    // present. llama-server forwards chat_template_kwargs directly to it.
+    if (model.think !== true || model.reasoning_effort === undefined) {
+      return request;
+    }
+    return {
+      ...request,
+      chat_template_kwargs: {
+        ...request.chat_template_kwargs,
+        reasoning_effort: model.reasoning_effort,
+      },
+    };
+  }
+
+  if (provider !== 'ollama') {
     return request;
   }
 

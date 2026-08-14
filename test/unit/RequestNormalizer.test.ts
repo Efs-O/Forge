@@ -58,4 +58,19 @@ describe('normalizeRequestForModel', () => {
 
     expect(normalizeRequestForModel(baseRequest, model)).toEqual(baseRequest);
   });
+
+  it('passes a direct llama.cpp reasoning effort into template kwargs', () => {
+    const model: ModelConfig = {
+      name: 'qwen38',
+      provider: 'llama.cpp',
+      gguf_path: 'C:/models/qwen38.gguf',
+      think: true,
+      reasoning_effort: 'medium',
+    };
+
+    expect(normalizeRequestForModel(baseRequest, model).chat_template_kwargs).toEqual({
+      enable_thinking: true,
+      reasoning_effort: 'medium',
+    });
+  });
 });
