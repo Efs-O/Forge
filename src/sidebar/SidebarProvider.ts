@@ -226,9 +226,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   async submitPrompt(text: string, attachments?: AttachmentData[]): Promise<void> {
     const activeId = this.sidebar.activeConversationId;
-    if (this.agentLoop.isStreamingConv(activeId)) {
+    if (
+      this.agentLoop.isStreamingConv(activeId) &&
+      !this.agentLoop.isCancellationPending(activeId)
+    ) {
       throw new Error(
         'Forge: this conversation is still generating. Switch to it and cancel, or open a new tab.',
+      );
+    }
+    await this.agentLoop.waitForCancelledTurns();
+    if (this.agentLoop.isStreamingConv(activeId)) {
+      throw new Error(
+        'Forge: this conversation is still generating. Cancel it before sending again.',
       );
     }
     await vscode.commands.executeCommand('workbench.view.extension.forge-sidebar');
@@ -386,10 +395,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.post({ type: 'error', message: 'Forge: the queued conversation is no longer open.' });
       return;
     }
-    if (this.agentLoop.isStreamingConv(conv.id)) {
+    if (this.agentLoop.isStreamingConv(conv.id) && !this.agentLoop.isCancellationPending(conv.id)) {
       this.post({
         type: 'error',
         message: 'Forge: this conversation is still generating. Cancel it first or open a new tab.',
+      });
+      return;
+    }
+    await this.agentLoop.waitForCancelledTurns();
+    if (this.agentLoop.isStreamingConv(conv.id)) {
+      this.post({
+        type: 'error',
+        message: 'Forge: this conversation is still generating. Cancel it before sending again.',
       });
       return;
     }

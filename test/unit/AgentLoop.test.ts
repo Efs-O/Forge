@@ -176,6 +176,47 @@ describe('AgentLoop', () => {
     expect(conv.title).toBe('Chat');
   });
 
+  it('waits for a cancelled turn to settle before allowing a new backend acquire', async () => {
+    let finishTurn: (() => void) | undefined;
+    streamModelChatCompletion.mockImplementation(
+      (
+        _baseUrl: string,
+        _request: unknown,
+        _model: ModelConfig,
+        handlers: {
+          onDone: (reason: string | null) => void;
+          onToolCalls: (calls: unknown[] | null) => void;
+        },
+      ) => {
+        finishTurn = () => {
+          handlers.onToolCalls(null);
+          handlers.onDone('cancelled');
+        };
+        return Promise.resolve();
+      },
+    );
+    const conv = makeConversation();
+    const config = makeConfig();
+    const loop = makeLoop(makePool(), config);
+
+    const firstTurn = loop.runTurn(conv, config.models[0]!, 'slow prompt');
+    await vi.waitFor(() => expect(loop.isStreamingConv(conv.id)).toBe(true));
+
+    const cancellation = loop.cancel(conv.id);
+    let barrierPassed = false;
+    const barrier = loop.waitForCancelledTurns().then(() => {
+      barrierPassed = true;
+    });
+    await Promise.resolve();
+    expect(barrierPassed).toBe(false);
+
+    finishTurn?.();
+    await cancellation;
+    await firstTurn;
+    await barrier;
+    expect(barrierPassed).toBe(true);
+  });
+
   it('commits a user prompt once the backend is ready and the turn begins', async () => {
     streamModelChatCompletion.mockImplementation(
       (

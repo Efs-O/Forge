@@ -67,6 +67,10 @@ export class AgentLoop {
   private readonly cancelControllers = new Map<string, AbortController>();
   private readonly streamingSettledMap = new Map<string, Promise<void>>();
   private readonly resolveSettledMap = new Map<string, () => void>();
+  /** Turns that received cancellation and must finish unwinding before a new
+   * request can acquire a backend. This includes worker delegation holds. */
+  private readonly cancellingConvIds = new Set<string>();
+  private readonly cancellationSettlements = new Set<Promise<void>>();
   private readonly capabilityCache = new Map<string, Promise<RuntimeModelCapabilities>>();
   private readonly capabilityWarningsShown = new Set<string>();
   private readonly toolDispatch: ToolDispatch;
@@ -81,6 +85,9 @@ export class AgentLoop {
   }
   isStreamingConv(id: string): boolean {
     return this.streamingConvIds.has(id);
+  }
+  isCancellationPending(id: string): boolean {
+    return this.cancellingConvIds.has(id);
   }
   getStreamingIds(): ReadonlySet<string> {
     return this.streamingConvIds;
@@ -170,15 +177,34 @@ export class AgentLoop {
     }
   }
 
-  cancel(convId?: string): void {
+  cancel(convId?: string): Promise<void> {
     this.approvals.cancelConversation(convId);
-    if (convId) {
-      this.cancelControllers.get(convId)?.abort();
-      void this.activeBackends.get(convId)?.stop();
-    } else {
-      this.promptRunCtrl?.abort();
-      for (const ctrl of this.cancelControllers.values()) ctrl.abort();
-      for (const backend of this.activeBackends.values()) void backend.stop();
+    if (!convId) this.promptRunCtrl?.abort();
+    const cancelling = convId
+      ? this.cancelControllers.has(convId)
+        ? [convId]
+        : []
+      : [...this.cancelControllers.keys()];
+    if (cancelling.length === 0) return Promise.resolve();
+
+    for (const id of cancelling) this.cancellingConvIds.add(id);
+    const settled = this.stopStreamingIfNeeded(convId)
+      .catch((err) => {
+        log.debug(`[AgentLoop] cancellation cleanup failed: ${(err as Error).message}`);
+      })
+      .finally(() => {
+        for (const id of cancelling) this.cancellingConvIds.delete(id);
+      });
+    this.cancellationSettlements.add(settled);
+    void settled.finally(() => this.cancellationSettlements.delete(settled));
+    return settled;
+  }
+
+  /** Wait for cancelled turns to release their backend/delegation resources.
+   * Active, non-cancelled conversations remain independent and do not block. */
+  async waitForCancelledTurns(): Promise<void> {
+    while (this.cancellationSettlements.size > 0) {
+      await Promise.all([...this.cancellationSettlements]);
     }
   }
 
@@ -212,6 +238,7 @@ export class AgentLoop {
     model: ModelConfig,
     request: WorkerRunRequest,
   ): Promise<WorkerRunResult> {
+    await this.waitForCancelledTurns();
     const convId = conv.id;
     const ctrl = new AbortController();
     this.cancelControllers.set(convId, ctrl);
@@ -312,6 +339,7 @@ export class AgentLoop {
     text: string,
     attachments?: AttachmentData[],
   ): Promise<void> {
+    await this.waitForCancelledTurns();
     const convId = conv.id;
     const postC = (msg: HostToWebview): void =>
       this.post({ ...msg, conversationId: convId } as HostToWebview);
