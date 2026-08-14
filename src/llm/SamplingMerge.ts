@@ -62,8 +62,8 @@ function modelSamplingOverrides(
 
 function getSamplingDefaults(model?: ModelConfig): SamplingDefaults {
   const baseDefaults: SamplingDefaults = {
-    temperature: 0.15,
-    top_p: 0.9,
+    temperature: 0.6,
+    top_p: 0.95,
     max_tokens: 4096,
   };
 
