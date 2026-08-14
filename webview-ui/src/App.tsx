@@ -271,7 +271,7 @@ export function App(): React.ReactElement {
       {streaming && (
         <div id="streaming-status" role="status" aria-live="polite">
           <span className="streaming-status-dot" />
-          Eating tokens…
+          Burning tokens…
         </div>
       )}
       <CheckpointBar visible={state.checkpointPending} />
