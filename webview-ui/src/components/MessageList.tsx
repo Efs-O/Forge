@@ -6,14 +6,24 @@ interface Props {
   messages: AppMessage[];
   streaming: boolean;
   generating: boolean;
+  /** Active conversation/tab id. A change means the user switched sessions, which
+   *  must jump to the bottom instantly instead of smooth-scrolling the whole
+   *  (different) conversation top-to-bottom. */
+  conversationId: string;
 }
 
 const SCROLL_THRESHOLD = 80; // px from bottom — within this, auto-scroll is active
 
-export function MessageList({ messages, streaming, generating }: Props): React.ReactElement {
+export function MessageList({
+  messages,
+  streaming,
+  generating,
+  conversationId,
+}: Props): React.ReactElement {
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const userScrolledUp = useRef(false);
+  const shownConversation = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -27,10 +37,19 @@ export function MessageList({ messages, streaming, generating }: Props): React.R
   }, []);
 
   useEffect(() => {
+    // Session switch: jump straight to the bottom with no animation and reset the
+    // "user scrolled up" flag for the freshly shown conversation. Smooth-scrolling
+    // here would animate through the entire (different) conversation.
+    if (shownConversation.current !== conversationId) {
+      shownConversation.current = conversationId;
+      userScrolledUp.current = false;
+      bottomRef.current?.scrollIntoView({ behavior: 'auto' });
+      return;
+    }
     if (!userScrolledUp.current) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages]);
+  }, [messages, conversationId]);
 
   return (
     <div id="messages" ref={containerRef}>

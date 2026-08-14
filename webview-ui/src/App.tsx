@@ -262,7 +262,12 @@ export function App(): React.ReactElement {
           </>
         )}
       </aside>
-      <MessageList messages={messages} streaming={streaming} generating={generating} />
+      <MessageList
+        messages={messages}
+        streaming={streaming}
+        generating={generating}
+        conversationId={state.activeConversationId}
+      />
       {streaming && (
         <div id="streaming-status" role="status" aria-live="polite">
           <span className="streaming-status-dot" />
