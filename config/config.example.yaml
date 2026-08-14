@@ -32,13 +32,34 @@ llama_server:
 # not stop while another workspace is borrowing it.
 # shared_runtime:
 #   enabled: true
-  n_gpu_layers: -1                   # -1 = all layers on GPU
+  # NOTE (llama.cpp b10430+): `-ngl` is an AUTO-FIT parameter ("exact number,
+  # 'auto', or 'all'; default auto"), not a plain "all layers" switch. Auto holds
+  # back a ~1024 MiB margin and may leave a layer on CPU. On hybrid architectures
+  # (Gated Delta Net / linear-attention models) ONE layer on CPU makes llama.cpp
+  # disable the fused kernel for the WHOLE model — a >2x generation hit, not a
+  # proportional one. Set an explicit count (e.g. 999) if you are VRAM-tight and
+  # sizing num_ctx by hand. Doing so also DISABLES auto-fit entirely
+  # ("already set by user to N, abort"), so the memory budget becomes yours.
+  n_gpu_layers: -1
   default_num_ctx: 32768             # fallback when a model omits num_ctx/spawn.num_ctx
   n_batch: 512
   n_parallel: 4                      # default concurrent worker slots
-  type_k: q8_0                       # KV cache quantization
+  # KV cache quantization. q8_0 is the safe default; q4_0 roughly halves KV VRAM
+  # at some cost to long-context recall precision — worth it only when the saving
+  # keeps layers on the GPU that would otherwise spill.
+  type_k: q8_0
   type_v: q8_0
   flash_attn_default: true
+
+  # Sizing num_ctx by hand? `llama-fit-params` (ships with llama.cpp) prints the
+  # exact per-device split:
+  #   llama-fit-params -m MODEL -ngl all --fit off -fitp on -c N --cache-type-k q4_0
+  #   -> "CUDA0 <model> <ctx> <compute>"  (MiB)
+  # Two gotchas: it REJECTS --spec-type, so a speculative/MTP draft context is NOT
+  # counted (budget it by hand — it can be ~700-900 MiB), and note that --ctx-size
+  # is the TOTAL split across n_parallel slots, so per-slot ctx = num_ctx/n_parallel.
+  # Leave headroom: on Windows, WDDM does not fail a too-tight allocation, it pages
+  # VRAM over PCIe and throughput collapses. Keep >= ~1 GB free.
 
 # -------------------------------------------------------------------
 # Request-time defaults — applied beneath each model's own fields and profile.
