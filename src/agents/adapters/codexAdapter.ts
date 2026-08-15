@@ -8,12 +8,17 @@ import type { CliAdapter } from '../types';
 export const codexAdapter: CliAdapter = {
   name: 'codex',
   buildArgs(task, access, options) {
+    // `--skip-git-repo-check`: codex exec refuses to start outside a trusted git
+    // repository, which fails every delegation in a non-git workspace regardless
+    // of sandbox level. That check is an interactive-CLI guardrail; blast radius
+    // here is governed by --sandbox, which we always pass.
     const args = options?.sessionId
-      ? ['exec', 'resume', options.sessionId, task, '--json']
+      ? ['exec', 'resume', options.sessionId, task, '--json', '--skip-git-repo-check']
       : [
           'exec',
           task,
           '--json',
+          '--skip-git-repo-check',
           '--sandbox',
           access === 'full'
             ? 'danger-full-access'

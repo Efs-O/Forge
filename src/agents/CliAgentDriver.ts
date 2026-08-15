@@ -1,4 +1,5 @@
 import * as readline from 'readline';
+import { getLogger } from '../util/logger';
 import { getCliAdapter } from './adapters';
 import { spawnCliProcess, terminateCliProcessTree, waitForCliProcessExit } from './cliProcess';
 import type {
@@ -8,6 +9,8 @@ import type {
   CliAgentRunResult,
   CliParseContext,
 } from './types';
+
+const log = getLogger();
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const STDERR_TAIL_CHARS = 4000;
@@ -110,46 +113,65 @@ export class CliAgentDriver {
 
     const stderrTail = stderrChunks.join('').slice(-STDERR_TAIL_CHARS);
 
+    // Every terminal outcome is logged. Delegation used to fail in total silence:
+    // two consecutive failures left no output-channel line and no coordination
+    // event, so diagnosing them meant reading the model's private reasoning out
+    // of state.vscdb. A delegate that cannot run must say so out loud.
+    const outcome = (result: CliAgentRunResult): CliAgentRunResult => {
+      if (result.status === 'completed') {
+        log.info(`[cli-agent] ${options.cliName} (${options.access}) completed`);
+      } else {
+        log.warn(
+          `[cli-agent] ${options.cliName} (${options.access}) ${result.status}: ${result.error ?? 'no detail'}`,
+        );
+      }
+      return result;
+    };
+
     if (exit.error) {
-      return {
+      return outcome({
         status: 'failed',
         finalText: '',
         error: `${options.cliName} CLI failed to start: ${exit.error.message}`,
         ...(sessionId ? { sessionId } : {}),
-      };
+      });
     }
     if (cancelled) {
-      return {
+      return outcome({
         status: 'cancelled',
         finalText: finalText ?? '',
         error: 'Cancelled.',
         ...(sessionId ? { sessionId } : {}),
-      };
+      });
     }
     if (timedOut) {
-      return {
+      return outcome({
         status: 'timed_out',
         finalText: finalText ?? '',
         error: `${options.cliName} CLI exceeded ${timeoutMs}ms timeout.`,
         ...(sessionId ? { sessionId } : {}),
-      };
+      });
     }
     if (errorText) {
-      return {
+      return outcome({
         status: 'failed',
         finalText: finalText ?? '',
         error: errorText,
         ...(sessionId ? { sessionId } : {}),
-      };
+      });
     }
     if (exit.code !== 0) {
-      return {
+      return outcome({
         status: 'failed',
         finalText: finalText ?? '',
         error: `${options.cliName} CLI exited with code ${exit.code ?? '?'}${stderrTail ? `: ${stderrTail}` : ''}`,
         ...(sessionId ? { sessionId } : {}),
-      };
+      });
     }
-    return { status: 'completed', finalText: finalText ?? '', ...(sessionId ? { sessionId } : {}) };
+    return outcome({
+      status: 'completed',
+      finalText: finalText ?? '',
+      ...(sessionId ? { sessionId } : {}),
+    });
   }
 }
