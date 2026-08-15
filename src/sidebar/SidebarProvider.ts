@@ -335,7 +335,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private postTokenBudget(): void {
-    const activeBase = this.baseOf(this.config.active_model);
+    // The model the user is actually talking to lives on the conversation; the
+    // config-level active_model is only a fallback default. Reading the config
+    // alone measured the budget for the wrong model whenever the two differed —
+    // and wrote (or skipped) the HalluMeter bridge on that wrong model's ctx.
+    // Same precedence as submitPrompt and runWorkerTurn.
+    const activeSelection = this.getActive().active_model ?? this.config.active_model;
+    const activeBase = this.baseOf(activeSelection);
     const rawModel = this.config.models.find((m) => m.name === activeBase);
     // Resolve group inheritance before reading num_ctx: models that take their ctx
     // from a group (`group: llamacpp-qwen3`) have no num_ctx of their own, and
@@ -349,13 +355,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const used = msgTokens + toolTokens + SYSTEM_AND_TEMPLATE_OVERHEAD;
     const max = activeModel?.spawn?.num_ctx ?? activeModel?.num_ctx ?? 0;
     this.post({ type: 'tokenBudget', used, max });
-    if (this.config.active_model && max > 0) {
-      writeForgeBridge(this.config.active_model, used, max);
-    } else if (this.config.active_model) {
+    if (activeSelection && max > 0) {
+      // Write the BASE name, not the raw selection: an `@profile` suffix would
+      // never match a curve id on HalluMeter's side and would churn its session id.
+      writeForgeBridge(activeBase ?? activeSelection, used, max);
+    } else if (activeSelection) {
       // Fail loudly: this previously skipped in silence, so a config change that
       // stranded num_ctx took the context warning and the bridge down with it.
       log.warn(
-        `token budget unavailable for '${this.config.active_model}' — no num_ctx on the model or its group(s); context warning and HalluMeter bridge disabled`,
+        `token budget unavailable for '${activeSelection}' — no num_ctx on the model or its group(s); context warning and HalluMeter bridge disabled`,
       );
     }
     if (max > 0 && used / max >= 0.75 && !this.contextWarningShown) {
