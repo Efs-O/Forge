@@ -3,8 +3,8 @@ import type { ContentPart } from '../llm/types';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
 import {
   MAX_CONVERSATIONS,
+  displayPersistMessages,
   newConversationId,
-  slimPersistMessages,
   upsertHistoryConversation,
 } from './sessionTypes';
 
@@ -58,7 +58,9 @@ export function opCloseConversation(
   const ix = sidebar.conversations.findIndex((c) => c.id === id);
   if (ix < 0) return null;
   const conv = sidebar.conversations[ix]!;
-  const shouldArchive = slimPersistMessages(conv.messages).length > 0;
+  // Display view on purpose: a conversation carrying only tool traffic and no
+  // visible turns should not be archived as if the user had said something.
+  const shouldArchive = displayPersistMessages(conv.messages).length > 0;
   const updated = { ...sidebar, conversations: [...sidebar.conversations] };
 
   if (updated.conversations.length === 1) {

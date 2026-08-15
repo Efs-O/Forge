@@ -112,7 +112,7 @@ Suite: type-check clean, lint clean, **569 tests pass** (4 new covering F1/F2).
 
 ---
 
-## F5 — known data loss, deliberately NOT fixed
+## F5 — data loss, FIXED on `fix/persist-tool-messages`
 
 `src/sidebar/sessionTypes.ts` → `slimPersistMessages`:
 
@@ -131,10 +131,30 @@ truncated reasoning — the tool-call turn, with its content dropped. Diagnosing
 the real Codex error required re-running the CLI by hand, because the error had
 never been written to disk.
 
-This is data loss at write time, not a render bug. The repair needs a widened
-`SlimPersistMessage` plus a persisted-schema migration, and was deliberately kept
-out of the build used to validate F1–F4 so a failed test could not be ambiguous.
-**Recommended as the next change, on its own branch.**
+This was data loss at write time, not a render bug. It was deliberately kept out
+of the build used to validate F1–F4 so a failed test could not be ambiguous.
+
+**Fix (branch `fix/persist-tool-messages`).** The root problem was that one
+function served two different consumers. It is now split:
+
+- `slimPersistMessages` — persistence view. Keeps `role: 'tool'` messages and
+  assistant turns carrying `tool_calls` (`content: null`). `system` is still
+  dropped (rebuilt per request), as is array `content` (image parts — never
+  persisted; widening that is a separate change).
+- `displayPersistMessages` — webview view. Text turns only, exactly the old
+  behavior. Tool activity is surfaced live through its own events, so replaying
+  raw tool JSON into the transcript would be noise. Used by `slimMessagesById`,
+  both `messageCount` fields, and the archive check in `ConversationOps`.
+
+`chatMessagesFromSlim` restores `tool_calls` / `tool_call_id` / `name` so a
+reloaded conversation hands the agent loop a complete transcript.
+
+**Migration is implicit, not versioned.** Every added schema field is optional
+and `content` only widened to nullable, so records written by older builds parse
+unchanged. Verified against live data from this machine: **33 conversations,
+298 messages** parsed and reconstructed under the new schema.
+
+`npm run ci` green — 573 tests.
 
 ---
 

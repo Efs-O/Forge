@@ -19,12 +19,30 @@ export const SESSION_KEY_V1 = 'forge.conversations.v1';
 
 const TITLE_MAX_LEN = 48;
 
+const toolCallSchema = z.object({
+  id: z.string(),
+  type: z.literal('function'),
+  function: z.object({ name: z.string(), arguments: z.string() }),
+});
+
+/**
+ * A tool-calling assistant turn carries `content: null` + `tool_calls`, and its
+ * results come back as `role: 'tool'`; filtering those dropped all tool activity
+ * at write time. Added fields are optional and `content` only widened, so
+ * records from earlier versions still parse unchanged.
+ */
 const slimMsgSchema = z.object({
-  role: z.enum(['user', 'assistant']),
-  content: z.string(),
+  role: z.enum(['user', 'assistant', 'tool']),
+  content: z.string().nullable(),
   reasoning: z.string().optional(),
+  tool_calls: z.array(toolCallSchema).optional(),
+  tool_call_id: z.string().optional(),
+  name: z.string().optional(),
 });
 type SlimPersistMessage = z.infer<typeof slimMsgSchema>;
+
+/** Subset the webview renders: plain text turns only. */
+type DisplayPersistMessage = { role: 'user' | 'assistant'; content: string; reasoning?: string };
 
 const conversationPersistedSchema = z.object({
   id: z.string().min(1),
@@ -76,7 +94,39 @@ export function deriveTitle(firstUserLine: string): string {
   return line.length > TITLE_MAX_LEN ? `${line.slice(0, TITLE_MAX_LEN)}…` : line;
 }
 
+/**
+ * Persistence view: keeps tool-call turns and tool results so a reloaded
+ * conversation still knows what the agent did. `system` is still dropped
+ * (rebuilt per request), as is array `content` (image parts) — never persisted,
+ * and widening that is a separate change.
+ */
 export function slimPersistMessages(messages: ChatMessage[]): SlimPersistMessage[] {
+  const out: SlimPersistMessage[] = [];
+  for (const m of messages) {
+    if (m.role !== 'user' && m.role !== 'assistant' && m.role !== 'tool') continue;
+    const hasText = typeof m.content === 'string';
+    const hasToolCalls = Array.isArray(m.tool_calls) && m.tool_calls.length > 0;
+    // An assistant turn with tool_calls legitimately has content: null.
+    if (!hasText && !hasToolCalls) continue;
+    out.push({
+      role: m.role,
+      content: hasText ? (m.content as string) : null,
+      ...(typeof m.reasoning === 'string' && m.reasoning.length > 0
+        ? { reasoning: m.reasoning }
+        : {}),
+      ...(hasToolCalls ? { tool_calls: m.tool_calls } : {}),
+      ...(typeof m.tool_call_id === 'string' ? { tool_call_id: m.tool_call_id } : {}),
+      ...(typeof m.name === 'string' ? { name: m.name } : {}),
+    });
+  }
+  return out;
+}
+
+/**
+ * Webview view: plain text turns only. Tool activity is surfaced live through
+ * its own events, so replaying raw tool JSON into the transcript would be noise.
+ */
+export function displayPersistMessages(messages: ChatMessage[]): DisplayPersistMessage[] {
   return messages
     .filter((m) => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
     .map((m) => ({
@@ -95,6 +145,9 @@ export function chatMessagesFromSlim(slim: SlimPersistMessage[]): ChatMessage[] 
     ...(typeof m.reasoning === 'string' && m.reasoning.length > 0
       ? { reasoning: m.reasoning }
       : {}),
+    ...(m.tool_calls ? { tool_calls: m.tool_calls } : {}),
+    ...(typeof m.tool_call_id === 'string' ? { tool_call_id: m.tool_call_id } : {}),
+    ...(typeof m.name === 'string' ? { name: m.name } : {}),
   }));
 }
 
@@ -250,13 +303,14 @@ export function tabMetasFromSession(
   streamingIds?: ReadonlySet<string>,
 ): SessionTabMeta[] {
   return session.conversations.map((c) => {
-    const slim = slimPersistMessages(c.messages);
+    // Display count: tool turns are persisted but must not inflate the badge.
+    const shown = displayPersistMessages(c.messages);
     return {
       id: c.id,
       title: c.title,
       createdAt: c.createdAt,
       updatedAt: c.updatedAt,
-      messageCount: slim.length,
+      messageCount: shown.length,
       ...(c.active_model !== undefined ? { active_model: c.active_model } : {}),
       ...(streamingIds?.has(c.id) ? { streaming: true } : {}),
     };
@@ -269,25 +323,26 @@ export function historyMetasFromSession(session: SidebarRuntime): SessionHistory
     .filter((c) => !openIds.has(c.id))
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .map((c) => {
-      const slim = slimPersistMessages(c.messages);
+      const shown = displayPersistMessages(c.messages);
       return {
         id: c.id,
         title: c.title,
         createdAt: c.createdAt,
         updatedAt: c.updatedAt,
-        messageCount: slim.length,
+        messageCount: shown.length,
         ...(c.active_model !== undefined ? { active_model: c.active_model } : {}),
       };
     });
 }
 
-export function slimMessagesById(session: SidebarRuntime): Record<string, SlimPersistMessage[]> {
-  const out: Record<string, SlimPersistMessage[]> = {};
+/** Transcripts for webview sync — display view, not the persistence view. */
+export function slimMessagesById(session: SidebarRuntime): Record<string, DisplayPersistMessage[]> {
+  const out: Record<string, DisplayPersistMessage[]> = {};
   for (const c of session.conversations) {
-    out[c.id] = slimPersistMessages(c.messages);
+    out[c.id] = displayPersistMessages(c.messages);
   }
   for (const c of session.history) {
-    out[c.id] = slimPersistMessages(c.messages);
+    out[c.id] = displayPersistMessages(c.messages);
   }
   return out;
 }

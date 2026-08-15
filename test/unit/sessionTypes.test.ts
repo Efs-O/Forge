@@ -1,8 +1,10 @@
 import type { Memento } from 'vscode';
 import { describe, expect, it } from 'vitest';
 import {
+  chatMessagesFromSlim,
   createDefaultSession,
   deriveTitle,
+  displayPersistMessages,
   historyMetasFromSession,
   HISTORY_KEY_LEGACY,
   loadSidebarSession,
@@ -42,16 +44,82 @@ describe('sessionTypes', () => {
     expect(sidebarSessionPersistedSchema.safeParse({}).success).toBe(false);
   });
 
-  it('slimPersistMessages keeps only user/assistant string content', () => {
+  const toolCall = {
+    id: 'call_1',
+    type: 'function' as const,
+    function: { name: 'ask_local_agent', arguments: '{}' },
+  };
+
+  // Tool activity used to be dropped at write time, so a reloaded conversation
+  // showed no trace that the agent had called anything at all.
+  it('slimPersistMessages retains tool_calls turns and tool results', () => {
     const messages: ChatMessage[] = [
+      { role: 'system', content: 'ignored' },
       { role: 'user', content: 'hi' },
-      { role: 'assistant', content: null, tool_calls: [] as never },
-      { role: 'tool', content: 'x', tool_call_id: '1', name: 't' },
+      { role: 'assistant', content: null, tool_calls: [toolCall] },
+      { role: 'tool', content: 'result', tool_call_id: 'call_1', name: 'ask_local_agent' },
       { role: 'assistant', content: 'bye', reasoning: 'thoughts' },
     ];
     expect(slimPersistMessages(messages)).toEqual([
       { role: 'user', content: 'hi' },
+      { role: 'assistant', content: null, tool_calls: [toolCall] },
+      { role: 'tool', content: 'result', tool_call_id: 'call_1', name: 'ask_local_agent' },
       { role: 'assistant', content: 'bye', reasoning: 'thoughts' },
+    ]);
+  });
+
+  it('slimPersistMessages drops system and contentless turns with no tool_calls', () => {
+    const messages: ChatMessage[] = [
+      { role: 'system', content: 'sys' },
+      { role: 'assistant', content: null },
+      { role: 'assistant', content: null, tool_calls: [] },
+    ];
+    expect(slimPersistMessages(messages)).toEqual([]);
+  });
+
+  it('displayPersistMessages keeps only renderable text turns', () => {
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'hi' },
+      { role: 'assistant', content: null, tool_calls: [toolCall] },
+      { role: 'tool', content: 'result', tool_call_id: 'call_1' },
+      { role: 'assistant', content: 'bye' },
+    ];
+    expect(displayPersistMessages(messages)).toEqual([
+      { role: 'user', content: 'hi' },
+      { role: 'assistant', content: 'bye' },
+    ]);
+  });
+
+  it('chatMessagesFromSlim restores tool fields for the agent loop', () => {
+    const messages: ChatMessage[] = [
+      { role: 'assistant', content: null, tool_calls: [toolCall] },
+      { role: 'tool', content: 'result', tool_call_id: 'call_1', name: 'ask_local_agent' },
+    ];
+    expect(chatMessagesFromSlim(slimPersistMessages(messages))).toEqual(messages);
+  });
+
+  // Records written before the schema widened must still load.
+  it('sidebarSessionPersistedSchema accepts pre-migration records', () => {
+    const legacy = {
+      activeConversationId: 'c1',
+      conversations: [
+        {
+          id: 'c1',
+          title: 'Chat',
+          createdAt: 1,
+          updatedAt: 2,
+          messages: [
+            { role: 'user', content: 'hi' },
+            { role: 'assistant', content: 'yo', reasoning: 'r' },
+          ],
+        },
+      ],
+    };
+    const parsed = sidebarSessionPersistedSchema.safeParse(legacy);
+    expect(parsed.success).toBe(true);
+    expect(chatMessagesFromSlim(parsed.data!.conversations[0]!.messages)).toEqual([
+      { role: 'user', content: 'hi' },
+      { role: 'assistant', content: 'yo', reasoning: 'r' },
     ]);
   });
 
