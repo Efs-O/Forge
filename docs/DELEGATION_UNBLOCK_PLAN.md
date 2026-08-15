@@ -179,3 +179,26 @@ help characterise it if it recurs. Watch for it after this install.
 - new tests cover F1, F2, F4
 - `run_terminal` gone from prompt text in both config files
 - vsix built and installed; window reload + fresh Qwen chat is the live test
+
+---
+
+## Outcome (2026-08-15) — ALL ACCEPTED
+
+Shipped as 0.12.36. Type-check clean, lint clean, **569 tests pass** (4 new).
+Live validation, observed transcripts, and the model-behaviour notes are in
+`DELEGATION_LIVE_VALIDATION.md` at the repo root.
+
+- **F1 verified.** The git-trust error is gone; `codex exec` now starts and runs
+  a full turn in a non-git workspace.
+- **F2 verified.** Claude Code completed a real delegation — a live network call
+  returning verified data. Before the fix this could only produce an
+  unanswerable approval prompt.
+- **F3 verified.** `run_terminal` no longer appears in any prompt profile.
+- **F4 verified.** Terminal outcomes are logged.
+- **F5 unchanged** — still not fixed, still the recommended next branch.
+
+One defect below F1 was **not** a Forge bug and is not fixed in code: Codex's
+Windows sandbox cannot execute a Store-only `pwsh`, which requires an MSI
+PowerShell 7 on the host. See `DELEGATION_LIVE_VALIDATION.md` for the full
+diagnosis, including why `winget --scope machine` must not be used for it.
+Both layers were required — F1 alone still failed at the shell spawn.
