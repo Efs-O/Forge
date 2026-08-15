@@ -552,4 +552,60 @@ describe('AgentLoop', () => {
         'Do not call it again; wrap up with what you have.',
     );
   });
+
+  it('reports context growth once per tool round instead of only at the end of the turn', async () => {
+    // The ctx bar and the HalluMeter bridge used to sit frozen for the whole
+    // turn: a run that pulled tens of thousands of tokens through several tool
+    // rounds showed the pre-turn number until it finished.
+    let round = 0;
+    streamModelChatCompletion.mockImplementation(
+      (
+        _baseUrl: string,
+        _request: unknown,
+        _model: ModelConfig,
+        handlers: {
+          onToken: (token: string) => void;
+          onDone: (reason: string | null) => void;
+          onToolCalls: (calls: unknown[] | null) => void;
+        },
+      ) => {
+        round++;
+        if (round <= 2) {
+          handlers.onToolCalls([
+            {
+              id: `call-${round}`,
+              type: 'function',
+              function: { name: 'read_file', arguments: '{}' },
+            },
+          ]);
+          handlers.onDone('tool_calls');
+        } else {
+          handlers.onToken('done');
+          handlers.onToolCalls(null);
+          handlers.onDone('stop');
+        }
+      },
+    );
+
+    const registry = new ToolRegistry();
+    registry.register({
+      definition: {
+        type: 'function',
+        function: { name: 'read_file', description: 'read', parameters: { type: 'object' } },
+      },
+      permission: 'read',
+      handler: vi.fn().mockResolvedValue('file contents'),
+    });
+
+    const conv = makeConversation();
+    const config = makeConfig();
+    const loop = makeLoop(makePool(), config, vi.fn(), registry);
+    const ticks: string[] = [];
+    loop.setContextChangedListener((convId) => ticks.push(convId));
+
+    await loop.runTurn(conv, config.models[0]!, 'read two files');
+
+    // Two tool rounds plus the final response, all scoped to this conversation.
+    expect(ticks).toEqual(['conv-1', 'conv-1', 'conv-1']);
+  });
 });

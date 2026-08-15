@@ -4,13 +4,14 @@ import { CliAgentSession } from '../../src/agents/CliAgentSession';
 
 const claudeFixture = path.resolve(__dirname, '../fixtures/fake-claude-cli.mjs');
 
-function createSession(confirmedSessionId?: string): CliAgentSession {
+function createSession(confirmedSessionId?: string, timeoutMs?: number): CliAgentSession {
   return new CliAgentSession({
     executable: process.execPath,
     argsPrefix: [claudeFixture],
     access: 'full',
     cwd: process.cwd(),
     ...(confirmedSessionId ? { confirmedSessionId } : {}),
+    ...(timeoutMs ? { timeoutMs } : {}),
   });
 }
 
@@ -39,6 +40,20 @@ describe('CliAgentSession', () => {
     const resumed = await session.send('WARM_TURN resumed');
     expect(resumed.status).toBe('completed');
     expect(resumed.sessionId).toBe('confirmed-id');
+    await session.dispose();
+  }, 10_000);
+
+  it('keeps the observed session id when a turn times out, so the retry resumes warm', async () => {
+    // A timed-out turn used to drop the id, forcing the next attempt to spawn a
+    // cold process and re-pay the whole prompt prefix as a cache miss.
+    const session = createSession(undefined, 400);
+    const timedOut = await session.send('TRIGGER_INIT_THEN_SLOW');
+    expect(timedOut.status).toBe('timed_out');
+    expect(timedOut.sessionId).toBe('fixture-session-id');
+    expect(session.confirmedSessionId).toBe('fixture-session-id');
+    const retried = await session.send('WARM_TURN retry');
+    expect(retried.status).toBe('completed');
+    expect(retried.sessionId).toBe('fixture-session-id');
     await session.dispose();
   }, 10_000);
 

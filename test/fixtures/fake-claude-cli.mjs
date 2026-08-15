@@ -11,6 +11,15 @@ function line(obj) {
 }
 
 function emitTask(task, turn = 1) {
+  if (task.includes('TRIGGER_INIT_THEN_SLOW')) {
+    // Announce the session id (as the real CLI does, immediately) and then
+    // stall, so the caller's timeout fires on a turn whose id is already known.
+    const resumed = process.argv.includes('--resume')
+      ? process.argv[process.argv.indexOf('--resume') + 1]
+      : 'fixture-session-id';
+    line({ type: 'system', subtype: 'init', session_id: resumed });
+    return;
+  }
   if (task.includes('TRIGGER_SLOW')) return;
   if (task.includes('TRIGGER_FAIL')) {
     process.stderr.write('claude: boom, something broke\n');

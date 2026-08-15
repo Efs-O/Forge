@@ -1,5 +1,24 @@
 # Forge — Recent Changes
 
+## 0.12.40 — Live context metering and warm CLI delegation
+
+- The context bar and the HalluMeter bridge now update once per tool round
+  during a turn instead of staying frozen until it ends. Ticks are throttled,
+  scoped to the conversation, and never trigger auto-compact mid-turn.
+- `ask_local_agent` to a `provider: cli` target (Claude Code, Codex) now reuses
+  a warm CLI process for the conversation instead of spawning a cold one per
+  call. A repeat review no longer re-pays the CLI's system prompt, tool
+  schemas, and project instructions as a prompt-cache miss.
+- Delegation and sidebar CLI chat now share one session registry, so
+  `max_cli_agents` caps the real process count and closing a tab disposes both.
+  Delegation sessions are keyed apart from chat sessions so a read-only review
+  can never inherit a chat session's write permissions.
+- Raised the delegation timeout to 10 minutes for `provider: cli` targets. The
+  120s ceiling (unchanged for local models) was aborting working reviews and
+  discarding everything they had spent.
+- A timed-out or cancelled CLI turn now keeps its session id, so the next
+  attempt resumes the existing session instead of starting cold.
+
 ## 0.12.31 — Shared runtimes, resilient Codex sessions, and queueing
 
 - Added opt-in compatible llama.cpp runtime sharing between Forge VS Code windows.

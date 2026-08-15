@@ -26,6 +26,9 @@ export interface WarmCliSession {
 
 export type CliSessionFactory = (options: CliAgentSessionOptions) => WarmCliSession;
 
+export const DEFAULT_MAX_CLI_AGENTS = 4;
+export const DEFAULT_CLI_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+
 export class CliSessionCapacityError extends Error {
   constructor(maxSessions: number) {
     super(`Forge CLI agent capacity (${maxSessions}) is full and every session is busy.`);

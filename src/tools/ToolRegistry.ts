@@ -36,6 +36,9 @@ export interface ToolHandlerContext {
   beforeMutate(paths: string[]): void;
   /** Caller's AbortSignal, threaded through for long-running tools (e.g. ask_local_agent). */
   abortSignal?: AbortSignal;
+  /** Conversation the call belongs to. ask_local_agent keys warm CLI agent
+   *  sessions on it so repeat delegations reuse one process. */
+  conversationId?: string;
   runWorkers?: (request: WorkerRunRequest) => Promise<WorkerRunResult>;
 }
 

@@ -103,6 +103,7 @@ export function makeLocalAgentTool(
       const focus = args['focus'] as string | undefined;
       const maxOutputTokens = args['max_output_tokens'] as number | undefined;
       const signal = context?.abortSignal;
+      const conversationId = context?.conversationId;
       const result = await delegationService.ask({
         primaryModel,
         targetModel: args['model'] as string,
@@ -111,6 +112,7 @@ export function makeLocalAgentTool(
         ...(focus !== undefined ? { focus } : {}),
         ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
         ...(signal !== undefined ? { signal } : {}),
+        ...(conversationId !== undefined ? { conversationId } : {}),
       });
       const bestEffortNote = result.bestEffort ? ' [best-effort: shared slot]' : '';
       return `[Delegated analysis — ${result.targetModel}${bestEffortNote}]\n\n${result.text}`;

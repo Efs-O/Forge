@@ -11,9 +11,11 @@ import type { ChatCompletionRequest } from '../llm/types';
 import type { StreamHandlers } from '../llm/OpenAIClient';
 import { capResultText } from '../tools/resultCap';
 import { CliAgentDriver } from '../agents/CliAgentDriver';
+import type { CliSessionRegistry } from '../agents/CliSessionRegistry';
 import { runCliDelegation } from './CliDelegationRunner';
 import { resolveDelegationTarget } from './eligibility';
 import {
+  CLI_DELEGATION_TIMEOUT_MS,
   DELEGATION_TIMEOUT_MS,
   MAX_DELEGATION_CONTEXT_BYTES,
   MAX_DELEGATION_CONTEXT_FILE_BYTES,
@@ -33,6 +35,9 @@ export interface LocalDelegationRequest {
   focus?: string;
   maxOutputTokens?: number;
   signal?: AbortSignal;
+  /** Warm-session scope for `provider: cli` targets. Without it every
+   *  delegation spawns a cold CLI process; see CliDelegationRunner. */
+  conversationId?: string;
 }
 
 export interface LocalDelegationResult {
@@ -55,6 +60,10 @@ export interface LocalDelegationServiceDeps {
   makeTimeoutSignal?: (timeoutMs: number) => AbortSignal;
   /** Test-only injection point for the `provider: cli` branch. */
   cliDriver?: CliAgentDriver;
+  /** Shared with AgentLoop so delegation and CLI chat draw on the same warm
+   *  process pool, the same max_cli_agents cap, and the same per-conversation
+   *  disposal. Absent in tests and when no conversation context exists. */
+  cliSessions?: CliSessionRegistry;
 }
 
 class DelegationError extends Error {
@@ -128,12 +137,17 @@ export class LocalDelegationService {
     assertDelegationTaskLength(request.task);
     const config = this.deps.getConfig();
     const target = resolveDelegationTarget(config, request.targetModel);
-    const timeoutSignal = this.makeTimeoutSignal(DELEGATION_TIMEOUT_MS);
+    // A cli target runs a full external agent against the real workspace and
+    // needs minutes, not the 120s a context-fed local model gets.
+    const timeoutMs =
+      target.model.provider === 'cli' ? CLI_DELEGATION_TIMEOUT_MS : DELEGATION_TIMEOUT_MS;
+    const timeoutSignal = this.makeTimeoutSignal(timeoutMs);
     const signal = composeSignals(
       request.signal ? [request.signal, timeoutSignal] : [timeoutSignal],
     );
 
     if (target.model.provider === 'cli') {
+      const registry = this.deps.cliSessions;
       try {
         return await runCliDelegation(
           request,
@@ -141,13 +155,16 @@ export class LocalDelegationService {
           this.cliDriver,
           this.deps.workspaceRoot,
           signal,
+          registry && request.conversationId
+            ? { registry, conversationId: request.conversationId }
+            : undefined,
         );
       } catch (err) {
         if (signal.aborted) {
           const kind = abortKind(signal, timeoutSignal);
           throw new DelegationError(
             kind === 'timeout'
-              ? `Delegation timeout: exceeded ${DELEGATION_TIMEOUT_MS}ms.`
+              ? `Delegation timeout: exceeded ${timeoutMs}ms.`
               : 'Delegation cancelled by caller.',
           );
         }
@@ -177,7 +194,7 @@ export class LocalDelegationService {
         const kind = abortKind(signal, timeoutSignal);
         throw new DelegationError(
           kind === 'timeout'
-            ? `Delegation timeout: exceeded ${DELEGATION_TIMEOUT_MS}ms.`
+            ? `Delegation timeout: exceeded ${timeoutMs}ms.`
             : 'Delegation cancelled by caller.',
         );
       }

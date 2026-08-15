@@ -27,6 +27,11 @@ import { IndexManager } from './search/IndexManager';
 import { registerSecretCommands } from './vscode/secretCommands';
 import { enterSetupMode } from './sidebar/SetupMode';
 import { LocalDelegationService } from './delegation/LocalDelegationService';
+import {
+  CliSessionRegistry,
+  DEFAULT_CLI_IDLE_TIMEOUT_MS,
+  DEFAULT_MAX_CLI_AGENTS,
+} from './agents/CliSessionRegistry';
 import { registerWorkerCommands } from './vscode/workerCommands';
 import { ModelManagerPanel } from './sidebar/modelManager/ModelManagerPanel';
 
@@ -97,10 +102,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(embeddingBackend);
   const indexManager = new IndexManager(config, embeddingBackend);
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+  // One registry for the whole extension. Sharing it between delegation and
+  // the sidebar's CLI chat means a repeat `ask_local_agent` to Claude Code
+  // resumes the warm process instead of re-paying its cold start, and that
+  // max_cli_agents caps the true number of live CLI processes.
+  const cliSessions = new CliSessionRegistry(
+    config.max_cli_agents ?? DEFAULT_MAX_CLI_AGENTS,
+    config.cli_idle_timeout_ms ?? DEFAULT_CLI_IDLE_TIMEOUT_MS,
+  );
   const delegationService = new LocalDelegationService({
     getConfig: () => config,
     backendPool: pool,
     workspaceRoot,
+    cliSessions,
   });
   const toolRegistry = new ToolRegistry();
   registerAllTools(
@@ -232,6 +246,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     context.secrets,
     workspaceRoot,
     () => activeConfigPath,
+    cliSessions,
   );
   context.subscriptions.push({
     dispose: () => {

@@ -47,13 +47,15 @@ import { runToolCallingLoop } from '../agent/ToolCallingLoop';
 import { recordModelUsage } from './modelManager/usageTracker';
 import { CliAgentDriver } from '../agents/CliAgentDriver';
 import { prepareCliChatAgent, runCliChat, runWarmCliChat } from '../agents/CliChatRunner';
-import { CliSessionRegistry } from '../agents/CliSessionRegistry';
+import {
+  CliSessionRegistry,
+  DEFAULT_CLI_IDLE_TIMEOUT_MS,
+  DEFAULT_MAX_CLI_AGENTS,
+} from '../agents/CliSessionRegistry';
 const log = getLogger();
 /** Tool rounds per sidebar turn before the loop aborts. Workers have their own,
  *  lower cap in `src/workers/limits.ts`. */
 const MAX_TOOL_ROUNDS = 40;
-const DEFAULT_MAX_CLI_AGENTS = 4;
-const DEFAULT_CLI_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 
 export interface SidebarProviderEvents {
   onGenerationStarted?: (modelName: string | null) => void;
@@ -82,6 +84,18 @@ export class AgentLoop {
   private readonly workspaceRoot: string;
   private readonly cliSessions: CliSessionRegistry;
   private promptRunCtrl: AbortController | null = null;
+  private onContextChanged?: (convId: string) => void;
+
+  /**
+   * Registers the mid-turn context-growth listener. A setter rather than an
+   * 18th constructor parameter. Fired once per tool round (after the round's
+   * messages have landed on the conversation) and once when the turn's final
+   * response completes — never per token, because recomputing the budget walks
+   * the whole transcript and serializes every tool definition.
+   */
+  setContextChangedListener(listener: (convId: string) => void): void {
+    this.onContextChanged = listener;
+  }
 
   get streaming(): boolean {
     return this.streamingConvIds.size > 0;
@@ -764,10 +778,16 @@ export class AgentLoop {
           activeModel.name,
           budget,
         );
+        // A round of file reads and search results can add tens of thousands of
+        // tokens. Report it now rather than at the end of the turn.
+        this.onContextChanged?.(conv.id);
       },
       onToken: (text) => postC({ type: 'token', text }),
       onReasoning: (text) => postC({ type: 'reasoningToken', text }),
-      onDone: (finishReason) => postC({ type: 'done', finishReason }),
+      onDone: (finishReason) => {
+        postC({ type: 'done', finishReason });
+        this.onContextChanged?.(conv.id);
+      },
       onRepeatedCall: () =>
         postC({
           type: 'error',

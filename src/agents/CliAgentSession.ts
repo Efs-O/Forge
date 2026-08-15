@@ -200,6 +200,12 @@ export class CliAgentSession {
     if (!turn) return;
     this.clearTurn(turn);
     if (this.currentState !== 'disposed') this.currentState = 'idle';
+    // Retain the session id even though the turn did not complete. Claude
+    // reports it in its init message, long before any timeout, and dropping it
+    // here forced the next attempt to start a cold process — re-paying the
+    // system prompt, tool schemas and CLAUDE.md as a prompt-cache miss. Keeping
+    // it lets the next send() spawn with `--resume` and rejoin the transcript.
+    if (turn.observedSessionId) this.confirmedId = turn.observedSessionId;
     const status = turn.timedOut ? 'timed_out' : turn.cancelled ? 'cancelled' : 'failed';
     turn.resolve({
       status,

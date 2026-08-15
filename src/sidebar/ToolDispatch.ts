@@ -201,6 +201,7 @@ export class ToolDispatch {
               this.snapshotPaths(resolved, checkpoint);
             },
             ...(signal !== undefined ? { abortSignal: signal } : {}),
+            ...(convId !== undefined ? { conversationId: convId } : {}),
             ...(this.workerRunner && checkpoint && convId && signal
               ? {
                   runWorkers: (request: WorkerRunRequest) =>

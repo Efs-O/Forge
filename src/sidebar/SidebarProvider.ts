@@ -13,6 +13,7 @@ import {
 import { isLocalModel } from '../backend/ModelHeuristics';
 import type { ForgeSlashCommandId, HostToWebview, WebviewToHost } from './messageBridge';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
+import type { CliSessionRegistry } from '../agents/CliSessionRegistry';
 import {
   createDefaultSession,
   historyMetasFromSession,
@@ -52,6 +53,9 @@ import type { IndexManager } from '../search/IndexManager';
 export type { SidebarProviderEvents };
 
 const log = getLogger();
+
+/** Minimum gap between mid-turn context recomputations. */
+const CONTEXT_TICK_THROTTLE_MS = 500;
 
 function estimateTokens(messages: ChatMessage[]): number {
   return messages.reduce((sum, m) => {
@@ -96,6 +100,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly agentLoop: AgentLoop;
   private readonly slashHandler: SlashCommandHandler;
   private contextWarningShown = false;
+  private lastContextTickAt = 0;
+  private contextTickTimer: ReturnType<typeof setTimeout> | undefined;
+  private pendingContextTickConvId: string | undefined;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -113,6 +120,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     secrets?: vscode.SecretStorage,
     workspaceRoot?: string,
     getConfigPath?: () => string,
+    cliSessions?: CliSessionRegistry,
   ) {
     this.sidebar = loadSidebarSession(workspaceState);
     const savedClanker = workspaceState.get<boolean>('forge.clankerMode', false);
@@ -132,8 +140,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       secrets,
       workspaceRoot,
       getConfigPath,
+      undefined,
+      cliSessions,
     );
     if (savedClanker) this.agentLoop.setClankerMode(true);
+    // Keeps the ctx bar and the HalluMeter bridge live during a turn instead of
+    // frozen until it ends. Fired once per tool round, never per token.
+    this.agentLoop.setContextChangedListener((convId) => this.onTurnContextChanged(convId));
 
     this.slashHandler = new SlashCommandHandler({
       getConfig: () => this.config,
@@ -345,12 +358,56 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
    * could immediately trigger another one.
    */
   private postTokenBudget(evaluateThresholds = false): void {
+    this.computeAndPublishBudget(this.getActive(), evaluateThresholds);
+  }
+
+  /**
+   * Mid-turn tick from AgentLoop, throttled leading+trailing.
+   *
+   * `computeAndPublishBudget` walks the whole transcript, serializes every tool
+   * definition, and then writes the HalluMeter bridge with a synchronous
+   * `writeFileSync`. A round of parallel tool calls can fire this several times
+   * in a few milliseconds, and doing all of that on the extension host thread
+   * each time would stall the UI it is meant to keep current.
+   */
+  private onTurnContextChanged(convId: string): void {
+    const elapsed = Date.now() - this.lastContextTickAt;
+    if (elapsed >= CONTEXT_TICK_THROTTLE_MS) {
+      this.lastContextTickAt = Date.now();
+      this.publishBudgetFor(convId);
+      return;
+    }
+    this.pendingContextTickConvId = convId;
+    if (this.contextTickTimer) return;
+    this.contextTickTimer = setTimeout(() => {
+      this.contextTickTimer = undefined;
+      this.lastContextTickAt = Date.now();
+      const pending = this.pendingContextTickConvId;
+      this.pendingContextTickConvId = undefined;
+      if (pending) this.publishBudgetFor(pending);
+    }, CONTEXT_TICK_THROTTLE_MS - elapsed);
+  }
+
+  private publishBudgetFor(convId: string): void {
+    const conv = this.sidebar.conversations.find((c) => c.id === convId);
+    // Mid-turn ticks never evaluate thresholds: /compact refuses to run while
+    // streaming, and compacting the transcript the tool loop is iterating would
+    // corrupt the turn. Auto-compact stays in handleSend's post-turn finally.
+    if (conv) this.computeAndPublishBudget(conv, false);
+  }
+
+  private computeAndPublishBudget(conv: ConversationRuntime, evaluateThresholds: boolean): void {
+    // The bar renders only the active conversation, and letting a background
+    // turn write the bridge would point HalluMeter at a model the user is not
+    // looking at. Switching tabs calls postTokenBudget(), so the number is
+    // refreshed on arrival either way.
+    if (conv.id !== this.sidebar.activeConversationId) return;
     // The model the user is actually talking to lives on the conversation; the
     // config-level active_model is only a fallback default. Reading the config
     // alone measured the budget for the wrong model whenever the two differed —
     // and wrote (or skipped) the HalluMeter bridge on that wrong model's ctx.
     // Same precedence as submitPrompt and runWorkerTurn.
-    const activeSelection = this.getActive().active_model ?? this.config.active_model;
+    const activeSelection = conv.active_model ?? this.config.active_model;
     const activeBase = this.baseOf(activeSelection);
     const rawModel = this.config.models.find((m) => m.name === activeBase);
     // Resolve group inheritance before reading num_ctx: models that take their ctx
@@ -358,7 +415,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     // reading the raw entry yielded 0 — silently disabling the budget and the
     // HalluMeter bridge for every such model.
     const activeModel = rawModel ? mergeGroupsIntoModel(this.config, rawModel) : undefined;
-    const msgTokens = estimateTokens(this.activeMessages());
+    const msgTokens = estimateTokens(conv.messages);
     const allowed = resolveToolPermissions(this.config);
     const toolTokens = Math.ceil(JSON.stringify(this.toolRegistry.definitions(allowed)).length / 4);
     const SYSTEM_AND_TEMPLATE_OVERHEAD = 200;
@@ -414,10 +471,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       conv = this.sidebar.conversations[0];
     }
     return conv;
-  }
-
-  private activeMessages(): ChatMessage[] {
-    return this.getActive().messages;
   }
 
   private clearActiveMessages(): void {
@@ -646,6 +699,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   async dispose(): Promise<void> {
+    if (this.contextTickTimer) clearTimeout(this.contextTickTimer);
+    this.contextTickTimer = undefined;
+    this.pendingContextTickConvId = undefined;
     await this.agentLoop.dispose();
     await this.checkpoints.dispose();
   }

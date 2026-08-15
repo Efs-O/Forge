@@ -6,6 +6,15 @@ export const MAX_DELEGATION_RESULT_CHARS = 24000;
 export const DEFAULT_DELEGATION_OUTPUT_TOKENS = 1024;
 export const HARD_MAX_DELEGATION_OUTPUT_TOKENS = 4096;
 export const DELEGATION_TIMEOUT_MS = 120_000;
+/**
+ * `provider: cli` targets run a full external agent (Claude Code, Codex) with
+ * its own tools against the real workspace — a code review legitimately takes
+ * minutes. The 120s ceiling above is sized for a local model answering a
+ * question from supplied context; applying it here aborted working runs and
+ * threw away everything they had already spent, and the retry paid the whole
+ * cold-start again.
+ */
+export const CLI_DELEGATION_TIMEOUT_MS = 600_000;
 
 export interface DelegationPromptContextFile {
   path: string;
