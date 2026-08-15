@@ -217,6 +217,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.failureTracker.reset();
     this.persistSession();
     this.postSessionSync();
+    this.postTokenBudget();
     log.debug('[SidebarProvider] new conversation tab');
   }
 
@@ -334,7 +335,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return splitModelProfile(expandAlias(this.config, id)).base;
   }
 
-  private postTokenBudget(): void {
+  /**
+   * Recomputes and posts the context budget for the ACTIVE conversation.
+   *
+   * `evaluateThresholds` gates the 75% warning and auto-compact, and is set only
+   * where a turn actually added context. Opening or switching a conversation
+   * must refresh the numbers without acting on them — otherwise merely visiting
+   * a full chat would compact it, and the refresh that follows a compaction
+   * could immediately trigger another one.
+   */
+  private postTokenBudget(evaluateThresholds = false): void {
     // The model the user is actually talking to lives on the conversation; the
     // config-level active_model is only a fallback default. Reading the config
     // alone measured the budget for the wrong model whenever the two differed —
@@ -366,10 +376,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         `token budget unavailable for '${activeSelection}' — no num_ctx on the model or its group(s); context warning and HalluMeter bridge disabled`,
       );
     }
-    // Opt-in automatic compaction. This runs post-turn (the only caller is
-    // submitPrompt's finally plus webviewReady), so compact()'s not-while-
-    // streaming guard is already satisfied. Compaction is non-destructive —
-    // the transcript is kept, only the model's window shrinks.
+    if (!evaluateThresholds) return;
+    // Opt-in automatic compaction. Only reached post-turn, so compact()'s
+    // not-while-streaming guard is already satisfied. Compaction is
+    // non-destructive — the transcript is kept, only the model's window shrinks.
     const auto = this.config.auto_compact;
     const autoAt = auto?.at ?? 0.85;
     if (auto?.enabled === true && max > 0 && used / max >= autoAt) {
@@ -416,6 +426,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.failureTracker.reset();
     this.persistSession();
     this.postSessionSync();
+    this.postTokenBudget();
   }
 
   private async handleSend(
@@ -471,7 +482,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.failureTracker.reset();
       this.persistSession();
       this.postSessionSync();
-      this.postTokenBudget();
+      this.postTokenBudget(true);
       this.flushSessionLog(conv.id);
     }
   }
@@ -590,6 +601,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.failureTracker.reset();
     this.persistSession();
     this.postSessionSync();
+    this.postTokenBudget();
     this.events.onConversationSwitched?.(this.config.active_model ?? null);
   }
 
@@ -606,6 +618,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.failureTracker.reset();
     this.persistSession();
     this.postSessionSync();
+    this.postTokenBudget();
 
     if (modelName) {
       // Compare on the base model: two tabs on the same GGUF (different @profile)
@@ -652,6 +665,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.failureTracker.reset();
       this.persistSession();
       this.postSessionSync();
+      this.postTokenBudget();
     }
   }
 }
