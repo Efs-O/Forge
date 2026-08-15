@@ -4,7 +4,12 @@ import * as os from 'os';
 import * as path from 'path';
 import type { IBackendPool } from '../backend/BackendPool';
 import type { ForgeConfig } from '../config/types';
-import { expandAlias, resolveRequestModel, splitModelProfile } from '../config/ConfigResolver';
+import {
+  expandAlias,
+  mergeGroupsIntoModel,
+  resolveRequestModel,
+  splitModelProfile,
+} from '../config/ConfigResolver';
 import { isLocalModel } from '../backend/ModelHeuristics';
 import type { ForgeSlashCommandId, HostToWebview, WebviewToHost } from './messageBridge';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
@@ -331,7 +336,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private postTokenBudget(): void {
     const activeBase = this.baseOf(this.config.active_model);
-    const activeModel = this.config.models.find((m) => m.name === activeBase);
+    const rawModel = this.config.models.find((m) => m.name === activeBase);
+    // Resolve group inheritance before reading num_ctx: models that take their ctx
+    // from a group (`group: llamacpp-qwen3`) have no num_ctx of their own, and
+    // reading the raw entry yielded 0 — silently disabling the budget and the
+    // HalluMeter bridge for every such model.
+    const activeModel = rawModel ? mergeGroupsIntoModel(this.config, rawModel) : undefined;
     const msgTokens = estimateTokens(this.activeMessages());
     const allowed = resolveToolPermissions(this.config);
     const toolTokens = Math.ceil(JSON.stringify(this.toolRegistry.definitions(allowed)).length / 4);
@@ -341,6 +351,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.post({ type: 'tokenBudget', used, max });
     if (this.config.active_model && max > 0) {
       writeForgeBridge(this.config.active_model, used, max);
+    } else if (this.config.active_model) {
+      // Fail loudly: this previously skipped in silence, so a config change that
+      // stranded num_ctx took the context warning and the bridge down with it.
+      log.warn(
+        `token budget unavailable for '${this.config.active_model}' — no num_ctx on the model or its group(s); context warning and HalluMeter bridge disabled`,
+      );
     }
     if (max > 0 && used / max >= 0.75 && !this.contextWarningShown) {
       this.contextWarningShown = true;
