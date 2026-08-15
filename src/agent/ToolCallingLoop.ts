@@ -193,7 +193,16 @@ export async function runToolCallingLoop(
         throw error;
       }
       options.failureTracker?.reset();
-      options.messages.push({ role: 'assistant', content: null, tool_calls: calls });
+      // Carry this round's reasoning on the tool-call turn. rawReasoning resets
+      // every round, so dropping it here discarded the model's thinking for every
+      // round that ended in a tool call — only the final round's survived, and
+      // the sidebar's reasoning bubbles collapsed to one when the turn ended.
+      options.messages.push({
+        role: 'assistant',
+        content: null,
+        tool_calls: calls,
+        ...(assistantReasoning ? { reasoning: assistantReasoning } : {}),
+      });
       const beforeDispatch = options.messages.length;
       await options.dispatchToolCalls(calls, options.messages);
       try {

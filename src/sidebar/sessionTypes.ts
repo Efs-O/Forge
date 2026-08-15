@@ -27,9 +27,11 @@ const toolCallSchema = z.object({
 
 /**
  * A tool-calling assistant turn carries `content: null` + `tool_calls`, and its
- * results come back as `role: 'tool'`; filtering those dropped all tool activity
- * at write time. Added fields are optional and `content` only widened, so
- * records from earlier versions still parse unchanged.
+ * results come back as `role: 'tool'`; filtering those out dropped every trace
+ * of tool activity at write time.
+ *
+ * Backward compatible: every field added here is optional and `content` only
+ * widened, so records written by earlier versions still parse unchanged.
  */
 const slimMsgSchema = z.object({
   role: z.enum(['user', 'assistant', 'tool']),
@@ -96,9 +98,10 @@ export function deriveTitle(firstUserLine: string): string {
 
 /**
  * Persistence view: keeps tool-call turns and tool results so a reloaded
- * conversation still knows what the agent did. `system` is still dropped
- * (rebuilt per request), as is array `content` (image parts) — never persisted,
- * and widening that is a separate change.
+ * conversation still knows what the agent actually did.
+ *
+ * `system` is still dropped (rebuilt per request), and so is array `content`
+ * (image parts) — that was never persisted and widening it is a separate change.
  */
 export function slimPersistMessages(messages: ChatMessage[]): SlimPersistMessage[] {
   const out: SlimPersistMessage[] = [];
@@ -123,15 +126,26 @@ export function slimPersistMessages(messages: ChatMessage[]): SlimPersistMessage
 }
 
 /**
- * Webview view: plain text turns only. Tool activity is surfaced live through
- * its own events, so replaying raw tool JSON into the transcript would be noise.
+ * Webview view: renderable turns. Tool *results* stay out — raw tool JSON in the
+ * transcript is noise, and the sidebar surfaces tool activity live through its
+ * own events.
+ *
+ * An assistant turn that only called a tool is kept when it carries reasoning.
+ * Dropping those made every thinking bubble except the final round's vanish the
+ * moment a turn ended and SESSION_SYNC rebuilt the transcript.
  */
 export function displayPersistMessages(messages: ChatMessage[]): DisplayPersistMessage[] {
   return messages
-    .filter((m) => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+    .filter(
+      (m) =>
+        (m.role === 'user' || m.role === 'assistant') &&
+        (typeof m.content === 'string' ||
+          (m.role === 'assistant' && typeof m.reasoning === 'string' && m.reasoning.length > 0)),
+    )
     .map((m) => ({
       role: m.role as 'user' | 'assistant',
-      content: m.content as string,
+      // A reasoning-only turn has content: null; the webview contract is string.
+      content: typeof m.content === 'string' ? m.content : '',
       ...(typeof m.reasoning === 'string' && m.reasoning.length > 0
         ? { reasoning: m.reasoning }
         : {}),

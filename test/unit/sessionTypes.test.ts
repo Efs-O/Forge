@@ -77,7 +77,7 @@ describe('sessionTypes', () => {
     expect(slimPersistMessages(messages)).toEqual([]);
   });
 
-  it('displayPersistMessages keeps only renderable text turns', () => {
+  it('displayPersistMessages drops tool results and contentless tool-call turns', () => {
     const messages: ChatMessage[] = [
       { role: 'user', content: 'hi' },
       { role: 'assistant', content: null, tool_calls: [toolCall] },
@@ -88,6 +88,30 @@ describe('sessionTypes', () => {
       { role: 'user', content: 'hi' },
       { role: 'assistant', content: 'bye' },
     ]);
+  });
+
+  // Each round of a multi-round turn owns a reasoning bubble. Dropping the
+  // reasoning-bearing tool-call turns collapsed them all to the final round's
+  // the moment the turn ended and SESSION_SYNC rebuilt the transcript.
+  it('displayPersistMessages keeps a reasoning-only tool-call turn as an empty-content row', () => {
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'go' },
+      { role: 'assistant', content: null, tool_calls: [toolCall], reasoning: 'round 1 thinking' },
+      { role: 'tool', content: 'result', tool_call_id: 'call_1' },
+      { role: 'assistant', content: 'done', reasoning: 'round 2 thinking' },
+    ];
+    expect(displayPersistMessages(messages)).toEqual([
+      { role: 'user', content: 'go' },
+      { role: 'assistant', content: '', reasoning: 'round 1 thinking' },
+      { role: 'assistant', content: 'done', reasoning: 'round 2 thinking' },
+    ]);
+  });
+
+  it('displayPersistMessages never emits null content to the webview', () => {
+    const rows = displayPersistMessages([
+      { role: 'assistant', content: null, tool_calls: [toolCall], reasoning: 'r' },
+    ]);
+    expect(rows.every((r) => typeof r.content === 'string')).toBe(true);
   });
 
   it('chatMessagesFromSlim restores tool fields for the agent loop', () => {
