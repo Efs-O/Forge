@@ -54,6 +54,10 @@ const conversationPersistedSchema = z.object({
   messages: z.array(slimMsgSchema),
   active_model: z.string().optional(),
   cli_sessions: z.record(z.string(), z.string().min(1)).optional(),
+  // Optional, so records written before compaction existed still parse.
+  compaction: z
+    .object({ summary: z.string().min(1), fromIndex: z.number().int().min(0) })
+    .optional(),
 });
 
 export const sidebarSessionPersistedSchema = z.object({
@@ -74,6 +78,12 @@ export interface ConversationRuntime {
   active_model?: string;
   /** Persistent external CLI sessions keyed by configured Forge model name. */
   cli_sessions?: Record<string, string>;
+  /**
+   * Set by /compact. The model is sent `summary` + `messages.slice(fromIndex)`;
+   * `messages` itself is never truncated, so the sidebar transcript and the
+   * persisted record stay whole. Clearing this restores full context.
+   */
+  compaction?: { summary: string; fromIndex: number };
 }
 
 export interface SidebarRuntime {
@@ -196,6 +206,7 @@ function persistedToRuntime(p: ConversationPersisted): ConversationRuntime {
     messages: chatMessagesFromSlim(p.messages),
     ...(p.active_model !== undefined ? { active_model: p.active_model } : {}),
     ...(p.cli_sessions !== undefined ? { cli_sessions: { ...p.cli_sessions } } : {}),
+    ...(p.compaction !== undefined ? { compaction: { ...p.compaction } } : {}),
   };
 }
 
@@ -210,6 +221,7 @@ export function runtimeToPersisted(session: SidebarRuntime): SidebarSessionPersi
       messages: slimPersistMessages(c.messages),
       ...(c.active_model !== undefined ? { active_model: c.active_model } : {}),
       ...(c.cli_sessions !== undefined ? { cli_sessions: { ...c.cli_sessions } } : {}),
+      ...(c.compaction !== undefined ? { compaction: { ...c.compaction } } : {}),
     })),
     history: session.history.map((c) => ({
       id: c.id,
@@ -219,6 +231,7 @@ export function runtimeToPersisted(session: SidebarRuntime): SidebarSessionPersi
       messages: slimPersistMessages(c.messages),
       ...(c.active_model !== undefined ? { active_model: c.active_model } : {}),
       ...(c.cli_sessions !== undefined ? { cli_sessions: { ...c.cli_sessions } } : {}),
+      ...(c.compaction !== undefined ? { compaction: { ...c.compaction } } : {}),
     })),
   };
 }

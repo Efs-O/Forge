@@ -265,6 +265,16 @@ export interface ForgeConfig {
      *  then the standard install location under %LOCALAPPDATA% on Windows. */
     executable?: string;
   };
+  /** Automatic context compaction. Off by default — compaction is the user's
+   *  call, and it changes what the model can still see. */
+  auto_compact?: {
+    /** Run /compact automatically when the context passes `at`. Default: false. */
+    enabled?: boolean;
+    /** Fraction of the context window that triggers it. Default: 0.85.
+     *  Deliberately not ~0.95: the summarization request sends the transcript,
+     *  so it needs room left to run. */
+    at?: number;
+  };
   /** Optional localhost model-control API so an external orchestrator can ask
    *  Forge to load the right model on demand and discover its endpoint. */
   control_server?: {

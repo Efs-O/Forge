@@ -10,6 +10,7 @@ import { resolveCloudRequestTarget } from '../llm/CloudRequestResolver';
 import type { ChatCompletionRequest } from '../llm/types';
 import type { AttachmentData } from './messageBridge';
 import { buildUserContent } from './ConversationOps';
+import { applyCompactionWindow } from './compactionWindow';
 import { injectSystemPrompt } from '../llm/SystemPromptInjector';
 import type { TemplateEngine } from '../llm/TemplateEngine';
 import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
@@ -48,7 +49,9 @@ import { CliAgentDriver } from '../agents/CliAgentDriver';
 import { prepareCliChatAgent, runCliChat, runWarmCliChat } from '../agents/CliChatRunner';
 import { CliSessionRegistry } from '../agents/CliSessionRegistry';
 const log = getLogger();
-const MAX_TOOL_ROUNDS = 20;
+/** Tool rounds per sidebar turn before the loop aborts. Workers have their own,
+ *  lower cap in `src/workers/limits.ts`. */
+const MAX_TOOL_ROUNDS = 40;
 const DEFAULT_MAX_CLI_AGENTS = 4;
 const DEFAULT_CLI_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 
@@ -718,6 +721,10 @@ export class AgentLoop {
       failureTracker: this.failureTracker,
       ...(apiKey ? { apiKey } : {}),
       prepareMessages: (messages) => {
+        // Compaction shrinks what the MODEL sees, never the stored transcript.
+        // The loop hands us a copy and re-runs this every round, so the window
+        // holds for the whole turn without touching conv.messages.
+        const windowed = applyCompactionWindow(messages, conv.compaction);
         const tmplCtx: Record<string, string> = {};
         if (activeFile) tmplCtx['activeFile'] = activeFile;
         if (config.custom_instructions) tmplCtx['customInstructions'] = config.custom_instructions;
@@ -725,7 +732,7 @@ export class AgentLoop {
         if (this.forgeLoader?.instructions)
           tmplCtx['forgeInstructions'] = this.forgeLoader.instructions;
         const injected = injectSystemPrompt(
-          messages,
+          windowed,
           this.templateEngine,
           tmplCtx,
           activeModel.system_prompt,

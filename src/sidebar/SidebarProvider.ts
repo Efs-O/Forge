@@ -366,6 +366,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         `token budget unavailable for '${activeSelection}' — no num_ctx on the model or its group(s); context warning and HalluMeter bridge disabled`,
       );
     }
+    // Opt-in automatic compaction. This runs post-turn (the only caller is
+    // submitPrompt's finally plus webviewReady), so compact()'s not-while-
+    // streaming guard is already satisfied. Compaction is non-destructive —
+    // the transcript is kept, only the model's window shrinks.
+    const auto = this.config.auto_compact;
+    const autoAt = auto?.at ?? 0.85;
+    if (auto?.enabled === true && max > 0 && used / max >= autoAt) {
+      log.info(`[auto-compact] context at ${Math.round((used / max) * 100)}% — compacting`);
+      void this.slashHandler.handle('compact');
+      return;
+    }
     if (max > 0 && used / max >= 0.75 && !this.contextWarningShown) {
       this.contextWarningShown = true;
       void vscode.window
@@ -491,6 +502,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           active: this.config.active_model,
         });
         this.postSessionSync();
+        // Without this the bar reads 0 until the next turn completes, and the
+        // context warning cannot fire on the first turn after a window reload.
+        this.postTokenBudget();
         if (this.pool.isAnyReady()) this.post({ type: 'ready' });
         this.post({ type: 'clankerChanged', enabled: this.agentLoop.getClankerMode() });
         break;

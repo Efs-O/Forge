@@ -346,8 +346,14 @@ Be specific and factual. Do not invent paths or names not present in the scan re
       return;
     }
     const conv = deps.getActiveConv();
-    const compactable = conv.messages.filter(
-      (m) => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string',
+    // Only summarize what the model is actually still being sent: re-compacting
+    // must not re-summarize turns already folded into the previous summary.
+    const from = conv.compaction ? Math.min(conv.compaction.fromIndex, conv.messages.length) : 0;
+    const pending = conv.messages.slice(from);
+    const compactable = pending.filter(
+      (m) =>
+        (m.role === 'user' || m.role === 'assistant' || m.role === 'tool') &&
+        typeof m.content === 'string',
     );
     if (compactable.length < 2) {
       void vscode.window.showInformationMessage(
@@ -355,12 +361,20 @@ Be specific and factual. Do not invent paths or names not present in the scan re
       );
       return;
     }
-    const transcript = compactable
-      .map((m) => {
-        const reasoning = m.reasoning ? `\nReasoning summary:\n${m.reasoning}` : '';
-        return `${m.role.toUpperCase()}:\n${m.content}${reasoning}`;
-      })
-      .join('\n\n');
+    const previous = conv.compaction ? `EARLIER SUMMARY:\n${conv.compaction.summary}\n\n` : '';
+    const transcript =
+      previous +
+      compactable
+        .map((m) => {
+          const reasoning = m.reasoning ? `\nReasoning summary:\n${m.reasoning}` : '';
+          // Tool output used to be excluded entirely, so compaction discarded
+          // everything the agent learned from its tools. Cap each result so a
+          // few large reads cannot crowd out the conversation itself.
+          const body =
+            m.role === 'tool' ? truncateForSummary(m.content as string) : (m.content as string);
+          return `${m.role.toUpperCase()}:\n${body}${reasoning}`;
+        })
+        .join('\n\n');
 
     const summary = await deps.runPromptToMarkdown(
       `Summarize this conversation for continued work in the same repository.\n\nRequirements:\n- Preserve user goals, constraints, decisions, open questions, and unfinished tasks.\n- Mention relevant files, commands, errors, and risks.\n- Keep it concise but specific.\n- Do not add facts not present in the conversation.\n\nConversation:\n${transcript}`,
@@ -371,18 +385,23 @@ Be specific and factual. Do not invent paths or names not present in the scan re
       return;
     }
 
-    conv.messages = [
-      {
-        role: 'user',
-        content:
-          'Conversation summary. Use this as the working context for future turns in this chat.',
-      },
-      { role: 'assistant', content: trimmed },
-    ];
+    // Non-destructive: record the summary and the cut point instead of
+    // overwriting the transcript. conv.messages stays whole, so the sidebar
+    // scrollback and the persisted record survive; only what the model is sent
+    // shrinks (see applyCompactionWindow).
+    conv.compaction = { summary: trimmed, fromIndex: conv.messages.length };
     conv.updatedAt = Date.now();
     deps.persistSession();
     deps.postSessionSync();
     deps.postTokenBudget();
-    void vscode.window.showInformationMessage('Forge: active chat compacted.');
+    void vscode.window.showInformationMessage(
+      'Forge: context compacted. Your chat history is unchanged.',
+    );
   }
+}
+
+/** Cap a single tool result inside the summarization prompt. */
+function truncateForSummary(text: string): string {
+  const LIMIT = 2000;
+  return text.length <= LIMIT ? text : `${text.slice(0, LIMIT)}\n…[truncated for summary]`;
 }

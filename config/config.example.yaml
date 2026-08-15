@@ -103,6 +103,19 @@ profiles:
 #   my-model-worker: my-model@worker
 
 # -------------------------------------------------------------------
+# Automatic context compaction (optional, OFF by default).
+# /compact summarizes the conversation and sends the model that summary plus
+# the recent turns. It is non-destructive: your chat transcript is kept whole,
+# only what the model is sent shrinks.
+# `at` is the fraction of the context window that triggers it. Keep it well
+# under 1.0 — the summarization request itself sends the transcript, so at
+# ~0.95 there is no room left for it to run. Max accepted is 0.95.
+# -------------------------------------------------------------------
+# auto_compact:
+#   enabled: true
+#   at: 0.85
+
+# -------------------------------------------------------------------
 # Control server (optional) — localhost API so an external orchestrator can
 # load models on demand and discover the OpenAI-compatible endpoint.
 #   GET /healthz  GET /models  POST /ensure {model}  POST /release {model}

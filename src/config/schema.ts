@@ -231,6 +231,13 @@ export const ForgeConfigSchema = z
         executable: z.string().min(1).optional(),
       })
       .optional(),
+    auto_compact: z
+      .object({
+        enabled: z.boolean().optional(),
+        // Upper bound below 1: the summarization call still needs context to run.
+        at: z.number().min(0.5).max(0.95).optional(),
+      })
+      .optional(),
     control_server: z
       .object({
         enabled: z.boolean().optional(),

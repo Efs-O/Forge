@@ -122,6 +122,31 @@ describe('sessionTypes', () => {
     expect(chatMessagesFromSlim(slimPersistMessages(messages))).toEqual(messages);
   });
 
+  it('round-trips the compaction window through persistence', () => {
+    const s = createDefaultSession();
+    s.conversations[0]!.messages.push(
+      { role: 'user', content: 'a' },
+      { role: 'assistant', content: 'b' },
+    );
+    s.conversations[0]!.compaction = { summary: 'earlier work', fromIndex: 2 };
+
+    const persisted = runtimeToPersisted(s);
+    expect(persisted.conversations[0]!.compaction).toEqual({
+      summary: 'earlier work',
+      fromIndex: 2,
+    });
+    expect(sidebarSessionPersistedSchema.safeParse(persisted).success).toBe(true);
+
+    const store: Record<string, unknown> = { [SESSION_KEY_V1]: persisted };
+    const restored = loadSidebarSession(makeMemento(store));
+    expect(restored.conversations[0]!.compaction).toEqual({
+      summary: 'earlier work',
+      fromIndex: 2,
+    });
+    // The transcript itself must come back whole — compaction is not a deletion.
+    expect(restored.conversations[0]!.messages).toHaveLength(2);
+  });
+
   // Records written before the schema widened must still load.
   it('sidebarSessionPersistedSchema accepts pre-migration records', () => {
     const legacy = {
