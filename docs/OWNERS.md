@@ -126,6 +126,8 @@ overlaps with an existing owner, extend the owner instead.
 | xAI token resolution (SecretStorage/OAuth) | `src/llm/XaiAuth.ts`                         |
 | FORGE.md workspace instructions loader     | `src/llm/ForgeInstructionsLoader.ts`         |
 | Streaming OpenAI-compat client             | `src/llm/OpenAIClient.ts`                    |
+| Cut-off tool call: type + classification   | `src/llm/ToolCallTruncatedError.ts`          |
+| Context/output budget (per-slot, reserve)  | `src/util/contextBudget.ts`                  |
 | Streaming Ollama native client             | `src/llm/OllamaNativeClient.ts`              |
 | Request normalization (per-provider)       | `src/llm/RequestNormalizer.ts`               |
 | Sampling parameter merge                   | `src/llm/SamplingMerge.ts`                   |
@@ -142,6 +144,7 @@ overlaps with an existing owner, extend the owner instead.
 | Config-to-tool permission resolution       | `src/tools/PermissionResolver.ts`     |
 | Tool registration entry point              | `src/tools/registerAllTools.ts`       |
 | Built-in tool definitions                  | `src/tools/builtinTools.ts`           |
+| Single-write size ceiling + chunk advice   | `src/tools/writeChunking.ts`          |
 | File read/write tools                      | `src/tools/fileEditTools.ts`          |
 | Structured line-edit validation + tool     | `src/tools/structuredEditTool.ts`     |
 | Directory listing tools                    | `src/tools/dirTools.ts`               |

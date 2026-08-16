@@ -92,9 +92,13 @@ export function MessageList({
       return;
     }
     if (!userScrolledUp.current) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+      // Every token is a new messages array. A smooth scroll restarts its
+      // animation on each one and never reaches the target, so the view falls
+      // behind — or appears frozen — for the whole turn. Jump instantly while
+      // tokens are arriving and keep the animation for settled updates.
+      bottomRef.current?.scrollIntoView({ behavior: streaming ? 'auto' : 'smooth' });
     }
-  }, [messages, conversationId]);
+  }, [messages, conversationId, streaming]);
 
   return (
     <div id="messages" ref={containerRef}>

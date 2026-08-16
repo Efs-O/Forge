@@ -1,5 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { AppMessage } from '../reducer';
+
+/** px from the bottom of the reasoning pane within which auto-scroll stays armed. */
+const PIN_THRESHOLD = 24;
 
 const ChevronDown = (): React.ReactElement => (
   <svg width="10" height="6" viewBox="0 0 10 6" fill="currentColor" aria-hidden="true">
@@ -31,6 +34,29 @@ function ThinkingRow({
   reasoning: string;
 }): React.ReactElement {
   const [open, setOpen] = useState(false);
+  const contentRef = useRef<HTMLPreElement>(null);
+  const pinned = useRef(true);
+
+  // The pane is its own scroll container (max-height + overflow-y in
+  // tool-rows.css), so the message list's auto-scroll never reaches it. Reasoning
+  // streams in token by token, so keep the newest text in view here — until the
+  // user scrolls up to read back, which disarms it for the rest of this run.
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) {
+      // Collapsed: the pane unmounts and remounts at scrollTop 0, so re-arm.
+      pinned.current = true;
+      return;
+    }
+    if (pinned.current) el.scrollTop = el.scrollHeight;
+  }, [reasoning, open]);
+
+  const handleScroll = (): void => {
+    const el = contentRef.current;
+    if (!el) return;
+    pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight <= PIN_THRESHOLD;
+  };
+
   return (
     <div className="thinking-row">
       <button
@@ -42,7 +68,11 @@ function ThinkingRow({
         <span className="thinking-row-chevron">{open ? <ChevronDown /> : <ChevronRight />}</span>
         <span className="thinking-row-label">{label}</span>
       </button>
-      {open && <pre className="thinking-content">{reasoning}</pre>}
+      {open && (
+        <pre ref={contentRef} className="thinking-content" onScroll={handleScroll}>
+          {reasoning}
+        </pre>
+      )}
     </div>
   );
 }

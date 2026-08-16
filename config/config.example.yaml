@@ -78,6 +78,9 @@ defaults:
   sampling:
     temperature: 0.6
     top_p: 0.95
+    # Upper bound only. Forge lowers this per request to the room actually left
+    # in the slot (num_ctx / n_parallel, minus the prompt), so a value larger
+    # than the context is harmless — but a small one still binds.
     max_tokens: 8192
 
 # -------------------------------------------------------------------

@@ -1,5 +1,41 @@
 # Forge — Recent Changes
 
+## 0.12.42 — Tool calls that outgrow the context no longer lose the turn
+
+- A tool call cut off mid-arguments is now recognised as a truncation instead of
+  a malformed call. Previously llama-server's HTTP 500 ("Failed to parse tool
+  call arguments as JSON") was read as "this model cannot do native tool calls",
+  so Forge stripped tools and re-sent the same oversized request — turning one
+  lost call into a lost turn, and eventually disabling tool calling for the
+  whole chat.
+- On a truncation Forge now tells the model what actually happened — nothing was
+  written, this is a size limit — and gives it a hard character ceiling for the
+  retry. Two recoveries, then the turn fails with a clear `/compact` message
+  rather than spinning.
+- Recovery rounds disable thinking. Thinking and the answer share one output
+  budget, so a retry that re-thinks starts with less room than the attempt that
+  just failed.
+- Added `append_file`, so a file too large for one call can be built across
+  several. `write_file` and `append_file` both advertise the size ceiling.
+- `max_tokens` is now derived from the room actually left in the slot rather
+  than from a config value unrelated to it (4096 by default, or larger than the
+  entire context where configured). It only ever lowers an explicit setting.
+- **Fixed: the context bar and HalluMeter bridge over-reported every model with
+  `n_parallel > 1`.** `--ctx-size` is the total across slots and `--parallel`
+  divides it, so per-conversation context is `num_ctx / n_parallel`. A
+  `n_parallel: 2` model now reads half what it did before — that is the correct
+  figure, not a regression.
+- A mid-stream SSE error frame is now surfaced instead of silently dropped. That
+  class of failure used to end a turn with no message at all.
+- **Fixed: an expanded thinking pane never followed the reasoning streaming into
+  it.** The pane is its own scroll container (280px tall), so the message list's
+  auto-scroll never reached it — past that height new text landed below the fold
+  and stayed there. It now pins to the newest text, and stops following the
+  moment you scroll up to read back.
+- Auto-scroll no longer stalls mid-turn. Every token is a new message array, and
+  the smooth scroll restarted its animation on each one without ever arriving.
+  Streaming updates now jump instantly; settled ones keep the animation.
+
 ## 0.12.40 — Live context metering and warm CLI delegation
 
 - The context bar and the HalluMeter bridge now update once per tool round
