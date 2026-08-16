@@ -1,4 +1,10 @@
 import type { ChatCompletionRequest, StreamChunk, ToolCall } from './types';
+import {
+  ToolCallTruncatedError,
+  argumentsAreIncomplete,
+  isTruncationParseError,
+  parseErrorColumn,
+} from './ToolCallTruncatedError';
 import { getLogger } from '../util/logger';
 
 const log = getLogger();
@@ -8,6 +14,36 @@ export type ReasoningHandler = (token: string) => void;
 export type DoneHandler = (finishReason: string | null) => void;
 export type ErrorHandler = (err: Error) => void;
 export type ToolCallsHandler = (calls: ToolCall[]) => void;
+
+/**
+ * Count an exact llama-server chat prompt after its template and tool schema
+ * rendering. Returns undefined only when this server build does not expose the
+ * optional token-count endpoint.
+ */
+export async function countChatCompletionInputTokens(
+  baseUrl: string,
+  request: ChatCompletionRequest,
+  signal?: AbortSignal,
+): Promise<number | undefined> {
+  const response = await fetch(`${baseUrl}/v1/chat/completions/input_tokens`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+    signal: signal ?? null,
+  });
+  if (response.status === 404 || response.status === 405 || response.status === 501) {
+    return undefined;
+  }
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(`HTTP ${response.status}: ${body}`);
+  }
+  const payload = (await response.json()) as { input_tokens?: unknown };
+  if (typeof payload.input_tokens !== 'number' || !Number.isFinite(payload.input_tokens)) {
+    throw new Error('llama-server returned an invalid input_tokens response.');
+  }
+  return payload.input_tokens;
+}
 
 export interface StreamHandlers {
   onToken: TokenHandler;
@@ -66,6 +102,21 @@ export async function streamChatCompletion(
     const body = await response.text().catch(() => '');
     const msg = `HTTP ${response.status}: ${body}`;
     log.error(`[OpenAIClient] ${baseUrl} — ${msg}`);
+    // llama-server answers 500 when its chat parser chokes on output that
+    // stopped mid-argument. That is a size problem, not a protocol problem —
+    // hand the caller a typed truncation so it retries smaller instead of
+    // deciding the model cannot do native tool calls.
+    if (isTruncationParseError(body)) {
+      const column = parseErrorColumn(body);
+      handlers.onError(
+        new ToolCallTruncatedError({
+          finishReason: 'length',
+          ...(column !== undefined ? { approxBytes: column } : {}),
+          message: msg,
+        }),
+      );
+      return;
+    }
     handlers.onError(new Error(msg));
     return;
   }
@@ -104,9 +155,13 @@ export async function streamChatCompletion(
 
       for (const line of lines) {
         const trimmed = line.trim();
-        if (!trimmed.startsWith('data:')) continue;
+        // llama-server reports a late failure as an SSE frame, sometimes on an
+        // `error:` line rather than `data:`. Skipping those ended the turn in
+        // silence — no tokens, no message, no error.
+        const isErrorLine = trimmed.startsWith('error:');
+        if (!trimmed.startsWith('data:') && !isErrorLine) continue;
 
-        const data = trimmed.slice(5).trim();
+        const data = trimmed.slice(isErrorLine ? 6 : 5).trim();
         if (data === '[DONE]') {
           // Some backends (notably Ollama OpenAI-compat) end streams here without a prior
           // finish_reason chunk carrying tool_calls — flush any accumulated deltas first.
@@ -120,6 +175,27 @@ export async function streamChatCompletion(
           chunk = JSON.parse(data) as StreamChunk;
         } catch {
           continue;
+        }
+
+        // Error frames carry no `choices`, so the old `if (!choice) continue`
+        // discarded them. Check before that guard, not after.
+        const framed = (chunk as { error?: { message?: string; code?: number } }).error;
+        if (framed) {
+          const detail = framed.message ?? JSON.stringify(framed);
+          log.error(`[OpenAIClient] ${baseUrl} — stream error frame: ${detail}`);
+          if (isTruncationParseError(detail)) {
+            const column = parseErrorColumn(detail);
+            handlers.onError(
+              new ToolCallTruncatedError({
+                finishReason: 'length',
+                ...(column !== undefined ? { approxBytes: column } : {}),
+                message: detail,
+              }),
+            );
+          } else {
+            handlers.onError(new Error(detail));
+          }
+          return;
         }
 
         const choice = chunk.choices?.[0];
@@ -156,6 +232,27 @@ export async function streamChatCompletion(
         }
 
         if (hasTerminalFinishReason(choice.finish_reason)) {
+          // A `length` finish with tool deltas still in flight means generation
+          // hit the output ceiling mid-arguments. Flushing that dispatched a
+          // half-written call — in practice `{}` — which the dispatcher then
+          // reported as malformed, hiding the real cause. Raise it as
+          // truncation instead. Args that still parse are complete and safe to
+          // flush, whatever the finish reason says.
+          const truncated =
+            choice.finish_reason === 'length'
+              ? [...toolAccum.values()].find((acc) => argumentsAreIncomplete(acc.arguments))
+              : undefined;
+          if (truncated) {
+            handlers.onError(
+              new ToolCallTruncatedError({
+                toolName: truncated.name,
+                toolCallId: truncated.id,
+                partialArguments: truncated.arguments,
+                finishReason: choice.finish_reason,
+              }),
+            );
+            return;
+          }
           // Ollama often emits finish_reason "stop" on the terminal chunk even when tool_calls
           // were streamed (OpenAI-style servers usually send "tool_calls"). Flush whenever we
           // have accumulated tool deltas so Forge can still dispatch native tools.

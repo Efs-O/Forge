@@ -6,6 +6,7 @@ import { makeLocalAgentTool } from './localAgentTool';
 import {
   makeReadFileTool,
   makeWriteFileTool,
+  makeAppendFileTool,
   makeReplaceSelectionTool,
   makeInsertCodeTool,
 } from './builtinTools';
@@ -71,6 +72,7 @@ export function registerAllTools(
   // v0.1 builtins
   registry.register(makeReadFileTool());
   registry.register(makeWriteFileTool());
+  registry.register(makeAppendFileTool());
   registry.register(makeReplaceSelectionTool());
   registry.register(makeInsertCodeTool());
 

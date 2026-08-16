@@ -103,4 +103,26 @@ describe('ToolCallingLoop reasoning retention', () => {
     expect(toolTurn.tool_calls).toHaveLength(1);
     expect('reasoning' in toolTurn).toBe(false);
   });
+
+  it('reports the normalized request before each model call', async () => {
+    streamModelChatCompletion.mockImplementation(
+      async (_url: string, _req: unknown, _model: unknown, h: Handlers) => {
+        h.onToken('done');
+        h.onDone('stop');
+      },
+    );
+    const onPreparedRequest = vi.fn();
+
+    await runToolCallingLoop({
+      ...runOptions([{ role: 'user', content: 'go' }]),
+      onPreparedRequest,
+    } as never);
+
+    expect(onPreparedRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: [{ role: 'user', content: 'go' }],
+        tools: expect.any(Array),
+      }),
+    );
+  });
 });

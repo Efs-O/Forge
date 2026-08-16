@@ -79,8 +79,8 @@ describe('mergeSyncedMessages', () => {
     expect(mergeSyncedMessages([], rows).map((m) => m.content)).toEqual(['hello', 'hi']);
   });
 
-  it('falls back to host order when the two views disagree', () => {
-    // Compaction: the host dropped a turn the webview still holds.
+  it('anchors local-only rows before the next matching host turn', () => {
+    // The host can omit or replace intermediate renderable turns.
     const local: AppMessage[] = [
       msg('user', 'one'),
       msg('assistant', 'two'),
@@ -90,8 +90,31 @@ describe('mergeSyncedMessages', () => {
     const rows: PersistedRow[] = [{ role: 'user', content: 'three' }];
 
     const merged = mergeSyncedMessages(local, rows);
-    expect(merged.map((m) => m.role)).toEqual(['user', 'tool']);
-    expect(merged[0]!.content).toBe('three');
+    expect(merged.map((m) => m.role)).toEqual(['tool', 'user']);
+    expect(merged[1]!.content).toBe('three');
+  });
+
+  it('keeps tool activity before the final report when an intermediate assistant turn is omitted', () => {
+    const local: AppMessage[] = [
+      msg('user', 'update the docs'),
+      msg('assistant', '', { reasoning: 'I will inspect the files first.' }),
+      msg('tool', 'read_file → docs/README.md', { toolName: 'read_file' }),
+      msg('tool', 'replace_in_file → docs/README.md', { toolName: 'replace_in_file' }),
+      msg('assistant', 'Docs updated.'),
+    ];
+    // Assistant tool-call turns may have no renderable content in the host
+    // view, but their tool activity must remain before the final response.
+    const rows: PersistedRow[] = [
+      { role: 'user', content: 'update the docs' },
+      { role: 'assistant', content: 'Docs updated.' },
+    ];
+
+    expect(mergeSyncedMessages(local, rows).map((m) => m.role)).toEqual([
+      'user',
+      'tool',
+      'tool',
+      'assistant',
+    ]);
   });
 
   it('preserves reasoning carried by the host', () => {

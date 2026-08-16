@@ -4,7 +4,9 @@ import type { BackendController } from '../backend/BackendController';
 import type { ForgeConfig, ModelConfig } from '../config/types';
 import type { HostToWebview } from './messageBridge';
 import type { ConversationRuntime } from './sessionTypes';
+import { computeContextBudget, estimateToolTokens, perSlotContext } from '../util/contextBudget';
 import { streamModelChatCompletion } from '../llm/ChatClient';
+import { countChatCompletionInputTokens } from '../llm/OpenAIClient';
 import { isCloudProvider } from '../llm/CloudProviders';
 import { resolveCloudRequestTarget } from '../llm/CloudRequestResolver';
 import type { ChatCompletionRequest } from '../llm/types';
@@ -84,7 +86,9 @@ export class AgentLoop {
   private readonly workspaceRoot: string;
   private readonly cliSessions: CliSessionRegistry;
   private promptRunCtrl: AbortController | null = null;
-  private onContextChanged?: (convId: string) => void;
+  private onContextChanged?: (convId: string, promptChanged: boolean) => void;
+  private onExactContextTokens?: (convId: string, usedTokens: number) => void;
+  private readonly exactTokenRequestVersions = new Map<string, number>();
 
   /**
    * Registers the mid-turn context-growth listener. A setter rather than an
@@ -93,8 +97,13 @@ export class AgentLoop {
    * response completes — never per token, because recomputing the budget walks
    * the whole transcript and serializes every tool definition.
    */
-  setContextChangedListener(listener: (convId: string) => void): void {
+  setContextChangedListener(listener: (convId: string, promptChanged: boolean) => void): void {
     this.onContextChanged = listener;
+  }
+
+  /** Receives llama-server's exact count for the fully rendered chat request. */
+  setExactContextTokensListener(listener: (convId: string, usedTokens: number) => void): void {
+    this.onExactContextTokens = listener;
   }
 
   get streaming(): boolean {
@@ -713,6 +722,14 @@ export class AgentLoop {
         `Forge: model "${activeModel.name}" does not expose a usable chat template. Prompt formatting may be mismatched.`,
       );
     }
+    const perSlot = perSlotContext(activeModel, config.llama_server);
+    const configuredMaxTokens = activeModel.sampling?.max_tokens;
+    if (perSlot > 0 && configuredMaxTokens !== undefined && configuredMaxTokens > perSlot) {
+      this.warnOnce(
+        `${activeModel.name}:max-tokens`,
+        `Forge: model "${activeModel.name}" sets max_tokens ${configuredMaxTokens}, above its ${perSlot}-token per-slot context. Forge will cap output at the room actually left in each turn.`,
+      );
+    }
     const toolDefinitions = budget.filterDefinitions(this.toolRegistry.definitions(allowed));
     const nativeTools = runtimeCaps?.likelySupportsTools !== false;
     if (toolDefinitions.length > 0 && !nativeTools) {
@@ -780,13 +797,16 @@ export class AgentLoop {
         );
         // A round of file reads and search results can add tens of thousands of
         // tokens. Report it now rather than at the end of the turn.
-        this.onContextChanged?.(conv.id);
+        this.onContextChanged?.(conv.id, true);
       },
       onToken: (text) => postC({ type: 'token', text }),
       onReasoning: (text) => postC({ type: 'reasoningToken', text }),
       onDone: (finishReason) => {
         postC({ type: 'done', finishReason });
-        this.onContextChanged?.(conv.id);
+        // The completed request's exact count remains the most faithful
+        // counterpart to llama-server's prompt-eval number. The final response
+        // itself becomes input only on the next request.
+        this.onContextChanged?.(conv.id, false);
       },
       onRepeatedCall: () =>
         postC({
@@ -799,6 +819,23 @@ export class AgentLoop {
           `${activeModel.name}:native-tool-json`,
           `Forge: llama-server rejected this model's native tool-call JSON. Retrying with Forge's JSON fallback tool format.`,
         ),
+      onPreparedRequest: (request) =>
+        this.requestExactContextTokens(baseUrl, activeModel, request, conv.id, ctrl.signal),
+      // A status line, not an error: the turn continues and the model is being
+      // asked for the same write in chunks.
+      onTruncatedToolCall: ({ toolName, approxBytes }) =>
+        postC({
+          type: 'toolActivity',
+          toolName: toolName ?? 'tool call',
+          detail: `output cut off after ${approxBytes} bytes — retrying in chunks`,
+        }),
+      getOutputRoom: (messages) =>
+        computeContextBudget({
+          messages,
+          toolTokens: estimateToolTokens(toolDefinitions),
+          model: activeModel,
+          server: config.llama_server,
+        }).outputRoom || undefined,
     });
   }
 
@@ -826,6 +863,37 @@ export class AgentLoop {
     if (!model || model.think !== false) return false;
     const config = this.getConfig();
     return (model.strip_thinking_channels ?? config.strip_thinking_channels) === true;
+  }
+
+  private requestExactContextTokens(
+    baseUrl: string,
+    model: ModelConfig,
+    request: ChatCompletionRequest,
+    convId: string,
+    signal: AbortSignal,
+  ): void {
+    if (!this.onExactContextTokens) return;
+    if (model.provider !== undefined && model.provider !== 'llama.cpp') return;
+    const version = (this.exactTokenRequestVersions.get(convId) ?? 0) + 1;
+    this.exactTokenRequestVersions.set(convId, version);
+    void countChatCompletionInputTokens(baseUrl, request, signal)
+      .then((usedTokens) => {
+        if (usedTokens === undefined) {
+          this.warnOnce(
+            `${model.name}:input-tokens`,
+            `Forge: llama-server for "${model.name}" does not support exact input-token counts; showing the local estimate instead.`,
+          );
+          return;
+        }
+        if (this.exactTokenRequestVersions.get(convId) !== version) return;
+        this.onExactContextTokens?.(convId, usedTokens);
+      })
+      .catch((err) => {
+        if (signal.aborted) return;
+        log.warn(
+          `[AgentLoop] exact input-token count failed for ${model.name}: ${(err as Error).message}`,
+        );
+      });
   }
 
   private warnOnce(key: string, message: string): void {

@@ -41,8 +41,10 @@ export function mkId(): string {
  * therefore kept *in position* by walking both lists together, rather than being
  * appended to the tail where their ordering would be lost.
  *
- * If the two views disagree on how many persisted rows exist (compaction, undo,
- * a restore), the host wins and local-only rows fall back to the tail.
+ * If the two views disagree (for example, an assistant tool-call turn is not
+ * renderable in the host view), local-only rows stay anchored before the next
+ * matching host turn. That keeps tool activity before the final report instead
+ * of moving it to the bottom after session reconciliation.
  */
 export function mergeSyncedMessages(local: AppMessage[], rows: PersistedRow[]): AppMessage[] {
   const persistedLocal = local.filter((m) => !LOCAL_ONLY_ROLES.has(m.role));
@@ -55,12 +57,66 @@ export function mergeSyncedMessages(local: AppMessage[], rows: PersistedRow[]): 
     reasoning: m.reasoning,
   }));
 
-  if (persistedLocal.length !== reconstructed.length) {
-    return [...reconstructed, ...local.filter((m) => LOCAL_ONLY_ROLES.has(m.role))];
+  // Match the local renderable rows to the authoritative host rows in order.
+  // The host can omit an assistant tool-call turn (content: null), so this is
+  // deliberately an ordered subsequence rather than a position-by-position map.
+  const localToHost = new Map<number, number>();
+  let hostCursor = 0;
+  for (let localIndex = 0; localIndex < local.length; localIndex++) {
+    const message = local[localIndex]!;
+    if (LOCAL_ONLY_ROLES.has(message.role)) continue;
+    const hostIndex = reconstructed.findIndex(
+      (host, index) => index >= hostCursor && sameRenderableMessage(message, host),
+    );
+    if (hostIndex < 0) continue;
+    localToHost.set(localIndex, hostIndex);
+    hostCursor = hostIndex + 1;
   }
 
-  let next = 0;
-  return local.map((m) => (LOCAL_ONLY_ROLES.has(m.role) ? m : reconstructed[next++]!));
+  const before = new Map<number, AppMessage[]>();
+  const after = new Map<number, AppMessage[]>();
+  for (let localIndex = 0; localIndex < local.length; localIndex++) {
+    const message = local[localIndex]!;
+    if (!LOCAL_ONLY_ROLES.has(message.role)) continue;
+    const nextHost = nearestMappedHost(localToHost, localIndex, 1, local.length);
+    if (nextHost !== undefined) {
+      appendRow(before, nextHost, message);
+      continue;
+    }
+    const previousHost = nearestMappedHost(localToHost, localIndex, -1, -1);
+    if (previousHost !== undefined) appendRow(after, previousHost, message);
+  }
+
+  return reconstructed.flatMap((message, index) => [
+    ...(before.get(index) ?? []),
+    message,
+    ...(after.get(index) ?? []),
+  ]);
+}
+
+function sameRenderableMessage(local: AppMessage, host: AppMessage): boolean {
+  return (
+    local.role === host.role && local.content === host.content && local.reasoning === host.reasoning
+  );
+}
+
+function nearestMappedHost(
+  mapped: ReadonlyMap<number, number>,
+  from: number,
+  step: 1 | -1,
+  stop: number,
+): number | undefined {
+  for (let index = from + step; index !== stop; index += step) {
+    const host = mapped.get(index);
+    if (host !== undefined) return host;
+  }
+  return undefined;
+}
+
+function appendRow(rows: Map<number, AppMessage[]>, index: number, message: AppMessage): void {
+  const existing = rows.get(index);
+  if (existing) existing.push(message);
+  else rows.set(index, [message]);
 }
 
 /** Index of the newest unresolved activity row for a tool, or -1. */

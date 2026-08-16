@@ -26,6 +26,7 @@ export interface SlashCommandDeps {
   getActiveConv: () => ConversationRuntime;
   persistSession: () => void;
   postSessionSync: () => void;
+  invalidateExactTokenBudget: () => void;
   postTokenBudget: () => void;
   runPromptToMarkdown: (text: string) => Promise<string>;
   isStreaming: () => boolean;
@@ -393,6 +394,7 @@ Be specific and factual. Do not invent paths or names not present in the scan re
     conv.updatedAt = Date.now();
     deps.persistSession();
     deps.postSessionSync();
+    deps.invalidateExactTokenBudget();
     deps.postTokenBudget();
     void vscode.window.showInformationMessage(
       'Forge: context compacted. Your chat history is unchanged.',

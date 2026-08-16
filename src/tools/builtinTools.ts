@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveWorkspacePath } from '../util/WorkspacePaths';
+import { CHUNKED_WRITE_ADVICE } from './writeChunking';
 
 export function makeReadFileTool(): RegisteredTool {
   return {
@@ -67,12 +68,16 @@ export function makeWriteFileTool(): RegisteredTool {
       function: {
         name: 'write_file',
         description:
-          'Write content to a file, creating it (and any missing directories) if needed.',
+          'Write content to a file, creating it (and any missing directories) if needed. ' +
+          `Overwrites any existing content. ${CHUNKED_WRITE_ADVICE}`,
         parameters: {
           type: 'object',
           properties: {
             path: { type: 'string', description: 'File path (absolute or workspace-relative).' },
-            content: { type: 'string', description: 'Complete file content to write.' },
+            content: {
+              type: 'string',
+              description: `File content to write. ${CHUNKED_WRITE_ADVICE}`,
+            },
           },
           required: ['path', 'content'],
           additionalProperties: false,
@@ -87,6 +92,44 @@ export function makeWriteFileTool(): RegisteredTool {
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
       fs.writeFileSync(filePath, content, 'utf8');
       return `Written ${filePath}`;
+    },
+  };
+}
+
+export function makeAppendFileTool(): RegisteredTool {
+  return {
+    definition: {
+      type: 'function',
+      function: {
+        name: 'append_file',
+        description:
+          'Append content to the end of a file, creating it (and any missing directories) ' +
+          `if it does not exist. Use this to build a large file across several calls: ${CHUNKED_WRITE_ADVICE}`,
+        parameters: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: 'File path (absolute or workspace-relative).' },
+            content: {
+              type: 'string',
+              description: 'Content to append verbatim. No separator is inserted.',
+            },
+          },
+          required: ['path', 'content'],
+          additionalProperties: false,
+        },
+      },
+    },
+    permission: 'write',
+    mutation: { paths: (args) => [args['path'] as string], showDiff: true },
+    handler: async (args) => {
+      const filePath = resolveWorkspacePath(args['path'] as string);
+      const content = args['content'] as string;
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      // appendFileSync creates the file when absent, so a chunked write can
+      // start with either tool.
+      fs.appendFileSync(filePath, content, 'utf8');
+      const total = fs.statSync(filePath).size;
+      return `Appended ${content.length} chars to ${filePath} (${total} bytes total)`;
     },
   };
 }

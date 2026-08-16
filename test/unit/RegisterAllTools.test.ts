@@ -21,6 +21,7 @@ const ALL_PERMISSIONS = new Set<ToolPermission>([
 ]);
 
 const EXPECTED_NATIVE_NAMES = [
+  'append_file',
   'apply_line_edits',
   'ask_local_agent',
   'ask_user',
@@ -106,7 +107,7 @@ function makeRegistry(options: { search?: boolean; delegation?: boolean } = {}):
 }
 
 describe('registerAllTools canonical coordinator catalog', () => {
-  it('exposes the exact 48-tool native catalog when all optional wiring is present', () => {
+  it('exposes the exact 49-tool native catalog when all optional wiring is present', () => {
     const registry = makeRegistry({ search: true, delegation: true });
     expect(registry.names().sort()).toEqual(EXPECTED_NATIVE_NAMES);
     expect(
@@ -123,6 +124,6 @@ describe('registerAllTools canonical coordinator catalog', () => {
     expect(names).not.toContain('ask_local_agent');
     expect(names).not.toContain('list_worker_models');
     expect(names).not.toContain('dispatch_workers');
-    expect(names).toHaveLength(44);
+    expect(names).toHaveLength(45);
   });
 });

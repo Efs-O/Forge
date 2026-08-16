@@ -23,8 +23,8 @@ import {
   slimMessagesById,
   tabMetasFromSession,
 } from './sessionTypes';
-import type { ChatMessage } from '../llm/types';
 import type { AttachmentData } from './messageBridge';
+import { computeContextBudget, estimateToolTokens, perSlotContext } from '../util/contextBudget';
 import { CheckpointStack } from '../checkpoint/CheckpointStack';
 import { ToolRegistry } from '../tools/ToolRegistry';
 import { resolveToolPermissions } from '../tools/PermissionResolver';
@@ -40,6 +40,7 @@ import { AgentLoop } from './AgentLoop';
 import type { SidebarProviderEvents } from './AgentLoop';
 import { SessionLogger } from './SessionLogger';
 import { SlashCommandHandler } from './SlashCommandHandler';
+import { applyCompactionWindow } from './compactionWindow';
 import {
   opNewConversation,
   opSwitchConversation,
@@ -57,23 +58,6 @@ const log = getLogger();
 
 /** Minimum gap between mid-turn context recomputations. */
 const CONTEXT_TICK_THROTTLE_MS = 500;
-
-function estimateTokens(messages: ChatMessage[]): number {
-  return messages.reduce((sum, m) => {
-    let chars = 0;
-    if (typeof m.content === 'string') {
-      chars += m.content.length;
-    } else if (Array.isArray(m.content)) {
-      for (const part of m.content) {
-        if (part.type === 'text') chars += part.text.length;
-      }
-    } else if (m.content === null && m.tool_calls?.length) {
-      chars += JSON.stringify(m.tool_calls).length;
-    }
-    if (m.reasoning) chars += m.reasoning.length;
-    return sum + Math.ceil(chars / 4);
-  }, 0);
-}
 
 function writeForgeBridge(model: string, usedTokens: number, maxTokens: number): void {
   try {
@@ -105,6 +89,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private lastContextTickAt = 0;
   private contextTickTimer: ReturnType<typeof setTimeout> | undefined;
   private pendingContextTickConvId: string | undefined;
+  private readonly exactContextTokens = new Map<string, number>();
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -148,7 +133,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (savedClanker) this.agentLoop.setClankerMode(true);
     // Keeps the ctx bar and the HalluMeter bridge live during a turn instead of
     // frozen until it ends. Fired once per tool round, never per token.
-    this.agentLoop.setContextChangedListener((convId) => this.onTurnContextChanged(convId));
+    this.agentLoop.setContextChangedListener((convId, promptChanged) =>
+      this.onTurnContextChanged(convId, promptChanged),
+    );
+    this.agentLoop.setExactContextTokensListener((convId, usedTokens) =>
+      this.publishExactContextTokens(convId, usedTokens),
+    );
 
     this.slashHandler = new SlashCommandHandler({
       getConfig: () => this.config,
@@ -164,6 +154,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       getActiveConv: () => this.getActive(),
       persistSession: () => this.persistSession(),
       postSessionSync: () => this.postSessionSync(),
+      invalidateExactTokenBudget: () => this.exactContextTokens.delete(this.getActive().id),
       postTokenBudget: () => this.postTokenBudget(),
       runPromptToMarkdown: (text) => this.agentLoop.runPromptToMarkdown(text),
       isStreaming: () => this.agentLoop.streaming,
@@ -373,13 +364,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   /**
    * Mid-turn tick from AgentLoop, throttled leading+trailing.
    *
-   * `computeAndPublishBudget` walks the whole transcript, serializes every tool
-   * definition, and then writes the HalluMeter bridge with a synchronous
+   * `computeAndPublishBudget` walks the model's compacted context window,
+   * serializes every tool definition, and then writes the HalluMeter bridge with a synchronous
    * `writeFileSync`. A round of parallel tool calls can fire this several times
    * in a few milliseconds, and doing all of that on the extension host thread
    * each time would stall the UI it is meant to keep current.
    */
-  private onTurnContextChanged(convId: string): void {
+  private onTurnContextChanged(convId: string, promptChanged: boolean): void {
+    // A tool result changed the prompt. Show the estimate until the next exact
+    // llama-server count arrives for that newly prepared request.
+    if (promptChanged) this.exactContextTokens.delete(convId);
     const elapsed = Date.now() - this.lastContextTickAt;
     if (elapsed >= CONTEXT_TICK_THROTTLE_MS) {
       this.lastContextTickAt = Date.now();
@@ -424,12 +418,21 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     // reading the raw entry yielded 0 — silently disabling the budget and the
     // HalluMeter bridge for every such model.
     const activeModel = rawModel ? mergeGroupsIntoModel(this.config, rawModel) : undefined;
-    const msgTokens = estimateTokens(conv.messages);
     const allowed = resolveToolPermissions(this.config);
-    const toolTokens = Math.ceil(JSON.stringify(this.toolRegistry.definitions(allowed)).length / 4);
-    const SYSTEM_AND_TEMPLATE_OVERHEAD = 200;
-    const used = msgTokens + toolTokens + SYSTEM_AND_TEMPLATE_OVERHEAD;
-    const max = activeModel?.spawn?.num_ctx ?? activeModel?.num_ctx ?? 0;
+    // `max` is now the PER-SLOT window: --ctx-size is the total and --parallel
+    // divides it, so every n_parallel > 1 model used to report several times
+    // the context it actually had, here and on the HalluMeter bridge.
+    const estimated = computeContextBudget({
+      // The retained transcript is for sidebar scrollback and persistence;
+      // account for exactly the compacted window that AgentLoop sends to the
+      // model. This value also drives the HalluMeter bridge.
+      messages: applyCompactionWindow(conv.messages, conv.compaction),
+      toolTokens: estimateToolTokens(this.toolRegistry.definitions(allowed)),
+      model: activeModel,
+      server: this.config.llama_server,
+    });
+    const used = this.exactContextTokens.get(conv.id) ?? estimated.used;
+    const { max } = estimated;
     this.post({ type: 'tokenBudget', used, max });
     if (activeSelection && max > 0) {
       // Write the BASE name, not the raw selection: an `@profile` suffix would
@@ -468,6 +471,21 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  private publishExactContextTokens(convId: string, usedTokens: number): void {
+    const conv = this.sidebar.conversations.find((candidate) => candidate.id === convId);
+    if (!conv || conv.id !== this.sidebar.activeConversationId) return;
+    const activeSelection = conv.active_model ?? this.config.active_model;
+    const activeBase = this.baseOf(activeSelection);
+    const rawModel = this.config.models.find((model) => model.name === activeBase);
+    const activeModel = rawModel ? mergeGroupsIntoModel(this.config, rawModel) : undefined;
+    const max = activeModel ? perSlotContext(activeModel, this.config.llama_server) : 0;
+    this.exactContextTokens.set(convId, usedTokens);
+    this.post({ type: 'tokenBudget', used: usedTokens, max });
+    if (activeSelection && max > 0) {
+      writeForgeBridge(activeBase ?? activeSelection, usedTokens, max);
+    }
+  }
+
   private getActive(): ConversationRuntime {
     let conv = this.sidebar.conversations.find((c) => c.id === this.sidebar.activeConversationId);
     if (!conv && this.sidebar.conversations.length > 0) {
@@ -484,7 +502,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private clearActiveMessages(): void {
     if (this.agentLoop.streaming) return;
-    opClearMessages(this.getActive());
+    const conv = this.getActive();
+    opClearMessages(conv);
+    this.exactContextTokens.delete(conv.id);
     this.failureTracker.reset();
     this.persistSession();
     this.postSessionSync();
