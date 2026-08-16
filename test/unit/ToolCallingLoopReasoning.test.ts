@@ -13,6 +13,7 @@ interface Handlers {
   onReasoning: (t: string) => void;
   onDone: (finishReason: string | null) => void;
   onToolCalls: (calls: ToolCall[]) => void;
+  onUsage?: (usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number }) => void;
 }
 
 const CALL: ToolCall = {
@@ -104,25 +105,30 @@ describe('ToolCallingLoop reasoning retention', () => {
     expect('reasoning' in toolTurn).toBe(false);
   });
 
-  it('reports the normalized request before each model call', async () => {
+  it('requests and forwards the provider usage for each model call', async () => {
     streamModelChatCompletion.mockImplementation(
       async (_url: string, _req: unknown, _model: unknown, h: Handlers) => {
+        h.onUsage?.({ prompt_tokens: 123, completion_tokens: 4, total_tokens: 127 });
         h.onToken('done');
         h.onDone('stop');
       },
     );
-    const onPreparedRequest = vi.fn();
+    const onUsage = vi.fn();
 
     await runToolCallingLoop({
       ...runOptions([{ role: 'user', content: 'go' }]),
-      onPreparedRequest,
+      includeUsage: true,
+      onUsage,
     } as never);
 
-    expect(onPreparedRequest).toHaveBeenCalledWith(
-      expect.objectContaining({
-        messages: [{ role: 'user', content: 'go' }],
-        tools: expect.any(Array),
-      }),
-    );
+    const request = streamModelChatCompletion.mock.calls[0]![1] as {
+      messages: ChatMessage[];
+      tools: unknown[];
+      stream_options?: { include_usage?: boolean };
+    };
+    expect(request.messages).toEqual([{ role: 'user', content: 'go' }]);
+    expect(request.tools).toEqual(expect.any(Array));
+    expect(request.stream_options).toEqual({ include_usage: true });
+    expect(onUsage).toHaveBeenCalledWith({ prompt_tokens: 123, completion_tokens: 4, total_tokens: 127 });
   });
 });

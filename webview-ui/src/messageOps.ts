@@ -26,7 +26,7 @@ export type PersistedRow = {
  * Roles the host never persists. They are reconciled positionally on
  * SESSION_SYNC so a finished turn keeps showing the work it did.
  */
-export const LOCAL_ONLY_ROLES = new Set<AppMessage['role']>(['tool', 'diff', 'error']);
+export const LOCAL_ONLY_ROLES = new Set<AppMessage['role']>(['tool', 'diff', 'error', 'system']);
 
 export function mkId(): string {
   return Math.random().toString(36).slice(2);

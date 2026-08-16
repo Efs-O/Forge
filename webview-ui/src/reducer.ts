@@ -101,6 +101,11 @@ export function reducer(state: State, action: Action): State {
       return appendToConv(state, cid, { id: mkId(), role: 'assistant', content: action.text });
     }
 
+    case 'NOTICE': {
+      const cid = resolveConvId(state, action.convId);
+      return appendToConv(state, cid, { id: mkId(), role: 'system', content: action.message });
+    }
+
     case 'REASONING_TOKEN': {
       const cid = resolveConvId(state, action.convId);
       const existing = state.messagesById[cid] ?? [];

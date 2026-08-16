@@ -1,5 +1,6 @@
 import type { ModelConfig } from '../config/types';
 import { streamModelChatCompletion } from '../llm/ChatClient';
+import type { UsageHandler } from '../llm/OpenAIClient';
 import { HtmlDocumentBoilerplateStripper } from '../llm/HtmlDocumentBoilerplateStripper';
 import { normalizeRequestForModel } from '../llm/RequestNormalizer';
 import { mergeSampling } from '../llm/SamplingMerge';
@@ -44,8 +45,9 @@ export interface ToolCallingLoopOptions {
   onDone?: (finishReason: string | null) => void;
   onRepeatedCall?: () => void;
   onNativeFallback?: () => void;
-  /** Fired with the fully normalized request immediately before it is sent. */
-  onPreparedRequest?: (request: ChatCompletionRequest) => void;
+  /** Request the provider's exact execution-side usage in the final stream frame. */
+  includeUsage?: boolean;
+  onUsage?: UsageHandler;
   /** Fired when a tool call was cut off and the loop is asking for it in chunks. */
   onTruncatedToolCall?: (info: { toolName: string | undefined; approxBytes: number }) => void;
   /**
@@ -171,6 +173,7 @@ async function streamOnce(
         onToolCalls: (calls) => {
           capturedToolCalls = calls;
         },
+        ...(options.onUsage ? { onUsage: options.onUsage } : {}),
       },
       options.signal,
       options.apiKey,
@@ -223,6 +226,7 @@ export async function runToolCallingLoop(
       model: options.model.name,
       messages: nativeDefinitions.length > 0 ? prepared : fallbackMessages,
       stream: true,
+      ...(options.includeUsage ? { stream_options: { include_usage: true } } : {}),
       ...(options.maxOutputTokens !== undefined ? { max_tokens: options.maxOutputTokens } : {}),
       ...(nativeDefinitions.length > 0 ? { tools: nativeDefinitions } : {}),
       ...(options.canUseThinkingKwargs && (options.model.think !== undefined || suppressThinking)
@@ -246,8 +250,6 @@ export async function runToolCallingLoop(
       options.stripAllTools ? stripTools(merged) : merged,
       options.model,
     );
-    options.onPreparedRequest?.(request);
-
     let rawAssistant = '';
     let rawReasoning = '';
     let thinking = options.stripThinkingChannels ? new ThinkingChannelStripper() : null;

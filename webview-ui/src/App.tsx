@@ -59,6 +59,9 @@ export function App(): React.ReactElement {
         case 'token':
           dispatch({ type: 'TOKEN', text: msg.text, convId: msg.conversationId });
           break;
+        case 'notice':
+          dispatch({ type: 'NOTICE', message: msg.message, convId: msg.conversationId });
+          break;
         case 'reasoningToken':
           dispatch({ type: 'REASONING_TOKEN', text: msg.text, convId: msg.conversationId });
           break;

@@ -86,6 +86,32 @@ describe('OpenAIClient truncation handling', () => {
     expect(h.onToolCalls).toHaveBeenCalledOnce();
   });
 
+  it('reads final usage after the terminal choice before settling the stream', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        sseResponse([
+          chunk({ content: 'done' }, 'stop'),
+          `data: ${JSON.stringify({
+            id: 'x',
+            object: 'chat.completion.chunk',
+            choices: [],
+            usage: { prompt_tokens: 36704, completion_tokens: 209, total_tokens: 36913 },
+          })}`,
+          'data: [DONE]',
+        ]),
+      ),
+    );
+    const h = { ...handlers(), onUsage: vi.fn() };
+    await streamChatCompletion('http://x', request, h);
+    expect(h.onUsage).toHaveBeenCalledWith({
+      prompt_tokens: 36704,
+      completion_tokens: 209,
+      total_tokens: 36913,
+    });
+    expect(h.onDone).toHaveBeenCalledWith('stop');
+  });
+
   it('surfaces a mid-stream error frame instead of ending in silence', async () => {
     vi.stubGlobal(
       'fetch',

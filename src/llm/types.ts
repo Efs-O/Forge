@@ -48,6 +48,12 @@ export interface StreamChunk {
     delta: ChatDelta;
     finish_reason: string | null;
   }>;
+  /** Present in the final stream frame when stream_options.include_usage is enabled. */
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
 }
 
 export interface ChatCompletionRequest {
@@ -69,6 +75,7 @@ export interface ChatCompletionRequest {
   reasoning_effort?: 'high' | 'medium' | 'low' | 'none';
   tools?: ToolDefinition[];
   chat_template_kwargs?: Record<string, unknown>;
+  stream_options?: { include_usage?: boolean };
 }
 
 export interface ToolDefinition {

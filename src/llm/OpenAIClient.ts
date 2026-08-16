@@ -14,36 +14,7 @@ export type ReasoningHandler = (token: string) => void;
 export type DoneHandler = (finishReason: string | null) => void;
 export type ErrorHandler = (err: Error) => void;
 export type ToolCallsHandler = (calls: ToolCall[]) => void;
-
-/**
- * Count an exact llama-server chat prompt after its template and tool schema
- * rendering. Returns undefined only when this server build does not expose the
- * optional token-count endpoint.
- */
-export async function countChatCompletionInputTokens(
-  baseUrl: string,
-  request: ChatCompletionRequest,
-  signal?: AbortSignal,
-): Promise<number | undefined> {
-  const response = await fetch(`${baseUrl}/v1/chat/completions/input_tokens`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
-    signal: signal ?? null,
-  });
-  if (response.status === 404 || response.status === 405 || response.status === 501) {
-    return undefined;
-  }
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(`HTTP ${response.status}: ${body}`);
-  }
-  const payload = (await response.json()) as { input_tokens?: unknown };
-  if (typeof payload.input_tokens !== 'number' || !Number.isFinite(payload.input_tokens)) {
-    throw new Error('llama-server returned an invalid input_tokens response.');
-  }
-  return payload.input_tokens;
-}
+export type UsageHandler = (usage: NonNullable<StreamChunk['usage']>) => void;
 
 export interface StreamHandlers {
   onToken: TokenHandler;
@@ -52,6 +23,8 @@ export interface StreamHandlers {
   onError: ErrorHandler;
   /** Fired before onDone when streamed tool deltas completed (finish_reason tool_calls or stop). */
   onToolCalls?: ToolCallsHandler;
+  /** Exact usage emitted by servers when stream_options.include_usage is enabled. */
+  onUsage?: UsageHandler;
 }
 
 /** Some servers (including some Ollama OpenAI-compat paths) emit `finish_reason: ""` on interim chunks — must not terminate the stream. */
@@ -129,10 +102,14 @@ export async function streamChatCompletion(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let terminalFinishReason: string | null = null;
+  let toolCallsFlushed = false;
   // key = index, accumulates partial tool call fragments
   const toolAccum = new Map<number, { id: string; name: string; arguments: string }>();
 
   const flushAccumulatedToolCalls = (): void => {
+    if (toolCallsFlushed) return;
+    toolCallsFlushed = true;
     if (!handlers.onToolCalls || toolAccum.size === 0) return;
     const calls: ToolCall[] = [...toolAccum.entries()]
       .sort(([a], [b]) => a - b)
@@ -166,7 +143,7 @@ export async function streamChatCompletion(
           // Some backends (notably Ollama OpenAI-compat) end streams here without a prior
           // finish_reason chunk carrying tool_calls — flush any accumulated deltas first.
           flushAccumulatedToolCalls();
-          handlers.onDone(null);
+          handlers.onDone(terminalFinishReason);
           return;
         }
 
@@ -196,6 +173,16 @@ export async function streamChatCompletion(
             handlers.onError(new Error(detail));
           }
           return;
+        }
+
+        const usage = chunk.usage;
+        if (
+          usage &&
+          Number.isFinite(usage.prompt_tokens) &&
+          Number.isFinite(usage.completion_tokens) &&
+          Number.isFinite(usage.total_tokens)
+        ) {
+          handlers.onUsage?.(usage);
         }
 
         const choice = chunk.choices?.[0];
@@ -257,15 +244,14 @@ export async function streamChatCompletion(
           // were streamed (OpenAI-style servers usually send "tool_calls"). Flush whenever we
           // have accumulated tool deltas so Forge can still dispatch native tools.
           flushAccumulatedToolCalls();
-          handlers.onDone(choice.finish_reason);
-          return;
+          terminalFinishReason = choice.finish_reason;
         }
       }
     }
     // Stream ended without [DONE] or a terminal finish_reason (server crash or
     // dropped connection) — settle anyway so the agent loop never hangs.
     flushAccumulatedToolCalls();
-    handlers.onDone(null);
+    handlers.onDone(terminalFinishReason);
   } catch (err) {
     if ((err as Error)?.name === 'AbortError') {
       handlers.onDone('cancelled');

@@ -362,6 +362,11 @@ Be specific and factual. Do not invent paths or names not present in the scan re
       );
       return;
     }
+    deps.post({
+      type: 'notice',
+      message: 'Compacting conversation…',
+      conversationId: conv.id,
+    });
     const previous = conv.compaction ? `EARLIER SUMMARY:\n${conv.compaction.summary}\n\n` : '';
     const transcript =
       previous +
@@ -396,6 +401,11 @@ Be specific and factual. Do not invent paths or names not present in the scan re
     deps.postSessionSync();
     deps.invalidateExactTokenBudget();
     deps.postTokenBudget();
+    deps.post({
+      type: 'notice',
+      message: 'Conversation compacted. Chat history is unchanged.',
+      conversationId: conv.id,
+    });
     void vscode.window.showInformationMessage(
       'Forge: context compacted. Your chat history is unchanged.',
     );

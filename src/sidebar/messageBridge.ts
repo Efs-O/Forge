@@ -41,6 +41,12 @@ export interface TokenMsg {
   text: string;
   conversationId?: string;
 }
+/** A non-model status row displayed in the conversation. */
+export interface NoticeMsg {
+  type: 'notice';
+  message: string;
+  conversationId?: string;
+}
 export interface ReasoningTokenMsg {
   type: 'reasoningToken';
   text: string;
@@ -211,6 +217,7 @@ export interface SessionSyncMsg {
 
 export type HostToWebview =
   | TokenMsg
+  | NoticeMsg
   | ReasoningTokenMsg
   | GenerationStartedMsg
   | DoneMsg
