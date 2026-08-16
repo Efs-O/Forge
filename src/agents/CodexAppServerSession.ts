@@ -7,26 +7,14 @@ import type {
   CliAgentSessionState,
 } from './CliAgentSession';
 import type { CliAgentRunResult } from './types';
-
-interface PendingRequest {
-  method: string;
-  resolve(value: unknown): void;
-  reject(error: Error): void;
-}
-
-interface ActiveTurn {
-  text: string;
-  /** Text already received per app-server agent-message item. */
-  readonly agentMessageText: Map<string, string>;
-  sawCommandExecution: boolean;
-  turnId?: string;
-  interrupted: boolean;
-  interruptSent: boolean;
-  resolve(result: CliAgentRunResult): void;
-  signal?: AbortSignal;
-  onAbort(): void;
-  onEvent?: CliAgentSessionSendOptions['onEvent'];
-}
+import { JsonRpcPending, routeJsonRpcLine } from './jsonRpcStdio';
+import { codexAppServerArgs, codexThreadStartParams } from './codexAppServerArgs';
+import {
+  appendAgentText,
+  captureCompletedAgentMessage,
+  captureTerminalTurnMessages,
+  type ActiveTurn,
+} from './codexTurnText';
 
 /** Warm Codex `app-server --stdio` JSON-RPC session. */
 export class CodexAppServerSession {
@@ -35,8 +23,7 @@ export class CodexAppServerSession {
   private input: readline.Interface | undefined;
   private active: ActiveTurn | undefined;
   private threadId: string | undefined;
-  private nextId = 1;
-  private readonly pending = new Map<number, PendingRequest>();
+  private readonly pending = new JsonRpcPending();
   private startPromise: Promise<void> | undefined;
 
   constructor(private readonly options: CliAgentSessionOptions) {
@@ -101,22 +88,7 @@ export class CodexAppServerSession {
   private async start(): Promise<void> {
     const child = spawnCliProcess({
       executable: this.options.executable,
-      args: [
-        ...(this.options.argsPrefix ?? []),
-        'app-server',
-        '--stdio',
-        '-c',
-        'analytics.enabled=false',
-        // Apply the policy to the Forge-owned app-server process as well as the
-        // thread. This prevents a persisted local Codex setting from widening
-        // a Forge chat beyond its workspace boundary.
-        '-c',
-        'sandbox_mode="workspace-write"',
-        '-c',
-        'approval_policy="untrusted"',
-        '-c',
-        'sandbox_workspace_write.network_access=false',
-      ],
+      args: codexAppServerArgs(this.options),
       cwd: this.options.cwd,
       stdin: 'pipe',
     });
@@ -142,22 +114,18 @@ export class CodexAppServerSession {
       const result = await this.request('thread/resume', { threadId: this.threadId });
       this.validateThreadResult(result, 'thread/resume');
     } else {
-      const result = await this.request('thread/start', {
-        cwd: this.options.cwd,
-        approvalPolicy: 'untrusted',
-        sandbox: 'workspace-write',
-        ephemeral: false,
-        ...(this.options.model ? { model: this.options.model } : {}),
-      });
+      const result = await this.request(
+        'thread/start',
+        codexThreadStartParams(this.options.cwd, this.options.model),
+      );
       this.threadId = this.validateThreadResult(result, 'thread/start');
     }
     this.currentState = 'idle';
   }
 
   private request(method: string, params: object): Promise<unknown> {
-    const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { method, resolve, reject });
+      const id = this.pending.open(method, resolve, reject);
       this.write({ id, method, params });
     });
   }
@@ -171,51 +139,21 @@ export class CodexAppServerSession {
       void this.failProtocol('Codex app-server stdin is unavailable.');
       return;
     }
-    this.child.stdin.write(`${JSON.stringify(message)}\n`, (error) => {
-      if (error) void this.failProtocol(`Codex app-server write failed: ${error.message}`);
-    });
+    this.child.stdin.write(
+      `${JSON.stringify(message)}
+`,
+      (error) => {
+        if (error) void this.failProtocol(`Codex app-server write failed: ${error.message}`);
+      },
+    );
   }
 
   private handleLine(line: string): void {
-    let message: unknown;
-    try {
-      message = JSON.parse(line);
-    } catch {
-      void this.failProtocol('Codex app-server emitted malformed JSON.');
-      return;
-    }
-    if (!message || typeof message !== 'object') {
-      void this.failProtocol('Codex app-server emitted a non-object message.');
-      return;
-    }
-    const value = message as Record<string, unknown>;
-    if (typeof value['id'] === 'number' && typeof value['method'] === 'string') {
-      this.handleServerRequest(value['id'], value['method'], value['params']);
-      return;
-    }
-    if (typeof value['id'] === 'number') {
-      this.handleResponse(value['id'], value);
-      return;
-    }
-    if (typeof value['method'] === 'string') {
-      this.handleNotification(value['method'], value['params']);
-      return;
-    }
-    void this.failProtocol('Codex app-server emitted an uncorrelated message.');
-  }
-
-  private handleResponse(id: number, message: Record<string, unknown>): void {
-    const pending = this.pending.get(id);
-    if (!pending) {
-      void this.failProtocol(`Codex app-server response ${id} has no matching request.`);
-      return;
-    }
-    this.pending.delete(id);
-    if (message['error']) {
-      pending.reject(new Error(`${pending.method} failed: ${JSON.stringify(message['error'])}`));
-    } else {
-      pending.resolve(message['result']);
-    }
+    routeJsonRpcLine(line, this.pending, {
+      onRequest: (id, method, params) => this.handleServerRequest(id, method, params),
+      onNotification: (method, params) => this.handleNotification(method, params),
+      onProtocolError: (message) => void this.failProtocol(message),
+    });
   }
 
   /**
@@ -273,11 +211,7 @@ export class CodexAppServerSession {
         return;
       }
       const itemId = params['itemId'];
-      this.appendAgentText(
-        active,
-        typeof itemId === 'string' ? itemId : undefined,
-        params['delta'],
-      );
+      appendAgentText(active, typeof itemId === 'string' ? itemId : undefined, params['delta']);
       return;
     }
     if (method === 'item/started') {
@@ -289,48 +223,10 @@ export class CodexAppServerSession {
       return;
     }
     if (method === 'item/completed') {
-      this.captureCompletedAgentMessage(active, params);
+      captureCompletedAgentMessage(active, params);
       return;
     }
     if (method === 'turn/completed') void this.finishFromTerminal(params);
-  }
-
-  private appendAgentText(active: ActiveTurn, itemId: string | undefined, text: string): void {
-    if (!text) return;
-    active.text += text;
-    if (itemId) {
-      active.agentMessageText.set(itemId, `${active.agentMessageText.get(itemId) ?? ''}${text}`);
-    }
-    active.onEvent?.({ kind: 'text', text });
-  }
-
-  /**
-   * Recent Codex app-server versions may deliver an assistant's final message
-   * only in item/completed, after the command item. Capture its unstreamed
-   * suffix without duplicating text that arrived through delta notifications.
-   */
-  private captureCompletedAgentMessage(active: ActiveTurn, params: Record<string, unknown>): void {
-    const item = params['item'];
-    const record = item && typeof item === 'object' ? (item as Record<string, unknown>) : undefined;
-    if (!record) return;
-    this.captureAgentMessage(active, record);
-  }
-
-  private captureAgentMessage(active: ActiveTurn, record: Record<string, unknown>): void {
-    if (record['type'] !== 'agentMessage' || typeof record['text'] !== 'string') return;
-    const itemId = typeof record['id'] === 'string' ? record['id'] : undefined;
-    const completed = record['text'];
-    const streamed = itemId ? active.agentMessageText.get(itemId) : undefined;
-    if (streamed !== undefined && completed.startsWith(streamed)) {
-      this.appendAgentText(active, itemId, completed.slice(streamed.length));
-      return;
-    }
-    // Some app-server builds omit or change the delta's item id. Do not treat
-    // an empty per-item buffer as a full-prefix match: completed.startsWith('')
-    // is always true and would append the already streamed reply a second time.
-    if (active.text.includes(completed)) return;
-    const overlap = trailingPrefixOverlap(active.text, completed);
-    this.appendAgentText(active, itemId, completed.slice(overlap));
   }
 
   private captureTurnId(result: unknown): void {
@@ -377,7 +273,7 @@ export class CodexAppServerSession {
           threadId: this.threadId,
           includeTurns: true,
         });
-        this.captureTerminalTurnMessages(active, result);
+        captureTerminalTurnMessages(active, result);
       } catch {
         // The streamed response remains usable if the optional history read fails.
       }
@@ -394,32 +290,6 @@ export class CodexAppServerSession {
         : {}),
       ...(this.threadId ? { sessionId: this.threadId } : {}),
     });
-  }
-
-  /**
-   * Some app-server builds omit item/completed for the final message after a
-   * command. The completed turn history is the authoritative fallback.
-   */
-  private captureTerminalTurnMessages(active: ActiveTurn, result: unknown): void {
-    const root =
-      result && typeof result === 'object' ? (result as Record<string, unknown>) : undefined;
-    const thread = root?.['thread'];
-    const threadRecord =
-      thread && typeof thread === 'object' ? (thread as Record<string, unknown>) : undefined;
-    const turns = threadRecord?.['turns'];
-    if (!Array.isArray(turns)) return;
-    const turn = turns.find(
-      (value) =>
-        value &&
-        typeof value === 'object' &&
-        (value as Record<string, unknown>)['id'] === active.turnId,
-    ) as Record<string, unknown> | undefined;
-    const items = turn?.['items'];
-    if (!Array.isArray(items)) return;
-    for (const item of items) {
-      if (!item || typeof item !== 'object') continue;
-      this.captureAgentMessage(active, item as Record<string, unknown>);
-    }
   }
 
   private validateThreadResult(result: unknown, method: string): string {
@@ -444,8 +314,7 @@ export class CodexAppServerSession {
     this.startPromise = undefined;
     this.input?.close();
     this.input = undefined;
-    for (const pending of this.pending.values()) pending.reject(new Error(message));
-    this.pending.clear();
+    this.pending.rejectAll(new Error(message));
     const active = this.active;
     if (active) {
       this.clearActive(active);
@@ -464,13 +333,4 @@ export class CodexAppServerSession {
     active.signal?.removeEventListener('abort', active.onAbort);
     if (this.active === active) this.active = undefined;
   }
-}
-
-/** Length of the longest suffix of `existing` that is a prefix of `next`. */
-function trailingPrefixOverlap(existing: string, next: string): number {
-  const limit = Math.min(existing.length, next.length);
-  for (let length = limit; length > 0; length -= 1) {
-    if (existing.endsWith(next.slice(0, length))) return length;
-  }
-  return 0;
 }
