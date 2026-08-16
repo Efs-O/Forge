@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ForgeConfig } from '../../src/config/types';
 import {
   makeDispatchWorkersTool,
@@ -64,6 +64,32 @@ describe('worker tool registry enforcement', () => {
       ),
     ) as Record<string, unknown>;
     expect(result).toMatchObject({ runId: 'run-1', status: 'completed' });
+  });
+
+  it('rejects write access for one-shot CLI workers before they are launched', async () => {
+    const config: ForgeConfig = {
+      active_model: 'codex',
+      llama_server: {},
+      models: [{ name: 'codex', provider: 'cli', cli: 'codex' }],
+    };
+    const runWorkers = vi.fn();
+    await expect(
+      makeDispatchWorkersTool(() => config).handler(
+        {
+          workers: [
+            {
+              id: 'writer',
+              model: 'codex',
+              task: 'change a file',
+              access: 'write',
+              allowed_paths: ['src/example.ts'],
+            },
+          ],
+        },
+        { beforeMutate: () => undefined, runWorkers },
+      ),
+    ).rejects.toThrow('cannot receive write access yet');
+    expect(runWorkers).not.toHaveBeenCalled();
   });
 
   it('lists exact eligible worker models without sensitive config fields', async () => {

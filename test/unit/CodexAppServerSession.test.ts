@@ -59,16 +59,59 @@ describe('CodexAppServerSession', () => {
     await current.dispose();
   });
 
-  it('enforces full access for the Forge-owned app-server process', async () => {
+  it('enforces workspace-write access for the Forge-owned app-server process', async () => {
     const current = new CodexAppServerSession({
       cliName: 'codex',
       executable: process.execPath,
-      argsPrefix: [fixture, 'REQUIRE_FORGE_FULL_ACCESS'],
+      argsPrefix: [
+        fixture,
+        'REQUIRE_FORGE_WORKSPACE_WRITE',
+        'REQUIRE_FORGE_UNTRUSTED_APPROVAL',
+      ],
       access: 'full',
       cwd: process.cwd(),
     });
     const result = await current.send('verify global sandbox policy');
     expect(result.status).toBe('completed');
+    await current.dispose();
+  });
+
+  it('automatically allows ordinary workspace commands through the approval channel', async () => {
+    const current = session();
+    const statuses: string[] = [];
+    const result = await current.send('TRIGGER_COMMAND_APPROVAL', {
+      onEvent: (event) => {
+        if (event.kind === 'status') statuses.push(event.text);
+      },
+    });
+    expect(result.finalText).toBe('Approval accept');
+    expect(statuses).toContain('[codex policy: allowed workspace command]');
+    await current.dispose();
+  });
+
+  it('automatically denies dangerous commands through the approval channel', async () => {
+    const current = session();
+    const statuses: string[] = [];
+    const result = await current.send('TRIGGER_COMMAND_APPROVAL TRIGGER_DANGEROUS_APPROVAL', {
+      onEvent: (event) => {
+        if (event.kind === 'status') statuses.push(event.text);
+      },
+    });
+    expect(result.finalText).toBe('Approval decline');
+    expect(statuses.some((status) => status.startsWith('[codex policy: denied command:'))).toBe(true);
+    await current.dispose();
+  });
+
+  it('automatically denies network-expansion requests through the command channel', async () => {
+    const current = session();
+    const statuses: string[] = [];
+    const result = await current.send('TRIGGER_NETWORK_APPROVAL', {
+      onEvent: (event) => {
+        if (event.kind === 'status') statuses.push(event.text);
+      },
+    });
+    expect(result.finalText).toBe('Approval decline');
+    expect(statuses).toContain('[codex policy: denied sandbox or network expansion]');
     await current.dispose();
   });
 

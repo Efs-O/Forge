@@ -14,7 +14,7 @@ import {
   makeCreateDirectoryTool,
   makeDeleteFileTool,
   makeMoveFileTool,
-  makeReplaceInFileTool,
+  makeEditFileTool,
 } from '../../src/tools/fileEditTools';
 import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
 
@@ -50,7 +50,7 @@ describe('isolated file and directory tool execution', () => {
     await expect(makeListDirectoryTool().handler({ path: 'work' })).resolves.toContain(
       '[file] source.txt',
     );
-    await makeReplaceInFileTool().handler({
+    await makeEditFileTool().handler({
       filepath: 'work/source.txt',
       old_str: 'alpha',
       new_str: 'first',

@@ -21,7 +21,7 @@ const WORKER_READ_TOOL_NAMES = [
   'get_document_symbols',
   'get_diagnostics',
 ] as const;
-const WORKER_WRITE_TOOL_NAMES = ['write_file', 'replace_in_file', 'apply_line_edits'] as const;
+const WORKER_WRITE_TOOL_NAMES = ['write_file', 'edit_file', 'apply_line_edits'] as const;
 
 function realContainedPath(
   input: string,
@@ -119,7 +119,7 @@ export class WorkerAccessPolicy {
       }
       return;
     }
-    const field = name === 'replace_in_file' ? 'filepath' : 'path';
+    const field = name === 'edit_file' ? 'filepath' : 'path';
     const target = realContainedPath(String(args[field] ?? ''), this.workspaceRoot, true);
     if (!this.writable.has(target))
       throw new Error(`Worker write path is not assigned: ${args[field]}`);
@@ -153,7 +153,7 @@ export class WorkerAccessPolicy {
     if (!tool.mutation || result.startsWith('Error:') || result.startsWith('User declined:'))
       return;
     const name = tool.definition.function.name;
-    const field = name === 'replace_in_file' ? 'filepath' : 'path';
+    const field = name === 'edit_file' ? 'filepath' : 'path';
     this.changed.add(realContainedPath(String(args[field] ?? ''), this.workspaceRoot, true));
   }
 }

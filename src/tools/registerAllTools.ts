@@ -31,7 +31,7 @@ import { makeWebFetchTool } from './fetchTool';
 import { makeWebSearchTool } from './searchTool';
 import { makeRememberTool, makeRecallTool, makeListMemoriesTool } from './memoryTools';
 import {
-  makeReplaceInFileTool,
+  makeEditFileTool,
   makeCreateDirectoryTool,
   makeMoveFileTool,
   makeDeleteFileTool,
@@ -102,7 +102,7 @@ export function registerAllTools(
   }
 
   // v0.6 write tools
-  registry.register(makeReplaceInFileTool());
+  registry.register(makeEditFileTool());
   registry.register(makeApplyLineEditsTool());
   registry.register(makeCreateDirectoryTool());
   registry.register(makeMoveFileTool());

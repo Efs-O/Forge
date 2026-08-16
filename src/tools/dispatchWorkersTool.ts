@@ -36,6 +36,19 @@ function hasWriteWorker(args: Record<string, unknown>): boolean {
   );
 }
 
+function assertCliWorkersAreReadOnly(config: ForgeConfig, request: WorkerRunRequest): void {
+  for (const worker of request.workers ?? []) {
+    if (worker.access !== 'write') continue;
+    const model = resolveRequestModel(config, worker.model);
+    if (model.provider === 'cli') {
+      throw new Error(
+        `dispatch_workers: CLI worker "${model.name}" cannot receive write access yet. ` +
+          'Its one-shot transport has no command-approval channel; use a read task or let the coordinator apply the verified changes.',
+      );
+    }
+  }
+}
+
 export function makeListWorkerModelsTool(getConfig: () => ForgeConfig): RegisteredTool {
   return {
     definition: {
@@ -89,7 +102,7 @@ export function makeDispatchWorkersTool(getConfig: () => ForgeConfig): Registere
       function: {
         name: 'dispatch_workers',
         description:
-          'Dispatch one or two configured Forge models as coding workers. Use list_worker_models first unless the user supplied an exact configured model name. Set access to read for review/research with no allowed_paths. Set access to write only when changes are required and assign exact allowed_paths. Never claim a worker ran unless this tool returns a run result. Example: {"workers":[{"id":"worker-a","model":"gemma@worker","task":"Implement the parser","access":"write","context_files":["docs/parser.md"],"allowed_paths":["src/parser.ts"],"max_output_tokens":1024}],"review_task":"Review the worker change."}',
+          'Dispatch one or two configured Forge models as coding workers. Use list_worker_models first unless the user supplied an exact configured model name. Set access to read for review/research with no allowed_paths. Set access to write only for Forge-native workers when changes are required and assign exact allowed_paths. CLI workers are read-only until their transport supports Forge command policy enforcement. Never claim a worker ran unless this tool returns a run result. Example: {"workers":[{"id":"worker-a","model":"gemma@worker","task":"Implement the parser","access":"write","context_files":["docs/parser.md"],"allowed_paths":["src/parser.ts"],"max_output_tokens":1024}],"review_task":"Review the worker change."}',
         parameters: {
           type: 'object',
           properties: {
@@ -172,7 +185,9 @@ export function makeDispatchWorkersTool(getConfig: () => ForgeConfig): Registere
     },
     handler: async (args, context) => {
       if (!context?.runWorkers) throw new Error('dispatch_workers: no active Forge worker turn');
-      return JSON.stringify(await context.runWorkers(args as unknown as WorkerRunRequest));
+      const request = args as unknown as WorkerRunRequest;
+      assertCliWorkersAreReadOnly(getConfig(), request);
+      return JSON.stringify(await context.runWorkers(request));
     },
   };
 }

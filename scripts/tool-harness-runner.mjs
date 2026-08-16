@@ -13,6 +13,7 @@ import {
 const EXAMPLE_ARGS = {
   read_file: { path: 'package.json', start_line: 1, end_line: 20 },
   write_file: { path: '.forge/tool-test-write.txt', content: 'Forge tool-call smoke test\n' },
+  append_file: { path: '.forge/tool-test-write.txt', content: 'appended by the smoke test\n' },
   replace_selection: { text: 'Forge tool-call smoke test' },
   insert_code: { text: '// Forge tool-call smoke test', line: 0 },
   list_directory: { path: 'src' },
@@ -40,7 +41,7 @@ const EXAMPLE_ARGS = {
   remember: { key: 'tool-test', value: 'Forge tool-call smoke test' },
   recall: { key: 'tool-test' },
   list_memories: {},
-  replace_in_file: {
+  edit_file: {
     filepath: '.forge/tool-test-write.txt',
     old_str: 'Forge tool-call smoke test',
     new_str: 'Forge tool-call smoke test updated',

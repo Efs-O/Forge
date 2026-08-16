@@ -6,14 +6,14 @@ import { resolveWorkspacePath } from '../util/WorkspacePaths';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-// ── replace_in_file ────────────────────────────────────────────────────────────
+// ── edit_file ──────────────────────────────────────────────────────────────────
 
-export function makeReplaceInFileTool(): RegisteredTool {
+export function makeEditFileTool(): RegisteredTool {
   return {
     definition: {
       type: 'function',
       function: {
-        name: 'replace_in_file',
+        name: 'edit_file',
         description:
           'Replace the FIRST occurrence of old_str with new_str in a file. old_str must be an exact match including whitespace and indentation.',
         parameters: {
@@ -45,12 +45,12 @@ export function makeReplaceInFileTool(): RegisteredTool {
       try {
         content = fs.readFileSync(filepath, 'utf8');
       } catch (err) {
-        throw new Error(`replace_in_file: cannot read file — ${(err as Error).message}`);
+        throw new Error(`edit_file: cannot read file — ${(err as Error).message}`);
       }
 
       const idx = content.indexOf(oldStr);
       if (idx === -1) {
-        throw new Error('replace_in_file: old_str not found in file (exact match required)');
+        throw new Error('edit_file: old_str not found in file (exact match required)');
       }
 
       const updated = content.slice(0, idx) + newStr + content.slice(idx + oldStr.length);

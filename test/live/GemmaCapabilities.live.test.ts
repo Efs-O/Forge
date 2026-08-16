@@ -15,7 +15,7 @@ import {
 } from '../../src/tools/dirTools';
 import { makeRunTestsTool } from '../../src/tools/execTools';
 import { buildFallbackToolInstructions } from '../../src/tools/FallbackToolPrompt';
-import { makeReplaceInFileTool } from '../../src/tools/fileEditTools';
+import { makeEditFileTool } from '../../src/tools/fileEditTools';
 import { makeGitStatusTool } from '../../src/tools/gitTools';
 import { makeGetDiagnosticsTool, makeGetDocumentSymbolsTool } from '../../src/tools/lspTools';
 import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
@@ -119,7 +119,7 @@ describe.skipIf(!LIVE)(
       const registry = new ToolRegistry();
       registry.register(makeReadFileTool());
       registry.register(makeSearchCodeTool());
-      registry.register(makeReplaceInFileTool());
+      registry.register(makeEditFileTool());
       registry.register(makeRunTestsTool());
       const checkpoints = new CheckpointStack();
       const session = checkpoints.beginTurn('live-coordinator');
@@ -127,14 +127,14 @@ describe.skipIf(!LIVE)(
         endpoint: ENDPOINT,
         model: MODEL,
         prompt:
-          'Read status.txt. Use search_code to find STATUS=old in the workspace. Replace the exact text STATUS=old with STATUS=done using replace_in_file. Then run the project tests with run_tests. Do not skip any step.',
+          'Read status.txt. Use search_code to find STATUS=old in the workspace. Replace the exact text STATUS=old with STATUS=done using edit_file. Then run the project tests with run_tests. Do not skip any step.',
         registry,
         allowed: new Set<ToolPermission>(['read', 'write', 'headless']),
         context: contextFor(session),
       });
       checkpoints.commitTurn(session);
       expect(result.calls).toEqual(
-        expect.arrayContaining(['read_file', 'search_code', 'replace_in_file', 'run_tests']),
+        expect.arrayContaining(['read_file', 'search_code', 'edit_file', 'run_tests']),
       );
       expect(fs.readFileSync(target, 'utf8')).toBe('STATUS=done\n');
       await expect(checkpoints.undo()).resolves.toEqual([target]);
@@ -159,7 +159,7 @@ describe.skipIf(!LIVE)(
         makeGetDocumentSymbolsTool(),
         makeGetDiagnosticsTool(),
         makeWriteFileTool(),
-        makeReplaceInFileTool(),
+        makeEditFileTool(),
         makeApplyLineEditsTool(),
       ])
         registry.register(tool);
@@ -185,7 +185,7 @@ describe.skipIf(!LIVE)(
         endpoint: ENDPOINT,
         model: MODEL,
         prompt:
-          'Use replace_in_file on write.txt to replace the exact text VALUE=old with VALUE=done, then report completion.',
+          'Use edit_file on write.txt to replace the exact text VALUE=old with VALUE=done, then report completion.',
         registry,
         allowed,
         context: contextFor(),
@@ -193,7 +193,7 @@ describe.skipIf(!LIVE)(
         maxSteps: 4,
       });
       expect(writeScope.allowedNames.size).toBe(9);
-      expect(writeResult.calls).toContain('replace_in_file');
+      expect(writeResult.calls).toContain('edit_file');
       expect(writePolicy.changedPaths()).toEqual([path.join(root, 'write.txt')]);
       expect(() => writeScope.validateMutationPaths?.([path.join(root, 'escape.txt')])).toThrow(
         'not assigned',

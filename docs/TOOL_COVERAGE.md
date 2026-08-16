@@ -1,11 +1,14 @@
 # Forge Tool Coverage Matrix
 
-Generated: 2026-07-17T19:54:28.699Z
+Generated: 2026-07-17T19:54:28.699Z (hand-amended 2026-08-16 to add `append_file`
+— regenerating discards the merged model-evidence columns, so re-run with
+`--model-evidence` if you need a full refresh)
 
 The inventory and permissions come from the constructors registered by `registerAllTools.ts`; worker visibility comes from `WorkerAccessPolicy.ts`. “Harness” means schema emission is available but not executed by default.
 
 | Tool | Origin | Permission | Coordinator | Read worker | Write worker | Model schema test | Handler test | Live test | Side effect |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| append_file | native | write | yes | no | no | harness | automated | not run | write |
 | apply_line_edits | native | write | yes | no | yes | passed | automated | schema passed | write |
 | ask_local_agent | native | delegate | yes | no | no | passed | automated | schema passed | delegate |
 | ask_user | native | read | yes | no | no | passed | automated | schema passed | read-only |
@@ -44,7 +47,7 @@ The inventory and permissions come from the constructors registered by `register
 | recall | native | read | yes | no | no | passed | automated | schema passed | read-only |
 | remember | native | read | yes | no | no | passed | automated | schema passed | read-only |
 | rename_symbol | native | write | yes | no | no | passed | automated | schema passed | write |
-| replace_in_file | native | write | yes | no | yes | passed | automated | handler passed | write |
+| edit_file | native | write | yes | no | yes | passed | automated | handler passed | write |
 | replace_selection | native | write | yes | no | no | passed | automated | schema passed | write |
 | run_build | native | headless | yes | no | no | passed | automated | schema passed | headless |
 | run_terminal | native | terminal | yes | no | no | passed | automated | schema passed | terminal |

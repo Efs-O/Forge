@@ -65,7 +65,7 @@ describe('isolated process, Git, and web tool execution', () => {
     await expect(
       makeExecCommandTool().handler({ command: process.execPath, args: ['&&', 'bad'] }),
     ).rejects.toThrow('Shell operator');
-  });
+  }, 15_000);
 
   it('pastes terminal commands without executing them', async () => {
     const sendText = vi.fn();

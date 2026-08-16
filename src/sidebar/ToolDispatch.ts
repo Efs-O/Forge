@@ -338,8 +338,7 @@ export class ToolDispatch {
     args?: Record<string, unknown>,
   ): string | null {
     if (isFailureResult(result)) return null;
-    if (!['write_file', 'append_file', 'replace_in_file', 'format_file'].includes(toolName))
-      return null;
+    if (!['write_file', 'append_file', 'edit_file', 'format_file'].includes(toolName)) return null;
     const rawPath = readPathArg(args);
     return rawPath ? resolveToolPath(rawPath) : null;
   }

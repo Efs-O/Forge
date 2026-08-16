@@ -95,7 +95,7 @@ describe('WorkerAccessPolicy', () => {
         'get_document_symbols',
         'get_diagnostics',
         'write_file',
-        'replace_in_file',
+        'edit_file',
         'apply_line_edits',
       ]),
     );

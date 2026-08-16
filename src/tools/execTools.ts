@@ -74,7 +74,7 @@ export function makeExecCommandTool(): RegisteredTool {
       function: {
         name: 'exec_command',
         description:
-          'Execute a binary directly (no shell). Requires user confirmation. Shell operators in args are banned — split into separate calls instead.',
+          'Execute a binary directly (no shell). Shell operators in args and dangerous commands are refused — split routine work into separate calls instead.',
         parameters: {
           type: 'object',
           properties: {
@@ -105,6 +105,12 @@ export function makeExecCommandTool(): RegisteredTool {
         );
       }
       try {
+        const denied = checkDenyList(command, cmdArgs, getBuiltinDenyList());
+        if (denied) {
+          throw new Error(
+            `exec_command: command matches denylist pattern "${denied.description}" — execution refused.`,
+          );
+        }
         checkPowerShellBan(command, cmdArgs);
         guardExec(command, cmdArgs);
       } catch (error) {

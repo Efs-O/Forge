@@ -11,13 +11,36 @@ function line(obj) {
 
 if (process.argv.includes('app-server')) {
   const input = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
-  const hasForgeFullAccessOverride = process.argv.includes('sandbox_mode="danger-full-access"');
+  const hasForgeWorkspaceWriteOverride = process.argv.includes('sandbox_mode="workspace-write"');
+  const hasForgeUntrustedApprovalOverride = process.argv.includes('approval_policy="untrusted"');
+  const hasForgeNetworkDisabledOverride = process.argv.includes(
+    'sandbox_workspace_write.network_access=false',
+  );
   let threadId = 'fixture-thread-id';
   let turn = 0;
   let activeTurn;
   let historyOnlyFinalMessage;
+  let pendingApproval;
   input.on('line', (raw) => {
     const message = JSON.parse(raw);
+    if (message.id === 900 && pendingApproval) {
+      const decision = message.result?.decision;
+      line({
+        method: 'item/agentMessage/delta',
+        params: {
+          threadId,
+          turnId: activeTurn,
+          itemId: `approval-message-${turn}`,
+          delta: `Approval ${decision}`,
+        },
+      });
+      line({
+        method: 'turn/completed',
+        params: { threadId, turn: { id: activeTurn, status: 'completed' } },
+      });
+      pendingApproval = undefined;
+      return;
+    }
     if (message.method === 'initialized') return;
     if (message.method === 'initialize') {
       line({ id: message.id, result: { userAgent: 'fake-codex' } });
@@ -25,10 +48,19 @@ if (process.argv.includes('app-server')) {
     }
     if (message.method === 'thread/start') {
       if (
-        process.argv.includes('REQUIRE_FORGE_FULL_ACCESS') &&
-        !hasForgeFullAccessOverride
+        process.argv.includes('REQUIRE_FORGE_WORKSPACE_WRITE') &&
+        !hasForgeWorkspaceWriteOverride
       ) {
-        line({ id: message.id, error: { message: 'missing Forge full-access override' } });
+        line({ id: message.id, error: { message: 'missing Forge workspace-write override' } });
+        return;
+      }
+      if (
+        process.argv.includes('REQUIRE_FORGE_UNTRUSTED_APPROVAL') &&
+        (!hasForgeUntrustedApprovalOverride ||
+          !hasForgeNetworkDisabledOverride ||
+          message.params.approvalPolicy !== 'untrusted')
+      ) {
+        line({ id: message.id, error: { message: 'missing Forge untrusted approval policy' } });
         return;
       }
       line({ id: message.id, result: { thread: { id: threadId } } });
@@ -80,6 +112,34 @@ if (process.argv.includes('app-server')) {
         return;
       }
       if (text.includes('TRIGGER_SLOW')) return;
+      if (text.includes('TRIGGER_COMMAND_APPROVAL')) {
+        pendingApproval = true;
+        line({
+          id: 900,
+          method: 'item/commandExecution/requestApproval',
+          params: {
+            threadId,
+            turnId: activeTurn,
+            itemId: `command-${turn}`,
+            command: text.includes('TRIGGER_DANGEROUS_APPROVAL') ? 'git reset --hard' : 'npm test',
+          },
+        });
+        return;
+      }
+      if (text.includes('TRIGGER_NETWORK_APPROVAL')) {
+        pendingApproval = true;
+        line({
+          id: 900,
+          method: 'item/commandExecution/requestApproval',
+          params: {
+            threadId,
+            turnId: activeTurn,
+            itemId: `command-${turn}`,
+            networkApprovalContext: { host: 'example.com' },
+          },
+        });
+        return;
+      }
       line({
         method: 'item/started',
         params: { threadId, turnId: activeTurn, item: { type: 'commandExecution' } },

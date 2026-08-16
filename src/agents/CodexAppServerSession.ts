@@ -1,5 +1,6 @@
 import * as readline from 'readline';
 import { spawnCliProcess, terminateCliProcessTree, waitForCliProcessExit } from './cliProcess';
+import { decideCodexApproval } from './CodexApprovalPolicy';
 import type {
   CliAgentSessionOptions,
   CliAgentSessionSendOptions,
@@ -107,10 +108,14 @@ export class CodexAppServerSession {
         '-c',
         'analytics.enabled=false',
         // Apply the policy to the Forge-owned app-server process as well as the
-        // thread. This prevents a persisted local Codex setting from causing a
-        // resumed warm session to enter the Windows sandbox.
+        // thread. This prevents a persisted local Codex setting from widening
+        // a Forge chat beyond its workspace boundary.
         '-c',
-        'sandbox_mode="danger-full-access"',
+        'sandbox_mode="workspace-write"',
+        '-c',
+        'approval_policy="untrusted"',
+        '-c',
+        'sandbox_workspace_write.network_access=false',
       ],
       cwd: this.options.cwd,
       stdin: 'pipe',
@@ -139,8 +144,8 @@ export class CodexAppServerSession {
     } else {
       const result = await this.request('thread/start', {
         cwd: this.options.cwd,
-        approvalPolicy: 'never',
-        sandbox: 'danger-full-access',
+        approvalPolicy: 'untrusted',
+        sandbox: 'workspace-write',
         ephemeral: false,
         ...(this.options.model ? { model: this.options.model } : {}),
       });
@@ -184,6 +189,10 @@ export class CodexAppServerSession {
       return;
     }
     const value = message as Record<string, unknown>;
+    if (typeof value['id'] === 'number' && typeof value['method'] === 'string') {
+      this.handleServerRequest(value['id'], value['method'], value['params']);
+      return;
+    }
     if (typeof value['id'] === 'number') {
       this.handleResponse(value['id'], value);
       return;
@@ -207,6 +216,28 @@ export class CodexAppServerSession {
     } else {
       pending.resolve(message['result']);
     }
+  }
+
+  /**
+   * Codex app-server sends approval elicitations as server-initiated JSON-RPC
+   * requests. Forge answers them automatically: ordinary workspace work keeps
+   * moving, while destructive commands and all sandbox-expansion requests are
+   * denied. This is intentionally enforcement, not a stream of modal prompts.
+   */
+  private handleServerRequest(id: number, method: string, rawParams: unknown): void {
+    const params =
+      rawParams && typeof rawParams === 'object'
+        ? (rawParams as Record<string, unknown>)
+        : undefined;
+    const active = this.active;
+    if (!params || !active || params['threadId'] !== this.threadId) {
+      void this.failProtocol(`Codex ${method} did not match the active thread.`);
+      return;
+    }
+
+    const approval = decideCodexApproval(method, params);
+    active.onEvent?.({ kind: 'status', text: `[codex policy: ${approval.status}]` });
+    this.write({ id, result: { decision: approval.decision } });
   }
 
   private handleNotification(method: string, rawParams: unknown): void {

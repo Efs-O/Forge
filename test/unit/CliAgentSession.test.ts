@@ -46,7 +46,9 @@ describe('CliAgentSession', () => {
   it('keeps the observed session id when a turn times out, so the retry resumes warm', async () => {
     // A timed-out turn used to drop the id, forcing the next attempt to spawn a
     // cold process and re-pay the whole prompt prefix as a cache miss.
-    const session = createSession(undefined, 400);
+    // The fixture must first spawn and emit its init event. A sub-second turn
+    // timeout races that setup when the full Vitest suite is under load.
+    const session = createSession(undefined, 1_500);
     const timedOut = await session.send('TRIGGER_INIT_THEN_SLOW');
     expect(timedOut.status).toBe('timed_out');
     expect(timedOut.sessionId).toBe('fixture-session-id');
