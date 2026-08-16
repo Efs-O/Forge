@@ -1,62 +1,44 @@
 import * as vscode from 'vscode';
 import type { IBackendPool } from '../backend/BackendPool';
-import type { BackendController } from '../backend/BackendController';
 import type { ForgeConfig, ModelConfig } from '../config/types';
 import type { HostToWebview } from './messageBridge';
 import type { ConversationRuntime } from './sessionTypes';
-import { computeContextBudget, estimateToolTokens, perSlotContext } from '../util/contextBudget';
-import { streamModelChatCompletion } from '../llm/ChatClient';
 import { isCloudProvider } from '../llm/CloudProviders';
-import { resolveCloudRequestTarget } from '../llm/CloudRequestResolver';
-import type { ChatCompletionRequest } from '../llm/types';
 import type { AttachmentData } from './messageBridge';
 import { buildUserContent } from './ConversationOps';
-import { applyCompactionWindow } from './compactionWindow';
-import { injectSystemPrompt } from '../llm/SystemPromptInjector';
 import type { TemplateEngine } from '../llm/TemplateEngine';
 import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
-import { mergeSampling } from '../llm/SamplingMerge';
-import { deriveStaticCapabilities, resolveRequestModel } from '../config/ConfigResolver';
-import { normalizeRequestForModel } from '../llm/RequestNormalizer';
-import { stripThinkingFromFullText } from '../llm/ThinkingChannelStripper';
-import { stripHtmlDocumentBoilerplateFromFullText } from '../llm/HtmlDocumentBoilerplateStripper';
-import { CheckpointStack, type CheckpointSession } from '../checkpoint/CheckpointStack';
+import { deriveStaticCapabilities } from '../config/ConfigResolver';
+import { CheckpointStack } from '../checkpoint/CheckpointStack';
 import { ToolRegistry } from '../tools/ToolRegistry';
-import { resolveToolPermissions } from '../tools/PermissionResolver';
-import { ToolBudget } from '../tools/ToolBudget';
 import type { KeepUndoCodeLensProvider } from './KeepUndoCodeLens';
 import { ToolFailureTracker } from '../tools/StripTools';
-import { stripStructuredOutputFromFullText } from '../tools/StructuredOutputParser';
 import { getLogger } from '../util/logger';
 import {
   inspectRuntimeModelCapabilities,
   type RuntimeModelCapabilities,
 } from '../backend/ModelCapabilities';
 import { ToolDispatch, type OpenFileOptions } from './ToolDispatch';
+import { TurnLifecycle } from './TurnLifecycle';
+import { runCliTurn } from './CliTurn';
+import { runModelTurn } from './ModelTurn';
+import type { TurnServices } from './turnServices';
+import { runWorkerTurn } from './WorkerTurn';
+import { runPromptToMarkdown } from './PromptRun';
+import { runCloudProviderTurn, runLocalProviderTurn } from './ProviderTurn';
 import type { DiffDecorations } from './DiffDecorations';
 import { deriveTitle } from './sessionTypes';
-import { extractToolDetail } from './toolSummary';
 import { ToolApprovalService } from './ToolApprovalService';
 import { WorkerOrchestrationService } from '../workers/WorkerOrchestrationService';
 import type { WorkerRunRequest, WorkerRunResult } from '../workers/types';
-import {
-  addWorkerDelegationInstructions,
-  buildWorkerCatalog,
-  buildWorkerReviewPrompt,
-} from '../workers/WorkerPrompts';
-import { runToolCallingLoop, isTurnCutOffError } from '../agent/ToolCallingLoop';
 import { recordModelUsage } from './modelManager/usageTracker';
 import { CliAgentDriver } from '../agents/CliAgentDriver';
-import { prepareCliChatAgent, runCliChat, runWarmCliChat } from '../agents/CliChatRunner';
 import {
   CliSessionRegistry,
   DEFAULT_CLI_IDLE_TIMEOUT_MS,
   DEFAULT_MAX_CLI_AGENTS,
 } from '../agents/CliSessionRegistry';
 const log = getLogger();
-/** Tool rounds per sidebar turn before the loop aborts. Workers have their own,
- *  lower cap in `src/workers/limits.ts`. */
-const MAX_TOOL_ROUNDS = 40;
 
 export interface SidebarProviderEvents {
   onGenerationStarted?: (modelName: string | null) => void;
@@ -68,15 +50,8 @@ export interface SidebarProviderEvents {
 }
 
 export class AgentLoop {
-  private readonly streamingConvIds = new Set<string>();
-  private readonly activeBackends = new Map<string, BackendController>();
-  private readonly cancelControllers = new Map<string, AbortController>();
-  private readonly streamingSettledMap = new Map<string, Promise<void>>();
-  private readonly resolveSettledMap = new Map<string, () => void>();
-  /** Turns that received cancellation and must finish unwinding before a new
-   * request can acquire a backend. This includes worker delegation holds. */
-  private readonly cancellingConvIds = new Set<string>();
-  private readonly cancellationSettlements = new Set<Promise<void>>();
+  /** Streaming/cancellation state for every conversation. */
+  private readonly lifecycle = new TurnLifecycle();
   private readonly capabilityCache = new Map<string, Promise<RuntimeModelCapabilities>>();
   private readonly capabilityWarningsShown = new Set<string>();
   private readonly toolDispatch: ToolDispatch;
@@ -84,10 +59,9 @@ export class AgentLoop {
   private readonly workerService: WorkerOrchestrationService;
   private readonly workspaceRoot: string;
   private readonly cliSessions: CliSessionRegistry;
+  /** Collaborators handed to every turn module. Assembled once, in the ctor. */
+  private readonly services: TurnServices;
   private promptRunCtrl: AbortController | null = null;
-  /** convId → why the last turn ended short. Set only when the turn was cut off
-   *  rather than finished, so auto-compact can decide whether to resume it. */
-  private readonly incompleteTurns = new Map<string, string>();
   private onContextChanged?: (convId: string, promptChanged: boolean) => void;
   private onExactContextTokens?: (convId: string, usedTokens: number) => void;
 
@@ -108,48 +82,44 @@ export class AgentLoop {
   }
 
   get streaming(): boolean {
-    return this.streamingConvIds.size > 0;
+    return this.lifecycle.streaming;
   }
   isStreamingConv(id: string): boolean {
-    return this.streamingConvIds.has(id);
+    return this.lifecycle.isStreaming(id);
   }
   /** Why the last turn on this conversation stopped short, if it did. */
   incompleteTurnReason(id: string): string | undefined {
-    return this.incompleteTurns.get(id);
+    return this.lifecycle.incompleteReason(id);
   }
 
-  /** Marks a conversation busy for background work that is not a turn (the
-   *  compaction summary). Without this the summarization streams while the UI
-   *  and the send guards both read as idle. */
   beginBackgroundWork(convId: string): () => void {
-    this.streamingConvIds.add(convId);
-    return () => this.streamingConvIds.delete(convId);
+    return this.lifecycle.beginBackgroundWork(convId);
   }
 
   isCancellationPending(id: string): boolean {
-    return this.cancellingConvIds.has(id);
+    return this.lifecycle.isCancellationPending(id);
   }
   getStreamingIds(): ReadonlySet<string> {
-    return this.streamingConvIds;
+    return this.lifecycle.streamingIds();
   }
 
   constructor(
-    private readonly pool: IBackendPool,
-    private readonly getConfig: () => ForgeConfig,
-    private readonly toolRegistry: ToolRegistry,
-    private readonly checkpoints: CheckpointStack,
+    pool: IBackendPool,
+    getConfig: () => ForgeConfig,
+    toolRegistry: ToolRegistry,
+    checkpoints: CheckpointStack,
     codeLens: KeepUndoCodeLensProvider,
     diffDecorations: DiffDecorations,
-    private readonly failureTracker: ToolFailureTracker,
-    private readonly events: SidebarProviderEvents,
+    failureTracker: ToolFailureTracker,
+    events: SidebarProviderEvents,
     private readonly post: (msg: HostToWebview) => void,
     getView: () => vscode.WebviewView | undefined,
-    private readonly templateEngine?: TemplateEngine,
-    private readonly forgeLoader?: ForgeInstructionsLoader,
-    private readonly secrets?: vscode.SecretStorage,
+    templateEngine?: TemplateEngine,
+    forgeLoader?: ForgeInstructionsLoader,
+    secrets?: vscode.SecretStorage,
     workspaceRoot?: string,
     private readonly getConfigPath?: () => string,
-    private readonly cliDriver?: CliAgentDriver,
+    cliDriver?: CliAgentDriver,
     cliSessions?: CliSessionRegistry,
   ) {
     this.workspaceRoot = workspaceRoot ?? forgeLoader?.root ?? '';
@@ -180,6 +150,51 @@ export class AgentLoop {
       onActivity: (activity, conversationId) =>
         this.post({ type: 'workerStatus', ...activity, conversationId }),
     });
+    this.services = {
+      pool,
+      getConfig,
+      toolRegistry,
+      toolDispatch: this.toolDispatch,
+      failureTracker,
+      approvals: this.approvals,
+      workerService: this.workerService,
+      checkpoints,
+      lifecycle: this.lifecycle,
+      events,
+      post,
+      workspaceRoot: this.workspaceRoot,
+      cliSessions: this.cliSessions,
+      ...(secrets ? { secrets } : {}),
+      ...(templateEngine ? { templateEngine } : {}),
+      ...(forgeLoader ? { forgeLoader } : {}),
+      ...(cliDriver ? { cliDriver } : {}),
+      ...(this.getConfigPath ? { getConfigPath: this.getConfigPath } : {}),
+      capabilities: (model, baseUrl) => this.getRuntimeCapabilities(model, baseUrl),
+      warnOnce: (key, message) => this.warnOnce(key, message),
+      // Wrapped rather than passed: both listeners are registered after
+      // construction, so a snapshot taken here would capture undefined.
+      onContextChanged: (convId, promptChanged) => this.onContextChanged?.(convId, promptChanged),
+      onExactContextTokens: (convId, used) => this.onExactContextTokens?.(convId, used),
+      commitUserPrompt: (conv, text, attachments) => this.commitUserPrompt(conv, text, attachments),
+      runModelTurn: (baseUrl, conv, model, activeFile, ctrl, postC, apiKey, checkpoint) =>
+        runModelTurn(this.services, {
+          baseUrl,
+          conv,
+          model,
+          activeFile,
+          ctrl,
+          postC,
+          ...(apiKey ? { apiKey } : {}),
+          checkpoint,
+        }),
+      waitForCancelledTurns: () => this.waitForCancelledTurns(),
+      setController: (ctrl) => {
+        this.promptRunCtrl = ctrl;
+      },
+      releaseController: (ctrl) => {
+        if (this.promptRunCtrl === ctrl) this.promptRunCtrl = null;
+      },
+    };
     this.toolDispatch.setWorkerRunner((request, context) =>
       this.workerService.run(request, context),
     );
@@ -194,58 +209,22 @@ export class AgentLoop {
   }
 
   async stopStreamingIfNeeded(convId?: string): Promise<void> {
-    if (convId) {
-      const ctrl = this.cancelControllers.get(convId);
-      if (!ctrl) return;
-      ctrl.abort();
-      try {
-        await this.activeBackends.get(convId)?.stop();
-      } catch {
-        /* abort is authoritative */
-      }
-      await this.streamingSettledMap.get(convId);
-    } else {
-      for (const [id, ctrl] of this.cancelControllers) {
-        ctrl.abort();
-        try {
-          await this.activeBackends.get(id)?.stop();
-        } catch (err) {
-          log.debug(`[AgentLoop] backend stop during cancel-all failed: ${(err as Error).message}`);
-        }
-      }
-      await Promise.all([...this.streamingSettledMap.values()]);
-    }
+    return this.lifecycle.stopStreaming(convId);
   }
 
   cancel(convId?: string): Promise<void> {
+    // Approvals and the standalone prompt run are AgentLoop's, not the
+    // lifecycle's: a pending confirmation and a /compact summary are neither
+    // of them a turn.
     this.approvals.cancelConversation(convId);
     if (!convId) this.promptRunCtrl?.abort();
-    const cancelling = convId
-      ? this.cancelControllers.has(convId)
-        ? [convId]
-        : []
-      : [...this.cancelControllers.keys()];
-    if (cancelling.length === 0) return Promise.resolve();
-
-    for (const id of cancelling) this.cancellingConvIds.add(id);
-    const settled = this.stopStreamingIfNeeded(convId)
-      .catch((err) => {
-        log.debug(`[AgentLoop] cancellation cleanup failed: ${(err as Error).message}`);
-      })
-      .finally(() => {
-        for (const id of cancelling) this.cancellingConvIds.delete(id);
-      });
-    this.cancellationSettlements.add(settled);
-    void settled.finally(() => this.cancellationSettlements.delete(settled));
-    return settled;
+    return this.lifecycle.cancel(convId);
   }
 
   /** Wait for cancelled turns to release their backend/delegation resources.
    * Active, non-cancelled conversations remain independent and do not block. */
   async waitForCancelledTurns(): Promise<void> {
-    while (this.cancellationSettlements.size > 0) {
-      await Promise.all([...this.cancellationSettlements]);
-    }
+    return this.lifecycle.waitForCancelledTurns();
   }
 
   toggleClanker(): boolean {
@@ -273,104 +252,12 @@ export class AgentLoop {
     return this.toolDispatch.openFile(filePath, options);
   }
 
-  async runWorkerTurn(
+  runWorkerTurn(
     conv: ConversationRuntime,
     model: ModelConfig,
     request: WorkerRunRequest,
   ): Promise<WorkerRunResult> {
-    await this.waitForCancelledTurns();
-    const convId = conv.id;
-    const ctrl = new AbortController();
-    this.cancelControllers.set(convId, ctrl);
-    const settled = new Promise<void>((resolve) => this.resolveSettledMap.set(convId, resolve));
-    this.streamingSettledMap.set(convId, settled);
-    this.streamingConvIds.add(convId);
-    const checkpoint = this.checkpoints.beginTurn(`workers-${Date.now()}`, convId);
-    const postC = (message: HostToWebview): void =>
-      this.post({ ...message, conversationId: convId } as HostToWebview);
-    postC({ type: 'generationStarted' });
-    try {
-      const dispatchTool = this.toolRegistry.get('dispatch_workers');
-      if (!dispatchTool) throw new Error('Forge: dispatch_workers is unavailable.');
-      this.toolRegistry.assertAllowed(
-        dispatchTool,
-        resolveToolPermissions(this.getConfig()),
-        request as unknown as Record<string, unknown>,
-      );
-      if (this.workerService.hasCloudTargets(request)) {
-        const approved = await this.approvals.request(
-          'dispatch_workers',
-          'Cloud workers may send their tasks and workspace file contents to configured providers.',
-          true,
-          convId,
-          ctrl.signal,
-        );
-        if (!approved) throw new Error('Cloud worker launch declined.');
-      }
-      postC({ type: 'toolActivity', toolName: 'dispatch_workers', detail: 'starting workers' });
-      const result = await this.workerService.run(request, {
-        checkpoint,
-        conversationId: convId,
-        abortSignal: ctrl.signal,
-        toolDispatch: this.toolDispatch,
-        coordinatorModel: model.name,
-      });
-      this.commitUserPrompt(conv, buildWorkerReviewPrompt(result, request.review_task));
-      postC({
-        type: 'workerStatus',
-        runId: result.runId,
-        stage: 'review-started',
-        elapsedMs: 0,
-      });
-      await this.runCoordinatorReview(conv, model, ctrl, checkpoint, postC);
-      return result;
-    } catch (err) {
-      postC({ type: 'error', message: err instanceof Error ? err.message : String(err) });
-      throw err;
-    } finally {
-      const depthBefore = this.checkpoints.depth(convId);
-      this.checkpoints.commitTurn(checkpoint);
-      if (this.checkpoints.depth(convId) > depthBefore) postC({ type: 'checkpointReady' });
-      this.activeBackends.delete(convId);
-      this.streamingConvIds.delete(convId);
-      this.resolveStreamingLifecycle(convId);
-    }
-  }
-
-  private async runCoordinatorReview(
-    conv: ConversationRuntime,
-    model: ModelConfig,
-    ctrl: AbortController,
-    checkpoint: CheckpointSession,
-    postC: (msg: HostToWebview) => void,
-  ): Promise<void> {
-    const activeFile = vscode.window.activeTextEditor?.document.uri.fsPath;
-    if (isCloudProvider(model.provider)) {
-      const target = await resolveCloudRequestTarget(model, this.secrets);
-      await this.runAgentLoop(
-        target.baseUrl,
-        conv,
-        model,
-        activeFile,
-        ctrl,
-        postC,
-        target.apiKey,
-        checkpoint,
-      );
-      return;
-    }
-    const backend = await this.pool.acquire(model.name);
-    this.activeBackends.set(conv.id, backend);
-    await this.runAgentLoop(
-      backend.baseUrl(),
-      conv,
-      model,
-      activeFile,
-      ctrl,
-      postC,
-      undefined,
-      checkpoint,
-    );
+    return runWorkerTurn(this.services, conv, model, request);
   }
 
   async runTurn(
@@ -383,7 +270,7 @@ export class AgentLoop {
     const convId = conv.id;
     // A new turn supersedes whatever the previous one ended as; auto-compact
     // resume reads this and must never act on a stale verdict.
-    this.incompleteTurns.delete(convId);
+    this.lifecycle.clearIncomplete(convId);
     const postC = (msg: HostToWebview): void =>
       this.post({ ...msg, conversationId: convId } as HostToWebview);
     const hasImage = attachments?.some((attachment) => attachment.mediaType.startsWith('image/'));
@@ -398,15 +285,11 @@ export class AgentLoop {
       return;
     }
     if (model.provider === 'cli') {
-      await this.runCliTurn(conv, model, text, attachments, postC);
+      await runCliTurn(this.services, conv, model, text, attachments, postC);
       return;
     }
     const ctrl = new AbortController();
-    this.cancelControllers.set(convId, ctrl);
-    const settled = new Promise<void>((resolve) => {
-      this.resolveSettledMap.set(convId, resolve);
-    });
-    this.streamingSettledMap.set(convId, settled);
+    this.lifecycle.register(convId, ctrl);
     // conv.active_model is set by the caller (SidebarProvider) to the full
     // selection id, incl. any @profile — don't clobber it with the base name (F6).
     conv.active_model ??= model.name;
@@ -414,210 +297,18 @@ export class AgentLoop {
 
     const activeFile = vscode.window.activeTextEditor?.document.uri.fsPath;
     log.debug(`[AgentLoop] runTurn model=${model.name} conv=${convId}`);
-    // Usage tracking (F7/§2.3): single choke point for every provider — fire
+    // Usage tracking (F7/2.3): single choke point for every provider — fire
     // and forget, debounced, never throws into the request path.
     const configPath = this.getConfigPath?.();
     if (configPath) recordModelUsage(configPath, model.name);
 
-    // Cloud providers (xai, openrouter): no local backend — resolve token and call the API directly.
+    const request = { conv, model, text, attachments, activeFile, ctrl, postC };
     if (isCloudProvider(model.provider)) {
-      let apiKey: string;
-      let cloudBaseUrl: string;
-      try {
-        ({ baseUrl: cloudBaseUrl, apiKey } = await resolveCloudRequestTarget(model, this.secrets));
-        log.info(`[AgentLoop] ${model.provider} token resolved for model=${model.name}`);
-      } catch (err) {
-        const msg = (err as Error).message;
-        log.error(`[AgentLoop] ${model.provider} setup failed: ${msg}`);
-        postC({ type: 'error', message: msg });
-        this.resolveStreamingLifecycle(convId);
-        return;
-      }
-      this.commitUserPrompt(conv, text, attachments);
-      this.events.onBackendReady?.(model.name);
-      postC({ type: 'ready' });
-      const turnId = `turn-${Date.now()}`;
-      const checkpoint = this.checkpoints.beginTurn(turnId, convId);
-      this.streamingConvIds.add(convId);
-      this.events.onGenerationStarted?.(model.name);
-      try {
-        await this.runAgentLoop(
-          cloudBaseUrl,
-          conv,
-          model,
-          activeFile,
-          ctrl,
-          postC,
-          apiKey,
-          checkpoint,
-        );
-      } catch (err) {
-        log.error(`[AgentLoop] ${model.provider} agent loop error: ${(err as Error).message}`);
-        postC({ type: 'error', message: (err as Error).message });
-      } finally {
-        this.streamingConvIds.delete(convId);
-        conv.updatedAt = Date.now();
-        const depthBefore = this.checkpoints.depth(convId);
-        this.checkpoints.commitTurn(checkpoint);
-        if (this.checkpoints.depth(convId) > depthBefore) postC({ type: 'checkpointReady' });
-        this.events.onGenerationFinished?.(model.name);
-        this.resolveStreamingLifecycle(convId);
-      }
+      await runCloudProviderTurn(this.services, request);
       return;
     }
-
-    let backend: BackendController;
-    try {
-      postC({ type: 'backendStarting', message: 'Starting backend, please wait…' });
-      backend = await this.pool.acquire(model.name);
-      this.activeBackends.set(convId, backend);
-      this.events.onBackendReady?.(model.name);
-      if (ctrl.signal.aborted) {
-        postC({ type: 'done', finishReason: 'cancelled' });
-        this.resolveStreamingLifecycle(convId);
-        return;
-      }
-      this.commitUserPrompt(conv, text, attachments);
-      postC({ type: 'ready' });
-    } catch (err) {
-      const msg = ctrl.signal.aborted
-        ? 'Backend start cancelled.'
-        : `Backend failed to start: ${(err as Error).message}`;
-      this.events.onBackendError?.(msg);
-      postC({ type: 'backendDown', message: msg });
-      this.resolveStreamingLifecycle(convId);
-      return;
-    }
-
-    const turnId = `turn-${Date.now()}`;
-    const checkpoint = this.checkpoints.beginTurn(turnId, convId);
-    this.streamingConvIds.add(convId);
-    this.events.onGenerationStarted?.(model.name);
-    try {
-      await this.runAgentLoop(
-        backend.baseUrl(),
-        conv,
-        model,
-        activeFile,
-        ctrl,
-        postC,
-        undefined,
-        checkpoint,
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      log.error(`[AgentLoop] ${model.provider} chat failed model=${model.name}: ${message}`);
-      this.events.onBackendError?.(message);
-      postC({ type: 'error', message });
-    } finally {
-      this.streamingConvIds.delete(convId);
-      this.activeBackends.delete(convId);
-      conv.updatedAt = Date.now();
-      const depthBefore = this.checkpoints.depth(convId);
-      this.checkpoints.commitTurn(checkpoint);
-      if (this.checkpoints.depth(convId) > depthBefore) postC({ type: 'checkpointReady' });
-      this.events.onGenerationFinished?.(model.name);
-      this.resolveStreamingLifecycle(convId);
-    }
+    await runLocalProviderTurn(this.services, request);
   }
-
-  private async runCliTurn(
-    conv: ConversationRuntime,
-    model: ModelConfig,
-    text: string,
-    attachments: AttachmentData[] | undefined,
-    postC: (msg: HostToWebview) => void,
-  ): Promise<void> {
-    const convId = conv.id;
-    // Only the first prompt in a conversation actually starts the CLI agent;
-    // later turns resume the warm session, so suppress the start/ready chatter.
-    const firstCliPrompt = !conv.cli_sessions?.[model.name];
-    let prepared;
-    try {
-      if (firstCliPrompt) postC({ type: 'backendStarting', message: `Starting ${model.name}…` });
-      prepared = await prepareCliChatAgent(model, this.workspaceRoot);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.events.onBackendError?.(message);
-      postC({ type: 'backendDown', message });
-      return;
-    }
-
-    const ctrl = new AbortController();
-    this.cancelControllers.set(convId, ctrl);
-    this.streamingSettledMap.set(
-      convId,
-      new Promise<void>((resolve) => this.resolveSettledMap.set(convId, resolve)),
-    );
-    conv.active_model ??= model.name;
-    conv.updatedAt = Date.now();
-    const configPath = this.getConfigPath?.();
-    if (configPath) recordModelUsage(configPath, model.name);
-
-    const checkpoint = this.checkpoints.beginTurn(`cli-chat-${Date.now()}`, convId);
-    this.streamingConvIds.add(convId);
-    let generationStarted = false;
-
-    try {
-      const sessionId = conv.cli_sessions?.[model.name];
-      const common = {
-        prepared,
-        model,
-        messages: conv.messages,
-        workspaceRoot: this.workspaceRoot,
-        checkpoint,
-        signal: ctrl.signal,
-        onText: (chunk: string) => postC({ type: 'token', text: chunk }),
-        onStatus: (detail: string) =>
-          postC({ type: 'toolActivity', toolName: prepared.cliName, detail }),
-        onPrepared: () => {
-          this.commitUserPrompt(conv, text, attachments);
-          generationStarted = true;
-          this.events.onBackendReady?.(model.name);
-          this.events.onGenerationStarted?.(model.name);
-          if (firstCliPrompt) postC({ type: 'ready' });
-          postC({ type: 'generationStarted' });
-        },
-        announceRollback: firstCliPrompt,
-        ...(sessionId ? { sessionId } : {}),
-      };
-      const result = this.cliDriver
-        ? await runCliChat({ ...common, driver: this.cliDriver })
-        : await runWarmCliChat({
-            ...common,
-            registry: this.cliSessions,
-            key: { conversationId: conv.id, modelName: model.name },
-          });
-      if (result.sessionId) {
-        conv.cli_sessions = { ...conv.cli_sessions, [model.name]: result.sessionId };
-      }
-      if (result.assistantText) {
-        conv.messages.push({ role: 'assistant', content: result.assistantText });
-      }
-      if (result.status !== 'completed' && result.status !== 'cancelled') {
-        postC({ type: 'error', message: result.error ?? `${model.name} failed.` });
-      }
-      postC({
-        type: 'done',
-        finishReason: result.status === 'completed' ? 'stop' : result.status,
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      log.error(`[AgentLoop] cli chat failed model=${model.name}: ${message}`);
-      this.events.onBackendError?.(message);
-      postC({ type: 'error', message });
-      postC({ type: 'done', finishReason: 'error' });
-    } finally {
-      this.streamingConvIds.delete(convId);
-      conv.updatedAt = Date.now();
-      const depthBefore = this.checkpoints.depth(convId);
-      this.checkpoints.commitTurn(checkpoint);
-      if (this.checkpoints.depth(convId) > depthBefore) postC({ type: 'checkpointReady' });
-      if (generationStarted) this.events.onGenerationFinished?.(model.name);
-      this.resolveStreamingLifecycle(convId);
-    }
-  }
-
   private commitUserPrompt(
     conv: ConversationRuntime,
     text: string,
@@ -629,260 +320,9 @@ export class AgentLoop {
     if (priorUserCount === 0) conv.title = deriveTitle(text.split('\n')[0] ?? text);
   }
 
-  async runPromptToMarkdown(text: string): Promise<string> {
-    const config = this.getConfig();
-    if (!config.active_model) throw new Error('Forge: no active model selected.');
-    // Request-time resolution (defaults + base + @profile, F6).
-    const selectedModel = resolveRequestModel(config, config.active_model, (m) => log.info(m));
-
-    const backend = await this.pool.acquire(selectedModel.name);
-    if (!backend.isReady()) await backend.start();
-    this.events.onBackendReady?.(backend.loadedModel());
-
-    const activeFile = vscode.window.activeTextEditor?.document.uri.fsPath;
-    const tmplCtx: Record<string, string> = {};
-    if (activeFile) tmplCtx['activeFile'] = activeFile;
-    if (config.custom_instructions) tmplCtx['customInstructions'] = config.custom_instructions;
-    if (this.forgeLoader?.root) tmplCtx['workspaceRoot'] = this.forgeLoader.root;
-    if (this.forgeLoader?.instructions)
-      tmplCtx['forgeInstructions'] = this.forgeLoader.instructions;
-
-    const messages = injectSystemPrompt(
-      [{ role: 'user', content: text }],
-      this.templateEngine,
-      tmplCtx,
-      selectedModel.system_prompt,
-      selectedModel.system_prompt_mode,
-    );
-    const base: ChatCompletionRequest = { model: selectedModel.name, messages, stream: true };
-    const request = normalizeRequestForModel(
-      mergeSampling(base, selectedModel, { allowPreserveThinking: false }),
-      selectedModel,
-    );
-
-    this.events.onGenerationStarted?.(selectedModel.name);
-    const ctrl = new AbortController();
-    this.promptRunCtrl = ctrl;
-    let content = '';
-    try {
-      await new Promise<void>((resolve, reject) => {
-        streamModelChatCompletion(
-          backend.baseUrl(),
-          request,
-          selectedModel,
-          {
-            onToken: (token) => {
-              content += token;
-            },
-            onReasoning: () => {},
-            onDone: () => resolve(),
-            onError: reject,
-            onToolCalls: () => {},
-          },
-          ctrl.signal,
-        );
-      });
-      return this.sanitizeText(content, this.shouldStripThinking(selectedModel));
-    } catch (err) {
-      this.events.onBackendError?.((err as Error).message);
-      throw err;
-    } finally {
-      if (this.promptRunCtrl === ctrl) this.promptRunCtrl = null;
-      this.events.onGenerationFinished?.(backend.loadedModel());
-    }
+  runPromptToMarkdown(text: string): Promise<string> {
+    return runPromptToMarkdown(this.services, text);
   }
-
-  private resolveStreamingLifecycle(convId: string): void {
-    this.resolveSettledMap.get(convId)?.();
-    this.resolveSettledMap.delete(convId);
-    this.streamingSettledMap.delete(convId);
-    this.cancelControllers.delete(convId);
-  }
-
-  private async runAgentLoop(
-    baseUrl: string,
-    conv: ConversationRuntime,
-    activeModel: ModelConfig,
-    activeFile: string | undefined,
-    ctrl: AbortController,
-    postC: (msg: HostToWebview) => void,
-    apiKey?: string,
-    checkpoint?: CheckpointSession,
-  ): Promise<void> {
-    const config = this.getConfig();
-    const allowed = resolveToolPermissions(config);
-    // One budget per turn — activeModel is already resolveRequestModel()'d
-    // (group tools/tool_call_limits merged) by the caller.
-    const budget = new ToolBudget(activeModel);
-    const useStrip = this.failureTracker.shouldStrip();
-    const runtimeCaps = await this.getRuntimeCapabilities(activeModel, baseUrl);
-    const canUseThinkingKwargs = this.canUseThinkingKwargs(activeModel, runtimeCaps);
-    const stripThinkingChannels = this.shouldStripThinking(activeModel);
-    if (useStrip) {
-      void vscode.window.showWarningMessage(
-        'Forge: tool calls disabled after repeated failures. Restart chat to re-enable.',
-      );
-    }
-
-    if (
-      !canUseThinkingKwargs &&
-      (activeModel.think !== undefined || activeModel.sampling?.preserve_thinking !== undefined)
-    ) {
-      this.warnOnce(
-        `${activeModel.name}:thinking`,
-        `Forge: model "${activeModel.name}" does not appear to support thinking template toggles. Thinking kwargs will be omitted for this request.`,
-      );
-    }
-    if (runtimeCaps?.hasChatTemplate === false) {
-      this.warnOnce(
-        `${activeModel.name}:template`,
-        `Forge: model "${activeModel.name}" does not expose a usable chat template. Prompt formatting may be mismatched.`,
-      );
-    }
-    const perSlot = perSlotContext(activeModel, config.llama_server);
-    const configuredMaxTokens = activeModel.sampling?.max_tokens;
-    if (perSlot > 0 && configuredMaxTokens !== undefined && configuredMaxTokens > perSlot) {
-      this.warnOnce(
-        `${activeModel.name}:max-tokens`,
-        `Forge: model "${activeModel.name}" sets max_tokens ${configuredMaxTokens}, above its ${perSlot}-token per-slot context. Forge will cap output at the room actually left in each turn.`,
-      );
-    }
-    const toolDefinitions = budget.filterDefinitions(this.toolRegistry.definitions(allowed));
-    const nativeTools = runtimeCaps?.likelySupportsTools !== false;
-    if (toolDefinitions.length > 0 && !nativeTools) {
-      this.warnOnce(
-        `${activeModel.name}:tools`,
-        `Forge: model "${activeModel.name}" does not appear to have a tool-aware chat template. Forge will use its fallback tool format.`,
-      );
-    }
-    const result = await this.trackTurnCompletion(conv.id, () =>
-      runToolCallingLoop({
-        baseUrl,
-        model: activeModel,
-        messages: conv.messages,
-        toolDefinitions,
-        signal: ctrl.signal,
-        maxRounds: MAX_TOOL_ROUNDS,
-        nativeTools,
-        stripAllTools: useStrip || activeModel.strip_tools === true,
-        includeUsage: activeModel.provider === undefined || activeModel.provider === 'llama.cpp',
-        canUseThinkingKwargs,
-        stripThinkingChannels,
-        failureTracker: this.failureTracker,
-        ...(apiKey ? { apiKey } : {}),
-        prepareMessages: (messages) => {
-          // Compaction shrinks what the MODEL sees, never the stored transcript.
-          // The loop hands us a copy and re-runs this every round, so the window
-          // holds for the whole turn without touching conv.messages.
-          const windowed = applyCompactionWindow(messages, conv.compaction);
-          const tmplCtx: Record<string, string> = {};
-          if (activeFile) tmplCtx['activeFile'] = activeFile;
-          if (config.custom_instructions)
-            tmplCtx['customInstructions'] = config.custom_instructions;
-          if (this.forgeLoader?.root) tmplCtx['workspaceRoot'] = this.forgeLoader.root;
-          if (this.forgeLoader?.instructions)
-            tmplCtx['forgeInstructions'] = this.forgeLoader.instructions;
-          const injected = injectSystemPrompt(
-            windowed,
-            this.templateEngine,
-            tmplCtx,
-            activeModel.system_prompt,
-            activeModel.system_prompt_mode,
-          );
-          const delegateEnabled = allowed.has('delegate');
-          const catalog = delegateEnabled
-            ? buildWorkerCatalog(config, allowed.has('cloud-worker'))
-            : undefined;
-          return addWorkerDelegationInstructions(injected, delegateEnabled, catalog);
-        },
-        dispatchToolCalls: async (toolCalls, messages) => {
-          for (const call of toolCalls) {
-            const detail = extractToolDetail(call.function.arguments);
-            postC({
-              type: 'toolActivity',
-              toolName: call.function.name,
-              ...(detail ? { detail } : {}),
-            });
-          }
-          await this.toolDispatch.dispatch(
-            toolCalls,
-            allowed,
-            messages,
-            conv.id,
-            ctrl.signal,
-            undefined,
-            checkpoint,
-            activeModel.name,
-            budget,
-          );
-          // A round of file reads and search results can add tens of thousands of
-          // tokens. Report it now rather than at the end of the turn.
-          this.onContextChanged?.(conv.id, true);
-        },
-        onToken: (text) => postC({ type: 'token', text }),
-        onReasoning: (text) => postC({ type: 'reasoningToken', text }),
-        onDone: (finishReason) => {
-          postC({ type: 'done', finishReason });
-          // The completed request's exact count remains the most faithful
-          // counterpart to llama-server's prompt-eval number. The final response
-          // itself becomes input only on the next request.
-          this.onContextChanged?.(conv.id, false);
-        },
-        onRepeatedCall: () =>
-          postC({
-            type: 'error',
-            message:
-              'Forge: agent is repeating the same tool call — stopping to avoid a loop. Try rephrasing your request or use /compact if the context is full.',
-          }),
-        onNativeFallback: () =>
-          this.warnOnce(
-            `${activeModel.name}:native-tool-json`,
-            `Forge: llama-server rejected this model's native tool-call JSON. Retrying with Forge's JSON fallback tool format.`,
-          ),
-        onUsage: (usage) => {
-          if (activeModel.provider !== undefined && activeModel.provider !== 'llama.cpp') return;
-          this.onExactContextTokens?.(conv.id, usage.prompt_tokens);
-        },
-        // A status line, not an error: the turn continues and the model is being
-        // asked for the same write in chunks.
-        onTruncatedToolCall: ({ toolName, approxBytes }) =>
-          postC({
-            type: 'toolActivity',
-            toolName: toolName ?? 'tool call',
-            detail: `output cut off after ${approxBytes} bytes — retrying in chunks`,
-          }),
-        getOutputRoom: (messages) =>
-          computeContextBudget({
-            messages,
-            toolTokens: estimateToolTokens(toolDefinitions),
-            model: activeModel,
-            server: config.llama_server,
-          }).outputRoom || undefined,
-      }),
-    );
-    // Cut off by the output ceiling: the reply stopped mid-thought, so the work
-    // is unfinished even though the loop returned normally.
-    if (result.finishReason === 'length') {
-      this.incompleteTurns.set(conv.id, 'the reply was cut off by the output limit');
-    }
-  }
-
-  /**
-   * Records turns that ended for want of room. `runToolCallingLoop` *throws* on
-   * the round cap and on exhausted context, so both have to be caught here —
-   * only `finish_reason: length` comes back through a normal return.
-   */
-  private async trackTurnCompletion<T>(convId: string, run: () => Promise<T>): Promise<T> {
-    try {
-      return await run();
-    } catch (err) {
-      if (isTurnCutOffError(err)) {
-        this.incompleteTurns.set(convId, (err as Error).message);
-      }
-      throw err;
-    }
-  }
-
   private async getRuntimeCapabilities(
     model: ModelConfig,
     baseUrl: string,
@@ -894,30 +334,9 @@ export class AgentLoop {
     return pending;
   }
 
-  private canUseThinkingKwargs(
-    model: ModelConfig | undefined,
-    runtimeCaps: RuntimeModelCapabilities | undefined,
-  ): boolean {
-    if (!model) return false;
-    if (runtimeCaps?.likelySupportsThinking === false) return false;
-    return model.think !== undefined || model.sampling?.preserve_thinking !== undefined;
-  }
-
-  private shouldStripThinking(model: ModelConfig | undefined): boolean {
-    if (!model || model.think !== false) return false;
-    const config = this.getConfig();
-    return (model.strip_thinking_channels ?? config.strip_thinking_channels) === true;
-  }
-
   private warnOnce(key: string, message: string): void {
     if (this.capabilityWarningsShown.has(key)) return;
     this.capabilityWarningsShown.add(key);
     void vscode.window.showWarningMessage(message);
-  }
-
-  private sanitizeText(text: string, stripThinking: boolean): string {
-    const withoutThinking = stripThinking ? stripThinkingFromFullText(text) : text;
-    const withoutStructured = stripStructuredOutputFromFullText(withoutThinking);
-    return stripHtmlDocumentBoilerplateFromFullText(withoutStructured);
   }
 }
