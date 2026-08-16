@@ -17,6 +17,8 @@ import type { ToolBudget } from '../tools/ToolBudget';
 import type { DiffDecorations } from './DiffDecorations';
 import type { WorkerRunContext, WorkerRunRequest, WorkerRunResult } from '../workers/types';
 import { resolveWorkspacePath, type ResolveWorkspacePathOptions } from '../util/WorkspacePaths';
+import { capDisplayText } from '../tools/resultCap';
+import { isFailureResult, readPathArg, resultLabel } from './toolResultView';
 
 const WRITE_PERMISSIONS = new Set<ToolPermission>(['write', 'delete']);
 
@@ -54,6 +56,13 @@ function gitDiffLarge(before: string, after: string): DiffHunk[] | null {
 
 export type ResolveToolPathOptions = ResolveWorkspacePathOptions;
 export const resolveToolPath = resolveWorkspacePath;
+
+/** How a transcript file reference should be revealed in the editor. */
+export interface OpenFileOptions {
+  /** 1-based line from a `path:42` reference. */
+  line?: number | undefined;
+  beside?: boolean | undefined;
+}
 
 export class ToolDispatch {
   private workerRunner?: (
@@ -239,10 +248,19 @@ export class ToolDispatch {
     }
   }
 
-  async openFile(filePath: string): Promise<void> {
+  async openFile(filePath: string, options?: OpenFileOptions): Promise<void> {
     const uri = vscode.Uri.file(resolveToolPath(filePath));
     const doc = await vscode.workspace.openTextDocument(uri);
-    await vscode.window.showTextDocument(doc, { preview: false, preserveFocus: false });
+    // `line` arrives 1-based from the transcript; VS Code positions are 0-based.
+    const zeroBased = options?.line === undefined ? undefined : Math.max(0, options.line - 1);
+    const target =
+      zeroBased === undefined ? undefined : new vscode.Range(zeroBased, 0, zeroBased, 0);
+    await vscode.window.showTextDocument(doc, {
+      preview: false,
+      preserveFocus: false,
+      ...(options?.beside ? { viewColumn: vscode.ViewColumn.Beside } : {}),
+      ...(target ? { selection: target } : {}),
+    });
   }
 
   private snapshotPaths(paths: string[], checkpoint?: CheckpointSession): void {
@@ -293,66 +311,35 @@ export class ToolDispatch {
     args?: Record<string, unknown>,
     convId?: string,
   ): void {
-    const fileLink = this.buildFileLink(tc.function.name, result, args);
-    const suffix = fileLink ? ` (${fileLink})` : '';
-    const cid = convId ? { conversationId: convId } : {};
+    const toolName = tc.function.name;
+    const pathArg = readPathArg(args);
+    const touchedFile = this.touchedFilePath(toolName, result, args);
+    const { text, totalChars } = capDisplayText(result);
+    const isError = isFailureResult(result);
 
-    const READ_ONLY_TOOLS = new Set([
-      'read_file',
-      'list_directory',
-      'search_code',
-      'get_diagnostics',
-    ]);
-    if (READ_ONLY_TOOLS.has(tc.function.name)) {
-      const pathArg =
-        typeof args?.['path'] === 'string'
-          ? args['path']
-          : typeof args?.['filepath'] === 'string'
-            ? args['filepath']
-            : null;
-      const label = pathArg ?? result.slice(0, 80).replace(/\r?\n/g, ' ');
-      this.post({
-        type: 'token',
-        text: `\n\n> **${tc.function.name}** → \`${label}\`${suffix}\n\n`,
-        ...cid,
-      });
-      return;
-    }
-
-    const truncated = result.length > 600 ? result.slice(0, 600) + '…' : result;
-    const preview = truncated.replace(/\[(file|dir|staged)\]\s*/g, '').replace(/\r?\n/g, ' ');
     this.post({
-      type: 'token',
-      text: `\n\n> **${tc.function.name}** → \`${preview}\`${suffix}\n\n`,
-      ...cid,
+      type: 'toolResult',
+      toolName,
+      label: resultLabel(toolName, result, pathArg),
+      text,
+      totalChars,
+      ...(touchedFile ? { filePath: touchedFile } : {}),
+      ...(isError ? { isError: true } : {}),
+      ...(convId ? { conversationId: convId } : {}),
     });
-    if (fileLink) {
-      const rawPath =
-        typeof args?.['path'] === 'string'
-          ? args['path']
-          : typeof args?.['filepath'] === 'string'
-            ? args['filepath']
-            : null;
-      if (rawPath) void this.openFile(rawPath);
-    }
+
+    if (touchedFile && pathArg) void this.openFile(pathArg);
   }
 
-  private buildFileLink(
+  /** Absolute path a write-style tool just changed, for the row's open link. */
+  private touchedFilePath(
     toolName: string,
     result: string,
     args?: Record<string, unknown>,
   ): string | null {
-    if (result.startsWith('Error:') || result.startsWith('User declined:')) return null;
+    if (isFailureResult(result)) return null;
     if (!['write_file', 'replace_in_file', 'format_file'].includes(toolName)) return null;
-    const rawPath =
-      typeof args?.['path'] === 'string'
-        ? args['path']
-        : typeof args?.['filepath'] === 'string'
-          ? args['filepath']
-          : null;
-    if (!rawPath) return null;
-    const resolved = resolveToolPath(rawPath);
-    const label = vscode.workspace.asRelativePath(resolved, false) || path.basename(resolved);
-    return `[open ${label}](forge-file://${encodeURIComponent(resolved)})`;
+    const rawPath = readPathArg(args);
+    return rawPath ? resolveToolPath(rawPath) : null;
   }
 }

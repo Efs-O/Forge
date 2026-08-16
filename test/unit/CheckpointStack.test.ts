@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { CheckpointStack } from '../../src/checkpoint/CheckpointStack';
+import { CheckpointStack, MAX_CHECKPOINT_DEPTH } from '../../src/checkpoint/CheckpointStack';
 
 describe('CheckpointStack', () => {
   let root: string;
@@ -107,5 +107,47 @@ describe('CheckpointStack', () => {
     expect(checkpoints.canUndo()).toBe(true);
     await checkpoints.undo();
     expect(fs.readFileSync(target, 'utf8')).toBe('before');
+  });
+
+  it('bounds undo history instead of growing for the life of the window', () => {
+    const target = path.join(root, 'churn.txt');
+    fs.writeFileSync(target, 'v0');
+    for (let i = 0; i < MAX_CHECKPOINT_DEPTH + 5; i++) {
+      checkpoints.beginTurn(`turn-${i}`);
+      checkpoints.snapshotBefore(target);
+      fs.writeFileSync(target, `v${i + 1}`);
+      checkpoints.commitTurn();
+    }
+
+    expect(checkpoints.depth()).toBe(MAX_CHECKPOINT_DEPTH);
+    expect(checkpoints.canUndo()).toBe(true);
+  });
+
+  it('exposes the newest pre-turn contents for review without consuming them', () => {
+    const existing = path.join(root, 'existing.txt');
+    const created = path.join(root, 'created.txt');
+    fs.writeFileSync(existing, 'before');
+
+    checkpoints.beginTurn('review-turn');
+    checkpoints.snapshotBefore(existing);
+    fs.writeFileSync(existing, 'after');
+    checkpoints.snapshotBefore(created);
+    fs.writeFileSync(created, 'new file');
+    checkpoints.commitTurn();
+
+    const pending = checkpoints.pendingSnapshots();
+    expect(pending).toEqual(
+      expect.arrayContaining([
+        { filePath: existing, original: 'before' },
+        { filePath: created, original: null },
+      ]),
+    );
+    // Reviewing must not consume the checkpoint.
+    expect(checkpoints.canUndo()).toBe(true);
+    expect(checkpoints.pendingSnapshots()).toHaveLength(pending.length);
+  });
+
+  it('returns no review entries when nothing is pending', () => {
+    expect(checkpoints.pendingSnapshots('never-used')).toEqual([]);
   });
 });

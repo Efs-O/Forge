@@ -3,14 +3,33 @@ import { vscode } from '../vscode';
 
 interface Props {
   visible: boolean;
+  fileCount: number;
+  added: number;
+  removed: number;
 }
 
-export function CheckpointBar({ visible }: Props): React.ReactElement | null {
+/**
+ * One summary row for the turn's file changes. Dismissing *is* keeping: the
+ * writes already landed on disk, and `keep` only releases the undo snapshot and
+ * clears the in-editor decorations — a separate "Keep" button read as though the
+ * changes were unsaved until pressed.
+ */
+export function CheckpointBar({
+  visible,
+  fileCount,
+  added,
+  removed,
+}: Props): React.ReactElement | null {
   if (!visible) return null;
+
+  const summary =
+    fileCount > 0 ? `Edited ${fileCount} file${fileCount === 1 ? '' : 's'}` : 'Files changed';
 
   return (
     <div id="checkpoint-bar">
-      <span id="checkpoint-label">Files changed this turn:</span>
+      <span id="checkpoint-label">{summary}</span>
+      {added > 0 && <span className="diff-stat diff-stat-added">+{added}</span>}
+      {removed > 0 && <span className="diff-stat diff-stat-removed">−{removed}</span>}
       <button
         className="btn-undo"
         onClick={() => vscode.postMessage({ type: 'undo' })}
@@ -19,11 +38,19 @@ export function CheckpointBar({ visible }: Props): React.ReactElement | null {
         ↩ Undo
       </button>
       <button
-        className="btn-keep"
-        onClick={() => vscode.postMessage({ type: 'keep' })}
-        title="Accept the changes from this turn"
+        className="btn-review"
+        onClick={() => vscode.postMessage({ type: 'reviewCheckpoint' })}
+        title="Open this turn's changes in the diff editor"
       >
-        ✓ Keep
+        Review
+      </button>
+      <button
+        className="btn-dismiss"
+        onClick={() => vscode.postMessage({ type: 'keep' })}
+        title="Keep the changes and dismiss — clears the undo snapshot and editor markers"
+        aria-label="Keep changes and dismiss"
+      >
+        ✕
       </button>
     </div>
   );

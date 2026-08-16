@@ -500,12 +500,49 @@ describe('ToolDispatch', () => {
 
     await dispatch.dispatch(toolCalls, allowed, messages as never);
 
+    // A structured message, not markdown injected into the assistant token
+    // stream: the transcript needs to be able to collapse and expand it.
     expect(post).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'token',
-        text: expect.stringContaining('read_file'),
+        type: 'toolResult',
+        toolName: 'read_file',
+        label: 'test.txt',
+        text: 'file contents here',
+        totalChars: 'file contents here'.length,
       }),
     );
+  });
+
+  it('keeps a long result readable instead of flattening it to a preview', async () => {
+    const report = ['# Report', '', 'First paragraph.', '', 'x'.repeat(4000)].join('\n');
+    toolRegistry.register({
+      definition: {
+        type: 'function',
+        function: {
+          name: 'delegate_to_agent',
+          description: 'Delegate',
+          parameters: { type: 'object' },
+        },
+      },
+      permission: 'read',
+      handler: vi.fn().mockResolvedValue(report),
+    });
+
+    const messages: Array<{ role: string; content: string }> = [];
+    await dispatch.dispatch(
+      [makeToolCall('delegate_to_agent', {})],
+      allowed,
+      messages as never,
+    );
+
+    const posted = post.mock.calls
+      .map((call) => call[0] as { type: string; text?: string; label?: string })
+      .find((msg) => msg.type === 'toolResult')!;
+    expect(posted.text).toBe(report);
+    expect(posted.text).toContain('\n');
+    expect(posted.label).toBe('# Report');
+    // The model still receives the untruncated result.
+    expect(messages.at(-1)?.content).toBe(report);
   });
 
   describe('tool budget (allowlist + per-turn call limits)', () => {

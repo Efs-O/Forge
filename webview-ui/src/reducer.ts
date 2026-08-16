@@ -1,99 +1,15 @@
-import type {
-  SessionTabMeta,
-  SessionHistoryMeta,
-  DiffHunk,
-  ModelEntry,
-} from '../../src/sidebar/messageBridge';
+import { findPendingToolRow, mergeSyncedMessages, mkId, type AppMessage } from './messageOps';
+import type { Action, State } from './appState';
 
-export interface AppMessage {
-  id: string;
-  role: 'user' | 'assistant' | 'error' | 'system' | 'tool' | 'diff';
-  content: string;
-  reasoning?: string | undefined;
-  diffHunks?: DiffHunk[] | null;
-  diffIsNew?: boolean;
-  diffIsDeleted?: boolean;
-}
-
-interface State {
-  messagesById: Record<string, AppMessage[]>;
-  streamingIds: Set<string>;
-  generatingIds: Set<string>;
-  models: ModelEntry[];
-  activeModel: string | null;
-  backendReady: boolean;
-  checkpointPending: boolean;
-  sessionHydrated: boolean;
-  tabs: SessionTabMeta[];
-  history: SessionHistoryMeta[];
-  activeConversationId: string;
-  clankerMode: boolean;
-}
-
-/** Derived view helpers — used by App.tsx */
-export function selectMessages(state: State): AppMessage[] {
-  return state.messagesById[state.activeConversationId] ?? [];
-}
-export function selectStreaming(state: State): boolean {
-  return state.streamingIds.has(state.activeConversationId);
-}
-export function selectGenerating(state: State): boolean {
-  return state.generatingIds.has(state.activeConversationId);
-}
-
-export type Action =
-  | { type: 'TOKEN'; text: string; convId?: string }
-  | { type: 'REASONING_TOKEN'; text: string; convId?: string }
-  | { type: 'GENERATION_STARTED'; convId?: string }
-  | { type: 'DONE'; convId?: string }
-  | { type: 'ERROR'; message: string; convId?: string }
-  | { type: 'READY'; convId?: string }
-  | { type: 'BACKEND_STARTING'; message: string; convId?: string }
-  | { type: 'BACKEND_DOWN'; message: string; convId?: string }
-  | { type: 'MODELS'; models: ModelEntry[]; active: string | null }
-  | { type: 'USER_SEND'; text: string; convId?: string }
-  | { type: 'SET_MODEL'; name: string | null }
-  | { type: 'CHECKPOINT_READY'; convId?: string }
-  | { type: 'CHECKPOINT_DISMISSED'; convId?: string }
-  | { type: 'TOOL_ACTIVITY'; toolName: string; detail?: string; convId?: string }
-  | {
-      type: 'FILE_DIFF';
-      filePath: string;
-      hunks: DiffHunk[] | null;
-      isNew: boolean;
-      isDeleted: boolean;
-      convId?: string;
-    }
-  | { type: 'CLANKER_CHANGED'; enabled: boolean }
-  | {
-      type: 'SESSION_SYNC';
-      activeId: string;
-      tabs: SessionTabMeta[];
-      history: SessionHistoryMeta[];
-      messagesById: Record<
-        string,
-        Array<{ role: 'user' | 'assistant'; content: string; reasoning?: string | undefined }>
-      >;
-    };
-
-function mkId(): string {
-  return Math.random().toString(36).slice(2);
-}
-
-export const initialState: State = {
-  messagesById: {},
-  streamingIds: new Set(),
-  generatingIds: new Set(),
-  models: [],
-  activeModel: null,
-  backendReady: false,
-  checkpointPending: false,
-  sessionHydrated: false,
-  tabs: [],
-  history: [],
-  activeConversationId: '',
-  clankerMode: false,
-};
+export type { AppMessage } from './messageOps';
+export type { Action, State } from './appState';
+export {
+  initialState,
+  selectMessages,
+  selectStreaming,
+  selectGenerating,
+  selectCheckpointPending,
+} from './appState';
 
 function appendToConv(state: State, convId: string, msg: AppMessage): State {
   const existing = state.messagesById[convId] ?? [];
@@ -113,6 +29,13 @@ function updateLastInConv(
 
 function resolveConvId(state: State, convId?: string): string {
   return convId ?? state.activeConversationId;
+}
+
+function withoutId(set: Set<string>, id: string): Set<string> {
+  if (!set.has(id)) return set;
+  const next = new Set(set);
+  next.delete(id);
+  return next;
 }
 
 function clearRecoveredBackendStartErrors(state: State, convId: string): State {
@@ -160,7 +83,7 @@ export function reducer(state: State, action: Action): State {
         ...state,
         streamingIds: new Set([...state.streamingIds, cid]),
         generatingIds: new Set([...state.generatingIds, cid]),
-        checkpointPending: false,
+        checkpointPendingIds: withoutId(state.checkpointPendingIds, cid),
         messagesById: {
           ...state.messagesById,
           [cid]: [...base, { id: mkId(), role: 'user', content: action.text }],
@@ -265,6 +188,37 @@ export function reducer(state: State, action: Action): State {
         id: mkId(),
         role: 'tool' as const,
         content: action.detail ? `${action.toolName} → ${action.detail}` : action.toolName,
+        toolName: action.toolName,
+      });
+    }
+
+    case 'TOOL_RESULT': {
+      const cid = resolveConvId(state, action.convId);
+      const existing = state.messagesById[cid] ?? [];
+      const filled = {
+        toolResult: action.text,
+        toolResultTotal: action.totalChars,
+        ...(action.filePath ? { toolFilePath: action.filePath } : {}),
+        ...(action.isError ? { toolIsError: true } : {}),
+      };
+      // Upgrade the pending activity row for this call rather than adding a
+      // second row — one line per tool call, gaining its result when it lands.
+      const pending = findPendingToolRow(existing, action.toolName);
+      if (pending >= 0) {
+        const updated = [...existing];
+        updated[pending] = {
+          ...existing[pending]!,
+          content: `${action.toolName} → ${action.label}`,
+          ...filled,
+        };
+        return { ...state, messagesById: { ...state.messagesById, [cid]: updated } };
+      }
+      return appendToConv(state, cid, {
+        id: mkId(),
+        role: 'tool' as const,
+        content: `${action.toolName} → ${action.label}`,
+        toolName: action.toolName,
+        ...filled,
       });
     }
 
@@ -280,11 +234,18 @@ export function reducer(state: State, action: Action): State {
       });
     }
 
-    case 'CHECKPOINT_READY':
-      return { ...state, checkpointPending: true };
+    case 'CHECKPOINT_READY': {
+      const cid = resolveConvId(state, action.convId);
+      return {
+        ...state,
+        checkpointPendingIds: new Set([...state.checkpointPendingIds, cid]),
+      };
+    }
 
-    case 'CHECKPOINT_DISMISSED':
-      return { ...state, checkpointPending: false };
+    case 'CHECKPOINT_DISMISSED': {
+      const cid = resolveConvId(state, action.convId);
+      return { ...state, checkpointPendingIds: withoutId(state.checkpointPendingIds, cid) };
+    }
 
     case 'CLANKER_CHANGED':
       return { ...state, clankerMode: action.enabled };
@@ -292,25 +253,20 @@ export function reducer(state: State, action: Action): State {
     case 'SESSION_SYNC': {
       const messagesById: Record<string, AppMessage[]> = {};
       for (const [id, rows] of Object.entries(action.messagesById)) {
-        const existing = state.messagesById[id] ?? [];
-        const reconstructed = rows.map((m, i) => ({
-          id: existing[i]?.role === m.role ? existing[i].id : mkId(),
-          role: m.role,
-          content: m.content,
-          reasoning: m.reasoning,
-        }));
-        // Re-append any diff cards that were live in this conversation — they are not
-        // persisted server-side so SESSION_SYNC would otherwise wipe them.
-        const survivingDiffs = (state.messagesById[id] ?? []).filter((m) => m.role === 'diff');
-        // Errors are host/UI state rather than persisted chat messages. Keep
-        // them across the post-turn SESSION_SYNC so actionable failures do not
-        // flash briefly and disappear during reconciliation.
-        const survivingErrors = (state.messagesById[id] ?? []).filter((m) => m.role === 'error');
-        messagesById[id] = [...reconstructed, ...survivingErrors, ...survivingDiffs];
+        messagesById[id] = mergeSyncedMessages(state.messagesById[id] ?? [], rows);
       }
+      // A closed tab can never show its bar again, so drop its pending id rather
+      // than letting the set grow for the lifetime of the webview.
+      // The active id is retained unconditionally: a sync can report an empty tab
+      // list mid-reconciliation, and dropping the visible bar there would strand
+      // an undo the user can still see files for.
+      const openIds = new Set([...action.tabs.map((tab) => tab.id), action.activeId]);
+      const pending = new Set([...state.checkpointPendingIds].filter((id) => openIds.has(id)));
       return {
         ...state,
         sessionHydrated: true,
+        checkpointPendingIds:
+          pending.size === state.checkpointPendingIds.size ? state.checkpointPendingIds : pending,
         tabs: action.tabs,
         history: action.history,
         activeConversationId: action.activeId,

@@ -29,6 +29,25 @@ overlaps with an existing owner, extend the owner instead.
 | Session transcript logging (~/.forge)      | `src/sidebar/SessionLogger.ts`       |
 | Tool-call argument summary labels          | `src/sidebar/toolSummary.ts`         |
 
+## Chat webview transcript
+
+| Concern                                          | Owner                                          |
+| ------------------------------------------------ | ---------------------------------------------- |
+| Webview state reducer (per-conversation keying)  | `webview-ui/src/reducer.ts`                    |
+| Transcript row folding (diff / thinking runs)    | `webview-ui/src/components/MessageList.tsx`    |
+| Single-file diff rendering + stats               | `webview-ui/src/components/DiffBlock.tsx`      |
+| Per-turn multi-file diff summary card            | `webview-ui/src/components/DiffGroup.tsx`      |
+| Compact per-round reasoning rows                 | `webview-ui/src/components/ThinkingGroup.tsx`  |
+| Tool call rows + expandable results              | `webview-ui/src/components/ToolRow.tsx`        |
+| Message list ops + session-sync reconciliation   | `webview-ui/src/messageOps.ts`                 |
+| Webview state shape, selectors, action union     | `webview-ui/src/appState.ts`                   |
+| Render-time path/URL linkification               | `webview-ui/src/linkify.ts`                    |
+| Tool result labelling for the transcript         | `src/sidebar/toolResultView.ts`                |
+| Checkpoint review (virtual pre-turn documents)   | `src/sidebar/CheckpointReview.ts`              |
+| Undo-history depth cap + review snapshots        | `src/checkpoint/checkpointHistory.ts`          |
+| Diff card styles                                 | `webview-ui/styles/diff.css`                   |
+| Tool + thinking row styles                       | `webview-ui/styles/tool-rows.css`              |
+
 ## Model Manager (F7/§2.3)
 
 | Concern                                        | Owner                                            |

@@ -54,6 +54,8 @@ const CSS_PARTIALS = [
   'webview-ui/styles/layout.css',
   'webview-ui/styles/tabs.css',
   'webview-ui/styles/messages.css',
+  'webview-ui/styles/tool-rows.css',
+  'webview-ui/styles/diff.css',
   'webview-ui/styles/highlight.css',
   'webview-ui/styles/input.css',
   'webview-ui/styles/dialogs.css',

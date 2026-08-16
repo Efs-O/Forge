@@ -10,6 +10,7 @@ import {
 } from './DiskCheckpointStore';
 import type { DiskCheckpointReference } from './CheckpointManifest';
 import type { CheckpointLimits } from './CheckpointPolicy';
+import { evictBeyondDepth, snapshotContents } from './checkpointHistory';
 import {
   captureMemoryState,
   restoreMemoryState,
@@ -43,6 +44,8 @@ export interface CheckpointStackOptions {
 }
 
 const DEFAULT_CONVERSATION_ID = '__default__';
+
+export { MAX_CHECKPOINT_DEPTH } from './checkpointHistory';
 
 export class CheckpointSession {
   private readonly pendingSnapshots: FileSnapshot[] = [];
@@ -196,13 +199,19 @@ export class CheckpointStack {
     });
     const diskSnapshots = [...session.diskSnapshots()];
     if (changed.length === 0 && diskSnapshots.length === 0) return;
-    this.stackFor(session.conversationId).push({
+    const stack = this.stackFor(session.conversationId);
+    stack.push({
       turnId: session.turnId,
       conversationId: session.conversationId,
       snapshots: changed,
       diskSnapshots,
       createdAt: Date.now(),
     });
+    for (const reference of evictBeyondDepth(stack)) {
+      void this.diskStore.discard(reference).catch((err: Error) => {
+        log.error(`[CheckpointStack] evicting oldest checkpoint failed: ${err.message}`);
+      });
+    }
     log.debug(
       `[CheckpointStack] committed conversation=${session.conversationId}, depth=${this.depth(session.conversationId)}`,
     );
@@ -270,6 +279,16 @@ export class CheckpointStack {
 
   readSnapshotContent(filePath: string): string | null | undefined {
     return this.legacySession?.readSnapshotContent(filePath);
+  }
+
+  /**
+   * Pre-turn contents of the files the newest checkpoint covers, for review
+   * without consuming it. `null` content means the file did not exist before.
+   */
+  pendingSnapshots(
+    conversationId = DEFAULT_CONVERSATION_ID,
+  ): Array<{ filePath: string; original: string | null }> {
+    return snapshotContents(this.stackFor(conversationId).at(-1));
   }
 
   depth(conversationId = DEFAULT_CONVERSATION_ID): number {

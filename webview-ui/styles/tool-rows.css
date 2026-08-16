@@ -1,0 +1,215 @@
+/* ── Tool activity rows ──────────────────────────────────────────────────── */
+
+.msg-tool-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  margin: 1px 0;
+  opacity: 0.8;
+}
+
+.tool-row-indicator {
+  color: var(--vscode-textLink-foreground, #4daafc);
+  font-size: 8px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.tool-row-name {
+  font-family: var(--vscode-editor-font-family, 'Cascadia Code', monospace);
+  font-size: 11px;
+  color: var(--vscode-textLink-foreground, #4daafc);
+  white-space: nowrap;
+}
+
+.tool-row-detail {
+  font-family: var(--vscode-editor-font-family, 'Cascadia Code', monospace);
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-row-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  align-self: auto;
+  flex-shrink: 0;
+}
+.tool-row-toggle:hover {
+  background: transparent;
+}
+.tool-row-toggle:hover .tool-row-name {
+  text-decoration: underline;
+}
+
+.tool-row-chevron {
+  display: inline-flex;
+  align-items: center;
+  width: 10px;
+  flex-shrink: 0;
+  color: var(--vscode-textLink-foreground, #4daafc);
+}
+
+.tool-row-size,
+.tool-row-open {
+  font-family: var(--vscode-editor-font-family, 'Cascadia Code', monospace);
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+  flex-shrink: 0;
+}
+
+.tool-row-open {
+  background: transparent;
+  border: none;
+  padding: 0 2px;
+  color: var(--vscode-textLink-foreground, #4daafc);
+  cursor: pointer;
+  align-self: auto;
+}
+.tool-row-open:hover {
+  background: transparent;
+  text-decoration: underline;
+}
+
+.msg-tool-row-error .tool-row-name {
+  color: var(--vscode-errorForeground, #f48771);
+}
+
+.tool-row-body {
+  margin: 2px 0 6px 16px;
+  padding: 6px 10px;
+  border-left: 2px solid var(--vscode-panel-border, #333);
+  background: var(--vscode-textCodeBlock-background, #1e1e1e);
+  border-radius: var(--forge-radius-sm);
+  font-size: 12px;
+  line-height: 1.45;
+  max-height: 360px;
+  overflow: auto;
+  word-break: break-word;
+}
+.tool-row-body p { margin: 0 0 6px; }
+.tool-row-body p:last-child { margin-bottom: 0; }
+.tool-row-body pre {
+  margin: 4px 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
+.tool-row-body code {
+  font-family: var(--vscode-editor-font-family, 'Cascadia Code', monospace);
+  font-size: 11px;
+}
+
+/* ── Thinking bubble ─────────────────────────────────────────────────────── */
+
+.thinking-bubble {
+  margin-bottom: 8px;
+  border: 1px solid var(--vscode-editorWidget-border, #454545);
+  border-radius: var(--forge-radius-md);
+  background: color-mix(in srgb, var(--vscode-editorWidget-background, #252526) 82%, transparent);
+  overflow: hidden;
+}
+
+.thinking-bubble-open {
+  background: color-mix(in srgb, var(--vscode-editorWidget-background, #252526) 94%, var(--vscode-textLink-foreground, #4daafc) 6%);
+}
+
+.thinking-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  border: none;
+  cursor: pointer;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-radius: 0;
+  align-self: auto;
+  transition: background 0.1s ease;
+}
+
+.thinking-toggle:hover {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+}
+
+.thinking-chevron {
+  display: inline-flex;
+  align-items: center;
+  color: var(--vscode-textLink-foreground, #4daafc);
+}
+
+.thinking-content {
+  margin: 0;
+  padding: 8px 10px;
+  border-top: 1px solid var(--vscode-editorWidget-border, #454545);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--vscode-editor-font-family, 'Cascadia Code', monospace);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--vscode-descriptionForeground);
+  background: var(--vscode-textCodeBlock-background, #1e1e1e);
+}
+
+/* ── Compact thinking rows (reasoning-only rounds) ──────────────────────── */
+
+.thinking-row,
+.thinking-group {
+  margin: 1px 0;
+}
+
+.thinking-row-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  background: transparent;
+  border: none;
+  color: var(--vscode-descriptionForeground);
+  font-family: var(--vscode-editor-font-family, 'Cascadia Code', monospace);
+  font-size: 11px;
+  cursor: pointer;
+  align-self: auto;
+}
+.thinking-row-toggle:hover {
+  background: transparent;
+  color: var(--vscode-foreground);
+}
+
+.thinking-row-chevron {
+  display: inline-flex;
+  align-items: center;
+  width: 10px;
+  flex-shrink: 0;
+  color: var(--vscode-descriptionForeground);
+}
+
+.thinking-row-label {
+  white-space: nowrap;
+}
+
+.thinking-group-body {
+  padding-left: 14px;
+  margin-left: 5px;
+  border-left: 1px solid var(--vscode-panel-border, #333);
+}
+
+.thinking-row .thinking-content {
+  border-top: none;
+  border-radius: var(--forge-radius-sm);
+  margin: 2px 0 4px 16px;
+  max-height: 280px;
+  overflow-y: auto;
+}

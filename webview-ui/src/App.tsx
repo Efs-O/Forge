@@ -1,4 +1,4 @@
-import React, { useEffect, useReducer, useCallback, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useReducer, useCallback, useRef, useState } from 'react';
 import type {
   AttachmentData,
   ForgeSlashCommandId,
@@ -13,11 +13,13 @@ import {
   selectMessages,
   selectStreaming,
   selectGenerating,
+  selectCheckpointPending,
 } from './reducer';
 export type { AppMessage } from './reducer';
 import { Header } from './components/Header';
 import { MessageList } from './components/MessageList';
 import { CheckpointBar } from './components/CheckpointBar';
+import { diffStats } from './components/DiffBlock';
 import { InputRow } from './components/InputRow';
 import { ConfirmationDialog } from './components/ConfirmationDialog';
 import { TabStrip } from './components/TabStrip';
@@ -89,6 +91,18 @@ export function App(): React.ReactElement {
             type: 'TOOL_ACTIVITY',
             toolName: msg.toolName,
             detail: msg.detail,
+            convId: msg.conversationId,
+          });
+          break;
+        case 'toolResult':
+          dispatch({
+            type: 'TOOL_RESULT',
+            toolName: msg.toolName,
+            label: msg.label,
+            text: msg.text,
+            totalChars: msg.totalChars,
+            ...(msg.filePath ? { filePath: msg.filePath } : {}),
+            ...(msg.isError ? { isError: true } : {}),
             convId: msg.conversationId,
           });
           break;
@@ -231,6 +245,22 @@ export function App(): React.ReactElement {
   const generating = selectGenerating(state);
   const uiBusy = generating;
 
+  // The bar reports the same edits the transcript's diff card shows.
+  const checkpointStats = useMemo(() => {
+    const diffs = messages.filter((m) => m.role === 'diff');
+    return diffs.reduce(
+      (acc, msg) => {
+        const { added, removed } = diffStats(msg.diffHunks);
+        return {
+          fileCount: acc.fileCount + 1,
+          added: acc.added + added,
+          removed: acc.removed + removed,
+        };
+      },
+      { fileCount: 0, added: 0, removed: 0 },
+    );
+  }, [messages]);
+
   return (
     <div id="forge-root">
       <Header
@@ -274,7 +304,12 @@ export function App(): React.ReactElement {
           Burning tokens…
         </div>
       )}
-      <CheckpointBar visible={state.checkpointPending} />
+      <CheckpointBar
+        visible={selectCheckpointPending(state)}
+        fileCount={checkpointStats.fileCount}
+        added={checkpointStats.added}
+        removed={checkpointStats.removed}
+      />
       <InputRow
         onSend={handleSend}
         onCancel={handleCancel}

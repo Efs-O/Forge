@@ -2,13 +2,16 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 interface AppModule {
   initialState: {
-    messagesById: Record<string, Array<{ role: string; content: string }>>;
+    messagesById: Record<
+      string,
+      Array<{ role: string; content: string; toolName?: string; toolResult?: string }>
+    >;
     streamingIds: Set<string>;
     generatingIds: Set<string>;
     models: string[];
     activeModel: string | null;
     backendReady: boolean;
-    checkpointPending: boolean;
+    checkpointPendingIds: Set<string>;
     sessionHydrated: boolean;
     tabs: unknown[];
     history: unknown[];
@@ -19,6 +22,19 @@ interface AppModule {
     action:
       | { type: 'MODELS'; names: string[]; active: string | null }
       | { type: 'GENERATION_STARTED'; convId?: string }
+      | { type: 'CHECKPOINT_READY'; convId?: string }
+      | { type: 'CHECKPOINT_DISMISSED'; convId?: string }
+      | { type: 'TOOL_ACTIVITY'; toolName: string; detail?: string; convId?: string }
+      | {
+          type: 'TOOL_RESULT';
+          toolName: string;
+          label: string;
+          text: string;
+          totalChars: number;
+          filePath?: string;
+          isError?: boolean;
+          convId?: string;
+        }
       | { type: 'USER_SEND'; text: string; convId?: string }
       | { type: 'DONE'; convId?: string }
       | { type: 'ERROR'; message: string; convId?: string }
@@ -49,6 +65,7 @@ interface AppModule {
           >;
         },
   ) => AppModule['initialState'];
+  selectCheckpointPending: (state: AppModule['initialState']) => boolean;
 }
 
 let appModule: AppModule;
@@ -208,4 +225,5 @@ describe('webview App reducer', () => {
       ]),
     );
   });
+
 });

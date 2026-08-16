@@ -30,6 +30,7 @@ import { ToolRegistry } from '../tools/ToolRegistry';
 import { resolveToolPermissions } from '../tools/PermissionResolver';
 import type { KeepUndoCodeLensProvider } from './KeepUndoCodeLens';
 import type { DiffDecorations } from './DiffDecorations';
+import { CheckpointReview } from './CheckpointReview';
 import type { WorkerRunRequest, WorkerRunResult } from '../workers/types';
 import { ToolFailureTracker } from '../tools/StripTools';
 import { getLogger } from '../util/logger';
@@ -99,6 +100,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly sessionLoggers = new Map<string, SessionLogger>();
   private readonly agentLoop: AgentLoop;
   private readonly slashHandler: SlashCommandHandler;
+  private readonly review = new CheckpointReview();
   private contextWarningShown = false;
   private lastContextTickAt = 0;
   private contextTickTimer: ReturnType<typeof setTimeout> | undefined;
@@ -191,17 +193,24 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   // ── Public API ────────────────────────────────────────────────────────────
 
+  /** Opens the active turn's changes in VS Code's native diff editor. */
+  async reviewCheckpoint(): Promise<void> {
+    await this.review.open(this.checkpoints.pendingSnapshots(this.sidebar.activeConversationId));
+  }
+
   async undo(): Promise<string[]> {
-    const restored = await this.checkpoints.undo(this.sidebar.activeConversationId);
+    const convId = this.sidebar.activeConversationId;
+    const restored = await this.checkpoints.undo(convId);
     this.codeLens.clearPending();
-    this.post({ type: 'checkpointDismissed' });
+    this.post({ type: 'checkpointDismissed', conversationId: convId });
     return restored;
   }
 
   async keep(): Promise<void> {
-    await this.checkpoints.keep(this.sidebar.activeConversationId);
+    const convId = this.sidebar.activeConversationId;
+    await this.checkpoints.keep(convId);
     this.codeLens.clearPending();
-    this.post({ type: 'checkpointDismissed' });
+    this.post({ type: 'checkpointDismissed', conversationId: convId });
   }
 
   canUndo(): boolean {
@@ -615,6 +624,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         void this.keep().catch((err: Error) => this.post({ type: 'error', message: err.message }));
         break;
 
+      case 'reviewCheckpoint':
+        void this.reviewCheckpoint().catch((err: Error) =>
+          this.post({ type: 'error', message: err.message }),
+        );
+        break;
+
       case 'newChat':
       case 'newConversation':
         void this.newConversation();
@@ -637,7 +652,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         break;
 
       case 'openFile':
-        void this.agentLoop.openFile(msg.path);
+        void this.agentLoop
+          .openFile(msg.path, { line: msg.line, beside: msg.beside })
+          .catch((err: Error) =>
+            this.post({ type: 'error', message: `Could not open ${msg.path}: ${err.message}` }),
+          );
         break;
 
       case 'confirmResponse':
@@ -702,6 +721,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (this.contextTickTimer) clearTimeout(this.contextTickTimer);
     this.contextTickTimer = undefined;
     this.pendingContextTickConvId = undefined;
+    this.review.dispose();
     await this.agentLoop.dispose();
     await this.checkpoints.dispose();
   }

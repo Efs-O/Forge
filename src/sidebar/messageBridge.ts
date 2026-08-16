@@ -104,6 +104,26 @@ export interface ConfirmRequestMsg {
   isDangerous?: boolean;
   conversationId?: string;
 }
+/**
+ * A finished tool call. Replaces the old practice of injecting a flattened
+ * 600-char preview into the assistant token stream as fake markdown: that could
+ * not be collapsed (it was not a message) and destroyed the newlines of any
+ * long result, such as a delegated CLI agent's report.
+ */
+export interface ToolResultMsg {
+  type: 'toolResult';
+  toolName: string;
+  /** One-line row label — a path for read-only tools, else a short summary. */
+  label: string;
+  /** Full result text, capped for display and with newlines intact. */
+  text: string;
+  /** Size of the untruncated result, so the row can say what was cut. */
+  totalChars: number;
+  /** Absolute path to offer as an "open" link, when the tool touched one file. */
+  filePath?: string;
+  isError?: boolean;
+  conversationId?: string;
+}
 export interface ToolActivityMsg {
   type: 'toolActivity';
   toolName: string;
@@ -204,6 +224,7 @@ export type HostToWebview =
   | NewChatMsg
   | ConfirmRequestMsg
   | ToolActivityMsg
+  | ToolResultMsg
   | WorkerStatusMsg
   | TokenBudgetMsg
   | SetInputMsg
@@ -247,6 +268,10 @@ export interface UndoMsg {
 export interface KeepMsg {
   type: 'keep';
 }
+/** Open the pending turn's changes in the native diff editor, without dismissing. */
+export interface ReviewCheckpointMsg {
+  type: 'reviewCheckpoint';
+}
 /** @deprecated Maps to newConversation on host. */
 export interface NewChatRequestMsg {
   type: 'newChat';
@@ -280,6 +305,10 @@ export interface RunSlashCommandMsg {
 export interface OpenFileMsg {
   type: 'openFile';
   path: string;
+  /** 1-based line to reveal, from a `path:42` reference in the transcript. */
+  line?: number;
+  /** Ctrl/Cmd-click: open in the editor group beside the active one. */
+  beside?: boolean;
 }
 
 export type WebviewToHost =
@@ -289,6 +318,7 @@ export type WebviewToHost =
   | WebviewReadyMsg
   | UndoMsg
   | KeepMsg
+  | ReviewCheckpointMsg
   | NewChatRequestMsg
   | NewConversationMsg
   | SwitchConversationMsg

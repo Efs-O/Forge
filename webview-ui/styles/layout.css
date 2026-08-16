@@ -130,13 +130,26 @@ body {
   color: #000;
 }
 
-#checkpoint-bar .btn-keep {
-  background: var(--vscode-button-background);
-  color: var(--vscode-button-foreground);
-  border: none;
+#checkpoint-bar .btn-review {
+  background: var(--vscode-button-secondaryBackground, #3a3d41);
+  color: var(--vscode-button-secondaryForeground, #ccc);
+  border: 1px solid var(--forge-border);
   padding: 3px 10px;
   border-radius: var(--forge-radius-sm);
 }
-#checkpoint-bar .btn-keep:hover {
-  background: var(--vscode-button-hoverBackground);
+#checkpoint-bar .btn-review:hover {
+  background: var(--vscode-button-secondaryHoverBackground, #4a4d51);
+}
+
+#checkpoint-bar .btn-dismiss {
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  border: none;
+  padding: 3px 6px;
+  border-radius: var(--forge-radius-sm);
+  line-height: 1;
+}
+#checkpoint-bar .btn-dismiss:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.1));
+  color: var(--vscode-foreground);
 }

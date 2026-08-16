@@ -1,6 +1,45 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import type { AppMessage } from '../App';
 import { Message } from './Message';
+import { DiffGroup } from './DiffGroup';
+import { ThinkingGroup, isReasoningOnly } from './ThinkingGroup';
+import { ToolRow } from './ToolRow';
+
+type Row =
+  | { kind: 'message'; message: AppMessage; index: number }
+  | { kind: 'diffGroup'; diffs: AppMessage[] }
+  | { kind: 'thinkingGroup'; steps: AppMessage[] };
+
+/**
+ * Folds runs of adjacent same-kind messages into single rows: file edits become
+ * one card per turn, per-round reasoning becomes one line. Anything else passes
+ * through untouched.
+ */
+function toRows(messages: AppMessage[]): Row[] {
+  const rows: Row[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i]!;
+
+    if (message.role === 'diff') {
+      const diffs: AppMessage[] = [];
+      while (i < messages.length && messages[i]!.role === 'diff') diffs.push(messages[i++]!);
+      i--;
+      rows.push({ kind: 'diffGroup', diffs });
+      continue;
+    }
+
+    if (isReasoningOnly(message)) {
+      const steps: AppMessage[] = [];
+      while (i < messages.length && isReasoningOnly(messages[i]!)) steps.push(messages[i++]!);
+      i--;
+      rows.push({ kind: 'thinkingGroup', steps });
+      continue;
+    }
+
+    rows.push({ kind: 'message', message, index: i });
+  }
+  return rows;
+}
 
 interface Props {
   messages: AppMessage[];
@@ -24,6 +63,7 @@ export function MessageList({
   const containerRef = useRef<HTMLDivElement>(null);
   const userScrolledUp = useRef(false);
   const shownConversation = useRef<string | undefined>(undefined);
+  const rows = useMemo(() => toRows(messages), [messages]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -53,13 +93,23 @@ export function MessageList({
 
   return (
     <div id="messages" ref={containerRef}>
-      {messages.map((msg, index) => (
-        <Message
-          key={msg.id}
-          {...msg}
-          streaming={streaming && index === messages.length - 1 && msg.role === 'assistant'}
-        />
-      ))}
+      {rows.map((row) =>
+        row.kind === 'diffGroup' ? (
+          <DiffGroup key={row.diffs[0]!.id} diffs={row.diffs} />
+        ) : row.kind === 'thinkingGroup' ? (
+          <ThinkingGroup key={row.steps[0]!.id} steps={row.steps} />
+        ) : row.message.role === 'tool' ? (
+          <ToolRow key={row.message.id} message={row.message} />
+        ) : (
+          <Message
+            key={row.message.id}
+            {...row.message}
+            streaming={
+              streaming && row.index === messages.length - 1 && row.message.role === 'assistant'
+            }
+          />
+        ),
+      )}
       {generating && messages[messages.length - 1]?.role !== 'assistant' && (
         <div className="forge-thinking-row" aria-label="Forge is thinking">
           <span className="forge-thinking-dot" />

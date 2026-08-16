@@ -31,7 +31,7 @@ import {
   inspectRuntimeModelCapabilities,
   type RuntimeModelCapabilities,
 } from '../backend/ModelCapabilities';
-import { ToolDispatch } from './ToolDispatch';
+import { ToolDispatch, type OpenFileOptions } from './ToolDispatch';
 import type { DiffDecorations } from './DiffDecorations';
 import { deriveTitle } from './sessionTypes';
 import { extractToolDetail } from './toolSummary';
@@ -246,8 +246,8 @@ export class AgentLoop {
     this.capabilityWarningsShown.clear();
   }
 
-  async openFile(filePath: string): Promise<void> {
-    return this.toolDispatch.openFile(filePath);
+  async openFile(filePath: string, options?: OpenFileOptions): Promise<void> {
+    return this.toolDispatch.openFile(filePath, options);
   }
 
   async runWorkerTurn(
