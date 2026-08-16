@@ -1,5 +1,16 @@
 # Forge — Recent Changes
 
+## 0.12.43 — The thinking pane follows its own reasoning
+
+- **Fixed: an expanded thinking pane never followed the reasoning streaming into
+  it.** The pane is its own scroll container (280px tall), so the message list's
+  auto-scroll never reached it — past that height new text landed below the fold
+  and stayed there. It now pins to the newest text, and stops following the
+  moment you scroll up to read back.
+- Auto-scroll no longer stalls mid-turn. Every token is a new message array, and
+  the smooth scroll restarted its animation on each one without ever arriving.
+  Streaming updates now jump instantly; settled ones keep the animation.
+
 ## 0.12.42 — Tool calls that outgrow the context no longer lose the turn
 
 - A tool call cut off mid-arguments is now recognised as a truncation instead of
@@ -27,14 +38,6 @@
   figure, not a regression.
 - A mid-stream SSE error frame is now surfaced instead of silently dropped. That
   class of failure used to end a turn with no message at all.
-- **Fixed: an expanded thinking pane never followed the reasoning streaming into
-  it.** The pane is its own scroll container (280px tall), so the message list's
-  auto-scroll never reached it — past that height new text landed below the fold
-  and stayed there. It now pins to the newest text, and stops following the
-  moment you scroll up to read back.
-- Auto-scroll no longer stalls mid-turn. Every token is a new message array, and
-  the smooth scroll restarted its animation on each one without ever arriving.
-  Streaming updates now jump instantly; settled ones keep the animation.
 
 ## 0.12.40 — Live context metering and warm CLI delegation
 
