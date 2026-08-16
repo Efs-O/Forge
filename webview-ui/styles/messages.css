@@ -33,6 +33,23 @@
   white-space: pre-wrap;
 }
 
+.msg.user.msg-queued {
+  opacity: 0.7;
+  border-left-style: dashed;
+}
+
+.queued-prompt-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 2px;
+}
+
+.queued-prompt-status {
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+}
+
 .msg.assistant {
   background: transparent;
   border: 1px solid var(--forge-border);

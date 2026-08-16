@@ -4,6 +4,7 @@ import { Message } from './Message';
 import { DiffGroup } from './DiffGroup';
 import { ThinkingGroup, isReasoningOnly } from './ThinkingGroup';
 import { ToolRow } from './ToolRow';
+import { QueuedPromptRow } from './QueuedPromptRow';
 
 type Row =
   | { kind: 'message'; message: AppMessage; index: number }
@@ -43,6 +44,8 @@ function toRows(messages: AppMessage[]): Row[] {
 
 interface Props {
   messages: AppMessage[];
+  queuedPrompts: Array<{ id: string; text: string; attachments: unknown[] }>;
+  onCancelQueuedPrompt: (id: string) => void;
   streaming: boolean;
   generating: boolean;
   /** Active conversation/tab id. A change means the user switched sessions, which
@@ -55,6 +58,8 @@ const SCROLL_THRESHOLD = 80; // px from bottom — within this, auto-scroll is a
 
 export function MessageList({
   messages,
+  queuedPrompts,
+  onCancelQueuedPrompt,
   streaming,
   generating,
   conversationId,
@@ -110,6 +115,14 @@ export function MessageList({
           />
         ),
       )}
+      {queuedPrompts.map((prompt) => (
+        <QueuedPromptRow
+          key={prompt.id}
+          text={prompt.text}
+          attachmentCount={prompt.attachments.length}
+          onCancel={() => onCancelQueuedPrompt(prompt.id)}
+        />
+      ))}
       {generating && messages[messages.length - 1]?.role !== 'assistant' && (
         <div className="forge-thinking-row" aria-label="Forge is thinking">
           <span className="forge-thinking-dot" />

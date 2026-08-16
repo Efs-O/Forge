@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useReducer, useCallback, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useReducer, useCallback, useState } from 'react';
 import type {
   AttachmentData,
   ForgeSlashCommandId,
@@ -27,6 +27,7 @@ import { HistoryList } from './components/HistoryList';
 import { SLASH_COMMANDS } from './slashCommands';
 
 interface QueuedPrompt {
+  id: string;
   conversationId: string;
   text: string;
   attachments: AttachmentData[];
@@ -44,10 +45,9 @@ export function App(): React.ReactElement {
   const [tokenUsed, setTokenUsed] = useState(0);
   const [tokenMax, setTokenMax] = useState(0);
   const [prefillText, setPrefillText] = useState<string | null>(null);
-  // Keep queued requests outside React state. Draining the previous state-backed
-  // queue from an effect both changed local state and dispatched a new prompt,
-  // which could re-enter rendering while an input change was in progress.
-  const queuedPrompts = useRef<QueuedPrompt[]>([]);
+  // Queued prompts belong in state so the user can see and cancel them before
+  // Forge submits them to the extension host.
+  const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
 
   useEffect(() => {
     function handler(event: MessageEvent): void {
@@ -185,23 +185,28 @@ export function App(): React.ReactElement {
     (text: string, attachments: AttachmentData[]) => {
       const prompt = { conversationId: state.activeConversationId, text, attachments };
       if (state.streamingIds.has(prompt.conversationId)) {
-        queuedPrompts.current.push(prompt);
+        setQueuedPrompts((current) => [...current, { ...prompt, id: crypto.randomUUID() }]);
         return;
       }
-      postPrompt(prompt);
+      postPrompt({ ...prompt, id: crypto.randomUUID() });
     },
     [postPrompt, state.activeConversationId, state.streamingIds],
   );
 
   useEffect(() => {
-    const nextIndex = queuedPrompts.current.findIndex(
+    const nextIndex = queuedPrompts.findIndex(
       (prompt) => !state.streamingIds.has(prompt.conversationId),
     );
     if (nextIndex < 0) return;
-    const [next] = queuedPrompts.current.splice(nextIndex, 1);
+    const next = queuedPrompts[nextIndex];
     if (!next) return;
+    setQueuedPrompts((current) => current.filter((prompt) => prompt.id !== next.id));
     postPrompt(next);
-  }, [postPrompt, state.streamingIds]);
+  }, [postPrompt, queuedPrompts, state.streamingIds]);
+
+  const cancelQueuedPrompt = useCallback((id: string) => {
+    setQueuedPrompts((current) => current.filter((prompt) => prompt.id !== id));
+  }, []);
 
   const handleCancel = useCallback(() => {
     vscode.postMessage({ type: 'cancel' });
@@ -297,6 +302,10 @@ export function App(): React.ReactElement {
       </aside>
       <MessageList
         messages={messages}
+        queuedPrompts={queuedPrompts.filter(
+          (prompt) => prompt.conversationId === state.activeConversationId,
+        )}
+        onCancelQueuedPrompt={cancelQueuedPrompt}
         streaming={streaming}
         generating={generating}
         conversationId={state.activeConversationId}
