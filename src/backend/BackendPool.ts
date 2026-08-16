@@ -1,24 +1,17 @@
 import type { BackendController } from './BackendController';
 import { DirectBackend } from './DirectBackend';
-import { probeHealthy } from './HealthCheck';
 import type { ForgeConfig } from '../config/types';
 import { expandAlias, resolveRequestModel, splitModelProfile } from '../config/ConfigResolver';
 import { DelegationGate } from './DelegationGate';
 import type { DelegationCheck, DelegationGroupHold, DelegationHold } from './DelegationGate';
 import { getLogger } from '../util/logger';
 import { SharedRuntimeRegistry, sharedRuntimeKey } from './SharedRuntimeRegistry';
+import { acquireOllamaSlot, borrowSharedRuntime, stopAllSlots } from './poolAcquisition';
+import { allocatePort, freeSlot, mostRecentSlot, type PoolSlot, type SlotTable } from './poolSlots';
 
 export type { DelegationCheck, DelegationGroupHold, DelegationHold } from './DelegationGate';
 
 const log = getLogger();
-
-interface PoolSlot {
-  backend: DirectBackend;
-  port: number;
-  lastUsed: number;
-  /** Resolves when the slot finishes starting up; null when already ready. */
-  starting: Promise<void> | null;
-}
 
 export interface IBackendPool {
   acquire(modelName: string): Promise<BackendController>;
@@ -179,47 +172,14 @@ export class BackendPool implements IBackendPool {
   }
 
   async stopAll(): Promise<void> {
-    for (const [model, shared] of this.sharedSlots) {
-      await shared.backend.stop().catch(() => {});
-      this.sharedRegistry.releaseLease(shared.key, shared.leaseId);
-      this.sharedSlots.delete(model);
-    }
-    const slotStops = [...this.slots.entries()].map(async ([model, slot]) => {
-      if (
-        this.config.shared_runtime?.enabled &&
-        this.sharedRegistry.hasBorrowers(this.runtimeKey(model))
-      ) {
-        log.info(`[BackendPool] retained shared runtime: ${model}`);
-        return;
-      }
-      if (slot.starting) await slot.starting.catch(() => {});
-      await slot.backend.stop();
+    await stopAllSlots({
+      slots: this.slots,
+      ollamaSlots: this.ollamaSlots,
+      sharedSlots: this.sharedSlots,
+      registry: this.sharedRegistry,
+      sharedRuntimeEnabled: this.config.shared_runtime?.enabled === true,
+      runtimeKey: (model) => this.runtimeKey(model),
     });
-    const ollamaStops = [...this.ollamaSlots.values()].map(async (backend) => {
-      try {
-        await backend.stop();
-      } catch {
-        /* best-effort */
-      }
-    });
-    const results = await Promise.allSettled([...slotStops, ...ollamaStops]);
-    const failures = results
-      .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
-      .map((result) =>
-        result.reason instanceof Error ? result.reason.message : String(result.reason),
-      );
-    if (failures.length) throw new Error(failures.join('\n'));
-    for (const model of [...this.slots.keys()]) {
-      if (
-        !this.config.shared_runtime?.enabled ||
-        !this.sharedRegistry.hasBorrowers(this.runtimeKey(model))
-      ) {
-        this.sharedRegistry.removeOwner(this.runtimeKey(model));
-        this.slots.delete(model);
-      }
-    }
-    this.ollamaSlots.clear();
-    log.info('[BackendPool] all slots stopped');
   }
 
   applyForgeConfig(next: ForgeConfig): void {
@@ -257,26 +217,7 @@ export class BackendPool implements IBackendPool {
   }
 
   private allocatePort(allowEvict: boolean): number {
-    if (this.freePorts.length > 0) {
-      return this.freePorts.shift()!;
-    }
-    if (!allowEvict) {
-      // Unreachable via DelegationGate (it pre-checks synchronously); kept as
-      // a hard guard so a non-evicting acquire can never evict.
-      throw new Error('BackendPool: no free slot for a non-evicting acquire');
-    }
-    // Evict LRU slot — models pinned by delegation holds are not candidates.
-    const lruEntry = this.getLruEntry();
-    if (!lruEntry)
-      throw new Error(
-        'BackendPool: no free slot and no eviction candidate — all resident models ' +
-          'are pinned by active delegation holds. Retry after delegation completes.',
-      );
-    const [lruModel, lruSlot] = lruEntry;
-    log.info(`[BackendPool] evicting LRU slot: ${lruModel} on port ${lruSlot.port}`);
-    void lruSlot.backend.stop().catch(() => {});
-    this.slots.delete(lruModel);
-    return lruSlot.port;
+    return allocatePort(this.slotTable(), allowEvict);
   }
 
   private startSlot(modelName: string, port: number): Promise<BackendController> {
@@ -353,87 +294,45 @@ export class BackendPool implements IBackendPool {
     this.freeSlot(modelName, slot);
   }
 
-  /**
-   * Remove a slot and return its port to the free list — only if `slot` still
-   * owns the map entry. A failed boot, an LRU eviction, or a concurrent
-   * release may have freed it already while a caller was awaiting; pushing the
-   * port twice would let two future models spawn on the same port.
-   */
   private freeSlot(modelName: string, slot: PoolSlot): void {
-    if (this.slots.get(modelName) !== slot) return;
-    this.slots.delete(modelName);
-    this.freePorts.push(slot.port);
-  }
-
-  private getLruEntry(): [string, PoolSlot] | undefined {
-    let lru: [string, PoolSlot] | undefined;
-    for (const entry of this.slots.entries()) {
-      if (this.gate.isPinned(entry[0])) continue;
-      if (!lru || entry[1].lastUsed < lru[1].lastUsed) lru = entry;
-    }
-    return lru;
+    freeSlot(this.slotTable(), modelName, slot);
   }
 
   private getMostRecentSlot(): PoolSlot | undefined {
-    let recent: PoolSlot | undefined;
-    for (const slot of this.slots.values()) {
-      if (!recent || slot.lastUsed > recent.lastUsed) recent = slot;
-    }
-    return recent;
+    return mostRecentSlot(this.slots);
+  }
+
+  private slotTable(): SlotTable {
+    return {
+      slots: this.slots,
+      freePorts: this.freePorts,
+      isPinned: (model) => this.gate.isPinned(model),
+    };
   }
 
   private isOllamaModel(modelName: string): boolean {
-    const model = this.config.models.find((m) => m.name === modelName);
-    return model?.provider === 'ollama';
+    return this.config.models.find((m) => m.name === modelName)?.provider === 'ollama';
   }
 
   private runtimeKey(modelName: string): string {
     return sharedRuntimeKey(resolveRequestModel(this.config, modelName));
   }
 
-  private async borrowSharedRuntime(modelName: string): Promise<BackendController | undefined> {
-    const key = this.runtimeKey(modelName);
-    const record = this.sharedRegistry.find(key);
-    if (!record || !(await probeHealthy(record.endpoint))) return undefined;
-    const port = Number(new URL(record.endpoint).port);
-    if (!Number.isInteger(port) || port < 1) return undefined;
-    const backend = new DirectBackend(this.config, port);
-    await backend.hotSwap(modelName);
-    const leaseId = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    this.sharedRegistry.acquireLease(key, leaseId);
-    this.sharedSlots.set(modelName, { backend, key, leaseId });
-    this.lastAcquiredModel = modelName;
-    log.info(`[BackendPool] borrowed shared runtime: ${modelName} at ${record.endpoint}`);
-    return backend;
+  private borrowSharedRuntime(modelName: string): Promise<BackendController | undefined> {
+    return borrowSharedRuntime(
+      { config: this.config, registry: this.sharedRegistry, key: this.runtimeKey(modelName) },
+      modelName,
+      (record) => {
+        this.sharedSlots.set(modelName, record);
+        this.lastAcquiredModel = modelName;
+      },
+    );
   }
 
   private acquireOllama(modelName: string): Promise<BackendController> {
-    const inFlight = this.ollamaStarting.get(modelName);
-    if (inFlight) return inFlight;
-
-    const existing = this.ollamaSlots.get(modelName);
-
-    const start = (async (): Promise<BackendController> => {
-      // `isReady` can be stale: the daemon may have died since the last use.
-      // Re-verify before trusting the cached slot; a dead endpoint falls
-      // through to hotSwap, which re-ensures (and may auto-start) the daemon.
-      if (existing?.isReady() && (await probeHealthy(existing.baseUrl()))) {
-        return existing;
-      }
-      if (existing) {
-        // Stale or never finished — re-hotSwap without recreating
-        await existing.hotSwap(modelName);
-        return existing;
-      }
-      // Port is irrelevant for Ollama: DirectBackend.hotSwap overrides currentBaseUrl
-      // to model.endpoint, so the port value here is never used.
-      const backend = new DirectBackend(this.config, 0);
-      this.ollamaSlots.set(modelName, backend);
-      await backend.hotSwap(modelName);
-      log.info(`[BackendPool] ollama slot ready: ${modelName}`);
-      return backend;
-    })();
-    this.ollamaStarting.set(modelName, start);
-    return start.finally(() => this.ollamaStarting.delete(modelName));
+    return acquireOllamaSlot(
+      { config: this.config, slots: this.ollamaSlots, starting: this.ollamaStarting },
+      modelName,
+    );
   }
 }

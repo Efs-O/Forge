@@ -12,13 +12,15 @@ import {
 } from '../../src/tools/execTools';
 import { makeWebFetchTool } from '../../src/tools/fetchTool';
 import {
-  makeCommitTool,
-  makeCreateBranchTool,
   makeGitBlameTool,
   makeGitDiffTool,
   makeGitLogTool,
   makeGitShowTool,
   makeGitStatusTool,
+} from '../../src/tools/gitReadTools';
+import {
+  makeCommitTool,
+  makeCreateBranchTool,
   makeStageTool,
   makeSwitchBranchTool,
 } from '../../src/tools/gitTools';

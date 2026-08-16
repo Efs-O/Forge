@@ -51,6 +51,8 @@ import {
   makeGitDiffTool,
   makeGitBlameTool,
   makeGitShowTool,
+} from './gitReadTools';
+import {
   makeCreateBranchTool,
   makeSwitchBranchTool,
   makeStageTool,

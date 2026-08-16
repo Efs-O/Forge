@@ -7,11 +7,11 @@ import { ControlServerRegistry, controlServerRegistryPath } from './backend/Cont
 import { buildControlChatProxy } from './llm/ControlChatProxy';
 import { registerControlServerCommands } from './vscode/controlCommands';
 import type { ForgeConfig } from './config/types';
-import { loadConfig, findConfigPath, watchForgeConfigPaths } from './config/ConfigLoader';
-import { expandAlias, splitModelProfile } from './config/ConfigResolver';
+import { loadConfig, findConfigPath } from './config/ConfigLoader';
 import { initLogger, getLogger } from './util/logger';
 import { ToolRegistry } from './tools/ToolRegistry';
-import { CheckpointStack } from './checkpoint/CheckpointStack';
+import { createCheckpointStack } from './vscode/checkpointSetup';
+import { watchForgeConfig } from './vscode/configReload';
 import { KeepUndoCodeLensProvider } from './sidebar/KeepUndoCodeLens';
 import { DiffDecorations } from './sidebar/DiffDecorations';
 import { TemplateEngine } from './llm/TemplateEngine';
@@ -138,35 +138,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       .catch((err) => log.error('MCP bridge failed unexpectedly', err));
   }
 
-  // ── Checkpoint stack ──────────────────────────────────────────────────────
-  const checkpointConfig = vscode.workspace.getConfiguration('forge.checkpoint');
-  const externalCliRollbackEnabled = checkpointConfig.get<boolean>('externalCliEnabled');
-  const checkpointMaxBytes = checkpointConfig.get<number>('maxBytes');
-  const checkpointMaxFiles = checkpointConfig.get<number>('maxFiles');
-  const checkpointStorageSetting = checkpointConfig.get<string>('storagePath');
-  if (
-    typeof externalCliRollbackEnabled !== 'boolean' ||
-    !Number.isSafeInteger(checkpointMaxBytes) ||
-    checkpointMaxBytes === undefined ||
-    checkpointMaxBytes < 1 ||
-    !Number.isSafeInteger(checkpointMaxFiles) ||
-    checkpointMaxFiles === undefined ||
-    checkpointMaxFiles < 1 ||
-    checkpointStorageSetting === undefined
-  ) {
-    throw new Error('Forge checkpoint settings are invalid. Review forge.checkpoint.* settings.');
-  }
-  const checkpointStorageRoot = checkpointStorageSetting.trim()
-    ? path.resolve(checkpointStorageSetting.trim())
-    : path.join(context.globalStorageUri.fsPath, 'checkpoints');
-  if (checkpointStorageSetting.trim() && !path.isAbsolute(checkpointStorageSetting.trim())) {
-    throw new Error('forge.checkpoint.storagePath must be an absolute path when configured.');
-  }
-  const checkpoints = new CheckpointStack({
-    storageRoot: checkpointStorageRoot,
-    limits: { maxBytes: checkpointMaxBytes, maxFiles: checkpointMaxFiles },
-    externalCliRollbackEnabled,
-  });
+  const checkpoints = createCheckpointStack(context);
 
   // Localhost model-control API for external orchestrators + the Forge command
   // palette. Always instantiated (cheap); the HTTP listener opens only when enabled.
@@ -277,42 +249,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   log.info('[Forge] backend will start on first prompt');
   statusBar.setStopped(config.active_model);
 
-  // ── Config hot-reload ────────────────────────────────────────────────────
   context.subscriptions.push(
-    watchForgeConfigPaths(activeConfigPath, [], (newConfig, err) => {
-      if (err) {
-        void vscode.window.showErrorMessage(`Forge: config reload failed — ${err.message}`);
-        return;
-      }
-      if (!newConfig) return;
-
-      const prevActive = config.active_model;
-      // Preserve the previous selection (incl. any @profile) across reloads if
-      // its base model still exists in the new config (F6).
-      const prevBase = prevActive
-        ? splitModelProfile(expandAlias(newConfig, prevActive)).base
-        : null;
-      if (prevActive && prevBase && newConfig.models.some((m) => m.name === prevBase)) {
-        newConfig.active_model = prevActive;
-      }
-
-      config = newConfig;
-      if (config.log_level) log.setLevel(config.log_level);
-
-      const newUserDirs = config.templates_dir ? [config.templates_dir] : [];
-      templateEngine?.reload(newUserDirs);
-
-      sidebarProvider.applyForgeConfig(config);
-      // pool.applyForgeConfig is called inside sidebarProvider.applyForgeConfig
-      controlServer.applyForgeConfig(config);
-      if (config.control_server?.enabled) controlServer.start();
-      statusBar.setStopped(config.active_model);
-      ModelManagerPanel.current?.refresh();
-
-      log.info('Forge: config reloaded');
-      void vscode.window.showInformationMessage(
-        'Forge: configuration reloaded (restart backend if you changed llama-server spawn settings)',
-      );
+    watchForgeConfig({
+      configPath: activeConfigPath,
+      getConfig: () => config,
+      onReloaded: (next) => {
+        config = next;
+        if (config.log_level) log.setLevel(config.log_level);
+        templateEngine?.reload(config.templates_dir ? [config.templates_dir] : []);
+        sidebarProvider.applyForgeConfig(config);
+        // pool.applyForgeConfig is called inside sidebarProvider.applyForgeConfig
+        controlServer.applyForgeConfig(config);
+        if (config.control_server?.enabled) controlServer.start();
+        statusBar.setStopped(config.active_model);
+        ModelManagerPanel.current?.refresh();
+      },
     }),
   );
 

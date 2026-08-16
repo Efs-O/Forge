@@ -12,7 +12,21 @@ overlaps with an existing owner, extend the owner instead.
 | Extension manifest + contributions         | `package.json`                       |
 | Activation / deactivation                  | `src/extension.ts`                   |
 | Webview lifecycle + message bridge entry   | `src/sidebar/SidebarProvider.ts`     |
+| Webview message routing                    | `src/sidebar/webviewMessageRouter.ts`|
+| Sidebar collaborator construction          | `src/sidebar/sidebarWiring.ts`       |
+| Ctx bar, HalluMeter bridge, thresholds     | `src/sidebar/ContextBudgetPublisher.ts`|
+| Tab create/switch/close/restore + VRAM     | `src/sidebar/ConversationTabs.ts`    |
+| Send guards, model resolution, turn logs   | `src/sidebar/SendPipeline.ts`        |
+| /reindex progress interaction              | `src/sidebar/reindexCommand.ts`      |
 | Primary turn + streaming lifecycle         | `src/sidebar/AgentLoop.ts`           |
+| Per-conversation streaming/cancel state    | `src/sidebar/TurnLifecycle.ts`       |
+| Model-endpoint turn: preflight + request   | `src/sidebar/ModelTurn.ts`           |
+| Cloud target / local backend startup       | `src/sidebar/ProviderTurn.ts`        |
+| Turn served by a local CLI agent           | `src/sidebar/CliTurn.ts`             |
+| Worker dispatch + coordinator review       | `src/sidebar/WorkerTurn.ts`          |
+| One-shot prompt (compaction, /review)      | `src/sidebar/PromptRun.ts`           |
+| Thinking kwargs, strip, template context   | `src/sidebar/turnModelBehavior.ts`   |
+| Collaborator set handed to turn modules    | `src/sidebar/turnServices.ts`        |
 | Confirmation FIFO + clanker bypass policy  | `src/sidebar/ToolApprovalService.ts` |
 | Tool call execution + result formatting    | `src/sidebar/ToolDispatch.ts`        |
 | Conversation CRUD pure ops                 | `src/sidebar/ConversationOps.ts`     |
@@ -21,6 +35,7 @@ overlaps with an existing owner, extend the owner instead.
 | Applying the compaction window to a request| `src/sidebar/compactionWindow.ts`    |
 | Webview HTML builder                       | `src/sidebar/WebviewBuilder.ts`      |
 | Multi-conversation session types + persist | `src/sidebar/sessionTypes.ts`        |
+| Session load/save/migrate (workspaceState) | `src/sidebar/sessionPersistence.ts`  |
 | First-run setup wizard                     | `src/sidebar/FirstRunWizard.ts`      |
 | Add-model setup wizard                     | `src/sidebar/AddModelWizard.ts`      |
 | Missing-config setup mode                  | `src/sidebar/SetupMode.ts`           |
@@ -74,6 +89,10 @@ overlaps with an existing owner, extend the owner instead.
 | Shared CLI spawn and process-tree cleanup    | `src/agents/cliProcess.ts`            |
 | One-shot worker/delegation CLI execution     | `src/agents/CliAgentDriver.ts`        |
 | Warm direct-chat CLI process lifecycle       | `src/agents/CliAgentSession.ts`       |
+| Codex app-server JSON-RPC session            | `src/agents/CodexAppServerSession.ts` |
+| JSON-RPC-over-stdio framing + correlation    | `src/agents/jsonRpcStdio.ts`          |
+| Codex turn text assembly + de-duplication    | `src/agents/codexTurnText.ts`         |
+| Codex app-server sandbox launch flags        | `src/agents/codexAppServerArgs.ts`    |
 | Conversation/model ownership, cap, and idle eviction | `src/agents/CliSessionRegistry.ts` |
 
 ## Backend
@@ -82,11 +101,15 @@ overlaps with an existing owner, extend the owner instead.
 | ----------------------------------------- | ---------------------------------- |
 | Mode-agnostic backend interface           | `src/backend/BackendController.ts` |
 | Multi-backend lifecycle + port allocation | `src/backend/BackendPool.ts`       |
+| llama.cpp slot table + LRU eviction       | `src/backend/poolSlots.ts`         |
+| Ollama + borrowed-runtime acquisition     | `src/backend/poolAcquisition.ts`   |
 | Delegation capacity check + eviction pins | `src/backend/DelegationGate.ts`    |
 | Direct mode (llama-server spawn)          | `src/backend/DirectBackend.ts`     |
+| Adopted llama-server health polling       | `src/backend/adoptedServerMonitor.ts` |
 | llama-server child-process spawn/teardown | `src/backend/llamaProcess.ts`      |
 | Embedding llama-server (semantic search)  | `src/backend/EmbeddingBackend.ts`  |
 | Localhost model-control HTTP API          | `src/backend/ControlServer.ts`     |
+| Control-server load/capacity/unload       | `src/backend/ControlModelLifecycle.ts` |
 | llama-server CLI arg builder              | `src/backend/LlamaServerArgs.ts`   |
 | Ollama endpoint normalization + health    | `src/backend/OllamaAdapter.ts`     |
 | Backend health polling                    | `src/backend/HealthCheck.ts`       |
@@ -125,6 +148,7 @@ overlaps with an existing owner, extend the owner instead.
 | Cloud request URL + secret resolution      | `src/llm/CloudRequestResolver.ts`            |
 | Local/cloud route classification           | `src/llm/ModelRouteClassifier.ts`            |
 | Shared native/fallback tool-calling loop   | `src/agent/ToolCallingLoop.ts`               |
+| Truncated tool call: detection + recovery  | `src/agent/truncationRecovery.ts`            |
 | xAI token resolution (SecretStorage/OAuth) | `src/llm/XaiAuth.ts`                         |
 | FORGE.md workspace instructions loader     | `src/llm/ForgeInstructionsLoader.ts`         |
 | Streaming OpenAI-compat client             | `src/llm/OpenAIClient.ts`                    |
@@ -153,6 +177,8 @@ overlaps with an existing owner, extend the owner instead.
 | Terminal + headless exec tools             | `src/tools/execTools.ts`              |
 | Exec child-process helpers                 | `src/tools/execHelpers.ts`            |
 | Git tools (status, diff, commit)           | `src/tools/gitTools.ts`               |
+| Read-only git tools (status, log, diff)    | `src/tools/gitReadTools.ts`           |
+| VS Code Git API access + path/status maps  | `src/tools/gitRepo.ts`                |
 | Search (Tavily / Brave)                    | `src/tools/searchTool.ts`             |
 | URL fetch tool (SSRF-guarded)              | `src/tools/fetchTool.ts`              |
 | LSP tools (go-to-def, refs, diagnostics)   | `src/tools/lspTools.ts`               |
@@ -215,6 +241,11 @@ overlaps with an existing owner, extend the owner instead.
 | ------------------------------------ | -------------------------------- |
 | Status bar (backend state indicator) | `src/vscode/BackendStatusBar.ts` |
 | Native VS Code commands              | `src/vscode/nativeCommands.ts`   |
+| Editor-context commands              | `src/vscode/editorCommands.ts`   |
+| Command behaviour (prefill, run)     | `src/vscode/commandHelpers.ts`   |
+| Shared command dependency type       | `src/vscode/commandDeps.ts`      |
+| Checkpoint settings -> stack         | `src/vscode/checkpointSetup.ts`  |
+| config.yaml hot-reload               | `src/vscode/configReload.ts`     |
 | Worker dispatch command              | `src/vscode/workerCommands.ts`   |
 | SecretStorage setup commands         | `src/vscode/secretCommands.ts`   |
 | Model-control palette commands       | `src/vscode/controlCommands.ts`  |

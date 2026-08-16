@@ -6,6 +6,7 @@ import type { ForgeConfig, ModelConfig } from '../config/types';
 import { composeLlamaServerArgs } from './LlamaServerArgs';
 import { spawnLlamaServer, killLlamaProcess } from './llamaProcess';
 import { waitForHealthy, probeHealthy, probeServedModel } from './HealthCheck';
+import { startAdoptedServerMonitor } from './adoptedServerMonitor';
 import { ensureOllamaReady, normalizeOllamaEndpoint, releaseOllamaModel } from './OllamaAdapter';
 import { isCloudProvider } from '../llm/CloudProviders';
 import { expandAlias, resolveSpawnModel, splitModelProfile } from '../config/ConfigResolver';
@@ -264,37 +265,15 @@ export class DirectBackend implements BackendController {
 
   private startAdoptedMonitor(): void {
     if (this.adoptPollTimer) return;
-    const baseUrl = `http://${this.host}:${this.port}`;
-    this.adoptPollTimer = setInterval(async () => {
-      try {
-        const [healthRes, slotsRes] = await Promise.all([
-          fetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(3000) }),
-          fetch(`${baseUrl}/slots`, { signal: AbortSignal.timeout(3000) }),
-        ]);
-        if (!healthRes.ok) throw new Error(`HTTP ${healthRes.status}`);
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const slots: any[] = slotsRes.ok ? ((await slotsRes.json()) as any[]) : [];
-        const active = slots.filter((s) => s.state === 1).length;
-        const total = slots.length;
-        const ctx = slots[0] ? `${slots[0].n_past ?? 0}/${slots[0].n_ctx ?? '?'} ctx` : '';
-        const ts = new Date().toLocaleTimeString();
-        const line = [
-          `[${ts}] llama-server healthy`,
-          total ? `slots: ${active}/${total} active` : '',
-          ctx,
-        ]
-          .filter(Boolean)
-          .join(' | ');
-        this.serverChannel?.appendLine(line);
-      } catch {
-        const ts = new Date().toLocaleTimeString();
-        this.serverChannel?.appendLine(`\n[${ts}] llama-server stopped or unreachable.`);
+    this.adoptPollTimer = startAdoptedServerMonitor({
+      baseUrl: `http://${this.host}:${this.port}`,
+      log: (line) => this.serverChannel?.appendLine(line),
+      onLost: () => {
         this.ready = false;
         this.stopAdoptedMonitor();
         this.onExitCb?.();
-      }
-    }, 5000);
+      },
+    });
   }
 
   private stopAdoptedMonitor(): void {
