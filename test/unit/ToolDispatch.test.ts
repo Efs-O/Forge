@@ -255,6 +255,34 @@ describe('ToolDispatch', () => {
     );
   });
 
+  it('does not request approval for a structurally bounded autonomous tool', async () => {
+    const handler = vi.fn().mockResolvedValue('workspace listed');
+    toolRegistry.register({
+      definition: {
+        type: 'function',
+        function: {
+          name: 'query_powershell',
+          description: 'Read-only PowerShell query',
+          parameters: { type: 'object' },
+        },
+      },
+      permission: 'headless',
+      autoApprove: true,
+      handler,
+    });
+
+    const messages: Array<{ role: string; content: string }> = [];
+    await dispatch.dispatch(
+      [makeToolCall('query_powershell', { operation: 'workspace_overview' })],
+      allowed,
+      messages as never,
+    );
+
+    expect(requestApproval).not.toHaveBeenCalled();
+    expect(handler).toHaveBeenCalledOnce();
+    expect(messages[0]?.content).toBe('workspace listed');
+  });
+
   it('requests approval for git tools', async () => {
     toolRegistry.register({
       definition: {

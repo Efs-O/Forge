@@ -274,6 +274,10 @@ export interface ForgeConfig {
      *  Deliberately not ~0.95: the summarization request sends the transcript,
      *  so it needs room left to run. */
     at?: number;
+    /** After an automatic compaction, resume a turn that was cut off (output
+     *  limit, exhausted context, tool-round cap) instead of leaving the agent
+     *  parked mid-task. Default: true. A user-typed /compact never resumes. */
+    resume?: boolean;
   };
   /** Optional localhost model-control API so an external orchestrator can ask
    *  Forge to load the right model on demand and discover its endpoint. */

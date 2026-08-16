@@ -236,6 +236,7 @@ export const ForgeConfigSchema = z
         enabled: z.boolean().optional(),
         // Upper bound below 1: the summarization call still needs context to run.
         at: z.number().min(0.5).max(0.95).optional(),
+        resume: z.boolean().optional(),
       })
       .optional(),
     control_server: z

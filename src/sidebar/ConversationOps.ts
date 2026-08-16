@@ -17,8 +17,18 @@ export type RestoreConvResult =
   | { notFound: true }
   | { ok: true; sidebar: SidebarRuntime; newActiveId: string; activeModelOverride?: string };
 
-/** Open a new empty conversation tab. Returns atCap if limit reached. */
-export function opNewConversation(sidebar: SidebarRuntime): NewConvResult {
+/**
+ * Open a new empty conversation tab. Returns atCap if limit reached.
+ *
+ * `defaultModel` is pinned onto the tab immediately rather than left to fall
+ * through to the global default at use time. That fallback is live: an unpinned
+ * tab silently adopted whatever model the last visited tab set, so merely
+ * switching away and back changed which model a new chat would talk to.
+ */
+export function opNewConversation(
+  sidebar: SidebarRuntime,
+  defaultModel?: string | null,
+): NewConvResult {
   if (sidebar.conversations.length >= MAX_CONVERSATIONS) return { atCap: true };
   const id = newConversationId();
   const now = Date.now();
@@ -28,6 +38,7 @@ export function opNewConversation(sidebar: SidebarRuntime): NewConvResult {
     createdAt: now,
     updatedAt: now,
     messages: [],
+    ...(defaultModel ? { active_model: defaultModel } : {}),
   };
   const updated: SidebarRuntime = {
     ...sidebar,
@@ -123,12 +134,18 @@ export function opRestoreConversation(sidebar: SidebarRuntime, id: string): Rest
   };
 }
 
-/** Clear messages from a conversation in place (mutates). */
+/**
+ * Clear messages from a conversation in place (mutates).
+ *
+ * The pinned model deliberately survives: dropping it left the tab following
+ * the global default again, so a cleared tab would change model behind the
+ * user's back the next time another tab was visited — while the picker went on
+ * showing the model they had chosen here.
+ */
 export function opClearMessages(conv: ConversationRuntime): void {
   conv.messages = [];
   conv.title = 'Chat';
   conv.updatedAt = Date.now();
-  delete conv.active_model;
 }
 
 /**

@@ -44,7 +44,7 @@ import {
   buildWorkerCatalog,
   buildWorkerReviewPrompt,
 } from '../workers/WorkerPrompts';
-import { runToolCallingLoop } from '../agent/ToolCallingLoop';
+import { runToolCallingLoop, isTurnCutOffError } from '../agent/ToolCallingLoop';
 import { recordModelUsage } from './modelManager/usageTracker';
 import { CliAgentDriver } from '../agents/CliAgentDriver';
 import { prepareCliChatAgent, runCliChat, runWarmCliChat } from '../agents/CliChatRunner';
@@ -85,6 +85,9 @@ export class AgentLoop {
   private readonly workspaceRoot: string;
   private readonly cliSessions: CliSessionRegistry;
   private promptRunCtrl: AbortController | null = null;
+  /** convId → why the last turn ended short. Set only when the turn was cut off
+   *  rather than finished, so auto-compact can decide whether to resume it. */
+  private readonly incompleteTurns = new Map<string, string>();
   private onContextChanged?: (convId: string, promptChanged: boolean) => void;
   private onExactContextTokens?: (convId: string, usedTokens: number) => void;
 
@@ -110,6 +113,19 @@ export class AgentLoop {
   isStreamingConv(id: string): boolean {
     return this.streamingConvIds.has(id);
   }
+  /** Why the last turn on this conversation stopped short, if it did. */
+  incompleteTurnReason(id: string): string | undefined {
+    return this.incompleteTurns.get(id);
+  }
+
+  /** Marks a conversation busy for background work that is not a turn (the
+   *  compaction summary). Without this the summarization streams while the UI
+   *  and the send guards both read as idle. */
+  beginBackgroundWork(convId: string): () => void {
+    this.streamingConvIds.add(convId);
+    return () => this.streamingConvIds.delete(convId);
+  }
+
   isCancellationPending(id: string): boolean {
     return this.cancellingConvIds.has(id);
   }
@@ -365,6 +381,9 @@ export class AgentLoop {
   ): Promise<void> {
     await this.waitForCancelledTurns();
     const convId = conv.id;
+    // A new turn supersedes whatever the previous one ended as; auto-compact
+    // resume reads this and must never act on a stale verdict.
+    this.incompleteTurns.delete(convId);
     const postC = (msg: HostToWebview): void =>
       this.post({ ...msg, conversationId: convId } as HostToWebview);
     const hasImage = attachments?.some((attachment) => attachment.mediaType.startsWith('image/'));
@@ -736,108 +755,132 @@ export class AgentLoop {
         `Forge: model "${activeModel.name}" does not appear to have a tool-aware chat template. Forge will use its fallback tool format.`,
       );
     }
-    await runToolCallingLoop({
-      baseUrl,
-      model: activeModel,
-      messages: conv.messages,
-      toolDefinitions,
-      signal: ctrl.signal,
-      maxRounds: MAX_TOOL_ROUNDS,
-      nativeTools,
-      stripAllTools: useStrip || activeModel.strip_tools === true,
-      includeUsage: activeModel.provider === undefined || activeModel.provider === 'llama.cpp',
-      canUseThinkingKwargs,
-      stripThinkingChannels,
-      failureTracker: this.failureTracker,
-      ...(apiKey ? { apiKey } : {}),
-      prepareMessages: (messages) => {
-        // Compaction shrinks what the MODEL sees, never the stored transcript.
-        // The loop hands us a copy and re-runs this every round, so the window
-        // holds for the whole turn without touching conv.messages.
-        const windowed = applyCompactionWindow(messages, conv.compaction);
-        const tmplCtx: Record<string, string> = {};
-        if (activeFile) tmplCtx['activeFile'] = activeFile;
-        if (config.custom_instructions) tmplCtx['customInstructions'] = config.custom_instructions;
-        if (this.forgeLoader?.root) tmplCtx['workspaceRoot'] = this.forgeLoader.root;
-        if (this.forgeLoader?.instructions)
-          tmplCtx['forgeInstructions'] = this.forgeLoader.instructions;
-        const injected = injectSystemPrompt(
-          windowed,
-          this.templateEngine,
-          tmplCtx,
-          activeModel.system_prompt,
-          activeModel.system_prompt_mode,
-        );
-        const delegateEnabled = allowed.has('delegate');
-        const catalog = delegateEnabled
-          ? buildWorkerCatalog(config, allowed.has('cloud-worker'))
-          : undefined;
-        return addWorkerDelegationInstructions(injected, delegateEnabled, catalog);
-      },
-      dispatchToolCalls: async (toolCalls, messages) => {
-        for (const call of toolCalls) {
-          const detail = extractToolDetail(call.function.arguments);
+    const result = await this.trackTurnCompletion(conv.id, () =>
+      runToolCallingLoop({
+        baseUrl,
+        model: activeModel,
+        messages: conv.messages,
+        toolDefinitions,
+        signal: ctrl.signal,
+        maxRounds: MAX_TOOL_ROUNDS,
+        nativeTools,
+        stripAllTools: useStrip || activeModel.strip_tools === true,
+        includeUsage: activeModel.provider === undefined || activeModel.provider === 'llama.cpp',
+        canUseThinkingKwargs,
+        stripThinkingChannels,
+        failureTracker: this.failureTracker,
+        ...(apiKey ? { apiKey } : {}),
+        prepareMessages: (messages) => {
+          // Compaction shrinks what the MODEL sees, never the stored transcript.
+          // The loop hands us a copy and re-runs this every round, so the window
+          // holds for the whole turn without touching conv.messages.
+          const windowed = applyCompactionWindow(messages, conv.compaction);
+          const tmplCtx: Record<string, string> = {};
+          if (activeFile) tmplCtx['activeFile'] = activeFile;
+          if (config.custom_instructions)
+            tmplCtx['customInstructions'] = config.custom_instructions;
+          if (this.forgeLoader?.root) tmplCtx['workspaceRoot'] = this.forgeLoader.root;
+          if (this.forgeLoader?.instructions)
+            tmplCtx['forgeInstructions'] = this.forgeLoader.instructions;
+          const injected = injectSystemPrompt(
+            windowed,
+            this.templateEngine,
+            tmplCtx,
+            activeModel.system_prompt,
+            activeModel.system_prompt_mode,
+          );
+          const delegateEnabled = allowed.has('delegate');
+          const catalog = delegateEnabled
+            ? buildWorkerCatalog(config, allowed.has('cloud-worker'))
+            : undefined;
+          return addWorkerDelegationInstructions(injected, delegateEnabled, catalog);
+        },
+        dispatchToolCalls: async (toolCalls, messages) => {
+          for (const call of toolCalls) {
+            const detail = extractToolDetail(call.function.arguments);
+            postC({
+              type: 'toolActivity',
+              toolName: call.function.name,
+              ...(detail ? { detail } : {}),
+            });
+          }
+          await this.toolDispatch.dispatch(
+            toolCalls,
+            allowed,
+            messages,
+            conv.id,
+            ctrl.signal,
+            undefined,
+            checkpoint,
+            activeModel.name,
+            budget,
+          );
+          // A round of file reads and search results can add tens of thousands of
+          // tokens. Report it now rather than at the end of the turn.
+          this.onContextChanged?.(conv.id, true);
+        },
+        onToken: (text) => postC({ type: 'token', text }),
+        onReasoning: (text) => postC({ type: 'reasoningToken', text }),
+        onDone: (finishReason) => {
+          postC({ type: 'done', finishReason });
+          // The completed request's exact count remains the most faithful
+          // counterpart to llama-server's prompt-eval number. The final response
+          // itself becomes input only on the next request.
+          this.onContextChanged?.(conv.id, false);
+        },
+        onRepeatedCall: () =>
+          postC({
+            type: 'error',
+            message:
+              'Forge: agent is repeating the same tool call — stopping to avoid a loop. Try rephrasing your request or use /compact if the context is full.',
+          }),
+        onNativeFallback: () =>
+          this.warnOnce(
+            `${activeModel.name}:native-tool-json`,
+            `Forge: llama-server rejected this model's native tool-call JSON. Retrying with Forge's JSON fallback tool format.`,
+          ),
+        onUsage: (usage) => {
+          if (activeModel.provider !== undefined && activeModel.provider !== 'llama.cpp') return;
+          this.onExactContextTokens?.(conv.id, usage.prompt_tokens);
+        },
+        // A status line, not an error: the turn continues and the model is being
+        // asked for the same write in chunks.
+        onTruncatedToolCall: ({ toolName, approxBytes }) =>
           postC({
             type: 'toolActivity',
-            toolName: call.function.name,
-            ...(detail ? { detail } : {}),
-          });
-        }
-        await this.toolDispatch.dispatch(
-          toolCalls,
-          allowed,
-          messages,
-          conv.id,
-          ctrl.signal,
-          undefined,
-          checkpoint,
-          activeModel.name,
-          budget,
-        );
-        // A round of file reads and search results can add tens of thousands of
-        // tokens. Report it now rather than at the end of the turn.
-        this.onContextChanged?.(conv.id, true);
-      },
-      onToken: (text) => postC({ type: 'token', text }),
-      onReasoning: (text) => postC({ type: 'reasoningToken', text }),
-      onDone: (finishReason) => {
-        postC({ type: 'done', finishReason });
-        // The completed request's exact count remains the most faithful
-        // counterpart to llama-server's prompt-eval number. The final response
-        // itself becomes input only on the next request.
-        this.onContextChanged?.(conv.id, false);
-      },
-      onRepeatedCall: () =>
-        postC({
-          type: 'error',
-          message:
-            'Forge: agent is repeating the same tool call — stopping to avoid a loop. Try rephrasing your request or use /compact if the context is full.',
-        }),
-      onNativeFallback: () =>
-        this.warnOnce(
-          `${activeModel.name}:native-tool-json`,
-          `Forge: llama-server rejected this model's native tool-call JSON. Retrying with Forge's JSON fallback tool format.`,
-        ),
-      onUsage: (usage) => {
-        if (activeModel.provider !== undefined && activeModel.provider !== 'llama.cpp') return;
-        this.onExactContextTokens?.(conv.id, usage.prompt_tokens);
-      },
-      // A status line, not an error: the turn continues and the model is being
-      // asked for the same write in chunks.
-      onTruncatedToolCall: ({ toolName, approxBytes }) =>
-        postC({
-          type: 'toolActivity',
-          toolName: toolName ?? 'tool call',
-          detail: `output cut off after ${approxBytes} bytes — retrying in chunks`,
-        }),
-      getOutputRoom: (messages) =>
-        computeContextBudget({
-          messages,
-          toolTokens: estimateToolTokens(toolDefinitions),
-          model: activeModel,
-          server: config.llama_server,
-        }).outputRoom || undefined,
-    });
+            toolName: toolName ?? 'tool call',
+            detail: `output cut off after ${approxBytes} bytes — retrying in chunks`,
+          }),
+        getOutputRoom: (messages) =>
+          computeContextBudget({
+            messages,
+            toolTokens: estimateToolTokens(toolDefinitions),
+            model: activeModel,
+            server: config.llama_server,
+          }).outputRoom || undefined,
+      }),
+    );
+    // Cut off by the output ceiling: the reply stopped mid-thought, so the work
+    // is unfinished even though the loop returned normally.
+    if (result.finishReason === 'length') {
+      this.incompleteTurns.set(conv.id, 'the reply was cut off by the output limit');
+    }
+  }
+
+  /**
+   * Records turns that ended for want of room. `runToolCallingLoop` *throws* on
+   * the round cap and on exhausted context, so both have to be caught here —
+   * only `finish_reason: length` comes back through a normal return.
+   */
+  private async trackTurnCompletion<T>(convId: string, run: () => Promise<T>): Promise<T> {
+    try {
+      return await run();
+    } catch (err) {
+      if (isTurnCutOffError(err)) {
+        this.incompleteTurns.set(convId, (err as Error).message);
+      }
+      throw err;
+    }
   }
 
   private async getRuntimeCapabilities(

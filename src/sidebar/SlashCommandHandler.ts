@@ -3,16 +3,16 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import type { IBackendPool } from '../backend/BackendPool';
 import type { ForgeConfig } from '../config/types';
-import type { HostToWebview, ForgeSlashCommandId } from './messageBridge';
-import type { ConversationRuntime } from './sessionTypes';
+import type { ForgeSlashCommandId } from './messageBridge';
 import type { SidebarProviderEvents } from './AgentLoop';
+import { runCompaction, type CompactionDeps, type CompactionOutcome } from './CompactionService';
 import {
   activeFileBlock,
   activeSelectionBlock,
   formatContextBlocks,
 } from '../vscode/editorContext';
 
-export interface SlashCommandDeps {
+export interface SlashCommandDeps extends CompactionDeps {
   getConfig: () => ForgeConfig;
   pool: IBackendPool;
   events: SidebarProviderEvents;
@@ -22,14 +22,6 @@ export interface SlashCommandDeps {
   submitPrompt: (text: string) => Promise<void>;
   undo: () => Promise<string[]>;
   keep: () => Promise<void>;
-  post: (msg: HostToWebview) => void;
-  getActiveConv: () => ConversationRuntime;
-  persistSession: () => void;
-  postSessionSync: () => void;
-  invalidateExactTokenBudget: () => void;
-  postTokenBudget: () => void;
-  runPromptToMarkdown: (text: string) => Promise<string>;
-  isStreaming: () => boolean;
   toggleClanker: () => boolean;
 }
 
@@ -91,7 +83,9 @@ export class SlashCommandHandler {
         return;
 
       case 'compact':
-        await this.compact();
+        // A user-typed /compact never auto-continues: they are at the keyboard
+        // and decide what happens next.
+        await this.compact({ auto: false });
         return;
 
       case 'undo':
@@ -338,82 +332,11 @@ Key directories and what they contain (3-8 entries).
 Be specific and factual. Do not invent paths or names not present in the scan results above.`;
   }
 
-  private async compact(): Promise<void> {
-    const { deps } = this;
-    if (deps.isStreaming()) {
-      void vscode.window.showInformationMessage(
-        'Forge: wait for the current response to finish before compacting.',
-      );
-      return;
-    }
-    const conv = deps.getActiveConv();
-    // Only summarize what the model is actually still being sent: re-compacting
-    // must not re-summarize turns already folded into the previous summary.
-    const from = conv.compaction ? Math.min(conv.compaction.fromIndex, conv.messages.length) : 0;
-    const pending = conv.messages.slice(from);
-    const compactable = pending.filter(
-      (m) =>
-        (m.role === 'user' || m.role === 'assistant' || m.role === 'tool') &&
-        typeof m.content === 'string',
-    );
-    if (compactable.length < 2) {
-      void vscode.window.showInformationMessage(
-        'Forge: not enough conversation history to compact.',
-      );
-      return;
-    }
-    deps.post({
-      type: 'notice',
-      message: 'Compacting conversation…',
-      conversationId: conv.id,
-    });
-    const previous = conv.compaction ? `EARLIER SUMMARY:\n${conv.compaction.summary}\n\n` : '';
-    const transcript =
-      previous +
-      compactable
-        .map((m) => {
-          const reasoning = m.reasoning ? `\nReasoning summary:\n${m.reasoning}` : '';
-          // Tool output used to be excluded entirely, so compaction discarded
-          // everything the agent learned from its tools. Cap each result so a
-          // few large reads cannot crowd out the conversation itself.
-          const body =
-            m.role === 'tool' ? truncateForSummary(m.content as string) : (m.content as string);
-          return `${m.role.toUpperCase()}:\n${body}${reasoning}`;
-        })
-        .join('\n\n');
-
-    const summary = await deps.runPromptToMarkdown(
-      `Summarize this conversation for continued work in the same repository.\n\nRequirements:\n- Preserve user goals, constraints, decisions, open questions, and unfinished tasks.\n- Mention relevant files, commands, errors, and risks.\n- Keep it concise but specific.\n- Do not add facts not present in the conversation.\n\nConversation:\n${transcript}`,
-    );
-    const trimmed = summary.trim();
-    if (!trimmed) {
-      void vscode.window.showWarningMessage('Forge: compaction returned no summary.');
-      return;
-    }
-
-    // Non-destructive: record the summary and the cut point instead of
-    // overwriting the transcript. conv.messages stays whole, so the sidebar
-    // scrollback and the persisted record survive; only what the model is sent
-    // shrinks (see applyCompactionWindow).
-    conv.compaction = { summary: trimmed, fromIndex: conv.messages.length };
-    conv.updatedAt = Date.now();
-    deps.persistSession();
-    deps.postSessionSync();
-    deps.invalidateExactTokenBudget();
-    deps.postTokenBudget();
-    deps.post({
-      type: 'notice',
-      message: 'Conversation compacted. Chat history is unchanged.',
-      conversationId: conv.id,
-    });
-    void vscode.window.showInformationMessage(
-      'Forge: context compacted. Your chat history is unchanged.',
-    );
+  /**
+   * Runs a compaction. `auto: true` is the threshold-triggered path — the
+   * caller decides whether to resume from the returned outcome.
+   */
+  async compact(options: { auto: boolean } = { auto: false }): Promise<CompactionOutcome> {
+    return runCompaction(this.deps, options);
   }
-}
-
-/** Cap a single tool result inside the summarization prompt. */
-function truncateForSummary(text: string): string {
-  const LIMIT = 2000;
-  return text.length <= LIMIT ? text : `${text.slice(0, LIMIT)}\n…[truncated for summary]`;
 }

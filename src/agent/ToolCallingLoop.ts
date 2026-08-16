@@ -131,9 +131,20 @@ const OUTPUT_CAP_MARGIN_TOKENS = 512;
 /** Never cap output below this, however tight the estimate looks. */
 const MIN_OUTPUT_CAP_TOKENS = 512;
 
-const CONTEXT_EXHAUSTED_MESSAGE =
+export const CONTEXT_EXHAUSTED_MESSAGE =
   `Forge: the model's tool call keeps being cut off — the remaining context cannot hold it. ` +
   `Use /compact or start a new chat, then ask for the file in smaller pieces.`;
+
+const MAX_ROUNDS_MESSAGE_PREFIX = 'Forge: agent exceeded maximum tool rounds';
+
+/**
+ * True when the loop aborted for want of room rather than finishing the work —
+ * the two cases a freshly compacted context could actually resume.
+ */
+export function isTurnCutOffError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return message === CONTEXT_EXHAUSTED_MESSAGE || message.startsWith(MAX_ROUNDS_MESSAGE_PREFIX);
+}
 
 /**
  * Lowers `max_tokens` to what the slot can actually generate.
@@ -393,5 +404,5 @@ export async function runToolCallingLoop(
       repeatedCall: false,
     };
   }
-  throw new Error(`Forge: agent exceeded maximum tool rounds (${options.maxRounds}).`);
+  throw new Error(`${MAX_ROUNDS_MESSAGE_PREFIX} (${options.maxRounds}).`);
 }

@@ -58,6 +58,12 @@ export interface RegisteredTool {
   handler: ToolHandler;
   mutation?: ToolMutation;
   approval?: (args: Record<string, unknown>) => ToolApprovalMetadata;
+  /**
+   * The handler's inputs and effects are structurally bounded enough to run
+   * without the normal per-call confirmation. This must never be used for a
+   * general shell or a mutable operation.
+   */
+  autoApprove?: boolean;
   /** When present, called during definitions() to suppress advertisement without removing the tool. */
   advertise?: () => boolean;
 }

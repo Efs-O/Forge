@@ -1,5 +1,30 @@
 # Forge — Recent Changes
 
+## 0.12.44 — Compaction stops leaving the agent stale
+
+- **Auto-compact can now resume the turn it interrupted.** Compaction used to
+  end at a notice: the agent parked mid-task holding nothing but a summary, and
+  you had to notice and re-prompt. When the previous turn was actually cut off —
+  output limit, exhausted context, or the 40-tool-round cap — Forge now
+  continues it. A turn that finished cleanly is left alone, `/compact` never
+  resumes, and no more than two resumes happen without a prompt from you.
+  Configurable as `auto_compact.resume` (default true).
+- **A compaction no longer swallows a message sent while it runs.** The cut
+  point was read *after* the summary came back, so anything you sent in those
+  seconds ended up in neither the summary nor the retained tail — still visible
+  in the chat, invisible to the model. The cut point is now taken before the
+  summarization starts.
+- **The conversation is marked busy while it summarizes.** Nothing was, so the
+  input stayed live and a send could race the compaction; prompts are now queued
+  and sent when it finishes.
+- **Compaction keeps the last exchange verbatim.** The model used to be left
+  with a paraphrase and nothing else. The last user turn is retained as-is
+  (capped, so a large tool dump cannot be kept whole) and excluded from the
+  summary.
+- Added `query_powershell`: structured, read-only PowerShell inspection on
+  Windows (workspace overview, location, directory listing, file hash). It takes
+  named operations, never a raw script.
+
 ## 0.12.43 — The thinking pane follows its own reasoning
 
 - **Fixed: an expanded thinking pane never followed the reasoning streaming into

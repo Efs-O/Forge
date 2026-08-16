@@ -16,7 +16,9 @@ overlaps with an existing owner, extend the owner instead.
 | Confirmation FIFO + clanker bypass policy  | `src/sidebar/ToolApprovalService.ts` |
 | Tool call execution + result formatting    | `src/sidebar/ToolDispatch.ts`        |
 | Conversation CRUD pure ops                 | `src/sidebar/ConversationOps.ts`     |
-| Slash command dispatch + compact           | `src/sidebar/SlashCommandHandler.ts` |
+| Slash command dispatch                     | `src/sidebar/SlashCommandHandler.ts` |
+| Compaction: cut point, summary, resume     | `src/sidebar/CompactionService.ts`   |
+| Applying the compaction window to a request| `src/sidebar/compactionWindow.ts`    |
 | Webview HTML builder                       | `src/sidebar/WebviewBuilder.ts`      |
 | Multi-conversation session types + persist | `src/sidebar/sessionTypes.ts`        |
 | First-run setup wizard                     | `src/sidebar/FirstRunWizard.ts`      |

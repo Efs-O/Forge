@@ -19,6 +19,13 @@
 # Model to activate on startup. `name` or `name@profile` (profile optional).
 active_model: my-model@main
 
+# Optional command capability for native local models. `headless` exposes
+# shell-free direct commands plus Forge's structured read-only PowerShell
+# inspection tool; ordinary terminal pasting remains off unless enabled too.
+# permissions:
+#   exec:
+#     headless: true
+
 # -------------------------------------------------------------------
 # llama-server settings (direct GGUF mode)
 # -------------------------------------------------------------------
@@ -114,9 +121,15 @@ profiles:
 # under 1.0 — the summarization request itself sends the transcript, so at
 # ~0.95 there is no room left for it to run. Max accepted is 0.95.
 # -------------------------------------------------------------------
+# `resume` continues a turn that was cut off (output limit, exhausted context,
+# tool-round cap) once the context has been freed, so an auto-compaction does
+# not leave the agent parked mid-task. Default true. A turn that finished
+# cleanly is never resumed, and a user-typed /compact never resumes at all.
+# -------------------------------------------------------------------
 # auto_compact:
 #   enabled: true
 #   at: 0.85
+#   resume: true
 
 # -------------------------------------------------------------------
 # Control server (optional) — localhost API so an external orchestrator can

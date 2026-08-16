@@ -84,6 +84,7 @@ export function spawnAndWait(
   args: string[],
   cwd: string,
   timeoutMs: number,
+  extraEnv: NodeJS.ProcessEnv = {},
 ): Promise<SpawnResult> {
   return new Promise((resolve, reject) => {
     let stdout = '';
@@ -95,7 +96,7 @@ export function spawnAndWait(
       cwd,
       // Suppress terminal color at the source so most tools (vitest, npm, …)
       // emit no ANSI. NOT CI=true — that changes some runners' semantics.
-      env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' },
+      env: { ...process.env, ...extraEnv, NO_COLOR: '1', FORCE_COLOR: '0' },
     });
 
     const timer = setTimeout(() => {

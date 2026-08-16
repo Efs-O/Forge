@@ -41,6 +41,7 @@ import type { SidebarProviderEvents } from './AgentLoop';
 import { SessionLogger } from './SessionLogger';
 import { SlashCommandHandler } from './SlashCommandHandler';
 import { applyCompactionWindow } from './compactionWindow';
+import { autoCompactAndResume } from './CompactionService';
 import {
   opNewConversation,
   opSwitchConversation,
@@ -86,6 +87,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly slashHandler: SlashCommandHandler;
   private readonly review = new CheckpointReview();
   private contextWarningShown = false;
+  /** Auto-compact resumes issued since the last user prompt. Bounded so a task
+   *  that keeps filling the window cannot drive Forge in a loop. */
+  private autoContinues = 0;
   private lastContextTickAt = 0;
   private contextTickTimer: ReturnType<typeof setTimeout> | undefined;
   private pendingContextTickConvId: string | undefined;
@@ -158,6 +162,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       postTokenBudget: () => this.postTokenBudget(),
       runPromptToMarkdown: (text) => this.agentLoop.runPromptToMarkdown(text),
       isStreaming: () => this.agentLoop.streaming,
+      beginCompaction: (convId) => this.agentLoop.beginBackgroundWork(convId),
       toggleClanker: () => {
         const on = this.agentLoop.toggleClanker();
         void this.workspaceState.update('forge.clankerMode', on);
@@ -219,7 +224,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   async newConversation(): Promise<void> {
-    const result = opNewConversation(this.sidebar);
+    // Pin the current selection onto the new tab. Left unpinned it tracked the
+    // global default, so switching to another tab and back silently re-pointed
+    // this one at that tab's model.
+    const result = opNewConversation(this.sidebar, this.config.active_model);
     if (result.atCap) {
       void vscode.window.showWarningMessage(
         `Forge: maximum ${MAX_CONVERSATIONS} conversations. Close one to add another.`,
@@ -229,6 +237,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.sidebar = result.sidebar;
     this.failureTracker.reset();
     this.persistSession();
+    this.postModels();
     this.postSessionSync();
     this.postTokenBudget();
     log.debug('[SidebarProvider] new conversation tab');
@@ -312,6 +321,20 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.agentLoop.clearCapabilityCache();
     this.pool.applyForgeConfig(next);
     this.indexManager.applyForgeConfig(next);
+    this.postModels();
+  }
+
+  // ── Internal ──────────────────────────────────────────────────────────────
+
+  /**
+   * Push the model list and the current selection to the picker.
+   *
+   * Must follow every change of active conversation: `sessionSync` carries no
+   * model, and the webview's selection is only ever set from this message, so a
+   * tab switch used to leave the header showing the previous tab's model while
+   * the host had already switched to this tab's.
+   */
+  private postModels(): void {
     this.post({
       type: 'models',
       models: this.config.models.map((m) => ({
@@ -321,8 +344,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       active: this.config.active_model,
     });
   }
-
-  // ── Internal ──────────────────────────────────────────────────────────────
 
   private post(msg: HostToWebview): void {
     this.view?.webview.postMessage(msg);
@@ -453,7 +474,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const autoAt = auto?.at ?? 0.85;
     if (auto?.enabled === true && max > 0 && used / max >= autoAt) {
       log.info(`[auto-compact] context at ${Math.round((used / max) * 100)}% — compacting`);
-      void this.slashHandler.handle('compact');
+      void this.autoCompact(conv);
       return;
     }
     if (max > 0 && used / max >= 0.75 && !this.contextWarningShown) {
@@ -469,6 +490,25 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           }
         });
     }
+  }
+
+  /** Threshold-triggered compaction. The resume policy lives in
+   *  CompactionService; this only supplies the runtime it needs. */
+  private async autoCompact(conv: ConversationRuntime): Promise<void> {
+    await autoCompactAndResume({
+      convId: conv.id,
+      post: (msg) => this.post(msg),
+      compact: (options) => this.slashHandler.compact(options),
+      incompleteTurnReason: () => this.agentLoop.incompleteTurnReason(conv.id),
+      resumeEnabled: this.config.auto_compact?.resume !== false,
+      autoContinues: () => this.autoContinues,
+      noteAutoContinue: () => {
+        this.autoContinues += 1;
+      },
+      // Addressed to the conversation that was compacted, not to whatever tab
+      // is active by the time the summary lands.
+      send: (text) => this.handleSend(text, undefined, conv.id),
+    });
   }
 
   private publishExactContextTokens(convId: string, usedTokens: number): void {
@@ -586,14 +626,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private handleMessage(msg: WebviewToHost): void {
     switch (msg.type) {
       case 'webviewReady':
-        this.post({
-          type: 'models',
-          models: this.config.models.map((m) => ({
-            name: m.name,
-            provider: m.provider ?? 'llama.cpp',
-          })),
-          active: this.config.active_model,
-        });
+        this.postModels();
         this.postSessionSync();
         // Without this the bar reads 0 until the next turn completes, and the
         // context warning cannot fire on the first turn after a window reload.
@@ -603,6 +636,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         break;
 
       case 'send':
+        // A prompt from the user ends the auto-resume chain: whatever happens
+        // next is their call again, not a continuation Forge chose.
+        this.autoContinues = 0;
         void this.handleSend(msg.text, msg.attachments, msg.conversationId);
         break;
 
@@ -618,14 +654,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         // pinned and is retried despite the picker showing another model.
         opSetActiveConversationModel(this.sidebar, msg.name);
         this.persistSession();
-        this.post({
-          type: 'models',
-          models: this.config.models.map((m) => ({
-            name: m.name,
-            provider: m.provider ?? 'llama.cpp',
-          })),
-          active: this.config.active_model,
-        });
+        this.postModels();
         this.postSessionSync();
         break;
 
@@ -692,6 +721,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (result.activeModelOverride) this.config.active_model = result.activeModelOverride;
     this.failureTracker.reset();
     this.persistSession();
+    this.postModels();
     this.postSessionSync();
     this.postTokenBudget();
     this.events.onConversationSwitched?.(this.config.active_model ?? null);
@@ -708,7 +738,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (!result) return;
     this.sidebar = result.sidebar;
     this.failureTracker.reset();
+    // Closing a tab hands focus to another one, which is a change of active
+    // conversation like any other: adopt its pinned model instead of leaving
+    // the closed tab's selection in place.
+    const nextActive = this.sidebar.conversations.find((c) => c.id === result.newActiveId);
+    if (nextActive?.active_model) this.config.active_model = nextActive.active_model;
     this.persistSession();
+    this.postModels();
     this.postSessionSync();
     this.postTokenBudget();
 
@@ -760,6 +796,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       if (result.activeModelOverride) this.config.active_model = result.activeModelOverride;
       this.failureTracker.reset();
       this.persistSession();
+      this.postModels();
       this.postSessionSync();
       this.postTokenBudget();
     }

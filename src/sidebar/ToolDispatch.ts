@@ -164,13 +164,15 @@ export class ToolDispatch {
         const requiredPermissions = this.toolRegistry.requiredPermissions(reg, args);
         const approvalMetadata = reg.approval?.(args);
         const needsConfirm =
-          requiredPermissions.some(
-            (permission) =>
-              WRITE_PERMISSIONS.has(permission) ||
-              permission === 'terminal' ||
-              permission === 'headless' ||
-              permission === 'git-write',
-          ) || approvalMetadata !== undefined;
+          approvalMetadata !== undefined ||
+          (!reg.autoApprove &&
+            requiredPermissions.some(
+              (permission) =>
+                WRITE_PERMISSIONS.has(permission) ||
+                permission === 'terminal' ||
+                permission === 'headless' ||
+                permission === 'git-write',
+            ));
         if (needsConfirm) {
           const raw = JSON.stringify(args, null, 2);
           const fallbackDetail = raw.length > 300 ? raw.slice(0, 300) + '\n…' : raw;

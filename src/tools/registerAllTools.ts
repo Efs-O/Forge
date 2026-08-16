@@ -44,6 +44,7 @@ import {
   makeRunTestsTool,
   makeRunBuildTool,
 } from './execTools';
+import { makeSafePowerShellTool } from './safePowerShellTool';
 import {
   makeGitStatusTool,
   makeGitLogTool,
@@ -113,6 +114,7 @@ export function registerAllTools(
   // v0.7 exec + git
   registry.register(makeRunTerminalTool());
   registry.register(makeExecCommandTool());
+  registry.register(makeSafePowerShellTool());
   registry.register(makeRunTestsTool());
   registry.register(makeRunBuildTool());
   registry.register(makeGitStatusTool());
