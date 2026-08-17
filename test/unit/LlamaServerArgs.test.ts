@@ -43,6 +43,14 @@ describe('composeLlamaServerArgs', () => {
     expect(args[args.indexOf('--flash-attn') + 1]).toBe('on');
   });
 
+  it('offloads every layer when neither model nor server sets n_gpu_layers', () => {
+    const { n_gpu_layers: _unset, ...noGpuDefault } = serverDefaults;
+    const args = composeLlamaServerArgs('', baseModel, noGpuDefault, '127.0.0.1', 8080);
+    // Must not be -1: that is auto-fit on b10430+, which strands layers on the
+    // CPU as tensor overrides instead of offloading everything.
+    expect(args[args.indexOf('--n-gpu-layers') + 1]).toBe('999');
+  });
+
   it('prefers model overrides over server defaults', () => {
     const model: ModelConfig = {
       ...baseModel,

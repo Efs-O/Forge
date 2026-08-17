@@ -44,10 +44,13 @@ llama_server:
   # back a ~1024 MiB margin and may leave a layer on CPU. On hybrid architectures
   # (Gated Delta Net / linear-attention models) ONE layer on CPU makes llama.cpp
   # disable the fused kernel for the WHOLE model — a >2x generation hit, not a
-  # proportional one. Set an explicit count (e.g. 999) if you are VRAM-tight and
-  # sizing num_ctx by hand. Doing so also DISABLES auto-fit entirely
-  # ("already set by user to N, abort"), so the memory budget becomes yours.
-  n_gpu_layers: -1
+  # proportional one. An explicit count also DISABLES auto-fit entirely
+  # ("already set by user to N, abort"), so the memory budget becomes yours —
+  # which is why 999 ("every layer") is the default here and what Forge uses when
+  # this key is absent. A model that no longer fits then fails loudly at startup
+  # instead of silently half-running on the CPU; lower num_ctx, or set a real
+  # layer count here, rather than going back to -1.
+  n_gpu_layers: 999
   default_num_ctx: 32768             # fallback when a model omits num_ctx/spawn.num_ctx
   n_batch: 512
   n_parallel: 4                      # default concurrent worker slots
@@ -166,7 +169,7 @@ models:
       type_k: q8_0
       type_v: q8_0
       flash_attn: true
-      n_gpu_layers: -1
+      n_gpu_layers: 999                # every layer on GPU; -1 is auto-fit, see above
       # extra_llama_server_args: ["--reasoning-budget", "4096"]
     # Rare spawn-time overrides (force a respawn when selected, e.g. via tools):
     # spawn_profiles:

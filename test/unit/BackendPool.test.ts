@@ -7,7 +7,23 @@ import type { ForgeConfig } from '../../src/config/types';
 const harness = vi.hoisted(() => ({
   pending: [] as Array<{ resolve: () => void; reject: (err: unknown) => void }>,
   exitCbs: [] as Array<() => void>,
+  /** hotSwap/stop calls in order, so eviction ordering is observable. */
+  events: [] as string[],
+  /** While true, stop() parks until the test releases it. */
+  blockStops: false,
+  pendingStops: [] as Array<() => void>,
 }));
+
+function resetHarness(): void {
+  harness.pending.length = 0;
+  harness.exitCbs.length = 0;
+  harness.events.length = 0;
+  harness.pendingStops.length = 0;
+  harness.blockStops = false;
+}
+
+/** Let every already-scheduled promise callback run. */
+const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
 vi.mock('../../src/backend/DirectBackend', () => {
   class FakeDirectBackend {
@@ -17,6 +33,7 @@ vi.mock('../../src/backend/DirectBackend', () => {
       private readonly port: number,
     ) {}
     hotSwap(): Promise<void> {
+      harness.events.push(`hotSwap:${this.port}`);
       return new Promise<void>((resolve, reject) => {
         harness.pending.push({
           resolve: () => {
@@ -29,6 +46,10 @@ vi.mock('../../src/backend/DirectBackend', () => {
     }
     async stop(): Promise<void> {
       this.ready = false;
+      harness.events.push(`stop:${this.port}`);
+      if (harness.blockStops) {
+        await new Promise<void>((resolve) => harness.pendingStops.push(resolve));
+      }
     }
     isReady(): boolean {
       return this.ready;
@@ -67,10 +88,7 @@ const freePortsOf = (pool: BackendPool): number[] =>
   (pool as unknown as { freePorts: number[] }).freePorts;
 
 describe('BackendPool port accounting', () => {
-  beforeEach(() => {
-    harness.pending.length = 0;
-    harness.exitCbs.length = 0;
-  });
+  beforeEach(resetHarness);
 
   it('frees the slot when a ready backend dies unexpectedly (F5 reconcile)', async () => {
     const pool = new BackendPool(makeConfig(1)); // freePorts [8080]
@@ -131,6 +149,35 @@ describe('BackendPool port accounting', () => {
     expect(pool.isLoaded('A-legacy')).toBe(true);
   });
 
+  it('waits for the evicted backend to exit before spawning its replacement', async () => {
+    const pool = new BackendPool(makeConfig(1)); // one port: B must evict A
+
+    const acquireA = pool.acquire('A');
+    harness.pending[0].resolve();
+    await acquireA;
+
+    harness.blockStops = true; // A's process lingers, still holding its VRAM
+    const acquireB = pool.acquire('B');
+    await flush();
+
+    // The eviction is under way but unfinished, so B must not have spawned:
+    // two llama-servers alive at once is what OOM'd the GPU.
+    expect(harness.events).toEqual(['hotSwap:8080', 'stop:8080']);
+    expect(harness.pending).toHaveLength(1);
+    // The slot is claimed synchronously, so a concurrent acquire of B joins
+    // this boot rather than starting a second one.
+    expect(pool.loadedModelNames()).toEqual(['B']);
+
+    harness.pendingStops[0](); // A is finally gone
+    await flush();
+    expect(harness.events).toEqual(['hotSwap:8080', 'stop:8080', 'hotSwap:8080']);
+
+    harness.pending[1].resolve();
+    await acquireB;
+    expect(pool.loadedModelNames()).toEqual(['B']);
+    expect(freePortsOf(pool)).toEqual([]);
+  });
+
   it('normal lifecycle returns the port once and reuses it', async () => {
     const pool = new BackendPool(makeConfig(1)); // freePorts [8080]
 
@@ -152,10 +199,7 @@ describe('BackendPool port accounting', () => {
 });
 
 describe('BackendPool delegation safety', () => {
-  beforeEach(() => {
-    harness.pending.length = 0;
-    harness.exitCbs.length = 0;
-  });
+  beforeEach(resetHarness);
 
   it('rejects a second llama.cpp model at capacity without starting or evicting', async () => {
     const pool = new BackendPool(makeConfig(1));
@@ -202,10 +246,7 @@ describe('BackendPool delegation safety', () => {
 });
 
 describe('BackendPool delegation holds', () => {
-  beforeEach(() => {
-    harness.pending.length = 0;
-    harness.exitCbs.length = 0;
-  });
+  beforeEach(resetHarness);
 
   async function loadPrimary(pool: BackendPool, name = 'A'): Promise<void> {
     const acquireP = pool.acquire(name);
@@ -272,8 +313,10 @@ describe('BackendPool delegation holds', () => {
     hold.release();
     hold.release(); // idempotent — extra calls are no-ops
 
-    // After release, normal LRU eviction applies again.
+    // After release, normal LRU eviction applies again. An evicting acquire
+    // boots only once the evicted backend has stopped, so let that settle.
     const acquireC = pool.acquire('C');
+    await flush();
     harness.pending[2].resolve();
     await acquireC;
     expect(pool.loadedModelNames()).toContain('C');
@@ -298,6 +341,7 @@ describe('BackendPool delegation holds', () => {
       }
 
       const acquireC = pool.acquire('C');
+      await flush(); // evicting acquire: boots after the evicted backend stops
       harness.pending[2].resolve();
       await acquireC;
       expect(pool.loadedModelNames()).toContain('C');

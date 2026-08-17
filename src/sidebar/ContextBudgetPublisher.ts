@@ -17,6 +17,7 @@ import type { ToolRegistry } from '../tools/ToolRegistry';
 import { computeContextBudget, estimateToolTokens, perSlotContext } from '../util/contextBudget';
 import { mergeGroupsIntoModel } from '../config/ConfigResolver';
 import { resolveToolPermissions } from '../tools/PermissionResolver';
+import { ToolBudget } from '../tools/ToolBudget';
 import { applyCompactionWindow } from './compactionWindow';
 import { getLogger } from '../util/logger';
 
@@ -113,12 +114,21 @@ export class ContextBudgetPublisher {
     // `max` is the PER-SLOT window: --ctx-size is the total and --parallel
     // divides it, so every n_parallel > 1 model used to report several times
     // the context it actually had, here and on the HalluMeter bridge.
+    // Count only what the turn will actually advertise. ModelTurn and WorkerLoop
+    // both narrow the permission-filtered list through ToolBudget — a `tools`
+    // allowlist, or a `tool_call_limits` entry of 0, keeps a tool's schema out of
+    // the prompt entirely. Measuring the raw registry here over-reported the
+    // baseline for every model that narrows its tools, so switching a tool off
+    // never showed up on the bar.
+    const advertised = new ToolBudget(activeModel ?? {}).filterDefinitions(
+      this.deps.toolRegistry.definitions(allowed),
+    );
     const estimated = computeContextBudget({
       // The retained transcript is for sidebar scrollback and persistence;
       // account for exactly the compacted window that the turn sends to the
       // model. This value also drives the HalluMeter bridge.
       messages: applyCompactionWindow(conv.messages, conv.compaction),
-      toolTokens: estimateToolTokens(this.deps.toolRegistry.definitions(allowed)),
+      toolTokens: estimateToolTokens(advertised),
       model: activeModel,
       server: config.llama_server,
     });

@@ -27,8 +27,23 @@ export interface SlotTable {
   isPinned: (modelName: string) => boolean;
 }
 
-export function allocatePort(table: SlotTable, allowEvict: boolean): number {
-  if (table.freePorts.length > 0) return table.freePorts.shift()!;
+export interface PortClaim {
+  port: number;
+  /**
+   * The evicted slot, when this claim reused its port. Its llama-server is
+   * still alive and still holding that VRAM and that port: the caller MUST
+   * await `evicted.backend.stop()` before spawning on `port`.
+   */
+  evicted: PoolSlot | null;
+}
+
+/**
+ * Claim a port, evicting the LRU slot if none is free. Synchronous by
+ * contract — DelegationGate's capacity check must stay valid through the slot
+ * claim, so nothing here may await.
+ */
+export function claimPort(table: SlotTable, allowEvict: boolean): PortClaim {
+  if (table.freePorts.length > 0) return { port: table.freePorts.shift()!, evicted: null };
   if (!allowEvict) {
     // Unreachable via DelegationGate (it pre-checks synchronously); kept as
     // a hard guard so a non-evicting acquire can never evict.
@@ -43,9 +58,8 @@ export function allocatePort(table: SlotTable, allowEvict: boolean): number {
   }
   const [lruModel, slot] = lruEntry;
   log.info(`[BackendPool] evicting LRU slot: ${lruModel} on port ${slot.port}`);
-  void slot.backend.stop().catch(() => {});
   table.slots.delete(lruModel);
-  return slot.port;
+  return { port: slot.port, evicted: slot };
 }
 
 /**

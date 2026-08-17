@@ -106,11 +106,18 @@ export class ConversationTabs {
   /** A model chosen in the picker also re-pins the active conversation, so a
    *  failed CLI model is not silently retried while the header shows another. */
   pinModel(name: string | null): void {
+    const outgoing = this.active().active_model ?? this.deps.getConfig().active_model ?? null;
     this.deps.setActiveModel(name);
     opSetActiveConversationModel(this.deps.getSidebar(), name);
     this.deps.persistSession();
     this.deps.postModels();
     this.deps.postSessionSync();
+    // `max_simultaneous_models` is cross-conversation headroom (worker fleet,
+    // delegation, a second tab). Swapping the model *within* one tab is not a
+    // request for a second resident model: without this, picking a 27B while a
+    // 12B was loaded spawned a second llama-server alongside it and OOM'd the
+    // GPU, because the pool only evicts once every port is taken.
+    if (outgoing) void this.releaseIfUnused(outgoing, name);
   }
 
   switch(id: string): void {
@@ -161,17 +168,50 @@ export class ConversationTabs {
     this.deps.refreshUi();
   }
 
-  /** The closed tab may have been the last user of a model still holding VRAM. */
-  private offerUnload(modelName: string): void {
-    const config = this.deps.getConfig();
-    // Compare on the base model: two tabs on the same GGUF (different @profile)
-    // share one loaded backend, so the prompt must key by base (F6).
+  /**
+   * The base model behind `modelName` if unloading it would free VRAM without
+   * taking a model out from under another tab, else null.
+   *
+   * Keyed by base: two tabs on the same GGUF with different @profile share one
+   * loaded backend (F6), so a profile suffix must never look like a second model.
+   */
+  private unloadCandidate(modelName: string): string | null {
     const base = this.deps.baseOf(modelName) ?? modelName;
-    const modelConfig = config.models.find((m) => m.name === base);
-    const otherTabUsesModel = this.deps
+    const modelConfig = this.deps.getConfig().models.find((m) => m.name === base);
+    if (!isLocalModel(modelConfig)) return null;
+    const stillInUse = this.deps
       .getSidebar()
       .conversations.some((c) => this.deps.baseOf(c.active_model) === base);
-    if (otherTabUsesModel || !isLocalModel(modelConfig)) return;
+    return stillInUse ? null : base;
+  }
+
+  /** Free the model a tab just switched away from, if nothing else wants it. */
+  private async releaseIfUnused(outgoing: string, incoming: string | null): Promise<void> {
+    // A turn in flight is still using the old backend — stopping it mid-stream
+    // would kill the generation the user is watching.
+    if (this.deps.isStreaming()) return;
+    const base = this.unloadCandidate(outgoing);
+    if (!base || base === this.deps.baseOf(incoming)) return;
+    if (!this.deps.pool.isLoaded(base)) return;
+    try {
+      await this.deps.pool.release(base);
+    } catch (err) {
+      // Pinned by a live delegation hold. The VRAM stays occupied, which is
+      // exactly what the user needs to know if the next load then fails.
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn(`[ConversationTabs] could not free "${base}" on model switch: ${message}`);
+      this.deps.post({ type: 'error', message: `Still loaded — ${message}` });
+      return;
+    }
+    log.info(`[ConversationTabs] freed "${base}" — switched to ${incoming ?? 'no model'}`);
+    this.deps.events.onBackendStopped?.(base);
+    this.deps.post({ type: 'backendDown', message: `${base} unloaded.` });
+  }
+
+  /** The closed tab may have been the last user of a model still holding VRAM. */
+  private offerUnload(modelName: string): void {
+    const base = this.unloadCandidate(modelName);
+    if (!base) return;
     void vscode.window
       .showInformationMessage(
         `"${base}" is still loaded in VRAM. Unload it to free memory?`,

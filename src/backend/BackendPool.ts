@@ -7,7 +7,8 @@ import type { DelegationCheck, DelegationGroupHold, DelegationHold } from './Del
 import { getLogger } from '../util/logger';
 import { SharedRuntimeRegistry, sharedRuntimeKey } from './SharedRuntimeRegistry';
 import { acquireOllamaSlot, borrowSharedRuntime, stopAllSlots } from './poolAcquisition';
-import { allocatePort, freeSlot, mostRecentSlot, type PoolSlot, type SlotTable } from './poolSlots';
+import { claimPort, freeSlot, mostRecentSlot } from './poolSlots';
+import type { PortClaim, PoolSlot, SlotTable } from './poolSlots';
 
 export type { DelegationCheck, DelegationGroupHold, DelegationHold } from './DelegationGate';
 
@@ -133,8 +134,7 @@ export class BackendPool implements IBackendPool {
     }
 
     // Need a new slot
-    const port = this.allocatePort(allowEvict);
-    return this.startSlot(key, port);
+    return this.startSlot(key, this.claimPort(allowEvict));
   }
 
   async release(modelName: string): Promise<void> {
@@ -216,11 +216,12 @@ export class BackendPool implements IBackendPool {
     return this.slots.has(key) || this.sharedSlots.has(key) || this.ollamaSlots.has(key);
   }
 
-  private allocatePort(allowEvict: boolean): number {
-    return allocatePort(this.slotTable(), allowEvict);
+  private claimPort(allowEvict: boolean): PortClaim {
+    return claimPort(this.slotTable(), allowEvict);
   }
 
-  private startSlot(modelName: string, port: number): Promise<BackendController> {
+  private startSlot(modelName: string, claim: PortClaim): Promise<BackendController> {
+    const { port, evicted } = claim;
     const backend = new DirectBackend(this.config, port);
     let resolveStart!: () => void;
     backend.onUnexpectedExit(() => this.reconcileDeadSlot(modelName));
@@ -232,8 +233,19 @@ export class BackendPool implements IBackendPool {
     const slot: PoolSlot = { backend, port, lastUsed: Date.now(), starting };
     this.slots.set(modelName, slot);
 
-    const boot = backend
-      .hotSwap(modelName)
+    // An evicted llama-server holds its VRAM and port until the process is gone,
+    // so its teardown must finish before the replacement spawns — fire-and-forget
+    // raced the two loads and OOM'd the GPU. The slot above is already registered,
+    // so a concurrent acquire joins this boot instead of starting a second one.
+    // With nothing to evict, hotSwap must still start synchronously.
+    const swapped = evicted
+      ? evicted.backend
+          .stop()
+          .catch(() => {})
+          .then(() => backend.hotSwap(modelName))
+      : backend.hotSwap(modelName);
+
+    const boot = swapped
       .then(() => {
         slot.starting = null;
         slot.lastUsed = Date.now();

@@ -31,7 +31,14 @@ export function composeLlamaServerArgs(
   }
   const args: string[] = ['-m', model.gguf_path, '--host', host, '--port', String(port), '--jinja'];
 
-  const gpuLayers = model.n_gpu_layers ?? server.n_gpu_layers ?? -1;
+  // 999 ("every layer"), not -1. `-ngl -1` used to mean "all layers"; on current
+  // llama.cpp (b10430+) it means AUTO-FIT, which keeps a ~1024 MiB margin and
+  // strands the overflow on the CPU as tensor overrides. That is a silent
+  // slowdown — measured 26 t/s -> 12 t/s on a hybrid model where one CPU layer
+  // disabled the fused kernel model-wide. An explicit count also switches
+  // auto-fit off entirely, so num_ctx budgets stay under the config's control.
+  // Set `n_gpu_layers` per model (or `llama_server.n_gpu_layers`) to offload less.
+  const gpuLayers = model.n_gpu_layers ?? server.n_gpu_layers ?? 999;
   args.push('--n-gpu-layers', String(gpuLayers));
 
   const ctx = model.num_ctx ?? server.default_num_ctx ?? 4096;

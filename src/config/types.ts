@@ -178,7 +178,9 @@ export interface ModelConfig {
 export interface LlamaServerConfig {
   /** Path to the llama-server binary. Required when any model uses provider: llama.cpp. */
   binary?: string;
-  /** Default GPU layers when the model doesn't override. -1 = all. */
+  /** Default GPU layers when the model doesn't override. Defaults to 999 (every
+   *  layer). NOT -1: on llama.cpp b10430+ that means auto-fit, which silently
+   *  leaves part of the model on the CPU. */
   n_gpu_layers?: number;
   /** Default context size when the model doesn't override. */
   default_num_ctx?: number;

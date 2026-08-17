@@ -12,7 +12,9 @@ models:
     gguf_path: /REPLACE/WITH/PATH/TO/model.gguf
     spawn:
       num_ctx: 32768
-      n_gpu_layers: -1
+      # Every layer on GPU. NOT -1 — on llama.cpp b10430+ that means auto-fit,
+      # which quietly leaves part of the model on the CPU.
+      n_gpu_layers: 999
       flash_attn: true
 
 permissions:

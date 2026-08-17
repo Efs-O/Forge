@@ -136,7 +136,7 @@ async function makeRoom(ctx: ModelLifecycleContext, model: string): Promise<Ensu
     ctx.lastAcquiredAt.delete(victim);
     // Await each release: it frees the slot/port only after backend.stop()
     // resolves. Fire-and-forget here let the subsequent acquire race it —
-    // allocatePort would LRU-evict the same slot and reuse its port, then the
+    // claimPort would LRU-evict the same slot and reuse its port, then the
     // in-flight release pushed that port back while the new slot occupied it.
     await ctx.pool.release(victim);
     log.info(`[ControlServer] released idle "${victim}" to make room for "${model}"`);
