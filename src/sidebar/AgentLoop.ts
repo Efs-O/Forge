@@ -14,10 +14,7 @@ import { ToolRegistry } from '../tools/ToolRegistry';
 import type { KeepUndoCodeLensProvider } from './KeepUndoCodeLens';
 import { ToolFailureTracker } from '../tools/StripTools';
 import { getLogger } from '../util/logger';
-import {
-  inspectRuntimeModelCapabilities,
-  type RuntimeModelCapabilities,
-} from '../backend/ModelCapabilities';
+import { CapabilityCache } from './CapabilityCache';
 import { ToolDispatch, type OpenFileOptions } from './ToolDispatch';
 import { TurnLifecycle } from './TurnLifecycle';
 import { runCliTurn } from './CliTurn';
@@ -52,8 +49,7 @@ export interface SidebarProviderEvents {
 export class AgentLoop {
   /** Streaming/cancellation state for every conversation. */
   private readonly lifecycle = new TurnLifecycle();
-  private readonly capabilityCache = new Map<string, Promise<RuntimeModelCapabilities>>();
-  private readonly capabilityWarningsShown = new Set<string>();
+  private readonly capabilities = new CapabilityCache();
   private readonly toolDispatch: ToolDispatch;
   private readonly approvals: ToolApprovalService;
   private readonly workerService: WorkerOrchestrationService;
@@ -169,7 +165,7 @@ export class AgentLoop {
       ...(forgeLoader ? { forgeLoader } : {}),
       ...(cliDriver ? { cliDriver } : {}),
       ...(this.getConfigPath ? { getConfigPath: this.getConfigPath } : {}),
-      capabilities: (model, baseUrl) => this.getRuntimeCapabilities(model, baseUrl),
+      capabilities: (model, baseUrl) => this.capabilities.get(model, baseUrl),
       warnOnce: (key, message) => this.warnOnce(key, message),
       // Wrapped rather than passed: both listeners are registered after
       // construction, so a snapshot taken here would capture undefined.
@@ -244,8 +240,7 @@ export class AgentLoop {
   }
 
   clearCapabilityCache(): void {
-    this.capabilityCache.clear();
-    this.capabilityWarningsShown.clear();
+    this.capabilities.clear();
   }
 
   async openFile(filePath: string, options?: OpenFileOptions): Promise<void> {
@@ -323,20 +318,9 @@ export class AgentLoop {
   runPromptToMarkdown(text: string): Promise<string> {
     return runPromptToMarkdown(this.services, text);
   }
-  private async getRuntimeCapabilities(
-    model: ModelConfig,
-    baseUrl: string,
-  ): Promise<RuntimeModelCapabilities> {
-    const cached = this.capabilityCache.get(model.name);
-    if (cached) return cached;
-    const pending = inspectRuntimeModelCapabilities(baseUrl, model);
-    this.capabilityCache.set(model.name, pending);
-    return pending;
-  }
-
   private warnOnce(key: string, message: string): void {
-    if (this.capabilityWarningsShown.has(key)) return;
-    this.capabilityWarningsShown.add(key);
-    void vscode.window.showWarningMessage(message);
+    this.capabilities.warnOnce(key, message, (text) => {
+      void vscode.window.showWarningMessage(text);
+    });
   }
 }

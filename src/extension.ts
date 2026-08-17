@@ -34,6 +34,8 @@ import {
 } from './agents/CliSessionRegistry';
 import { registerWorkerCommands } from './vscode/workerCommands';
 import { ModelManagerPanel } from './sidebar/modelManager/ModelManagerPanel';
+import { registerSidebarCommands } from './vscode/sidebarCommands';
+import { flushPendingModelUsage } from './sidebar/modelManager/usageTracker';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   initLogger(context);
@@ -291,49 +293,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     ),
   );
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand('forge.openSidebar', () => {
-      void vscode.commands.executeCommand('workbench.view.extension.forge-sidebar');
-    }),
-
-    vscode.commands.registerCommand('forge.modelManager', () => {
-      const panel = ModelManagerPanel.createOrShow(
-        context.extensionUri,
-        pool,
-        () => config,
-        () => activeConfigPath,
-      );
-      panel.refresh();
-    }),
-
-    vscode.commands.registerCommand('forge.showBackendConsole', () => {
-      pool.showConsole();
-    }),
-
-    vscode.commands.registerCommand('forge.undo', async () => {
-      try {
-        const restored = await sidebarProvider.undo();
-        void vscode.window.showInformationMessage(
-          `Forge: undid last turn, restored ${restored.length} file(s)`,
-        );
-      } catch (err) {
-        void vscode.window.showErrorMessage(`Forge: ${(err as Error).message}`);
-      }
-    }),
-
-    vscode.commands.registerCommand('forge.keep', async () => {
-      try {
-        await sidebarProvider.keep();
-        void vscode.window.showInformationMessage('Forge: changes kept');
-      } catch (err) {
-        void vscode.window.showErrorMessage(`Forge: ${(err as Error).message}`);
-      }
-    }),
-
-    vscode.commands.registerCommand('forge.newChat', () => {
-      sidebarProvider.newConversation();
-    }),
-  );
+  registerSidebarCommands(context, {
+    pool,
+    sidebar: sidebarProvider,
+    getConfig: () => config,
+    getConfigPath: () => activeConfigPath,
+  });
 
   context.subscriptions.push({
     dispose: () => {
@@ -345,5 +310,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 }
 
 export function deactivate(): void {
-  // backend.stop() called via subscription above
+  // backend.stop() called via subscription above.
+  // Debounced last_used writes would otherwise be lost when the window closes
+  // within DEBOUNCE_MS of a turn — the exact case the Model Manager cares about.
+  flushPendingModelUsage();
 }

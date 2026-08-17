@@ -17,11 +17,11 @@ import {
 import {
   FREE_SPACE_RESERVE_BYTES,
   formatCheckpointBytes,
-  isPathInside,
   readAndHashCheckpointFile,
   throwIfCheckpointAborted,
   writeCheckpointJsonAtomic,
 } from './CheckpointFileIO';
+import { isPathInside } from '../util/pathContainment';
 import {
   checkpointEntryChanged,
   checkpointInventoriesMatch,

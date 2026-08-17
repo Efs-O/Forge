@@ -1,6 +1,11 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { isPathInside } from './pathContainment';
+
+// Re-exported so the many callers that reach for containment via this module
+// keep working; the implementation lives in the vscode-free leaf module.
+export { isPathInside };
 
 export interface ResolveWorkspacePathOptions {
   workspaceRoot?: string;
@@ -10,11 +15,6 @@ export interface ResolveWorkspacePathOptions {
 
 function defaultWorkspaceRoot(): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-}
-
-export function isPathInside(root: string, candidate: string): boolean {
-  const relative = path.relative(path.resolve(root), path.resolve(candidate));
-  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
 export function resolveWorkspacePath(

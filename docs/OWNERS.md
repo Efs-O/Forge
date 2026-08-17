@@ -45,6 +45,7 @@ overlaps with an existing owner, extend the owner instead.
 | Diff computation + unified-diff parsing    | `src/sidebar/DiffUtils.ts`           |
 | Session transcript logging (~/.forge)      | `src/sidebar/SessionLogger.ts`       |
 | Tool-call argument summary labels          | `src/sidebar/toolSummary.ts`         |
+| Runtime capability memo + warn-once ledger | `src/sidebar/CapabilityCache.ts`     |
 
 ## Chat webview transcript
 
@@ -94,6 +95,10 @@ overlaps with an existing owner, extend the owner instead.
 | Codex turn text assembly + de-duplication    | `src/agents/codexTurnText.ts`         |
 | Codex app-server sandbox launch flags        | `src/agents/codexAppServerArgs.ts`    |
 | Conversation/model ownership, cap, and idle eviction | `src/agents/CliSessionRegistry.ts` |
+| Direct-chat CLI run (cold + warm) and task text | `src/agents/CliChatRunner.ts`       |
+| Codex approval decisions (bounded autonomy)  | `src/agents/CodexApprovalPolicy.ts`   |
+| Pre-run disk checkpoint for full-access CLIs | `src/agents/WorkspaceCheckpoint.ts`   |
+| Windows `.cmd` shim quoting (DEP0190 escape) | `src/agents/windowsCmdShim.ts`        |
 
 ## Backend
 
@@ -110,6 +115,10 @@ overlaps with an existing owner, extend the owner instead.
 | Embedding llama-server (semantic search)  | `src/backend/EmbeddingBackend.ts`  |
 | Localhost model-control HTTP API          | `src/backend/ControlServer.ts`     |
 | Control-server load/capacity/unload       | `src/backend/ControlModelLifecycle.ts` |
+| Control-server HTTP/serialization helpers | `src/backend/controlHttp.ts`       |
+| `/models` catalog contract + availability | `src/backend/ControlModelCatalog.ts` |
+| Control-server discovery records (LOCALAPPDATA) | `src/backend/ControlServerRegistry.ts` |
+| Machine-wide llama.cpp runtime discovery + leases | `src/backend/SharedRuntimeRegistry.ts` |
 | llama-server CLI arg builder              | `src/backend/LlamaServerArgs.ts`   |
 | Ollama endpoint normalization + health    | `src/backend/OllamaAdapter.ts`     |
 | Backend health polling                    | `src/backend/HealthCheck.ts`       |
@@ -149,6 +158,9 @@ overlaps with an existing owner, extend the owner instead.
 | Local/cloud route classification           | `src/llm/ModelRouteClassifier.ts`            |
 | Shared native/fallback tool-calling loop   | `src/agent/ToolCallingLoop.ts`               |
 | Truncated tool call: detection + recovery  | `src/agent/truncationRecovery.ts`            |
+| Repeated identical tool call detection     | `src/agent/ToolLoopGuard.ts`                 |
+| Chat message / tool call wire types        | `src/llm/types.ts`                           |
+| Buffered in-host chat for POST /chat       | `src/llm/ControlChatProxy.ts`                |
 | xAI token resolution (SecretStorage/OAuth) | `src/llm/XaiAuth.ts`                         |
 | FORGE.md workspace instructions loader     | `src/llm/ForgeInstructionsLoader.ts`         |
 | Streaming OpenAI-compat client             | `src/llm/OpenAIClient.ts`                    |
@@ -189,6 +201,8 @@ overlaps with an existing owner, extend the owner instead.
 | Tool strip (remove tools from request)     | `src/tools/StripTools.ts`             |
 | Structured output / fallback tool parser   | `src/tools/StructuredOutputParser.ts` |
 | Tool call JSON-fence fallback converter    | `src/tools/ToolCallFallback.ts`       |
+| Fallback tool-format prompt instructions   | `src/tools/FallbackToolPrompt.ts`     |
+| Allowlisted PowerShell query tool          | `src/tools/safePowerShellTool.ts`     |
 | Semantic codebase search tool              | `src/tools/semanticSearchTool.ts`     |
 | MCP client bridge (external MCP servers)   | `src/tools/mcpBridge.ts`              |
 | Tool-result size capping                   | `src/tools/resultCap.ts`              |
@@ -233,6 +247,7 @@ overlaps with an existing owner, extend the owner instead.
 | YAML Document mutation helpers (set/add/remove) | `src/config/ConfigWriterHelpers.ts` |
 | Groups migration orchestration + resolved-diff verifier | `src/config/ConfigMigrator.ts` |
 | Groups migration clustering/lifting heuristic | `src/config/ConfigGroupHeuristic.ts` |
+| Schema-valid starter config generation  | `src/config/StarterConfig.ts`  |
 | User-facing config example              | `config/config.example.yaml`   |
 
 ## VS Code Integration
@@ -252,11 +267,28 @@ overlaps with an existing owner, extend the owner instead.
 | Code action provider (quick fixes)   | `src/vscode/codeActions.ts`      |
 | Editor context collector             | `src/vscode/editorContext.ts`    |
 | Scratch document (markdown preview)  | `src/vscode/scratchDocuments.ts` |
+| Sidebar/panel + Keep/Undo commands   | `src/vscode/sidebarCommands.ts`  |
+
+## Checkpoints
+
+| Concern                                          | Owner                                       |
+| ------------------------------------------------ | ------------------------------------------- |
+| Per-turn checkpoint stack (public entry point)   | `src/checkpoint/CheckpointStack.ts`         |
+| Undo-history depth cap + review snapshots        | `src/checkpoint/checkpointHistory.ts`       |
+| Disk-backed capture + commit                     | `src/checkpoint/DiskCheckpointStore.ts`     |
+| Disk-backed restore + discard                    | `src/checkpoint/DiskCheckpointRestore.ts`   |
+| In-memory snapshot capture/restore               | `src/checkpoint/MemoryCheckpointState.ts`   |
+| Workspace/paths inventory walk                   | `src/checkpoint/CheckpointInventory.ts`     |
+| On-disk manifest schema + versioning             | `src/checkpoint/CheckpointManifest.ts`      |
+| Change detection + inventory comparison          | `src/checkpoint/CheckpointDiff.ts`          |
+| Size/count limits + free-space assertions        | `src/checkpoint/CheckpointPolicy.ts`        |
+| Atomic writes, hashing, abort checks             | `src/checkpoint/CheckpointFileIO.ts`        |
+| Leftover-checkpoint reporting on startup         | `src/checkpoint/CheckpointRecovery.ts`      |
 
 ## Misc
 
 | Concern                              | Owner                               |
 | ------------------------------------ | ----------------------------------- |
-| Per-turn checkpoint stack            | `src/checkpoint/CheckpointStack.ts` |
-| Canonical workspace path containment | `src/util/WorkspacePaths.ts`        |
+| Path containment test (vscode-free)  | `src/util/pathContainment.ts`       |
+| Workspace path resolution + realpath | `src/util/WorkspacePaths.ts`        |
 | Structured logging                   | `src/util/logger.ts`                |

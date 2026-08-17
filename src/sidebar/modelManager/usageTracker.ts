@@ -40,8 +40,15 @@ function writeForgeState(configPath: string, state: ForgeState): void {
 }
 
 // Debounce per model name so a burst of tool-call round-trips within one turn
-// doesn't hammer disk with redundant writes.
-const pendingWrites = new Map<string, ReturnType<typeof setTimeout>>();
+// doesn't hammer disk with redundant writes. The target is carried alongside
+// the timer rather than parsed back out of the key — a model name is
+// user-supplied and may contain the separator.
+interface PendingWrite {
+  configPath: string;
+  modelName: string;
+  timer: ReturnType<typeof setTimeout>;
+}
+const pendingWrites = new Map<string, PendingWrite>();
 const DEBOUNCE_MS = 2000;
 
 /**
@@ -53,11 +60,12 @@ const DEBOUNCE_MS = 2000;
 export function recordModelUsage(configPath: string, modelName: string): void {
   const key = `${configPath}::${modelName}`;
   const existing = pendingWrites.get(key);
-  if (existing) clearTimeout(existing);
-  pendingWrites.set(
-    key,
-    setTimeout(() => flushOne(configPath, modelName, key), DEBOUNCE_MS),
-  );
+  if (existing) clearTimeout(existing.timer);
+  pendingWrites.set(key, {
+    configPath,
+    modelName,
+    timer: setTimeout(() => flushOne(configPath, modelName, key), DEBOUNCE_MS),
+  });
 }
 
 function flushOne(configPath: string, modelName: string, key: string): void {
@@ -76,6 +84,22 @@ function flushOne(configPath: string, modelName: string, key: string): void {
 export function flushModelUsageForTest(configPath: string, modelName: string): void {
   const key = `${configPath}::${modelName}`;
   const existing = pendingWrites.get(key);
-  if (existing) clearTimeout(existing);
+  if (existing) clearTimeout(existing.timer);
   flushOne(configPath, modelName, key);
+}
+
+/**
+ * Write out every debounced `last_used` update now, synchronously.
+ *
+ * Hooked into `deactivate()`. Without it, closing the window within
+ * DEBOUNCE_MS of a turn drops that turn's usage entirely — which is precisely
+ * the "I used this model last thing before quitting" case the Model Manager's
+ * zoo-hygiene view exists to show. Never throws: `flushOne` swallows per-model
+ * failures, and shutdown is not a place to surface a disk error.
+ */
+export function flushPendingModelUsage(): void {
+  for (const [key, pending] of [...pendingWrites]) {
+    clearTimeout(pending.timer);
+    flushOne(pending.configPath, pending.modelName, key);
+  }
 }

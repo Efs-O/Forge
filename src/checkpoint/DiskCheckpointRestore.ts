@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { hashCheckpointFile, isPathInside } from './CheckpointFileIO';
+import { hashCheckpointFile } from './CheckpointFileIO';
+import { isPathInside } from '../util/pathContainment';
 import {
   type DiskCheckpointReference,
   fromManifestPath,

@@ -339,6 +339,3 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await this.checkpoints.dispose();
   }
 }
-
-// Compatibility export; canonical implementation lives in util/WorkspacePaths.
-export { resolveWorkspacePath as resolveToolPath } from '../util/WorkspacePaths';

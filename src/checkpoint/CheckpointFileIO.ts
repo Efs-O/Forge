@@ -1,6 +1,5 @@
 import * as crypto from 'crypto';
 import * as fs from 'fs';
-import * as path from 'path';
 import type { InventoryEntry } from './CheckpointInventory';
 
 export const FREE_SPACE_RESERVE_BYTES = 64 * 1024 * 1024;
@@ -23,14 +22,6 @@ export function formatCheckpointBytes(bytes: number): string {
     unit = units[index];
   }
   return `${value.toFixed(value >= 10 ? 1 : 2)} ${unit}`;
-}
-
-export function isPathInside(root: string, target: string): boolean {
-  const relative = path.relative(root, target);
-  return (
-    relative === '' ||
-    (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))
-  );
 }
 
 export async function writeCheckpointJsonAtomic(target: string, value: unknown): Promise<void> {
