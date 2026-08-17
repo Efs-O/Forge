@@ -1,5 +1,31 @@
 # Forge — Recent Changes
 
+## 0.12.45 — Post-refactor audit fixes
+
+- **A backend that was still starting no longer costs you thinking for the whole
+  session.** The capability probe is cached per model, but a probe that failed
+  degraded silently to name heuristics — and that degraded verdict was what got
+  cached. A thinking-capable model raced at the first turn of a session ran the
+  rest of it without thinking kwargs, warned you it did not support them, and
+  only recovered on a config change. Degraded answers are now evicted so the next
+  turn re-probes; concurrent turns still share one probe.
+- **Workspaces whose paths contain `..config` or `..cache` work again.** The
+  canonical containment check tested for a `..` prefix rather than a `..`
+  segment, so any first path segment merely *beginning* with two dots read as
+  traversal and every tool refused the file with "Path is outside the
+  workspace". Containment now has one owner, `util/pathContainment.ts`.
+- **The last turn before you close the window is recorded.** `last_used` writes
+  were debounced 2s with nothing to flush them, so closing within that window
+  lost the turn — the exact case the Model Manager's usage view exists to show.
+  `deactivate()` now flushes.
+- **CI evaluates the bundle, not just the types.** Circular-import and
+  module-scope failures type-check clean and only appear on load, which is
+  precisely what module reshuffling creates. `npm run ci` now loads the built
+  bundle under a stubbed `vscode`.
+- Full record in `POST_REFACTOR_AUDIT.md`, including what came back clean and
+  the two items left for a decision (coverage-threshold enforcement, oversized
+  docs).
+
 ## 0.12.44 — Compaction stops leaving the agent stale
 
 - **Auto-compact can now resume the turn it interrupted.** Compaction used to
