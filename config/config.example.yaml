@@ -124,10 +124,9 @@ profiles:
 # under 1.0 — the summarization request itself sends the transcript, so at
 # ~0.95 there is no room left for it to run. Max accepted is 0.95.
 # -------------------------------------------------------------------
-# `resume` continues a turn that was cut off (output limit, exhausted context,
-# tool-round cap) once the context has been freed, so an auto-compaction does
-# not leave the agent parked mid-task. Default true. A turn that finished
-# cleanly is never resumed, and a user-typed /compact never resumes at all.
+# `resume` continues the active task from the summary and retained tail once
+# the context has been freed. Default true.
+# A user-typed /compact never resumes at all.
 # -------------------------------------------------------------------
 # auto_compact:
 #   enabled: true

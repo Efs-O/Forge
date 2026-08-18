@@ -219,10 +219,11 @@ describe('autoCompactAndResume', () => {
     expect(continues.count).toBe(1);
   });
 
-  it('does not resume a turn that finished cleanly', async () => {
-    const { deps, sent } = autoDeps({ incompleteTurnReason: () => undefined });
+  it('continues after compaction even when the preceding turn finished cleanly', async () => {
+    const { deps, sent, continues } = autoDeps({ incompleteTurnReason: () => undefined });
     await autoCompactAndResume(deps);
-    expect(sent).toEqual([]);
+    expect(sent).toEqual([RESUME_PROMPT]);
+    expect(continues.count).toBe(1);
   });
 
   it('does not resume when the compaction did not happen', async () => {

@@ -38,11 +38,11 @@ export const RETAINED_TAIL_MAX_CHARS = 4000;
  *  summary has nothing to say and compaction is not worth a request. */
 const MIN_SUMMARIZED_MESSAGES = 2;
 
-/** Prompt used to resume a task that was cut off before an auto-compaction. */
+/** Prompt used to continue the active task after an auto-compaction. */
 export const RESUME_PROMPT =
   'Your context was automatically compacted; the summary above is what survived of the earlier turns. ' +
-  'Continue the task you were in the middle of, from where it stopped. ' +
-  'Do not restart or redo work the summary shows as already finished, and do not summarize what you did — just carry on.';
+  "Continue the user's most recent task from the retained context. " +
+  'Do not restart, repeat, or undo work the summary shows as complete. If the task is already complete, do not take further action.';
 
 /** Consecutive auto-resumes allowed without an intervening user prompt. */
 export const MAX_CONSECUTIVE_AUTO_CONTINUES = 2;
@@ -224,18 +224,17 @@ export interface AutoCompactDeps {
 /**
  * Threshold-triggered compaction, plus the resume that makes it useful.
  *
- * Compaction frees the context the previous turn ran out of. Without a resume
- * the agent parks mid-task holding nothing but a summary, and the user has to
- * notice and re-prompt. Only a turn that was actually cut off is resumed:
- * re-prompting after a clean finish would re-litigate work the summary already
- * records as done.
+ * Compaction is an internal context-management step, not the end of the
+ * user's request. Once it succeeds, re-enter the same conversation so the
+ * agent can either finish remaining work or recognize that the task is done.
+ * The resume prompt explicitly prohibits repeating completed work.
  */
 export async function autoCompactAndResume(deps: AutoCompactDeps): Promise<void> {
-  // Read before compacting: the summarization call itself must not be what the
-  // resume decision is made from.
+  // Read before compacting: the summarization call itself must not determine
+  // the status shown for the turn it interrupted.
   const reason = deps.incompleteTurnReason();
   const outcome = await deps.compact({ auto: true });
-  if (outcome !== 'compacted' || !deps.resumeEnabled || !reason) return;
+  if (outcome !== 'compacted' || !deps.resumeEnabled) return;
 
   if (deps.autoContinues() >= MAX_CONSECUTIVE_AUTO_CONTINUES) {
     log.info('[auto-compact] resume limit reached — waiting for the user');
@@ -249,10 +248,16 @@ export async function autoCompactAndResume(deps: AutoCompactDeps): Promise<void>
   }
 
   deps.noteAutoContinue();
-  log.info(`[auto-compact] resuming: ${reason}`);
+  log.info(
+    reason
+      ? `[auto-compact] resuming: ${reason}`
+      : '[auto-compact] continuing after successful compaction',
+  );
   deps.post({
     type: 'notice',
-    message: `Context compacted mid-task (${reason}). Resuming.`,
+    message: reason
+      ? `Context compacted mid-task (${reason}). Resuming.`
+      : 'Context compacted. Continuing the active task.',
     conversationId: deps.convId,
   });
   try {
