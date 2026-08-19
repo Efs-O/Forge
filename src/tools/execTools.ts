@@ -9,7 +9,6 @@ import {
   ExecCommandError,
   formatExecCommandOutput,
   formatOutput,
-  getWorkspaceRoot,
   guardExec,
   MAX_OUTPUT_CHARS,
   MAX_EXEC_OUTPUT_LINES,
@@ -174,6 +173,11 @@ export function makeRunTestsTool(): RegisteredTool {
               description: 'File or test name pattern to filter. Optional.',
             },
             reporter: { type: 'string', description: 'Reporter name (e.g. verbose). Optional.' },
+            cwd: {
+              type: 'string',
+              description:
+                'Project directory to run in, relative to the workspace root (or absolute). Defaults to the workspace root — set it when the project is a subdirectory, e.g. "threejs-game-prompt".',
+            },
           },
           required: [],
           additionalProperties: false,
@@ -182,7 +186,10 @@ export function makeRunTestsTool(): RegisteredTool {
     },
     permission: 'headless',
     handler: async (args) => {
-      const root = getWorkspaceRoot();
+      // Was hardcoded to the workspace root, so in a workspace holding several
+      // projects it looked for a package.json that was never there and failed
+      // with a bare ENOENT naming a path nobody had chosen.
+      const root = resolveExecCwd(args['cwd'] as string | undefined);
       const runner = detectTestRunner(root);
       const cmdArgs = [...runner.baseArgs];
 
@@ -220,6 +227,11 @@ export function makeRunBuildTool(): RegisteredTool {
           type: 'object',
           properties: {
             script: { type: 'string', description: 'npm script name. Default "build".' },
+            cwd: {
+              type: 'string',
+              description:
+                'Project directory to run in, relative to the workspace root (or absolute). Defaults to the workspace root — set it when the project is a subdirectory, e.g. "threejs-game-prompt".',
+            },
           },
           required: [],
           additionalProperties: false,
@@ -228,13 +240,15 @@ export function makeRunBuildTool(): RegisteredTool {
     },
     permission: 'headless',
     handler: async (args) => {
-      const root = getWorkspaceRoot();
+      const root = resolveExecCwd(args['cwd'] as string | undefined);
       const script = (args['script'] as string | undefined) ?? 'build';
 
       // Verify script exists in package.json
       const pkgPath = path.join(root, 'package.json');
       if (!fs.existsSync(pkgPath)) {
-        throw new Error('run_build: no package.json found in workspace root');
+        throw new Error(
+          `run_build: no package.json in ${root}. Pass cwd if the project is a subdirectory.`,
+        );
       }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- package.json is untyped

@@ -8,7 +8,7 @@
 import * as child_process from 'child_process';
 import * as path from 'path';
 import type { RegisteredTool } from './ToolRegistry';
-import { getRepo, resolveFilePath, statusLetter, workspaceRoot } from './gitRepo';
+import { getRepo, gitCwd, resolveFilePath, statusLetter, workspaceRoot } from './gitRepo';
 
 export function makeGitStatusTool(): RegisteredTool {
   return {
@@ -114,7 +114,7 @@ export function makeGitDiffTool(): RegisteredTool {
         const resolved = resolveFilePath(filePath);
         const spawnArgs = staged ? ['diff', '--staged', '--', resolved] : ['diff', '--', resolved];
         const result = child_process.spawnSync('git', spawnArgs, {
-          cwd: workspaceRoot(),
+          cwd: gitCwd(filePath),
           encoding: 'utf8',
         });
         return result.stdout || result.stderr || '(no diff)';
@@ -149,7 +149,7 @@ export function makeGitBlameTool(): RegisteredTool {
     handler: async (args) => {
       const filePath = resolveFilePath(args['path'] as string);
       const result = child_process.spawnSync('git', ['blame', '--line-porcelain', filePath], {
-        cwd: workspaceRoot(),
+        cwd: gitCwd(args['path'] as string),
         encoding: 'utf8',
       });
       if (result.error) throw new Error(`git_blame: ${result.error.message}`);
@@ -181,7 +181,7 @@ export function makeGitShowTool(): RegisteredTool {
     handler: async (args) => {
       const ref = args['ref'] as string;
       const result = child_process.spawnSync('git', ['show', ref], {
-        cwd: workspaceRoot(),
+        cwd: gitCwd(),
         encoding: 'utf8',
       });
       if (result.error) throw new Error(`git_show: ${result.error.message}`);

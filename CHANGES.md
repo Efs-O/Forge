@@ -98,6 +98,32 @@
 - **A blocked command names the sanctioned route.** `delete_file` went uncalled
   across roughly three thousand tool calls while the agent reached for shell
   deletion and got a bare refusal. Refusals now say what to use instead.
+- **`exec_command` stopped refusing ordinary one-liners.** The shell-operator
+  guard matched `&&`, `;`, `|`, `` ` ``, `>`, `<` as *substrings* of an
+  argument. Commands spawn with `shell: false`, so those characters reach the
+  program verbatim and no shell ever sees them — the check prevented nothing and
+  blocked a great deal: `node -e "for(let i=0;i<50;i++)console.log(i)"` was
+  refused for containing `;` and `<`, which rules out most one-liners, every
+  arrow function, every comparison, and every JS template literal. It now
+  matches whole argument tokens, which is the thing actually worth catching:
+  a model writing a shell line and handing over the pieces as argv.
+- **`git_blame`, `git_show`, and `git_diff` on a path find the repository.**
+  They spawned git in the workspace root while `git_status` and `git_log` went
+  through VS Code's Git API, which *discovers* repositories. In a workspace
+  whose repo sits one directory down, half the git tools worked and half
+  answered `fatal: not a git repository`. All of them now resolve the repo —
+  preferring the one containing the file, so several repos in one workspace
+  blame the right one.
+- **`go_to_definition` works on JavaScript again.** `executeDefinitionProvider`
+  is typed as returning `Location[]`, but VS Code lets a provider answer with
+  `LocationLink[]` — and the JS/TS server does. Reading `loc.range.start` on one
+  threw `Cannot read properties of undefined (reading 'start')` on every JS
+  file. `find_references` was never affected; its provider returns real
+  Locations.
+- **`run_tests` and `run_build` take a `cwd`.** Both hardcoded the workspace
+  root, so in a workspace holding several projects they looked for a
+  `package.json` that was never there and failed with a bare ENOENT naming a
+  path nobody had chosen. The error now names the directory it searched.
 - **A search that finds nothing says why it might not have.** `search_code` is a
   literal search, so a regex like `\.heal\(` cannot match however much of it is
   in the file — and "No matches found" reported that identically to a term that

@@ -23,8 +23,24 @@ function symbolKindLabel(k: vscode.SymbolKind): string {
   return vscode.SymbolKind[k] ?? String(k);
 }
 
-function locationToString(loc: vscode.Location): string {
-  return `${vscode.workspace.asRelativePath(loc.uri)}:${loc.range.start.line + 1}:${loc.range.start.character + 1}`;
+/**
+ * Renders either shape a definition/reference provider can return.
+ *
+ * `executeDefinitionProvider` is typed as returning `Location[]`, but VS Code
+ * lets a provider answer with `LocationLink[]` instead — and the JavaScript/
+ * TypeScript server does. Those carry `targetUri`/`targetRange` and no `range`
+ * at all, so reading `loc.range.start` threw
+ * "Cannot read properties of undefined (reading 'start')" and go_to_definition
+ * failed on every JS file. `find_references` was unaffected because the
+ * references provider does return plain Locations.
+ */
+function locationToString(loc: vscode.Location | vscode.LocationLink): string {
+  const link = loc as vscode.LocationLink;
+  const plain = loc as vscode.Location;
+  const uri = link.targetUri ?? plain.uri;
+  const range = link.targetSelectionRange ?? link.targetRange ?? plain.range;
+  if (!uri || !range) return '(location unavailable)';
+  return `${vscode.workspace.asRelativePath(uri)}:${range.start.line + 1}:${range.start.character + 1}`;
 }
 
 // ── get_diagnostics ───────────────────────────────────────────────────────────
@@ -234,11 +250,9 @@ export function makeGoToDefinitionTool(): RegisteredTool {
     handler: async (args) => {
       const uri = resolveWorkspaceUri(args['path'] as string);
       const position = new vscode.Position(args['line'] as number, args['character'] as number);
-      const result = await vscode.commands.executeCommand<vscode.Location[] | undefined>(
-        'vscode.executeDefinitionProvider',
-        uri,
-        position,
-      );
+      const result = await vscode.commands.executeCommand<
+        Array<vscode.Location | vscode.LocationLink> | undefined
+      >('vscode.executeDefinitionProvider', uri, position);
       if (!result?.length) return 'No definition found.';
       return result.map(locationToString).join('\n');
     },

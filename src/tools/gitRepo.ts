@@ -6,11 +6,14 @@
  * the same path/status conversions, and neither should own it.
  */
 
+import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
 // ── Git API bootstrap ─────────────────────────────────────────────────────────
 export interface GitRepository {
+  /** Repository root, as discovered by VS Code's Git extension. */
+  rootUri?: vscode.Uri;
   state: {
     workingTreeChanges: Array<{ uri: vscode.Uri; status: number }>;
     indexChanges: Array<{ uri: vscode.Uri; status: number }>;
@@ -45,6 +48,46 @@ export function workspaceRoot(): string {
 export function resolveFilePath(p: string): string {
   if (path.isAbsolute(p)) return p;
   return path.join(workspaceRoot(), p);
+}
+
+/**
+ * Directory to spawn `git` in.
+ *
+ * The tools that go through VS Code's Git API (`git_status`, `git_log`,
+ * plain `git_diff`) work in a workspace whose repository sits in a
+ * subdirectory, because the API discovers repositories rather than assuming
+ * one at the root. The tools that spawn git directly passed `workspaceRoot()`
+ * and got `fatal: not a git repository` for the same workspace — measured on
+ * `git_blame` and `git_show` against a repo one directory down.
+ *
+ * Prefers the repository containing `filePath`, so a workspace holding several
+ * repositories blames the right one; falls back to the discovered repository,
+ * then to the workspace root.
+ */
+export function gitCwd(filePath?: string): string {
+  if (filePath) {
+    const fromFile = findRepoRoot(path.dirname(resolveFilePath(filePath)));
+    if (fromFile) return fromFile;
+  }
+  try {
+    const root = getRepo().rootUri?.fsPath;
+    if (root) return root;
+  } catch {
+    // No repository discovered — fall through to the workspace root, where git
+    // will produce its own, clearer "not a git repository" message.
+  }
+  return workspaceRoot();
+}
+
+/** Nearest ancestor of `from` containing a `.git` entry, or undefined. */
+function findRepoRoot(from: string): string | undefined {
+  let current = from;
+  for (;;) {
+    if (fs.existsSync(path.join(current, '.git'))) return current;
+    const parent = path.dirname(current);
+    if (parent === current) return undefined;
+    current = parent;
+  }
 }
 
 // Status code → letter (subset of git status codes used by vscode.git)

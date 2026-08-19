@@ -74,16 +74,44 @@ export function resolveExecCwd(cwd: string | undefined): string {
 
 // ── Shell-operator guard ───────────────────────────────────────────────────────
 
-const SHELL_OPERATORS = ['&&', '||', ';', '|', '`', '$(', '>', '<'];
+/**
+ * Tokens that are shell operators when they stand alone as one argument.
+ *
+ * Matched WHOLE, never as substrings. Commands are spawned with `shell: false`,
+ * so an operator character *inside* an argument is passed verbatim to the
+ * program and no shell ever sees it — there is nothing to escape and no
+ * injection to prevent. Substring matching therefore protected nothing and
+ * blocked a great deal: `for(let i=0;i<50;i++)console.log(i)` was refused for
+ * containing `;` and `<`, which rules out most `node -e` one-liners, every
+ * arrow function, and every comparison. Backticks were the worst of it — a JS
+ * template literal could not be passed at all.
+ *
+ * What is worth catching is the model writing a shell *line* and handing the
+ * pieces over as argv, e.g. args: ["-e", "...", "&&", "node", ...]. That shows
+ * up as a bare operator token, and it is what this now looks for.
+ */
+const SHELL_OPERATOR_TOKENS = new Set([
+  '&&',
+  '||',
+  '|',
+  '&',
+  ';',
+  '>',
+  '>>',
+  '<',
+  '<<',
+  '2>',
+  '2>&1',
+]);
 
 export function checkShellOperators(args: string[]): void {
   for (const arg of args) {
-    for (const op of SHELL_OPERATORS) {
-      if (arg.includes(op)) {
-        throw new Error(
-          'Shell operators are not permitted in arguments. Split into separate tool calls.',
-        );
-      }
+    if (SHELL_OPERATOR_TOKENS.has(arg.trim())) {
+      throw new Error(
+        `Shell operators are not permitted in arguments ("${arg.trim()}" is one). ` +
+          'There is no shell — split this into separate exec_command calls, and use ' +
+          'tail_lines, head_lines, max_output_chars, or output_stream instead of piping.',
+      );
     }
   }
 }
