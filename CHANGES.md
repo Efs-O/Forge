@@ -54,8 +54,9 @@
   transcript to say the turn had been cut short — so the next request re-planned
   from a history that looked complete. It now returns, records the stop as an
   assistant turn, and keeps every edit the capped rounds landed.
-- **The tool-round cap is configurable.** `max_tool_rounds` on a model or group
-  (default 40, hard ceiling 400) replaces one constant that had to serve both a
+- **The tool-round cap is configurable.** `max_tool_rounds` on `defaults`, a
+  group, or a model — set it once on `defaults` to cover every model
+  (built-in default 40, hard ceiling 400) replaces one constant that had to serve both a
   chat turn and a multi-file refactor. Measured on a real session: a turn that
   made 28 successful edits was killed at 40 rounds with the refactor half done.
   The cap's job is to bound a runaway loop, not to decide how big a task may be.

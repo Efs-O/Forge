@@ -253,6 +253,7 @@ export function resolveRequestModel(
       p.strip_thinking_channels,
     ),
     capabilities: pick(d.capabilities, model.capabilities, p.capabilities),
+    max_tool_rounds: pick(d.max_tool_rounds, model.max_tool_rounds, p.max_tool_rounds),
   });
 }
 

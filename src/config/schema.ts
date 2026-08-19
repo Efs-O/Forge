@@ -50,6 +50,7 @@ const ProfileSchema = z.object({
   strip_tools: z.boolean().optional(),
   strip_thinking_channels: z.boolean().optional(),
   capabilities: CapabilitiesSchema.optional(),
+  max_tool_rounds: z.number().int().positive().optional(),
 });
 
 const ModelConfigSchema = z.object({

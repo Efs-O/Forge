@@ -87,6 +87,8 @@ export interface ProfileConfig {
   strip_tools?: boolean;
   strip_thinking_channels?: boolean;
   capabilities?: ('tool-call' | 'vision' | 'long-context')[];
+  /** Tool rounds per sidebar turn. Set on `defaults` to cover every model. */
+  max_tool_rounds?: number;
 }
 
 export interface ModelConfig {
