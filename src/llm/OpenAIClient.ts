@@ -320,7 +320,15 @@ export async function streamChatCompletion(
             }
             const acc = toolAccum.get(idx)!;
             if (tc.id) acc.id = tc.id;
-            if (tc.function?.name) acc.name += tc.function.name;
+            // Only `arguments` is streamed in fragments; the name arrives whole
+            // in the delta that opens the call. Appending every name delta
+            // assumed otherwise, so a provider that repeats the name on each
+            // chunk produced "search_codesearch_code" — an unknown tool, and a
+            // wasted round, every single time (measured on gemma4:31b-cloud).
+            // Genuine fragmentation still concatenates: only a repeat of what
+            // is already accumulated is dropped.
+            const incomingName = tc.function?.name;
+            if (incomingName && !acc.name.includes(incomingName)) acc.name += incomingName;
             if (tc.function?.arguments) acc.arguments += tc.function.arguments;
           }
         }

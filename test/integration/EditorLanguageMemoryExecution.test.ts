@@ -45,12 +45,18 @@ describe('isolated editor, language, search, and memory tool execution', () => {
   });
 
   it('executes discovery and semantic-search handlers with controlled results', async () => {
-    vi.spyOn(vscode.workspace, 'findFiles').mockResolvedValue([
-      vscode.Uri.file(path.join(root, 'sample.ts')),
-    ]);
-    await expect(makeFindFilesTool().handler({ pattern: '**/*.ts', max_results: 5 })).resolves.toBe(
-      'sample.ts',
-    );
+    // find_files runs ripgrep now, not vscode.workspace.findFiles — one engine
+    // shared with search_code, so the two cannot disagree about the workspace.
+    const stub = path.join(root, 'rg-stub.js');
+    fs.writeFileSync(stub, "process.stdout.write('sample.ts');", 'utf8');
+    const resolveStub = () => ({
+      command: process.execPath,
+      argsPrefix: [stub],
+      candidates: [] as string[],
+    });
+    await expect(
+      makeFindFilesTool(resolveStub).handler({ pattern: '**/*.ts', max_results: 5 }),
+    ).resolves.toBe('sample.ts');
 
     const search = vi
       .fn()

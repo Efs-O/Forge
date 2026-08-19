@@ -32,6 +32,13 @@ export function makeReadFileTool(): RegisteredTool {
               description:
                 'Optional 1-based last line to read (inclusive). Defaults to end of file.',
             },
+            numbered: {
+              type: 'boolean',
+              description:
+                'Prefix each line with its 1-based number as "  12| text". Use when you need ' +
+                'line numbers, e.g. to build apply_line_edits operations. The prefix is display ' +
+                'only — never copy it into old_str or expected_lines.',
+            },
           },
           required: ['path'],
           additionalProperties: false,
@@ -50,7 +57,8 @@ export function makeReadFileTool(): RegisteredTool {
 
       const startLine = typeof args['start_line'] === 'number' ? args['start_line'] : undefined;
       const endLine = typeof args['end_line'] === 'number' ? args['end_line'] : undefined;
-      if (startLine === undefined && endLine === undefined) return content;
+      const numbered = args['numbered'] === true;
+      if (startLine === undefined && endLine === undefined && !numbered) return content;
 
       const lines = content.split('\n');
       const start = Math.max(1, startLine ?? 1);
@@ -60,7 +68,15 @@ export function makeReadFileTool(): RegisteredTool {
           `read_file: start_line ${start} is past end_line ${end} (file has ${lines.length} lines).`,
         );
       }
-      return lines.slice(start - 1, end).join('\n');
+      const selected = lines.slice(start - 1, end);
+      if (!numbered) return selected.join('\n');
+      // `apply_line_edits` wants 1-based line numbers, but the only way to read
+      // a file gave none — so the model counted them itself and got it wrong:
+      // 14 of its 19 calls failed on stale or miscounted `expected_lines`.
+      const width = String(end).length;
+      return selected
+        .map((line, index) => `${String(start + index).padStart(width, ' ')}| ${line}`)
+        .join('\n');
     },
   };
 }

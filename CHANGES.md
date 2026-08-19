@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## 0.12.47 — Search, the round cap, and where paths resolve
+## 0.12.47 — Search, the round cap, and the tools that were quietly failing
 
 - **`search_code` stopped returning its own index instead of your code.** Three
   faults compounded. `.forge/` was never excluded, so the embeddings index — a
@@ -67,6 +67,37 @@
   ENOENT naming a path it never chose. The contract is now stated in the system
   prompt and in the tool schemas, including that `search_code` and `find_files`
   already return paths in the accepted form.
+- **`edit_file` can apply several edits in one call.** One edit per call is one
+  *round* per edit, and rounds are the scarcest thing a turn has: 616 calls
+  across recent sessions at an average of 1.62 tool calls per round, against a
+  40-round budget. Pass `edits: [{old_str, new_str}, ...]` to change one file in
+  a single call. Edits apply in order and all-or-nothing — a miss on any one of
+  them leaves the file untouched rather than half-written.
+- **`read_file` can number its lines.** `apply_line_edits` wants 1-based line
+  numbers and verbatim `expected_lines`, but nothing could produce them: the
+  only way to read a file returned bare text, so the model counted lines itself
+  and failed **14 of the 19 times** it tried. `numbered: true` prefixes each
+  line with its real number, ranged reads included.
+- **`find_files` uses ripgrep, like `search_code`.** It used VS Code's indexed
+  search service, which on a workspace held on a mapped network drive reported
+  "no files match" for paths that plainly exist and are not ignored —
+  `threejs-game-prompt/package*.json` among them, **16 failures in 42 calls** —
+  while `search_code` was returning those very paths from the same root. Two
+  file-matching tools backed by two engines could disagree about what the
+  workspace contains. Now there is one engine, one root, one glob dialect.
+- **A repeated tool name is no longer concatenated into an unknown one.** Only
+  `arguments` is streamed in fragments; the name arrives whole. Appending every
+  name delta assumed otherwise, so a provider that repeats it on each chunk
+  produced `search_codesearch_code` — dispatched as an unknown tool, and a
+  wasted round, every time (measured on `gemma4:31b-cloud`).
+- **The `rm -rf` rule no longer refuses scoped deletes.** Its pattern ended in
+  `-?[fF]` with the hyphen optional, so any bare "r" in a later filename
+  satisfied it: `git rm -f README.md` was refused while `git rm -f notes.txt`
+  was allowed. Recursion and force must now both be present as real flags,
+  short or long. Every destructive form stays blocked, with tests to prove it.
+- **A blocked command names the sanctioned route.** `delete_file` went uncalled
+  across roughly three thousand tool calls while the agent reached for shell
+  deletion and got a bare refusal. Refusals now say what to use instead.
 - **A search that finds nothing says why it might not have.** `search_code` is a
   literal search, so a regex like `\.heal\(` cannot match however much of it is
   in the file — and "No matches found" reported that identically to a term that

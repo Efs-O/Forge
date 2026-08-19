@@ -1,5 +1,4 @@
 import { spawn } from 'child_process';
-import * as path from 'path';
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveWorkspaceUri } from '../util/WorkspacePaths';
@@ -63,8 +62,8 @@ export const SNIPPETS_PER_FILE_LIMIT = 8;
  * Globs must be recursive to match below the search root. Bare `.git/**` is
  * anchored to that root, so it excluded only a top-level `.git` and happily
  * searched `subproject/.git/`, `subproject/node_modules/`, and so on —
- * `find_files` (FIND_FILES_EXCLUDE below) already got this right, which is why
- * the two tools disagreed about what is in the workspace.
+ * `find_files` already got this right, which is why the two tools disagreed
+ * about what is in the workspace. Both now share this one list.
  *
  * `.forge/` is excluded outright: it holds the semantic index, which is a
  * verbatim copy of the sources and would otherwise double every match.
@@ -76,7 +75,6 @@ export const SEARCH_EXCLUDES = [
   '!**/out/**',
   '!**/.forge/**',
 ];
-const FIND_FILES_EXCLUDE = '{**/node_modules/**,**/dist/**,**/out/**,**/.git/**,**/.forge/**}';
 
 interface SearchCodeMatch {
   path: string;
@@ -119,7 +117,95 @@ function isContextEvent(
   return event.type === 'context';
 }
 
-export function makeFindFilesTool(): RegisteredTool {
+/**
+ * Lists workspace files matching a glob, via the same ripgrep `search_code` uses.
+ *
+ * Previously `vscode.workspace.findFiles`, which routes through VS Code's
+ * indexed search service. On this workspace that reported "no files match" for
+ * paths that plainly exist and are not ignored — `threejs-game-prompt/
+ * package*.json` and `threejs-game-prompt/REFACTOR_PLAN.md` among them, 16
+ * failures in 42 calls — while `search_code` was returning those very paths
+ * from the same root. The workspace sits on a mapped network drive, where that
+ * index is unreliable. Two file-matching tools backed by two different engines
+ * could disagree about what the workspace contains; now there is one engine,
+ * one root, and one glob dialect.
+ */
+async function listWorkspaceFiles(
+  pattern: string,
+  maxResults: number,
+  resolution: RipgrepResolution,
+  signal?: AbortSignal,
+): Promise<string[]> {
+  signal?.throwIfAborted();
+  const folder = vscode.workspace.workspaceFolders?.[0];
+  if (!folder) throw new Error('No workspace folder open.');
+
+  const args = ['--files', '--glob', pattern, ...SEARCH_EXCLUDES.flatMap((g) => ['--glob', g])];
+
+  return new Promise<string[]>((resolve, reject) => {
+    const found: string[] = [];
+    let buffer = '';
+    let stderr = '';
+    let settled = false;
+
+    const child = spawn(resolution.command, [...(resolution.argsPrefix ?? []), ...args], {
+      cwd: folder.uri.fsPath,
+      shell: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    const onAbort = (): void => {
+      child.kill();
+      finish(new Error('find_files: cancelled'));
+    };
+    const finish = (result: string[] | Error): void => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener('abort', onAbort);
+      if (result instanceof Error) reject(result);
+      else resolve(result);
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+
+    const take = (line: string): void => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      if (found.length >= maxResults) {
+        if (!child.killed) child.kill();
+        return;
+      }
+      found.push(trimmed.replace(/\\/g, '/').replace(/^\.\//, ''));
+    };
+
+    child.stdout?.on('data', (chunk: Buffer) => {
+      buffer += chunk.toString('utf8');
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() ?? '';
+      for (const line of lines) take(line);
+    });
+    child.stderr?.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString('utf8');
+    });
+    child.once('error', (err) => {
+      finish(new Error(`find_files: failed to start ripgrep: ${err.message}`));
+    });
+    child.once('close', (code) => {
+      if (buffer.trim()) take(buffer);
+      if (settled) return;
+      // rg exits 1 for "no matches", which is a result, not a failure.
+      if (found.length > 0 || code === 0 || code === 1) {
+        finish(found.sort());
+        return;
+      }
+      finish(new Error(`find_files: ${stderr.trim() || `ripgrep exited with code ${code}`}`));
+    });
+  });
+}
+
+export function makeFindFilesTool(
+  resolveCommand: () => RipgrepResolution = () => resolveRipgrep(vscode.env.appRoot),
+): RegisteredTool {
   return {
     definition: {
       type: 'function',
@@ -155,15 +241,20 @@ export function makeFindFilesTool(): RegisteredTool {
       }
       const maxResults = typeof args['max_results'] === 'number' ? args['max_results'] : 100;
 
-      const matches = await vscode.workspace.findFiles(pattern, FIND_FILES_EXCLUDE, maxResults);
+      const matches = await listWorkspaceFiles(
+        pattern,
+        maxResults,
+        resolveCommand(),
+        context?.abortSignal,
+      );
       context?.abortSignal?.throwIfAborted();
-      if (matches.length === 0) return `No files match "${pattern}".`;
-
-      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-      return matches
-        .map((uri) => (root ? path.relative(root, uri.fsPath).replace(/\\/g, '/') : uri.fsPath))
-        .sort()
-        .join('\n');
+      if (matches.length === 0) {
+        return (
+          `No files match "${pattern}". The glob is anchored at the workspace root — ` +
+          `prefix a nested repository's directory, or lead with "**/" to match at any depth.`
+        );
+      }
+      return matches.join('\n');
     },
   };
 }

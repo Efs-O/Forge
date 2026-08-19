@@ -52,7 +52,8 @@ export function makeRunTerminalTool(): RegisteredTool {
       const denied = checkDenyList(command, [], getBuiltinDenyList());
       if (denied) {
         throw new Error(
-          `run_terminal: command matches denylist pattern "${denied.description}" — paste refused.`,
+          `run_terminal: command matches denylist pattern "${denied.description}" — paste refused.` +
+            (denied.alternative ? ` ${denied.alternative}` : ''),
         );
       }
 
@@ -135,7 +136,8 @@ export function makeExecCommandTool(): RegisteredTool {
         const denied = checkDenyList(command, cmdArgs, getBuiltinDenyList());
         if (denied) {
           throw new Error(
-            `exec_command: command matches denylist pattern "${denied.description}" — execution refused.`,
+            `exec_command: command matches denylist pattern "${denied.description}" — execution refused.` +
+              (denied.alternative ? ` ${denied.alternative}` : ''),
           );
         }
         checkPowerShellBan(command, cmdArgs);

@@ -253,7 +253,11 @@ export function formatExecCommandOutput(
 export function guardExec(command: string, args: string[]): void {
   const denyEntry = checkDenyList(command, args, getBuiltinDenyList());
   if (denyEntry) {
-    throw new Error(`exec_command: blocked — ${denyEntry.description}`);
+    // Name the sanctioned route. A bare refusal left the agent to invent one,
+    // and `delete_file` — which it is permitted to use — went uncalled across
+    // roughly three thousand tool calls while it reached for the shell instead.
+    const alternative = denyEntry.alternative ? ` ${denyEntry.alternative}` : '';
+    throw new Error(`exec_command: blocked — ${denyEntry.description}.${alternative}`);
   }
 }
 
