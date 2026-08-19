@@ -25,7 +25,7 @@ const COMMAND_PREFIXES = new Set(['sudo', 'git', 'npx', 'pnpm', 'yarn', 'npm', '
 /**
  * True when the command line is a recursive *and* forced delete.
  *
- * Replaces `/rm.*-[rR].*-?[fF]/`, whose trailing `-?[fF]` made the hyphen
+ * Replaces `/\brm\b.*-[rR].*-?[fF]/`, whose trailing `-?[fF]` made the hyphen
  * optional — so any bare "r" in a later filename satisfied it. Measured:
  * `git rm -f README.md` was refused (the "r" in README) while
  * `git rm -f notes.txt` was allowed. The agent needed the former to clean up
@@ -62,6 +62,36 @@ export function isRecursiveForceDelete(fullCommand: string): boolean {
   return false;
 }
 
+/**
+ * True for a `git checkout` / `git restore` that throws away working-tree
+ * changes, rather than one that just moves between branches.
+ *
+ * `git checkout -- .` and `git restore .` delete uncommitted work with no
+ * confirmation and no reflog entry to recover from — the one genuinely
+ * unrecoverable thing in everyday git. Neither was on the denylist, while
+ * `git reset --hard` (which IS recoverable via reflog) was.
+ *
+ * `git checkout <branch>` stays allowed: git refuses it when it would clobber
+ * local modifications, so it is not the hazard. `git restore --staged <path>`
+ * only unstages and is likewise left alone.
+ */
+export function isDestructiveGitCheckout(fullCommand: string): boolean {
+  const tokens = fullCommand.split(/\s+/u).filter(Boolean);
+  const git = tokens.indexOf('git');
+  if (git === -1) return false;
+  const sub = tokens[git + 1];
+  const rest = tokens.slice(git + 2);
+  if (sub === 'restore') {
+    // Only `--staged`/`--cached` restores leave the working tree alone.
+    return !rest.some((t) => t === '--staged' || t === '--cached');
+  }
+  if (sub !== 'checkout') return false;
+  // `--` introduces pathspecs: everything after it is a file to overwrite.
+  if (rest.includes('--')) return true;
+  // `git checkout .` / `git checkout src/` — a pathspec with no branch.
+  return rest.some((t) => t === '.' || t.endsWith('/'));
+}
+
 /** Returns the built-in denylist covering common destructive commands. */
 export function getBuiltinDenyList(): DenyListEntry[] {
   return [
@@ -78,7 +108,24 @@ export function getBuiltinDenyList(): DenyListEntry[] {
       description: 'git clean -f',
       alternative: 'To remove specific files, use the delete_file tool on each path.',
     },
-    { pattern: /git\s+push\s+--(force|force-with-lease)/, description: 'force push' },
+    {
+      match: isDestructiveGitCheckout,
+      description: 'git checkout/restore discarding working-tree changes',
+      alternative:
+        'This deletes uncommitted work unrecoverably. To move between branches use ' +
+        'the switch_branch tool; to inspect a file at a ref use git_show.',
+    },
+    // Every push is outward-facing, not just a forced one.
+    {
+      pattern: /\bgit\s+push\b/,
+      description: 'git push (publishes to a remote)',
+      alternative: "Publishing is the user's call — commit locally and let them push.",
+    },
+    { pattern: /\bgit\s+rebase\b/, description: 'git rebase (rewrites history)' },
+    { pattern: /\bgit\s+branch\s+-[dD]\b/, description: 'git branch -d/-D (deletes a branch)' },
+    { pattern: /\bgit\s+stash\s+(drop|clear)\b/, description: 'git stash drop/clear' },
+    { pattern: /\bgit\s+filter-branch\b/, description: 'git filter-branch (rewrites history)' },
+    { pattern: /\bgit\s+reflog\s+expire\b/, description: 'git reflog expire (destroys recovery)' },
     { pattern: /DROP\s+(TABLE|DATABASE|SCHEMA)/i, description: 'SQL DROP' },
     { pattern: /\b(shutdown|reboot|halt|poweroff)\b/, description: 'system power command' },
     { pattern: /curl\s+.+\|\s*(ba)?sh/, description: 'curl pipe to shell' },

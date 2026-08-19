@@ -96,6 +96,16 @@
   satisfied it: `git rm -f README.md` was refused while `git rm -f notes.txt`
   was allowed. Recursion and force must now both be present as real flags,
   short or long. Every destructive form stays blocked, with tests to prove it.
+- **The denylist covers the git commands that actually destroy work.** It
+  blocked `git reset --hard` — which the reflog can undo — while allowing
+  `git checkout -- .` and `git restore .`, which delete uncommitted changes with
+  no confirmation and nothing to recover from. Also now refused: `git push` (any
+  push is outward-facing, not only a forced one), `rebase`, `branch -d/-D`,
+  `stash drop/clear`, `filter-branch`, and `reflog expire`. `git checkout
+  <branch>`, `restore --staged`, `stash pop`, `add` and `commit` stay allowed —
+  git itself refuses a checkout that would clobber local edits, so that is not
+  the hazard, and a denylist that refuses ordinary work just teaches the agent
+  to route around it.
 - **A blocked command names the sanctioned route.** `delete_file` went uncalled
   across roughly three thousand tool calls while the agent reached for shell
   deletion and got a bare refusal. Refusals now say what to use instead.
