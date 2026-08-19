@@ -45,7 +45,7 @@ export class SessionLogger {
       if (msg.role === 'system') continue;
 
       if (msg.tool_calls?.length) {
-        this.append({
+        const toolLine: Record<string, unknown> = {
           role: msg.role,
           content: null,
           tool_calls: msg.tool_calls.map((tc) => ({
@@ -60,7 +60,15 @@ export class SessionLogger {
           })),
           timestamp_ms: Date.now(),
           model,
-        });
+        };
+        // Reasoning belongs on tool-call turns most of all: that is where the
+        // model decides what to do, and where it goes wrong. `ToolCallingLoop`
+        // deliberately carries it onto these messages, and this branch dropped
+        // it — so a 56-round session persisted thinking for exactly one turn,
+        // the final one. Reviewing why an agent spiralled meant reading tool
+        // calls and guessing at the reasoning behind them.
+        if (msg.reasoning) toolLine['reasoning'] = msg.reasoning;
+        this.append(toolLine);
         continue;
       }
 
@@ -74,11 +82,13 @@ export class SessionLogger {
                 .join('\n')
             : null;
 
-      if (!content) continue;
+      // A turn that produced only reasoning — cut off, refused, or interrupted
+      // mid-thought — still says why. Requiring content dropped those entirely.
+      if (!content && !msg.reasoning) continue;
 
       const line: Record<string, unknown> = {
         role: msg.role,
-        content,
+        content: content ?? '',
         timestamp_ms: Date.now(),
         model,
       };

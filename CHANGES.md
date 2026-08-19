@@ -121,6 +121,14 @@
   threw `Cannot read properties of undefined (reading 'start')` on every JS
   file. `find_references` was never affected; its provider returns real
   Locations.
+- **Session logs keep the reasoning on tool-call turns.** `ToolCallingLoop`
+  deliberately carries each round's thinking onto the assistant message, and
+  `SessionLogger` dropped it for exactly the turns that have `tool_calls` — the
+  turns where the model decides what to do, and where it goes wrong. A 56-round
+  session persisted thinking for one turn, the last. Reviewing why an agent
+  spiralled meant reading its tool calls and guessing at the reasoning behind
+  them. A turn that produced only reasoning is now kept too, instead of being
+  skipped for having no content.
 - **Language-intelligence tools open the file before asking about it.** VS Code
   providers analyse open documents; a file nobody has opened can report no
   symbols and no hover while plainly containing them — `get_document_symbols`
