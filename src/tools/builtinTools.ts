@@ -168,7 +168,10 @@ export function makeReplaceSelectionTool(): RegisteredTool {
       type: 'function',
       function: {
         name: 'replace_selection',
-        description: 'Replace the current editor selection with new text.',
+        description:
+          'Replace the current editor selection with new text, in the ACTIVE EDITOR — the file ' +
+          'the user currently has focused, which you cannot choose or see. Prefer edit_file, ' +
+          'which takes an explicit path. The result names the file that was written; check it.',
         parameters: {
           type: 'object',
           properties: {
@@ -191,7 +194,8 @@ export function makeReplaceSelectionTool(): RegisteredTool {
       const editor = vscode.window.activeTextEditor;
       if (!editor) throw new Error('replace_selection: no active editor');
       await editor.edit((b) => b.replace(editor.selection, args['text'] as string));
-      return 'Selection replaced.';
+      // Name the file, for the same reason insert_code does.
+      return `Selection replaced in ${vscode.workspace.asRelativePath(editor.document.uri)}.`;
     },
   };
 }
@@ -202,7 +206,10 @@ export function makeInsertCodeTool(): RegisteredTool {
       type: 'function',
       function: {
         name: 'insert_code',
-        description: 'Insert a line of code at a zero-based line number in the active editor.',
+        description:
+          'Insert a line of code at a zero-based line number in the ACTIVE EDITOR — the file ' +
+          'the user currently has focused, which you cannot choose or see. Prefer edit_file, ' +
+          'which takes an explicit path. The result names the file that was written; check it.',
         parameters: {
           type: 'object',
           properties: {
@@ -229,7 +236,11 @@ export function makeInsertCodeTool(): RegisteredTool {
       await editor.edit((b) =>
         b.insert(new vscode.Position(line, 0), (args['text'] as string) + '\n'),
       );
-      return `Inserted at line ${line}.`;
+      // Name the file. The target is whatever the user has focused, which the
+      // model cannot choose or inspect — so a bare "Inserted at line 0." let a
+      // write land in an unrelated file with nothing in the transcript to show
+      // it. Reporting the path turns a silent mistake into a visible one.
+      return `Inserted at line ${line} of ${vscode.workspace.asRelativePath(editor.document.uri)}.`;
     },
   };
 }

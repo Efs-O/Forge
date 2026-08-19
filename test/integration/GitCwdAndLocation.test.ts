@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { gitCwd } from '../../src/tools/gitRepo';
-import { makeGoToDefinitionTool } from '../../src/tools/lspTools';
+import { makeGetDocumentSymbolsTool, makeGoToDefinitionTool } from '../../src/tools/lspTools';
 
 describe('gitCwd', () => {
   let root: string;
@@ -92,5 +92,40 @@ describe('go_to_definition location rendering', () => {
     await expect(
       makeGoToDefinitionTool().handler({ path: 'Game.js', line: 0, character: 0 }),
     ).resolves.toBe('No definition found.');
+  });
+});
+
+describe('LSP tools prime the language service', () => {
+  let root: string;
+
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-lsp-open-'));
+    fs.writeFileSync(path.join(root, 'Game.js'), 'export class Game {}\n', 'utf8');
+    vscode.workspace.workspaceFolders.splice(0, Infinity, { uri: vscode.Uri.file(root) });
+  });
+
+  afterEach(() => {
+    vscode.workspace.workspaceFolders.splice(0);
+    fs.rmSync(root, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  it('opens the document before asking for symbols', async () => {
+    // Providers analyse open documents. Querying a file nobody has opened
+    // returned "No symbols found." for a file containing `export class Game`.
+    const open = vi.spyOn(vscode.workspace, 'openTextDocument').mockResolvedValue({} as never);
+    vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue([]);
+    await makeGetDocumentSymbolsTool().handler({ path: 'Game.js' }, undefined);
+    expect(open).toHaveBeenCalledOnce();
+  });
+
+  it('still answers when the document cannot be opened', async () => {
+    // A binary or deleted file must not fail on the preparatory step — the
+    // provider call should report the real problem.
+    vi.spyOn(vscode.workspace, 'openTextDocument').mockRejectedValue(new Error('binary'));
+    vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue([]);
+    await expect(
+      makeGetDocumentSymbolsTool().handler({ path: 'Game.js' }, undefined),
+    ).resolves.toBe('No symbols found.');
   });
 });

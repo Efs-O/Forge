@@ -4,6 +4,30 @@ import { resolveWorkspaceUri } from '../util/WorkspacePaths';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/**
+ * Resolves a path and makes sure the language service has actually seen it.
+ *
+ * VS Code's language servers analyse open documents. A file the user has never
+ * opened may have no symbols, no hover and no definitions — not because the
+ * code lacks them, but because nothing asked for the file to be parsed. That
+ * reads as a broken tool: measured on a real run, `get_document_symbols` on a
+ * file containing `export class Game` returned "No symbols found." while a
+ * plain text search found the class on line 32.
+ *
+ * `openTextDocument` loads the document into the workspace without showing it
+ * in an editor, which is what primes the provider.
+ */
+async function openForAnalysis(pathArg: string): Promise<vscode.Uri> {
+  const uri = resolveWorkspaceUri(pathArg);
+  try {
+    await vscode.workspace.openTextDocument(uri);
+  } catch {
+    // Binary, deleted, or unreadable — let the provider call report the real
+    // problem rather than failing here on a preparatory step.
+  }
+  return uri;
+}
+
 function severityLabel(s: vscode.DiagnosticSeverity): string {
   switch (s) {
     case vscode.DiagnosticSeverity.Error:
@@ -130,7 +154,7 @@ export function makeGetDocumentSymbolsTool(): RegisteredTool {
     permission: 'read',
     handler: async (args, context) => {
       context?.abortSignal?.throwIfAborted();
-      const uri = resolveWorkspaceUri(args['path'] as string);
+      const uri = await openForAnalysis(args['path'] as string);
       const result = await vscode.commands.executeCommand<vscode.DocumentSymbol[] | undefined>(
         'vscode.executeDocumentSymbolProvider',
         uri,
@@ -202,7 +226,7 @@ export function makeGetHoverTool(): RegisteredTool {
     },
     permission: 'read',
     handler: async (args) => {
-      const uri = resolveWorkspaceUri(args['path'] as string);
+      const uri = await openForAnalysis(args['path'] as string);
       const position = new vscode.Position(args['line'] as number, args['character'] as number);
       const result = await vscode.commands.executeCommand<vscode.Hover[] | undefined>(
         'vscode.executeHoverProvider',
@@ -248,7 +272,7 @@ export function makeGoToDefinitionTool(): RegisteredTool {
     },
     permission: 'read',
     handler: async (args) => {
-      const uri = resolveWorkspaceUri(args['path'] as string);
+      const uri = await openForAnalysis(args['path'] as string);
       const position = new vscode.Position(args['line'] as number, args['character'] as number);
       const result = await vscode.commands.executeCommand<
         Array<vscode.Location | vscode.LocationLink> | undefined
@@ -282,7 +306,7 @@ export function makeFindReferencesTool(): RegisteredTool {
     },
     permission: 'read',
     handler: async (args) => {
-      const uri = resolveWorkspaceUri(args['path'] as string);
+      const uri = await openForAnalysis(args['path'] as string);
       const position = new vscode.Position(args['line'] as number, args['character'] as number);
       const result = await vscode.commands.executeCommand<vscode.Location[] | undefined>(
         'vscode.executeReferenceProvider',

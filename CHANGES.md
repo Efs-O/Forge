@@ -120,6 +120,19 @@
   threw `Cannot read properties of undefined (reading 'start')` on every JS
   file. `find_references` was never affected; its provider returns real
   Locations.
+- **Language-intelligence tools open the file before asking about it.** VS Code
+  providers analyse open documents; a file nobody has opened can report no
+  symbols and no hover while plainly containing them — `get_document_symbols`
+  answered "No symbols found." for a file whose `export class Game` a text
+  search found on line 32. All the path-taking LSP tools now prime the document
+  first, and a file that cannot be opened still reaches the provider rather
+  than failing on the preparatory step.
+- **`insert_code` and `replace_selection` name the file they wrote to.** Both
+  target the *active editor* — whichever file the user has focused, which the
+  model can neither choose nor inspect — and both replied "Inserted at line 0."
+  with no indication of where. A write landing in an unrelated file left nothing
+  in the transcript to show it. Their descriptions now say so plainly and point
+  at `edit_file`, which takes a path.
 - **`run_tests` and `run_build` take a `cwd`.** Both hardcoded the workspace
   root, so in a workspace holding several projects they looked for a
   `package.json` that was never there and failed with a bare ENOENT naming a
