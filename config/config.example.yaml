@@ -298,5 +298,10 @@ permissions:
 #   prompt_style: gemma
 #   auto_index_on_search: true
 #   max_file_size_kb: 256
+#   # Anchored at the WORKSPACE ROOT, like every other glob Forge takes. In a
+#   # workspace holding several projects, "src/**" matches only a top-level
+#   # src/ — it will not reach subproject/src/**, and the index comes out
+#   # nearly empty while looking like it built fine. Omit this key to index
+#   # everything (**/*), or list each project: ["app/src/**", "lib/src/**"].
 #   include_globs: ["src/**", "test/**"]
 #   exclude_globs: ["**/node_modules/**", "**/dist/**", "**/.git/**"]
