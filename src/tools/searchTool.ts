@@ -69,11 +69,19 @@ export function makeWebSearchTool(
 // ── Tavily ────────────────────────────────────────────────────────────────────
 
 async function searchTavily(query: string, apiKey: string, maxResults: number): Promise<string> {
+  // Bearer header, which is the only form Tavily documents. The older `api_key`
+  // body field still works (verified against the live API 2026-08-19), so this
+  // is alignment with the documented contract, not a fix for a broken call — do
+  // not read a 401 here as evidence the transport is wrong. Either form returns
+  // an identical 401 for a bad key, so a 401 means the KEY, and the first thing
+  // to check is whether one is stored at all.
   const response = await fetch('https://api.tavily.com/search', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
     body: JSON.stringify({
-      api_key: apiKey,
       query,
       max_results: maxResults,
       search_depth: 'basic',
@@ -81,7 +89,13 @@ async function searchTavily(query: string, apiKey: string, maxResults: number): 
   });
 
   if (!response.ok) {
-    throw new Error(`Tavily search failed: HTTP ${response.status}`);
+    // 401 here means the key was rejected, not that it was missing — the
+    // missing case is caught before the request is ever made.
+    const hint =
+      response.status === 401
+        ? ' — key rejected. Re-run "Forge: Set Search API Key" with a current tvly- key.'
+        : '';
+    throw new Error(`Tavily search failed: HTTP ${response.status}${hint}`);
   }
 
   const data = (await response.json()) as TavilyResponse;

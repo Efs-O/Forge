@@ -69,6 +69,8 @@ export interface GroupConfig {
   system_prompt_mode?: SystemPromptMode;
   capabilities?: ('tool-call' | 'vision' | 'long-context')[];
   max_output_tokens?: number;
+  /** Tool rounds per sidebar turn for models in this group. See ModelConfig. */
+  max_tool_rounds?: number;
   /** Tool-name allowlist for models in this group. */
   tools?: string[];
   /** Per-tool max invocations per turn for models in this group. */
@@ -173,6 +175,18 @@ export interface ModelConfig {
   tool_call_limits?: Record<string, number>;
   /** Per-model output-token cap override, merged over any inherited group value. */
   max_output_tokens?: number;
+  /**
+   * Tool rounds this model may spend on one sidebar turn before the loop stops.
+   * Falls back to `MAX_TOOL_ROUNDS` (40).
+   *
+   * A round is one model reply, so this is a ceiling on how many steps a single
+   * request may take — and the right value is a property of the WORK, not of
+   * Forge. A multi-file refactor legitimately spends dozens of rounds landing
+   * edits; a chat model answering questions never approaches it. One hard-coded
+   * constant cannot serve both, and the cost of guessing low is a turn killed
+   * mid-refactor with the remaining edits unmade.
+   */
+  max_tool_rounds?: number;
 }
 
 export interface LlamaServerConfig {

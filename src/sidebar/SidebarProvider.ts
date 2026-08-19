@@ -1,8 +1,13 @@
 import * as vscode from 'vscode';
 import type { IBackendPool } from '../backend/BackendPool';
 import type { ForgeConfig } from '../config/types';
-import { expandAlias, resolveRequestModel, splitModelProfile } from '../config/ConfigResolver';
-import type { HostToWebview, WebviewToHost } from './messageBridge';
+import {
+  expandAlias,
+  mergeGroupsIntoModel,
+  resolveRequestModel,
+  splitModelProfile,
+} from '../config/ConfigResolver';
+import type { HostToWebview, WebviewDiagnosticMsg, WebviewToHost } from './messageBridge';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
 import type { CliSessionRegistry } from '../agents/CliSessionRegistry';
 import {
@@ -34,6 +39,10 @@ import { routeWebviewMessage } from './webviewMessageRouter';
 import { autoCompactAndResume } from './CompactionService';
 import { buildWebviewHtml } from './WebviewBuilder';
 import type { IndexManager } from '../search/IndexManager';
+import { modelPickerGroup } from './ModelPickerGroups';
+import { getLogger } from '../util/logger';
+
+const log = getLogger();
 
 export type { SidebarProviderEvents };
 
@@ -241,10 +250,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private postModels(): void {
     this.post({
       type: 'models',
-      models: this.config.models.map((m) => ({
-        name: m.name,
-        provider: m.provider ?? 'llama.cpp',
-      })),
+      models: this.config.models.map((configured) => {
+        const model = mergeGroupsIntoModel(this.config, configured);
+        return {
+          name: model.name,
+          provider: model.provider ?? 'llama.cpp',
+          group: modelPickerGroup(model),
+        };
+      }),
       active: this.config.active_model,
     });
   }
@@ -327,9 +340,27 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         runSlashCommand: (id) => void this.slashHandler.handle(id),
         openFile: (path, line, beside) => this.agentLoop.openFile(path, { line, beside }),
         resolveConfirmation: (id, approved) => this.agentLoop.resolveConfirmation(id, approved),
+        recordWebviewDiagnostic: (message) => this.recordWebviewDiagnostic(message),
       },
       msg,
     );
+  }
+
+  private recordWebviewDiagnostic(message: WebviewDiagnosticMsg): void {
+    const prefix = `[webview:${message.instanceId}] ${message.kind}`;
+    const summary = JSON.stringify(message.summary);
+    if (
+      message.kind === 'error' ||
+      message.kind === 'unhandledrejection' ||
+      message.kind === 'react-error'
+    ) {
+      log.error(`${prefix} message=${message.message ?? 'unknown'} summary=${summary}`);
+      if (message.stack) log.error(`${prefix} stack=${message.stack}`);
+      if (message.componentStack) log.error(`${prefix} component=${message.componentStack}`);
+      if (message.recent) log.error(`${prefix} recent=${JSON.stringify(message.recent)}`);
+      return;
+    }
+    log.info(`${prefix} summary=${summary}`);
   }
 
   async dispose(): Promise<void> {

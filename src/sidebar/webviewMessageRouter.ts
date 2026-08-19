@@ -7,7 +7,12 @@
  * single description of what the webview can ask for.
  */
 
-import type { ForgeSlashCommandId, HostToWebview, WebviewToHost } from './messageBridge';
+import type {
+  ForgeSlashCommandId,
+  HostToWebview,
+  WebviewDiagnosticMsg,
+  WebviewToHost,
+} from './messageBridge';
 import type { AttachmentData } from './messageBridge';
 
 export interface WebviewActions {
@@ -30,6 +35,7 @@ export interface WebviewActions {
   runSlashCommand: (id: ForgeSlashCommandId) => void;
   openFile: (path: string, line?: number, beside?: boolean) => Promise<void>;
   resolveConfirmation: (id: string, approved: boolean) => void;
+  recordWebviewDiagnostic: (message: WebviewDiagnosticMsg) => void;
 }
 
 export function routeWebviewMessage(actions: WebviewActions, msg: WebviewToHost): void {
@@ -109,6 +115,10 @@ export function routeWebviewMessage(actions: WebviewActions, msg: WebviewToHost)
 
     case 'confirmResponse':
       actions.resolveConfirmation(msg.id, msg.approved);
+      break;
+
+    case 'webviewDiagnostic':
+      actions.recordWebviewDiagnostic(msg);
       break;
   }
 }

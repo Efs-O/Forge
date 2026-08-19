@@ -35,8 +35,8 @@ export function buildWorkerSystemPrompt(spec: WorkerSpec, workspaceRoot: string)
     'You are a Forge coding worker. Complete only the assigned task.',
     `Execution context: repo_root=${workspaceRoot}; platform=${process.platform}; arch=${process.arch}; path_style=${process.platform === 'win32' ? 'windows' : 'posix'}; command_contract=executable-plus-argv; no shell operators.`,
     process.platform === 'win32'
-      ? 'Valid command example: exec_command {"command":"npm.cmd","args":["test"]}. Do not send PowerShell syntax as argv.'
-      : 'Valid command example: exec_command {"command":"npm","args":["test"]}. Do not send pipes or redirects as argv.',
+      ? 'Valid command example: exec_command {"command":"npm.cmd","args":["test"],"tail_lines":20}. Do not send PowerShell syntax as argv.'
+      : 'Valid command example: exec_command {"command":"npm","args":["test"],"tail_lines":20}. Do not send pipes or redirects as argv.',
     spec.access === 'write'
       ? `Writable files (exact paths only):\n${spec.allowed_paths?.map((path) => `- ${path}`).join('\n')}`
       : 'This is a read-only task. You have no write tools and must not claim to modify files.',
@@ -149,6 +149,19 @@ export class WorkerLoop {
           if (declined) throw new WorkerDeclinedError('Worker write was declined by the user.');
         },
       });
+      // The loop reports the round cap instead of throwing it, so the worker's
+      // `exhausted_steps` verdict is decided here rather than in the catch below.
+      if (result.hitRoundCap) {
+        return {
+          id: spec.id,
+          model: spec.model,
+          status: 'exhausted_steps',
+          summary: capResultText(result.finalText, MAX_WORKER_FINAL_CHARS),
+          changedPaths: policy.changedPaths(),
+          error: `Worker stopped after ${MAX_WORKER_TOOL_ROUNDS} tool rounds without finishing.`,
+          ...(target.bestEffort ? { bestEffort: true } : {}),
+        };
+      }
       if (result.finishReason === 'length' && !result.finalText.trim()) {
         return {
           id: spec.id,

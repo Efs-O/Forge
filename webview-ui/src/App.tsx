@@ -25,6 +25,7 @@ import { ConfirmationDialog } from './components/ConfirmationDialog';
 import { TabStrip } from './components/TabStrip';
 import { HistoryList } from './components/HistoryList';
 import { SLASH_COMMANDS } from './slashCommands';
+import { webviewDiagnostics } from './WebviewDiagnostics';
 
 interface QueuedPrompt {
   id: string;
@@ -34,6 +35,7 @@ interface QueuedPrompt {
 }
 
 export function App(): React.ReactElement {
+  webviewDiagnostics.recordRender();
   const [state, dispatch] = useReducer(reducer, initialState);
 
   const [confirmRequest, setConfirmRequest] = useState<{
@@ -52,6 +54,7 @@ export function App(): React.ReactElement {
   useEffect(() => {
     function handler(event: MessageEvent): void {
       const msg = event.data as HostToWebview;
+      webviewDiagnostics.recordHostMessage(msg);
       switch (msg.type) {
         case 'generationStarted':
           dispatch({ type: 'GENERATION_STARTED', convId: msg.conversationId });
@@ -243,6 +246,7 @@ export function App(): React.ReactElement {
   const handleRunSlashCommand = useCallback((commandId: ForgeSlashCommandId) => {
     vscode.postMessage({ type: 'runSlashCommand', commandId });
   }, []);
+  const handlePrefillConsumed = useCallback(() => setPrefillText(null), []);
 
   // Unused tab/history types satisfy TS — keep them aligned with SessionSyncMsg shape
   void ([] as SessionTabMeta[]);
@@ -252,6 +256,16 @@ export function App(): React.ReactElement {
   const streaming = selectStreaming(state);
   const generating = selectGenerating(state);
   const uiBusy = generating;
+
+  useEffect(() => {
+    webviewDiagnostics.recordState({
+      activeConversationId: state.activeConversationId,
+      displayedMessages: messages.length,
+      queuedPrompts: queuedPrompts.length,
+      streaming,
+      prefillPending: prefillText !== null,
+    });
+  }, [messages.length, prefillText, queuedPrompts.length, state.activeConversationId, streaming]);
 
   // The bar reports the same edits the transcript's diff card shows.
   const checkpointStats = useMemo(() => {
@@ -330,7 +344,7 @@ export function App(): React.ReactElement {
         slashCommands={SLASH_COMMANDS}
         onRunSlashCommand={handleRunSlashCommand}
         prefillText={prefillText}
-        onPrefillConsumed={() => setPrefillText(null)}
+        onPrefillConsumed={handlePrefillConsumed}
         clankerMode={state.clankerMode}
       />
       {confirmRequest && (

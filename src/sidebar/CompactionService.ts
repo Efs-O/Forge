@@ -248,6 +248,16 @@ export async function autoCompactAndResume(deps: AutoCompactDeps): Promise<void>
   }
 
   deps.noteAutoContinue();
+  // Re-arm the webview's streaming state before the resume turn.
+  //
+  // The webview sets `streaming` from its own USER_SEND (a click on Send) or
+  // from a host `generationStarted`. `compact()` posts `done` in its finally,
+  // which clears it — and this resume is host-initiated, so it never produces a
+  // USER_SEND. Without this the resumed turn generated with `streaming: false`:
+  // the Stop button vanished and only Send was left, with no way to cancel a
+  // turn that was still running. It looked random because auto-compact fires on
+  // a threshold rather than on anything the user did.
+  deps.post({ type: 'generationStarted', conversationId: deps.convId });
   log.info(
     reason
       ? `[auto-compact] resuming: ${reason}`

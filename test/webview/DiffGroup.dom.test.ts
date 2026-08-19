@@ -100,11 +100,17 @@ describe('DiffGroup', () => {
     expect(container.querySelectorAll('.diff-line').length).toBe(12);
   });
 
-  it('renders a single edited file as a plain block with no group header', () => {
+  it('renders a single edited file collapsed with no group header', () => {
     render([diffMessage('a', 'src/only.ts', 3, 1)]);
 
     expect(container.querySelector('.diff-group-header')).toBeNull();
     expect(container.querySelectorAll('.diff-block')).toHaveLength(1);
+    expect(container.querySelectorAll('.diff-line')).toHaveLength(0);
+
+    act(() => {
+      container.querySelector<HTMLButtonElement>('.diff-toggle')!.click();
+    });
+    expect(container.querySelectorAll('.diff-line')).toHaveLength(4);
   });
 
   it('opens the file when its path is clicked', () => {

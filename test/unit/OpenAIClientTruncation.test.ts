@@ -2,9 +2,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { streamChatCompletion } from '../../src/llm/OpenAIClient';
 import { ToolCallTruncatedError } from '../../src/llm/ToolCallTruncatedError';
 
+const { logLines } = vi.hoisted(() => ({ logLines: [] as string[] }));
+
 vi.mock('vscode', () => ({
   window: {
-    createOutputChannel: () => ({ appendLine: () => {}, show: () => {}, dispose: () => {} }),
+    createOutputChannel: () => ({
+      appendLine: (line: string) => logLines.push(line),
+      show: () => {},
+      dispose: () => {},
+    }),
   },
 }));
 
@@ -39,9 +45,33 @@ function handlers() {
 
 const request = { model: 'm', messages: [], stream: true } as const;
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  logLines.length = 0;
+});
 
 describe('OpenAIClient truncation handling', () => {
+  it('logs request metrics and incomplete streams without logging prompt text', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => sseResponse([chunk({ content: 'answer' })])),
+    );
+    const h = handlers();
+    const diagnosticRequest = {
+      ...request,
+      messages: [{ role: 'user' as const, content: 'do not put this in logs' }],
+    };
+
+    await streamChatCompletion('http://127.0.0.1:8080', diagnosticRequest, h);
+
+    const output = logLines.join('\n');
+    expect(output).toContain('[OpenAIClient] request start');
+    expect(output).toContain('messages=1');
+    expect(output).toContain('message_chars=23');
+    expect(output).toContain('stream ended without terminal frame');
+    expect(output).not.toContain('do not put this in logs');
+  });
+
   it('raises truncation instead of dispatching a half-written tool call', async () => {
     vi.stubGlobal(
       'fetch',

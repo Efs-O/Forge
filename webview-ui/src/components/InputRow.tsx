@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import type { SlashCommand } from '../slashCommands';
 import type { AttachmentData } from '../../../src/sidebar/messageBridge';
+import { webviewDiagnostics } from '../WebviewDiagnostics';
 
 interface Props {
   onSend: (text: string, attachments: AttachmentData[]) => void;
@@ -60,15 +61,20 @@ export function InputRow({
   const showSlashMenu = !streaming && slashMatches.length > 0 && text.startsWith('/');
 
   useEffect(() => {
-    setSelectedCommandIndex(0);
-  }, [text]);
-
-  useEffect(() => {
     if (prefillText === null) return;
     setText(prefillText);
     onPrefillConsumed();
     setTimeout(() => textareaRef.current?.focus(), 0);
   }, [onPrefillConsumed, prefillText]);
+
+  const handleTextChange = useCallback(
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      webviewDiagnostics.recordInputChange(e.target.value.length);
+      setText(e.target.value);
+      if (selectedCommandIndex !== 0) setSelectedCommandIndex(0);
+    },
+    [selectedCommandIndex],
+  );
 
   const submit = useCallback(() => {
     const trimmed = text.trim();
@@ -215,7 +221,7 @@ export function InputRow({
           id="prompt"
           value={text}
           placeholder={placeholder}
-          onChange={(e) => setText(e.target.value)}
+          onChange={handleTextChange}
           onKeyDown={handleKeyDown}
           rows={2}
         />

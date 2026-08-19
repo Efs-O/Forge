@@ -12,6 +12,8 @@ import {
   getWorkspaceRoot,
   guardExec,
   MAX_OUTPUT_CHARS,
+  MAX_EXEC_OUTPUT_LINES,
+  parseExecOutputOptions,
   resolveExecCwd,
   resolvePackageRunnerInvocation,
   spawnAndWait,
@@ -74,7 +76,7 @@ export function makeExecCommandTool(): RegisteredTool {
       function: {
         name: 'exec_command',
         description:
-          'Execute a binary directly (no shell). Shell operators in args and dangerous commands are refused — split routine work into separate calls instead.',
+          'Execute a binary directly (no shell). Shell operators in args and dangerous commands are refused. Use tail_lines, head_lines, max_output_chars, or output_stream to shape returned output instead of piping.',
         parameters: {
           type: 'object',
           properties: {
@@ -82,6 +84,30 @@ export function makeExecCommandTool(): RegisteredTool {
             args: { type: 'array', items: { type: 'string' }, description: 'Arguments array.' },
             cwd: { type: 'string', description: 'Working directory. Optional.' },
             timeout_ms: { type: 'integer', description: 'Timeout in ms. Default 30000.' },
+            tail_lines: {
+              type: 'integer',
+              minimum: 1,
+              maximum: MAX_EXEC_OUTPUT_LINES,
+              description: 'Return only the final N lines from each selected output stream.',
+            },
+            head_lines: {
+              type: 'integer',
+              minimum: 1,
+              maximum: MAX_EXEC_OUTPUT_LINES,
+              description:
+                'Return only the first N lines from each selected output stream. Cannot be used with tail_lines.',
+            },
+            max_output_chars: {
+              type: 'integer',
+              minimum: 1,
+              maximum: MAX_OUTPUT_CHARS,
+              description: 'Maximum returned characters per selected output stream. Default 10000.',
+            },
+            output_stream: {
+              type: 'string',
+              enum: ['both', 'stdout', 'stderr'],
+              description: 'Which output stream to return. Default both.',
+            },
           },
           required: ['command', 'args'],
           additionalProperties: false,
@@ -92,6 +118,7 @@ export function makeExecCommandTool(): RegisteredTool {
     handler: async (args) => {
       const command = args['command'] as string;
       const cmdArgs = (args['args'] as string[]) ?? [];
+      const outputOptions = parseExecOutputOptions(args);
       const cwd = resolveExecCwd(args['cwd'] as string | undefined);
       const timeoutMs = (args['timeout_ms'] as number | undefined) ?? 30_000;
 
@@ -122,7 +149,7 @@ export function makeExecCommandTool(): RegisteredTool {
       }
 
       const result = await spawnAndWait(command, cmdArgs, cwd, timeoutMs);
-      return formatExecCommandOutput(command, result);
+      return formatExecCommandOutput(command, result, outputOptions);
     },
   };
 }

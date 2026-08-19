@@ -35,7 +35,7 @@ function sidebar(models: string[]): SidebarRuntime {
 }
 
 function harness(options: { tabs?: string[]; streaming?: boolean; loaded?: string[] } = {}) {
-  const state = sidebar(options.tabs ?? ['12b']);
+  let state = sidebar(options.tabs ?? ['12b']);
   const release = vi.fn(async () => {});
   const posted: HostToWebview[] = [];
   const loaded = new Set(options.loaded ?? ['12b']);
@@ -45,14 +45,16 @@ function harness(options: { tabs?: string[]; streaming?: boolean; loaded?: strin
     forgetBudget: () => {},
     getConfig: config,
     getSidebar: () => state,
-    setSidebar: () => {},
+    setSidebar: (next: SidebarRuntime) => {
+      state = next;
+    },
     setActiveModel: () => {},
     persistSession: () => {},
     postModels: () => {},
     postSessionSync: () => {},
     pool: { release, isLoaded: (name: string) => loaded.has(name) },
-    agentLoop: {},
-    checkpoints: {},
+    agentLoop: { stopStreamingIfNeeded: async () => {}, disposeConversation: async () => {} },
+    checkpoints: { disposeConversation: async () => {} },
     failureTracker: { reset: () => {} },
     events: {},
     post: (msg: HostToWebview) => posted.push(msg),
@@ -123,5 +125,16 @@ describe('ConversationTabs.pinModel VRAM release', () => {
       type: 'error',
       message: 'Still loaded — an active delegation hold is using it',
     });
+  });
+
+  it('does not offer to unload a model already released by a tab switch', async () => {
+    const { tabs, release } = harness({ tabs: ['12b', '27b'], loaded: ['27b'] });
+
+    await tabs.close('tab0');
+    await flush();
+
+    // The tab's pinned name remains 12b, but its server has already gone away.
+    // Closing it must not produce a stale "still loaded" prompt or release call.
+    expect(release).not.toHaveBeenCalled();
   });
 });

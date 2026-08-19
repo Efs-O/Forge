@@ -58,4 +58,17 @@ describe('structured exec_command outcomes', () => {
       spawnAndWait(process.execPath, ['-e', 'setTimeout(() => {}, 1000)'], process.cwd(), 10),
     ).rejects.toMatchObject<Partial<ExecCommandError>>({ kind: 'timeout' });
   });
+
+  it('returns a bounded final output window without a shell pipe', () => {
+    const output = JSON.parse(
+      formatExecCommandOutput(
+        'tool',
+        { stdout: 'one\ntwo\nthree\n', stderr: 'warning\n', exitCode: 0 },
+        { tailLines: 2, stream: 'stdout' },
+      ),
+    );
+
+    expect(output).toMatchObject({ stdout: 'two\nthree', stdout_truncated: true });
+    expect(output).not.toHaveProperty('stderr');
+  });
 });

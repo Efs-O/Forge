@@ -211,7 +211,11 @@ export class ConversationTabs {
   /** The closed tab may have been the last user of a model still holding VRAM. */
   private offerUnload(modelName: string): void {
     const base = this.unloadCandidate(modelName);
-    if (!base) return;
+    // A model switch may already have released this tab's model before the tab
+    // is closed. The tab still remembers its model selection, but that is not
+    // evidence that a server is resident; prompting in that state offered a
+    // stale "still loaded" action for a model that no longer existed.
+    if (!base || !this.deps.pool.isLoaded(base)) return;
     void vscode.window
       .showInformationMessage(
         `"${base}" is still loaded in VRAM. Unload it to free memory?`,

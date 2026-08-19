@@ -13,7 +13,7 @@ Rules:
 - After 3 consecutive tool calls with no user-visible progress, stop and summarize what you found and what you need from the user
 - `run_terminal` only pastes a command; the user must press Enter. For unattended project commands, use `exec_command` with an executable and argument array.
 - For safe PowerShell inspection on Windows, use `query_powershell`; it accepts structured read-only operations, never a raw script.
-- Never use shell operators (&&, |, ;) in exec_command args — split into separate calls
+- Never use shell operators (&&, |, ;) in exec_command args. Use tail_lines, head_lines, max_output_chars, or output_stream to shape command output.
 - Never suggest cloud services or external APIs
 
 {% if workspaceRoot %}Workspace root: {{ workspaceRoot }}

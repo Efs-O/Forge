@@ -5,6 +5,58 @@ import * as vscode from 'vscode';
 import { checkDenyList, getBuiltinDenyList } from './DenyList';
 
 export const MAX_OUTPUT_CHARS = 10_000;
+export const MAX_EXEC_OUTPUT_LINES = 2_000;
+
+export type ExecOutputStream = 'both' | 'stdout' | 'stderr';
+
+export interface ExecOutputOptions {
+  /** Return the first N lines from each selected stream. */
+  headLines?: number;
+  /** Return the final N lines from each selected stream. */
+  tailLines?: number;
+  /** Maximum returned characters per selected stream. */
+  maxChars?: number;
+  /** Limit returned data to stdout, stderr, or both streams. */
+  stream?: ExecOutputStream;
+}
+
+/**
+ * Validates the bounded output-shaping controls accepted by `exec_command`.
+ * They intentionally affect only what returns to the model, never what is
+ * executed, so they cover common pipe use cases without granting a shell.
+ */
+export function parseExecOutputOptions(args: Record<string, unknown>): ExecOutputOptions {
+  const readBoundedInt = (key: string, max: number): number | undefined => {
+    const value = args[key];
+    if (value === undefined) return undefined;
+    if (!Number.isInteger(value) || (value as number) < 1 || (value as number) > max) {
+      throw new Error(`exec_command: ${key} must be an integer from 1 to ${max}.`);
+    }
+    return value as number;
+  };
+
+  const headLines = readBoundedInt('head_lines', MAX_EXEC_OUTPUT_LINES);
+  const tailLines = readBoundedInt('tail_lines', MAX_EXEC_OUTPUT_LINES);
+  if (headLines !== undefined && tailLines !== undefined) {
+    throw new Error('exec_command: head_lines and tail_lines cannot be used together.');
+  }
+  const maxChars = readBoundedInt('max_output_chars', MAX_OUTPUT_CHARS);
+  const rawStream = args['output_stream'];
+  if (
+    rawStream !== undefined &&
+    rawStream !== 'both' &&
+    rawStream !== 'stdout' &&
+    rawStream !== 'stderr'
+  ) {
+    throw new Error('exec_command: output_stream must be "both", "stdout", or "stderr".');
+  }
+  return {
+    ...(headLines !== undefined ? { headLines } : {}),
+    ...(tailLines !== undefined ? { tailLines } : {}),
+    ...(maxChars !== undefined ? { maxChars } : {}),
+    ...(rawStream !== undefined ? { stream: rawStream } : {}),
+  };
+}
 
 // ── Workspace helpers ──────────────────────────────────────────────────────────
 
@@ -159,13 +211,40 @@ export function formatOutput(result: SpawnResult): string {
   return out;
 }
 
-export function formatExecCommandOutput(program: string, result: SpawnResult): string {
+function filterExecOutput(
+  text: string,
+  options: ExecOutputOptions,
+): { text: string; truncated: boolean } {
+  const normalized = stripAnsi(text);
+  const lines = normalized.endsWith('\n')
+    ? normalized.slice(0, -1).split(/\r?\n/u)
+    : normalized.split(/\r?\n/u);
+  const selected =
+    options.headLines !== undefined
+      ? lines.slice(0, options.headLines)
+      : options.tailLines !== undefined
+        ? lines.slice(-options.tailLines)
+        : lines;
+  const shaped = selected.join('\n');
+  const limit = options.maxChars ?? MAX_OUTPUT_CHARS;
+  const clipped = options.tailLines !== undefined ? shaped.slice(-limit) : shaped.slice(0, limit);
+  return { text: clipped, truncated: shaped.length > limit || selected.length < lines.length };
+}
+
+export function formatExecCommandOutput(
+  program: string,
+  result: SpawnResult,
+  options: ExecOutputOptions = {},
+): string {
+  const stream = options.stream ?? 'both';
+  const stdout = filterExecOutput(result.stdout, options);
+  const stderr = filterExecOutput(result.stderr, options);
   return JSON.stringify({
     kind: result.exitCode === 0 ? 'success' : 'non_zero_exit',
     program,
     exitCode: result.exitCode,
-    stdout: stripAnsi(result.stdout).slice(0, MAX_OUTPUT_CHARS),
-    stderr: stripAnsi(result.stderr).slice(0, MAX_OUTPUT_CHARS),
+    ...(stream !== 'stderr' ? { stdout: stdout.text, stdout_truncated: stdout.truncated } : {}),
+    ...(stream !== 'stdout' ? { stderr: stderr.text, stderr_truncated: stderr.truncated } : {}),
   });
 }
 

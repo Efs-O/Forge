@@ -1,5 +1,77 @@
 # Forge — Recent Changes
 
+## 0.12.47 — Search, the round cap, and where paths resolve
+
+- **`search_code` stopped returning its own index instead of your code.** Three
+  faults compounded. `.forge/` was never excluded, so the embeddings index — a
+  verbatim copy of every indexed chunk — matched nearly any query; being a
+  dot-directory it was also the *first* thing ripgrep reached. The exclude globs
+  were root-anchored (`!.git/**`), so a monorepo's `subproject/.git/` and nested
+  `node_modules/` were searched anyway, while `find_files` had always excluded
+  them recursively. And the 50-line output budget was global, so whichever file
+  came first spent all of it. Measured on a real workspace, a search for
+  "pickup" returned fifty lines of index JSON and not one source file. Excludes
+  are now recursive and cover `.forge/`, and a per-file snippet cap stops any
+  single file from starving the rest.
+- **`web_search` is reachable again — the permission, not the key, was hiding
+  it.** `permissions.net.search` defaults to `false`, and once a `permissions`
+  block exists at all those schema defaults are authoritative. Any config with
+  an `exec` or `agents` group but no `net` group therefore filtered `web_search`
+  (and `web_fetch`) out of the advertised tool list entirely, so the model
+  truthfully reported having no web search tool — with a valid API key sitting
+  in SecretStorage the whole time. Enable it with `permissions: { net: { search:
+  true } }`.
+- **Web search now authenticates the way Tavily documents.** The key moved from
+  an `api_key` body field to an `Authorization: Bearer` header, and a 401 now
+  says the key was *rejected* rather than implying it was missing. This is a
+  cleanup, not a bug fix: verified against the live API, Tavily still accepts
+  the undocumented body form, so a 401 from either form means the key itself is
+  bad — check the key before suspecting the transport.
+- **The context bar is calibrated against the tokenizer instead of a guess.**
+  Chars-per-token was 4, the English-prose figure; measured against llama-server
+  on 200,000 chars of real transcript, this workload runs 3.15. The system
+  prompt was counted as a flat 200 tokens when the rendered template alone is
+  659, because `injectSystemPrompt` builds it outside the message array the
+  estimate walks. And reasoning was counted despite never being sent to the
+  model — on an agentic turn that is a whole thinking budget of phantom tokens
+  per round. The first two pushed the bar low and the third pushed it high, so
+  each previous fix appeared to help and then drifted. This matters beyond the
+  display: `auto_compact.at` and the 75% warning are fractions of this number,
+  so a bar reading 0.85 was really nearer 0.95 of the window.
+- **The Stop button survives an automatic compaction.** Compaction posts `done`
+  in its `finally`, which clears the webview's streaming state, and the resume
+  that follows is host-initiated — so it produced no `USER_SEND` either. The
+  resumed turn generated with Stop hidden and only Send showing, leaving no way
+  to cancel a turn that was still running. It looked random because auto-compact
+  fires on a threshold, not on anything you did.
+- **A refusal on one tab no longer disarms another.** `SendPipeline`'s guard
+  errors were unaddressed, and the webview resolves an unaddressed message
+  against the active tab — clearing *its* streaming state. A background
+  conversation refusing a send hid the Stop button on whatever tab you were
+  looking at.
+- **Running out of tool rounds no longer throws your work away.** The loop
+  *threw* at the cap, which discarded the turn's text and left nothing in the
+  transcript to say the turn had been cut short — so the next request re-planned
+  from a history that looked complete. It now returns, records the stop as an
+  assistant turn, and keeps every edit the capped rounds landed.
+- **The tool-round cap is configurable.** `max_tool_rounds` on a model or group
+  (default 40, hard ceiling 400) replaces one constant that had to serve both a
+  chat turn and a multi-file refactor. Measured on a real session: a turn that
+  made 28 successful edits was killed at 40 rounds with the refactor half done.
+  The cap's job is to bound a runaway loop, not to decide how big a task may be.
+  Hitting it now says so, and names the setting.
+- **Tool paths say what they resolve against.** Every `path`, `cwd`, and
+  `include` resolves against the workspace root — but nothing said so, and a
+  task pointed at a repository *nested* in the workspace ("you are working in
+  .../Qwen testing/threejs-game-prompt") would ask for `BUGS.md` and get a bare
+  ENOENT naming a path it never chose. The contract is now stated in the system
+  prompt and in the tool schemas, including that `search_code` and `find_files`
+  already return paths in the accepted form.
+- **A search that finds nothing says why it might not have.** `search_code` is a
+  literal search, so a regex like `\.heal\(` cannot match however much of it is
+  in the file — and "No matches found" reported that identically to a term that
+  is genuinely absent. The miss now names the search mode and the glob it used.
+
 ## 0.12.45 — Post-refactor audit fixes
 
 - **A backend that was still starting no longer costs you thinking for the whole

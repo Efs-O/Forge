@@ -27,7 +27,11 @@ import {
   truncationGuidance,
 } from './truncationRecovery';
 
-export { CONTEXT_EXHAUSTED_MESSAGE, isTurnCutOffError } from './truncationRecovery';
+export {
+  CONTEXT_EXHAUSTED_MESSAGE,
+  isTurnCutOffError,
+  ROUND_CAP_INCOMPLETE_PREFIX,
+} from './truncationRecovery';
 
 export interface ToolCallingLoopOptions {
   baseUrl: string;
@@ -69,6 +73,13 @@ export interface ToolCallingLoopResult {
   finalText: string;
   rounds: number;
   repeatedCall: boolean;
+  /**
+   * The loop stopped because it ran out of rounds, not because the model was
+   * done. Returned rather than thrown: the rounds already spent did real work —
+   * files written, tests run — and throwing discarded `finalText` along with any
+   * account of it, leaving the user an error where a partial answer belonged.
+   */
+  hitRoundCap: boolean;
 }
 
 function sanitizeText(text: string, stripThinking: boolean): string {
@@ -315,7 +326,25 @@ export async function runToolCallingLoop(
       finalText,
       rounds: round + 1,
       repeatedCall: false,
+      hitRoundCap: false,
     };
   }
-  throw new Error(`${MAX_ROUNDS_MESSAGE_PREFIX} (${options.maxRounds}).`);
+
+  // Out of rounds. Record it in the transcript as an assistant turn so the next
+  // request — a resume, or the user's own follow-up — can see that the work was
+  // cut short rather than silently re-planning from a transcript that looks
+  // complete.
+  const capNotice = `${MAX_ROUNDS_MESSAGE_PREFIX} (${options.maxRounds}).`;
+  options.messages.push({ role: 'assistant', content: capNotice });
+  options.onToken?.(`
+
+_${capNotice}_`);
+  options.onDone?.('max_rounds');
+  return {
+    finishReason: 'max_rounds',
+    finalText: finalText || capNotice,
+    rounds: options.maxRounds,
+    repeatedCall: false,
+    hitRoundCap: true,
+  };
 }

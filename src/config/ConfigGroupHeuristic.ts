@@ -30,6 +30,7 @@ const SCALAR_GROUP_KEYS = [
   'system_prompt_mode',
   'capabilities',
   'max_output_tokens',
+  'max_tool_rounds',
   'tools',
 ] as const;
 

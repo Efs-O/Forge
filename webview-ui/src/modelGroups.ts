@@ -1,35 +1,31 @@
 import type { ModelEntry } from '../../src/sidebar/messageBridge';
+import {
+  compareModelPickerEntries,
+  MODEL_PICKER_GROUP_ORDER,
+} from '../../src/sidebar/ModelPickerGroups';
 
 export interface ModelGroup {
   label: string;
   entries: ModelEntry[];
 }
 
-const GROUP_ORDER = [
-  'Local (llama.cpp)',
-  'Ollama — Local',
-  'Ollama — Cloud',
-  'xAI / Grok',
-  'OpenRouter',
-  'OpenAI',
-  'Custom Endpoint',
-];
-
 function groupLabel(entry: ModelEntry): string {
+  if (entry.group) return entry.group;
   const p = entry.provider;
-  if (!p || p === 'llama.cpp') return 'Local (llama.cpp)';
+  if (!p || p === 'llama.cpp') return 'Local — llama.cpp';
   if (p === 'xai') return 'xAI / Grok';
   if (p === 'openrouter') return 'OpenRouter';
   if (p === 'openai') return 'OpenAI';
-  if (p === 'openai-compatible') return 'Custom Endpoint';
+  if (p === 'openai-compatible') return 'Other OpenAI-compatible';
+  if (p === 'cli') return 'CLI agents';
   if (p === 'ollama') {
     const n = entry.name;
-    return n.endsWith(':cloud') || n.endsWith('-cloud') ? 'Ollama — Cloud' : 'Ollama — Local';
+    return n.endsWith(':cloud') || n.endsWith('-cloud') ? 'Ollama Cloud' : 'Local — Ollama';
   }
   return p;
 }
 
-/** Groups models by provider, preserving config.yaml order within each group. */
+/** Groups models by route/provider and alphabetizes entries within each group. */
 export function groupModels(models: ModelEntry[]): ModelGroup[] {
   const map = new Map<string, ModelEntry[]>();
   for (const entry of models) {
@@ -43,16 +39,16 @@ export function groupModels(models: ModelEntry[]): ModelGroup[] {
   }
 
   const result: ModelGroup[] = [];
-  for (const label of GROUP_ORDER) {
+  for (const label of MODEL_PICKER_GROUP_ORDER) {
     const entries = map.get(label);
     if (entries && entries.length > 0) {
-      result.push({ label, entries });
+      result.push({ label, entries: entries.sort(compareModelPickerEntries) });
       map.delete(label);
     }
   }
-  // Append any unknown provider groups not in the fixed order
-  for (const [label, entries] of map) {
-    result.push({ label, entries });
+  // Stale webviews or an added provider may emit an unrecognised group.
+  for (const [label, entries] of [...map].sort(([a], [b]) => a.localeCompare(b))) {
+    result.push({ label, entries: entries.sort(compareModelPickerEntries) });
   }
   return result;
 }

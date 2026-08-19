@@ -10,11 +10,38 @@ import type { ModelConfig, LlamaServerConfig } from '../config/types';
  * generate? See TOOL_CALL_TRUNCATION_PLAN.md.
  */
 
-/** Chars-per-token used for prompt estimates. Crude, deliberately pessimistic for code. */
-const CHARS_PER_TOKEN = 4;
+/**
+ * Chars-per-token used for prompt estimates.
+ *
+ * Was 4, which is the English-prose figure and far too generous for this
+ * workload. Measured 2026-08-19 against the live llama-server tokenizer
+ * (Qwen3.8-27B): 200,000 chars of real Forge transcript — tool-call JSON, tool
+ * results, source excerpts — tokenized to 63,403 tokens, i.e. 3.15 chars/token.
+ * At 4 the bar read ~21% under, and since `auto_compact.at` and the 75% warning
+ * are both fractions of this number, a bar showing 0.85 was really ~0.95 of the
+ * window.
+ *
+ * 3.1 rather than the measured 3.15 keeps the estimate pessimistic (~2% high),
+ * which is the safe direction for a compaction trigger.
+ */
+export const CHARS_PER_TOKEN = 3.1;
 
-/** Prompt scaffolding the message estimate cannot see (chat template, BOS/EOS, role tags). */
-export const SYSTEM_AND_TEMPLATE_OVERHEAD = 200;
+/**
+ * Prompt scaffolding the message estimate cannot see (chat template, BOS/EOS,
+ * role tags) AND the system prompt.
+ *
+ * The system prompt is the reason this is not small. `injectSystemPrompt`
+ * builds it into a NEW array at request time, so it never reaches the
+ * `conv.messages` that `estimateTokens` walks — it is invisible to the estimate
+ * and has to be carried here. Measured 2026-08-19 on the live tokenizer: the
+ * rendered `execute` template plus FORGE.md is 659 tokens before any per-turn
+ * context (open-file lists, workspace facts) the template also renders in.
+ *
+ * 900 covers that measurement plus chat-template scaffolding. It is a floor,
+ * not an exact figure: a large FORGE.md will exceed it, so this stays the
+ * estimate's known residual error.
+ */
+export const SYSTEM_AND_TEMPLATE_OVERHEAD = 900;
 
 /**
  * Headroom below which a round should not attempt a large tool call. Sized to
@@ -34,7 +61,12 @@ export function estimateTokens(messages: ChatMessage[]): number {
     } else if (m.content === null && m.tool_calls?.length) {
       chars += JSON.stringify(m.tool_calls).length;
     }
-    if (m.reasoning) chars += m.reasoning.length;
+    // `reasoning` is deliberately NOT counted. It is retained on the message for
+    // the sidebar's thinking pane, but `ChatMessage.reasoning` is never sent
+    // back to the model, so it occupies no prompt tokens. Counting it inflated
+    // the bar by the whole turn's thinking — and ToolCallingLoop attaches
+    // reasoning to EVERY tool-call round, so on an agentic turn under
+    // `--reasoning-budget 6144` that was thousands of phantom tokens per round.
     return sum + Math.ceil(chars / CHARS_PER_TOKEN);
   }, 0);
 }

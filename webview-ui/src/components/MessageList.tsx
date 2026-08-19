@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { AppMessage } from '../App';
 import { Message } from './Message';
 import { DiffGroup } from './DiffGroup';
@@ -64,11 +64,20 @@ export function MessageList({
   generating,
   conversationId,
 }: Props): React.ReactElement {
-  const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const userScrolledUp = useRef(false);
   const shownConversation = useRef<string | undefined>(undefined);
   const rows = useMemo(() => toRows(messages), [messages]);
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
+    const el = containerRef.current;
+    if (!el) return;
+    if (typeof el.scrollTo === 'function') {
+      el.scrollTo({ top: el.scrollHeight, behavior });
+    } else {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, []);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -82,13 +91,26 @@ export function MessageList({
   }, []);
 
   useEffect(() => {
+    const el = containerRef.current;
+    if (!el || typeof MutationObserver === 'undefined') return;
+    // Expanding a thinking row and streaming text into its nested pane mutate
+    // the DOM without changing MessageList's `messages` prop. Follow those
+    // changes too, but never override a reader who intentionally scrolled up.
+    const observer = new MutationObserver(() => {
+      if (!userScrolledUp.current) scrollToBottom();
+    });
+    observer.observe(el, { childList: true, subtree: true, characterData: true });
+    return () => observer.disconnect();
+  }, [scrollToBottom]);
+
+  useEffect(() => {
     // Session switch: jump straight to the bottom with no animation and reset the
     // "user scrolled up" flag for the freshly shown conversation. Smooth-scrolling
     // here would animate through the entire (different) conversation.
     if (shownConversation.current !== conversationId) {
       shownConversation.current = conversationId;
       userScrolledUp.current = false;
-      bottomRef.current?.scrollIntoView({ behavior: 'auto' });
+      scrollToBottom();
       return;
     }
     if (!userScrolledUp.current) {
@@ -96,9 +118,9 @@ export function MessageList({
       // animation on each one and never reaches the target, so the view falls
       // behind — or appears frozen — for the whole turn. Jump instantly while
       // tokens are arriving and keep the animation for settled updates.
-      bottomRef.current?.scrollIntoView({ behavior: streaming ? 'auto' : 'smooth' });
+      scrollToBottom(streaming ? 'auto' : 'smooth');
     }
-  }, [messages, conversationId, streaming]);
+  }, [messages, conversationId, scrollToBottom, streaming]);
 
   return (
     <div id="messages" ref={containerRef}>
@@ -134,7 +156,7 @@ export function MessageList({
           <span className="forge-thinking-dot" />
         </div>
       )}
-      <div ref={bottomRef} />
+      <div />
     </div>
   );
 }

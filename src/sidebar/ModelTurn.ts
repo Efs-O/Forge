@@ -26,16 +26,37 @@ import { resolveToolPermissions } from '../tools/PermissionResolver';
 import { ToolBudget } from '../tools/ToolBudget';
 import { extractToolDetail } from './toolSummary';
 import { addWorkerDelegationInstructions, buildWorkerCatalog } from '../workers/WorkerPrompts';
-import { isTurnCutOffError, runToolCallingLoop } from '../agent/ToolCallingLoop';
+import {
+  isTurnCutOffError,
+  ROUND_CAP_INCOMPLETE_PREFIX,
+  runToolCallingLoop,
+} from '../agent/ToolCallingLoop';
 import {
   buildTemplateContext,
   canUseThinkingKwargs,
   shouldStripThinking,
 } from './turnModelBehavior';
 
-/** Tool rounds per sidebar turn before the loop aborts. Workers have their own,
- *  lower cap in `src/workers/limits.ts`. */
+/** Tool rounds per sidebar turn when the model does not set `max_tool_rounds`.
+ *  Workers have their own, lower cap in `src/workers/limits.ts`. */
 export const MAX_TOOL_ROUNDS = 40;
+
+/** Ceiling on a configured `max_tool_rounds`. The cap's job is to stop a
+ *  runaway loop eventually; an unbounded value would remove that guarantee. */
+export const MAX_CONFIGURABLE_TOOL_ROUNDS = 400;
+
+/**
+ * Rounds this model may spend on one turn.
+ *
+ * Resolution happens here rather than in the loop because `model` has already
+ * been through `resolveRequestModel`, so a group- or profile-level value is
+ * merged in by the time it arrives.
+ */
+export function resolveMaxToolRounds(model: ModelConfig): number {
+  const configured = model.max_tool_rounds;
+  if (configured === undefined) return MAX_TOOL_ROUNDS;
+  return Math.max(1, Math.min(Math.floor(configured), MAX_CONFIGURABLE_TOOL_ROUNDS));
+}
 
 export interface ModelTurnContext {
   getConfig: () => ForgeConfig;
@@ -139,6 +160,7 @@ export async function runModelTurn(
   }
   warnAboutModel(ctx, model, config, runtimeCaps, thinkingKwargs);
 
+  const maxRounds = resolveMaxToolRounds(model);
   const toolDefinitions = budget.filterDefinitions(ctx.toolRegistry.definitions(allowed));
   const nativeTools = runtimeCaps?.likelySupportsTools !== false;
   if (toolDefinitions.length > 0 && !nativeTools) {
@@ -155,7 +177,7 @@ export async function runModelTurn(
       messages: conv.messages,
       toolDefinitions,
       signal: ctrl.signal,
-      maxRounds: MAX_TOOL_ROUNDS,
+      maxRounds,
       nativeTools,
       stripAllTools: useStrip || model.strip_tools === true,
       includeUsage: model.provider === undefined || model.provider === 'llama.cpp',
@@ -209,10 +231,6 @@ export async function runModelTurn(
       onReasoning: (text) => postC({ type: 'reasoningToken', text }),
       onDone: (finishReason) => {
         postC({ type: 'done', finishReason });
-        // The completed request's exact count remains the most faithful
-        // counterpart to llama-server's prompt-eval number. The final response
-        // itself becomes input only on the next request.
-        ctx.onContextChanged?.(conv.id, false);
       },
       onRepeatedCall: () =>
         postC({
@@ -246,9 +264,32 @@ export async function runModelTurn(
         }).outputRoom || undefined,
     }),
   );
+  // llama.cpp reports the exact count for the prompt it just evaluated. Once
+  // the loop returns, its reply (or tool-call turn) has joined `conv.messages`
+  // and is part of the *next* prompt, so retaining that exact count makes the
+  // meter and HalluMeter bridge describe an older context. Drop it and show a
+  // current estimate until the server reports the next exact count.
+  ctx.onContextChanged?.(conv.id, true);
   // Cut off by the output ceiling: the reply stopped mid-thought, so the work
   // is unfinished even though the loop returned normally.
   if (result.finishReason === 'length') {
     ctx.lifecycle.markIncomplete(conv.id, 'the reply was cut off by the output limit');
+  }
+  // Same shape as the `length` case above: the loop returned normally, but the
+  // request is unfinished. Marking it is what lets the post-turn resume pick it
+  // up — without this the turn simply stopped, and only a manual "continue"
+  // restarted it (with a fresh, equally exhaustible budget).
+  if (result.hitRoundCap) {
+    ctx.lifecycle.markIncomplete(conv.id, `${ROUND_CAP_INCOMPLETE_PREFIX} (${maxRounds})`);
+    // Name the knob. Hitting the cap on real work is a budgeting problem the
+    // user can fix, and without this the stop looked like an internal failure
+    // with no recourse but to retype "continue" for another identical budget.
+    postC({
+      type: 'notice',
+      message:
+        `Forge: stopped after ${maxRounds} tool rounds with the task unfinished. ` +
+        `Send a smaller step, or raise \`max_tool_rounds\` on "${model.name}" ` +
+        `(or its group) if this task legitimately needs more.`,
+    });
   }
 }

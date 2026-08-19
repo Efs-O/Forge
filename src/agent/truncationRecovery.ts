@@ -85,6 +85,13 @@ export const CONTEXT_EXHAUSTED_MESSAGE =
 export const MAX_ROUNDS_MESSAGE_PREFIX = 'Forge: agent exceeded maximum tool rounds';
 
 /**
+ * Prefix of the incomplete-turn reason recorded when the loop runs out of tool
+ * rounds. The post-turn resume matches on it, so both sides must agree — hence
+ * one constant rather than a literal at each end.
+ */
+export const ROUND_CAP_INCOMPLETE_PREFIX = 'the agent ran out of tool rounds';
+
+/**
  * True when the loop aborted for want of room rather than finishing the work —
  * the two cases a freshly compacted context could actually resume.
  */

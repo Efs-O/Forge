@@ -13,6 +13,13 @@ import { expandAlias, resolveSpawnModel, splitModelProfile } from '../config/Con
 import { getLogger } from '../util/logger';
 
 const log = getLogger();
+const MAX_DIAGNOSTIC_TAIL_CHARS = 2_000;
+
+function appendDiagnosticTail(previous: string, chunk: string): string {
+  const normalized = chunk.replace(/\s+/g, ' ').trim();
+  if (!normalized) return previous;
+  return `${previous} ${normalized}`.slice(-MAX_DIAGNOSTIC_TAIL_CHARS);
+}
 
 export class DirectBackend implements BackendController {
   private proc: ChildProcess | null = null;
@@ -209,40 +216,83 @@ export class DirectBackend implements BackendController {
 
     this.proc = spawnLlamaServer(binary, args);
     this.adoptedServer = false;
+    const proc = this.proc;
+    const startedAt = Date.now();
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let stderrTail = '';
+    log.info(`[DirectBackend] llama-server spawned pid=${proc.pid ?? '?'} model=${model.name}`);
 
-    this.proc.stdout?.on('data', (chunk: Buffer) => this.serverChannel?.append(chunk.toString()));
-    this.proc.stderr?.on('data', (chunk: Buffer) => this.serverChannel?.append(chunk.toString()));
-    this.proc.once('error', (err) => {
-      log.error(`[DirectBackend] spawn error: ${err.message}`);
+    proc.stdout?.on('data', (chunk: Buffer) => {
+      const text = chunk.toString();
+      stdoutBytes += chunk.byteLength;
+      this.serverChannel?.append(text);
+    });
+    proc.stderr?.on('data', (chunk: Buffer) => {
+      const text = chunk.toString();
+      stderrBytes += chunk.byteLength;
+      stderrTail = appendDiagnosticTail(stderrTail, text);
+      this.serverChannel?.append(text);
+    });
+    proc.once('error', (err) => {
+      log.error(
+        `[DirectBackend] llama-server process error pid=${proc.pid ?? '?'} ` +
+          `model=${model.name} after_ms=${Date.now() - startedAt}`,
+        err,
+      );
       this.serverChannel?.appendLine(`\n[ERROR] ${err.message}`);
+    });
+    proc.once('exit', (code, signal) => {
+      // stopLlamaServer clears this.proc before intentional termination. This
+      // lets one listener cover startup failure, runtime crash, and teardown.
+      const unexpected = this.proc === proc;
+      const detail =
+        `[DirectBackend] llama-server ${unexpected ? 'exited unexpectedly' : 'exited'} ` +
+        `pid=${proc.pid ?? '?'} model=${model.name} code=${code ?? '?'} ` +
+        `signal=${signal ?? '?'} after_ms=${Date.now() - startedAt} ` +
+        `stdout_bytes=${stdoutBytes} stderr_bytes=${stderrBytes}` +
+        (stderrTail ? ` stderr_tail=${JSON.stringify(stderrTail)}` : '');
+      if (unexpected) {
+        this.proc = null;
+        this.ready = false;
+        log.error(detail);
+        this.serverChannel?.appendLine(`\n[Forge] ${detail}`);
+        this.onExitCb?.();
+      } else {
+        log.info(detail);
+      }
+    });
+    proc.once('close', (code, signal) => {
+      log.debug(
+        `[DirectBackend] llama-server stdio closed pid=${proc.pid ?? '?'} ` +
+          `model=${model.name} code=${code ?? '?'} signal=${signal ?? '?'}`,
+      );
     });
 
     const abort = this.startAbort;
+    log.info(
+      `[DirectBackend] waiting for llama-server health model=${model.name} ` +
+        `url=http://${this.host}:${this.port}`,
+    );
     const result = await waitForHealthy(
       { baseUrl: `http://${this.host}:${this.port}` },
-      this.proc,
+      proc,
       abort?.signal,
     );
 
     if (!result.ok) {
+      log.error(
+        `[DirectBackend] llama-server health check failed model=${model.name} ` +
+          `reason=${result.reason} message=${result.message}`,
+      );
       await this.stopLlamaServer();
       throw new Error(`llama-server failed to start: ${result.message}`);
     }
 
-    // Reconcile on external death: stopLlamaServer nulls this.proc BEFORE
-    // killing, so an intentional stop/swap never reaches the callback.
-    const proc = this.proc;
-    proc?.once('exit', (code) => {
-      if (this.proc !== proc) return;
-      this.proc = null;
-      this.ready = false;
-      log.warn(`[DirectBackend] llama-server exited unexpectedly (code ${code ?? '?'})`);
-      this.serverChannel?.appendLine(
-        `\n[Forge] llama-server exited unexpectedly (code ${code ?? '?'}).`,
-      );
-      this.onExitCb?.();
-    });
-
+    log.info(
+      `[DirectBackend] llama-server health check passed model=${model.name} ` +
+        `pid=${proc.pid ?? '?'} startup_ms=${Date.now() - startedAt}`,
+    );
     log.info('[DirectBackend] ready');
   }
 

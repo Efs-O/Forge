@@ -68,6 +68,7 @@ export const GroupSchema = z.object({
   system_prompt_mode: z.enum(['append', 'replace']).optional(),
   capabilities: CapabilitiesSchema.optional(),
   max_output_tokens: z.number().int().positive().optional(),
+  max_tool_rounds: z.number().int().positive().optional(),
   tools: z.array(z.string().min(1)).optional(),
   tool_call_limits: ToolCallLimitsSchema.optional(),
 });

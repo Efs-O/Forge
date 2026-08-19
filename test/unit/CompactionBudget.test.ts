@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { applyCompactionWindow } from '../../src/sidebar/compactionWindow';
-import { computeContextBudget } from '../../src/util/contextBudget';
+import {
+  computeContextBudget,
+  estimateTokens,
+  SYSTEM_AND_TEMPLATE_OVERHEAD,
+} from '../../src/util/contextBudget';
 import type { ModelConfig } from '../../src/config/types';
 
 describe('compacted context budget', () => {
@@ -17,6 +21,9 @@ describe('compacted context budget', () => {
     const sent = computeContextBudget({ messages: compacted, model });
 
     expect(sent.used).toBeLessThan(retained.used);
-    expect(sent.used).toBe(229);
+    // Derived, not hardcoded: the point of the assertion is that `used` is
+    // exactly the compacted window plus the fixed overhead, so recalibrating
+    // CHARS_PER_TOKEN or the overhead must not require editing this test.
+    expect(sent.used).toBe(estimateTokens(compacted) + SYSTEM_AND_TEMPLATE_OVERHEAD);
   });
 });

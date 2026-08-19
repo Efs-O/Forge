@@ -106,4 +106,31 @@ describe('ContextBudgetPublisher tool accounting', () => {
   it('honours a tools allowlist the same way', () => {
     expect(publishedTokens({ tools: ['read_file'] })).toBeLessThan(publishedTokens());
   });
+
+  it('drops an exact prompt count when the transcript changes', () => {
+    const conv = conversation();
+    const sidebar: SidebarRuntime = {
+      activeConversationId: conv.id,
+      conversations: [conv],
+      history: [],
+    };
+    const posted: HostToWebview[] = [];
+    const publisher = new ContextBudgetPublisher({
+      getConfig: () => config({}),
+      getSidebar: () => sidebar,
+      toolRegistry: registry(),
+      post: (msg) => posted.push(msg),
+      baseOf: (id) => (id ? id.split('@')[0] : null),
+      autoCompact: async () => {},
+      manualCompact: () => {},
+    } as ContextBudgetDeps);
+
+    publisher.publishExact(conv.id, 12_345);
+    conv.messages.push({ role: 'assistant', content: 'completed reply' });
+    publisher.onTurnContextChanged(conv.id, true);
+
+    const budget = posted.at(-1);
+    expect(budget).toMatchObject({ type: 'tokenBudget' });
+    expect((budget as Extract<HostToWebview, { type: 'tokenBudget' }>).used).not.toBe(12_345);
+  });
 });

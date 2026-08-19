@@ -45,13 +45,23 @@ export class SendPipeline {
       ? deps.getSidebar().conversations.find((candidate) => candidate.id === conversationId)
       : deps.getActive();
     if (!conv) {
+      // Deliberately unaddressed: the conversation this referred to is gone, so
+      // there is no tab to route it to. The active tab is the only place the
+      // user can actually see it, and nothing is left streaming to clear.
       deps.post({ type: 'error', message: 'Forge: the queued conversation is no longer open.' });
       return;
     }
+    // Every refusal below MUST name the conversation it refers to. The webview
+    // resolves an unaddressed message against the ACTIVE tab, and its ERROR
+    // action clears that tab's streaming state — so a background conversation
+    // failing a guard used to hide the Stop button on whichever tab the user
+    // happened to be looking at, while leaving the real one streaming with no
+    // way to cancel it.
     if (deps.agentLoop.isStreamingConv(conv.id) && !deps.agentLoop.isCancellationPending(conv.id)) {
       deps.post({
         type: 'error',
         message: 'Forge: this conversation is still generating. Cancel it first or open a new tab.',
+        conversationId: conv.id,
       });
       return;
     }
@@ -60,6 +70,7 @@ export class SendPipeline {
       deps.post({
         type: 'error',
         message: 'Forge: this conversation is still generating. Cancel it before sending again.',
+        conversationId: conv.id,
       });
       return;
     }
@@ -68,7 +79,7 @@ export class SendPipeline {
     if (!modelName) {
       const message = 'Forge: no active model selected. Pick a model before sending.';
       deps.events.onBackendError?.(message);
-      deps.post({ type: 'error', message });
+      deps.post({ type: 'error', message, conversationId: conv.id });
       return;
     }
     // Request-time resolution: active_model may carry @profile (F6). Flattens
@@ -77,7 +88,7 @@ export class SendPipeline {
     try {
       selectedModel = resolveRequestModel(config, modelName, (m) => log.info(m));
     } catch (err) {
-      deps.post({ type: 'error', message: (err as Error).message });
+      deps.post({ type: 'error', message: (err as Error).message, conversationId: conv.id });
       return;
     }
     // Persist the full selection (incl. @profile) on the conversation so tab

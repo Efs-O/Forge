@@ -193,10 +193,13 @@ describe('autoCompactAndResume', () => {
     continues: { count: number };
   } {
     const sent: string[] = [];
+    const posted: HostToWebview[] = [];
     const continues = { count: 0 };
     const deps: AutoCompactDeps = {
       convId: 'c1',
-      post: () => undefined,
+      post: (msg) => {
+        posted.push(msg);
+      },
       compact: async (): Promise<CompactionOutcome> => 'compacted',
       incompleteTurnReason: () => 'the reply was cut off by the output limit',
       resumeEnabled: true,
@@ -209,8 +212,28 @@ describe('autoCompactAndResume', () => {
       },
       ...overrides,
     };
-    return { deps, sent, continues };
+    return { deps, sent, continues, posted };
   }
+
+  // `compact()` posts `done` in its finally, which clears the webview's
+  // streaming state. The resume is host-initiated, so it produces no USER_SEND
+  // either — without an explicit generationStarted the resumed turn generated
+  // with the Stop button hidden and no way to cancel it.
+  it('re-arms the webview streaming state before resuming', async () => {
+    const { deps, sent, posted } = autoDeps();
+    await autoCompactAndResume(deps);
+    expect(sent).toEqual([RESUME_PROMPT]);
+    const started = posted.findIndex(
+      (m) => m.type === 'generationStarted' && m.conversationId === 'c1',
+    );
+    expect(started).toBeGreaterThanOrEqual(0);
+  });
+
+  it('does not re-arm streaming when the resume is skipped', async () => {
+    const { deps, posted } = autoDeps({ resumeEnabled: false });
+    await autoCompactAndResume(deps);
+    expect(posted.some((m) => m.type === 'generationStarted')).toBe(false);
+  });
 
   it('resumes a turn that was cut off', async () => {
     const { deps, sent, continues } = autoDeps();

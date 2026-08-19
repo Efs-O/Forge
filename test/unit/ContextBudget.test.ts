@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { ModelConfig } from '../../src/config/types';
 import {
+  CHARS_PER_TOKEN,
   computeContextBudget,
+  estimateTokens,
   perSlotContext,
   reasoningReserve,
+  SYSTEM_AND_TEMPLATE_OVERHEAD,
 } from '../../src/util/contextBudget';
 
 describe('perSlotContext', () => {
@@ -53,6 +56,20 @@ describe('reasoningReserve', () => {
   });
 });
 
+describe('estimateTokens', () => {
+  // ChatMessage.reasoning is retained for the sidebar's thinking pane but is
+  // never sent back to the model, so it costs no prompt tokens. Counting it
+  // inflated the bar by the whole turn's thinking — ToolCallingLoop attaches
+  // reasoning to EVERY tool-call round, so the error compounded per round.
+  it('ignores reasoning, which is never sent to the model', () => {
+    const withoutReasoning = [{ role: 'assistant' as const, content: 'hello' }];
+    const withReasoning = [
+      { role: 'assistant' as const, content: 'hello', reasoning: 'z'.repeat(20000) },
+    ];
+    expect(estimateTokens(withReasoning)).toBe(estimateTokens(withoutReasoning));
+  });
+});
+
 describe('computeContextBudget', () => {
   const model = {
     name: 'm',
@@ -70,7 +87,7 @@ describe('computeContextBudget', () => {
       model,
     });
     expect(max).toBe(49152);
-    expect(used).toBe(1000 + 3000 + 200);
+    expect(used).toBe(Math.ceil(4000 / CHARS_PER_TOKEN) + 3000 + SYSTEM_AND_TEMPLATE_OVERHEAD);
     // outputRoom is what max_tokens must be: the model spends thinking out of
     // it too, so subtracting the reserve here would double-count it.
     expect(outputRoom).toBe(49152 - used);

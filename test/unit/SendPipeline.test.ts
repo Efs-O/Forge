@@ -210,3 +210,25 @@ describe('SendPipeline.submitExternal', () => {
     expect(h.runTurn).toHaveBeenCalledOnce();
   });
 });
+
+describe('SendPipeline guard errors address their own conversation', () => {
+  // The webview resolves an unaddressed message against the ACTIVE tab, and its
+  // ERROR action clears that tab's streaming state. An unaddressed refusal for a
+  // background conversation therefore hid the Stop button on the tab the user
+  // was looking at, while the real conversation kept streaming uncancellable.
+  it('names the conversation when refusing a send that is still generating', async () => {
+    const { pipeline, posted } = harness({ streaming: true });
+    await pipeline.send('hello', undefined, 'conv-1');
+    const errors = posted.filter((m) => m.type === 'error');
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({ conversationId: 'conv-1' });
+  });
+
+  it('names the conversation when no model is selected', async () => {
+    const { pipeline, posted } = harness({ config: { active_model: undefined } });
+    await pipeline.send('hello', undefined, 'conv-1');
+    const errors = posted.filter((m) => m.type === 'error');
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({ conversationId: 'conv-1' });
+  });
+});

@@ -48,7 +48,34 @@ export function makeListDirectoryTool(): RegisteredTool {
 
 const OUTPUT_LINE_LIMIT = 50;
 const CONTEXT_LINES = 2;
-const SEARCH_EXCLUDES = ['!.git/**', '!node_modules/**', '!dist/**', '!out/**'];
+/**
+ * Per-file snippet cap.
+ *
+ * Without it, whichever file ripgrep reaches first spends the whole
+ * OUTPUT_LINE_LIMIT and every other match is cut off. That is not hypothetical:
+ * `.forge/embeddings.index.json` sorts first (dot-directory) and, being a copy
+ * of every indexed chunk, matches nearly any query — so a search for "pickup"
+ * in a workspace with an index returned 50 lines of index JSON and nothing from
+ * the actual sources. The tool looked broken while working.
+ */
+export const SNIPPETS_PER_FILE_LIMIT = 8;
+/**
+ * Globs must be recursive to match below the search root. Bare `.git/**` is
+ * anchored to that root, so it excluded only a top-level `.git` and happily
+ * searched `subproject/.git/`, `subproject/node_modules/`, and so on —
+ * `find_files` (FIND_FILES_EXCLUDE below) already got this right, which is why
+ * the two tools disagreed about what is in the workspace.
+ *
+ * `.forge/` is excluded outright: it holds the semantic index, which is a
+ * verbatim copy of the sources and would otherwise double every match.
+ */
+export const SEARCH_EXCLUDES = [
+  '!**/.git/**',
+  '!**/node_modules/**',
+  '!**/dist/**',
+  '!**/out/**',
+  '!**/.forge/**',
+];
 const FIND_FILES_EXCLUDE = '{**/node_modules/**,**/dist/**,**/out/**,**/.git/**,**/.forge/**}';
 
 interface SearchCodeMatch {
@@ -105,7 +132,9 @@ export function makeFindFilesTool(): RegisteredTool {
           properties: {
             pattern: {
               type: 'string',
-              description: 'Glob pattern to match against file paths, e.g. "**/*.ts".',
+              description:
+                'Glob pattern to match against file paths, e.g. "**/*.ts". Anchored at the ' +
+                'workspace root, so prefix a nested repository directory or lead with "**/".',
             },
             max_results: {
               type: 'integer',
@@ -155,7 +184,10 @@ export function makeSearchCodeTool(
             query: { type: 'string', description: 'Text to search for (literal string).' },
             include: {
               type: 'string',
-              description: 'Glob pattern of files to include, e.g. "**/*.ts". Defaults to "**/*".',
+              description:
+                'Glob pattern of files to include, e.g. "**/*.ts". Defaults to "**/*". ' +
+                'Anchored at the workspace root, so a path-bearing glob must start there: ' +
+                'use "subproject/src/**/*.ts", or "**/src/**/*.ts" to match at any depth.',
             },
             max_results: {
               type: 'integer',
@@ -180,7 +212,18 @@ export function makeSearchCodeTool(
         resolveCommand(),
         context?.abortSignal,
       );
-      if (matches.length === 0) return `No matches found for "${query}".`;
+      // Name the search mode on the miss. The query is passed to ripgrep with
+      // --fixed-strings, so a regex like `\.heal\(` cannot match however much
+      // of it is present in the file — and a bare "no matches" reported that
+      // identically to a term that is genuinely absent, leaving the model to
+      // re-guess the term rather than the syntax.
+      if (matches.length === 0) {
+        return (
+          `No matches found for "${query}" in ${include} ` +
+          `(literal text search — regular-expression syntax is not interpreted, ` +
+          `and the include glob is anchored at the workspace root).`
+        );
+      }
 
       const outputLines: string[] = [];
       for (const match of matches) {
@@ -276,6 +319,10 @@ async function searchWorkspaceText(
         matches.set(normalizedPath, entry);
       }
 
+      if (entry.snippets.length >= SNIPPETS_PER_FILE_LIMIT) {
+        stopIfEnoughMatches();
+        return;
+      }
       const marker = event.type === 'match' ? '>' : ' ';
       const snippet = `${marker} ${lineNumber}: ${line.replace(/\r?\n$/, '')}`;
       if (!entry.snippets.includes(snippet)) entry.snippets.push(snippet);

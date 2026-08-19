@@ -8,6 +8,37 @@ import {
 import { getLogger } from '../util/logger';
 
 const log = getLogger();
+let requestSequence = 0;
+
+function requestTarget(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).host;
+  } catch {
+    return '<invalid-url>';
+  }
+}
+
+function messageStats(request: ChatCompletionRequest): {
+  chars: number;
+  imageParts: number;
+  toolCalls: number;
+} {
+  let chars = 0;
+  let imageParts = 0;
+  let toolCalls = 0;
+  for (const message of request.messages) {
+    if (typeof message.content === 'string') {
+      chars += message.content.length;
+    } else if (Array.isArray(message.content)) {
+      for (const part of message.content) {
+        if (part.type === 'text') chars += part.text.length;
+        else imageParts += 1;
+      }
+    }
+    toolCalls += message.tool_calls?.length ?? 0;
+  }
+  return { chars, imageParts, toolCalls };
+}
 
 export type TokenHandler = (token: string) => void;
 export type ReasoningHandler = (token: string) => void;
@@ -52,7 +83,24 @@ export async function streamChatCompletion(
   signal?: AbortSignal,
   apiKey?: string,
 ): Promise<void> {
+  const requestId = ++requestSequence;
+  const startedAt = Date.now();
+  const stats = messageStats(request);
+  const target = requestTarget(baseUrl);
+  log.info(
+    `[OpenAIClient] request start id=${requestId} target=${target} model=${request.model} ` +
+      `messages=${request.messages.length} message_chars=${stats.chars} ` +
+      `image_parts=${stats.imageParts} prior_tool_calls=${stats.toolCalls} ` +
+      `tools=${request.tools?.length ?? 0} max_tokens=${request.max_tokens ?? '?'} ` +
+      `reasoning_effort=${request.reasoning_effort ?? '?'}`,
+  );
   let response: Response;
+  const headerWatchdog = setTimeout(() => {
+    log.warn(
+      `[OpenAIClient] request still waiting for response headers id=${requestId} ` +
+        `target=${target} elapsed_ms=${Date.now() - startedAt}`,
+    );
+  }, 15_000);
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
   try {
@@ -63,18 +111,35 @@ export async function streamChatCompletion(
       signal: signal ?? null,
     });
   } catch (err) {
+    clearTimeout(headerWatchdog);
     if ((err as Error)?.name === 'AbortError') {
+      log.info(
+        `[OpenAIClient] request aborted id=${requestId} elapsed_ms=${Date.now() - startedAt}`,
+      );
       handlers.onDone('cancelled');
     } else {
+      log.error(
+        `[OpenAIClient] request transport failure id=${requestId} ` +
+          `elapsed_ms=${Date.now() - startedAt}`,
+        err,
+      );
       handlers.onError(err instanceof Error ? err : new Error(String(err)));
     }
     return;
   }
+  clearTimeout(headerWatchdog);
+
+  log.info(
+    `[OpenAIClient] response headers id=${requestId} status=${response.status} ` +
+      `content_type=${response.headers.get('content-type') ?? '?'} ` +
+      `elapsed_ms=${Date.now() - startedAt}`,
+  );
 
   if (!response.ok) {
     const body = await response.text().catch(() => '');
-    const msg = `HTTP ${response.status}: ${body}`;
-    log.error(`[OpenAIClient] ${baseUrl} — ${msg}`);
+    const boundedBody = body.length > 4_000 ? `${body.slice(0, 4_000)}…` : body;
+    const msg = `HTTP ${response.status}: ${boundedBody}`;
+    log.error(`[OpenAIClient] request failed id=${requestId} target=${target} — ${msg}`);
     // llama-server answers 500 when its chat parser chokes on output that
     // stopped mid-argument. That is a size problem, not a protocol problem —
     // hand the caller a typed truncation so it retries smaller instead of
@@ -95,6 +160,7 @@ export async function streamChatCompletion(
   }
 
   if (!response.body) {
+    log.error(`[OpenAIClient] response body missing id=${requestId}`);
     handlers.onError(new Error('Response body is null'));
     return;
   }
@@ -104,6 +170,36 @@ export async function streamChatCompletion(
   let buffer = '';
   let terminalFinishReason: string | null = null;
   let toolCallsFlushed = false;
+  let readCount = 0;
+  let sseFrameCount = 0;
+  let bytesRead = 0;
+  let textChars = 0;
+  let reasoningChars = 0;
+  let toolDeltaCount = 0;
+  let firstByteAt: number | null = null;
+  let lastActivityAt = Date.now();
+  let streamStallWarned = false;
+  const heartbeat = setInterval(() => {
+    const now = Date.now();
+    const idleMs = now - lastActivityAt;
+    const heartbeatLine =
+      `[OpenAIClient] stream heartbeat id=${requestId} elapsed_ms=${now - startedAt} ` +
+      `idle_ms=${idleMs} reads=${readCount} sse_frames=${sseFrameCount} ` +
+      `bytes=${bytesRead} text_chars=${textChars} reasoning_chars=${reasoningChars} ` +
+      `tool_deltas=${toolDeltaCount}`;
+    if (idleMs >= 15_000 && !streamStallWarned) {
+      streamStallWarned = true;
+      log.warn(heartbeatLine);
+    } else {
+      log.debug(heartbeatLine);
+    }
+  }, 15_000);
+  const streamSummary = (): string =>
+    `id=${requestId} elapsed_ms=${Date.now() - startedAt} ` +
+    `ttfb_ms=${firstByteAt === null ? '?' : firstByteAt - startedAt} reads=${readCount} ` +
+    `sse_frames=${sseFrameCount} bytes=${bytesRead} text_chars=${textChars} ` +
+    `reasoning_chars=${reasoningChars} tool_deltas=${toolDeltaCount} ` +
+    `finish_reason=${terminalFinishReason ?? '?'}`;
   // key = index, accumulates partial tool call fragments
   const toolAccum = new Map<number, { id: string; name: string; arguments: string }>();
 
@@ -125,6 +221,11 @@ export async function streamChatCompletion(
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+      readCount += 1;
+      bytesRead += value.byteLength;
+      lastActivityAt = Date.now();
+      streamStallWarned = false;
+      firstByteAt ??= lastActivityAt;
 
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
@@ -139,10 +240,12 @@ export async function streamChatCompletion(
         if (!trimmed.startsWith('data:') && !isErrorLine) continue;
 
         const data = trimmed.slice(isErrorLine ? 6 : 5).trim();
+        sseFrameCount += 1;
         if (data === '[DONE]') {
           // Some backends (notably Ollama OpenAI-compat) end streams here without a prior
           // finish_reason chunk carrying tool_calls — flush any accumulated deltas first.
           flushAccumulatedToolCalls();
+          log.info(`[OpenAIClient] stream done ${streamSummary()}`);
           handlers.onDone(terminalFinishReason);
           return;
         }
@@ -159,7 +262,7 @@ export async function streamChatCompletion(
         const framed = (chunk as { error?: { message?: string; code?: number } }).error;
         if (framed) {
           const detail = framed.message ?? JSON.stringify(framed);
-          log.error(`[OpenAIClient] ${baseUrl} — stream error frame: ${detail}`);
+          log.error(`[OpenAIClient] stream error frame ${streamSummary()} — ${detail}`);
           if (isTruncationParseError(detail)) {
             const column = parseErrorColumn(detail);
             handlers.onError(
@@ -191,14 +294,17 @@ export async function streamChatCompletion(
         const delta = choice.delta;
         const content = delta?.content;
         if (typeof content === 'string' && content.length > 0) {
+          textChars += content.length;
           handlers.onToken(content);
         } else if (
           typeof delta?.reasoning_content === 'string' &&
           delta.reasoning_content.length > 0
         ) {
+          reasoningChars += delta.reasoning_content.length;
           if (handlers.onReasoning) handlers.onReasoning(delta.reasoning_content);
           else handlers.onToken(delta.reasoning_content);
         } else if (typeof delta?.reasoning === 'string' && delta.reasoning.length > 0) {
+          reasoningChars += delta.reasoning.length;
           if (handlers.onReasoning) handlers.onReasoning(delta.reasoning);
           else handlers.onToken(delta.reasoning);
         }
@@ -207,6 +313,7 @@ export async function streamChatCompletion(
         const deltaToolCalls = (choice.delta as { tool_calls?: ToolCallDelta[] }).tool_calls;
         if (deltaToolCalls) {
           for (const tc of deltaToolCalls) {
+            toolDeltaCount += 1;
             const idx = tc.index ?? 0;
             if (!toolAccum.has(idx)) {
               toolAccum.set(idx, { id: '', name: '', arguments: '' });
@@ -230,6 +337,10 @@ export async function streamChatCompletion(
               ? [...toolAccum.values()].find((acc) => argumentsAreIncomplete(acc.arguments))
               : undefined;
           if (truncated) {
+            log.warn(
+              `[OpenAIClient] truncated tool call ${streamSummary()} ` +
+                `tool=${truncated.name || '?'} approx_arg_chars=${truncated.arguments.length}`,
+            );
             handlers.onError(
               new ToolCallTruncatedError({
                 toolName: truncated.name,
@@ -251,14 +362,18 @@ export async function streamChatCompletion(
     // Stream ended without [DONE] or a terminal finish_reason (server crash or
     // dropped connection) — settle anyway so the agent loop never hangs.
     flushAccumulatedToolCalls();
+    log.warn(`[OpenAIClient] stream ended without terminal frame ${streamSummary()}`);
     handlers.onDone(terminalFinishReason);
   } catch (err) {
     if ((err as Error)?.name === 'AbortError') {
+      log.info(`[OpenAIClient] stream aborted ${streamSummary()}`);
       handlers.onDone('cancelled');
     } else {
+      log.error(`[OpenAIClient] stream failure ${streamSummary()}`, err);
       handlers.onError(err instanceof Error ? err : new Error(String(err)));
     }
   } finally {
+    clearInterval(heartbeat);
     reader.releaseLock();
   }
 }

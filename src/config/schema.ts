@@ -90,6 +90,7 @@ const ModelConfigSchema = z.object({
   tools: z.array(z.string().min(1)).optional(),
   tool_call_limits: ToolCallLimitsSchema.optional(),
   max_output_tokens: z.number().int().positive().optional(),
+  max_tool_rounds: z.number().int().positive().optional(),
 });
 
 // Provider-requiredness checks (gguf_path/cli/endpoint/api_key_secret) live at

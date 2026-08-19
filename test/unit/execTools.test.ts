@@ -11,4 +11,15 @@ describe('exec_command safety policy', () => {
       }),
     ).rejects.toThrow('denylist pattern');
   });
+
+  it('validates structured output controls before spawning', async () => {
+    await expect(
+      makeExecCommandTool().handler({
+        command: process.execPath,
+        args: ['-e', 'console.log("should not run")'],
+        head_lines: 1,
+        tail_lines: 1,
+      }),
+    ).rejects.toThrow('head_lines and tail_lines cannot be used together');
+  });
 });

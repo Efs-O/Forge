@@ -19,6 +19,21 @@ const ChevronRight = (): React.ReactElement => (
   </svg>
 );
 
+const CopyIcon = (): React.ReactElement => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+    <path
+      d="M5.5 4.5h7v8h-7zM3.5 11.5h-1v-8h7v-1h-7a1 1 0 00-1 1v8a1 1 0 001 1h7v-1h-6z"
+      fill="currentColor"
+    />
+  </svg>
+);
+
+const CheckIcon = (): React.ReactElement => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+    <path d="M6.2 11.3L2.9 8l1.1-1.1 2.2 2.2 5.8-5.8L13.1 4 6.2 11.3z" fill="currentColor" />
+  </svg>
+);
+
 const markdownComponents: React.ComponentProps<typeof Markdown>['components'] = {
   a: ({ href, children, ...props }) => {
     if (href?.startsWith(FILE_LINK_SCHEME)) {
@@ -187,8 +202,14 @@ export function Message({ role, content, reasoning, streaming }: MessageProps): 
 
       {role === 'assistant' && content && (
         <div className="msg-actions">
-          <button className="btn-action" onClick={handleCopy} type="button">
-            {copied ? '✓ Copied' : 'Copy'}
+          <button
+            className="btn-action btn-action-icon"
+            onClick={handleCopy}
+            type="button"
+            title={copied ? 'Copied' : 'Copy response'}
+            aria-label={copied ? 'Copied' : 'Copy response'}
+          >
+            {copied ? <CheckIcon /> : <CopyIcon />}
           </button>
         </div>
       )}

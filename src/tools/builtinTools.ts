@@ -16,7 +16,11 @@ export function makeReadFileTool(): RegisteredTool {
         parameters: {
           type: 'object',
           properties: {
-            path: { type: 'string', description: 'File path (absolute or workspace-relative).' },
+            path: {
+              type: 'string',
+              description:
+                'File path, relative to the WORKSPACE ROOT (not to any project directory named in the task) or absolute. For a repository nested in the workspace, keep its directory as a prefix, e.g. "subproject/src/main.ts".',
+            },
             start_line: {
               type: 'integer',
               minimum: 1,
@@ -73,7 +77,11 @@ export function makeWriteFileTool(): RegisteredTool {
         parameters: {
           type: 'object',
           properties: {
-            path: { type: 'string', description: 'File path (absolute or workspace-relative).' },
+            path: {
+              type: 'string',
+              description:
+                'File path, relative to the WORKSPACE ROOT (not to any project directory named in the task) or absolute. For a repository nested in the workspace, keep its directory as a prefix, e.g. "subproject/src/main.ts".',
+            },
             content: {
               type: 'string',
               description: `File content to write. ${CHUNKED_WRITE_ADVICE}`,
@@ -108,7 +116,11 @@ export function makeAppendFileTool(): RegisteredTool {
         parameters: {
           type: 'object',
           properties: {
-            path: { type: 'string', description: 'File path (absolute or workspace-relative).' },
+            path: {
+              type: 'string',
+              description:
+                'File path, relative to the WORKSPACE ROOT (not to any project directory named in the task) or absolute. For a repository nested in the workspace, keep its directory as a prefix, e.g. "subproject/src/main.ts".',
+            },
             content: {
               type: 'string',
               description: 'Content to append verbatim. No separator is inserted.',

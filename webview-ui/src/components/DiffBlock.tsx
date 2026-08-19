@@ -2,8 +2,6 @@ import React, { useMemo, useState } from 'react';
 import type { DiffHunk } from '../../../src/sidebar/messageBridge';
 import { vscode } from '../vscode';
 
-const DIFF_COLLAPSE_THRESHOLD = 50;
-
 export interface DiffStats {
   added: number;
   removed: number;
@@ -22,10 +20,7 @@ interface Props {
   hunks: DiffHunk[] | null | undefined;
   isNew?: boolean;
   isDeleted?: boolean;
-  /**
-   * Omitted, a block opens unless it is large. Inside a group every row starts
-   * closed regardless of size — the group header is the thing being read.
-   */
+  /** Omitted, every file-edit preview starts closed. */
   defaultExpanded?: boolean;
 }
 
@@ -38,8 +33,7 @@ export function DiffBlock({
 }: Props): React.ReactElement {
   const allLines = useMemo(() => hunks?.flatMap((h) => h.lines) ?? [], [hunks]);
   const { added, removed } = useMemo(() => diffStats(hunks), [hunks]);
-  const large = allLines.length > DIFF_COLLAPSE_THRESHOLD;
-  const [expanded, setExpanded] = useState(defaultExpanded ?? !large);
+  const [expanded, setExpanded] = useState(defaultExpanded ?? false);
 
   const badge = isDeleted ? 'deleted' : isNew ? 'new' : 'modified';
 
