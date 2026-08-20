@@ -581,7 +581,7 @@ describe('ControlServer', () => {
     const base = `http://127.0.0.1:${port}`;
     const pool = new FakePool();
     // capacity 4: slots are NOT the constraint — VRAM-policy eviction must
-    // still unload idle A before spawning B (RELAY_SMOKE_FINDINGS.md F4).
+    // still unload idle A before spawning B (docs/archive/validation/RELAY_SMOKE_FINDINGS.md F4).
     server = new ControlServer(pool, makeConfig(port, 4), testDeps());
     server.start();
     await waitReady(base);

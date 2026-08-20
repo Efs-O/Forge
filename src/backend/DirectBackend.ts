@@ -70,7 +70,7 @@ export class DirectBackend implements BackendController {
   /** Fired when a ready llama-server dies WITHOUT Forge stopping it (external
    *  kill, crash, adopted server vanishing) — never on stop()/hotSwap(). Lets
    *  the pool reconcile its slot table instead of reporting loaded=true for a
-   *  dead process (RELAY_SMOKE_FINDINGS.md F5). */
+   *  dead process (docs/archive/validation/RELAY_SMOKE_FINDINGS.md F5). */
   onUnexpectedExit(cb: () => void): void {
     this.onExitCb = cb;
   }

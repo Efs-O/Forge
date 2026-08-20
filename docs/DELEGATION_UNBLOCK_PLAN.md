@@ -186,7 +186,7 @@ help characterise it if it recurs. Watch for it after this install.
 
 Shipped as 0.12.36. Type-check clean, lint clean, **569 tests pass** (4 new).
 Live validation, observed transcripts, and the model-behaviour notes are in
-`DELEGATION_LIVE_VALIDATION.md` at the repo root.
+`archive/validation/DELEGATION_LIVE_VALIDATION.md`.
 
 - **F1 verified.** The git-trust error is gone; `codex exec` now starts and runs
   a full turn in a non-git workspace.
@@ -199,6 +199,6 @@ Live validation, observed transcripts, and the model-behaviour notes are in
 
 One defect below F1 was **not** a Forge bug and is not fixed in code: Codex's
 Windows sandbox cannot execute a Store-only `pwsh`, which requires an MSI
-PowerShell 7 on the host. See `DELEGATION_LIVE_VALIDATION.md` for the full
+PowerShell 7 on the host. See `archive/validation/DELEGATION_LIVE_VALIDATION.md` for the full
 diagnosis, including why `winget --scope machine` must not be used for it.
 Both layers were required — F1 alone still failed at the shell spawn.

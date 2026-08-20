@@ -14,7 +14,7 @@ port slots. Ollama is excluded from capacity/eviction entirely
 Result: a llama.cpp GGUF (e.g. gemma4-26b) loaded **and** an Ollama worker of
 similar size loaded → Forge does not check, loads no matter what → silent GPU
 over-subscription. A llama-server that can't get VRAM starves until its 120 s
-health timeout (RELAY_SMOKE_FINDINGS.md F4); Ollama errors ugly.
+health timeout (docs/archive/validation/RELAY_SMOKE_FINDINGS.md F4); Ollama errors ugly.
 
 ## Key insight (the leverage is upstream, not in a capacity gate)
 

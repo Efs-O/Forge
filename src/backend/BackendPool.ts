@@ -296,7 +296,7 @@ export class BackendPool implements IBackendPool {
   /**
    * A ready backend's process died without Forge stopping it (external kill,
    * crash). Free the slot so /models and capacity decisions reflect reality
-   * (RELAY_SMOKE_FINDINGS.md F5). Skipped while a restart is in flight —
+   * (docs/archive/validation/RELAY_SMOKE_FINDINGS.md F5). Skipped while a restart is in flight —
    * restartSlot owns the slot during `starting` and frees it itself on failure.
    */
   private reconcileDeadSlot(modelName: string): void {

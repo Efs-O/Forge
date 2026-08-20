@@ -1,7 +1,7 @@
 # F6 — Models-vs-Profiles Redesign (Forge side) — FULL IMPLEMENTATION PLAN
 
 Status: PLAN (implement in a fresh session). Breaking schema change.
-Reference format: `F3_CHAT_PROXY_PLAN.md`. Findings: `RELAY_SMOKE_FINDINGS.md` §F6.
+Reference format: `F3_CHAT_PROXY_PLAN.md`. Findings: `docs/archive/validation/RELAY_SMOKE_FINDINGS.md` §F6.
 Relay counterpart: `forge-relay/F6_RELAY_PROFILES_PLAN.md`.
 User decisions (2026-06-13): migrate live `.forge/config.yaml` in place (+ `.bak`);
 `config.yaml` is LOC-exempt; default cadence is plan→implement, but this one is

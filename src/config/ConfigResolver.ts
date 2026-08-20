@@ -7,6 +7,10 @@ import type {
   SpawnConfig,
 } from './types';
 
+/** Fields that configuration layers may overlay on a concrete named model. */
+type ModelOverlayKey = Exclude<keyof ModelConfig, 'name'>;
+type ModelOverlay = { [K in ModelOverlayKey]?: ModelConfig[K] | undefined };
+
 /**
  * F6 — model/profile resolution. Two flavors, both flattening to legacy
  * `ModelConfig` so every downstream consumer stays unchanged:
@@ -167,7 +171,7 @@ export function mergeGroupsIntoModel(config: ForgeConfig, model: ModelConfig): M
     .filter((g): g is GroupConfig => Boolean(g));
   if (groups.length === 0) return model;
 
-  let groupFields: Record<string, unknown> = {};
+  let groupFields: ModelOverlay = {};
   const samplingLayers: (SamplingConfig | undefined)[] = [];
   const spawnLayers: (SpawnConfig | undefined)[] = [];
   const limitLayers: (Record<string, number> | undefined)[] = [];
@@ -182,17 +186,19 @@ export function mergeGroupsIntoModel(config: ForgeConfig, model: ModelConfig): M
   spawnLayers.push(model.spawn);
   limitLayers.push(model.tool_call_limits);
 
-  const merged: Record<string, unknown> = { ...groupFields, ...model };
+  const modelFields: Partial<ModelConfig> = { ...model };
+  delete modelFields.name;
+  const merged = withDefined(withDefined({ name: model.name }, groupFields), modelFields);
   const mergedSampling = mergeSampling(...samplingLayers);
   const mergedSpawn = mergeRecord<SpawnConfig>(...spawnLayers);
   const mergedLimits = mergeRecord<Record<string, number>>(...limitLayers);
-  if (mergedSampling) merged['sampling'] = mergedSampling;
-  else delete merged['sampling'];
-  if (mergedSpawn) merged['spawn'] = mergedSpawn;
-  else delete merged['spawn'];
-  if (mergedLimits) merged['tool_call_limits'] = mergedLimits;
-  else delete merged['tool_call_limits'];
-  return merged as unknown as ModelConfig;
+  if (mergedSampling) merged.sampling = mergedSampling;
+  else delete merged.sampling;
+  if (mergedSpawn) merged.spawn = mergedSpawn;
+  else delete merged.spawn;
+  if (mergedLimits) merged.tool_call_limits = mergedLimits;
+  else delete merged.tool_call_limits;
+  return merged;
 }
 
 /** Highest-precedence defined value across layers ordered low→high. */
@@ -206,12 +212,20 @@ function pick<T>(...layers: (T | undefined)[]): T | undefined {
 
 /** Clone `base`, overlaying only the defined entries of `overrides`. Avoids
  *  assigning `undefined` to optional fields (exactOptionalPropertyTypes). */
-function withDefined(base: ModelConfig, overrides: Record<string, unknown>): ModelConfig {
-  const out: Record<string, unknown> = { ...base };
-  for (const [k, v] of Object.entries(overrides)) {
-    if (v !== undefined) out[k] = v;
+function withDefined(base: ModelConfig, overrides: ModelOverlay): ModelConfig {
+  const out: ModelConfig = { ...base };
+  for (const key of Object.keys(overrides) as ModelOverlayKey[]) {
+    applyDefinedModelField(out, key, overrides[key]);
   }
-  return out as unknown as ModelConfig;
+  return out;
+}
+
+function applyDefinedModelField<K extends ModelOverlayKey>(
+  target: ModelConfig,
+  key: K,
+  value: ModelOverlay[K],
+): void {
+  if (value !== undefined) target[key] = value;
 }
 
 /**

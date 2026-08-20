@@ -183,7 +183,7 @@
   module-scope failures type-check clean and only appear on load, which is
   precisely what module reshuffling creates. `npm run ci` now loads the built
   bundle under a stubbed `vscode`.
-- Full record in `POST_REFACTOR_AUDIT.md`, including what came back clean and
+- Full record in `docs/archive/validation/POST_REFACTOR_AUDIT.md`, including what came back clean and
   the two items left for a decision (coverage-threshold enforcement, oversized
   docs).
 

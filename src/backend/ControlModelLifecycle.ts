@@ -113,7 +113,7 @@ async function waitReady(ctx: ModelLifecycleContext, baseUrl: string): Promise<b
 
 /**
  * Free idle slots before loading `model`. VRAM — not the slot count — is the
- * binding constraint on local models (RELAY_SMOKE_FINDINGS.md F4): spawning a
+ * binding constraint on local models (docs/archive/validation/RELAY_SMOKE_FINDINGS.md F4): spawning a
  * second GGUF while an idle one still holds VRAM starves the new server until
  * its health timeout. So EVERY idle local model is released before the spawn,
  * not only when the slot table is full. Evictable = no holders AND not
