@@ -69,9 +69,8 @@ export function opCloseConversation(
   const ix = sidebar.conversations.findIndex((c) => c.id === id);
   if (ix < 0) return null;
   const conv = sidebar.conversations[ix]!;
-  // Display view on purpose: a conversation carrying only tool traffic and no
-  // visible turns should not be archived as if the user had said something.
-  const shouldArchive = displayPersistMessages(conv.messages).length > 0;
+  // Tool history alone should not create an archived conversation.
+  const shouldArchive = displayPersistMessages(conv.messages).some((m) => m.role !== 'tool');
   const updated = { ...sidebar, conversations: [...sidebar.conversations] };
 
   if (updated.conversations.length === 1) {

@@ -35,6 +35,7 @@ export interface CliTurnContext {
     text: string,
     attachments?: AttachmentData[],
   ) => void;
+  onTranscriptChanged: (conv: ConversationRuntime) => void;
 }
 
 export async function runCliTurn(
@@ -103,9 +104,11 @@ export async function runCliTurn(
         });
     if (result.sessionId) {
       conv.cli_sessions = { ...conv.cli_sessions, [model.name]: result.sessionId };
+      ctx.onTranscriptChanged(conv);
     }
     if (result.assistantText) {
       conv.messages.push({ role: 'assistant', content: result.assistantText });
+      ctx.onTranscriptChanged(conv);
     }
     if (result.status !== 'completed' && result.status !== 'cancelled') {
       postC({ type: 'error', message: result.error ?? `${model.name} failed.` });

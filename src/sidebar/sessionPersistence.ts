@@ -8,6 +8,7 @@
  */
 
 import type { Memento } from 'vscode';
+import type { ChatMessage } from '../llm/types';
 import {
   HISTORY_KEY_LEGACY,
   MAX_HISTORY_CONVERSATIONS,
@@ -49,11 +50,41 @@ function persistedToRuntime(p: ConversationPersisted): ConversationRuntime {
     title: p.title,
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,
-    messages: chatMessagesFromSlim(p.messages),
+    messages: repairInterruptedToolCalls(chatMessagesFromSlim(p.messages)),
     ...(p.active_model !== undefined ? { active_model: p.active_model } : {}),
     ...(p.cli_sessions !== undefined ? { cli_sessions: { ...p.cli_sessions } } : {}),
     ...(p.compaction !== undefined ? { compaction: { ...p.compaction } } : {}),
   };
+}
+
+/**
+ * A reload can occur after the assistant has announced tool calls but before
+ * the host has appended every result. Close those calls with an explicit
+ * unknown outcome so strict chat templates remain valid and the next turn does
+ * not pretend the tool completed.
+ */
+function repairInterruptedToolCalls(messages: ChatMessage[]): ChatMessage[] {
+  const answered = new Set(
+    messages
+      .filter((m) => m.role === 'tool' && typeof m.tool_call_id === 'string')
+      .map((m) => m.tool_call_id!),
+  );
+  const repaired: ChatMessage[] = [];
+  for (const message of messages) {
+    repaired.push(message);
+    if (message.role !== 'assistant' || !message.tool_calls?.length) continue;
+    for (const call of message.tool_calls) {
+      if (answered.has(call.id)) continue;
+      repaired.push({
+        role: 'tool',
+        content:
+          'Forge was reloaded while this tool call was running. Its result is unknown; inspect the workspace before deciding whether to rerun it.',
+        tool_call_id: call.id,
+        name: call.function.name,
+      });
+    }
+  }
+  return repaired;
 }
 
 export function runtimeToPersisted(session: SidebarRuntime): SidebarSessionPersisted {

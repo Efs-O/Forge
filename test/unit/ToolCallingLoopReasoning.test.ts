@@ -105,6 +105,19 @@ describe('ToolCallingLoop reasoning retention', () => {
     expect('reasoning' in toolTurn).toBe(false);
   });
 
+  it('reports transcript mutations before and after a tool dispatch', async () => {
+    scriptTwoRounds();
+    const changed = vi.fn();
+
+    await runToolCallingLoop({
+      ...runOptions([{ role: 'user', content: 'go' }]),
+      onMessagesChanged: changed,
+    } as never);
+
+    // Tool-call assistant turn, tool result, then final assistant reply.
+    expect(changed).toHaveBeenCalledTimes(3);
+  });
+
   it('requests and forwards the provider usage for each model call', async () => {
     streamModelChatCompletion.mockImplementation(
       async (_url: string, _req: unknown, _model: unknown, h: Handlers) => {

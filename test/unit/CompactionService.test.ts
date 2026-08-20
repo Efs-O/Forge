@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   autoCompactAndResume,
   MAX_CONSECUTIVE_AUTO_CONTINUES,
@@ -98,6 +98,21 @@ describe('selectCompactionSplit', () => {
 });
 
 describe('runCompaction', () => {
+  it('associates its summary request with the compacted conversation', async () => {
+    const c = conv([
+      { role: 'user', content: 'first task' },
+      { role: 'assistant', content: 'did the first task' },
+      { role: 'user', content: 'second task' },
+    ]);
+    const h = harness(c, async () => 'summary');
+    const runPrompt = vi.fn(async () => 'summary');
+    h.deps.runPromptToMarkdown = runPrompt;
+
+    await runCompaction(h.deps, { auto: true });
+
+    expect(runPrompt).toHaveBeenCalledWith(expect.any(String), c.id);
+  });
+
   const base: ChatMessage[] = [
     { role: 'user', content: 'first task' },
     { role: 'assistant', content: 'did the first task' },

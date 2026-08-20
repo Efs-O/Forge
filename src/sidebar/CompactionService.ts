@@ -21,7 +21,7 @@ export interface CompactionDeps {
   postSessionSync: () => void;
   invalidateExactTokenBudget: () => void;
   postTokenBudget: () => void;
-  runPromptToMarkdown: (text: string) => Promise<string>;
+  runPromptToMarkdown: (text: string, conversationId?: string) => Promise<string>;
   isStreaming: () => boolean;
   /** Marks the conversation busy for the duration of the summarization call.
    *  Returns the release. */
@@ -167,6 +167,7 @@ export async function runCompaction(
   try {
     summary = await deps.runPromptToMarkdown(
       buildSummaryPrompt(conv.compaction?.summary, split.summarize),
+      conv.id,
     );
   } catch (err) {
     deps.post({

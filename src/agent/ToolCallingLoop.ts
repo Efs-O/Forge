@@ -54,6 +54,8 @@ export interface ToolCallingLoopOptions {
   onDone?: (finishReason: string | null) => void;
   onRepeatedCall?: () => void;
   onNativeFallback?: () => void;
+  /** Called as soon as a transcript entry is appended, before the turn ends. */
+  onMessagesChanged?: () => void;
   /** Request the provider's exact execution-side usage in the final stream frame. */
   includeUsage?: boolean;
   onUsage?: UsageHandler;
@@ -244,10 +246,12 @@ export async function runToolCallingLoop(
             tool_call_id: truncation.toolCallId,
             name: truncation.toolName,
           });
+          options.onMessagesChanged?.();
         } else {
           // The server failed the whole request, so there is no call id to
           // answer — a plain user-role nudge is the portable alternative.
           options.messages.push({ role: 'user', content: guidance });
+          options.onMessagesChanged?.();
         }
         continue;
       }
@@ -301,8 +305,10 @@ export async function runToolCallingLoop(
         tool_calls: calls,
         ...(assistantReasoning ? { reasoning: assistantReasoning } : {}),
       });
+      options.onMessagesChanged?.();
       const beforeDispatch = options.messages.length;
       await options.dispatchToolCalls(calls, options.messages);
+      options.onMessagesChanged?.();
       try {
         loopGuard.afterRound(calls, options.messages.slice(beforeDispatch));
       } catch (error) {
@@ -318,6 +324,7 @@ export async function runToolCallingLoop(
         content: assistantContent,
         ...(assistantReasoning ? { reasoning: assistantReasoning } : {}),
       });
+      options.onMessagesChanged?.();
       finalText = assistantContent;
     }
     options.onDone?.(streamed.finishReason);
@@ -336,6 +343,7 @@ export async function runToolCallingLoop(
   // complete.
   const capNotice = `${MAX_ROUNDS_MESSAGE_PREFIX} (${options.maxRounds}).`;
   options.messages.push({ role: 'assistant', content: capNotice });
+  options.onMessagesChanged?.();
   options.onToken?.(`
 
 _${capNotice}_`);

@@ -217,6 +217,27 @@ describe('AgentLoop', () => {
     expect(barrierPassed).toBe(true);
   });
 
+  it('cancels a compaction prompt owned by the selected conversation', async () => {
+    streamModelChatCompletion.mockImplementation(
+      (
+        _baseUrl: string,
+        _request: unknown,
+        _model: ModelConfig,
+        handlers: { onDone: (reason: string | null) => void },
+        signal: AbortSignal,
+      ) => {
+        signal.addEventListener('abort', () => handlers.onDone('cancelled'), { once: true });
+      },
+    );
+    const conv = makeConversation();
+    const loop = makeLoop(makePool(), makeConfig());
+
+    const compact = loop.runPromptToMarkdown('summarize the conversation', conv.id);
+    await vi.waitFor(() => expect(streamModelChatCompletion).toHaveBeenCalledOnce());
+    await loop.cancel(conv.id);
+    await expect(compact).resolves.toBe('');
+  });
+
   it('commits a user prompt once the backend is ready and the turn begins', async () => {
     streamModelChatCompletion.mockImplementation(
       (

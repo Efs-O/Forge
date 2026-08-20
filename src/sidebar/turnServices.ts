@@ -49,6 +49,8 @@ export interface TurnServices {
   warnOnce: (key: string, message: string) => void;
   onContextChanged: (convId: string, promptChanged: boolean) => void;
   onExactContextTokens: (convId: string, usedTokens: number) => void;
+  /** Persists a transcript mutation immediately, including an in-flight turn. */
+  onTranscriptChanged: (conv: ConversationRuntime) => void;
   commitUserPrompt: (
     conv: ConversationRuntime,
     text: string,
@@ -65,6 +67,8 @@ export interface TurnServices {
     checkpoint: CheckpointSession,
   ) => Promise<void>;
   waitForCancelledTurns: () => Promise<void>;
-  setController: (ctrl: AbortController) => void;
+  /** Associates an out-of-band model request with its owning conversation when
+   * one exists, so that tab's Stop action can abort it. */
+  setController: (ctrl: AbortController, conversationId?: string) => void;
   releaseController: (ctrl: AbortController) => void;
 }

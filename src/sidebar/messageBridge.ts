@@ -213,7 +213,17 @@ export interface SessionSyncMsg {
   history: SessionHistoryMeta[];
   messagesById: Record<
     string,
-    Array<{ role: 'user' | 'assistant'; content: string; reasoning?: string | undefined }>
+    Array<
+      | { role: 'user' | 'assistant'; content: string; reasoning?: string | undefined }
+      | {
+          role: 'tool';
+          content: string;
+          toolName: string;
+          toolResult: string;
+          toolResultTotal: number;
+          toolIsError?: boolean | undefined;
+        }
+    >
   >;
 }
 

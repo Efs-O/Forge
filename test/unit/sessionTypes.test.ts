@@ -77,7 +77,7 @@ describe('sessionTypes', () => {
     expect(slimPersistMessages(messages)).toEqual([]);
   });
 
-  it('displayPersistMessages drops tool results and contentless tool-call turns', () => {
+  it('displayPersistMessages restores completed tool rows without raw unbounded output', () => {
     const messages: ChatMessage[] = [
       { role: 'user', content: 'hi' },
       { role: 'assistant', content: null, tool_calls: [toolCall] },
@@ -86,6 +86,13 @@ describe('sessionTypes', () => {
     ];
     expect(displayPersistMessages(messages)).toEqual([
       { role: 'user', content: 'hi' },
+      {
+        role: 'tool',
+        content: 'tool → result',
+        toolName: 'tool',
+        toolResult: 'result',
+        toolResultTotal: 6,
+      },
       { role: 'assistant', content: 'bye' },
     ]);
   });
@@ -103,6 +110,13 @@ describe('sessionTypes', () => {
     expect(displayPersistMessages(messages)).toEqual([
       { role: 'user', content: 'go' },
       { role: 'assistant', content: '', reasoning: 'round 1 thinking' },
+      {
+        role: 'tool',
+        content: 'tool → result',
+        toolName: 'tool',
+        toolResult: 'result',
+        toolResultTotal: 6,
+      },
       { role: 'assistant', content: 'done', reasoning: 'round 2 thinking' },
     ]);
   });
@@ -120,6 +134,27 @@ describe('sessionTypes', () => {
       { role: 'tool', content: 'result', tool_call_id: 'call_1', name: 'ask_local_agent' },
     ];
     expect(chatMessagesFromSlim(slimPersistMessages(messages))).toEqual(messages);
+  });
+
+  it('closes an in-flight tool call as unknown when a session reloads', () => {
+    const session = createDefaultSession();
+    session.conversations[0]!.messages.push(
+      { role: 'user', content: 'run the test' },
+      { role: 'assistant', content: null, tool_calls: [toolCall] },
+    );
+    const store: Record<string, unknown> = { [SESSION_KEY_V1]: runtimeToPersisted(session) };
+
+    const restored = loadSidebarSession(makeMemento(store));
+    expect(restored.conversations[0]!.messages).toEqual([
+      { role: 'user', content: 'run the test' },
+      { role: 'assistant', content: null, tool_calls: [toolCall] },
+      {
+        role: 'tool',
+        content: expect.stringContaining('result is unknown'),
+        tool_call_id: 'call_1',
+        name: 'ask_local_agent',
+      },
+    ]);
   });
 
   it('round-trips the compaction window through persistence', () => {

@@ -11,14 +11,25 @@ function msg(role: AppMessage['role'], content: string, extra: Partial<AppMessag
 }
 
 describe('mergeSyncedMessages', () => {
-  it('keeps tool rows in position instead of dropping them', () => {
+  it('restores a completed tool row from the host', () => {
     const local: AppMessage[] = [
       msg('user', 'do it'),
-      msg('tool', 'read_file → src/a.ts', { toolName: 'read_file' }),
+      msg('tool', 'read_file → src/a.ts', {
+        toolName: 'read_file',
+        toolResult: 'contents',
+        toolResultTotal: 8,
+      }),
       msg('assistant', 'done'),
     ];
     const rows: PersistedRow[] = [
       { role: 'user', content: 'do it' },
+      {
+        role: 'tool',
+        content: 'read_file → src/a.ts',
+        toolName: 'read_file',
+        toolResult: 'contents',
+        toolResultTotal: 8,
+      },
       { role: 'assistant', content: 'done' },
     ];
 
@@ -27,6 +38,16 @@ describe('mergeSyncedMessages', () => {
       'tool',
       'assistant',
     ]);
+  });
+
+  it('keeps an in-flight tool row until the host has a completed result', () => {
+    const local: AppMessage[] = [
+      msg('user', 'do it'),
+      msg('tool', 'read_file → src/a.ts', { toolName: 'read_file' }),
+    ];
+    const rows: PersistedRow[] = [{ role: 'user', content: 'do it' }];
+
+    expect(mergeSyncedMessages(local, rows).map((m) => m.role)).toEqual(['user', 'tool']);
   });
 
   it('keeps diffs and errors interleaved rather than appended to the tail', () => {

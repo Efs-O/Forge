@@ -1,6 +1,7 @@
 import * as child_process from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import { terminateCliProcessTree } from '../agents/cliProcess';
 import * as vscode from 'vscode';
 import { checkDenyList, getBuiltinDenyList } from './DenyList';
 
@@ -152,6 +153,7 @@ export interface SpawnResult {
 export type ExecCommandErrorKind =
   | 'missing_executable'
   | 'timeout'
+  | 'cancelled'
   | 'spawn_error'
   | 'invalid_shell_syntax'
   | 'policy_refusal';
@@ -173,11 +175,12 @@ export function spawnAndWait(
   cwd: string,
   timeoutMs: number,
   extraEnv: NodeJS.ProcessEnv = {},
+  signal?: AbortSignal,
 ): Promise<SpawnResult> {
   return new Promise((resolve, reject) => {
     let stdout = '';
     let stderr = '';
-    let timedOut = false;
+    let settled = false;
 
     const proc = child_process.spawn(command, args, {
       shell: false,
@@ -187,10 +190,33 @@ export function spawnAndWait(
       env: { ...process.env, ...extraEnv, NO_COLOR: '1', FORCE_COLOR: '0' },
     });
 
+    const finish = (result: SpawnResult | Error): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      if (result instanceof Error) reject(result);
+      else resolve(result);
+    };
+
+    const terminate = (): void => {
+      // npm/npx often launch a shell shim then a Node process. Killing only
+      // the shim leaves the test runner alive and its stdio open forever.
+      void terminateCliProcessTree(proc);
+    };
+    const onAbort = (): void => {
+      terminate();
+      finish(new ExecCommandError('cancelled', command, 'process cancelled'));
+    };
     const timer = setTimeout(() => {
-      timedOut = true;
-      proc.kill();
+      terminate();
+      finish(new ExecCommandError('timeout', command, `process timed out after ${timeoutMs}ms`));
     }, timeoutMs);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
 
     proc.stdout.on('data', (chunk: Buffer) => {
       stdout += chunk.toString();
@@ -200,8 +226,7 @@ export function spawnAndWait(
     });
 
     proc.on('error', (err: NodeJS.ErrnoException) => {
-      clearTimeout(timer);
-      reject(
+      finish(
         new ExecCommandError(
           err.code === 'ENOENT' ? 'missing_executable' : 'spawn_error',
           command,
@@ -211,12 +236,7 @@ export function spawnAndWait(
     });
 
     proc.on('close', (code) => {
-      clearTimeout(timer);
-      if (timedOut) {
-        reject(new ExecCommandError('timeout', command, `process timed out after ${timeoutMs}ms`));
-        return;
-      }
-      resolve({ stdout, stderr, exitCode: code });
+      finish({ stdout, stderr, exitCode: code });
     });
   });
 }

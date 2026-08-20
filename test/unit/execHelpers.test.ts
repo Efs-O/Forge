@@ -59,6 +59,20 @@ describe('structured exec_command outcomes', () => {
     ).rejects.toMatchObject<Partial<ExecCommandError>>({ kind: 'timeout' });
   });
 
+  it('cancels the full spawned command promptly', async () => {
+    const controller = new AbortController();
+    const pending = spawnAndWait(
+      process.execPath,
+      ['-e', 'setInterval(() => {}, 1000)'],
+      process.cwd(),
+      10_000,
+      {},
+      controller.signal,
+    );
+    controller.abort();
+    await expect(pending).rejects.toMatchObject<Partial<ExecCommandError>>({ kind: 'cancelled' });
+  });
+
   it('returns a bounded final output window without a shell pipe', () => {
     const output = JSON.parse(
       formatExecCommandOutput(

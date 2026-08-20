@@ -3,7 +3,9 @@
  *
  * Used where Forge needs prose from the model rather than a turn: the `/compact`
  * summary, the `/review` scan. No transcript, no tools, no checkpoint — and the
- * result is returned rather than streamed to the webview.
+ * result is returned rather than streamed to the webview. A caller can attach
+ * it to a conversation (compaction does) so that conversation's Stop action
+ * can cancel the otherwise out-of-band request.
  */
 
 import * as vscode from 'vscode';
@@ -29,13 +31,17 @@ export interface PromptRunContext {
   events: SidebarProviderEvents;
   templateEngine?: TemplateEngine;
   forgeLoader?: ForgeInstructionsLoader;
-  /** Publishes the controller so a global cancel can abort this run. */
-  setController: (ctrl: AbortController) => void;
+  /** Publishes the controller so a global or owning-conversation cancel can abort this run. */
+  setController: (ctrl: AbortController, conversationId?: string) => void;
   /** Clears it again, but only if a later run has not already replaced it. */
   releaseController: (ctrl: AbortController) => void;
 }
 
-export async function runPromptToMarkdown(ctx: PromptRunContext, text: string): Promise<string> {
+export async function runPromptToMarkdown(
+  ctx: PromptRunContext,
+  text: string,
+  conversationId?: string,
+): Promise<string> {
   const config = ctx.getConfig();
   if (!config.active_model) throw new Error('Forge: no active model selected.');
   // Request-time resolution (defaults + base + @profile, F6).
@@ -61,7 +67,7 @@ export async function runPromptToMarkdown(ctx: PromptRunContext, text: string): 
 
   ctx.events.onGenerationStarted?.(selectedModel.name);
   const ctrl = new AbortController();
-  ctx.setController(ctrl);
+  ctx.setController(ctrl, conversationId);
   let content = '';
   try {
     await new Promise<void>((resolve, reject) => {

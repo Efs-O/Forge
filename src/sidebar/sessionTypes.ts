@@ -12,6 +12,8 @@ export {
 } from './sessionPersistence';
 import type { ChatMessage } from '../llm/types';
 import type { SessionHistoryMeta, SessionTabMeta } from './messageBridge';
+import { capDisplayText } from '../tools/resultCap';
+import { isFailureResult, resultLabel } from './toolResultView';
 
 export type { SessionHistoryMeta, SessionTabMeta };
 
@@ -49,8 +51,17 @@ const slimMsgSchema = z.object({
 });
 export type SlimPersistMessage = z.infer<typeof slimMsgSchema>;
 
-/** Subset the webview renders: plain text turns only. */
-type DisplayPersistMessage = { role: 'user' | 'assistant'; content: string; reasoning?: string };
+/** Subset of the transcript which can be safely restored into the webview. */
+export type DisplayPersistMessage =
+  | { role: 'user' | 'assistant'; content: string; reasoning?: string }
+  | {
+      role: 'tool';
+      content: string;
+      toolName: string;
+      toolResult: string;
+      toolResultTotal: number;
+      toolIsError?: boolean;
+    };
 
 export const conversationPersistedSchema = z.object({
   id: z.string().min(1),
@@ -143,30 +154,48 @@ export function slimPersistMessages(messages: ChatMessage[]): SlimPersistMessage
 }
 
 /**
- * Webview view: renderable turns. Tool *results* stay out — raw tool JSON in the
- * transcript is noise, and the sidebar surfaces tool activity live through its
- * own events.
+ * Webview view: renderable turns. Completed tool calls are included so reload
+ * can reconstruct the work already done. Their body is capped by the same rule
+ * as a live ToolResult message, rather than copying an unbounded tool payload
+ * into a webview message.
  *
  * An assistant turn that only called a tool is kept when it carries reasoning.
  * Dropping those made every thinking bubble except the final round's vanish the
  * moment a turn ended and SESSION_SYNC rebuilt the transcript.
  */
 export function displayPersistMessages(messages: ChatMessage[]): DisplayPersistMessage[] {
-  return messages
-    .filter(
-      (m) =>
-        (m.role === 'user' || m.role === 'assistant') &&
-        (typeof m.content === 'string' ||
-          (m.role === 'assistant' && typeof m.reasoning === 'string' && m.reasoning.length > 0)),
-    )
-    .map((m) => ({
-      role: m.role as 'user' | 'assistant',
+  const out: DisplayPersistMessage[] = [];
+  for (const m of messages) {
+    if (m.role === 'tool' && typeof m.content === 'string') {
+      const toolName = m.name ?? 'tool';
+      const { text: toolResult, totalChars: toolResultTotal } = capDisplayText(m.content);
+      out.push({
+        role: 'tool',
+        content: `${toolName} → ${resultLabel(toolName, m.content, null)}`,
+        toolName,
+        toolResult,
+        toolResultTotal,
+        ...(isFailureResult(m.content) ? { toolIsError: true } : {}),
+      });
+      continue;
+    }
+    if (
+      (m.role !== 'user' && m.role !== 'assistant') ||
+      (typeof m.content !== 'string' &&
+        !(m.role === 'assistant' && typeof m.reasoning === 'string' && m.reasoning.length > 0))
+    ) {
+      continue;
+    }
+    out.push({
+      role: m.role,
       // A reasoning-only turn has content: null; the webview contract is string.
       content: typeof m.content === 'string' ? m.content : '',
       ...(typeof m.reasoning === 'string' && m.reasoning.length > 0
         ? { reasoning: m.reasoning }
         : {}),
-    }));
+    });
+  }
+  return out;
 }
 
 export function chatMessagesFromSlim(slim: SlimPersistMessage[]): ChatMessage[] {
@@ -187,8 +216,8 @@ export function tabMetasFromSession(
   streamingIds?: ReadonlySet<string>,
 ): SessionTabMeta[] {
   return session.conversations.map((c) => {
-    // Display count: tool turns are persisted but must not inflate the badge.
-    const shown = displayPersistMessages(c.messages);
+    // Tool turns are restored but must not inflate the user-facing badge.
+    const shown = displayPersistMessages(c.messages).filter((m) => m.role !== 'tool');
     return {
       id: c.id,
       title: c.title,
@@ -207,7 +236,7 @@ export function historyMetasFromSession(session: SidebarRuntime): SessionHistory
     .filter((c) => !openIds.has(c.id))
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .map((c) => {
-      const shown = displayPersistMessages(c.messages);
+      const shown = displayPersistMessages(c.messages).filter((m) => m.role !== 'tool');
       return {
         id: c.id,
         title: c.title,

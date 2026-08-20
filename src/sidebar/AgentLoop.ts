@@ -58,8 +58,11 @@ export class AgentLoop {
   /** Collaborators handed to every turn module. Assembled once, in the ctor. */
   private readonly services: TurnServices;
   private promptRunCtrl: AbortController | null = null;
+  /** Conversation that owns the current out-of-band prompt, if any. */
+  private promptRunConversationId: string | null = null;
   private onContextChanged?: (convId: string, promptChanged: boolean) => void;
   private onExactContextTokens?: (convId: string, usedTokens: number) => void;
+  private onTranscriptChanged?: (convId: string) => void;
 
   /**
    * Registers the mid-turn context-growth listener. A setter rather than an
@@ -75,6 +78,11 @@ export class AgentLoop {
   /** Receives llama-server's execution-side prompt token count. */
   setExactContextTokensListener(listener: (convId: string, usedTokens: number) => void): void {
     this.onExactContextTokens = listener;
+  }
+
+  /** Snapshots transcript mutations while a turn is still in progress. */
+  setTranscriptChangedListener(listener: (convId: string) => void): void {
+    this.onTranscriptChanged = listener;
   }
 
   get streaming(): boolean {
@@ -171,6 +179,7 @@ export class AgentLoop {
       // construction, so a snapshot taken here would capture undefined.
       onContextChanged: (convId, promptChanged) => this.onContextChanged?.(convId, promptChanged),
       onExactContextTokens: (convId, used) => this.onExactContextTokens?.(convId, used),
+      onTranscriptChanged: (conv) => this.recordTranscriptMutation(conv),
       commitUserPrompt: (conv, text, attachments) => this.commitUserPrompt(conv, text, attachments),
       runModelTurn: (baseUrl, conv, model, activeFile, ctrl, postC, apiKey, checkpoint) =>
         runModelTurn(this.services, {
@@ -184,11 +193,15 @@ export class AgentLoop {
           checkpoint,
         }),
       waitForCancelledTurns: () => this.waitForCancelledTurns(),
-      setController: (ctrl) => {
+      setController: (ctrl, conversationId) => {
         this.promptRunCtrl = ctrl;
+        this.promptRunConversationId = conversationId ?? null;
       },
       releaseController: (ctrl) => {
-        if (this.promptRunCtrl === ctrl) this.promptRunCtrl = null;
+        if (this.promptRunCtrl === ctrl) {
+          this.promptRunCtrl = null;
+          this.promptRunConversationId = null;
+        }
       },
     };
     this.toolDispatch.setWorkerRunner((request, context) =>
@@ -213,7 +226,7 @@ export class AgentLoop {
     // lifecycle's: a pending confirmation and a /compact summary are neither
     // of them a turn.
     this.approvals.cancelConversation(convId);
-    if (!convId) this.promptRunCtrl?.abort();
+    if (!convId || this.promptRunConversationId === convId) this.promptRunCtrl?.abort();
     return this.lifecycle.cancel(convId);
   }
 
@@ -311,12 +324,17 @@ export class AgentLoop {
   ): void {
     const priorUserCount = conv.messages.filter((m) => m.role === 'user').length;
     conv.messages.push({ role: 'user', content: buildUserContent(text, attachments) });
-    conv.updatedAt = Date.now();
     if (priorUserCount === 0) conv.title = deriveTitle(text.split('\n')[0] ?? text);
+    this.recordTranscriptMutation(conv);
   }
 
-  runPromptToMarkdown(text: string): Promise<string> {
-    return runPromptToMarkdown(this.services, text);
+  private recordTranscriptMutation(conv: ConversationRuntime): void {
+    conv.updatedAt = Date.now();
+    this.onTranscriptChanged?.(conv.id);
+  }
+
+  runPromptToMarkdown(text: string, conversationId?: string): Promise<string> {
+    return runPromptToMarkdown(this.services, text, conversationId);
   }
   private warnOnce(key: string, message: string): void {
     this.capabilities.warnOnce(key, message, (text) => {

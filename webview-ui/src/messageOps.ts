@@ -16,17 +16,22 @@ export interface AppMessage {
   toolIsError?: boolean;
 }
 
-export type PersistedRow = {
-  role: 'user' | 'assistant';
-  content: string;
-  reasoning?: string | undefined;
-};
+export type PersistedRow =
+  | { role: 'user' | 'assistant'; content: string; reasoning?: string | undefined }
+  | {
+      role: 'tool';
+      content: string;
+      toolName: string;
+      toolResult: string;
+      toolResultTotal: number;
+      toolIsError?: boolean | undefined;
+    };
 
 /**
- * Roles the host never persists. They are reconciled positionally on
- * SESSION_SYNC so a finished turn keeps showing the work it did.
+ * Roles which only exist in the live webview. They are reconciled positionally
+ * on SESSION_SYNC so a finished turn keeps showing its diff and error cards.
  */
-export const LOCAL_ONLY_ROLES = new Set<AppMessage['role']>(['tool', 'diff', 'error', 'system']);
+export const LOCAL_ONLY_ROLES = new Set<AppMessage['role']>(['diff', 'error', 'system']);
 
 export function mkId(): string {
   return Math.random().toString(36).slice(2);
@@ -35,11 +40,10 @@ export function mkId(): string {
 /**
  * Reconciles a conversation against the host's persisted view.
  *
- * The host only persists user and assistant turns, so a naive rebuild wipes the
- * tool rows, diff cards and errors that make a finished turn legible — that is
- * what made the agent's work vanish the moment it stopped. Local-only rows are
- * therefore kept *in position* by walking both lists together, rather than being
- * appended to the tail where their ordering would be lost.
+ * The host persists completed tool rows too. Tool activity that has not yet
+ * produced a result, plus diff cards and errors, remains local until the host
+ * can authoritatively restore it. Those transient rows are kept in position
+ * rather than appended to the tail where their ordering would be lost.
  *
  * If the two views disagree (for example, an assistant tool-call turn is not
  * renderable in the host view), local-only rows stay anchored before the next
@@ -47,14 +51,19 @@ export function mkId(): string {
  * of moving it to the bottom after session reconciliation.
  */
 export function mergeSyncedMessages(local: AppMessage[], rows: PersistedRow[]): AppMessage[] {
-  const persistedLocal = local.filter((m) => !LOCAL_ONLY_ROLES.has(m.role));
-  const reconstructed: AppMessage[] = rows.map((m, i) => ({
-    // Reuse the existing id where the row still matches, so React keeps
-    // component state (open thinking rows, scroll) across reconciliation.
-    id: persistedLocal[i]?.role === m.role ? persistedLocal[i]!.id : mkId(),
+  const reconstructed: AppMessage[] = rows.map((m) => ({
+    id: mkId(),
     role: m.role,
     content: m.content,
-    reasoning: m.reasoning,
+    ...(m.role !== 'tool' && m.reasoning !== undefined ? { reasoning: m.reasoning } : {}),
+    ...(m.role === 'tool'
+      ? {
+          toolName: m.toolName,
+          toolResult: m.toolResult,
+          toolResultTotal: m.toolResultTotal,
+          ...(m.toolIsError ? { toolIsError: true } : {}),
+        }
+      : {}),
   }));
 
   // Match the local renderable rows to the authoritative host rows in order.
@@ -70,6 +79,7 @@ export function mergeSyncedMessages(local: AppMessage[], rows: PersistedRow[]): 
     );
     if (hostIndex < 0) continue;
     localToHost.set(localIndex, hostIndex);
+    reconstructed[hostIndex]!.id = message.id;
     hostCursor = hostIndex + 1;
   }
 
@@ -77,7 +87,10 @@ export function mergeSyncedMessages(local: AppMessage[], rows: PersistedRow[]): 
   const after = new Map<number, AppMessage[]>();
   for (let localIndex = 0; localIndex < local.length; localIndex++) {
     const message = local[localIndex]!;
-    if (!LOCAL_ONLY_ROLES.has(message.role)) continue;
+    const keepTransient =
+      LOCAL_ONLY_ROLES.has(message.role) ||
+      (message.role === 'tool' && !localToHost.has(localIndex));
+    if (!keepTransient) continue;
     const nextHost = nearestMappedHost(localToHost, localIndex, 1, local.length);
     if (nextHost !== undefined) {
       appendRow(before, nextHost, message);
@@ -95,6 +108,9 @@ export function mergeSyncedMessages(local: AppMessage[], rows: PersistedRow[]): 
 }
 
 function sameRenderableMessage(local: AppMessage, host: AppMessage): boolean {
+  if (local.role === 'tool' && host.role === 'tool') {
+    return local.toolName === host.toolName && local.toolResult === host.toolResult;
+  }
   return (
     local.role === host.role && local.content === host.content && local.reasoning === host.reasoning
   );

@@ -124,7 +124,7 @@ export function makeExecCommandTool(): RegisteredTool {
       },
     },
     permission: 'headless',
-    handler: async (args) => {
+    handler: async (args, context) => {
       // `npm.cmd` and `npm` are one program, and the denylist recognises the
       // bare spelling only — collapse them BEFORE any guard sees the command.
       const command = canonicalizeExecCommand(args['command'] as string);
@@ -174,7 +174,14 @@ export function makeExecCommandTool(): RegisteredTool {
       }
 
       try {
-        const result = await spawnAndWait(spawned.command, spawned.args, cwd, timeoutMs);
+        const result = await spawnAndWait(
+          spawned.command,
+          spawned.args,
+          cwd,
+          timeoutMs,
+          {},
+          context?.abortSignal,
+        );
         return formatExecCommandOutput(command, result, outputOptions);
       } catch (error) {
         // A cmd.exe builtin has no executable image, so spawn reports it
@@ -227,7 +234,7 @@ export function makeRunTestsTool(): RegisteredTool {
       },
     },
     permission: 'headless',
-    handler: async (args) => {
+    handler: async (args, context) => {
       // Was hardcoded to the workspace root, so in a workspace holding several
       // projects it looked for a package.json that was never there and failed
       // with a bare ENOENT naming a path nobody had chosen.
@@ -249,6 +256,8 @@ export function makeRunTestsTool(): RegisteredTool {
         [...invocation.argsPrefix, ...cmdArgs],
         root,
         60_000,
+        {},
+        context?.abortSignal,
       );
       return formatOutput(result);
     },
@@ -281,7 +290,7 @@ export function makeRunBuildTool(): RegisteredTool {
       },
     },
     permission: 'headless',
-    handler: async (args) => {
+    handler: async (args, context) => {
       const root = resolveExecCwd(args['cwd'] as string | undefined);
       const script = (args['script'] as string | undefined) ?? 'build';
 
@@ -315,6 +324,8 @@ export function makeRunBuildTool(): RegisteredTool {
         [...invocation.argsPrefix, ...cmdArgs],
         root,
         120_000,
+        {},
+        context?.abortSignal,
       );
       const out = result.stdout.slice(0, MAX_OUTPUT_CHARS);
       let formatted = out;

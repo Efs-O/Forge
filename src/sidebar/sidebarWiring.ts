@@ -128,7 +128,8 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     postSessionSync: host.postSessionSync,
     invalidateExactTokenBudget: () => budget.forget(host.getActive().id),
     postTokenBudget: () => host.postTokenBudget(),
-    runPromptToMarkdown: (text) => agentLoop.runPromptToMarkdown(text),
+    runPromptToMarkdown: (text, conversationId) =>
+      agentLoop.runPromptToMarkdown(text, conversationId),
     isStreaming: () => agentLoop.streaming,
     beginCompaction: (convId) => agentLoop.beginBackgroundWork(convId),
     toggleClanker: () => {
@@ -146,6 +147,10 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
   agentLoop.setExactContextTokensListener((convId, usedTokens) =>
     budget.publishExact(convId, usedTokens),
   );
+  agentLoop.setTranscriptChangedListener(() => {
+    host.persistSession();
+    host.postSessionSync();
+  });
 
   const send = new SendPipeline({
     getConfig: host.getConfig,

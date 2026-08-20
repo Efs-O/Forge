@@ -72,6 +72,7 @@ export interface ModelTurnContext {
   warnOnce: (key: string, message: string) => void;
   onContextChanged?: (convId: string, promptChanged: boolean) => void;
   onExactContextTokens?: (convId: string, usedTokens: number) => void;
+  onTranscriptChanged?: (conv: ConversationRuntime) => void;
 }
 
 export interface ModelTurnRequest {
@@ -227,6 +228,7 @@ export async function runModelTurn(
         // tokens. Report it now rather than at the end of the turn.
         ctx.onContextChanged?.(conv.id, true);
       },
+      onMessagesChanged: () => ctx.onTranscriptChanged?.(conv),
       onToken: (text) => postC({ type: 'token', text }),
       onReasoning: (text) => postC({ type: 'reasoningToken', text }),
       onDone: (finishReason) => {
