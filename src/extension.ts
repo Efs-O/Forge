@@ -15,7 +15,10 @@ import { watchForgeConfig } from './vscode/configReload';
 import { KeepUndoCodeLensProvider } from './sidebar/KeepUndoCodeLens';
 import { DiffDecorations } from './sidebar/DiffDecorations';
 import { TemplateEngine } from './llm/TemplateEngine';
-import { createForgeInstructionsLoader } from './llm/ForgeInstructionsLoader';
+import {
+  createForgeInstructionsLoader,
+  ensureForgeInstructionsFile,
+} from './llm/ForgeInstructionsLoader';
 import { SESSION_KEY_V1 } from './sidebar/sessionTypes';
 import { registerAllTools } from './tools/registerAllTools';
 import { connectMcpServers } from './tools/mcpBridge';
@@ -189,6 +192,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }
 
   // ── Sidebar ───────────────────────────────────────────────────────────────
+  if (workspaceRoot && config.forge_instructions?.auto_create) {
+    const bootstrap = ensureForgeInstructionsFile(workspaceRoot);
+    if (bootstrap.status === 'error') {
+      const message = `Forge: could not create FORGE.md — ${bootstrap.error.message}`;
+      log.warn(message);
+      void vscode.window.showWarningMessage(message);
+    }
+  }
   const forgeLoader = createForgeInstructionsLoader();
   if (forgeLoader) context.subscriptions.push(forgeLoader);
 

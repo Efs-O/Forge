@@ -5,6 +5,46 @@ import * as vscode from 'vscode';
 const FORGE_MD = 'FORGE.md';
 const MAX_BYTES = 8192; // guard against accidentally huge files eating context
 const RELOAD_DEBOUNCE_MS = 150;
+const STARTER_CONTENT = `# Forge Project Notes
+
+Keep this file concise (under 8 KB). Forge includes it in every local-agent prompt.
+
+## Project facts
+- Purpose and important architecture decisions:
+
+## Commands
+- Build:
+- Test:
+
+## Working rules
+- Add durable conventions and safety constraints here.
+`;
+
+export type ForgeInstructionsBootstrapResult =
+  | { status: 'created'; path: string }
+  | { status: 'exists'; path: string }
+  | { status: 'error'; path: string; error: Error };
+
+/**
+ * Creates the deliberately small starter only when a workspace has no project
+ * instructions. It never replaces user-authored content.
+ */
+export function ensureForgeInstructionsFile(
+  workspaceRoot: string,
+): ForgeInstructionsBootstrapResult {
+  const filePath = path.join(workspaceRoot, FORGE_MD);
+  try {
+    if (fs.existsSync(filePath)) return { status: 'exists', path: filePath };
+    fs.writeFileSync(filePath, STARTER_CONTENT, { encoding: 'utf8', flag: 'wx' });
+    return { status: 'created', path: filePath };
+  } catch (error) {
+    // Another VS Code window can create the file between existsSync and write.
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      return { status: 'exists', path: filePath };
+    }
+    return { status: 'error', path: filePath, error: error as Error };
+  }
+}
 
 export class ForgeInstructionsLoader implements vscode.Disposable {
   private content: string | undefined;

@@ -133,6 +133,12 @@ profiles:
 #   at: 0.85
 #   resume: true
 
+# Create a small FORGE.md in a workspace that does not have one yet. Forge
+# injects that project file into every native local-agent prompt; it never
+# overwrites an existing FORGE.md.
+# forge_instructions:
+#   auto_create: true
+
 # -------------------------------------------------------------------
 # Control server (optional) — localhost API so an external orchestrator can
 # load models on demand and discover the OpenAI-compatible endpoint.

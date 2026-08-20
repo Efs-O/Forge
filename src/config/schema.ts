@@ -223,6 +223,11 @@ export const ForgeConfigSchema = z
     model_dirs: z.array(z.string()).optional(),
     templates_dir: z.string().optional(),
     custom_instructions: z.string().optional(),
+    forge_instructions: z
+      .object({
+        auto_create: z.boolean().optional(),
+      })
+      .optional(),
     strip_thinking_channels: z.boolean().optional(),
     max_simultaneous_models: z.number().int().min(1).max(8).optional(),
     max_cli_agents: z.number().int().min(1).max(32).optional(),

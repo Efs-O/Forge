@@ -266,6 +266,11 @@ export interface ForgeConfig {
   templates_dir?: string;
   /** Text injected into every system prompt via the template engine. */
   custom_instructions?: string;
+  /** Workspace instruction-file behavior for native Forge agents. */
+  forge_instructions?: {
+    /** Create a small FORGE.md starter when this workspace does not have one. */
+    auto_create?: boolean;
+  };
   /** Default thinking/channel stripping behavior, overridable per model. */
   strip_thinking_channels?: boolean;
   /** Maximum number of llama-server processes to keep alive simultaneously. Default: 1. */
