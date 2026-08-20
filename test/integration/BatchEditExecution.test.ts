@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { makeEditFileTool } from '../../src/tools/fileEditTools';
+import { makeEditFileTool } from '../../src/tools/editFileTool';
 import { makeReadFileTool } from '../../src/tools/builtinTools';
 
 describe('edit_file batch form', () => {

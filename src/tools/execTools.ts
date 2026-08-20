@@ -14,9 +14,14 @@ import {
   MAX_EXEC_OUTPUT_LINES,
   parseExecOutputOptions,
   resolveExecCwd,
-  resolvePackageRunnerInvocation,
   spawnAndWait,
 } from './execHelpers';
+import {
+  canonicalizeExecCommand,
+  describeShellBuiltin,
+  resolveExecInvocation,
+  resolvePackageRunnerInvocation,
+} from './execProgramResolver';
 import { checkDenyList, getBuiltinDenyList } from './DenyList';
 
 // ── run_terminal ───────────────────────────────────────────────────────────────
@@ -76,11 +81,15 @@ export function makeExecCommandTool(): RegisteredTool {
       function: {
         name: 'exec_command',
         description:
-          'Execute a binary directly (no shell). Shell operators in args and dangerous commands are refused. Use tail_lines, head_lines, max_output_chars, or output_stream to shape returned output instead of piping.',
+          'Execute a binary directly (no shell). "npm" and "npx" work as-is on every platform — do not wrap them in cmd or add .cmd. Shell builtins (dir, echo, type) are not programs and will not run; use list_directory, write_file, and read_file instead. Shell operators in args and dangerous commands are refused. Use tail_lines, head_lines, max_output_chars, or output_stream to shape returned output instead of piping.',
         parameters: {
           type: 'object',
           properties: {
-            command: { type: 'string', description: 'Binary to run (no shell).' },
+            command: {
+              type: 'string',
+              description:
+                'Executable to run, with no shell. Bare "npm" and "npx" are resolved for you on Windows.',
+            },
             args: { type: 'array', items: { type: 'string' }, description: 'Arguments array.' },
             cwd: { type: 'string', description: 'Working directory. Optional.' },
             timeout_ms: { type: 'integer', description: 'Timeout in ms. Default 30000.' },
@@ -116,7 +125,9 @@ export function makeExecCommandTool(): RegisteredTool {
     },
     permission: 'headless',
     handler: async (args) => {
-      const command = args['command'] as string;
+      // `npm.cmd` and `npm` are one program, and the denylist recognises the
+      // bare spelling only — collapse them BEFORE any guard sees the command.
+      const command = canonicalizeExecCommand(args['command'] as string);
       const cmdArgs = (args['args'] as string[]) ?? [];
       const outputOptions = parseExecOutputOptions(args);
       const cwd = resolveExecCwd(args['cwd'] as string | undefined);
@@ -149,8 +160,39 @@ export function makeExecCommandTool(): RegisteredTool {
         );
       }
 
-      const result = await spawnAndWait(command, cmdArgs, cwd, timeoutMs);
-      return formatExecCommandOutput(command, result, outputOptions);
+      // Guards ran against the canonical name, so the denylist saw `npm`, not
+      // the node.exe it resolves to. Only the spawn sees the translation.
+      let spawned;
+      try {
+        spawned = resolveExecInvocation(command, cmdArgs);
+      } catch (error) {
+        throw new ExecCommandError(
+          'missing_executable',
+          command,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+
+      try {
+        const result = await spawnAndWait(spawned.command, spawned.args, cwd, timeoutMs);
+        return formatExecCommandOutput(command, result, outputOptions);
+      } catch (error) {
+        // A cmd.exe builtin has no executable image, so spawn reports it
+        // missing — true, but useless. Say which tool replaces it.
+        const alternative = describeShellBuiltin(command);
+        if (
+          alternative &&
+          error instanceof ExecCommandError &&
+          error.kind === 'missing_executable'
+        ) {
+          throw new ExecCommandError(
+            'missing_executable',
+            command,
+            `"${command}" is a shell builtin, not a program, and exec_command runs without a shell. ${alternative}`,
+          );
+        }
+        throw error;
+      }
     },
   };
 }

@@ -15,7 +15,7 @@ import {
 } from '../../src/tools/dirTools';
 import { makeRunTestsTool } from '../../src/tools/execTools';
 import { buildFallbackToolInstructions } from '../../src/tools/FallbackToolPrompt';
-import { makeEditFileTool } from '../../src/tools/fileEditTools';
+import { makeEditFileTool } from '../../src/tools/editFileTool';
 import { makeGitStatusTool } from '../../src/tools/gitTools';
 import { makeGetDiagnosticsTool, makeGetDocumentSymbolsTool } from '../../src/tools/lspTools';
 import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';

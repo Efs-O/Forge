@@ -125,8 +125,16 @@ export function checkPowerShellBan(command: string, args: string[]): void {
   if (cmd === 'powershell.exe' || cmd === 'powershell') {
     for (const arg of args) {
       if (PS_DANGEROUS_FLAGS.includes(arg)) {
+        // Name the route that works. "Use a non-shell binary instead" told the
+        // model what to stop doing and nothing about what to do, so it kept
+        // hunting for another shell rather than reaching for the tool that
+        // already does the job.
         throw new Error(
-          `PowerShell flag "${arg}" is banned. Use exec_command with a non-shell binary instead.`,
+          `PowerShell flag "${arg}" is banned — a model-authored script cannot be checked ` +
+            'by the denylist, so it is never run. Use the dedicated tools instead: ' +
+            'list_directory to list files, read_file to read them, search_code to search, ' +
+            'query_powershell for a read-only workspace overview or a file hash, or ' +
+            'exec_command with a real executable and an args array.',
         );
       }
     }
@@ -294,40 +302,6 @@ export function guardExec(command: string, args: string[]): void {
 export interface TestRunnerConfig {
   command: string;
   baseArgs: string[];
-}
-
-export interface PackageRunnerInvocation {
-  command: string;
-  argsPrefix: string[];
-}
-
-/**
- * npm and npx are .cmd shims on Windows, which cannot be passed to spawn with
- * shell:false. Resolve the shim to its adjacent node.exe and npm CLI script so
- * project scripts remain shell-free and user arguments cannot become shell syntax.
- */
-export function resolvePackageRunnerInvocation(
-  runner: 'npm' | 'npx',
-  platform: NodeJS.Platform = process.platform,
-): PackageRunnerInvocation {
-  if (platform !== 'win32') return { command: runner, argsPrefix: [] };
-
-  const lookup = child_process.spawnSync('where.exe', [`${runner}.cmd`], { encoding: 'utf8' });
-  const shim = lookup.stdout
-    ?.split(/\r?\n/u)
-    .map((entry) => entry.trim())
-    .find((entry) => entry.toLowerCase().endsWith(`${runner}.cmd`));
-  if (!shim) throw new Error(`${runner}: Windows command shim was not found on PATH`);
-
-  const installRoot = path.dirname(shim);
-  const node = path.join(installRoot, 'node.exe');
-  const cli = path.join(installRoot, 'node_modules', 'npm', 'bin', `${runner}-cli.js`);
-  if (!fs.existsSync(node) || !fs.existsSync(cli)) {
-    throw new Error(
-      `${runner}: expected node executable and CLI beside the resolved shim (${installRoot})`,
-    );
-  }
-  return { command: node, argsPrefix: [cli] };
 }
 
 export function detectTestRunner(workspaceRoot: string): TestRunnerConfig {

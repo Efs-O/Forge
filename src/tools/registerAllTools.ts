@@ -30,8 +30,8 @@ import {
 import { makeWebFetchTool } from './fetchTool';
 import { makeWebSearchTool } from './searchTool';
 import { makeRememberTool, makeRecallTool, makeListMemoriesTool } from './memoryTools';
+import { makeEditFileTool } from './editFileTool';
 import {
-  makeEditFileTool,
   makeCreateDirectoryTool,
   makeMoveFileTool,
   makeDeleteFileTool,

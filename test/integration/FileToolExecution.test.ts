@@ -14,8 +14,8 @@ import {
   makeCreateDirectoryTool,
   makeDeleteFileTool,
   makeMoveFileTool,
-  makeEditFileTool,
 } from '../../src/tools/fileEditTools';
+import { makeEditFileTool } from '../../src/tools/editFileTool';
 import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
 
 describe('isolated file and directory tool execution', () => {

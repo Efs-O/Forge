@@ -184,10 +184,13 @@ overlaps with an existing owner, extend the owner instead.
 | Built-in tool definitions                  | `src/tools/builtinTools.ts`           |
 | Single-write size ceiling + chunk advice   | `src/tools/writeChunking.ts`          |
 | File read/write tools                      | `src/tools/fileEditTools.ts`          |
+| `edit_file` tool                           | `src/tools/editFileTool.ts`           |
+| `old_str` matching + line-ending handling  | `src/tools/editMatch.ts`              |
 | Structured line-edit validation + tool     | `src/tools/structuredEditTool.ts`     |
 | Directory listing tools                    | `src/tools/dirTools.ts`               |
 | Terminal + headless exec tools             | `src/tools/execTools.ts`              |
 | Exec child-process helpers                 | `src/tools/execHelpers.ts`            |
+| exec_command program resolution            | `src/tools/execProgramResolver.ts`    |
 | Git tools (status, diff, commit)           | `src/tools/gitTools.ts`               |
 | Read-only git tools (status, log, diff)    | `src/tools/gitReadTools.ts`           |
 | VS Code Git API access + path/status maps  | `src/tools/gitRepo.ts`                |
