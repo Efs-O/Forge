@@ -58,7 +58,10 @@ export function InputRow({
       : slashCommands.filter(
           (cmd) => cmd.trigger.includes(slashQuery) || cmd.title.toLowerCase().includes(slashQuery),
         );
-  const showSlashMenu = !streaming && slashMatches.length > 0 && text.startsWith('/');
+  const availableSlashMatches = streaming
+    ? slashMatches.filter((command) => command.availableWhileStreaming)
+    : slashMatches;
+  const showSlashMenu = availableSlashMatches.length > 0 && text.startsWith('/');
 
   useEffect(() => {
     if (prefillText === null) return;
@@ -114,7 +117,7 @@ export function InputRow({
 
   const runSlashCommand = useCallback(
     (command: SlashCommand) => {
-      if (streaming) return;
+      if (streaming && !command.availableWhileStreaming) return;
       onRunSlashCommand(command.id);
       setText('');
       setSelectedCommandIndex(0);
@@ -128,17 +131,19 @@ export function InputRow({
       if (showSlashMenu) {
         if (e.key === 'ArrowDown') {
           e.preventDefault();
-          setSelectedCommandIndex((i) => (i + 1) % slashMatches.length);
+          setSelectedCommandIndex((i) => (i + 1) % availableSlashMatches.length);
           return;
         }
         if (e.key === 'ArrowUp') {
           e.preventDefault();
-          setSelectedCommandIndex((i) => (i - 1 + slashMatches.length) % slashMatches.length);
+          setSelectedCommandIndex(
+            (i) => (i - 1 + availableSlashMatches.length) % availableSlashMatches.length,
+          );
           return;
         }
         if (e.key === 'Tab' || e.key === 'Enter') {
           e.preventDefault();
-          runSlashCommand(slashMatches[selectedCommandIndex] ?? slashMatches[0]);
+          runSlashCommand(availableSlashMatches[selectedCommandIndex] ?? availableSlashMatches[0]);
           return;
         }
         if (e.key === 'Escape') {
@@ -152,7 +157,7 @@ export function InputRow({
         submit();
       }
     },
-    [runSlashCommand, selectedCommandIndex, showSlashMenu, slashMatches, submit],
+    [availableSlashMatches, runSlashCommand, selectedCommandIndex, showSlashMenu, submit],
   );
 
   const canSend = text.trim().length > 0 || attachments.length > 0;
@@ -164,7 +169,7 @@ export function InputRow({
     <div id="input-row">
       {showSlashMenu && (
         <div id="slash-menu" role="listbox" aria-label="Slash commands">
-          {slashMatches.map((cmd, index) => (
+          {availableSlashMatches.map((cmd, index) => (
             <button
               key={`${cmd.id}-${cmd.trigger}`}
               type="button"

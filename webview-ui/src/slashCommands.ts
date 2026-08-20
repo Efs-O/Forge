@@ -5,6 +5,8 @@ export interface SlashCommand {
   trigger: string;
   title: string;
   description: string;
+  /** Safe to run without changing the active turn or its backend resources. */
+  availableWhileStreaming?: boolean;
 }
 
 export const SLASH_COMMANDS: SlashCommand[] = [
@@ -31,6 +33,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     trigger: 'new',
     title: 'New Chat',
     description: 'Open a new conversation tab.',
+    availableWhileStreaming: true,
   },
   {
     id: 'clearChat',
