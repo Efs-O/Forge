@@ -150,6 +150,7 @@ export class AgentLoop {
       pool,
       registry: toolRegistry,
       workspaceRoot: this.workspaceRoot,
+      ...(forgeLoader ? { instructionsLoader: forgeLoader } : {}),
       ...(secrets ? { secrets } : {}),
       onActivity: (activity, conversationId) =>
         this.post({ type: 'workerStatus', ...activity, conversationId }),

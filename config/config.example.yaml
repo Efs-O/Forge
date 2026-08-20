@@ -133,9 +133,9 @@ profiles:
 #   at: 0.85
 #   resume: true
 
-# Create a small root AGENTS.md in a workspace that has neither AGENTS.md nor
-# the legacy FORGE.md. Forge injects that project file into every native
-# local-agent prompt; it never overwrites an existing instructions file.
+# Create a small FORGE.md in every discovered repository that does not have
+# one. Forge prefers FORGE.md over AGENTS.md and injects the repository-specific
+# file into native local-agent prompts; it never overwrites existing files.
 # forge_instructions:
 #   auto_create: true
 

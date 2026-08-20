@@ -1,6 +1,6 @@
 # Project Instructions for Forge Agent
-# Copy this file to FORGE.md in your workspace root and fill it in.
-# Forge reads it automatically and injects it into every prompt.
+# Copy this file to FORGE.md in each repository root and fill it in.
+# Forge reads it automatically and injects it into Forge-native prompts.
 # Keep it focused — every token here costs context on every turn.
 
 ## Stack
@@ -16,7 +16,7 @@ src/tools/    — tool definitions and execution
 src/sidebar/  — VS Code webview and agent loop
 src/config/   — Zod config schema and loader
 config/       — user-facing config examples and templates
-tests/        — unit and integration tests
+test/         — unit and integration tests
 
 ## Key Files
 <!-- The single most important owner for each concern — agent starts here -->
@@ -25,7 +25,7 @@ tests/        — unit and integration tests
 - LLM dispatch:      src/llm/ChatClient.ts
 - Tool definitions:  src/tools/registerAllTools.ts
 - Config schema:     src/config/schema.ts
-- System prompt:     src/templates/builtin/execute.njk
+- System prompt:     config/templates/builtin/execute.njk
 
 ## Navigation Rules
 - Grep before creating — check if a function or file already exists

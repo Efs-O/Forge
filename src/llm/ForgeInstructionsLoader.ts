@@ -3,8 +3,8 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 
 const AGENTS_MD = 'AGENTS.md';
-const LEGACY_FORGE_MD = 'FORGE.md';
-const INSTRUCTION_FILES = [AGENTS_MD, LEGACY_FORGE_MD] as const;
+const FORGE_MD = 'FORGE.md';
+const INSTRUCTION_FILES = [FORGE_MD, AGENTS_MD] as const;
 const MAX_BYTES = 8192; // guard against accidentally huge files eating context
 const RELOAD_DEBOUNCE_MS = 150;
 const STARTER_CONTENT = `# Project Instructions
@@ -28,16 +28,19 @@ export type ForgeInstructionsBootstrapResult =
   | { status: 'error'; path: string; error: Error };
 
 /**
- * AGENTS.md is the shared workspace convention. FORGE.md remains supported for
- * existing workspaces, but a new workspace receives AGENTS.md only when neither
- * instruction file exists.
+ * FORGE.md is authoritative for Forge-native agents. AGENTS.md remains a
+ * compatibility fallback for repositories that have not adopted it yet.
  */
 export function resolveProjectInstructionsPath(workspaceRoot: string): string {
   for (const fileName of INSTRUCTION_FILES) {
     const candidate = path.join(workspaceRoot, fileName);
     if (fs.existsSync(candidate)) return candidate;
   }
-  return path.join(workspaceRoot, AGENTS_MD);
+  return preferredProjectInstructionsPath(workspaceRoot);
+}
+
+export function preferredProjectInstructionsPath(repositoryRoot: string): string {
+  return path.join(repositoryRoot, FORGE_MD);
 }
 
 /**
@@ -45,9 +48,9 @@ export function resolveProjectInstructionsPath(workspaceRoot: string): string {
  * instructions. It never replaces user-authored content.
  */
 export function ensureForgeInstructionsFile(
-  workspaceRoot: string,
+  repositoryRoot: string,
 ): ForgeInstructionsBootstrapResult {
-  const filePath = resolveProjectInstructionsPath(workspaceRoot);
+  const filePath = preferredProjectInstructionsPath(repositoryRoot);
   try {
     if (fs.existsSync(filePath)) return { status: 'exists', path: filePath };
     fs.writeFileSync(filePath, STARTER_CONTENT, { encoding: 'utf8', flag: 'wx' });
@@ -62,50 +65,56 @@ export function ensureForgeInstructionsFile(
 }
 
 export class ForgeInstructionsLoader implements vscode.Disposable {
-  private content: string | undefined;
+  private readonly contentByPath = new Map<string, string | undefined>();
   private watcher: vscode.Disposable | undefined;
   private debounceTimer: ReturnType<typeof setTimeout> | undefined;
-  private filePath: string;
-  private truncationWarningShown = false;
+  private readonly truncationWarnings = new Set<string>();
 
   constructor(private readonly workspaceRoot: string) {
-    this.filePath = resolveProjectInstructionsPath(workspaceRoot);
-    this.load();
     this.watch();
   }
 
   get instructions(): string | undefined {
-    return this.content;
+    return this.instructionsFor();
   }
   get root(): string {
     return this.workspaceRoot;
   }
 
-  private load(): void {
+  /** Instructions for the repository containing `target`, or the workspace
+   * root when no target/repository can be identified. */
+  instructionsFor(target?: string): string | undefined {
+    const scopeRoot = resolveInstructionScopeRoot(this.workspaceRoot, target);
+    const filePath = resolveProjectInstructionsPath(scopeRoot);
+    if (this.contentByPath.has(filePath)) return this.contentByPath.get(filePath);
     try {
-      this.filePath = resolveProjectInstructionsPath(this.workspaceRoot);
-      if (!fs.existsSync(this.filePath)) {
-        this.content = undefined;
-        this.truncationWarningShown = false;
-        return;
+      if (!fs.existsSync(filePath)) {
+        this.contentByPath.set(filePath, undefined);
+        return undefined;
       }
 
-      const raw = fs.readFileSync(this.filePath, 'utf8');
-      if (raw.length > MAX_BYTES) {
-        this.content = raw.slice(0, MAX_BYTES);
-        if (!this.truncationWarningShown) {
-          this.truncationWarningShown = true;
+      const raw = fs.readFileSync(filePath, 'utf8');
+      const bytes = Buffer.from(raw, 'utf8');
+      if (bytes.length > MAX_BYTES) {
+        let end = MAX_BYTES;
+        while (end > 0 && (bytes[end] & 0xc0) === 0x80) end--;
+        const truncated = bytes.subarray(0, end).toString('utf8');
+        this.contentByPath.set(filePath, truncated);
+        if (!this.truncationWarnings.has(filePath)) {
+          this.truncationWarnings.add(filePath);
           void vscode.window.showWarningMessage(
-            `Forge: ${path.basename(this.filePath)} exceeds ${MAX_BYTES} bytes and was truncated before prompt injection.`,
+            `Forge: ${filePath} exceeds ${MAX_BYTES} bytes and was truncated before prompt injection.`,
           );
         }
-        return;
+        return truncated;
       }
 
-      this.truncationWarningShown = false;
-      this.content = raw;
+      this.truncationWarnings.delete(filePath);
+      this.contentByPath.set(filePath, raw);
+      return raw;
     } catch {
-      this.content = undefined;
+      this.contentByPath.set(filePath, undefined);
+      return undefined;
     }
   }
 
@@ -113,14 +122,15 @@ export class ForgeInstructionsLoader implements vscode.Disposable {
     try {
       const pattern = new vscode.RelativePattern(
         this.workspaceRoot,
-        `{${INSTRUCTION_FILES.join(',')}}`,
+        `**/{${INSTRUCTION_FILES.join(',')}}`,
       );
       const watcher = vscode.workspace.createFileSystemWatcher(pattern);
       const scheduleLoad = (): void => {
         if (this.debounceTimer !== undefined) clearTimeout(this.debounceTimer);
         this.debounceTimer = setTimeout(() => {
           this.debounceTimer = undefined;
-          this.load();
+          this.contentByPath.clear();
+          this.truncationWarnings.clear();
         }, RELOAD_DEBOUNCE_MS);
       };
 
@@ -140,6 +150,67 @@ export class ForgeInstructionsLoader implements vscode.Disposable {
     }
     this.watcher?.dispose();
   }
+}
+
+/** Nearest repository root for a target, bounded by the workspace root. */
+export function resolveInstructionScopeRoot(workspaceRoot: string, target?: string): string {
+  const boundary = path.resolve(workspaceRoot);
+  if (!target) return boundary;
+  const resolvedTarget = path.isAbsolute(target)
+    ? path.resolve(target)
+    : path.resolve(boundary, target);
+  let current =
+    fs.existsSync(resolvedTarget) && fs.statSync(resolvedTarget).isDirectory()
+      ? resolvedTarget
+      : path.dirname(resolvedTarget);
+  if (!containsPath(boundary, current)) return boundary;
+  for (;;) {
+    if (fs.existsSync(path.join(current, '.git'))) return current;
+    if (samePath(current, boundary)) return boundary;
+    const parent = path.dirname(current);
+    if (parent === current || !containsPath(boundary, parent)) return boundary;
+    current = parent;
+  }
+}
+
+function containsPath(root: string, target: string): boolean {
+  const relative = path.relative(root, target);
+  return (
+    relative === '' ||
+    (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))
+  );
+}
+
+function samePath(a: string, b: string): boolean {
+  return process.platform === 'win32'
+    ? path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase()
+    : path.resolve(a) === path.resolve(b);
+}
+
+/** Git repositories currently discovered inside the workspace. */
+export async function discoverWorkspaceRepositoryRoots(workspaceRoot: string): Promise<string[]> {
+  const roots = new Set<string>();
+  if (fs.existsSync(path.join(workspaceRoot, '.git'))) roots.add(path.resolve(workspaceRoot));
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- vscode.git API is untyped
+    const extension = vscode.extensions.getExtension<any>('vscode.git');
+    const exports = extension
+      ? extension.isActive
+        ? extension.exports
+        : await extension.activate()
+      : undefined;
+    const repositories = exports?.getAPI(1)?.repositories as
+      | Array<{ rootUri?: vscode.Uri }>
+      | undefined;
+    for (const repository of repositories ?? []) {
+      const root = repository.rootUri?.fsPath;
+      if (root && containsPath(workspaceRoot, root)) roots.add(path.resolve(root));
+    }
+  } catch {
+    // Git discovery is best-effort; a non-repository workspace still receives
+    // its own FORGE.md when auto-create is enabled.
+  }
+  return roots.size ? [...roots] : [path.resolve(workspaceRoot)];
 }
 
 export function createForgeInstructionsLoader(): ForgeInstructionsLoader | undefined {

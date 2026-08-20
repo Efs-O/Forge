@@ -56,6 +56,10 @@ export function getRepo(location?: string): GitRepository {
     );
   }
 
+  return getRepoFrom(repos, location);
+}
+
+function getRepoFrom(repos: readonly GitRepository[], location: string): GitRepository {
   const resolved = resolveFilePath(location);
   const matching = repos
     .filter((repo) => repo.rootUri && containsPath(repo.rootUri.fsPath, resolved))
@@ -70,9 +74,17 @@ export function getRepo(location?: string): GitRepository {
 /** Select one repository for a stage request and reject cross-repository calls. */
 export function getRepoForPaths(paths: readonly string[]): GitRepository {
   if (!paths.length) throw new Error('git_stage: at least one path is required');
-  const selected = paths.map((filePath) => getRepo(filePath));
+  // Take one Git API snapshot for the whole batch. The built-in extension may
+  // return fresh repository wrapper objects from separate getAPI() calls, so
+  // object identity is not a stable repository key.
+  const repos = repositories();
+  const selected = paths.map((filePath) => getRepoFrom(repos, filePath));
   const first = selected[0];
-  if (selected.some((repo) => repo !== first)) {
+  const firstRoot = canonicalPath(first.rootUri?.fsPath ?? '');
+  if (
+    !firstRoot ||
+    selected.some((repo) => canonicalPath(repo.rootUri?.fsPath ?? '') !== firstRoot)
+  ) {
     throw new Error(
       'git_stage: paths belong to different repositories; stage each repository separately',
     );
@@ -95,11 +107,19 @@ export async function withGitError<T>(
 }
 
 function containsPath(root: string, target: string): boolean {
-  const relative = path.relative(root, target);
+  const relative = path.relative(canonicalPath(root), canonicalPath(target));
   return (
     relative === '' ||
     (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))
   );
+}
+
+function canonicalPath(value: string): string {
+  if (!value) return '';
+  // Do not realpath only the existing side: on Windows that can turn the repo
+  // root into an 8.3 short path while a new file keeps its long spelling.
+  const resolved = path.resolve(value);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
 }
 
 function repoRoots(repos: readonly GitRepository[]): string[] {

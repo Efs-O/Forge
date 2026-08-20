@@ -267,9 +267,14 @@ export function reducer(state: State, action: Action): State {
       // an undo the user can still see files for.
       const openIds = new Set([...action.tabs.map((tab) => tab.id), action.activeId]);
       const pending = new Set([...state.checkpointPendingIds].filter((id) => openIds.has(id)));
+      // A restored webview may have missed generationStarted. Recover host-busy
+      // tabs without clearing newer local starts; DONE remains the end signal.
+      const hostStreaming = action.tabs.filter((tab) => tab.streaming).map((tab) => tab.id);
       return {
         ...state,
         sessionHydrated: true,
+        streamingIds: new Set([...state.streamingIds, ...hostStreaming]),
+        generatingIds: new Set([...state.generatingIds, ...hostStreaming]),
         checkpointPendingIds:
           pending.size === state.checkpointPendingIds.size ? state.checkpointPendingIds : pending,
         tabs: action.tabs,

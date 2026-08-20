@@ -55,6 +55,40 @@ describe('WorkerLoop', () => {
     expect(prompt).toContain('C:\\workspace');
   });
 
+  it('injects repository instructions into a native worker prompt', async () => {
+    runToolCallingLoop.mockResolvedValue({
+      finishReason: 'stop',
+      finalText: 'done',
+      rounds: 1,
+      repeatedCall: false,
+      hitRoundCap: false,
+    });
+    const loader = {
+      instructionsFor: vi.fn().mockReturnValue('# Repository rule\nUse npm run ci.'),
+    };
+    const config = {
+      models: [{ name: 'local', provider: 'llama.cpp' }],
+      llama_server: {},
+      permissions: { fs: { read: true }, agents: { delegate: true } },
+    } as ForgeConfig;
+    const loop = new WorkerLoop(
+      () => config,
+      new ToolRegistry(),
+      'C:\\workspace',
+      loader as never,
+    );
+
+    await loop.run({ ...spec, context_files: ['nested/src/a.ts'] }, target, policy, context);
+
+    expect(loader.instructionsFor).toHaveBeenCalledWith('nested/src/a.ts');
+    const options = runToolCallingLoop.mock.calls.at(-1)?.[0] as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    expect(options.messages[0]?.content).toContain(
+      '--- Repository Instructions ---\n# Repository rule\nUse npm run ci.',
+    );
+  });
+
   it('classifies empty length termination as token exhaustion', async () => {
     runToolCallingLoop.mockResolvedValue({
       finishReason: 'length',

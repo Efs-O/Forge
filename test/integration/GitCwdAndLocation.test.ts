@@ -73,6 +73,32 @@ describe('Git repository selection', () => {
     expect(getRepoForPaths(['subproject/src/a.ts'])).toBe(nestedRepo);
   });
 
+  it('accepts multiple paths when Git returns fresh wrappers for the same repository', () => {
+    vi.mocked(vscode.extensions.getExtension).mockImplementation(
+      () =>
+        ({
+          exports: {
+            getAPI: () => ({
+              repositories: [
+                { rootUri: vscode.Uri.file(root) },
+                { rootUri: vscode.Uri.file(nested) },
+              ],
+            }),
+          },
+        }) as never,
+    );
+
+    expect(getRepoForPaths(['subproject/src/a.ts', 'subproject/test/b.ts']).rootUri?.fsPath).toBe(
+      nested,
+    );
+  });
+
+  it('still rejects a batch that resolves to different nested repositories', () => {
+    expect(() => getRepoForPaths(['README.md', 'subproject/src/a.ts'])).toThrow(
+      'paths belong to different repositories',
+    );
+  });
+
   it('requires a cwd rather than silently choosing the first of multiple repositories', () => {
     expect(() => getRepo()).toThrow('multiple repositories found; pass cwd');
   });

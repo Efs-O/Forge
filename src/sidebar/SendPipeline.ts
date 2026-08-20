@@ -95,6 +95,10 @@ export class SendPipeline {
     // switches restore the same profile, not just the base model (F6).
     conv.active_model = modelName;
     deps.resetContextWarning();
+    // USER_SEND covers clicks in the current webview, but auto-compaction
+    // resumes, commands, and restored webviews have no such action. Announce
+    // every accepted turn here so Stop does not depend on its caller.
+    deps.post({ type: 'generationStarted', conversationId: conv.id });
     try {
       await deps.agentLoop.runTurn(conv, selectedModel, text, attachments);
     } finally {

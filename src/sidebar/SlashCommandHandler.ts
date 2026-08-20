@@ -6,7 +6,10 @@ import type { ForgeConfig } from '../config/types';
 import type { ForgeSlashCommandId } from './messageBridge';
 import type { SidebarProviderEvents } from './AgentLoop';
 import { runCompaction, type CompactionDeps, type CompactionOutcome } from './CompactionService';
-import { resolveProjectInstructionsPath } from '../llm/ForgeInstructionsLoader';
+import {
+  preferredProjectInstructionsPath,
+  resolveInstructionScopeRoot,
+} from '../llm/ForgeInstructionsLoader';
 import {
   activeFileBlock,
   activeSelectionBlock,
@@ -145,11 +148,13 @@ export class SlashCommandHandler {
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (!root) {
       void vscode.window.showWarningMessage(
-        'Forge: no workspace folder open — cannot generate AGENTS.md.',
+        'Forge: no workspace folder open — cannot generate FORGE.md.',
       );
       return;
     }
-    const instructionsPath = resolveProjectInstructionsPath(root);
+    const activeFile = vscode.window.activeTextEditor?.document.uri.fsPath;
+    const repositoryRoot = resolveInstructionScopeRoot(root, activeFile);
+    const instructionsPath = preferredProjectInstructionsPath(repositoryRoot);
     const instructionsName = path.basename(instructionsPath);
     if (fs.existsSync(instructionsPath)) {
       const answer = await vscode.window.showWarningMessage(
@@ -169,8 +174,8 @@ export class SlashCommandHandler {
           cancellable: false,
         },
         async () => {
-          const context = this.collectWorkspaceContext(root);
-          return deps.runPromptToMarkdown(this.buildInitForgePrompt(root, context));
+          const context = this.collectWorkspaceContext(repositoryRoot);
+          return deps.runPromptToMarkdown(this.buildInitForgePrompt(repositoryRoot, context));
         },
       );
     } catch (err) {
@@ -305,14 +310,14 @@ export class SlashCommandHandler {
   }
 
   private buildInitForgePrompt(root: string, context: string): string {
-    return `Generate an AGENTS.md workspace instructions file. All information you need is provided below — do NOT call any tools or request more files.
+    return `Generate a FORGE.md repository instructions file. All information you need is provided below — do NOT call any tools or request more files.
 
 Workspace root: ${root}
 
 Workspace scan results:
 ${context}
 
-Write the AGENTS.md now. Use only the information above. Output raw markdown only — no preamble, no explanation, no code fences, no tool calls.
+Write the FORGE.md now. Use only the information above. Output raw markdown only — no preamble, no explanation, no code fences, no tool calls.
 
 Include these sections (skip any where you have no real information):
 

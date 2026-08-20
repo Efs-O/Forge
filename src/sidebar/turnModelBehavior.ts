@@ -42,6 +42,7 @@ export function buildTemplateContext(
   if (activeFile) ctx['activeFile'] = activeFile;
   if (config.custom_instructions) ctx['customInstructions'] = config.custom_instructions;
   if (forgeLoader?.root) ctx['workspaceRoot'] = forgeLoader.root;
-  if (forgeLoader?.instructions) ctx['forgeInstructions'] = forgeLoader.instructions;
+  const projectInstructions = forgeLoader?.instructionsFor(activeFile);
+  if (projectInstructions) ctx['forgeInstructions'] = projectInstructions;
   return ctx;
 }

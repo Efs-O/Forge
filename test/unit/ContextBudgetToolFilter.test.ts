@@ -107,7 +107,7 @@ describe('ContextBudgetPublisher tool accounting', () => {
     expect(publishedTokens({ tools: ['read_file'] })).toBeLessThan(publishedTokens());
   });
 
-  it('drops an exact prompt count when the transcript changes', () => {
+  it('drops an exact count when a tool result changes the next prompt', () => {
     const conv = conversation();
     const sidebar: SidebarRuntime = {
       activeConversationId: conv.id,
@@ -132,5 +132,30 @@ describe('ContextBudgetPublisher tool accounting', () => {
     const budget = posted.at(-1);
     expect(budget).toMatchObject({ type: 'tokenBudget' });
     expect((budget as Extract<HostToWebview, { type: 'tokenBudget' }>).used).not.toBe(12_345);
+  });
+
+  it('retains an exact count when the current response merely completed', () => {
+    const conv = conversation();
+    const sidebar: SidebarRuntime = {
+      activeConversationId: conv.id,
+      conversations: [conv],
+      history: [],
+    };
+    const posted: HostToWebview[] = [];
+    const publisher = new ContextBudgetPublisher({
+      getConfig: () => config({}),
+      getSidebar: () => sidebar,
+      toolRegistry: registry(),
+      post: (msg) => posted.push(msg),
+      baseOf: (id) => (id ? id.split('@')[0] : null),
+      autoCompact: async () => {},
+      manualCompact: () => {},
+    } as ContextBudgetDeps);
+
+    publisher.publishExact(conv.id, 12_345);
+    conv.messages.push({ role: 'assistant', content: 'completed reply' });
+    publisher.onTurnContextChanged(conv.id, false);
+
+    expect(posted.at(-1)).toMatchObject({ type: 'tokenBudget', used: 12_345 });
   });
 });

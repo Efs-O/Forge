@@ -30,6 +30,7 @@ import type {
 } from './types';
 import { WorkerAccessPolicy } from './WorkerAccessPolicy';
 import { WorkerLoop, type WorkerExecutionTarget } from './WorkerLoop';
+import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
 
 interface ResolvedWorker {
   spec: WorkerSpec;
@@ -43,6 +44,7 @@ export interface WorkerOrchestrationDeps {
   pool: IBackendPool;
   registry: ToolRegistry;
   workspaceRoot: string;
+  instructionsLoader?: ForgeInstructionsLoader;
   secrets?: vscode.SecretStorage;
   onActivity?: (activity: WorkerActivity, conversationId: string) => void;
 }
@@ -51,7 +53,12 @@ export class WorkerOrchestrationService {
   private readonly loop: WorkerLoop;
 
   constructor(private readonly deps: WorkerOrchestrationDeps) {
-    this.loop = new WorkerLoop(deps.getConfig, deps.registry, deps.workspaceRoot);
+    this.loop = new WorkerLoop(
+      deps.getConfig,
+      deps.registry,
+      deps.workspaceRoot,
+      deps.instructionsLoader,
+    );
   }
 
   hasCloudTargets(request: WorkerRunRequest): boolean {

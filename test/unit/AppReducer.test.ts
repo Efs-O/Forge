@@ -50,6 +50,7 @@ interface AppModule {
             updatedAt: number;
             messageCount: number;
             active_model?: string;
+            streaming?: boolean;
           }>;
           history: Array<{
             id: string;
@@ -100,6 +101,28 @@ describe('webview App reducer', () => {
     const done = appModule.reducer(running, { type: 'DONE', convId: 'tab-1' });
     expect(done.streamingIds.has('tab-1')).toBe(false);
     expect(done.generatingIds.has('tab-1')).toBe(false);
+  });
+
+  it('recovers Stop state when generation started before the webview was restored', () => {
+    const synced = appModule.reducer(appModule.initialState, {
+      type: 'SESSION_SYNC',
+      activeId: 'tab-1',
+      tabs: [
+        {
+          id: 'tab-1',
+          title: 'Chat',
+          createdAt: 1,
+          updatedAt: 2,
+          messageCount: 1,
+          streaming: true,
+        },
+      ],
+      history: [],
+      messagesById: { 'tab-1': [{ role: 'user', content: 'continue' }] },
+    });
+
+    expect(synced.streamingIds.has('tab-1')).toBe(true);
+    expect(synced.generatingIds.has('tab-1')).toBe(true);
   });
 
   it('adds a queued prompt to its original conversation rather than the active tab', () => {

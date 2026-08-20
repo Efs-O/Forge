@@ -365,7 +365,7 @@ Type `/` in chat to open the built-in command list.
 | `/undo`       | Restore files from the last checkpoint      |
 | `/keep`       | Keep current checkpoint changes             |
 | `/reload`     | Reload the VS Code window                   |
-| `/initForge`  | Generate a workspace `AGENTS.md`             |
+| `/initForge`  | Generate the active repository's `FORGE.md`   |
 | `/clanker`    | Toggle full-auto mode for confirmations     |
 
 ## VS Code Commands

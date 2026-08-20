@@ -159,8 +159,9 @@ export class ContextBudgetPublisher {
    * each time would stall the UI it is meant to keep current.
    */
   onTurnContextChanged(convId: string, promptChanged: boolean): void {
-    // A tool result changed the prompt. Show the estimate until the next exact
-    // llama-server count arrives for that newly prepared request.
+    // A tool result changed the next request. Show the estimate until
+    // llama-server evaluates it; a final response uses promptChanged=false so
+    // the server's exact prompt+completion total remains authoritative.
     if (promptChanged) this.exactTokens.delete(convId);
     const elapsed = Date.now() - this.lastTickAt;
     if (elapsed >= CONTEXT_TICK_THROTTLE_MS) {

@@ -97,6 +97,16 @@ describe('SendPipeline.send', () => {
     expect(errors(h.posted)).toEqual([]);
   });
 
+  it('announces an accepted host-initiated turn so Stop is available', async () => {
+    const h = harness();
+    await h.pipeline.send('continue after compaction', undefined, 'conv-1');
+
+    expect(h.posted).toContainEqual({
+      type: 'generationStarted',
+      conversationId: 'conv-1',
+    });
+  });
+
   it('refuses a conversation that no longer exists', async () => {
     const h = harness();
     await h.pipeline.send('hello', undefined, 'conv-gone');

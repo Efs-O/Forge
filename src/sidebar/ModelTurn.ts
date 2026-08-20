@@ -247,7 +247,9 @@ export async function runModelTurn(
         ),
       onUsage: (usage) => {
         if (model.provider !== undefined && model.provider !== 'llama.cpp') return;
-        ctx.onExactContextTokens?.(conv.id, usage.prompt_tokens);
+        // The slot advances through prompt evaluation and generation,
+        // including hidden thinking, so total_tokens matches its counter.
+        ctx.onExactContextTokens?.(conv.id, usage.total_tokens);
       },
       // A status line, not an error: the turn continues and the model is being
       // asked for the same write in chunks.
@@ -266,12 +268,11 @@ export async function runModelTurn(
         }).outputRoom || undefined,
     }),
   );
-  // llama.cpp reports the exact count for the prompt it just evaluated. Once
-  // the loop returns, its reply (or tool-call turn) has joined `conv.messages`
-  // and is part of the *next* prompt, so retaining that exact count makes the
-  // meter and HalluMeter bridge describe an older context. Drop it and show a
-  // current estimate until the server reports the next exact count.
-  ctx.onContextChanged?.(conv.id, true);
+  // Keep llama-server's exact prompt+completion count after the final round.
+  // Replacing it here with a character estimate made the bar jump away from
+  // the server as soon as a response landed. Tool dispatches still invalidate
+  // the count above because their results change the next request.
+  ctx.onContextChanged?.(conv.id, false);
   // Cut off by the output ceiling: the reply stopped mid-thought, so the work
   // is unfinished even though the loop returned normally.
   if (result.finishReason === 'length') {

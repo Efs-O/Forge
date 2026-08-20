@@ -16,6 +16,7 @@ import {
 import type { WorkerResult, WorkerRunContext, WorkerSpec } from './types';
 import type { WorkerAccessPolicy } from './WorkerAccessPolicy';
 import { ToolLoopDetectedError } from '../agent/ToolLoopGuard';
+import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
 
 export interface WorkerExecutionTarget {
   model: ModelConfig;
@@ -30,7 +31,11 @@ export interface WorkerExecutionTarget {
 class WorkerDeclinedError extends Error {}
 class WorkerToolError extends Error {}
 
-export function buildWorkerSystemPrompt(spec: WorkerSpec, workspaceRoot: string): string {
+export function buildWorkerSystemPrompt(
+  spec: WorkerSpec,
+  workspaceRoot: string,
+  projectInstructions?: string,
+): string {
   return [
     'You are a Forge coding worker. Complete only the assigned task.',
     `Execution context: repo_root=${workspaceRoot}; platform=${process.platform}; arch=${process.arch}; path_style=${process.platform === 'win32' ? 'windows' : 'posix'}; command_contract=executable-plus-argv; no shell operators.`,
@@ -45,8 +50,13 @@ export function buildWorkerSystemPrompt(spec: WorkerSpec, workspaceRoot: string)
       : '',
     'Use tool calls for every write. You may read and list only inside the workspace.',
     'Do not claim a file changed unless a write tool succeeded. Do not call unavailable tools.',
+    projectInstructions
+      ? `--- Repository Instructions ---\n${projectInstructions}\n--- End Repository Instructions ---`
+      : '',
     'Finish with a concise summary of work actually completed.',
-  ].join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 export class WorkerLoop {
@@ -54,6 +64,7 @@ export class WorkerLoop {
     private readonly getConfig: () => ForgeConfig,
     private readonly registry: ToolRegistry,
     private readonly workspaceRoot: string,
+    private readonly instructionsLoader?: ForgeInstructionsLoader,
   ) {}
 
   async run(
@@ -83,10 +94,12 @@ export class WorkerLoop {
     // (group tools/tool_call_limits merged) by WorkerOrchestrationService.
     const budget = new ToolBudget(target.model);
     const toolDefinitions = budget.filterDefinitions(this.registry.definitions(allowed, scope));
+    const instructionTarget = spec.context_files?.[0] ?? spec.allowed_paths?.[0];
+    const projectInstructions = this.instructionsLoader?.instructionsFor(instructionTarget);
     const messages: ChatMessage[] = [
       {
         role: 'system',
-        content: buildWorkerSystemPrompt(spec, this.workspaceRoot),
+        content: buildWorkerSystemPrompt(spec, this.workspaceRoot, projectInstructions),
       },
       {
         role: 'user',
