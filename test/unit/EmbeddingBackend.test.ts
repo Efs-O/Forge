@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { composeEmbeddingServerArgs } from '../../src/backend/EmbeddingBackend';
+import { composeEmbeddingServerArgs, embeddingModelMatches } from '../../src/backend/EmbeddingBackend';
 import type { ForgeConfig } from '../../src/config/types';
 
 function makeConfig(overrides: Partial<ForgeConfig> = {}): ForgeConfig {
@@ -63,5 +63,15 @@ describe('composeEmbeddingServerArgs', () => {
     expect(args).toContain('--embedding');
     expect(argValue(args, '-m')).toBe('/models/e.gguf');
     expect(argValue(args, '--port')).toBe('8099');
+  });
+});
+
+describe('embeddingModelMatches', () => {
+  it('matches equivalent normalized model paths', () => {
+    expect(embeddingModelMatches('/models/../models/embed.gguf', '/models/embed.gguf')).toBe(true);
+  });
+
+  it('rejects a server running a different embedding model', () => {
+    expect(embeddingModelMatches('/models/other.gguf', '/models/embed.gguf')).toBe(false);
   });
 });

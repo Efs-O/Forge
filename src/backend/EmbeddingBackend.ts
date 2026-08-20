@@ -3,10 +3,16 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import type { ForgeConfig } from '../config/types';
 import { spawnLlamaServer, killLlamaProcess } from './llamaProcess';
-import { waitForHealthy, probeHealthy } from './HealthCheck';
+import { waitForHealthy, probeHealthy, probeServedModel } from './HealthCheck';
 
 /** EmbeddingGemma 300M's trained context window. Override via embeddings.n_ctx. */
 const DEFAULT_EMBEDDING_CTX = 2048;
+
+export function embeddingModelMatches(servedModel: string, configuredModelPath: string): boolean {
+  return (
+    path.normalize(path.resolve(servedModel)) === path.normalize(path.resolve(configuredModelPath))
+  );
+}
 
 export class EmbeddingBackend implements vscode.Disposable {
   private proc: ChildProcess | null = null;
@@ -63,7 +69,21 @@ export class EmbeddingBackend implements vscode.Disposable {
 
     const host = this.config.llama_server.host ?? '127.0.0.1';
     const port = cfg.port ?? 8091;
-    if (await probeHealthy(`http://${host}:${port}`)) {
+    const baseUrl = `http://${host}:${port}`;
+    if (await probeHealthy(baseUrl)) {
+      const servedModel = await probeServedModel(baseUrl);
+      if (!servedModel) {
+        throw new Error(
+          `Embedding endpoint ${baseUrl} is already in use, but Forge could not verify its model. ` +
+            'Stop the existing server or configure embeddings.port to an unused port.',
+        );
+      }
+      if (!embeddingModelMatches(servedModel, cfg.model_path)) {
+        throw new Error(
+          `Embedding endpoint ${baseUrl} serves "${servedModel}", not the configured model "${cfg.model_path}". ` +
+            'Stop the existing server or configure embeddings.port to an unused port.',
+        );
+      }
       this.ready = true;
       this.currentSignature = signature;
       this.output ??= vscode.window.createOutputChannel('Forge - embeddings');
@@ -82,11 +102,7 @@ export class EmbeddingBackend implements vscode.Disposable {
     this.proc.stdout?.on('data', (chunk: Buffer) => this.output?.append(chunk.toString()));
     this.proc.stderr?.on('data', (chunk: Buffer) => this.output?.append(chunk.toString()));
 
-    const result = await waitForHealthy(
-      { baseUrl: this.baseUrl() },
-      this.proc,
-      this.startAbort.signal,
-    );
+    const result = await waitForHealthy({ baseUrl }, this.proc, this.startAbort.signal);
     if (!result.ok) {
       await this.stop();
       throw new Error(`Embedding server failed to start: ${result.message}`);

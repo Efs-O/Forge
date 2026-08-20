@@ -195,7 +195,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   if (workspaceRoot && config.forge_instructions?.auto_create) {
     const bootstrap = ensureForgeInstructionsFile(workspaceRoot);
     if (bootstrap.status === 'error') {
-      const message = `Forge: could not create FORGE.md — ${bootstrap.error.message}`;
+      const message = `Forge: could not create ${path.basename(bootstrap.path)} — ${bootstrap.error.message}`;
       log.warn(message);
       void vscode.window.showWarningMessage(message);
     }

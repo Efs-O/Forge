@@ -6,6 +6,7 @@ import type { ForgeConfig } from '../config/types';
 import type { ForgeSlashCommandId } from './messageBridge';
 import type { SidebarProviderEvents } from './AgentLoop';
 import { runCompaction, type CompactionDeps, type CompactionOutcome } from './CompactionService';
+import { resolveProjectInstructionsPath } from '../llm/ForgeInstructionsLoader';
 import {
   activeFileBlock,
   activeSelectionBlock,
@@ -144,14 +145,15 @@ export class SlashCommandHandler {
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (!root) {
       void vscode.window.showWarningMessage(
-        'Forge: no workspace folder open — cannot generate FORGE.md.',
+        'Forge: no workspace folder open — cannot generate AGENTS.md.',
       );
       return;
     }
-    const forgePath = path.join(root, 'FORGE.md');
-    if (fs.existsSync(forgePath)) {
+    const instructionsPath = resolveProjectInstructionsPath(root);
+    const instructionsName = path.basename(instructionsPath);
+    if (fs.existsSync(instructionsPath)) {
       const answer = await vscode.window.showWarningMessage(
-        'Forge: FORGE.md already exists. Overwrite it?',
+        `Forge: ${instructionsName} already exists. Overwrite it?`,
         'Overwrite',
         'Cancel',
       );
@@ -163,7 +165,7 @@ export class SlashCommandHandler {
       content = await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
-          title: 'Forge: scanning workspace and generating FORGE.md…',
+          title: `Forge: scanning workspace and generating ${instructionsName}…`,
           cancellable: false,
         },
         async () => {
@@ -173,7 +175,7 @@ export class SlashCommandHandler {
       );
     } catch (err) {
       void vscode.window.showErrorMessage(
-        `Forge: failed to generate FORGE.md — ${(err as Error).message}`,
+        `Forge: failed to generate ${instructionsName} — ${(err as Error).message}`,
       );
       return;
     }
@@ -181,25 +183,25 @@ export class SlashCommandHandler {
     const trimmed = this.extractMarkdownFromToolCall(content.trim());
     if (!trimmed) {
       void vscode.window.showWarningMessage(
-        'Forge: model returned empty content — FORGE.md not written.',
+        `Forge: model returned empty content — ${instructionsName} not written.`,
       );
       return;
     }
 
     try {
       await vscode.workspace.fs.writeFile(
-        vscode.Uri.file(forgePath),
+        vscode.Uri.file(instructionsPath),
         new TextEncoder().encode(trimmed + '\n'),
       );
     } catch (err) {
       void vscode.window.showErrorMessage(
-        `Forge: could not write FORGE.md — ${(err as Error).message}`,
+        `Forge: could not write ${instructionsName} — ${(err as Error).message}`,
       );
       return;
     }
 
     void vscode.window.showInformationMessage(
-      'Forge: FORGE.md created. The agent will use it from the next message.',
+      `Forge: ${instructionsName} created. The agent will use it from the next message.`,
     );
   }
 
@@ -303,14 +305,14 @@ export class SlashCommandHandler {
   }
 
   private buildInitForgePrompt(root: string, context: string): string {
-    return `Generate a FORGE.md workspace instructions file. All information you need is provided below — do NOT call any tools or request more files.
+    return `Generate an AGENTS.md workspace instructions file. All information you need is provided below — do NOT call any tools or request more files.
 
 Workspace root: ${root}
 
 Workspace scan results:
 ${context}
 
-Write the FORGE.md now. Use only the information above. Output raw markdown only — no preamble, no explanation, no code fences, no tool calls.
+Write the AGENTS.md now. Use only the information above. Output raw markdown only — no preamble, no explanation, no code fences, no tool calls.
 
 Include these sections (skip any where you have no real information):
 

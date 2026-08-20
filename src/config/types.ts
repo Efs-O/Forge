@@ -268,7 +268,7 @@ export interface ForgeConfig {
   custom_instructions?: string;
   /** Workspace instruction-file behavior for native Forge agents. */
   forge_instructions?: {
-    /** Create a small FORGE.md starter when this workspace does not have one. */
+    /** Create a root AGENTS.md starter when no AGENTS.md or legacy FORGE.md exists. */
     auto_create?: boolean;
   };
   /** Default thinking/channel stripping behavior, overridable per model. */

@@ -75,7 +75,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     id: 'initForge',
     trigger: 'initForge',
     title: 'Init Forge',
-    description: 'Scan this workspace and generate a FORGE.md agent instructions file.',
+    description: 'Scan this workspace and generate an AGENTS.md instructions file.',
   },
   {
     id: 'clanker',

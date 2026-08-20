@@ -390,7 +390,7 @@ export class ToolDispatch {
     const isNew = beforeContent === null;
     let hunks = !isDeleted ? computeDiff(beforeContent ?? '', afterContent) : null;
     if (hunks === null && !isDeleted) hunks = gitDiffLarge(beforeContent ?? '', afterContent);
-    const relPath = vscode.workspace.asRelativePath(resolvedPath, true);
+    const relPath = vscode.workspace.asRelativePath(resolvedPath);
     this.post({
       type: 'fileDiff',
       filePath: relPath,

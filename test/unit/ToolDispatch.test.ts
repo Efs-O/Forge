@@ -1,9 +1,12 @@
 import * as path from 'path';
+import * as fs from 'fs';
+import * as vscode from 'vscode';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolDispatch, resolveToolPath } from '../../src/sidebar/ToolDispatch';
 import type { ToolCall } from '../../src/llm/types';
 import type { CheckpointStack } from '../../src/checkpoint/CheckpointStack';
 import type { KeepUndoCodeLensProvider } from '../../src/sidebar/KeepUndoCodeLens';
+import type { DiffDecorations } from '../../src/sidebar/DiffDecorations';
 import type { ToolFailureTracker } from '../../src/tools/StripTools';
 import { ToolRegistry } from '../../src/tools/ToolRegistry';
 import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
@@ -59,6 +62,7 @@ describe('ToolDispatch', () => {
   let checkpoints: CheckpointStack;
   let codeLens: KeepUndoCodeLensProvider;
   let failureTracker: ToolFailureTracker;
+  let diffDecorations: DiffDecorations;
   let post: ReturnType<typeof vi.fn>;
   let requestApproval: ReturnType<typeof vi.fn>;
   let dispatch: ToolDispatch;
@@ -76,6 +80,7 @@ describe('ToolDispatch', () => {
     toolRegistry = new ToolRegistry();
     checkpoints = {
       snapshotBefore: vi.fn(),
+      readSnapshotContent: vi.fn(),
       beginTurn: vi.fn(),
       commitTurn: vi.fn(),
       undo: vi.fn(),
@@ -95,6 +100,8 @@ describe('ToolDispatch', () => {
       shouldStrip: vi.fn().mockReturnValue(false),
     } as unknown as ToolFailureTracker;
 
+    diffDecorations = { apply: vi.fn() } as unknown as DiffDecorations;
+
     post = vi.fn();
     requestApproval = vi.fn().mockResolvedValue(true);
 
@@ -105,6 +112,7 @@ describe('ToolDispatch', () => {
       failureTracker,
       post,
       requestApproval,
+      diffDecorations,
     );
   });
 
@@ -167,6 +175,29 @@ describe('ToolDispatch', () => {
     );
     expect(checkpoints.snapshotBefore).toHaveBeenCalled();
     expect(codeLens.markPending).toHaveBeenCalled();
+  });
+
+  it('publishes diff paths relative to the workspace without its folder-name prefix', async () => {
+    const target = path.join(WS, `tool-dispatch-${Date.now()}.ts`);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, 'after');
+    (checkpoints.readSnapshotContent as ReturnType<typeof vi.fn>).mockReturnValue('before');
+    toolRegistry.register({
+      definition: {
+        type: 'function',
+        function: { name: 'write_file', description: 'Write a file', parameters: { type: 'object' } },
+      },
+      permission: 'write',
+      mutation: { paths: () => [target], showDiff: true },
+      handler: vi.fn().mockResolvedValue('written'),
+    });
+
+    try {
+      await dispatch.dispatch([makeToolCall('write_file', { path: target })], allowed, [] as never);
+      expect(vscode.workspace.asRelativePath).toHaveBeenCalledWith(target);
+    } finally {
+      fs.rmSync(target, { force: true });
+    }
   });
 
   it('snapshots a structured multi-edit exactly once before its handler', async () => {

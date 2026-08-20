@@ -133,9 +133,9 @@ profiles:
 #   at: 0.85
 #   resume: true
 
-# Create a small FORGE.md in a workspace that does not have one yet. Forge
-# injects that project file into every native local-agent prompt; it never
-# overwrites an existing FORGE.md.
+# Create a small root AGENTS.md in a workspace that has neither AGENTS.md nor
+# the legacy FORGE.md. Forge injects that project file into every native
+# local-agent prompt; it never overwrites an existing instructions file.
 # forge_instructions:
 #   auto_create: true
 
@@ -287,6 +287,9 @@ permissions:
 # -------------------------------------------------------------------
 # Optional: local semantic code search
 # Requires a second local GGUF embedding model served by llama.cpp
+# Forge starts it lazily on the first semantic search or /reindex, keeps it
+# alive for that VS Code window, and stops it when the window deactivates.
+# Each workspace keeps its own persisted index at .forge/embeddings.index.json.
 # -------------------------------------------------------------------
 # embeddings:
 #   enabled: true
