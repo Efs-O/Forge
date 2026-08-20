@@ -6,7 +6,13 @@
  */
 
 import type { RegisteredTool } from './ToolRegistry';
-import { getRepo, resolveFilePath } from './gitRepo';
+import { getRepo, getRepoForPaths, resolveFilePath, withGitError } from './gitRepo';
+
+const cwdParameter = {
+  type: 'string',
+  description:
+    'Workspace-relative directory or file used to select the repository. Required when multiple repositories are open.',
+} as const;
 
 export function makeCreateBranchTool(): RegisteredTool {
   return {
@@ -20,6 +26,7 @@ export function makeCreateBranchTool(): RegisteredTool {
           properties: {
             name: { type: 'string', description: 'New branch name.' },
             from: { type: 'string', description: 'Starting ref (branch, hash). Optional.' },
+            cwd: cwdParameter,
           },
           required: ['name'],
           additionalProperties: false,
@@ -28,10 +35,10 @@ export function makeCreateBranchTool(): RegisteredTool {
     },
     permission: 'git-write',
     handler: async (args) => {
-      const repo = getRepo();
+      const repo = getRepo(args['cwd'] as string | undefined);
       const name = args['name'] as string;
       const from = args['from'] as string | undefined;
-      await repo.createBranch(name, true, from);
+      await withGitError('git_create_branch', repo, () => repo.createBranch(name, true, from));
       return `Branch created: ${name}`;
     },
   };
@@ -50,6 +57,7 @@ export function makeSwitchBranchTool(): RegisteredTool {
           type: 'object',
           properties: {
             name: { type: 'string', description: 'Branch name to check out.' },
+            cwd: cwdParameter,
           },
           required: ['name'],
           additionalProperties: false,
@@ -58,9 +66,9 @@ export function makeSwitchBranchTool(): RegisteredTool {
     },
     permission: 'git-write',
     handler: async (args) => {
-      const repo = getRepo();
+      const repo = getRepo(args['cwd'] as string | undefined);
       const name = args['name'] as string;
-      await repo.checkout(name);
+      await withGitError('git_switch_branch', repo, () => repo.checkout(name));
       return `Switched to ${name}`;
     },
   };
@@ -74,7 +82,8 @@ export function makeStageTool(): RegisteredTool {
       type: 'function',
       function: {
         name: 'stage',
-        description: 'Stage one or more files for commit.',
+        description:
+          'Stage one or more files for commit. All paths must belong to the same repository; the repository is inferred from the paths.',
         parameters: {
           type: 'object',
           properties: {
@@ -91,9 +100,9 @@ export function makeStageTool(): RegisteredTool {
     },
     permission: 'git-write',
     handler: async (args) => {
-      const repo = getRepo();
       const paths = (args['paths'] as string[]).map(resolveFilePath);
-      await repo.add(paths);
+      const repo = getRepoForPaths(args['paths'] as string[]);
+      await withGitError('git_stage', repo, () => repo.add(paths));
       return `Staged: ${(args['paths'] as string[]).join(', ')}`;
     },
   };
@@ -112,6 +121,7 @@ export function makeCommitTool(): RegisteredTool {
           type: 'object',
           properties: {
             message: { type: 'string', description: 'Commit message.' },
+            cwd: cwdParameter,
           },
           required: ['message'],
           additionalProperties: false,
@@ -120,9 +130,9 @@ export function makeCommitTool(): RegisteredTool {
     },
     permission: 'git-write',
     handler: async (args) => {
-      const repo = getRepo();
+      const repo = getRepo(args['cwd'] as string | undefined);
       const message = args['message'] as string;
-      await repo.commit(message);
+      await withGitError('git_commit', repo, () => repo.commit(message));
       return `Committed: ${message}`;
     },
   };

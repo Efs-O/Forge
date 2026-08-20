@@ -8,7 +8,20 @@
 import * as child_process from 'child_process';
 import * as path from 'path';
 import type { RegisteredTool } from './ToolRegistry';
-import { getRepo, gitCwd, resolveFilePath, statusLetter, workspaceRoot } from './gitRepo';
+import {
+  getRepo,
+  gitCwd,
+  resolveFilePath,
+  statusLetter,
+  withGitError,
+  workspaceRoot,
+} from './gitRepo';
+
+const cwdParameter = {
+  type: 'string',
+  description:
+    'Workspace-relative directory or file used to select the repository. Required when multiple repositories are open.',
+} as const;
 
 export function makeGitStatusTool(): RegisteredTool {
   return {
@@ -17,13 +30,18 @@ export function makeGitStatusTool(): RegisteredTool {
       function: {
         name: 'git_status',
         description: 'Show working tree and index status (modified, added, deleted files).',
-        parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
+        parameters: {
+          type: 'object',
+          properties: { cwd: cwdParameter },
+          required: [],
+          additionalProperties: false,
+        },
       },
     },
     permission: 'git-read',
-    handler: async () => {
-      const repo = getRepo();
-      const root = workspaceRoot();
+    handler: async (args) => {
+      const repo = getRepo(args['cwd'] as string | undefined);
+      const root = repo.rootUri?.fsPath ?? workspaceRoot();
       const lines: string[] = [];
 
       for (const change of repo.state.indexChanges) {
@@ -54,6 +72,7 @@ export function makeGitLogTool(): RegisteredTool {
           properties: {
             max_entries: { type: 'integer', description: 'Max commits to return. Default 20.' },
             branch: { type: 'string', description: 'Branch or ref to log. Optional.' },
+            cwd: cwdParameter,
           },
           required: [],
           additionalProperties: false,
@@ -62,11 +81,13 @@ export function makeGitLogTool(): RegisteredTool {
     },
     permission: 'git-read',
     handler: async (args) => {
-      const repo = getRepo();
+      const repo = getRepo(args['cwd'] as string | undefined);
       const maxEntries = (args['max_entries'] as number | undefined) ?? 20;
       const ref = args['branch'] as string | undefined;
 
-      const commits = await repo.log({ maxEntries, ...(ref ? { ref } : {}) });
+      const commits = await withGitError('git_log', repo, () =>
+        repo.log({ maxEntries, ...(ref ? { ref } : {}) }),
+      );
       if (!commits.length) return 'No commits.';
 
       return commits
@@ -97,6 +118,7 @@ export function makeGitDiffTool(): RegisteredTool {
           properties: {
             path: { type: 'string', description: 'Limit diff to this file path. Optional.' },
             staged: { type: 'boolean', description: 'If true, show staged diff. Default false.' },
+            cwd: cwdParameter,
           },
           required: [],
           additionalProperties: false,
@@ -105,22 +127,23 @@ export function makeGitDiffTool(): RegisteredTool {
     },
     permission: 'git-read',
     handler: async (args) => {
-      const repo = getRepo();
+      const cwd = args['cwd'] as string | undefined;
       const staged = args['staged'] === true;
 
       // vscode.git diff does not support per-file filtering; fall back to spawn for that case
       const filePath = args['path'] as string | undefined;
+      const repo = getRepo(filePath ?? cwd);
       if (filePath) {
         const resolved = resolveFilePath(filePath);
         const spawnArgs = staged ? ['diff', '--staged', '--', resolved] : ['diff', '--', resolved];
         const result = child_process.spawnSync('git', spawnArgs, {
-          cwd: gitCwd(filePath),
+          cwd: gitCwd(filePath ?? cwd),
           encoding: 'utf8',
         });
         return result.stdout || result.stderr || '(no diff)';
       }
 
-      const diff = await repo.diff(staged);
+      const diff = await withGitError('git_diff', repo, () => repo.diff(staged));
       return diff || '(no diff)';
     },
   };
@@ -139,6 +162,7 @@ export function makeGitBlameTool(): RegisteredTool {
           type: 'object',
           properties: {
             path: { type: 'string', description: 'File path (absolute or workspace-relative).' },
+            cwd: cwdParameter,
           },
           required: ['path'],
           additionalProperties: false,
@@ -149,7 +173,7 @@ export function makeGitBlameTool(): RegisteredTool {
     handler: async (args) => {
       const filePath = resolveFilePath(args['path'] as string);
       const result = child_process.spawnSync('git', ['blame', '--line-porcelain', filePath], {
-        cwd: gitCwd(args['path'] as string),
+        cwd: gitCwd((args['path'] as string) ?? (args['cwd'] as string | undefined)),
         encoding: 'utf8',
       });
       if (result.error) throw new Error(`git_blame: ${result.error.message}`);
@@ -171,6 +195,7 @@ export function makeGitShowTool(): RegisteredTool {
           type: 'object',
           properties: {
             ref: { type: 'string', description: 'Commit hash, tag, or ref to show.' },
+            cwd: cwdParameter,
           },
           required: ['ref'],
           additionalProperties: false,
@@ -181,7 +206,7 @@ export function makeGitShowTool(): RegisteredTool {
     handler: async (args) => {
       const ref = args['ref'] as string;
       const result = child_process.spawnSync('git', ['show', ref], {
-        cwd: gitCwd(),
+        cwd: gitCwd(args['cwd'] as string | undefined),
         encoding: 'utf8',
       });
       if (result.error) throw new Error(`git_show: ${result.error.message}`);

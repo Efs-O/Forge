@@ -30,13 +30,80 @@ export interface GitRepository {
   commit(message: string): Promise<void>;
 }
 
-export function getRepo(): GitRepository {
+function repositories(): GitRepository[] {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- vscode.git API is untyped
   const gitExt = vscode.extensions.getExtension<any>('vscode.git');
   const git = gitExt?.exports?.getAPI(1);
-  const repo: GitRepository | undefined = git?.repositories?.[0];
-  if (!repo) throw new Error('git_*: no git repository found in workspace');
-  return repo;
+  const repos = git?.repositories as GitRepository[] | undefined;
+  if (!repos?.length) throw new Error('git_*: no git repository found in workspace');
+  return repos;
+}
+
+/**
+ * Resolve a VS Code Git repository for a workspace-relative directory or file.
+ *
+ * The Git extension discovers every repository in a workspace. Selecting its
+ * first entry is unsafe when the workspace root and a nested project are both
+ * repositories: status may describe one repository while stage/commit mutate
+ * another. When a location is supplied, choose the deepest containing root.
+ */
+export function getRepo(location?: string): GitRepository {
+  const repos = repositories();
+  if (location === undefined) {
+    if (repos.length === 1) return repos[0];
+    throw new Error(
+      `git_*: multiple repositories found; pass cwd (${repoRoots(repos).join(', ')})`,
+    );
+  }
+
+  const resolved = resolveFilePath(location);
+  const matching = repos
+    .filter((repo) => repo.rootUri && containsPath(repo.rootUri.fsPath, resolved))
+    .sort((a, b) => (b.rootUri?.fsPath.length ?? 0) - (a.rootUri?.fsPath.length ?? 0));
+  if (matching.length) return matching[0];
+
+  throw new Error(
+    `git_*: no repository contains "${location}"; detected repositories: ${repoRoots(repos).join(', ')}`,
+  );
+}
+
+/** Select one repository for a stage request and reject cross-repository calls. */
+export function getRepoForPaths(paths: readonly string[]): GitRepository {
+  if (!paths.length) throw new Error('git_stage: at least one path is required');
+  const selected = paths.map((filePath) => getRepo(filePath));
+  const first = selected[0];
+  if (selected.some((repo) => repo !== first)) {
+    throw new Error(
+      'git_stage: paths belong to different repositories; stage each repository separately',
+    );
+  }
+  return first;
+}
+
+export async function withGitError<T>(
+  operation: string,
+  repo: GitRepository,
+  action: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await action();
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    const root = repo.rootUri?.fsPath ?? '(repository root unavailable)';
+    throw new Error(`${operation} failed in repository "${root}": ${detail}`);
+  }
+}
+
+function containsPath(root: string, target: string): boolean {
+  const relative = path.relative(root, target);
+  return (
+    relative === '' ||
+    (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))
+  );
+}
+
+function repoRoots(repos: readonly GitRepository[]): string[] {
+  return repos.map((repo) => repo.rootUri?.fsPath ?? '(repository root unavailable)');
 }
 
 export function workspaceRoot(): string {
@@ -66,7 +133,12 @@ export function resolveFilePath(p: string): string {
  */
 export function gitCwd(filePath?: string): string {
   if (filePath) {
-    const fromFile = findRepoRoot(path.dirname(resolveFilePath(filePath)));
+    const resolved = resolveFilePath(filePath);
+    const from =
+      fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()
+        ? resolved
+        : path.dirname(resolved);
+    const fromFile = findRepoRoot(from);
     if (fromFile) return fromFile;
   }
   try {

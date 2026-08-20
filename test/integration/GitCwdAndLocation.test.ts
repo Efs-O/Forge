@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { gitCwd } from '../../src/tools/gitRepo';
+import { getRepo, getRepoForPaths, gitCwd, withGitError } from '../../src/tools/gitRepo';
 import { makeGetDocumentSymbolsTool, makeGoToDefinitionTool } from '../../src/tools/lspTools';
 
 describe('gitCwd', () => {
@@ -33,9 +33,56 @@ describe('gitCwd', () => {
     expect(gitCwd('subproject/src')).toBe(path.join(root, 'subproject'));
   });
 
+  it('does not select an outer repository when cwd is a nested repository root', () => {
+    fs.mkdirSync(path.join(root, '.git'));
+    expect(gitCwd('subproject')).toBe(path.join(root, 'subproject'));
+  });
+
   it('falls back to the workspace root when no repository contains the path', () => {
     // git itself then produces the clearer message, rather than us guessing.
     expect(gitCwd('nowhere/else.ts')).toBe(root);
+  });
+});
+
+describe('Git repository selection', () => {
+  let root: string;
+  let nested: string;
+  let rootRepo: object;
+  let nestedRepo: object;
+
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-git-repos-'));
+    nested = path.join(root, 'subproject');
+    fs.mkdirSync(nested, { recursive: true });
+    vscode.workspace.workspaceFolders.splice(0, Infinity, { uri: vscode.Uri.file(root) });
+    rootRepo = { rootUri: vscode.Uri.file(root) };
+    nestedRepo = { rootUri: vscode.Uri.file(nested) };
+    vi.spyOn(vscode.extensions, 'getExtension').mockReturnValue({
+      exports: { getAPI: () => ({ repositories: [rootRepo, nestedRepo] }) },
+    } as never);
+  });
+
+  afterEach(() => {
+    vscode.workspace.workspaceFolders.splice(0);
+    vi.restoreAllMocks();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('selects the deepest repository containing an explicit cwd or file path', () => {
+    expect(getRepo('subproject')).toBe(nestedRepo);
+    expect(getRepoForPaths(['subproject/src/a.ts'])).toBe(nestedRepo);
+  });
+
+  it('requires a cwd rather than silently choosing the first of multiple repositories', () => {
+    expect(() => getRepo()).toThrow('multiple repositories found; pass cwd');
+  });
+
+  it('makes Git API errors actionable by including the selected repository root', async () => {
+    await expect(
+      withGitError('git_commit', nestedRepo as never, async () => {
+        throw new Error('Failed to execute git');
+      }),
+    ).rejects.toThrow(`git_commit failed in repository "${nested}": Failed to execute git`);
   });
 });
 

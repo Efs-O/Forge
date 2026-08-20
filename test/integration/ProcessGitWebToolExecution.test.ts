@@ -99,6 +99,7 @@ describe('isolated process, Git, and web tool execution', () => {
     );
 
     const repo = {
+      rootUri: vscode.Uri.file(root),
       state: {
         workingTreeChanges: [{ uri: vscode.Uri.file(path.join(root, 'tracked.txt')), status: 1 }],
         indexChanges: [],
