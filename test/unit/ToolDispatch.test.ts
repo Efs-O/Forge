@@ -225,6 +225,8 @@ describe('ToolDispatch', () => {
       false,
       undefined,
     );
+    expect(requestApproval.mock.calls[0]?.[1]).toContain('About to permanently delete:');
+    expect(requestApproval.mock.calls[0]?.[1]).toContain('Target: test.txt');
   });
 
   it('requests approval for terminal tools', async () => {
@@ -337,6 +339,9 @@ describe('ToolDispatch', () => {
       expect.any(String),
       true,
       undefined,
+    );
+    expect(requestApproval.mock.calls[0]?.[1]).toContain(
+      'Scope requested: recursive — all contents would be deleted if the target is accessible.',
     );
   });
 
