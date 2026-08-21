@@ -36,7 +36,7 @@ import type { ContextBudgetPublisher } from './ContextBudgetPublisher';
 import type { ConversationTabs } from './ConversationTabs';
 import type { SendPipeline } from './SendPipeline';
 import { routeWebviewMessage } from './webviewMessageRouter';
-import { autoCompactAndResume } from './CompactionService';
+import { autoCompactAndResume, resumeAfterCompaction } from './CompactionService';
 import { buildWebviewHtml } from './WebviewBuilder';
 import type { IndexManager } from '../search/IndexManager';
 import { modelPickerGroup } from './ModelPickerGroups';
@@ -100,6 +100,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         persistSession: () => this.persistSession(),
         baseOf: (id) => this.baseOf(id),
         autoCompact: (conv) => this.autoCompact(conv),
+        resumeAfterManualCompact: (conversationId) => this.resumeAfterManualCompact(conversationId),
         reindexCodebase: () => this.reindexCodebase(),
         newConversation: () => this.newConversation(),
         clearMessages: () => this.tabs.clearActive(),
@@ -316,6 +317,21 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       // is active by the time the summary lands.
       send: (text) => this.send.send(text, undefined, conv.id),
     });
+  }
+
+  private async resumeAfterManualCompact(conversationId: string): Promise<void> {
+    await resumeAfterCompaction(
+      {
+        convId: conversationId,
+        post: (msg) => this.post(msg),
+        incompleteTurnReason: () => this.agentLoop.incompleteTurnReason(conversationId),
+        resumeEnabled: true,
+        autoContinues: () => 0,
+        noteAutoContinue: () => undefined,
+        send: (text) => this.send.send(text, undefined, conversationId),
+      },
+      { automatic: false },
+    );
   }
   private getActive(): ConversationRuntime {
     return this.tabs.active();

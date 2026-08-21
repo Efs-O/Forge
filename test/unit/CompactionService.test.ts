@@ -6,6 +6,7 @@ import {
   MAX_CONSECUTIVE_AUTO_CONTINUES,
   RESUME_PROMPT,
   RETAINED_TAIL_MAX_CHARS,
+  resumeAfterCompaction,
   runCompaction,
   selectCompactionSplit,
   type AutoCompactDeps,
@@ -273,6 +274,21 @@ describe('autoCompactAndResume', () => {
       (m) => m.type === 'generationStarted' && m.conversationId === 'c1',
     );
     expect(started).toBeGreaterThanOrEqual(0);
+  });
+
+  it('resumes after an explicit compact even when the automatic chain limit is reached', async () => {
+    const { deps, sent, continues, posted } = autoDeps({
+      autoContinues: () => MAX_CONSECUTIVE_AUTO_CONTINUES,
+    });
+
+    await resumeAfterCompaction(deps, { automatic: false });
+
+    expect(sent).toEqual([RESUME_PROMPT]);
+    expect(continues.count).toBe(0);
+    expect(posted).toContainEqual({
+      type: 'generationStarted',
+      conversationId: 'c1',
+    });
   });
 
   it('does not re-arm streaming when the resume is skipped', async () => {

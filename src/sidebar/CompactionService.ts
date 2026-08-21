@@ -268,33 +268,42 @@ export interface AutoCompactDeps {
   send: (text: string) => Promise<void>;
 }
 
-/**
- * Threshold-triggered compaction, plus the resume that makes it useful.
- *
- * Compaction is an internal context-management step, not the end of the
- * user's request. Once it succeeds, re-enter the same conversation so the
- * agent can either finish remaining work or recognize that the task is done.
- * The resume prompt explicitly prohibits repeating completed work.
- */
-export async function autoCompactAndResume(deps: AutoCompactDeps): Promise<void> {
-  // Read before compacting: the summarization call itself must not determine
-  // the status shown for the turn it interrupted.
-  const reason = deps.incompleteTurnReason();
-  const outcome = await deps.compact({ auto: true });
-  if (outcome !== 'compacted' || !deps.resumeEnabled) return;
+export type CompactionResumeDeps = Pick<
+  AutoCompactDeps,
+  | 'convId'
+  | 'post'
+  | 'incompleteTurnReason'
+  | 'resumeEnabled'
+  | 'autoContinues'
+  | 'noteAutoContinue'
+  | 'send'
+>;
 
+/** Continue the conversation after a successful compaction. */
+export async function resumeAfterCompaction(
+  deps: CompactionResumeDeps,
+  options: { automatic: boolean; reason?: string } = { automatic: true },
+): Promise<void> {
+  const reason = options.reason ?? deps.incompleteTurnReason();
+  if (!deps.resumeEnabled) return;
   if (deps.autoContinues() >= MAX_CONSECUTIVE_AUTO_CONTINUES) {
-    log.info('[auto-compact] resume limit reached — waiting for the user');
-    deps.post({
-      type: 'notice',
-      message:
-        'Forge: compacted again without finishing. Stopping here so this does not loop — send a prompt to continue.',
-      conversationId: deps.convId,
-    });
-    return;
+    if (!options.automatic) {
+      // An explicit /compact is a deliberate user action and starts a fresh
+      // continuation; the automatic-chain guard must not block it.
+      log.info('[manual-compact] continuing after explicit compaction');
+    } else {
+      log.info('[auto-compact] resume limit reached — waiting for the user');
+      deps.post({
+        type: 'notice',
+        message:
+          'Forge: compacted again without finishing. Stopping here so this does not loop — send a prompt to continue.',
+        conversationId: deps.convId,
+      });
+      return;
+    }
   }
 
-  deps.noteAutoContinue();
+  if (options.automatic) deps.noteAutoContinue();
   // Re-arm the webview's streaming state before the resume turn.
   //
   // The webview sets `streaming` from its own USER_SEND (a click on Send) or
@@ -302,13 +311,14 @@ export async function autoCompactAndResume(deps: AutoCompactDeps): Promise<void>
   // which clears it — and this resume is host-initiated, so it never produces a
   // USER_SEND. Without this the resumed turn generated with `streaming: false`:
   // the Stop button vanished and only Send was left, with no way to cancel a
-  // turn that was still running. It looked random because auto-compact fires on
-  // a threshold rather than on anything the user did.
+  // turn that was still running.
   deps.post({ type: 'generationStarted', conversationId: deps.convId });
   log.info(
-    reason
-      ? `[auto-compact] resuming: ${reason}`
-      : '[auto-compact] continuing after successful compaction',
+    options.automatic
+      ? reason
+        ? `[auto-compact] resuming: ${reason}`
+        : '[auto-compact] continuing after successful compaction'
+      : '[manual-compact] continuing after successful compaction',
   );
   deps.post({
     type: 'notice',
@@ -326,4 +336,18 @@ export async function autoCompactAndResume(deps: AutoCompactDeps): Promise<void>
       conversationId: deps.convId,
     });
   }
+}
+
+/** Run threshold compaction and, when enabled, resume the active conversation. */
+export async function autoCompactAndResume(deps: AutoCompactDeps): Promise<void> {
+  // Read before compacting: the summarization call itself must not determine
+  // the status shown for the turn it interrupted.
+  const reason = deps.incompleteTurnReason();
+  const outcome = await deps.compact({ auto: true });
+  if (outcome !== 'compacted') return;
+
+  await resumeAfterCompaction(deps, {
+    automatic: true,
+    ...(reason !== undefined ? { reason } : {}),
+  });
 }

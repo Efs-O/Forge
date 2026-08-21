@@ -302,7 +302,7 @@ export interface ForgeConfig {
      *  so it needs room left to run. */
     at?: number;
     /** After an automatic compaction, continue the active task from its summary
-     *  and retained tail. Default: true. A user-typed /compact never resumes. */
+     *  and retained tail. Default: true. A user-typed /compact always resumes. */
     resume?: boolean;
   };
   /** Optional localhost model-control API so an external orchestrator can ask

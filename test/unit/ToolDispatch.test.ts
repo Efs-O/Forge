@@ -1,5 +1,6 @@
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as vscode from 'vscode';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolDispatch, resolveToolPath } from '../../src/sidebar/ToolDispatch';
@@ -16,7 +17,11 @@ import { ToolBudget } from '../../src/tools/ToolBudget';
 vi.mock('vscode', () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const p = require('path') as typeof import('path');
-  const ws = p.resolve('/workspace');
+  // Keep the mocked workspace writable on Linux/macOS CI as well as Windows.
+  // `/workspace` is not a writable directory on hosted runners.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const o = require('os') as typeof import('os');
+  const ws = p.join(o.tmpdir(), 'forge-tool-dispatch-workspace');
   return {
     workspace: {
       workspaceFolders: [{ uri: { fsPath: ws } }],
@@ -32,7 +37,7 @@ vi.mock('vscode', () => {
   };
 });
 
-const WS = path.resolve('/workspace');
+const WS = path.join(os.tmpdir(), 'forge-tool-dispatch-workspace');
 
 function makeToolCall(name: string, args: Record<string, unknown>): ToolCall {
   return {

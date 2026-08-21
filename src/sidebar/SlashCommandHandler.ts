@@ -27,6 +27,7 @@ export interface SlashCommandDeps extends CompactionDeps {
   undo: () => Promise<string[]>;
   keep: () => Promise<void>;
   toggleClanker: () => boolean;
+  resumeAfterManualCompact: (conversationId: string) => Promise<void>;
 }
 
 export class SlashCommandHandler {
@@ -87,9 +88,13 @@ export class SlashCommandHandler {
         return;
 
       case 'compact':
-        // A user-typed /compact never auto-continues: they are at the keyboard
-        // and decide what happens next.
-        await this.compact({ auto: false });
+        {
+          const conversationId = deps.getActiveConv().id;
+          const outcome = await this.compact({ auto: false });
+          if (outcome === 'compacted') {
+            await deps.resumeAfterManualCompact(conversationId);
+          }
+        }
         return;
 
       case 'undo':
