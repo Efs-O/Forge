@@ -44,6 +44,10 @@ export class IndexManager {
     this.indexLoaded = false;
   }
 
+  startApproval(): { detail: string } | undefined {
+    return this.backend.startApproval();
+  }
+
   markDirty(fsPath: string): void {
     const normalized = this.toWorkspaceRelative(fsPath);
     if (!normalized) return;
@@ -63,56 +67,59 @@ export class IndexManager {
   async reindex(): Promise<SearchResultSummary> {
     this.ensureEmbeddingsEnabled();
     await this.backend.start();
+    return this.backend.withActivity(async () => {
+      const paths = await this.findWorkspaceFiles();
+      const chunks = await this.buildChunksForPaths(paths);
+      this.index = {
+        version: INDEX_VERSION,
+        workspaceRoot: this.workspaceRoot(),
+        modelPath: this.modelPath(),
+        includeGlobs: this.includeGlobs(),
+        excludeGlobs: this.excludeGlobs(),
+        maxFileSizeKb: this.maxFileSizeKb(),
+        promptStyle: this.promptStyle(),
+        builtAt: Date.now(),
+        chunks,
+      };
+      this.indexLoaded = true;
+      this.dirtyPaths.clear();
+      this.pendingSave = false;
+      await this.saveIndex();
 
-    const paths = await this.findWorkspaceFiles();
-    const chunks = await this.buildChunksForPaths(paths);
-    this.index = {
-      version: INDEX_VERSION,
-      workspaceRoot: this.workspaceRoot(),
-      modelPath: this.modelPath(),
-      includeGlobs: this.includeGlobs(),
-      excludeGlobs: this.excludeGlobs(),
-      maxFileSizeKb: this.maxFileSizeKb(),
-      promptStyle: this.promptStyle(),
-      builtAt: Date.now(),
-      chunks,
-    };
-    this.indexLoaded = true;
-    this.dirtyPaths.clear();
-    this.pendingSave = false;
-    await this.saveIndex();
-
-    return {
-      filesIndexed: new Set(chunks.map((chunk) => chunk.path)).size,
-      chunksIndexed: chunks.length,
-    };
+      return {
+        filesIndexed: new Set(chunks.map((chunk) => chunk.path)).size,
+        chunksIndexed: chunks.length,
+      };
+    });
   }
 
   async search(query: string, topK = 5, scopeGlob?: string): Promise<SearchHit[]> {
     this.ensureEmbeddingsEnabled();
     await this.backend.start();
-    await this.ensureIndexReady();
-    if (!this.index) return [];
+    return this.backend.withActivity(async () => {
+      await this.ensureIndexReady();
+      if (!this.index) return [];
 
-    if (this.dirtyPaths.size > 0) {
-      await this.refreshDirtyPaths();
-      if (this.pendingSave) await this.saveIndex();
-    }
+      if (this.dirtyPaths.size > 0) {
+        await this.refreshDirtyPaths();
+        if (this.pendingSave) await this.saveIndex();
+      }
 
-    const queryEmbedding = await this.client.embedQuery(query);
-    const scopedPaths = scopeGlob ? await this.findScopedPaths(scopeGlob) : null;
-    return this.index.chunks
-      .filter((chunk) => scopedPaths === null || scopedPaths.has(chunk.path))
-      .map((chunk) => ({
-        path: chunk.path,
-        startLine: chunk.startLine,
-        endLine: chunk.endLine,
-        score: cosineSimilarity(queryEmbedding, chunk.embedding),
-        snippet: chunk.text,
-        ...(chunk.symbolName ? { symbolName: chunk.symbolName } : {}),
-      }))
-      .sort((left, right) => right.score - left.score)
-      .slice(0, topK);
+      const queryEmbedding = await this.client.embedQuery(query);
+      const scopedPaths = scopeGlob ? await this.findScopedPaths(scopeGlob) : null;
+      return this.index.chunks
+        .filter((chunk) => scopedPaths === null || scopedPaths.has(chunk.path))
+        .map((chunk) => ({
+          path: chunk.path,
+          startLine: chunk.startLine,
+          endLine: chunk.endLine,
+          score: cosineSimilarity(queryEmbedding, chunk.embedding),
+          snippet: chunk.text,
+          ...(chunk.symbolName ? { symbolName: chunk.symbolName } : {}),
+        }))
+        .sort((left, right) => right.score - left.score)
+        .slice(0, topK);
+    });
   }
 
   private async ensureIndexReady(): Promise<void> {

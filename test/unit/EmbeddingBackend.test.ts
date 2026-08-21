@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { composeEmbeddingServerArgs, embeddingModelMatches } from '../../src/backend/EmbeddingBackend';
+import {
+  composeEmbeddingServerArgs,
+  EmbeddingBackend,
+  embeddingModelMatches,
+} from '../../src/backend/EmbeddingBackend';
 import type { ForgeConfig } from '../../src/config/types';
 
 function makeConfig(overrides: Partial<ForgeConfig> = {}): ForgeConfig {
@@ -73,5 +77,32 @@ describe('embeddingModelMatches', () => {
 
   it('rejects a server running a different embedding model', () => {
     expect(embeddingModelMatches('/models/other.gguf', '/models/embed.gguf')).toBe(false);
+  });
+});
+
+describe('EmbeddingBackend cold-start approval', () => {
+  it('warns before starting a configured cold server', () => {
+    const backend = new EmbeddingBackend(makeConfig({
+      embeddings: {
+        enabled: true,
+        model_path: '/models/e.gguf',
+        idle_timeout_ms: 60_000,
+      },
+    }));
+
+    expect(backend.startApproval()?.detail).toContain('additional VRAM');
+    expect(backend.startApproval()?.detail).toContain('60 seconds');
+  });
+
+  it('can disable the cold-start warning explicitly', () => {
+    const backend = new EmbeddingBackend(makeConfig({
+      embeddings: {
+        enabled: true,
+        model_path: '/models/e.gguf',
+        confirm_on_start: false,
+      },
+    }));
+
+    expect(backend.startApproval()).toBeUndefined();
   });
 });

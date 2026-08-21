@@ -57,7 +57,7 @@ export interface RegisteredTool {
   additionalPermissionsForArgs?: (args: Record<string, unknown>) => readonly ToolPermission[];
   handler: ToolHandler;
   mutation?: ToolMutation;
-  approval?: (args: Record<string, unknown>) => ToolApprovalMetadata;
+  approval?: (args: Record<string, unknown>) => ToolApprovalMetadata | undefined;
   /**
    * The handler's inputs and effects are structurally bounded enough to run
    * without the normal per-call confirmation. This must never be used for a

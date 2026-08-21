@@ -239,6 +239,10 @@ export interface EmbeddingsConfig {
   n_ctx?: number;
   prompt_style?: EmbeddingPromptStyle;
   auto_index_on_search?: boolean;
+  /** Ask before starting the embedding server when it is cold. */
+  confirm_on_start?: boolean;
+  /** Stop Forge-owned embedding server after this many idle milliseconds. */
+  idle_timeout_ms?: number;
   max_file_size_kb?: number;
   include_globs?: string[];
   exclude_globs?: string[];

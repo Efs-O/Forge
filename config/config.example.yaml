@@ -288,7 +288,8 @@ permissions:
 # Optional: local semantic code search
 # Requires a second local GGUF embedding model served by llama.cpp
 # Forge starts it lazily on the first semantic search or /reindex, keeps it
-# alive for that VS Code window, and stops it when the window deactivates.
+# warm during active indexing/search, asks before a cold start, and unloads it
+# after the configured idle timeout. It stops when the window deactivates too.
 # Each workspace keeps its own persisted index at .forge/embeddings.index.json.
 # -------------------------------------------------------------------
 # embeddings:
@@ -306,6 +307,10 @@ permissions:
 #   # invalidates the stored index and forces a rebuild.
 #   prompt_style: gemma
 #   auto_index_on_search: true
+#   # Show an Accept/Cancel warning before starting the server from a cold state.
+#   confirm_on_start: true
+#   # Forge-owned server is stopped after this long without indexing/search use.
+#   idle_timeout_ms: 120000
 #   max_file_size_kb: 256
 #   # Anchored at the WORKSPACE ROOT, like every other glob Forge takes. In a
 #   # workspace holding several projects, "src/**" matches only a top-level

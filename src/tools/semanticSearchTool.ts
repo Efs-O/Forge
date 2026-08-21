@@ -30,6 +30,7 @@ export function makeSearchCodebaseTool(indexManager: IndexManager): RegisteredTo
       },
     },
     permission: 'read',
+    approval: () => indexManager.startApproval(),
     handler: async (args) => {
       const query = args['query'];
       if (typeof query !== 'string' || query.trim().length === 0) {

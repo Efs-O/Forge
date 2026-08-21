@@ -7,6 +7,7 @@ import { waitForHealthy, probeHealthy, probeServedModel } from './HealthCheck';
 
 /** EmbeddingGemma 300M's trained context window. Override via embeddings.n_ctx. */
 const DEFAULT_EMBEDDING_CTX = 2048;
+const DEFAULT_EMBEDDING_IDLE_TIMEOUT_MS = 120_000;
 
 export function embeddingModelMatches(servedModel: string, configuredModelPath: string): boolean {
   return (
@@ -17,7 +18,11 @@ export function embeddingModelMatches(servedModel: string, configuredModelPath: 
 export class EmbeddingBackend implements vscode.Disposable {
   private proc: ChildProcess | null = null;
   private ready = false;
+  private ownsProcess = false;
   private startAbort: AbortController | null = null;
+  private startPromise: Promise<void> | null = null;
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  private activeUses = 0;
   private output: vscode.OutputChannel | null = null;
   private currentSignature: string | null = null;
 
@@ -35,6 +40,33 @@ export class EmbeddingBackend implements vscode.Disposable {
     return this.ready;
   }
 
+  /** Returns confirmation metadata only when a new Forge-owned server is needed. */
+  startApproval(): { detail: string } | undefined {
+    const cfg = this.config.embeddings;
+    if (!cfg?.enabled || cfg.confirm_on_start === false || this.ready || this.startPromise) {
+      return undefined;
+    }
+    const timeout = this.idleTimeoutMs();
+    return {
+      detail:
+        'Semantic code search will start EmbeddingGemma alongside the active model. ' +
+        'It may consume significant additional VRAM and could cause an out-of-memory failure. ' +
+        `If approved, Forge will unload it after ${Math.round(timeout / 1000)} seconds of inactivity.`,
+    };
+  }
+
+  /** Keep the server alive while an indexing or query operation is running. */
+  async withActivity<T>(operation: () => Promise<T>): Promise<T> {
+    this.activeUses++;
+    this.clearIdleTimer();
+    try {
+      return await operation();
+    } finally {
+      this.activeUses--;
+      this.scheduleIdleStop();
+    }
+  }
+
   baseUrl(): string {
     const host = this.config.llama_server.host ?? '127.0.0.1';
     const port = this.config.embeddings?.port ?? 8091;
@@ -47,6 +79,17 @@ export class EmbeddingBackend implements vscode.Disposable {
   }
 
   async start(): Promise<void> {
+    if (this.startPromise) return this.startPromise;
+    const promise = this.startInternal();
+    this.startPromise = promise;
+    try {
+      await promise;
+    } finally {
+      if (this.startPromise === promise) this.startPromise = null;
+    }
+  }
+
+  private async startInternal(): Promise<void> {
     const cfg = this.config.embeddings;
     const binary = this.config.llama_server.binary;
     if (!cfg?.enabled) {
@@ -85,6 +128,7 @@ export class EmbeddingBackend implements vscode.Disposable {
         );
       }
       this.ready = true;
+      this.ownsProcess = false;
       this.currentSignature = signature;
       this.output ??= vscode.window.createOutputChannel('Forge - embeddings');
       this.output.appendLine(`[Forge] Adopted existing embedding server on port ${port}.`);
@@ -99,6 +143,7 @@ export class EmbeddingBackend implements vscode.Disposable {
     this.output.appendLine('');
 
     this.proc = spawnLlamaServer(binary, args);
+    this.ownsProcess = true;
     this.proc.stdout?.on('data', (chunk: Buffer) => this.output?.append(chunk.toString()));
     this.proc.stderr?.on('data', (chunk: Buffer) => this.output?.append(chunk.toString()));
 
@@ -110,18 +155,41 @@ export class EmbeddingBackend implements vscode.Disposable {
 
     this.ready = true;
     this.currentSignature = signature;
+    this.scheduleIdleStop();
   }
 
   async stop(): Promise<void> {
+    this.clearIdleTimer();
     this.ready = false;
     this.currentSignature = null;
     this.startAbort?.abort();
     this.startAbort = null;
+    this.ownsProcess = false;
     if (!this.proc) return;
 
     const proc = this.proc;
     this.proc = null;
     await killLlamaProcess(proc);
+  }
+
+  private idleTimeoutMs(): number {
+    return this.config.embeddings?.idle_timeout_ms ?? DEFAULT_EMBEDDING_IDLE_TIMEOUT_MS;
+  }
+
+  private clearIdleTimer(): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = null;
+  }
+
+  private scheduleIdleStop(): void {
+    this.clearIdleTimer();
+    // Never terminate a server Forge did not spawn; it may belong to another
+    // Forge window or an external caller that owns its lifecycle.
+    if (!this.proc || !this.ownsProcess || this.activeUses > 0) return;
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null;
+      if (this.activeUses === 0 && this.proc) void this.stop();
+    }, this.idleTimeoutMs());
   }
 
   /**

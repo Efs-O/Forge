@@ -155,6 +155,8 @@ const EmbeddingsConfigSchema = z
     // this invalidates the stored index and forces a rebuild.
     prompt_style: z.enum(['gemma', 'none']).optional(),
     auto_index_on_search: z.boolean().optional(),
+    confirm_on_start: z.boolean().optional(),
+    idle_timeout_ms: z.number().int().positive().optional(),
     max_file_size_kb: z.number().int().positive().optional(),
     include_globs: z.array(z.string().min(1)).optional(),
     exclude_globs: z.array(z.string().min(1)).optional(),
