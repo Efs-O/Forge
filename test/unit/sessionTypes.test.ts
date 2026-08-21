@@ -186,6 +186,25 @@ describe('sessionTypes', () => {
     ]);
   });
 
+  it('keeps commentary from a reasoning turn that also called a tool', () => {
+    expect(
+      displayPersistMessages([
+        {
+          role: 'assistant',
+          content: 'Now the docs — index.html control grids and README.',
+          reasoning: 'Checking what remains.',
+          tool_calls: [toolCall],
+        },
+      ]),
+    ).toEqual([
+      { role: 'assistant', content: '', reasoning: 'Checking what remains.' },
+      {
+        role: 'assistant',
+        content: 'Now the docs — index.html control grids and README.',
+      },
+    ]);
+  });
+
   it('displayPersistMessages never emits null content to the webview', () => {
     const rows = displayPersistMessages([
       { role: 'assistant', content: null, tool_calls: [toolCall], reasoning: 'r' },

@@ -303,7 +303,11 @@ export async function runToolCallingLoop(
       // every round, so dropping it here discarded the model's thinking for every
       // round that ended in a tool call — only the final round's survived, and
       // the sidebar's reasoning bubbles collapsed to one when the turn ended.
-      streamedAssistant.completeToolCall(calls, assistantReasoning);
+      // A model may narrate its next action before emitting the tool call. That
+      // commentary has already streamed into the sidebar, so retain it on the
+      // protocol turn as well; otherwise the next session sync replaces the
+      // live row with `content: null` and the visible text disappears.
+      streamedAssistant.completeToolCall(calls, assistantContent, assistantReasoning);
       options.onMessagesChanged?.();
       const beforeDispatch = options.messages.length;
       await options.dispatchToolCalls(calls, options.messages);

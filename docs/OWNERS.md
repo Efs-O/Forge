@@ -51,6 +51,7 @@ overlaps with an existing owner, extend the owner instead.
 
 | Concern                                          | Owner                                          |
 | ------------------------------------------------ | ---------------------------------------------- |
+| Streamed assistant turn finalization             | `src/agent/StreamedAssistantTurn.ts`           |
 | Webview state reducer (per-conversation keying)  | `webview-ui/src/reducer.ts`                    |
 | Transcript row folding (diff / thinking runs)    | `webview-ui/src/components/MessageList.tsx`    |
 | Single-file diff rendering + stats               | `webview-ui/src/components/DiffBlock.tsx`      |

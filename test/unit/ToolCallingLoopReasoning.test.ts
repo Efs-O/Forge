@@ -92,6 +92,37 @@ describe('ToolCallingLoop reasoning retention', () => {
     expect(finalTurn.reasoning).toBe('round two thinking');
   });
 
+  it('retains visible commentary from a round that ends with a tool call', async () => {
+    let round = 0;
+    streamModelChatCompletion.mockImplementation(
+      async (_url: string, _req: unknown, _model: unknown, h: Handlers) => {
+        round += 1;
+        if (round === 1) {
+          h.onReasoning('Checking what remains.');
+          h.onToken('Now the docs — index.html control grids and README.');
+          h.onToolCalls([CALL]);
+          h.onDone('tool_calls');
+        } else {
+          h.onToken('Done.');
+          h.onDone('stop');
+        }
+      },
+    );
+    const messages: ChatMessage[] = [{ role: 'user', content: 'go' }];
+
+    await runToolCallingLoop(runOptions(messages) as never);
+
+    expect(messages.filter((m) => m.role === 'assistant')).toEqual([
+      {
+        role: 'assistant',
+        content: 'Now the docs — index.html control grids and README.',
+        reasoning: 'Checking what remains.',
+        tool_calls: [CALL],
+      },
+      { role: 'assistant', content: 'Done.' },
+    ]);
+  });
+
   it('writes reasoning into the real transcript while it is still streaming', async () => {
     const messages: ChatMessage[] = [{ role: 'user', content: 'go' }];
     let streamedSnapshot: ChatMessage[] = [];

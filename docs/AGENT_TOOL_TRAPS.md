@@ -51,5 +51,15 @@ Both use ripgrep now — keep it that way.
 is dropped there (reasoning on `tool_calls` turns was, until 0.12.47), the
 behaviour it explains becomes undiagnosable after the fact.
 
+**A tool-call turn may contain visible assistant text too.** Models often narrate
+the next action (for example, "Now the docs...") in `content` before emitting
+`tool_calls`. That text is not reasoning and is not disposable stream chrome.
+`StreamedAssistantTurn.completeToolCall()` must retain the sanitized assistant
+content on the same protocol message; use `content: null` only when the round
+actually emitted no visible text. Otherwise the commentary appears live, then
+vanishes on the next transcript sync while the final summary misleadingly
+survives. Regression coverage lives in `ToolCallingLoopReasoning.test.ts` and
+`sessionTypes.test.ts`.
+
 **`src/templates/builtin/` is DEAD.** `TemplateEngine` loads
 `config/templates/builtin/` (see `extension.ts`). The two copies have diverged.

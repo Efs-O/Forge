@@ -12,7 +12,7 @@ export type ContentPart = ContentPartText | ContentPartImage;
 
 export interface ChatMessage {
   role: Role;
-  /** null only on assistant messages that carry tool_calls instead of text. */
+  /** May be null on assistant messages that carry tool_calls without text. */
   content: string | ContentPart[] | null;
   /** Optional reasoning/thinking text shown in the sidebar but never sent back to the model. */
   reasoning?: string;

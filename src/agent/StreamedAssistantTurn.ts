@@ -18,16 +18,16 @@ export class StreamedAssistantTurn {
     this.current.reasoning = (this.current.reasoning ?? '') + token;
   }
 
-  completeToolCall(calls: ToolCall[], reasoning: string): void {
+  completeToolCall(calls: ToolCall[], content: string, reasoning: string): void {
     if (this.current) {
-      this.current.content = null;
+      this.current.content = content || null;
       this.current.tool_calls = calls;
       if (reasoning) this.current.reasoning = reasoning;
       return;
     }
     this.messages.push({
       role: 'assistant',
-      content: null,
+      content: content || null,
       tool_calls: calls,
       ...(reasoning ? { reasoning } : {}),
     });
