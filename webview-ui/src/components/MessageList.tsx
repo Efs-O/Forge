@@ -3,18 +3,19 @@ import type { AppMessage } from '../App';
 import { Message } from './Message';
 import { DiffGroup } from './DiffGroup';
 import { ThinkingGroup, isReasoningOnly } from './ThinkingGroup';
-import { ToolRow } from './ToolRow';
+import { ToolGroup } from './ToolGroup';
 import { QueuedPromptRow } from './QueuedPromptRow';
 
 type Row =
   | { kind: 'message'; message: AppMessage; index: number }
   | { kind: 'diffGroup'; diffs: AppMessage[] }
-  | { kind: 'thinkingGroup'; steps: AppMessage[] };
+  | { kind: 'thinkingGroup'; steps: AppMessage[] }
+  | { kind: 'toolGroup'; tools: AppMessage[] };
 
 /**
- * Folds runs of adjacent same-kind messages into single rows: file edits become
- * one card per turn, per-round reasoning becomes one line. Anything else passes
- * through untouched.
+ * Folds runs of adjacent same-kind messages into single rows: file edits and
+ * tool calls become one card per turn, and per-round reasoning becomes one line.
+ * Anything else passes through untouched.
  */
 function toRows(messages: AppMessage[]): Row[] {
   const rows: Row[] = [];
@@ -34,6 +35,14 @@ function toRows(messages: AppMessage[]): Row[] {
       while (i < messages.length && isReasoningOnly(messages[i]!)) steps.push(messages[i++]!);
       i--;
       rows.push({ kind: 'thinkingGroup', steps });
+      continue;
+    }
+
+    if (message.role === 'tool') {
+      const tools: AppMessage[] = [];
+      while (i < messages.length && messages[i]!.role === 'tool') tools.push(messages[i++]!);
+      i--;
+      rows.push({ kind: 'toolGroup', tools });
       continue;
     }
 
@@ -129,8 +138,8 @@ export function MessageList({
           <DiffGroup key={row.diffs[0]!.id} diffs={row.diffs} />
         ) : row.kind === 'thinkingGroup' ? (
           <ThinkingGroup key={row.steps[0]!.id} steps={row.steps} />
-        ) : row.message.role === 'tool' ? (
-          <ToolRow key={row.message.id} message={row.message} />
+        ) : row.kind === 'toolGroup' ? (
+          <ToolGroup key={row.tools[0]!.id} tools={row.tools} />
         ) : (
           <Message
             key={row.message.id}

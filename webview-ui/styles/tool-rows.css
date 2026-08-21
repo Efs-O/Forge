@@ -1,5 +1,48 @@
 /* ── Tool activity rows ──────────────────────────────────────────────────── */
 
+.tool-group {
+  margin: 2px 0;
+}
+
+.tool-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  background: transparent;
+  border: none;
+  color: var(--vscode-textLink-foreground, #4daafc);
+  cursor: pointer;
+  font-family: var(--vscode-editor-font-family, 'Cascadia Code', monospace);
+  font-size: 11px;
+  align-self: auto;
+}
+
+.tool-group-toggle:hover {
+  background: transparent;
+  text-decoration: underline;
+}
+
+.tool-group-chevron {
+  display: inline-flex;
+  align-items: center;
+  width: 10px;
+  flex-shrink: 0;
+}
+
+.tool-group-summary {
+  color: var(--vscode-descriptionForeground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-group-body {
+  margin: 2px 0 5px 5px;
+  padding-left: 14px;
+  border-left: 1px solid var(--vscode-panel-border, #333);
+}
+
 .msg-tool-row {
   display: flex;
   align-items: center;

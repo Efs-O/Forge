@@ -439,6 +439,7 @@ export class ToolDispatch {
     this.post({
       type: 'toolResult',
       toolName,
+      toolCallId: tc.id,
       label: resultLabel(toolName, result, pathArg),
       text,
       totalChars,

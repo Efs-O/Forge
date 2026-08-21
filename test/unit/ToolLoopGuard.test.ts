@@ -17,10 +17,11 @@ function result(content: string): ChatMessage[] {
 }
 
 describe('ToolLoopGuard', () => {
-  it('normalizes JSON key order and stops the third identical no-progress result', () => {
+  it('normalizes JSON key order and stops six identical read-only no-progress results', () => {
     const guard = new ToolLoopGuard();
-    guard.afterRound(call('read_file', { path: 'a', line: 1 }), result('same'));
-    guard.afterRound(call('read_file', { line: 1, path: 'a' }), result('same'));
+    for (let index = 0; index < 5; index++) {
+      guard.afterRound(call('read_file', { line: 1, path: 'a' }), result('same'));
+    }
     expect(() =>
       guard.afterRound(call('read_file', { path: 'a', line: 1 }), result('same')),
     ).toThrow(ToolLoopDetectedError);
@@ -45,7 +46,7 @@ describe('ToolLoopGuard', () => {
     const guard = new ToolLoopGuard();
     const a = call('read_file', { path: 'a' });
     const b = call('read_file', { path: 'b' });
-    for (let index = 0; index < 5; index++) {
+    for (let index = 0; index < 9; index++) {
       guard.afterRound(index % 2 === 0 ? a : b, result(index % 2 === 0 ? 'A' : 'B'));
     }
     expect(() => guard.afterRound(b, result('B'))).toThrow(/alternating/);

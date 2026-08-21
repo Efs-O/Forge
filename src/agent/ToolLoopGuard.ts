@@ -5,6 +5,10 @@ interface ToolRoundRecord {
   result: string;
 }
 
+/** Read-only investigation can legitimately repeat a search while auditing. */
+const IDENTICAL_READ_ONLY_ROUNDS = 6;
+const ALTERNATING_READ_ONLY_ROUNDS = 10;
+
 export class ToolLoopDetectedError extends Error {
   constructor(message: string) {
     super(message);
@@ -69,16 +73,15 @@ export class ToolLoopGuard {
     const length = this.records.length;
     const last = this.records[length - 1];
     if (
-      length >= 3 &&
-      last?.call === this.records[length - 2]?.call &&
-      last.result === this.records[length - 2]?.result &&
-      last.call === this.records[length - 3]?.call &&
-      last.result === this.records[length - 3]?.result
+      length >= IDENTICAL_READ_ONLY_ROUNDS &&
+      this.records
+        .slice(-IDENTICAL_READ_ONLY_ROUNDS)
+        .every((record) => record.call === last?.call && record.result === last?.result)
     ) {
       throw new ToolLoopDetectedError('Forge: repeated tool call produced no progress.');
     }
-    if (length >= 6) {
-      const cycle = this.records.slice(-6);
+    if (length >= ALTERNATING_READ_ONLY_ROUNDS) {
+      const cycle = this.records.slice(-ALTERNATING_READ_ONLY_ROUNDS);
       const left = cycle[0];
       const right = cycle[1];
       if (

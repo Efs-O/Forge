@@ -200,6 +200,7 @@ export function reducer(state: State, action: Action): State {
         role: 'tool' as const,
         content: action.detail ? `${action.toolName} → ${action.detail}` : action.toolName,
         toolName: action.toolName,
+        ...(action.toolCallId ? { toolCallId: action.toolCallId } : {}),
       });
     }
 
@@ -214,7 +215,7 @@ export function reducer(state: State, action: Action): State {
       };
       // Upgrade the pending activity row for this call rather than adding a
       // second row — one line per tool call, gaining its result when it lands.
-      const pending = findPendingToolRow(existing, action.toolName);
+      const pending = findPendingToolRow(existing, action.toolName, action.toolCallId);
       if (pending >= 0) {
         const updated = [...existing];
         updated[pending] = {

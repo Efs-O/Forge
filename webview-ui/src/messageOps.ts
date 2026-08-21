@@ -10,6 +10,7 @@ export interface AppMessage {
   diffIsDeleted?: boolean;
   /** Tool rows: set on activity, then filled in when the call returns. */
   toolName?: string;
+  toolCallId?: string;
   toolResult?: string;
   toolResultTotal?: number;
   toolFilePath?: string;
@@ -150,10 +151,21 @@ function appendRow(rows: Map<number, AppMessage[]>, index: number, message: AppM
 }
 
 /** Index of the newest unresolved activity row for a tool, or -1. */
-export function findPendingToolRow(messages: AppMessage[], toolName: string): number {
+export function findPendingToolRow(
+  messages: AppMessage[],
+  toolName: string,
+  toolCallId?: string,
+): number {
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i]!;
-    if (m.role === 'tool' && m.toolName === toolName && m.toolResult === undefined) return i;
+    if (
+      m.role === 'tool' &&
+      m.toolName === toolName &&
+      m.toolResult === undefined &&
+      (toolCallId === undefined || m.toolCallId === toolCallId)
+    ) {
+      return i;
+    }
   }
   return -1;
 }

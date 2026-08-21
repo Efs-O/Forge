@@ -96,6 +96,7 @@ export function App(): React.ReactElement {
           dispatch({
             type: 'TOOL_ACTIVITY',
             toolName: msg.toolName,
+            toolCallId: msg.toolCallId,
             detail: msg.detail,
             convId: msg.conversationId,
           });
@@ -104,6 +105,7 @@ export function App(): React.ReactElement {
           dispatch({
             type: 'TOOL_RESULT',
             toolName: msg.toolName,
+            toolCallId: msg.toolCallId,
             label: msg.label,
             text: msg.text,
             totalChars: msg.totalChars,

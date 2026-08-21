@@ -121,6 +121,8 @@ export interface ConfirmRequestMsg {
 export interface ToolResultMsg {
   type: 'toolResult';
   toolName: string;
+  /** Correlates a result with its activity row when a model issued parallel calls. */
+  toolCallId?: string;
   /** One-line row label — a path for read-only tools, else a short summary. */
   label: string;
   /** Full result text, capped for display and with newlines intact. */
@@ -135,6 +137,8 @@ export interface ToolResultMsg {
 export interface ToolActivityMsg {
   type: 'toolActivity';
   toolName: string;
+  /** Native tool-call id, when this activity represents one model tool call. */
+  toolCallId?: string;
   detail?: string;
   conversationId?: string;
 }

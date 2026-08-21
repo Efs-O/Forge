@@ -70,10 +70,17 @@ export type Action =
   | { type: 'SET_MODEL'; name: string | null }
   | { type: 'CHECKPOINT_READY'; convId?: string }
   | { type: 'CHECKPOINT_DISMISSED'; convId?: string }
-  | { type: 'TOOL_ACTIVITY'; toolName: string; detail?: string; convId?: string }
+  | {
+      type: 'TOOL_ACTIVITY';
+      toolName: string;
+      toolCallId?: string;
+      detail?: string;
+      convId?: string;
+    }
   | {
       type: 'TOOL_RESULT';
       toolName: string;
+      toolCallId?: string;
       label: string;
       text: string;
       totalChars: number;

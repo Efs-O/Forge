@@ -39,7 +39,7 @@ import {
 
 /** Tool rounds per sidebar turn when the model does not set `max_tool_rounds`.
  *  Workers have their own, lower cap in `src/workers/limits.ts`. */
-export const MAX_TOOL_ROUNDS = 40;
+export const MAX_TOOL_ROUNDS = 80;
 
 /** Ceiling on a configured `max_tool_rounds`. The cap's job is to stop a
  *  runaway loop eventually; an unbounded value would remove that guarantee. */
@@ -210,6 +210,7 @@ export async function runModelTurn(
           postC({
             type: 'toolActivity',
             toolName: call.function.name,
+            toolCallId: call.id,
             ...(detail ? { detail } : {}),
           });
         }
