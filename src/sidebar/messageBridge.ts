@@ -223,6 +223,13 @@ export interface SessionSyncMsg {
           toolResultTotal: number;
           toolIsError?: boolean | undefined;
         }
+      | {
+          role: 'diff';
+          content: string;
+          diffHunks: DiffHunk[] | null;
+          diffIsNew: boolean;
+          diffIsDeleted: boolean;
+        }
     >
   >;
 }

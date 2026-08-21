@@ -5,8 +5,16 @@
  * confirmation-gated, and keeping them together makes that boundary visible.
  */
 
+import * as path from 'path';
 import type { RegisteredTool } from './ToolRegistry';
-import { getRepo, getRepoForPaths, resolveFilePath, withGitError } from './gitRepo';
+import {
+  getRepo,
+  getRepoForPaths,
+  readLiveGitStatus,
+  resolveFilePath,
+  runGit,
+  withGitError,
+} from './gitRepo';
 
 const cwdParameter = {
   type: 'string',
@@ -100,10 +108,24 @@ export function makeStageTool(): RegisteredTool {
     },
     permission: 'git-write',
     handler: async (args) => {
-      const paths = (args['paths'] as string[]).map(resolveFilePath);
-      const repo = getRepoForPaths(args['paths'] as string[]);
-      await withGitError('git_stage', repo, () => repo.add(paths));
-      return `Staged: ${(args['paths'] as string[]).join(', ')}`;
+      const requestedPaths = args['paths'] as string[];
+      const paths = requestedPaths.map(resolveFilePath);
+      const repo = getRepoForPaths(requestedPaths);
+      const root = repo.rootUri?.fsPath;
+      if (!root) throw new Error('git_stage: selected repository has no root path');
+      const relativePaths = paths.map((filePath) => path.relative(root, filePath));
+      await runGit(repo, ['add', '--', ...relativePaths]);
+
+      const requested = new Set(relativePaths.map(normalizeGitPath));
+      const staged = (await readLiveGitStatus(repo)).filter(
+        (entry) =>
+          entry.index !== ' ' &&
+          (requested.has(normalizeGitPath(entry.path)) ||
+            (entry.originalPath !== undefined &&
+              requested.has(normalizeGitPath(entry.originalPath)))),
+      );
+      if (!staged.length) return `No changes staged: ${requestedPaths.join(', ')}`;
+      return `Staged: ${staged.map((entry) => entry.path).join(', ')}`;
     },
   };
 }
@@ -132,8 +154,20 @@ export function makeCommitTool(): RegisteredTool {
     handler: async (args) => {
       const repo = getRepo(args['cwd'] as string | undefined);
       const message = args['message'] as string;
-      await withGitError('git_commit', repo, () => repo.commit(message));
+      const staged = (await readLiveGitStatus(repo)).some(
+        (entry) => entry.index !== ' ' && entry.index !== '?',
+      );
+      if (!staged) {
+        const root = repo.rootUri?.fsPath ?? '(repository root unavailable)';
+        throw new Error(`git commit failed in repository "${root}": No staged changes to commit.`);
+      }
+      await runGit(repo, ['commit', '-m', message]);
       return `Committed: ${message}`;
     },
   };
+}
+
+function normalizeGitPath(filePath: string): string {
+  const normalized = filePath.replace(/\\/g, '/');
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
 }

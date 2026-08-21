@@ -117,6 +117,7 @@ export function opRestoreConversation(sidebar: SidebarRuntime, id: string): Rest
   const restored: ConversationRuntime = {
     ...archived,
     messages: [...archived.messages],
+    ...(archived.displayDiffs ? { displayDiffs: [...archived.displayDiffs] } : {}),
     updatedAt: Date.now(),
   };
   const updated: SidebarRuntime = {
@@ -143,6 +144,7 @@ export function opRestoreConversation(sidebar: SidebarRuntime, id: string): Rest
  */
 export function opClearMessages(conv: ConversationRuntime): void {
   conv.messages = [];
+  conv.displayDiffs = [];
   conv.title = 'Chat';
   conv.updatedAt = Date.now();
 }

@@ -95,6 +95,12 @@ export function reducer(state: State, action: Action): State {
       const cid = resolveConvId(state, action.convId);
       const existing = state.messagesById[cid] ?? [];
       const last = existing[existing.length - 1];
+      // The final round commonly streams reasoning before answer text. Keep
+      // that reasoning as its own Thinking row instead of converting it into
+      // a normal assistant bubble (which does not render `reasoning`).
+      if (last?.role === 'assistant' && last.content === '' && last.reasoning) {
+        return appendToConv(state, cid, { id: mkId(), role: 'assistant', content: action.text });
+      }
       if (last?.role === 'assistant') {
         return updateLastInConv(state, cid, (m) => ({ ...m, content: m.content + action.text }));
       }

@@ -54,6 +54,9 @@ function persistedToRuntime(p: ConversationPersisted): ConversationRuntime {
     ...(p.active_model !== undefined ? { active_model: p.active_model } : {}),
     ...(p.cli_sessions !== undefined ? { cli_sessions: { ...p.cli_sessions } } : {}),
     ...(p.compaction !== undefined ? { compaction: { ...p.compaction } } : {}),
+    ...(p.display_diffs !== undefined
+      ? { displayDiffs: p.display_diffs.map((diff) => ({ ...diff })) }
+      : {}),
   };
 }
 
@@ -99,6 +102,9 @@ export function runtimeToPersisted(session: SidebarRuntime): SidebarSessionPersi
       ...(c.active_model !== undefined ? { active_model: c.active_model } : {}),
       ...(c.cli_sessions !== undefined ? { cli_sessions: { ...c.cli_sessions } } : {}),
       ...(c.compaction !== undefined ? { compaction: { ...c.compaction } } : {}),
+      ...(c.displayDiffs !== undefined
+        ? { display_diffs: c.displayDiffs.map((diff) => ({ ...diff })) }
+        : {}),
     })),
     history: session.history.map((c) => ({
       id: c.id,
@@ -109,6 +115,9 @@ export function runtimeToPersisted(session: SidebarRuntime): SidebarSessionPersi
       ...(c.active_model !== undefined ? { active_model: c.active_model } : {}),
       ...(c.cli_sessions !== undefined ? { cli_sessions: { ...c.cli_sessions } } : {}),
       ...(c.compaction !== undefined ? { compaction: { ...c.compaction } } : {}),
+      ...(c.displayDiffs !== undefined
+        ? { display_diffs: c.displayDiffs.map((diff) => ({ ...diff })) }
+        : {}),
     })),
   };
 }

@@ -6,7 +6,11 @@ import {
   type PersistedRow,
 } from '../../webview-ui/src/messageOps';
 
-function msg(role: AppMessage['role'], content: string, extra: Partial<AppMessage> = {}): AppMessage {
+function msg(
+  role: AppMessage['role'],
+  content: string,
+  extra: Partial<AppMessage> = {},
+): AppMessage {
   return { id: `${role}-${content}`, role, content, ...extra };
 }
 
@@ -71,6 +75,41 @@ describe('mergeSyncedMessages', () => {
       'error',
       'assistant',
     ]);
+  });
+
+  it('uses the synchronized diff preview instead of dropping it at turn completion', () => {
+    const local: AppMessage[] = [
+      msg('user', 'edit it'),
+      msg('tool', 'write_file → src/a.ts', {
+        toolName: 'write_file',
+        toolResult: 'written',
+        toolResultTotal: 7,
+      }),
+      msg('diff', 'src/a.ts'),
+      msg('assistant', 'Done.'),
+    ];
+    const rows: PersistedRow[] = [
+      { role: 'user', content: 'edit it' },
+      {
+        role: 'tool',
+        content: 'write_file → src/a.ts',
+        toolName: 'write_file',
+        toolResult: 'written',
+        toolResultTotal: 7,
+      },
+      {
+        role: 'diff',
+        content: 'src/a.ts',
+        diffHunks: [{ oldStart: 1, newStart: 1, lines: [{ kind: 'added', text: 'x' }] }],
+        diffIsNew: false,
+        diffIsDeleted: false,
+      },
+      { role: 'assistant', content: 'Done.' },
+    ];
+
+    const merged = mergeSyncedMessages(local, rows);
+    expect(merged.map((m) => m.role)).toEqual(['user', 'tool', 'diff', 'assistant']);
+    expect(merged[2]!.diffHunks?.[0]?.lines[0]?.text).toBe('x');
   });
 
   it('takes the host content for persisted rows', () => {

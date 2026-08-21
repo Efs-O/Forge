@@ -1,10 +1,13 @@
 import type { ModelConfig } from '../config/types';
 import { streamModelChatCompletion } from '../llm/ChatClient';
 import type { UsageHandler } from '../llm/OpenAIClient';
-import { HtmlDocumentBoilerplateStripper } from '../llm/HtmlDocumentBoilerplateStripper';
+import {
+  HtmlDocumentBoilerplateStripper,
+  stripHtmlDocumentBoilerplateFromFullText,
+} from '../llm/HtmlDocumentBoilerplateStripper';
 import { normalizeRequestForModel } from '../llm/RequestNormalizer';
 import { mergeSampling } from '../llm/SamplingMerge';
-import { ThinkingChannelStripper } from '../llm/ThinkingChannelStripper';
+import { ThinkingChannelStripper, stripThinkingFromFullText } from '../llm/ThinkingChannelStripper';
 import type { ChatCompletionRequest, ChatMessage, ToolCall, ToolDefinition } from '../llm/types';
 import { buildFallbackToolInstructions } from '../tools/FallbackToolPrompt';
 import { ToolFailureTracker, stripTools } from '../tools/StripTools';
@@ -14,9 +17,8 @@ import {
 } from '../tools/StructuredOutputParser';
 import { extractFallbackToolCalls } from '../tools/ToolCallFallback';
 import { MIN_ROUND_HEADROOM_TOKENS } from '../util/contextBudget';
-import { stripThinkingFromFullText } from '../llm/ThinkingChannelStripper';
-import { stripHtmlDocumentBoilerplateFromFullText } from '../llm/HtmlDocumentBoilerplateStripper';
 import { ToolLoopDetectedError, ToolLoopGuard } from './ToolLoopGuard';
+import { StreamedAssistantTurn } from './StreamedAssistantTurn';
 import {
   applyOutputCap,
   asTruncation,
@@ -189,6 +191,7 @@ export async function runToolCallingLoop(
     );
     let rawAssistant = '';
     let rawReasoning = '';
+    const streamedAssistant = new StreamedAssistantTurn(options.messages);
     let thinking = options.stripThinkingChannels ? new ThinkingChannelStripper() : null;
     let structured = new StructuredOutputStripper();
     let html = new HtmlDocumentBoilerplateStripper();
@@ -202,6 +205,7 @@ export async function runToolCallingLoop(
     const reasoningHandler = (token: string): void => {
       if (options.stripThinkingChannels) return;
       rawReasoning += token;
+      streamedAssistant.appendReasoning(token);
       options.onReasoning?.(token);
     };
 
@@ -299,12 +303,7 @@ export async function runToolCallingLoop(
       // every round, so dropping it here discarded the model's thinking for every
       // round that ended in a tool call — only the final round's survived, and
       // the sidebar's reasoning bubbles collapsed to one when the turn ended.
-      options.messages.push({
-        role: 'assistant',
-        content: null,
-        tool_calls: calls,
-        ...(assistantReasoning ? { reasoning: assistantReasoning } : {}),
-      });
+      streamedAssistant.completeToolCall(calls, assistantReasoning);
       options.onMessagesChanged?.();
       const beforeDispatch = options.messages.length;
       await options.dispatchToolCalls(calls, options.messages);
@@ -319,11 +318,7 @@ export async function runToolCallingLoop(
     }
 
     if (assistantContent || assistantReasoning) {
-      options.messages.push({
-        role: 'assistant',
-        content: assistantContent,
-        ...(assistantReasoning ? { reasoning: assistantReasoning } : {}),
-      });
+      streamedAssistant.completeAnswer(assistantContent, assistantReasoning);
       options.onMessagesChanged?.();
       finalText = assistantContent;
     }
@@ -337,10 +332,7 @@ export async function runToolCallingLoop(
     };
   }
 
-  // Out of rounds. Record it in the transcript as an assistant turn so the next
-  // request — a resume, or the user's own follow-up — can see that the work was
-  // cut short rather than silently re-planning from a transcript that looks
-  // complete.
+  // Record the round cap in the transcript so the next request knows work stopped early.
   const capNotice = `${MAX_ROUNDS_MESSAGE_PREFIX} (${options.maxRounds}).`;
   options.messages.push({ role: 'assistant', content: capNotice });
   options.onMessagesChanged?.();

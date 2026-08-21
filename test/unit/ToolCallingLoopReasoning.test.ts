@@ -13,7 +13,11 @@ interface Handlers {
   onReasoning: (t: string) => void;
   onDone: (finishReason: string | null) => void;
   onToolCalls: (calls: ToolCall[]) => void;
-  onUsage?: (usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number }) => void;
+  onUsage?: (usage: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  }) => void;
 }
 
 const CALL: ToolCall = {
@@ -49,7 +53,12 @@ function runOptions(messages: ChatMessage[]) {
     toolDefinitions: [{ type: 'function', function: { name: 'read_file' } }] as never,
     dispatchToolCalls: async (calls: ToolCall[], msgs: ChatMessage[]) => {
       for (const c of calls) {
-        msgs.push({ role: 'tool', content: 'file contents', tool_call_id: c.id, name: 'read_file' });
+        msgs.push({
+          role: 'tool',
+          content: 'file contents',
+          tool_call_id: c.id,
+          name: 'read_file',
+        });
       }
     },
     signal: new AbortController().signal,
@@ -81,6 +90,38 @@ describe('ToolCallingLoop reasoning retention', () => {
     const finalTurn = assistants[1]!;
     expect(finalTurn.content).toBe('final answer');
     expect(finalTurn.reasoning).toBe('round two thinking');
+  });
+
+  it('writes reasoning into the real transcript while it is still streaming', async () => {
+    const messages: ChatMessage[] = [{ role: 'user', content: 'go' }];
+    let streamedSnapshot: ChatMessage[] = [];
+    streamModelChatCompletion.mockImplementation(
+      async (_url: string, _req: unknown, _model: unknown, h: Handlers) => {
+        h.onReasoning('Now the docs — index.html control grids and README.');
+        streamedSnapshot = messages.map((message) => ({ ...message }));
+        h.onToken('Done.');
+        h.onDone('stop');
+      },
+    );
+
+    await runToolCallingLoop(runOptions(messages) as never);
+
+    expect(streamedSnapshot).toEqual([
+      { role: 'user', content: 'go' },
+      {
+        role: 'assistant',
+        content: '',
+        reasoning: 'Now the docs — index.html control grids and README.',
+      },
+    ]);
+    expect(messages).toEqual([
+      { role: 'user', content: 'go' },
+      {
+        role: 'assistant',
+        content: 'Done.',
+        reasoning: 'Now the docs — index.html control grids and README.',
+      },
+    ]);
   });
 
   it('omits reasoning on a tool-call turn when the round produced none', async () => {
@@ -142,6 +183,10 @@ describe('ToolCallingLoop reasoning retention', () => {
     expect(request.messages).toEqual([{ role: 'user', content: 'go' }]);
     expect(request.tools).toEqual(expect.any(Array));
     expect(request.stream_options).toEqual({ include_usage: true });
-    expect(onUsage).toHaveBeenCalledWith({ prompt_tokens: 123, completion_tokens: 4, total_tokens: 127 });
+    expect(onUsage).toHaveBeenCalledWith({
+      prompt_tokens: 123,
+      completion_tokens: 4,
+      total_tokens: 127,
+    });
   });
 });

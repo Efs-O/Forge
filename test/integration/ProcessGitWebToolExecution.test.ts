@@ -97,6 +97,9 @@ describe('isolated process, Git, and web tool execution', () => {
       ],
       { cwd: root },
     );
+    execFileSync('git', ['config', 'user.name', 'Forge Test'], { cwd: root });
+    execFileSync('git', ['config', 'user.email', 'forge@test.invalid'], { cwd: root });
+    fs.writeFileSync(path.join(root, 'tracked.txt'), 'changed\n', 'utf8');
 
     const repo = {
       rootUri: vscode.Uri.file(root),
@@ -123,11 +126,11 @@ describe('isolated process, Git, and web tool execution', () => {
       exports: { getAPI: () => ({ repositories: [repo] }) },
     } as never);
 
-    await expect(makeGitStatusTool().handler({})).resolves.toContain('M tracked.txt');
+    await expect(makeGitStatusTool().handler({})).resolves.toBe('M tracked.txt');
     await expect(makeGitLogTool().handler({ max_entries: 1 })).resolves.toContain('1234567');
-    await expect(makeGitDiffTool().handler({ staged: false })).resolves.toBe('fixture diff');
+    await expect(makeGitDiffTool().handler({ staged: false })).resolves.toContain('-fixture');
     await expect(makeGitBlameTool().handler({ path: 'tracked.txt' })).resolves.toContain(
-      'author Forge Test',
+      'author Not Committed Yet',
     );
     await expect(makeGitShowTool().handler({ ref: 'HEAD' })).resolves.toContain('fixture');
     await expect(makeCreateBranchTool().handler({ name: 'feature', from: 'HEAD' })).resolves.toBe(
@@ -136,12 +139,17 @@ describe('isolated process, Git, and web tool execution', () => {
     await expect(makeSwitchBranchTool().handler({ name: 'main' })).resolves.toBe(
       'Switched to main',
     );
+    await expect(makeCommitTool().handler({ message: 'empty' })).rejects.toThrow(
+      'No staged changes to commit',
+    );
     await expect(makeStageTool().handler({ paths: ['tracked.txt'] })).resolves.toContain(
       'tracked.txt',
     );
+    await expect(makeGitStatusTool().handler({})).resolves.toBe('M tracked.txt [staged]');
     await expect(makeCommitTool().handler({ message: 'next' })).resolves.toBe('Committed: next');
     expect(repo.createBranch).toHaveBeenCalledWith('feature', true, 'HEAD');
-    expect(repo.add).toHaveBeenCalledWith([path.join(root, 'tracked.txt')]);
+    expect(repo.add).not.toHaveBeenCalled();
+    expect(repo.commit).not.toHaveBeenCalled();
   });
 
   it('executes fetch and search handlers with deterministic network adapters', async () => {

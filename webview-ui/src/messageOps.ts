@@ -25,13 +25,14 @@ export type PersistedRow =
       toolResult: string;
       toolResultTotal: number;
       toolIsError?: boolean | undefined;
+    }
+  | {
+      role: 'diff';
+      content: string;
+      diffHunks: DiffHunk[] | null;
+      diffIsNew: boolean;
+      diffIsDeleted: boolean;
     };
-
-/**
- * Roles which only exist in the live webview. They are reconciled positionally
- * on SESSION_SYNC so a finished turn keeps showing its diff and error cards.
- */
-export const LOCAL_ONLY_ROLES = new Set<AppMessage['role']>(['diff', 'error', 'system']);
 
 export function mkId(): string {
   return Math.random().toString(36).slice(2);
@@ -55,13 +56,22 @@ export function mergeSyncedMessages(local: AppMessage[], rows: PersistedRow[]): 
     id: mkId(),
     role: m.role,
     content: m.content,
-    ...(m.role !== 'tool' && m.reasoning !== undefined ? { reasoning: m.reasoning } : {}),
+    ...((m.role === 'user' || m.role === 'assistant') && m.reasoning !== undefined
+      ? { reasoning: m.reasoning }
+      : {}),
     ...(m.role === 'tool'
       ? {
           toolName: m.toolName,
           toolResult: m.toolResult,
           toolResultTotal: m.toolResultTotal,
           ...(m.toolIsError ? { toolIsError: true } : {}),
+        }
+      : {}),
+    ...(m.role === 'diff'
+      ? {
+          diffHunks: m.diffHunks,
+          diffIsNew: m.diffIsNew,
+          diffIsDeleted: m.diffIsDeleted,
         }
       : {}),
   }));
@@ -73,7 +83,10 @@ export function mergeSyncedMessages(local: AppMessage[], rows: PersistedRow[]): 
   let hostCursor = 0;
   for (let localIndex = 0; localIndex < local.length; localIndex++) {
     const message = local[localIndex]!;
-    if (LOCAL_ONLY_ROLES.has(message.role)) continue;
+    // Diffs are now part of the authoritative transcript view. Errors and
+    // notices remain webview-only, but a matching diff must replace its live
+    // precursor instead of being kept as a duplicate or discarded on reload.
+    if (message.role === 'error' || message.role === 'system') continue;
     const hostIndex = reconstructed.findIndex(
       (host, index) => index >= hostCursor && sameRenderableMessage(message, host),
     );
@@ -88,8 +101,9 @@ export function mergeSyncedMessages(local: AppMessage[], rows: PersistedRow[]): 
   for (let localIndex = 0; localIndex < local.length; localIndex++) {
     const message = local[localIndex]!;
     const keepTransient =
-      LOCAL_ONLY_ROLES.has(message.role) ||
-      (message.role === 'tool' && !localToHost.has(localIndex));
+      message.role === 'error' ||
+      message.role === 'system' ||
+      ((message.role === 'tool' || message.role === 'diff') && !localToHost.has(localIndex));
     if (!keepTransient) continue;
     const nextHost = nearestMappedHost(localToHost, localIndex, 1, local.length);
     if (nextHost !== undefined) {

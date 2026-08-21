@@ -8,7 +8,11 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import * as vscode from 'vscode';
+
+const execFileAsync = promisify(execFile);
 
 // ── Git API bootstrap ─────────────────────────────────────────────────────────
 export interface GitRepository {
@@ -28,6 +32,16 @@ export interface GitRepository {
   checkout(branch: string): Promise<void>;
   add(paths: string[]): Promise<void>;
   commit(message: string): Promise<void>;
+}
+
+export interface LiveGitStatusEntry {
+  /** Index column from porcelain v1's XY record. */
+  index: string;
+  /** Working-tree column from porcelain v1's XY record. */
+  workingTree: string;
+  path: string;
+  /** Present for rename/copy records. */
+  originalPath?: string;
 }
 
 function repositories(): GitRepository[] {
@@ -106,6 +120,60 @@ export async function withGitError<T>(
   }
 }
 
+/**
+ * Run Git directly for mutations and index-sensitive reads. The VS Code Git
+ * API remains useful for finding the selected repository, but its UI state is
+ * not the source of truth for a tool result that promises to have changed the
+ * real index.
+ */
+export async function runGit(repo: GitRepository, args: readonly string[]): Promise<string> {
+  const root = repo.rootUri?.fsPath;
+  if (!root) throw new Error('git: selected repository has no root path');
+  try {
+    const { stdout } = await execFileAsync('git', [...args], {
+      cwd: root,
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+    return stdout;
+  } catch (err) {
+    const error = err as NodeJS.ErrnoException & {
+      stdout?: string | Buffer;
+      stderr?: string | Buffer;
+    };
+    const output = [error.stderr, error.stdout]
+      .filter(
+        (value): value is string | Buffer => value !== undefined && String(value).trim() !== '',
+      )
+      .map((value) => String(value).trim())
+      .join('\n');
+    const detail = output || error.message || String(err);
+    throw new Error(`git ${args[0] ?? 'command'} failed in repository "${root}": ${detail}`);
+  }
+}
+
+/** Read the actual index and working tree using Git's stable porcelain format. */
+export async function readLiveGitStatus(repo: GitRepository): Promise<LiveGitStatusEntry[]> {
+  const output = await runGit(repo, ['status', '--porcelain=v1', '-z']);
+  const records = output.split('\0');
+  const entries: LiveGitStatusEntry[] = [];
+
+  for (let index = 0; index < records.length; index++) {
+    const record = records[index];
+    if (!record || record.length < 4) continue;
+    const x = record[0] ?? ' ';
+    const y = record[1] ?? ' ';
+    if (record[2] !== ' ') continue;
+    const entry: LiveGitStatusEntry = { index: x, workingTree: y, path: record.slice(3) };
+    if (x === 'R' || x === 'C' || y === 'R' || y === 'C') {
+      const originalPath = records[++index];
+      if (originalPath) entry.originalPath = originalPath;
+    }
+    entries.push(entry);
+  }
+  return entries;
+}
+
 function containsPath(root: string, target: string): boolean {
   const relative = path.relative(canonicalPath(root), canonicalPath(target));
   return (
@@ -181,16 +249,3 @@ function findRepoRoot(from: string): string | undefined {
     current = parent;
   }
 }
-
-// Status code → letter (subset of git status codes used by vscode.git)
-export function statusLetter(s: number): string {
-  if (s === 1) return 'M'; // Modified
-  if (s === 2) return 'A'; // Added
-  if (s === 3) return 'D'; // Deleted
-  if (s === 4) return 'R'; // Renamed
-  if (s === 5) return 'C'; // Copied
-  if (s === 6) return 'U'; // Unmerged
-  return '?';
-}
-
-// ── git_status ─────────────────────────────────────────────────────────────────

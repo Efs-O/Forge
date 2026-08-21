@@ -97,6 +97,55 @@ describe('sessionTypes', () => {
     ]);
   });
 
+  it('restores a completed tool row and its file preview after session sync or reload', () => {
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'update the file' },
+      { role: 'assistant', content: null, tool_calls: [toolCall] },
+      { role: 'tool', content: 'Wrote src/app.ts', tool_call_id: 'call_1', name: 'write_file' },
+      { role: 'assistant', content: 'Updated.' },
+    ];
+    const diffs = [
+      {
+        toolCallId: 'call_1',
+        filePath: 'src/app.ts',
+        hunks: [
+          { oldStart: 1, newStart: 1, lines: [{ kind: 'added' as const, text: 'export {};' }] },
+        ],
+        isNew: false,
+        isDeleted: false,
+      },
+    ];
+    const session = createDefaultSession();
+    session.conversations[0]!.messages = messages;
+    session.conversations[0]!.displayDiffs = diffs;
+
+    const persisted = runtimeToPersisted(session);
+    const restored = loadSidebarSession(makeMemento({ [SESSION_KEY_V1]: persisted }));
+    expect(
+      displayPersistMessages(
+        restored.conversations[0]!.messages,
+        restored.conversations[0]!.displayDiffs,
+      ),
+    ).toEqual([
+      { role: 'user', content: 'update the file' },
+      {
+        role: 'tool',
+        content: 'write_file → Wrote src/app.ts',
+        toolName: 'write_file',
+        toolResult: 'Wrote src/app.ts',
+        toolResultTotal: 16,
+      },
+      {
+        role: 'diff',
+        content: 'src/app.ts',
+        diffHunks: [{ oldStart: 1, newStart: 1, lines: [{ kind: 'added', text: 'export {};' }] }],
+        diffIsNew: false,
+        diffIsDeleted: false,
+      },
+      { role: 'assistant', content: 'Updated.' },
+    ]);
+  });
+
   // Each round of a multi-round turn owns a reasoning bubble. Dropping the
   // reasoning-bearing tool-call turns collapsed them all to the final round's
   // the moment the turn ended and SESSION_SYNC rebuilt the transcript.
@@ -117,7 +166,23 @@ describe('sessionTypes', () => {
         toolResult: 'result',
         toolResultTotal: 6,
       },
-      { role: 'assistant', content: 'done', reasoning: 'round 2 thinking' },
+      { role: 'assistant', content: '', reasoning: 'round 2 thinking' },
+      { role: 'assistant', content: 'done' },
+    ]);
+  });
+
+  it('keeps final-round reasoning in a Thinking row instead of hiding it behind the answer', () => {
+    expect(
+      displayPersistMessages([
+        {
+          role: 'assistant',
+          content: 'Finished the update.',
+          reasoning: 'Checking the result first.',
+        },
+      ]),
+    ).toEqual([
+      { role: 'assistant', content: '', reasoning: 'Checking the result first.' },
+      { role: 'assistant', content: 'Finished the update.' },
     ]);
   });
 

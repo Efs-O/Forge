@@ -11,7 +11,7 @@ export {
   upsertHistoryConversation,
 } from './sessionPersistence';
 import type { ChatMessage } from '../llm/types';
-import type { SessionHistoryMeta, SessionTabMeta } from './messageBridge';
+import type { DiffHunk, SessionHistoryMeta, SessionTabMeta } from './messageBridge';
 import { capDisplayText } from '../tools/resultCap';
 import { isFailureResult, resultLabel } from './toolResultView';
 
@@ -61,7 +61,43 @@ export type DisplayPersistMessage =
       toolResult: string;
       toolResultTotal: number;
       toolIsError?: boolean;
+    }
+  | {
+      role: 'diff';
+      content: string;
+      diffHunks: DiffHunk[] | null;
+      diffIsNew: boolean;
+      diffIsDeleted: boolean;
     };
+
+/** A file preview produced by one completed native tool call. */
+export interface ConversationDisplayDiff {
+  toolCallId: string;
+  filePath: string;
+  hunks: DiffHunk[] | null;
+  isNew: boolean;
+  isDeleted: boolean;
+}
+
+const diffLineSchema = z.object({
+  kind: z.enum(['context', 'added', 'removed']),
+  text: z.string(),
+});
+const displayDiffSchema = z.object({
+  toolCallId: z.string().min(1),
+  filePath: z.string().min(1),
+  hunks: z
+    .array(
+      z.object({
+        oldStart: z.number().int(),
+        newStart: z.number().int(),
+        lines: z.array(diffLineSchema),
+      }),
+    )
+    .nullable(),
+  isNew: z.boolean(),
+  isDeleted: z.boolean(),
+});
 
 export const conversationPersistedSchema = z.object({
   id: z.string().min(1),
@@ -75,6 +111,9 @@ export const conversationPersistedSchema = z.object({
   compaction: z
     .object({ summary: z.string().min(1), fromIndex: z.number().int().min(0) })
     .optional(),
+  // Optional migration field: previews written by older Forge versions were
+  // only live webview state and therefore were not recoverable after a sync.
+  display_diffs: z.array(displayDiffSchema).optional(),
 });
 
 export const sidebarSessionPersistedSchema = z.object({
@@ -102,6 +141,8 @@ export interface ConversationRuntime {
    * persisted record stay whole. Clearing this restores full context.
    */
   compaction?: { summary: string; fromIndex: number };
+  /** Durable presentation previews, deliberately separate from LLM messages. */
+  displayDiffs?: ConversationDisplayDiff[];
 }
 
 export interface SidebarRuntime {
@@ -163,8 +204,17 @@ export function slimPersistMessages(messages: ChatMessage[]): SlimPersistMessage
  * Dropping those made every thinking bubble except the final round's vanish the
  * moment a turn ended and SESSION_SYNC rebuilt the transcript.
  */
-export function displayPersistMessages(messages: ChatMessage[]): DisplayPersistMessage[] {
+export function displayPersistMessages(
+  messages: ChatMessage[],
+  displayDiffs: ConversationDisplayDiff[] = [],
+): DisplayPersistMessage[] {
   const out: DisplayPersistMessage[] = [];
+  const diffsByToolCall = new Map<string, ConversationDisplayDiff[]>();
+  for (const diff of displayDiffs) {
+    const current = diffsByToolCall.get(diff.toolCallId);
+    if (current) current.push(diff);
+    else diffsByToolCall.set(diff.toolCallId, [diff]);
+  }
   for (const m of messages) {
     if (m.role === 'tool' && typeof m.content === 'string') {
       const toolName = m.name ?? 'tool';
@@ -177,6 +227,15 @@ export function displayPersistMessages(messages: ChatMessage[]): DisplayPersistM
         toolResultTotal,
         ...(isFailureResult(m.content) ? { toolIsError: true } : {}),
       });
+      for (const diff of diffsByToolCall.get(m.tool_call_id ?? '') ?? []) {
+        out.push({
+          role: 'diff',
+          content: diff.filePath,
+          diffHunks: diff.hunks,
+          diffIsNew: diff.isNew,
+          diffIsDeleted: diff.isDeleted,
+        });
+      }
       continue;
     }
     if (
@@ -186,13 +245,22 @@ export function displayPersistMessages(messages: ChatMessage[]): DisplayPersistM
     ) {
       continue;
     }
+    const content = typeof m.content === 'string' ? m.content : '';
+    const reasoning = typeof m.reasoning === 'string' && m.reasoning.length > 0 ? m.reasoning : '';
+    // The final answer can follow streamed reasoning in the same model turn.
+    // The ordinary message renderer intentionally shows answer text only, so
+    // preserve the thought as its own Thinking row rather than losing it when
+    // session sync replaces the live stream.
+    if (m.role === 'assistant' && content && reasoning) {
+      out.push({ role: 'assistant', content: '', reasoning });
+      out.push({ role: 'assistant', content });
+      continue;
+    }
     out.push({
       role: m.role,
       // A reasoning-only turn has content: null; the webview contract is string.
-      content: typeof m.content === 'string' ? m.content : '',
-      ...(typeof m.reasoning === 'string' && m.reasoning.length > 0
-        ? { reasoning: m.reasoning }
-        : {}),
+      content,
+      ...(reasoning ? { reasoning } : {}),
     });
   }
   return out;
@@ -217,7 +285,9 @@ export function tabMetasFromSession(
 ): SessionTabMeta[] {
   return session.conversations.map((c) => {
     // Tool turns are restored but must not inflate the user-facing badge.
-    const shown = displayPersistMessages(c.messages).filter((m) => m.role !== 'tool');
+    const shown = displayPersistMessages(c.messages, c.displayDiffs).filter(
+      (m) => m.role !== 'tool',
+    );
     return {
       id: c.id,
       title: c.title,
@@ -236,7 +306,9 @@ export function historyMetasFromSession(session: SidebarRuntime): SessionHistory
     .filter((c) => !openIds.has(c.id))
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .map((c) => {
-      const shown = displayPersistMessages(c.messages).filter((m) => m.role !== 'tool');
+      const shown = displayPersistMessages(c.messages, c.displayDiffs).filter(
+        (m) => m.role !== 'tool',
+      );
       return {
         id: c.id,
         title: c.title,
@@ -252,10 +324,10 @@ export function historyMetasFromSession(session: SidebarRuntime): SessionHistory
 export function slimMessagesById(session: SidebarRuntime): Record<string, DisplayPersistMessage[]> {
   const out: Record<string, DisplayPersistMessage[]> = {};
   for (const c of session.conversations) {
-    out[c.id] = displayPersistMessages(c.messages);
+    out[c.id] = displayPersistMessages(c.messages, c.displayDiffs);
   }
   for (const c of session.history) {
-    out[c.id] = displayPersistMessages(c.messages);
+    out[c.id] = displayPersistMessages(c.messages, c.displayDiffs);
   }
   return out;
 }

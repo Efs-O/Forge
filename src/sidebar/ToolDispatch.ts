@@ -32,6 +32,14 @@ interface DeleteInventory {
   truncated: boolean;
 }
 
+export interface RecordedFileDiff {
+  toolCallId: string;
+  filePath: string;
+  hunks: DiffHunk[] | null;
+  isNew: boolean;
+  isDeleted: boolean;
+}
+
 /**
  * Build an approval message from the filesystem state before a destructive
  * action. The scan is deliberately bounded: confirmation must stay responsive
@@ -203,6 +211,7 @@ export class ToolDispatch {
     checkpoint?: CheckpointSession,
     coordinatorModel?: string,
     budget?: ToolBudget,
+    recordFileDiff?: (diff: RecordedFileDiff) => void,
   ): Promise<void> {
     for (const tc of toolCalls) {
       let result: string;
@@ -339,7 +348,7 @@ export class ToolDispatch {
           if (reg.mutation.showDiff) {
             for (const resolved of mutationPaths) {
               this.applyDiffDecorations(resolved, checkpoint);
-              this.postFileDiff(resolved, convId, checkpoint);
+              this.postFileDiff(resolved, convId, checkpoint, tc.id, recordFileDiff);
             }
           }
         }
@@ -379,6 +388,8 @@ export class ToolDispatch {
     resolvedPath: string,
     convId?: string,
     checkpoint?: CheckpointSession,
+    toolCallId?: string,
+    recordFileDiff?: (diff: RecordedFileDiff) => void,
   ): void {
     const beforeContent = checkpoint
       ? checkpoint.readSnapshotContent(resolvedPath)
@@ -391,6 +402,9 @@ export class ToolDispatch {
     let hunks = !isDeleted ? computeDiff(beforeContent ?? '', afterContent) : null;
     if (hunks === null && !isDeleted) hunks = gitDiffLarge(beforeContent ?? '', afterContent);
     const relPath = vscode.workspace.asRelativePath(resolvedPath);
+    if (toolCallId) {
+      recordFileDiff?.({ toolCallId, filePath: relPath, hunks, isNew, isDeleted });
+    }
     this.post({
       type: 'fileDiff',
       filePath: relPath,

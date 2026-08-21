@@ -146,6 +146,24 @@ describe('webview App reducer — transcript rows', () => {
     });
   });
 
+  it('keeps streamed reasoning separate when final answer tokens arrive', () => {
+    const thinking = appModule.reducer(appModule.initialState, {
+      type: 'REASONING_TOKEN',
+      text: 'Checking the workspace.',
+      convId: 'tab-1',
+    });
+    const answer = appModule.reducer(thinking, {
+      type: 'TOKEN',
+      text: 'Done.',
+      convId: 'tab-1',
+    });
+
+    expect(answer.messagesById['tab-1']).toMatchObject([
+      { role: 'assistant', content: '', reasoning: 'Checking the workspace.' },
+      { role: 'assistant', content: 'Done.' },
+    ]);
+  });
+
   describe('checkpoint bar visibility', () => {
     function pendingIn(state: AppModule['initialState'], convId: string): boolean {
       return appModule.selectCheckpointPending({ ...state, activeConversationId: convId });

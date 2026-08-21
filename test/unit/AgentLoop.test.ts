@@ -290,6 +290,11 @@ describe('AgentLoop', () => {
     );
     expect(conv.messages).toEqual([
       { role: 'user', content: 'please implement this' },
+      {
+        role: 'tool',
+        content: '[codex: edit src/foo.ts]',
+        name: 'claude',
+      },
       { role: 'assistant', content: 'Implemented it.' },
     ]);
     expect(post).toHaveBeenCalledWith(

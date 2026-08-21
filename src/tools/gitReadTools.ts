@@ -6,15 +6,14 @@
  */
 
 import * as child_process from 'child_process';
-import * as path from 'path';
 import type { RegisteredTool } from './ToolRegistry';
 import {
   getRepo,
   gitCwd,
+  readLiveGitStatus,
   resolveFilePath,
-  statusLetter,
+  runGit,
   withGitError,
-  workspaceRoot,
 } from './gitRepo';
 
 const cwdParameter = {
@@ -41,16 +40,16 @@ export function makeGitStatusTool(): RegisteredTool {
     permission: 'git-read',
     handler: async (args) => {
       const repo = getRepo(args['cwd'] as string | undefined);
-      const root = repo.rootUri?.fsPath ?? workspaceRoot();
       const lines: string[] = [];
 
-      for (const change of repo.state.indexChanges) {
-        lines.push(
-          `${statusLetter(change.status)} ${path.relative(root, change.uri.fsPath)} [staged]`,
-        );
-      }
-      for (const change of repo.state.workingTreeChanges) {
-        lines.push(`${statusLetter(change.status)} ${path.relative(root, change.uri.fsPath)}`);
+      for (const change of await readLiveGitStatus(repo)) {
+        if (change.index !== ' ' && change.index !== '?') {
+          lines.push(`${change.index} ${change.path} [staged]`);
+        }
+        if (change.workingTree !== ' ' && change.workingTree !== '?') {
+          lines.push(`${change.workingTree} ${change.path}`);
+        }
+        if (change.index === '?' && change.workingTree === '?') lines.push(`? ${change.path}`);
       }
 
       return lines.length ? lines.join('\n') : 'No changes.';
@@ -143,7 +142,7 @@ export function makeGitDiffTool(): RegisteredTool {
         return result.stdout || result.stderr || '(no diff)';
       }
 
-      const diff = await withGitError('git_diff', repo, () => repo.diff(staged));
+      const diff = await runGit(repo, ['diff', ...(staged ? ['--staged'] : [])]);
       return diff || '(no diff)';
     },
   };

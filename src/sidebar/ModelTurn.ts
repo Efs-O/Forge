@@ -223,6 +223,10 @@ export async function runModelTurn(
           checkpoint,
           model.name,
           budget,
+          (diff) => {
+            const displayDiffs = conv.displayDiffs ?? (conv.displayDiffs = []);
+            displayDiffs.push(diff);
+          },
         );
         // A round of file reads and search results can add tens of thousands of
         // tokens. Report it now rather than at the end of the turn.

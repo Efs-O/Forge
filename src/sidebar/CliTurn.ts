@@ -82,8 +82,25 @@ export async function runCliTurn(
       checkpoint,
       signal: ctrl.signal,
       onText: (chunk: string) => postC({ type: 'token', text: chunk }),
-      onStatus: (detail: string) =>
-        postC({ type: 'toolActivity', toolName: prepared.cliName, detail }),
+      onStatus: (detail: string) => {
+        // CLI agents execute their tools outside Forge's ToolDispatch, so no
+        // native tool-result turn is added to `conv.messages`. Keeping the
+        // status only in the live webview made it disappear on the next
+        // session sync (and after reload). Persist it as a displayable tool
+        // turn as well, preserving the agent's work log in the transcript.
+        // Preparation can report a rollback warning before the user's prompt
+        // has been accepted. It is useful live, but must not turn a failed
+        // startup into a persisted conversation entry.
+        if (generationStarted) {
+          conv.messages.push({
+            role: 'tool',
+            content: detail,
+            name: prepared.cliName,
+          });
+          ctx.onTranscriptChanged(conv);
+        }
+        postC({ type: 'toolActivity', toolName: prepared.cliName, detail });
+      },
       onPrepared: () => {
         ctx.commitUserPrompt(conv, text, attachments);
         generationStarted = true;
