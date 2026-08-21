@@ -20,33 +20,74 @@ export interface ExecInvocation {
 
 export type PackageRunner = 'npm' | 'npx';
 
+/** Injectable seam so the Windows resolution rules are testable off Windows. */
+export interface RunnerProbe {
+  /** Every match for a program name on PATH, in PATH order. */
+  which(program: string): string[];
+  exists(candidate: string): boolean;
+}
+
+function whichAll(program: string): string[] {
+  const lookup = child_process.spawnSync('where.exe', [program], { encoding: 'utf8' });
+  return (lookup.stdout ?? '')
+    .split(/\r?\n/u)
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
+const SYSTEM_PROBE: RunnerProbe = {
+  which: whichAll,
+  exists: (candidate) => fs.existsSync(candidate),
+};
+
 /**
  * npm and npx are .cmd shims on Windows, which cannot be passed to spawn with
- * shell:false. Resolve the shim to its adjacent node.exe and npm CLI script so
- * project scripts remain shell-free and user arguments cannot become shell syntax.
+ * shell:false. Resolve the shim to a node.exe and the npm CLI script so project
+ * scripts remain shell-free and user arguments cannot become shell syntax.
+ *
+ * A shim does NOT have to sit beside a node.exe. `npm install -g npm` puts a
+ * second shim in the npm prefix directory — on Windows that is %APPDATA%\npm,
+ * which carries node_modules/npm but no node.exe — and the prefix usually
+ * precedes the Node install on PATH. The real .cmd handles that case itself
+ * (`IF EXIST %dp0%\node.exe ... ELSE SET _prog=node`); requiring an adjacent
+ * node.exe instead made every `npm run <script>` fail outright with "expected
+ * node executable and CLI beside the resolved shim". So: prefer a shim that is
+ * self-contained, and otherwise pair its CLI with node resolved from PATH.
  */
 export function resolvePackageRunnerInvocation(
   runner: PackageRunner,
   platform: NodeJS.Platform = process.platform,
+  probe: RunnerProbe = SYSTEM_PROBE,
 ): PackageRunnerInvocation {
   if (platform !== 'win32') return { command: runner, argsPrefix: [] };
 
-  const lookup = child_process.spawnSync('where.exe', [`${runner}.cmd`], { encoding: 'utf8' });
-  const shim = lookup.stdout
-    ?.split(/\r?\n/u)
-    .map((entry) => entry.trim())
-    .find((entry) => entry.toLowerCase().endsWith(`${runner}.cmd`));
-  if (!shim) throw new Error(`${runner}: Windows command shim was not found on PATH`);
+  const shims = probe
+    .which(`${runner}.cmd`)
+    .filter((entry) => entry.toLowerCase().endsWith(`${runner}.cmd`));
+  if (shims.length === 0) throw new Error(`${runner}: Windows command shim was not found on PATH`);
 
-  const installRoot = path.dirname(shim);
-  const node = path.join(installRoot, 'node.exe');
-  const cli = path.join(installRoot, 'node_modules', 'npm', 'bin', `${runner}-cli.js`);
-  if (!fs.existsSync(node) || !fs.existsSync(cli)) {
-    throw new Error(
-      `${runner}: expected node executable and CLI beside the resolved shim (${installRoot})`,
-    );
-  }
-  return { command: node, argsPrefix: [cli] };
+  const candidates = shims.map((shim) => {
+    const installRoot = path.dirname(shim);
+    return {
+      installRoot,
+      node: path.join(installRoot, 'node.exe'),
+      cli: path.join(installRoot, 'node_modules', 'npm', 'bin', `${runner}-cli.js`),
+    };
+  });
+
+  const selfContained = candidates.find((c) => probe.exists(c.node) && probe.exists(c.cli));
+  if (selfContained) return { command: selfContained.node, argsPrefix: [selfContained.cli] };
+
+  const withCli = candidates.find((c) => probe.exists(c.cli));
+  const node = probe.which('node.exe')[0];
+  if (withCli && node) return { command: node, argsPrefix: [withCli.cli] };
+
+  const roots = candidates.map((c) => c.installRoot).join(', ');
+  throw new Error(
+    withCli
+      ? `${runner}: found ${withCli.cli} but no node.exe on PATH to run it with`
+      : `${runner}: no ${runner}-cli.js beside any shim on PATH (looked in ${roots})`,
+  );
 }
 
 /**
@@ -114,10 +155,11 @@ export function resolveExecInvocation(
   command: string,
   args: string[],
   platform: NodeJS.Platform = process.platform,
+  probe?: RunnerProbe,
 ): ExecInvocation {
   const runner = matchPackageRunner(command);
   if (!runner) return { command, args };
 
-  const invocation = resolvePackageRunnerInvocation(runner, platform);
+  const invocation = resolvePackageRunnerInvocation(runner, platform, probe);
   return { command: invocation.command, args: [...invocation.argsPrefix, ...args] };
 }
