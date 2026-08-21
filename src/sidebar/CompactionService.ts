@@ -40,24 +40,25 @@ const MIN_SUMMARIZED_MESSAGES = 2;
 
 /** Prompt used to continue the active task after an auto-compaction. */
 export const RESUME_PROMPT =
-  'Your context was automatically compacted; the summary above is what survived of the earlier turns. ' +
-  "Continue the user's most recent task from the retained context. " +
-  'Do not restart, repeat, or undo work the summary shows as complete. If the task is already complete, do not take further action.';
+  'Context was compacted. Read the continuation checkpoint, continue from Next, and do not repeat completed work.';
 
 /** Consecutive auto-resumes allowed without an intervening user prompt. */
 export const MAX_CONSECUTIVE_AUTO_CONTINUES = 2;
 
 function isSummarizable(m: ChatMessage): boolean {
   return (
-    (m.role === 'user' || m.role === 'assistant' || m.role === 'tool') &&
-    typeof m.content === 'string'
+    ((m.role === 'user' || m.role === 'tool') && typeof m.content === 'string') ||
+    (m.role === 'assistant' && (typeof m.content === 'string' || Boolean(m.tool_calls?.length)))
   );
 }
 
 /** Cap a single tool result inside the summarization prompt. */
+const TOOL_RESULT_MAX_CHARS = 2000;
+
 export function truncateForSummary(text: string): string {
-  const LIMIT = 2000;
-  return text.length <= LIMIT ? text : `${text.slice(0, LIMIT)}\n…[truncated for summary]`;
+  return text.length <= TOOL_RESULT_MAX_CHARS
+    ? text
+    : `${text.slice(0, TOOL_RESULT_MAX_CHARS)}\n…[truncated for summary]`;
 }
 
 export interface CompactionSplit {
@@ -66,6 +67,15 @@ export interface CompactionSplit {
   /** Index into `pending` where the retained verbatim tail begins. */
   tailStart: number;
 }
+
+/** Keep the continuation checkpoint small enough to be useful, not a second transcript. */
+export const COMPACTION_SUMMARY_MAX_CHARS = 5000;
+
+/** Bound the input to the summarization turn as well as its output. */
+const SUMMARY_SOURCE_MAX_CHARS = 24000;
+const PREVIOUS_SUMMARY_MAX_CHARS = COMPACTION_SUMMARY_MAX_CHARS;
+const MESSAGE_TEXT_MAX_CHARS = 3000;
+const TOOL_CALL_METADATA_MAX_CHARS = 1200;
 
 /**
  * Splits the still-uncompacted messages into "summarize this" and "keep this
@@ -99,25 +109,61 @@ export function selectCompactionSplit(pending: ChatMessage[]): CompactionSplit |
   return { summarize: pending.slice(0, tailStart).filter(isSummarizable), tailStart };
 }
 
+function truncateText(text: string, limit: number): string {
+  return text.length <= limit ? text : `${text.slice(0, limit)}\n…[truncated]`;
+}
+
+function formatToolCalls(message: ChatMessage): string {
+  if (!message.tool_calls?.length) return '';
+  const details = message.tool_calls
+    .map((call) => `${call.function.name}(${truncateText(call.function.arguments, 400)})`)
+    .join(', ');
+  return `\nTool calls: ${truncateText(details, TOOL_CALL_METADATA_MAX_CHARS)}`;
+}
+
+function formatSummaryMessage(message: ChatMessage): string {
+  const content =
+    typeof message.content === 'string'
+      ? message.content
+      : message.content === null
+        ? '[no visible assistant text]'
+        : '[non-text content]';
+  const body =
+    message.role === 'tool'
+      ? truncateForSummary(content)
+      : truncateText(content, MESSAGE_TEXT_MAX_CHARS);
+  const reasoning = message.reasoning
+    ? `\nReasoning note: ${truncateText(message.reasoning, 600)}`
+    : '';
+  return `${message.role.toUpperCase()}:\n${body}${formatToolCalls(message)}${reasoning}`;
+}
+
+function capSummarySource(source: string): string {
+  if (source.length <= SUMMARY_SOURCE_MAX_CHARS) return source;
+  const head = Math.floor(SUMMARY_SOURCE_MAX_CHARS * 0.35);
+  const tail = SUMMARY_SOURCE_MAX_CHARS - head;
+  return `${source.slice(0, head)}\n…[middle of compaction source omitted]…\n${source.slice(-tail)}`;
+}
+
 export function buildSummaryPrompt(
   previousSummary: string | undefined,
   messages: ChatMessage[],
 ): string {
-  const previous = previousSummary ? `EARLIER SUMMARY:\n${previousSummary}\n\n` : '';
-  const transcript =
-    previous +
-    messages
-      .map((m) => {
-        const reasoning = m.reasoning ? `\nReasoning summary:\n${m.reasoning}` : '';
-        // Tool output used to be excluded entirely, so compaction discarded
-        // everything the agent learned from its tools. Cap each result so a
-        // few large reads cannot crowd out the conversation itself.
-        const body =
-          m.role === 'tool' ? truncateForSummary(m.content as string) : (m.content as string);
-        return `${m.role.toUpperCase()}:\n${body}${reasoning}`;
-      })
-      .join('\n\n');
-  return `Summarize this conversation for continued work in the same repository.\n\nRequirements:\n- Preserve user goals, constraints, decisions, open questions, and unfinished tasks.\n- Mention relevant files, commands, errors, and risks.\n- Keep it concise but specific.\n- Do not add facts not present in the conversation.\n\nConversation:\n${transcript}`;
+  const previous = previousSummary
+    ? `EARLIER CHECKPOINT:\n${truncateText(previousSummary, PREVIOUS_SUMMARY_MAX_CHARS)}\n\n`
+    : '';
+  const transcript = capSummarySource(messages.map(formatSummaryMessage).join('\n\n'));
+  return (
+    'Create a compact continuation checkpoint for the same repository.\n\n' +
+    'Use only facts present below. Keep it under 600 words and omit empty sections. ' +
+    'Use these labels: Goal, State, Next, Files, Constraints, Errors. ' +
+    'Record the exact next action when one is clear; do not retell the conversation.\n\n' +
+    `${previous}Conversation:\n${transcript}`
+  );
+}
+
+function capSummary(summary: string): string {
+  return truncateText(summary.trim(), COMPACTION_SUMMARY_MAX_CHARS);
 }
 
 /**
@@ -181,7 +227,7 @@ export async function runCompaction(
     deps.post({ type: 'done', finishReason: 'stop', conversationId: conv.id });
   }
 
-  const trimmed = summary.trim();
+  const trimmed = capSummary(summary);
   if (!trimmed) {
     void vscode.window.showWarningMessage('Forge: compaction returned no summary.');
     return 'failed';

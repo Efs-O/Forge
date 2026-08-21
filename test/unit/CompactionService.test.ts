@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   autoCompactAndResume,
+  buildSummaryPrompt,
+  COMPACTION_SUMMARY_MAX_CHARS,
   MAX_CONSECUTIVE_AUTO_CONTINUES,
   RESUME_PROMPT,
   RETAINED_TAIL_MAX_CHARS,
@@ -95,6 +97,26 @@ describe('selectCompactionSplit', () => {
   it('returns null below the minimum summarizable history', () => {
     expect(selectCompactionSplit([{ role: 'user', content: 'hello' }])).toBeNull();
   });
+
+  it('keeps assistant tool-call turns available to the summary', () => {
+    const prompt = buildSummaryPrompt(undefined, [
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: '1',
+            type: 'function',
+            function: { name: 'write_file', arguments: '{"path":"a.ts"}' },
+          },
+        ],
+      },
+      { role: 'tool', content: 'file written' },
+    ]);
+
+    expect(prompt).toContain('Tool calls: write_file');
+    expect(prompt).toContain('file written');
+  });
 });
 
 describe('runCompaction', () => {
@@ -168,6 +190,15 @@ describe('runCompaction', () => {
     expect(h.posted.some((m) => m.type === 'error')).toBe(true);
   });
 
+  it('caps the persisted checkpoint instead of allowing it to become a second transcript', async () => {
+    const c = conv([...base]);
+    const h = harness(c, async () => 'x'.repeat(COMPACTION_SUMMARY_MAX_CHARS + 100));
+
+    expect(await runCompaction(h.deps, { auto: true })).toBe('compacted');
+    expect(c.compaction?.summary.length).toBe(COMPACTION_SUMMARY_MAX_CHARS + 13);
+    expect(c.compaction?.summary).toContain('…[truncated]');
+  });
+
   it('skips while a turn is streaming', async () => {
     const c = conv([...base]);
     const h = harness(c, async () => 'summary');
@@ -194,7 +225,7 @@ describe('runCompaction', () => {
 
     await runCompaction(deps, { auto: true });
 
-    expect(prompt).toContain('EARLIER SUMMARY:\nearlier summary');
+    expect(prompt).toContain('EARLIER CHECKPOINT:\nearlier summary');
     expect(prompt).toContain('second task');
     expect(prompt).not.toContain('third task');
     expect(c.compaction?.fromIndex).toBe(4);
