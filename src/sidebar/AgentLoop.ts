@@ -245,6 +245,9 @@ export class AgentLoop {
       onUsage: (conv, inputTokens, outputTokens) => {
         conv.input_tokens = (conv.input_tokens ?? 0) + inputTokens;
         conv.output_tokens = (conv.output_tokens ?? 0) + outputTokens;
+        conv.last_input_tokens = inputTokens;
+        conv.last_output_tokens = outputTokens;
+        conv.model_request_count = (conv.model_request_count ?? 0) + 1;
         this.recordTranscriptMutation(conv);
       },
       onTranscriptChanged: (conv) => this.recordTranscriptMutation(conv),

@@ -9,6 +9,9 @@ export interface SessionTimeSnapshot {
   activeMs: number;
   inputTokens?: number;
   outputTokens?: number;
+  contextTokens?: number;
+  currentOutputTokens?: number;
+  requestCount?: number;
 }
 
 export class SessionTimeStatusBar implements vscode.Disposable {
@@ -27,17 +30,25 @@ export class SessionTimeStatusBar implements vscode.Disposable {
   refresh(): void {
     const snapshot = this.getSnapshot();
     const activeMs = Math.max(0, snapshot.activeMs);
-    const signature = `${activeMs}|${snapshot.inputTokens ?? ''}|${snapshot.outputTokens ?? ''}`;
+    const signature = [
+      activeMs,
+      snapshot.inputTokens ?? '',
+      snapshot.outputTokens ?? '',
+      snapshot.contextTokens ?? '',
+      snapshot.currentOutputTokens ?? '',
+      snapshot.requestCount ?? '',
+    ].join('|');
     if (signature === this.lastSignature) return;
     this.lastSignature = signature;
-    const input = formatTokenCount(snapshot.inputTokens);
-    const output = formatTokenCount(snapshot.outputTokens);
-    this.item.text = `$(timer) ${formatSessionDuration(activeMs)}  $(symbol-number) ${input} in / ${output} out`;
+    this.item.text = formatSessionStatus({ ...snapshot, activeMs });
     this.item.tooltip = [
       'Forge session usage',
       `Active agent time: ${formatSessionDuration(activeMs)} (approval waits excluded)`,
-      `Input tokens: ${formatExactTokenCount(snapshot.inputTokens)}`,
-      `Output tokens: ${formatExactTokenCount(snapshot.outputTokens)}`,
+      `Current request context: ${formatExactTokenCount(snapshot.contextTokens)}`,
+      `Current request output: ${formatExactTokenCount(snapshot.currentOutputTokens)}`,
+      `Session input processed: ${formatExactTokenCount(snapshot.inputTokens)}`,
+      `Session output generated: ${formatExactTokenCount(snapshot.outputTokens)}`,
+      `Model requests: ${snapshot.requestCount ?? 0}`,
     ].join('\n');
     this.item.show();
   }
@@ -54,6 +65,10 @@ export function formatSessionDuration(ms: number): string {
   const minutes = Math.floor((totalSec % 3600) / 60);
   const seconds = totalSec % 60;
   return [hours, minutes, seconds].map((value) => String(value).padStart(2, '0')).join(':');
+}
+
+export function formatSessionStatus(snapshot: SessionTimeSnapshot): string {
+  return `$(timer) ${formatSessionDuration(snapshot.activeMs)}  $(layers) ctx ${formatTokenCount(snapshot.contextTokens)} · session out ${formatTokenCount(snapshot.outputTokens)}`;
 }
 
 export function formatTokenCount(value: number | undefined): string {

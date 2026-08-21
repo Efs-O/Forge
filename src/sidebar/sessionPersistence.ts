@@ -61,6 +61,9 @@ function persistedToRuntime(p: ConversationPersisted): ConversationRuntime {
     ...(p.active_started_at !== undefined ? { active_started_at: p.active_started_at } : {}),
     ...(p.input_tokens !== undefined ? { input_tokens: p.input_tokens } : {}),
     ...(p.output_tokens !== undefined ? { output_tokens: p.output_tokens } : {}),
+    ...(p.last_input_tokens !== undefined ? { last_input_tokens: p.last_input_tokens } : {}),
+    ...(p.last_output_tokens !== undefined ? { last_output_tokens: p.last_output_tokens } : {}),
+    ...(p.model_request_count !== undefined ? { model_request_count: p.model_request_count } : {}),
   };
 }
 
@@ -113,6 +116,11 @@ export function runtimeToPersisted(session: SidebarRuntime): SidebarSessionPersi
       ...(c.active_started_at !== undefined ? { active_started_at: c.active_started_at } : {}),
       ...(c.input_tokens !== undefined ? { input_tokens: c.input_tokens } : {}),
       ...(c.output_tokens !== undefined ? { output_tokens: c.output_tokens } : {}),
+      ...(c.last_input_tokens !== undefined ? { last_input_tokens: c.last_input_tokens } : {}),
+      ...(c.last_output_tokens !== undefined ? { last_output_tokens: c.last_output_tokens } : {}),
+      ...(c.model_request_count !== undefined
+        ? { model_request_count: c.model_request_count }
+        : {}),
     })),
     history: session.history.map((c) => ({
       id: c.id,
@@ -130,6 +138,11 @@ export function runtimeToPersisted(session: SidebarRuntime): SidebarSessionPersi
       ...(c.active_started_at !== undefined ? { active_started_at: c.active_started_at } : {}),
       ...(c.input_tokens !== undefined ? { input_tokens: c.input_tokens } : {}),
       ...(c.output_tokens !== undefined ? { output_tokens: c.output_tokens } : {}),
+      ...(c.last_input_tokens !== undefined ? { last_input_tokens: c.last_input_tokens } : {}),
+      ...(c.last_output_tokens !== undefined ? { last_output_tokens: c.last_output_tokens } : {}),
+      ...(c.model_request_count !== undefined
+        ? { model_request_count: c.model_request_count }
+        : {}),
     })),
   };
 }

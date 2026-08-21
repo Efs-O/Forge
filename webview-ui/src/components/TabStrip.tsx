@@ -58,13 +58,6 @@ export function TabStrip({
                 {live && !sel && <span className="tab-streaming-dot" aria-label="generating" />}
                 {label}
               </button>
-              <span
-                className="tab-chip-time"
-                title={`Active agent time: ${formatSessionDuration(tab.active_time_ms ?? 0)}`}
-                aria-label={`Active agent time ${formatSessionDuration(tab.active_time_ms ?? 0)}`}
-              >
-                {formatSessionDuration(tab.active_time_ms ?? 0)}
-              </span>
               <button
                 type="button"
                 className="tab-chip-close"

@@ -345,6 +345,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       activeMs: this.agentLoop.getSessionActiveMs(conv),
       ...(conv.input_tokens !== undefined ? { inputTokens: conv.input_tokens } : {}),
       ...(conv.output_tokens !== undefined ? { outputTokens: conv.output_tokens } : {}),
+      ...(conv.last_input_tokens !== undefined ? { contextTokens: conv.last_input_tokens } : {}),
+      ...(conv.last_output_tokens !== undefined
+        ? { currentOutputTokens: conv.last_output_tokens }
+        : {}),
+      ...(conv.model_request_count !== undefined ? { requestCount: conv.model_request_count } : {}),
     };
   }
 

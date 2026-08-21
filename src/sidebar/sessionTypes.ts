@@ -119,6 +119,9 @@ export const conversationPersistedSchema = z.object({
   active_started_at: z.number().int().optional(),
   input_tokens: z.number().int().min(0).optional(),
   output_tokens: z.number().int().min(0).optional(),
+  last_input_tokens: z.number().int().min(0).optional(),
+  last_output_tokens: z.number().int().min(0).optional(),
+  model_request_count: z.number().int().min(0).optional(),
 });
 
 export const sidebarSessionPersistedSchema = z.object({
@@ -162,6 +165,12 @@ export interface ConversationRuntime {
   input_tokens?: number;
   /** Provider-reported completion tokens accumulated for this conversation. */
   output_tokens?: number;
+  /** Prompt tokens in the most recent model request. */
+  last_input_tokens?: number;
+  /** Completion tokens in the most recent model request. */
+  last_output_tokens?: number;
+  /** Number of model requests that have reported usage. */
+  model_request_count?: number;
 }
 
 export interface SidebarRuntime {

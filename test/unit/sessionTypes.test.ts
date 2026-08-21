@@ -322,6 +322,9 @@ describe('sessionTypes', () => {
     conv.active_time_ms = 3_661_000;
     conv.input_tokens = 12_400;
     conv.output_tokens = 2_000;
+    conv.last_input_tokens = 2_800;
+    conv.last_output_tokens = 450;
+    conv.model_request_count = 4;
 
     const loaded = loadSidebarSession(
       makeMemento({ [SESSION_KEY_V1]: runtimeToPersisted(session) }),
@@ -331,6 +334,9 @@ describe('sessionTypes', () => {
       active_time_ms: 3_661_000,
       input_tokens: 12_400,
       output_tokens: 2_000,
+      last_input_tokens: 2_800,
+      last_output_tokens: 450,
+      model_request_count: 4,
     });
   });
 

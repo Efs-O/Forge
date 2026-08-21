@@ -24,7 +24,7 @@ afterEach(() => {
 });
 
 describe('TabStrip', () => {
-  it('shows each conversation active-time badge', () => {
+  it('keeps active time available in the tab tooltip without cluttering the title', () => {
     const tabs: SessionTabMeta[] = [
       { id: 'one', title: 'First task', createdAt: 0, updatedAt: 0, active_time_ms: 3_661_000 },
       { id: 'two', title: 'Second task', createdAt: 0, updatedAt: 0, active_time_ms: 0 },
@@ -43,9 +43,9 @@ describe('TabStrip', () => {
       );
     });
 
-    expect([...container.querySelectorAll('.tab-chip-time')].map((node) => node.textContent)).toEqual([
-      '01:01:01',
-      '00:00:00',
-    ]);
+    expect(container.querySelectorAll('.tab-chip-time')).toHaveLength(0);
+    expect(container.querySelector<HTMLButtonElement>('.tab-chip-label')?.title).toContain(
+      'active time 01:01:01',
+    );
   });
 });
