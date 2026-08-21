@@ -15,11 +15,22 @@ export class ToolApprovalService {
   private readonly queue: PendingApproval[] = [];
   private active: PendingApproval | null = null;
   private clankerMode = false;
+  private onApprovalStart?: (conversationId: string) => void;
+  private onApprovalEnd?: (conversationId: string) => void;
 
   constructor(
     private readonly post: (message: HostToWebview) => void,
     private readonly getView: () => vscode.WebviewView | undefined,
   ) {}
+
+  /** Register callbacks fired when an approval request is shown / resolved. */
+  setApprovalLifecycle(
+    onStart: (conversationId: string) => void,
+    onEnd: (conversationId: string) => void,
+  ): void {
+    this.onApprovalStart = onStart;
+    this.onApprovalEnd = onEnd;
+  }
 
   setClankerMode(enabled: boolean): void {
     this.clankerMode = enabled;
@@ -61,6 +72,7 @@ export class ToolApprovalService {
       };
       signal?.addEventListener('abort', () => this.cancel(pending.id), { once: true });
       this.queue.push(pending);
+      if (pending.conversationId) this.onApprovalStart?.(pending.conversationId);
       this.pump();
     });
   }
@@ -69,24 +81,31 @@ export class ToolApprovalService {
     if (this.active?.id === id) {
       const current = this.active;
       this.active = null;
+      if (current.conversationId) this.onApprovalEnd?.(current.conversationId);
       current.resolve(approved);
       this.pump();
       return;
     }
     const index = this.queue.findIndex((item) => item.id === id);
-    if (index >= 0) this.queue.splice(index, 1)[0]?.resolve(approved);
+    if (index >= 0) {
+      const item = this.queue.splice(index, 1)[0];
+      if (item.conversationId) this.onApprovalEnd?.(item.conversationId);
+      item.resolve(approved);
+    }
   }
 
   cancelConversation(conversationId?: string): void {
     if (this.active && (!conversationId || this.active.conversationId === conversationId)) {
       const current = this.active;
       this.active = null;
+      if (current.conversationId) this.onApprovalEnd?.(current.conversationId);
       current.resolve(false);
     }
     for (let index = this.queue.length - 1; index >= 0; index--) {
       const item = this.queue[index];
       if (item && (!conversationId || item.conversationId === conversationId)) {
         this.queue.splice(index, 1);
+        if (item.conversationId) this.onApprovalEnd?.(item.conversationId);
         item.resolve(false);
       }
     }
@@ -102,6 +121,7 @@ export class ToolApprovalService {
     const next = this.queue.shift();
     if (!next) return;
     if (next.signal?.aborted) {
+      if (next.conversationId) this.onApprovalEnd?.(next.conversationId);
       next.resolve(false);
       this.pump();
       return;

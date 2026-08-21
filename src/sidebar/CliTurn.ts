@@ -105,7 +105,7 @@ export async function runCliTurn(
         ctx.commitUserPrompt(conv, text, attachments);
         generationStarted = true;
         ctx.events.onBackendReady?.(model.name);
-        ctx.events.onGenerationStarted?.(model.name);
+        ctx.events.onGenerationStarted?.(model.name, convId);
         if (firstCliPrompt) postC({ type: 'ready' });
         postC({ type: 'generationStarted' });
       },
@@ -146,7 +146,7 @@ export async function runCliTurn(
     const depthBefore = ctx.checkpoints.depth(convId);
     ctx.checkpoints.commitTurn(checkpoint);
     if (ctx.checkpoints.depth(convId) > depthBefore) postC({ type: 'checkpointReady' });
-    if (generationStarted) ctx.events.onGenerationFinished?.(model.name);
+    if (generationStarted) ctx.events.onGenerationFinished?.(model.name, convId);
     ctx.lifecycle.settle(convId);
   }
 }

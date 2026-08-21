@@ -8,6 +8,8 @@ export interface SessionTabMeta {
   active_model?: string;
   /** True while an agent turn is streaming in this conversation. */
   streaming?: boolean;
+  /** Accumulated active-agent time for the tab badge. */
+  active_time_ms?: number;
 }
 
 export interface SessionHistoryMeta {
@@ -17,6 +19,8 @@ export interface SessionHistoryMeta {
   updatedAt: number;
   messageCount?: number;
   active_model?: string;
+  /** Accumulated active-agent time for the history badge. */
+  active_time_ms?: number;
 }
 
 /** Slash commands from the sidebar input (`/` menu); kept in sync with `webview-ui/src/slashCommands.ts`. */

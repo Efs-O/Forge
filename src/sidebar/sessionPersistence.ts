@@ -57,6 +57,10 @@ function persistedToRuntime(p: ConversationPersisted): ConversationRuntime {
     ...(p.display_diffs !== undefined
       ? { displayDiffs: p.display_diffs.map((diff) => ({ ...diff })) }
       : {}),
+    ...(p.active_time_ms !== undefined ? { active_time_ms: p.active_time_ms } : {}),
+    ...(p.active_started_at !== undefined ? { active_started_at: p.active_started_at } : {}),
+    ...(p.input_tokens !== undefined ? { input_tokens: p.input_tokens } : {}),
+    ...(p.output_tokens !== undefined ? { output_tokens: p.output_tokens } : {}),
   };
 }
 
@@ -105,6 +109,10 @@ export function runtimeToPersisted(session: SidebarRuntime): SidebarSessionPersi
       ...(c.displayDiffs !== undefined
         ? { display_diffs: c.displayDiffs.map((diff) => ({ ...diff })) }
         : {}),
+      ...(c.active_time_ms !== undefined ? { active_time_ms: c.active_time_ms } : {}),
+      ...(c.active_started_at !== undefined ? { active_started_at: c.active_started_at } : {}),
+      ...(c.input_tokens !== undefined ? { input_tokens: c.input_tokens } : {}),
+      ...(c.output_tokens !== undefined ? { output_tokens: c.output_tokens } : {}),
     })),
     history: session.history.map((c) => ({
       id: c.id,
@@ -118,6 +126,10 @@ export function runtimeToPersisted(session: SidebarRuntime): SidebarSessionPersi
       ...(c.displayDiffs !== undefined
         ? { display_diffs: c.displayDiffs.map((diff) => ({ ...diff })) }
         : {}),
+      ...(c.active_time_ms !== undefined ? { active_time_ms: c.active_time_ms } : {}),
+      ...(c.active_started_at !== undefined ? { active_started_at: c.active_started_at } : {}),
+      ...(c.input_tokens !== undefined ? { input_tokens: c.input_tokens } : {}),
+      ...(c.output_tokens !== undefined ? { output_tokens: c.output_tokens } : {}),
     })),
   };
 }

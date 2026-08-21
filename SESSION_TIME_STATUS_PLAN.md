@@ -1,14 +1,15 @@
 # Per-session active time and system clock — implementation plan
 
-**Status:** Draft for review — no implementation included.
+**Status:** Implemented — includes active time, input/output usage, and webview badges.
 
-**Goal:** show a live system clock and the selected conversation's accumulated
-active-agent time beside Forge's existing status-bar state, with the time
-preserved when conversations are switched or VS Code is reopened.
+**Goal:** show a live system clock, the selected conversation's accumulated
+active-agent time, and cumulative input/output token usage beside Forge's
+existing status-bar state, with all values preserved when conversations are
+switched or VS Code is reopened.
 
 ## Proposed behaviour
 
-The bottom status bar would contain two adjacent items:
+The bottom status bar contains the existing Forge state item plus session metrics:
 
 ```text
 $(pulse) Forge: generating    $(history) 00:12:34    $(clock) 19:42:08
@@ -23,6 +24,16 @@ $(pulse) Forge: generating    $(history) 00:12:34    $(clock) 19:42:08
 - A session can continue accumulating time while it runs in the background;
   the selected tab controls only which total is displayed.
 - Existing conversations without the new fields start at `00:00:00`.
+- A compact token counter may sit beside the timer, for example
+  `$(symbol-number) 12.4k in / 3.1k out`; its tooltip shows exact totals.
+
+The token counter should remain compact rather than adding a wide status item.
+Exact input/output values belong in the tooltip and can also be available
+through session details later.
+
+Each open conversation tab also shows its accumulated active-agent time as a
+compact `HH:MM:SS` badge. This makes switching sessions immediately reveal the
+selected conversation's stored total without opening session details.
 
 ## Timing definition
 
@@ -48,6 +59,8 @@ Add optional fields to `ConversationRuntime` and its persisted Zod schema:
 ```ts
 active_time_ms?: number;
 active_started_at?: number;
+input_tokens?: number;
+output_tokens?: number;
 ```
 
 The fields remain optional so existing `workspaceState` records migrate without
@@ -64,9 +77,29 @@ Lifecycle:
 4. On restore, if an old record contains `active_started_at`, close that
    unfinished interval at restore time, counting the elapsed time through the
    reload.
+5. After each model request reports usage, add its `prompt_tokens` to
+   `input_tokens` and its `completion_tokens` to `output_tokens`, then persist
+   the conversation through the existing session persistence path.
 
 Timers must calculate from `Date.now()` rather than incrementing once per
 interval, so delayed JavaScript timers do not introduce drift.
+
+## Token usage definition
+
+Track cumulative **input tokens** and **output tokens** for every model request
+belonging to the conversation. Input means provider-reported prompt tokens,
+including the conversation context, tool definitions, and tool results sent in
+that request. Output means provider-reported completion tokens, including
+reasoning tokens when the provider includes them in completion usage.
+
+The totals should include normal turns, tool rounds, automatic compaction, and
+the automatic resume after compaction, because all are model work performed
+for the session. Embedding requests are separate from chat usage and should not
+be mixed into this counter.
+
+Provider-reported usage is the source of truth. If a CLI or provider does not
+return token usage, Forge should leave that provider's totals unchanged and
+show usage as unavailable rather than inventing a character-based estimate.
 
 ## Status-bar design
 
@@ -78,12 +111,14 @@ Suggested API:
 ```ts
 setSession(conversationId: string, activeTimeMs: number, activeSince?: number): void;
 clearSession(): void;
+setUsage(inputTokens?: number, outputTokens?: number): void;
 ```
 
 The item owns a one-second refresh interval while it is visible. It should use
 `context.subscriptions`/`dispose()` to clear the interval and both status items.
 The tooltip should include the full session title or ID and explain that the
-counter is active-agent time.
+counter is active-agent time. It should also show exact input/output token
+totals and explain when usage is unavailable.
 
 The system clock may use the same class and interval, but it must remain
 independent of conversation state and continue displaying while Forge is
@@ -110,6 +145,8 @@ empty conversation and initially displays `00:00:00`.
 ## Candidate files
 
 - `src/sidebar/sessionTypes.ts` — persisted/runtime fields and schema migration.
+- `src/sidebar/ModelTurn.ts` and provider usage callbacks — collect exact
+  `prompt_tokens` and `completion_tokens` from each streamed model request.
 - `src/sidebar/AgentLoop.ts` — conversation-aware generation events.
 - `src/sidebar/ProviderTurn.ts` and `src/sidebar/CliTurn.ts` — pass the
   conversation ID through start/finish events.
@@ -117,6 +154,8 @@ empty conversation and initially displays `00:00:00`.
 - `src/sidebar/BackendStatusBar` integration in `src/extension.ts` — connect
   timer updates and disposal.
 - `src/vscode/BackendStatusBar.ts` — second item, formatting, and clock tick.
+- `src/vscode/SessionTimeStatusBar.ts` — timer, clock, and compact token usage
+  display if the status-bar implementation remains split out as planned.
 - Existing session and status-bar unit tests — migration, accumulation,
   switching, and disposal coverage.
 
@@ -131,6 +170,10 @@ recommended active-agent-time version.
 - Multiple generation-start paths: avoid double-starting the same interval.
 - CLI/cloud turns: count them as active-agent time, alongside local llama.cpp
   turns.
+- Token totals are additive per conversation and never reset when the model is
+  changed mid-session.
+- Missing provider usage does not create a false estimate; it is displayed as
+  unavailable for that provider's contribution.
 - VS Code reload during generation: use the persisted `active_started_at`
   policy selected below rather than silently losing the interval.
 - Closed conversations: their final total remains in history until the normal
@@ -148,6 +191,10 @@ Add tests for:
 - status-bar formatting at seconds, minutes, and hours;
 - system clock refresh and disposal of the interval;
 - status-bar switching between conversations.
+- input/output token accumulation across model and tool rounds;
+- persistence and migration of token totals;
+- compaction and auto-resume usage accounting;
+- compact `k`/`M` formatting and unavailable-usage display.
 
 ## Open decisions before implementation
 
@@ -160,6 +207,9 @@ Add tests for:
    one hour.
 5. The status-bar item is visible for a new empty conversation and shows
    `00:00:00`.
+6. Should token totals be displayed as a compact status-bar value, or only in
+   the tooltip/session details? Recommended: compact status-bar value plus
+   exact tooltip totals.
 
 ## Decisions recorded for this draft
 
@@ -168,3 +218,5 @@ Add tests for:
 - Count local, CLI, and cloud agent sessions.
 - Always display elapsed time as `HH:MM:SS`.
 - Keep the session timer visible from the beginning of every conversation.
+- Track cumulative provider-reported input and output tokens per conversation;
+  display compact totals with exact tooltip values.

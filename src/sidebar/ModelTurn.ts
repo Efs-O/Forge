@@ -72,6 +72,7 @@ export interface ModelTurnContext {
   warnOnce: (key: string, message: string) => void;
   onContextChanged?: (convId: string, promptChanged: boolean) => void;
   onExactContextTokens?: (convId: string, usedTokens: number) => void;
+  onUsage?: (conv: ConversationRuntime, inputTokens: number, outputTokens: number) => void;
   onTranscriptChanged?: (conv: ConversationRuntime) => void;
 }
 
@@ -181,7 +182,7 @@ export async function runModelTurn(
       maxRounds,
       nativeTools,
       stripAllTools: useStrip || model.strip_tools === true,
-      includeUsage: model.provider === undefined || model.provider === 'llama.cpp',
+      includeUsage: model.provider !== 'ollama',
       canUseThinkingKwargs: thinkingKwargs,
       stripThinkingChannels,
       failureTracker: ctx.failureTracker,
@@ -251,6 +252,7 @@ export async function runModelTurn(
           `Forge: llama-server rejected this model's native tool-call JSON. Retrying with Forge's JSON fallback tool format.`,
         ),
       onUsage: (usage) => {
+        ctx.onUsage?.(conv, usage.prompt_tokens, usage.completion_tokens);
         if (model.provider !== undefined && model.provider !== 'llama.cpp') return;
         // The slot advances through prompt evaluation and generation,
         // including hidden thinking, so total_tokens matches its counter.

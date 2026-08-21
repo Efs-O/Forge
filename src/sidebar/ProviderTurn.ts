@@ -70,7 +70,7 @@ function finishTurn(
   const depthBefore = ctx.checkpoints.depth(convId);
   ctx.checkpoints.commitTurn(checkpoint);
   if (ctx.checkpoints.depth(convId) > depthBefore) postC({ type: 'checkpointReady' });
-  ctx.events.onGenerationFinished?.(model.name);
+  ctx.events.onGenerationFinished?.(model.name, convId);
   ctx.lifecycle.settle(convId);
 }
 
@@ -98,7 +98,7 @@ export async function runCloudProviderTurn(
   postC({ type: 'ready' });
   const checkpoint = ctx.checkpoints.beginTurn(`turn-${Date.now()}`, convId);
   ctx.lifecycle.markStreaming(convId);
-  ctx.events.onGenerationStarted?.(model.name);
+  ctx.events.onGenerationStarted?.(model.name, convId);
   try {
     await ctx.runModelTurn(baseUrl, conv, model, activeFile, ctrl, postC, apiKey, checkpoint);
   } catch (err) {
@@ -140,7 +140,7 @@ export async function runLocalProviderTurn(
 
   const checkpoint = ctx.checkpoints.beginTurn(`turn-${Date.now()}`, convId);
   ctx.lifecycle.markStreaming(convId);
-  ctx.events.onGenerationStarted?.(model.name);
+  ctx.events.onGenerationStarted?.(model.name, convId);
   try {
     await ctx.runModelTurn(
       backend.baseUrl(),

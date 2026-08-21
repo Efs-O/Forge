@@ -37,4 +37,25 @@ describe('ToolApprovalService', () => {
     await expect(first).resolves.toBe(false);
     await expect(second).resolves.toBe(false);
   });
+
+  it('reports approval lifecycle for queued items from enqueue to resolution', async () => {
+    const lifecycle: string[] = [];
+    const service = new ToolApprovalService(
+      () => {},
+      () => ({}) as never,
+    );
+    service.setApprovalLifecycle(
+      (conversationId) => lifecycle.push(`start:${conversationId}`),
+      (conversationId) => lifecycle.push(`end:${conversationId}`),
+    );
+
+    const first = service.request('write_file', 'one', false, 'conv-1');
+    const second = service.request('write_file', 'two', false, 'conv-2');
+    service.cancelConversation('conv-2');
+    service.cancelConversation('conv-1');
+    await expect(first).resolves.toBe(false);
+    await expect(second).resolves.toBe(false);
+
+    expect(lifecycle).toEqual(['start:conv-1', 'start:conv-2', 'end:conv-2', 'end:conv-1']);
+  });
 });

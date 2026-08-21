@@ -114,6 +114,11 @@ export const conversationPersistedSchema = z.object({
   // Optional migration field: previews written by older Forge versions were
   // only live webview state and therefore were not recoverable after a sync.
   display_diffs: z.array(displayDiffSchema).optional(),
+  // Active-agent-time tracking. Optional so pre-existing records parse unchanged.
+  active_time_ms: z.number().int().min(0).optional(),
+  active_started_at: z.number().int().optional(),
+  input_tokens: z.number().int().min(0).optional(),
+  output_tokens: z.number().int().min(0).optional(),
 });
 
 export const sidebarSessionPersistedSchema = z.object({
@@ -143,6 +148,20 @@ export interface ConversationRuntime {
   compaction?: { summary: string; fromIndex: number };
   /** Durable presentation previews, deliberately separate from LLM messages. */
   displayDiffs?: ConversationDisplayDiff[];
+  /**
+   * Accumulated active-agent time in milliseconds (model work + tool execution,
+   * excluding approval waits). Set after each completed generation interval.
+   */
+  active_time_ms?: number;
+  /**
+   * Epoch ms when the current active interval began. Present while a turn is
+   * in progress; cleared (and folded into `active_time_ms`) when the turn ends.
+   */
+  active_started_at?: number;
+  /** Provider-reported prompt tokens accumulated for this conversation. */
+  input_tokens?: number;
+  /** Provider-reported completion tokens accumulated for this conversation. */
+  output_tokens?: number;
 }
 
 export interface SidebarRuntime {
@@ -282,6 +301,7 @@ export function chatMessagesFromSlim(slim: SlimPersistMessage[]): ChatMessage[] 
 export function tabMetasFromSession(
   session: SidebarRuntime,
   streamingIds?: ReadonlySet<string>,
+  getActiveTimeMs?: (conversation: ConversationRuntime) => number,
 ): SessionTabMeta[] {
   return session.conversations.map((c) => {
     // Tool turns are restored but must not inflate the user-facing badge.
@@ -295,6 +315,7 @@ export function tabMetasFromSession(
       updatedAt: c.updatedAt,
       messageCount: shown.length,
       ...(c.active_model !== undefined ? { active_model: c.active_model } : {}),
+      active_time_ms: getActiveTimeMs?.(c) ?? c.active_time_ms ?? 0,
       ...(streamingIds?.has(c.id) ? { streaming: true } : {}),
     };
   });
@@ -316,6 +337,7 @@ export function historyMetasFromSession(session: SidebarRuntime): SessionHistory
         updatedAt: c.updatedAt,
         messageCount: shown.length,
         ...(c.active_model !== undefined ? { active_model: c.active_model } : {}),
+        active_time_ms: c.active_time_ms ?? 0,
       };
     });
 }

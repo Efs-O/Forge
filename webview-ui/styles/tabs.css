@@ -81,6 +81,16 @@
   cursor: not-allowed;
 }
 
+.tab-chip-time {
+  flex-shrink: 0;
+  margin-right: 2px;
+  color: var(--vscode-descriptionForeground);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .tab-chip-close {
   flex-shrink: 0;
   width: 18px;

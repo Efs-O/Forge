@@ -52,12 +52,19 @@ export function TabStrip({
               <button
                 type="button"
                 className="tab-chip-label"
-                title={tab.title}
+                title={`${tab.title} — active time ${formatSessionDuration(tab.active_time_ms ?? 0)}`}
                 onClick={() => onSwitch(tab.id)}
               >
                 {live && !sel && <span className="tab-streaming-dot" aria-label="generating" />}
                 {label}
               </button>
+              <span
+                className="tab-chip-time"
+                title={`Active agent time: ${formatSessionDuration(tab.active_time_ms ?? 0)}`}
+                aria-label={`Active agent time ${formatSessionDuration(tab.active_time_ms ?? 0)}`}
+              >
+                {formatSessionDuration(tab.active_time_ms ?? 0)}
+              </span>
               <button
                 type="button"
                 className="tab-chip-close"
@@ -84,4 +91,12 @@ export function TabStrip({
       </div>
     </div>
   );
+}
+
+function formatSessionDuration(ms: number): string {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSec / 3600);
+  const minutes = Math.floor((totalSec % 3600) / 60);
+  const seconds = totalSec % 60;
+  return [hours, minutes, seconds].map((value) => String(value).padStart(2, '0')).join(':');
 }

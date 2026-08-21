@@ -130,6 +130,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.budget = runtime.budget;
     this.tabs = runtime.tabs;
     this.send = runtime.send;
+    // Register the conversation lookup so the session timer can resolve ids,
+    // then fold any unfinished intervals from a previous session into the
+    // persisted totals.
+    this.agentLoop.setConversationLookup((id) => this.getConversation(id));
+    this.agentLoop.restoreSessionTimers(this.sidebar);
+    this.persistSession();
   }
 
   resolveWebviewView(
@@ -270,7 +276,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.post({
       type: 'sessionSync',
       activeId: this.sidebar.activeConversationId,
-      tabs: tabMetasFromSession(this.sidebar, this.agentLoop.getStreamingIds()),
+      tabs: tabMetasFromSession(this.sidebar, this.agentLoop.getStreamingIds(), (conversation) =>
+        this.agentLoop.getSessionActiveMs(conversation),
+      ),
       history: historyMetasFromSession(this.sidebar),
       messagesById: slimMessagesById(this.sidebar),
     });
@@ -311,6 +319,38 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
   private getActive(): ConversationRuntime {
     return this.tabs.active();
+  }
+
+  /** Look up a conversation by id across open tabs and history. */
+  getConversation(id: string): ConversationRuntime | undefined {
+    return (
+      this.sidebar.conversations.find((c) => c.id === id) ??
+      this.sidebar.history.find((c) => c.id === id)
+    );
+  }
+
+  /** Total active agent time in ms for the currently active conversation. */
+  getActiveSessionTimeMs(): number {
+    const conv = this.getActive();
+    return this.agentLoop.getSessionActiveMs(conv);
+  }
+
+  getActiveSessionMetrics(): {
+    activeMs: number;
+    inputTokens?: number;
+    outputTokens?: number;
+  } {
+    const conv = this.getActive();
+    return {
+      activeMs: this.agentLoop.getSessionActiveMs(conv),
+      ...(conv.input_tokens !== undefined ? { inputTokens: conv.input_tokens } : {}),
+      ...(conv.output_tokens !== undefined ? { outputTokens: conv.output_tokens } : {}),
+    };
+  }
+
+  /** Persist the current session to workspace state. */
+  saveSession(): void {
+    this.persistSession();
   }
 
   private handleMessage(msg: WebviewToHost): void {

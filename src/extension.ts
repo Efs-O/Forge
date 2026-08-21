@@ -24,6 +24,7 @@ import { SESSION_KEY_V1 } from './sidebar/sessionTypes';
 import { registerAllTools } from './tools/registerAllTools';
 import { connectMcpServers } from './tools/mcpBridge';
 import { BackendStatusBar } from './vscode/BackendStatusBar';
+import { SessionTimeStatusBar } from './vscode/SessionTimeStatusBar';
 import { ForgeCodeActionProvider } from './vscode/codeActions';
 import { registerNativeCommands } from './vscode/nativeCommands';
 import { EmbeddingBackend } from './backend/EmbeddingBackend';
@@ -207,6 +208,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const forgeLoader = createForgeInstructionsLoader();
   if (forgeLoader) context.subscriptions.push(forgeLoader);
 
+  let refreshSessionTime = (): void => {};
   sidebarProvider = new SidebarProvider(
     context.extensionUri,
     pool,
@@ -219,16 +221,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     diffDecorations,
     templateEngine,
     {
-      onGenerationStarted: (modelName) => statusBar.setGenerating(modelName),
+      onGenerationStarted: (modelName) => {
+        statusBar.setGenerating(modelName);
+        refreshSessionTime();
+      },
       onGenerationFinished: (modelName) => {
         if (pool.isAnyReady()) statusBar.setReady(modelName);
         else statusBar.setStopped(modelName);
+        refreshSessionTime();
       },
       onBackendError: (message) => statusBar.setError(message),
       onBackendReady: (modelName) => statusBar.setReady(modelName),
       onConversationSwitched: (modelName) => {
         if (pool.isAnyReady()) statusBar.setReady(modelName);
         else statusBar.setStopped(modelName);
+        refreshSessionTime();
       },
     },
     forgeLoader,
@@ -242,6 +249,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       void sidebarProvider.dispose();
     },
   });
+  const sessionTimeBar = new SessionTimeStatusBar(() => sidebarProvider.getActiveSessionMetrics());
+  refreshSessionTime = () => sessionTimeBar.refresh();
+  context.subscriptions.push(sessionTimeBar);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(SidebarProvider.viewId, sidebarProvider, {
       webviewOptions: { retainContextWhenHidden: true },

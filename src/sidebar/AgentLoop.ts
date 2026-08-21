@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import type { IBackendPool } from '../backend/BackendPool';
 import type { ForgeConfig, ModelConfig } from '../config/types';
 import type { HostToWebview } from './messageBridge';
-import type { ConversationRuntime } from './sessionTypes';
+import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
 import { isCloudProvider } from '../llm/CloudProviders';
 import type { AttachmentData } from './messageBridge';
 import { buildUserContent } from './ConversationOps';
@@ -13,6 +13,7 @@ import { CheckpointStack } from '../checkpoint/CheckpointStack';
 import { ToolRegistry } from '../tools/ToolRegistry';
 import type { KeepUndoCodeLensProvider } from './KeepUndoCodeLens';
 import { ToolFailureTracker } from '../tools/StripTools';
+import { SessionTimer } from './SessionTimer';
 import { getLogger } from '../util/logger';
 import { CapabilityCache } from './CapabilityCache';
 import { ToolDispatch, type OpenFileOptions } from './ToolDispatch';
@@ -38,8 +39,8 @@ import {
 const log = getLogger();
 
 export interface SidebarProviderEvents {
-  onGenerationStarted?: (modelName: string | null) => void;
-  onGenerationFinished?: (modelName: string | null) => void;
+  onGenerationStarted?: (modelName: string | null, conversationId?: string) => void;
+  onGenerationFinished?: (modelName: string | null, conversationId?: string) => void;
   onBackendError?: (message: string) => void;
   onBackendReady?: (modelName: string | null) => void;
   onBackendStopped?: (modelName: string | null) => void;
@@ -60,6 +61,12 @@ export class AgentLoop {
   private promptRunCtrl: AbortController | null = null;
   /** Conversation that owns the current out-of-band prompt, if any. */
   private promptRunConversationId: string | null = null;
+  private readonly sessionTimer = new SessionTimer();
+  /**
+   * Resolves a conversation id to its runtime object. Set by the SidebarProvider
+   * after construction; without it the session timer is a no-op.
+   */
+  private conversationLookup: ((id: string) => ConversationRuntime | undefined) | null = null;
   private onContextChanged?: (convId: string, promptChanged: boolean) => void;
   private onExactContextTokens?: (convId: string, usedTokens: number) => void;
   private onTranscriptChanged?: (convId: string) => void;
@@ -73,6 +80,25 @@ export class AgentLoop {
    */
   setContextChangedListener(listener: (convId: string, promptChanged: boolean) => void): void {
     this.onContextChanged = listener;
+  }
+
+  /**
+   * Registers a conversation lookup so the session timer can resolve
+   * conversation ids to runtime objects. Set by SidebarProvider after
+   * construction.
+   */
+  setConversationLookup(lookup: (id: string) => ConversationRuntime | undefined): void {
+    this.conversationLookup = lookup;
+  }
+
+  /** Total active agent time in ms for a conversation (including in-progress). */
+  getSessionActiveMs(conv: ConversationRuntime): number {
+    return this.sessionTimer.totalActiveMs(conv);
+  }
+
+  /** Restore unfinished intervals after a VS Code reload. Call once at startup. */
+  restoreSessionTimers(session: SidebarRuntime): void {
+    this.sessionTimer.restoreUnfinishedIntervals(session);
   }
 
   /** Receives llama-server's execution-side prompt token count. */
@@ -135,6 +161,42 @@ export class AgentLoop {
         config.cli_idle_timeout_ms ?? DEFAULT_CLI_IDLE_TIMEOUT_MS,
       );
     this.approvals = new ToolApprovalService(post, getView);
+    this.approvals.setApprovalLifecycle(
+      (convId) => this.sessionTimer.pauseApproval(convId),
+      (convId) => this.sessionTimer.resumeApproval(convId),
+    );
+    // Wrap the generation events so the session timer tracks every turn
+    // automatically. PromptRun events carry no conversationId and are
+    // deliberately excluded from session time.
+    const timer = this.sessionTimer;
+    const origStarted = events.onGenerationStarted;
+    const origFinished = events.onGenerationFinished;
+    events.onGenerationStarted = (modelName, conversationId) => {
+      if (conversationId) {
+        const conv = this.conversationLookup?.(conversationId);
+        if (conv) {
+          timer.start(conv);
+          this.onTranscriptChanged?.(conversationId);
+        }
+      }
+      origStarted?.(modelName, conversationId);
+    };
+    events.onGenerationFinished = (modelName, conversationId) => {
+      if (conversationId) {
+        const conv = this.conversationLookup?.(conversationId);
+        if (conv) {
+          timer.finish(conv);
+          this.onTranscriptChanged?.(conversationId);
+        }
+      }
+      origFinished?.(modelName, conversationId);
+    };
+    this.sessionTimer.setCheckpointCallback((conversationId) => {
+      const conv = this.conversationLookup?.(conversationId);
+      if (!conv) return;
+      conv.updatedAt = Date.now();
+      this.onTranscriptChanged?.(conversationId);
+    });
     this.toolDispatch = new ToolDispatch(
       toolRegistry,
       checkpoints,
@@ -180,6 +242,11 @@ export class AgentLoop {
       // construction, so a snapshot taken here would capture undefined.
       onContextChanged: (convId, promptChanged) => this.onContextChanged?.(convId, promptChanged),
       onExactContextTokens: (convId, used) => this.onExactContextTokens?.(convId, used),
+      onUsage: (conv, inputTokens, outputTokens) => {
+        conv.input_tokens = (conv.input_tokens ?? 0) + inputTokens;
+        conv.output_tokens = (conv.output_tokens ?? 0) + outputTokens;
+        this.recordTranscriptMutation(conv);
+      },
       onTranscriptChanged: (conv) => this.recordTranscriptMutation(conv),
       commitUserPrompt: (conv, text, attachments) => this.commitUserPrompt(conv, text, attachments),
       runModelTurn: (baseUrl, conv, model, activeFile, ctrl, postC, apiKey, checkpoint) =>
@@ -211,10 +278,13 @@ export class AgentLoop {
   }
 
   disposeConversation(id: string): Promise<void> {
+    const conv = this.conversationLookup?.(id);
+    if (conv) this.sessionTimer.disposeConversation(conv);
     return this.cliSessions.disposeConversation(id);
   }
 
   dispose(): Promise<void> {
+    this.sessionTimer.dispose();
     return this.cliSessions.dispose();
   }
 

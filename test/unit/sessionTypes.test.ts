@@ -316,6 +316,24 @@ describe('sessionTypes', () => {
     expect(loaded.conversations[0].cli_sessions).toEqual(session.conversations[0].cli_sessions);
   });
 
+  it('persists active time and provider token totals', () => {
+    const session = createDefaultSession();
+    const conv = session.conversations[0];
+    conv.active_time_ms = 3_661_000;
+    conv.input_tokens = 12_400;
+    conv.output_tokens = 2_000;
+
+    const loaded = loadSidebarSession(
+      makeMemento({ [SESSION_KEY_V1]: runtimeToPersisted(session) }),
+    );
+
+    expect(loaded.conversations[0]).toMatchObject({
+      active_time_ms: 3_661_000,
+      input_tokens: 12_400,
+      output_tokens: 2_000,
+    });
+  });
+
   it('runtimeToPersisted includes archived history conversations', () => {
     const s = createDefaultSession();
     s.conversations[0].messages.push(
