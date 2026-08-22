@@ -1,4 +1,3 @@
-import * as vscode from 'vscode';
 import type { BackendController } from './BackendController';
 import { DirectBackend } from './DirectBackend';
 import type { ForgeConfig } from '../config/types';
@@ -14,6 +13,13 @@ import { getLogger } from '../util/logger';
 import { SharedRuntimeRegistry, sharedRuntimeKey } from './SharedRuntimeRegistry';
 import { acquireOllamaSlot, borrowSharedRuntime, stopAllSlots } from './poolAcquisition';
 import { claimPort, freeSlot, mostRecentSlot } from './poolSlots';
+import {
+  changedStructuralSettings,
+  readStructuralSettings,
+  warnStructuralReloadRequired,
+  withPinnedStructuralSettings,
+} from './poolStructuralConfig';
+import type { StructuralSettings } from './poolStructuralConfig';
 import type { PortClaim, PoolSlot, SlotTable } from './poolSlots';
 
 export type { DelegationCheck, DelegationHold } from './DelegationGate';
@@ -62,7 +68,7 @@ export class BackendPool implements IBackendPool {
   private readonly freePorts: number[];
   private readonly gate: DelegationGate;
   /** Settings baked into the physical slot/port inventory at construction. */
-  private readonly structural: { maxSimultaneousModels: number; port: number; shared: boolean };
+  private readonly structural: StructuralSettings;
   private lastAcquiredModel: string | null = null;
 
   constructor(private config: ForgeConfig) {
@@ -71,11 +77,7 @@ export class BackendPool implements IBackendPool {
     this.freePorts = Array.from({ length: max }, (_, i) => base + i);
     // Snapshot, never re-derived: the whole failure mode this guards against is
     // policy reading a new value while the physical slots are still the old one.
-    this.structural = {
-      maxSimultaneousModels: max,
-      port: base,
-      shared: config.shared_runtime?.enabled === true,
-    };
+    this.structural = readStructuralSettings(config);
     this.gate = new DelegationGate({
       poolKey: (name) => this.poolKey(name),
       isOllama: (key) => this.isOllamaModel(key),
@@ -239,43 +241,11 @@ export class BackendPool implements IBackendPool {
    * required. Everything else applies immediately.
    */
   applyForgeConfig(next: ForgeConfig): void {
-    const changed = this.changedStructuralSettings(next);
-    this.config = changed.length === 0 ? next : this.withPinnedStructuralSettings(next);
+    const changed = changedStructuralSettings(this.structural, next);
+    this.config = changed.length === 0 ? next : withPinnedStructuralSettings(this.structural, next);
     for (const slot of this.slots.values()) slot.backend.applyForgeConfig(this.config);
     for (const backend of this.ollamaSlots.values()) backend.applyForgeConfig(this.config);
-    if (changed.length > 0) this.warnStructuralReloadRequired(changed);
-  }
-
-  private changedStructuralSettings(next: ForgeConfig): string[] {
-    const changed: string[] = [];
-    if ((next.max_simultaneous_models ?? 1) !== this.structural.maxSimultaneousModels) {
-      changed.push('max_simultaneous_models');
-    }
-    if ((next.llama_server.port ?? 8080) !== this.structural.port)
-      changed.push('llama_server.port');
-    if ((next.shared_runtime?.enabled === true) !== this.structural.shared) {
-      changed.push('shared_runtime.enabled');
-    }
-    return changed;
-  }
-
-  private withPinnedStructuralSettings(next: ForgeConfig): ForgeConfig {
-    return {
-      ...next,
-      max_simultaneous_models: this.structural.maxSimultaneousModels,
-      llama_server: { ...next.llama_server, port: this.structural.port },
-      ...(next.shared_runtime
-        ? { shared_runtime: { ...next.shared_runtime, enabled: this.structural.shared } }
-        : {}),
-    };
-  }
-
-  private warnStructuralReloadRequired(changed: string[]): void {
-    const message =
-      `Forge: ${changed.join(', ')} changed, but ${changed.length > 1 ? 'these settings' : 'this setting'} ` +
-      'define the backend slot layout created at startup. The old value stays active until you reload the window.';
-    log.warn(`[BackendPool] ${message}`);
-    void vscode.window.showWarningMessage(message);
+    if (changed.length > 0) warnStructuralReloadRequired(changed);
   }
 
   showConsole(modelName?: string): void {
