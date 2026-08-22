@@ -1,6 +1,8 @@
 # Compaction summarizer: its own request shape (impl plan)
 
-Status: proposed, awaiting go/no-go.
+Status: **REVISED after measurement (2026-08-22).** One hypothesis confirmed,
+one refuted. See "Measured results" before reading the Design section — the
+`disableThinking` option described below must NOT be implemented.
 
 Scope: item 3 of the compaction review only. The tail-sizing cliff, the 73%
 source truncation, goal anchoring, and summary layering are **not** in this
@@ -54,8 +56,6 @@ export interface PromptRunOptions {
   modelName?: string;
   /** Replaces the agent system prompt entirely. */
   systemPrompt?: string;
-  /** Send enable_thinking:false when the model's template supports the kwarg. */
-  disableThinking?: boolean;
   /** Output room ON TOP of the model's reasoning reserve. */
   outputTokens?: number;
   /** Strip thinking channels regardless of model.think. */
@@ -80,33 +80,40 @@ lands. The kwarg is the optimisation; the formula is the guarantee.
 Applied only when `outputTokens` is set, so `/review` and `/initForge` keep the
 4096 default.
 
-### Thinking
+### Thinking — STAYS ON (revised after measurement)
 
-`enable_thinking:false` is per-request and needs no reload — `--jinja` is
-unconditional ([LlamaServerArgs.ts:32](src/backend/LlamaServerArgs.ts#L32)), the
-efso template gates `<|think|>` on `enable_thinking is defined and
-enable_thinking`, and `ToolCallingLoop` already flips it mid-turn on a live
-server for truncation recovery ([ToolCallingLoop.ts:171-177](src/agent/ToolCallingLoop.ts#L171-L177)).
+An earlier draft of this plan added `disableThinking`. **Do not.** Measurement
+put it at −0.39 to −0.42 writtenFileRecall (see "Measured results"). Thinking is
+the single largest quality factor in the summarizer and must be left alone.
 
-Gated on `canUseThinkingKwargs(model, runtimeCaps)`, the same guard `ModelTurn`
-uses. `PromptRunContext` gains an optional `capabilities` member; `TurnServices`
-already supplies one ([turnServices.ts:48](src/sidebar/turnServices.ts#L48)), so
-the existing `runPromptToMarkdown(this.services, …)` call satisfies it with no
-wiring change. Absent capabilities → kwarg omitted, `max_tokens` covers it.
+`enable_thinking:false` IS technically per-request and needs no model reload
+(`--jinja` is unconditional at [LlamaServerArgs.ts:32](src/backend/LlamaServerArgs.ts#L32);
+`ToolCallingLoop` already flips it mid-turn for truncation recovery). That
+question was settled — the answer is simply that we should not use it here.
 
-### Summarizer system prompt
+### Summarizer system prompt — a template, not a constant
 
-New export in `CompactionService.ts`, next to the prompt it pairs with:
+`TemplateEngine.render(name)` resolves `<name>.njk` **user dirs first, then
+builtin** ([TemplateEngine.ts:30](src/llm/TemplateEngine.ts#L30)). Today the only
+template is `config/templates/builtin/execute.njk`. Add a second:
+
+**`config/templates/builtin/summarize.njk`** — content must be EXACTLY the string
+the winning arm C measured with, or the result does not carry over:
 
 ```
-You compress a software-engineering conversation into a factual summary.
-Report only what the transcript states. Do not offer help, ask questions, or
-call tools.
+You compress a software-engineering conversation into a factual summary. Report only what the transcript states. Do not offer help, ask questions, or call tools.
 ```
 
-`injectSystemPrompt(messages, undefined, undefined, SUMMARY_SYSTEM_PROMPT, 'replace')`
-— the `replace` branch ([SystemPromptInjector.ts:36-41](src/llm/SystemPromptInjector.ts#L36-L41))
-skips the template engine entirely, so no FORGE.md and no workspace context.
+(161 characters, one line, no trailing newline inside the sentence run.)
+
+Rendered with no template context, then passed as the system message in
+`replace` mode ([SystemPromptInjector.ts:36-41](src/llm/SystemPromptInjector.ts#L36-L41)),
+which skips the execute template entirely — no FORGE.md, no workspace facts.
+
+Why a template rather than a `const` in `CompactionService.ts`: it is tunable by
+editing a file with no rebuild, a user copy overrides the builtin, and it matches
+the pattern already in the repo. Note `src/templates/builtin/` is DEAD (see
+CLAUDE.md) — the live directory is `config/templates/builtin/`.
 
 ## Changes
 
@@ -118,11 +125,9 @@ skips the template engine entirely, so no FORGE.md and no workspace context.
 - When `options.systemPrompt` is set, call `injectSystemPrompt` with it in
   `replace` mode and no template engine/context.
 - After `mergeSampling`, override `max_tokens` when `options.outputTokens` is set.
-- Add the `chat_template_kwargs.enable_thinking = false` merge when
-  `options.disableThinking` and `canUseThinkingKwargs` agree. Merge into any
-  existing kwargs — `normalizeRequestForModel` also writes `reasoning_effort`
-  there ([RequestNormalizer.ts:27-32](src/llm/RequestNormalizer.ts#L27-L32)) and
-  must not be clobbered. Apply before `normalizeRequestForModel`.
+- No thinking kwarg. `canUseThinkingKwargs` / `chat_template_kwargs` are NOT
+  touched by this change; leave the request's thinking behaviour exactly as it
+  is today.
 - `sanitizeText(content, options.alwaysStripThinking || shouldStripThinking(...))`.
 - `PromptRunContext` gains `capabilities?: (model, baseUrl) => Promise<RuntimeModelCapabilities>`.
 
@@ -130,12 +135,18 @@ Estimated +35 LOC; file is 98 today, well under the limit.
 
 ### `src/sidebar/CompactionService.ts`
 
-- Export `SUMMARY_SYSTEM_PROMPT` and `SUMMARY_OUTPUT_TOKENS = 2048` (the 5000-char
+- Export `SUMMARY_OUTPUT_TOKENS = 2048` (the 5000-char
   `COMPACTION_SUMMARY_MAX_CHARS` is ~1600 tokens at 3.1 chars/token; 2048 leaves
   margin without inviting a rambling summary).
 - Widen the `runPromptToMarkdown` dep signature to carry `PromptRunOptions`.
-- `runCompaction` passes `{ modelName: conv.active_model, systemPrompt,
-  disableThinking: true, outputTokens, alwaysStripThinking: true }`.
+- `runCompaction` passes `{ modelName: conv.active_model, systemPromptTemplate:
+  'summarize', outputTokens: SUMMARY_OUTPUT_TOKENS, alwaysStripThinking: true }`.
+- **Validate before storing** (new — see "the persona emits a tool call"):
+  reject a candidate summary that parses as JSON, matches a tool-call shape
+  (`{"tool":` / `"arguments":` / a lone fenced JSON block), or is under ~200
+  chars. Return `'failed'` instead of persisting it. `capSummary` only rejects
+  the empty string today, which is why a 117-char tool call would be stored as
+  the conversation's permanent working context.
 - Fix the leftover `EARLIER CHECKPOINT:` label at
   [line 160](src/sidebar/CompactionService.ts#L160) → `EARLIER SUMMARY:`. Missed
   when the other two sites were renamed; same noun collision with Forge's
@@ -145,7 +156,7 @@ Estimated +35 LOC; file is 98 today, well under the limit.
 350 limit before this change (353 at HEAD). This plan adds ~15 more. It must be
 split in the same pass — proposed seam: move `truncateForSummary`,
 `formatSummaryMessage`, `capSummarySource`, `buildSummaryPrompt`,
-`SUMMARY_SYSTEM_PROMPT` and their constants into a new
+and their constants into a new
 `src/sidebar/compactionPrompt.ts` (~110 LOC), leaving `CompactionService.ts` as
 execution + resume (~265 LOC). `docs/OWNERS.md` gains the row.
 
@@ -177,8 +188,10 @@ Thread the optional `options` argument through the two forwarders
   alongside it** — the kwarg-merge regression.
 - The summarizer run resolves `conv.active_model`, not `config.active_model`,
   including with an `@profile` suffix.
-- System prompt is exactly `SUMMARY_SYSTEM_PROMPT` — no FORGE.md, no template
-  context.
+- System prompt is exactly the rendered `summarize.njk` — no FORGE.md, no
+  workspace context, no execute template.
+- A candidate summary that is a tool-call JSON blob, or 117 chars, is REJECTED
+  and never reaches `conv.compaction.summary`.
 - A response containing an inline `<think>` block is stripped from the stored
   summary even when `model.think === true`.
 - Existing `CompactionService.test.ts` and `SlashCommandHandler.test.ts` pass
@@ -197,7 +210,9 @@ Thread the optional `options` argument through the two forwarders
 
 - **Summary quality without thinking is unmeasured.** Compression is judgment
   work and this is the one place thinking might earn its 3 000 tokens. `2` above
-  is the check; `disableThinking` is one flag to flip back if summaries degrade.
+  is the check. RESOLVED by measurement: thinking is worth ~0.40 recall and
+  stays on. The remaining risk is the opposite one — 104s per compaction,
+  mid-task, which only a smaller input can fix (see Out of scope).
 - **The split is mechanical but touches a hot file.** Pure moves, no logic
   changes, covered by the existing suite.
 
@@ -211,3 +226,227 @@ Deliberately excluded, each still open from the review:
 - Anchoring the first user message; layering summaries instead of
   re-summarizing; deterministic file/error facts appended by code.
 - Backoff after a failed compaction.
+
+---
+
+## Evidence harness (built 2026-08-22, before implementing)
+
+`npm run ab:compaction` — `scripts/compaction-ab.mjs`. Runs both request shapes
+back to back against a model that is **already loaded**; it spawns nothing.
+
+Arm B is only a different set of request parameters, so the plan can be judged
+on measurements before a line of it is written.
+
+```
+node scripts/compaction-ab.mjs --densest --runs 3 --base-url http://127.0.0.1:8080
+node scripts/compaction-ab.mjs --dry-run --densest     # inputs only, no model needed
+```
+
+| flag | meaning |
+|---|---|
+| `--dry-run` | print window/split/ground truth and stop |
+| `--densest` | summarize the window with the most write calls, not the tail |
+| `--tokens N` | window size, default 40000 |
+| `--runs N` | runs per arm, default 3 |
+| `--end N` | window ends at message N instead of the last |
+| `--arm-a-max-tokens` / `--arm-b-output-tokens` / `--reasoning-budget` | request sizing |
+
+Both arms go through the shipping `selectCompactionSplit` and
+`buildSummaryPrompt`, bundled out of `src/` with the unit tests' `vscode` stub
+(`compaction-ab-bridge.mjs`) so the harness cannot drift from the real code.
+
+### Metrics
+
+Ground truth comes from the transcript itself — every path in a `tool_calls`
+argument — so recall and confabulation are measured, not eyeballed:
+
+- **writtenFileRecall** — of the files actually modified, how many the summary names
+- **topReferencedRecall** — same for the 10 most-referenced files
+- **inventedPaths** — path-shaped tokens appearing nowhere in the transcript
+- empty/error count, completion tokens, wall-clock, label coverage, leaked `<think>`
+
+### Dry run on a real qwen3.8 session
+
+```
+session       51c25020-…jsonl   (qwen38-27b-mtp-ud-q3kxl-no-mmproj)
+messages      1540 total -> 88 in window     window ~39,154 tokens
+split         summarize=88   retainedVerbatim=0
+prompt chars  24,344
+groundTruth   written=12  topReferenced=10
+arm A system  788 chars    arm B system  161 chars
+```
+
+Two review findings reproduce on real data before any model is called:
+
+- `retainedVerbatim=0` — the zero-tail cliff, on a genuine 40k qwen3.8 window.
+- 88 messages (~39k tokens ≈ 121k chars) reduced to a 24,344-char prompt: the
+  `SUMMARY_SOURCE_MAX_CHARS` cap silently drops ~80% of the source.
+
+Neither is addressed by this plan — both are in Out of scope, and the harness
+can now measure a fix for them as a third arm.
+
+### Caveats
+
+- Arm A uses `injectSystemPrompt`'s hardcoded fallback (788 chars). The live
+  extension renders the `execute` template plus FORGE.md, which is larger — so
+  the persona effect measured here **understates** the real one.
+- `llamacpp-qwen3` sets `sampling.max_tokens: 16384`, so the empty-summary
+  failure does **not** reproduce on qwen3.8. That defect belongs to
+  `llamacpp-gemma4`, which sets no `max_tokens` and falls back to 4096. Test
+  efso to see it.
+- `llamacpp-qwen3` configures no seed; the harness passes an explicit one per
+  run index so both arms see identical sampling.
+
+
+---
+
+## Measured results (2026-08-22, qwen3.8-27B UD-Q3_K_XL, 3 runs/cell)
+
+`npm run ab:compaction -- --densest --runs 3`, 40k window, 88 messages, 12
+ground-truth written files. Full 2x2 because the first A/B moved two variables
+at once and could attribute nothing.
+
+**writtenFileRecall** (of the 12 files actually modified, how many the summary names):
+
+| system prompt | thinking ON | thinking OFF |
+|---|---|---|
+| agent persona (current) | **A: 0.81** — 97s, 3561 out, 0.3 invented | **D: 0.39** — 8.9s, 249 out |
+| minimal summarizer | **C: 1.00** — 104s, 3823 out, 0.0 invented | **B: 0.61** — 12.8s, 505 out |
+
+Effects are consistent and separable:
+
+- **Thinking is worth ~0.40 recall** (D→A +0.42, B→C +0.39). It dominates.
+- **The persona costs ~0.20 recall** (A→C +0.19, D→B +0.22).
+- **C is the only cell with no variance**: 12/12 on all three runs. A and B are
+  bimodal — 5/12 or 12/12 depending on the draw.
+- C also invents nothing (A averaged 0.3 fabricated paths per run).
+- C costs the same as A (104s vs 97s), so the persona fix is free.
+
+### Decisions
+
+1. **Minimal system prompt — CONFIRMED, ship it.** +0.19 recall, −0.3 invented
+   paths, zero cost.
+2. **`disableThinking` — REFUTED, do NOT implement.** The reasoning in the
+   Design section ("summarization is compression, not reasoning") is wrong on
+   this model: turning thinking off costs 0.39-0.42 recall. Drop the option.
+3. **`max_tokens = reserve + 2048` — validated.** The worst thinking run emitted
+   4060 tokens against a 5120 ceiling; 26% headroom. Keep the formula.
+4. `conv.active_model` and `alwaysStripThinking` stand (no thinking leaked in 12
+   runs, but the guard is free).
+
+### New finding: the persona makes the model emit a TOOL CALL as the summary
+
+D runs 2 and 3 returned 150 and 117 characters. In full:
+
+```
+{ "tool": "read_file", "arguments": { "path": "…/UPGRADES_PLAN.md" } }
+```
+
+The persona's JSON-fallback instruction ("emit exactly one fenced JSON block
+with { \"tool\": ... }") beat the summarization request. That string would have
+been stored as `conv.compaction.summary` and become the model's working context
+for the rest of the conversation. Thinking partially masks this — arm A never
+did it — so the danger is a config where the persona survives and thinking is
+weak or off.
+
+**Therefore an additional change, not in the original plan:** `runCompaction`
+must validate before storing. Reject a summary that parses as JSON, matches a
+tool-call shape, or falls under a plausible floor (~200 chars), and treat it as
+`'failed'` rather than persisting it. `capSummary` currently only checks for the
+empty string, which is why a 117-char tool call sailed through.
+
+### Not reproduced
+
+The empty-summary failure (defect 2) did not occur on qwen3.8, as predicted —
+`llamacpp-qwen3` sets `max_tokens: 16384`. It remains a live risk on
+`llamacpp-gemma4`, which sets none. Re-run against efso to confirm.
+
+---
+
+## Implementation checklist (read this first after a context reset)
+
+Ordered, and each item is the *revised* decision — where this list disagrees
+with the Design section above, this list wins.
+
+1. **`config/templates/builtin/summarize.njk`** — the exact 161-char string in
+   "Summarizer system prompt". Not a code constant. Not `src/templates/`.
+2. **`PromptRunOptions`** on `runPromptToMarkdown`: `modelName`,
+   `systemPromptTemplate`, `outputTokens`, `alwaysStripThinking`.
+   **No `disableThinking`.** Existing callers (`/review`, `/initForge`,
+   `commandHelpers`) pass nothing and must be unaffected — assert this in a test.
+3. **`modelName: conv.active_model`** in `runCompaction`; falls back to
+   `config.active_model`. `resolveRequestModel` handles an `@profile` suffix.
+4. **`max_tokens = reasoningReserve(model) + 2048`**, applied only when
+   `outputTokens` is set.
+5. **`alwaysStripThinking: true`** for the summarizer path.
+6. **Validate before storing** — reject tool-call-shaped / JSON / <200-char
+   candidates as `'failed'`.
+7. **Split `CompactionService.ts`** (361 lines, over the 350 limit) into
+   `compactionPrompt.ts`; add the `docs/OWNERS.md` row.
+8. **`EARLIER CHECKPOINT:`** → `EARLIER SUMMARY:` (line ~160).
+9. `npm run ci` and `npm run package`.
+10. **Re-run the harness** and confirm arm C's numbers still hold through the
+    real code path, not just the raw HTTP one.
+
+## Reproducing the measurement
+
+```bash
+curl -s -X POST http://127.0.0.1:8799/ensure -H "Content-Type: application/json" \
+  -d '{"model":"qwen38-27b-mtp-ud-q3kxl-no-mmproj"}'      # -> baseUrl :8081
+
+npm run ab:compaction -- --base-url http://127.0.0.1:8081 \
+  --model qwen38-27b-mtp-ud-q3kxl-no-mmproj --densest --tokens 40000 --runs 3
+```
+
+Fixed inputs for comparability: session
+`51c25020-201c-459f-b33f-2b77aa43c341.jsonl`, `--densest` window (88 messages,
+~39,154 tokens), 12 ground-truth written files, seeds 42/43/44.
+
+The four cells live in `scripts/compaction-ab.mjs`; `--arms A,C` runs just the
+current-vs-winner pair.
+
+## Repo state at the time of writing
+
+- **Committed** (`26bd1de`): the RESUME_PROMPT / "conversation summary" rename.
+- **UNCOMMITTED**: `scripts/compaction-ab*.mjs` (3 files), the
+  `ab:compaction` entry in `package.json`, and this document. Commit them before
+  or alongside the implementation — the harness is the evidence for every
+  decision here.
+- `webview-ui/src/App.tsx` and `test/webview/AppHeavyStream.dom.test.ts` are
+  being modified by a session OTHER than this one. Do not touch or commit them.
+
+## Does the 80% source truncation lose files? Measured: no
+
+```
+written ground-truth files: 12
+  survive the 24k cap: 12
+  DROPPED by the cap:   0
+source chars 121,142 -> prompt 24,344 (20% kept)
+```
+
+Paths recur throughout a transcript, so 35%-head + 65%-tail retention catches
+them even when the middle is discarded.
+
+**Do not over-read this.** It measures file IDENTITY only. It says nothing about
+whether the decisions, constraints, error states and exact next action survived
+— and those are what the discarded 80% actually contains. There is no cheap
+objective proxy for them, which is why "compaction is fixed" is NOT a claim this
+evidence supports.
+
+## Honest assessment of where this leaves compaction
+
+Arm C is unambiguously better than what ships today: +0.19 recall over current,
+fabricated paths 0.3 -> 0.0, zero variance across runs, same wall-clock. Ship it.
+
+It is not a solved problem:
+
+- `retainedVerbatim=0` still holds — the model gets prose and no concrete
+  exchange. C is a better summary of a still-impoverished input.
+- 80% of the source is still discarded, proven harmless only for file names.
+- 104 s per compaction, mid-task. Thinking-off was the obvious lever and is now
+  ruled out; the honest fix is a smaller, better-chosen input.
+- One session, one window, one model, three runs. Enough to detect a 0.4 effect,
+  not enough to certify quality.
+
+The tail-sizing and chunked-summarization items under "Out of scope" are the
+bigger prize, and the harness can now A/B them as a fifth arm.
