@@ -1,5 +1,4 @@
 import { type ChildProcess } from 'child_process';
-import { existsSync } from 'fs';
 import * as vscode from 'vscode';
 import type { BackendController } from './BackendController';
 import type { ForgeConfig, ModelConfig } from '../config/types';
@@ -7,20 +6,14 @@ import { composeLlamaServerArgs } from './LlamaServerArgs';
 import { spawnLlamaServer, killLlamaProcess } from './llamaProcess';
 import { waitForHealthy, probeHealthy, probeServedModel } from './HealthCheck';
 import { startAdoptedServerMonitor } from './adoptedServerMonitor';
+import { attachServerDiagnostics } from './serverDiagnostics';
+import { assertModelFilesExist, servedModelMatches } from './modelFileChecks';
 import { ensureOllamaReady, normalizeOllamaEndpoint, releaseOllamaModel } from './OllamaAdapter';
 import { isCloudProvider } from '../llm/CloudProviders';
 import { expandAlias, resolveSpawnModel, splitModelProfile } from '../config/ConfigResolver';
 import { getLogger } from '../util/logger';
 
 const log = getLogger();
-const MAX_DIAGNOSTIC_TAIL_CHARS = 2_000;
-
-function appendDiagnosticTail(previous: string, chunk: string): string {
-  const normalized = chunk.replace(/\s+/g, ' ').trim();
-  if (!normalized) return previous;
-  return `${previous} ${normalized}`.slice(-MAX_DIAGNOSTIC_TAIL_CHARS);
-}
-
 export class DirectBackend implements BackendController {
   private proc: ChildProcess | null = null;
   private ready = false;
@@ -194,7 +187,7 @@ export class DirectBackend implements BackendController {
     const baseUrl = `http://${this.host}:${this.port}`;
     if (await probeHealthy(baseUrl)) {
       const served = await probeServedModel(baseUrl);
-      if (!this.servedModelMatches(served, model)) {
+      if (!servedModelMatches(served, model)) {
         const servedLabel = served ?? 'an unidentifiable model';
         throw new Error(
           `Port ${this.port} is already serving ${servedLabel}, not "${model.name}" ` +
@@ -223,7 +216,7 @@ export class DirectBackend implements BackendController {
     // Fail fast with the real cause when a configured file is absent. Otherwise
     // llama-server just exits with code 1 and the user only sees a generic
     // "failed to start", burying the fact that the GGUF path is wrong/missing.
-    this.assertModelFilesExist(model);
+    assertModelFilesExist(model);
 
     const args = composeLlamaServerArgs(
       binary,
@@ -243,56 +236,15 @@ export class DirectBackend implements BackendController {
     this.proc = spawnLlamaServer(binary, args);
     this.adoptedServer = false;
     const proc = this.proc;
-    const startedAt = Date.now();
-    let stdoutBytes = 0;
-    let stderrBytes = 0;
-    let stderrTail = '';
-    log.info(`[DirectBackend] llama-server spawned pid=${proc.pid ?? '?'} model=${model.name}`);
-
-    proc.stdout?.on('data', (chunk: Buffer) => {
-      const text = chunk.toString();
-      stdoutBytes += chunk.byteLength;
-      this.serverChannel?.append(text);
-    });
-    proc.stderr?.on('data', (chunk: Buffer) => {
-      const text = chunk.toString();
-      stderrBytes += chunk.byteLength;
-      stderrTail = appendDiagnosticTail(stderrTail, text);
-      this.serverChannel?.append(text);
-    });
-    proc.once('error', (err) => {
-      log.error(
-        `[DirectBackend] llama-server process error pid=${proc.pid ?? '?'} ` +
-          `model=${model.name} after_ms=${Date.now() - startedAt}`,
-        err,
-      );
-      this.serverChannel?.appendLine(`\n[ERROR] ${err.message}`);
-    });
-    proc.once('exit', (code, signal) => {
-      // stopLlamaServer clears this.proc before intentional termination. This
-      // lets one listener cover startup failure, runtime crash, and teardown.
-      const unexpected = this.proc === proc;
-      const detail =
-        `[DirectBackend] llama-server ${unexpected ? 'exited unexpectedly' : 'exited'} ` +
-        `pid=${proc.pid ?? '?'} model=${model.name} code=${code ?? '?'} ` +
-        `signal=${signal ?? '?'} after_ms=${Date.now() - startedAt} ` +
-        `stdout_bytes=${stdoutBytes} stderr_bytes=${stderrBytes}` +
-        (stderrTail ? ` stderr_tail=${JSON.stringify(stderrTail)}` : '');
-      if (unexpected) {
+    const startedAt = attachServerDiagnostics(proc, {
+      modelName: model.name,
+      channel: () => this.serverChannel,
+      isCurrent: () => this.proc === proc,
+      onUnexpectedExit: () => {
         this.proc = null;
         this.ready = false;
-        log.error(detail);
-        this.serverChannel?.appendLine(`\n[Forge] ${detail}`);
         this.onExitCb?.();
-      } else {
-        log.info(detail);
-      }
-    });
-    proc.once('close', (code, signal) => {
-      log.debug(
-        `[DirectBackend] llama-server stdio closed pid=${proc.pid ?? '?'} ` +
-          `model=${model.name} code=${code ?? '?'} signal=${signal ?? '?'}`,
-      );
+      },
     });
 
     const abort = this.startAbort;
@@ -320,23 +272,6 @@ export class DirectBackend implements BackendController {
         `pid=${proc.pid ?? '?'} startup_ms=${Date.now() - startedAt}`,
     );
     log.info('[DirectBackend] ready');
-  }
-
-  /** Fail with a clear, specific message when a configured GGUF/mmproj file is
-   *  absent — llama-server would otherwise exit code 1 and bury the cause. */
-  private assertModelFilesExist(model: ModelConfig): void {
-    const files: Array<readonly [string, string | undefined]> = [
-      ['gguf_path', model.gguf_path],
-      ['mmproj_path', model.mmproj_path],
-    ];
-    for (const [field, filePath] of files) {
-      if (filePath && !existsSync(filePath)) {
-        throw new Error(
-          `Model "${model.name}": ${field} not found on disk: ${filePath}. ` +
-            `Fix the path in config.yaml or restore the file.`,
-        );
-      }
-    }
   }
 
   private startAdoptedMonitor(): void {
@@ -386,20 +321,6 @@ export class DirectBackend implements BackendController {
     const proc = this.proc;
     this.proc = null;
     await killLlamaProcess(proc);
-  }
-
-  /**
-   * True when the identifier reported by a running server matches the model we
-   * want to load. llama-server reports the `-m` path, so we compare against the
-   * model's gguf_path by normalized full path and by basename (the server build
-   * may report either). Returns false when the served model is unknown — we
-   * refuse to adopt rather than risk serving the wrong model.
-   */
-  private servedModelMatches(served: string | null, model: ModelConfig): boolean {
-    if (!served || !model.gguf_path) return false;
-    const norm = (p: string): string => p.replace(/\\/g, '/').toLowerCase();
-    const base = (p: string): string => norm(p).split('/').pop() ?? norm(p);
-    return norm(served) === norm(model.gguf_path) || base(served) === base(model.gguf_path);
   }
 
   private resolveModel(name: string): ModelConfig {

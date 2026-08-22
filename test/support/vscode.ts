@@ -64,6 +64,7 @@ export const window = {
   visibleTextEditors: [] as Array<{ document: { uri: { fsPath: string } } }>,
   createOutputChannel: () => ({
     appendLine: () => undefined,
+    clear: () => undefined,
     show: () => undefined,
     dispose: () => undefined,
   }),

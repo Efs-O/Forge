@@ -11,6 +11,7 @@ import type * as vscode from 'vscode';
 import type { ForgeConfig, ModelConfig } from '../config/types';
 import type { AttachmentData, HostToWebview } from './messageBridge';
 import type { ConversationRuntime } from './sessionTypes';
+import type { ModelTurnRequest } from './ModelTurn';
 import type { IBackendPool } from '../backend/BackendPool';
 import type { CheckpointStack, CheckpointSession } from '../checkpoint/CheckpointStack';
 import type { RuntimeModelCapabilities } from '../backend/ModelCapabilities';
@@ -69,4 +70,26 @@ export interface TurnServices {
    * one exists, so that tab's Stop action can abort it. */
   setController: (ctrl: AbortController, conversationId?: string) => void;
   releaseController: (ctrl: AbortController) => void;
+}
+
+/**
+ * Adapt `runModelTurn`'s positional signature to the options object the turn
+ * module takes. `getServices` is called late: the services object holds this
+ * very function, so it cannot be captured while it is still being built.
+ */
+export function makeRunModelTurn(
+  getServices: () => TurnServices,
+  run: (services: TurnServices, options: ModelTurnRequest) => Promise<void>,
+): TurnServices['runModelTurn'] {
+  return (baseUrl, conv, model, activeFile, ctrl, postC, apiKey, checkpoint) =>
+    run(getServices(), {
+      baseUrl,
+      conv,
+      model,
+      activeFile,
+      ctrl,
+      postC,
+      ...(apiKey ? { apiKey } : {}),
+      checkpoint,
+    });
 }

@@ -122,6 +122,8 @@ overlaps with an existing owner, extend the owner instead.
 | Machine-wide llama.cpp runtime discovery + leases | `src/backend/SharedRuntimeRegistry.ts` |
 | Backend pool contract (IBackendPool)              | `src/backend/poolTypes.ts` |
 | Slot boot/restart + dead-slot reconcile           | `src/backend/poolStart.ts` |
+| llama-server stdio/exit diagnostics               | `src/backend/serverDiagnostics.ts` |
+| GGUF/mmproj existence + served-model match        | `src/backend/modelFileChecks.ts` |
 | Structural settings pinned across hot reload      | `src/backend/poolStructuralConfig.ts` |
 | Process-liveness check (stale resource reclaim)   | `src/util/processLiveness.ts` |
 | llama-server CLI arg builder              | `src/backend/LlamaServerArgs.ts`   |
