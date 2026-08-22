@@ -442,3 +442,70 @@ describe('BackendPool delegation holds', () => {
     await pool.release('A'); // primary unpinned again
   });
 });
+
+/**
+ * A borrowed runtime is a llama-server owned by ANOTHER Forge window. Releasing
+ * it must detach this client only: killing the process would pull VRAM out from
+ * under the owner, and failing to clean up the lease leaves the owner unable to
+ * unload forever (the two halves of HIGH-1/HIGH-2).
+ */
+describe('BackendPool borrowed-runtime release', () => {
+  beforeEach(resetHarness);
+
+  interface SharedProbe {
+    detach: ReturnType<typeof vi.fn>;
+    stop: ReturnType<typeof vi.fn>;
+    released: string[];
+  }
+
+  function withBorrowedSlot(pool: BackendPool, detachImpl?: () => Promise<void>): SharedProbe {
+    const probe: SharedProbe = {
+      detach: vi.fn(detachImpl ?? (() => Promise.resolve())),
+      stop: vi.fn(() => Promise.resolve()),
+      released: [],
+    };
+    const internals = pool as unknown as {
+      sharedSlots: Map<string, unknown>;
+      sharedRegistry: { releaseLease: (key: string, id: string) => void };
+    };
+    internals.sharedSlots.set('A', {
+      backend: { detach: probe.detach, stop: probe.stop },
+      key: 'runtime-key',
+      leaseId: 'lease-1',
+    });
+    internals.sharedRegistry.releaseLease = (_key, id) => probe.released.push(id);
+    return probe;
+  }
+
+  it('detaches instead of stopping, so the owner process survives', async () => {
+    const pool = new BackendPool(makeConfig(1));
+    const probe = withBorrowedSlot(pool);
+
+    await pool.release('A');
+
+    expect(probe.detach).toHaveBeenCalledTimes(1);
+    expect(probe.stop).not.toHaveBeenCalled();
+    expect(probe.released).toEqual(['lease-1']);
+    expect(pool.isLoaded('A')).toBe(false);
+    expect(pool.loadedModelNames()).toEqual([]);
+  });
+
+  it('still releases the lease and the slot when detach fails', async () => {
+    const pool = new BackendPool(makeConfig(1));
+    const probe = withBorrowedSlot(pool, () => Promise.reject(new Error('endpoint vanished')));
+
+    // The failure surfaces — it is not swallowed — but cleanup happened anyway.
+    await expect(pool.release('A')).rejects.toThrow('endpoint vanished');
+
+    expect(probe.released).toEqual(['lease-1']);
+    expect(pool.isLoaded('A')).toBe(false);
+  });
+
+  it('does not consume a port slot: borrowing never touches freePorts', async () => {
+    const pool = new BackendPool(makeConfig(1));
+    withBorrowedSlot(pool);
+    expect(freePortsOf(pool)).toEqual([8080]);
+    await pool.release('A');
+    expect(freePortsOf(pool)).toEqual([8080]);
+  });
+});

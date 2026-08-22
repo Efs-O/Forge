@@ -82,7 +82,35 @@ export class DirectBackend implements BackendController {
     await this.hotSwap(this.config.active_model);
   }
 
+  /**
+   * Erase this client's attachment state. Callers MUST have finished releasing
+   * the underlying resources first: `releaseActiveOllamaModel` reads
+   * `activeModel` and `stopLlamaServer` reads `adoptedServer`, so clearing
+   * either before those run turns them into silent no-ops.
+   */
+  private resetAttachmentState(): void {
+    this.ready = false;
+    this.startAbort?.abort();
+    this.startAbort = null;
+    this.stopAdoptedMonitor();
+    this.adoptedServer = false;
+    this.activeModel = null;
+    this.currentBaseUrl = `http://${this.host}:${this.port}`;
+  }
+
+  /**
+   * Release this client's attachment to a server another Forge window owns.
+   * Never terminates a process — that is `stop()`'s job and only valid for a
+   * server this backend spawned. Safe on a server that already vanished.
+   */
+  async detach(): Promise<void> {
+    this.resetAttachmentState();
+    log.info('[DirectBackend] detached from adopted server');
+  }
+
   async stop(): Promise<void> {
+    // Halt new work before releasing anything, but keep the ownership metadata
+    // the two release paths below need — see resetAttachmentState.
     this.ready = false;
     this.startAbort?.abort();
     this.startAbort = null;
@@ -90,9 +118,7 @@ export class DirectBackend implements BackendController {
 
     await this.releaseActiveOllamaModel();
     await this.stopLlamaServer();
-    this.adoptedServer = false;
-    this.activeModel = null;
-    this.currentBaseUrl = `http://${this.host}:${this.port}`;
+    this.resetAttachmentState();
     log.info('[DirectBackend] stopped');
   }
 

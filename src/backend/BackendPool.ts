@@ -171,9 +171,15 @@ export class BackendPool implements IBackendPool {
       }
     } else if (this.sharedSlots.has(key)) {
       const shared = this.sharedSlots.get(key)!;
-      await shared.backend.stop();
-      this.sharedRegistry.releaseLease(shared.key, shared.leaseId);
-      this.sharedSlots.delete(key);
+      // Borrowed: detach this client only — the process belongs to another
+      // window. The finally is load-bearing: the lease and the slot entry must
+      // be cleaned up even if detach fails, or the owner can never unload.
+      try {
+        await shared.backend.detach();
+      } finally {
+        this.sharedRegistry.releaseLease(shared.key, shared.leaseId);
+        this.sharedSlots.delete(key);
+      }
     } else {
       const slot = this.slots.get(key);
       if (slot) {
