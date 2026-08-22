@@ -326,6 +326,11 @@
           "default": true,
           "description": "Keep webview state when sidebar is hidden"
         },
+        "forge.editor.autoOpenChangedFiles": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically open files changed by Forge in the editor"
+        },
         "forge.firstRun.shown": {
           "type": "boolean",
           "default": false,
