@@ -38,9 +38,16 @@ export const RETAINED_TAIL_MAX_CHARS = 4000;
  *  summary has nothing to say and compaction is not worth a request. */
 const MIN_SUMMARIZED_MESSAGES = 2;
 
-/** Prompt used to continue the active task after an auto-compaction. */
+/**
+ * Prompt used to continue the active task after a compaction. Every noun must
+ * name something already in the model's window, in that window's own words:
+ * "Read the continuation checkpoint" sent agents hunting for a file, because
+ * the phrase lived only in `buildSummaryPrompt` (a request they never see)
+ * while what they DO see says "Conversation summary" — and "checkpoint" is
+ * Forge's Keep/Undo system while "Read" is the `read_file` verb.
+ */
 export const RESUME_PROMPT =
-  'Context was compacted. Read the continuation checkpoint, continue from Next, and do not repeat completed work.';
+  'Context was compacted. The conversation summary above is your working context - nothing else is being withheld. Continue the task from its Next section, and do not redo work it records as done.';
 
 /** Consecutive auto-resumes allowed without an intervening user prompt. */
 export const MAX_CONSECUTIVE_AUTO_CONTINUES = 2;
@@ -68,7 +75,7 @@ export interface CompactionSplit {
   tailStart: number;
 }
 
-/** Keep the continuation checkpoint small enough to be useful, not a second transcript. */
+/** Keep the summary small enough to be useful, not a second transcript. */
 export const COMPACTION_SUMMARY_MAX_CHARS = 5000;
 
 /** Bound the input to the summarization turn as well as its output. */
@@ -154,7 +161,8 @@ export function buildSummaryPrompt(
     : '';
   const transcript = capSummarySource(messages.map(formatSummaryMessage).join('\n\n'));
   return (
-    'Create a compact continuation checkpoint for the same repository.\n\n' +
+    // One name for one artifact, matching SUMMARY_PREAMBLE and RESUME_PROMPT.
+    'Create a compact conversation summary for the same repository.\n\n' +
     'Use only facts present below. Keep it under 600 words and omit empty sections. ' +
     'Use these labels: Goal, State, Next, Files, Constraints, Errors. ' +
     'Record the exact next action when one is clear; do not retell the conversation.\n\n' +
