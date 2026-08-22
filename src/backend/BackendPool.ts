@@ -241,18 +241,34 @@ export class BackendPool implements IBackendPool {
     }
   }
 
+  /**
+   * Is ANY endpoint healthy and able to serve a request right now?
+   *
+   * Callers use this to gate sending work and to drive the status bar, so a
+   * runtime borrowed from another Forge window counts: it is a usable endpoint
+   * even though this window owns neither the process nor a port slot.
+   * Distinct from `isLoaded` (residency) — do not conflate the two.
+   */
   isAnyReady(): boolean {
     return (
       [...this.slots.values()].some((s) => s.backend.isReady()) ||
+      [...this.sharedSlots.values()].some((s) => s.backend.isReady()) ||
       [...this.ollamaSlots.values()].some((b) => b.isReady())
     );
   }
 
+  /** Models occupying a port-consuming slot, owned or borrowed. Ollama models
+   *  are deliberately absent: they are unbounded and never evicted, so they
+   *  are irrelevant to the capacity decisions this feeds. */
   loadedModelNames(): string[] {
-    // Port-consuming slots only; Ollama models are unbounded and never evicted.
     return [...this.slots.keys(), ...this.sharedSlots.keys()];
   }
 
+  /**
+   * Is this model resident anywhere — owned slot, borrowed runtime, or Ollama
+   * daemon? Residency, NOT readiness: a resident model can still be starting
+   * or unhealthy. Use `isAnyReady` to decide whether work can be dispatched.
+   */
   isLoaded(modelName: string): boolean {
     const key = this.poolKey(modelName);
     return this.slots.has(key) || this.sharedSlots.has(key) || this.ollamaSlots.has(key);

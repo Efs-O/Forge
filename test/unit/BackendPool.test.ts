@@ -501,6 +501,21 @@ describe('BackendPool borrowed-runtime release', () => {
     expect(pool.isLoaded('A')).toBe(false);
   });
 
+  it('counts a borrowed runtime as ready, not merely loaded', () => {
+    const pool = new BackendPool(makeConfig(1));
+    const internals = pool as unknown as { sharedSlots: Map<string, unknown> };
+    internals.sharedSlots.set('A', {
+      backend: { isReady: () => true, detach: vi.fn(), stop: vi.fn() },
+      key: 'runtime-key',
+      leaseId: 'lease-1',
+    });
+
+    // Before the fix this window reported loaded=true / ready=false and the
+    // status bar and prompt gate disagreed about the same backend.
+    expect(pool.isLoaded('A')).toBe(true);
+    expect(pool.isAnyReady()).toBe(true);
+  });
+
   it('does not consume a port slot: borrowing never touches freePorts', async () => {
     const pool = new BackendPool(makeConfig(1));
     withBorrowedSlot(pool);
