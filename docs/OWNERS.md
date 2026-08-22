@@ -13,6 +13,12 @@ overlaps with an existing owner, extend the owner instead.
 | Activation / deactivation                  | `src/extension.ts`                   |
 | Webview lifecycle + message bridge entry   | `src/sidebar/SidebarProvider.ts`     |
 | Webview message routing                    | `src/sidebar/webviewMessageRouter.ts`|
+| Outbound webview payloads + status metrics  | `src/sidebar/sidebarPayloads.ts`     |
+| Webview crash/diagnostic relay to host log  | `src/sidebar/webviewDiagnostics.ts`  |
+| Auto vs manual compaction resume policy     | `src/sidebar/compactionPolicy.ts`    |
+| Generation-event session timing             | `src/sidebar/sessionTimerWiring.ts`  |
+| Pure transcript/usage mutations             | `src/sidebar/transcriptMutations.ts` |
+| Sidebar host->webview event contract        | `src/sidebar/providerEvents.ts`      |
 | Sidebar collaborator construction          | `src/sidebar/sidebarWiring.ts`       |
 | Ctx bar, HalluMeter bridge, thresholds     | `src/sidebar/ContextBudgetPublisher.ts`|
 | Tab create/switch/close/restore + VRAM     | `src/sidebar/ConversationTabs.ts`    |
