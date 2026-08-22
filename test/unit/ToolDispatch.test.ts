@@ -27,7 +27,7 @@ vi.mock('vscode', () => {
       workspaceFolders: [{ uri: { fsPath: ws } }],
       openTextDocument: vi.fn().mockResolvedValue({}),
       asRelativePath: vi.fn((s: string) => s.replace(ws + p.sep, '')),
-      getConfiguration: vi.fn(() => ({ get: vi.fn(() => true) })),
+      getConfiguration: vi.fn(() => ({ get: vi.fn(() => false) })),
     },
     window: {
       showTextDocument: vi.fn().mockResolvedValue(undefined),

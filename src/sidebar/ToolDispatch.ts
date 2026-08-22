@@ -448,10 +448,11 @@ export class ToolDispatch {
       ...(convId ? { conversationId: convId } : {}),
     });
 
+    if (!touchedFile || !pathArg) return;
     const autoOpenChangedFiles = vscode.workspace
       .getConfiguration('forge.editor')
-      .get<boolean>('autoOpenChangedFiles', true);
-    if (autoOpenChangedFiles && touchedFile && pathArg) void this.openFile(pathArg);
+      .get<boolean>('autoOpenChangedFiles', false);
+    if (autoOpenChangedFiles) void this.openFile(pathArg);
   }
 
   /** Absolute path a write-style tool just changed, for the row's open link. */

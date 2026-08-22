@@ -328,7 +328,7 @@
         },
         "forge.editor.autoOpenChangedFiles": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "description": "Automatically open files changed by Forge in the editor"
         },
         "forge.firstRun.shown": {
