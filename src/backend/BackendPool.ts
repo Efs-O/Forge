@@ -55,6 +55,8 @@ export class BackendPool implements IBackendPool {
   private readonly ollamaSlots = new Map<string, DirectBackend>();
   /** model → in-flight ollama acquire, so concurrent acquires share one hotSwap. */
   private readonly ollamaStarting = new Map<string, Promise<BackendController>>();
+  /** Model releases in progress; every later acquire waits for teardown. */
+  private readonly releasing = new Map<string, Promise<void>>();
   private readonly freePorts: number[];
   private readonly gate: DelegationGate;
   private lastAcquiredModel: string | null = null;
@@ -107,6 +109,9 @@ export class BackendPool implements IBackendPool {
    *  used by DelegationGate, whose synchronous capacity check must stay valid
    *  through the synchronous slot claim below. */
   private async acquireByKey(key: string, allowEvict: boolean): Promise<BackendController> {
+    const pendingReleases = this.pendingReleaseWait();
+    if (pendingReleases) await pendingReleases;
+
     if (this.isOllamaModel(key)) {
       this.lastAcquiredModel = key;
       return this.acquireOllama(key);
@@ -139,6 +144,22 @@ export class BackendPool implements IBackendPool {
 
   async release(modelName: string): Promise<void> {
     const key = this.poolKey(modelName);
+    const existingRelease = this.releasing.get(key);
+    if (existingRelease) {
+      await existingRelease;
+      return;
+    }
+
+    const release = this.releaseKey(key);
+    this.releasing.set(key, release);
+    try {
+      await release;
+    } finally {
+      if (this.releasing.get(key) === release) this.releasing.delete(key);
+    }
+  }
+
+  private async releaseKey(key: string): Promise<void> {
     if (this.gate.isPinned(key)) {
       throw new Error(`Cannot release "${key}": an active delegation hold is using it.`);
     }
@@ -169,6 +190,21 @@ export class BackendPool implements IBackendPool {
       }
     }
     log.info(`[BackendPool] released: ${key}`);
+  }
+
+  /**
+   * A sidebar model switch can release its old backend without awaiting the
+   * result before the next prompt arrives. Wait here as the final barrier
+   * before any acquire so a free port never allows two GGUF servers to overlap
+   * during that transition.
+   */
+  private pendingReleaseWait(): Promise<void> | undefined {
+    const pending = [...this.releasing.values()];
+    if (pending.length === 0) return undefined;
+    return Promise.all(pending).then(() => {
+      const next = this.pendingReleaseWait();
+      return next ?? Promise.resolve();
+    });
   }
 
   async stopAll(): Promise<void> {

@@ -206,6 +206,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.tabs.clearActive();
   }
 
+  /** Change the active conversation's model and finish any old-backend release. */
+  async switchModel(name: string | null): Promise<void> {
+    await this.tabs.pinModel(name);
+  }
+
   submitPrompt(text: string, attachments?: AttachmentData[]): Promise<void> {
     return this.send.submitExternal(text, attachments);
   }

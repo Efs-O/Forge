@@ -29,7 +29,7 @@ export interface WebviewActions {
     conversationId: string,
   ) => Promise<void>;
   cancel: () => void;
-  switchModel: (name: string | null) => void;
+  switchModel: (name: string | null) => Promise<void>;
   undo: () => Promise<string[]>;
   keep: () => Promise<void>;
   reviewCheckpoint: () => Promise<void>;
@@ -70,7 +70,7 @@ export function routeWebviewMessage(actions: WebviewActions, msg: WebviewToHost)
       break;
 
     case 'switchModel':
-      actions.switchModel(msg.name);
+      void actions.switchModel(msg.name).catch(reportError);
       break;
 
     case 'undo':

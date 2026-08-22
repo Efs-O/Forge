@@ -88,29 +88,32 @@ export function registerNativeCommands(
         if (!profilePick) return;
         if (profilePick.profile) selectedId = `${pick.modelName}@${profilePick.profile}`;
       }
-      config.active_model = selectedId;
       const selectedModel = config.models.find((m) => m.name === pick.modelName);
-      if (selectedModel?.provider === 'cli') {
-        deps.statusBar.setReady(selectedId);
-        void vscode.window.showInformationMessage(
-          `Forge: switched to ${selectedId} (external CLI agent)`,
-        );
-        return;
-      }
-      if (
-        selectedModel?.provider === 'xai' ||
-        selectedModel?.provider === 'openrouter' ||
-        selectedModel?.provider === 'openai' ||
-        selectedModel?.provider === 'openai-compatible'
-      ) {
-        deps.statusBar.setReady(selectedId);
-        void vscode.window.showInformationMessage(
-          `Forge: switched to ${selectedId} (${selectedModel.provider})`,
-        );
-        return;
-      }
       deps.statusBar.setStarting(selectedId);
       try {
+        // Route native picking through the same conversation-aware transition
+        // as the sidebar picker, so the outgoing local backend is released
+        // before this command acquires a replacement.
+        await deps.sidebar.switchModel(selectedId);
+        if (selectedModel?.provider === 'cli') {
+          deps.statusBar.setReady(selectedId);
+          void vscode.window.showInformationMessage(
+            `Forge: switched to ${selectedId} (external CLI agent)`,
+          );
+          return;
+        }
+        if (
+          selectedModel?.provider === 'xai' ||
+          selectedModel?.provider === 'openrouter' ||
+          selectedModel?.provider === 'openai' ||
+          selectedModel?.provider === 'openai-compatible'
+        ) {
+          deps.statusBar.setReady(selectedId);
+          void vscode.window.showInformationMessage(
+            `Forge: switched to ${selectedId} (${selectedModel.provider})`,
+          );
+          return;
+        }
         await deps.backend.acquire(selectedId);
         deps.statusBar.setReady(selectedId);
         void vscode.window.showInformationMessage(`Forge: switched to ${selectedId}`);

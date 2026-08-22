@@ -106,7 +106,7 @@ export class ConversationTabs {
 
   /** A model chosen in the picker also re-pins the active conversation, so a
    *  failed CLI model is not silently retried while the header shows another. */
-  pinModel(name: string | null): void {
+  async pinModel(name: string | null): Promise<void> {
     const outgoing = this.active().active_model ?? this.deps.getConfig().active_model ?? null;
     this.deps.setActiveModel(name);
     opSetActiveConversationModel(this.deps.getSidebar(), name);
@@ -118,7 +118,7 @@ export class ConversationTabs {
     // request for a second resident model: without this, picking a 27B while a
     // 12B was loaded spawned a second llama-server alongside it and OOM'd the
     // GPU, because the pool only evicts once every port is taken.
-    if (outgoing) void this.releaseIfUnused(outgoing, name);
+    if (outgoing) await this.releaseIfUnused(outgoing, name);
   }
 
   switch(id: string): void {

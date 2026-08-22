@@ -178,6 +178,33 @@ describe('BackendPool port accounting', () => {
     expect(freePortsOf(pool)).toEqual([]);
   });
 
+  it('waits for an explicit release before using an otherwise free port', async () => {
+    const pool = new BackendPool(makeConfig(2));
+
+    const acquireA = pool.acquire('A');
+    harness.pending[0].resolve();
+    await acquireA;
+
+    harness.blockStops = true;
+    const releaseA = pool.release('A');
+    await flush();
+
+    // A free second port must not allow B to start while A still owns VRAM.
+    const acquireB = pool.acquire('B');
+    await flush();
+    expect(harness.events).toEqual(['hotSwap:8080', 'stop:8080']);
+    expect(harness.pending).toHaveLength(1);
+
+    harness.pendingStops[0]();
+    await releaseA;
+    await flush();
+    expect(harness.events).toEqual(['hotSwap:8080', 'stop:8080', 'hotSwap:8081']);
+
+    harness.pending[1].resolve();
+    await acquireB;
+    expect(pool.loadedModelNames()).toEqual(['B']);
+  });
+
   it('normal lifecycle returns the port once and reuses it', async () => {
     const pool = new BackendPool(makeConfig(1)); // freePorts [8080]
 
