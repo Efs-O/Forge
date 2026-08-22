@@ -108,4 +108,55 @@ describe('App heavy streaming load', () => {
     },
     60_000,
   );
+
+  it('keeps a steered prompt visible through the interrupted turn shutdown', () => {
+    const textarea = container.querySelector<HTMLTextAreaElement>('#prompt')!;
+    act(() => setNativeTextareaValue(textarea, 'redirect the active turn'));
+    act(() => container.querySelector<HTMLButtonElement>('#btn-send')!.click());
+
+    const steer = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find(
+      (button) => button.textContent === 'Steer',
+    );
+    expect(steer).toBeDefined();
+    act(() => steer!.click());
+
+    expect(posted).toContainEqual({
+      type: 'steer',
+      text: 'redirect the active turn',
+      conversationId: 'stress-conversation',
+    });
+    expect(container.textContent).toContain('redirect the active turn');
+
+    // The interrupted request completes and publishes its older persisted
+    // transcript before the redirected request announces its start.
+    act(() => {
+      hostMessage({
+        type: 'done',
+        finishReason: 'cancelled',
+        conversationId: 'stress-conversation',
+      });
+      hostMessage({
+        type: 'sessionSync',
+        activeId: 'stress-conversation',
+        tabs: [
+          {
+            id: 'stress-conversation',
+            title: 'Stress test',
+            createdAt: 1,
+            updatedAt: 2,
+          },
+        ],
+        history: [],
+        messagesById: { 'stress-conversation': [] },
+      });
+    });
+
+    expect(container.textContent).toContain('redirect the active turn');
+    expect(container.textContent).toContain('Burning tokens');
+
+    act(() =>
+      hostMessage({ type: 'generationStarted', conversationId: 'stress-conversation' }),
+    );
+    expect(container.textContent).toContain('redirect the active turn');
+  });
 });

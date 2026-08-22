@@ -72,6 +72,13 @@ export function App(): React.ReactElement {
           dispatch({ type: 'REASONING_TOKEN', text: msg.text, convId: msg.conversationId });
           break;
         case 'done':
+          // A steering handoff first finishes the interrupted request, then
+          // starts the redirected one. Keep the optimistic steered prompt and
+          // the conversation's live state through that intermediate DONE;
+          // generationStarted clears the handoff marker for the new request.
+          if (msg.conversationId && steeringConversationIds.current.has(msg.conversationId)) {
+            break;
+          }
           dispatch({ type: 'DONE', convId: msg.conversationId });
           break;
         case 'error':
@@ -226,6 +233,10 @@ export function App(): React.ReactElement {
       if (!prompt) return;
       steeringConversationIds.current.add(prompt.conversationId);
       setQueuedPrompts((current) => current.filter((candidate) => candidate.id !== id));
+      // Replace the queued presentation with the same optimistic user row used
+      // by an ordinary send. The host persists and reconciles it once the
+      // interrupted request has released the conversation.
+      dispatch({ type: 'USER_SEND', text: prompt.text, convId: prompt.conversationId });
       vscode.postMessage({
         type: 'steer',
         text: prompt.text,
