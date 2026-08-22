@@ -113,6 +113,11 @@ Task Manager, end the VS Code process. Do **not** close it politely.
 **This is the immortal-lease fix.** Before 0.13.0, A was stuck permanently and
 the only cure was deleting the lease file by hand.
 
+> **Partly automated now.** `test/integration/StaleLeaseRealProcess.test.ts`
+> spawns real processes, force-kills them, and asserts the reclaim — so the
+> pid check itself is covered on every CI run. What is still manual here is
+> that the *server process* actually dies afterwards.
+
 ---
 
 ## Test 4 — The owner dies underneath the borrower
@@ -177,6 +182,11 @@ permissions:
 This matters because that key was valid before 0.13.0. If someone's existing
 config now refuses to boot, that is a bad upgrade for every user who set it.
 
+> **Automated now** in `test/unit/ConfigLoader.test.ts`, and the "must not fail
+> to load" half is guaranteed by construction: the config schema ignores keys
+> it does not recognise, so an unknown key can never block startup. Verified.
+> Treat this one as done unless you want to see the warning text yourself.
+
 ---
 
 ## Also worth confirming
@@ -208,4 +218,7 @@ failures — the rendered chat hides them. The output channel is the real record
   genuinely fixed. Safe to merge and publish.
 - **Test 4 or 5 fails** → report it; these are crash-recovery paths, worth
   fixing before publishing but they do not invalidate the rest.
-- **Test 7 fails** → do not publish. That one breaks existing users on upgrade.
+- **Test 7** is covered by CI now — see the note under it.
+
+**If you are short on time, do 1 and 2.** Those are the two that need real
+VRAM and a real second window, and nothing automated can stand in for them.
