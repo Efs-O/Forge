@@ -2,6 +2,8 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { isProcessAlive } from '../util/processLiveness';
+import { composeLlamaServerArgs } from './LlamaServerArgs';
+import type { LlamaServerConfig, ModelConfig } from '../config/types';
 import { getLogger } from '../util/logger';
 
 const log = getLogger();
@@ -117,11 +119,57 @@ export class SharedRuntimeRegistry {
   }
 }
 
-export function sharedRuntimeKey(model: {
-  name: string;
-  gguf_path?: string;
-  spawn?: unknown;
-}): string {
-  const identity = JSON.stringify(model);
-  return crypto.createHash('sha256').update(identity).digest('hex');
+/**
+ * Canonical form of a path for identity comparison. Case-folding is correct on
+ * Windows and WRONG elsewhere: on a case-sensitive filesystem /models/Qwen.gguf
+ * and /models/qwen.gguf are different files and must not collide into one
+ * runtime identity.
+ */
+function canonicalRuntimePath(value: string): string {
+  let resolved = value;
+  try {
+    resolved = fs.realpathSync(value);
+  } catch {
+    // Not on disk (yet) — fall back to lexical normalization.
+  }
+  const normalized = path.normalize(resolved).replace(/\\/g, '/');
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+}
+
+/** argv flags that identify THIS server instance rather than its semantics. */
+const INSTANCE_ARGS = new Set(['--host', '--port']);
+/** argv flags whose value is a path and must be canonicalized before hashing. */
+const PATH_ARGS = new Set(['-m', '--mmproj']);
+
+/**
+ * Identity of the llama-server a model would spawn — two windows may share a
+ * runtime only when these match.
+ *
+ * Derived from `composeLlamaServerArgs` rather than a hand-listed set of
+ * fields, so anything that changes the spawned argv changes the identity
+ * automatically. A parallel field list would silently drift: `--threads` and
+ * `--threads-batch` were already missing from one.
+ *
+ * Argument ORDER is preserved, never sorted: llama.cpp honours later-option
+ * precedence, so a repeated flag is not order-independent, and
+ * `extra_llama_server_args` is passed through verbatim.
+ */
+export function sharedRuntimeKey(model: ModelConfig, server: LlamaServerConfig): string {
+  const argv = composeLlamaServerArgs('', model, server, 'identity', 0);
+  const identity: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]!;
+    if (INSTANCE_ARGS.has(arg)) {
+      i++; // skip its value too
+      continue;
+    }
+    if (PATH_ARGS.has(arg) && argv[i + 1] !== undefined) {
+      identity.push(arg, canonicalRuntimePath(argv[++i]!));
+      continue;
+    }
+    identity.push(arg);
+  }
+  // Joined on NUL so no argument value can forge a boundary; arrays keep
+  // their order, so there is no property-order hazard here.
+  return crypto.createHash('sha256').update(identity.join('\u0000')).digest('hex');
 }

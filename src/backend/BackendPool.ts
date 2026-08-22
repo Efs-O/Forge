@@ -1,7 +1,13 @@
+import * as vscode from 'vscode';
 import type { BackendController } from './BackendController';
 import { DirectBackend } from './DirectBackend';
 import type { ForgeConfig } from '../config/types';
-import { expandAlias, resolveRequestModel, splitModelProfile } from '../config/ConfigResolver';
+import {
+  expandAlias,
+  resolveRequestModel,
+  resolveSpawnModel,
+  splitModelProfile,
+} from '../config/ConfigResolver';
 import { DelegationGate } from './DelegationGate';
 import type { DelegationCheck, DelegationHold } from './DelegationGate';
 import { getLogger } from '../util/logger';
@@ -55,12 +61,21 @@ export class BackendPool implements IBackendPool {
   private readonly releasing = new Map<string, Promise<void>>();
   private readonly freePorts: number[];
   private readonly gate: DelegationGate;
+  /** Settings baked into the physical slot/port inventory at construction. */
+  private readonly structural: { maxSimultaneousModels: number; port: number; shared: boolean };
   private lastAcquiredModel: string | null = null;
 
   constructor(private config: ForgeConfig) {
     const max = config.max_simultaneous_models ?? 1;
     const base = config.llama_server.port ?? 8080;
     this.freePorts = Array.from({ length: max }, (_, i) => base + i);
+    // Snapshot, never re-derived: the whole failure mode this guards against is
+    // policy reading a new value while the physical slots are still the old one.
+    this.structural = {
+      maxSimultaneousModels: max,
+      port: base,
+      shared: config.shared_runtime?.enabled === true,
+    };
     this.gate = new DelegationGate({
       poolKey: (name) => this.poolKey(name),
       isOllama: (key) => this.isOllamaModel(key),
@@ -213,10 +228,54 @@ export class BackendPool implements IBackendPool {
     });
   }
 
+  /**
+   * Hot-reload the config, PINNING the settings baked into the physical pool.
+   *
+   * `freePorts` is built once in the constructor. Letting a reload change
+   * `max_simultaneous_models` or `llama_server.port` in `this.config` would
+   * leave capacity policy (DelegationGate.maxSlots) reading a value the actual
+   * slot table does not implement — a warning alone does not close that gap,
+   * so the old values are carried forward and the user is told a reload is
+   * required. Everything else applies immediately.
+   */
   applyForgeConfig(next: ForgeConfig): void {
-    this.config = next;
-    for (const slot of this.slots.values()) slot.backend.applyForgeConfig(next);
-    for (const backend of this.ollamaSlots.values()) backend.applyForgeConfig(next);
+    const changed = this.changedStructuralSettings(next);
+    this.config = changed.length === 0 ? next : this.withPinnedStructuralSettings(next);
+    for (const slot of this.slots.values()) slot.backend.applyForgeConfig(this.config);
+    for (const backend of this.ollamaSlots.values()) backend.applyForgeConfig(this.config);
+    if (changed.length > 0) this.warnStructuralReloadRequired(changed);
+  }
+
+  private changedStructuralSettings(next: ForgeConfig): string[] {
+    const changed: string[] = [];
+    if ((next.max_simultaneous_models ?? 1) !== this.structural.maxSimultaneousModels) {
+      changed.push('max_simultaneous_models');
+    }
+    if ((next.llama_server.port ?? 8080) !== this.structural.port)
+      changed.push('llama_server.port');
+    if ((next.shared_runtime?.enabled === true) !== this.structural.shared) {
+      changed.push('shared_runtime.enabled');
+    }
+    return changed;
+  }
+
+  private withPinnedStructuralSettings(next: ForgeConfig): ForgeConfig {
+    return {
+      ...next,
+      max_simultaneous_models: this.structural.maxSimultaneousModels,
+      llama_server: { ...next.llama_server, port: this.structural.port },
+      ...(next.shared_runtime
+        ? { shared_runtime: { ...next.shared_runtime, enabled: this.structural.shared } }
+        : {}),
+    };
+  }
+
+  private warnStructuralReloadRequired(changed: string[]): void {
+    const message =
+      `Forge: ${changed.join(', ')} changed, but ${changed.length > 1 ? 'these settings' : 'this setting'} ` +
+      'define the backend slot layout created at startup. The old value stays active until you reload the window.';
+    log.warn(`[BackendPool] ${message}`);
+    void vscode.window.showWarningMessage(message);
   }
 
   showConsole(modelName?: string): void {
@@ -373,8 +432,11 @@ export class BackendPool implements IBackendPool {
     return this.config.models.find((m) => m.name === modelName)?.provider === 'ollama';
   }
 
+  /** Identity of the llama-server this model would spawn. Uses the SPAWN model:
+   *  request-time profile fields do not change the server, so they must not
+   *  fork its identity and block an otherwise compatible share. */
   private runtimeKey(modelName: string): string {
-    return sharedRuntimeKey(resolveRequestModel(this.config, modelName));
+    return sharedRuntimeKey(resolveSpawnModel(this.config, modelName), this.config.llama_server);
   }
 
   private borrowSharedRuntime(modelName: string): Promise<BackendController | undefined> {
