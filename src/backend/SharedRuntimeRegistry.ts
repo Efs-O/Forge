@@ -132,7 +132,12 @@ function canonicalRuntimePath(value: string): string {
   } catch {
     // Not on disk (yet) — fall back to lexical normalization.
   }
-  const normalized = path.normalize(resolved).replace(/\\/g, '/');
+  // Separators are folded BEFORE normalizing, and normalized with the posix
+  // rules on every platform. Order matters: `path.normalize` on Linux/macOS
+  // does not treat `\` as a separator, so normalizing first would leave the
+  // `..` in a Windows-style path uncollapsed and produce a different key for
+  // the same model depending on which OS read the config.
+  const normalized = path.posix.normalize(resolved.replace(/\\/g, '/'));
   return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
 }
 
