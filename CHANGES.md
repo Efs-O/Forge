@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## Unreleased — Shared-runtime reliability and worker removal
+## 0.13.0 — Shared-runtime reliability and worker removal
 
 - **Releasing a borrowed model no longer strands the owner.** A runtime
   borrowed from another Forge window is now detached rather than stopped, and
