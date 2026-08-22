@@ -30,6 +30,7 @@ export function loadConfig(storagePath: string): ForgeConfig {
   }
 
   const config = result.data as ForgeConfig;
+  warnOnDeprecatedKeys(parsed);
   const seen = new Set<string>();
   for (const model of config.models) {
     if (seen.has(model.name)) {
@@ -217,4 +218,21 @@ export function watchForgeConfigPaths(
   );
 
   return vscode.Disposable.from(...watchers);
+}
+
+/**
+ * Keys Forge still parses for backward compatibility but no longer acts on.
+ * Surfaced once at load: a silently inert setting is exactly the hidden
+ * behaviour the no-fallbacks rule forbids, and the user needs to know their
+ * config is asking for something that no longer exists.
+ */
+function warnOnDeprecatedKeys(parsed: Record<string, unknown>): void {
+  const permissions = parsed['permissions'] as Record<string, unknown> | undefined;
+  const agents = permissions?.['agents'] as Record<string, unknown> | undefined;
+  if (agents && 'cloud_workers' in agents) {
+    void vscode.window.showWarningMessage(
+      'Forge: permissions.agents.cloud_workers is deprecated and has no effect — ' +
+        'worker dispatch was removed. You can delete it from config.yaml.',
+    );
+  }
 }

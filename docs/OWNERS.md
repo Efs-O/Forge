@@ -23,7 +23,6 @@ overlaps with an existing owner, extend the owner instead.
 | Model-endpoint turn: preflight + request   | `src/sidebar/ModelTurn.ts`           |
 | Cloud target / local backend startup       | `src/sidebar/ProviderTurn.ts`        |
 | Turn served by a local CLI agent           | `src/sidebar/CliTurn.ts`             |
-| Worker dispatch + coordinator review       | `src/sidebar/WorkerTurn.ts`          |
 | One-shot prompt (compaction, /review)      | `src/sidebar/PromptRun.ts`           |
 | Thinking kwargs, strip, template context   | `src/sidebar/turnModelBehavior.ts`   |
 | Collaborator set handed to turn modules    | `src/sidebar/turnServices.ts`        |
@@ -90,7 +89,7 @@ overlaps with an existing owner, extend the owner instead.
 | Concern                                      | Owner                                |
 | -------------------------------------------- | ------------------------------------ |
 | Shared CLI spawn and process-tree cleanup    | `src/agents/cliProcess.ts`            |
-| One-shot worker/delegation CLI execution     | `src/agents/CliAgentDriver.ts`        |
+| One-shot delegation CLI execution            | `src/agents/CliAgentDriver.ts`        |
 | Warm direct-chat CLI process lifecycle       | `src/agents/CliAgentSession.ts`       |
 | Codex app-server JSON-RPC session            | `src/agents/CodexAppServerSession.ts` |
 | JSON-RPC-over-stdio framing + correlation    | `src/agents/jsonRpcStdio.ts`          |
@@ -121,6 +120,7 @@ overlaps with an existing owner, extend the owner instead.
 | `/models` catalog contract + availability | `src/backend/ControlModelCatalog.ts` |
 | Control-server discovery records (LOCALAPPDATA) | `src/backend/ControlServerRegistry.ts` |
 | Machine-wide llama.cpp runtime discovery + leases | `src/backend/SharedRuntimeRegistry.ts` |
+| Process-liveness check (stale resource reclaim)   | `src/util/processLiveness.ts` |
 | llama-server CLI arg builder              | `src/backend/LlamaServerArgs.ts`   |
 | Ollama endpoint normalization + health    | `src/backend/OllamaAdapter.ts`     |
 | Backend health polling                    | `src/backend/HealthCheck.ts`       |
@@ -148,7 +148,6 @@ overlaps with an existing owner, extend the owner instead.
 | Per-CLI adapter registry                              | `src/agents/adapters/index.ts`         |
 | Claude Code stream-json adapter                       | `src/agents/adapters/claudeAdapter.ts` |
 | Codex JSONL adapter                                   | `src/agents/adapters/codexAdapter.ts`  |
-| `dispatch_workers` cli-provider run (checkpoint + task prompt) | `src/agents/CliWorkerRunner.ts` |
 
 ## LLM / Inference
 
@@ -214,20 +213,7 @@ overlaps with an existing owner, extend the owner instead.
 | Tool-result size capping                   | `src/tools/resultCap.ts`              |
 | Bundled ripgrep executable resolution      | `src/tools/RipgrepResolver.ts`        |
 | Local agent delegation tool                | `src/tools/localAgentTool.ts`         |
-| Worker orchestration model tool            | `src/tools/dispatchWorkersTool.ts`    |
 | Per-turn tool allowlist + call-budget      | `src/tools/ToolBudget.ts`             |
-
-## Coding Workers
-
-| Concern                                    | Owner                                       |
-| ------------------------------------------ | ------------------------------------------- |
-| Worker request/result contracts + activity | `src/workers/types.ts`                      |
-| Worker limits and budgets                  | `src/workers/limits.ts`                     |
-| Exact-path/read-budget policy              | `src/workers/WorkerAccessPolicy.ts`         |
-| Worker discovery argument validation       | `src/workers/WorkerToolValidators.ts`       |
-| Coordinator delegation/review prompts      | `src/workers/WorkerPrompts.ts`              |
-| Worker tool-calling configuration          | `src/workers/WorkerLoop.ts`                 |
-| Run admission, execution, aggregation      | `src/workers/WorkerOrchestrationService.ts` |
 
 ## Semantic Search
 
@@ -267,7 +253,6 @@ overlaps with an existing owner, extend the owner instead.
 | Shared command dependency type       | `src/vscode/commandDeps.ts`      |
 | Checkpoint settings -> stack         | `src/vscode/checkpointSetup.ts`  |
 | config.yaml hot-reload               | `src/vscode/configReload.ts`     |
-| Worker dispatch command              | `src/vscode/workerCommands.ts`   |
 | SecretStorage setup commands         | `src/vscode/secretCommands.ts`   |
 | Model-control palette commands       | `src/vscode/controlCommands.ts`  |
 | Code action provider (quick fixes)   | `src/vscode/codeActions.ts`      |

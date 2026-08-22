@@ -77,15 +77,8 @@ describe('local tool harness canonical inventory', () => {
       .split(/\r?\n/)
       .map((line) => line.split('\t')[0]);
 
-    expect(names).toHaveLength(50);
-    expect(names).toEqual(
-      expect.arrayContaining([
-        'apply_line_edits',
-        'ask_local_agent',
-        'list_worker_models',
-        'dispatch_workers',
-      ]),
-    );
+    expect(names).toHaveLength(48);
+    expect(names).toEqual(expect.arrayContaining(['apply_line_edits', 'ask_local_agent']));
   });
 
   it('generates a canonical coverage matrix with no missing native handler tests', () => {
@@ -99,9 +92,9 @@ describe('local tool harness canonical inventory', () => {
         { cwd: root, encoding: 'utf8' },
       );
       const content = fs.readFileSync(report, 'utf8');
-      expect(content.match(/^\| [a-z_]+ \| native \|/gmu)).toHaveLength(50);
+      expect(content.match(/^\| [a-z_]+ \| native \|/gmu)).toHaveLength(48);
       expect(content).not.toContain('| missing |');
-      expect(content).toContain('| search_code | native | read | yes | yes | yes |');
+      expect(content).toContain('| search_code | native | read | yes |');
     } finally {
       fs.rmSync(temp, { recursive: true, force: true });
     }

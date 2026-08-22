@@ -37,7 +37,6 @@ import {
   DEFAULT_CLI_IDLE_TIMEOUT_MS,
   DEFAULT_MAX_CLI_AGENTS,
 } from './agents/CliSessionRegistry';
-import { registerWorkerCommands } from './vscode/workerCommands';
 import { ModelManagerPanel } from './sidebar/modelManager/ModelManagerPanel';
 import { registerSidebarCommands } from './vscode/sidebarCommands';
 import { flushPendingModelUsage } from './sidebar/modelManager/usageTracker';
@@ -309,7 +308,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
   });
   registerSecretCommands(context, () => config, activeConfigPath);
-  registerWorkerCommands(context, sidebarProvider, () => config);
   context.subscriptions.push(
     vscode.languages.registerCodeActionsProvider(
       { scheme: 'file' },

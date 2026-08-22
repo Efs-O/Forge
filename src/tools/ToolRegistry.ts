@@ -1,5 +1,4 @@
 import type { ToolDefinition } from '../llm/types';
-import type { WorkerRunRequest, WorkerRunResult } from '../workers/types';
 
 export type ToolPermission =
   | 'read'
@@ -11,20 +10,11 @@ export type ToolPermission =
   | 'fetch'
   | 'git-read'
   | 'git-write'
-  | 'delegate'
-  | 'cloud-worker';
+  | 'delegate';
 
 export interface ToolApprovalMetadata {
   dangerous?: boolean;
   detail?: string;
-}
-
-export interface ToolScope {
-  allowedNames: ReadonlySet<string>;
-  validate?: (tool: RegisteredTool, args: Record<string, unknown>) => void;
-  validateMutationPaths?: (paths: readonly string[]) => void;
-  transformResult?: (tool: RegisteredTool, result: string) => string;
-  onResult?: (tool: RegisteredTool, args: Record<string, unknown>, result: string) => void;
 }
 
 export interface ToolHandler {
@@ -39,7 +29,6 @@ export interface ToolHandlerContext {
   /** Conversation the call belongs to. ask_local_agent keys warm CLI agent
    *  sessions on it so repeat delegations reuse one process. */
   conversationId?: string;
-  runWorkers?: (request: WorkerRunRequest) => Promise<WorkerRunResult>;
 }
 
 export interface ToolMutation {
@@ -127,14 +116,9 @@ export class ToolRegistry {
     );
   }
 
-  definitions(allowed: Set<ToolPermission>, scope?: ToolScope): ToolDefinition[] {
+  definitions(allowed: Set<ToolPermission>): ToolDefinition[] {
     return [...this.tools.values()]
-      .filter(
-        (t) =>
-          this.isAllowed(t, allowed) &&
-          (!scope || scope.allowedNames.has(t.definition.function.name)) &&
-          (t.advertise === undefined || t.advertise()),
-      )
+      .filter((t) => this.isAllowed(t, allowed) && (t.advertise === undefined || t.advertise()))
       .map((t) => t.definition);
   }
 
@@ -147,18 +131,11 @@ export class ToolRegistry {
     args: Record<string, unknown>,
     allowed: Set<ToolPermission>,
     context?: ToolHandlerContext,
-    scope?: ToolScope,
-    scopeAlreadyValidated = false,
   ): Promise<string> {
     const tool = this.tools.get(name);
     if (!tool) throw new Error(`ToolRegistry: unknown tool "${name}"`);
-    if (scope && !scope.allowedNames.has(name)) {
-      throw new Error(`ToolRegistry: tool "${name}" is outside the active tool scope`);
-    }
     this.assertAllowed(tool, allowed, args);
-    if (!scopeAlreadyValidated) scope?.validate?.(tool, args);
-    const result = await tool.handler(args, context);
-    return scope?.transformResult ? scope.transformResult(tool, result) : result;
+    return tool.handler(args, context);
   }
 
   names(): string[] {

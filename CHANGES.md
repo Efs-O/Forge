@@ -1,5 +1,28 @@
 # Forge — Recent Changes
 
+## Unreleased — Shared-runtime reliability and worker removal
+
+- **Releasing a borrowed model no longer strands the owner.** A runtime
+  borrowed from another Forge window is now detached rather than stopped, and
+  its lease is released even if detaching fails. Previously the release threw
+  before cleanup, leaving a lease that blocked the owning window from ever
+  unloading the model.
+- **Leases from crashed windows are reclaimed.** Lease files record a PID and
+  are discarded when that process is gone or the file is malformed, so a
+  force-killed or crashed borrower no longer pins another window's VRAM
+  indefinitely.
+- **A borrowed runtime now counts as ready.** A window whose only backend was
+  borrowed reported the model as loaded but not ready, so the status bar and
+  the prompt gate disagreed about the same usable endpoint.
+- **Worker dispatch is removed.** `dispatch_workers` and `list_worker_models`
+  are gone, along with the coordinator/worker role split, its per-role
+  permission and path policy, and the `Forge: Dispatch Workers` command.
+  Delegation is unaffected: `ask_local_agent` still asks a second local model
+  or an external CLI agent (Claude, Codex) for an opinion.
+  `permissions.agents.cloud_workers` remains valid in `config.yaml` so existing
+  configurations keep loading, but it grants nothing and Forge warns once at
+  startup when it is present.
+
 ## 0.12.49 — Reliable resumes, Git batches, and repository instructions
 
 - **Host-initiated turns always expose Stop.** The shared send pipeline now

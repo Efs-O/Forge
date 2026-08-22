@@ -21,14 +21,11 @@ import { TurnLifecycle } from './TurnLifecycle';
 import { runCliTurn } from './CliTurn';
 import { runModelTurn } from './ModelTurn';
 import type { TurnServices } from './turnServices';
-import { runWorkerTurn } from './WorkerTurn';
 import { runPromptToMarkdown, type PromptRunOptions } from './PromptRun';
 import { runCloudProviderTurn, runLocalProviderTurn } from './ProviderTurn';
 import type { DiffDecorations } from './DiffDecorations';
 import { deriveTitle } from './sessionTypes';
 import { ToolApprovalService } from './ToolApprovalService';
-import { WorkerOrchestrationService } from '../workers/WorkerOrchestrationService';
-import type { WorkerRunRequest, WorkerRunResult } from '../workers/types';
 import { recordModelUsage } from './modelManager/usageTracker';
 import { CliAgentDriver } from '../agents/CliAgentDriver';
 import {
@@ -53,7 +50,6 @@ export class AgentLoop {
   private readonly capabilities = new CapabilityCache();
   private readonly toolDispatch: ToolDispatch;
   private readonly approvals: ToolApprovalService;
-  private readonly workerService: WorkerOrchestrationService;
   private readonly workspaceRoot: string;
   private readonly cliSessions: CliSessionRegistry;
   /** Collaborators handed to every turn module. Assembled once, in the ctor. */
@@ -200,16 +196,6 @@ export class AgentLoop {
         this.approvals.request(name, detail, isDangerous, convId, signal),
       diffDecorations,
     );
-    this.workerService = new WorkerOrchestrationService({
-      getConfig,
-      pool,
-      registry: toolRegistry,
-      workspaceRoot: this.workspaceRoot,
-      ...(forgeLoader ? { instructionsLoader: forgeLoader } : {}),
-      ...(secrets ? { secrets } : {}),
-      onActivity: (activity, conversationId) =>
-        this.post({ type: 'workerStatus', ...activity, conversationId }),
-    });
     this.services = {
       pool,
       getConfig,
@@ -217,7 +203,6 @@ export class AgentLoop {
       toolDispatch: this.toolDispatch,
       failureTracker,
       approvals: this.approvals,
-      workerService: this.workerService,
       checkpoints,
       lifecycle: this.lifecycle,
       events,
@@ -267,9 +252,6 @@ export class AgentLoop {
         }
       },
     };
-    this.toolDispatch.setWorkerRunner((request, context) =>
-      this.workerService.run(request, context),
-    );
   }
 
   disposeConversation(id: string): Promise<void> {
@@ -331,14 +313,6 @@ export class AgentLoop {
 
   async openFile(filePath: string, options?: OpenFileOptions): Promise<void> {
     return this.toolDispatch.openFile(filePath, options);
-  }
-
-  runWorkerTurn(
-    conv: ConversationRuntime,
-    model: ModelConfig,
-    request: WorkerRunRequest,
-  ): Promise<WorkerRunResult> {
-    return runWorkerTurn(this.services, conv, model, request);
   }
 
   async runTurn(

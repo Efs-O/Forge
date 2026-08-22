@@ -150,36 +150,11 @@ export async function discoverMcpDefinitions(configPath, nativeNames) {
   }
 }
 
-function extractWorkerToolNames() {
-  const filename = path.join(ROOT, 'src/workers/WorkerAccessPolicy.ts');
-  const source = ts.createSourceFile(
-    filename,
-    fs.readFileSync(filename, 'utf8'),
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
-  );
-  const values = new Map();
-  visit(source, (node) => {
-    if (!ts.isVariableDeclaration(node) || !ts.isIdentifier(node.name) || !node.initializer) return;
-    if (node.name.text !== 'WORKER_READ_TOOL_NAMES' && node.name.text !== 'WORKER_WRITE_TOOL_NAMES')
-      return;
-    const initializer = ts.isAsExpression(node.initializer)
-      ? node.initializer.expression
-      : node.initializer;
-    values.set(node.name.text, expressionToValue(initializer));
-  });
-  const read = new Set(values.get('WORKER_READ_TOOL_NAMES') ?? []);
-  const write = new Set([...read, ...(values.get('WORKER_WRITE_TOOL_NAMES') ?? [])]);
-  return { read, write };
-}
-
 export function readJsonEvidence(filename) {
   return filename ? JSON.parse(fs.readFileSync(filename, 'utf8')) : undefined;
 }
 
 export function writeCoverageReport(filename, definitions, modelEvidence, capabilityEvidence) {
-  const { read, write } = extractWorkerToolNames();
   const testRoot = path.join(ROOT, 'test');
   const testSources = fs
     .readdirSync(testRoot, { recursive: true })
@@ -223,17 +198,17 @@ export function writeCoverageReport(filename, definitions, modelEvidence, capabi
       : modelResults.get(name)
         ? 'schema passed'
         : 'opt-in';
-    return `| ${name} | ${definition.origin} | ${definition.permission} | yes | ${read.has(name) ? 'yes' : 'no'} | ${write.has(name) ? 'yes' : 'no'} | ${modelStatus} | ${handlerTest ? 'automated' : 'missing'} | ${liveStatus} | ${effect} |`;
+    return `| ${name} | ${definition.origin} | ${definition.permission} | yes | ${modelStatus} | ${handlerTest ? 'automated' : 'missing'} | ${liveStatus} | ${effect} |`;
   });
   const markdown = [
     '# Forge Tool Coverage Matrix',
     '',
     `Generated: ${new Date().toISOString()}`,
     '',
-    'The inventory and permissions come from the constructors registered by `registerAllTools.ts`; worker visibility comes from `WorkerAccessPolicy.ts`. “Harness” means schema emission is available but not executed by default.',
+    'The inventory and permissions come from the constructors registered by `registerAllTools.ts`. “Harness” means schema emission is available but not executed by default.',
     '',
-    '| Tool | Origin | Permission | Coordinator | Read worker | Write worker | Model schema test | Handler test | Live test | Side effect |',
-    '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+    '| Tool | Origin | Permission | Coordinator | Model schema test | Handler test | Live test | Side effect |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- |',
     ...rows,
     '',
   ].join('\n');

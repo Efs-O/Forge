@@ -7,7 +7,6 @@ import { CheckpointStack } from '../../src/checkpoint/CheckpointStack';
 import { EmbeddingClient } from '../../src/search/EmbeddingClient';
 import { cosineSimilarity } from '../../src/search/semanticMath';
 import { makeReadFileTool, makeWriteFileTool } from '../../src/tools/builtinTools';
-import { makeDispatchWorkersTool } from '../../src/tools/dispatchWorkersTool';
 import {
   makeFindFilesTool,
   makeListDirectoryTool,
@@ -25,7 +24,6 @@ import {
   type ToolHandlerContext,
   type ToolPermission,
 } from '../../src/tools/ToolRegistry';
-import { WorkerAccessPolicy } from '../../src/workers/WorkerAccessPolicy';
 import { callLiveModel, runLiveToolLoop } from './liveModelHarness';
 
 const LIVE = process.env['FORGE_LIVE_CAPABILITIES'] === '1';
@@ -51,7 +49,7 @@ function contextFor(checkpoint?: ReturnType<CheckpointStack['beginTurn']>): Tool
 }
 
 describe.skipIf(!LIVE)(
-  'opt-in Gemma coordinator, worker, delegation, vision, and semantic checks',
+  'opt-in Gemma coordinator, delegation, vision, and semantic checks',
   () => {
     let root: string;
 
@@ -147,67 +145,6 @@ describe.skipIf(!LIVE)(
       });
     }, 240_000);
 
-    it('runs read and write workers with exact tool visibility and path ownership', async () => {
-      fs.writeFileSync(path.join(root, 'read.txt'), 'worker fixture\n', 'utf8');
-      fs.writeFileSync(path.join(root, 'write.txt'), 'VALUE=old\n', 'utf8');
-      const registry = new ToolRegistry();
-      for (const tool of [
-        makeReadFileTool(),
-        makeListDirectoryTool(),
-        makeFindFilesTool(),
-        makeSearchCodeTool(),
-        makeGetDocumentSymbolsTool(),
-        makeGetDiagnosticsTool(),
-        makeWriteFileTool(),
-        makeEditFileTool(),
-        makeApplyLineEditsTool(),
-      ])
-        registry.register(tool);
-      const allowed = new Set<ToolPermission>(['read', 'write']);
-      const readPolicy = new WorkerAccessPolicy(root, 'read', []);
-      const readResult = await runLiveToolLoop({
-        endpoint: ENDPOINT,
-        model: MODEL,
-        prompt: 'Use read_file to read read.txt, then report its contents. Do not modify anything.',
-        registry,
-        allowed,
-        context: contextFor(),
-        scope: readPolicy.scope(),
-        maxSteps: 4,
-      });
-      expect(readPolicy.scope().allowedNames.size).toBe(6);
-      expect(readResult.calls).toContain('read_file');
-      expect(readPolicy.changedPaths()).toEqual([]);
-
-      const writePolicy = new WorkerAccessPolicy(root, 'write', ['write.txt']);
-      const writeScope = writePolicy.scope();
-      const writeResult = await runLiveToolLoop({
-        endpoint: ENDPOINT,
-        model: MODEL,
-        prompt:
-          'Use edit_file on write.txt to replace the exact text VALUE=old with VALUE=done, then report completion.',
-        registry,
-        allowed,
-        context: contextFor(),
-        scope: writeScope,
-        maxSteps: 4,
-      });
-      expect(writeScope.allowedNames.size).toBe(9);
-      expect(writeResult.calls).toContain('edit_file');
-      expect(writePolicy.changedPaths()).toEqual([path.join(root, 'write.txt')]);
-      expect(() => writeScope.validateMutationPaths?.([path.join(root, 'escape.txt')])).toThrow(
-        'not assigned',
-      );
-      results.push({
-        check: 'workers',
-        passed: true,
-        readToolCount: 6,
-        writeToolCount: 9,
-        readCalls: readResult.calls,
-        writeCalls: writeResult.calls,
-      });
-    }, 240_000);
-
     it('sends advisory delegation with zero tools', async () => {
       const message = await callLiveModel(ENDPOINT, MODEL, [
         {
@@ -273,23 +210,6 @@ describe.skipIf(!LIVE)(
         {
           tool: makeReadFileTool(),
           args: { path: 'package.json', start_line: 1, end_line: 2 },
-        },
-        {
-          tool: makeDispatchWorkersTool(() => {
-            throw new Error('Config is not needed while inspecting the tool definition');
-          }),
-          args: {
-            workers: [
-              {
-                id: 'audit-worker',
-                model: 'gemma-worker',
-                task: 'Review package metadata',
-                access: 'read',
-                context_files: ['package.json'],
-                max_output_tokens: 256,
-              },
-            ],
-          },
         },
       ];
       const promptVariants = [

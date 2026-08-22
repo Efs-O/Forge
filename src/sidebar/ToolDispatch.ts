@@ -15,7 +15,6 @@ import { ToolRegistry } from '../tools/ToolRegistry';
 import { ToolFailureTracker } from '../tools/StripTools';
 import type { ToolBudget } from '../tools/ToolBudget';
 import type { DiffDecorations } from './DiffDecorations';
-import type { WorkerRunContext, WorkerRunRequest, WorkerRunResult } from '../workers/types';
 import { resolveWorkspacePath, type ResolveWorkspacePathOptions } from '../util/WorkspacePaths';
 import { capDisplayText } from '../tools/resultCap';
 import { isFailureResult, readPathArg, resultLabel } from './toolResultView';
@@ -174,11 +173,6 @@ export interface OpenFileOptions {
 }
 
 export class ToolDispatch {
-  private workerRunner?: (
-    request: WorkerRunRequest,
-    context: WorkerRunContext,
-  ) => Promise<WorkerRunResult>;
-
   constructor(
     private readonly toolRegistry: ToolRegistry,
     private readonly checkpoints: CheckpointStack,
@@ -195,21 +189,13 @@ export class ToolDispatch {
     private readonly diffDecorations: DiffDecorations,
   ) {}
 
-  setWorkerRunner(
-    runner: (request: WorkerRunRequest, context: WorkerRunContext) => Promise<WorkerRunResult>,
-  ): void {
-    this.workerRunner = runner;
-  }
-
   async dispatch(
     toolCalls: ToolCall[],
     allowed: Set<ToolPermission>,
     messages: ChatMessage[],
     convId?: string,
     signal?: AbortSignal,
-    scope?: import('../tools/ToolRegistry').ToolScope,
     checkpoint?: CheckpointSession,
-    coordinatorModel?: string,
     budget?: ToolBudget,
     recordFileDiff?: (diff: RecordedFileDiff) => void,
   ): Promise<void> {
@@ -255,9 +241,6 @@ export class ToolDispatch {
           });
           continue;
         }
-        if (scope && !scope.allowedNames.has(tc.function.name)) {
-          throw new Error(`Tool "${tc.function.name}" is outside the active worker scope`);
-        }
         const budgetBlock = budget?.check(tc.function.name);
         if (budgetBlock) {
           this.postResult(tc, budgetBlock, undefined, convId);
@@ -269,7 +252,6 @@ export class ToolDispatch {
           });
           continue;
         }
-        scope?.validate?.(reg, args);
 
         const requiredPermissions = this.toolRegistry.requiredPermissions(reg, args);
         const approvalMetadata = reg.approval?.(args);
@@ -309,39 +291,17 @@ export class ToolDispatch {
         }
 
         const rawMutationPaths = reg.mutation?.paths(args) ?? [];
-        scope?.validateMutationPaths?.(rawMutationPaths);
         const mutationPaths = rawMutationPaths.map((p) => resolveToolPath(p));
         this.snapshotPaths(mutationPaths, checkpoint);
 
-        result = await this.toolRegistry.dispatch(
-          tc.function.name,
-          args,
-          allowed,
-          {
-            beforeMutate: (paths) => {
-              scope?.validateMutationPaths?.(paths);
-              const resolved = paths.map((p) => resolveToolPath(p));
-              this.snapshotPaths(resolved, checkpoint);
-            },
-            ...(signal !== undefined ? { abortSignal: signal } : {}),
-            ...(convId !== undefined ? { conversationId: convId } : {}),
-            ...(this.workerRunner && checkpoint && convId && signal
-              ? {
-                  runWorkers: (request: WorkerRunRequest) =>
-                    this.workerRunner?.(request, {
-                      checkpoint,
-                      conversationId: convId,
-                      abortSignal: signal,
-                      toolDispatch: this,
-                      ...(coordinatorModel ? { coordinatorModel } : {}),
-                    }) ?? Promise.reject(new Error('Worker runner unavailable')),
-                }
-              : {}),
+        result = await this.toolRegistry.dispatch(tc.function.name, args, allowed, {
+          beforeMutate: (paths) => {
+            const resolved = paths.map((p) => resolveToolPath(p));
+            this.snapshotPaths(resolved, checkpoint);
           },
-          scope,
-          true,
-        );
-        scope?.onResult?.(reg, args, result);
+          ...(signal !== undefined ? { abortSignal: signal } : {}),
+          ...(convId !== undefined ? { conversationId: convId } : {}),
+        });
 
         if (reg.mutation) {
           this.codeLens.markPending(mutationPaths);

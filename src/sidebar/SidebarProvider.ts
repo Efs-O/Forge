@@ -1,12 +1,7 @@
 import * as vscode from 'vscode';
 import type { IBackendPool } from '../backend/BackendPool';
 import type { ForgeConfig } from '../config/types';
-import {
-  expandAlias,
-  mergeGroupsIntoModel,
-  resolveRequestModel,
-  splitModelProfile,
-} from '../config/ConfigResolver';
+import { expandAlias, mergeGroupsIntoModel, splitModelProfile } from '../config/ConfigResolver';
 import type { HostToWebview, WebviewDiagnosticMsg, WebviewToHost } from './messageBridge';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
 import type { CliSessionRegistry } from '../agents/CliSessionRegistry';
@@ -23,7 +18,6 @@ import { ToolRegistry } from '../tools/ToolRegistry';
 import type { KeepUndoCodeLensProvider } from './KeepUndoCodeLens';
 import type { DiffDecorations } from './DiffDecorations';
 import { CheckpointReview } from './CheckpointReview';
-import type { WorkerRunRequest, WorkerRunResult } from '../workers/types';
 import { ToolFailureTracker } from '../tools/StripTools';
 import type { TemplateEngine } from '../llm/TemplateEngine';
 import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
@@ -181,16 +175,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   canUndo(): boolean {
     return this.checkpoints.canUndo(this.sidebar.activeConversationId);
-  }
-
-  async dispatchWorkerRun(request: WorkerRunRequest): Promise<WorkerRunResult> {
-    const conv = this.getActive();
-    const selected = conv.active_model ?? this.config.active_model;
-    if (!selected) throw new Error('Forge: no active coordinator model selected.');
-    const model = resolveRequestModel(this.config, selected);
-    const result = await this.agentLoop.runWorkerTurn(conv, model, request);
-    this.persistSession();
-    return result;
   }
 
   async newConversation(): Promise<void> {

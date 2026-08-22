@@ -3,14 +3,14 @@ import { DirectBackend } from './DirectBackend';
 import type { ForgeConfig } from '../config/types';
 import { expandAlias, resolveRequestModel, splitModelProfile } from '../config/ConfigResolver';
 import { DelegationGate } from './DelegationGate';
-import type { DelegationCheck, DelegationGroupHold, DelegationHold } from './DelegationGate';
+import type { DelegationCheck, DelegationHold } from './DelegationGate';
 import { getLogger } from '../util/logger';
 import { SharedRuntimeRegistry, sharedRuntimeKey } from './SharedRuntimeRegistry';
 import { acquireOllamaSlot, borrowSharedRuntime, stopAllSlots } from './poolAcquisition';
 import { claimPort, freeSlot, mostRecentSlot } from './poolSlots';
 import type { PortClaim, PoolSlot, SlotTable } from './poolSlots';
 
-export type { DelegationCheck, DelegationGroupHold, DelegationHold } from './DelegationGate';
+export type { DelegationCheck, DelegationHold } from './DelegationGate';
 
 const log = getLogger();
 
@@ -24,10 +24,6 @@ export interface IBackendPool {
    *  closes the canDelegate→acquire TOCTOU race. Release exactly once on
    *  success, cancellation, and failure paths (extra calls are no-ops). */
   acquireForDelegation(primaryModel: string, targetModel: string): Promise<DelegationHold>;
-  acquireGroupForDelegation(
-    primaryModel: string,
-    targetModels: readonly string[],
-  ): Promise<DelegationGroupHold>;
   parallelCapacity(modelName: string): number;
   /** Stop and remove a single model's backend, freeing its VRAM / port slot. */
   release(modelName: string): Promise<void>;
@@ -87,13 +83,6 @@ export class BackendPool implements IBackendPool {
 
   acquireForDelegation(primaryModel: string, targetModel: string): Promise<DelegationHold> {
     return this.gate.acquire(primaryModel, targetModel);
-  }
-
-  acquireGroupForDelegation(
-    primaryModel: string,
-    targetModels: readonly string[],
-  ): Promise<DelegationGroupHold> {
-    return this.gate.acquireGroup(primaryModel, targetModels);
   }
 
   parallelCapacity(modelName: string): number {

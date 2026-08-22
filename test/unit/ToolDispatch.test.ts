@@ -670,8 +670,6 @@ describe('ToolDispatch', () => {
         undefined,
         undefined,
         undefined,
-        undefined,
-        undefined,
         budget,
       );
 
@@ -688,8 +686,6 @@ describe('ToolDispatch', () => {
         [makeToolCall('run_terminal', { command: 'echo hi' })],
         noTerminalPermission,
         messages as never,
-        undefined,
-        undefined,
         undefined,
         undefined,
         undefined,
@@ -711,16 +707,12 @@ describe('ToolDispatch', () => {
         undefined,
         undefined,
         undefined,
-        undefined,
-        undefined,
         budget,
       );
       await dispatch.dispatch(
         [makeToolCall('run_terminal', { command: 'echo two' })],
         allowed,
         messages as never,
-        undefined,
-        undefined,
         undefined,
         undefined,
         undefined,

@@ -146,26 +146,6 @@ export interface ToolActivityMsg {
   detail?: string;
   conversationId?: string;
 }
-export interface WorkerStatusMsg {
-  type: 'workerStatus';
-  runId: string;
-  stage:
-    | 'run-started'
-    | 'worker-started'
-    | 'worker-finished'
-    | 'review-started'
-    | 'worker-progress';
-  workerId?: string;
-  model?: string;
-  status?: string;
-  executionMode?: 'parallel' | 'serial' | 'best-effort';
-  elapsedMs: number;
-  changedPaths?: string[];
-  conversationId?: string;
-  /** 'worker-progress' only — a concise status/text line from a `provider: cli`
-   *  external agent, relayed to the sidebar worker status surface as it streams. */
-  detail?: string;
-}
 export interface TokenBudgetMsg {
   type: 'tokenBudget';
   used: number;
@@ -259,7 +239,6 @@ export type HostToWebview =
   | ConfirmRequestMsg
   | ToolActivityMsg
   | ToolResultMsg
-  | WorkerStatusMsg
   | TokenBudgetMsg
   | SetInputMsg
   | HistoryRestoreMsg

@@ -1,7 +1,7 @@
 /**
  * The collaborators every kind of turn needs, assembled once by `AgentLoop`.
  *
- * Each turn module (`ModelTurn`, `CliTurn`, `WorkerTurn`, `ProviderTurn`,
+ * Each turn module (`ModelTurn`, `CliTurn`, `ProviderTurn`,
  * `PromptRun`) declares the narrower slice it actually uses; this is the
  * superset that satisfies all of them, so AgentLoop hands the same object to
  * each instead of rebuilding a bespoke context per call.
@@ -20,7 +20,6 @@ import type { TemplateEngine } from '../llm/TemplateEngine';
 import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
 import type { CliAgentDriver } from '../agents/CliAgentDriver';
 import type { CliSessionRegistry } from '../agents/CliSessionRegistry';
-import type { WorkerOrchestrationService } from '../workers/WorkerOrchestrationService';
 import type { ToolApprovalService } from './ToolApprovalService';
 import type { ToolDispatch } from './ToolDispatch';
 import type { TurnLifecycle } from './TurnLifecycle';
@@ -33,7 +32,6 @@ export interface TurnServices {
   toolDispatch: ToolDispatch;
   failureTracker: ToolFailureTracker;
   approvals: ToolApprovalService;
-  workerService: WorkerOrchestrationService;
   checkpoints: CheckpointStack;
   lifecycle: TurnLifecycle;
   events: SidebarProviderEvents;
