@@ -22,7 +22,7 @@ import { runCliTurn } from './CliTurn';
 import { runModelTurn } from './ModelTurn';
 import type { TurnServices } from './turnServices';
 import { runWorkerTurn } from './WorkerTurn';
-import { runPromptToMarkdown } from './PromptRun';
+import { runPromptToMarkdown, type PromptRunOptions } from './PromptRun';
 import { runCloudProviderTurn, runLocalProviderTurn } from './ProviderTurn';
 import type { DiffDecorations } from './DiffDecorations';
 import { deriveTitle } from './sessionTypes';
@@ -406,8 +406,12 @@ export class AgentLoop {
     this.onTranscriptChanged?.(conv.id);
   }
 
-  runPromptToMarkdown(text: string, conversationId?: string): Promise<string> {
-    return runPromptToMarkdown(this.services, text, conversationId);
+  runPromptToMarkdown(
+    text: string,
+    conversationId?: string,
+    options?: PromptRunOptions,
+  ): Promise<string> {
+    return runPromptToMarkdown(this.services, text, conversationId, options);
   }
   private warnOnce(key: string, message: string): void {
     this.capabilities.warnOnce(key, message, (text) => {

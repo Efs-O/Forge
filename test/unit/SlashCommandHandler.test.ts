@@ -25,7 +25,9 @@ describe('SlashCommandHandler', () => {
       invalidateExactTokenBudget: () => undefined,
       postTokenBudget: () => undefined,
       post: () => undefined,
-      runPromptToMarkdown: async () => 'Goal: continue the second task',
+      // Long enough to clear runCompaction's plausibility floor, which now
+      // rejects a short candidate as an unusable summary.
+      runPromptToMarkdown: async () => 'Goal: continue the second task. State: the first task is done and the second is in progress. Next: finish it. Files: src/a.ts, src/b.ts. Constraints: none recorded. Errors: none. This body exists only to clear the plausibility floor that rejects tool-call-shaped summaries.',
       isStreaming: () => false,
       beginCompaction: () => () => undefined,
       resumeAfterManualCompact,

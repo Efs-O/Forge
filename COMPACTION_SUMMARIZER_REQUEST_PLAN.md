@@ -415,7 +415,24 @@ current-vs-winner pair.
 - `webview-ui/src/App.tsx` and `test/webview/AppHeavyStream.dom.test.ts` are
   being modified by a session OTHER than this one. Do not touch or commit them.
 
-## Does the 80% source truncation lose files? Measured: no
+## CORRECTION: the 80% source truncation DOES lose files
+
+Measured on a second, independent session (weather-app `39c9bf42`, 2026-08-22,
+the first live compaction on the shipped implementation):
+
+```
+written ground-truth files: 6
+  survive the 24k cap: 4
+  DROPPED by the cap:   2   (index.html, test/fixtures/forecast.js)
+source chars 229,715 -> prompt 24,344 (11% kept)
+```
+
+Both files the summary "missed" were never in its input. Recall on what the
+model was actually shown was 6/6. The single-session result below generalized
+badly: at 230k source chars the cap keeps 11%, not 20%, and file identity stops
+surviving. Truncation is now the dominant error term, not the summarizer.
+
+## The earlier single-session measurement (superseded by the above)
 
 ```
 written ground-truth files: 12
@@ -450,3 +467,142 @@ It is not a solved problem:
 
 The tail-sizing and chunked-summarization items under "Out of scope" are the
 bigger prize, and the harness can now A/B them as a fifth arm.
+
+---
+
+# Part 2: the input, not the request shape
+
+Part 1 (above) is SHIPPED. It fixed how the summarizer is *asked*. Everything
+below is about what it is *handed*, which the 2026-08-22 live compaction showed
+is now the dominant error term.
+
+## What shipped alongside Part 1 (no measurement needed)
+
+These are code reading a data structure - no model judgement, so nothing to be
+wrong about. Both are in `compactionPrompt.ts`.
+
+- **Recorded file facts.** `collectWrittenFiles` / `recordedFilesBlock` read
+  every changed file off the `tool_calls` and append them to the stored summary
+  after the model returns. Derived from ALL summarized messages, not the capped
+  prompt, so truncation cannot reach them. Verified on session `39c9bf42`:
+  6/6 files recovered including `index.html`, which the model itself missed
+  because the cap hid it.
+- **Anchored first user message.** `anchorRequest` pins the opening user message
+  outside `capSummarySource` under `ORIGINAL REQUEST`, where the head/tail slice
+  cannot cut it.
+- **Next is mandatory.** `buildSummaryPrompt` no longer says "omit empty
+  sections" unqualified; Next must always be emitted, "nothing pending - the
+  task is complete" when there is none. `RESUME_PROMPT` no longer assumes what
+  Next says. Third instance of the resume prompt naming something absent from
+  the window - see the comment above `RESUME_PROMPT`.
+
+## Hypotheses - DO NOT IMPLEMENT BEFORE MEASURING
+
+Recorded because they are plausible and untested, not because they are agreed.
+Two confident recommendations in this document have already been refuted by the
+harness (thinking-off, "truncation is harmless"). Each item below states what
+would falsify it and how to run that test.
+
+Add each as a new arm in `scripts/compaction-ab.mjs` alongside the existing
+A/B/C/D cells, scored with `compaction-ab-score.mjs`. Baseline to beat: arm C
+plus the shipped Part 1 changes.
+
+### H1. Size the source cap from the model's real context window
+
+**Claim.** `SUMMARY_SOURCE_MAX_CHARS = 24000` is a constant that predates the
+summarizer having its own request shape. It is unrelated to the window the model
+actually has. Derive it from `perSlotContext(model, server)` instead, minus the
+system prompt, the previous summary, and `max_tokens`.
+
+**Evidence it matters.** Session `39c9bf42`: 229,715 source chars -> 24,344
+prompt chars (11% kept) on a model with a **58,000-token** window
+(`llamacpp-qwen3`, `n_parallel: 1`). The summarize request used roughly 8,000
+tokens of 58,000. About 45,000 tokens - ~140,000 chars - sat unused while two
+changed files were being discarded. Headroom is not in dispute.
+
+**Why it could still be wrong.**
+- Long-context degradation. Recall of a specific detail can FALL as input grows
+  ("lost in the middle"). 4x the text may produce a worse summary, not better.
+- Wall clock. Compaction already costs ~100 s mid-task; this pushes it up
+  roughly with input size. A better summary that takes 5 minutes may be worse
+  in practice than a good one that takes 100 s.
+- `perSlotContext` reads CONFIG, not what llama-server actually loaded. If the
+  two disagree the request overflows and compaction fails outright - worse than
+  a truncated summary. Needs a floor and a safety margin, and possibly
+  `/props` rather than config.
+- Thinking spends from the same budget. A 45k-token prompt plus a 3072-token
+  reasoning budget plus 2048 of prose has to fit; the arithmetic must be
+  explicit, not assumed.
+
+**How to measure.** New arm E: arm C's request shape with the cap at 25%, 50%
+and 75% of per-slot context. Same session, same window, 3 runs each.
+
+**Decision rule.** Adopt only if writtenFileRecall improves AND invented paths
+do not rise AND wall-clock stays under a ceiling the user sets. If recall is
+flat, keep 24k - the recorded-files block already covers file identity, and the
+remaining value is decisions and constraints, which the scorer cannot see.
+Judge those by reading, and say so.
+
+### H3. Drop cheap material before expensive material
+
+**Claim.** `capSummarySource` slices one concatenated string: 35% head, 65%
+tail, blind to what it cuts. A 30-word user instruction is exactly as likely to
+be dropped as a 2,000-char file dump. Budget by role instead - user messages
+first, then assistant text and tool-call metadata, then tool results - and drop
+from the bottom until it fits.
+
+**Evidence it matters.** Session `39c9bf42`: 70 of 145 rows were tool results,
+each capped at `TOOL_RESULT_MAX_CHARS = 2000`. Tool output is the bulk and the
+least valuable per character.
+
+**Why it could still be wrong.**
+- Tool results are where the concrete facts live - the error text, the failing
+  test, the actual file content. Starving them could cost more than the space
+  buys. The good 2026-08-22 summary quoted a truncated test result accurately.
+- Ordering matters to a transcript. Reassembling by role risks handing the model
+  a scrambled conversation, which may hurt more than dropped bulk.
+- Partly subsumed by H1: with 4x the budget there may be nothing to rank.
+
+**How to measure.** Arm F, at the CURRENT 24k budget so it is a fair test of
+selection rather than of size. Then re-test on top of the winning H1 budget -
+the two interact and must not be measured together first.
+
+**Decision rule.** Adopt if it beats arm C at equal budget. If it only wins when
+combined with H1, prefer H1 alone - fewer moving parts.
+
+### H5. Token-budget the verbatim tail
+
+**Claim.** `RETAINED_TAIL_MAX_CHARS = 4000` is a character cap on the
+last-user-message tail. One large exchange blows it and the tail collapses to
+**nothing**, exactly when concrete context matters most. Budget it in tokens
+against the same window as H1, keeping as many trailing messages as fit.
+
+**Evidence it matters.** Harness dry run on a 40k qwen3.8 window:
+`retainedVerbatim=0`. The live 2026-08-22 compactions retained 18 and 17
+messages, so this is bimodal, not uniformly broken - it fails on exactly the
+large-exchange sessions that need compaction most.
+
+**Why it could still be wrong.**
+- Every token of retained tail is a token not available to the summary source.
+  This trades against H1 for the same budget; they cannot both be maximised.
+- A large retained tail can defeat the compaction that just ran - the original
+  reason for the cap.
+- The two live sessions did NOT exhibit the failure, so the fix may be
+  addressing a case that is rarer than the dry run implied.
+
+**How to measure.** Needs a harness change: the current scorer measures the
+SUMMARY only, and the tail's value is that it is not summarized. Score the
+summary plus the retained tail as one context blob against the same ground
+truth, and pick sessions where the current code yields `retainedVerbatim=0`.
+
+**Decision rule.** Adopt if it removes the zero-tail case without reducing
+writtenFileRecall. Do not adopt on the strength of the dry run alone.
+
+## Ordering
+
+1. Measure H1 first - largest effect, and H3/H5 both trade against its budget.
+2. H5 next, since it needs a harness change that H3 does not.
+3. H3 last, and only if H1 did not already dissolve it.
+
+Do not implement any of the three from this document alone. Each needs its arm,
+its three runs, and its numbers written back here.

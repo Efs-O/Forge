@@ -31,7 +31,8 @@ overlaps with an existing owner, extend the owner instead.
 | Tool call execution + result formatting    | `src/sidebar/ToolDispatch.ts`        |
 | Conversation CRUD pure ops                 | `src/sidebar/ConversationOps.ts`     |
 | Slash command dispatch                     | `src/sidebar/SlashCommandHandler.ts` |
-| Compaction: cut point, summary, resume     | `src/sidebar/CompactionService.ts`   |
+| Compaction: cut point, run, resume         | `src/sidebar/CompactionService.ts`   |
+| Summary prompt text + summary validation   | `src/sidebar/compactionPrompt.ts`    |
 | Applying the compaction window to a request| `src/sidebar/compactionWindow.ts`    |
 | Webview HTML builder                       | `src/sidebar/WebviewBuilder.ts`      |
 | Multi-conversation session types + persist | `src/sidebar/sessionTypes.ts`        |

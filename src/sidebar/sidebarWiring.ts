@@ -129,8 +129,8 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     postSessionSync: host.postSessionSync,
     invalidateExactTokenBudget: () => opResetReportedContext(host.getActive()),
     postTokenBudget: () => host.postTokenBudget(),
-    runPromptToMarkdown: (text, conversationId) =>
-      agentLoop.runPromptToMarkdown(text, conversationId),
+    runPromptToMarkdown: (text, conversationId, options) =>
+      agentLoop.runPromptToMarkdown(text, conversationId, options),
     isStreaming: () => agentLoop.streaming,
     beginCompaction: (convId) => agentLoop.beginBackgroundWork(convId),
     resumeAfterManualCompact: (conversationId) => host.resumeAfterManualCompact(conversationId),

@@ -1,8 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   autoCompactAndResume,
-  buildSummaryPrompt,
-  COMPACTION_SUMMARY_MAX_CHARS,
   MAX_CONSECUTIVE_AUTO_CONTINUES,
   RESUME_PROMPT,
   RETAINED_TAIL_MAX_CHARS,
@@ -13,6 +11,13 @@ import {
   type CompactionDeps,
   type CompactionOutcome,
 } from '../../src/sidebar/CompactionService';
+import {
+  buildSummaryPrompt,
+  collectWrittenFiles,
+  COMPACTION_SUMMARY_MAX_CHARS,
+  isUsableSummary,
+  recordedFilesBlock,
+} from '../../src/sidebar/compactionPrompt';
 import { applyCompactionWindow } from '../../src/sidebar/compactionWindow';
 import type { ChatMessage } from '../../src/llm/types';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
@@ -62,6 +67,18 @@ function harness(
   };
   return state;
 }
+
+/**
+ * A summary long enough to clear `runCompaction`'s plausibility floor.
+ *
+ * That floor rejects short candidates because a model under the agent persona
+ * answered a summarization request with a 117-char tool call, which would then
+ * have become the conversation's working context.
+ */
+const long = (label: string): string =>
+  `${label}
+
+State: recorded. Next: continue. Files: src/a.ts. ${'detail. '.repeat(30)}`.trim();
 
 describe('selectCompactionSplit', () => {
   it('keeps the last user turn verbatim and summarizes only what precedes it', () => {
@@ -120,6 +137,107 @@ describe('selectCompactionSplit', () => {
   });
 });
 
+describe('isUsableSummary', () => {
+  // Measured: under the agent persona the model answered a summarization
+  // request with this exact shape, 117 characters, which capSummary accepted
+  // and which would then have BEEN the conversation's working context.
+  it('rejects a tool call returned in place of a summary', () => {
+    expect(
+      isUsableSummary('{ "tool": "read_file", "arguments": { "path": "UPGRADES_PLAN.md" } }'),
+    ).toBe(false);
+  });
+
+  it('rejects a fenced JSON block and anything too short to be a summary', () => {
+    expect(isUsableSummary('```json\n{"a": 1}\n```')).toBe(false);
+    expect(isUsableSummary('Goal: ship it.')).toBe(false);
+    expect(isUsableSummary('')).toBe(false);
+  });
+
+  // Found stored as an 817-message conversation's working context on
+  // 2026-08-22, from qwen3.8. Length alone caught that instance; the shape must
+  // catch it at any length.
+  it('rejects a non-JSON tool call at any length', () => {
+    const real =
+      '<tool_call>\n<function=git_log>\n<parameter=max_entries>\n5\n</parameter>\n</function>\n</tool_call>';
+    expect(isUsableSummary(real)).toBe(false);
+    expect(isUsableSummary([real, real, real, real].join('\n'))).toBe(false);
+  });
+
+  it('accepts real prose that merely mentions a tool', () => {
+    expect(isUsableSummary(long('Goal: finish the read_file fix'))).toBe(true);
+  });
+});
+
+describe('summary prompt anchoring', () => {
+  it('always asks for Next, so RESUME_PROMPT cannot point at a missing section', () => {
+    const prompt = buildSummaryPrompt(undefined, [{ role: 'user', content: 'do the thing' }]);
+
+    expect(prompt).toContain('ALWAYS include Next');
+    expect(prompt).toContain('nothing pending');
+    // The blanket "omit empty sections" is what removed Next from a finished
+    // task's summary and sent the resumed agent hunting for it.
+    expect(prompt).not.toContain('omit empty sections');
+  });
+
+  it('keeps the first user message outside the truncated transcript', () => {
+    const goal = 'the animations are broken - dublin is cloudy but shows a sun';
+    const messages: ChatMessage[] = [
+      { role: 'user', content: goal },
+      // Far more than the source cap, so a head/tail slice would cut the goal.
+      { role: 'tool', content: 'x'.repeat(60000) },
+      { role: 'user', content: 'still broken' },
+    ];
+
+    const prompt = buildSummaryPrompt(undefined, messages);
+
+    expect(prompt).toContain('ORIGINAL REQUEST');
+    expect(prompt).toContain(goal);
+  });
+});
+
+describe('recorded file facts', () => {
+  const call = (name: string, args: Record<string, unknown>) => ({
+    id: name,
+    type: 'function' as const,
+    function: { name, arguments: JSON.stringify(args) },
+  });
+
+  it('reads every changed file off the tool calls, including edit_file\'s filepath', () => {
+    const messages: ChatMessage[] = [
+      { role: 'assistant', content: null, tool_calls: [call('edit_file', { filepath: 'js/a.js' })] },
+      { role: 'assistant', content: null, tool_calls: [call('write_file', { path: 'index.html' })] },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [call('move_file', { source: 'old.js', destination: 'new.js' })],
+      },
+      // Reads must NOT appear - this block is what CHANGED.
+      { role: 'assistant', content: null, tool_calls: [call('read_file', { path: 'js/bg.js' })] },
+    ];
+
+    expect(collectWrittenFiles(messages)).toEqual(['js/a.js', 'index.html', 'old.js', 'new.js']);
+  });
+
+  it('survives a malformed arguments blob instead of losing the whole list', () => {
+    const messages: ChatMessage[] = [
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          { id: 'x', type: 'function', function: { name: 'edit_file', arguments: '{ truncated' } },
+          call('edit_file', { filepath: 'js/b.js' }),
+        ],
+      },
+    ];
+
+    expect(collectWrittenFiles(messages)).toEqual(['js/b.js']);
+  });
+
+  it('emits nothing when the conversation changed no files', () => {
+    expect(recordedFilesBlock([{ role: 'user', content: 'hello' }])).toBe('');
+  });
+});
+
 describe('runCompaction', () => {
   it('associates its summary request with the compacted conversation', async () => {
     const c = conv([
@@ -127,13 +245,20 @@ describe('runCompaction', () => {
       { role: 'assistant', content: 'did the first task' },
       { role: 'user', content: 'second task' },
     ]);
-    const h = harness(c, async () => 'summary');
-    const runPrompt = vi.fn(async () => 'summary');
+    const h = harness(c, async () => long('summary'));
+    const runPrompt = vi.fn(async () => long('summary'));
     h.deps.runPromptToMarkdown = runPrompt;
 
     await runCompaction(h.deps, { auto: true });
 
-    expect(runPrompt).toHaveBeenCalledWith(expect.any(String), c.id);
+    expect(runPrompt).toHaveBeenCalledWith(
+      expect.any(String),
+      c.id,
+      expect.objectContaining({
+        systemPromptTemplate: 'summarize',
+        alwaysStripThinking: true,
+      }),
+    );
   });
 
   const base: ChatMessage[] = [
@@ -143,6 +268,47 @@ describe('runCompaction', () => {
     { role: 'assistant', content: 'working on it' },
   ];
 
+  it('refuses to store a tool call as the conversation summary', async () => {
+    const c = conv([
+      { role: 'user', content: 'first task' },
+      { role: 'assistant', content: 'did the first task' },
+      { role: 'user', content: 'second task' },
+    ]);
+    const h = harness(c, async () => '{ "tool": "read_file", "arguments": { "path": "a.md" } }');
+
+    const outcome = await runCompaction(h.deps, { auto: true });
+
+    expect(outcome).toBe('failed');
+    expect(c.compaction).toBeUndefined();
+  });
+
+  it('appends the changed files even when the summarizer never mentions them', async () => {
+    const c = conv([
+      { role: 'user', content: 'fix the fetch' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: '1',
+            type: 'function',
+            function: { name: 'edit_file', arguments: JSON.stringify({ filepath: 'index.html' }) },
+          },
+        ],
+      },
+      { role: 'tool', content: 'edited' },
+      { role: 'user', content: 'thanks' },
+    ]);
+    // The summary names nothing - exactly the case where the source cap hid the
+    // file from the model. Measured on session 39c9bf42: 2 of 6 changed files.
+    const h = harness(c, async () => long('Goal: fix the fetch'));
+
+    await runCompaction(h.deps, { auto: true });
+
+    expect(c.compaction?.summary).toContain('index.html');
+    expect(c.compaction?.summary).toContain('recorded by Forge');
+  });
+
   it('records the cut point from the pre-await snapshot, not the later length', async () => {
     const c = conv([...base]);
     const h = harness(c, async () => {
@@ -150,13 +316,13 @@ describe('runCompaction', () => {
       // messages.length afterwards used to bury it behind the cut.
       c.messages.push({ role: 'user', content: 'raced prompt' });
       c.messages.push({ role: 'assistant', content: 'raced reply' });
-      return 'summary of the first task';
+      return long('summary of the first task');
     });
 
     const outcome = await runCompaction(h.deps, { auto: true });
 
     expect(outcome).toBe('compacted');
-    expect(c.compaction).toEqual({ summary: 'summary of the first task', fromIndex: 2 });
+    expect(c.compaction).toEqual({ summary: long('summary of the first task'), fromIndex: 2 });
     const sent = applyCompactionWindow(c.messages, c.compaction);
     expect(sent.map((m) => m.content)).toContain('raced prompt');
     expect(sent.map((m) => m.content)).toContain('second task');
@@ -164,7 +330,7 @@ describe('runCompaction', () => {
 
   it('marks the conversation busy for the summarization and releases it after', async () => {
     const c = conv([...base]);
-    const h = harness(c, async () => 'summary');
+    const h = harness(c, async () => long('summary'));
 
     await runCompaction(h.deps, { auto: true });
 
@@ -202,7 +368,7 @@ describe('runCompaction', () => {
 
   it('skips while a turn is streaming', async () => {
     const c = conv([...base]);
-    const h = harness(c, async () => 'summary');
+    const h = harness(c, async () => long('summary'));
     const deps = { ...h.deps, isStreaming: () => true };
 
     expect(await runCompaction(deps, { auto: false })).toBe('skipped');
@@ -215,18 +381,18 @@ describe('runCompaction', () => {
     c.messages.push({ role: 'user', content: 'third task' });
     c.messages.push({ role: 'assistant', content: 'still working' });
     let prompt = '';
-    const h = harness(c, async () => 'newer summary');
+    const h = harness(c, async () => long('newer summary'));
     const deps: CompactionDeps = {
       ...h.deps,
       runPromptToMarkdown: async (text) => {
         prompt = text;
-        return 'newer summary';
+        return long('newer summary');
       },
     };
 
     await runCompaction(deps, { auto: true });
 
-    expect(prompt).toContain('EARLIER CHECKPOINT:\nearlier summary');
+    expect(prompt).toContain('EARLIER SUMMARY:\nearlier summary');
     expect(prompt).toContain('second task');
     expect(prompt).not.toContain('third task');
     expect(c.compaction?.fromIndex).toBe(4);

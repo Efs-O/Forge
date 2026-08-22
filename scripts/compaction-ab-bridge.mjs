@@ -31,7 +31,8 @@ export async function loadForgeCompaction(outDir) {
   fs.writeFileSync(
     entry,
     [
-      `export { selectCompactionSplit, buildSummaryPrompt, RETAINED_TAIL_MAX_CHARS, COMPACTION_SUMMARY_MAX_CHARS } from '${spec('src/sidebar/CompactionService.ts')}';`,
+      `export { selectCompactionSplit, RETAINED_TAIL_MAX_CHARS } from '${spec('src/sidebar/CompactionService.ts')}';`,
+      `export { buildSummaryPrompt, COMPACTION_SUMMARY_MAX_CHARS } from '${spec('src/sidebar/compactionPrompt.ts')}';`,
       `export { estimateTokens, CHARS_PER_TOKEN } from '${spec('src/util/contextBudget.ts')}';`,
       `export { injectSystemPrompt } from '${spec('src/llm/SystemPromptInjector.ts')}';`,
     ].join('\n'),

@@ -10,6 +10,14 @@ import * as vscode from 'vscode';
 import type { ChatMessage } from '../llm/types';
 import type { HostToWebview } from './messageBridge';
 import type { ConversationRuntime } from './sessionTypes';
+import {
+  buildSummaryPrompt,
+  capSummary,
+  isUsableSummary,
+  recordedFilesBlock,
+  SUMMARY_OUTPUT_TOKENS,
+} from './compactionPrompt';
+import type { PromptRunOptions } from './PromptRun';
 import { getLogger } from '../util/logger';
 
 const log = getLogger();
@@ -21,7 +29,11 @@ export interface CompactionDeps {
   postSessionSync: () => void;
   invalidateExactTokenBudget: () => void;
   postTokenBudget: () => void;
-  runPromptToMarkdown: (text: string, conversationId?: string) => Promise<string>;
+  runPromptToMarkdown: (
+    text: string,
+    conversationId?: string,
+    options?: PromptRunOptions,
+  ) => Promise<string>;
   isStreaming: () => boolean;
   /** Marks the conversation busy for the duration of the summarization call.
    *  Returns the release. */
@@ -45,9 +57,15 @@ const MIN_SUMMARIZED_MESSAGES = 2;
  * the phrase lived only in `buildSummaryPrompt` (a request they never see)
  * while what they DO see says "Conversation summary" — and "checkpoint" is
  * Forge's Keep/Undo system while "Read" is the `read_file` verb.
+ *
+ * Third instance, 2026-08-22: "Continue the task from its Next section" pointed
+ * at a section `buildSummaryPrompt` had told the model to omit when empty. The
+ * task was finished, the summary correctly carried no Next, and the resumed
+ * agent burned a turn hunting for it. `buildSummaryPrompt` now always emits
+ * Next, and this prompt no longer assumes what that section says.
  */
 export const RESUME_PROMPT =
-  'Context was compacted. The conversation summary above is your working context - nothing else is being withheld. Continue the task from its Next section, and do not redo work it records as done.';
+  'Context was compacted. The conversation summary above is your working context - nothing else is being withheld. Do what its Next section records, and do not redo work it records as done. If Next says the task is complete, report that to the user instead of starting new work.';
 
 /** Consecutive auto-resumes allowed without an intervening user prompt. */
 export const MAX_CONSECUTIVE_AUTO_CONTINUES = 2;
@@ -59,30 +77,12 @@ function isSummarizable(m: ChatMessage): boolean {
   );
 }
 
-/** Cap a single tool result inside the summarization prompt. */
-const TOOL_RESULT_MAX_CHARS = 2000;
-
-export function truncateForSummary(text: string): string {
-  return text.length <= TOOL_RESULT_MAX_CHARS
-    ? text
-    : `${text.slice(0, TOOL_RESULT_MAX_CHARS)}\n…[truncated for summary]`;
-}
-
 export interface CompactionSplit {
   /** Messages fed to the summarizer. */
   summarize: ChatMessage[];
   /** Index into `pending` where the retained verbatim tail begins. */
   tailStart: number;
 }
-
-/** Keep the summary small enough to be useful, not a second transcript. */
-export const COMPACTION_SUMMARY_MAX_CHARS = 5000;
-
-/** Bound the input to the summarization turn as well as its output. */
-const SUMMARY_SOURCE_MAX_CHARS = 24000;
-const PREVIOUS_SUMMARY_MAX_CHARS = COMPACTION_SUMMARY_MAX_CHARS;
-const MESSAGE_TEXT_MAX_CHARS = 3000;
-const TOOL_CALL_METADATA_MAX_CHARS = 1200;
 
 /**
  * Splits the still-uncompacted messages into "summarize this" and "keep this
@@ -114,64 +114,6 @@ export function selectCompactionSplit(pending: ChatMessage[]): CompactionSplit |
   }
 
   return { summarize: pending.slice(0, tailStart).filter(isSummarizable), tailStart };
-}
-
-function truncateText(text: string, limit: number): string {
-  return text.length <= limit ? text : `${text.slice(0, limit)}\n…[truncated]`;
-}
-
-function formatToolCalls(message: ChatMessage): string {
-  if (!message.tool_calls?.length) return '';
-  const details = message.tool_calls
-    .map((call) => `${call.function.name}(${truncateText(call.function.arguments, 400)})`)
-    .join(', ');
-  return `\nTool calls: ${truncateText(details, TOOL_CALL_METADATA_MAX_CHARS)}`;
-}
-
-function formatSummaryMessage(message: ChatMessage): string {
-  const content =
-    typeof message.content === 'string'
-      ? message.content
-      : message.content === null
-        ? '[no visible assistant text]'
-        : '[non-text content]';
-  const body =
-    message.role === 'tool'
-      ? truncateForSummary(content)
-      : truncateText(content, MESSAGE_TEXT_MAX_CHARS);
-  const reasoning = message.reasoning
-    ? `\nReasoning note: ${truncateText(message.reasoning, 600)}`
-    : '';
-  return `${message.role.toUpperCase()}:\n${body}${formatToolCalls(message)}${reasoning}`;
-}
-
-function capSummarySource(source: string): string {
-  if (source.length <= SUMMARY_SOURCE_MAX_CHARS) return source;
-  const head = Math.floor(SUMMARY_SOURCE_MAX_CHARS * 0.35);
-  const tail = SUMMARY_SOURCE_MAX_CHARS - head;
-  return `${source.slice(0, head)}\n…[middle of compaction source omitted]…\n${source.slice(-tail)}`;
-}
-
-export function buildSummaryPrompt(
-  previousSummary: string | undefined,
-  messages: ChatMessage[],
-): string {
-  const previous = previousSummary
-    ? `EARLIER CHECKPOINT:\n${truncateText(previousSummary, PREVIOUS_SUMMARY_MAX_CHARS)}\n\n`
-    : '';
-  const transcript = capSummarySource(messages.map(formatSummaryMessage).join('\n\n'));
-  return (
-    // One name for one artifact, matching SUMMARY_PREAMBLE and RESUME_PROMPT.
-    'Create a compact conversation summary for the same repository.\n\n' +
-    'Use only facts present below. Keep it under 600 words and omit empty sections. ' +
-    'Use these labels: Goal, State, Next, Files, Constraints, Errors. ' +
-    'Record the exact next action when one is clear; do not retell the conversation.\n\n' +
-    `${previous}Conversation:\n${transcript}`
-  );
-}
-
-function capSummary(summary: string): string {
-  return truncateText(summary.trim(), COMPACTION_SUMMARY_MAX_CHARS);
 }
 
 /**
@@ -222,6 +164,15 @@ export async function runCompaction(
     summary = await deps.runPromptToMarkdown(
       buildSummaryPrompt(conv.compaction?.summary, split.summarize),
       conv.id,
+      {
+        // The conversation's OWN model, not the picker's global default: a
+        // pinned conversation was being summarized by whatever was last
+        // selected elsewhere.
+        ...(conv.active_model ? { modelName: conv.active_model } : {}),
+        systemPromptTemplate: 'summarize',
+        outputTokens: SUMMARY_OUTPUT_TOKENS,
+        alwaysStripThinking: true,
+      },
     );
   } catch (err) {
     deps.post({
@@ -235,9 +186,17 @@ export async function runCompaction(
     deps.post({ type: 'done', finishReason: 'stop', conversationId: conv.id });
   }
 
-  const trimmed = capSummary(summary);
-  if (!trimmed) {
-    void vscode.window.showWarningMessage('Forge: compaction returned no summary.');
+  // Recorded by code from the tool calls, so the files the agent changed
+  // survive even when the source cap kept them out of the summarizer's view.
+  const recorded = recordedFilesBlock(split.summarize);
+  const trimmed = capSummary(summary, recorded.length);
+  if (!isUsableSummary(trimmed)) {
+    log.info(`[compact] rejected unusable summary (${trimmed.length} chars)`);
+    void vscode.window.showWarningMessage(
+      trimmed
+        ? 'Forge: compaction produced no usable summary — context is unchanged.'
+        : 'Forge: compaction returned no summary.',
+    );
     return 'failed';
   }
 
@@ -245,7 +204,7 @@ export async function runCompaction(
   // overwriting the transcript. conv.messages stays whole, so the sidebar
   // scrollback and the persisted record survive; only what the model is sent
   // shrinks (see applyCompactionWindow).
-  conv.compaction = { summary: trimmed, fromIndex };
+  conv.compaction = { summary: `${trimmed}${recorded}`, fromIndex };
   conv.updatedAt = Date.now();
   deps.persistSession();
   deps.postSessionSync();
