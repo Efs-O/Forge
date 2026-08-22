@@ -40,6 +40,8 @@ import { autoCompactAndResume, resumeAfterCompaction } from './CompactionService
 import { buildWebviewHtml } from './WebviewBuilder';
 import type { IndexManager } from '../search/IndexManager';
 import { modelPickerGroup } from './ModelPickerGroups';
+import { reportedContextTokens } from '../util/contextBudget';
+import type { SessionTimeSnapshot } from '../vscode/SessionTimeStatusBar';
 import { getLogger } from '../util/logger';
 
 const log = getLogger();
@@ -351,17 +353,22 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return this.agentLoop.getSessionActiveMs(conv);
   }
 
-  getActiveSessionMetrics(): {
-    activeMs: number;
-    inputTokens?: number;
-    outputTokens?: number;
-  } {
+  /**
+   * Feeds the status bar. `contextTokens` is deliberately the same
+   * `reportedContextTokens` value the sidebar bar and the HalluMeter bridge
+   * render: it used to be `last_input_tokens` alone, so the two displays
+   * disagreed by the size of the last completion.
+   */
+  getActiveSessionMetrics(): SessionTimeSnapshot {
     const conv = this.getActive();
     return {
       activeMs: this.agentLoop.getSessionActiveMs(conv),
+      contextTokens: reportedContextTokens(conv),
       ...(conv.input_tokens !== undefined ? { inputTokens: conv.input_tokens } : {}),
       ...(conv.output_tokens !== undefined ? { outputTokens: conv.output_tokens } : {}),
-      ...(conv.last_input_tokens !== undefined ? { contextTokens: conv.last_input_tokens } : {}),
+      ...(conv.last_input_tokens !== undefined
+        ? { currentInputTokens: conv.last_input_tokens }
+        : {}),
       ...(conv.last_output_tokens !== undefined
         ? { currentOutputTokens: conv.last_output_tokens }
         : {}),
@@ -388,6 +395,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           // next is their call again, not a continuation Forge chose.
           this.autoContinues = 0;
           void this.send.send(text, attachments, conversationId);
+        },
+        steer: async (text, attachments, conversationId) => {
+          // Steering ends only the request/turn. Unlike Stop, it deliberately
+          // leaves the backend loaded so the redirected turn starts without a
+          // llama-server model reload.
+          this.autoContinues = 0;
+          await this.agentLoop.interrupt(conversationId);
+          await this.send.send(text, attachments, conversationId);
         },
         cancel: () => void this.agentLoop.cancel(this.sidebar.activeConversationId),
         switchModel: (name) => this.tabs.pinModel(name),

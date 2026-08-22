@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { ModelEntry } from '../../../src/sidebar/messageBridge';
+import { formatTokens } from '../../../src/util/formatTokens';
 import { groupModels } from '../modelGroups';
 
 interface Props {
@@ -18,11 +19,6 @@ function budgetColor(used: number, max: number): string {
   if (pct >= 0.9) return 'var(--vscode-errorForeground, #f48771)';
   if (pct >= 0.7) return 'var(--vscode-editorWarning-foreground, #cca700)';
   return 'var(--vscode-progressBar-background, #0e70c0)';
-}
-
-function formatTokens(n: number): string {
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-  return String(n);
 }
 
 const ROLE_SUFFIXES = ['-coding', '-vision', '-worker'] as const;

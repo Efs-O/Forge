@@ -3,11 +3,17 @@ import React from 'react';
 interface Props {
   text: string;
   attachmentCount: number;
+  onSteer: () => void;
   onCancel: () => void;
 }
 
 /** A local-only row: it becomes a normal user message only when its turn starts. */
-export function QueuedPromptRow({ text, attachmentCount, onCancel }: Props): React.ReactElement {
+export function QueuedPromptRow({
+  text,
+  attachmentCount,
+  onSteer,
+  onCancel,
+}: Props): React.ReactElement {
   const attachmentLabel = attachmentCount
     ? ` · ${attachmentCount} attachment${attachmentCount === 1 ? '' : 's'}`
     : '';
@@ -17,6 +23,9 @@ export function QueuedPromptRow({ text, attachmentCount, onCancel }: Props): Rea
       <div className="msg user msg-queued">{text || 'Attachment queued'}</div>
       <div className="queued-prompt-actions">
         <span className="queued-prompt-status">Queued{attachmentLabel}</span>
+        <button className="btn-action" type="button" onClick={onSteer}>
+          Steer
+        </button>
         <button className="btn-action" type="button" onClick={onCancel}>
           Cancel
         </button>

@@ -97,31 +97,44 @@ export class TurnLifecycle {
     this.incompleteTurns.delete(convId);
   }
 
-  async stopStreaming(convId?: string): Promise<void> {
+  async stopStreaming(convId?: string, stopBackend = true): Promise<void> {
     if (convId) {
       const ctrl = this.cancelControllers.get(convId);
       if (!ctrl) return;
       ctrl.abort();
-      try {
-        await this.activeBackends.get(convId)?.stop();
-      } catch {
-        /* abort is authoritative */
+      if (stopBackend) {
+        try {
+          await this.activeBackends.get(convId)?.stop();
+        } catch {
+          /* abort is authoritative */
+        }
       }
       await this.settledMap.get(convId);
       return;
     }
     for (const [id, ctrl] of this.cancelControllers) {
       ctrl.abort();
-      try {
-        await this.activeBackends.get(id)?.stop();
-      } catch (err) {
-        log.debug(`[AgentLoop] backend stop during cancel-all failed: ${(err as Error).message}`);
+      if (stopBackend) {
+        try {
+          await this.activeBackends.get(id)?.stop();
+        } catch (err) {
+          log.debug(`[AgentLoop] backend stop during cancel-all failed: ${(err as Error).message}`);
+        }
       }
     }
     await Promise.all([...this.settledMap.values()]);
   }
 
   cancel(convId?: string): Promise<void> {
+    return this.beginCancellation(convId, true);
+  }
+
+  /** Abort only the active request and retain its loaded backend for steering. */
+  interrupt(convId: string): Promise<void> {
+    return this.beginCancellation(convId, false);
+  }
+
+  private beginCancellation(convId: string | undefined, stopBackend: boolean): Promise<void> {
     const cancelling = convId
       ? this.cancelControllers.has(convId)
         ? [convId]
@@ -130,7 +143,7 @@ export class TurnLifecycle {
     if (cancelling.length === 0) return Promise.resolve();
 
     for (const id of cancelling) this.cancellingConvIds.add(id);
-    const settled = this.stopStreaming(convId)
+    const settled = this.stopStreaming(convId, stopBackend)
       .catch((err) => {
         log.debug(`[AgentLoop] cancellation cleanup failed: ${(err as Error).message}`);
       })

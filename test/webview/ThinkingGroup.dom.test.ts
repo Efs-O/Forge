@@ -95,60 +95,22 @@ describe('ThinkingGroup', () => {
   });
 });
 
-/**
- * The reasoning pane is its own scroll container (max-height + overflow-y), so
- * the message list's auto-scroll never reaches it. jsdom has no layout, so the
- * overflow it would produce is stubbed in.
- */
-describe('ThinkingRow auto-scroll', () => {
+describe('ThinkingRow live expansion', () => {
   function openPane(reasoning: string): HTMLElement {
     render([step('a', reasoning)]);
     act(() => {
       container.querySelector<HTMLButtonElement>('.thinking-row-toggle')!.click();
     });
-    const pane = container.querySelector<HTMLElement>('.thinking-content')!;
-    Object.defineProperty(pane, 'clientHeight', { configurable: true, value: 280 });
-    Object.defineProperty(pane, 'scrollHeight', { configurable: true, value: 1000 });
-    return pane;
+    return container.querySelector<HTMLElement>('.thinking-content')!;
   }
 
-  it('pins the pane to the newest reasoning as it streams in', () => {
+  it('keeps the complete expanded trace in one pane as reasoning streams', () => {
     const pane = openPane('one');
-    expect(pane.scrollTop).toBe(0);
+    const complete = Array.from({ length: 200 }, (_, i) => `line ${i + 1}`).join('\n');
+    render([step('a', complete)]);
 
-    render([step('a', 'one two three')]);
-
-    expect(pane.scrollTop).toBe(1000);
-  });
-
-  it('stops following once the user scrolls up to read back', () => {
-    const pane = openPane('one');
-
-    act(() => {
-      pane.scrollTop = 120;
-      pane.dispatchEvent(new Event('scroll'));
-    });
-    render([step('a', 'one two three')]);
-
-    expect(pane.scrollTop).toBe(120);
-  });
-
-  it('re-arms after the pane is collapsed and reopened', () => {
-    const pane = openPane('one');
-    act(() => {
-      pane.scrollTop = 120;
-      pane.dispatchEvent(new Event('scroll'));
-    });
-
-    const toggle = container.querySelector<HTMLButtonElement>('.thinking-row-toggle')!;
-    act(() => toggle.click()); // collapse — pane unmounts
-    act(() => toggle.click()); // reopen — remounts at scrollTop 0
-
-    const reopened = container.querySelector<HTMLElement>('.thinking-content')!;
-    Object.defineProperty(reopened, 'clientHeight', { configurable: true, value: 280 });
-    Object.defineProperty(reopened, 'scrollHeight', { configurable: true, value: 1000 });
-    render([step('a', 'one two three')]);
-
-    expect(reopened.scrollTop).toBe(1000);
+    expect(container.querySelector('.thinking-content')).toBe(pane);
+    expect(pane.textContent).toBe(complete);
+    expect(pane.getAttribute('data-inner-scroll')).toBe('false');
   });
 });

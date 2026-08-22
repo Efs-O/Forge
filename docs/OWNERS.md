@@ -166,7 +166,8 @@ overlaps with an existing owner, extend the owner instead.
 | FORGE.md workspace instructions loader     | `src/llm/ForgeInstructionsLoader.ts`         |
 | Streaming OpenAI-compat client             | `src/llm/OpenAIClient.ts`                    |
 | Cut-off tool call: type + classification   | `src/llm/ToolCallTruncatedError.ts`          |
-| Context/output budget (per-slot, reserve)  | `src/util/contextBudget.ts`                  |
+| Context measured + output budget estimate  | `src/util/contextBudget.ts`                  |
+| Token-count display formatting             | `src/util/formatTokens.ts`                   |
 | Streaming Ollama native client             | `src/llm/OllamaNativeClient.ts`              |
 | Request normalization (per-provider)       | `src/llm/RequestNormalizer.ts`               |
 | Sampling parameter merge                   | `src/llm/SamplingMerge.ts`                   |

@@ -5,7 +5,15 @@ export interface SlashCommand {
   trigger: string;
   title: string;
   description: string;
-  /** Safe to run without changing the active turn or its backend resources. */
+  /**
+   * Safe to run without changing the active turn or its backend resources.
+   *
+   * Everything else is still LISTED while a turn streams, just disabled — the
+   * host guards refuse them anyway (`/compact` and `/clear` no-op while
+   * streaming, `/review` errors), and several would corrupt the turn outright:
+   * `/unload` and `/restart` stop the server mid-stream, `/undo` and `/keep`
+   * move files the agent is still writing.
+   */
   availableWhileStreaming?: boolean;
 }
 
@@ -70,6 +78,8 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     trigger: 'reload',
     title: 'Reload Window',
     description: 'Run Reload Window (reloads Cursor / VS Code).',
+    // Ends the turn by design, and works regardless of what the agent is doing.
+    availableWhileStreaming: true,
   },
   {
     id: 'initForge',
@@ -83,5 +93,8 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     title: 'Full Clanker',
     description:
       'Toggle full-auto mode — no confirmation prompts until you run /clanker again. Recursive deletes still confirm.',
+    // An in-memory approval-mode flag that touches no backend state. Mid-turn is
+    // exactly when it is wanted: the agent is asking for confirmations now.
+    availableWhileStreaming: true,
   },
 ];

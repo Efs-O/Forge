@@ -582,7 +582,8 @@ describe('AgentLoop', () => {
   it('reports context growth once per tool round instead of only at the end of the turn', async () => {
     // The ctx bar and the HalluMeter bridge used to sit frozen for the whole
     // turn: a run that pulled tens of thousands of tokens through several tool
-    // rounds showed the pre-turn number until it finished.
+    // rounds showed the pre-turn number until it finished. The tick now rides
+    // the server's usage frame, because that is the only thing the bar shows.
     let round = 0;
     streamModelChatCompletion.mockImplementation(
       (
@@ -593,9 +594,19 @@ describe('AgentLoop', () => {
           onToken: (token: string) => void;
           onDone: (reason: string | null) => void;
           onToolCalls: (calls: unknown[] | null) => void;
+          onUsage?: (usage: {
+            prompt_tokens: number;
+            completion_tokens: number;
+            total_tokens: number;
+          }) => void;
         },
       ) => {
         round++;
+        handlers.onUsage?.({
+          prompt_tokens: 1000 * round,
+          completion_tokens: 10,
+          total_tokens: 1000 * round + 10,
+        });
         if (round <= 2) {
           handlers.onToolCalls([
             {
@@ -631,7 +642,13 @@ describe('AgentLoop', () => {
 
     await loop.runTurn(conv, config.models[0]!, 'read two files');
 
-    // Two tool rounds plus the final response, all scoped to this conversation.
-    expect(ticks).toEqual(['conv-1', 'conv-1', 'conv-1']);
+    // One tick per usage frame (three rounds) plus the end-of-turn publish,
+    // all scoped to this conversation.
+    expect(ticks).toEqual(['conv-1', 'conv-1', 'conv-1', 'conv-1']);
+    // The conversation carries the last request's counters, which is what every
+    // context display reads.
+    expect(conv.last_input_tokens).toBe(3000);
+    expect(conv.last_output_tokens).toBe(10);
+    expect(conv.model_request_count).toBe(3);
   });
 });

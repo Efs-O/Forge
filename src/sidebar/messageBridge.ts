@@ -286,6 +286,12 @@ export interface SendMsg {
   /** Set by the standby-prompt queue so it stays with the conversation that queued it. */
   conversationId?: string;
 }
+export interface SteerMsg {
+  type: 'steer';
+  text: string;
+  attachments?: AttachmentData[];
+  conversationId: string;
+}
 export interface CancelMsg {
   type: 'cancel';
 }
@@ -388,6 +394,7 @@ export interface WebviewDiagnosticMsg {
 
 export type WebviewToHost =
   | SendMsg
+  | SteerMsg
   | CancelMsg
   | SwitchModelMsg
   | WebviewReadyMsg

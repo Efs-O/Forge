@@ -37,7 +37,6 @@ export interface ConversationTabsDeps {
   workspaceState: vscode.Memento;
   /** True while any conversation is streaming — clearing then would race it. */
   isStreaming: () => boolean;
-  forgetBudget: (convId: string) => void;
   getConfig: () => ForgeConfig;
   getSidebar: () => SidebarRuntime;
   setSidebar: (next: SidebarRuntime) => void;
@@ -97,8 +96,10 @@ export class ConversationTabs {
   clearActive(): void {
     if (this.deps.isStreaming()) return;
     const conv = this.active();
+    // opClearMessages also drops the measured context counters, so the token
+    // bar and the HalluMeter bridge fall back to 0 rather than describing a
+    // transcript that no longer exists.
     opClearMessages(conv);
-    this.deps.forgetBudget(conv.id);
     this.deps.failureTracker.reset();
     this.deps.refreshUi();
   }

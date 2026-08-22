@@ -164,6 +164,39 @@ describe('webview App reducer — transcript rows', () => {
     ]);
   });
 
+  it('does not replace live reasoning with a stale session snapshot', () => {
+    let state = appModule.reducer(appModule.initialState, {
+      type: 'GENERATION_STARTED',
+      convId: 'tab-1',
+    });
+    state = appModule.reducer(state, {
+      type: 'REASONING_TOKEN',
+      text: 'A long trace that is still streaming.',
+      convId: 'tab-1',
+    });
+    const live = state.messagesById['tab-1']![0]!;
+
+    state = appModule.reducer(state, {
+      type: 'SESSION_SYNC',
+      activeId: 'tab-1',
+      tabs: [
+        {
+          id: 'tab-1',
+          title: 'Chat',
+          createdAt: 1,
+          updatedAt: 2,
+          messageCount: 0,
+          streaming: true,
+        },
+      ],
+      history: [],
+      // This snapshot was created before the latest reasoning tokens arrived.
+      messagesById: { 'tab-1': [] },
+    });
+
+    expect(state.messagesById['tab-1']).toEqual([live]);
+  });
+
   describe('checkpoint bar visibility', () => {
     function pendingIn(state: AppModule['initialState'], convId: string): boolean {
       return appModule.selectCheckpointPending({ ...state, activeConversationId: convId });

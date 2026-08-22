@@ -6,6 +6,7 @@ import {
   estimateTokens,
   perSlotContext,
   reasoningReserve,
+  reportedContextTokens,
   SYSTEM_AND_TEMPLATE_OVERHEAD,
 } from '../../src/util/contextBudget';
 
@@ -112,5 +113,22 @@ describe('computeContextBudget', () => {
     });
     expect(budget.headroom).toBe(0);
     expect(budget.outputRoom).toBe(0);
+  });
+});
+
+describe('reportedContextTokens', () => {
+  it('sums prompt and completion, because the completion becomes prompt next round', () => {
+    expect(reportedContextTokens({ last_input_tokens: 12_000, last_output_tokens: 345 })).toBe(
+      12_345,
+    );
+  });
+
+  it('is 0 before any response, rather than falling back to an estimate', () => {
+    expect(reportedContextTokens({})).toBe(0);
+  });
+
+  it('tolerates a half-populated record from an older session file', () => {
+    expect(reportedContextTokens({ last_input_tokens: 900 })).toBe(900);
+    expect(reportedContextTokens({ last_output_tokens: 40 })).toBe(40);
   });
 });

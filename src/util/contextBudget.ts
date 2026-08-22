@@ -2,13 +2,44 @@ import type { ChatMessage } from '../llm/types';
 import type { ModelConfig, LlamaServerConfig } from '../config/types';
 
 /**
- * Context accounting shared by the sidebar's token bar and the agent loop.
+ * Context accounting for the agent loop and the sidebar's token bar.
  *
- * This lived privately inside SidebarProvider, where it could only ever be
- * displayed. The agent loop needs the same numbers to answer a question the
- * display never asked: is there room left for what the model is about to
- * generate? See TOOL_CALL_TRUNCATION_PLAN.md.
+ * Two distinct jobs live here, and confusing them is what the token bar used to
+ * do:
+ *
+ * - MEASURING THE LAST REQUEST — `reportedContextTokens`. Provider-reported,
+ *   exact, and the only thing the token bar, the status bar, the HalluMeter
+ *   bridge, and the compaction trigger are allowed to display or act on.
+ * - PREDICTING THE NEXT REQUEST — `estimateTokens` / `computeContextBudget`.
+ *   A chars-per-token approximation, because the request has not been sent and
+ *   nobody has tokenized it yet. Its only consumer is the output budget that
+ *   sizes `max_tokens` (see TOOL_CALL_TRUNCATION_PLAN.md). It must never reach
+ *   a display: a bar that reads 0.85 when the truth is 0.95 is worse than no
+ *   bar at all.
  */
+
+/** The usage counters a conversation carries; structural so util stays leaf. */
+export interface ReportedUsage {
+  /** Prompt tokens in the most recent model request. */
+  last_input_tokens?: number;
+  /** Completion tokens in the most recent model request. */
+  last_output_tokens?: number;
+}
+
+/**
+ * Context the model actually holds, as the inference server reported it.
+ *
+ * prompt + completion, because the completion the server just generated becomes
+ * prompt on the next round. Reading `prompt_tokens` alone under-reported by a
+ * whole response — thousands of tokens on a thinking model — and that number
+ * fed the auto-compaction trigger.
+ *
+ * 0 before the first response of a conversation, which callers render as
+ * `0 / max` rather than substituting a guess.
+ */
+export function reportedContextTokens(conv: ReportedUsage): number {
+  return Math.max(0, (conv.last_input_tokens ?? 0) + (conv.last_output_tokens ?? 0));
+}
 
 /**
  * Chars-per-token used for prompt estimates.

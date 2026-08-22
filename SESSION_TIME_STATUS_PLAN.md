@@ -12,7 +12,7 @@ switched or VS Code is reopened.
 The bottom status bar contains the existing Forge state item plus session metrics:
 
 ```text
-$(pulse) Forge: generating    $(history) 00:12:34    $(clock) 19:42:08
+$(pulse) Forge: generating    $(timer) 00:12:34  $(layers) ctx 28k · session out 3.1k    $(clock) 19:42:08
 ```
 
 - The existing Forge item continues to report stopped, ready, generating, and
@@ -24,12 +24,13 @@ $(pulse) Forge: generating    $(history) 00:12:34    $(clock) 19:42:08
 - A session can continue accumulating time while it runs in the background;
   the selected tab controls only which total is displayed.
 - Existing conversations without the new fields start at `00:00:00`.
-- A compact token counter may sit beside the timer, for example
-  `$(symbol-number) 12.4k in / 3.1k out`; its tooltip shows exact totals.
+- A compact token counter shows the latest request context and cumulative
+  session output, for example `$(layers) ctx 28k · session out 3.1k`.
 
 The token counter should remain compact rather than adding a wide status item.
-Exact input/output values belong in the tooltip and can also be available
-through session details later.
+The tooltip separately shows current request context/output, cumulative session
+input/output, and the number of model requests. This avoids presenting the
+cumulative input total as if it were the current context.
 
 Each open conversation tab also shows its accumulated active-agent time as a
 compact `HH:MM:SS` badge. This makes switching sessions immediately reveal the
@@ -61,6 +62,9 @@ active_time_ms?: number;
 active_started_at?: number;
 input_tokens?: number;
 output_tokens?: number;
+last_input_tokens?: number;
+last_output_tokens?: number;
+model_request_count?: number;
 ```
 
 The fields remain optional so existing `workspaceState` records migrate without
@@ -80,6 +84,8 @@ Lifecycle:
 5. After each model request reports usage, add its `prompt_tokens` to
    `input_tokens` and its `completion_tokens` to `output_tokens`, then persist
    the conversation through the existing session persistence path.
+   Also retain the latest request's input/output values and increment the
+   request count for the status-bar context display.
 
 Timers must calculate from `Date.now()` rather than incrementing once per
 interval, so delayed JavaScript timers do not introduce drift.

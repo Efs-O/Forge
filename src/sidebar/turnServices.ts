@@ -47,8 +47,7 @@ export interface TurnServices {
   getConfigPath?: () => string;
   capabilities: (model: ModelConfig, baseUrl: string) => Promise<RuntimeModelCapabilities>;
   warnOnce: (key: string, message: string) => void;
-  onContextChanged: (convId: string, promptChanged: boolean) => void;
-  onExactContextTokens: (convId: string, usedTokens: number) => void;
+  onContextChanged: (convId: string) => void;
   onUsage: (conv: ConversationRuntime, inputTokens: number, outputTokens: number) => void;
   /** Persists a transcript mutation immediately, including an in-flight turn. */
   onTranscriptChanged: (conv: ConversationRuntime) => void;

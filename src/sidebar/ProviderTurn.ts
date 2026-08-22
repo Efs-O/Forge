@@ -102,8 +102,12 @@ export async function runCloudProviderTurn(
   try {
     await ctx.runModelTurn(baseUrl, conv, model, activeFile, ctrl, postC, apiKey, checkpoint);
   } catch (err) {
-    log.error(`[AgentLoop] ${model.provider} agent loop error: ${(err as Error).message}`);
-    postC({ type: 'error', message: (err as Error).message });
+    if (ctrl.signal.aborted) {
+      postC({ type: 'done', finishReason: 'cancelled' });
+    } else {
+      log.error(`[AgentLoop] ${model.provider} agent loop error: ${(err as Error).message}`);
+      postC({ type: 'error', message: (err as Error).message });
+    }
   } finally {
     finishTurn(ctx, conv, model, checkpoint, postC, false);
   }
@@ -154,9 +158,13 @@ export async function runLocalProviderTurn(
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    log.error(`[AgentLoop] ${model.provider} chat failed model=${model.name}: ${message}`);
-    ctx.events.onBackendError?.(message);
-    postC({ type: 'error', message });
+    if (ctrl.signal.aborted) {
+      postC({ type: 'done', finishReason: 'cancelled' });
+    } else {
+      log.error(`[AgentLoop] ${model.provider} chat failed model=${model.name}: ${message}`);
+      ctx.events.onBackendError?.(message);
+      postC({ type: 'error', message });
+    }
   } finally {
     finishTurn(ctx, conv, model, checkpoint, postC, true);
   }

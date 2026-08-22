@@ -1,15 +1,24 @@
 /**
  * Status bar for the selected conversation's active time and model usage.
  * The timer is active-agent time: model work and tools, excluding approvals.
+ *
+ * Every token here is provider-reported. `contextTokens` is the same
+ * `reportedContextTokens` value the sidebar bar and the HalluMeter bridge show,
+ * so the two displays cannot disagree.
  */
 
 import * as vscode from 'vscode';
+import { formatTokens, formatExactTokens } from '../util/formatTokens';
 
 export interface SessionTimeSnapshot {
   activeMs: number;
   inputTokens?: number;
   outputTokens?: number;
+  /** Prompt + completion of the last request: the context now in the slot. */
   contextTokens?: number;
+  /** Prompt half of that last request. */
+  currentInputTokens?: number;
+  /** Completion half of that last request. */
   currentOutputTokens?: number;
   requestCount?: number;
 }
@@ -35,6 +44,7 @@ export class SessionTimeStatusBar implements vscode.Disposable {
       snapshot.inputTokens ?? '',
       snapshot.outputTokens ?? '',
       snapshot.contextTokens ?? '',
+      snapshot.currentInputTokens ?? '',
       snapshot.currentOutputTokens ?? '',
       snapshot.requestCount ?? '',
     ].join('|');
@@ -44,10 +54,10 @@ export class SessionTimeStatusBar implements vscode.Disposable {
     this.item.tooltip = [
       'Forge session usage',
       `Active agent time: ${formatSessionDuration(activeMs)} (approval waits excluded)`,
-      `Current request context: ${formatExactTokenCount(snapshot.contextTokens)}`,
-      `Current request output: ${formatExactTokenCount(snapshot.currentOutputTokens)}`,
-      `Session input processed: ${formatExactTokenCount(snapshot.inputTokens)}`,
-      `Session output generated: ${formatExactTokenCount(snapshot.outputTokens)}`,
+      `Context in use: ${formatExactTokens(snapshot.contextTokens)}`,
+      `Last request: ${formatExactTokens(snapshot.currentInputTokens)} prompt + ${formatExactTokens(snapshot.currentOutputTokens)} completion`,
+      `Session input processed: ${formatExactTokens(snapshot.inputTokens)}`,
+      `Session output generated: ${formatExactTokens(snapshot.outputTokens)}`,
       `Model requests: ${snapshot.requestCount ?? 0}`,
     ].join('\n');
     this.item.show();
@@ -68,21 +78,5 @@ export function formatSessionDuration(ms: number): string {
 }
 
 export function formatSessionStatus(snapshot: SessionTimeSnapshot): string {
-  return `$(timer) ${formatSessionDuration(snapshot.activeMs)}  $(layers) ctx ${formatTokenCount(snapshot.contextTokens)} · session out ${formatTokenCount(snapshot.outputTokens)}`;
-}
-
-export function formatTokenCount(value: number | undefined): string {
-  if (value === undefined) return '—';
-  if (value < 1000) return String(Math.max(0, Math.floor(value)));
-  if (value < 1_000_000) return `${trimUnit(value / 1_000)}k`;
-  if (value < 1_000_000_000) return `${trimUnit(value / 1_000_000)}M`;
-  return `${trimUnit(value / 1_000_000_000)}B`;
-}
-
-function trimUnit(value: number): string {
-  return value >= 100 ? Math.round(value).toString() : value.toFixed(1).replace(/\.0$/, '');
-}
-
-function formatExactTokenCount(value: number | undefined): string {
-  return value === undefined ? 'unavailable' : Math.max(0, Math.floor(value)).toLocaleString();
+  return `$(timer) ${formatSessionDuration(snapshot.activeMs)}  $(layers) ctx ${formatTokens(snapshot.contextTokens)} · session out ${formatTokens(snapshot.outputTokens)}`;
 }

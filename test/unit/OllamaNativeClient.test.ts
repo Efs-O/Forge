@@ -82,6 +82,57 @@ describe('streamOllamaChatCompletion', () => {
     vi.unstubAllGlobals();
   });
 
+  it('forwards Ollama token counters as OpenAI-shaped usage', async () => {
+    // Ollama has no stream_options.include_usage; the counts ride the final
+    // frame. Without this every context display reads 0 forever on Ollama,
+    // because none of them will substitute an estimate.
+    const line = JSON.stringify({
+      message: { content: 'ok' },
+      done: true,
+      done_reason: 'stop',
+      prompt_eval_count: 1200,
+      eval_count: 34,
+    });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, body: new Response(`${line}
+`).body });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const usage = vi.fn();
+    await streamOllamaChatCompletion('http://127.0.0.1:11434', baseRequest, baseModel, {
+      onToken: vi.fn(),
+      onDone: vi.fn(),
+      onError: vi.fn(),
+      onToolCalls: vi.fn(),
+      onUsage: usage,
+    });
+
+    expect(usage).toHaveBeenCalledWith({
+      prompt_tokens: 1200,
+      completion_tokens: 34,
+      total_tokens: 1234,
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it('reports no usage when the final frame omits the counters', async () => {
+    const line = JSON.stringify({ message: { content: 'ok' }, done: true, done_reason: 'stop' });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, body: new Response(`${line}
+`).body });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const usage = vi.fn();
+    await streamOllamaChatCompletion('http://127.0.0.1:11434', baseRequest, baseModel, {
+      onToken: vi.fn(),
+      onDone: vi.fn(),
+      onError: vi.fn(),
+      onToolCalls: vi.fn(),
+      onUsage: usage,
+    });
+
+    expect(usage).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
   it('submits an unlisted cloud alias exactly and tolerates a normalized response model', async () => {
     const cloudId = 'qwen3-coder:480b-cloud';
     const line = JSON.stringify({

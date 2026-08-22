@@ -147,6 +147,22 @@ export function opClearMessages(conv: ConversationRuntime): void {
   conv.displayDiffs = [];
   conv.title = 'Chat';
   conv.updatedAt = Date.now();
+  opResetReportedContext(conv);
+}
+
+/**
+ * Forget the last request's measured context.
+ *
+ * Called wherever the prompt the model will see stops matching the one that was
+ * measured — clearing a conversation, or compacting it. The token bar, the
+ * status bar and the HalluMeter bridge all read these two counters, so leaving
+ * them in place after a /compact left every display insisting the window was
+ * still full. They read 0 (bar shows `0 / max`) until the next response
+ * reports real numbers; the session totals are cumulative and are not touched.
+ */
+export function opResetReportedContext(conv: ConversationRuntime): void {
+  delete conv.last_input_tokens;
+  delete conv.last_output_tokens;
 }
 
 /**

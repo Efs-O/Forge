@@ -23,13 +23,15 @@ afterEach(() => {
 });
 
 describe('QueuedPromptRow', () => {
-  it('shows the queued prompt and removes it only when Cancel is clicked', () => {
+  it('shows Steer and Cancel actions beside the queued message', () => {
+    const onSteer = vi.fn();
     const onCancel = vi.fn();
     act(() => {
       root.render(
         React.createElement(QueuedPromptRow, {
           text: 'Run the tests after this task.',
           attachmentCount: 1,
+          onSteer,
           onCancel,
         }),
       );
@@ -37,7 +39,12 @@ describe('QueuedPromptRow', () => {
 
     expect(container.textContent).toContain('Run the tests after this task.');
     expect(container.textContent).toContain('Queued · 1 attachment');
-    act(() => container.querySelector<HTMLButtonElement>('button')!.click());
+    const buttons = container.querySelectorAll<HTMLButtonElement>('button');
+    expect(Array.from(buttons, (button) => button.textContent)).toEqual(['Steer', 'Cancel']);
+    act(() => buttons[0]!.click());
+    expect(onSteer).toHaveBeenCalledOnce();
+    expect(onCancel).not.toHaveBeenCalled();
+    act(() => buttons[1]!.click());
     expect(onCancel).toHaveBeenCalledOnce();
   });
 });

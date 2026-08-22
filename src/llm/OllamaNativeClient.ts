@@ -27,6 +27,28 @@ interface OllamaStreamChunk {
   done?: boolean;
   done_reason?: string;
   error?: string;
+  /** Ollama's own token counters, present on the `done: true` frame. */
+  prompt_eval_count?: number;
+  eval_count?: number;
+}
+
+/**
+ * Forward Ollama's token counters in the OpenAI `usage` shape.
+ *
+ * Ollama has no `stream_options.include_usage`; it puts the counts on the final
+ * frame instead. Without this every context display — token bar, status bar,
+ * HalluMeter bridge — and the auto-compaction trigger read 0 forever on an
+ * Ollama model, because all of them refuse to substitute an estimate.
+ */
+function reportUsage(chunk: OllamaStreamChunk, handlers: StreamHandlers): void {
+  const prompt = chunk.prompt_eval_count;
+  const completion = chunk.eval_count;
+  if (!Number.isFinite(prompt) || !Number.isFinite(completion)) return;
+  handlers.onUsage?.({
+    prompt_tokens: prompt as number,
+    completion_tokens: completion as number,
+    total_tokens: (prompt as number) + (completion as number),
+  });
 }
 
 interface OllamaChatMessage {
@@ -287,6 +309,7 @@ export async function streamOllamaChatCompletion(
 
         if (chunk.done) {
           flushToolCalls(toolAccum, handlers.onToolCalls);
+          reportUsage(chunk, handlers);
           handlers.onDone(chunk.done_reason ?? null);
           return;
         }
@@ -309,6 +332,7 @@ export async function streamOllamaChatCompletion(
         accumulateToolCalls(trailing.message?.tool_calls, toolAccum);
         if (trailing.done) {
           flushToolCalls(toolAccum, handlers.onToolCalls);
+          reportUsage(trailing, handlers);
           handlers.onDone(trailing.done_reason ?? null);
           return;
         }

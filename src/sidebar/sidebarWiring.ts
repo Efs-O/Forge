@@ -25,6 +25,7 @@ import { SlashCommandHandler } from './SlashCommandHandler';
 import { ContextBudgetPublisher } from './ContextBudgetPublisher';
 import { ConversationTabs } from './ConversationTabs';
 import { SendPipeline } from './SendPipeline';
+import { opResetReportedContext } from './ConversationOps';
 
 /** What the provider lends its collaborators. */
 export interface SidebarHost {
@@ -106,7 +107,6 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
   const budget = new ContextBudgetPublisher({
     getConfig: host.getConfig,
     getSidebar: host.getSidebar,
-    toolRegistry,
     post: host.post,
     baseOf: host.baseOf,
     autoCompact: host.autoCompact,
@@ -127,7 +127,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     getActiveConv: host.getActive,
     persistSession: host.persistSession,
     postSessionSync: host.postSessionSync,
-    invalidateExactTokenBudget: () => budget.forget(host.getActive().id),
+    invalidateExactTokenBudget: () => opResetReportedContext(host.getActive()),
     postTokenBudget: () => host.postTokenBudget(),
     runPromptToMarkdown: (text, conversationId) =>
       agentLoop.runPromptToMarkdown(text, conversationId),
@@ -143,12 +143,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
 
   // Keeps the ctx bar and the HalluMeter bridge live during a turn instead of
   // frozen until it ends. Fired once per tool round, never per token.
-  agentLoop.setContextChangedListener((convId, promptChanged) =>
-    budget.onTurnContextChanged(convId, promptChanged),
-  );
-  agentLoop.setExactContextTokensListener((convId, usedTokens) =>
-    budget.publishExact(convId, usedTokens),
-  );
+  agentLoop.setContextChangedListener((convId) => budget.onTurnContextChanged(convId));
   agentLoop.setTranscriptChangedListener(() => {
     host.persistSession();
     host.postSessionSync();
@@ -171,7 +166,6 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
   const tabs = new ConversationTabs({
     workspaceState,
     isStreaming: () => agentLoop.streaming,
-    forgetBudget: (convId) => budget.forget(convId),
     getConfig: host.getConfig,
     getSidebar: host.getSidebar,
     setSidebar: host.setSidebar,

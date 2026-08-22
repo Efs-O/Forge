@@ -253,6 +253,4 @@
   border-top: none;
   border-radius: var(--forge-radius-sm);
   margin: 2px 0 4px 16px;
-  max-height: 280px;
-  overflow-y: auto;
 }

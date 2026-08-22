@@ -263,9 +263,22 @@ export function reducer(state: State, action: Action): State {
       return { ...state, clankerMode: action.enabled };
 
     case 'SESSION_SYNC': {
+      const hostStreaming = action.tabs.filter((tab) => tab.streaming).map((tab) => tab.id);
+      const liveConversationIds = new Set([...state.streamingIds, ...hostStreaming]);
       const messagesById: Record<string, AppMessage[]> = {};
       for (const [id, rows] of Object.entries(action.messagesById)) {
-        messagesById[id] = mergeSyncedMessages(state.messagesById[id] ?? [], rows);
+        const local = state.messagesById[id] ?? [];
+        // Stream tokens and tool events are the newest presentation state. A
+        // periodic host checkpoint can have been serialized before the latest
+        // webview events arrive; reconciling that older snapshot used to make
+        // an open Thinking trace shrink or disappear until the final sync.
+        // Hydrate an empty/restored webview, but never replace an established
+        // live transcript. DONE removes the id so the settled sync becomes
+        // authoritative again.
+        messagesById[id] =
+          liveConversationIds.has(id) && local.length > 0
+            ? local
+            : mergeSyncedMessages(local, rows);
       }
       // A closed tab can never show its bar again, so drop its pending id rather
       // than letting the set grow for the lifetime of the webview.
@@ -276,7 +289,6 @@ export function reducer(state: State, action: Action): State {
       const pending = new Set([...state.checkpointPendingIds].filter((id) => openIds.has(id)));
       // A restored webview may have missed generationStarted. Recover host-busy
       // tabs without clearing newer local starts; DONE remains the end signal.
-      const hostStreaming = action.tabs.filter((tab) => tab.streaming).map((tab) => tab.id);
       return {
         ...state,
         sessionHydrated: true,

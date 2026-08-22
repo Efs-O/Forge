@@ -67,18 +67,16 @@ export class AgentLoop {
    * after construction; without it the session timer is a no-op.
    */
   private conversationLookup: ((id: string) => ConversationRuntime | undefined) | null = null;
-  private onContextChanged?: (convId: string, promptChanged: boolean) => void;
-  private onExactContextTokens?: (convId: string, usedTokens: number) => void;
+  private onContextChanged?: (convId: string) => void;
   private onTranscriptChanged?: (convId: string) => void;
 
   /**
-   * Registers the mid-turn context-growth listener. A setter rather than an
-   * 18th constructor parameter. Fired once per tool round (after the round's
-   * messages have landed on the conversation) and once when the turn's final
-   * response completes — never per token, because recomputing the budget walks
-   * the whole transcript and serializes every tool definition.
+   * Registers the mid-turn context listener. A setter rather than an 18th
+   * constructor parameter. Fired once per round, when the server reports that
+   * round's token usage, and once more when the turn ends — never per token,
+   * because publishing writes the HalluMeter bridge synchronously.
    */
-  setContextChangedListener(listener: (convId: string, promptChanged: boolean) => void): void {
+  setContextChangedListener(listener: (convId: string) => void): void {
     this.onContextChanged = listener;
   }
 
@@ -99,11 +97,6 @@ export class AgentLoop {
   /** Restore unfinished intervals after a VS Code reload. Call once at startup. */
   restoreSessionTimers(session: SidebarRuntime): void {
     this.sessionTimer.restoreUnfinishedIntervals(session);
-  }
-
-  /** Receives llama-server's execution-side prompt token count. */
-  setExactContextTokensListener(listener: (convId: string, usedTokens: number) => void): void {
-    this.onExactContextTokens = listener;
   }
 
   /** Snapshots transcript mutations while a turn is still in progress. */
@@ -240,8 +233,7 @@ export class AgentLoop {
       warnOnce: (key, message) => this.warnOnce(key, message),
       // Wrapped rather than passed: both listeners are registered after
       // construction, so a snapshot taken here would capture undefined.
-      onContextChanged: (convId, promptChanged) => this.onContextChanged?.(convId, promptChanged),
-      onExactContextTokens: (convId, used) => this.onExactContextTokens?.(convId, used),
+      onContextChanged: (convId) => this.onContextChanged?.(convId),
       onUsage: (conv, inputTokens, outputTokens) => {
         conv.input_tokens = (conv.input_tokens ?? 0) + inputTokens;
         conv.output_tokens = (conv.output_tokens ?? 0) + outputTokens;
@@ -302,6 +294,13 @@ export class AgentLoop {
     this.approvals.cancelConversation(convId);
     if (!convId || this.promptRunConversationId === convId) this.promptRunCtrl?.abort();
     return this.lifecycle.cancel(convId);
+  }
+
+  /** Interrupt a turn for steering without unloading its backend/model. */
+  interrupt(convId: string): Promise<void> {
+    this.approvals.cancelConversation(convId);
+    if (this.promptRunConversationId === convId) this.promptRunCtrl?.abort();
+    return this.lifecycle.interrupt(convId);
   }
 
   /** Wait for cancelled turns to release their backend/delegation resources.

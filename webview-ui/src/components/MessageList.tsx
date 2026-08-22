@@ -55,6 +55,7 @@ interface Props {
   messages: AppMessage[];
   queuedPrompts: Array<{ id: string; text: string; attachments: unknown[] }>;
   onCancelQueuedPrompt: (id: string) => void;
+  onSteerQueuedPrompt: (id: string) => void;
   streaming: boolean;
   generating: boolean;
   /** Active conversation/tab id. A change means the user switched sessions, which
@@ -69,6 +70,7 @@ export function MessageList({
   messages,
   queuedPrompts,
   onCancelQueuedPrompt,
+  onSteerQueuedPrompt,
   streaming,
   generating,
   conversationId,
@@ -155,6 +157,7 @@ export function MessageList({
           key={prompt.id}
           text={prompt.text}
           attachmentCount={prompt.attachments.length}
+          onSteer={() => onSteerQueuedPrompt(prompt.id)}
           onCancel={() => onCancelQueuedPrompt(prompt.id)}
         />
       ))}

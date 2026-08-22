@@ -70,8 +70,7 @@ export interface ModelTurnContext {
   capabilities: (model: ModelConfig, baseUrl: string) => Promise<RuntimeModelCapabilities>;
   /** Shows a warning at most once per key, for the life of the session. */
   warnOnce: (key: string, message: string) => void;
-  onContextChanged?: (convId: string, promptChanged: boolean) => void;
-  onExactContextTokens?: (convId: string, usedTokens: number) => void;
+  onContextChanged?: (convId: string) => void;
   onUsage?: (conv: ConversationRuntime, inputTokens: number, outputTokens: number) => void;
   onTranscriptChanged?: (conv: ConversationRuntime) => void;
 }
@@ -182,7 +181,7 @@ export async function runModelTurn(
       maxRounds,
       nativeTools,
       stripAllTools: useStrip || model.strip_tools === true,
-      includeUsage: model.provider !== 'ollama',
+      includeUsage: true,
       canUseThinkingKwargs: thinkingKwargs,
       stripThinkingChannels,
       failureTracker: ctx.failureTracker,
@@ -230,9 +229,9 @@ export async function runModelTurn(
             displayDiffs.push(diff);
           },
         );
-        // A round of file reads and search results can add tens of thousands of
-        // tokens. Report it now rather than at the end of the turn.
-        ctx.onContextChanged?.(conv.id, true);
+        // The token bar reports measured context, not a projection, so a tool
+        // result does not move it — the next round's usage frame does. The
+        // tick therefore lives in `onUsage` below.
       },
       onMessagesChanged: () => ctx.onTranscriptChanged?.(conv),
       onToken: (text) => postC({ type: 'token', text }),
@@ -252,11 +251,12 @@ export async function runModelTurn(
           `Forge: llama-server rejected this model's native tool-call JSON. Retrying with Forge's JSON fallback tool format.`,
         ),
       onUsage: (usage) => {
+        // The server's own slot counters, covering prompt evaluation and
+        // generation including hidden thinking. Every context display reads
+        // what this writes, so publish the bar from here: an agentic turn
+        // reports usage once per round and the bar stays live mid-turn.
         ctx.onUsage?.(conv, usage.prompt_tokens, usage.completion_tokens);
-        if (model.provider !== undefined && model.provider !== 'llama.cpp') return;
-        // The slot advances through prompt evaluation and generation,
-        // including hidden thinking, so total_tokens matches its counter.
-        ctx.onExactContextTokens?.(conv.id, usage.total_tokens);
+        ctx.onContextChanged?.(conv.id);
       },
       // A status line, not an error: the turn continues and the model is being
       // asked for the same write in chunks.
@@ -275,11 +275,9 @@ export async function runModelTurn(
         }).outputRoom || undefined,
     }),
   );
-  // Keep llama-server's exact prompt+completion count after the final round.
-  // Replacing it here with a character estimate made the bar jump away from
-  // the server as soon as a response landed. Tool dispatches still invalidate
-  // the count above because their results change the next request.
-  ctx.onContextChanged?.(conv.id, false);
+  // Final publish for the turn. The per-round ticks above are throttled, so
+  // the last one may have been coalesced away.
+  ctx.onContextChanged?.(conv.id);
   // Cut off by the output ceiling: the reply stopped mid-thought, so the work
   // is unfinished even though the loop returned normally.
   if (result.finishReason === 'length') {

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useReducer, useCallback, useState } from 'react';
+import React, { useEffect, useMemo, useReducer, useCallback, useRef, useState } from 'react';
 import type {
   AttachmentData,
   ForgeSlashCommandId,
@@ -50,6 +50,8 @@ export function App(): React.ReactElement {
   // Queued prompts belong in state so the user can see and cancel them before
   // Forge submits them to the extension host.
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
+  /** Prevent ordinary queue draining while a selected prompt is taking over. */
+  const steeringConversationIds = useRef(new Set<string>());
 
   useEffect(() => {
     function handler(event: MessageEvent): void {
@@ -57,6 +59,7 @@ export function App(): React.ReactElement {
       webviewDiagnostics.recordHostMessage(msg);
       switch (msg.type) {
         case 'generationStarted':
+          if (msg.conversationId) steeringConversationIds.current.delete(msg.conversationId);
           dispatch({ type: 'GENERATION_STARTED', convId: msg.conversationId });
           break;
         case 'token':
@@ -72,6 +75,7 @@ export function App(): React.ReactElement {
           dispatch({ type: 'DONE', convId: msg.conversationId });
           break;
         case 'error':
+          if (msg.conversationId) steeringConversationIds.current.delete(msg.conversationId);
           dispatch({ type: 'ERROR', message: msg.message, convId: msg.conversationId });
           break;
         case 'ready':
@@ -81,6 +85,7 @@ export function App(): React.ReactElement {
           dispatch({ type: 'BACKEND_STARTING', message: msg.message, convId: msg.conversationId });
           break;
         case 'backendDown':
+          if (msg.conversationId) steeringConversationIds.current.delete(msg.conversationId);
           dispatch({ type: 'BACKEND_DOWN', message: msg.message, convId: msg.conversationId });
           break;
         case 'models':
@@ -200,7 +205,9 @@ export function App(): React.ReactElement {
 
   useEffect(() => {
     const nextIndex = queuedPrompts.findIndex(
-      (prompt) => !state.streamingIds.has(prompt.conversationId),
+      (prompt) =>
+        !state.streamingIds.has(prompt.conversationId) &&
+        !steeringConversationIds.current.has(prompt.conversationId),
     );
     if (nextIndex < 0) return;
     const next = queuedPrompts[nextIndex];
@@ -212,6 +219,22 @@ export function App(): React.ReactElement {
   const cancelQueuedPrompt = useCallback((id: string) => {
     setQueuedPrompts((current) => current.filter((prompt) => prompt.id !== id));
   }, []);
+
+  const steerQueuedPrompt = useCallback(
+    (id: string) => {
+      const prompt = queuedPrompts.find((candidate) => candidate.id === id);
+      if (!prompt) return;
+      steeringConversationIds.current.add(prompt.conversationId);
+      setQueuedPrompts((current) => current.filter((candidate) => candidate.id !== id));
+      vscode.postMessage({
+        type: 'steer',
+        text: prompt.text,
+        attachments: prompt.attachments.length ? prompt.attachments : undefined,
+        conversationId: prompt.conversationId,
+      });
+    },
+    [queuedPrompts],
+  );
 
   const handleCancel = useCallback(() => {
     vscode.postMessage({ type: 'cancel' });
@@ -322,6 +345,7 @@ export function App(): React.ReactElement {
           (prompt) => prompt.conversationId === state.activeConversationId,
         )}
         onCancelQueuedPrompt={cancelQueuedPrompt}
+        onSteerQueuedPrompt={steerQueuedPrompt}
         streaming={streaming}
         generating={generating}
         conversationId={state.activeConversationId}

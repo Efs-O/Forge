@@ -211,6 +211,17 @@
   background: var(--vscode-list-hoverBackground, #2a2d2e);
 }
 
+/* Listed but not runnable right now (a turn is streaming). Kept visible so the
+   menu still shows what exists and says why it is unavailable. */
+.slash-item.disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.slash-item.disabled:hover {
+  background: none;
+}
+
 .slash-trigger {
   grid-column: 1;
   grid-row: 1 / span 2;

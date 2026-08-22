@@ -1,9 +1,17 @@
 /**
  * Publishes how full the model's context window is: the sidebar bar, the
- * HalluMeter bridge file, the 75% warning, and the auto-compact trigger.
+ * HalluMeter bridge file, the 85% warning, and the auto-compact trigger.
  *
  * Split out of `SidebarProvider`. All of it hangs off one number, and all of it
  * has to agree about which conversation and which model that number describes.
+ *
+ * That number is `reportedContextTokens(conv)` — prompt + completion as the
+ * inference server counted them. This used to fall back to a chars-per-token
+ * estimate of the transcript whenever an exact figure was missing, which meant
+ * the bar, the bridge, and the compaction trigger could all be acting on a
+ * guess whose known residual error was the whole system prompt. Before the
+ * first response there is no measurement, so `used` is 0 and the bar reads
+ * `0 / max`; it is never backfilled with an approximation.
  */
 
 import * as fs from 'fs';
@@ -13,12 +21,8 @@ import * as vscode from 'vscode';
 import type { ForgeConfig } from '../config/types';
 import type { HostToWebview } from './messageBridge';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
-import type { ToolRegistry } from '../tools/ToolRegistry';
-import { computeContextBudget, estimateToolTokens, perSlotContext } from '../util/contextBudget';
+import { perSlotContext, reportedContextTokens } from '../util/contextBudget';
 import { mergeGroupsIntoModel } from '../config/ConfigResolver';
-import { resolveToolPermissions } from '../tools/PermissionResolver';
-import { ToolBudget } from '../tools/ToolBudget';
-import { applyCompactionWindow } from './compactionWindow';
 import { getLogger } from '../util/logger';
 
 const log = getLogger();
@@ -27,7 +31,7 @@ const log = getLogger();
 const CONTEXT_TICK_THROTTLE_MS = 500;
 
 /** Fraction of the window that triggers the manual-compaction warning. */
-const WARN_AT = 0.75;
+const WARN_AT = 0.85;
 
 /** Default fraction that triggers auto-compaction when it is enabled. */
 const DEFAULT_AUTO_COMPACT_AT = 0.85;
@@ -51,13 +55,12 @@ function writeForgeBridge(model: string, usedTokens: number, maxTokens: number):
 export interface ContextBudgetDeps {
   getConfig: () => ForgeConfig;
   getSidebar: () => SidebarRuntime;
-  toolRegistry: ToolRegistry;
   post: (msg: HostToWebview) => void;
   /** Strips @profile and expands aliases to the base model name (F6). */
   baseOf: (id: string | null | undefined) => string | null;
   /** Runs the threshold-triggered compaction (and its resume). */
   autoCompact: (conv: ConversationRuntime) => Promise<void>;
-  /** Runs a user-accepted `/compact` from the 75% warning. */
+  /** Runs a user-accepted `/compact` from the 85% warning. */
   manualCompact: () => void;
 }
 
@@ -66,8 +69,6 @@ export class ContextBudgetPublisher {
   private lastTickAt = 0;
   private tickTimer: ReturnType<typeof setTimeout> | undefined;
   private pendingTickConvId: string | undefined;
-  /** llama-server's execution-side prompt count, when we have one. */
-  private readonly exactTokens = new Map<string, number>();
 
   constructor(private readonly deps: ContextBudgetDeps) {}
 
@@ -81,10 +82,6 @@ export class ContextBudgetPublisher {
     if (this.tickTimer) clearTimeout(this.tickTimer);
     this.tickTimer = undefined;
     this.pendingTickConvId = undefined;
-  }
-
-  forget(convId: string): void {
-    this.exactTokens.delete(convId);
   }
 
   /**
@@ -110,30 +107,11 @@ export class ContextBudgetPublisher {
     const activeSelection = conv.active_model ?? config.active_model;
     const activeBase = this.deps.baseOf(activeSelection);
     const activeModel = this.resolveModel(config, activeBase);
-    const allowed = resolveToolPermissions(config);
     // `max` is the PER-SLOT window: --ctx-size is the total and --parallel
     // divides it, so every n_parallel > 1 model used to report several times
     // the context it actually had, here and on the HalluMeter bridge.
-    // Count only what the turn will actually advertise. ModelTurn and WorkerLoop
-    // both narrow the permission-filtered list through ToolBudget — a `tools`
-    // allowlist, or a `tool_call_limits` entry of 0, keeps a tool's schema out of
-    // the prompt entirely. Measuring the raw registry here over-reported the
-    // baseline for every model that narrows its tools, so switching a tool off
-    // never showed up on the bar.
-    const advertised = new ToolBudget(activeModel ?? {}).filterDefinitions(
-      this.deps.toolRegistry.definitions(allowed),
-    );
-    const estimated = computeContextBudget({
-      // The retained transcript is for sidebar scrollback and persistence;
-      // account for exactly the compacted window that the turn sends to the
-      // model. This value also drives the HalluMeter bridge.
-      messages: applyCompactionWindow(conv.messages, conv.compaction),
-      toolTokens: estimateToolTokens(advertised),
-      model: activeModel,
-      server: config.llama_server,
-    });
-    const used = this.exactTokens.get(conv.id) ?? estimated.used;
-    const { max } = estimated;
+    const max = activeModel ? perSlotContext(activeModel, config.llama_server) : 0;
+    const used = reportedContextTokens(conv);
     this.deps.post({ type: 'tokenBudget', used, max });
     if (activeSelection && max > 0) {
       // Write the BASE name, not the raw selection: an `@profile` suffix would
@@ -152,17 +130,13 @@ export class ContextBudgetPublisher {
   /**
    * Mid-turn tick, throttled leading+trailing.
    *
-   * `publish` walks the model's compacted context window, serializes every tool
-   * definition, and then writes the HalluMeter bridge with a synchronous
-   * `writeFileSync`. A round of parallel tool calls can fire this several times
-   * in a few milliseconds, and doing all of that on the extension host thread
-   * each time would stall the UI it is meant to keep current.
+   * Called when the server reports usage for a round. `publish` writes the
+   * HalluMeter bridge with a synchronous `writeFileSync`, and a round of
+   * parallel tool calls can fire this several times in a few milliseconds —
+   * doing that on the extension host thread each time would stall the UI it is
+   * meant to keep current.
    */
-  onTurnContextChanged(convId: string, promptChanged: boolean): void {
-    // A tool result changed the next request. Show the estimate until
-    // llama-server evaluates it; a final response uses promptChanged=false so
-    // the server's exact prompt+completion total remains authoritative.
-    if (promptChanged) this.exactTokens.delete(convId);
+  onTurnContextChanged(convId: string): void {
     const elapsed = Date.now() - this.lastTickAt;
     if (elapsed >= CONTEXT_TICK_THROTTLE_MS) {
       this.lastTickAt = Date.now();
@@ -178,22 +152,6 @@ export class ContextBudgetPublisher {
       this.pendingTickConvId = undefined;
       if (pending) this.publishFor(pending);
     }, CONTEXT_TICK_THROTTLE_MS - elapsed);
-  }
-
-  /** llama-server's exact prompt-eval count for the request just prepared. */
-  publishExact(convId: string, usedTokens: number): void {
-    const config = this.deps.getConfig();
-    const sidebar = this.deps.getSidebar();
-    const conv = sidebar.conversations.find((candidate) => candidate.id === convId);
-    if (!conv || conv.id !== sidebar.activeConversationId) return;
-    const activeSelection = conv.active_model ?? config.active_model;
-    const activeBase = this.deps.baseOf(activeSelection);
-    const activeModel = this.resolveModel(config, activeBase);
-    const max = activeModel ? perSlotContext(activeModel, config.llama_server) : 0;
-    this.exactTokens.set(convId, usedTokens);
-    this.deps.post({ type: 'tokenBudget', used: usedTokens, max });
-    if (activeSelection && max > 0)
-      writeForgeBridge(activeBase ?? activeSelection, usedTokens, max);
   }
 
   /**
@@ -239,7 +197,7 @@ export class ContextBudgetPublisher {
       this.warningShown = true;
       void vscode.window
         .showWarningMessage(
-          'Forge: context window is 75% full — run /compact to keep the agent coherent.',
+          'Forge: context window is 85% full — run /compact to keep the agent coherent.',
           'Run /compact',
         )
         .then((choice) => {

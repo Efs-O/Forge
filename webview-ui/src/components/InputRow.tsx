@@ -15,6 +15,27 @@ interface Props {
   clankerMode: boolean;
 }
 
+const UNAVAILABLE_WHILE_STREAMING = 'Unavailable while the agent is generating.';
+
+/**
+ * Move the highlight to the next command that can actually be run, wrapping in
+ * `direction`. Returns `from` when nothing in the list is runnable, so the
+ * caller never lands on an index that Enter would ignore.
+ */
+function step(
+  commands: SlashCommand[],
+  runnable: (cmd: SlashCommand) => boolean,
+  from: number,
+  direction: 1 | -1,
+): number {
+  const count = commands.length;
+  for (let hop = 1; hop <= count; hop++) {
+    const next = (from + direction * hop + count * count) % count;
+    if (runnable(commands[next]!)) return next;
+  }
+  return from;
+}
+
 const SendIcon = (): React.ReactElement => (
   <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
     <path d="M15.854.146a.5.5 0 0 1 .11.54l-5.819 14.547a.75.75 0 0 1-1.329.124l-3.178-4.995L.643 7.184a.75.75 0 0 1 .124-1.33L15.314.037a.5.5 0 0 1 .54.11z" />
@@ -58,10 +79,18 @@ export function InputRow({
       : slashCommands.filter(
           (cmd) => cmd.trigger.includes(slashQuery) || cmd.title.toLowerCase().includes(slashQuery),
         );
-  const availableSlashMatches = streaming
-    ? slashMatches.filter((command) => command.availableWhileStreaming)
-    : slashMatches;
-  const showSlashMenu = availableSlashMatches.length > 0 && text.startsWith('/');
+  // Streaming-unsafe commands stay LISTED and are disabled instead of being
+  // filtered out. Hiding them left a menu holding a single entry, which reads
+  // as a broken menu rather than as a deliberate restriction — and gave no hint
+  // that the command exists at all or why it is unavailable right now.
+  const runnable = (cmd: SlashCommand): boolean =>
+    !streaming || cmd.availableWhileStreaming === true;
+  const showSlashMenu = slashMatches.length > 0 && text.startsWith('/');
+  const firstRunnableIndex = slashMatches.findIndex(runnable);
+  // Keyboard selection must never rest on a disabled row: Enter would silently
+  // do nothing.
+  const selected = slashMatches[selectedCommandIndex];
+  const activeIndex = selected && runnable(selected) ? selectedCommandIndex : firstRunnableIndex;
 
   useEffect(() => {
     if (prefillText === null) return;
@@ -131,19 +160,18 @@ export function InputRow({
       if (showSlashMenu) {
         if (e.key === 'ArrowDown') {
           e.preventDefault();
-          setSelectedCommandIndex((i) => (i + 1) % availableSlashMatches.length);
+          setSelectedCommandIndex((i) => step(slashMatches, runnable, i, 1));
           return;
         }
         if (e.key === 'ArrowUp') {
           e.preventDefault();
-          setSelectedCommandIndex(
-            (i) => (i - 1 + availableSlashMatches.length) % availableSlashMatches.length,
-          );
+          setSelectedCommandIndex((i) => step(slashMatches, runnable, i, -1));
           return;
         }
         if (e.key === 'Tab' || e.key === 'Enter') {
           e.preventDefault();
-          runSlashCommand(availableSlashMatches[selectedCommandIndex] ?? availableSlashMatches[0]);
+          const picked = slashMatches[activeIndex];
+          if (picked) runSlashCommand(picked);
           return;
         }
         if (e.key === 'Escape') {
@@ -157,7 +185,7 @@ export function InputRow({
         submit();
       }
     },
-    [availableSlashMatches, runSlashCommand, selectedCommandIndex, showSlashMenu, submit],
+    [activeIndex, runSlashCommand, runnable, slashMatches, showSlashMenu, submit],
   );
 
   const canSend = text.trim().length > 0 || attachments.length > 0;
@@ -169,19 +197,28 @@ export function InputRow({
     <div id="input-row">
       {showSlashMenu && (
         <div id="slash-menu" role="listbox" aria-label="Slash commands">
-          {availableSlashMatches.map((cmd, index) => (
-            <button
-              key={`${cmd.id}-${cmd.trigger}`}
-              type="button"
-              className={`slash-item${index === selectedCommandIndex ? ' selected' : ''}`}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => runSlashCommand(cmd)}
-            >
-              <span className="slash-trigger">/{cmd.trigger}</span>
-              <span className="slash-title">{cmd.title}</span>
-              <span className="slash-description">{cmd.description}</span>
-            </button>
-          ))}
+          {slashMatches.map((cmd, index) => {
+            const enabled = runnable(cmd);
+            return (
+              <button
+                key={`${cmd.id}-${cmd.trigger}`}
+                type="button"
+                disabled={!enabled}
+                title={enabled ? cmd.description : UNAVAILABLE_WHILE_STREAMING}
+                className={`slash-item${index === activeIndex ? ' selected' : ''}${
+                  enabled ? '' : ' disabled'
+                }`}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => runSlashCommand(cmd)}
+              >
+                <span className="slash-trigger">/{cmd.trigger}</span>
+                <span className="slash-title">{cmd.title}</span>
+                <span className="slash-description">
+                  {enabled ? cmd.description : UNAVAILABLE_WHILE_STREAMING}
+                </span>
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -228,7 +265,7 @@ export function InputRow({
           placeholder={placeholder}
           onChange={handleTextChange}
           onKeyDown={handleKeyDown}
-          rows={2}
+          rows={5}
         />
 
         <input
