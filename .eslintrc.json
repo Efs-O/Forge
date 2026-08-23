@@ -4,9 +4,15 @@
   "parserOptions": {
     "ecmaVersion": 2022,
     "sourceType": "module",
-    "project": ["./tsconfig.json", "./webview-ui/tsconfig.json"]
+    "project": [
+      "./tsconfig.json",
+      "./webview-ui/tsconfig.json"
+    ]
   },
-  "plugins": ["@typescript-eslint", "prettier"],
+  "plugins": [
+    "@typescript-eslint",
+    "prettier"
+  ],
   "extends": [
     "eslint:recommended",
     "plugin:@typescript-eslint/recommended",
@@ -15,9 +21,32 @@
   "rules": {
     "@typescript-eslint/no-explicit-any": "warn",
     "@typescript-eslint/explicit-function-return-type": "off",
-    "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_" }],
+    "@typescript-eslint/no-unused-vars": [
+      "error",
+      {
+        "argsIgnorePattern": "^_"
+      }
+    ],
     "no-console": "warn",
-    "no-constant-condition": ["error", { "checkLoops": false }]
+    "no-constant-condition": [
+      "error",
+      {
+        "checkLoops": false
+      }
+    ],
+    "max-lines": [
+      "error",
+      {
+        "max": 500,
+        "skipBlankLines": false,
+        "skipComments": false
+      }
+    ]
   },
-  "ignorePatterns": ["dist/", "node_modules/", "*.js", "*.mjs"]
+  "ignorePatterns": [
+    "dist/",
+    "node_modules/",
+    "*.js",
+    "*.mjs"
+  ]
 }

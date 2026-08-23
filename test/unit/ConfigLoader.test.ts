@@ -4,8 +4,13 @@ import * as path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadConfig, resolveExplicitConfigPath } from '../../src/config/ConfigLoader';
 
+const showWarningMessage = vi.fn();
+
 vi.mock('vscode', () => ({
   workspace: {},
+  window: {
+    showWarningMessage: (...args: unknown[]) => showWarningMessage(...args),
+  },
 }));
 
 const tempDirs: string[] = [];
@@ -414,6 +419,58 @@ models:
     );
     const config = loadConfig(dir);
     expect(config.models[0]?.short_name).toBe('gemma4');
+  });
+
+  /**
+   * `permissions.agents.cloud_workers` was a valid key before worker dispatch
+   * was removed. Anyone who set it must still be able to start Forge after
+   * upgrading — a config that no longer boots is the worst possible upgrade.
+   */
+  it('still boots a config carrying the deprecated cloud_workers key', () => {
+    showWarningMessage.mockClear();
+    const dir = mkTempDir();
+    fs.writeFileSync(
+      path.join(dir, 'config.yaml'),
+      `active_model: local-gguf
+llama_server:
+  binary: llama-server
+permissions:
+  agents:
+    delegate: true
+    cloud_workers: true
+models:
+  - name: local-gguf
+    provider: llama.cpp
+    gguf_path: C:/models/local.gguf
+`,
+      'utf8',
+    );
+
+    const config = loadConfig(dir);
+    expect(config.active_model).toBe('local-gguf');
+    expect(config.permissions?.agents?.delegate).toBe(true);
+    expect(showWarningMessage).toHaveBeenCalledTimes(1);
+    expect(showWarningMessage.mock.calls[0]![0]).toContain('cloud_workers');
+  });
+
+  it('says nothing when the deprecated key is absent', () => {
+    showWarningMessage.mockClear();
+    const dir = mkTempDir();
+    fs.writeFileSync(
+      path.join(dir, 'config.yaml'),
+      `active_model: local-gguf
+llama_server:
+  binary: llama-server
+models:
+  - name: local-gguf
+    provider: llama.cpp
+    gguf_path: C:/models/local.gguf
+`,
+      'utf8',
+    );
+
+    loadConfig(dir);
+    expect(showWarningMessage).not.toHaveBeenCalled();
   });
 
   it('accepts active_model that is an alias key', () => {

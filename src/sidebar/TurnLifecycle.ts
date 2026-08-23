@@ -97,7 +97,11 @@ export class TurnLifecycle {
     this.incompleteTurns.delete(convId);
   }
 
-  async stopStreaming(convId?: string, stopBackend = true): Promise<void> {
+  /** `stopBackend` defaults off: closing a tab (via `stopStreamingIfNeeded`)
+   *  must not tear down a server other tabs — or other windows, under a shared
+   *  runtime — are still using. Backend teardown belongs to BackendPool's
+   *  release/eviction path, not to ending a turn. */
+  async stopStreaming(convId?: string, stopBackend = false): Promise<void> {
     if (convId) {
       const ctrl = this.cancelControllers.get(convId);
       if (!ctrl) return;
@@ -125,8 +129,19 @@ export class TurnLifecycle {
     await Promise.all([...this.settledMap.values()]);
   }
 
+  /**
+   * The Stop button. Aborts the in-flight request and leaves the server up.
+   *
+   * This used to pass `stopBackend: true`, which SIGTERM'd llama-server on
+   * every Stop — a full model reload to cancel one generation. Under a shared
+   * runtime it was worse than that: the owning window's Stop killed the server
+   * its borrower was using, and the borrower's own Stop was saved only by
+   * `stop()` throwing on an adopted backend into a swallowed catch. Aborting
+   * the request is what actually ends generation; llama-server releases the
+   * slot when the socket closes.
+   */
   cancel(convId?: string): Promise<void> {
-    return this.beginCancellation(convId, true);
+    return this.beginCancellation(convId, false);
   }
 
   /** Abort only the active request and retain its loaded backend for steering. */

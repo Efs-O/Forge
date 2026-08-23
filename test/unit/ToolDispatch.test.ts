@@ -27,6 +27,7 @@ vi.mock('vscode', () => {
       workspaceFolders: [{ uri: { fsPath: ws } }],
       openTextDocument: vi.fn().mockResolvedValue({}),
       asRelativePath: vi.fn((s: string) => s.replace(ws + p.sep, '')),
+      getConfiguration: vi.fn(() => ({ get: vi.fn(() => false) })),
     },
     window: {
       showTextDocument: vi.fn().mockResolvedValue(undefined),
@@ -180,6 +181,25 @@ describe('ToolDispatch', () => {
     );
     expect(checkpoints.snapshotBefore).toHaveBeenCalled();
     expect(codeLens.markPending).toHaveBeenCalled();
+  });
+
+  it('does not open changed files when auto-open is disabled', async () => {
+    vi.mocked(vscode.workspace.getConfiguration).mockReturnValueOnce({
+      get: vi.fn().mockReturnValue(false),
+    } as never);
+    toolRegistry.register({
+      definition: {
+        type: 'function',
+        function: { name: 'write_file', description: 'Write a file', parameters: { type: 'object' } },
+      },
+      permission: 'write',
+      mutation: { paths: (args) => [args['path'] as string], showDiff: true },
+      handler: vi.fn().mockResolvedValue('written'),
+    });
+
+    await dispatch.dispatch([makeToolCall('write_file', { path: 'test.txt' })], allowed, [] as never);
+
+    expect(vscode.window.showTextDocument).not.toHaveBeenCalled();
   });
 
   it('publishes diff paths relative to the workspace without its folder-name prefix', async () => {
@@ -650,8 +670,6 @@ describe('ToolDispatch', () => {
         undefined,
         undefined,
         undefined,
-        undefined,
-        undefined,
         budget,
       );
 
@@ -668,8 +686,6 @@ describe('ToolDispatch', () => {
         [makeToolCall('run_terminal', { command: 'echo hi' })],
         noTerminalPermission,
         messages as never,
-        undefined,
-        undefined,
         undefined,
         undefined,
         undefined,
@@ -691,16 +707,12 @@ describe('ToolDispatch', () => {
         undefined,
         undefined,
         undefined,
-        undefined,
-        undefined,
         budget,
       );
       await dispatch.dispatch(
         [makeToolCall('run_terminal', { command: 'echo two' })],
         allowed,
         messages as never,
-        undefined,
-        undefined,
         undefined,
         undefined,
         undefined,

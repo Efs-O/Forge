@@ -1,7 +1,7 @@
 /**
  * The collaborators every kind of turn needs, assembled once by `AgentLoop`.
  *
- * Each turn module (`ModelTurn`, `CliTurn`, `WorkerTurn`, `ProviderTurn`,
+ * Each turn module (`ModelTurn`, `CliTurn`, `ProviderTurn`,
  * `PromptRun`) declares the narrower slice it actually uses; this is the
  * superset that satisfies all of them, so AgentLoop hands the same object to
  * each instead of rebuilding a bespoke context per call.
@@ -11,6 +11,7 @@ import type * as vscode from 'vscode';
 import type { ForgeConfig, ModelConfig } from '../config/types';
 import type { AttachmentData, HostToWebview } from './messageBridge';
 import type { ConversationRuntime } from './sessionTypes';
+import type { ModelTurnRequest } from './ModelTurn';
 import type { IBackendPool } from '../backend/BackendPool';
 import type { CheckpointStack, CheckpointSession } from '../checkpoint/CheckpointStack';
 import type { RuntimeModelCapabilities } from '../backend/ModelCapabilities';
@@ -20,7 +21,6 @@ import type { TemplateEngine } from '../llm/TemplateEngine';
 import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
 import type { CliAgentDriver } from '../agents/CliAgentDriver';
 import type { CliSessionRegistry } from '../agents/CliSessionRegistry';
-import type { WorkerOrchestrationService } from '../workers/WorkerOrchestrationService';
 import type { ToolApprovalService } from './ToolApprovalService';
 import type { ToolDispatch } from './ToolDispatch';
 import type { TurnLifecycle } from './TurnLifecycle';
@@ -33,7 +33,6 @@ export interface TurnServices {
   toolDispatch: ToolDispatch;
   failureTracker: ToolFailureTracker;
   approvals: ToolApprovalService;
-  workerService: WorkerOrchestrationService;
   checkpoints: CheckpointStack;
   lifecycle: TurnLifecycle;
   events: SidebarProviderEvents;
@@ -71,4 +70,26 @@ export interface TurnServices {
    * one exists, so that tab's Stop action can abort it. */
   setController: (ctrl: AbortController, conversationId?: string) => void;
   releaseController: (ctrl: AbortController) => void;
+}
+
+/**
+ * Adapt `runModelTurn`'s positional signature to the options object the turn
+ * module takes. `getServices` is called late: the services object holds this
+ * very function, so it cannot be captured while it is still being built.
+ */
+export function makeRunModelTurn(
+  getServices: () => TurnServices,
+  run: (services: TurnServices, options: ModelTurnRequest) => Promise<void>,
+): TurnServices['runModelTurn'] {
+  return (baseUrl, conv, model, activeFile, ctrl, postC, apiKey, checkpoint) =>
+    run(getServices(), {
+      baseUrl,
+      conv,
+      model,
+      activeFile,
+      ctrl,
+      postC,
+      ...(apiKey ? { apiKey } : {}),
+      checkpoint,
+    });
 }

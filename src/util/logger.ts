@@ -55,9 +55,19 @@ class Logger {
 
 export const logger = new Logger();
 
-/** No-op in v0.1 — reserved for future per-extension-instance setup. */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export function initLogger(_context: unknown): void {}
+/**
+ * Apply the `forge.logLevel` VS Code setting.
+ *
+ * The setting is contributed in package.json and appears in the settings UI,
+ * but nothing read it until 0.13.0 — a user who set it to `debug` got `info`
+ * and no indication why. Config.yaml's `log_level` still wins where present
+ * (`extension.ts` applies it after this, and again on hot reload), so this
+ * only fills the gap for the common case of a config that does not set it.
+ */
+export function initLogger(_context: unknown): void {
+  const setting = vscode.workspace.getConfiguration('forge').get<string>('logLevel');
+  if (setting && setting in LEVELS) logger.setLevel(setting as LogLevel);
+}
 
 export function getLogger(): Logger {
   return logger;

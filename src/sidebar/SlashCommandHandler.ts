@@ -15,6 +15,7 @@ import {
   activeSelectionBlock,
   formatContextBlocks,
 } from '../vscode/editorContext';
+import { deriveTitle } from './sessionTypes';
 
 export interface SlashCommandDeps extends CompactionDeps {
   getConfig: () => ForgeConfig;
@@ -77,6 +78,22 @@ export class SlashCommandHandler {
 
       case 'newChat':
         await deps.newConversation();
+        return;
+
+      case 'rename':
+        await this.renameConversation();
+        return;
+
+      case 'context':
+        await this.chooseContext();
+        return;
+
+      case 'config':
+        await vscode.commands.executeCommand('forge.openConfig');
+        return;
+
+      case 'logs':
+        await vscode.commands.executeCommand('forge.showBackendConsole');
         return;
 
       case 'clearChat':
@@ -146,6 +163,51 @@ export class SlashCommandHandler {
     if (file)
       return `Review this file. Lead with findings, then risks and test gaps.\n\n${formatContextBlocks([file])}`;
     return 'Review the current workspace changes. Start by inspecting the most relevant files or git diff. Lead with findings, then risks and test gaps.';
+  }
+
+  private async renameConversation(): Promise<void> {
+    const conversation = this.deps.getActiveConv();
+    const title = await vscode.window.showInputBox({
+      prompt: 'Rename active conversation',
+      value: conversation.title === 'Chat' ? '' : conversation.title,
+      placeHolder: 'Conversation title',
+      validateInput: (value) => (value.trim() ? undefined : 'Enter a title.'),
+    });
+    if (title === undefined) return;
+
+    conversation.title = deriveTitle(title);
+    conversation.updatedAt = Date.now();
+    this.deps.persistSession();
+    this.deps.postSessionSync();
+  }
+
+  private async chooseContext(): Promise<void> {
+    const pick = await vscode.window.showQuickPick(
+      [
+        {
+          label: 'Current File',
+          description: 'Use the active editor file as context.',
+          command: 'forge.useCurrentFile',
+        },
+        {
+          label: 'Selection',
+          description: 'Use the current editor selection as context.',
+          command: 'forge.useSelection',
+        },
+        {
+          label: 'Open Tabs',
+          description: 'Use all open editor tabs as context.',
+          command: 'forge.useOpenTabs',
+        },
+        {
+          label: 'Pick Files',
+          description: 'Choose files to use as context.',
+          command: 'forge.pickContextFiles',
+        },
+      ],
+      { title: 'Forge: Add Context', placeHolder: 'Choose context for the next answer' },
+    );
+    if (pick) await vscode.commands.executeCommand(pick.command);
   }
 
   private async initForge(): Promise<void> {

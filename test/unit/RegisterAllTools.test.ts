@@ -30,7 +30,6 @@ const EXPECTED_NATIVE_NAMES = [
   'create_branch',
   'create_directory',
   'delete_file',
-  'dispatch_workers',
   'edit_file',
   'exec_command',
   'find_files',
@@ -49,7 +48,6 @@ const EXPECTED_NATIVE_NAMES = [
   'insert_code',
   'list_directory',
   'list_memories',
-  'list_worker_models',
   'move_file',
   'open_url_in_browser',
   'query_powershell',
@@ -108,7 +106,7 @@ function makeRegistry(options: { search?: boolean; delegation?: boolean } = {}):
 }
 
 describe('registerAllTools canonical coordinator catalog', () => {
-  it('exposes the exact 50-tool native catalog when all optional wiring is present', () => {
+  it('exposes the exact 48-tool native catalog when all optional wiring is present', () => {
     const registry = makeRegistry({ search: true, delegation: true });
     expect(registry.names().sort()).toEqual(EXPECTED_NATIVE_NAMES);
     expect(
@@ -123,8 +121,6 @@ describe('registerAllTools canonical coordinator catalog', () => {
     const names = makeRegistry().names();
     expect(names).not.toContain('web_search');
     expect(names).not.toContain('ask_local_agent');
-    expect(names).not.toContain('list_worker_models');
-    expect(names).not.toContain('dispatch_workers');
     expect(names).toHaveLength(46);
   });
 });

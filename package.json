@@ -2,7 +2,7 @@
   "name": "forge-llm",
   "displayName": "Forge LLM",
   "description": "Local-LLM coding assistant — direct llama.cpp, strict tool schemas, single execute-style workflow",
-  "version": "0.12.57",
+  "version": "0.13.1",
   "publisher": "Efsoo",
   "icon": "assets/publisher-logo.png",
   "galleryBanner": {
@@ -224,10 +224,6 @@
       {
         "command": "forge.setupWizard",
         "title": "Forge: Setup Wizard"
-      },
-      {
-        "command": "forge.dispatchLocalWorkers",
-        "title": "Forge: Dispatch Workers"
       }
     ],
     "menus": {
@@ -325,6 +321,11 @@
           "type": "boolean",
           "default": true,
           "description": "Keep webview state when sidebar is hidden"
+        },
+        "forge.editor.autoOpenChangedFiles": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically open files changed by Forge in the editor"
         },
         "forge.firstRun.shown": {
           "type": "boolean",

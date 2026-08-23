@@ -1,29 +1,17 @@
 import * as vscode from 'vscode';
 import type { IBackendPool } from '../backend/BackendPool';
 import type { ForgeConfig } from '../config/types';
-import {
-  expandAlias,
-  mergeGroupsIntoModel,
-  resolveRequestModel,
-  splitModelProfile,
-} from '../config/ConfigResolver';
-import type { HostToWebview, WebviewDiagnosticMsg, WebviewToHost } from './messageBridge';
+import { expandAlias, splitModelProfile } from '../config/ConfigResolver';
+import type { HostToWebview, WebviewToHost } from './messageBridge';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
 import type { CliSessionRegistry } from '../agents/CliSessionRegistry';
-import {
-  historyMetasFromSession,
-  loadSidebarSession,
-  saveSidebarSession,
-  slimMessagesById,
-  tabMetasFromSession,
-} from './sessionTypes';
+import { loadSidebarSession, saveSidebarSession } from './sessionTypes';
 import type { AttachmentData } from './messageBridge';
 import { CheckpointStack } from '../checkpoint/CheckpointStack';
 import { ToolRegistry } from '../tools/ToolRegistry';
 import type { KeepUndoCodeLensProvider } from './KeepUndoCodeLens';
 import type { DiffDecorations } from './DiffDecorations';
 import { CheckpointReview } from './CheckpointReview';
-import type { WorkerRunRequest, WorkerRunResult } from '../workers/types';
 import { ToolFailureTracker } from '../tools/StripTools';
 import type { TemplateEngine } from '../llm/TemplateEngine';
 import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
@@ -36,15 +24,17 @@ import type { ContextBudgetPublisher } from './ContextBudgetPublisher';
 import type { ConversationTabs } from './ConversationTabs';
 import type { SendPipeline } from './SendPipeline';
 import { routeWebviewMessage } from './webviewMessageRouter';
-import { autoCompactAndResume, resumeAfterCompaction } from './CompactionService';
+import { logWebviewDiagnostic } from './webviewDiagnostics';
+import {
+  buildModelsMessage,
+  buildSessionMetrics,
+  buildSessionSyncMessage,
+} from './sidebarPayloads';
+import { runAutoCompact, runManualCompactResume } from './compactionPolicy';
+import type { CompactionPolicyDeps } from './compactionPolicy';
 import { buildWebviewHtml } from './WebviewBuilder';
 import type { IndexManager } from '../search/IndexManager';
-import { modelPickerGroup } from './ModelPickerGroups';
-import { reportedContextTokens } from '../util/contextBudget';
 import type { SessionTimeSnapshot } from '../vscode/SessionTimeStatusBar';
-import { getLogger } from '../util/logger';
-
-const log = getLogger();
 
 export type { SidebarProviderEvents };
 
@@ -183,16 +173,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return this.checkpoints.canUndo(this.sidebar.activeConversationId);
   }
 
-  async dispatchWorkerRun(request: WorkerRunRequest): Promise<WorkerRunResult> {
-    const conv = this.getActive();
-    const selected = conv.active_model ?? this.config.active_model;
-    if (!selected) throw new Error('Forge: no active coordinator model selected.');
-    const model = resolveRequestModel(this.config, selected);
-    const result = await this.agentLoop.runWorkerTurn(conv, model, request);
-    this.persistSession();
-    return result;
-  }
-
   async newConversation(): Promise<void> {
     this.tabs.create();
   }
@@ -253,27 +233,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   // ── Internal ──────────────────────────────────────────────────────────────
 
-  /**
-   * Push the model list and the current selection to the picker.
-   *
-   * Must follow every change of active conversation: `sessionSync` carries no
-   * model, and the webview's selection is only ever set from this message, so a
-   * tab switch used to leave the header showing the previous tab's model while
-   * the host had already switched to this tab's.
-   */
   private postModels(): void {
-    this.post({
-      type: 'models',
-      models: this.config.models.map((configured) => {
-        const model = mergeGroupsIntoModel(this.config, configured);
-        return {
-          name: model.name,
-          provider: model.provider ?? 'llama.cpp',
-          group: modelPickerGroup(model),
-        };
-      }),
-      active: this.config.active_model,
-    });
+    this.post(buildModelsMessage(this.config));
   }
 
   private post(msg: HostToWebview): void {
@@ -281,15 +242,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private postSessionSync(): void {
-    this.post({
-      type: 'sessionSync',
-      activeId: this.sidebar.activeConversationId,
-      tabs: tabMetasFromSession(this.sidebar, this.agentLoop.getStreamingIds(), (conversation) =>
+    this.post(
+      buildSessionSyncMessage(this.sidebar, this.agentLoop.getStreamingIds(), (conversation) =>
         this.agentLoop.getSessionActiveMs(conversation),
       ),
-      history: historyMetasFromSession(this.sidebar),
-      messagesById: slimMessagesById(this.sidebar),
-    });
+    );
   }
 
   private persistSession(): void {
@@ -307,39 +264,28 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.budget.publish(this.getActive(), evaluateThresholds);
   }
 
-  /** Threshold-triggered compaction. The resume policy lives in
-   *  CompactionService; this only supplies the runtime it needs. */
-  private async autoCompact(conv: ConversationRuntime): Promise<void> {
-    await autoCompactAndResume({
-      convId: conv.id,
+  private compactionDeps(): CompactionPolicyDeps {
+    return {
       post: (msg) => this.post(msg),
       compact: (options) => this.slashHandler.compact(options),
-      incompleteTurnReason: () => this.agentLoop.incompleteTurnReason(conv.id),
+      incompleteTurnReason: (convId) => this.agentLoop.incompleteTurnReason(convId),
+      send: (text, convId) => this.send.send(text, undefined, convId),
       resumeEnabled: this.config.auto_compact?.resume !== false,
       autoContinues: () => this.autoContinues,
       noteAutoContinue: () => {
         this.autoContinues += 1;
       },
-      // Addressed to the conversation that was compacted, not to whatever tab
-      // is active by the time the summary lands.
-      send: (text) => this.send.send(text, undefined, conv.id),
-    });
+    };
   }
 
-  private async resumeAfterManualCompact(conversationId: string): Promise<void> {
-    await resumeAfterCompaction(
-      {
-        convId: conversationId,
-        post: (msg) => this.post(msg),
-        incompleteTurnReason: () => this.agentLoop.incompleteTurnReason(conversationId),
-        resumeEnabled: true,
-        autoContinues: () => 0,
-        noteAutoContinue: () => undefined,
-        send: (text) => this.send.send(text, undefined, conversationId),
-      },
-      { automatic: false },
-    );
+  private autoCompact(conv: ConversationRuntime): Promise<void> {
+    return runAutoCompact(this.compactionDeps(), conv.id);
   }
+
+  private resumeAfterManualCompact(conversationId: string): Promise<void> {
+    return runManualCompactResume(this.compactionDeps(), conversationId);
+  }
+
   private getActive(): ConversationRuntime {
     return this.tabs.active();
   }
@@ -358,27 +304,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return this.agentLoop.getSessionActiveMs(conv);
   }
 
-  /**
-   * Feeds the status bar. `contextTokens` is deliberately the same
-   * `reportedContextTokens` value the sidebar bar and the HalluMeter bridge
-   * render: it used to be `last_input_tokens` alone, so the two displays
-   * disagreed by the size of the last completion.
-   */
   getActiveSessionMetrics(): SessionTimeSnapshot {
     const conv = this.getActive();
-    return {
-      activeMs: this.agentLoop.getSessionActiveMs(conv),
-      contextTokens: reportedContextTokens(conv),
-      ...(conv.input_tokens !== undefined ? { inputTokens: conv.input_tokens } : {}),
-      ...(conv.output_tokens !== undefined ? { outputTokens: conv.output_tokens } : {}),
-      ...(conv.last_input_tokens !== undefined
-        ? { currentInputTokens: conv.last_input_tokens }
-        : {}),
-      ...(conv.last_output_tokens !== undefined
-        ? { currentOutputTokens: conv.last_output_tokens }
-        : {}),
-      ...(conv.model_request_count !== undefined ? { requestCount: conv.model_request_count } : {}),
-    };
+    return buildSessionMetrics(conv, this.agentLoop.getSessionActiveMs(conv));
   }
 
   /** Persist the current session to workspace state. */
@@ -421,27 +349,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         runSlashCommand: (id) => void this.slashHandler.handle(id),
         openFile: (path, line, beside) => this.agentLoop.openFile(path, { line, beside }),
         resolveConfirmation: (id, approved) => this.agentLoop.resolveConfirmation(id, approved),
-        recordWebviewDiagnostic: (message) => this.recordWebviewDiagnostic(message),
+        recordWebviewDiagnostic: (message) => logWebviewDiagnostic(message),
       },
       msg,
     );
-  }
-
-  private recordWebviewDiagnostic(message: WebviewDiagnosticMsg): void {
-    const prefix = `[webview:${message.instanceId}] ${message.kind}`;
-    const summary = JSON.stringify(message.summary);
-    if (
-      message.kind === 'error' ||
-      message.kind === 'unhandledrejection' ||
-      message.kind === 'react-error'
-    ) {
-      log.error(`${prefix} message=${message.message ?? 'unknown'} summary=${summary}`);
-      if (message.stack) log.error(`${prefix} stack=${message.stack}`);
-      if (message.componentStack) log.error(`${prefix} component=${message.componentStack}`);
-      if (message.recent) log.error(`${prefix} recent=${JSON.stringify(message.recent)}`);
-      return;
-    }
-    log.info(`${prefix} summary=${summary}`);
   }
 
   async dispose(): Promise<void> {

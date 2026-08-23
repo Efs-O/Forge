@@ -2,6 +2,17 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { BackendPool } from '../../src/backend/BackendPool';
 import type { ForgeConfig } from '../../src/config/types';
 
+const warnings: string[] = [];
+vi.mock('vscode', () => ({
+  window: {
+    showWarningMessage: (msg: string) => {
+      warnings.push(msg);
+      return Promise.resolve(undefined);
+    },
+    createOutputChannel: () => ({ appendLine: () => {}, clear: () => {}, show: () => {} }),
+  },
+}));
+
 // Controllable stand-in for DirectBackend: each hotSwap parks a deferred the
 // test settles by hand, so we can interleave release() with a failing boot.
 const harness = vi.hoisted(() => ({
@@ -15,6 +26,7 @@ const harness = vi.hoisted(() => ({
 }));
 
 function resetHarness(): void {
+  warnings.length = 0;
   harness.pending.length = 0;
   harness.exitCbs.length = 0;
   harness.events.length = 0;
@@ -86,6 +98,9 @@ function makeConfig(maxModels: number): ForgeConfig {
 
 const freePortsOf = (pool: BackendPool): number[] =>
   (pool as unknown as { freePorts: number[] }).freePorts;
+
+const configOf = (pool: BackendPool): ForgeConfig =>
+  (pool as unknown as { config: ForgeConfig }).config;
 
 describe('BackendPool port accounting', () => {
   beforeEach(resetHarness);
@@ -440,5 +455,130 @@ describe('BackendPool delegation holds', () => {
       'Ollama daemon failed to load delegation target "ollama-local": daemon stalled',
     );
     await pool.release('A'); // primary unpinned again
+  });
+});
+
+/**
+ * A borrowed runtime is a llama-server owned by ANOTHER Forge window. Releasing
+ * it must detach this client only: killing the process would pull VRAM out from
+ * under the owner, and failing to clean up the lease leaves the owner unable to
+ * unload forever (the two halves of HIGH-1/HIGH-2).
+ */
+describe('BackendPool borrowed-runtime release', () => {
+  beforeEach(resetHarness);
+
+  interface SharedProbe {
+    detach: ReturnType<typeof vi.fn>;
+    stop: ReturnType<typeof vi.fn>;
+    released: string[];
+  }
+
+  function withBorrowedSlot(pool: BackendPool, detachImpl?: () => Promise<void>): SharedProbe {
+    const probe: SharedProbe = {
+      detach: vi.fn(detachImpl ?? (() => Promise.resolve())),
+      stop: vi.fn(() => Promise.resolve()),
+      released: [],
+    };
+    const internals = pool as unknown as {
+      sharedSlots: Map<string, unknown>;
+      sharedRegistry: { releaseLease: (key: string, id: string) => void };
+    };
+    internals.sharedSlots.set('A', {
+      backend: { detach: probe.detach, stop: probe.stop },
+      key: 'runtime-key',
+      leaseId: 'lease-1',
+    });
+    internals.sharedRegistry.releaseLease = (_key, id) => probe.released.push(id);
+    return probe;
+  }
+
+  it('detaches instead of stopping, so the owner process survives', async () => {
+    const pool = new BackendPool(makeConfig(1));
+    const probe = withBorrowedSlot(pool);
+
+    await pool.release('A');
+
+    expect(probe.detach).toHaveBeenCalledTimes(1);
+    expect(probe.stop).not.toHaveBeenCalled();
+    expect(probe.released).toEqual(['lease-1']);
+    expect(pool.isLoaded('A')).toBe(false);
+    expect(pool.loadedModelNames()).toEqual([]);
+  });
+
+  it('still releases the lease and the slot when detach fails', async () => {
+    const pool = new BackendPool(makeConfig(1));
+    const probe = withBorrowedSlot(pool, () => Promise.reject(new Error('endpoint vanished')));
+
+    // The failure surfaces — it is not swallowed — but cleanup happened anyway.
+    await expect(pool.release('A')).rejects.toThrow('endpoint vanished');
+
+    expect(probe.released).toEqual(['lease-1']);
+    expect(pool.isLoaded('A')).toBe(false);
+  });
+
+  it('counts a borrowed runtime as ready, not merely loaded', () => {
+    const pool = new BackendPool(makeConfig(1));
+    const internals = pool as unknown as { sharedSlots: Map<string, unknown> };
+    internals.sharedSlots.set('A', {
+      backend: { isReady: () => true, detach: vi.fn(), stop: vi.fn() },
+      key: 'runtime-key',
+      leaseId: 'lease-1',
+    });
+
+    // Before the fix this window reported loaded=true / ready=false and the
+    // status bar and prompt gate disagreed about the same backend.
+    expect(pool.isLoaded('A')).toBe(true);
+    expect(pool.isAnyReady()).toBe(true);
+  });
+
+  it('does not consume a port slot: borrowing never touches freePorts', async () => {
+    const pool = new BackendPool(makeConfig(1));
+    withBorrowedSlot(pool);
+    expect(freePortsOf(pool)).toEqual([8080]);
+    await pool.release('A');
+    expect(freePortsOf(pool)).toEqual([8080]);
+  });
+});
+
+/**
+ * freePorts is built once, in the constructor. If a hot reload could change the
+ * settings it was built from, capacity policy would read a slot layout the pool
+ * does not actually have — so those settings are pinned until a window reload.
+ */
+describe('BackendPool structural config reload', () => {
+  beforeEach(resetHarness);
+
+  it('applies non-structural changes immediately and silently', () => {
+    const pool = new BackendPool(makeConfig(2));
+    const next = { ...makeConfig(2), active_model: 'B' } as ForgeConfig;
+
+    pool.applyForgeConfig(next);
+
+    expect(warnings).toEqual([]);
+    expect(configOf(pool).active_model).toBe('B');
+  });
+
+  it('pins max_simultaneous_models and warns instead of diverging', () => {
+    const pool = new BackendPool(makeConfig(2)); // freePorts [8080, 8081]
+
+    pool.applyForgeConfig(makeConfig(4));
+
+    // Both the physical ports AND the value policy reads stay at the old layout.
+    expect(freePortsOf(pool)).toEqual([8080, 8081]);
+    expect(configOf(pool).max_simultaneous_models).toBe(2);
+    expect(warnings[0]).toContain('max_simultaneous_models');
+    expect(warnings[0]).toContain('reload');
+  });
+
+  it('pins llama_server.port', () => {
+    const pool = new BackendPool(makeConfig(1));
+    const moved = makeConfig(1);
+    moved.llama_server = { ...moved.llama_server, port: 9000 };
+
+    pool.applyForgeConfig(moved);
+
+    expect(freePortsOf(pool)).toEqual([8080]);
+    expect(configOf(pool).llama_server.port).toBe(8080);
+    expect(warnings[0]).toContain('llama_server.port');
   });
 });

@@ -22,11 +22,10 @@ const ToolPermissionSchema = z.enum(
     'git-read',
     'git-write',
     'delegate',
-    'cloud-worker',
   ],
   {
     error:
-      'MCP tool permission must be one of: read, write, delete, terminal, headless, search, fetch, git-read, git-write, delegate, cloud-worker',
+      'MCP tool permission must be one of: read, write, delete, terminal, headless, search, fetch, git-read, git-write, delegate',
   },
 );
 const ActiveModelSchema = z.preprocess(
@@ -193,6 +192,9 @@ const PermissionsSchema = z
     agents: z
       .object({
         delegate: z.boolean().default(false),
+        /** @deprecated Inert since dispatch_workers was removed. Still parsed
+         *  so an existing config.yaml keeps booting; grants no capability.
+         *  Delete once no user config is expected to carry it. */
         cloud_workers: z.boolean().default(false),
       })
       .optional(),

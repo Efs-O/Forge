@@ -84,12 +84,6 @@ const EXAMPLE_ARGS = {
     ],
   },
   ask_local_agent: { model: 'secondary-local-model', task: 'Review ToolRegistry permissions.' },
-  list_worker_models: {},
-  dispatch_workers: {
-    workers: [
-      { id: 'audit-reader', model: 'local-model', task: 'Inspect ToolRegistry.', access: 'read' },
-    ],
-  },
 };
 
 export async function discoverModel(baseUrl) {

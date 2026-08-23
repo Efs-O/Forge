@@ -2,6 +2,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { SidebarProvider } from './sidebar/SidebarProvider';
 import { BackendPool } from './backend/BackendPool';
+import { disposeServerChannel } from './backend/DirectBackend';
 import { ControlServer } from './backend/ControlServer';
 import { ControlServerRegistry, controlServerRegistryPath } from './backend/ControlServerRegistry';
 import { buildControlChatProxy } from './llm/ControlChatProxy';
@@ -37,7 +38,6 @@ import {
   DEFAULT_CLI_IDLE_TIMEOUT_MS,
   DEFAULT_MAX_CLI_AGENTS,
 } from './agents/CliSessionRegistry';
-import { registerWorkerCommands } from './vscode/workerCommands';
 import { ModelManagerPanel } from './sidebar/modelManager/ModelManagerPanel';
 import { registerSidebarCommands } from './vscode/sidebarCommands';
 import { flushPendingModelUsage } from './sidebar/modelManager/usageTracker';
@@ -309,7 +309,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
   });
   registerSecretCommands(context, () => config, activeConfigPath);
-  registerWorkerCommands(context, sidebarProvider, () => config);
   context.subscriptions.push(
     vscode.languages.registerCodeActionsProvider(
       { scheme: 'file' },
@@ -336,6 +335,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 export function deactivate(): void {
   // backend.stop() called via subscription above.
+  disposeServerChannel();
   // Debounced last_used writes would otherwise be lost when the window closes
   // within DEBOUNCE_MS of a turn — the exact case the Model Manager cares about.
   flushPendingModelUsage();

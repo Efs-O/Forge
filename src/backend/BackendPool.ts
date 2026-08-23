@@ -1,47 +1,33 @@
 import type { BackendController } from './BackendController';
 import { DirectBackend } from './DirectBackend';
 import type { ForgeConfig } from '../config/types';
-import { expandAlias, resolveRequestModel, splitModelProfile } from '../config/ConfigResolver';
+import {
+  expandAlias,
+  resolveRequestModel,
+  resolveSpawnModel,
+  splitModelProfile,
+} from '../config/ConfigResolver';
 import { DelegationGate } from './DelegationGate';
-import type { DelegationCheck, DelegationGroupHold, DelegationHold } from './DelegationGate';
+import type { DelegationCheck, DelegationHold } from './DelegationGate';
 import { getLogger } from '../util/logger';
 import { SharedRuntimeRegistry, sharedRuntimeKey } from './SharedRuntimeRegistry';
 import { acquireOllamaSlot, borrowSharedRuntime, stopAllSlots } from './poolAcquisition';
 import { claimPort, freeSlot, mostRecentSlot } from './poolSlots';
+import {
+  changedStructuralSettings,
+  readStructuralSettings,
+  warnStructuralReloadRequired,
+  withPinnedStructuralSettings,
+} from './poolStructuralConfig';
+import type { StructuralSettings } from './poolStructuralConfig';
 import type { PortClaim, PoolSlot, SlotTable } from './poolSlots';
+import type { IBackendPool } from './poolTypes';
+import { reconcileDeadSlot, restartSlot, startSlot, type SlotStartContext } from './poolStart';
 
-export type { DelegationCheck, DelegationGroupHold, DelegationHold } from './DelegationGate';
+export type { DelegationCheck, DelegationHold } from './DelegationGate';
+export type { IBackendPool } from './poolTypes';
 
 const log = getLogger();
-
-export interface IBackendPool {
-  acquire(modelName: string): Promise<BackendController>;
-  /** Read-only capacity query: would delegating from `primaryModel` to
-   *  `targetModel` be possible without evicting any loaded backend? Never
-   *  mutates pool state and never triggers the LRU eviction in acquire(). */
-  canDelegate(primaryModel: string, targetModel: string): DelegationCheck;
-  /** Atomic non-evicting target acquire. Pins primary and target until release —
-   *  closes the canDelegate→acquire TOCTOU race. Release exactly once on
-   *  success, cancellation, and failure paths (extra calls are no-ops). */
-  acquireForDelegation(primaryModel: string, targetModel: string): Promise<DelegationHold>;
-  acquireGroupForDelegation(
-    primaryModel: string,
-    targetModels: readonly string[],
-  ): Promise<DelegationGroupHold>;
-  parallelCapacity(modelName: string): number;
-  /** Stop and remove a single model's backend, freeing its VRAM / port slot. */
-  release(modelName: string): Promise<void>;
-  stopAll(): Promise<void>;
-  applyForgeConfig(next: ForgeConfig): void;
-  showConsole(modelName?: string): void;
-  isAnyReady(): boolean;
-  /** Names of models currently holding a port slot (llama.cpp/direct). Used by
-   *  the control server to make capacity/eviction decisions. Excludes Ollama,
-   *  which is daemon-backed and does not consume a slot. */
-  loadedModelNames(): string[];
-  /** Whether the model currently has a live backend (llama.cpp slot OR ollama). */
-  isLoaded(modelName: string): boolean;
-}
 
 export class BackendPool implements IBackendPool {
   private readonly slots = new Map<string, PoolSlot>();
@@ -50,7 +36,9 @@ export class BackendPool implements IBackendPool {
     string,
     { backend: DirectBackend; key: string; leaseId: string }
   >();
-  private readonly sharedRegistry = new SharedRuntimeRegistry();
+  /** Injectable so tests exercise lease bookkeeping against a temp root
+   *  instead of the real per-machine registry under LOCALAPPDATA. */
+  private readonly sharedRegistry: SharedRuntimeRegistry;
   // Ollama models connect to a pre-running daemon and don't consume a port slot.
   private readonly ollamaSlots = new Map<string, DirectBackend>();
   /** model → in-flight ollama acquire, so concurrent acquires share one hotSwap. */
@@ -59,12 +47,21 @@ export class BackendPool implements IBackendPool {
   private readonly releasing = new Map<string, Promise<void>>();
   private readonly freePorts: number[];
   private readonly gate: DelegationGate;
+  /** Settings baked into the physical slot/port inventory at construction. */
+  private readonly structural: StructuralSettings;
   private lastAcquiredModel: string | null = null;
 
-  constructor(private config: ForgeConfig) {
+  constructor(
+    private config: ForgeConfig,
+    sharedRegistry: SharedRuntimeRegistry = new SharedRuntimeRegistry(),
+  ) {
+    this.sharedRegistry = sharedRegistry;
     const max = config.max_simultaneous_models ?? 1;
     const base = config.llama_server.port ?? 8080;
     this.freePorts = Array.from({ length: max }, (_, i) => base + i);
+    // Snapshot, never re-derived: the whole failure mode this guards against is
+    // policy reading a new value while the physical slots are still the old one.
+    this.structural = readStructuralSettings(config);
     this.gate = new DelegationGate({
       poolKey: (name) => this.poolKey(name),
       isOllama: (key) => this.isOllamaModel(key),
@@ -87,13 +84,6 @@ export class BackendPool implements IBackendPool {
 
   acquireForDelegation(primaryModel: string, targetModel: string): Promise<DelegationHold> {
     return this.gate.acquire(primaryModel, targetModel);
-  }
-
-  acquireGroupForDelegation(
-    primaryModel: string,
-    targetModels: readonly string[],
-  ): Promise<DelegationGroupHold> {
-    return this.gate.acquireGroup(primaryModel, targetModels);
   }
 
   parallelCapacity(modelName: string): number {
@@ -171,9 +161,15 @@ export class BackendPool implements IBackendPool {
       }
     } else if (this.sharedSlots.has(key)) {
       const shared = this.sharedSlots.get(key)!;
-      await shared.backend.stop();
-      this.sharedRegistry.releaseLease(shared.key, shared.leaseId);
-      this.sharedSlots.delete(key);
+      // Borrowed: detach this client only — the process belongs to another
+      // window. The finally is load-bearing: the lease and the slot entry must
+      // be cleaned up even if detach fails, or the owner can never unload.
+      try {
+        await shared.backend.detach();
+      } finally {
+        this.sharedRegistry.releaseLease(shared.key, shared.leaseId);
+        this.sharedSlots.delete(key);
+      }
     } else {
       const slot = this.slots.get(key);
       if (slot) {
@@ -218,10 +214,22 @@ export class BackendPool implements IBackendPool {
     });
   }
 
+  /**
+   * Hot-reload the config, PINNING the settings baked into the physical pool.
+   *
+   * `freePorts` is built once in the constructor. Letting a reload change
+   * `max_simultaneous_models` or `llama_server.port` in `this.config` would
+   * leave capacity policy (DelegationGate.maxSlots) reading a value the actual
+   * slot table does not implement — a warning alone does not close that gap,
+   * so the old values are carried forward and the user is told a reload is
+   * required. Everything else applies immediately.
+   */
   applyForgeConfig(next: ForgeConfig): void {
-    this.config = next;
-    for (const slot of this.slots.values()) slot.backend.applyForgeConfig(next);
-    for (const backend of this.ollamaSlots.values()) backend.applyForgeConfig(next);
+    const changed = changedStructuralSettings(this.structural, next);
+    this.config = changed.length === 0 ? next : withPinnedStructuralSettings(this.structural, next);
+    for (const slot of this.slots.values()) slot.backend.applyForgeConfig(this.config);
+    for (const backend of this.ollamaSlots.values()) backend.applyForgeConfig(this.config);
+    if (changed.length > 0) warnStructuralReloadRequired(changed);
   }
 
   showConsole(modelName?: string): void {
@@ -235,18 +243,34 @@ export class BackendPool implements IBackendPool {
     }
   }
 
+  /**
+   * Is ANY endpoint healthy and able to serve a request right now?
+   *
+   * Callers use this to gate sending work and to drive the status bar, so a
+   * runtime borrowed from another Forge window counts: it is a usable endpoint
+   * even though this window owns neither the process nor a port slot.
+   * Distinct from `isLoaded` (residency) — do not conflate the two.
+   */
   isAnyReady(): boolean {
     return (
       [...this.slots.values()].some((s) => s.backend.isReady()) ||
+      [...this.sharedSlots.values()].some((s) => s.backend.isReady()) ||
       [...this.ollamaSlots.values()].some((b) => b.isReady())
     );
   }
 
+  /** Models occupying a port-consuming slot, owned or borrowed. Ollama models
+   *  are deliberately absent: they are unbounded and never evicted, so they
+   *  are irrelevant to the capacity decisions this feeds. */
   loadedModelNames(): string[] {
-    // Port-consuming slots only; Ollama models are unbounded and never evicted.
     return [...this.slots.keys(), ...this.sharedSlots.keys()];
   }
 
+  /**
+   * Is this model resident anywhere — owned slot, borrowed runtime, or Ollama
+   * daemon? Residency, NOT readiness: a resident model can still be starting
+   * or unhealthy. Use `isAnyReady` to decide whether work can be dispatched.
+   */
   isLoaded(modelName: string): boolean {
     const key = this.poolKey(modelName);
     return this.slots.has(key) || this.sharedSlots.has(key) || this.ollamaSlots.has(key);
@@ -257,89 +281,26 @@ export class BackendPool implements IBackendPool {
   }
 
   private startSlot(modelName: string, claim: PortClaim): Promise<BackendController> {
-    const { port, evicted } = claim;
-    const backend = new DirectBackend(this.config, port);
-    let resolveStart!: () => void;
-    backend.onUnexpectedExit(() => this.reconcileDeadSlot(modelName));
-    let rejectStart!: (err: unknown) => void;
-    const starting = new Promise<void>((res, rej) => {
-      resolveStart = res;
-      rejectStart = rej;
-    });
-    const slot: PoolSlot = { backend, port, lastUsed: Date.now(), starting };
-    this.slots.set(modelName, slot);
-
-    // An evicted llama-server holds its VRAM and port until the process is gone,
-    // so its teardown must finish before the replacement spawns — fire-and-forget
-    // raced the two loads and OOM'd the GPU. The slot above is already registered,
-    // so a concurrent acquire joins this boot instead of starting a second one.
-    // With nothing to evict, hotSwap must still start synchronously.
-    const swapped = evicted
-      ? evicted.backend
-          .stop()
-          .catch(() => {})
-          .then(() => backend.hotSwap(modelName))
-      : backend.hotSwap(modelName);
-
-    const boot = swapped
-      .then(() => {
-        slot.starting = null;
-        slot.lastUsed = Date.now();
-        this.lastAcquiredModel = modelName;
-        if (this.config.shared_runtime?.enabled) {
-          this.sharedRegistry.publish({
-            key: this.runtimeKey(modelName),
-            model: modelName,
-            endpoint: backend.baseUrl(),
-            ownerPid: process.pid,
-            createdAt: new Date().toISOString(),
-          });
-        }
-        resolveStart();
-        log.info(`[BackendPool] slot ready: ${modelName} on port ${port}`);
-      })
-      .catch((err: unknown) => {
-        this.freeSlot(modelName, slot);
-        rejectStart(err);
-      });
-
-    void boot;
-    return starting.then(() => backend);
+    return startSlot(this.slotStartContext(), modelName, claim);
   }
 
-  private async restartSlot(modelName: string, slot: PoolSlot): Promise<BackendController> {
-    log.info(`[BackendPool] restarting crashed slot: ${modelName} on port ${slot.port}`);
-    let resolveStart!: () => void;
-    let rejectStart!: (err: unknown) => void;
-    slot.starting = new Promise<void>((res, rej) => {
-      resolveStart = res;
-      rejectStart = rej;
-    });
-    try {
-      await slot.backend.hotSwap(modelName);
-      slot.starting = null;
-      slot.lastUsed = Date.now();
-      this.lastAcquiredModel = modelName;
-      resolveStart();
-      return slot.backend;
-    } catch (err) {
-      this.freeSlot(modelName, slot);
-      rejectStart(err);
-      throw err;
-    }
+  private restartSlot(modelName: string, slot: PoolSlot): Promise<BackendController> {
+    return restartSlot(this.slotStartContext(), modelName, slot);
   }
 
-  /**
-   * A ready backend's process died without Forge stopping it (external kill,
-   * crash). Free the slot so /models and capacity decisions reflect reality
-   * (docs/archive/validation/RELAY_SMOKE_FINDINGS.md F5). Skipped while a restart is in flight —
-   * restartSlot owns the slot during `starting` and frees it itself on failure.
-   */
-  private reconcileDeadSlot(modelName: string): void {
-    const slot = this.slots.get(modelName);
-    if (!slot || slot.starting) return;
-    log.warn(`[BackendPool] backend for "${modelName}" died — freeing slot on port ${slot.port}`);
-    this.freeSlot(modelName, slot);
+  /** Rebuilt per call: `config` is replaced wholesale by a hot reload. */
+  private slotStartContext(): SlotStartContext {
+    return {
+      config: this.config,
+      slots: this.slots,
+      registry: this.sharedRegistry,
+      runtimeKey: (model) => this.runtimeKey(model),
+      onUnexpectedExit: (model) => reconcileDeadSlot(this.slotStartContext(), model),
+      freeSlot: (model, slot) => this.freeSlot(model, slot),
+      onAcquired: (model) => {
+        this.lastAcquiredModel = model;
+      },
+    };
   }
 
   private freeSlot(modelName: string, slot: PoolSlot): void {
@@ -362,8 +323,11 @@ export class BackendPool implements IBackendPool {
     return this.config.models.find((m) => m.name === modelName)?.provider === 'ollama';
   }
 
+  /** Identity of the llama-server this model would spawn. Uses the SPAWN model:
+   *  request-time profile fields do not change the server, so they must not
+   *  fork its identity and block an otherwise compatible share. */
   private runtimeKey(modelName: string): string {
-    return sharedRuntimeKey(resolveRequestModel(this.config, modelName));
+    return sharedRuntimeKey(resolveSpawnModel(this.config, modelName), this.config.llama_server);
   }
 
   private borrowSharedRuntime(modelName: string): Promise<BackendController | undefined> {
@@ -371,6 +335,18 @@ export class BackendPool implements IBackendPool {
       { config: this.config, registry: this.sharedRegistry, key: this.runtimeKey(modelName) },
       modelName,
       (record) => {
+        // Re-borrowing replaces the slot record, so any lease the previous
+        // attachment held must be released HERE — once the record is
+        // overwritten its leaseId is unrecoverable, and the file it left
+        // behind names a pid that is still very much alive (our own). The
+        // owner would then see a live borrower forever and never be able to
+        // unload: precisely the failure shared leases exist to prevent.
+        //
+        // Reached whenever a borrowed backend goes not-ready and is borrowed
+        // again — the owner's llama-server dying and being respawned is the
+        // ordinary way in.
+        const previous = this.sharedSlots.get(modelName);
+        if (previous) this.sharedRegistry.releaseLease(previous.key, previous.leaseId);
         this.sharedSlots.set(modelName, record);
         this.lastAcquiredModel = modelName;
       },

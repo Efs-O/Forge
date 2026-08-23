@@ -1,5 +1,4 @@
 import { type ChildProcess } from 'child_process';
-import { existsSync } from 'fs';
 import * as vscode from 'vscode';
 import type { BackendController } from './BackendController';
 import type { ForgeConfig, ModelConfig } from '../config/types';
@@ -7,25 +6,42 @@ import { composeLlamaServerArgs } from './LlamaServerArgs';
 import { spawnLlamaServer, killLlamaProcess } from './llamaProcess';
 import { waitForHealthy, probeHealthy, probeServedModel } from './HealthCheck';
 import { startAdoptedServerMonitor } from './adoptedServerMonitor';
+import { attachServerDiagnostics } from './serverDiagnostics';
+import { assertModelFilesExist, servedModelMatches } from './modelFileChecks';
 import { ensureOllamaReady, normalizeOllamaEndpoint, releaseOllamaModel } from './OllamaAdapter';
 import { isCloudProvider } from '../llm/CloudProviders';
 import { expandAlias, resolveSpawnModel, splitModelProfile } from '../config/ConfigResolver';
 import { getLogger } from '../util/logger';
 
 const log = getLogger();
-const MAX_DIAGNOSTIC_TAIL_CHARS = 2_000;
+/**
+ * ONE "Forge - llama-server" channel for the whole extension host.
+ *
+ * Each DirectBackend used to create its own lazily and none were ever
+ * disposed, so every spawn/stop cycle left another identically-named entry in
+ * the Output dropdown — and with several slots live at once the real ones were
+ * indistinguishable from each other and from the dead ones. Sharing one
+ * channel removes the leak; the per-server banner below replaces the clear()
+ * each backend used to do, which would now wipe another slot's output.
+ */
+let sharedServerChannel: vscode.OutputChannel | undefined;
 
-function appendDiagnosticTail(previous: string, chunk: string): string {
-  const normalized = chunk.replace(/\s+/g, ' ').trim();
-  if (!normalized) return previous;
-  return `${previous} ${normalized}`.slice(-MAX_DIAGNOSTIC_TAIL_CHARS);
+function serverChannel(): vscode.OutputChannel {
+  sharedServerChannel ??= vscode.window.createOutputChannel('Forge - llama-server');
+  return sharedServerChannel;
+}
+
+/** Called from `deactivate()`; the channel outlives any single backend. */
+export function disposeServerChannel(): void {
+  sharedServerChannel?.dispose();
+  sharedServerChannel = undefined;
 }
 
 export class DirectBackend implements BackendController {
   private proc: ChildProcess | null = null;
   private ready = false;
   private startAbort: AbortController | null = null;
-  private serverChannel: vscode.OutputChannel | null = null;
+
   private readonly host: string;
   private readonly port: number;
   private activeModel: ModelConfig | null = null;
@@ -59,8 +75,7 @@ export class DirectBackend implements BackendController {
   }
 
   showConsole(): void {
-    this.serverChannel ??= vscode.window.createOutputChannel('Forge - llama-server');
-    this.serverChannel.show(true);
+    serverChannel().show(true);
   }
 
   loadedModel(): string | null {
@@ -82,7 +97,35 @@ export class DirectBackend implements BackendController {
     await this.hotSwap(this.config.active_model);
   }
 
+  /**
+   * Erase this client's attachment state. Callers MUST have finished releasing
+   * the underlying resources first: `releaseActiveOllamaModel` reads
+   * `activeModel` and `stopLlamaServer` reads `adoptedServer`, so clearing
+   * either before those run turns them into silent no-ops.
+   */
+  private resetAttachmentState(): void {
+    this.ready = false;
+    this.startAbort?.abort();
+    this.startAbort = null;
+    this.stopAdoptedMonitor();
+    this.adoptedServer = false;
+    this.activeModel = null;
+    this.currentBaseUrl = `http://${this.host}:${this.port}`;
+  }
+
+  /**
+   * Release this client's attachment to a server another Forge window owns.
+   * Never terminates a process — that is `stop()`'s job and only valid for a
+   * server this backend spawned. Safe on a server that already vanished.
+   */
+  async detach(): Promise<void> {
+    this.resetAttachmentState();
+    log.info('[DirectBackend] detached from adopted server');
+  }
+
   async stop(): Promise<void> {
+    // Halt new work before releasing anything, but keep the ownership metadata
+    // the two release paths below need — see resetAttachmentState.
     this.ready = false;
     this.startAbort?.abort();
     this.startAbort = null;
@@ -90,9 +133,7 @@ export class DirectBackend implements BackendController {
 
     await this.releaseActiveOllamaModel();
     await this.stopLlamaServer();
-    this.adoptedServer = false;
-    this.activeModel = null;
-    this.currentBaseUrl = `http://${this.host}:${this.port}`;
+    this.resetAttachmentState();
     log.info('[DirectBackend] stopped');
   }
 
@@ -168,7 +209,7 @@ export class DirectBackend implements BackendController {
     const baseUrl = `http://${this.host}:${this.port}`;
     if (await probeHealthy(baseUrl)) {
       const served = await probeServedModel(baseUrl);
-      if (!this.servedModelMatches(served, model)) {
+      if (!servedModelMatches(served, model)) {
         const servedLabel = served ?? 'an unidentifiable model';
         throw new Error(
           `Port ${this.port} is already serving ${servedLabel}, not "${model.name}" ` +
@@ -180,15 +221,15 @@ export class DirectBackend implements BackendController {
       log.info(
         `[DirectBackend] port ${this.port} already serving ${model.name} — adopting existing server`,
       );
-      this.serverChannel ??= vscode.window.createOutputChannel('Forge - llama-server');
-      this.serverChannel.clear();
-      this.serverChannel.appendLine(
+      const adopted = serverChannel();
+      adopted.appendLine(`\n=== ${model.name} — port ${this.port} (adopted) ===`);
+      adopted.appendLine(
         `[Forge] Adopted existing llama-server on port ${this.port} (started by another VS Code window).`,
       );
-      this.serverChannel.appendLine(
+      adopted.appendLine(
         `[Forge] Live output is in that window. Polling /health + /slots every 5 s...\n`,
       );
-      this.serverChannel.show(true);
+      adopted.show(true);
       this.adoptedServer = true;
       this.startAdoptedMonitor();
       return;
@@ -197,7 +238,7 @@ export class DirectBackend implements BackendController {
     // Fail fast with the real cause when a configured file is absent. Otherwise
     // llama-server just exits with code 1 and the user only sees a generic
     // "failed to start", burying the fact that the GGUF path is wrong/missing.
-    this.assertModelFilesExist(model);
+    assertModelFilesExist(model);
 
     const args = composeLlamaServerArgs(
       binary,
@@ -207,66 +248,26 @@ export class DirectBackend implements BackendController {
       this.port,
     );
 
-    this.serverChannel ??= vscode.window.createOutputChannel('Forge - llama-server');
-    this.serverChannel.clear();
-    this.serverChannel.appendLine(`> ${binary} ${args.join(' ')}`);
-    this.serverChannel.appendLine('');
-    this.serverChannel.show(true);
+    const spawned = serverChannel();
+    spawned.appendLine(`
+=== ${model.name} — port ${this.port} ===`);
+    spawned.appendLine(`> ${binary} ${args.join(' ')}`);
+    spawned.appendLine('');
+    spawned.show(true);
     log.info(`[DirectBackend] spawn: ${binary} ${args.join(' ')}`);
 
     this.proc = spawnLlamaServer(binary, args);
     this.adoptedServer = false;
     const proc = this.proc;
-    const startedAt = Date.now();
-    let stdoutBytes = 0;
-    let stderrBytes = 0;
-    let stderrTail = '';
-    log.info(`[DirectBackend] llama-server spawned pid=${proc.pid ?? '?'} model=${model.name}`);
-
-    proc.stdout?.on('data', (chunk: Buffer) => {
-      const text = chunk.toString();
-      stdoutBytes += chunk.byteLength;
-      this.serverChannel?.append(text);
-    });
-    proc.stderr?.on('data', (chunk: Buffer) => {
-      const text = chunk.toString();
-      stderrBytes += chunk.byteLength;
-      stderrTail = appendDiagnosticTail(stderrTail, text);
-      this.serverChannel?.append(text);
-    });
-    proc.once('error', (err) => {
-      log.error(
-        `[DirectBackend] llama-server process error pid=${proc.pid ?? '?'} ` +
-          `model=${model.name} after_ms=${Date.now() - startedAt}`,
-        err,
-      );
-      this.serverChannel?.appendLine(`\n[ERROR] ${err.message}`);
-    });
-    proc.once('exit', (code, signal) => {
-      // stopLlamaServer clears this.proc before intentional termination. This
-      // lets one listener cover startup failure, runtime crash, and teardown.
-      const unexpected = this.proc === proc;
-      const detail =
-        `[DirectBackend] llama-server ${unexpected ? 'exited unexpectedly' : 'exited'} ` +
-        `pid=${proc.pid ?? '?'} model=${model.name} code=${code ?? '?'} ` +
-        `signal=${signal ?? '?'} after_ms=${Date.now() - startedAt} ` +
-        `stdout_bytes=${stdoutBytes} stderr_bytes=${stderrBytes}` +
-        (stderrTail ? ` stderr_tail=${JSON.stringify(stderrTail)}` : '');
-      if (unexpected) {
+    const startedAt = attachServerDiagnostics(proc, {
+      modelName: model.name,
+      channel: () => serverChannel(),
+      isCurrent: () => this.proc === proc,
+      onUnexpectedExit: () => {
         this.proc = null;
         this.ready = false;
-        log.error(detail);
-        this.serverChannel?.appendLine(`\n[Forge] ${detail}`);
         this.onExitCb?.();
-      } else {
-        log.info(detail);
-      }
-    });
-    proc.once('close', (code, signal) => {
-      log.debug(
-        `[DirectBackend] llama-server stdio closed pid=${proc.pid ?? '?'} ` +
-          `model=${model.name} code=${code ?? '?'} signal=${signal ?? '?'}`,
-      );
+      },
     });
 
     const abort = this.startAbort;
@@ -296,28 +297,11 @@ export class DirectBackend implements BackendController {
     log.info('[DirectBackend] ready');
   }
 
-  /** Fail with a clear, specific message when a configured GGUF/mmproj file is
-   *  absent — llama-server would otherwise exit code 1 and bury the cause. */
-  private assertModelFilesExist(model: ModelConfig): void {
-    const files: Array<readonly [string, string | undefined]> = [
-      ['gguf_path', model.gguf_path],
-      ['mmproj_path', model.mmproj_path],
-    ];
-    for (const [field, filePath] of files) {
-      if (filePath && !existsSync(filePath)) {
-        throw new Error(
-          `Model "${model.name}": ${field} not found on disk: ${filePath}. ` +
-            `Fix the path in config.yaml or restore the file.`,
-        );
-      }
-    }
-  }
-
   private startAdoptedMonitor(): void {
     if (this.adoptPollTimer) return;
     this.adoptPollTimer = startAdoptedServerMonitor({
       baseUrl: `http://${this.host}:${this.port}`,
-      log: (line) => this.serverChannel?.appendLine(line),
+      log: (line) => serverChannel().appendLine(line),
       onLost: () => {
         this.ready = false;
         this.stopAdoptedMonitor();
@@ -360,20 +344,6 @@ export class DirectBackend implements BackendController {
     const proc = this.proc;
     this.proc = null;
     await killLlamaProcess(proc);
-  }
-
-  /**
-   * True when the identifier reported by a running server matches the model we
-   * want to load. llama-server reports the `-m` path, so we compare against the
-   * model's gguf_path by normalized full path and by basename (the server build
-   * may report either). Returns false when the served model is unknown — we
-   * refuse to adopt rather than risk serving the wrong model.
-   */
-  private servedModelMatches(served: string | null, model: ModelConfig): boolean {
-    if (!served || !model.gguf_path) return false;
-    const norm = (p: string): string => p.replace(/\\/g, '/').toLowerCase();
-    const base = (p: string): string => norm(p).split('/').pop() ?? norm(p);
-    return norm(served) === norm(model.gguf_path) || base(served) === base(model.gguf_path);
   }
 
   private resolveModel(name: string): ModelConfig {

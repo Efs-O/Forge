@@ -113,6 +113,72 @@ SecretStorage under the name you set as `api_key_secret`).
 
 This is opt-in. Nothing uses a cloud provider unless you configure a model that points to one and provide its token through VS Code SecretStorage.
 
+## Sharing one llama-server across windows
+
+Opt-in, off unless you enable it:
+
+```yaml
+shared_runtime:
+  enabled: true
+```
+
+With it on, a second VS Code window asking for a model another window already
+loaded **borrows that running llama-server** instead of spawning its own. One
+copy of the weights in VRAM. The borrowing window takes a lease; the owner will
+not shut the server down while a lease is outstanding, and a lease left behind
+by a window that crashed is reclaimed once its process is confirmed gone.
+
+### What is and is not shared
+
+**Conversation history is not shared.** Each window keeps its own tabs, its own
+messages, its own checkpoints. Windows share the loaded weights, nothing else.
+
+**KV cache slots are shared, and this is the part that surprises people.**
+`--parallel` divides `--ctx-size` into N slots, and every borrowing window draws
+from that same pool. With the default single slot, two windows take turns on one
+cache, and llama.cpp picks up whatever the last conversation left behind by
+prefix similarity:
+
+```
+slot get_availabl: id 0 | selected slot by LCP similarity, f_sim_best = 0.949
+```
+
+Alternating windows evict each other's cached prefix, so each pays full prompt
+re-processing — an 8k prompt costs about 10 s of eval on a miss instead of near
+zero on a hit. Answers stay correct (the whole prompt is sent every time); you
+only lose the cache speedup.
+
+### How the token counter behaves
+
+Each window counts **its own** conversation against `perSlotContext()` —
+`num_ctx / n_parallel`, not `num_ctx`. Both windows compute the same per-slot
+ceiling and measure only their own messages, so compaction triggers per window
+on that window's history. A borrowing window has no idea the other exists.
+
+That number describes the *slot*. With `--parallel 1` there is one slot serving
+both windows: neither is over its limit, but they contend for one cache.
+Compaction stays correct — it simply cannot see the contention.
+
+### If you have VRAM to spare
+
+`max_simultaneous_models` is **not** the setting for this. It controls how many
+*different* models Forge keeps loaded at once. Two windows asking for the same
+model resolve to the same runtime key and share one server regardless — that is
+the feature working as designed.
+
+Two real options:
+
+- **Independent servers** — set `shared_runtime.enabled: false`. Each window
+  spawns its own llama-server with its own full context and no contention, at
+  double the VRAM. That is precisely the cost sharing exists to avoid.
+- **Keep sharing, drop the thrashing** — raise `--parallel` to 2 or more so each
+  window gets its own slot. `--ctx-size` is the *total* and gets divided, so
+  `--parallel 2` halves each window's context unless you raise `--ctx-size` to
+  match.
+
+For two windows on a large card the second option is the better trade: one copy
+of the weights, two independent caches.
+
 ## Quick Start
 
 ### 1. Install the extension
@@ -316,32 +382,18 @@ Tool results are capped at `max_result_chars` (default 24000) before entering th
 
 Set `permissions.agents.delegate: true` to let the primary agent use `ask_local_agent` for a bounded, read-only consultation with another configured local model. The delegated model receives only the task and selected workspace files, has no tools, and cannot edit files or run commands; its response is advisory analysis returned to the primary conversation.
 
-Forge also supports bounded coding workers through `dispatch_workers` and the
-`Forge: Dispatch Workers` command. Each worker receives an independent task,
-workspace-wide bounded read access, plus optional write access only to the exact
-files assigned to it. Read-only runs require `permissions.agents.delegate` and
-`permissions.fs.read`; `permissions.fs.write` is required only when at least one
-worker has `access: write`. Workers can read/list files and use bounded file/code
-search, document symbols, and file-scoped diagnostics. Cloud-routed workers additionally require the explicit
-`permissions.agents.cloud_workers: true` opt-in and always show a non-bypassable
-approval before any task or workspace content is sent to the configured provider.
+Worker dispatch was removed in 0.13.1. `dispatch_workers`,
+`list_worker_models`, and the coordinator/worker role hierarchy are gone;
+`ask_local_agent` is the single delegation path. `permissions.agents.cloud_workers`
+is still accepted so existing configs keep booting, but it grants nothing.
 
-The coordinator can call `list_worker_models` to discover exact configured model
-names instead of asking you to construct worker arguments. Ollama targets are
-best-effort because the daemon manages loading. Opt-in OpenAI-compatible models
-and Ollama cloud routes are catalogued only when cloud workers are enabled. A
-profile such as `model@reviewer` shares the same underlying backend as `model`.
-
-Writable workers also receive `apply_line_edits`, a bounded structured editing
-tool for multiple changes to one assigned file. It uses one-based inclusive line
-ranges and requires exact `expected_lines`; stale, overlapping, out-of-range, or
-oversized edits are rejected before the file is written.
+A profile such as `model@reviewer` shares the same underlying backend as `model`.
 
 To consult a different direct llama.cpp model without evicting the primary model, configure enough slots, for example `max_simultaneous_models: 2`. Slot availability prevents Forge from evicting the primary backend, but it does not guarantee the machine has enough RAM or VRAM to load the second model. Delegation is limited to 120 seconds and returned analysis is capped at 24,000 characters.
 
-A model configured with `provider: cli` (Claude Code, Codex) is a full-rights external agent: Forge spawns the already-authenticated CLI locally, and it runs with its OWN tools — Forge does not inject its tool registry or run its own tool loop for it. `cli` models can be selected for direct sidebar chat and are also valid `dispatch_workers`/`ask_local_agent` targets.
+A model configured with `provider: cli` (Claude Code, Codex) is a full-rights external agent: Forge spawns the already-authenticated CLI locally, and it runs with its OWN tools — Forge does not inject its tool registry or run its own tool loop for it. `cli` models can be selected for direct sidebar chat and are also valid `ask_local_agent` targets.
 
-Direct CLI chat owns one warm process per conversation/model. Claude uses its stream-json stdin protocol; Codex uses `app-server --stdio`. Tabs remain isolated and may generate concurrently. A completed turn confirms the persistent Claude session ID or Codex thread ID. Claude cancellation terminates its process and cold-resumes the last confirmed session on the next turn; Codex uses `turn/interrupt` and keeps a cleanly interrupted app-server warm. Forge never silently replays a failed turn. Closing a conversation, idle eviction, or extension shutdown disposes the processes it owns. Workers and delegation deliberately remain one-shot.
+Direct CLI chat owns one warm process per conversation/model. Claude uses its stream-json stdin protocol; Codex uses `app-server --stdio`. Tabs remain isolated and may generate concurrently. A completed turn confirms the persistent Claude session ID or Codex thread ID. Claude cancellation terminates its process and cold-resumes the last confirmed session on the next turn; Codex uses `turn/interrupt` and keeps a cleanly interrupted app-server warm. Forge never silently replays a failed turn. Closing a conversation, idle eviction, or extension shutdown disposes the processes it owns. Delegation deliberately remains one-shot.
 
 Warm direct-chat processes are capped by `max_cli_agents` (default `4`, per VS Code window) and idle processes are disposed after `cli_idle_timeout_ms` (default `900000`, or 15 minutes). When the cap is full, Forge evicts only the least-recently-used idle session; if every session is busy, it surfaces a capacity error. By default Forge passes no model override, so the CLI resolves its own configured/default model. Set optional `cli_model` only when an explicit per-entry override is wanted. A separate extension's per-chat model picker is private state and is not treated as configuration.
 
@@ -359,6 +411,10 @@ Type `/` in chat to open the built-in command list.
 | `/restart`    | Restart or reconnect the backend            |
 | `/reindex`    | Rebuild the local semantic search index     |
 | `/new`        | Open a new conversation tab                 |
+| `/rename`     | Rename the active conversation              |
+| `/context`    | Add a file, selection, tabs, or files as context |
+| `/config`     | Open the active Forge config                |
+| `/logs`       | Show the Forge backend output               |
 | `/clear`      | Clear the active tab only                   |
 | `/review`     | Run an immediate review prompt              |
 | `/compact`    | Summarize and compress the current chat     |

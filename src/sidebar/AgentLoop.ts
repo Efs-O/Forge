@@ -5,7 +5,7 @@ import type { HostToWebview } from './messageBridge';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
 import { isCloudProvider } from '../llm/CloudProviders';
 import type { AttachmentData } from './messageBridge';
-import { buildUserContent } from './ConversationOps';
+import { appendUserPrompt, applyUsage } from './transcriptMutations';
 import type { TemplateEngine } from '../llm/TemplateEngine';
 import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
 import { deriveStaticCapabilities } from '../config/ConfigResolver';
@@ -14,6 +14,8 @@ import { ToolRegistry } from '../tools/ToolRegistry';
 import type { KeepUndoCodeLensProvider } from './KeepUndoCodeLens';
 import { ToolFailureTracker } from '../tools/StripTools';
 import { SessionTimer } from './SessionTimer';
+import { wireSessionTimer } from './sessionTimerWiring';
+import type { SidebarProviderEvents } from './providerEvents';
 import { getLogger } from '../util/logger';
 import { CapabilityCache } from './CapabilityCache';
 import { ToolDispatch, type OpenFileOptions } from './ToolDispatch';
@@ -21,14 +23,11 @@ import { TurnLifecycle } from './TurnLifecycle';
 import { runCliTurn } from './CliTurn';
 import { runModelTurn } from './ModelTurn';
 import type { TurnServices } from './turnServices';
-import { runWorkerTurn } from './WorkerTurn';
+import { makeRunModelTurn } from './turnServices';
 import { runPromptToMarkdown, type PromptRunOptions } from './PromptRun';
 import { runCloudProviderTurn, runLocalProviderTurn } from './ProviderTurn';
 import type { DiffDecorations } from './DiffDecorations';
-import { deriveTitle } from './sessionTypes';
 import { ToolApprovalService } from './ToolApprovalService';
-import { WorkerOrchestrationService } from '../workers/WorkerOrchestrationService';
-import type { WorkerRunRequest, WorkerRunResult } from '../workers/types';
 import { recordModelUsage } from './modelManager/usageTracker';
 import { CliAgentDriver } from '../agents/CliAgentDriver';
 import {
@@ -38,14 +37,7 @@ import {
 } from '../agents/CliSessionRegistry';
 const log = getLogger();
 
-export interface SidebarProviderEvents {
-  onGenerationStarted?: (modelName: string | null, conversationId?: string) => void;
-  onGenerationFinished?: (modelName: string | null, conversationId?: string) => void;
-  onBackendError?: (message: string) => void;
-  onBackendReady?: (modelName: string | null) => void;
-  onBackendStopped?: (modelName: string | null) => void;
-  onConversationSwitched?: (modelName: string | null) => void;
-}
+export type { SidebarProviderEvents } from './providerEvents';
 
 export class AgentLoop {
   /** Streaming/cancellation state for every conversation. */
@@ -53,7 +45,6 @@ export class AgentLoop {
   private readonly capabilities = new CapabilityCache();
   private readonly toolDispatch: ToolDispatch;
   private readonly approvals: ToolApprovalService;
-  private readonly workerService: WorkerOrchestrationService;
   private readonly workspaceRoot: string;
   private readonly cliSessions: CliSessionRegistry;
   /** Collaborators handed to every turn module. Assembled once, in the ctor. */
@@ -158,37 +149,10 @@ export class AgentLoop {
       (convId) => this.sessionTimer.pauseApproval(convId),
       (convId) => this.sessionTimer.resumeApproval(convId),
     );
-    // Wrap the generation events so the session timer tracks every turn
-    // automatically. PromptRun events carry no conversationId and are
-    // deliberately excluded from session time.
-    const timer = this.sessionTimer;
-    const origStarted = events.onGenerationStarted;
-    const origFinished = events.onGenerationFinished;
-    events.onGenerationStarted = (modelName, conversationId) => {
-      if (conversationId) {
-        const conv = this.conversationLookup?.(conversationId);
-        if (conv) {
-          timer.start(conv);
-          this.onTranscriptChanged?.(conversationId);
-        }
-      }
-      origStarted?.(modelName, conversationId);
-    };
-    events.onGenerationFinished = (modelName, conversationId) => {
-      if (conversationId) {
-        const conv = this.conversationLookup?.(conversationId);
-        if (conv) {
-          timer.finish(conv);
-          this.onTranscriptChanged?.(conversationId);
-        }
-      }
-      origFinished?.(modelName, conversationId);
-    };
-    this.sessionTimer.setCheckpointCallback((conversationId) => {
-      const conv = this.conversationLookup?.(conversationId);
-      if (!conv) return;
-      conv.updatedAt = Date.now();
-      this.onTranscriptChanged?.(conversationId);
+    wireSessionTimer(events, {
+      timer: this.sessionTimer,
+      lookup: (id) => this.conversationLookup?.(id),
+      onTranscriptChanged: (convId) => this.onTranscriptChanged?.(convId),
     });
     this.toolDispatch = new ToolDispatch(
       toolRegistry,
@@ -200,16 +164,6 @@ export class AgentLoop {
         this.approvals.request(name, detail, isDangerous, convId, signal),
       diffDecorations,
     );
-    this.workerService = new WorkerOrchestrationService({
-      getConfig,
-      pool,
-      registry: toolRegistry,
-      workspaceRoot: this.workspaceRoot,
-      ...(forgeLoader ? { instructionsLoader: forgeLoader } : {}),
-      ...(secrets ? { secrets } : {}),
-      onActivity: (activity, conversationId) =>
-        this.post({ type: 'workerStatus', ...activity, conversationId }),
-    });
     this.services = {
       pool,
       getConfig,
@@ -217,7 +171,6 @@ export class AgentLoop {
       toolDispatch: this.toolDispatch,
       failureTracker,
       approvals: this.approvals,
-      workerService: this.workerService,
       checkpoints,
       lifecycle: this.lifecycle,
       events,
@@ -235,26 +188,12 @@ export class AgentLoop {
       // construction, so a snapshot taken here would capture undefined.
       onContextChanged: (convId) => this.onContextChanged?.(convId),
       onUsage: (conv, inputTokens, outputTokens) => {
-        conv.input_tokens = (conv.input_tokens ?? 0) + inputTokens;
-        conv.output_tokens = (conv.output_tokens ?? 0) + outputTokens;
-        conv.last_input_tokens = inputTokens;
-        conv.last_output_tokens = outputTokens;
-        conv.model_request_count = (conv.model_request_count ?? 0) + 1;
+        applyUsage(conv, inputTokens, outputTokens);
         this.recordTranscriptMutation(conv);
       },
       onTranscriptChanged: (conv) => this.recordTranscriptMutation(conv),
       commitUserPrompt: (conv, text, attachments) => this.commitUserPrompt(conv, text, attachments),
-      runModelTurn: (baseUrl, conv, model, activeFile, ctrl, postC, apiKey, checkpoint) =>
-        runModelTurn(this.services, {
-          baseUrl,
-          conv,
-          model,
-          activeFile,
-          ctrl,
-          postC,
-          ...(apiKey ? { apiKey } : {}),
-          checkpoint,
-        }),
+      runModelTurn: makeRunModelTurn(() => this.services, runModelTurn),
       waitForCancelledTurns: () => this.waitForCancelledTurns(),
       setController: (ctrl, conversationId) => {
         this.promptRunCtrl = ctrl;
@@ -267,9 +206,6 @@ export class AgentLoop {
         }
       },
     };
-    this.toolDispatch.setWorkerRunner((request, context) =>
-      this.workerService.run(request, context),
-    );
   }
 
   disposeConversation(id: string): Promise<void> {
@@ -333,14 +269,6 @@ export class AgentLoop {
     return this.toolDispatch.openFile(filePath, options);
   }
 
-  runWorkerTurn(
-    conv: ConversationRuntime,
-    model: ModelConfig,
-    request: WorkerRunRequest,
-  ): Promise<WorkerRunResult> {
-    return runWorkerTurn(this.services, conv, model, request);
-  }
-
   async runTurn(
     conv: ConversationRuntime,
     model: ModelConfig,
@@ -395,9 +323,7 @@ export class AgentLoop {
     text: string,
     attachments?: AttachmentData[],
   ): void {
-    const priorUserCount = conv.messages.filter((m) => m.role === 'user').length;
-    conv.messages.push({ role: 'user', content: buildUserContent(text, attachments) });
-    if (priorUserCount === 0) conv.title = deriveTitle(text.split('\n')[0] ?? text);
+    appendUserPrompt(conv, text, attachments);
     this.recordTranscriptMutation(conv);
   }
 

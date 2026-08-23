@@ -25,7 +25,6 @@ import { injectSystemPrompt } from '../llm/SystemPromptInjector';
 import { resolveToolPermissions } from '../tools/PermissionResolver';
 import { ToolBudget } from '../tools/ToolBudget';
 import { extractToolDetail } from './toolSummary';
-import { addWorkerDelegationInstructions, buildWorkerCatalog } from '../workers/WorkerPrompts';
 import {
   isTurnCutOffError,
   ROUND_CAP_INCOMPLETE_PREFIX,
@@ -38,7 +37,7 @@ import {
 } from './turnModelBehavior';
 
 /** Tool rounds per sidebar turn when the model does not set `max_tool_rounds`.
- *  Workers have their own, lower cap in `src/workers/limits.ts`. */
+ */
 export const MAX_TOOL_ROUNDS = 80;
 
 /** Ceiling on a configured `max_tool_rounds`. The cap's job is to stop a
@@ -198,11 +197,7 @@ export async function runModelTurn(
           model.system_prompt,
           model.system_prompt_mode,
         );
-        const delegateEnabled = allowed.has('delegate');
-        const catalog = delegateEnabled
-          ? buildWorkerCatalog(config, allowed.has('cloud-worker'))
-          : undefined;
-        return addWorkerDelegationInstructions(injected, delegateEnabled, catalog);
+        return injected;
       },
       dispatchToolCalls: async (toolCalls, messages) => {
         for (const call of toolCalls) {
@@ -220,9 +215,7 @@ export async function runModelTurn(
           messages,
           conv.id,
           ctrl.signal,
-          undefined,
           checkpoint,
-          model.name,
           budget,
           (diff) => {
             const displayDiffs = conv.displayDiffs ?? (conv.displayDiffs = []);
