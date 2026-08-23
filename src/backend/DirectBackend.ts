@@ -14,11 +14,34 @@ import { expandAlias, resolveSpawnModel, splitModelProfile } from '../config/Con
 import { getLogger } from '../util/logger';
 
 const log = getLogger();
+/**
+ * ONE "Forge - llama-server" channel for the whole extension host.
+ *
+ * Each DirectBackend used to create its own lazily and none were ever
+ * disposed, so every spawn/stop cycle left another identically-named entry in
+ * the Output dropdown — and with several slots live at once the real ones were
+ * indistinguishable from each other and from the dead ones. Sharing one
+ * channel removes the leak; the per-server banner below replaces the clear()
+ * each backend used to do, which would now wipe another slot's output.
+ */
+let sharedServerChannel: vscode.OutputChannel | undefined;
+
+function serverChannel(): vscode.OutputChannel {
+  sharedServerChannel ??= vscode.window.createOutputChannel('Forge - llama-server');
+  return sharedServerChannel;
+}
+
+/** Called from `deactivate()`; the channel outlives any single backend. */
+export function disposeServerChannel(): void {
+  sharedServerChannel?.dispose();
+  sharedServerChannel = undefined;
+}
+
 export class DirectBackend implements BackendController {
   private proc: ChildProcess | null = null;
   private ready = false;
   private startAbort: AbortController | null = null;
-  private serverChannel: vscode.OutputChannel | null = null;
+
   private readonly host: string;
   private readonly port: number;
   private activeModel: ModelConfig | null = null;
@@ -52,8 +75,7 @@ export class DirectBackend implements BackendController {
   }
 
   showConsole(): void {
-    this.serverChannel ??= vscode.window.createOutputChannel('Forge - llama-server');
-    this.serverChannel.show(true);
+    serverChannel().show(true);
   }
 
   loadedModel(): string | null {
@@ -199,15 +221,15 @@ export class DirectBackend implements BackendController {
       log.info(
         `[DirectBackend] port ${this.port} already serving ${model.name} — adopting existing server`,
       );
-      this.serverChannel ??= vscode.window.createOutputChannel('Forge - llama-server');
-      this.serverChannel.clear();
-      this.serverChannel.appendLine(
+      const adopted = serverChannel();
+      adopted.appendLine(`\n=== ${model.name} — port ${this.port} (adopted) ===`);
+      adopted.appendLine(
         `[Forge] Adopted existing llama-server on port ${this.port} (started by another VS Code window).`,
       );
-      this.serverChannel.appendLine(
+      adopted.appendLine(
         `[Forge] Live output is in that window. Polling /health + /slots every 5 s...\n`,
       );
-      this.serverChannel.show(true);
+      adopted.show(true);
       this.adoptedServer = true;
       this.startAdoptedMonitor();
       return;
@@ -226,11 +248,12 @@ export class DirectBackend implements BackendController {
       this.port,
     );
 
-    this.serverChannel ??= vscode.window.createOutputChannel('Forge - llama-server');
-    this.serverChannel.clear();
-    this.serverChannel.appendLine(`> ${binary} ${args.join(' ')}`);
-    this.serverChannel.appendLine('');
-    this.serverChannel.show(true);
+    const spawned = serverChannel();
+    spawned.appendLine(`
+=== ${model.name} — port ${this.port} ===`);
+    spawned.appendLine(`> ${binary} ${args.join(' ')}`);
+    spawned.appendLine('');
+    spawned.show(true);
     log.info(`[DirectBackend] spawn: ${binary} ${args.join(' ')}`);
 
     this.proc = spawnLlamaServer(binary, args);
@@ -238,7 +261,7 @@ export class DirectBackend implements BackendController {
     const proc = this.proc;
     const startedAt = attachServerDiagnostics(proc, {
       modelName: model.name,
-      channel: () => this.serverChannel,
+      channel: () => serverChannel(),
       isCurrent: () => this.proc === proc,
       onUnexpectedExit: () => {
         this.proc = null;
@@ -278,7 +301,7 @@ export class DirectBackend implements BackendController {
     if (this.adoptPollTimer) return;
     this.adoptPollTimer = startAdoptedServerMonitor({
       baseUrl: `http://${this.host}:${this.port}`,
-      log: (line) => this.serverChannel?.appendLine(line),
+      log: (line) => serverChannel().appendLine(line),
       onLost: () => {
         this.ready = false;
         this.stopAdoptedMonitor();

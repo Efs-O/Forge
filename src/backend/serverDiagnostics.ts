@@ -30,8 +30,8 @@ export interface ServerDiagnosticsSink {
 
 export interface ServerDiagnosticsOptions {
   modelName: string;
-  /** The output channel, when one exists. */
-  channel: () => ServerDiagnosticsSink | null;
+  /** The shared llama-server output channel. */
+  channel: () => ServerDiagnosticsSink;
   /**
    * Whether this process is still the backend's current one.
    * `stopLlamaServer` clears it before an intentional kill, which is how one

@@ -2,6 +2,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { SidebarProvider } from './sidebar/SidebarProvider';
 import { BackendPool } from './backend/BackendPool';
+import { disposeServerChannel } from './backend/DirectBackend';
 import { ControlServer } from './backend/ControlServer';
 import { ControlServerRegistry, controlServerRegistryPath } from './backend/ControlServerRegistry';
 import { buildControlChatProxy } from './llm/ControlChatProxy';
@@ -334,6 +335,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 export function deactivate(): void {
   // backend.stop() called via subscription above.
+  disposeServerChannel();
   // Debounced last_used writes would otherwise be lost when the window closes
   // within DEBOUNCE_MS of a turn — the exact case the Model Manager cares about.
   flushPendingModelUsage();
