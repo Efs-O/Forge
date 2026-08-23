@@ -20,8 +20,8 @@ That is what this checklist is for. Budget 20–30 minutes.
 
 **1. Install the build.**
 
-```
-code --install-extension forge-llm-0.13.0.vsix
+```powershell
+code --install-extension .\forge-llm-0.13.0.vsix
 ```
 
 Then **fully close and reopen VS Code**. Not "Reload Window" — the extension
@@ -38,9 +38,18 @@ shared_runtime:
 **3. Clear stale state.** This release changes the runtime key format, so
 anything already in there is from the old format and will just sit unused:
 
+PowerShell — which is what the VS Code terminal gives you by default:
+
+```powershell
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\forge-llm\shared-runtimes" -ErrorAction SilentlyContinue
+Test-Path "$env:LOCALAPPDATA\forge-llm\shared-runtimes"   # expect: False
 ```
-rmdir /s /q "%LOCALAPPDATA%\forge-llm\shared-runtimes"
-```
+
+Two things that trip this up: it is `$env:LOCALAPPDATA`, not `%LOCALAPPDATA%`
+(PowerShell does not expand the `%...%` form — it passes it through as literal
+text), and the flags are `-Recurse -Force`, not `/s /q`. The
+`-ErrorAction SilentlyContinue` just keeps it quiet when the folder was never
+created in the first place.
 
 **4. Open two VS Code windows on two different folders.** Same folder twice
 will not do — each window needs its own extension host. Call them **A** and
@@ -52,7 +61,8 @@ will not do — each window needs its own extension host. Call them **A** and
 - **Output panel → "Forge - llama-server"** — only the *owning* window shows
   live server output; the borrower shows a note saying so.
 - A terminal running `nvidia-smi -l 2` to watch VRAM and process count.
-- Explorer at `%LOCALAPPDATA%\forge-llm\shared-runtimes` — one `<hash>.json`
+- Explorer at `%LOCALAPPDATA%\forge-llm\shared-runtimes` — paste that into the
+  Explorer address bar, where `%...%` *does* expand. One `<hash>.json`
   per shared server, and a `<hash>.leases\` folder holding one file per
   borrowing window.
 
@@ -202,8 +212,13 @@ still delegates — that is the capability you said you wanted kept.
 Grab, in this order:
 
 1. The **Forge** output channel from both windows.
-2. A directory listing of `%LOCALAPPDATA%\forge-llm\shared-runtimes` including
-   the `.leases` folder.
+2. The registry contents, leases included:
+
+   ```powershell
+   Get-ChildItem -Recurse "$env:LOCALAPPDATA\forge-llm\shared-runtimes" | Select-Object FullName, Length
+   Get-ChildItem -Recurse -Filter *.json "$env:LOCALAPPDATA\forge-llm\shared-runtimes" | ForEach-Object { $_.FullName; Get-Content $_.FullName }
+   ```
+
 3. `nvidia-smi` output at the moment it went wrong.
 4. Which test number, and what you expected versus what happened.
 
