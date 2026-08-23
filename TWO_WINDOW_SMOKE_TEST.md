@@ -234,6 +234,32 @@ config now refuses to boot, that is a bad upgrade for every user who set it.
 
 ---
 
+## Test 8 — Re-borrow after the owner's server restarts
+
+Added because the first real run of this checklist found a bug here that none
+of tests 1–7 reach.
+
+**Do:** Set up the share (test 1). Then kill `llama-server` directly, load the
+model again in **A** so a fresh server comes up, and send a prompt in **B** so
+it re-attaches. Now run `Forge: Release Model` in **B**, then
+`Forge: Unload Model` in **A**.
+
+**Expect:**
+
+- After B re-attaches, `<hash>.leases\` holds **exactly one** file, not two.
+- A unloads successfully.
+
+**The bug this catches:** B took a second lease on re-attach without releasing
+the first. Releasing in B then removed only the newer one, leaving a file that
+named B's own *live* process — so A saw a borrower that would never leave and
+could not unload for as long as B stayed open. Two lease files for one window
+is the tell; check the directory even if everything else looks fine.
+
+Automated in `test/integration/SharedRuntimeReborrow.test.ts`, but the manual
+version is what found it.
+
+---
+
 ## Also worth confirming
 
 `dispatch_workers` is gone in this release, but `ask_local_agent` is not. Ask
