@@ -227,8 +227,7 @@ models:
   # Forge spawns the already-logged-in CLI locally; auth is entirely the CLI's
   # own login (`claude login` / `codex login`), never a key in config.yaml.
   # These are FULL-RIGHTS external agents using their OWN tools. They can be
-  # selected for direct sidebar chat and used as dispatch_workers or
-  # ask_local_agent targets.
+  # selected for direct sidebar chat and used as ask_local_agent targets.
   # - name: claude-code
   #   provider: cli
   #   cli: claude          # bare name resolved on PATH, or an absolute path

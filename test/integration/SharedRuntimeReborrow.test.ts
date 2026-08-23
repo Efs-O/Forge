@@ -117,3 +117,64 @@ describe('re-borrowing a shared runtime', () => {
     expect(registry.hasBorrowers(key)).toBe(false);
   });
 });
+
+/**
+ * `stopAll` is the window-close / "Unload Model" path. For a BORROWED runtime
+ * it must detach, never stop: the process belongs to another window.
+ *
+ * It previously called stop().catch(() => {}), which happened to be safe only
+ * because stop() throws for an adopted server and the bare catch swallowed it.
+ * Safety resting on a swallowed exception is one refactor away from killing
+ * another window's llama-server, so this asserts the borrower path directly.
+ */
+describe('stopAll with a borrowed runtime', () => {
+  let root: string;
+  let owner: Awaited<ReturnType<typeof startFakeServer>>;
+  let cfg: ForgeConfig;
+  let key: string;
+
+  beforeEach(async () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-stopall-'));
+    owner = await startFakeServer();
+    cfg = {
+      active_model: 'shared',
+      llama_server: { binary: 'llama-server.exe', host: '127.0.0.1', port: owner.port },
+      models: [{ name: 'shared', provider: 'llama.cpp', gguf_path: GGUF }],
+      shared_runtime: { enabled: true },
+    } as ForgeConfig;
+    key = sharedRuntimeKey(cfg.models[0]!, cfg.llama_server);
+  });
+
+  afterEach(async () => {
+    if (owner.server.listening) {
+      await new Promise<void>((resolve) => owner.server.close(() => resolve()));
+    }
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('detaches, releases the lease, and leaves the owner serving', async () => {
+    const registry = new SharedRuntimeRegistry(root);
+    registry.publish({
+      key,
+      model: 'shared',
+      endpoint: `http://127.0.0.1:${owner.port}`,
+      ownerPid: process.pid,
+      createdAt: new Date().toISOString(),
+    });
+    const pool = new BackendPool(cfg, registry);
+    const backend = (await pool.acquire('shared')) as DirectBackend;
+    expect(fs.readdirSync(path.join(root, `${key}.leases`))).toHaveLength(1);
+
+    await pool.stopAll();
+
+    expect(fs.readdirSync(path.join(root, `${key}.leases`))).toEqual([]);
+    expect(registry.hasBorrowers(key)).toBe(false);
+    // Fully torn down, not the half-state stop()'s early throw used to leave.
+    expect(backend.isReady()).toBe(false);
+    expect(backend.loadedModel()).toBeNull();
+    // The decisive assertion: the owner's server is untouched.
+    expect(owner.server.listening).toBe(true);
+    const probe = await fetch(`http://127.0.0.1:${owner.port}/v1/models`);
+    expect(probe.ok).toBe(true);
+  });
+});

@@ -124,7 +124,13 @@ model as loaded but not ready.
 
 ## Test 2 — The borrower releases (the main fix)
 
-**Do:** In **B**, run `Forge: Release Model` from the Command Palette.
+**Do:** In **B**, run `Forge: Unload Model` from the Command Palette.
+
+> **Not `Forge: Release Model`** — despite the name, that command only
+> decrements a control-server *hold* counter used by external API consumers
+> (Relay calling `/ensure`). It frees no VRAM, no slot, and no lease. With no
+> holds outstanding it reports "had no active holds" and does nothing.
+> `Forge: Unload Model` is the one that tears down this window's backends.
 
 **Expect:**
 
@@ -176,7 +182,7 @@ leaving B running and pointed at a server that no longer exists.
 - B does **not** sit there claiming to be ready and then hang on a prompt.
 - Sending a prompt in B produces a clear error, or B starts its own server —
   either is acceptable. Silently hanging is not.
-- `Forge: Release Model` in B still works and removes B's lease.
+- `Forge: Unload Model` in B still works and removes B's lease.
 
 This is the one with the least automated coverage. Take your time here.
 
@@ -241,7 +247,7 @@ of tests 1–7 reach.
 
 **Do:** Set up the share (test 1). Then kill `llama-server` directly, load the
 model again in **A** so a fresh server comes up, and send a prompt in **B** so
-it re-attaches. Now run `Forge: Release Model` in **B**, then
+it re-attaches. Now run `Forge: Unload Model` in **B**, then
 `Forge: Unload Model` in **A**.
 
 **Expect:**

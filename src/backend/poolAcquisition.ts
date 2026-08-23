@@ -101,9 +101,17 @@ export interface StopAllContext {
  */
 export async function stopAllSlots(ctx: StopAllContext): Promise<void> {
   for (const [model, shared] of ctx.sharedSlots) {
-    await shared.backend.stop().catch(() => {});
-    ctx.registry.releaseLease(shared.key, shared.leaseId);
-    ctx.sharedSlots.delete(model);
+    // detach(), never stop(): the process belongs to another window. stop()
+    // does refuse an adopted server, but only by throwing from deep inside
+    // stopLlamaServer — so the safety here would rest entirely on a swallowed
+    // exception, and it would also skip resetAttachmentState and leave the
+    // backend half-torn-down. Make the borrower path explicit instead.
+    try {
+      await shared.backend.detach();
+    } finally {
+      ctx.registry.releaseLease(shared.key, shared.leaseId);
+      ctx.sharedSlots.delete(model);
+    }
   }
   const retained = (model: string): boolean =>
     ctx.sharedRuntimeEnabled && ctx.registry.hasBorrowers(ctx.runtimeKey(model));
