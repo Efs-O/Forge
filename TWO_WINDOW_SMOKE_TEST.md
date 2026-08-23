@@ -55,6 +55,21 @@ created in the first place.
 will not do — each window needs its own extension host. Call them **A** and
 **B** for the rest of this document.
 
+**Both windows must resolve to the SAME `config.yaml`.** Forge looks for
+`.forge/config.yaml` in the workspace and falls back to the one in
+globalStorage, so a window opened on a folder without `.forge/` may land on a
+different config — and if the two configs disagree about the model at all, the
+two windows compute different runtime keys and never share. That failure looks
+exactly like the bug this release fixes, which makes it worth ruling out first.
+
+If B is a folder with no `.forge/`, point it at A's config: `Ctrl+,` →
+`forge.configFile` → **Workspace** tab → the absolute path to A's
+`.forge/config.yaml`. Workspace scope, not User, so A keeps its normal lookup.
+Reload B and confirm its model picker is actually populated before starting.
+
+Do not solve this by *copying* the config into B. Two copies drift, and drift
+is the thing that silently breaks sharing. One file, two readers.
+
 **5. Have these ready to watch:**
 
 - **Output panel → "Forge"** in both windows. This is the log referenced below.
@@ -65,6 +80,17 @@ will not do — each window needs its own extension host. Call them **A** and
   Explorer address bar, where `%...%` *does* expand. One `<hash>.json`
   per shared server, and a `<hash>.leases\` folder holding one file per
   borrowing window.
+
+**Noise you should expect and ignore.** With both windows on one config, the
+second window logs:
+
+```
+[ControlServer] port 8799 in use — another Forge window likely owns it; not starting a second.
+```
+
+That is correct — only one window owns the control API port. Any configured
+`mcp_servers` also spawn once per window, so you will see two of each in Task
+Manager. Neither is a failure of this test.
 
 ---
 
@@ -77,6 +103,15 @@ will not do — each window needs its own extension host. Call them **A** and
 
 - `nvidia-smi` shows **one** `llama-server.exe`, not two. VRAM does not double.
   This is the whole point of the feature — if VRAM doubles, stop and report it.
+
+  > **Do not run a semantic search during this test.** Embeddings spawn a
+  > *second* `llama-server` on port 8091 (EmbeddingGemma), which makes the
+  > process count 2 for an entirely innocent reason and would read as a
+  > failure here. It starts lazily and asks first, so simply declining the
+  > prompt — or not searching — keeps the count honest. If one is already
+  > running, check the port before counting: an embedding server is
+  > `--embedding` on 8091, the chat server is not.
+
 - B's Forge log: `adopting existing server` and `borrowed shared runtime`.
 - One `<hash>.json` file appears, plus `<hash>.leases\` containing one file.
 - B's sidebar shows the model as ready and **can actually answer a prompt.**
