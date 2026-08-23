@@ -15,7 +15,7 @@ esbuild.config.mjs
 tsconfig.json
 .eslintrc.json
 .prettierrc
-vitest.config.ts
+vitest.config.*
 *.md
 !README.md
 src/**
@@ -38,3 +38,6 @@ meadow.html
 meadow_v2.html
 particle_network.html
 assets/.coordination/**
+assets/_preview/**
+assets/publisher-logo.svg
+publisher-logo.png

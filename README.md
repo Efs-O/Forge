@@ -1,13 +1,33 @@
-# Forge LLM - Official Repository
+# Forge LLM
 
-> This is the official Forge LLM extension by [Efsoo](https://github.com/Efs-O).
-> Licensed under Apache License 2.0. If you fork this project, keep the copyright notices, `LICENSE`, and `NOTICE`, and document significant changes.
+> **The VS Code coding agent built for people who run their own models.**
 
-# Forge
+Load GGUF models through llama.cpp, share one loaded model across VS Code
+windows, use tool calling hardened for local-model context limits, and review
+file-changing turns with visible diffs and Keep/Undo checkpoints. Forge has no
+telemetry and requires no cloud account.
 
-Forge is a local-first AI coding assistant for VS Code.
+This is the official Forge LLM extension by [Efsoo](https://github.com/Efs-O),
+licensed under Apache License 2.0. Cloud and OpenAI-compatible providers are
+available only when you explicitly configure them.
 
-Its default and strongest path is still local: GGUF models through `llama-server`, local Ollama models, strict tool schemas, per-action confirmation, and per-turn undo. Forge now also supports optional cloud or OpenAI-compatible providers for users who explicitly configure them. Telemetry remains none.
+## Why Forge
+
+- **First-class llama.cpp control.** Forge starts, monitors, shares, restarts,
+  and unloads `llama-server`; it does not treat your local runtime as merely
+  another API URL.
+- **Tools engineered for local models.** Strict schemas, per-slot context
+  budgeting, truncated-call recovery, bounded results, and chunked writes keep
+  smaller local models productive through long coding turns.
+- **Reversible agent work.** Confirmation gates, inline diffs, and per-turn
+  Keep/Undo checkpoints make file-changing actions visible and recoverable.
+- **Bring the runtime you prefer.** Use direct GGUF loading, local or
+  daemon-routed Ollama, an explicitly configured OpenAI-compatible provider, or
+  an already-authenticated Claude Code or Codex CLI.
+
+Local execution is the default. Search, fetch, cloud providers, and external
+CLI agents run only when you configure or invoke them, and Forge sends no
+telemetry, analytics, or auto-update pings.
 
 ![Forge agent loop in action](assets/readme/demo.gif)
 
@@ -21,14 +41,6 @@ Its default and strongest path is still local: GGUF models through `llama-server
 | :-------------------------------------------------: | :-------------------------------------------: |
 | ![Slash commands](assets/readme/slash-commands.jpg) | ![Marketplace](assets/readme/marketplace.jpg) |
 
-## Current Positioning
-
-- Local-first by default.
-- `llama.cpp` and local Ollama remain first-class.
-- Optional cloud and OpenAI-compatible backends exist for users who opt in.
-- No telemetry, analytics, or auto-update pings.
-- Search and fetch stay explicit and user-configured.
-
 ## Highlights
 
 - Single execute-style workflow with no mode switching
@@ -39,8 +51,8 @@ Its default and strongest path is still local: GGUF models through `llama-server
 - Direct `llama-server` lifecycle management
 - Ollama local and Ollama cloud routing through the local daemon
 - Optional cloud or self-hosted providers: `xai`, `openrouter`, `openai`, `openai-compatible`
-- External CLI agents (`provider: cli` — Claude Code, Codex) as full-rights direct-chat and worker/delegation targets via existing subscriptions, no API key
-- Localhost control server for external orchestrators and worker fleets
+- External CLI agents (`provider: cli` — Claude Code, Codex) as full-rights direct-chat models and read-only delegation targets using each CLI's own authentication
+- Localhost control server for external orchestrators and shared model lifecycle
 - Reasoning token display and optional thinking-channel stripping
 - Optional Tavily or Brave web search with keys stored in VS Code SecretStorage
 - Local semantic code search and reindex support
@@ -53,7 +65,7 @@ Its default and strongest path is still local: GGUF models through `llama-server
 - Added localhost control-server support for load-on-demand model orchestration
 - Added control-server commands in VS Code for ensure, release, and status
 - Expanded Ollama support, including local daemon usage and cloud routing through the local Ollama daemon
-- Added multi-worker and concurrency-oriented config examples
+- Added shared llama-server runtimes across VS Code windows with explicit ownership, leases, and crash recovery
 - Hardened backend lifecycle, readiness, and release behavior
 - Added semantic code search reindexing flow and slash command support
 - Improved diff display, checkpoint handling, and multi-tab chat behavior
@@ -183,7 +195,7 @@ of the weights, two independent caches.
 
 ### 1. Install the extension
 
-Install Forge from the VS Code Marketplace or load the packaged VSIX.
+Install Forge from the VS Code Marketplace or Open VSX, or load the packaged VSIX.
 
 ### 2. Create `.forge/config.yaml`
 
@@ -296,7 +308,7 @@ Routes:
 - `POST /ensure` with `{ "model": "..." }`
 - `POST /release` with `{ "model": "..." }`
 
-This is especially useful for multi-worker local fleets where an external process needs Forge to warm or release a model on demand.
+This is especially useful in multi-process local setups where an external process needs Forge to warm or release a model on demand.
 
 ## Search and Semantic Code Search
 
@@ -338,16 +350,17 @@ never started by default. Use `--include-mcp` explicitly (and optionally
 sweep. Reports identify native versus MCP tools and state that the mode is
 schema emission only.
 
-Generate the canonical native/MCP coverage matrix by merging dated evidence:
+Generate the canonical native coverage matrix by merging dated evidence:
 
 ```powershell
-npm run test:local-tools -- --list --include-mcp `
+npm run test:local-tools -- --list `
   --coverage-report docs/TOOL_COVERAGE.md `
   --model-evidence docs/live-reports/<dated-tool-report>.json `
   --capability-evidence docs/live-reports/<dated-capability-report>.json
 ```
 
-The coordinator, worker, advisory, vision, and semantic-search checks are
+Add `--include-mcp` for a local, configuration-dependent MCP inventory. The
+coordinator, delegation, vision, and semantic-search checks are
 hardware-dependent and skipped in ordinary CI. Run them explicitly against a
 local model and embedding endpoint:
 
@@ -380,7 +393,7 @@ Tool results are capped at `max_result_chars` (default 24000) before entering th
 
 ## Local Delegation
 
-Set `permissions.agents.delegate: true` to let the primary agent use `ask_local_agent` for a bounded, read-only consultation with another configured local model. The delegated model receives only the task and selected workspace files, has no tools, and cannot edit files or run commands; its response is advisory analysis returned to the primary conversation.
+Set `permissions.agents.delegate: true` to let the primary agent use `ask_local_agent` for a bounded, read-only consultation with another configured model. A regular llama.cpp or Ollama delegate receives only the task and selected workspace files and has no tools. A `provider: cli` delegate instead uses the authenticated CLI's own read-only tool set, so it can inspect files and run non-mutating investigations but cannot edit the workspace. In both cases, the response is advisory analysis returned to the primary conversation.
 
 Worker dispatch was removed in 0.13.1. `dispatch_workers`,
 `list_worker_models`, and the coordinator/worker role hierarchy are gone;
@@ -397,7 +410,7 @@ Direct CLI chat owns one warm process per conversation/model. Claude uses its st
 
 Warm direct-chat processes are capped by `max_cli_agents` (default `4`, per VS Code window) and idle processes are disposed after `cli_idle_timeout_ms` (default `900000`, or 15 minutes). When the cap is full, Forge evicts only the least-recently-used idle session; if every session is busy, it surfaces a capacity error. By default Forge passes no model override, so the CLI resolves its own configured/default model. Set optional `cli_model` only when an explicit per-entry override is wanted. A separate extension's per-chat model picker is private state and is not treated as configuration.
 
-Authentication is entirely the CLI's own login (`claude`/`codex`), never a key stored in Forge. Before an unrestricted direct-chat CLI starts, Forge inventories the eligible workspace and streams a rollback baseline to Forge-owned disk storage in bounded chunks; it does not retain the workspace as an extension-host memory snapshot. Write-capable CLI workers use the same engine over their assigned paths. Finalization hashes covered files and retains only preimages needed for changed paths. Forge always excludes `.forge` and `.forge-*` from workspace checkpoints.
+Authentication is entirely the CLI's own login (`claude`/`codex`), never a key stored in Forge. Before an unrestricted direct-chat CLI starts, Forge inventories the eligible workspace and streams a rollback baseline to Forge-owned disk storage in bounded chunks; it does not retain the workspace as an extension-host memory snapshot. Full-access direct CLI chats use the same checkpoint engine over their eligible workspace paths. Finalization hashes covered files and retains only preimages needed for changed paths. Forge always excludes `.forge` and `.forge-*` from workspace checkpoints.
 
 External CLI checkpoint controls are explicit VS Code settings. `forge.checkpoint.externalCliEnabled` defaults to `true`, `forge.checkpoint.maxBytes` defaults to 2 GiB, `forge.checkpoint.maxFiles` defaults to 100,000 files, and `forge.checkpoint.storagePath` optionally selects an absolute storage directory outside the workspace. Forge checks capacity before launch and refuses the turn with a measured error when safe rollback coverage cannot be established. As an explicit temporary opt-out, setting `forge.checkpoint.externalCliEnabled` to `false` skips the external CLI scan and checkpoint; Forge displays a warning and Keep/Undo cannot restore that CLI's changes. Forge-native tools retain per-file checkpoints. Reload the VS Code window after changing these settings.
 
@@ -509,6 +522,7 @@ Outbound traffic is limited to the endpoints you explicitly use:
 - an explicitly configured cloud or OpenAI-compatible provider endpoint
 - Tavily or Brave if search is enabled
 - user-approved fetch targets
+- an authenticated Claude Code or Codex CLI agent you explicitly invoke; that CLI uses its own tools and network configuration
 
 Configured MCP servers run as local stdio child processes — Forge sends them no network traffic.
 
@@ -517,8 +531,7 @@ Configured MCP servers run as local stdio child processes — Forge sends them n
 Quality gates:
 
 ```bash
-npx tsc --noEmit
-npx vitest run
+npm run ci
 npm run package
 ```
 

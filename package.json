@@ -1,8 +1,8 @@
 {
   "name": "forge-llm",
   "displayName": "Forge LLM",
-  "description": "Local-LLM coding assistant — direct llama.cpp, strict tool schemas, single execute-style workflow",
-  "version": "0.13.1",
+  "description": "Local coding agent with first-class llama.cpp/GGUF control, reliable tools, and Keep/Undo checkpoints",
+  "version": "0.13.2",
   "publisher": "Efsoo",
   "icon": "assets/publisher-logo.png",
   "galleryBanner": {
@@ -24,7 +24,12 @@
     "local ai",
     "coding assistant",
     "agent",
-    "gguf"
+    "gguf",
+    "ollama",
+    "llama-server",
+    "offline",
+    "agentic coding",
+    "checkpoint"
   ],
   "repository": {
     "type": "git",
@@ -401,23 +406,23 @@
     "@types/vscode": "^1.90.0",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
-    "@vitest/coverage-v8": "^1.0.0",
+    "@vitest/coverage-v8": "^4.1.11",
     "@vscode/test-electron": "^2.4.0",
     "@vscode/vsce": "^3.0.0",
-    "esbuild": "^0.21.0",
+    "esbuild": "^0.28.2",
     "eslint": "^8.57.0",
     "eslint-config-prettier": "^9.0.0",
     "eslint-plugin-prettier": "^5.0.0",
     "jsdom": "^29.1.1",
     "prettier": "^3.0.0",
     "typescript": "^5.4.0",
-    "vitest": "^1.0.0"
+    "vitest": "^4.1.11"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.11.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@mozilla/readability": "^0.6.0",
     "highlight.js": "^11.11.1",
-    "js-yaml": "^4.1.0",
+    "js-yaml": "^4.3.1",
     "nunjucks": "^3.2.4",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",

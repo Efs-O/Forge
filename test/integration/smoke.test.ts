@@ -13,15 +13,35 @@ import type { ChatCompletionRequest } from '../../src/llm/types';
 
 type Handler = (req: http.IncomingMessage, res: http.ServerResponse) => void;
 
+// `listen(0)` may return a port that Fetch blocks even on loopback. Retry those
+// WHATWG unsafe ports so this integration test cannot fail based on the OS's
+// ephemeral-port choice.
+const FETCH_BLOCKED_PORTS = new Set([
+  1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101,
+  102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161, 179, 389,
+  427, 465, 512, 513, 514, 515, 526, 530, 531, 532, 540, 548, 554, 556, 563, 587, 601, 636,
+  989, 990, 993, 995, 1719, 1720, 1723, 2049, 3659, 4045, 5060, 5061, 6000, 6566, 6665,
+  6666, 6667, 6668, 6669, 6697, 10080,
+]);
+
 function startServer(handler: Handler): Promise<{ url: string; close: () => Promise<void> }> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const srv = http.createServer(handler);
-    srv.listen(0, '127.0.0.1', () => {
+    srv.once('error', reject);
+
+    const listen = () => srv.listen(0, '127.0.0.1', onListening);
+    const onListening = () => {
       const { port } = srv.address() as AddressInfo;
+      if (FETCH_BLOCKED_PORTS.has(port)) {
+        srv.close((error) => (error ? reject(error) : listen()));
+        return;
+      }
       const url = `http://127.0.0.1:${port}`;
       const close = () => new Promise<void>((res, rej) => srv.close((e) => (e ? rej(e) : res())));
       resolve({ url, close });
-    });
+    };
+
+    listen();
   });
 }
 

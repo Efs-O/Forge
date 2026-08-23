@@ -1,20 +1,28 @@
-# 0.13.1 smoke-test status
+# 0.13.1 smoke-test status (historical pre-publication record)
 
 Result of the manual two-window validation. The checklist itself is
 `TWO_WINDOW_SMOKE_TEST.md`. Last updated 2026-08-23.
+
+Release update: PR #2 was subsequently merged to `origin/main` as
+`3ed257bb2be221c9ef495b2b32e977b757bb468a`, and Marketplace version 0.13.1 was
+published on 2026-08-23. The statements below about an open PR and an
+unpublished release describe the moment the smoke test finished, not the
+current release state.
 
 ---
 
 ## Where things stand
 
-**All eight tests pass.** Branch `reliability-hardening`, working tree clean,
-PR #2 open. Nothing merged, nothing published. `main` untouched.
+**All eight tests passed.** At the time of the test, branch
+`reliability-hardening` had a clean worktree, PR #2 was open, and `main` was
+untouched. See the release update above for what happened afterward.
 
 VSIX: `forge-llm-0.13.1.vsix` at repo root. The version was bumped from 0.13.0
 because 0.13.0 was never published and the smoke test found six further bugs;
 `CHANGES.md` folds them into one 0.13.1 entry.
 
-CI: 952 tests passing.
+CI at the time: 952 tests passing. The 2026-08-23 Open VSX release audit ran
+the expanded suite with 957 tests passing and 8 explicitly skipped.
 
 ---
 
@@ -130,13 +138,16 @@ don't see a `dispatch_workers` tool"* — a wasted turn on every delegation.
 
 ---
 
-## Remaining before publish
+## Publication follow-up
 
-1. Remote review of PR #2 — `/code-review ultra 2`. User-triggered and billed;
-   it cannot be launched from the agent side.
-2. Merge to `main`.
-3. `vsce publish` (publisher `Efsoo`, Azure DevOps PAT from
-   Marketplace → Manage, not Azure Portal).
+The original Marketplace steps are complete: PR #2 was merged and 0.13.1 was
+published under publisher `Efsoo`. Open VSX is a separate registry release and
+requires its own Eclipse/Open VSX account agreement, namespace, and token.
+
+The Open VSX audit produced dependency, documentation, and package-hygiene
+changes after Marketplace 0.13.1 was published. Those bytes should ship under
+a new patch version in both registries rather than publishing two different
+0.13.1 artifacts.
 
 Deferred, not blocking: MED-4 (legacy permissions migration), MED-5 (denylist →
 structured policy), LOW-2 (doc archive), and the seven onboarding findings in

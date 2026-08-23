@@ -4,7 +4,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   resolve: {
     alias: {
-      vscode: path.resolve(__dirname, 'test', 'support', 'vscode.ts'),
+      vscode: path.resolve(import.meta.dirname, 'test', 'support', 'vscode.ts'),
     },
   },
   test: {

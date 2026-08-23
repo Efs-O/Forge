@@ -4,7 +4,9 @@ const flush = vi.fn();
 const updateTitle = vi.fn();
 // The real logger writes a transcript under ~/.forge on every finished turn.
 vi.mock('../../src/sidebar/SessionLogger', () => ({
-  SessionLogger: vi.fn().mockImplementation(() => ({ flush, updateTitle })),
+  SessionLogger: vi.fn().mockImplementation(function SessionLoggerMock() {
+    return { flush, updateTitle };
+  }),
 }));
 
 import { SendPipeline, type SendPipelineDeps } from '../../src/sidebar/SendPipeline';

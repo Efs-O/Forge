@@ -1,5 +1,38 @@
 # Forge — Recent Changes
 
+## 0.13.2 — Open VSX release audit
+
+- **The complete dependency audit is clean, including development tooling.**
+  Upgraded Vitest and its V8 coverage provider to 4.1.11, esbuild to 0.28.2,
+  and the transitive Vite toolchain to patched releases. The migration keeps
+  the full test suite and coverage thresholds intact, updates the Vitest
+  configuration to native ESM, and adapts a constructor test double to Vitest
+  4's JavaScript constructor semantics. `npm audit` now reports zero
+  vulnerabilities across production and development dependencies.
+- **Production dependency audit is clean.** Updated `js-yaml` and the MCP SDK
+  to patched releases, including their URL parsing and HTTP-server transitive
+  dependencies. `npm audit --omit=dev` now reports zero vulnerabilities.
+- **Delegation and privacy documentation matches the shipped behavior.** The
+  README now distinguishes tool-free local-model delegates from read-only CLI
+  delegates, removes the last reference to deleted CLI workers, and discloses
+  that an explicitly invoked authenticated CLI uses its own network settings.
+  The public tool-coverage matrix was regenerated from the current 48-tool
+  catalog, removing retired worker tools and access columns.
+- **The VSIX contains only release assets.** Removed a duplicate root logo,
+  unused palette previews, and an unused SVG logo source from the package. The
+  resulting archive contains no source, tests, local configuration, machine
+  paths, source maps, or credential-shaped strings.
+- **Forge's local-model wedge is clear at first glance.** The README now leads
+  with first-class llama.cpp/GGUF control, local-model tool reliability, and
+  reversible Keep/Undo checkpoints; Marketplace metadata uses the same
+  concrete positioning. Open VSX is documented as an installation source, and
+  development guidance uses the canonical `npm run ci` and `npm run package`
+  gates.
+- **The HTTP streaming smoke test no longer depends on a lucky ephemeral
+  port.** Its loopback server retries ports that Fetch classifies as unsafe,
+  eliminating a Windows CI failure that appeared only when the OS selected one
+  of those otherwise-free ports.
+
 ## 0.13.1 — Shared-runtime reliability and worker removal
 
 Supersedes 0.13.0, which was never published. The entries below marked *(found
