@@ -36,7 +36,9 @@ export class BackendPool implements IBackendPool {
     string,
     { backend: DirectBackend; key: string; leaseId: string }
   >();
-  private readonly sharedRegistry = new SharedRuntimeRegistry();
+  /** Injectable so tests exercise lease bookkeeping against a temp root
+   *  instead of the real per-machine registry under LOCALAPPDATA. */
+  private readonly sharedRegistry: SharedRuntimeRegistry;
   // Ollama models connect to a pre-running daemon and don't consume a port slot.
   private readonly ollamaSlots = new Map<string, DirectBackend>();
   /** model → in-flight ollama acquire, so concurrent acquires share one hotSwap. */
@@ -49,7 +51,11 @@ export class BackendPool implements IBackendPool {
   private readonly structural: StructuralSettings;
   private lastAcquiredModel: string | null = null;
 
-  constructor(private config: ForgeConfig) {
+  constructor(
+    private config: ForgeConfig,
+    sharedRegistry: SharedRuntimeRegistry = new SharedRuntimeRegistry(),
+  ) {
+    this.sharedRegistry = sharedRegistry;
     const max = config.max_simultaneous_models ?? 1;
     const base = config.llama_server.port ?? 8080;
     this.freePorts = Array.from({ length: max }, (_, i) => base + i);
@@ -329,6 +335,18 @@ export class BackendPool implements IBackendPool {
       { config: this.config, registry: this.sharedRegistry, key: this.runtimeKey(modelName) },
       modelName,
       (record) => {
+        // Re-borrowing replaces the slot record, so any lease the previous
+        // attachment held must be released HERE — once the record is
+        // overwritten its leaseId is unrecoverable, and the file it left
+        // behind names a pid that is still very much alive (our own). The
+        // owner would then see a live borrower forever and never be able to
+        // unload: precisely the failure shared leases exist to prevent.
+        //
+        // Reached whenever a borrowed backend goes not-ready and is borrowed
+        // again — the owner's llama-server dying and being respawned is the
+        // ordinary way in.
+        const previous = this.sharedSlots.get(modelName);
+        if (previous) this.sharedRegistry.releaseLease(previous.key, previous.leaseId);
         this.sharedSlots.set(modelName, record);
         this.lastAcquiredModel = modelName;
       },
