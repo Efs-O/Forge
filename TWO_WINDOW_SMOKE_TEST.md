@@ -1,4 +1,4 @@
-# Two-window smoke test (0.13.0, before merge)
+# Two-window smoke test (0.13.1, before merge)
 
 The automated tests in this PR cover the *bookkeeping*: lease files, slot
 tables, detach logic. They fake the llama-server with a plain HTTP server.
@@ -21,7 +21,7 @@ That is what this checklist is for. Budget 20–30 minutes.
 **1. Install the build.**
 
 ```powershell
-code --install-extension .\forge-llm-0.13.0.vsix
+code --install-extension .\forge-llm-0.13.1.vsix --force
 ```
 
 Then **fully close and reopen VS Code**. Not "Reload Window" — the extension
@@ -117,7 +117,7 @@ Manager. Neither is a failure of this test.
 - B's sidebar shows the model as ready and **can actually answer a prompt.**
   Send one. A borrowed model that shows ready but errors on send is a failure.
 
-**This is the fix for the readiness bug** — before 0.13.0, B could show the
+**This is the fix for the readiness bug** — before 0.13.1, B could show the
 model as loaded but not ready.
 
 ---
@@ -142,7 +142,7 @@ model as loaded but not ready.
 - Now run `Forge: Unload Model` in **A** — it should succeed, and the process
   should disappear from `nvidia-smi`.
 
-**Before 0.13.0 this failed:** B's release threw an error, left its lease file
+**Before 0.13.1 this failed:** B's release threw an error, left its lease file
 behind, and A could then never unload — it kept saying *"another Forge
 workspace is using this shared runtime"* forever, even after B was closed.
 
@@ -161,7 +161,7 @@ Task Manager, end the VS Code process. Do **not** close it politely.
 - A's log shows `reclaimed stale runtime lease`.
 - The lease file is gone and the server process is gone.
 
-**This is the immortal-lease fix.** Before 0.13.0, A was stuck permanently and
+**This is the immortal-lease fix.** Before 0.13.1, A was stuck permanently and
 the only cure was deleting the lease file by hand.
 
 > **Partly automated now.** `test/integration/StaleLeaseRealProcess.test.ts`
@@ -230,7 +230,7 @@ permissions:
 - Forge starts normally. **It must not fail to load.**
 - A one-time warning says `cloud_workers` is deprecated and has no effect.
 
-This matters because that key was valid before 0.13.0. If someone's existing
+This matters because that key was valid before 0.13.1. If someone's existing
 config now refuses to boot, that is a bad upgrade for every user who set it.
 
 > **Automated now** in `test/unit/ConfigLoader.test.ts`, and the "must not fail
@@ -265,6 +265,33 @@ Automated in `test/integration/SharedRuntimeReborrow.test.ts`, but the manual
 version is what found it.
 
 ---
+
+## Test 9 — Stop cancels the generation, it does not kill the server
+
+Added after the first full run of this checklist, which found that it did.
+
+**Do:** With the share set up (test 1), send a long prompt in **A** and press
+**Stop** as soon as tokens start arriving. Then send a prompt in **B**.
+
+**Expect:**
+
+- `llama-server` is **still running**. Check the process list, not the UI.
+- B answers immediately — it never noticed anything happened.
+- A's Forge log shows no `[DirectBackend] stopped` and no `llama-server exited`
+  around the Stop.
+
+**The bug this catches:** Stop aborted the request and then SIGTERM'd the
+backend, so cancelling one generation cost a full model reload — and the
+owning window's Stop tore down the server the borrower was using, silently.
+Repeat the same test with Stop pressed in **B** rather than A; that direction
+was safe before the fix, but only because `stop()` throws on an adopted backend
+into a swallowed `catch`, so it is worth confirming it stays safe for the right
+reason now.
+
+Also close a tab mid-generation: it routed through the same code path.
+
+Automated in `test/unit/TurnLifecycle.test.ts`.
+
 
 ## Also worth confirming
 

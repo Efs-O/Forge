@@ -1,6 +1,36 @@
 # Forge — Recent Changes
 
-## 0.13.0 — Shared-runtime reliability and worker removal
+## 0.13.1 — Shared-runtime reliability and worker removal
+
+Supersedes 0.13.0, which was never published. The entries below marked *(found
+in smoke testing)* came out of the manual two-window validation rather than the
+automated suite — worth noting, because none of the 952 tests caught them.
+
+- **Stop cancels the generation instead of killing the server** *(found in
+  smoke testing)*. The Stop button aborted the request and then SIGTERM'd
+  llama-server, so cancelling one generation cost a full model reload. Under a
+  shared runtime it was worse: the owning window's Stop tore down the server a
+  second window had borrowed, silently. Closing a tab took the same path.
+  Aborting the request is what ends generation; backend teardown belongs to
+  unload and eviction.
+- **Re-borrowing no longer leaks the previous lease** *(found in smoke
+  testing)*. Re-attaching to a restarted server took a second lease without
+  releasing the first, leaving a lease file naming a live process — which
+  blocked the owner from ever unloading. The exact failure shared leases exist
+  to prevent, reached by a different route.
+- **Window close no longer calls `stop()` on borrowed backends** *(found in
+  smoke testing)*. It relied on `stop()` throwing into a swallowed catch, and
+  skipped attachment-state cleanup. The borrower path is now explicit.
+- **`forge.logLevel` is read again** *(found in smoke testing)*. The setting was
+  contributed and shown in the settings UI but wired to nothing; only
+  `config.yaml`'s `log_level` had any effect.
+- **One llama-server output channel, not one per backend** *(found in smoke
+  testing)*. Each backend created its own identically-named channel and nothing
+  disposed them. Servers now announce themselves with a banner naming the model
+  and port.
+- **Repository instructions no longer name removed tools** *(found in smoke
+  testing)*. `FORGE.md` still told the model to call `dispatch_workers`, costing
+  a turn per delegation while it worked out the tool did not exist.
 
 - **Releasing a borrowed model no longer strands the owner.** A runtime
   borrowed from another Forge window is now detached rather than stopped, and
