@@ -411,6 +411,10 @@ Type `/` in chat to open the built-in command list.
 | `/restart`    | Restart or reconnect the backend            |
 | `/reindex`    | Rebuild the local semantic search index     |
 | `/new`        | Open a new conversation tab                 |
+| `/rename`     | Rename the active conversation              |
+| `/context`    | Add a file, selection, tabs, or files as context |
+| `/config`     | Open the active Forge config                |
+| `/logs`       | Show the Forge backend output               |
 | `/clear`      | Clear the active tab only                   |
 | `/review`     | Run an immediate review prompt              |
 | `/compact`    | Summarize and compress the current chat     |

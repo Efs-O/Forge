@@ -1,10 +1,91 @@
 import { describe, expect, it, vi } from 'vitest';
+import * as vscode from 'vscode';
 import { SlashCommandHandler, type SlashCommandDeps } from '../../src/sidebar/SlashCommandHandler';
 import type { ForgeConfig } from '../../src/config/types';
 import type { IBackendPool } from '../../src/backend/BackendPool';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
 
+vi.mock('vscode', () => ({
+  window: {
+    showInputBox: vi.fn(),
+    showQuickPick: vi.fn(),
+    showInformationMessage: vi.fn(),
+    createOutputChannel: vi.fn(() => ({ appendLine: vi.fn(), dispose: vi.fn(), show: vi.fn() })),
+  },
+  commands: {
+    executeCommand: vi.fn(),
+  },
+}));
+
 describe('SlashCommandHandler', () => {
+  it.each([
+    ['config', 'forge.openConfig'],
+    ['logs', 'forge.showBackendConsole'],
+  ] as const)('routes /%s through the existing command', async (id, command) => {
+    await new SlashCommandHandler({} as unknown as SlashCommandDeps).handle(id);
+
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith(command);
+  });
+
+  it('routes the selected /context option through the existing context command', async () => {
+    vi.mocked(vscode.window.showQuickPick).mockResolvedValueOnce({
+      label: 'Selection',
+      description: 'Use the current editor selection as context.',
+      command: 'forge.useSelection',
+    });
+
+    await new SlashCommandHandler({} as unknown as SlashCommandDeps).handle('context');
+
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith('forge.useSelection');
+  });
+
+  it('renames the active conversation and persists the normalized title', async () => {
+    const conversation: ConversationRuntime = {
+      id: 'conversation-1',
+      title: 'Chat',
+      createdAt: 0,
+      updatedAt: 0,
+      messages: [],
+    };
+    vi.mocked(vscode.window.showInputBox).mockResolvedValueOnce('  shared   runtime test  ');
+    const persistSession = vi.fn();
+    const postSessionSync = vi.fn();
+    const deps = {
+      getActiveConv: () => conversation,
+      persistSession,
+      postSessionSync,
+    } as unknown as SlashCommandDeps;
+
+    await new SlashCommandHandler(deps).handle('rename');
+
+    expect(conversation.title).toBe('shared runtime test');
+    expect(conversation.updatedAt).toBeGreaterThan(0);
+    expect(persistSession).toHaveBeenCalledOnce();
+    expect(postSessionSync).toHaveBeenCalledOnce();
+  });
+
+  it('leaves the conversation unchanged when renaming is cancelled', async () => {
+    const conversation: ConversationRuntime = {
+      id: 'conversation-1',
+      title: 'Existing title',
+      createdAt: 0,
+      updatedAt: 10,
+      messages: [],
+    };
+    vi.mocked(vscode.window.showInputBox).mockResolvedValueOnce(undefined);
+    const persistSession = vi.fn();
+    const deps = {
+      getActiveConv: () => conversation,
+      persistSession,
+      postSessionSync: vi.fn(),
+    } as unknown as SlashCommandDeps;
+
+    await new SlashCommandHandler(deps).handle('rename');
+
+    expect(conversation).toMatchObject({ title: 'Existing title', updatedAt: 10 });
+    expect(persistSession).not.toHaveBeenCalled();
+  });
+
   it('resumes the same conversation after a manual compact', async () => {
     const conversation: ConversationRuntime = {
       id: 'conversation-1',
