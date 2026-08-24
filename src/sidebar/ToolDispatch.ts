@@ -10,7 +10,7 @@ import type { ChatMessage, ToolCall } from '../llm/types';
 import type { CheckpointStack } from '../checkpoint/CheckpointStack';
 import type { CheckpointSession } from '../checkpoint/CheckpointStack';
 import type { KeepUndoCodeLensProvider } from './KeepUndoCodeLens';
-import type { ToolPermission } from '../tools/ToolRegistry';
+import type { ToolHandlerResult, ToolPermission } from '../tools/ToolRegistry';
 import { ToolRegistry } from '../tools/ToolRegistry';
 import { ToolFailureTracker } from '../tools/StripTools';
 import type { ToolBudget } from '../tools/ToolBudget';
@@ -165,6 +165,14 @@ function gitDiffLarge(before: string, after: string): DiffHunk[] | null {
 export type ResolveToolPathOptions = ResolveWorkspacePathOptions;
 export const resolveToolPath = resolveWorkspacePath;
 
+function toolResultText(result: ToolHandlerResult): string {
+  return typeof result === 'string' ? result : result.text;
+}
+
+function toolResultContent(result: ToolHandlerResult): ChatMessage['content'] {
+  return typeof result === 'string' ? result : result.content;
+}
+
 /** How a transcript file reference should be revealed in the editor. */
 export interface OpenFileOptions {
   /** 1-based line from a `path:42` reference. */
@@ -200,15 +208,15 @@ export class ToolDispatch {
     recordFileDiff?: (diff: RecordedFileDiff) => void,
   ): Promise<void> {
     for (const tc of toolCalls) {
-      let result: string;
+      let result: ToolHandlerResult;
       let args: Record<string, unknown> | undefined;
       try {
         if (signal?.aborted) {
           result = 'Error: tool execution cancelled';
-          this.postResult(tc, result, undefined, convId);
+          this.postResult(tc, toolResultText(result), undefined, convId);
           messages.push({
             role: 'tool',
-            content: result,
+            content: toolResultContent(result),
             tool_call_id: tc.id,
             name: tc.function.name,
           });
@@ -219,10 +227,10 @@ export class ToolDispatch {
         } catch {
           this.failureTracker.record();
           result = `Error: malformed tool arguments (invalid JSON)`;
-          this.postResult(tc, result, undefined, convId);
+          this.postResult(tc, toolResultText(result), undefined, convId);
           messages.push({
             role: 'tool',
-            content: result,
+            content: toolResultContent(result),
             tool_call_id: tc.id,
             name: tc.function.name,
           });
@@ -232,10 +240,10 @@ export class ToolDispatch {
         const reg = this.toolRegistry.get(tc.function.name);
         if (!reg) {
           result = `Error: unknown tool "${tc.function.name}"`;
-          this.postResult(tc, result, undefined, convId);
+          this.postResult(tc, toolResultText(result), undefined, convId);
           messages.push({
             role: 'tool',
-            content: result,
+            content: toolResultContent(result),
             tool_call_id: tc.id,
             name: tc.function.name,
           });
@@ -279,10 +287,10 @@ export class ToolDispatch {
             : await this.requestApproval(tc.function.name, detail, isDangerous, convId);
           if (!approved) {
             result = `User declined: ${tc.function.name}`;
-            this.postResult(tc, result, undefined, convId);
+            this.postResult(tc, toolResultText(result), undefined, convId);
             messages.push({
               role: 'tool',
-              content: result,
+              content: toolResultContent(result),
               tool_call_id: tc.id,
               name: tc.function.name,
             });
@@ -317,8 +325,13 @@ export class ToolDispatch {
         result = `Error: ${(err as Error).message}`;
       }
 
-      this.postResult(tc, result, args, convId);
-      messages.push({ role: 'tool', content: result, tool_call_id: tc.id, name: tc.function.name });
+      this.postResult(tc, toolResultText(result), args, convId);
+      messages.push({
+        role: 'tool',
+        content: toolResultContent(result),
+        tool_call_id: tc.id,
+        name: tc.function.name,
+      });
     }
   }
 

@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as vscode from 'vscode';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolDispatch, resolveToolPath } from '../../src/sidebar/ToolDispatch';
-import type { ToolCall } from '../../src/llm/types';
+import type { ChatMessage, ToolCall } from '../../src/llm/types';
 import type { CheckpointStack } from '../../src/checkpoint/CheckpointStack';
 import type { KeepUndoCodeLensProvider } from '../../src/sidebar/KeepUndoCodeLens';
 import type { DiffDecorations } from '../../src/sidebar/DiffDecorations';
@@ -150,6 +150,32 @@ describe('ToolDispatch', () => {
     expect(messages).toHaveLength(1);
     expect(messages[0].content).toBe('file contents');
     expect(messages[0].tool_call_id).toBe('call-read_file');
+  });
+
+  it('passes multimodal tool results back to the model while displaying text', async () => {
+    const content = [
+      { type: 'text' as const, text: 'Loaded image assets/diagram.png.' },
+      {
+        type: 'image_url' as const,
+        image_url: { url: 'data:image/png;base64,AA==' },
+      },
+    ];
+    toolRegistry.register({
+      definition: {
+        type: 'function',
+        function: { name: 'view_image', description: 'View an image', parameters: { type: 'object' } },
+      },
+      permission: 'read',
+      handler: vi.fn().mockResolvedValue({ text: 'Loaded image assets/diagram.png.', content }),
+    });
+
+    const messages: ChatMessage[] = [];
+    await dispatch.dispatch([makeToolCall('view_image', { path: 'assets/diagram.png' })], allowed, messages);
+
+    expect(messages[0]?.content).toEqual(content);
+    expect(post).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'toolResult', text: 'Loaded image assets/diagram.png.' }),
+    );
   });
 
   it('requests approval for write tools', async () => {

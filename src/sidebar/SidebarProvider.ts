@@ -269,7 +269,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       post: (msg) => this.post(msg),
       compact: (options) => this.slashHandler.compact(options),
       incompleteTurnReason: (convId) => this.agentLoop.incompleteTurnReason(convId),
-      send: (text, convId) => this.send.send(text, undefined, convId),
+      send: (text, convId, options) => this.send.send(text, undefined, convId, options),
       resumeEnabled: this.config.auto_compact?.resume !== false,
       autoContinues: () => this.autoContinues,
       noteAutoContinue: () => {

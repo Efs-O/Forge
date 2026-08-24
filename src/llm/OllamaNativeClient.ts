@@ -132,6 +132,13 @@ function toOllamaMessage(message: ChatMessage): OllamaChatMessage {
     };
   }
   if (message.role === 'tool') {
+    if (Array.isArray(message.content)) {
+      return {
+        role: 'tool',
+        ...contentPartsToOllama(message.content),
+        ...(message.name ? { tool_name: message.name } : {}),
+      };
+    }
     return {
       role: 'tool',
       content: typeof message.content === 'string' ? message.content : '',

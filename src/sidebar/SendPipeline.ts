@@ -16,6 +16,7 @@ import type { AgentLoop, SidebarProviderEvents } from './AgentLoop';
 import { SessionLogger } from './SessionLogger';
 import { resolveRequestModel } from '../config/ConfigResolver';
 import { getLogger } from '../util/logger';
+import type { UserPromptOptions } from './transcriptMutations';
 
 const log = getLogger();
 
@@ -39,7 +40,12 @@ export class SendPipeline {
 
   constructor(private readonly deps: SendPipelineDeps) {}
 
-  async send(text: string, attachments?: AttachmentData[], conversationId?: string): Promise<void> {
+  async send(
+    text: string,
+    attachments?: AttachmentData[],
+    conversationId?: string,
+    promptOptions?: UserPromptOptions,
+  ): Promise<void> {
     const { deps } = this;
     const conv = conversationId
       ? deps.getSidebar().conversations.find((candidate) => candidate.id === conversationId)
@@ -100,7 +106,7 @@ export class SendPipeline {
     // every accepted turn here so Stop does not depend on its caller.
     deps.post({ type: 'generationStarted', conversationId: conv.id });
     try {
-      await deps.agentLoop.runTurn(conv, selectedModel, text, attachments);
+      await deps.agentLoop.runTurn(conv, selectedModel, text, attachments, promptOptions);
     } finally {
       deps.failureTracker.reset();
       deps.persistSession();

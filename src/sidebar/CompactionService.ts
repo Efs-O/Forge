@@ -19,6 +19,7 @@ import {
 } from './compactionPrompt';
 import type { PromptRunOptions } from './PromptRun';
 import { getLogger } from '../util/logger';
+import type { UserPromptOptions } from './transcriptMutations';
 
 const log = getLogger();
 
@@ -232,7 +233,7 @@ export interface AutoCompactDeps {
   resumeEnabled: boolean;
   autoContinues: () => number;
   noteAutoContinue: () => void;
-  send: (text: string) => Promise<void>;
+  send: (text: string, options?: UserPromptOptions) => Promise<void>;
 }
 
 export type CompactionResumeDeps = Pick<
@@ -295,7 +296,7 @@ export async function resumeAfterCompaction(
     conversationId: deps.convId,
   });
   try {
-    await deps.send(RESUME_PROMPT);
+    await deps.send(RESUME_PROMPT, { internal: true });
   } catch (err) {
     deps.post({
       type: 'error',

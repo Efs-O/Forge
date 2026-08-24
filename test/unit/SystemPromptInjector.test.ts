@@ -16,6 +16,12 @@ describe('injectSystemPrompt', () => {
     expect(system!.content).toContain('You are a helpful assistant.');
   });
 
+  it('uses the built-in fallback authority rule when no template engine is available', () => {
+    const [system] = injectSystemPrompt(user);
+    expect(system!.content).toContain('direct request may override repository-local');
+    expect(system!.content).toContain('destructive-action confirmation requirements');
+  });
+
   it('appends when mode is explicitly append', () => {
     const [system] = injectSystemPrompt(user, engine, {}, 'Custom.', 'append');
     expect(system!.content).toContain('You are Forge');

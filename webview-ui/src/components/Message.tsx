@@ -34,7 +34,52 @@ const CheckIcon = (): React.ReactElement => (
   </svg>
 );
 
+function textFromChildren(children: React.ReactNode): string {
+  if (typeof children === 'string' || typeof children === 'number') return String(children);
+  if (Array.isArray(children)) return children.map(textFromChildren).join('');
+  if (React.isValidElement<{ children?: React.ReactNode }>(children)) {
+    return textFromChildren(children.props.children);
+  }
+  return '';
+}
+
+interface CodeBlockProps extends React.ComponentPropsWithoutRef<'pre'> {
+  /** react-markdown adds its hast node alongside the DOM props. */
+  node?: unknown;
+}
+
+function CodeBlock({ children, node: _node, ...props }: CodeBlockProps): React.ReactElement {
+  const [copied, setCopied] = useState(false);
+  const code = textFromChildren(children);
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard
+      .writeText(code)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => undefined);
+  }, [code]);
+
+  return (
+    <div className="forge-code-block">
+      <button
+        className="forge-code-copy"
+        type="button"
+        onClick={handleCopy}
+        title={copied ? 'Copied' : 'Copy code'}
+        aria-label={copied ? 'Copied' : 'Copy code'}
+      >
+        {copied ? <CheckIcon /> : <CopyIcon />}
+      </button>
+      <pre {...props}>{children}</pre>
+    </div>
+  );
+}
+
 const markdownComponents: React.ComponentProps<typeof Markdown>['components'] = {
+  pre: CodeBlock,
   a: ({ href, children, ...props }) => {
     if (href?.startsWith(FILE_LINK_SCHEME)) {
       const { path: filePath, line } = parseFileLink(href);

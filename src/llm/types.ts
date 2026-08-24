@@ -19,6 +19,8 @@ export interface ChatMessage {
   tool_call_id?: string;
   name?: string;
   tool_calls?: ToolCall[];
+  /** Retained for model context and persistence, but not rendered in the sidebar. */
+  internal?: boolean;
 }
 
 export interface ToolCall {

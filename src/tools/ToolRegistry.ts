@@ -1,4 +1,4 @@
-import type { ToolDefinition } from '../llm/types';
+import type { ContentPart, ToolDefinition } from '../llm/types';
 
 export type ToolPermission =
   | 'read'
@@ -17,9 +17,16 @@ export interface ToolApprovalMetadata {
   detail?: string;
 }
 
+export interface MultimodalToolResult {
+  text: string;
+  content: ContentPart[];
+}
+
+export type ToolHandlerResult = string | MultimodalToolResult;
+
 export interface ToolHandler {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- tool args are schema-validated at call site
-  (args: Record<string, unknown>, context?: ToolHandlerContext): Promise<string>;
+  (args: Record<string, unknown>, context?: ToolHandlerContext): Promise<ToolHandlerResult>;
 }
 
 export interface ToolHandlerContext {
@@ -131,7 +138,7 @@ export class ToolRegistry {
     args: Record<string, unknown>,
     allowed: Set<ToolPermission>,
     context?: ToolHandlerContext,
-  ): Promise<string> {
+  ): Promise<ToolHandlerResult> {
     const tool = this.tools.get(name);
     if (!tool) throw new Error(`ToolRegistry: unknown tool "${name}"`);
     this.assertAllowed(tool, allowed, args);

@@ -18,6 +18,7 @@ import { recordModelUsage } from './modelManager/usageTracker';
 import type { SidebarProviderEvents } from './AgentLoop';
 import type { TurnLifecycle } from './TurnLifecycle';
 import { getLogger } from '../util/logger';
+import type { UserPromptOptions } from './transcriptMutations';
 
 const log = getLogger();
 
@@ -34,6 +35,7 @@ export interface CliTurnContext {
     conv: ConversationRuntime,
     text: string,
     attachments?: AttachmentData[],
+    options?: UserPromptOptions,
   ) => void;
   onTranscriptChanged: (conv: ConversationRuntime) => void;
 }
@@ -45,6 +47,7 @@ export async function runCliTurn(
   text: string,
   attachments: AttachmentData[] | undefined,
   postC: (msg: HostToWebview) => void,
+  promptOptions?: UserPromptOptions,
 ): Promise<void> {
   const convId = conv.id;
   // Only the first prompt in a conversation actually starts the CLI agent;
@@ -102,7 +105,7 @@ export async function runCliTurn(
         postC({ type: 'toolActivity', toolName: prepared.cliName, detail });
       },
       onPrepared: () => {
-        ctx.commitUserPrompt(conv, text, attachments);
+        ctx.commitUserPrompt(conv, text, attachments, promptOptions);
         generationStarted = true;
         ctx.events.onBackendReady?.(model.name);
         ctx.events.onGenerationStarted?.(model.name, convId);

@@ -16,6 +16,7 @@
 import type { HostToWebview } from './messageBridge';
 import { autoCompactAndResume, resumeAfterCompaction } from './CompactionService';
 import type { CompactionOutcome } from './CompactionService';
+import type { UserPromptOptions } from './transcriptMutations';
 
 export interface CompactionPolicyDeps {
   post: (msg: HostToWebview) => void;
@@ -23,7 +24,7 @@ export interface CompactionPolicyDeps {
   incompleteTurnReason: (convId: string) => string | undefined;
   /** Addressed to the conversation that was compacted, not to whatever tab is
    *  active by the time the summary lands. */
-  send: (text: string, convId: string) => Promise<void>;
+  send: (text: string, convId: string, options?: UserPromptOptions) => Promise<void>;
   resumeEnabled: boolean;
   autoContinues: () => number;
   noteAutoContinue: () => void;
@@ -39,7 +40,7 @@ export function runAutoCompact(deps: CompactionPolicyDeps, convId: string): Prom
     resumeEnabled: deps.resumeEnabled,
     autoContinues: deps.autoContinues,
     noteAutoContinue: deps.noteAutoContinue,
-    send: (text) => deps.send(text, convId),
+    send: (text, options) => deps.send(text, convId, options),
   });
 }
 
@@ -53,7 +54,7 @@ export function runManualCompactResume(deps: CompactionPolicyDeps, convId: strin
       resumeEnabled: true,
       autoContinues: () => 0,
       noteAutoContinue: () => undefined,
-      send: (text) => deps.send(text, convId),
+      send: (text, options) => deps.send(text, convId, options),
     },
     { automatic: false },
   );

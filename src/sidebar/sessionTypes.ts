@@ -33,6 +33,16 @@ const toolCallSchema = z.object({
   function: z.object({ name: z.string(), arguments: z.string() }),
 });
 
+function textContent(content: ChatMessage['content']): string | null {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return null;
+  const text = content
+    .filter((part) => part.type === 'text')
+    .map((part) => part.text)
+    .join('\n');
+  return text || null;
+}
+
 /**
  * A tool-calling assistant turn carries `content: null` + `tool_calls`, and its
  * results come back as `role: 'tool'`; filtering those out dropped every trace
@@ -48,6 +58,7 @@ const slimMsgSchema = z.object({
   tool_calls: z.array(toolCallSchema).optional(),
   tool_call_id: z.string().optional(),
   name: z.string().optional(),
+  internal: z.boolean().optional(),
 });
 export type SlimPersistMessage = z.infer<typeof slimMsgSchema>;
 
@@ -204,19 +215,23 @@ export function slimPersistMessages(messages: ChatMessage[]): SlimPersistMessage
   const out: SlimPersistMessage[] = [];
   for (const m of messages) {
     if (m.role !== 'user' && m.role !== 'assistant' && m.role !== 'tool') continue;
-    const hasText = typeof m.content === 'string';
+    // Tool results may carry an image part for the current request. Persist
+    // their text summary, but never copy base64 image data into workspaceState.
+    const persistedText = m.role === 'tool' ? textContent(m.content) : m.content;
+    const hasText = typeof persistedText === 'string';
     const hasToolCalls = Array.isArray(m.tool_calls) && m.tool_calls.length > 0;
     // An assistant turn with tool_calls legitimately has content: null.
     if (!hasText && !hasToolCalls) continue;
     out.push({
       role: m.role,
-      content: hasText ? (m.content as string) : null,
+      content: hasText ? (persistedText as string) : null,
       ...(typeof m.reasoning === 'string' && m.reasoning.length > 0
         ? { reasoning: m.reasoning }
         : {}),
       ...(hasToolCalls ? { tool_calls: m.tool_calls } : {}),
       ...(typeof m.tool_call_id === 'string' ? { tool_call_id: m.tool_call_id } : {}),
       ...(typeof m.name === 'string' ? { name: m.name } : {}),
+      ...(m.internal ? { internal: true } : {}),
     });
   }
   return out;
@@ -244,16 +259,18 @@ export function displayPersistMessages(
     else diffsByToolCall.set(diff.toolCallId, [diff]);
   }
   for (const m of messages) {
-    if (m.role === 'tool' && typeof m.content === 'string') {
+    if (m.internal) continue;
+    const toolText = m.role === 'tool' ? textContent(m.content) : null;
+    if (m.role === 'tool' && toolText !== null) {
       const toolName = m.name ?? 'tool';
-      const { text: toolResult, totalChars: toolResultTotal } = capDisplayText(m.content);
+      const { text: toolResult, totalChars: toolResultTotal } = capDisplayText(toolText);
       out.push({
         role: 'tool',
-        content: `${toolName} → ${resultLabel(toolName, m.content, null)}`,
+        content: `${toolName} → ${resultLabel(toolName, toolText, null)}`,
         toolName,
         toolResult,
         toolResultTotal,
-        ...(isFailureResult(m.content) ? { toolIsError: true } : {}),
+        ...(isFailureResult(toolText) ? { toolIsError: true } : {}),
       });
       for (const diff of diffsByToolCall.get(m.tool_call_id ?? '') ?? []) {
         out.push({
@@ -304,6 +321,7 @@ export function chatMessagesFromSlim(slim: SlimPersistMessage[]): ChatMessage[] 
     ...(m.tool_calls ? { tool_calls: m.tool_calls } : {}),
     ...(typeof m.tool_call_id === 'string' ? { tool_call_id: m.tool_call_id } : {}),
     ...(typeof m.name === 'string' ? { name: m.name } : {}),
+    ...(m.internal ? { internal: true } : {}),
   }));
 }
 

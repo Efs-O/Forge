@@ -61,6 +61,7 @@ import {
 import { makeSearchCodebaseTool } from './semanticSearchTool';
 import type { IndexManager } from '../search/IndexManager';
 import { makeApplyLineEditsTool } from './structuredEditTool';
+import { makeViewImageTool } from './imageTool';
 
 export function registerAllTools(
   registry: ToolRegistry,
@@ -73,6 +74,7 @@ export function registerAllTools(
 ): void {
   // v0.1 builtins
   registry.register(makeReadFileTool());
+  registry.register(makeViewImageTool());
   registry.register(makeWriteFileTool());
   registry.register(makeAppendFileTool());
   registry.register(makeReplaceSelectionTool());

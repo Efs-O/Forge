@@ -5,7 +5,7 @@ import type { HostToWebview } from './messageBridge';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
 import { isCloudProvider } from '../llm/CloudProviders';
 import type { AttachmentData } from './messageBridge';
-import { appendUserPrompt, applyUsage } from './transcriptMutations';
+import { appendUserPrompt, applyUsage, type UserPromptOptions } from './transcriptMutations';
 import type { TemplateEngine } from '../llm/TemplateEngine';
 import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
 import { deriveStaticCapabilities } from '../config/ConfigResolver';
@@ -274,6 +274,7 @@ export class AgentLoop {
     model: ModelConfig,
     text: string,
     attachments?: AttachmentData[],
+    promptOptions?: UserPromptOptions,
   ): Promise<void> {
     await this.waitForCancelledTurns();
     const convId = conv.id;
@@ -294,7 +295,7 @@ export class AgentLoop {
       return;
     }
     if (model.provider === 'cli') {
-      await runCliTurn(this.services, conv, model, text, attachments, postC);
+      await runCliTurn(this.services, conv, model, text, attachments, postC, promptOptions);
       return;
     }
     const ctrl = new AbortController();
@@ -311,7 +312,16 @@ export class AgentLoop {
     const configPath = this.getConfigPath?.();
     if (configPath) recordModelUsage(configPath, model.name);
 
-    const request = { conv, model, text, attachments, activeFile, ctrl, postC };
+    const request = {
+      conv,
+      model,
+      text,
+      attachments,
+      ...(promptOptions ? { promptOptions } : {}),
+      activeFile,
+      ctrl,
+      postC,
+    };
     if (isCloudProvider(model.provider)) {
       await runCloudProviderTurn(this.services, request);
       return;
@@ -322,8 +332,9 @@ export class AgentLoop {
     conv: ConversationRuntime,
     text: string,
     attachments?: AttachmentData[],
+    options?: UserPromptOptions,
   ): void {
-    appendUserPrompt(conv, text, attachments);
+    appendUserPrompt(conv, text, attachments, options);
     this.recordTranscriptMutation(conv);
   }
 

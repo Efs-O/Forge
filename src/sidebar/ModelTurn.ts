@@ -24,6 +24,7 @@ import { applyCompactionWindow } from './compactionWindow';
 import { injectSystemPrompt } from '../llm/SystemPromptInjector';
 import { resolveToolPermissions } from '../tools/PermissionResolver';
 import { ToolBudget } from '../tools/ToolBudget';
+import { deriveStaticCapabilities } from '../config/ConfigResolver';
 import { extractToolDetail } from './toolSummary';
 import {
   isTurnCutOffError,
@@ -161,7 +162,11 @@ export async function runModelTurn(
   warnAboutModel(ctx, model, config, runtimeCaps, thinkingKwargs);
 
   const maxRounds = resolveMaxToolRounds(model);
-  const toolDefinitions = budget.filterDefinitions(ctx.toolRegistry.definitions(allowed));
+  const isVisionModel = deriveStaticCapabilities(model).includes('vision');
+  const advertisedDefinitions = ctx.toolRegistry
+    .definitions(allowed)
+    .filter((definition) => isVisionModel || definition.function.name !== 'view_image');
+  const toolDefinitions = budget.filterDefinitions(advertisedDefinitions);
   const nativeTools = runtimeCaps?.likelySupportsTools !== false;
   if (toolDefinitions.length > 0 && !nativeTools) {
     ctx.warnOnce(

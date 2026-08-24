@@ -18,6 +18,7 @@ import type { SidebarProviderEvents } from './AgentLoop';
 import { resolveCloudRequestTarget } from '../llm/CloudRequestResolver';
 import { getLogger } from '../util/logger';
 import type * as vscode from 'vscode';
+import type { UserPromptOptions } from './transcriptMutations';
 
 const log = getLogger();
 
@@ -31,6 +32,7 @@ export interface ProviderTurnContext {
     conv: ConversationRuntime,
     text: string,
     attachments?: AttachmentData[],
+    options?: UserPromptOptions,
   ) => void;
   runModelTurn: (
     baseUrl: string,
@@ -49,6 +51,7 @@ export interface ProviderTurnRequest {
   model: ModelConfig;
   text: string;
   attachments: AttachmentData[] | undefined;
+  promptOptions?: UserPromptOptions;
   activeFile: string | undefined;
   ctrl: AbortController;
   postC: (msg: HostToWebview) => void;
@@ -78,7 +81,7 @@ function finishTurn(
  *  call the API directly. */
 export async function runCloudProviderTurn(
   ctx: ProviderTurnContext,
-  { conv, model, text, attachments, activeFile, ctrl, postC }: ProviderTurnRequest,
+  { conv, model, text, attachments, promptOptions, activeFile, ctrl, postC }: ProviderTurnRequest,
 ): Promise<void> {
   const convId = conv.id;
   let apiKey: string;
@@ -93,7 +96,7 @@ export async function runCloudProviderTurn(
     ctx.lifecycle.settle(convId);
     return;
   }
-  ctx.commitUserPrompt(conv, text, attachments);
+  ctx.commitUserPrompt(conv, text, attachments, promptOptions);
   ctx.events.onBackendReady?.(model.name);
   postC({ type: 'ready' });
   const checkpoint = ctx.checkpoints.beginTurn(`turn-${Date.now()}`, convId);
@@ -116,7 +119,7 @@ export async function runCloudProviderTurn(
 /** Local providers: acquire (and if necessary start) the backend first. */
 export async function runLocalProviderTurn(
   ctx: ProviderTurnContext,
-  { conv, model, text, attachments, activeFile, ctrl, postC }: ProviderTurnRequest,
+  { conv, model, text, attachments, promptOptions, activeFile, ctrl, postC }: ProviderTurnRequest,
 ): Promise<void> {
   const convId = conv.id;
   let backend: BackendController;
@@ -130,7 +133,7 @@ export async function runLocalProviderTurn(
       ctx.lifecycle.settle(convId);
       return;
     }
-    ctx.commitUserPrompt(conv, text, attachments);
+    ctx.commitUserPrompt(conv, text, attachments, promptOptions);
     postC({ type: 'ready' });
   } catch (err) {
     const msg = ctrl.signal.aborted

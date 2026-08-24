@@ -10,14 +10,24 @@ import type { ConversationRuntime } from './sessionTypes';
 import { buildUserContent } from './ConversationOps';
 import { deriveTitle } from './sessionTypes';
 
+/** Presentation metadata for a prompt injected by Forge rather than authored by the user. */
+export interface UserPromptOptions {
+  internal?: boolean;
+}
+
 /** Append the user's message, titling the conversation from its first one. */
 export function appendUserPrompt(
   conv: ConversationRuntime,
   text: string,
   attachments?: AttachmentData[],
+  options?: UserPromptOptions,
 ): void {
   const priorUserCount = conv.messages.filter((m) => m.role === 'user').length;
-  conv.messages.push({ role: 'user', content: buildUserContent(text, attachments) });
+  conv.messages.push({
+    role: 'user',
+    content: buildUserContent(text, attachments),
+    ...(options?.internal ? { internal: true } : {}),
+  });
   if (priorUserCount === 0) conv.title = deriveTitle(text.split('\n')[0] ?? text);
 }
 

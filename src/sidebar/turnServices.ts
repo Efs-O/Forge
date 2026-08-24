@@ -25,6 +25,7 @@ import type { ToolApprovalService } from './ToolApprovalService';
 import type { ToolDispatch } from './ToolDispatch';
 import type { TurnLifecycle } from './TurnLifecycle';
 import type { SidebarProviderEvents } from './AgentLoop';
+import type { UserPromptOptions } from './transcriptMutations';
 
 export interface TurnServices {
   pool: IBackendPool;
@@ -54,6 +55,7 @@ export interface TurnServices {
     conv: ConversationRuntime,
     text: string,
     attachments?: AttachmentData[],
+    options?: UserPromptOptions,
   ) => void;
   runModelTurn: (
     baseUrl: string,

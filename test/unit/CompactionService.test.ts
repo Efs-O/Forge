@@ -420,8 +420,8 @@ describe('autoCompactAndResume', () => {
       noteAutoContinue: () => {
         continues.count += 1;
       },
-      send: async (text) => {
-        sent.push(text);
+      send: async (text, options) => {
+        sent.push(`${text}:${options?.internal === true ? 'internal' : 'visible'}`);
       },
       ...overrides,
     };
@@ -435,7 +435,7 @@ describe('autoCompactAndResume', () => {
   it('re-arms the webview streaming state before resuming', async () => {
     const { deps, sent, posted } = autoDeps();
     await autoCompactAndResume(deps);
-    expect(sent).toEqual([RESUME_PROMPT]);
+    expect(sent).toEqual([`${RESUME_PROMPT}:internal`]);
     const started = posted.findIndex(
       (m) => m.type === 'generationStarted' && m.conversationId === 'c1',
     );
@@ -449,7 +449,7 @@ describe('autoCompactAndResume', () => {
 
     await resumeAfterCompaction(deps, { automatic: false });
 
-    expect(sent).toEqual([RESUME_PROMPT]);
+    expect(sent).toEqual([`${RESUME_PROMPT}:internal`]);
     expect(continues.count).toBe(0);
     expect(posted).toContainEqual({
       type: 'generationStarted',
@@ -466,14 +466,14 @@ describe('autoCompactAndResume', () => {
   it('resumes a turn that was cut off', async () => {
     const { deps, sent, continues } = autoDeps();
     await autoCompactAndResume(deps);
-    expect(sent).toEqual([RESUME_PROMPT]);
+    expect(sent).toEqual([`${RESUME_PROMPT}:internal`]);
     expect(continues.count).toBe(1);
   });
 
   it('continues after compaction even when the preceding turn finished cleanly', async () => {
     const { deps, sent, continues } = autoDeps({ incompleteTurnReason: () => undefined });
     await autoCompactAndResume(deps);
-    expect(sent).toEqual([RESUME_PROMPT]);
+    expect(sent).toEqual([`${RESUME_PROMPT}:internal`]);
     expect(continues.count).toBe(1);
   });
 

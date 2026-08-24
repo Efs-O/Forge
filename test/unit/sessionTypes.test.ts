@@ -97,6 +97,19 @@ describe('sessionTypes', () => {
     ]);
   });
 
+  it('keeps internal prompts for the model but omits them from the sidebar', () => {
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'visible request' },
+      { role: 'user', content: 'internal resume instruction', internal: true },
+      { role: 'assistant', content: 'visible answer' },
+    ];
+    expect(displayPersistMessages(messages)).toEqual([
+      { role: 'user', content: 'visible request' },
+      { role: 'assistant', content: 'visible answer' },
+    ]);
+    expect(chatMessagesFromSlim(slimPersistMessages(messages))).toEqual(messages);
+  });
+
   it('restores a completed tool row and its file preview after session sync or reload', () => {
     const messages: ChatMessage[] = [
       { role: 'user', content: 'update the file' },
