@@ -68,6 +68,46 @@ describe('sessionTypes', () => {
     ]);
   });
 
+  // A prompt sent WITH an attachment has array content. Keying the text
+  // extraction off `role === 'tool'` meant it failed the string test and the
+  // whole turn was dropped, so a reload lost what the user actually asked.
+  it('slimPersistMessages keeps the text of a user turn sent with an image', () => {
+    const messages: ChatMessage[] = [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'what is in this screenshot?' },
+          { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } },
+        ],
+      },
+    ];
+    const slim = slimPersistMessages(messages);
+    expect(slim).toHaveLength(1);
+    expect(slim[0].content).toContain('what is in this screenshot?');
+    expect(slim[0].content).not.toContain('base64');
+    expect(slim[0].content).toContain('NOT');
+  });
+
+  // The pixels are never persisted, so a restored view_image result that still
+  // reads as a plain success invites the model to describe what it cannot see.
+  it('slimPersistMessages marks a restored image tool result as no longer visible', () => {
+    const messages: ChatMessage[] = [
+      {
+        role: 'tool',
+        content: [
+          { type: 'text', text: 'Loaded image stills/s03.png (image/png, 1 bytes).' },
+          { type: 'image_url', image_url: { url: 'data:image/png;base64,BBBB' } },
+        ],
+        tool_call_id: 'call_2',
+        name: 'view_image',
+      },
+    ];
+    const slim = slimPersistMessages(messages);
+    expect(slim[0].content).toContain('Loaded image stills/s03.png');
+    expect(slim[0].content).toContain('view_image again');
+    expect(slim[0].content).not.toContain('base64');
+  });
+
   it('slimPersistMessages drops system and contentless turns with no tool_calls', () => {
     const messages: ChatMessage[] = [
       { role: 'system', content: 'sys' },

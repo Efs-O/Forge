@@ -17,6 +17,7 @@ import {
 } from '../../src/tools/fileEditTools';
 import { makeEditFileTool } from '../../src/tools/editFileTool';
 import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
+import { MAX_READ_FILE_CHARS } from '../../src/tools/resultCap';
 
 describe('isolated file and directory tool execution', () => {
   let root: string;
@@ -41,6 +42,30 @@ describe('isolated file and directory tool execution', () => {
     await expect(
       makeReadFileTool().handler({ path: 'nested/example.txt', start_line: 4, end_line: 2 }),
     ).rejects.toThrow('past end_line');
+  });
+
+  // read_file was uncapped and decoded anything as UTF-8, so a 1.3 MB PNG
+  // became ~1.3 M characters of replacement glyphs and exhausted a one-slot
+  // context in a single tool result.
+  it('refuses to decode an image and names view_image instead', async () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]);
+    fs.writeFileSync(path.join(root, 'shot.png'), png);
+    await expect(makeReadFileTool().handler({ path: 'shot.png' })).rejects.toThrow('view_image');
+  });
+
+  it('refuses a non-image binary file rather than returning mojibake', async () => {
+    fs.writeFileSync(path.join(root, 'blob.bin'), Buffer.from([0x01, 0x00, 0x02, 0x03]));
+    await expect(makeReadFileTool().handler({ path: 'blob.bin' })).rejects.toThrow(
+      'appears to be a binary file',
+    );
+  });
+
+  it('caps an oversized text read and says how to get the rest', async () => {
+    fs.writeFileSync(path.join(root, 'huge.txt'), 'x'.repeat(MAX_READ_FILE_CHARS + 500), 'utf8');
+    const result = (await makeReadFileTool().handler({ path: 'huge.txt' })) as string;
+    expect(result.length).toBeLessThan(MAX_READ_FILE_CHARS + 300);
+    expect(result).toContain('truncated by read_file');
+    expect(result).toContain('start_line');
   });
 
   it('executes create, list, replace, structured edit, move, and delete handlers', async () => {

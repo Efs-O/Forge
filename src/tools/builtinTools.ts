@@ -4,6 +4,40 @@ import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveWorkspacePath } from '../util/WorkspacePaths';
 import { CHUNKED_WRITE_ADVICE } from './writeChunking';
+import { mimeFromHeader } from './imageTool';
+import { MAX_READ_FILE_CHARS, capResultText } from './resultCap';
+
+/** How much of a file to sniff for NUL bytes before calling it binary. */
+const BINARY_SNIFF_BYTES = 8000;
+
+/**
+ * Binary files have no business being decoded as UTF-8 and fed to a model — a
+ * 1.3 MB PNG became ~1.3 M characters of replacement glyphs and exhausted a
+ * one-slot context in a single tool result. Refuse, and for an image name the
+ * tool that does handle it rather than leaving the model to find a workaround.
+ */
+function binaryRefusal(bytes: Buffer, requestedPath: string): string | null {
+  const imageMime = mimeFromHeader(bytes);
+  if (imageMime) {
+    return (
+      `read_file: ${requestedPath} is an image (${imageMime}), not text. Use view_image to look at it. ` +
+      'If view_image is not available to you, the active model has no vision projector configured; ' +
+      'tell the user to switch to a vision-capable model.'
+    );
+  }
+  if (!bytes.subarray(0, BINARY_SNIFF_BYTES).includes(0)) return null;
+  return `read_file: ${requestedPath} appears to be a binary file, not text. Refusing to decode it as UTF-8.`;
+}
+
+/** Bound every read_file return path; a range re-read is the way to get more. */
+function capRead(text: string): string {
+  return capResultText(
+    text,
+    MAX_READ_FILE_CHARS,
+    'read_file',
+    'Re-read a smaller range with start_line and end_line to see the rest.',
+  );
+}
 
 export function makeReadFileTool(): RegisteredTool {
   return {
@@ -48,17 +82,20 @@ export function makeReadFileTool(): RegisteredTool {
     permission: 'read',
     handler: async (args) => {
       const filePath = resolveWorkspacePath(args['path'] as string);
-      let content: string;
+      let bytes: Buffer;
       try {
-        content = fs.readFileSync(filePath, 'utf8');
+        bytes = fs.readFileSync(filePath);
       } catch (err) {
         throw new Error(`read_file: ${(err as Error).message}`);
       }
+      const refusal = binaryRefusal(bytes, args['path'] as string);
+      if (refusal) throw new Error(refusal);
+      const content = bytes.toString('utf8');
 
       const startLine = typeof args['start_line'] === 'number' ? args['start_line'] : undefined;
       const endLine = typeof args['end_line'] === 'number' ? args['end_line'] : undefined;
       const numbered = args['numbered'] === true;
-      if (startLine === undefined && endLine === undefined && !numbered) return content;
+      if (startLine === undefined && endLine === undefined && !numbered) return capRead(content);
 
       const lines = content.split('\n');
       const start = Math.max(1, startLine ?? 1);
@@ -69,14 +106,16 @@ export function makeReadFileTool(): RegisteredTool {
         );
       }
       const selected = lines.slice(start - 1, end);
-      if (!numbered) return selected.join('\n');
+      if (!numbered) return capRead(selected.join('\n'));
       // `apply_line_edits` wants 1-based line numbers, but the only way to read
       // a file gave none — so the model counted them itself and got it wrong:
       // 14 of its 19 calls failed on stale or miscounted `expected_lines`.
       const width = String(end).length;
-      return selected
-        .map((line, index) => `${String(start + index).padStart(width, ' ')}| ${line}`)
-        .join('\n');
+      return capRead(
+        selected
+          .map((line, index) => `${String(start + index).padStart(width, ' ')}| ${line}`)
+          .join('\n'),
+      );
     },
   };
 }

@@ -22,6 +22,8 @@ active_model: my-model@main
 # Optional command capability for native local models. `headless` exposes
 # shell-free direct commands plus Forge's structured read-only PowerShell
 # inspection tool; ordinary terminal pasting remains off unless enabled too.
+# NOTE: a permissions block naming only `exec` denies every OTHER group by
+# schema default. Prefer the full block near the bottom of this file.
 # permissions:
 #   exec:
 #     headless: true
@@ -159,6 +161,45 @@ profiles:
 #   executable: C:\path\to\ollama.exe  # only for non-standard installs
 
 # -------------------------------------------------------------------
+# Optional: groups — shared settings folded into every model that names them.
+# Precedence: defaults < group(s) < the model's own fields. `sampling`, `spawn`
+# and `tool_call_limits` merge key by key; EVERY OTHER FIELD IS A WHOLESALE
+# OVERRIDE. That matters most for `capabilities`: a model adding `vision` must
+# restate `tool-call` here or it silently loses tool calling.
+# -------------------------------------------------------------------
+# groups:
+#   external-agents:
+#     provider: cli
+#   openrouter-cloud:
+#     provider: openrouter
+#     num_ctx: 262144
+#     capabilities: [tool-call, long-context]
+#     sampling: { max_tokens: 16384 }
+
+# -------------------------------------------------------------------
+# Optional: extra directories the Model Manager scans for GGUF files.
+# With no `model_dirs` Forge scans NOTHING, and the "add a model" browser comes
+# up empty even when the drive is full of GGUFs. Sibling `mmproj-*.gguf` files
+# found next to a model are auto-suggested as its `mmproj_path`.
+# -------------------------------------------------------------------
+# model_dirs:
+#   - D:/models
+#   - /home/me/gguf
+
+# -------------------------------------------------------------------
+# Optional: a short instruction appended to every system prompt, for things
+# true of this workspace regardless of model. Per-repo guidance belongs in
+# FORGE.md instead — Forge injects that automatically.
+# -------------------------------------------------------------------
+# custom_instructions: >-
+#   Prefer the repository's existing patterns over introducing new dependencies.
+
+# Optional: 'trace' | 'debug' | 'info' | 'warn' | 'error'. Raise this before
+# reporting a bug — the Forge output channel is the only record of a failed
+# spawn or a rejected request.
+# log_level: info
+
+# -------------------------------------------------------------------
 # Models — array form. `name` is the id shown in the picker.
 # -------------------------------------------------------------------
 models:
@@ -249,6 +290,21 @@ models:
 # -------------------------------------------------------------------
 # Tool permissions. Once this block is present, these switches are
 # authoritative for both tool advertising and dispatch.
+#
+# These switches hand real capability to an agent that will sometimes be wrong.
+# `fs.delete`, `exec.*` and `git.write` let it delete files, run commands and
+# change history. Forge gates and checkpoints them, but the software is provided
+# AS IS with no warranty — see "Responsibility and Risk" in the README.
+#
+# ALL-OR-NOTHING: naming ANY group makes the schema defaults authoritative for
+# EVERY group, not just the one you named. Omit `net:` here and web_search and
+# web_fetch are denied — the tools are not advertised to the model at all, and
+# it will report that it has no web search, whether or not you stored an API
+# key. Forge warns at startup naming any capability that went off this way.
+# An explicit `false` (as below) is a decision and is never warned about.
+#
+# `net.search: true` is necessary but NOT sufficient: web_search is only
+# registered when a `search:` block exists too (see above).
 # -------------------------------------------------------------------
 permissions:
   fs: { read: true, write: true, delete: false }
@@ -257,7 +313,6 @@ permissions:
   git: { read: true, write: false }
   agents:
     delegate: false       # set true to expose delegation tools
-    cloud_workers: false  # explicit opt-in; cloud worker launches always require approval
 
 # Native local delegation is advisory and read-only: the secondary model can
 # analyze supplied context but receives no tools and cannot edit or execute.

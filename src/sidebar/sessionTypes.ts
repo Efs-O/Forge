@@ -204,20 +204,40 @@ export function deriveTitle(firstUserLine: string): string {
   return line.length > TITLE_MAX_LEN ? `${line.slice(0, TITLE_MAX_LEN)}…` : line;
 }
 
+/** Image parts never reach workspaceState, so a restored turn must say so. */
+const TOOL_IMAGE_DROPPED_NOTE =
+  '[The image itself was not retained across the reload and is NOT visible to you now. ' +
+  'Call view_image again before describing it.]';
+const USER_IMAGE_DROPPED_NOTE =
+  '[The user attached an image here. It was not retained across the reload and is NOT ' +
+  'visible to you now. Ask the user to re-attach it before describing it.]';
+
+function hasImageParts(content: ChatMessage['content']): boolean {
+  return Array.isArray(content) && content.some((part) => part.type === 'image_url');
+}
+
 /**
  * Persistence view: keeps tool-call turns and tool results so a reloaded
  * conversation still knows what the agent actually did.
  *
- * `system` is still dropped (rebuilt per request), and so is array `content`
- * (image parts) — that was never persisted and widening it is a separate change.
+ * `system` is still dropped (rebuilt per request). Array `content` is reduced to
+ * its text parts — base64 image data must never land in workspaceState — but the
+ * message itself survives now: keying off `role === 'tool'` meant a user prompt
+ * sent WITH an attachment had array content, failed the `typeof === 'string'`
+ * test, and was dropped whole, losing what the user actually asked. Dropping the
+ * pixels silently is its own hazard, so a restored turn carries a note saying the
+ * image is gone rather than an intact-looking success line.
  */
 export function slimPersistMessages(messages: ChatMessage[]): SlimPersistMessage[] {
   const out: SlimPersistMessage[] = [];
   for (const m of messages) {
     if (m.role !== 'user' && m.role !== 'assistant' && m.role !== 'tool') continue;
-    // Tool results may carry an image part for the current request. Persist
-    // their text summary, but never copy base64 image data into workspaceState.
-    const persistedText = m.role === 'tool' ? textContent(m.content) : m.content;
+    const asText = typeof m.content === 'string' ? m.content : textContent(m.content);
+    const persistedText = hasImageParts(m.content)
+      ? [asText, m.role === 'tool' ? TOOL_IMAGE_DROPPED_NOTE : USER_IMAGE_DROPPED_NOTE]
+          .filter((part): part is string => typeof part === 'string' && part.length > 0)
+          .join('\n\n')
+      : asText;
     const hasText = typeof persistedText === 'string';
     const hasToolCalls = Array.isArray(m.tool_calls) && m.tool_calls.length > 0;
     // An assistant turn with tool_calls legitimately has content: null.

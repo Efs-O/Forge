@@ -18,7 +18,12 @@ const IMAGE_MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
   '.webp': 'image/webp',
 };
 
-function mimeFromHeader(bytes: Uint8Array): string | undefined {
+/**
+ * Image type from magic bytes. Exported because `read_file` needs the same
+ * answer to tell the model an image belongs to `view_image` — two sniffers
+ * would drift.
+ */
+export function mimeFromHeader(bytes: Uint8Array): string | undefined {
   if (
     bytes.length >= 8 &&
     bytes[0] === 0x89 &&
@@ -72,6 +77,20 @@ async function resolveImagePath(requestedPath: string): Promise<{ root: string; 
     throw new Error(`view_image: path is outside the workspace: ${requestedPath}`);
   }
   return { root: realRoot, file: realFile };
+}
+
+/**
+ * Why `view_image` is unavailable on a model without a projector. Advertised
+ * nowhere and refused at dispatch — a bare "unknown tool" taught the agent the
+ * capability did not exist, and it went looking for a workaround (shell `rm`
+ * all over again, this time as `read_file` on a PNG).
+ */
+export function visionUnavailableMessage(modelName: string): string {
+  return (
+    `Error: view_image is not available because the active model "${modelName}" has no vision ` +
+    'projector configured (mmproj_path). Do not try to read the image with another tool: ' +
+    'report that you cannot see it and ask the user to switch to a vision-capable model.'
+  );
 }
 
 export function makeViewImageTool(): RegisteredTool {

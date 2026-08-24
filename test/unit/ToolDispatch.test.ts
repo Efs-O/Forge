@@ -178,6 +178,38 @@ describe('ToolDispatch', () => {
     );
   });
 
+  // Filtering view_image out of the advertised definitions is not enforcement:
+  // the tool stays in the registry, so a model that calls it blind would ship
+  // base64 to a backend with no projector.
+  it('refuses a withheld tool with its reason instead of running it', async () => {
+    const handler = vi.fn();
+    toolRegistry.register({
+      definition: {
+        type: 'function',
+        function: { name: 'view_image', description: 'View an image', parameters: { type: 'object' } },
+      },
+      permission: 'read',
+      handler,
+    });
+
+    const messages: ChatMessage[] = [];
+    await dispatch.dispatch(
+      [makeToolCall('view_image', { path: 'assets/diagram.png' })],
+      allowed,
+      messages,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      new Map([['view_image', 'Error: view_image is not available (no projector).']]),
+    );
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(messages[0]?.content).toContain('not available');
+    expect(messages[0]?.tool_call_id).toBe('call-view_image');
+  });
+
   it('requests approval for write tools', async () => {
     toolRegistry.register({
       definition: {

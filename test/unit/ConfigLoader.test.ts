@@ -449,8 +449,49 @@ models:
     const config = loadConfig(dir);
     expect(config.active_model).toBe('local-gguf');
     expect(config.permissions?.agents?.delegate).toBe(true);
-    expect(showWarningMessage).toHaveBeenCalledTimes(1);
-    expect(showWarningMessage.mock.calls[0]![0]).toContain('cloud_workers');
+    // This fixture also trips the suppressed-permissions warning: naming only
+    // `agents` makes the schema defaults authoritative for every other group.
+    const warnings = showWarningMessage.mock.calls.map((call) => String(call[0]));
+    expect(warnings.some((text) => text.includes('cloud_workers'))).toBe(true);
+  });
+
+  /**
+   * Adding one permissions group makes the schema defaults authoritative for
+   * every other group, so capabilities go dark without ever being switched off.
+   * The only symptom is a tool missing from the model's list — which reads as a
+   * broken model rather than as config, and cost real turns twice.
+   */
+  it('warns which capabilities a partial permissions block switched off', () => {
+    showWarningMessage.mockClear();
+    const dir = mkTempDir();
+    fs.writeFileSync(
+      path.join(dir, 'config.yaml'),
+      `active_model: local-gguf
+llama_server:
+  binary: llama-server
+permissions:
+  fs:
+    delete: true
+  exec:
+    headless: true
+    terminal: true
+  git:
+    write: true
+models:
+  - name: local-gguf
+    provider: llama.cpp
+    gguf_path: C:/models/local.gguf
+`,
+      'utf8',
+    );
+
+    loadConfig(dir);
+    const warnings = showWarningMessage.mock.calls.map((call) => String(call[0]));
+    const suppressed = warnings.find((text) => text.includes('OFF by schema default'));
+    expect(suppressed).toBeDefined();
+    expect(suppressed).toContain('net.search');
+    expect(suppressed).toContain('net.fetch');
+    expect(suppressed).not.toContain('git.write');
   });
 
   it('says nothing when the deprecated key is absent', () => {

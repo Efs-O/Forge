@@ -1,5 +1,48 @@
 # Forge — Recent Changes
 
+## 0.13.3 — image handling, permission visibility, and an explicit risk statement
+
+- **The README states the risk in plain language.** A new "Responsibility and
+  Risk" section says the authors accept no responsibility for lost work,
+  deleted files, destructive commands, or unwanted git operations, restates the
+  Apache 2.0 AS-IS terms, and lists what each safety measure does and does not
+  cover. The example config carries a short pointer to it.
+- **The shipped example config no longer trips its own deprecation warning.**
+  It set `permissions.agents.cloud_workers`, removed in 0.13.0, so every user
+  copying it got a warning toast on first load. It also now documents `groups`
+  (referenced by a model in the file but never defined), `model_dirs` (empty
+  means the model browser scans nothing at all), `custom_instructions`, and
+  `log_level`, and states that `net.search: true` does nothing without a
+  `search:` block.
+- **A partial `permissions` block no longer switches capabilities off in
+  silence.** Naming any one group makes the schema defaults authoritative for
+  every other group, so adding `fs.delete` to grant one tool also revoked
+  `web_search`, and `net.fetch` stayed off because nobody knew to set it — the
+  only symptom either time was a tool missing from the model's list, which
+  reads as a broken model rather than as config. Forge now warns at config load
+  and names the exact keys to set, once per distinct message per session.
+- **`read_file` no longer decodes binary files.** It read every path as UTF-8
+  with no size cap, so a 1.3 MB PNG returned roughly 1.3 million replacement
+  characters and could exhaust a single-slot context in one tool result. It now
+  refuses binary content, names `view_image` when the file is an image, and
+  caps text reads at 120,000 characters with an instruction to re-read a
+  narrower `start_line`/`end_line` range.
+- **A model without a vision projector is told why it cannot see images.**
+  `view_image` was only withheld from the advertised tool list while remaining
+  in the registry, so a model calling it blind would still ship base64 to a
+  backend with no projector, and a model that never saw it went looking for a
+  substitute. The call is now refused at dispatch with the reason and a pointer
+  to switching models.
+- **A prompt sent with an attachment survives a reload.** Persistence extracted
+  text only for `role: 'tool'` messages, so a user turn carrying an image had
+  array content, failed the string test, and was dropped whole — losing what the
+  user had asked along with the picture.
+- **Restored image results no longer read as intact successes.** Image data is
+  deliberately never written to workspace state, but the reloaded transcript
+  still said `Loaded image ...`, inviting the model to describe something it
+  could no longer see. Restored turns now carry an explicit note that the image
+  is gone and must be re-loaded.
+
 ## 0.13.2 — Open VSX release audit
 
 - **The complete dependency audit is clean, including development tooling.**

@@ -42,3 +42,39 @@ export function resolveToolPermissions(config: ForgeConfig): Set<ToolPermission>
   // and is deliberately not resolved into a capability.
   return allowed;
 }
+
+/**
+ * Capabilities that are deny-by-default, paired with the key that grants them.
+ * `fs.read`, `fs.write` and `git.read` default to true and so can never go
+ * dark by omission — they are absent here on purpose.
+ */
+const DENY_BY_DEFAULT: readonly (readonly [
+  string,
+  (p: NonNullable<ForgeConfig['permissions']>) => boolean | undefined,
+])[] = [
+  ['fs.delete', (p) => p.fs?.delete],
+  ['exec.terminal', (p) => p.exec?.terminal],
+  ['exec.headless', (p) => p.exec?.headless],
+  ['net.search', (p) => p.net?.search],
+  ['net.fetch', (p) => p.net?.fetch],
+  ['git.write', (p) => p.git?.write],
+];
+
+/**
+ * Capabilities that are off because nobody said anything, NOT because someone
+ * chose to deny them. The permissions block is all-or-nothing: naming any one
+ * group makes the schema defaults authoritative for EVERY group, so adding
+ * `fs.delete` to grant one tool silently revoked `web_search`, and `net.fetch`
+ * stayed off because nobody knew to set it. Both cost real turns before anyone
+ * worked out why a tool had vanished.
+ *
+ * An explicit `false` is a decision and is never reported — the shipped
+ * example config denies most of these on purpose, and warning about a
+ * deliberate choice would train people to ignore the message. Returns config
+ * keys so the warning can name the fix rather than the symptom.
+ */
+export function permissionsSuppressedByBlock(config: ForgeConfig): string[] {
+  const configured = config.permissions;
+  if (!configured) return [];
+  return DENY_BY_DEFAULT.filter(([, read]) => read(configured) === undefined).map(([key]) => key);
+}

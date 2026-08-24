@@ -6,10 +6,28 @@
  */
 export const DEFAULT_MAX_RESULT_CHARS = 24000;
 
-/** Truncates oversized tool output, appending a visible marker so the model knows. */
-export function capResultText(text: string, maxChars: number): string {
+/**
+ * Upper bound on a single `read_file` result. Deliberately far larger than the
+ * MCP cap — reading a big source file is legitimate work — but bounded, because
+ * `read_file` was uncapped entirely and a 1.3 MB file could exhaust a one-slot
+ * context in a single tool result.
+ */
+export const MAX_READ_FILE_CHARS = 120000;
+
+/**
+ * Truncates oversized tool output, appending a visible marker so the model knows.
+ * `source` names the component that did the cutting and `advice` (optional) tells
+ * the model how to get the rest — a bare truncation notice leaves it guessing.
+ */
+export function capResultText(
+  text: string,
+  maxChars: number,
+  source = 'Forge MCP bridge',
+  advice?: string,
+): string {
   if (text.length <= maxChars) return text;
-  return `${text.slice(0, maxChars)}\n\n[truncated by Forge MCP bridge — showing ${maxChars} of ${text.length} chars]`;
+  const tail = advice ? `. ${advice}` : '';
+  return `${text.slice(0, maxChars)}\n\n[truncated by ${source} — showing ${maxChars} of ${text.length} chars${tail}]`;
 }
 
 /**

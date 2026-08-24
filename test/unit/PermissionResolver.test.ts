@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { ForgeConfig } from '../../src/config/types';
-import { resolveToolPermissions } from '../../src/tools/PermissionResolver';
+import {
+  permissionsSuppressedByBlock,
+  resolveToolPermissions,
+} from '../../src/tools/PermissionResolver';
 
 function configWith(permissions?: ForgeConfig['permissions']): ForgeConfig {
   return {
@@ -62,5 +65,46 @@ describe('resolveToolPermissions', () => {
       configWith({ agents: { delegate: true, cloud_workers: true } }),
     );
     expect([...allowed]).toEqual(['read', 'write', 'git-read', 'delegate']);
+  });
+});
+
+// The block is all-or-nothing: naming one group makes the schema defaults
+// authoritative for every other group, so a capability can go dark without
+// ever being switched off. The only symptom is a missing tool.
+describe('permissionsSuppressedByBlock', () => {
+  it('reports nothing when no permissions block is present', () => {
+    expect(permissionsSuppressedByBlock(configWith())).toEqual([]);
+  });
+
+  it('names the config keys that adding one group silently switched off', () => {
+    expect(permissionsSuppressedByBlock(configWith({ fs: { delete: true } }))).toEqual([
+      'exec.terminal',
+      'exec.headless',
+      'net.search',
+      'net.fetch',
+      'git.write',
+    ]);
+  });
+
+  // The shipped example config denies most of these deliberately. Warning about
+  // a decision someone already made trains people to ignore the message.
+  it('stays silent about capabilities that were explicitly denied', () => {
+    const permissions = {
+      fs: { read: true, write: true, delete: false },
+      net: { search: false, fetch: false },
+      exec: { terminal: false, headless: false },
+      git: { read: true, write: false },
+    };
+    expect(permissionsSuppressedByBlock(configWith(permissions))).toEqual([]);
+  });
+
+  it('reports nothing when every legacy capability is granted back', () => {
+    const permissions = {
+      fs: { delete: true },
+      net: { search: true, fetch: true },
+      exec: { terminal: true, headless: true },
+      git: { write: true },
+    };
+    expect(permissionsSuppressedByBlock(configWith(permissions))).toEqual([]);
   });
 });

@@ -5,6 +5,7 @@ import * as vscode from 'vscode';
 import { ForgeConfigSchema } from './schema';
 import type { ForgeConfig } from './types';
 import { splitModelProfile } from './ConfigResolver';
+import { permissionsSuppressedByBlock } from '../tools/PermissionResolver';
 
 const CONFIG_FILENAME = 'config.yaml';
 
@@ -113,7 +114,31 @@ export function loadConfig(storagePath: string): ForgeConfig {
   config.models = config.models.sort((a, b) =>
     a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
   );
+  warnOnSuppressedPermissions(config);
   return config;
+}
+
+// The config watcher reloads on every save, so an unconditional toast would
+// fire on each keystroke-to-disk. Warn once per distinct message per session.
+const warnedMessages = new Set<string>();
+
+/**
+ * A permissions block is all-or-nothing: naming one group makes the schema
+ * defaults authoritative for every other group too. Capabilities then go dark
+ * without ever being switched off, and the only visible symptom is a tool
+ * missing from the model's list — which reads as a broken model, not as config.
+ */
+function warnOnSuppressedPermissions(config: ForgeConfig): void {
+  const suppressed = permissionsSuppressedByBlock(config);
+  if (suppressed.length === 0) return;
+  const message =
+    'Forge: a permissions block is present, so these capabilities are OFF by ' +
+    `schema default rather than by choice: ${suppressed.join(', ')}. Their tools are ` +
+    'not advertised to the model at all. Set each one explicitly in config.yaml ' +
+    'if you want it.';
+  if (warnedMessages.has(message)) return;
+  warnedMessages.add(message);
+  void vscode.window.showWarningMessage(message);
 }
 
 /**

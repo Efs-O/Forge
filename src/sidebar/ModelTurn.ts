@@ -26,6 +26,7 @@ import { resolveToolPermissions } from '../tools/PermissionResolver';
 import { ToolBudget } from '../tools/ToolBudget';
 import { deriveStaticCapabilities } from '../config/ConfigResolver';
 import { extractToolDetail } from './toolSummary';
+import { visionUnavailableMessage } from '../tools/imageTool';
 import {
   isTurnCutOffError,
   ROUND_CAP_INCOMPLETE_PREFIX,
@@ -163,6 +164,12 @@ export async function runModelTurn(
 
   const maxRounds = resolveMaxToolRounds(model);
   const isVisionModel = deriveStaticCapabilities(model).includes('vision');
+  // Withholding the definition is not enforcement: the tool stays in the
+  // registry and a model that calls it blind would ship base64 to a backend
+  // with no projector. Refuse it at dispatch, with the reason.
+  const unavailableTools = isVisionModel
+    ? undefined
+    : new Map([['view_image', visionUnavailableMessage(model.name)]]);
   const advertisedDefinitions = ctx.toolRegistry
     .definitions(allowed)
     .filter((definition) => isVisionModel || definition.function.name !== 'view_image');
@@ -226,6 +233,7 @@ export async function runModelTurn(
             const displayDiffs = conv.displayDiffs ?? (conv.displayDiffs = []);
             displayDiffs.push(diff);
           },
+          unavailableTools,
         );
         // The token bar reports measured context, not a projection, so a tool
         // result does not move it — the next round's usage frame does. The

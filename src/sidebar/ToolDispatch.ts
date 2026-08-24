@@ -206,6 +206,7 @@ export class ToolDispatch {
     checkpoint?: CheckpointSession,
     budget?: ToolBudget,
     recordFileDiff?: (diff: RecordedFileDiff) => void,
+    unavailableTools?: ReadonlyMap<string, string>,
   ): Promise<void> {
     for (const tc of toolCalls) {
       let result: ToolHandlerResult;
@@ -231,6 +232,21 @@ export class ToolDispatch {
           messages.push({
             role: 'tool',
             content: toolResultContent(result),
+            tool_call_id: tc.id,
+            name: tc.function.name,
+          });
+          continue;
+        }
+
+        // Registered but withheld from this model (e.g. view_image without a
+        // projector). The tool would still execute if called blind — say why
+        // instead, so the model does not go hunting for a substitute.
+        const unavailable = unavailableTools?.get(tc.function.name);
+        if (unavailable) {
+          this.postResult(tc, unavailable, undefined, convId);
+          messages.push({
+            role: 'tool',
+            content: unavailable,
             tool_call_id: tc.id,
             name: tc.function.name,
           });

@@ -511,6 +511,38 @@ These commands are currently contributed by the extension.
 - Confirmation gates protect writes, terminal actions, and git actions.
 - `/clanker` disables those prompts for the session, except recursive deletes which still require approval.
 
+## Responsibility and Risk
+
+**Forge runs an AI agent that edits and deletes files, runs commands, and makes
+git changes on your machine. Use it at your own risk. The authors accept no
+responsibility for lost work, deleted or corrupted files, destructive commands,
+unwanted git operations, leaked information, or any other damage or loss
+arising from its use.** This restates in plain language what the Apache 2.0
+licence already says: the software is provided "AS IS", WITHOUT WARRANTIES OR
+CONDITIONS OF ANY KIND, and no contributor is liable for any damages. See
+sections 7 and 8 of [LICENSE](LICENSE).
+
+Forge takes the safety measures it reasonably can, and you should understand
+what each one does and does not cover:
+
+- **Confirmation gates** on writes, terminal actions, and git actions. `/clanker`
+  turns these off for the session — recursive deletes still ask.
+- **Per-turn checkpoints** with Keep/Undo. Undo restores the paths a turn
+  mutated; it is not a backup, does not cover changes made outside Forge, and
+  external CLI turns are only covered when checkpoint preparation succeeds.
+- **A command denylist** for destructive git and shell operations, and
+  **deny-by-default tool permissions** you opt out of in `config.yaml`.
+- **An SSRF-guarded, GET-only fetch** and no outbound traffic beyond the
+  endpoints you configure.
+
+None of this makes an agent safe to point at work you cannot afford to lose.
+A model can misread an instruction, a path can resolve somewhere you did not
+expect, and content fetched from the web or read out of a repository can carry
+prompt injection that redirects the agent. Granting `exec.headless`,
+`fs.delete`, or `git.write` hands real capability to a process that will
+sometimes be wrong. **Use version control, commit before large agent runs, and
+keep backups of anything that matters.**
+
 ## Privacy
 
 Forge does not send telemetry, analytics, or auto-update pings.
