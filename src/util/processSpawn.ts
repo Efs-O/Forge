@@ -1,0 +1,105 @@
+import * as child_process from 'child_process';
+import { terminateCliProcessTree } from '../agents/cliProcess';
+
+/**
+ * Canonical `spawn`-and-collect primitive. Lives here rather than in
+ * `tools/execHelpers.ts` because that module imports `vscode`, and callers like
+ * `tools/videoExtract.ts` must stay unit-testable outside the extension host.
+ * `execHelpers` re-exports these names, so existing importers are unaffected.
+ */
+export interface SpawnResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+}
+
+export type ExecCommandErrorKind =
+  | 'missing_executable'
+  | 'timeout'
+  | 'cancelled'
+  | 'spawn_error'
+  | 'invalid_shell_syntax'
+  | 'policy_refusal';
+
+export class ExecCommandError extends Error {
+  constructor(
+    readonly kind: ExecCommandErrorKind,
+    readonly program: string,
+    detail: string,
+  ) {
+    super(JSON.stringify({ kind, program, detail }));
+    this.name = 'ExecCommandError';
+  }
+}
+
+export function spawnAndWait(
+  command: string,
+  args: string[],
+  cwd: string,
+  timeoutMs: number,
+  extraEnv: NodeJS.ProcessEnv = {},
+  signal?: AbortSignal,
+): Promise<SpawnResult> {
+  return new Promise((resolve, reject) => {
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+
+    const proc = child_process.spawn(command, args, {
+      shell: false,
+      cwd,
+      // Suppress terminal color at the source so most tools (vitest, npm, …)
+      // emit no ANSI. NOT CI=true — that changes some runners' semantics.
+      env: { ...process.env, ...extraEnv, NO_COLOR: '1', FORCE_COLOR: '0' },
+    });
+
+    const finish = (result: SpawnResult | Error): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      if (result instanceof Error) reject(result);
+      else resolve(result);
+    };
+
+    const terminate = (): void => {
+      // npm/npx often launch a shell shim then a Node process. Killing only
+      // the shim leaves the test runner alive and its stdio open forever.
+      void terminateCliProcessTree(proc);
+    };
+    const onAbort = (): void => {
+      terminate();
+      finish(new ExecCommandError('cancelled', command, 'process cancelled'));
+    };
+    const timer = setTimeout(() => {
+      terminate();
+      finish(new ExecCommandError('timeout', command, `process timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+
+    proc.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    proc.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+
+    proc.on('error', (err: NodeJS.ErrnoException) => {
+      finish(
+        new ExecCommandError(
+          err.code === 'ENOENT' ? 'missing_executable' : 'spawn_error',
+          command,
+          err.message,
+        ),
+      );
+    });
+
+    proc.on('close', (code) => {
+      finish({ stdout, stderr, exitCode: code });
+    });
+  });
+}

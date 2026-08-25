@@ -41,6 +41,7 @@ import {
 import { ModelManagerPanel } from './sidebar/modelManager/ModelManagerPanel';
 import { registerSidebarCommands } from './vscode/sidebarCommands';
 import { flushPendingModelUsage } from './sidebar/modelManager/usageTracker';
+import { backgroundExecutionManager } from './tools/BackgroundExecutionManager';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   initLogger(context);
@@ -328,6 +329,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     dispose: () => {
       void pool.stopAll();
     },
+  });
+  context.subscriptions.push({
+    dispose: () => backgroundExecutionManager.dispose(),
   });
 
   log.info('Forge activated');

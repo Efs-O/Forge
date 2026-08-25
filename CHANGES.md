@@ -1,5 +1,29 @@
 # Forge — Recent Changes
 
+## 0.13.4 — video frames, background execution follow-ups
+
+- **`view_video` extracts frames for vision models.** A new tool pulls frames
+  via ffmpeg (`ffmpeg_path` and `frame_max_dimension` under a new `video:`
+  config block) so a vision-capable model can look at a clip. Models without
+  vision get an explicit unavailable message naming the model rather than a
+  silent no-op.
+- **Background executions can no longer run forever unnoticed.**
+  `exec_command` now honours `timeout_ms` when `background: true`, arming a kill
+  deadline that reports `terminated` with the elapsed limit in `error`. There is
+  deliberately no default deadline in background mode — inheriting the 30s
+  foreground default would have killed every long job it exists to support — so
+  the schema now states both halves of that rule.
+- **`list_executions` recovers a lost `execution_id`.** The agent's own record
+  of an id does not survive a `/compact`, which left a running job unreachable
+  and unstoppable until the window closed. The new tool lists every execution
+  the session still knows about, with status, pid, cwd, and exit code.
+- **`stop_execution` no longer prompts.** Stopping a job the agent itself
+  started is less risky than starting it was; gating the stop harder than the
+  start only added friction.
+- **A background command that fails to launch says so immediately.** The status
+  was read in the same tick as the spawn, before Node reports a failed launch,
+  so a process that was already dead came back as `running`.
+
 ## 0.13.3 — image handling, permission visibility, and an explicit risk statement
 
 - **The README states the risk in plain language.** A new "Responsibility and

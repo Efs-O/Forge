@@ -373,3 +373,38 @@ permissions:
 #   # everything (**/*), or list each project: ["app/src/**", "lib/src/**"].
 #   include_globs: ["src/**", "test/**"]
 #   exclude_globs: ["**/node_modules/**", "**/dist/**", "**/.git/**"]
+
+# -------------------------------------------------------------------
+# view_video — frame extraction (optional)
+# -------------------------------------------------------------------
+# The agent's `view_video` tool samples still frames across a short clip with
+# ffmpeg and sends them as images. It requires ffmpeg AND ffprobe; without them
+# the tool fails with a message naming the install command. It does not send
+# audio, and it does not send motion — only the sampled stills.
+#
+# frame_max_dimension is a CONTEXT knob before it is a quality one. Measured on
+# a 5 s clip, prompt tokens for the whole request:
+#
+#   1920x1088 unscaled   Qwen3.8-27B   22,501   (rejected outright at 16k ctx)
+#   1920x1088 unscaled   Gemma 4 12B    5,363
+#   640 px               Qwen3.8-27B    2,479
+#   384 px               Qwen3.8-27B      983
+#
+# If a clip is rejected for exceeding the context, lower this before anything
+# else. Settings are global — tools are registered once at activation, so these
+# cannot be overridden per model or per group.
+# -------------------------------------------------------------------
+# video:
+#   # Clips longer than this are refused before any frame is decoded.
+#   max_duration_seconds: 30
+#   # Hard cap on frames per call. The model's own max_frames argument may only
+#   # lower this, never raise it. Actual count scales with clip length
+#   # (roughly one frame per 5 s, minimum 3).
+#   max_frames: 8
+#   # Longest edge of each frame, in pixels. See the table above.
+#   frame_max_dimension: 640
+#   # ffmpeg -q:v. 2 is best quality, higher is smaller. 2..31.
+#   frame_quality: 3
+#   # Explicit ffmpeg executable. Omit to resolve from PATH, then (on Windows)
+#   # the WinGet package tree. ffprobe must sit beside it.
+#   ffmpeg_path: ""

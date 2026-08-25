@@ -83,6 +83,18 @@ telemetry, analytics, or auto-update pings.
   - an explicitly configured cloud provider model
   - an authenticated Claude Code or Codex CLI for `provider: cli`
 
+### Optional: ffmpeg, for `view_video`
+
+The `view_video` tool samples still frames from a workspace video clip and sends
+them to a vision model. It needs **ffmpeg and ffprobe** on `PATH` (Windows:
+`winget install Gyan.FFmpeg`; macOS: `brew install ffmpeg`), or an explicit
+`video.ffmpeg_path` in `config.yaml`. Nothing else in Forge uses ffmpeg, so
+skip it if you do not need video.
+
+Frames cost prompt tokens — an unscaled 1080p clip can exceed a 16k context on
+its own. `video.frame_max_dimension` (default 640) is the knob; see the measured
+table in `config/config.example.yaml`.
+
 ## Backend Modes
 
 ### 1. Direct GGUF mode

@@ -1,8 +1,15 @@
 # Compaction summarizer: its own request shape (impl plan)
 
-Status: **REVISED after measurement (2026-08-22).** One hypothesis confirmed,
-one refuted. See "Measured results" before reading the Design section — the
-`disableThinking` option described below must NOT be implemented.
+Status: **IMPLEMENTED 2026-08-22.** Shipped as described below, with one
+revision from measurement: one hypothesis confirmed, one refuted. See "Measured
+results" before reading the Design section — the `disableThinking` option
+described there was NOT implemented, deliberately.
+
+What landed: `config/templates/builtin/summarize.njk`, `PromptRunOptions` in
+`src/sidebar/PromptRun.ts`, `SUMMARY_OUTPUT_TOKENS` and the summary validation
+guard in the new `src/sidebar/compactionPrompt.ts`, the summarizer options in
+`CompactionService.ts` (which the split brought back under the LOC threshold),
+the `EARLIER SUMMARY` label fix, and the `docs/OWNERS.md` row.
 
 Scope: item 3 of the compaction review only. The tail-sizing cliff, the 73%
 source truncation, goal anchoring, and summary layering are **not** in this

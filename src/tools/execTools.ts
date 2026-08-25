@@ -23,6 +23,8 @@ import {
   resolvePackageRunnerInvocation,
 } from './execProgramResolver';
 import { checkDenyList, getBuiltinDenyList } from './DenyList';
+import { backgroundExecutionManager } from './BackgroundExecutionManager';
+import { formatBackgroundObservation } from './backgroundExecutionTools';
 
 // ── run_terminal ───────────────────────────────────────────────────────────────
 
@@ -92,7 +94,11 @@ export function makeExecCommandTool(): RegisteredTool {
             },
             args: { type: 'array', items: { type: 'string' }, description: 'Arguments array.' },
             cwd: { type: 'string', description: 'Working directory. Optional.' },
-            timeout_ms: { type: 'integer', description: 'Timeout in ms. Default 30000.' },
+            timeout_ms: {
+              type: 'integer',
+              description:
+                'Timeout in ms. Default 30000. With background=true there is no default deadline — the job runs until it exits or stop_execution is called — and setting this makes it a kill deadline instead.',
+            },
             tail_lines: {
               type: 'integer',
               minimum: 1,
@@ -117,6 +123,11 @@ export function makeExecCommandTool(): RegisteredTool {
               enum: ['both', 'stdout', 'stderr'],
               description: 'Which output stream to return. Default both.',
             },
+            background: {
+              type: 'boolean',
+              description:
+                'Start the process without waiting for it. Returns an execution_id for monitor_execution.',
+            },
           },
           required: ['command', 'args'],
           additionalProperties: false,
@@ -131,7 +142,8 @@ export function makeExecCommandTool(): RegisteredTool {
       const cmdArgs = (args['args'] as string[]) ?? [];
       const outputOptions = parseExecOutputOptions(args);
       const cwd = resolveExecCwd(args['cwd'] as string | undefined);
-      const timeoutMs = (args['timeout_ms'] as number | undefined) ?? 30_000;
+      const requestedTimeoutMs = args['timeout_ms'] as number | undefined;
+      const timeoutMs = requestedTimeoutMs ?? 30_000;
 
       try {
         checkShellOperators(cmdArgs);
@@ -174,6 +186,19 @@ export function makeExecCommandTool(): RegisteredTool {
       }
 
       try {
+        if (args['background'] === true) {
+          const started = backgroundExecutionManager.start({
+            command: spawned.command,
+            args: spawned.args,
+            cwd,
+            timeoutMs: requestedTimeoutMs,
+          });
+          // spawn reports a failed launch on the next tick, so observing
+          // immediately would report "running" for a process already dead.
+          await new Promise((resolve) => setImmediate(resolve));
+          const observation = await backgroundExecutionManager.observe(started.id, 0, 0, 0);
+          return formatBackgroundObservation(observation, 0, outputOptions);
+        }
         const result = await spawnAndWait(
           spawned.command,
           spawned.args,

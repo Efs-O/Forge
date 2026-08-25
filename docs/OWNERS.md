@@ -225,6 +225,10 @@ overlaps with an existing owner, extend the owner instead.
 | Bundled ripgrep executable resolution      | `src/tools/RipgrepResolver.ts`        |
 | Local agent delegation tool                | `src/tools/localAgentTool.ts`         |
 | Per-turn tool allowlist + call-budget      | `src/tools/ToolBudget.ts`             |
+| `view_image` tool                          | `src/tools/imageTool.ts`              |
+| `view_video` tool definition + handler     | `src/tools/videoTool.ts`              |
+| ffmpeg probe + frame extraction            | `src/tools/videoExtract.ts`           |
+| ffmpeg/ffprobe executable discovery        | `src/tools/ffmpegLocate.ts`           |
 
 ## Semantic Search
 
@@ -292,5 +296,6 @@ overlaps with an existing owner, extend the owner instead.
 | Concern                              | Owner                               |
 | ------------------------------------ | ----------------------------------- |
 | Path containment test (vscode-free)  | `src/util/pathContainment.ts`       |
+| Spawn-and-collect child process (no vscode) | `src/util/processSpawn.ts`         |
 | Workspace path resolution + realpath | `src/util/WorkspacePaths.ts`        |
 | Structured logging                   | `src/util/logger.ts`                |

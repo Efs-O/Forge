@@ -27,6 +27,7 @@ import { ToolBudget } from '../tools/ToolBudget';
 import { deriveStaticCapabilities } from '../config/ConfigResolver';
 import { extractToolDetail } from './toolSummary';
 import { visionUnavailableMessage } from '../tools/imageTool';
+import { videoUnavailableMessage } from '../tools/videoTool';
 import {
   isTurnCutOffError,
   ROUND_CAP_INCOMPLETE_PREFIX,
@@ -37,6 +38,9 @@ import {
   canUseThinkingKwargs,
   shouldStripThinking,
 } from './turnModelBehavior';
+
+/** Tools that need an mmproj projector. Gated in two places below; keep in sync. */
+const VISION_ONLY_TOOLS = new Set(['view_image', 'view_video']);
 
 /** Tool rounds per sidebar turn when the model does not set `max_tool_rounds`.
  */
@@ -169,10 +173,16 @@ export async function runModelTurn(
   // with no projector. Refuse it at dispatch, with the reason.
   const unavailableTools = isVisionModel
     ? undefined
-    : new Map([['view_image', visionUnavailableMessage(model.name)]]);
+    : new Map([
+        ['view_image', visionUnavailableMessage(model.name)],
+        ['view_video', videoUnavailableMessage(model.name)],
+      ]);
+  // Both halves of the gate must list the same tools. Advertising without
+  // refusing ships base64 at a projector-less backend; refusing without
+  // withholding advertises a tool that always fails.
   const advertisedDefinitions = ctx.toolRegistry
     .definitions(allowed)
-    .filter((definition) => isVisionModel || definition.function.name !== 'view_image');
+    .filter((definition) => isVisionModel || !VISION_ONLY_TOOLS.has(definition.function.name));
   const toolDefinitions = budget.filterDefinitions(advertisedDefinitions);
   const nativeTools = runtimeCaps?.likelySupportsTools !== false;
   if (toolDefinitions.length > 0 && !nativeTools) {

@@ -62,6 +62,12 @@ import { makeSearchCodebaseTool } from './semanticSearchTool';
 import type { IndexManager } from '../search/IndexManager';
 import { makeApplyLineEditsTool } from './structuredEditTool';
 import { makeViewImageTool } from './imageTool';
+import { makeViewVideoTool } from './videoTool';
+import {
+  makeListExecutionsTool,
+  makeMonitorExecutionTool,
+  makeStopExecutionTool,
+} from './backgroundExecutionTools';
 
 export function registerAllTools(
   registry: ToolRegistry,
@@ -75,6 +81,9 @@ export function registerAllTools(
   // v0.1 builtins
   registry.register(makeReadFileTool());
   registry.register(makeViewImageTool());
+  // Registered unconditionally: getConfig is optional on this signature, and
+  // gating on it would silently drop the tool wherever it is not supplied.
+  registry.register(makeViewVideoTool(getConfig ? () => getConfig().video : undefined));
   registry.register(makeWriteFileTool());
   registry.register(makeAppendFileTool());
   registry.register(makeReplaceSelectionTool());
@@ -117,6 +126,9 @@ export function registerAllTools(
   // v0.7 exec + git
   registry.register(makeRunTerminalTool());
   registry.register(makeExecCommandTool());
+  registry.register(makeMonitorExecutionTool());
+  registry.register(makeStopExecutionTool());
+  registry.register(makeListExecutionsTool());
   registry.register(makeSafePowerShellTool());
   registry.register(makeRunTestsTool());
   registry.register(makeRunBuildTool());

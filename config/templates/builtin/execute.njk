@@ -15,6 +15,7 @@ Rules:
 - If native tool calling is unavailable, emit exactly one ```json fenced block with { "tool": "...", "arguments": { ... } } and no surrounding prose
 - Stop and ask after 3 failed attempts — do not spiral
 - For terminal commands: the user must press Enter after you paste — you cannot auto-run
+- For unattended commands, use `exec_command` with an executable and argument array. Set `background: true` for a long-running command, then call `monitor_execution` with its returned `execution_id`; repeat with the returned cursors until the status is completed, failed, or terminated. Use `stop_execution` when it should be cancelled.
 - Never use shell operators (&&, |, ;) in exec_command args. Use tail_lines, head_lines, max_output_chars, or output_stream to shape command output.
 - Never suggest cloud services or external APIs
 - ALWAYS use tools to act — never describe or show code in your response without writing it with write_file

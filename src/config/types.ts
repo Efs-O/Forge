@@ -248,6 +248,18 @@ export interface EmbeddingsConfig {
   exclude_globs?: string[];
 }
 
+/** Raw `video:` block. Defaults live in `videoTool.ts` (VIDEO_DEFAULTS). */
+export interface VideoConfig {
+  max_duration_seconds?: number;
+  max_frames?: number;
+  /** Longest frame edge in pixels. The dominant term in prompt cost. */
+  frame_max_dimension?: number;
+  /** ffmpeg -q:v: 2 is best quality, higher is smaller. */
+  frame_quality?: number;
+  /** Explicit ffmpeg executable. Empty means resolve from PATH / WinGet. */
+  ffmpeg_path?: string;
+}
+
 export interface ForgeConfig {
   models: ModelConfig[];
   active_model: string | null;
@@ -263,6 +275,9 @@ export interface ForgeConfig {
   shared_runtime?: SharedRuntimeConfig;
   search?: SearchConfig;
   embeddings?: EmbeddingsConfig;
+  /** `view_video` frame extraction. Top-level only: tools are registered once
+   *  at activation and never see the per-turn resolved model. */
+  video?: VideoConfig;
   log_level?: 'trace' | 'debug' | 'info' | 'warn' | 'error';
   /** Extra directories to scan for GGUF files (used by first-run wizard). */
   model_dirs?: string[];
