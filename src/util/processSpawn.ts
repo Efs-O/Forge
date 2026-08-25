@@ -32,6 +32,22 @@ export class ExecCommandError extends Error {
   }
 }
 
+/**
+ * Canonical spawn `cwd` normaliser. VS Code's `Uri.fsPath` lower-cases the
+ * Windows drive letter, so a workspace on `N:` arrives as `n:\...`. Node spawns
+ * that happily, but tools that resolve module ids against `cwd` — anything on
+ * Vite, vitest included — then key the same file under two spellings and load
+ * two copies of their own module graph. vitest fails every file at `describe`
+ * with "Cannot read properties of undefined (reading 'config')", which looks
+ * like a broken test file and is really a broken path.
+ *
+ * Every spawn goes through here, so no caller has to remember this.
+ */
+export function normalizeSpawnCwd(cwd: string): string {
+  if (process.platform !== 'win32') return cwd;
+  return /^[a-z]:/u.test(cwd) ? cwd[0].toUpperCase() + cwd.slice(1) : cwd;
+}
+
 export function spawnAndWait(
   command: string,
   args: string[],
@@ -47,7 +63,7 @@ export function spawnAndWait(
 
     const proc = child_process.spawn(command, args, {
       shell: false,
-      cwd,
+      cwd: normalizeSpawnCwd(cwd),
       // Suppress terminal color at the source so most tools (vitest, npm, …)
       // emit no ANSI. NOT CI=true — that changes some runners' semantics.
       env: { ...process.env, ...extraEnv, NO_COLOR: '1', FORCE_COLOR: '0' },

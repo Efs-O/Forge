@@ -200,6 +200,7 @@ export function reducer(state: State, action: Action): State {
         role: 'tool' as const,
         content: action.detail ? `${action.toolName} → ${action.detail}` : action.toolName,
         toolName: action.toolName,
+        ...(action.detail ? { toolDetail: action.detail } : {}),
         ...(action.toolCallId ? { toolCallId: action.toolCallId } : {}),
       });
     }
@@ -221,6 +222,9 @@ export function reducer(state: State, action: Action): State {
         updated[pending] = {
           ...existing[pending]!,
           content: `${action.toolName} → ${action.label}`,
+          ...(existing[pending]!.toolDetail !== undefined
+            ? { toolDetail: existing[pending]!.toolDetail }
+            : {}),
           ...filled,
         };
         return { ...state, messagesById: { ...state.messagesById, [cid]: updated } };

@@ -43,7 +43,7 @@ describe('ensureForgeInstructionsFile', () => {
     expect(result.status).toBe('created');
     const content = fs.readFileSync(path.join(root, 'FORGE.md'), 'utf8');
     expect(content).toContain('# Project Instructions');
-    expect(Buffer.byteLength(content, 'utf8')).toBeLessThan(8192);
+    expect(Buffer.byteLength(content, 'utf8')).toBeLessThan(15000);
   });
 
   it('creates FORGE.md without overwriting an existing AGENTS.md fallback', () => {
@@ -102,6 +102,21 @@ describe('ForgeInstructionsLoader', () => {
     const loader = new ForgeInstructionsLoader(root);
 
     expect(loader.instructionsFor(path.join(nested, 'new.ts'))).toBe('# Nested fallback\n');
+    loader.dispose();
+  });
+
+  it('truncates oversized instructions at 15,000 bytes without changing the file', () => {
+    const root = makeRoot();
+    const file = path.join(root, 'FORGE.md');
+    const content = `${'a'.repeat(15000)}TAIL`;
+    fs.writeFileSync(file, content, 'utf8');
+    const loader = new ForgeInstructionsLoader(root);
+
+    expect(loader.instructions).toBe('a'.repeat(15000));
+    expect(fs.readFileSync(file, 'utf8')).toBe(content);
+    expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+      `Forge: ${file} exceeds 15000 bytes and was truncated before prompt injection.`,
+    );
     loader.dispose();
   });
 });

@@ -11,6 +11,7 @@ export interface AppMessage {
   /** Tool rows: set on activity, then filled in when the call returns. */
   toolName?: string;
   toolCallId?: string;
+  toolDetail?: string;
   toolResult?: string;
   toolResultTotal?: number;
   toolFilePath?: string;
@@ -23,6 +24,7 @@ export type PersistedRow =
       role: 'tool';
       content: string;
       toolName: string;
+      toolDetail?: string;
       toolResult: string;
       toolResultTotal: number;
       toolIsError?: boolean | undefined;
@@ -63,6 +65,7 @@ export function mergeSyncedMessages(local: AppMessage[], rows: PersistedRow[]): 
     ...(m.role === 'tool'
       ? {
           toolName: m.toolName,
+          ...(m.toolDetail !== undefined ? { toolDetail: m.toolDetail } : {}),
           toolResult: m.toolResult,
           toolResultTotal: m.toolResultTotal,
           ...(m.toolIsError ? { toolIsError: true } : {}),
@@ -94,6 +97,9 @@ export function mergeSyncedMessages(local: AppMessage[], rows: PersistedRow[]): 
     if (hostIndex < 0) continue;
     localToHost.set(localIndex, hostIndex);
     reconstructed[hostIndex]!.id = message.id;
+    if (message.role === 'tool' && message.toolDetail !== undefined) {
+      reconstructed[hostIndex]!.toolDetail = message.toolDetail;
+    }
     hostCursor = hostIndex + 1;
   }
 

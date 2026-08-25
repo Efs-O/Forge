@@ -5,11 +5,11 @@ import * as vscode from 'vscode';
 const AGENTS_MD = 'AGENTS.md';
 const FORGE_MD = 'FORGE.md';
 const INSTRUCTION_FILES = [FORGE_MD, AGENTS_MD] as const;
-const MAX_BYTES = 8192; // guard against accidentally huge files eating context
+const MAX_BYTES = 15000; // guard against accidentally huge files eating context
 const RELOAD_DEBOUNCE_MS = 150;
 const STARTER_CONTENT = `# Project Instructions
 
-Keep this file concise (under 8 KB). Forge includes it in every native local-agent prompt.
+Keep this file concise (under 15,000 bytes). Forge includes it in every native local-agent prompt.
 
 ## Project facts
 - Purpose and important architecture decisions:

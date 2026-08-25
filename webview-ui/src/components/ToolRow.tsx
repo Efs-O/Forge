@@ -17,8 +17,8 @@ const ChevronRight = (): React.ReactElement => (
   </svg>
 );
 
-/** Below this a result is short enough that expanding it adds nothing. */
-const EXPANDABLE_MIN_CHARS = 200;
+/** Below this a result or command is short enough that expanding it adds little. */
+const EXPANDABLE_MIN_CHARS = 100;
 
 function formatSize(chars: number): string {
   return chars >= 1000 ? `${(chars / 1000).toFixed(1)}k chars` : `${chars} chars`;
@@ -34,10 +34,10 @@ export function ToolRow({ message }: { message: AppMessage }): React.ReactElemen
 
   const arrow = message.content.indexOf(' → ');
   const name = arrow !== -1 ? message.content.slice(0, arrow) : message.content;
-  const detail = arrow !== -1 ? message.content.slice(arrow + 3) : '';
+  const detail = message.toolDetail ?? (arrow !== -1 ? message.content.slice(arrow + 3) : '');
 
   const result = message.toolResult ?? '';
-  const expandable = result.length >= EXPANDABLE_MIN_CHARS;
+  const expandable = result.length >= EXPANDABLE_MIN_CHARS || detail.length >= EXPANDABLE_MIN_CHARS;
   const body = useMemo(() => normalizeMarkdownForRender(result), [result]);
 
   return (
@@ -85,7 +85,13 @@ export function ToolRow({ message }: { message: AppMessage }): React.ReactElemen
       </div>
       {open && (
         <div className="tool-row-body">
-          <Markdown remarkPlugins={[remarkGfm]}>{body}</Markdown>
+          {detail && (
+            <div className="tool-row-command">
+              <div className="tool-row-command-label">Command / details</div>
+              <code>{detail}</code>
+            </div>
+          )}
+          {result && <Markdown remarkPlugins={[remarkGfm]}>{body}</Markdown>}
         </div>
       )}
     </div>

@@ -109,7 +109,29 @@ describe('webview App reducer — transcript rows', () => {
       const rows = finished.messagesById['tab-1']!.filter((m) => m.role === 'tool');
       expect(rows).toHaveLength(1);
       expect(rows[0]!.content).toBe('codex → Summary line');
+      expect((rows[0] as { toolDetail?: string }).toolDetail).toBe('starting');
       expect(rows[0]!.toolResult).toBe('the full report');
+    });
+
+    it('preserves a full command detail when the result replaces the activity label', () => {
+      const command = `npm run test -- --grep ${'x'.repeat(120)}`;
+      const started = appModule.reducer(appModule.initialState, {
+        type: 'TOOL_ACTIVITY',
+        toolName: 'exec_command',
+        detail: command,
+        convId: 'tab-1',
+      });
+      const finished = appModule.reducer(started, {
+        type: 'TOOL_RESULT',
+        toolName: 'exec_command',
+        label: 'success',
+        text: 'ok',
+        totalChars: 2,
+        convId: 'tab-1',
+      });
+
+      const row = finished.messagesById['tab-1']!.find((m) => m.role === 'tool');
+      expect((row as { toolDetail?: string }).toolDetail).toBe(command);
     });
 
     it('appends a row when no activity row is pending', () => {

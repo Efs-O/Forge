@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { spawn, type ChildProcessByStdio } from 'child_process';
 import type { Readable } from 'stream';
 import { terminateCliProcessTree } from '../agents/cliProcess';
+import { normalizeSpawnCwd } from '../util/processSpawn';
 
 export const MAX_BACKGROUND_OUTPUT_CHARS = 200_000;
 export const MAX_BACKGROUND_EXECUTIONS = 32;
@@ -93,9 +94,10 @@ export class BackgroundExecutionManager {
       );
     }
 
+    const cwd = normalizeSpawnCwd(options.cwd);
     const process = spawn(options.command, [...options.args], {
       shell: false,
-      cwd: options.cwd,
+      cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
       env: { ...globalThis.process.env, NO_COLOR: '1', FORCE_COLOR: '0' },
@@ -104,7 +106,7 @@ export class BackgroundExecutionManager {
       id: `exec-${randomUUID()}`,
       command: options.command,
       args: [...options.args],
-      cwd: options.cwd,
+      cwd,
       pid: process.pid ?? undefined,
       startedAt: Date.now(),
       process,

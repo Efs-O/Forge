@@ -66,9 +66,11 @@ export function getWorkspaceRoot(): string {
 }
 
 export function resolveExecCwd(cwd: string | undefined): string {
-  if (!cwd) return getWorkspaceRoot();
-  if (path.isAbsolute(cwd)) return cwd;
-  return path.join(getWorkspaceRoot(), cwd);
+  // normalizeSpawnCwd here as well as at the spawn, so the cwd reported back to
+  // the model is the same spelling the process actually ran under.
+  if (!cwd) return normalizeSpawnCwd(getWorkspaceRoot());
+  if (path.isAbsolute(cwd)) return normalizeSpawnCwd(cwd);
+  return normalizeSpawnCwd(path.join(getWorkspaceRoot(), cwd));
 }
 
 // ── Shell-operator guard ───────────────────────────────────────────────────────
@@ -149,11 +151,12 @@ export function checkPowerShellBan(command: string, args: string[]): void {
  */
 export {
   ExecCommandError,
+  normalizeSpawnCwd,
   spawnAndWait,
   type ExecCommandErrorKind,
   type SpawnResult,
 } from '../util/processSpawn';
-import { type SpawnResult } from '../util/processSpawn';
+import { normalizeSpawnCwd, type SpawnResult } from '../util/processSpawn';
 
 // ── ANSI stripping ───────────────────────────────────────────────────────────
 

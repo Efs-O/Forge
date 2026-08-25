@@ -7,6 +7,14 @@
   config block) so a vision-capable model can look at a clip. Models without
   vision get an explicit unavailable message naming the model rather than a
   silent no-op.
+- **Every spawned process now gets an upper-case Windows drive letter.** VS
+  Code's `Uri.fsPath` lower-cases it, so a workspace on `N:` reached `spawn` as
+  `n:\...`. Node runs that fine, but tools resolving module ids against `cwd` —
+  anything on Vite — key the same file under two spellings and load two copies
+  of their own module graph. `npx vitest run` failed all 140 files at `describe`
+  with "Cannot read properties of undefined (reading 'config')", which reads as
+  a broken test suite and was a broken path. Normalising happens at the spawn
+  itself, so it covers every tool, not just `exec_command`.
 - **Background executions can no longer run forever unnoticed.**
   `exec_command` now honours `timeout_ms` when `background: true`, arming a kill
   deadline that reports `terminated` with the elapsed limit in `error`. There is
