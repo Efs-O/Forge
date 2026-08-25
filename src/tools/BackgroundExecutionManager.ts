@@ -62,8 +62,17 @@ export interface BackgroundExecutionObservation {
   error: string | undefined;
   stdout: string;
   stderr: string;
-  nextStdoutCursor: number;
-  nextStderrCursor: number;
+  /**
+   * Absolute position of the first returned character. The caller caps how much
+   * of `stdout` it actually shows, so only it can say where the next read
+   * resumes — reporting `stdoutEnd` as the next cursor skipped everything the
+   * cap held back and made truncated output unreachable.
+   */
+  stdoutStart: number;
+  stderrStart: number;
+  /** Absolute position one past the last character produced so far. */
+  stdoutEnd: number;
+  stderrEnd: number;
   stdoutTruncated: boolean;
   stderrTruncated: boolean;
 }
@@ -288,8 +297,10 @@ export class BackgroundExecutionManager {
       error: execution.error,
       stdout: stdout.text,
       stderr: stderr.text,
-      nextStdoutCursor: execution.stdoutBase + execution.stdout.length,
-      nextStderrCursor: execution.stderrBase + execution.stderr.length,
+      stdoutStart: stdout.start,
+      stderrStart: stderr.start,
+      stdoutEnd: execution.stdoutBase + execution.stdout.length,
+      stderrEnd: execution.stderrBase + execution.stderr.length,
       stdoutTruncated: stdout.truncated,
       stderrTruncated: stderr.truncated,
     };
@@ -334,10 +345,13 @@ function readOutput(
   output: string,
   base: number,
   cursor: number,
-): { text: string; truncated: boolean } {
+): { text: string; truncated: boolean; start: number } {
   const safeCursor = Number.isInteger(cursor) && cursor >= 0 ? cursor : 0;
   const truncated = safeCursor < base;
-  return { text: output.slice(Math.max(0, safeCursor - base)), truncated };
+  // A cursor behind the retained window resumes at the window, not at the
+  // cursor — those characters are gone, and `truncated` says so.
+  const start = Math.max(safeCursor, base);
+  return { text: output.slice(start - base), truncated, start };
 }
 
 export const backgroundExecutionManager = new BackgroundExecutionManager();

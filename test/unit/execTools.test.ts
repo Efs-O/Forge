@@ -66,6 +66,61 @@ describe('exec_command safety policy', () => {
     ).rejects.toThrow('unknown execution id');
   });
 
+  it('pages through capped output instead of skipping to the end', async () => {
+    const start = await makeExecCommandTool().handler({
+      command: process.execPath,
+      args: ['-e', "process.stdout.write('x'.repeat(50000))"],
+      cwd: process.cwd(),
+      background: true,
+    });
+    const started = JSON.parse(start as string) as { execution_id: string };
+
+    // Read the whole stream back one capped chunk at a time. Before the fix the
+    // first call reported a cursor at the very end, so everything the cap held
+    // back was unreachable and this loop ended after one 1k chunk.
+    let cursor = 0;
+    let total = 0;
+    let calls = 0;
+    for (;;) {
+      const raw = (await makeMonitorExecutionTool().handler({
+        execution_id: started.execution_id,
+        wait_ms: calls === 0 ? 5_000 : 0,
+        stdout_cursor: cursor,
+        max_output_chars: 1_000,
+      })) as string;
+      const obs = JSON.parse(raw) as { stdout: string; next_stdout_cursor: number };
+      calls += 1;
+      total += obs.stdout.length;
+      if (obs.stdout.length === 0 || calls > 100) break;
+      expect(obs.next_stdout_cursor).toBe(cursor + obs.stdout.length);
+      cursor = obs.next_stdout_cursor;
+    }
+    expect(total).toBe(50_000);
+    expect(calls).toBe(51);
+  });
+
+  it('reports the time actually waited, not the requested budget', async () => {
+    const start = await makeExecCommandTool().handler({
+      command: process.execPath,
+      args: ['-e', 'setTimeout(() => {}, 50)'],
+      cwd: process.cwd(),
+      background: true,
+    });
+    const started = JSON.parse(start as string) as { execution_id: string };
+    const result = await makeMonitorExecutionTool().handler({
+      execution_id: started.execution_id,
+      wait_ms: 30_000,
+    });
+    const observed = JSON.parse(result as string) as {
+      status: string;
+      waited_ms: number;
+      ran_for_ms: number;
+    };
+    expect(observed.status).toBe('completed');
+    expect(observed.waited_ms).toBeLessThan(5_000);
+    expect(observed.ran_for_ms).toBeGreaterThanOrEqual(40);
+  });
+
   it('kills a background execution once timeout_ms elapses', async () => {
     const start = await makeExecCommandTool().handler({
       command: process.execPath,

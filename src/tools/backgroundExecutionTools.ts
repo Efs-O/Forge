@@ -12,7 +12,7 @@ export function makeMonitorExecutionTool(): RegisteredTool {
       function: {
         name: 'monitor_execution',
         description:
-          'Wait for a background exec_command to finish or until wait_ms elapses, then return new output and status. Call again with the returned cursors to continue monitoring.',
+          'Wait for a background exec_command to finish or until wait_ms elapses, then return new output and status. Call again with the returned next_stdout_cursor / next_stderr_cursor to read the next chunk — output is capped per call, so a noisy job needs several calls to read in full. waited_ms is the time actually waited and ran_for_ms is the process runtime.',
         parameters: {
           type: 'object',
           properties: {
@@ -61,6 +61,10 @@ export function makeMonitorExecutionTool(): RegisteredTool {
         throw new Error('monitor_execution: wait_ms must be an integer from 0 to 60000.');
       }
       const outputOptions = parseExecOutputOptions(args);
+      // Measured, not requested. The wait resolves the moment the process
+      // finishes or the turn is cancelled, so echoing wait_ms back reported a
+      // full-length wait for a call that returned in a fraction of it.
+      const startedWaitingAt = Date.now();
       const observation = await backgroundExecutionManager.observe(
         args['execution_id'] as string,
         waitMs,
@@ -68,7 +72,7 @@ export function makeMonitorExecutionTool(): RegisteredTool {
         (args['stderr_cursor'] as number | undefined) ?? 0,
         context?.abortSignal,
       );
-      return formatBackgroundObservation(observation, waitMs, outputOptions);
+      return formatBackgroundObservation(observation, Date.now() - startedWaitingAt, outputOptions);
     },
   };
 }
@@ -127,8 +131,12 @@ export function makeListExecutionsTool(): RegisteredTool {
           cwd: execution.cwd,
           status: execution.status,
           pid: execution.pid,
-          started_at: new Date(execution.startedAt).toISOString(),
-          finished_at:
+          // ISO timestamps are UTC and read as hours-wrong against the user's
+          // clock, and "how long has this been running" is the actual question
+          // — so answer it directly rather than making the caller subtract.
+          ran_for_ms: (execution.finishedAt ?? Date.now()) - execution.startedAt,
+          started_at_utc: new Date(execution.startedAt).toISOString(),
+          finished_at_utc:
             execution.finishedAt === undefined
               ? null
               : new Date(execution.finishedAt).toISOString(),
@@ -145,15 +153,27 @@ export function formatBackgroundObservation(
   outputOptions: ReturnType<typeof parseExecOutputOptions>,
 ): string {
   const stream = outputOptions.stream ?? 'both';
-  const stdout = shapeBackgroundOutput(observation.stdout, outputOptions);
-  const stderr = shapeBackgroundOutput(observation.stderr, outputOptions);
+  const stdout = shapeBackgroundOutput(
+    observation.stdout,
+    outputOptions,
+    observation.stdoutStart,
+    observation.stdoutEnd,
+  );
+  const stderr = shapeBackgroundOutput(
+    observation.stderr,
+    outputOptions,
+    observation.stderrStart,
+    observation.stderrEnd,
+  );
+  const ranForMs = (observation.finishedAt ?? Date.now()) - observation.startedAt;
   const result: Record<string, unknown> = {
     execution_id: observation.id,
     status: observation.status,
     exit_code: observation.exitCode,
     waited_ms: waitedMs,
-    next_stdout_cursor: observation.nextStdoutCursor,
-    next_stderr_cursor: observation.nextStderrCursor,
+    ran_for_ms: ranForMs,
+    next_stdout_cursor: stdout.nextCursor,
+    next_stderr_cursor: stderr.nextCursor,
   };
   if (stream !== 'stderr') {
     result['stdout'] = stdout.text;
@@ -167,22 +187,50 @@ export function formatBackgroundObservation(
   return JSON.stringify(result);
 }
 
+/**
+ * Shapes one stream for display AND says where the next read resumes.
+ *
+ * The cap is applied to the RAW text before ANSI is stripped, because the next
+ * cursor has to be expressed in the same units the buffer is indexed by —
+ * counting stripped characters would under-advance it and re-serve the same
+ * bytes forever.
+ *
+ * `tail_lines` is the one case that consumes everything: the caller asked for
+ * the end of the stream, so resuming mid-buffer would hand back output it has
+ * already been shown.
+ */
 function shapeBackgroundOutput(
   text: string,
   options: ReturnType<typeof parseExecOutputOptions>,
-): { text: string; truncated: boolean } {
-  const normalized = stripAnsi(text);
-  const lines = normalized.endsWith('\n')
-    ? normalized.slice(0, -1).split(/\r?\n/u)
-    : normalized.split(/\r?\n/u);
-  const selected =
-    options.headLines !== undefined
-      ? lines.slice(0, options.headLines)
-      : options.tailLines !== undefined
-        ? lines.slice(-options.tailLines)
-        : lines;
-  const shaped = selected.join('\n');
+  start: number,
+  end: number,
+): { text: string; truncated: boolean; nextCursor: number } {
   const limit = options.maxChars ?? MAX_OUTPUT_CHARS;
-  const output = options.tailLines !== undefined ? shaped.slice(-limit) : shaped.slice(0, limit);
-  return { text: output, truncated: shaped.length > limit || selected.length < lines.length };
+
+  if (options.tailLines !== undefined) {
+    const normalized = stripAnsi(text);
+    const lines = splitLines(normalized);
+    const selected = lines.slice(-options.tailLines);
+    const shaped = selected.join('\n');
+    return {
+      text: shaped.slice(-limit),
+      truncated: shaped.length > limit || selected.length < lines.length,
+      nextCursor: end,
+    };
+  }
+
+  const raw =
+    options.headLines !== undefined
+      ? splitLines(text).slice(0, options.headLines).join('\n')
+      : text;
+  const consumed = raw.slice(0, limit);
+  return {
+    text: stripAnsi(consumed),
+    truncated: consumed.length < text.length,
+    nextCursor: start + consumed.length,
+  };
+}
+
+function splitLines(text: string): string[] {
+  return text.endsWith('\n') ? text.slice(0, -1).split(/\r?\n/u) : text.split(/\r?\n/u);
 }

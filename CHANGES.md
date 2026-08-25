@@ -1,5 +1,24 @@
 # Forge — Recent Changes
 
+## 0.13.5 - background execution reporting fixes
+
+- **Truncated output can be read to the end.** `monitor_execution` capped the
+  output it returned but reported the next cursor as the end of the whole
+  stream, so everything the cap held back was unreachable: `stdout_truncated`
+  told the agent it had missed output and then gave it no way to fetch it. The
+  next cursor is now computed from what the call actually returned, so repeated
+  calls page through the retained buffer. `tail_lines` still consumes to the
+  end, since a caller asking for the tail does not want to resume mid-buffer.
+- **`waited_ms` is measured, not requested.** It echoed the `wait_ms` budget
+  even when the process finished — or the turn was cancelled — a fraction of
+  the way in, which made it impossible to tell a prompt return from a full
+  wait, including when checking whether cancellation worked at all.
+- **Execution timestamps say they are UTC, and elapsed time is reported
+  directly.** `started_at` / `finished_at` are now `started_at_utc` /
+  `finished_at_utc`, and both `list_executions` and `monitor_execution` carry
+  `ran_for_ms`, so "how long has this been running" no longer requires
+  subtracting two ISO strings against a clock three hours off.
+
 ## 0.13.4 — video frames, background execution follow-ups
 
 - **`view_video` extracts frames for vision models.** A new tool pulls frames
