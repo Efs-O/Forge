@@ -17,6 +17,10 @@ export type RestoreConvResult =
   | { notFound: true }
   | { ok: true; sidebar: SidebarRuntime; newActiveId: string; activeModelOverride?: string };
 
+export type DeleteConvResult =
+  | { notFound: true }
+  | { ok: true; sidebar: SidebarRuntime; newActiveId: string };
+
 /**
  * Open a new empty conversation tab. Returns atCap if limit reached.
  *
@@ -94,6 +98,45 @@ export function opCloseConversation(
     updated.activeConversationId = fallback.id;
   }
   return { sidebar: updated, newActiveId: updated.activeConversationId };
+}
+
+/** Permanently remove an open or archived conversation. */
+export function opDeleteConversation(sidebar: SidebarRuntime, id: string): DeleteConvResult {
+  const conversationIndex = sidebar.conversations.findIndex((c) => c.id === id);
+  const historyIndex = sidebar.history.findIndex((c) => c.id === id);
+  if (conversationIndex < 0 && historyIndex < 0) return { notFound: true };
+
+  const updated: SidebarRuntime = {
+    ...sidebar,
+    conversations: [...sidebar.conversations],
+    history: [...sidebar.history],
+  };
+  if (historyIndex >= 0) updated.history.splice(historyIndex, 1);
+
+  if (conversationIndex < 0) {
+    return { ok: true, sidebar: updated, newActiveId: updated.activeConversationId };
+  }
+
+  if (updated.conversations.length === 1) {
+    const now = Date.now();
+    updated.conversations[0] = {
+      id: newConversationId(),
+      title: 'Chat',
+      createdAt: now,
+      updatedAt: now,
+      messages: [],
+    };
+    updated.activeConversationId = updated.conversations[0].id;
+    return { ok: true, sidebar: updated, newActiveId: updated.activeConversationId };
+  }
+
+  updated.conversations.splice(conversationIndex, 1);
+  if (updated.activeConversationId === id) {
+    const fallback =
+      updated.conversations[Math.min(conversationIndex, updated.conversations.length - 1)]!;
+    updated.activeConversationId = fallback.id;
+  }
+  return { ok: true, sidebar: updated, newActiveId: updated.activeConversationId };
 }
 
 /** Restore a conversation from history (or re-activate if already open). */

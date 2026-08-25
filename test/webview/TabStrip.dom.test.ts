@@ -36,9 +36,12 @@ describe('TabStrip', () => {
           tabs,
           activeId: 'one',
           streamingIds: new Set<string>(),
+          historyCount: 0,
+          historyExpanded: false,
           onSwitch: () => {},
           onNew: () => {},
           onClose: () => {},
+          onToggleHistory: () => {},
         }),
       );
     });

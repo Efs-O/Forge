@@ -18,6 +18,7 @@ import { isLocalModel } from '../backend/ModelHeuristics';
 import {
   opClearMessages,
   opCloseConversation,
+  opDeleteConversation,
   opNewConversation,
   opSetActiveConversationModel,
   opRestoreConversation,
@@ -145,6 +146,38 @@ export class ConversationTabs {
     // Closing a tab hands focus to another one, which is a change of active
     // conversation like any other: adopt its pinned model instead of leaving
     // the closed tab's selection in place.
+    const nextActive = this.deps
+      .getSidebar()
+      .conversations.find((c) => c.id === result.newActiveId);
+    if (nextActive?.active_model) this.deps.setActiveModel(nextActive.active_model);
+    this.deps.refreshUi();
+    if (modelName) this.offerUnload(modelName);
+  }
+
+  async deleteConversation(id: string): Promise<void> {
+    const sidebar = this.deps.getSidebar();
+    const conversation = sidebar.conversations.find((c) => c.id === id);
+    const archived = sidebar.history.find((c) => c.id === id);
+    const target = conversation ?? archived;
+    if (!target) return;
+
+    const choice = await vscode.window.showWarningMessage(
+      `Permanently delete "${target.title}"? This conversation cannot be recovered.`,
+      { modal: true },
+      'Delete',
+    );
+    if (choice !== 'Delete') return;
+
+    const modelName = conversation?.active_model;
+    if (conversation) {
+      await this.deps.agentLoop.stopStreamingIfNeeded(id);
+      await this.deps.agentLoop.disposeConversation(id);
+      await this.deps.checkpoints.disposeConversation(id);
+    }
+    const result = opDeleteConversation(this.deps.getSidebar(), id);
+    if (!('ok' in result)) return;
+    this.deps.setSidebar(result.sidebar);
+    this.deps.failureTracker.reset();
     const nextActive = this.deps
       .getSidebar()
       .conversations.find((c) => c.id === result.newActiveId);

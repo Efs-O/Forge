@@ -1,5 +1,21 @@
 # Forge — Recent Changes
 
+## 0.13.6 - say what happened to missing output
+
+- **"Capped, call again" and "gone for good" are no longer the same flag.**
+  `stdout_truncated` meant both, so an agent could not tell whether more output
+  was waiting or whether it had permanently missed some. Given a 4.7 MB job it
+  guessed wrong, decided the cursor API was broken, and fell back to writing a
+  file. `monitor_execution` now reports `stdout_more_available` (keep calling)
+  separately from `stdout_dropped_chars` (that much is unrecoverable), plus
+  `stdout_oldest_available_cursor` so the retained window is visible rather
+  than something to infer from cursor arithmetic.
+- **A dropped-output note names the way out.** When the retention cap has eaten
+  part of a stream, the result carries a note saying how much went, where
+  reading resumed, and that redirecting to a file is the way to capture a noisy
+  job from the start — instead of leaving the agent to work that out and lose
+  confidence in the tool on the way.
+
 ## 0.13.5 - background execution reporting fixes
 
 - **Truncated output can be read to the end.** `monitor_execution` capped the

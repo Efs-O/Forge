@@ -314,6 +314,10 @@ export interface RestoreConversationMsg {
   type: 'restoreConversation';
   id: string;
 }
+export interface DeleteConversationMsg {
+  type: 'deleteConversation';
+  id: string;
+}
 
 // v0.2+ additions
 export interface ConfirmResponseMsg {
@@ -389,6 +393,7 @@ export type WebviewToHost =
   | SwitchConversationMsg
   | CloseConversationMsg
   | RestoreConversationMsg
+  | DeleteConversationMsg
   | ConfirmResponseMsg
   | OpenFileMsg
   | RunSlashCommandMsg

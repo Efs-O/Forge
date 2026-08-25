@@ -2,6 +2,7 @@ import type { RegisteredTool } from './ToolRegistry';
 import { MAX_OUTPUT_CHARS, parseExecOutputOptions, stripAnsi } from './execHelpers';
 import {
   backgroundExecutionManager,
+  MAX_BACKGROUND_OUTPUT_CHARS,
   type BackgroundExecutionObservation,
 } from './BackgroundExecutionManager';
 
@@ -12,7 +13,7 @@ export function makeMonitorExecutionTool(): RegisteredTool {
       function: {
         name: 'monitor_execution',
         description:
-          'Wait for a background exec_command to finish or until wait_ms elapses, then return new output and status. Call again with the returned next_stdout_cursor / next_stderr_cursor to read the next chunk — output is capped per call, so a noisy job needs several calls to read in full. waited_ms is the time actually waited and ran_for_ms is the process runtime.',
+          'Wait for a background exec_command to finish or until wait_ms elapses, then return new output and status. Output is capped per call: keep calling with the returned next_stdout_cursor / next_stderr_cursor while stdout_more_available is true. Only a bounded tail of a noisy job is retained — if stdout_dropped_chars appears, that much output is gone for good and stdout_note says what to do. waited_ms is the time actually waited; ran_for_ms is the process runtime.',
         parameters: {
           type: 'object',
           properties: {
@@ -177,14 +178,42 @@ export function formatBackgroundObservation(
   };
   if (stream !== 'stderr') {
     result['stdout'] = stdout.text;
-    result['stdout_truncated'] = stdout.truncated || observation.stdoutTruncated;
+    describeStream(result, 'stdout', stdout.nextCursor, observation.stdoutEnd, observation);
   }
   if (stream !== 'stdout') {
     result['stderr'] = stderr.text;
-    result['stderr_truncated'] = stderr.truncated || observation.stderrTruncated;
+    describeStream(result, 'stderr', stderr.nextCursor, observation.stderrEnd, observation);
   }
   if (observation.error !== undefined) result['error'] = observation.error;
   return JSON.stringify(result);
+}
+
+/**
+ * One boolean used to mean two unrelated things: "this call was capped, ask
+ * again" and "these characters are gone for good". An agent reading
+ * `truncated: true` could not tell which, and the one that hit it in practice
+ * concluded the cursor API was broken and stopped using it. Report them
+ * separately, and when output really was lost, say how much and what to do.
+ */
+function describeStream(
+  result: Record<string, unknown>,
+  name: 'stdout' | 'stderr',
+  nextCursor: number,
+  end: number,
+  observation: BackgroundExecutionObservation,
+): void {
+  const oldest = name === 'stdout' ? observation.stdoutOldest : observation.stderrOldest;
+  const dropped = name === 'stdout' ? observation.stdoutDropped : observation.stderrDropped;
+  result[`${name}_more_available`] = nextCursor < end;
+  result[`${name}_oldest_available_cursor`] = oldest;
+  if (dropped > 0) {
+    result[`${name}_dropped_chars`] = dropped;
+    result[`${name}_note`] =
+      `${String(dropped)} characters before your cursor were discarded by the ` +
+      `${String(MAX_BACKGROUND_OUTPUT_CHARS)}-character retention cap and cannot be recovered; ` +
+      `reading resumed at ${String(oldest)}. Redirect the command's output to a file if you need ` +
+      `it from the beginning.`;
+  }
 }
 
 /**

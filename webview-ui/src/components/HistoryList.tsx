@@ -1,9 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import type { SessionHistoryMeta } from '../../../src/sidebar/messageBridge';
 
 interface Props {
   items: SessionHistoryMeta[];
+  expanded: boolean;
   onRestore: (id: string) => void;
+  onDelete: (id: string) => void;
 }
 
 function relativeTime(ts: number): string {
@@ -27,58 +29,29 @@ function absoluteTime(ts: number): string {
   });
 }
 
-const ChevronDown = (): React.ReactElement => (
-  <svg width="10" height="6" viewBox="0 0 10 6" fill="currentColor" aria-hidden="true">
-    <path d="M0 0l5 6 5-6z" />
+const TrashIcon = (): React.ReactElement => (
+  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+    <path
+      d="M2.5 3.5h7M4.5 3.5V2h3v1.5m-4 1.5v4.5h5V5M5 6v2.5m2-2.5v2.5"
+      stroke="currentColor"
+      strokeWidth="1.1"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
   </svg>
 );
 
-const ChevronRight = (): React.ReactElement => (
-  <svg width="6" height="10" viewBox="0 0 6 10" fill="currentColor" aria-hidden="true">
-    <path d="M0 0l6 5-6 5z" />
-  </svg>
-);
-
-export function HistoryList({ items, onRestore }: Props): React.ReactElement {
-  const [expanded, setExpanded] = useState(false);
-
-  useEffect(() => {
-    if (items.length === 0) setExpanded(true);
-  }, [items.length]);
-
-  const showBody = expanded || items.length === 0;
-
+export function HistoryList({ items, expanded, onRestore, onDelete }: Props): React.ReactElement {
   return (
-    <section id="history-panel" aria-label="Chat history">
-      <button
-        id="history-toggle"
-        type="button"
-        aria-expanded={showBody}
-        aria-controls="history-list-wrap"
-        onClick={() => {
-          if (items.length > 0) setExpanded((v) => !v);
-        }}
-      >
-        <span id="history-heading-row">
-          <span id="history-heading">History</span>
-          <span id="history-toggle-meta">
-            {items.length > 0 && <span id="history-count">{items.length}</span>}
-            <span id="history-chevron" aria-hidden="true">
-              {showBody ? <ChevronDown /> : <ChevronRight />}
-            </span>
-          </span>
-        </span>
-      </button>
-
-      {showBody &&
-        (items.length === 0 ? (
-          <p id="history-empty">Closed chats appear here.</p>
-        ) : (
-          <div id="history-list-wrap">
-            <div id="history-list">
-              {items.map((item) => (
+    <section id="history-panel" aria-label="Chat history" hidden={!expanded}>
+      {items.length === 0 ? (
+        <p id="history-empty">Closed chats appear here.</p>
+      ) : (
+        <div id="history-list-wrap">
+          <div id="history-list">
+            {items.map((item) => (
+              <div key={item.id} className="history-item-row">
                 <button
-                  key={item.id}
                   type="button"
                   className="history-item"
                   onClick={() => onRestore(item.id)}
@@ -89,10 +62,20 @@ export function HistoryList({ items, onRestore }: Props): React.ReactElement {
                     {item.messageCount ?? 0} msg · {relativeTime(item.updatedAt)}
                   </span>
                 </button>
-              ))}
-            </div>
+                <button
+                  type="button"
+                  className="history-item-delete"
+                  aria-label={`Delete ${item.title}`}
+                  title="Delete permanently"
+                  onClick={() => onDelete(item.id)}
+                >
+                  <TrashIcon />
+                </button>
+              </div>
+            ))}
           </div>
-        ))}
+        </div>
+      )}
     </section>
   );
 }

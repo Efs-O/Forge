@@ -99,6 +99,38 @@ describe('exec_command safety policy', () => {
     expect(calls).toBe(51);
   });
 
+  it('distinguishes output dropped by the cap from output not yet read', async () => {
+    const start = await makeExecCommandTool().handler({
+      command: process.execPath,
+      args: ['-e', "process.stdout.write('y'.repeat(260000))"],
+      cwd: process.cwd(),
+      background: true,
+    });
+    const started = JSON.parse(start as string) as { execution_id: string };
+
+    const raw = (await makeMonitorExecutionTool().handler({
+      execution_id: started.execution_id,
+      wait_ms: 10_000,
+      stdout_cursor: 0,
+      max_output_chars: 1_000,
+    })) as string;
+    const obs = JSON.parse(raw) as {
+      status: string;
+      stdout_dropped_chars?: number;
+      stdout_note?: string;
+      stdout_oldest_available_cursor: number;
+      stdout_more_available: boolean;
+      next_stdout_cursor: number;
+    };
+    expect(obs.status).toBe('completed');
+    // 260k produced, 200k retained: 60k is gone, and the rest is still readable.
+    expect(obs.stdout_dropped_chars).toBe(60_000);
+    expect(obs.stdout_oldest_available_cursor).toBe(60_000);
+    expect(obs.next_stdout_cursor).toBe(61_000);
+    expect(obs.stdout_more_available).toBe(true);
+    expect(obs.stdout_note).toContain('cannot be recovered');
+  });
+
   it('reports the time actually waited, not the requested budget', async () => {
     const start = await makeExecCommandTool().handler({
       command: process.execPath,

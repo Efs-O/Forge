@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   opClearMessages,
+  opDeleteConversation,
   opNewConversation,
   opSetActiveConversationModel,
 } from '../../src/sidebar/ConversationOps';
@@ -84,5 +85,45 @@ describe('opClearMessages', () => {
 
     expect(conv.messages).toEqual([]);
     expect(conv.active_model).toBe('claude');
+  });
+});
+
+describe('opDeleteConversation', () => {
+  it('removes an archived conversation without affecting open tabs', () => {
+    const state = sidebar();
+    state.history = [
+      {
+        id: 'old',
+        title: 'Old chat',
+        createdAt: 1,
+        updatedAt: 2,
+        messages: [{ role: 'user', content: 'old' }],
+      },
+    ];
+
+    const result = opDeleteConversation(state, 'old');
+
+    expect(result).toMatchObject({ ok: true });
+    if (!('ok' in result)) return;
+    expect(result.sidebar.history).toEqual([]);
+    expect(result.sidebar.conversations.map((conversation) => conversation.id)).toEqual([
+      'active',
+      'other',
+    ]);
+  });
+
+  it('creates a fresh empty chat when the last open conversation is deleted', () => {
+    const state = sidebar();
+    state.conversations = [state.conversations[0]!];
+
+    const result = opDeleteConversation(state, 'active');
+
+    expect(result).toMatchObject({ ok: true });
+    if (!('ok' in result)) return;
+    expect(result.sidebar.conversations).toHaveLength(1);
+    expect(result.sidebar.conversations[0]?.title).toBe('Chat');
+    expect(result.sidebar.conversations[0]?.messages).toEqual([]);
+    expect(result.sidebar.conversations[0]?.id).not.toBe('active');
+    expect(result.sidebar.activeConversationId).toBe(result.sidebar.conversations[0]?.id);
   });
 });

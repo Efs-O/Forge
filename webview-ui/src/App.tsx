@@ -47,6 +47,7 @@ export function App(): React.ReactElement {
   const [tokenUsed, setTokenUsed] = useState(0);
   const [tokenMax, setTokenMax] = useState(0);
   const [prefillText, setPrefillText] = useState<string | null>(null);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
   // Queued prompts belong in state so the user can see and cancel them before
   // Forge submits them to the extension host.
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
@@ -253,6 +254,13 @@ export function App(): React.ReactElement {
   const handleRestoreConversation = useCallback((id: string) => {
     vscode.postMessage({ type: 'restoreConversation', id });
   }, []);
+  const handleDeleteConversation = useCallback((id: string) => {
+    vscode.postMessage({ type: 'deleteConversation', id });
+  }, []);
+
+  useEffect(() => {
+    if (state.history.length === 0) setHistoryExpanded(false);
+  }, [state.history.length]);
 
   const handleConfirmApprove = useCallback(() => {
     if (!confirmRequest) return;
@@ -329,11 +337,19 @@ export function App(): React.ReactElement {
               tabs={state.tabs}
               activeId={state.activeConversationId}
               streamingIds={state.streamingIds}
+              historyCount={state.history.length}
+              historyExpanded={historyExpanded}
               onSwitch={handleSwitchTab}
               onNew={handleNewConversation}
               onClose={handleCloseTab}
+              onToggleHistory={() => setHistoryExpanded((expanded) => !expanded)}
             />
-            <HistoryList items={state.history} onRestore={handleRestoreConversation} />
+            <HistoryList
+              items={state.history}
+              expanded={historyExpanded}
+              onRestore={handleRestoreConversation}
+              onDelete={handleDeleteConversation}
+            />
           </>
         )}
       </aside>

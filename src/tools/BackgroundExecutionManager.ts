@@ -73,8 +73,12 @@ export interface BackgroundExecutionObservation {
   /** Absolute position one past the last character produced so far. */
   stdoutEnd: number;
   stderrEnd: number;
-  stdoutTruncated: boolean;
-  stderrTruncated: boolean;
+  /** Oldest position still held; anything before it was dropped by the cap. */
+  stdoutOldest: number;
+  stderrOldest: number;
+  /** Characters between the caller's cursor and the window — lost for good. */
+  stdoutDropped: number;
+  stderrDropped: number;
 }
 
 export interface BackgroundExecutionStartOptions {
@@ -301,8 +305,10 @@ export class BackgroundExecutionManager {
       stderrStart: stderr.start,
       stdoutEnd: execution.stdoutBase + execution.stdout.length,
       stderrEnd: execution.stderrBase + execution.stderr.length,
-      stdoutTruncated: stdout.truncated,
-      stderrTruncated: stderr.truncated,
+      stdoutOldest: execution.stdoutBase,
+      stderrOldest: execution.stderrBase,
+      stdoutDropped: stdout.dropped,
+      stderrDropped: stderr.dropped,
     };
   }
 
@@ -345,13 +351,13 @@ function readOutput(
   output: string,
   base: number,
   cursor: number,
-): { text: string; truncated: boolean; start: number } {
+): { text: string; start: number; dropped: number } {
   const safeCursor = Number.isInteger(cursor) && cursor >= 0 ? cursor : 0;
-  const truncated = safeCursor < base;
   // A cursor behind the retained window resumes at the window, not at the
-  // cursor — those characters are gone, and `truncated` says so.
+  // cursor — the characters in between are gone for good, and `dropped` counts
+  // exactly how many the caller lost.
   const start = Math.max(safeCursor, base);
-  return { text: output.slice(start - base), truncated, start };
+  return { text: output.slice(start - base), start, dropped: Math.max(0, base - safeCursor) };
 }
 
 export const backgroundExecutionManager = new BackgroundExecutionManager();

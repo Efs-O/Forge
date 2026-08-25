@@ -3,7 +3,7 @@
 #chats-panel {
   flex-shrink: 0;
   border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #333);
-  padding: 4px 8px 2px;
+  padding: 0 8px 4px;
   background: var(--vscode-sideBar-background);
 }
 
@@ -13,18 +13,106 @@
   padding: 4px 0;
 }
 
-/* ── Tab strip ───────────────────────────────────────────────────────────── */
+/* ── Toolbar and horizontal tab strip ───────────────────────────────────── */
 
 #tab-strip-wrap {
   flex-shrink: 0;
 }
 
+#chats-toolbar {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #333);
+}
+
+#chats-heading {
+  color: var(--vscode-sideBarTitle-foreground, #bbb);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+#chats-toolbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+#history-toolbar-btn,
+#tab-new-btn,
+.tab-nav-btn {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 1px solid transparent;
+  border-radius: var(--forge-radius-sm);
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+#history-toolbar-btn:hover:not(:disabled),
+#tab-new-btn:hover:not(:disabled),
+.tab-nav-btn:hover:not(:disabled) {
+  background: var(--vscode-toolbar-hoverBackground, rgba(90,90,90,0.2));
+  color: var(--vscode-foreground);
+  border-color: var(--forge-accent);
+}
+
+#history-toolbar-btn[aria-expanded='true'] {
+  color: var(--forge-accent);
+  border-color: var(--forge-accent);
+}
+
+#history-toolbar-count {
+  min-width: 13px;
+  height: 13px;
+  margin-left: -5px;
+  margin-top: -13px;
+  padding: 0 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: var(--vscode-badge-background, #4d4d4d);
+  color: var(--vscode-badge-foreground, #fff);
+  font-size: 9px;
+  line-height: 1;
+}
+
+#tab-strip-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  padding-top: 4px;
+}
+
+.tab-nav-btn {
+  width: 20px;
+  height: 24px;
+}
+
+.tab-nav-btn:disabled {
+  opacity: 0.28;
+  cursor: default;
+}
+
 #tab-strip-scroll {
   display: flex;
+  flex: 1;
   flex-wrap: nowrap;
   gap: 4px;
+  min-width: 0;
   overflow-x: auto;
-  padding: 2px 0 4px;
+  padding: 0 0 2px;
   align-items: center;
   scrollbar-width: none;
 }
@@ -115,108 +203,48 @@
   background: var(--vscode-toolbar-hoverBackground, rgba(90,90,90,0.28));
 }
 
-#tab-new-btn {
-  flex-shrink: 0;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
-  font-family: inherit;
-  cursor: pointer;
-  border-radius: var(--forge-radius-sm);
-  border: 1px solid var(--forge-border);
-  background: transparent;
-  color: var(--vscode-descriptionForeground);
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
-}
-
-#tab-new-btn:hover:not(:disabled) {
-  background: var(--vscode-toolbar-hoverBackground, rgba(90,90,90,0.2));
-  color: var(--vscode-foreground);
-  border-color: var(--forge-accent);
-}
-
-#tab-new-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-/* ── Background-streaming tab indicator ──────────────────────────────────── */
-
 .tab-chip-streaming .tab-chip-label {
   color: var(--forge-accent, #0090ff);
 }
 
-.tab-streaming-dot {
+.tab-streaming-spinner {
   display: inline-block;
-  width: 5px;
-  height: 5px;
+  width: 11px;
+  height: 11px;
+  border: 2px solid color-mix(in srgb, var(--forge-accent, #0090ff) 30%, transparent);
+  border-top-color: var(--forge-accent, #0090ff);
   border-radius: 50%;
-  background: var(--forge-accent, #0090ff);
   flex-shrink: 0;
   margin-right: 4px;
-  animation: forge-cursor-blink 0.9s ease-in-out infinite;
+  animation: forge-tab-spin 0.9s linear infinite;
+}
+
+@keyframes forge-tab-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab-streaming-spinner { animation: none; }
+}
+
+#tab-new-btn {
+  border-color: var(--forge-border);
 }
 
 /* ── History panel ───────────────────────────────────────────────────────── */
 
 #history-panel {
-  margin-top: 6px;
+  margin-top: 4px;
   border-top: 1px solid var(--vscode-sideBarSectionHeader-border, #333);
-  padding-top: 6px;
+  padding-top: 4px;
 }
 
-#history-toggle {
-  width: 100%;
-  padding: 2px 4px;
-  background: transparent;
-  border: none;
-  border-radius: var(--forge-radius-sm);
-  align-self: auto;
-  transition: background 0.1s ease;
-}
-
-#history-toggle:hover {
-  background: var(--vscode-toolbar-hoverBackground, rgba(90,90,90,0.12));
-}
-
-#history-heading-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-#history-toggle-meta {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-#history-heading {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--vscode-sideBarTitle-foreground, #bbb);
-}
-
-#history-chevron {
-  display: inline-flex;
-  align-items: center;
-  color: var(--vscode-descriptionForeground);
-}
-
-#history-count,
 #history-empty {
+  margin: 6px 0;
   font-size: 10px;
   color: var(--vscode-descriptionForeground);
 }
 
-#history-empty,
 #history-list-wrap {
   margin-top: 6px;
 }
@@ -229,8 +257,15 @@
   overflow-y: auto;
 }
 
+.history-item-row {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+
 .history-item {
   width: 100%;
+  min-width: 0;
   padding: 5px 8px 5px 10px;
   text-align: left;
   display: flex;
@@ -244,9 +279,36 @@
   transition: background 0.1s ease, border-color 0.1s ease;
 }
 
+.history-item-row .history-item {
+  flex: 1;
+}
+
 .history-item:hover:not(:disabled) {
   background: var(--vscode-list-hoverBackground, #2a2d2e);
   border-left-color: var(--forge-accent);
+}
+
+.history-item-delete {
+  width: 26px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: var(--forge-radius-sm);
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s ease, background 0.1s ease, color 0.1s ease;
+}
+
+.history-item-row:hover .history-item-delete,
+.history-item-row:focus-within .history-item-delete {
+  opacity: 0.75;
+}
+
+.history-item-delete:hover {
+  opacity: 1;
+  color: var(--vscode-errorForeground, #f48771);
+  background: var(--vscode-toolbar-hoverBackground, rgba(90,90,90,0.2));
 }
 
 .history-item-title {
