@@ -78,24 +78,28 @@
   min-width: 0;
 }
 
+/* Hidden with `visibility`, and the animation applied ONLY while streaming.
+   Gating on `opacity` does not work here: a running animation outranks normal
+   declarations in the cascade, so `forge-cursor-blink` kept overriding the idle
+   `opacity: 0` and the dot blinked forever with nothing running. */
 .streaming-status-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: var(--forge-accent, #0090ff);
   flex-shrink: 0;
-  opacity: 0;
-  animation: forge-cursor-blink 0.9s ease-in-out infinite;
+  visibility: hidden;
 }
 
 #streaming-status.is-streaming .streaming-status-dot {
-  opacity: 1;
+  visibility: visible;
+  animation: forge-cursor-blink 0.9s ease-in-out infinite;
 }
 
 /* The phrase rotation is not motion, so it keeps running here — it is the only
    remaining proof the turn is alive. Only the blink stops. */
 @media (prefers-reduced-motion: reduce) {
-  .streaming-status-dot {
+  #streaming-status.is-streaming .streaming-status-dot {
     animation: none;
   }
 }

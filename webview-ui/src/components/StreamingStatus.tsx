@@ -1,8 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { nextPhrase, phrasePool } from '../statusPhrases';
 
-/** How long each phrase holds before rotating. */
-const ROTATE_MS = 3500;
+/**
+ * How long each phrase holds before rotating. Long enough to read and forget
+ * about — at 3.5s the line drew the eye away from the text it sits under, which
+ * defeats the point of an ambient indicator.
+ */
+const ROTATE_MS = 6000;
 
 interface Props {
   streaming: boolean;

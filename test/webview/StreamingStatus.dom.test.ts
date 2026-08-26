@@ -41,6 +41,25 @@ describe('StreamingStatus', () => {
     expect(text()).toBe('');
   });
 
+  it('drops is-streaming when idle, which is what gates the blinking dot', () => {
+    // Regression: the dot was hidden with `opacity: 0` while a keyframe
+    // animation drove the same property. Animations outrank normal
+    // declarations, so it blinked forever with nothing running. The class is
+    // the contract the stylesheet hangs the animation on.
+    render(false);
+    expect(container.querySelector('#streaming-status')?.className).not.toContain('is-streaming');
+
+    render(true);
+    expect(container.querySelector('#streaming-status')?.className).toContain('is-streaming');
+  });
+
+  it('holds a phrase for the full rotation interval', () => {
+    render(true, true);
+    const first = text();
+    act(() => void vi.advanceTimersByTime(5000));
+    expect(text()).toBe(first);
+  });
+
   it('shows a local phrase while streaming a local model', () => {
     render(true, true);
     expect(LOCAL_PHRASES as readonly string[]).toContain(text());
@@ -58,7 +77,7 @@ describe('StreamingStatus', () => {
     render(true, true, true);
     const seen = new Set<string>([text()]);
     for (let i = 0; i < 80; i++) {
-      act(() => void vi.advanceTimersByTime(3500));
+      act(() => void vi.advanceTimersByTime(6000));
       seen.add(text());
     }
     const clanker = [...seen].filter((p) => (CLANKER_PHRASES as readonly string[]).includes(p));
@@ -68,7 +87,7 @@ describe('StreamingStatus', () => {
   it('rotates to a different phrase on each tick — the liveness signal', () => {
     render(true, true);
     const first = text();
-    act(() => void vi.advanceTimersByTime(3500));
+    act(() => void vi.advanceTimersByTime(6000));
     expect(text()).not.toBe(first);
   });
 

@@ -1,5 +1,16 @@
 # Forge — Recent Changes
 
+## 0.13.10 - stop the idle dot blinking, slow the phrase rotation
+
+- **The blue dot blinked forever, even with nothing running.** It was hidden
+  with `opacity: 0` while a keyframe animation drove that same property, and a
+  running animation outranks normal declarations in the cascade — so the idle
+  rule never applied. The dot is now hidden with `visibility`, and the
+  animation is attached only while a turn is streaming.
+- **Phrases rotate every 6s instead of 3.5s.** At 3.5s the line pulled the eye
+  away from the text it sits under, which is the opposite of what an ambient
+  indicator is for.
+
 ## 0.13.9 - one streaming line, and it has opinions
 
 - **The status line rotates through a pool of phrases.** With no spinner glyph
