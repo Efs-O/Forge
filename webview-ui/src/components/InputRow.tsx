@@ -3,6 +3,9 @@ import type { SlashCommand } from '../slashCommands';
 import type { AttachmentData, ModelEntry } from '../../../src/sidebar/messageBridge';
 import { ModelSelector } from './ModelSelector';
 import { webviewDiagnostics } from '../WebviewDiagnostics';
+import { ATTACHMENT_ACCEPT } from '../../../src/sidebar/attachmentLimits';
+import { AttachmentTray } from './AttachmentTray';
+import { useAttachments } from './useAttachments';
 
 interface Props {
   onSend: (text: string, attachments: AttachmentData[]) => void;
@@ -18,6 +21,12 @@ interface Props {
   activeModel: string | null;
   onModelChange: (name: string | null) => void;
   modelPickerDisabled: boolean;
+  activeConversationId: string;
+}
+
+/** A drag of selected text or a VS Code editor tab must not arm the drop target. */
+function carriesFiles(e: React.DragEvent): boolean {
+  return Array.from(e.dataTransfer?.types ?? []).includes('Files');
 }
 
 const UNAVAILABLE_WHILE_STREAMING = 'Unavailable while the agent is generating.';
@@ -73,12 +82,18 @@ export function InputRow({
   activeModel,
   onModelChange,
   modelPickerDisabled,
+  activeConversationId,
 }: Props): React.ReactElement {
   const [text, setText] = useState('');
-  const [attachments, setAttachments] = useState<AttachmentData[]>([]);
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
+  const [dragging, setDragging] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // dragenter/dragleave fire for every child element the pointer crosses, so a
+  // boolean alone flickers the overlay off mid-drag. Depth counts them.
+  const dragDepth = useRef(0);
+  const files = useAttachments(activeConversationId);
+  const { attachments, addFiles, clear: clearAttachments } = files;
 
   const slashQuery = text.startsWith('/') ? text.slice(1).trim().toLowerCase() : '';
   const slashMatches = !text.startsWith('/')
@@ -122,36 +137,60 @@ export function InputRow({
     if (!trimmed && attachments.length === 0) return;
     onSend(trimmed, attachments);
     setText('');
-    setAttachments([]);
+    clearAttachments();
     textareaRef.current?.focus();
-  }, [text, attachments, streaming, onSend]);
+  }, [text, attachments, clearAttachments, streaming, onSend]);
 
-  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []);
-    if (!files.length) return;
-    files.forEach((file) => {
-      const reader = new FileReader();
-      const isImage = file.type.startsWith('image/');
-      reader.onload = () => {
-        const raw = reader.result as string;
-        setAttachments((prev) => [
-          ...prev,
-          {
-            name: file.name,
-            mediaType: file.type || 'application/octet-stream',
-            data: isImage ? raw.split(',')[1] : raw,
-          },
-        ]);
-      };
-      if (isImage) reader.readAsDataURL(file);
-      else reader.readAsText(file);
-    });
-    e.target.value = '';
+  const handleFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      addFiles(Array.from(e.target.files ?? []));
+      // Reset so re-picking the same file still fires a change event.
+      e.target.value = '';
+    },
+    [addFiles],
+  );
+
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      const pasted = Array.from(e.clipboardData?.files ?? []);
+      if (!pasted.length) return;
+      // Only swallow the event when files came with it — a paste carrying both
+      // text and files (some editors) still needs its text to land.
+      if (!e.clipboardData.getData('text')) e.preventDefault();
+      addFiles(pasted);
+    },
+    [addFiles],
+  );
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    if (!carriesFiles(e)) return;
+    dragDepth.current += 1;
+    setDragging(true);
   }, []);
 
-  const removeAttachment = useCallback((index: number) => {
-    setAttachments((prev) => prev.filter((_, i) => i !== index));
+  const handleDragLeave = useCallback(() => {
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDragging(false);
   }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    if (!carriesFiles(e)) return;
+    // Without both of these the webview navigates away to the dropped file.
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      const dropped = Array.from(e.dataTransfer?.files ?? []);
+      if (!dropped.length) return;
+      e.preventDefault();
+      dragDepth.current = 0;
+      setDragging(false);
+      addFiles(dropped);
+    },
+    [addFiles],
+  );
 
   const runSlashCommand = useCallback(
     (command: SlashCommand) => {
@@ -203,7 +242,20 @@ export function InputRow({
     : 'Ask anything… first send starts the backend';
 
   return (
-    <div id="input-row">
+    <div
+      id="input-row"
+      className={dragging ? 'dropping' : undefined}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {dragging && (
+        <div id="drop-overlay" aria-hidden="true">
+          <span>Drop files to attach</span>
+        </div>
+      )}
+
       {showSlashMenu && (
         <div id="slash-menu" role="listbox" aria-label="Slash commands">
           {slashMatches.map((cmd, index) => {
@@ -231,30 +283,14 @@ export function InputRow({
         </div>
       )}
 
-      {attachments.length > 0 && (
-        <div id="attachment-chips">
-          {attachments.map((a, i) => (
-            <span key={i} className="attachment-chip">
-              {a.mediaType.startsWith('image/') && (
-                <img
-                  className="attachment-thumb"
-                  src={`data:${a.mediaType};base64,${a.data}`}
-                  alt={a.name}
-                />
-              )}
-              <span className="attachment-name">{a.name}</span>
-              <button
-                type="button"
-                className="attachment-remove"
-                onClick={() => removeAttachment(i)}
-                title="Remove"
-              >
-                ×
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
+      <AttachmentTray
+        attachments={attachments}
+        totalBytes={files.totalBytes}
+        errors={files.errors}
+        onRemove={files.remove}
+        onClear={clearAttachments}
+        onDismissErrors={files.dismissErrors}
+      />
 
       <div id="model-row">
         <ModelSelector
@@ -269,8 +305,8 @@ export function InputRow({
         <button
           id="attach-btn"
           type="button"
-          title="Attach image or file"
-          aria-label="Attach file"
+          title="Attach files — or drop them here, or paste a screenshot. Images up to 10 MiB, text and code up to 2 MiB, 10 files / 25 MiB per message."
+          aria-label="Attach files"
           onClick={() => fileInputRef.current?.click()}
         >
           <PaperclipIcon />
@@ -283,13 +319,14 @@ export function InputRow({
           placeholder={placeholder}
           onChange={handleTextChange}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           rows={5}
         />
 
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*,.ts,.tsx,.js,.jsx,.py,.md,.txt,.json,.yaml,.yml,.toml,.css,.html,.sh,.rs,.go,.java,.c,.cpp,.h"
+          accept={ATTACHMENT_ACCEPT}
           multiple
           style={{ display: 'none' }}
           onChange={handleFileChange}

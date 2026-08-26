@@ -66,6 +66,8 @@ overlaps with an existing owner, extend the owner instead.
 | Tool call rows + expandable results              | `webview-ui/src/components/ToolRow.tsx`        |
 | Model picker dropdown (grouped, opens upward)    | `webview-ui/src/components/ModelSelector.tsx`  |
 | Chat history rows: restore, rename, delete       | `webview-ui/src/components/HistoryList.tsx`    |
+| Staged attachment state + file validation        | `webview-ui/src/components/useAttachments.ts`  |
+| Attachment tiles, size budget, reject notices    | `webview-ui/src/components/AttachmentTray.tsx` |
 | Message list ops + session-sync reconciliation   | `webview-ui/src/messageOps.ts`                 |
 | Webview state shape, selectors, action union     | `webview-ui/src/appState.ts`                   |
 | Render-time path/URL linkification               | `webview-ui/src/linkify.ts`                    |

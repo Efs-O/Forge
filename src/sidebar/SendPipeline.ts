@@ -17,6 +17,7 @@ import { SessionLogger } from './SessionLogger';
 import { resolveRequestModel } from '../config/ConfigResolver';
 import { getLogger } from '../util/logger';
 import type { UserPromptOptions } from './transcriptMutations';
+import { validateAttachments } from './attachmentValidation';
 
 const log = getLogger();
 
@@ -55,6 +56,11 @@ export class SendPipeline {
       // there is no tab to route it to. The active tab is the only place the
       // user can actually see it, and nothing is left streaming to clear.
       deps.post({ type: 'error', message: 'Forge: the queued conversation is no longer open.' });
+      return;
+    }
+    const attachmentError = validateAttachments(attachments);
+    if (attachmentError) {
+      deps.post({ type: 'error', message: attachmentError, conversationId: conv.id });
       return;
     }
     // Every refusal below MUST name the conversation it refers to. The webview

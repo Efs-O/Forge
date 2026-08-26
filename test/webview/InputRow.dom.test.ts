@@ -59,6 +59,7 @@ function renderInput(streaming: boolean, onRunSlashCommand = vi.fn()): typeof on
         activeModel: null,
         onModelChange: vi.fn(),
         modelPickerDisabled: false,
+        activeConversationId: 'test-conversation',
       }),
     );
   });

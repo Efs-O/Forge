@@ -389,6 +389,7 @@ export function App(): React.ReactElement {
         activeModel={state.activeModel}
         onModelChange={handleModelChange}
         modelPickerDisabled={uiBusy}
+        activeConversationId={state.activeConversationId}
       />
       {confirmRequest && (
         <ConfirmationDialog

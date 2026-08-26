@@ -9,52 +9,197 @@
   flex-shrink: 0;
 }
 
-#attachment-chips {
+#attachment-tray {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.attachment-tiles {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 5px;
 }
 
-.attachment-chip {
-  display: inline-flex;
+.attachment-tile {
+  position: relative;
+  display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  background: var(--vscode-badge-background, #4d4d4d);
-  color: var(--vscode-badge-foreground, #fff);
-  border-radius: var(--forge-radius-pill);
-  font-size: 11px;
-  max-width: 180px;
+  gap: 7px;
+  padding: 4px 8px 4px 4px;
+  max-width: 100%;
+  border: 1px solid var(--vscode-input-border, #555);
+  border-radius: var(--forge-radius-sm);
+  background: var(--vscode-editorWidget-background, #252526);
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease;
+}
+.attachment-tile:hover {
+  border-color: var(--forge-accent);
 }
 
-.attachment-thumb {
-  width: 18px;
-  height: 18px;
-  object-fit: cover;
-  border-radius: 3px;
+.attachment-preview {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
   flex-shrink: 0;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--vscode-badge-background, #4d4d4d);
+  color: var(--vscode-descriptionForeground);
+}
+.attachment-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.attachment-tile.is-image .attachment-preview {
+  background: transparent;
+}
+
+.attachment-ext {
+  position: absolute;
+  bottom: 1px;
+  font-size: 7px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  line-height: 1;
+  color: var(--vscode-badge-foreground, #fff);
+}
+
+.attachment-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding-right: 10px;
 }
 
 .attachment-name {
+  font-size: 11px;
+  line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.attachment-size {
+  font-size: 10px;
+  line-height: 1.2;
+  color: var(--vscode-descriptionForeground);
+}
+
 .attachment-remove {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: none;
   border: none;
-  border-radius: 0;
+  border-radius: 3px;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0;
+  transition:
+    opacity 0.12s ease,
+    background 0.12s ease,
+    color 0.12s ease;
+}
+.attachment-tile:hover .attachment-remove,
+.attachment-remove:focus-visible {
+  opacity: 1;
+}
+.attachment-remove:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.1));
+  color: var(--vscode-foreground);
+}
+
+.attachment-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+}
+.attachment-clear {
+  margin-left: auto;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--vscode-textLink-foreground, #3794ff);
+  cursor: pointer;
+  font-size: 10px;
+}
+.attachment-clear:hover {
+  text-decoration: underline;
+  background: none;
+}
+
+.attachment-errors {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 5px 7px;
+  border-radius: var(--forge-radius-sm);
+  border: 1px solid var(--vscode-inputValidation-errorBorder, #be1100);
+  background: var(--vscode-inputValidation-errorBackground, rgba(190, 17, 0, 0.15));
+  font-size: 11px;
+  line-height: 1.35;
+}
+.attachment-error-list {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.attachment-error-dismiss {
+  padding: 0 2px;
+  background: none;
+  border: none;
   color: inherit;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1;
-  padding: 0 2px;
   opacity: 0.7;
   flex-shrink: 0;
-  align-self: auto;
 }
-.attachment-remove:hover { opacity: 1; background: transparent; }
+.attachment-error-dismiss:hover {
+  opacity: 1;
+  background: none;
+}
+
+#input-row.dropping {
+  position: relative;
+}
+
+#drop-overlay {
+  position: absolute;
+  inset: 2px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  border: 1px dashed var(--forge-accent);
+  border-radius: var(--forge-radius-sm);
+  background: var(--vscode-editor-background, #1e1e1e);
+  opacity: 0.94;
+}
+#drop-overlay span {
+  font-size: 12px;
+  color: var(--forge-accent);
+}
 
 #model-row {
   display: flex;
@@ -89,7 +234,9 @@
   outline: none;
   border-color: var(--forge-accent);
 }
-#prompt:disabled { opacity: 0.5; }
+#prompt:disabled {
+  opacity: 0.5;
+}
 
 #input-btn-col {
   display: flex;
@@ -112,11 +259,14 @@
   cursor: pointer;
   border-radius: var(--forge-radius-sm);
   flex-shrink: 0;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
   align-self: auto;
 }
 #attach-btn:hover {
-  background: var(--vscode-toolbar-hoverBackground, rgba(255,255,255,0.07));
+  background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.07));
   color: var(--vscode-foreground);
   border-color: var(--forge-accent);
 }
@@ -139,8 +289,13 @@
   transition: background 0.12s ease;
   align-self: auto;
 }
-#btn-send:hover:not(:disabled) { background: var(--vscode-button-hoverBackground); }
-#btn-send:disabled { opacity: 0.4; cursor: default; }
+#btn-send:hover:not(:disabled) {
+  background: var(--vscode-button-hoverBackground);
+}
+#btn-send:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
 
 #btn-stop {
   display: inline-flex;
@@ -148,7 +303,11 @@
   justify-content: center;
   gap: 5px;
   padding: 6px 14px;
-  background: color-mix(in srgb, var(--vscode-inputValidation-errorBackground, #5a1d1d) 60%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--vscode-inputValidation-errorBackground, #5a1d1d) 60%,
+    transparent
+  );
   color: var(--vscode-errorForeground, #f48771);
   border: 1px solid var(--vscode-inputValidation-errorBorder, #be1100);
   border-radius: var(--forge-radius-sm);
@@ -212,7 +371,9 @@
   border-radius: 0;
 }
 
-.slash-item:last-child { border-bottom: none; }
+.slash-item:last-child {
+  border-bottom: none;
+}
 
 .slash-item:hover,
 .slash-item.selected {
