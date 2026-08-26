@@ -1,5 +1,10 @@
 # Forge — Recent Changes
 
+## 0.13.11 - slower phrase rotation
+
+- Streaming phrases rotate every 12s, up from 6s. The line sits under the text
+  you are reading, and anything quicker pulls the eye to it.
+
 ## 0.13.10 - stop the idle dot blinking, slow the phrase rotation
 
 - **The blue dot blinked forever, even with nothing running.** It was hidden

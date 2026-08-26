@@ -56,7 +56,7 @@ describe('StreamingStatus', () => {
   it('holds a phrase for the full rotation interval', () => {
     render(true, true);
     const first = text();
-    act(() => void vi.advanceTimersByTime(5000));
+    act(() => void vi.advanceTimersByTime(11_000));
     expect(text()).toBe(first);
   });
 
@@ -77,7 +77,7 @@ describe('StreamingStatus', () => {
     render(true, true, true);
     const seen = new Set<string>([text()]);
     for (let i = 0; i < 80; i++) {
-      act(() => void vi.advanceTimersByTime(6000));
+      act(() => void vi.advanceTimersByTime(12_000));
       seen.add(text());
     }
     const clanker = [...seen].filter((p) => (CLANKER_PHRASES as readonly string[]).includes(p));
@@ -87,7 +87,7 @@ describe('StreamingStatus', () => {
   it('rotates to a different phrase on each tick — the liveness signal', () => {
     render(true, true);
     const first = text();
-    act(() => void vi.advanceTimersByTime(6000));
+    act(() => void vi.advanceTimersByTime(12_000));
     expect(text()).not.toBe(first);
   });
 

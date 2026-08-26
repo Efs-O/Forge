@@ -2,11 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { nextPhrase, phrasePool } from '../statusPhrases';
 
 /**
- * How long each phrase holds before rotating. Long enough to read and forget
- * about — at 3.5s the line drew the eye away from the text it sits under, which
- * defeats the point of an ambient indicator.
+ * How long each phrase holds before rotating. Deliberately slow: the line sits
+ * under the text you are reading, and anything quicker pulls the eye away from
+ * it — the opposite of what an ambient indicator is for. Tried at 3.5s and 6s,
+ * both too busy.
  */
-const ROTATE_MS = 6000;
+const ROTATE_MS = 12_000;
 
 interface Props {
   streaming: boolean;
