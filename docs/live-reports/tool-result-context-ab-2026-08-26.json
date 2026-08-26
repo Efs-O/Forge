@@ -1,0 +1,29 @@
+{
+  "server": "http://127.0.0.1:8080",
+  "model": "qwen38-27b-mtp-ud-q3kxl-no-vision",
+  "slot_context_tokens": 62208,
+  "fixture": {
+    "raw_tool_result_chars": 556389,
+    "facts": [
+      "START_FACT: API migration is complete; preserve the rollback command.",
+      "END_FACT: the final failing test is ContextBudgetToolFilter.test.ts."
+    ]
+  },
+  "baseline": {
+    "status": 400,
+    "prompt_tokens": 176446,
+    "outcome": "rejected: exceeds available context size"
+  },
+  "candidate": {
+    "status": 200,
+    "prompt_tokens": 2477,
+    "completion_tokens": 1,
+    "estimated_input_tokens": 3558,
+    "input_budget_tokens": 58208,
+    "excerpted_tool_call_ids": ["large-result"],
+    "raw_transcript_preserved": true,
+    "start_fact_preserved": true,
+    "end_fact_preserved": true
+  },
+  "decision": "pass"
+}

@@ -24,6 +24,7 @@ import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
 import { perSlotContext, reportedContextTokens } from '../util/contextBudget';
 import { mergeGroupsIntoModel } from '../config/ConfigResolver';
 import { getLogger } from '../util/logger';
+import { isContextExhaustionReason } from '../agent/truncationRecovery';
 
 const log = getLogger();
 
@@ -62,6 +63,9 @@ export interface ContextBudgetDeps {
   autoCompact: (conv: ConversationRuntime) => Promise<void>;
   /** Runs a user-accepted `/compact` from the 85% warning. */
   manualCompact: () => void;
+  /** A preflight context failure can need compaction even when the last server
+   * usage frame was still below the normal threshold. */
+  incompleteTurnReason?: (convId: string) => string | undefined;
 }
 
 export class ContextBudgetPublisher {
@@ -188,6 +192,14 @@ export class ContextBudgetPublisher {
     // not-while-streaming guard is already satisfied. It is non-destructive —
     // the transcript is kept, only the model's window shrinks.
     const auto = config.auto_compact;
+    if (
+      auto?.enabled === true &&
+      isContextExhaustionReason(this.deps.incompleteTurnReason?.(conv.id))
+    ) {
+      log.info('[auto-compact] next request cannot fit — compacting before resume');
+      void this.deps.autoCompact(conv);
+      return;
+    }
     if (auto?.enabled === true && fraction >= (auto.at ?? DEFAULT_AUTO_COMPACT_AT)) {
       log.info(`[auto-compact] context at ${Math.round(fraction * 100)}% — compacting`);
       void this.deps.autoCompact(conv);

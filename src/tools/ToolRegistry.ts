@@ -1,4 +1,4 @@
-import type { ContentPart, ToolDefinition } from '../llm/types';
+import type { ChatMessage, ContentPart, ToolDefinition } from '../llm/types';
 
 export type ToolPermission =
   | 'read'
@@ -36,6 +36,9 @@ export interface ToolHandlerContext {
   /** Conversation the call belongs to. ask_local_agent keys warm CLI agent
    *  sessions on it so repeat delegations reuse one process. */
   conversationId?: string;
+  /** Full raw transcript for the current conversation. Read-only tools may use
+   * this to recover an earlier result without widening the model prompt. */
+  conversationMessages?: readonly ChatMessage[];
 }
 
 export interface ToolMutation {

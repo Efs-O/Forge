@@ -22,7 +22,9 @@ import { StreamedAssistantTurn } from './StreamedAssistantTurn';
 import {
   applyOutputCap,
   asTruncation,
+  CONTEXT_INPUT_EXHAUSTED_MESSAGE,
   CONTEXT_EXHAUSTED_MESSAGE,
+  isLlamaContextExhaustion,
   isNativeToolJsonParseError,
   MAX_ROUNDS_MESSAGE_PREFIX,
   MAX_TRUNCATION_RECOVERIES,
@@ -30,7 +32,9 @@ import {
 } from './truncationRecovery';
 
 export {
+  CONTEXT_INPUT_EXHAUSTED_MESSAGE,
   CONTEXT_EXHAUSTED_MESSAGE,
+  isContextExhaustionReason,
   isTurnCutOffError,
   ROUND_CAP_INCOMPLETE_PREFIX,
 } from './truncationRecovery';
@@ -133,6 +137,12 @@ export async function runToolCallingLoop(
       ? options.prepareMessages([...options.messages])
       : [...options.messages];
     const outputRoom = options.getOutputRoom?.(prepared);
+    // Do not send an input that leaves no answer/tool-call room at all. The
+    // model-only tool-result window normally prevents this; this guard covers
+    // transcripts that cannot be reduced further (for example, huge user text).
+    if (outputRoom !== undefined && outputRoom <= 0) {
+      throw new Error(CONTEXT_INPUT_EXHAUSTED_MESSAGE);
+    }
     // Only fail early once truncation has already happened this turn: with a
     // healthy turn a thin margin is still enough for a short reply, and
     // refusing outright would break those. After a cut-off call, a margin this
@@ -213,6 +223,10 @@ export async function runToolCallingLoop(
     try {
       streamed = await streamOnce(options, request, tokenHandler, reasoningHandler);
     } catch (err) {
+      // Estimates deliberately err on the safe side, but the server tokenizer
+      // remains authoritative. Convert its 400 into Forge's recoverable path
+      // instead of surfacing a raw provider failure.
+      if (isLlamaContextExhaustion(err)) throw new Error(CONTEXT_INPUT_EXHAUSTED_MESSAGE);
       // Truncation is checked first: it shares llama-server's parse-error
       // message with a genuinely malformed call, but stripping native tools
       // here would re-send the same oversized conversation and ask for the same

@@ -325,6 +325,7 @@ export class ToolDispatch {
           },
           ...(signal !== undefined ? { abortSignal: signal } : {}),
           ...(convId !== undefined ? { conversationId: convId } : {}),
+          conversationMessages: messages,
         });
 
         if (reg.mutation) {

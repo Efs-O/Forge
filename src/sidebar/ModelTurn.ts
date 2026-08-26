@@ -20,6 +20,7 @@ import type { ToolDispatch } from './ToolDispatch';
 import type { ToolFailureTracker } from '../tools/StripTools';
 import type { TurnLifecycle } from './TurnLifecycle';
 import { computeContextBudget, estimateToolTokens, perSlotContext } from '../util/contextBudget';
+import { prepareToolResultContext } from '../agent/toolResultContext';
 import { applyCompactionWindow } from './compactionWindow';
 import { injectSystemPrompt } from '../llm/SystemPromptInjector';
 import { resolveToolPermissions } from '../tools/PermissionResolver';
@@ -219,7 +220,15 @@ export async function runModelTurn(
           model.system_prompt,
           model.system_prompt_mode,
         );
-        return injected;
+        // Only the model-facing copy is reduced. `conv.messages` remains the
+        // full raw transcript for sidebar, persistence, and exact recovery via
+        // read_tool_result when an excerpt calls for more detail.
+        return prepareToolResultContext({
+          messages: injected,
+          toolTokens: estimateToolTokens(toolDefinitions),
+          model,
+          server: config.llama_server,
+        }).messages;
       },
       dispatchToolCalls: async (toolCalls, messages) => {
         for (const call of toolCalls) {

@@ -2,6 +2,7 @@ node_modules/
 dist/
 *.vsix
 coverage/
+tool-result-context-ab-results/
 .forge/
 *.log
 .DS_Store
@@ -65,3 +66,4 @@ REPO_SUMMARY.md
 SYSTEM_PROMPT_MODE_PLAN.md
 !docs/COMPACTION_PLAN.md
 !docs/CLOUD_DELEGATION_PLAN.md
+!docs/TOOL_RESULT_CONTEXT_EFFICIENCY_PLAN.md

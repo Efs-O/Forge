@@ -82,6 +82,24 @@ export const CONTEXT_EXHAUSTED_MESSAGE =
   `Forge: the model's tool call keeps being cut off — the remaining context cannot hold it. ` +
   `Use /compact or start a new chat, then ask for the file in smaller pieces.`;
 
+/** The request itself cannot fit, before any tokens can be generated. */
+export const CONTEXT_INPUT_EXHAUSTED_MESSAGE =
+  `Forge: the next model request cannot fit in this conversation's remaining context. ` +
+  `Earlier context must be compacted before continuing.`;
+
+/** llama-server's pre-generation 400 is the fallback when estimation misses. */
+export function isLlamaContextExhaustion(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return (
+    message.includes('exceeds the available context size') ||
+    message.includes('exceed_context_size_error')
+  );
+}
+
+export function isContextExhaustionReason(reason: string | undefined): boolean {
+  return reason === CONTEXT_EXHAUSTED_MESSAGE || reason === CONTEXT_INPUT_EXHAUSTED_MESSAGE;
+}
+
 export const MAX_ROUNDS_MESSAGE_PREFIX = 'Forge: agent exceeded maximum tool rounds';
 
 /**
@@ -97,7 +115,7 @@ export const ROUND_CAP_INCOMPLETE_PREFIX = 'the agent ran out of tool rounds';
  */
 export function isTurnCutOffError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
-  return message === CONTEXT_EXHAUSTED_MESSAGE || message.startsWith(MAX_ROUNDS_MESSAGE_PREFIX);
+  return isContextExhaustionReason(message) || message.startsWith(MAX_ROUNDS_MESSAGE_PREFIX);
 }
 
 /**

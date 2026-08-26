@@ -393,7 +393,8 @@
     "publish": "npm run build:release && vsce publish --no-dependencies",
     "ci": "npm run type-check && npm run lint && npm test && npm run build && npm run check:bundle",
     "check:bundle": "node scripts/bundle-load-check.js",
-    "ab:compaction": "node scripts/compaction-ab.mjs"
+    "ab:compaction": "node scripts/compaction-ab.mjs",
+    "ab:tool-result-context": "node scripts/tool-result-context-ab.mjs"
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",

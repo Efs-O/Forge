@@ -66,7 +66,7 @@ describe('local tool harness argument classification', () => {
 });
 
 describe('local tool harness canonical inventory', () => {
-  it('contains all 59 registered native tools, including code actions, notebooks, and tasks', () => {
+  it('contains all 60 registered native tools, including tool-result recovery', () => {
     const root = path.resolve(__dirname, '../..');
     const output = execFileSync(process.execPath, ['scripts/test-local-tools.mjs', '--list'], {
       cwd: root,
@@ -77,13 +77,14 @@ describe('local tool harness canonical inventory', () => {
       .split(/\r?\n/)
       .map((line) => line.split('\t')[0]);
 
-    expect(names).toHaveLength(59);
+    expect(names).toHaveLength(60);
     expect(names).toEqual(
       expect.arrayContaining([
         'apply_code_action',
         'apply_line_edits',
         'ask_local_agent',
         'edit_notebook_cell',
+        'read_tool_result',
         'run_workspace_task',
         'view_image',
       ]),
@@ -101,7 +102,7 @@ describe('local tool harness canonical inventory', () => {
         { cwd: root, encoding: 'utf8' },
       );
       const content = fs.readFileSync(report, 'utf8');
-      expect(content.match(/^\| [a-z_]+ \| native \|/gmu)).toHaveLength(59);
+      expect(content.match(/^\| [a-z_]+ \| native \|/gmu)).toHaveLength(60);
       expect(content).not.toContain('| missing |');
       expect(content).toContain('| search_code | native | read | yes |');
     } finally {

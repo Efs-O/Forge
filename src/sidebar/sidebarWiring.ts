@@ -111,6 +111,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     baseOf: host.baseOf,
     autoCompact: host.autoCompact,
     manualCompact: () => void slashHandler.handle('compact'),
+    incompleteTurnReason: (convId) => agentLoop.incompleteTurnReason(convId),
   });
 
   const slashHandler = new SlashCommandHandler({

@@ -6,7 +6,7 @@ const { streamModelChatCompletion } = vi.hoisted(() => ({
 }));
 vi.mock('../../src/llm/ChatClient', () => ({ streamModelChatCompletion }));
 
-import { runToolCallingLoop } from '../../src/agent/ToolCallingLoop';
+import { CONTEXT_INPUT_EXHAUSTED_MESSAGE, runToolCallingLoop } from '../../src/agent/ToolCallingLoop';
 import { ToolCallTruncatedError } from '../../src/llm/ToolCallTruncatedError';
 import { ToolFailureTracker } from '../../src/tools/StripTools';
 
@@ -30,6 +30,9 @@ const SERVER_MALFORMED_500 =
   '[json.exception.parse_error.101] parse error at line 1, column 12: syntax error while ' +
   "parsing value - invalid literal; last read: 'nope'\"}}";
 
+const SERVER_CONTEXT_400 =
+  'HTTP 400: {"error":{"code":400,"message":"request (71277 tokens) exceeds the available context size (62208 tokens), try increasing it","type":"exceed_context_size_error"}}';
+
 function runOptions(messages: ChatMessage[], extra: Record<string, unknown> = {}) {
   return {
     baseUrl: 'http://localhost:0',
@@ -51,6 +54,18 @@ function runOptions(messages: ChatMessage[], extra: Record<string, unknown> = {}
 describe('truncated tool calls', () => {
   beforeEach(() => {
     streamModelChatCompletion.mockReset();
+  });
+
+  it('maps llama-server input-context 400s to Forge recovery instead of a raw provider error', async () => {
+    streamModelChatCompletion.mockImplementation(
+      async (_url: string, _req: unknown, _model: unknown, h: Handlers) => {
+        h.onError(new Error(SERVER_CONTEXT_400));
+      },
+    );
+
+    await expect(
+      runToolCallingLoop(runOptions([{ role: 'user', content: 'continue' }]) as never),
+    ).rejects.toThrow(CONTEXT_INPUT_EXHAUSTED_MESSAGE);
   });
 
   it('asks for the write in chunks instead of downgrading the model', async () => {

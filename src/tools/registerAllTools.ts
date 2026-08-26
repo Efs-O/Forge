@@ -48,6 +48,7 @@ import {
   makeRunBuildTool,
 } from './execTools';
 import { makeSafePowerShellTool } from './safePowerShellTool';
+import { makeReadToolResultTool } from './toolResultTools';
 import {
   makeGitStatusTool,
   makeGitLogTool,
@@ -96,6 +97,7 @@ export function registerAllTools(
   registry.register(makeListDirectoryTool());
   registry.register(makeFindFilesTool());
   registry.register(makeSearchCodeTool());
+  registry.register(makeReadToolResultTool());
   registry.register(makeSearchCodebaseTool(indexManager));
   registry.register(makeGetDiagnosticsTool());
   registry.register(makeGetDocumentSymbolsTool());

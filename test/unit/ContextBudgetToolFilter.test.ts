@@ -158,6 +158,24 @@ describe('ContextBudgetPublisher thresholds', () => {
     expect(withAutoCompact(0.85)).toBe(true);
   });
 
+  it('auto-compacts a locally detected next-request overflow even below the usage threshold', () => {
+    const conv = conversation({ last_input_tokens: 12_000, last_output_tokens: 0 });
+    let compacted = false;
+    publish(
+      conv,
+      {
+        getConfig: () => ({ ...config(), auto_compact: { enabled: true } }) as unknown as ForgeConfig,
+        incompleteTurnReason: () =>
+          "Forge: the next model request cannot fit in this conversation's remaining context. Earlier context must be compacted before continuing.",
+        autoCompact: async () => {
+          compacted = true;
+        },
+      },
+      true,
+    );
+    expect(compacted).toBe(true);
+  });
+
   it('honours an explicit threshold', () => {
     expect(withAutoCompact(0.62, 0.6)).toBe(true);
   });
