@@ -1,34 +1,5 @@
 /* ── Streaming indicator ──────────────────────────────────────── */
 
-/* ── In-message generating indicator ───────────────────────────────────── */
-
-@keyframes forge-thinking-bounce {
-  0%, 80%, 100% { transform: translateY(0);    opacity: 0.35; }
-  40%           { transform: translateY(-5px); opacity: 1; }
-}
-
-.forge-thinking-row {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 10px 14px;
-  border: 1px solid var(--forge-border);
-  border-radius: var(--forge-radius-md);
-  background: transparent;
-  width: fit-content;
-}
-
-.forge-thinking-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--forge-accent, #0090ff);
-  animation: forge-thinking-bounce 1.2s ease-in-out infinite;
-}
-
-.forge-thinking-dot:nth-child(2) { animation-delay: 0.18s; }
-.forge-thinking-dot:nth-child(3) { animation-delay: 0.36s; }
-
 /* ── Streaming cursor + label ───────────────────────────────────────────── */
 
 @keyframes forge-cursor-blink {
@@ -60,9 +31,9 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  min-height: 20px;
+  min-height: 24px;
   padding: 0 12px;
-  font-size: 0.78em;
+  font-size: 0.92em;
   color: var(--forge-accent, #0090ff);
   user-select: none;
   letter-spacing: 0.02em;
@@ -83,8 +54,8 @@
    declarations in the cascade, so `forge-cursor-blink` kept overriding the idle
    `opacity: 0` and the dot blinked forever with nothing running. */
 .streaming-status-dot {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--forge-accent, #0090ff);
   flex-shrink: 0;

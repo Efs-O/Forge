@@ -30,6 +30,7 @@ export const LOCAL_PHRASES = [
   'Annoying the GPU…',
   'Draining the PSU…',
   'Torturing the fans…',
+  'Something smells burned…',
 ] as const;
 
 /**
@@ -68,6 +69,13 @@ export const CLANKER_PHRASES = [
   'Yeeting…',
 ] as const;
 
+/**
+ * True on any route, because they are about the code rather than the machine.
+ * Kept in their own pool instead of duplicated into both: a phrase that drifts
+ * between the two copies is exactly the bug nobody notices.
+ */
+export const SHARED_PHRASES = ['Sloppy coding…', 'No code for you…'] as const;
+
 export interface PhrasePoolOptions {
   /** True when the active model runs on the user's own hardware. */
   local: boolean;
@@ -75,7 +83,7 @@ export interface PhrasePoolOptions {
 }
 
 export function phrasePool({ local, clanker }: PhrasePoolOptions): readonly string[] {
-  const base = local ? LOCAL_PHRASES : CLOUD_PHRASES;
+  const base = [...(local ? LOCAL_PHRASES : CLOUD_PHRASES), ...SHARED_PHRASES];
   return clanker ? [...base, ...CLANKER_PHRASES] : base;
 }
 

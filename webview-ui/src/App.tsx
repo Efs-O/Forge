@@ -362,7 +362,6 @@ export function App(): React.ReactElement {
         onCancelQueuedPrompt={cancelQueuedPrompt}
         onSteerQueuedPrompt={steerQueuedPrompt}
         streaming={streaming}
-        generating={generating}
         conversationId={state.activeConversationId}
       />
       <StreamingStatus

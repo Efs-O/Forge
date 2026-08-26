@@ -3,6 +3,7 @@ import {
   CLANKER_PHRASES,
   CLOUD_PHRASES,
   LOCAL_PHRASES,
+  SHARED_PHRASES,
   nextPhrase,
   phrasePool,
 } from '../../webview-ui/src/statusPhrases';
@@ -13,7 +14,7 @@ describe('phrasePool', () => {
     // would undercut the residency signalling the rest of the sidebar does.
     const pool = phrasePool({ local: false, clanker: false });
     for (const phrase of LOCAL_PHRASES) expect(pool).not.toContain(phrase);
-    expect(pool).toEqual([...CLOUD_PHRASES]);
+    expect(pool).toEqual([...CLOUD_PHRASES, ...SHARED_PHRASES]);
   });
 
   it('gives a local turn no phrase about paying for someone else GPU', () => {
@@ -23,10 +24,10 @@ describe('phrasePool', () => {
 
   it('adds the clanker phrases to whichever pool applies, replacing neither', () => {
     const local = phrasePool({ local: true, clanker: true });
-    expect(local).toEqual([...LOCAL_PHRASES, ...CLANKER_PHRASES]);
+    expect(local).toEqual([...LOCAL_PHRASES, ...SHARED_PHRASES, ...CLANKER_PHRASES]);
 
     const cloud = phrasePool({ local: false, clanker: true });
-    expect(cloud).toEqual([...CLOUD_PHRASES, ...CLANKER_PHRASES]);
+    expect(cloud).toEqual([...CLOUD_PHRASES, ...SHARED_PHRASES, ...CLANKER_PHRASES]);
   });
 
   it('holds enough phrases to rotate a long turn without obvious repeats', () => {
@@ -36,9 +37,15 @@ describe('phrasePool', () => {
   });
 
   it('never promises progress it cannot measure', () => {
-    const all = [...LOCAL_PHRASES, ...CLOUD_PHRASES, ...CLANKER_PHRASES];
+    const all = [...LOCAL_PHRASES, ...CLOUD_PHRASES, ...SHARED_PHRASES, ...CLANKER_PHRASES];
     for (const phrase of all) {
       expect(phrase).not.toMatch(/almost|nearly|soon|finishing|wrapping/i);
+    }
+  });
+
+  it('keeps the shared phrases free of any claim about where the work runs', () => {
+    for (const phrase of SHARED_PHRASES) {
+      expect(phrase).not.toMatch(/gpu|vram|credit|rent|datacenter|silicon|watt/i);
     }
   });
 });

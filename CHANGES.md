@@ -1,5 +1,15 @@
 # Forge — Recent Changes
 
+## 0.13.12
+
+- Streaming status line is larger (0.78em -> 0.92em) with a matching 7px dot; it
+  sat below comfortable reading size for an ambient line.
+- New phrases: "Something smells burned..." (local) plus a route-agnostic shared
+  pool, "Sloppy coding..." and "No code for you...".
+- Removed the three bouncing dots from the transcript. They stated the same fact
+  as the streaming line above the composer, which stays put while the transcript
+  scrolls, so the dots were duplicate motion in a worse place.
+
 ## 0.13.11 - slower phrase rotation
 
 - Streaming phrases rotate every 12s, up from 6s. The line sits under the text

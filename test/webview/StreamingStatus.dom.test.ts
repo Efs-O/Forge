@@ -2,7 +2,12 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CLANKER_PHRASES, CLOUD_PHRASES, LOCAL_PHRASES } from '../../webview-ui/src/statusPhrases';
+import {
+  CLANKER_PHRASES,
+  CLOUD_PHRASES,
+  LOCAL_PHRASES,
+  SHARED_PHRASES,
+} from '../../webview-ui/src/statusPhrases';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -60,14 +65,17 @@ describe('StreamingStatus', () => {
     expect(text()).toBe(first);
   });
 
-  it('shows a local phrase while streaming a local model', () => {
+  it('shows a local phrase while streaming a local model, never a cloud one', () => {
+    // Either pool may draw a shared phrase, so the invariant worth pinning is
+    // that the *other* route's hardware claims never appear.
     render(true, true);
-    expect(LOCAL_PHRASES as readonly string[]).toContain(text());
+    expect([...LOCAL_PHRASES, ...SHARED_PHRASES]).toContain(text());
+    expect(CLOUD_PHRASES as readonly string[]).not.toContain(text());
   });
 
   it('shows a cloud phrase for a remote model, never a local one', () => {
     render(true, false);
-    expect(CLOUD_PHRASES as readonly string[]).toContain(text());
+    expect([...CLOUD_PHRASES, ...SHARED_PHRASES]).toContain(text());
     expect(LOCAL_PHRASES as readonly string[]).not.toContain(text());
   });
 

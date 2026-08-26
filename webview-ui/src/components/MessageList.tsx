@@ -57,7 +57,6 @@ interface Props {
   onCancelQueuedPrompt: (id: string) => void;
   onSteerQueuedPrompt: (id: string) => void;
   streaming: boolean;
-  generating: boolean;
   /** Active conversation/tab id. A change means the user switched sessions, which
    *  must jump to the bottom instantly instead of smooth-scrolling the whole
    *  (different) conversation top-to-bottom. */
@@ -72,7 +71,6 @@ export function MessageList({
   onCancelQueuedPrompt,
   onSteerQueuedPrompt,
   streaming,
-  generating,
   conversationId,
 }: Props): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -161,13 +159,6 @@ export function MessageList({
           onCancel={() => onCancelQueuedPrompt(prompt.id)}
         />
       ))}
-      {generating && messages[messages.length - 1]?.role !== 'assistant' && (
-        <div className="forge-thinking-row" aria-label="Forge is thinking">
-          <span className="forge-thinking-dot" />
-          <span className="forge-thinking-dot" />
-          <span className="forge-thinking-dot" />
-        </div>
-      )}
       <div />
     </div>
   );
