@@ -1,5 +1,24 @@
 # Forge — Recent Changes
 
+## 0.13.7 - rename a chat from the history row; model picker by the prompt
+
+- **History rows can be renamed.** The only control on a row was a 12px trash
+  icon held at opacity 0 until hover — a permanent, unrecoverable action that
+  was invisible until the cursor was already on top of it. Rows now carry a
+  kebab at half opacity in a real 28×28 target, opening Rename / Delete. Rename
+  edits in place (Enter commits, Escape cancels); delete still routes to the
+  existing modal confirm. Renaming leaves `updatedAt` alone, so a cosmetic edit
+  does not reorder history.
+- **Closed chats are renameable at all.** `/rename` only ever retitled the
+  *active* conversation, so an auto-derived title like "hello man" could not be
+  fixed once the chat was closed without restoring it first.
+- **The model selector moved to the composer**, next to the prompt where the
+  choice is actually made — it previously sat above the tab strip, the history
+  panel and the whole scrolled transcript. The dropdown opens upward. The token
+  budget stays in the header: it is ambient status that has to stay readable
+  while scrolling, not only when you look down to type.
+- **The history list stops slicing a row in half** at the scroll boundary.
+
 ## 0.13.6 - say what happened to missing output
 
 - **"Capped, call again" and "gone for good" are no longer the same flag.**
