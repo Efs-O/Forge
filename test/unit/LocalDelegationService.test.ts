@@ -146,12 +146,20 @@ describe('delegation eligibility', () => {
   });
 
   it.each([
-    ['xai-model', 'xAI'],
-    ['openai-model', 'OpenAI'],
-    ['openrouter-model', 'OpenRouter'],
-    ['compat-model', 'OpenAI-compatible'],
-    ['ollama-cloud', 'Ollama cloud'],
-    ['gpt-oss:20b-cloud', 'Ollama cloud-routed model'],
+    ['xai-model'],
+    ['openai-model'],
+    ['openrouter-model'],
+    ['compat-model'],
+  ])('classifies configured cloud provider %s as a cloud target', (target) => {
+    expect(resolveDelegationTarget(config(), target).provider).toBe('cloud');
+  });
+
+  it('accepts an Ollama cloud-routed model (local daemon, no local slot cost)', () => {
+    expect(resolveDelegationTarget(config(), 'gpt-oss:20b-cloud').provider).toBe('ollama');
+  });
+
+  it.each([
+    ['ollama-cloud', 'non-local Ollama endpoint'],
     ['missing', 'Unknown delegation target'],
   ])('rejects %s distinctly', (target, expected) => {
     expect(() => resolveDelegationTarget(config(), target)).toThrow(expected);

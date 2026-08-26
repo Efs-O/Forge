@@ -123,6 +123,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     backendPool: pool,
     workspaceRoot,
     cliSessions,
+    secrets: context.secrets,
   });
   const toolRegistry = new ToolRegistry();
   registerAllTools(

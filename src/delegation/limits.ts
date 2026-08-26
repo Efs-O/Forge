@@ -15,6 +15,14 @@ export const DELEGATION_TIMEOUT_MS = 120_000;
  * cold-start again.
  */
 export const CLI_DELEGATION_TIMEOUT_MS = 600_000;
+/**
+ * Cloud targets (xAI, OpenRouter, OpenAI-compatible, Ollama cloud-routed) are
+ * reasoning models behind a network hop with no local slot to hold. The 120s
+ * ceiling is sized for a local model that is already resident; a cloud
+ * reasoning model routinely spends longer than that on its thinking alone, and
+ * an abort there wastes tokens the user has already paid for.
+ */
+export const CLOUD_DELEGATION_TIMEOUT_MS = 300_000;
 
 export interface DelegationPromptContextFile {
   path: string;

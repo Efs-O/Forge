@@ -1,10 +1,12 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import type * as vscode from 'vscode';
 import { resolveWorkspacePath } from '../util/WorkspacePaths';
 import type { ForgeConfig, ModelConfig } from '../config/types';
 import type { IBackendPool } from '../backend/BackendPool';
 import type { DelegationHold } from '../backend/DelegationGate';
 import { streamModelChatCompletion } from '../llm/ChatClient';
+import { resolveCloudRequestTarget } from '../llm/CloudRequestResolver';
 import { mergeSampling } from '../llm/SamplingMerge';
 import { normalizeRequestForModel } from '../llm/RequestNormalizer';
 import type { ChatCompletionRequest } from '../llm/types';
@@ -13,9 +15,10 @@ import { capResultText } from '../tools/resultCap';
 import { CliAgentDriver } from '../agents/CliAgentDriver';
 import type { CliSessionRegistry } from '../agents/CliSessionRegistry';
 import { runCliDelegation } from './CliDelegationRunner';
-import { resolveDelegationTarget } from './eligibility';
+import { resolveDelegationTarget, type DelegationTarget } from './eligibility';
 import {
   CLI_DELEGATION_TIMEOUT_MS,
+  CLOUD_DELEGATION_TIMEOUT_MS,
   DELEGATION_TIMEOUT_MS,
   MAX_DELEGATION_CONTEXT_BYTES,
   MAX_DELEGATION_CONTEXT_FILE_BYTES,
@@ -64,6 +67,10 @@ export interface LocalDelegationServiceDeps {
    *  process pool, the same max_cli_agents cap, and the same per-conversation
    *  disposal. Absent in tests and when no conversation context exists. */
   cliSessions?: CliSessionRegistry;
+  /** Needed only for cloud targets — the bearer token lives in SecretStorage,
+   *  never in config.yaml. Absent in tests and in local-only deployments; a
+   *  cloud delegation then fails with the resolver's own missing-key message. */
+  secrets?: vscode.SecretStorage;
 }
 
 class DelegationError extends Error {
@@ -88,6 +95,12 @@ function formatContextForUser(files: DelegationPromptContextFile[]): string {
 
 function abortKind(signal: AbortSignal, timeoutSignal: AbortSignal): 'timeout' | 'cancellation' {
   return timeoutSignal.aborted && signal.aborted ? 'timeout' : 'cancellation';
+}
+
+function selectDelegationTimeout(provider: DelegationTarget['provider']): number {
+  if (provider === 'cli') return CLI_DELEGATION_TIMEOUT_MS;
+  if (provider === 'cloud') return CLOUD_DELEGATION_TIMEOUT_MS;
+  return DELEGATION_TIMEOUT_MS;
 }
 
 async function defaultReadFile(filePath: string, signal: AbortSignal): Promise<Uint8Array> {
@@ -128,6 +141,9 @@ export class LocalDelegationService {
   canDelegate(primaryModel: string, targetModel: string): { ok: boolean; reason?: string } {
     const config = this.deps.getConfig();
     const target = resolveDelegationTarget(config, targetModel);
+    // Cloud and cli targets never touch the backend pool, so pool capacity has
+    // nothing to say about them.
+    if (target.provider === 'cloud' || target.provider === 'cli') return { ok: true };
     const check = this.deps.backendPool.canDelegate(primaryModel, target.resolvedId);
     if (check.safe) return { ok: true };
     return check.reason ? { ok: false, reason: check.reason } : { ok: false };
@@ -138,9 +154,10 @@ export class LocalDelegationService {
     const config = this.deps.getConfig();
     const target = resolveDelegationTarget(config, request.targetModel);
     // A cli target runs a full external agent against the real workspace and
-    // needs minutes, not the 120s a context-fed local model gets.
-    const timeoutMs =
-      target.model.provider === 'cli' ? CLI_DELEGATION_TIMEOUT_MS : DELEGATION_TIMEOUT_MS;
+    // needs minutes, not the 120s a context-fed local model gets; a cloud
+    // target sits behind a network hop and thinks for longer than a resident
+    // local model does.
+    const timeoutMs = selectDelegationTimeout(target.provider);
     const timeoutSignal = this.makeTimeoutSignal(timeoutMs);
     const signal = composeSignals(
       request.signal ? [request.signal, timeoutSignal] : [timeoutSignal],
@@ -159,6 +176,37 @@ export class LocalDelegationService {
             ? { registry, conversationId: request.conversationId }
             : undefined,
         );
+      } catch (err) {
+        if (signal.aborted) {
+          const kind = abortKind(signal, timeoutSignal);
+          throw new DelegationError(
+            kind === 'timeout'
+              ? `Delegation timeout: exceeded ${timeoutMs}ms.`
+              : 'Delegation cancelled by caller.',
+          );
+        }
+        if (err instanceof DelegationError) throw err;
+        throw new DelegationError(`Delegation provider error: ${(err as Error).message}`);
+      }
+    }
+
+    if (target.provider === 'cloud') {
+      // No backend hold: a cloud target occupies no local slot, so gating it on
+      // pool capacity would fail the consultation precisely when the local slot
+      // is busy — which is when a second opinion is most useful.
+      try {
+        const files = await this.readContextFiles(request.contextFiles ?? [], signal);
+        const req = this.buildRequest(request, target.model, files);
+        const { baseUrl, apiKey } = await resolveCloudRequestTarget(
+          target.model,
+          this.deps.secrets,
+        );
+        const text = await this.streamToBuffer(baseUrl, req, target.model, signal, apiKey);
+        return {
+          text: capResultText(text, MAX_DELEGATION_RESULT_CHARS),
+          targetModel: target.resolvedId,
+          bestEffort: false,
+        };
       } catch (err) {
         if (signal.aborted) {
           const kind = abortKind(signal, timeoutSignal);
@@ -325,6 +373,7 @@ export class LocalDelegationService {
     request: ChatCompletionRequest,
     model: Parameters<typeof streamModelChatCompletion>[2],
     signal: AbortSignal,
+    apiKey?: string,
   ): Promise<string> {
     let text = '';
     return new Promise<string>((resolve, reject) => {
@@ -350,7 +399,7 @@ export class LocalDelegationService {
         },
         onError: (err) => reject(new DelegationError(`Delegation provider error: ${err.message}`)),
       };
-      void this.streamChat(baseUrl, request, model, handlers, signal).catch(reject);
+      void this.streamChat(baseUrl, request, model, handlers, signal, apiKey).catch(reject);
     });
   }
 }

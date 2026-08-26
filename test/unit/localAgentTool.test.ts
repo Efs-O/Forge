@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { ForgeConfig, ModelConfig } from '../../src/config/types';
 import type { LocalDelegationService, LocalDelegationResult } from '../../src/delegation/LocalDelegationService';
 import { ToolRegistry } from '../../src/tools/ToolRegistry';
-import { makeLocalAgentTool, hasEligibleDelegationTargets } from '../../src/tools/localAgentTool';
+import { makeLocalAgentTool, hasEligibleDelegationTargets, describeDelegationTargets } from '../../src/tools/localAgentTool';
 import {
   MAX_DELEGATION_TASK_CHARS,
   MAX_DELEGATION_CONTEXT_FILES,
@@ -39,6 +39,10 @@ const cloudOnlyConfig = makeConfig([
   model('openrouter-model', 'openrouter'),
 ]);
 
+// The only remaining shape that resolves to no eligible target at all: a
+// remote Ollama daemon Forge holds no auth for.
+const ineligibleConfig = makeConfig([model('ollama-remote', 'ollama', 'https://ollama.com')]);
+
 const emptyConfig = makeConfig([]);
 
 // ── Mock LocalDelegationService ─────────────────────────────────────────────
@@ -66,17 +70,21 @@ describe('hasEligibleDelegationTargets', () => {
     expect(hasEligibleDelegationTargets(cfg)).toBe(true);
   });
 
-  it('returns false when only cloud providers are configured', () => {
-    expect(hasEligibleDelegationTargets(cloudOnlyConfig)).toBe(false);
+  it('returns true when only configured cloud providers exist', () => {
+    expect(hasEligibleDelegationTargets(cloudOnlyConfig)).toBe(true);
+  });
+
+  it('returns false when the only model is a non-local Ollama endpoint', () => {
+    expect(hasEligibleDelegationTargets(ineligibleConfig)).toBe(false);
   });
 
   it('returns false for empty model list', () => {
     expect(hasEligibleDelegationTargets(emptyConfig)).toBe(false);
   });
 
-  it('returns false for Ollama cloud-tag model', () => {
+  it('returns true for an Ollama cloud-tag model on the local daemon', () => {
     const cfg = makeConfig([model('gpt-oss:20b-cloud', 'ollama', 'http://127.0.0.1:11434')]);
-    expect(hasEligibleDelegationTargets(cfg)).toBe(false);
+    expect(hasEligibleDelegationTargets(cfg)).toBe(true);
   });
 });
 
@@ -161,10 +169,18 @@ describe('advertisement', () => {
     expect(defs.some((d) => d.function.name === 'ask_local_agent')).toBe(false);
   });
 
-  it('does not advertise when no eligible local targets exist', () => {
+  it('advertises when only configured cloud targets exist', () => {
     const { service } = makeMockService();
     const registry = new ToolRegistry();
     registry.register(makeLocalAgentTool(service, () => cloudOnlyConfig));
+    const defs = registry.definitions(new Set(['delegate']));
+    expect(defs.some((d) => d.function.name === 'ask_local_agent')).toBe(true);
+  });
+
+  it('does not advertise when no eligible targets exist', () => {
+    const { service } = makeMockService();
+    const registry = new ToolRegistry();
+    registry.register(makeLocalAgentTool(service, () => ineligibleConfig));
     const defs = registry.definitions(new Set(['delegate']));
     expect(defs.some((d) => d.function.name === 'ask_local_agent')).toBe(false);
   });
@@ -305,12 +321,22 @@ describe('handler', () => {
     await expect(tool.handler({ model: 'llama', task: 'check' })).rejects.toThrow('provider timeout');
   });
 
-  it('throws when no eligible local targets are configured', async () => {
+  it('throws when no eligible targets are configured', async () => {
     const { service } = makeMockService();
-    const tool = makeLocalAgentTool(service, () => cloudOnlyConfig);
+    const tool = makeLocalAgentTool(service, () => ineligibleConfig);
 
     await expect(tool.handler({ model: 'llama', task: 'check' })).rejects.toThrow(
-      'no eligible local delegation targets',
+      'no eligible delegation targets',
+    );
+  });
+
+  it('delegates to a configured cloud model', async () => {
+    const { service, ask } = makeMockService();
+    const tool = makeLocalAgentTool(service, () => cloudOnlyConfig);
+
+    await tool.handler({ model: 'openrouter-model', task: 'second opinion' });
+    expect(ask).toHaveBeenCalledWith(
+      expect.objectContaining({ targetModel: 'openrouter-model', task: 'second opinion' }),
     );
   });
 
@@ -321,5 +347,80 @@ describe('handler', () => {
 
     await tool.handler({ model: 'mymodel', task: 'check' });
     expect(ask).toHaveBeenCalledWith(expect.objectContaining({ primaryModel: 'mymodel' }));
+  });
+});
+
+// ── Target hint in the schema ───────────────────────────────────────────────
+
+describe('describeDelegationTargets', () => {
+  it('names each eligible target with its kind', () => {
+    const hint = describeDelegationTargets(localConfig);
+    expect(hint).toContain('"llama" (local)');
+    expect(hint).toContain('"ollama-local" (local Ollama)');
+  });
+
+  it('labels configured cloud models as cloud', () => {
+    expect(describeDelegationTargets(cloudOnlyConfig)).toContain('"openrouter-model" (cloud)');
+  });
+
+  // The user's real config sets provider on the GROUP, not the model, so the
+  // hint is only correct if it resolves through the same flattening the
+  // delegation path uses.
+  it('resolves a provider inherited from the model group', () => {
+    const cfg = makeConfig([{ name: 'qwen/qwen3.8-max', group: 'openrouter-cloud' }]);
+    cfg.groups = { 'openrouter-cloud': { provider: 'openrouter' } };
+    expect(describeDelegationTargets(cfg)).toContain('"qwen/qwen3.8-max" (cloud)');
+  });
+
+  it('flags cli agents as carrying their own tools', () => {
+    const cfg = makeConfig([{ name: 'claude-code', provider: 'cli', cli: 'claude' }]);
+    expect(describeDelegationTargets(cfg)).toContain('"claude-code" (CLI agent, has its own tools)');
+  });
+
+  it('omits ineligible targets and returns empty when none are eligible', () => {
+    expect(describeDelegationTargets(ineligibleConfig)).toBe('');
+  });
+
+  it('is carried in the model arg description ToolRegistry advertises', () => {
+    const { service } = makeMockService();
+    const registry = new ToolRegistry();
+    registry.register(makeLocalAgentTool(service, () => localConfig));
+    const def = registry
+      .definitions(new Set(['delegate']))
+      .find((d) => d.function.name === 'ask_local_agent');
+    const params = def?.function.parameters as {
+      properties: { model: { description: string } };
+    };
+    expect(params.properties.model.description).toContain('"llama" (local)');
+    expect(params.properties.model.description).toContain('do NOT read');
+  });
+
+  // The canonical `definition` literal stays static — scripts/tool-audit-catalog.mjs
+  // extracts it from source, so it must remain a plain object literal.
+  it('leaves the static definition untouched', () => {
+    const { service } = makeMockService();
+    const tool = makeLocalAgentTool(service, () => localConfig);
+    const params = tool.definition.function.parameters as {
+      properties: { model: { description: string } };
+    };
+    expect(params.properties.model.description).not.toContain('"llama" (local)');
+  });
+
+  // ToolRegistry.definitions() re-reads `definition` every turn; a config
+  // reload must show up without re-registering the tool.
+  it('refreshes when the config changes', () => {
+    const { service } = makeMockService();
+    let cfg = localConfig;
+    const tool = makeLocalAgentTool(service, () => cfg);
+    const read = () =>
+      (
+        tool.describe!().function.parameters as {
+          properties: { model: { description: string } };
+        }
+      ).properties.model.description;
+    expect(read()).toContain('"llama" (local)');
+    cfg = cloudOnlyConfig;
+    expect(read()).toContain('"openrouter-model" (cloud)');
+    expect(read()).not.toContain('"llama" (local)');
   });
 });

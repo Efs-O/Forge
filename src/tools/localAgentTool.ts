@@ -1,7 +1,12 @@
 import type { RegisteredTool } from './ToolRegistry';
+import type { ToolDefinition } from '../llm/types';
 import type { LocalDelegationService } from '../delegation/LocalDelegationService';
 import type { ForgeConfig } from '../config/types';
-import { resolveDelegationTarget } from '../delegation/eligibility';
+import {
+  listEligibleDelegationTargets,
+  resolveDelegationTarget,
+  type EligibleDelegationTarget,
+} from '../delegation/eligibility';
 import {
   MAX_DELEGATION_TASK_CHARS,
   MAX_DELEGATION_CONTEXT_FILES,
@@ -17,7 +22,7 @@ const FOCUS_VALUES = [
   'second-opinion',
 ] as const;
 
-/** Returns true when at least one configured model can accept a local delegation. */
+/** Returns true when at least one configured model can accept a delegation. */
 export function hasEligibleDelegationTargets(config: ForgeConfig): boolean {
   for (const model of config.models) {
     try {
@@ -30,6 +35,59 @@ export function hasEligibleDelegationTargets(config: ForgeConfig): boolean {
   return false;
 }
 
+const KIND_LABELS: Record<EligibleDelegationTarget['provider'], string> = {
+  'llama.cpp': 'local',
+  ollama: 'local Ollama',
+  cloud: 'cloud',
+  cli: 'CLI agent, has its own tools',
+};
+
+/**
+ * Names the callable targets inside the `model` arg description.
+ *
+ * Deliberately NOT a JSON Schema `enum`: resolveRequestModel also accepts
+ * aliases, short_names and `base@profile` forms, and an enum would reject every
+ * one of them. This is a hint, and the handler stays the real gate.
+ */
+export function describeDelegationTargets(config: ForgeConfig): string {
+  const targets = listEligibleDelegationTargets(config);
+  if (targets.length === 0) return '';
+  const listed = targets.map((t) => `"${t.name}" (${KIND_LABELS[t.provider]})`).join(', ');
+  return ` Configured targets: ${listed}. Aliases, short_names and "model@profile" also resolve.`;
+}
+
+/**
+ * Returns the advertised definition: the canonical literal with the current
+ * config's target list spliced into the `model` arg description.
+ *
+ * The literal stays the canonical `definition` (scripts/tool-audit-catalog.mjs
+ * extracts it statically from source); this only rewrites one description
+ * string, so the tool name and schema shape are unchanged.
+ */
+const MODEL_ARG_DESCRIPTION =
+  'Model to delegate to. Pass a name exactly as listed here — do NOT read config.yaml to find one.';
+
+function describeWithTargets(base: ToolDefinition, config: ForgeConfig): ToolDefinition {
+  const hint = describeDelegationTargets(config);
+  if (!hint) return base;
+  const params = base.function.parameters as {
+    properties: { model: { description: string } };
+  };
+  return {
+    ...base,
+    function: {
+      ...base.function,
+      parameters: {
+        ...base.function.parameters,
+        properties: {
+          ...params.properties,
+          model: { ...params.properties.model, description: MODEL_ARG_DESCRIPTION + hint },
+        },
+      },
+    },
+  };
+}
+
 /**
  * Creates the ask_local_agent tool.
  * Advertised only when the 'delegate' permission is granted AND at least one
@@ -40,25 +98,26 @@ export function makeLocalAgentTool(
   delegationService: LocalDelegationService,
   getConfig: () => ForgeConfig,
 ): RegisteredTool {
-  return {
+  const tool: RegisteredTool = {
     definition: {
       type: 'function',
       function: {
         name: 'ask_local_agent',
         description:
-          'Delegate an analysis task to a secondary local model or a provider: cli external agent ' +
-          '(Claude Code, Codex). Use for second opinions, security reviews, test suggestions, or ' +
-          'correctness checks. Regular models receive only the task and optional context files — they ' +
-          'have no tools. A cli target instead runs read-only with ITS OWN tools (it can read/list files ' +
-          'itself) but is instructed not to modify anything. ' +
+          'Delegate an analysis task to a secondary model: a local llama.cpp or Ollama model, a ' +
+          'configured cloud model (xAI, OpenRouter, OpenAI-compatible — this is how you reach ' +
+          'OpenRouter), or a provider: cli external agent (Claude Code, Codex). Use for second ' +
+          'opinions, security reviews, test suggestions, or correctness checks. Local and cloud ' +
+          'models receive only the task and optional context files — they have no tools. A cli ' +
+          'target instead runs read-only with ITS OWN tools (it can read/list files itself) but is ' +
+          'instructed not to modify anything. ' +
           'This tool requires only the delegate permission; do not request terminal, write, or other permissions.',
         parameters: {
           type: 'object',
           properties: {
             model: {
               type: 'string',
-              description:
-                'Local model name or alias to delegate to (must be a local llama.cpp target, a local Ollama daemon target, or a provider: cli external agent).',
+              description: MODEL_ARG_DESCRIPTION,
             },
             task: {
               type: 'string',
@@ -88,13 +147,17 @@ export function makeLocalAgentTool(
         },
       },
     },
+    // ToolRegistry.definitions() runs every agent turn, so a model added to
+    // config.yaml shows up in the advertised target list without a reload.
+    describe: () => describeWithTargets(tool.definition, getConfig()),
     permission: 'delegate',
     advertise: () => hasEligibleDelegationTargets(getConfig()),
     handler: async (args, context) => {
       if (!hasEligibleDelegationTargets(getConfig())) {
         throw new Error(
-          'ask_local_agent: no eligible local delegation targets are configured. ' +
-            'Add a local llama.cpp or Ollama model to config.yaml.',
+          'ask_local_agent: no eligible delegation targets are configured. ' +
+            'Add a local llama.cpp or Ollama model, a configured cloud model, or a ' +
+            'provider: cli agent to config.yaml.',
         );
       }
       const config = getConfig();
@@ -118,4 +181,5 @@ export function makeLocalAgentTool(
       return `[Delegated analysis — ${result.targetModel}${bestEffortNote}]\n\n${result.text}`;
     },
   };
+  return tool;
 }

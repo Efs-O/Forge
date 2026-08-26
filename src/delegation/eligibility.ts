@@ -1,14 +1,13 @@
 import type { ForgeConfig, ModelConfig } from '../config/types';
 import { expandAlias, resolveRequestModel, splitModelProfile } from '../config/ConfigResolver';
-import { isCloudProvider, getCloudProviderLabel } from '../llm/CloudProviders';
-import { isOllamaCloudModel } from '../llm/ModelRouteClassifier';
+import { isCloudProvider } from '../llm/CloudProviders';
 
 export interface DelegationTarget {
   requested: string;
   resolvedId: string;
   baseModel: string;
   model: ModelConfig;
-  provider: 'llama.cpp' | 'ollama' | 'cli';
+  provider: 'llama.cpp' | 'ollama' | 'cli' | 'cloud';
 }
 
 function isLocalOllamaEndpoint(endpoint: string | undefined): boolean {
@@ -20,11 +19,6 @@ function isLocalOllamaEndpoint(endpoint: string | undefined): boolean {
   } catch {
     return false;
   }
-}
-
-function providerLabel(provider: ModelConfig['provider']): string {
-  if (isCloudProvider(provider)) return getCloudProviderLabel(provider);
-  return provider ?? 'llama.cpp';
 }
 
 export function resolveDelegationTarget(config: ForgeConfig, requested: string): DelegationTarget {
@@ -51,18 +45,14 @@ export function resolveDelegationTarget(config: ForgeConfig, requested: string):
   }
 
   if (provider === 'ollama') {
+    // A non-local Ollama endpoint is someone else's daemon: Forge holds no
+    // auth for it and the backend pool cannot manage its lifecycle. Still
+    // rejected. Cloud-ROUTED models (the "-cloud"/":cloud" tag) are fine —
+    // they reach the local daemon like any other Ollama target, and auth is
+    // the user's own `ollama auth login`.
     if (!isLocalOllamaEndpoint(model.endpoint)) {
       throw new Error(
-        `Delegation target "${requested}" is Ollama cloud or non-local Ollama endpoint (${model.endpoint}); only local Ollama daemon targets are allowed.`,
-      );
-    }
-    // Ollama cloud models route THROUGH the local daemon (localhost:11434) but
-    // execute remotely; only their "-cloud"/":cloud" tag suffix marks them
-    // (the model name is what gets sent to the daemon). The endpoint check
-    // above cannot catch them.
-    if (isOllamaCloudModel(model)) {
-      throw new Error(
-        `Delegation target "${requested}" is an Ollama cloud-routed model ("${model.name}"); only local Ollama daemon targets are allowed.`,
+        `Delegation target "${requested}" uses a non-local Ollama endpoint (${model.endpoint}); only local Ollama daemon targets are allowed.`,
       );
     }
     return { requested, resolvedId, baseModel: base, model, provider };
@@ -75,12 +65,42 @@ export function resolveDelegationTarget(config: ForgeConfig, requested: string):
   }
 
   if (isCloudProvider(provider)) {
-    throw new Error(
-      `Delegation target "${requested}" uses ${providerLabel(provider)}; cloud providers are not allowed for local delegation.`,
-    );
+    // Opt-in, user-configured cloud providers only (config.yaml entry + a key
+    // in SecretStorage). The exclusion these targets used to hit was a VRAM
+    // capacity rule, and a cloud target occupies no local slot — it takes the
+    // no-hold path in LocalDelegationService instead.
+    return { requested, resolvedId, baseModel: base, model, provider: 'cloud' };
   }
 
   throw new Error(
-    `Delegation target "${requested}" uses unsupported provider "${String(provider)}"; only local llama.cpp and local Ollama targets are allowed.`,
+    `Delegation target "${requested}" uses unsupported provider "${String(provider)}"; supported targets are llama.cpp, local Ollama, configured cloud providers, and provider: cli agents.`,
   );
+}
+
+/** One advertisable delegation target: the name to pass as `model`, plus the
+ *  kind that tells the caller what it will get (tool-less vs its own tools). */
+export interface EligibleDelegationTarget {
+  name: string;
+  provider: DelegationTarget['provider'];
+}
+
+/**
+ * Every configured model that can accept a delegation, with its kind.
+ *
+ * Exists so `ask_local_agent` can NAME its valid targets in its schema. Without
+ * it the model's only way to learn that `qwen/qwen3.8-max` is a legal value is
+ * to read config.yaml — which costs ~23k tokens of context before the first
+ * delegation and invites hallucinated model names.
+ */
+export function listEligibleDelegationTargets(config: ForgeConfig): EligibleDelegationTarget[] {
+  const targets: EligibleDelegationTarget[] = [];
+  for (const model of config.models) {
+    try {
+      const target = resolveDelegationTarget(config, model.name);
+      targets.push({ name: model.name, provider: target.provider });
+    } catch {
+      // not an eligible delegation target
+    }
+  }
+  return targets;
 }

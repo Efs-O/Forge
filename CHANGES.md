@@ -1,5 +1,24 @@
 # Forge — Recent Changes
 
+## 0.13.14
+
+- `ask_local_agent` can now delegate to a configured cloud model (xAI,
+  OpenRouter, OpenAI-compatible) and to Ollama cloud-routed models. The old
+  block was a VRAM-capacity rule applied to targets that hold no local slot, so
+  the agent's only route to OpenRouter was curl'ing the control server's
+  `/chat` proxy through the terminal. Cloud targets skip the backend hold
+  entirely — a second opinion now works *while* the local slot is busy — and
+  get a 300s timeout instead of the 120s sized for a resident local model. A
+  non-local Ollama endpoint is still refused; Forge holds no auth for someone
+  else's daemon.
+- `ask_local_agent` now names its callable targets in its own schema. The
+  `model` arg was a bare string with no list anywhere — not in the schema, not
+  in the system prompt, and no tool enumerates models — so the only way to
+  learn that `qwen/qwen3.8-max` is a legal value was to read config.yaml, ~9k
+  tokens of context spent before the first delegation and a standing invitation
+  to invent model names. The hint costs ~300 tokens and is rebuilt per turn, so
+  a model added to config.yaml appears without a window reload.
+
 ## 0.13.13
 
 - Model name is centred in the picker. The chevron is out of flow so it no

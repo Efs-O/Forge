@@ -145,9 +145,9 @@ overlaps with an existing owner, extend the owner instead.
 
 | Concern                                   | Owner                                      |
 | ----------------------------------------- | ------------------------------------------ |
-| Local delegation orchestration            | `src/delegation/LocalDelegationService.ts` |
-| Local delegation target eligibility       | `src/delegation/eligibility.ts`            |
-| Local delegation limits + prompt contract | `src/delegation/limits.ts`                 |
+| Delegation orchestration (local + cloud)  | `src/delegation/LocalDelegationService.ts` |
+| Delegation target eligibility             | `src/delegation/eligibility.ts`            |
+| Delegation limits + prompt contract       | `src/delegation/limits.ts`                 |
 | `ask_local_agent` for `provider: cli` targets | `src/delegation/CliDelegationRunner.ts` |
 
 ## CLI Agents (`provider: cli` — F7/§2.4)

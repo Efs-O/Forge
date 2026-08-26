@@ -62,6 +62,14 @@ export interface RegisteredTool {
   autoApprove?: boolean;
   /** When present, called during definitions() to suppress advertisement without removing the tool. */
   advertise?: () => boolean;
+  /**
+   * When present, called during definitions() to advertise a definition built
+   * from current state instead of the static one — e.g. naming the delegation
+   * targets in the current config.yaml. `definition` stays the canonical
+   * literal (the tool-audit catalog extracts it statically), so this must
+   * return the same tool name and schema shape.
+   */
+  describe?: () => ToolDefinition;
 }
 
 /**
@@ -126,7 +134,7 @@ export class ToolRegistry {
   definitions(allowed: Set<ToolPermission>): ToolDefinition[] {
     return [...this.tools.values()]
       .filter((t) => this.isAllowed(t, allowed) && (t.advertise === undefined || t.advertise()))
-      .map((t) => t.definition);
+      .map((t) => (t.describe ? t.describe() : t.definition));
   }
 
   /**
