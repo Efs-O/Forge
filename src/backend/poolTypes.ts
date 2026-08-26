@@ -34,4 +34,13 @@ export interface IBackendPool {
   /** Whether the model currently has a live backend (llama.cpp slot OR ollama).
    *  Residency, not readiness — see `isAnyReady`. */
   isLoaded(modelName: string): boolean;
+  /** Per-model readiness: is THIS model's backend serving right now? Narrower
+   *  than `isAnyReady`, which answers the question for the pool as a whole. A
+   *  resident model returns false while it is still spawning. */
+  isModelReady(modelName: string): boolean;
+  /** Cheap change-detection key over every slot's residency AND readiness.
+   *  Pure reads. Equal signatures mean nothing observable moved, so the sidebar
+   *  can skip a repost; see MODEL_READINESS_DOT_PLAN.md for why this is polled
+   *  rather than emitted. */
+  residencySignature(): string;
 }

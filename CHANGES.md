@@ -1,5 +1,22 @@
 # Forge — Recent Changes
 
+## 0.13.8 - the model picker says whether your next send pays a cold load
+
+- **Readiness dot in the model picker.** Picking a model only *pins* it; the
+  llama-server spawn happens on your first send. On a single-slot card that
+  means the next turn can evict what is resident and spend tens of seconds
+  reading weights, with nothing in the UI saying so beforehand. Each local
+  model now shows solid (loaded and ready), hollow-pulsing (resident, still
+  starting) or dim (cold — the next send loads it).
+- **No dot for remote models.** Residency is meaningless for a model Forge does
+  not host, Ollama *cloud* included — it reaches the daemon on localhost but
+  holds no VRAM here. Showing those as "cold" would advertise a load cost that
+  does not exist, so they get no dot at all.
+- The dot is polled, not pushed, and lags reality by at most 1.5s. Slot state
+  mutates in nine places across five files; a signature compare cannot rot the
+  way an emit call that someone forgets to add can. It only runs while the
+  sidebar is visible. See `MODEL_READINESS_DOT_PLAN.md`.
+
 ## 0.13.7 - rename a chat from the history row; model picker by the prompt
 
 - **History rows can be renamed.** The only control on a row was a 12px trash

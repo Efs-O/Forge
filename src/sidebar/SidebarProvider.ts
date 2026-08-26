@@ -38,10 +38,21 @@ import type { SessionTimeSnapshot } from '../vscode/SessionTimeStatusBar';
 
 export type { SidebarProviderEvents };
 
+/**
+ * How often the sidebar re-checks model residency while visible. Slow enough to
+ * be free (a string compare over a handful of slots), fast enough that a dot
+ * never sits visibly wrong after a load or an eviction.
+ */
+const RESIDENCY_POLL_MS = 1500;
+
 export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewId = 'forge.sidebar';
 
   private view?: vscode.WebviewView;
+  /** Residency poll: see MODEL_READINESS_DOT_PLAN.md for why this is a tick and
+   *  not an event. Runs only while the sidebar is visible. */
+  private residencyTimer: ReturnType<typeof setInterval> | undefined;
+  private lastResidencySignature = '';
   private sidebar: SidebarRuntime;
   private readonly failureTracker = new ToolFailureTracker();
   private readonly agentLoop: AgentLoop;
@@ -145,6 +156,31 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     webviewView.webview.onDidReceiveMessage((raw: unknown) => {
       this.handleMessage(raw as WebviewToHost);
     });
+    webviewView.onDidChangeVisibility(() => this.syncResidencyPolling());
+    webviewView.onDidDispose(() => this.stopResidencyPolling());
+    this.syncResidencyPolling();
+  }
+
+  /** Poll only while someone can see the result. */
+  private syncResidencyPolling(): void {
+    if (this.view?.visible) this.startResidencyPolling();
+    else this.stopResidencyPolling();
+  }
+
+  private startResidencyPolling(): void {
+    if (this.residencyTimer) return;
+    this.residencyTimer = setInterval(() => {
+      const signature = this.pool.residencySignature();
+      if (signature === this.lastResidencySignature) return;
+      this.lastResidencySignature = signature;
+      this.postModels();
+    }, RESIDENCY_POLL_MS);
+  }
+
+  private stopResidencyPolling(): void {
+    if (!this.residencyTimer) return;
+    clearInterval(this.residencyTimer);
+    this.residencyTimer = undefined;
   }
 
   // ── Public API ────────────────────────────────────────────────────────────
@@ -234,7 +270,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   // ── Internal ──────────────────────────────────────────────────────────────
 
   private postModels(): void {
-    this.post(buildModelsMessage(this.config));
+    this.post(buildModelsMessage(this.config, this.pool));
   }
 
   private post(msg: HostToWebview): void {
@@ -358,6 +394,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   async dispose(): Promise<void> {
+    this.stopResidencyPolling();
     this.budget.dispose();
     this.review.dispose();
     await this.agentLoop.dispose();

@@ -582,3 +582,64 @@ describe('BackendPool structural config reload', () => {
     expect(warnings[0]).toContain('llama_server.port');
   });
 });
+
+describe('residency reporting for the sidebar dot', () => {
+  beforeEach(resetHarness);
+
+  it('separates resident-but-starting from ready', async () => {
+    const pool = new BackendPool(makeConfig(1));
+
+    expect(pool.isLoaded('A')).toBe(false);
+    expect(pool.isModelReady('A')).toBe(false);
+
+    const acquireA = pool.acquire('A');
+    await flush();
+    // Slot taken, llama-server still reading weights: the gap the dot exists for.
+    expect(pool.isLoaded('A')).toBe(true);
+    expect(pool.isModelReady('A')).toBe(false);
+
+    harness.pending[0].resolve();
+    await acquireA;
+    expect(pool.isModelReady('A')).toBe(true);
+  });
+
+  it('changes signature when readiness flips without residency moving', async () => {
+    const pool = new BackendPool(makeConfig(1));
+
+    const acquireA = pool.acquire('A');
+    await flush();
+    const starting = pool.residencySignature();
+
+    harness.pending[0].resolve();
+    await acquireA;
+
+    // Same single resident model both times — only readiness moved.
+    expect(pool.loadedModelNames()).toEqual(['A']);
+    expect(pool.residencySignature()).not.toBe(starting);
+  });
+
+  it('is stable when nothing moves, so the sidebar skips the repost', async () => {
+    const pool = new BackendPool(makeConfig(1));
+    const acquireA = pool.acquire('A');
+    harness.pending[0].resolve();
+    await acquireA;
+
+    expect(pool.residencySignature()).toBe(pool.residencySignature());
+  });
+
+  it('drops the evicted model from the signature', async () => {
+    const pool = new BackendPool(makeConfig(1)); // one port: B evicts A
+    const acquireA = pool.acquire('A');
+    harness.pending[0].resolve();
+    await acquireA;
+    const withA = pool.residencySignature();
+
+    const acquireB = pool.acquire('B');
+    await flush();
+    harness.pending[1]?.resolve();
+    await acquireB;
+
+    expect(pool.residencySignature()).not.toBe(withA);
+    expect(pool.isLoaded('A')).toBe(false);
+  });
+});

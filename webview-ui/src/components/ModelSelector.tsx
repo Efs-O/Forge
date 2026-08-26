@@ -1,6 +1,29 @@
 import React, { useState, useEffect, useRef } from 'react';
-import type { ModelEntry } from '../../../src/sidebar/messageBridge';
+import type { ModelEntry, ModelResidency } from '../../../src/sidebar/messageBridge';
 import { groupModels } from '../modelGroups';
+
+const RESIDENCY_TITLE: Record<ModelResidency, string> = {
+  ready: 'Loaded and ready — this send starts immediately',
+  loading: 'Loading — the backend is still starting up',
+  cold: 'Not loaded — the next send loads this model first',
+};
+
+/**
+ * Local backend state. Rendered only when the host sent a residency: remote
+ * models hold no VRAM here, and a "cold" dot on one would imply a load cost
+ * that does not exist.
+ */
+function ResidencyDot({ residency }: { residency?: ModelResidency }): React.ReactElement | null {
+  if (!residency) return null;
+  return (
+    <span
+      className={`ms-dot ms-dot--${residency}`}
+      title={RESIDENCY_TITLE[residency]}
+      aria-label={RESIDENCY_TITLE[residency]}
+      role="img"
+    />
+  );
+}
 
 const ROLE_SUFFIXES = ['-coding', '-vision', '-worker'] as const;
 
@@ -66,7 +89,10 @@ export function ModelSelector({
       >
         <span className="ms-trigger-name">
           {activeModel ? (
-            <ModelName name={activeModel} />
+            <>
+              <ResidencyDot residency={models.find((m) => m.name === activeModel)?.residency} />
+              <ModelName name={activeModel} />
+            </>
           ) : (
             <span className="ms-placeholder">No model selected</span>
           )}
@@ -106,6 +132,7 @@ export function ModelSelector({
                     setOpen(false);
                   }}
                 >
+                  <ResidencyDot residency={m.residency} />
                   <ModelName name={m.name} />
                 </div>
               ))}

@@ -9,7 +9,8 @@
 
 import type { ForgeConfig } from '../config/types';
 import { mergeGroupsIntoModel } from '../config/ConfigResolver';
-import type { HostToWebview } from './messageBridge';
+import type { HostToWebview, ModelResidency } from './messageBridge';
+import { classifyModelRoute } from '../llm/ModelRouteClassifier';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
 import { historyMetasFromSession, slimMessagesById, tabMetasFromSession } from './sessionTypes';
 import { modelPickerGroup } from './ModelPickerGroups';
@@ -24,15 +25,42 @@ import type { SessionTimeSnapshot } from '../vscode/SessionTimeStatusBar';
  * tab switch used to leave the header showing the previous tab's model while
  * the host had already switched to this tab's.
  */
-export function buildModelsMessage(config: ForgeConfig): HostToWebview {
+/** Residency the pool can speak to. Remote routes get `undefined` — see
+ *  `ModelEntry.residency`. */
+function residencyOf(
+  model: Parameters<typeof modelPickerGroup>[0],
+  pool: ModelResidencySource | undefined,
+): ModelResidency | undefined {
+  if (!pool) return undefined;
+  const route = classifyModelRoute(model);
+  if (route !== 'local-llama' && route !== 'local-ollama') return undefined;
+  if (!pool.isLoaded(model.name)) return 'cold';
+  return pool.isModelReady(model.name) ? 'ready' : 'loading';
+}
+
+/** The slice of the pool this projection needs, so tests need not build one. */
+export interface ModelResidencySource {
+  isLoaded(modelName: string): boolean;
+  isModelReady(modelName: string): boolean;
+}
+
+export function buildModelsMessage(
+  config: ForgeConfig,
+  pool?: ModelResidencySource,
+): HostToWebview {
   return {
     type: 'models',
     models: config.models.map((configured) => {
       const model = mergeGroupsIntoModel(config, configured);
+      const residency = residencyOf(model, pool);
+      // Spread rather than assign undefined: exactOptionalPropertyTypes draws a
+      // distinction between an absent key and an explicit undefined, and
+      // "no dot" is the absent case.
       return {
         name: model.name,
         provider: model.provider ?? 'llama.cpp',
         group: modelPickerGroup(model),
+        ...(residency ? { residency } : {}),
       };
     }),
     active: config.active_model,

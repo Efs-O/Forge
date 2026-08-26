@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildModelsMessage, buildSessionMetrics } from '../../src/sidebar/sidebarPayloads';
 import type { ForgeConfig } from '../../src/config/types';
+import type { ModelEntry } from '../../src/sidebar/messageBridge';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
 
 const conv = (over: Partial<ConversationRuntime> = {}): ConversationRuntime =>
@@ -19,6 +20,55 @@ describe('buildModelsMessage', () => {
       ['a', 'llama.cpp'],
       ['b', 'ollama'],
     ]);
+  });
+
+  it('omits residency entirely when no pool is supplied', () => {
+    const msg = buildModelsMessage({ active_model: 'a', models: [{ name: 'a' }] } as ForgeConfig);
+    expect((msg as { models: ModelEntry[] }).models[0]).not.toHaveProperty('residency');
+  });
+
+  it('maps a local model through cold / loading / ready', () => {
+    const config = { active_model: 'a', models: [{ name: 'a' }] } as ForgeConfig;
+    const at = (loaded: boolean, ready: boolean): ModelEntry | undefined =>
+      (buildModelsMessage(config, { isLoaded: () => loaded, isModelReady: () => ready }) as {
+        models: ModelEntry[];
+      }).models[0];
+
+    expect(at(false, false)?.residency).toBe('cold');
+    expect(at(true, false)?.residency).toBe('loading');
+    expect(at(true, true)?.residency).toBe('ready');
+  });
+
+  it('reports no residency for remote routes, Ollama cloud included', () => {
+    // Ollama cloud reaches the daemon on localhost but holds no VRAM here, so a
+    // "cold" dot would advertise a load cost that does not exist. Note the route
+    // is decided by the `-cloud`/`:cloud` NAME suffix, not by the endpoint.
+    const msg = buildModelsMessage(
+      {
+        active_model: 'gpt-oss:120b-cloud',
+        models: [
+          { name: 'gpt-oss:120b-cloud', provider: 'ollama' },
+          { name: 'y', provider: 'xai' },
+          { name: 'z', provider: 'openrouter' },
+        ],
+      } as ForgeConfig,
+      { isLoaded: () => false, isModelReady: () => false },
+    );
+
+    for (const model of (msg as { models: ModelEntry[] }).models) {
+      expect(model).not.toHaveProperty('residency');
+    }
+  });
+
+  it('still reports residency for a local Ollama model', () => {
+    const msg = buildModelsMessage(
+      {
+        active_model: 'q',
+        models: [{ name: 'q', provider: 'ollama', endpoint: 'http://localhost:11434' }],
+      } as ForgeConfig,
+      { isLoaded: () => true, isModelReady: () => true },
+    );
+    expect((msg as { models: ModelEntry[] }).models[0]?.residency).toBe('ready');
   });
 });
 

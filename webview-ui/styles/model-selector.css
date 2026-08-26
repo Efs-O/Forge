@@ -52,6 +52,54 @@
   opacity: 0.5;
 }
 
+/* ── Residency dot ──────────────────────────────────────────────────────────
+   Rendered only for models Forge actually hosts. Colour alone never carries
+   the meaning: each dot also has a title/aria-label, and the three states
+   differ in fill as well as hue so they stay distinguishable without colour. */
+
+.ms-dot {
+  flex-shrink: 0;
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+
+.ms-dot--ready {
+  background: var(--vscode-testing-iconPassed, #89d185);
+}
+
+/* Hollow, so "starting" reads as different from "ready" even in monochrome. */
+.ms-dot--loading {
+  background: transparent;
+  border: 1.5px solid var(--vscode-editorWarning-foreground, #cca700);
+  animation: ms-dot-pulse 1.1s ease-in-out infinite;
+}
+
+.ms-dot--cold {
+  background: transparent;
+  border: 1.5px solid var(--vscode-descriptionForeground, #8b8b8b);
+  opacity: 0.6;
+}
+
+@keyframes ms-dot-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ms-dot--loading {
+    animation: none;
+  }
+}
+
 /* Role suffix badge inside trigger and panel items */
 .ms-role {
   margin-left: 2px;

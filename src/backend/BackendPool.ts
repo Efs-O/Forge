@@ -276,6 +276,38 @@ export class BackendPool implements IBackendPool {
     return this.slots.has(key) || this.sharedSlots.has(key) || this.ollamaSlots.has(key);
   }
 
+  /**
+   * Per-model readiness, as opposed to `isAnyReady`'s pool-wide answer. A model
+   * that is resident but still spawning returns false — that gap is the whole
+   * point, since it is the tens of seconds a cold llama-server spends reading
+   * weights before it can serve.
+   */
+  isModelReady(modelName: string): boolean {
+    return this.backendFor(this.poolKey(modelName))?.isReady() ?? false;
+  }
+
+  /**
+   * Change-detection key, not a data structure to parse. Covers residency and
+   * readiness together so a slot that finished starting registers as a change
+   * even though the set of resident models did not move.
+   */
+  residencySignature(): string {
+    const keys = [...this.slots.keys(), ...this.sharedSlots.keys(), ...this.ollamaSlots.keys()];
+    return keys
+      .sort()
+      .map((key) => `${key}:${this.backendFor(key)?.isReady() ? 'r' : 's'}`)
+      .join(',');
+  }
+
+  /** The backend behind an already-resolved pool key, wherever it lives. */
+  private backendFor(key: string): DirectBackend | undefined {
+    return (
+      this.slots.get(key)?.backend ??
+      this.sharedSlots.get(key)?.backend ??
+      this.ollamaSlots.get(key)
+    );
+  }
+
   private claimPort(allowEvict: boolean): PortClaim {
     return claimPort(this.slotTable(), allowEvict);
   }
