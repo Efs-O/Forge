@@ -24,6 +24,7 @@ import { InputRow } from './components/InputRow';
 import { ConfirmationDialog } from './components/ConfirmationDialog';
 import { TabStrip } from './components/TabStrip';
 import { HistoryList } from './components/HistoryList';
+import { StreamingStatus } from './components/StreamingStatus';
 import { SLASH_COMMANDS } from './slashCommands';
 import { webviewDiagnostics } from './WebviewDiagnostics';
 
@@ -290,6 +291,10 @@ export function App(): React.ReactElement {
   const streaming = selectStreaming(state);
   const generating = selectGenerating(state);
   const uiBusy = generating;
+  // `residency` is sent only for models Forge itself hosts, so its presence is
+  // the local/remote answer already — no second heuristic to drift from it.
+  const activeModelIsLocal =
+    state.models.find((model) => model.name === state.activeModel)?.residency !== undefined;
 
   useEffect(() => {
     webviewDiagnostics.recordState({
@@ -319,7 +324,7 @@ export function App(): React.ReactElement {
 
   return (
     <div id="forge-root">
-      <Header streaming={streaming} tokenUsed={tokenUsed} tokenMax={tokenMax} />
+      <Header tokenUsed={tokenUsed} tokenMax={tokenMax} />
       <aside id="chats-panel" aria-label="Forge chats">
         {!state.sessionHydrated && (
           <span id="chats-loading" role="status">
@@ -360,12 +365,11 @@ export function App(): React.ReactElement {
         generating={generating}
         conversationId={state.activeConversationId}
       />
-      {streaming && (
-        <div id="streaming-status" role="status" aria-live="polite">
-          <span className="streaming-status-dot" />
-          Burning tokens…
-        </div>
-      )}
+      <StreamingStatus
+        streaming={streaming}
+        local={activeModelIsLocal}
+        clanker={state.clankerMode}
+      />
       <CheckpointBar
         visible={selectCheckpointPending(state)}
         fileCount={checkpointStats.fileCount}

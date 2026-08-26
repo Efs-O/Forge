@@ -1,29 +1,4 @@
-/* ── Typing / streaming indicator ───────────────────────────────────────── */
-
-@keyframes forge-bounce {
-  0%, 80%, 100% { transform: scaleY(0.5); opacity: 0.3; }
-  40%           { transform: scaleY(1.0); opacity: 1.0; }
-}
-
-#forge-typing {
-  display: none; /* hidden — kept for future use */
-  align-items: center;
-  gap: 3px;
-  flex-shrink: 0;
-  padding: 0 2px;
-}
-
-.forge-typing-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--vscode-progressBar-background, #0e70c0);
-  animation: forge-bounce 1.2s ease-in-out infinite;
-  display: inline-block;
-}
-
-.forge-typing-dot:nth-child(2) { animation-delay: 0.15s; }
-.forge-typing-dot:nth-child(3) { animation-delay: 0.30s; }
+/* ── Streaming indicator ──────────────────────────────────────── */
 
 /* ── In-message generating indicator ───────────────────────────────────── */
 
@@ -77,16 +52,30 @@
   word-break: break-word;
 }
 
+/* Always mounted and always this tall, empty or not: appearing on stream start
+   used to shove the composer down at the moment text began arriving. No border
+   either — a full-width rule read as a panel divider and promoted a transient
+   line into permanent furniture. */
 #streaming-status {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 12px;
+  min-height: 20px;
+  padding: 0 12px;
   font-size: 0.78em;
   color: var(--forge-accent, #0090ff);
-  border-top: 1px solid var(--vscode-editorWidget-border, rgba(128,128,128,0.15));
   user-select: none;
   letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+
+/* Clip rather than wrap: a wrapped phrase would change the row's height and
+   reintroduce exactly the layout shift the reserved height removes. */
+.streaming-status-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .streaming-status-dot {
@@ -95,5 +84,18 @@
   border-radius: 50%;
   background: var(--forge-accent, #0090ff);
   flex-shrink: 0;
+  opacity: 0;
   animation: forge-cursor-blink 0.9s ease-in-out infinite;
+}
+
+#streaming-status.is-streaming .streaming-status-dot {
+  opacity: 1;
+}
+
+/* The phrase rotation is not motion, so it keeps running here — it is the only
+   remaining proof the turn is alive. Only the blink stops. */
+@media (prefers-reduced-motion: reduce) {
+  .streaming-status-dot {
+    animation: none;
+  }
 }

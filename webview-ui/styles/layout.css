@@ -48,19 +48,7 @@ body {
   display: inline-flex;
 }
 
-#forge-header-selects {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 8px 6px;
-}
 
-/* Holds only the typing indicator now that the model selector moved to the
-   composer, so it is empty for most of a session. Collapse it rather than
-   leaving 8px of dead header above the transcript. */
-#forge-header-selects:empty {
-  display: none;
-}
 
 
 /* ── Token budget bar ───────────────────────────────────────────────────── */

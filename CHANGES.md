@@ -1,5 +1,28 @@
 # Forge — Recent Changes
 
+## 0.13.9 - one streaming line, and it has opinions
+
+- **The status line rotates through a pool of phrases.** With no spinner glyph
+  a fixed line sits motionless for the length of a cold model load, and a
+  motionless indicator cannot tell working from hung — so the rotation is the
+  liveness signal, not decoration. Local turns talk about your own hardware
+  ("Melting VRAM…", "Heating the room…"); Clanker Mode adds its own set.
+- **Cloud turns get their own pool** ("Burning credits…", "Renting a GPU…").
+  Claiming local VRAM load during an xAI or Ollama-cloud call would undercut
+  the residency signalling the picker now does honestly — and the wording
+  quietly tells you when a turn went to the wrong model.
+- **No phrase claims progress.** "Almost there" is unknowable, so nothing in
+  any pool says it. A unit test enforces this.
+- **The line no longer moves the page.** It kept its own bordered strip that
+  appeared on stream start and pushed the composer down exactly as text began
+  arriving. It is now always mounted at a reserved height, borderless, and
+  clips rather than wraps when the sidebar is narrow.
+- **Screen readers get a fact, not a joke every 3.5s.** The rotating text is
+  aria-hidden; a stable "Generating" lives in the live region instead. The
+  blinking dot honours prefers-reduced-motion.
+- Removed the dead header typing-dot indicator, which had been display:none
+  but still expanded the header row on every turn.
+
 ## 0.13.8 - the model picker says whether your next send pays a cold load
 
 - **Readiness dot in the model picker.** Picking a model only *pins* it; the

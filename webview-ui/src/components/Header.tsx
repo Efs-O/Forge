@@ -2,7 +2,6 @@ import React from 'react';
 import { formatTokens } from '../../../src/util/formatTokens';
 
 interface Props {
-  streaming: boolean;
   tokenUsed: number;
   tokenMax: number;
 }
@@ -16,28 +15,21 @@ function budgetColor(used: number, max: number): string {
 }
 
 /**
- * Ambient conversation status: how full the context is, and whether a turn is
- * running. The model selector deliberately does NOT live here — it moved next
- * to the prompt, where the choice is actually made. The budget stayed behind
- * because it has to stay readable while scrolling the transcript, not only when
- * you look down to type.
+ * Ambient conversation status: how full the context is.
+ *
+ * The model selector moved to the composer, where the choice is made, and the
+ * typing dots moved to the single streaming line above the prompt — two
+ * indicators firing off one `streaming` flag was redundant, and this row
+ * collapsing and re-expanding around them shifted the transcript on every turn.
+ * The budget stayed because it has to stay readable while scrolling, not only
+ * when you look down to type.
  */
-export function Header({ streaming, tokenUsed, tokenMax }: Props): React.ReactElement {
+export function Header({ tokenUsed, tokenMax }: Props): React.ReactElement {
   const showBudget = tokenMax > 0;
   const fillPct = tokenMax > 0 ? Math.min(100, (tokenUsed / tokenMax) * 100) : 0;
 
   return (
     <div id="forge-header">
-      <div id="forge-header-selects">
-        {streaming && (
-          <span id="forge-typing" title="Generating…" aria-label="Generating">
-            <span className="forge-typing-dot" />
-            <span className="forge-typing-dot" />
-            <span className="forge-typing-dot" />
-          </span>
-        )}
-      </div>
-
       {showBudget && (
         <div
           id="token-budget"

@@ -29,6 +29,12 @@ function setNativeTextareaValue(textarea: HTMLTextAreaElement, value: string): v
   textarea.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
+/** The streaming line's visible phrase. Randomised from a pool, so tests assert
+ *  that something is showing rather than which phrase won. */
+const streamingPhrase = (): string =>
+  document.querySelector<HTMLElement>('#streaming-status.is-streaming .streaming-status-text')
+    ?.textContent ?? '';
+
 describe('App heavy streaming load', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -104,7 +110,7 @@ describe('App heavy streaming load', () => {
       expect(uncaught).toEqual([]);
       expect(reactDepthErrors).toEqual([]);
       expect(textarea.value).toBe('prompt edit 5900');
-      expect(container.textContent).toContain('Burning tokens');
+      expect(streamingPhrase()).not.toBe('');
     },
     60_000,
   );
@@ -152,7 +158,7 @@ describe('App heavy streaming load', () => {
     });
 
     expect(container.textContent).toContain('redirect the active turn');
-    expect(container.textContent).toContain('Burning tokens');
+    expect(streamingPhrase()).not.toBe('');
 
     act(() =>
       hostMessage({ type: 'generationStarted', conversationId: 'stress-conversation' }),
