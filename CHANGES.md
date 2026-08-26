@@ -1,5 +1,11 @@
 # Forge — Recent Changes
 
+## 0.13.13
+
+- Model name is centred in the picker. The chevron is out of flow so it no
+  longer pulls the name off-centre, and its lane stays reserved so a long name
+  ellipsises before reaching it.
+
 ## 0.13.12
 
 - Streaming status line is larger (0.78em -> 0.92em) with a matching 7px dot; it

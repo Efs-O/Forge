@@ -6,21 +6,26 @@
   min-width: 0;
 }
 
+/* Padding is symmetric and the chevron is taken out of flow deliberately: with
+   the chevron in flow, the name centres inside the space *left over* beside it
+   and lands visibly off-centre. The right padding reserves the chevron's lane
+   so a long name ellipsises before it reaches it. */
 .ms-trigger {
   width: 100%;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   gap: 4px;
+  position: relative;
   background: var(--vscode-dropdown-background);
   color: var(--vscode-dropdown-foreground);
   border: 1px solid var(--vscode-dropdown-border);
-  padding: 4px 8px;
+  padding: 4px 22px;
   font-size: inherit;
   font-family: inherit;
   border-radius: var(--forge-radius-sm);
   cursor: pointer;
-  text-align: left;
+  text-align: center;
   min-width: 0;
 }
 
@@ -42,7 +47,10 @@
 }
 
 .ms-chevron {
-  flex-shrink: 0;
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
   font-size: 10px;
   opacity: 0.6;
   line-height: 1;
