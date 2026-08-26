@@ -64,6 +64,8 @@ overlaps with an existing owner, extend the owner instead.
 | Per-turn multi-file diff summary card            | `webview-ui/src/components/DiffGroup.tsx`      |
 | Compact per-round reasoning rows                 | `webview-ui/src/components/ThinkingGroup.tsx`  |
 | Tool call rows + expandable results              | `webview-ui/src/components/ToolRow.tsx`        |
+| Model picker dropdown (grouped, opens upward)    | `webview-ui/src/components/ModelSelector.tsx`  |
+| Chat history rows: restore, rename, delete       | `webview-ui/src/components/HistoryList.tsx`    |
 | Message list ops + session-sync reconciliation   | `webview-ui/src/messageOps.ts`                 |
 | Webview state shape, selectors, action union     | `webview-ui/src/appState.ts`                   |
 | Render-time path/URL linkification               | `webview-ui/src/linkify.ts`                    |

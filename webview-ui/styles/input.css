@@ -56,6 +56,14 @@
 }
 .attachment-remove:hover { opacity: 1; background: transparent; }
 
+#model-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  min-width: 0;
+}
+
 #prompt-area {
   display: flex;
   align-items: flex-end;

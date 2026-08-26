@@ -21,11 +21,13 @@ import {
   opDeleteConversation,
   opNewConversation,
   opSetActiveConversationModel,
+  opRenameConversation,
   opRestoreConversation,
   opSwitchConversation,
 } from './ConversationOps';
 import {
   createDefaultSession,
+  deriveTitle,
   MAX_CONVERSATIONS,
   saveSidebarSession,
   type ConversationRuntime,
@@ -184,6 +186,20 @@ export class ConversationTabs {
     if (nextActive?.active_model) this.deps.setActiveModel(nextActive.active_model);
     this.deps.refreshUi();
     if (modelName) this.offerUnload(modelName);
+  }
+
+  /**
+   * Retitle a tab or a history row. `deriveTitle` caps the length and collapses
+   * whitespace exactly as an auto-derived title is capped, so a hand-typed name
+   * cannot blow out the row it renders in. An all-whitespace title is a no-op
+   * rather than a reset to 'Chat' — the webview treats an empty box as cancel.
+   */
+  rename(id: string, title: string): void {
+    if (!title.trim()) return;
+    const result = opRenameConversation(this.deps.getSidebar(), id, deriveTitle(title));
+    if (!('ok' in result)) return;
+    this.deps.setSidebar(result.sidebar);
+    this.deps.refreshUi();
   }
 
   restore(id: string): void {

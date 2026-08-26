@@ -257,6 +257,9 @@ export function App(): React.ReactElement {
   const handleDeleteConversation = useCallback((id: string) => {
     vscode.postMessage({ type: 'deleteConversation', id });
   }, []);
+  const handleRenameConversation = useCallback((id: string, title: string) => {
+    vscode.postMessage({ type: 'renameConversation', id, title });
+  }, []);
 
   useEffect(() => {
     if (state.history.length === 0) setHistoryExpanded(false);
@@ -316,15 +319,7 @@ export function App(): React.ReactElement {
 
   return (
     <div id="forge-root">
-      <Header
-        models={state.models}
-        activeModel={state.activeModel}
-        onModelChange={handleModelChange}
-        disabled={uiBusy}
-        streaming={streaming}
-        tokenUsed={tokenUsed}
-        tokenMax={tokenMax}
-      />
+      <Header streaming={streaming} tokenUsed={tokenUsed} tokenMax={tokenMax} />
       <aside id="chats-panel" aria-label="Forge chats">
         {!state.sessionHydrated && (
           <span id="chats-loading" role="status">
@@ -349,6 +344,7 @@ export function App(): React.ReactElement {
               expanded={historyExpanded}
               onRestore={handleRestoreConversation}
               onDelete={handleDeleteConversation}
+              onRename={handleRenameConversation}
             />
           </>
         )}
@@ -386,6 +382,10 @@ export function App(): React.ReactElement {
         prefillText={prefillText}
         onPrefillConsumed={handlePrefillConsumed}
         clankerMode={state.clankerMode}
+        models={state.models}
+        activeModel={state.activeModel}
+        onModelChange={handleModelChange}
+        modelPickerDisabled={uiBusy}
       />
       {confirmRequest && (
         <ConfirmationDialog

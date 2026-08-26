@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import type { SlashCommand } from '../slashCommands';
-import type { AttachmentData } from '../../../src/sidebar/messageBridge';
+import type { AttachmentData, ModelEntry } from '../../../src/sidebar/messageBridge';
+import { ModelSelector } from './ModelSelector';
 import { webviewDiagnostics } from '../WebviewDiagnostics';
 
 interface Props {
@@ -13,6 +14,10 @@ interface Props {
   prefillText: string | null;
   onPrefillConsumed: () => void;
   clankerMode: boolean;
+  models: ModelEntry[];
+  activeModel: string | null;
+  onModelChange: (name: string | null) => void;
+  modelPickerDisabled: boolean;
 }
 
 const UNAVAILABLE_WHILE_STREAMING = 'Unavailable while the agent is generating.';
@@ -64,6 +69,10 @@ export function InputRow({
   prefillText,
   onPrefillConsumed,
   clankerMode,
+  models,
+  activeModel,
+  onModelChange,
+  modelPickerDisabled,
 }: Props): React.ReactElement {
   const [text, setText] = useState('');
   const [attachments, setAttachments] = useState<AttachmentData[]>([]);
@@ -246,6 +255,15 @@ export function InputRow({
           ))}
         </div>
       )}
+
+      <div id="model-row">
+        <ModelSelector
+          models={models}
+          activeModel={activeModel}
+          onModelChange={onModelChange}
+          disabled={modelPickerDisabled}
+        />
+      </div>
 
       <div id="prompt-area">
         <button

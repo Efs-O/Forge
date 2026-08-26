@@ -318,6 +318,12 @@ export interface DeleteConversationMsg {
   type: 'deleteConversation';
   id: string;
 }
+/** Rename any conversation by id — an open tab or one archived in history. */
+export interface RenameConversationMsg {
+  type: 'renameConversation';
+  id: string;
+  title: string;
+}
 
 // v0.2+ additions
 export interface ConfirmResponseMsg {
@@ -394,6 +400,7 @@ export type WebviewToHost =
   | CloseConversationMsg
   | RestoreConversationMsg
   | DeleteConversationMsg
+  | RenameConversationMsg
   | ConfirmResponseMsg
   | OpenFileMsg
   | RunSlashCommandMsg

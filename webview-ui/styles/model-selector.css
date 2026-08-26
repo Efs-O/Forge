@@ -61,9 +61,13 @@
 
 /* ── Dropdown panel ─────────────────────────────────────────────────────── */
 
+/* Anchored to the BOTTOM of the trigger and growing upward: the selector now
+   sits in the composer at the foot of the sidebar, so a downward panel would
+   open straight off the bottom edge. `max-height` is viewport-relative so a
+   long grouped model list scrolls instead of overflowing the panel. */
 .ms-panel {
   position: absolute;
-  top: calc(100% + 3px);
+  bottom: calc(100% + 3px);
   left: 0;
   right: 0;
   z-index: 1000;

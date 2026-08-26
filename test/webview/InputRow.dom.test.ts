@@ -55,6 +55,10 @@ function renderInput(streaming: boolean, onRunSlashCommand = vi.fn()): typeof on
         clankerMode: false,
         onRunSlashCommand,
         slashCommands: COMMANDS,
+        models: [],
+        activeModel: null,
+        onModelChange: vi.fn(),
+        modelPickerDisabled: false,
       }),
     );
   });

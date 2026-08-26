@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { SessionHistoryMeta } from '../../../src/sidebar/messageBridge';
 
 interface Props {
@@ -6,6 +6,7 @@ interface Props {
   expanded: boolean;
   onRestore: (id: string) => void;
   onDelete: (id: string) => void;
+  onRename: (id: string, title: string) => void;
 }
 
 function relativeTime(ts: number): string {
@@ -29,19 +30,193 @@ function absoluteTime(ts: number): string {
   });
 }
 
-const TrashIcon = (): React.ReactElement => (
-  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-    <path
-      d="M2.5 3.5h7M4.5 3.5V2h3v1.5m-4 1.5v4.5h5V5M5 6v2.5m2-2.5v2.5"
-      stroke="currentColor"
-      strokeWidth="1.1"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
+const KebabIcon = (): React.ReactElement => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+    <circle cx="8" cy="3.5" r="1.4" />
+    <circle cx="8" cy="8" r="1.4" />
+    <circle cx="8" cy="12.5" r="1.4" />
   </svg>
 );
 
-export function HistoryList({ items, expanded, onRestore, onDelete }: Props): React.ReactElement {
+const RenameIcon = (): React.ReactElement => (
+  <svg
+    width="13"
+    height="13"
+    viewBox="0 0 16 16"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.3"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M11 2.5l2.5 2.5L6 12.5 3 13l.5-3z" />
+  </svg>
+);
+
+const TrashIcon = (): React.ReactElement => (
+  <svg
+    width="13"
+    height="13"
+    viewBox="0 0 16 16"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.3"
+    strokeLinecap="round"
+    aria-hidden="true"
+  >
+    <path d="M3 4.5h10M6 4.5V3h4v1.5m-5 2v6h6v-6" />
+  </svg>
+);
+
+interface RowProps {
+  item: SessionHistoryMeta;
+  renaming: boolean;
+  menuOpen: boolean;
+  onOpenMenu: (id: string | null) => void;
+  onStartRename: (id: string | null) => void;
+  onRestore: (id: string) => void;
+  onDelete: (id: string) => void;
+  onRename: (id: string, title: string) => void;
+}
+
+function HistoryRow({
+  item,
+  renaming,
+  menuOpen,
+  onOpenMenu,
+  onStartRename,
+  onRestore,
+  onDelete,
+  onRename,
+}: RowProps): React.ReactElement {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Dismiss the menu on an outside click or Escape, the same contract the model
+  // selector uses. Without this the menu survives a click into the transcript.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: MouseEvent): void => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) onOpenMenu(null);
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onOpenMenu(null);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [menuOpen, onOpenMenu]);
+
+  useEffect(() => {
+    if (renaming) inputRef.current?.select();
+  }, [renaming]);
+
+  const commit = useCallback((): void => {
+    const next = inputRef.current?.value ?? '';
+    // An unchanged or blank box is a cancel, not a rename: blank would otherwise
+    // round-trip to the host only to be rejected there.
+    if (next.trim() && next !== item.title) onRename(item.id, next);
+    onStartRename(null);
+  }, [item.id, item.title, onRename, onStartRename]);
+
+  if (renaming) {
+    return (
+      <div className="history-item-row history-item-row-editing">
+        <input
+          ref={inputRef}
+          className="history-rename-input"
+          defaultValue={item.title}
+          aria-label="Conversation title"
+          autoFocus
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              commit();
+            } else if (e.key === 'Escape') {
+              e.preventDefault();
+              onStartRename(null);
+            }
+          }}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className={`history-item-row${menuOpen ? ' history-item-row-active' : ''}`}>
+      <button
+        type="button"
+        className="history-item"
+        onClick={() => onRestore(item.id)}
+        title={absoluteTime(item.updatedAt)}
+      >
+        <span className="history-item-title">{item.title}</span>
+        <span className="history-item-meta">
+          {item.messageCount ?? 0} msg · {relativeTime(item.updatedAt)}
+        </span>
+      </button>
+      <div className="history-item-menu-wrap" ref={menuRef}>
+        <button
+          type="button"
+          className="history-item-kebab"
+          aria-label={`Actions for ${item.title}`}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          title="More actions"
+          onClick={() => onOpenMenu(menuOpen ? null : item.id)}
+        >
+          <KebabIcon />
+        </button>
+        {menuOpen && (
+          <div className="history-item-menu" role="menu">
+            <button
+              type="button"
+              role="menuitem"
+              className="history-menu-item"
+              onClick={() => {
+                onOpenMenu(null);
+                onStartRename(item.id);
+              }}
+            >
+              <RenameIcon />
+              Rename
+            </button>
+            <div className="history-menu-sep" />
+            <button
+              type="button"
+              role="menuitem"
+              className="history-menu-item history-menu-item-danger"
+              onClick={() => {
+                onOpenMenu(null);
+                onDelete(item.id);
+              }}
+            >
+              <TrashIcon />
+              Delete…
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function HistoryList({
+  items,
+  expanded,
+  onRestore,
+  onDelete,
+  onRename,
+}: Props): React.ReactElement {
+  // Only one row may be open or editing at a time, so both live here as an id
+  // rather than as per-row state that would survive the row being re-keyed.
+  const [menuId, setMenuId] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+
   return (
     <section id="history-panel" aria-label="Chat history" hidden={!expanded}>
       {items.length === 0 ? (
@@ -50,28 +225,17 @@ export function HistoryList({ items, expanded, onRestore, onDelete }: Props): Re
         <div id="history-list-wrap">
           <div id="history-list">
             {items.map((item) => (
-              <div key={item.id} className="history-item-row">
-                <button
-                  type="button"
-                  className="history-item"
-                  onClick={() => onRestore(item.id)}
-                  title={absoluteTime(item.updatedAt)}
-                >
-                  <span className="history-item-title">{item.title}</span>
-                  <span className="history-item-meta">
-                    {item.messageCount ?? 0} msg · {relativeTime(item.updatedAt)}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  className="history-item-delete"
-                  aria-label={`Delete ${item.title}`}
-                  title="Delete permanently"
-                  onClick={() => onDelete(item.id)}
-                >
-                  <TrashIcon />
-                </button>
-              </div>
+              <HistoryRow
+                key={item.id}
+                item={item}
+                renaming={renamingId === item.id}
+                menuOpen={menuId === item.id}
+                onOpenMenu={setMenuId}
+                onStartRename={setRenamingId}
+                onRestore={onRestore}
+                onDelete={onDelete}
+                onRename={onRename}
+              />
             ))}
           </div>
         </div>

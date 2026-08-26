@@ -3,6 +3,7 @@ import {
   opClearMessages,
   opDeleteConversation,
   opNewConversation,
+  opRenameConversation,
   opSetActiveConversationModel,
 } from '../../src/sidebar/ConversationOps';
 import type { SidebarRuntime } from '../../src/sidebar/sessionTypes';
@@ -125,5 +126,41 @@ describe('opDeleteConversation', () => {
     expect(result.sidebar.conversations[0]?.messages).toEqual([]);
     expect(result.sidebar.conversations[0]?.id).not.toBe('active');
     expect(result.sidebar.activeConversationId).toBe(result.sidebar.conversations[0]?.id);
+  });
+});
+
+describe('opRenameConversation', () => {
+  it('renames an archived conversation without restoring it', () => {
+    const state = sidebar();
+    state.history = [
+      { id: 'old', title: 'hello man', createdAt: 1, updatedAt: 2, messages: [] },
+    ];
+
+    const result = opRenameConversation(state, 'old', 'Background test-suite run');
+
+    expect(result).toMatchObject({ ok: true });
+    if (!('ok' in result)) return;
+    expect(result.sidebar.history[0]?.title).toBe('Background test-suite run');
+  });
+
+  it('leaves updatedAt alone so a rename does not reorder history', () => {
+    const state = sidebar();
+    state.history = [{ id: 'old', title: 'hello man', createdAt: 1, updatedAt: 2, messages: [] }];
+
+    const result = opRenameConversation(state, 'old', 'Renamed');
+
+    if (!('ok' in result)) throw new Error('expected ok');
+    expect(result.sidebar.history[0]?.updatedAt).toBe(2);
+  });
+
+  it('renames an open tab and leaves the other tabs untouched', () => {
+    const result = opRenameConversation(sidebar(), 'other', 'Renamed tab');
+
+    if (!('ok' in result)) throw new Error('expected ok');
+    expect(result.sidebar.conversations.map((c) => c.title)).toEqual(['Active', 'Renamed tab']);
+  });
+
+  it('reports notFound for an unknown id', () => {
+    expect(opRenameConversation(sidebar(), 'nope', 'x')).toEqual({ notFound: true });
   });
 });

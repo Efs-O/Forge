@@ -347,6 +347,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         closeConversation: (id) => void this.tabs.close(id),
         restoreConversation: (id) => this.tabs.restore(id),
         deleteConversation: (id) => void this.tabs.deleteConversation(id),
+        renameConversation: (id, title) => this.tabs.rename(id, title),
         runSlashCommand: (id) => void this.slashHandler.handle(id),
         openFile: (path, line, beside) => this.agentLoop.openFile(path, { line, beside }),
         resolveConfirmation: (id, approved) => this.agentLoop.resolveConfirmation(id, approved),

@@ -21,6 +21,8 @@ export type DeleteConvResult =
   | { notFound: true }
   | { ok: true; sidebar: SidebarRuntime; newActiveId: string };
 
+export type RenameConvResult = { notFound: true } | { ok: true; sidebar: SidebarRuntime };
+
 /**
  * Open a new empty conversation tab. Returns atCap if limit reached.
  *
@@ -137,6 +139,41 @@ export function opDeleteConversation(sidebar: SidebarRuntime, id: string): Delet
     updated.activeConversationId = fallback.id;
   }
   return { ok: true, sidebar: updated, newActiveId: updated.activeConversationId };
+}
+
+/**
+ * Retitle a conversation in place. Looks in both lists: history rows are
+ * renameable without restoring them first, which is the whole point — an
+ * auto-derived title is usually only worth fixing after the chat is closed.
+ *
+ * `updatedAt` is deliberately left alone. It drives the "14h ago" label and the
+ * history sort order, and a rename is not new activity; bumping it would jump
+ * an old chat to the top of the list for a cosmetic edit.
+ */
+export function opRenameConversation(
+  sidebar: SidebarRuntime,
+  id: string,
+  title: string,
+): RenameConvResult {
+  const conversationIndex = sidebar.conversations.findIndex((c) => c.id === id);
+  const historyIndex = sidebar.history.findIndex((c) => c.id === id);
+  if (conversationIndex < 0 && historyIndex < 0) return { notFound: true };
+
+  const updated: SidebarRuntime = {
+    ...sidebar,
+    conversations: [...sidebar.conversations],
+    history: [...sidebar.history],
+  };
+  if (conversationIndex >= 0) {
+    updated.conversations[conversationIndex] = {
+      ...updated.conversations[conversationIndex]!,
+      title,
+    };
+  }
+  if (historyIndex >= 0) {
+    updated.history[historyIndex] = { ...updated.history[historyIndex]!, title };
+  }
+  return { ok: true, sidebar: updated };
 }
 
 /** Restore a conversation from history (or re-activate if already open). */

@@ -38,6 +38,7 @@ export interface WebviewActions {
   closeConversation: (id: string) => void;
   restoreConversation: (id: string) => void;
   deleteConversation: (id: string) => void;
+  renameConversation: (id: string, title: string) => void;
   runSlashCommand: (id: ForgeSlashCommandId) => void;
   openFile: (path: string, line?: number, beside?: boolean) => Promise<void>;
   resolveConfirmation: (id: string, approved: boolean) => void;
@@ -113,6 +114,10 @@ export function routeWebviewMessage(actions: WebviewActions, msg: WebviewToHost)
 
     case 'deleteConversation':
       actions.deleteConversation(msg.id);
+      break;
+
+    case 'renameConversation':
+      actions.renameConversation(msg.id, msg.title);
       break;
 
     case 'runSlashCommand':
