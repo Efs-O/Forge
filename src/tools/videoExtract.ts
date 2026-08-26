@@ -74,6 +74,10 @@ export async function probeVideo(
   signal?: AbortSignal,
   run: RunFfmpeg = defaultRunFfmpeg,
 ): Promise<VideoProbe> {
+  // ffprobe has no `-nostdin` (it rejects the flag and dumps its build banner),
+  // and with an empty input it reads stdin and blocks until the timeout fires.
+  // Guard the argument instead.
+  if (!file.trim()) throw new Error('view_video: probeVideo requires a file path.');
   const argv = [
     '-v',
     'error',
@@ -154,10 +158,53 @@ const SECONDS_PER_FRAME = 5;
 const MIN_FRAMES = 3;
 
 export interface VideoOptions {
+  /** Hard ceiling from config. Never exceeded, whatever the caller asks for. */
   maxFrames: number;
+  /** Explicit count from the caller. Overrides the duration heuristic, up to `maxFrames`. */
+  requestedFrames?: number;
   frameMaxDimension: number;
   frameQuality: number;
   maxDurationSeconds: number;
+  /** Sample only this slice of the clip. Both default to the full clip. */
+  startSeconds?: number;
+  endSeconds?: number;
+}
+
+/** The slice actually sampled. Equal to the whole clip unless a window was asked for. */
+export interface SampleWindow {
+  startSeconds: number;
+  endSeconds: number;
+  /** True when the caller narrowed the clip, so the summary can say so. */
+  isWindowed: boolean;
+}
+
+/**
+ * Validate the requested slice against the clip. Errors name the clip's real
+ * length, because the caller is usually guessing at it.
+ */
+export function resolveWindow(probe: VideoProbe, options: VideoOptions): SampleWindow {
+  const duration = probe.durationSeconds;
+  const start = options.startSeconds ?? 0;
+  const end = options.endSeconds ?? duration;
+
+  if (start < 0) throw new Error('view_video: start_seconds cannot be negative.');
+  if (start >= duration) {
+    throw new Error(
+      `view_video: start_seconds ${start} is at or past the end of the clip (${duration.toFixed(1)}s).`,
+    );
+  }
+  if (end <= start) {
+    throw new Error(
+      `view_video: end_seconds (${end}) must be greater than start_seconds (${start}).`,
+    );
+  }
+  // Past the end is a guess, not an error — clamp and carry on.
+  const clampedEnd = Math.min(end, duration);
+  return {
+    startSeconds: start,
+    endSeconds: clampedEnd,
+    isWindowed: start > 0 || clampedEnd < duration,
+  };
 }
 
 export interface ExtractedFrame {
@@ -175,12 +222,22 @@ function clamp(value: number, low: number, high: number): number {
 }
 
 /**
- * How many stills to take. Tied to duration so a 3 s clip is not sampled as
- * densely as a 30 s one, and hard-bounded by the caller's cap because frames
- * are the dominant term in prompt cost.
+ * How many stills to take.
+ *
+ * An explicit `requestedFrames` wins, bounded only by the configured ceiling.
+ * This ordering is the whole point: the duration heuristic is a *default*, and
+ * an earlier version let it silently override the caller. On a 6-11 s clip the
+ * heuristic always lands on the 3-frame floor, so the `max_frames` argument was
+ * a no-op for every short clip — a caller asking for 10 frames got 3 and had no
+ * way to tell why.
  */
-export function frameCountFor(durationSeconds: number, maxFrames: number): number {
+export function frameCountFor(
+  durationSeconds: number,
+  maxFrames: number,
+  requestedFrames?: number,
+): number {
   const cap = Math.max(1, Math.floor(maxFrames));
+  if (requestedFrames !== undefined) return clamp(Math.floor(requestedFrames), 1, cap);
   return clamp(Math.round(durationSeconds / SECONDS_PER_FRAME), Math.min(MIN_FRAMES, cap), cap);
 }
 
@@ -188,10 +245,11 @@ export function frameCountFor(durationSeconds: number, maxFrames: number): numbe
  * Centre of each slice, not its boundary. Sampling at boundaries lands on cuts
  * and transitions; the centre lands on the shot the slice is actually about.
  */
-export function frameTimes(durationSeconds: number, count: number): number[] {
-  const last = Math.max(0, durationSeconds - END_GUARD_SECONDS);
+export function frameTimes(startSeconds: number, endSeconds: number, count: number): number[] {
+  const span = endSeconds - startSeconds;
+  const last = Math.max(startSeconds, endSeconds - END_GUARD_SECONDS);
   return Array.from({ length: count }, (_unused, index) =>
-    clamp(durationSeconds * ((index + 0.5) / count), 0, last),
+    clamp(startSeconds + span * ((index + 0.5) / count), startSeconds, last),
   );
 }
 
@@ -258,16 +316,24 @@ export async function extractFrames(
   signal?: AbortSignal,
   run: RunFfmpeg = defaultRunFfmpeg,
 ): Promise<VideoExtraction> {
-  if (probe.durationSeconds > options.maxDurationSeconds) {
+  const window = resolveWindow(probe, options);
+  const span = window.endSeconds - window.startSeconds;
+
+  // The limit bounds what we SAMPLE, not what the file happens to contain — so
+  // a window makes a long clip usable instead of refusing it outright.
+  if (span > options.maxDurationSeconds) {
+    const what = window.isWindowed
+      ? `the requested ${span.toFixed(1)}s window of ${path.basename(file)}`
+      : `${path.basename(file)} is ${span.toFixed(1)}s, which`;
     throw new Error(
-      `view_video: ${path.basename(file)} is ${probe.durationSeconds.toFixed(1)}s, longer than the ` +
-        `${options.maxDurationSeconds}s limit. Trim the clip, or raise video.max_duration_seconds ` +
-        'in Forge config — note that every extra frame costs prompt tokens.',
+      `view_video: ${what} exceeds the ${options.maxDurationSeconds}s limit. Narrow it with ` +
+        'start_seconds/end_seconds, or raise video.max_duration_seconds in Forge config — ' +
+        'note that every extra frame costs prompt tokens.',
     );
   }
 
-  const count = frameCountFor(probe.durationSeconds, options.maxFrames);
-  const times = frameTimes(probe.durationSeconds, count);
+  const count = frameCountFor(span, options.maxFrames, options.requestedFrames);
+  const times = frameTimes(window.startSeconds, window.endSeconds, count);
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'forge-video-'));
   try {
     const frames: ExtractedFrame[] = [];

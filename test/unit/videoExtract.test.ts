@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import {
   computeScale,
+  resolveWindow,
   extractFrames,
   FfmpegMissingError,
   frameArgv,
@@ -236,28 +237,46 @@ describe('frameCountFor', () => {
     expect(frameCountFor(300, 2)).toBe(2);
     expect(frameCountFor(1, 1)).toBe(1);
   });
+
+  // The bug this guards: the duration heuristic used to win over an explicit
+  // request, so `max_frames` did nothing on any clip under ~40s.
+  it('honours an explicit request over the duration heuristic', () => {
+    expect(frameCountFor(11, 8, 6)).toBe(6);
+    expect(frameCountFor(5, 8, 8)).toBe(8);
+    expect(frameCountFor(9, 8, 2)).toBe(2);
+  });
+
+  it('still refuses to exceed the configured ceiling', () => {
+    expect(frameCountFor(11, 8, 40)).toBe(8);
+    expect(frameCountFor(11, 3, 10)).toBe(3);
+  });
+
+  it('gives a short clip more frames than the heuristic would, when asked', () => {
+    expect(frameCountFor(11, 8)).toBe(3);
+    expect(frameCountFor(11, 8, 8)).toBe(8);
+  });
 });
 
 describe('frameTimes', () => {
   it('samples slice centres, not boundaries', () => {
-    expect(frameTimes(10, 4)).toEqual([1.25, 3.75, 6.25, 8.75]);
+    expect(frameTimes(0, 10, 4)).toEqual([1.25, 3.75, 6.25, 8.75]);
   });
 
   it('never lands on the very first or very last instant', () => {
-    const times = frameTimes(6, 3);
+    const times = frameTimes(0, 6, 3);
     expect(times[0]).toBeGreaterThan(0);
     expect(times.at(-1)).toBeLessThan(6);
   });
 
   it('clamps against the end guard on a clip shorter than the guard', () => {
-    for (const time of frameTimes(0.1, 3)) {
+    for (const time of frameTimes(0, 0.1, 3)) {
       expect(time).toBeGreaterThanOrEqual(0);
       expect(time).toBeLessThanOrEqual(0.1);
     }
   });
 
   it('returns times in ascending order', () => {
-    const times = frameTimes(11, 5);
+    const times = frameTimes(0, 11, 5);
     expect([...times].sort((a, b) => a - b)).toEqual(times);
   });
 });
@@ -354,7 +373,7 @@ describe('extractFrames', () => {
       fakeFrameRunner(),
     );
     expect(result.frames).toHaveLength(3);
-    expect(result.frames.map((frame) => frame.timeSeconds)).toEqual(frameTimes(5, 3));
+    expect(result.frames.map((frame) => frame.timeSeconds)).toEqual(frameTimes(0, 5, 3));
     expect(result.frames[0]?.jpegBase64).toBe(Buffer.from([0xff, 0xd8, 0xff, 0xdb]).toString('base64'));
     expect(result.probe).toBe(PROBE_HD);
   });
@@ -423,5 +442,149 @@ describe('extractFrames', () => {
     await expect(
       extractFrames(TOOLS, '/clips/a.mp4', PROBE_HD, OPTIONS, undefined, run),
     ).rejects.toThrow(/wrote no frame/);
+  });
+});
+
+const FULL_PROBE: VideoProbe = {
+  durationSeconds: 11,
+  width: 1920,
+  height: 1088,
+  hasAudio: true,
+};
+
+const BASE: VideoOptions = {
+  maxFrames: 26,
+  frameMaxDimension: 640,
+  frameQuality: 3,
+  maxDurationSeconds: 30,
+};
+
+describe('resolveWindow', () => {
+  it('defaults to the whole clip and reports it as unwindowed', () => {
+    expect(resolveWindow(FULL_PROBE, BASE)).toEqual({
+      startSeconds: 0,
+      endSeconds: 11,
+      isWindowed: false,
+    });
+  });
+
+  it('honours a requested slice', () => {
+    expect(resolveWindow(FULL_PROBE, { ...BASE, startSeconds: 8, endSeconds: 11 })).toEqual({
+      startSeconds: 8,
+      endSeconds: 11,
+      isWindowed: true,
+    });
+  });
+
+  it('treats a start alone as "from here to the end"', () => {
+    expect(resolveWindow(FULL_PROBE, { ...BASE, startSeconds: 4 })).toMatchObject({
+      startSeconds: 4,
+      endSeconds: 11,
+      isWindowed: true,
+    });
+  });
+
+  it('clamps an end past the clip rather than failing the call', () => {
+    expect(resolveWindow(FULL_PROBE, { ...BASE, startSeconds: 8, endSeconds: 999 })).toEqual({
+      startSeconds: 8,
+      endSeconds: 11,
+      isWindowed: true,
+    });
+  });
+
+  it('rejects a start past the end of the clip, naming the real length', () => {
+    expect(() => resolveWindow(FULL_PROBE, { ...BASE, startSeconds: 30 })).toThrow(/11\.0s/);
+  });
+
+  it('rejects an inverted or empty window', () => {
+    expect(() => resolveWindow(FULL_PROBE, { ...BASE, startSeconds: 8, endSeconds: 4 })).toThrow(
+      /must be greater than/,
+    );
+    expect(() => resolveWindow(FULL_PROBE, { ...BASE, startSeconds: 5, endSeconds: 5 })).toThrow(
+      /must be greater than/,
+    );
+  });
+
+  it('rejects a negative start', () => {
+    expect(() => resolveWindow(FULL_PROBE, { ...BASE, startSeconds: -1 })).toThrow(/negative/);
+  });
+});
+
+describe('frameTimes with a window', () => {
+  it('samples only inside the window', () => {
+    for (const time of frameTimes(8, 11, 4)) {
+      expect(time).toBeGreaterThanOrEqual(8);
+      expect(time).toBeLessThanOrEqual(11);
+    }
+  });
+
+  it('spreads centres across the window, not the clip', () => {
+    expect(frameTimes(8, 12, 4)).toEqual([8.5, 9.5, 10.5, 11.5]);
+  });
+});
+
+describe('windowed extraction', () => {
+  it('concentrates frames on the requested slice', async () => {
+    const run = fakeFrameRunner();
+    const result = await extractFrames(
+      TOOLS,
+      '/clips/a.mp4',
+      FULL_PROBE,
+      { ...BASE, startSeconds: 8, endSeconds: 11, requestedFrames: 4 },
+      undefined,
+      run,
+    );
+    expect(result.frames).toHaveLength(4);
+    for (const frame of result.frames) {
+      expect(frame.timeSeconds).toBeGreaterThanOrEqual(8);
+      expect(frame.timeSeconds).toBeLessThanOrEqual(11);
+    }
+  });
+
+  it('measures the duration limit against the window, so a window unlocks a long clip', async () => {
+    const longClip: VideoProbe = { ...FULL_PROBE, durationSeconds: 600 };
+    await expect(
+      extractFrames(TOOLS, '/clips/long.mp4', longClip, BASE, undefined, fakeFrameRunner()),
+    ).rejects.toThrow(/exceeds the 30s limit/);
+
+    const windowed = await extractFrames(
+      TOOLS,
+      '/clips/long.mp4',
+      longClip,
+      { ...BASE, startSeconds: 100, endSeconds: 110 },
+      undefined,
+      fakeFrameRunner(),
+    );
+    expect(windowed.frames.length).toBeGreaterThan(0);
+  });
+
+  it('tells the caller to narrow the window when the limit bites', async () => {
+    const longClip: VideoProbe = { ...FULL_PROBE, durationSeconds: 600 };
+    await expect(
+      extractFrames(TOOLS, '/clips/long.mp4', longClip, BASE, undefined, fakeFrameRunner()),
+    ).rejects.toThrow(/start_seconds\/end_seconds/);
+  });
+
+  it('derives the default frame count from the window, not the clip', async () => {
+    const longClip: VideoProbe = { ...FULL_PROBE, durationSeconds: 600 };
+    const result = await extractFrames(
+      TOOLS,
+      '/clips/long.mp4',
+      longClip,
+      { ...BASE, startSeconds: 0, endSeconds: 25 },
+      undefined,
+      fakeFrameRunner(),
+    );
+    expect(result.frames).toHaveLength(5); // round(25/5)
+  });
+});
+
+describe('frame_max_dimension reaches ffmpeg', () => {
+  it('scales to a raised per-call dimension', () => {
+    const argv = frameArgv('/clips/a.mp4', 1, '/tmp/f.jpg', FULL_PROBE, {
+      ...BASE,
+      frameMaxDimension: 1024,
+    });
+    expect(argv[argv.indexOf('-vf') + 1]).toBe('scale=1024:580:flags=lanczos');
   });
 });

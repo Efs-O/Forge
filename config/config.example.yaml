@@ -397,11 +397,13 @@ permissions:
 # video:
 #   # Clips longer than this are refused before any frame is decoded.
 #   max_duration_seconds: 30
-#   # Hard cap on frames per call. The model's own max_frames argument may only
-#   # lower this, never raise it. Actual count scales with clip length
-#   # (roughly one frame per 5 s, minimum 3).
-#   max_frames: 8
-#   # Longest edge of each frame, in pixels. See the table above.
+#   # Hard ceiling on frames per call. When the agent passes max_frames it is
+#   # honoured exactly, up to this number. When it does not, the count comes
+#   # from clip length (roughly one frame per 5 s, minimum 3) — which lands on
+#   # the floor of 3 for any clip under ~17 s, so short clips need max_frames.
+#   max_frames: 26
+#   # Longest edge of each frame, in pixels. See the table above. The agent can
+#   # override this per call (64..4096) when detail is too small to read.
 #   frame_max_dimension: 640
 #   # ffmpeg -q:v. 2 is best quality, higher is smaller. 2..31.
 #   frame_quality: 3

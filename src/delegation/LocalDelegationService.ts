@@ -179,10 +179,22 @@ export class LocalDelegationService {
     }
 
     let hold: DelegationHold | undefined;
+    let holdReleased = false;
+    let releaseOnAbort: (() => void) | undefined;
+    const releaseHold = () => {
+      if (!hold || holdReleased) return;
+      holdReleased = true;
+      hold.release();
+    };
     try {
       const files = await this.readContextFiles(request.contextFiles ?? [], signal);
       const req = this.buildRequest(request, target.model, files);
       hold = await this.acquireHold(request.primaryModel, target.resolvedId, signal);
+      // A cancelled UI turn must free its pool pins immediately. Waiting for a
+      // provider stream to notice the aborted fetch can otherwise leave every
+      // resident model non-evictable after the user has moved on.
+      releaseOnAbort = releaseHold;
+      signal.addEventListener('abort', releaseOnAbort, { once: true });
       const text = await this.streamToBuffer(hold.backend.baseUrl(), req, target.model, signal);
       return {
         text: capResultText(text, MAX_DELEGATION_RESULT_CHARS),
@@ -201,7 +213,8 @@ export class LocalDelegationService {
       if (err instanceof DelegationError) throw err;
       throw new DelegationError(`Delegation provider error: ${(err as Error).message}`);
     } finally {
-      hold?.release();
+      if (releaseOnAbort) signal.removeEventListener('abort', releaseOnAbort);
+      releaseHold();
     }
   }
 

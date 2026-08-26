@@ -171,7 +171,7 @@ const EmbeddingsConfigSchema = z
 const VideoConfigSchema = z
   .object({
     max_duration_seconds: z.number().positive().optional(),
-    max_frames: z.number().int().positive().max(32).optional(),
+    max_frames: z.number().int().positive().max(64).optional(),
     frame_max_dimension: z.number().int().min(64).max(4096).optional(),
     // ffmpeg -q:v: 2 is best quality, higher is smaller.
     frame_quality: z.number().int().min(2).max(31).optional(),

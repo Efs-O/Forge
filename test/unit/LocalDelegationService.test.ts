@@ -67,6 +67,7 @@ function makeHarness(
   opts: Partial<{
     acquireDeferred: boolean;
     streamNever: boolean;
+    streamIgnoresAbort: boolean;
     streamText: string;
     realPath: (filePath: string) => Promise<string>;
   }> = {},
@@ -98,7 +99,9 @@ function makeHarness(
     capturedRequest = req;
     return new Promise<void>((resolve, reject) => {
       streamReject = reject;
-      signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+      if (!opts.streamIgnoresAbort) {
+        signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+      }
       if (!opts.streamNever) {
         handlers.onToken(opts.streamText ?? 'analysis');
         handlers.onDone('stop');
@@ -322,6 +325,25 @@ describe('LocalDelegationService limits and dispatch', () => {
     caller.abort(new DOMException('stop', 'AbortError'));
     await expect(cancelRun).rejects.toThrow('cancelled');
     expect(cancelled.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('unpins immediately when a cancelled provider stream has not settled', async () => {
+    const h = makeHarness({ streamNever: true, streamIgnoresAbort: true });
+    const caller = new AbortController();
+    const run = h.service.ask({
+      primaryModel: 'llama',
+      targetModel: 'llama',
+      task: 'check',
+      signal: caller.signal,
+    });
+    await vi.waitFor(() => expect(h.streamChat).toHaveBeenCalled());
+
+    caller.abort(new DOMException('stop', 'AbortError'));
+    await vi.waitFor(() => expect(h.release).toHaveBeenCalledTimes(1));
+
+    h.streamReject?.(caller.signal.reason);
+    await expect(run).rejects.toThrow('cancelled');
+    expect(h.release).toHaveBeenCalledTimes(1);
   });
 
   it('releases a late startup hold after caller cancellation', async () => {
