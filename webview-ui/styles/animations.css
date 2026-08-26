@@ -1,21 +1,10 @@
-/* ── Streaming indicator ──────────────────────────────────────── */
+/* ── Streaming indicator ───────────────────────────────────────────────── */
 
-/* ── Streaming cursor + label ───────────────────────────────────────────── */
-
+/* Named for the text caret it was written for, which no longer exists. The
+   status dot is the only thing that blinks now. */
 @keyframes forge-cursor-blink {
   0%, 100% { opacity: 1; }
   50%       { opacity: 0; }
-}
-
-.streaming-cursor {
-  display: inline-block;
-  width: 2px;
-  height: 0.85em;
-  background: var(--forge-accent, #0090ff);
-  border-radius: 1px;
-  margin-left: 1px;
-  vertical-align: middle;
-  animation: forge-cursor-blink 0.7s ease-in-out infinite;
 }
 
 .streaming-tail {
