@@ -19,6 +19,9 @@ import {
   makeGoToDefinitionTool,
   makeFindReferencesTool,
 } from './lspTools';
+import { makeApplyCodeActionTool, makeGetCodeActionsTool } from './codeActionTools';
+import { makeEditNotebookCellTool, makeReadNotebookTool } from './notebookTools';
+import { makeListWorkspaceTasksTool, makeRunWorkspaceTaskTool } from './taskTools';
 import {
   makeShowDiffTool,
   makeAskUserTool,
@@ -100,6 +103,9 @@ export function registerAllTools(
   registry.register(makeGetHoverTool());
   registry.register(makeGoToDefinitionTool());
   registry.register(makeFindReferencesTool());
+  registry.register(makeGetCodeActionsTool());
+  registry.register(makeReadNotebookTool());
+  registry.register(makeListWorkspaceTasksTool());
   registry.register(makeShowDiffTool());
   registry.register(makeAskUserTool());
   registry.register(makeShowNotificationTool());
@@ -122,6 +128,8 @@ export function registerAllTools(
   registry.register(makeDeleteFileTool());
   registry.register(makeFormatFileTool());
   registry.register(makeRenameSymbolTool());
+  registry.register(makeApplyCodeActionTool());
+  registry.register(makeEditNotebookCellTool());
 
   // v0.7 exec + git
   registry.register(makeRunTerminalTool());
@@ -132,6 +140,7 @@ export function registerAllTools(
   registry.register(makeSafePowerShellTool());
   registry.register(makeRunTestsTool());
   registry.register(makeRunBuildTool());
+  registry.register(makeRunWorkspaceTaskTool());
   registry.register(makeGitStatusTool());
   registry.register(makeGitLogTool());
   registry.register(makeGitDiffTool());

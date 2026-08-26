@@ -22,6 +22,7 @@ const ALL_PERMISSIONS = new Set<ToolPermission>([
 
 const EXPECTED_NATIVE_NAMES = [
   'append_file',
+  'apply_code_action',
   'apply_line_edits',
   'ask_local_agent',
   'ask_user',
@@ -31,10 +32,12 @@ const EXPECTED_NATIVE_NAMES = [
   'create_directory',
   'delete_file',
   'edit_file',
+  'edit_notebook_cell',
   'exec_command',
   'find_files',
   'find_references',
   'format_file',
+  'get_code_actions',
   'get_diagnostics',
   'get_document_symbols',
   'get_hover',
@@ -49,12 +52,14 @@ const EXPECTED_NATIVE_NAMES = [
   'list_directory',
   'list_executions',
   'list_memories',
+  'list_workspace_tasks',
   'monitor_execution',
   'move_file',
   'open_url_in_browser',
   'query_powershell',
   'read_clipboard',
   'read_file',
+  'read_notebook',
   'recall',
   'remember',
   'rename_symbol',
@@ -62,6 +67,7 @@ const EXPECTED_NATIVE_NAMES = [
   'run_build',
   'run_terminal',
   'run_tests',
+  'run_workspace_task',
   'search_code',
   'search_codebase',
   'show_diff',
@@ -111,7 +117,7 @@ function makeRegistry(options: { search?: boolean; delegation?: boolean } = {}):
 }
 
 describe('registerAllTools canonical coordinator catalog', () => {
-  it('exposes the exact 52-tool native catalog when all optional wiring is present', () => {
+  it('exposes the exact 59-tool native catalog when all optional wiring is present', () => {
     const registry = makeRegistry({ search: true, delegation: true });
     expect(registry.names().sort()).toEqual(EXPECTED_NATIVE_NAMES);
     expect(
@@ -126,6 +132,6 @@ describe('registerAllTools canonical coordinator catalog', () => {
     const names = makeRegistry().names();
     expect(names).not.toContain('web_search');
     expect(names).not.toContain('ask_local_agent');
-    expect(names).toHaveLength(51);
+    expect(names).toHaveLength(57);
   });
 });
