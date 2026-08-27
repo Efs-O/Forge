@@ -1,9 +1,10 @@
 /**
- * Send one short chat to every Ollama *cloud* catalog model defined in bridge.yaml.
- * Cloud rows are detected by key: ...:cloud or ...-cloud (matches bridge.yaml section).
+ * Send one short chat to every Ollama *cloud* catalog model defined in
+ * .forge/config.yaml (F6 models-vs-profiles shape: `models` is an array).
+ * Cloud rows are detected by `group: ollama-local` plus a :cloud / -cloud name.
  *
  * Usage:
- *   node scripts/ping-ollama-cloud-models.mjs [path/to/bridge.yaml] [--prompt "your question"]
+ *   node scripts/ping-ollama-cloud-models.mjs [path/to/config.yaml] [--prompt "your question"]
  *
  * Env:
  *   PING_PROMPT  — default question if --prompt omitted
@@ -29,7 +30,7 @@ function normalizeEndpoint(url) {
 
 function parseArgs(argv) {
   const out = {
-    bridgePath: path.join(REPO_ROOT, "bridge.yaml"),
+    configPath: path.join(REPO_ROOT, ".forge", "config.yaml"),
     prompt: process.env.PING_PROMPT ?? "Reply with exactly: OK",
     timeoutMs: Number(process.env.PING_TIMEOUT_MS ?? 120_000) || 120_000,
   };
@@ -46,7 +47,7 @@ function parseArgs(argv) {
     }
     if (!a.startsWith("-")) rest.push(a);
   }
-  if (rest[0]) out.bridgePath = path.resolve(rest[0]);
+  if (rest[0]) out.configPath = path.resolve(rest[0]);
   return out;
 }
 
@@ -131,34 +132,32 @@ async function chatOnce(baseUrl, request, timeoutMs) {
 }
 
 async function main() {
-  const { bridgePath, prompt, timeoutMs } = parseArgs(process.argv.slice(2));
-  if (!fs.existsSync(bridgePath)) {
-    console.error(`Forge: bridge file not found: ${bridgePath}`);
+  const { configPath, prompt, timeoutMs } = parseArgs(process.argv.slice(2));
+  if (!fs.existsSync(configPath)) {
+    console.error(`Forge: config file not found: ${configPath}`);
     process.exitCode = 1;
     return;
   }
 
-  const doc = yaml.load(fs.readFileSync(bridgePath, "utf8"));
+  const doc = yaml.load(fs.readFileSync(configPath, "utf8"));
   const modelsBlock = doc?.models;
-  if (!modelsBlock || typeof modelsBlock !== "object" || Array.isArray(modelsBlock)) {
-    console.error("Forge: bridge.yaml has no models object");
+  if (!Array.isArray(modelsBlock)) {
+    console.error("Forge: config.yaml has no models array (expected F6 models-vs-profiles shape)");
     process.exitCode = 1;
     return;
   }
 
-  const cloudRows = Object.entries(modelsBlock).filter(([name, cfg]) => {
-    if (!isOllamaCloudKey(name)) return false;
-    if (cfg?.provider !== "ollama" || !cfg?.endpoint) return false;
-    return true;
-  });
+  const cloudRows = modelsBlock
+    .filter((cfg) => cfg?.group === "ollama-local" && isOllamaCloudKey(cfg?.name))
+    .map((cfg) => [cfg.name, cfg]);
 
   if (cloudRows.length === 0) {
-    console.error("Forge: no Ollama cloud models found (keys containing :cloud or ending with -cloud)");
+    console.error("Forge: no Ollama cloud models found (group: ollama-local, name containing :cloud or ending with -cloud)");
     process.exitCode = 1;
     return;
   }
 
-  console.log(`Bridge: ${bridgePath}`);
+  console.log(`Config: ${configPath}`);
   console.log(`Prompt: ${prompt}`);
   console.log(`Models: ${cloudRows.length} (cloud only)\n`);
 
