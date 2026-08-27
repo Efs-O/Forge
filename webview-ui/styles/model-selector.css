@@ -108,10 +108,10 @@
   }
 }
 
-/* Role suffix badge inside trigger and panel items */
+/* Role suffixes describe a model capability, so keep them as legible as the
+   model name rather than treating them as disabled metadata. */
 .ms-role {
   margin-left: 2px;
-  opacity: 0.45;
   font-size: 0.88em;
 }
 
@@ -178,10 +178,6 @@
 .ms-item--active {
   background: var(--vscode-list-activeSelectionBackground, #094771);
   color: var(--vscode-list-activeSelectionForeground, #fff);
-}
-
-.ms-item--active .ms-role {
-  opacity: 0.6;
 }
 
 /* First ms-item (no-model placeholder) has less indent */
