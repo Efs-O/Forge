@@ -195,6 +195,17 @@ describe('summary prompt anchoring', () => {
     expect(prompt).toContain('ORIGINAL REQUEST');
     expect(prompt).toContain(goal);
   });
+
+  it('puts host-recorded command evidence ahead of an oversized transcript', () => {
+    const prompt = buildSummaryPrompt(
+      undefined,
+      [{ role: 'tool', content: 'x'.repeat(60000) }],
+      '**Commands run (recorded by Forge, not written by the model):**\n- ran `download krea2` → exit 0; output evidence: Downloaded krea2_turbo_fp8_scaled.safetensors',
+    );
+
+    expect(prompt).toContain('HOST-RECORDED ACTION OUTCOMES');
+    expect(prompt).toContain('Downloaded krea2_turbo_fp8_scaled.safetensors');
+  });
 });
 
 describe('recorded file facts', () => {
@@ -303,6 +314,42 @@ describe('runCompaction repo snapshot', () => {
 });
 
 describe('runCompaction', () => {
+  it('pins a completed download in both the summary request and compacted context', async () => {
+    const c = conv([
+      { role: 'user', content: 'install Krea 2' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'download',
+            type: 'function',
+            function: {
+              name: 'exec_command',
+              arguments: JSON.stringify({ command: 'download krea2' }),
+            },
+          },
+        ],
+      },
+      {
+        role: 'tool',
+        content: 'Downloaded krea2_turbo_fp8_scaled.safetensors\n[exit code: 0]',
+        tool_call_id: 'download',
+      },
+      { role: 'assistant', content: 'Krea 2 is installed and verified.' },
+      { role: 'user', content: 'continue' },
+    ]);
+    const h = harness(c, async () => long('summary'));
+    const runPrompt = vi.fn(async () => long('summary'));
+    h.deps.runPromptToMarkdown = runPrompt;
+
+    await expect(runCompaction(h.deps, { auto: true })).resolves.toBe('compacted');
+
+    expect(runPrompt.mock.calls[0]?.[0]).toContain('Downloaded krea2_turbo_fp8_scaled.safetensors');
+    expect(c.compaction?.summary).toContain('Downloaded krea2_turbo_fp8_scaled.safetensors');
+    expect(RESUME_PROMPT).toContain('do not repeat its download or installation');
+  });
+
   it('associates its summary request with the compacted conversation', async () => {
     const c = conv([
       { role: 'user', content: 'first task' },

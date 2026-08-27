@@ -84,7 +84,8 @@ const MIN_SUMMARIZED_MESSAGES = 2;
  */
 export const RESUME_PROMPT =
   'Context was compacted. The conversation summary above is your working context - nothing else is being withheld. ' +
-  'The blocks marked "recorded by Forge" are host-recorded fact, not model claims: prefer them over re-checking, and confirm with a tool call only where an entry is marked FAILED or its outcome is unknown. ' +
+  'The blocks marked "recorded by Forge" are host-recorded outcomes, not model claims: prefer them over re-checking. ' +
+  'A successful command with named output evidence means that artifact or state was already observed; do not repeat its download or installation unless the user asks or an entry is marked FAILED or unknown. ' +
   'Do what the Next section of that summary records. If Next says the task is complete, report that to the user instead of starting new work.';
 
 /** Consecutive auto-resumes allowed without an intervening user prompt. */
@@ -195,8 +196,12 @@ export async function runCompaction(
         log.info(`[compact] repo snapshot unavailable — ${(err as Error).message}`);
       }
     }
+    // Supply the deterministic ledger to the summarizer as well as pinning it
+    // below. A long tool dump used to hide an already-completed download from
+    // the model that wrote the summary, leaving only an earlier "next" step.
+    const recordedActions = recordedActionsBlock(split.summarize);
     summary = await deps.runPromptToMarkdown(
-      buildSummaryPrompt(conv.compaction?.summary, split.summarize),
+      buildSummaryPrompt(conv.compaction?.summary, split.summarize, recordedActions),
       conv.id,
       {
         // The conversation's OWN model, not the picker's global default: a

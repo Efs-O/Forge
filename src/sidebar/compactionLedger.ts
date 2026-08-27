@@ -75,6 +75,9 @@ export type ActionOutcome = 'ok' | 'failed' | 'unknown';
 interface Action {
   outcome: ActionOutcome;
   line: string;
+  /** Command output named an artifact or durable state. Preserve these ahead
+   * of ordinary successes when the ledger must be capped. */
+  durableEvidence?: boolean;
 }
 
 /**
@@ -209,6 +212,34 @@ function lastExitCode(result: string): string | undefined {
   return last;
 }
 
+/**
+ * Command output is the host's only evidence for work done outside the
+ * workspace (model downloads, installers, service setup, and similar). Keep
+ * the small, concrete lines that name such work instead of asking a later
+ * summarizer to rediscover them in a multi-megabyte tool result.
+ *
+ * This is deliberately evidence, not an inferred claim: Forge repeats the
+ * command's own output verbatim-ish and separately records its exit status.
+ * A command that merely echoes "installed" is therefore not upgraded into a
+ * host assertion that an installation exists.
+ */
+const DURABLE_OUTPUT_LINE =
+  /\b(?:download(?:ed|ing)?|install(?:ed|ing)?|saved|wrote|created|copied|extracted|verified|available|present|complete(?:d)?|success(?:fully)?|exists?)\b|(?:[A-Za-z]:[\\/]|\/[\w.-]+\/)/i;
+const COMMAND_EVIDENCE_MAX_LINES = 2;
+const COMMAND_EVIDENCE_LINE_MAX_CHARS = 220;
+
+function commandEvidence(result: string): string[] {
+  const found: string[] = [];
+  for (const raw of result.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || /^\[exit code: /i.test(line) || !DURABLE_OUTPUT_LINE.test(line)) continue;
+    const shortened = truncate(line, COMMAND_EVIDENCE_LINE_MAX_CHARS);
+    if (!found.includes(shortened)) found.push(shortened);
+    if (found.length === COMMAND_EVIDENCE_MAX_LINES) break;
+  }
+  return found;
+}
+
 function commandAction(tool: string, label: string, result: string | undefined): Action {
   const outcome = classifyResult(result);
   if (outcome === 'failed') {
@@ -234,7 +265,16 @@ function commandAction(tool: string, label: string, result: string | undefined):
   if (exit === 'null') {
     return { outcome: 'unknown', line: `- ran \`${label}\` → did not complete (exit null)` };
   }
-  if (exit === '0') return { outcome: 'ok', line: `- ran \`${label}\` → exit 0` };
+  if (exit === '0') {
+    const evidence = commandEvidence(result);
+    return {
+      outcome: 'ok',
+      line:
+        `- ran \`${label}\` → exit 0` +
+        (evidence.length > 0 ? `; output evidence: ${evidence.join(' | ')}` : ''),
+      ...(evidence.length > 0 ? { durableEvidence: true } : {}),
+    };
+  }
   return { outcome: 'failed', line: `- ran \`${label}\` → exit ${exit} (FAILED)` };
 }
 
@@ -268,6 +308,9 @@ function capActions(actions: readonly Action[]): { lines: string[]; omitted: num
   const kept = new Set<number>();
   for (const [index, action] of actions.entries()) {
     if (action.outcome !== 'ok' && kept.size < RECORDED_ENTRIES_MAX) kept.add(index);
+  }
+  for (const [index, action] of actions.entries()) {
+    if (action.durableEvidence && kept.size < RECORDED_ENTRIES_MAX) kept.add(index);
   }
   for (const [index] of actions.entries()) {
     if (kept.size >= RECORDED_ENTRIES_MAX) break;

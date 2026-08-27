@@ -124,6 +124,24 @@ describe('collectCommandActions', () => {
     expect(actions).toEqual([{ outcome: 'ok', line: '- ran `npm run ci` → exit 0' }]);
   });
 
+  it('pins concrete download evidence from a successful command', () => {
+    const actions = collectCommandActions([
+      call('krea', 'exec_command', {
+        command: 'huggingface-cli',
+        args: ['download', 'Comfy-Org/Krea-2', 'krea2_turbo_fp8_scaled.safetensors'],
+      }),
+      result(
+        'krea',
+        'Downloaded krea2_turbo_fp8_scaled.safetensors\nSaved to N:\\AI\\ComfyUI\\models\\diffusion_models\\krea2_turbo_fp8_scaled.safetensors\n[exit code: 0]',
+      ),
+    ]);
+
+    expect(actions[0]?.outcome).toBe('ok');
+    expect(actions[0]?.line).toContain('output evidence: Downloaded krea2_turbo');
+    expect(actions[0]?.line).toContain('Saved to N:\\AI\\ComfyUI');
+    expect(actions[0]?.durableEvidence).toBe(true);
+  });
+
   it('makes a non-zero exit as loud as a success', () => {
     const actions = collectCommandActions([
       call('a', 'run_tests', {}),
@@ -197,6 +215,19 @@ describe('recordedActionsBlock', () => {
     const block = recordedActionsBlock(messages);
     expect(block).toContain('FAILED write_file src/bad.ts');
     expect(block).toContain('…and 7 more');
+  });
+
+  it('keeps successful artifact evidence when ordinary successes exceed the cap', () => {
+    const messages: ChatMessage[] = [];
+    for (let i = 0; i < 30; i++) {
+      messages.push(call(`ok${i}`, 'exec_command', { command: `echo ${i}` }), result(`ok${i}`, '[exit code: 0]'));
+    }
+    messages.push(
+      call('krea', 'exec_command', { command: 'download krea2' }),
+      result('krea', 'Downloaded krea2_turbo_fp8_scaled.safetensors\n[exit code: 0]'),
+    );
+
+    expect(recordedActionsBlock(messages)).toContain('Downloaded krea2_turbo_fp8_scaled.safetensors');
   });
 });
 
