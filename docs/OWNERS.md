@@ -207,7 +207,8 @@ overlaps with an existing owner, extend the owner instead.
 | `edit_file` tool                           | `src/tools/editFileTool.ts`           |
 | `old_str` matching + line-ending handling  | `src/tools/editMatch.ts`              |
 | Structured line-edit validation + tool     | `src/tools/structuredEditTool.ts`     |
-| Directory listing tools                    | `src/tools/dirTools.ts`               |
+| Code + file search tools (ripgrep)         | `src/tools/dirTools.ts`               |
+| list_directory + size/age formatting       | `src/tools/listDirectoryTool.ts`      |
 | Terminal + headless exec tools             | `src/tools/execTools.ts`              |
 | Exec child-process helpers                 | `src/tools/execHelpers.ts`            |
 | exec_command program resolution            | `src/tools/execProgramResolver.ts`    |

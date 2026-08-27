@@ -6,6 +6,11 @@ import {
   type BackgroundExecutionObservation,
 } from './BackgroundExecutionManager';
 
+/** Default wait for a fresh monitor call, and the value backoff resets to. */
+export const DEFAULT_MONITOR_WAIT_MS = 10_000;
+/** Schema ceiling for a single wait, and therefore the backoff ceiling. */
+export const MAX_MONITOR_WAIT_MS = 60_000;
+
 export function makeMonitorExecutionTool(): RegisteredTool {
   return {
     definition: {
@@ -13,7 +18,7 @@ export function makeMonitorExecutionTool(): RegisteredTool {
       function: {
         name: 'monitor_execution',
         description:
-          'Wait for a background exec_command to finish or until wait_ms elapses, then return new output and status. Output is capped per call: keep calling with the returned next_stdout_cursor / next_stderr_cursor while stdout_more_available is true. Only a bounded tail of a noisy job is retained — if stdout_dropped_chars appears, that much output is gone for good and stdout_note says what to do. waited_ms is the time actually waited; ran_for_ms is the process runtime.',
+          'Wait for a background exec_command to finish or until wait_ms elapses, then return new output and status. Output is capped per call: keep calling with the returned next_stdout_cursor / next_stderr_cursor while stdout_more_available is true. Only a bounded tail of a noisy job is retained — if stdout_dropped_chars appears, that much output is gone for good and stdout_note says what to do. waited_ms is the time actually waited; ran_for_ms is the process runtime. Always pass the returned suggested_next_wait_ms as your next wait_ms: a job that prints nothing is not necessarily stuck, and re-polling it every 10s burns the tool-round budget of the turn before a long job can finish. If output stays empty while status is running, the job is silent — progress bars redraw with a carriage return and never reach a pipe — so stop watching stdout and watch the artifact instead: poll the SIZE of the file the job is writing. Downloaders and archivers write to a temporary or partial file (.part, .incomplete, .tmp, .download) beside or BELOW the destination, not to the final path, so list the destination recursively before concluding nothing is happening.',
         parameters: {
           type: 'object',
           properties: {
@@ -25,7 +30,8 @@ export function makeMonitorExecutionTool(): RegisteredTool {
               type: 'integer',
               minimum: 0,
               maximum: 60000,
-              description: 'Maximum time to wait for completion, in milliseconds. Default 10000.',
+              description:
+                'Maximum time to wait for completion, in milliseconds. Default 10000. Pass the suggested_next_wait_ms from the previous call rather than re-sending the default.',
             },
             stdout_cursor: {
               type: 'integer',
@@ -73,7 +79,12 @@ export function makeMonitorExecutionTool(): RegisteredTool {
         (args['stderr_cursor'] as number | undefined) ?? 0,
         context?.abortSignal,
       );
-      return formatBackgroundObservation(observation, Date.now() - startedWaitingAt, outputOptions);
+      return formatBackgroundObservation(
+        observation,
+        Date.now() - startedWaitingAt,
+        outputOptions,
+        waitMs,
+      );
     },
   };
 }
@@ -148,10 +159,33 @@ export function makeListExecutionsTool(): RegisteredTool {
   };
 }
 
+/**
+ * Next wait to suggest, given how long this call waited for nothing.
+ *
+ * Geometric, and deliberately stateless: the caller feeds the suggestion back
+ * as `wait_ms`, so doubling the REQUESTED wait produces 10s → 20s → 40s → 60s
+ * without the manager tracking a poll count per execution. Measured wait is the
+ * wrong input — a cancelled turn returns early, and scaling from that would
+ * suggest a shorter wait for a job that is still running.
+ *
+ * Why this matters more here than it looks: the agent has to stay parked inside
+ * a live turn to observe a background job, so every poll spends one of the
+ * turn's `max_tool_rounds`. At the 10s default a 20-minute download costs 120
+ * rounds and the turn dies waiting; at the 60s ceiling it costs 20.
+ */
+function suggestNextWaitMs(requestedWaitMs: number, sawNewOutput: boolean): number {
+  if (sawNewOutput) return DEFAULT_MONITOR_WAIT_MS;
+  // A zero/short wait is a deliberate status peek, not a poll that came up
+  // empty — start the ladder at the default rather than doubling nothing.
+  const base = Math.max(requestedWaitMs, DEFAULT_MONITOR_WAIT_MS);
+  return Math.min(base * 2, MAX_MONITOR_WAIT_MS);
+}
+
 export function formatBackgroundObservation(
   observation: BackgroundExecutionObservation,
   waitedMs: number,
   outputOptions: ReturnType<typeof parseExecOutputOptions>,
+  requestedWaitMs?: number,
 ): string {
   const stream = outputOptions.stream ?? 'both';
   const stdout = shapeBackgroundOutput(
@@ -185,6 +219,23 @@ export function formatBackgroundObservation(
     describeStream(result, 'stderr', stderr.nextCursor, observation.stderrEnd, observation);
   }
   if (observation.error !== undefined) result['error'] = observation.error;
+  if (requestedWaitMs !== undefined && observation.status === 'running') {
+    const sawNewOutput =
+      stdout.nextCursor > observation.stdoutStart || stderr.nextCursor > observation.stderrStart;
+    const suggested = suggestNextWaitMs(requestedWaitMs, sawNewOutput);
+    result['suggested_next_wait_ms'] = suggested;
+    // Only once the ladder has actually left the default — saying this on every
+    // poll of a chatty job is noise, and the advice only applies to a silent one.
+    if (!sawNewOutput && suggested > DEFAULT_MONITOR_WAIT_MS) {
+      result['silence_note'] =
+        'No new output while still running. Silence is not evidence the job is stuck — many ' +
+        'programs draw progress with a carriage return, which never reaches a pipe. Pass ' +
+        `suggested_next_wait_ms (${String(suggested)}) as your next wait_ms, and check progress ` +
+        'by listing the destination directory recursively and watching a file GROW: downloads ' +
+        'and archives write to a .part / .incomplete / .tmp file below the destination, not to ' +
+        'the final path.';
+    }
+  }
   return JSON.stringify(result);
 }
 

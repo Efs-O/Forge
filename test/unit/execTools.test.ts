@@ -193,4 +193,101 @@ describe('exec_command safety policy', () => {
     ) as { status: string };
     expect(stopped.status).toBe('terminated');
   });
+
+  it('backs the suggested wait off while a running job stays silent', async () => {
+    const start = await makeExecCommandTool().handler({
+      command: process.execPath,
+      args: ['-e', 'setTimeout(() => {}, 300000)'],
+      cwd: process.cwd(),
+      background: true,
+    });
+    const started = JSON.parse(start as string) as { execution_id: string };
+
+    // An already-aborted signal makes observe() return at once, so the ladder
+    // can be walked without the test actually sleeping for 130 seconds. The
+    // suggestion is derived from the REQUESTED wait, never the measured one —
+    // which is exactly the property under test.
+    const peek = { beforeMutate: (): void => {}, abortSignal: AbortSignal.abort() };
+    const ladder: number[] = [];
+    for (const requested of [10_000, 20_000, 40_000, 60_000]) {
+      const raw = (await makeMonitorExecutionTool().handler(
+        {
+          execution_id: started.execution_id,
+          wait_ms: requested,
+          stdout_cursor: 0,
+          stderr_cursor: 0,
+        },
+        peek,
+      )) as string;
+      const observed = JSON.parse(raw) as {
+        status: string;
+        suggested_next_wait_ms?: number;
+        silence_note?: string;
+      };
+      expect(observed.status).toBe('running');
+      ladder.push(observed.suggested_next_wait_ms ?? -1);
+      expect(observed.silence_note).toContain('.incomplete');
+    }
+    expect(ladder).toEqual([20_000, 40_000, 60_000, 60_000]);
+
+    await makeStopExecutionTool().handler({ execution_id: started.execution_id });
+  });
+
+  it('resets the suggested wait and drops the note once output arrives', async () => {
+    const start = await makeExecCommandTool().handler({
+      command: process.execPath,
+      args: ['-e', 'process.stdout.write("tick"); setTimeout(() => {}, 300000)'],
+      cwd: process.cwd(),
+      background: true,
+    });
+    const started = JSON.parse(start as string) as { execution_id: string };
+
+    // A real short wait so the child's first chunk reaches the buffer; the
+    // assertion below then re-reads it from cursor 0.
+    await makeMonitorExecutionTool().handler({
+      execution_id: started.execution_id,
+      wait_ms: 500,
+    });
+
+    const raw = (await makeMonitorExecutionTool().handler(
+      {
+        execution_id: started.execution_id,
+        wait_ms: 40_000,
+        stdout_cursor: 0,
+        stderr_cursor: 0,
+      },
+      { beforeMutate: (): void => {}, abortSignal: AbortSignal.abort() },
+    )) as string;
+    const observed = JSON.parse(raw) as {
+      stdout: string;
+      suggested_next_wait_ms?: number;
+      silence_note?: string;
+    };
+    expect(observed.stdout).toContain('tick');
+    expect(observed.suggested_next_wait_ms).toBe(10_000);
+    expect(observed.silence_note).toBeUndefined();
+
+    await makeStopExecutionTool().handler({ execution_id: started.execution_id });
+  });
+
+  it('omits the suggestion once the job is no longer running', async () => {
+    const start = await makeExecCommandTool().handler({
+      command: process.execPath,
+      args: ['-e', 'process.stdout.write("bye")'],
+      cwd: process.cwd(),
+      background: true,
+    });
+    const started = JSON.parse(start as string) as { execution_id: string };
+
+    const raw = (await makeMonitorExecutionTool().handler({
+      execution_id: started.execution_id,
+      wait_ms: 20_000,
+    })) as string;
+    const observed = JSON.parse(raw) as {
+      status: string;
+      suggested_next_wait_ms?: number;
+    };
+    expect(observed.status).toBe('completed');
+    expect(observed.suggested_next_wait_ms).toBeUndefined();
+  });
 });

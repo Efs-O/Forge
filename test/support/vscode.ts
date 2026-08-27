@@ -40,6 +40,20 @@ export const workspace = {
         entry.isDirectory() ? FileType.Directory : FileType.File,
       ]);
     },
+    async stat(uri: { fsPath: string }): Promise<{
+      type: FileType;
+      size: number;
+      ctime: number;
+      mtime: number;
+    }> {
+      const stats = await fs.stat(uri.fsPath);
+      return {
+        type: stats.isDirectory() ? FileType.Directory : FileType.File,
+        size: stats.size,
+        ctime: stats.birthtimeMs,
+        mtime: stats.mtimeMs,
+      };
+    },
   },
   findFiles: async (): Promise<Array<{ fsPath: string }>> => [],
   asRelativePath: (uri: { fsPath: string }): string => {
@@ -120,6 +134,9 @@ export class RelativePattern {
 
 export const Uri = {
   file: (fsPath: string) => ({ fsPath }),
+  joinPath: (base: { fsPath: string }, ...segments: string[]) => ({
+    fsPath: path.join(base.fsPath, ...segments),
+  }),
   parse: (value: string) => ({ fsPath: value, toString: () => value }),
 };
 

@@ -10,7 +10,8 @@ import {
   makeReplaceSelectionTool,
   makeInsertCodeTool,
 } from './builtinTools';
-import { makeListDirectoryTool, makeSearchCodeTool, makeFindFilesTool } from './dirTools';
+import { makeSearchCodeTool, makeFindFilesTool } from './dirTools';
+import { makeListDirectoryTool } from './listDirectoryTool';
 import {
   makeGetDiagnosticsTool,
   makeGetDocumentSymbolsTool,

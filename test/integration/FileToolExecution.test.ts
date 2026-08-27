@@ -9,7 +9,7 @@ import {
   makeReplaceSelectionTool,
   makeWriteFileTool,
 } from '../../src/tools/builtinTools';
-import { makeListDirectoryTool } from '../../src/tools/dirTools';
+import { makeListDirectoryTool } from '../../src/tools/listDirectoryTool';
 import {
   makeCreateDirectoryTool,
   makeDeleteFileTool,
@@ -72,9 +72,11 @@ describe('isolated file and directory tool execution', () => {
     await makeCreateDirectoryTool().handler({ path: 'work' });
     fs.writeFileSync(path.join(root, 'work/source.txt'), 'alpha\nbeta\n', 'utf8');
 
-    await expect(makeListDirectoryTool().handler({ path: 'work' })).resolves.toContain(
-      '[file] source.txt',
-    );
+    const listed = (await makeListDirectoryTool().handler({ path: 'work' })) as string;
+    expect(listed).toContain('[file] source.txt');
+    // Size and age are what let the agent tell a growing file from a stalled
+    // one without waiting on a process that prints nothing.
+    expect(listed).toMatch(/\[file\] source\.txt \(11 B, \d+s ago\)/u);
     await makeEditFileTool().handler({
       filepath: 'work/source.txt',
       old_str: 'alpha',

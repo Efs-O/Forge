@@ -1,49 +1,7 @@
 import { spawn } from 'child_process';
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
-import { resolveWorkspaceUri } from '../util/WorkspacePaths';
 import { resolveRipgrep, type RipgrepResolution } from './RipgrepResolver';
-
-export function makeListDirectoryTool(): RegisteredTool {
-  return {
-    definition: {
-      type: 'function',
-      function: {
-        name: 'list_directory',
-        description:
-          'List entries in a directory. Returns each entry prefixed with [file] or [dir].',
-        parameters: {
-          type: 'object',
-          properties: {
-            path: {
-              type: 'string',
-              description: 'Directory path (absolute or workspace-relative).',
-            },
-          },
-          required: ['path'],
-          additionalProperties: false,
-        },
-      },
-    },
-    permission: 'read',
-    handler: async (args) => {
-      const uri = resolveWorkspaceUri(args['path'] as string);
-      let entries: [string, vscode.FileType][];
-      try {
-        entries = await vscode.workspace.fs.readDirectory(uri);
-      } catch (err) {
-        throw new Error(`list_directory: ${(err as Error).message}`);
-      }
-      if (!entries.length) return '(empty directory)';
-      return entries
-        .map(([name, type]) => {
-          const tag = type === vscode.FileType.Directory ? '[dir]' : '[file]';
-          return `${tag} ${name}`;
-        })
-        .join('\n');
-    },
-  };
-}
 
 const OUTPUT_LINE_LIMIT = 50;
 const CONTEXT_LINES = 2;

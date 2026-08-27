@@ -1,5 +1,24 @@
 # Forge — Recent Changes
 
+## 0.13.16
+
+- A background job that prints nothing no longer costs the turn. `monitor_execution`
+  now returns `suggested_next_wait_ms`, a geometric backoff (10s → 20s → 40s → 60s)
+  derived from the *requested* wait, that resets to 10s the moment new output
+  appears. The agent has to stay parked inside a live turn to observe a background
+  job — Forge has no auto-wake, by design — so every poll spends one of the turn's
+  `max_tool_rounds`. At the old 10s default a 20-minute download cost 120 rounds and
+  the turn died waiting; at the ceiling it costs 20. Once the ladder leaves the
+  default, a `silence_note` also says why silence is not evidence of a stall
+  (progress bars redraw with a carriage return and never reach a pipe) and where to
+  look instead.
+- `list_directory` now reports each entry's size and how long ago it was modified,
+  so "is this job still making progress?" is two calls and a comparison rather than
+  a hand-written `python -c` with `os.path.getmtime`. Directories over 500 entries
+  are listed without metadata and say so. `list_directory` moved to
+  `src/tools/listDirectoryTool.ts`; `dirTools.ts` keeps the two ripgrep-backed
+  search tools.
+
 ## 0.13.15
 
 - Delegation to an Ollama model whose `provider` is inherited from a `group`

@@ -7,11 +7,8 @@ import { CheckpointStack } from '../../src/checkpoint/CheckpointStack';
 import { EmbeddingClient } from '../../src/search/EmbeddingClient';
 import { cosineSimilarity } from '../../src/search/semanticMath';
 import { makeReadFileTool, makeWriteFileTool } from '../../src/tools/builtinTools';
-import {
-  makeFindFilesTool,
-  makeListDirectoryTool,
-  makeSearchCodeTool,
-} from '../../src/tools/dirTools';
+import { makeFindFilesTool, makeSearchCodeTool } from '../../src/tools/dirTools';
+import { makeListDirectoryTool } from '../../src/tools/listDirectoryTool';
 import { makeRunTestsTool } from '../../src/tools/execTools';
 import { buildFallbackToolInstructions } from '../../src/tools/FallbackToolPrompt';
 import { makeEditFileTool } from '../../src/tools/editFileTool';
