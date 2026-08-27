@@ -110,6 +110,34 @@ const displayDiffSchema = z.object({
   isDeleted: z.boolean(),
 });
 
+/**
+ * Bounds on the agent-written task plan.
+ *
+ * `update_plan` is auto-approved, so a model can write this state with no
+ * confirmation gate, and the result is both persisted to session.json AND
+ * re-injected into every subsequent request. Unbounded, that is a context leak
+ * that compounds each round rather than a one-off mistake.
+ */
+export const PLAN_MAX_ITEMS = 20;
+export const PLAN_ITEM_MAX_CHARS = 200;
+
+// `.strict()`, not the Zod default: an object schema that silently STRIPS
+// unknown keys would accept the arbitrary blob the advertised
+// `additionalProperties: false` promises to refuse, and the model would never
+// learn its call was wrong.
+export const planItemSchema = z
+  .object({
+    text: z.string().min(1).max(PLAN_ITEM_MAX_CHARS),
+    status: z.enum(['pending', 'active', 'done']),
+  })
+  .strict();
+
+export type PlanItem = z.infer<typeof planItemSchema>;
+export interface ConversationPlan {
+  items: PlanItem[];
+  updatedAt: number;
+}
+
 export const conversationPersistedSchema = z.object({
   id: z.string().min(1),
   title: z.string(),
@@ -121,6 +149,15 @@ export const conversationPersistedSchema = z.object({
   // Optional, so records written before compaction existed still parse.
   compaction: z
     .object({ summary: z.string().min(1), fromIndex: z.number().int().min(0) })
+    .optional(),
+  // The bounds are re-asserted here, not just in the tool schema: a hand-edited
+  // or corrupted session.json must not be able to reintroduce an unbounded plan
+  // on load, since every round re-injects it into the prompt.
+  plan: z
+    .object({
+      items: z.array(planItemSchema).min(1).max(PLAN_MAX_ITEMS),
+      updatedAt: z.number().int(),
+    })
     .optional(),
   // Optional migration field: previews written by older Forge versions were
   // only live webview state and therefore were not recoverable after a sync.
@@ -160,6 +197,16 @@ export interface ConversationRuntime {
    * persisted record stay whole. Clearing this restores full context.
    */
   compaction?: { summary: string; fromIndex: number };
+  /**
+   * Agent-maintained task ledger, written by the `update_plan` tool.
+   *
+   * Held as conversation state rather than as transcript text so compaction
+   * cannot summarize it away: it is re-rendered into the model-facing messages
+   * every round (see ModelTurn's prepareMessages). `updatedAt` is stamped by
+   * the host, never by the model — the staleness the render displays would be
+   * worthless if the writer could choose it.
+   */
+  plan?: ConversationPlan;
   /** Durable presentation previews, deliberately separate from LLM messages. */
   displayDiffs?: ConversationDisplayDiff[];
   /**

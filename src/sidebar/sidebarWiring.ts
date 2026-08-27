@@ -26,6 +26,7 @@ import { ContextBudgetPublisher } from './ContextBudgetPublisher';
 import { ConversationTabs } from './ConversationTabs';
 import { SendPipeline } from './SendPipeline';
 import { opResetReportedContext } from './ConversationOps';
+import { snapshotRepoState } from './repoSnapshot';
 
 /** What the provider lends its collaborators. */
 export interface SidebarHost {
@@ -134,6 +135,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
       agentLoop.runPromptToMarkdown(text, conversationId, options),
     isStreaming: () => agentLoop.streaming,
     beginCompaction: (convId) => agentLoop.beginBackgroundWork(convId),
+    snapshotRepoState,
     resumeAfterManualCompact: (conversationId) => host.resumeAfterManualCompact(conversationId),
     toggleClanker: () => {
       const on = agentLoop.toggleClanker();

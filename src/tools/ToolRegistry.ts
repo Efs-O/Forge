@@ -1,4 +1,5 @@
 import type { ChatMessage, ContentPart, ToolDefinition } from '../llm/types';
+import type { PlanItem } from '../sidebar/sessionTypes';
 
 export type ToolPermission =
   | 'read'
@@ -39,6 +40,15 @@ export interface ToolHandlerContext {
   /** Full raw transcript for the current conversation. Read-only tools may use
    * this to recover an earlier result without widening the model prompt. */
   conversationMessages?: readonly ChatMessage[];
+  /**
+   * Records the conversation's task plan (`update_plan`).
+   *
+   * A callback rather than a store handle, so `ToolDispatch` never gains one:
+   * `ModelTurn` owns the live conversation and supplies this closure, exactly
+   * as it already does for `recordFileDiff`. The host stamps the timestamp —
+   * the tool supplies items only.
+   */
+  setPlan?: (items: PlanItem[]) => void;
 }
 
 export interface ToolMutation {

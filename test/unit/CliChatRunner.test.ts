@@ -34,6 +34,21 @@ describe('CliChatRunner', () => {
     expect(prompt).toBe('Continue with this');
   });
 
+  it('keeps the host-recorded plan on a CLI resume without restoring old requests', () => {
+    const prompt = buildCliResumeTask(
+      [
+        { role: 'user', content: 'First request' },
+        { role: 'assistant', content: 'First answer' },
+        { role: 'user', content: 'Latest request' },
+      ],
+      '**Task plan (recorded by Forge, updated just now):**\n- [>] in progress: finish it',
+    );
+
+    expect(prompt).toContain('Task plan (recorded by Forge');
+    expect(prompt).toContain('Latest request');
+    expect(prompt).not.toContain('First request');
+  });
+
   it('keeps one-shot Codex chat read-only, streams activity, and joins streamed and final text', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-cli-chat-'));
     roots.push(root);

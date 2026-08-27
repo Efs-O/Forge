@@ -39,6 +39,9 @@ overlaps with an existing owner, extend the owner instead.
 | Compaction: cut point, run, resume         | `src/sidebar/CompactionService.ts`   |
 | Summary prompt text + summary validation   | `src/sidebar/compactionPrompt.ts`    |
 | Applying the compaction window to a request| `src/sidebar/compactionWindow.ts`    |
+| Host-recorded summary facts (from messages)| `src/sidebar/compactionLedger.ts`    |
+| Working-tree snapshot for a compaction     | `src/sidebar/repoSnapshot.ts`        |
+| Agent task plan tool + prompt injection    | `src/tools/planTools.ts`             |
 | Webview HTML builder                       | `src/sidebar/WebviewBuilder.ts`      |
 | Multi-conversation session types + persist | `src/sidebar/sessionTypes.ts`        |
 | Session load/save/migrate (workspaceState) | `src/sidebar/sessionPersistence.ts`  |

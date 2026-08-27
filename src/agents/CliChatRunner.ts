@@ -25,6 +25,9 @@ export interface RunCliChatOptions {
   onPrepared?(): void;
   driver?: CliAgentDriver;
   sessionId?: string;
+  /** Host-recorded Forge plan supplied on every CLI turn. CLI agents own their
+   * tools, so this is context only; it is not a native Forge tool definition. */
+  planPrompt?: string;
   /** When false, suppress the disabled-rollback warning — used for resumed
    *  warm turns that already surfaced it on the first prompt. Defaults to
    *  announcing so one-shot callers keep the warning. */
@@ -68,9 +71,10 @@ export function buildCliChatTask(messages: readonly ChatMessage[]): string {
   ].join('\n\n');
 }
 
-export function buildCliResumeTask(messages: readonly ChatMessage[]): string {
+export function buildCliResumeTask(messages: readonly ChatMessage[], planPrompt?: string): string {
   const latest = [...messages].reverse().find((message) => message.role === 'user');
-  return latest ? contentText(latest.content) : '';
+  const latestText = latest ? contentText(latest.content) : '';
+  return planPrompt ? `${planPrompt}\n\n${latestText}` : latestText;
 }
 
 export async function prepareCliChatAgent(
@@ -108,7 +112,7 @@ export async function runCliChat(options: RunCliChatOptions): Promise<CliChatRes
       cliName: options.prepared.cliName,
       executable: options.prepared.executable,
       task: options.sessionId
-        ? buildCliResumeTask(options.messages)
+        ? buildCliResumeTask(options.messages, options.planPrompt)
         : buildCliChatTask(options.messages),
       // One-shot Codex execution has no app-server approval channel. Keep it
       // read-only; warm Codex sessions below provide workspace-write autonomy
@@ -160,7 +164,9 @@ export async function runWarmCliChat(options: RunWarmCliChatOptions): Promise<Cl
     result = await options.registry.run(
       options.key,
       sessionOptions,
-      confirmedId ? buildCliResumeTask(options.messages) : buildCliChatTask(options.messages),
+      confirmedId
+        ? buildCliResumeTask(options.messages, options.planPrompt)
+        : buildCliChatTask(options.messages),
       {
         signal: options.signal,
         onEvent: (event) => {

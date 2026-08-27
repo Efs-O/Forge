@@ -54,6 +54,9 @@ function persistedToRuntime(p: ConversationPersisted): ConversationRuntime {
     ...(p.active_model !== undefined ? { active_model: p.active_model } : {}),
     ...(p.cli_sessions !== undefined ? { cli_sessions: { ...p.cli_sessions } } : {}),
     ...(p.compaction !== undefined ? { compaction: { ...p.compaction } } : {}),
+    ...(p.plan !== undefined
+      ? { plan: { ...p.plan, items: p.plan.items.map((i) => ({ ...i })) } }
+      : {}),
     ...(p.display_diffs !== undefined
       ? { displayDiffs: p.display_diffs.map((diff) => ({ ...diff })) }
       : {}),
@@ -66,6 +69,19 @@ function persistedToRuntime(p: ConversationPersisted): ConversationRuntime {
     ...(p.model_request_count !== undefined ? { model_request_count: p.model_request_count } : {}),
   };
 }
+
+/**
+ * Result synthesized for a tool call that was still running when Forge was
+ * reloaded.
+ *
+ * Exported because `compactionLedger.ts` must classify it as an UNKNOWN
+ * outcome: it is not a failure (it carries no `Error:`/`User declined:`
+ * prefix), so a classifier that only checks `isFailureResult` would record the
+ * interrupted call as a completed one, in a block that vouches for being
+ * host-recorded truth.
+ */
+export const TOOL_INTERRUPTED_RESULT =
+  'Forge was reloaded while this tool call was running. Its result is unknown; inspect the workspace before deciding whether to rerun it.';
 
 /**
  * A reload can occur after the assistant has announced tool calls but before
@@ -87,8 +103,7 @@ function repairInterruptedToolCalls(messages: ChatMessage[]): ChatMessage[] {
       if (answered.has(call.id)) continue;
       repaired.push({
         role: 'tool',
-        content:
-          'Forge was reloaded while this tool call was running. Its result is unknown; inspect the workspace before deciding whether to rerun it.',
+        content: TOOL_INTERRUPTED_RESULT,
         tool_call_id: call.id,
         name: call.function.name,
       });
@@ -109,6 +124,9 @@ export function runtimeToPersisted(session: SidebarRuntime): SidebarSessionPersi
       ...(c.active_model !== undefined ? { active_model: c.active_model } : {}),
       ...(c.cli_sessions !== undefined ? { cli_sessions: { ...c.cli_sessions } } : {}),
       ...(c.compaction !== undefined ? { compaction: { ...c.compaction } } : {}),
+      ...(c.plan !== undefined
+        ? { plan: { ...c.plan, items: c.plan.items.map((i) => ({ ...i })) } }
+        : {}),
       ...(c.displayDiffs !== undefined
         ? { display_diffs: c.displayDiffs.map((diff) => ({ ...diff })) }
         : {}),
@@ -131,6 +149,9 @@ export function runtimeToPersisted(session: SidebarRuntime): SidebarSessionPersi
       ...(c.active_model !== undefined ? { active_model: c.active_model } : {}),
       ...(c.cli_sessions !== undefined ? { cli_sessions: { ...c.cli_sessions } } : {}),
       ...(c.compaction !== undefined ? { compaction: { ...c.compaction } } : {}),
+      ...(c.plan !== undefined
+        ? { plan: { ...c.plan, items: c.plan.items.map((i) => ({ ...i })) } }
+        : {}),
       ...(c.displayDiffs !== undefined
         ? { display_diffs: c.displayDiffs.map((diff) => ({ ...diff })) }
         : {}),

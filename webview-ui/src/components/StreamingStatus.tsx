@@ -39,6 +39,8 @@ export function StreamingStatus({ streaming, local, clanker }: Props): React.Rea
     // Picked here rather than during render: every arriving token re-renders
     // this component, and rolling in render would reshuffle the phrase on each
     // one.
+    // The bag behind nextPhrase is module-level, so a short turn that draws one
+    // phrase leaves the rest of the deck for the next turn.
     setPhrase((current) => nextPhrase(pool, current));
     const timer = setInterval(() => setPhrase((current) => nextPhrase(pool, current)), ROTATE_MS);
     return () => clearInterval(timer);

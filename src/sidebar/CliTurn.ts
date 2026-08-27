@@ -19,6 +19,7 @@ import type { SidebarProviderEvents } from './AgentLoop';
 import type { TurnLifecycle } from './TurnLifecycle';
 import { getLogger } from '../util/logger';
 import type { UserPromptOptions } from './transcriptMutations';
+import { renderPlan, withPlan } from '../tools/planTools';
 
 const log = getLogger();
 
@@ -77,10 +78,18 @@ export async function runCliTurn(
 
   try {
     const sessionId = conv.cli_sessions?.[model.name];
+    // CLI agents own their tools, so they cannot call Forge's native
+    // update_plan handler. They still receive any existing Forge plan on every
+    // turn, including a warm-session resume that otherwise sends only the
+    // latest user request.
+    const planPrompt = conv.plan
+      ? renderPlan(conv.plan.items, conv.plan.updatedAt, Date.now())
+      : undefined;
     const common = {
       prepared,
       model,
-      messages: conv.messages,
+      messages: withPlan(conv.messages, conv.plan),
+      ...(planPrompt ? { planPrompt } : {}),
       workspaceRoot: ctx.workspaceRoot,
       checkpoint,
       signal: ctrl.signal,

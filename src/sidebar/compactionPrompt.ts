@@ -4,7 +4,9 @@
  * Split out of `CompactionService.ts` for the file-size limit; that file owns
  * WHEN a compaction runs and what is done with the result, this one owns the
  * text going in and the text coming out. `compactionWindow.ts` owns applying a
- * recorded result at request time.
+ * recorded result at request time, and `compactionLedger.ts` owns the
+ * host-recorded facts appended to the summary — nothing model-authored lives
+ * there, and nothing deterministic lives here.
  */
 
 import type { ChatMessage } from '../llm/types';
@@ -102,72 +104,6 @@ export function buildSummaryPrompt(
     'Omit any OTHER section that would be empty. Do not retell the conversation.\n\n' +
     `${previous}${anchorRequest(messages)}Conversation:\n${transcript}`
   );
-}
-
-/**
- * Tools that MODIFY a file, and the argument keys that carry the path.
- *
- * Taken from the schemas in `src/tools/`, not guessed: `edit_file` spells it
- * `filepath` while everything else uses `path`, and missing that spelling
- * silently zeroed this list on a session with 106 edits in it.
- */
-const WRITE_TOOLS = new Set([
-  'write_file',
-  'edit_file',
-  'apply_line_edits',
-  'append_file',
-  'insert_code',
-  'delete_file',
-  'move_file',
-  'format_file',
-  'rename_symbol',
-  'create_file',
-]);
-const PATH_KEYS = ['path', 'filepath', 'file_path', 'source', 'destination'];
-
-/** Cap on the appended block, so recorded facts cannot crowd out the summary. */
-const RECORDED_FILES_MAX = 24;
-
-/**
- * Every file the agent actually changed, read straight off the tool calls.
- *
- * No model judgement is involved, so this cannot be forgotten, paraphrased or
- * hallucinated - and unlike the summary it is derived from ALL the summarized
- * messages, not from the truncated prompt. Measured on session 39c9bf42: two of
- * six changed files never reached the model because the source cap dropped
- * them, so no summarizer could have named them.
- */
-export function collectWrittenFiles(messages: ChatMessage[]): string[] {
-  const found = new Set<string>();
-  for (const msg of messages) {
-    for (const call of msg.tool_calls ?? []) {
-      if (!WRITE_TOOLS.has(call.function.name)) continue;
-      let args: unknown;
-      try {
-        args = JSON.parse(call.function.arguments);
-      } catch {
-        continue;
-      }
-      if (!args || typeof args !== 'object') continue;
-      for (const key of PATH_KEYS) {
-        const value = (args as Record<string, unknown>)[key];
-        if (typeof value === 'string' && value.trim()) {
-          found.add(value.trim().split('\\').join('/'));
-        }
-      }
-    }
-  }
-  return [...found];
-}
-
-/** The recorded-files block, or '' when nothing was written. */
-export function recordedFilesBlock(messages: ChatMessage[]): string {
-  const files = collectWrittenFiles(messages);
-  if (files.length === 0) return '';
-  const shown = files.slice(0, RECORDED_FILES_MAX);
-  const more = files.length > shown.length ? `\n- ...and ${files.length - shown.length} more` : '';
-  const list = shown.map((f) => `- ${f}`).join('\n');
-  return `\n\n**Files changed (recorded by Forge, not written by the model):**\n${list}${more}`;
 }
 
 export function capSummary(summary: string, reserve = 0): string {

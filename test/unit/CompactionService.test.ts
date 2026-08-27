@@ -13,11 +13,13 @@ import {
 } from '../../src/sidebar/CompactionService';
 import {
   buildSummaryPrompt,
-  collectWrittenFiles,
   COMPACTION_SUMMARY_MAX_CHARS,
   isUsableSummary,
-  recordedFilesBlock,
 } from '../../src/sidebar/compactionPrompt';
+import {
+  collectWrittenFiles,
+  recordedActionsBlock,
+} from '../../src/sidebar/compactionLedger';
 import { applyCompactionWindow } from '../../src/sidebar/compactionWindow';
 import type { ChatMessage } from '../../src/llm/types';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
@@ -234,7 +236,69 @@ describe('recorded file facts', () => {
   });
 
   it('emits nothing when the conversation changed no files', () => {
-    expect(recordedFilesBlock([{ role: 'user', content: 'hello' }])).toBe('');
+    expect(recordedActionsBlock([{ role: 'user', content: 'hello' }])).toBe('');
+  });
+});
+
+describe('runCompaction repo snapshot', () => {
+  const messages: ChatMessage[] = [
+    { role: 'user', content: 'first task' },
+    { role: 'assistant', content: 'did the first task' },
+    { role: 'user', content: 'second task' },
+  ];
+
+  it('appends the injected working-tree state to the recorded summary', async () => {
+    const c = conv([...messages]);
+    const h = harness(c, async () => long('summary'));
+    h.deps.snapshotRepoState = async () => '\n\nWORKING TREE: 2 files changed';
+
+    await expect(runCompaction(h.deps, { auto: true })).resolves.toBe('compacted');
+    expect(c.compaction?.summary).toContain('WORKING TREE: 2 files changed');
+  });
+
+  it('captures the snapshot before the summarization request, not after', async () => {
+    const order: string[] = [];
+    const c = conv([...messages]);
+    const h = harness(c, async () => {
+      order.push('summarize');
+      return long('summary');
+    });
+    h.deps.snapshotRepoState = async () => {
+      order.push('snapshot');
+      return '';
+    };
+
+    await runCompaction(h.deps, { auto: true });
+    expect(order).toEqual(['snapshot', 'summarize']);
+  });
+
+  it('still compacts when the snapshot is unavailable', async () => {
+    const c = conv([...messages]);
+    const h = harness(c, async () => long('summary'));
+    h.deps.snapshotRepoState = async () => '';
+
+    await expect(runCompaction(h.deps, { auto: true })).resolves.toBe('compacted');
+    expect(c.compaction?.summary).toContain('summary');
+  });
+
+  it('treats a rejecting injected snapshot as unavailable', async () => {
+    const c = conv([...messages]);
+    const h = harness(c, async () => long('summary'));
+    h.deps.snapshotRepoState = async () => {
+      throw new Error('injected snapshot failed');
+    };
+
+    await expect(runCompaction(h.deps, { auto: true })).resolves.toBe('compacted');
+    expect(c.compaction?.summary).toContain('summary');
+    expect(h.posted.some((m) => m.type === 'generationStarted')).toBe(true);
+  });
+
+  it('compacts unchanged when no snapshot dep is wired at all', async () => {
+    const c = conv([...messages]);
+    const h = harness(c, async () => long('summary'));
+    expect(h.deps.snapshotRepoState).toBeUndefined();
+
+    await expect(runCompaction(h.deps, { auto: true })).resolves.toBe('compacted');
   });
 });
 

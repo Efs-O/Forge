@@ -14,9 +14,9 @@ import {
   buildSummaryPrompt,
   capSummary,
   isUsableSummary,
-  recordedFilesBlock,
   SUMMARY_OUTPUT_TOKENS,
 } from './compactionPrompt';
+import { recordedActionsBlock } from './compactionLedger';
 import type { PromptRunOptions } from './PromptRun';
 import { getLogger } from '../util/logger';
 import type { UserPromptOptions } from './transcriptMutations';
@@ -39,6 +39,15 @@ export interface CompactionDeps {
   /** Marks the conversation busy for the duration of the summarization call.
    *  Returns the release. */
   beginCompaction: (convId: string) => () => void;
+  /**
+   * Working-tree state to append to the summary, so a resumed agent can check
+   * the recorded ledger against the repo without spending a tool call.
+   *
+   * Injected rather than imported so the git/process dependency stays out of
+   * this file's tests, and optional so a caller that cannot supply one still
+   * compacts — the block is evidence, never a precondition.
+   */
+  snapshotRepoState?: () => Promise<string>;
 }
 
 export type CompactionOutcome = 'compacted' | 'skipped' | 'failed';
@@ -64,9 +73,19 @@ const MIN_SUMMARIZED_MESSAGES = 2;
  * task was finished, the summary correctly carried no Next, and the resumed
  * agent burned a turn hunting for it. `buildSummaryPrompt` now always emits
  * Next, and this prompt no longer assumes what that section says.
+ *
+ * Fourth instance, 2026-08-27: "do not redo work it records as done" is a
+ * prohibition a model violates the moment it feels uncertain, and prose it
+ * cannot verify makes it uncertain constantly. The wording now points at the
+ * host-recorded blocks `compactionLedger.ts` appends and permits exactly the
+ * verification those blocks cannot supply. This is guidance, not enforcement —
+ * nothing here stops a model re-reading a file, and the fix for that is
+ * removing the REASON to re-read, not scolding it harder.
  */
 export const RESUME_PROMPT =
-  'Context was compacted. The conversation summary above is your working context - nothing else is being withheld. Do what its Next section records, and do not redo work it records as done. If Next says the task is complete, report that to the user instead of starting new work.';
+  'Context was compacted. The conversation summary above is your working context - nothing else is being withheld. ' +
+  'The blocks marked "recorded by Forge" are host-recorded fact, not model claims: prefer them over re-checking, and confirm with a tool call only where an entry is marked FAILED or its outcome is unknown. ' +
+  'Do what the Next section of that summary records. If Next says the task is complete, report that to the user instead of starting new work.';
 
 /** Consecutive auto-resumes allowed without an intervening user prompt. */
 export const MAX_CONSECUTIVE_AUTO_CONTINUES = 2;
@@ -161,7 +180,21 @@ export async function runCompaction(
   deps.post({ type: 'generationStarted', conversationId: conv.id });
   const release = deps.beginCompaction(conv.id);
   let summary: string;
+  let repoState = '';
   try {
+    // Keep the conversation busy while the bounded snapshot runs. Awaiting it
+    // before beginCompaction left a window in which a new turn could start and
+    // invalidate the cut point we just selected.
+    if (deps.snapshotRepoState) {
+      try {
+        repoState = await deps.snapshotRepoState();
+      } catch (err) {
+        // Evidence is optional even when an injected implementation is faulty.
+        // The real snapshotter already catches its own git errors; this guard
+        // preserves CompactionDeps' promise that it can never block compaction.
+        log.info(`[compact] repo snapshot unavailable — ${(err as Error).message}`);
+      }
+    }
     summary = await deps.runPromptToMarkdown(
       buildSummaryPrompt(conv.compaction?.summary, split.summarize),
       conv.id,
@@ -187,9 +220,10 @@ export async function runCompaction(
     deps.post({ type: 'done', finishReason: 'stop', conversationId: conv.id });
   }
 
-  // Recorded by code from the tool calls, so the files the agent changed
-  // survive even when the source cap kept them out of the summarizer's view.
-  const recorded = recordedFilesBlock(split.summarize);
+  // Recorded by code from the tool calls, so what the agent did survives even
+  // when the source cap kept it out of the summarizer's view — and so a failed
+  // write is never reported as a completed one.
+  const recorded = recordedActionsBlock(split.summarize) + repoState;
   const trimmed = capSummary(summary, recorded.length);
   if (!isUsableSummary(trimmed)) {
     log.info(`[compact] rejected unusable summary (${trimmed.length} chars)`);

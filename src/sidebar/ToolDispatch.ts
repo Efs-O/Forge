@@ -18,6 +18,7 @@ import type { DiffDecorations } from './DiffDecorations';
 import { resolveWorkspacePath, type ResolveWorkspacePathOptions } from '../util/WorkspacePaths';
 import { capDisplayText } from '../tools/resultCap';
 import { isFailureResult, readPathArg, resultLabel } from './toolResultView';
+import type { PlanItem } from './sessionTypes';
 
 const WRITE_PERMISSIONS = new Set<ToolPermission>(['write', 'delete']);
 const DELETE_PREVIEW_LIMIT = 8;
@@ -207,6 +208,7 @@ export class ToolDispatch {
     budget?: ToolBudget,
     recordFileDiff?: (diff: RecordedFileDiff) => void,
     unavailableTools?: ReadonlyMap<string, string>,
+    setPlan?: (items: PlanItem[]) => void,
   ): Promise<void> {
     for (const tc of toolCalls) {
       let result: ToolHandlerResult;
@@ -326,6 +328,7 @@ export class ToolDispatch {
           ...(signal !== undefined ? { abortSignal: signal } : {}),
           ...(convId !== undefined ? { conversationId: convId } : {}),
           conversationMessages: messages,
+          ...(setPlan !== undefined ? { setPlan } : {}),
         });
 
         if (reg.mutation) {

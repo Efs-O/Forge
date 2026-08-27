@@ -27,6 +27,7 @@ import { resolveToolPermissions } from '../tools/PermissionResolver';
 import { ToolBudget } from '../tools/ToolBudget';
 import { deriveStaticCapabilities } from '../config/ConfigResolver';
 import { extractToolDetail } from './toolSummary';
+import { withPlan } from '../tools/planTools';
 import { visionUnavailableMessage } from '../tools/imageTool';
 import { videoUnavailableMessage } from '../tools/videoTool';
 import {
@@ -224,7 +225,7 @@ export async function runModelTurn(
         // full raw transcript for sidebar, persistence, and exact recovery via
         // read_tool_result when an excerpt calls for more detail.
         return prepareToolResultContext({
-          messages: injected,
+          messages: withPlan(injected, conv.plan),
           toolTokens: estimateToolTokens(toolDefinitions),
           model,
           server: config.llama_server,
@@ -253,6 +254,14 @@ export async function runModelTurn(
             displayDiffs.push(diff);
           },
           unavailableTools,
+          // The host stamps updatedAt, never the model: the staleness shown in
+          // the injected block would be worthless if its writer could choose
+          // it. onTranscriptChanged is what persists and syncs, so the plan is
+          // durable the moment the tool returns.
+          (items) => {
+            conv.plan = { items, updatedAt: Date.now() };
+            ctx.onTranscriptChanged?.(conv);
+          },
         );
         // The token bar reports measured context, not a projection, so a tool
         // result does not move it — the next round's usage frame does. The
