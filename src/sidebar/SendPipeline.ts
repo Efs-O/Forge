@@ -21,6 +21,12 @@ import { validateAttachments } from './attachmentValidation';
 
 const log = getLogger();
 
+/** Undefined outside a real host (tests, or an unresolvable extension id). */
+function forgeVersion(): string | undefined {
+  const version = vscode.extensions.getExtension('Efsoo.forge-llm')?.packageJSON?.['version'];
+  return typeof version === 'string' ? version : undefined;
+}
+
 export interface SendPipelineDeps {
   getConfig: () => ForgeConfig;
   getSidebar: () => SidebarRuntime;
@@ -154,13 +160,22 @@ export class SendPipeline {
     const conv = this.deps.getSidebar().conversations.find((c) => c.id === convId);
     if (!conv || conv.messages.length === 0) return;
     if (!this.sessionLoggers.has(convId)) {
+      const folder = vscode.workspace.workspaceFolders?.[0];
       this.sessionLoggers.set(
         convId,
-        new SessionLogger(convId, conv.title, conv.active_model ?? ''),
+        new SessionLogger(convId, conv.title, conv.active_model ?? '', {
+          ...(folder ? { workspaceName: folder.name, workspacePath: folder.uri.fsPath } : {}),
+          ...(forgeVersion() ? { forgeVersion: forgeVersion()! } : {}),
+        }),
       );
     }
     const logger = this.sessionLoggers.get(convId)!;
     logger.updateTitle(conv.title);
-    logger.flush(conv.messages, conv.active_model ?? '');
+    logger.flush(conv.messages, conv.active_model ?? '', {
+      inputTokens: conv.input_tokens ?? 0,
+      outputTokens: conv.output_tokens ?? 0,
+      requestCount: conv.model_request_count ?? 0,
+      ...(conv.active_time_ms !== undefined ? { activeTimeMs: conv.active_time_ms } : {}),
+    });
   }
 }
