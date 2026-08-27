@@ -4,7 +4,7 @@
  * Both arms run back to back against the SAME loaded llama-server, on the SAME
  * transcript window, through Forge's real `selectCompactionSplit` and
  * `buildSummaryPrompt`. Only the request shape differs — which is the whole of
- * COMPACTION_SUMMARIZER_REQUEST_PLAN.md, so the plan can be judged on evidence
+ * docs/plans/COMPACTION_SUMMARIZER_REQUEST_PLAN.md, so the plan can be judged on evidence
  * before it is implemented.
  *
  *   node scripts/compaction-ab.mjs --base-url http://127.0.0.1:8080 --runs 3

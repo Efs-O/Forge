@@ -4,7 +4,7 @@
  * A tool call's arguments are generated as one JSON string, so a large file
  * body is one unbroken run of output. When the remaining context cannot hold
  * it, generation stops mid-string, llama-server's chat parser throws, and the
- * whole turn is lost — see TOOL_CALL_TRUNCATION_PLAN.md. Staying under this
+ * whole turn is lost — see docs/plans/TOOL_CALL_TRUNCATION_PLAN.md. Staying under this
  * keeps any single call recoverable, and the cost of being wrong is one extra
  * append rather than a dead turn.
  *

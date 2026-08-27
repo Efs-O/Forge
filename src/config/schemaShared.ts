@@ -53,7 +53,7 @@ export const SpawnSchema = z.object({
 });
 
 // Shared config bundle ("board") — F7. All optional; a model opts in via
-// `group`/`groups`. See CONFIG_OVERHAUL_PLAN.md §2.1.
+// `group`/`groups`. See docs/plans/CONFIG_OVERHAUL_PLAN.md §2.1.
 export const GroupSchema = z.object({
   provider: ProviderSchema.optional(),
   endpoint: z.string().url().optional(),

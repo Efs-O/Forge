@@ -49,7 +49,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewId = 'forge.sidebar';
 
   private view?: vscode.WebviewView;
-  /** Residency poll: see MODEL_READINESS_DOT_PLAN.md for why this is a tick and
+  /** Residency poll: see docs/plans/MODEL_READINESS_DOT_PLAN.md for why this is a tick and
    *  not an event. Runs only while the sidebar is visible. */
   private residencyTimer: ReturnType<typeof setInterval> | undefined;
   private lastResidencySignature = '';

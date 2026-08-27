@@ -16,13 +16,13 @@ type ModelOverlay = { [K in ModelOverlayKey]?: ModelConfig[K] | undefined };
  * `ModelConfig` so every downstream consumer stays unchanged:
  *   - request-time: defaults < base request fields < named profile
  *   - spawn-time:   base flat/spawn < spawn_profile
- * See `F6_PROFILES_PLAN.md`.
+ * See `docs/plans/F6_PROFILES_PLAN.md`.
  *
  * F7 — `groups` ("boards") and fuzzy model-name resolution layer on top:
  * precedence is `defaults < group(s) < model fields < profile`. Groups are
  * merged into the base model once, in `findBase`, so both request-time and
  * spawn-time flattening automatically see group-derived fields as if they
- * were declared directly on the model. See CONFIG_OVERHAUL_PLAN.md §2.1/§2.2.
+ * were declared directly on the model. See docs/plans/CONFIG_OVERHAUL_PLAN.md §2.1/§2.2.
  */
 
 /** Thrown when a fuzzy model lookup matches more than one configured model.

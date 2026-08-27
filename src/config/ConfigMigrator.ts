@@ -27,7 +27,7 @@ import type { ForgeConfig } from './types';
  * One-shot migration: factor repeated spawn/sampling/endpoint/think blocks
  * across models into `groups:` ("boards") via `ConfigGroupHeuristic`, verify
  * a zero resolved-config diff, then write through the comment-preserving
- * writer. See CONFIG_OVERHAUL_PLAN.md §2.6 and §4 step 4. Owner for the
+ * writer. See docs/plans/CONFIG_OVERHAUL_PLAN.md §2.6 and §4 step 4. Owner for the
  * resolved-diff verifier and the end-to-end migration flow; the grouping
  * heuristic itself lives in `ConfigGroupHeuristic.ts`. Command registration
  * lives in `src/vscode/nativeCommands.ts` (`forge.compactConfig`). See

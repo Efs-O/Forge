@@ -7,7 +7,7 @@ import type { ForgeConfig, GroupConfig, ModelConfig } from './types';
  * "which fields get lifted into a shared `groups:` entry, and how models
  * are clustered to decide that." Orchestration (verify/backup/write) lives
  * in `ConfigMigrator.ts`, which is the only consumer of this module. See
- * CONFIG_OVERHAUL_PLAN.md §2.6/§4 step 4 and docs/OWNERS.md.
+ * docs/plans/CONFIG_OVERHAUL_PLAN.md §2.6/§4 step 4 and docs/OWNERS.md.
  *
  * Per-key, not all-or-nothing: `ConfigResolver.mergeGroupsIntoModel` merges
  * `spawn`, `sampling`, and `tool_call_limits` KEY-BY-KEY, so a group only

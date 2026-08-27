@@ -1,5 +1,5 @@
 /**
- * Shared types for the `provider: cli` external agent driver (CONFIG_OVERHAUL_PLAN.md
+ * Shared types for the `provider: cli` external agent driver (docs/plans/CONFIG_OVERHAUL_PLAN.md
  * §2.4/§4 step 7). Forge spawns an already-logged-in CLI (Claude Code, Codex) as a
  * full-rights external agent using its own tools — Forge never injects its tool
  * registry or runs its own tool-calling loop for these.

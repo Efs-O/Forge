@@ -13,7 +13,7 @@ import type { ModelConfig, LlamaServerConfig } from '../config/types';
  * - PREDICTING THE NEXT REQUEST — `estimateTokens` / `computeContextBudget`.
  *   A chars-per-token approximation, because the request has not been sent and
  *   nobody has tokenized it yet. Its only consumer is the output budget that
- *   sizes `max_tokens` (see TOOL_CALL_TRUNCATION_PLAN.md). It must never reach
+ *   sizes `max_tokens` (see docs/plans/TOOL_CALL_TRUNCATION_PLAN.md). It must never reach
  *   a display: a bar that reads 0.85 when the truth is 0.95 is worse than no
  *   bar at all.
  */

@@ -5,7 +5,7 @@
  * which a resumed agent cannot tell apart from a claim, so it re-verifies. This
  * is the exception: the plan is conversation state, re-injected verbatim every
  * round and never summarized, so a compaction cannot cost more than one stale
- * item. See COMPACTION_STATE_LEDGER_PLAN.md.
+ * item. See docs/plans/COMPACTION_STATE_LEDGER_PLAN.md.
  *
  * The tool does not own the state. `ModelTurn` does, via the `setPlan` closure
  * on `ToolHandlerContext` — the same shape `recordFileDiff` already uses to let

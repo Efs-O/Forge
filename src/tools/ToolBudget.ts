@@ -8,7 +8,7 @@ import type { ToolDefinition } from '../llm/types';
  * never shared across turns/runs. This narrows what
  * ToolRegistry/PermissionResolver already allow — it never grants back
  * something permissions deny, since permission checks always still run in
- * `ToolRegistry.dispatch`. See CONFIG_OVERHAUL_PLAN.md §2.1/§4 step 3.
+ * `ToolRegistry.dispatch`. See docs/plans/CONFIG_OVERHAUL_PLAN.md §2.1/§4 step 3.
  */
 export class ToolBudget {
   private readonly allowlist: ReadonlySet<string> | null;

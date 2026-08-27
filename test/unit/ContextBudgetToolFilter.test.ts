@@ -197,7 +197,7 @@ describe('output-budget estimate still accounts for advertised tools', () => {
   // Tool filtering moved off the display and onto the only consumer that still
   // needs a projection: the `max_tokens` the next request may generate. The
   // request has not been sent, so nothing has tokenized it and an estimate is
-  // the only option available (see TOOL_CALL_TRUNCATION_PLAN.md).
+  // the only option available (see docs/plans/TOOL_CALL_TRUNCATION_PLAN.md).
   function outputRoom(group: GroupOverride): number {
     const model = { name: 'local', num_ctx: 32768, ...group } as unknown as ModelConfig;
     const advertised = new ToolBudget(model).filterDefinitions(

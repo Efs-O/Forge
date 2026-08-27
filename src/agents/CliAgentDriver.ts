@@ -38,7 +38,7 @@ export interface CliAgentRunOptions {
  * one task, streams its parsed progress, and returns the final result. Forge
  * injects no tools here — the CLI runs its own agentic loop with its own
  * tools; this driver only relays stdout/exit status. Single owner of the
- * CLI-agent spawn/parse/cancel/timeout lifecycle (CONFIG_OVERHAUL_PLAN.md §4 step 7).
+ * CLI-agent spawn/parse/cancel/timeout lifecycle (docs/plans/CONFIG_OVERHAUL_PLAN.md §4 step 7).
  */
 export class CliAgentDriver {
   async run(options: CliAgentRunOptions): Promise<CliAgentRunResult> {

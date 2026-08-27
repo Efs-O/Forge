@@ -53,7 +53,7 @@ export type ModelProvider =
  * A named bundle of shared config ("board") that models opt into via
  * `group`/`groups`. Purely additive — precedence is
  * `defaults < group(s) < model fields < profile` (ConfigResolver owns the
- * merge). See CONFIG_OVERHAUL_PLAN.md §2.1.
+ * merge). See docs/plans/CONFIG_OVERHAUL_PLAN.md §2.1.
  */
 export interface GroupConfig {
   provider?: ModelProvider;

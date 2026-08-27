@@ -68,7 +68,7 @@ async function buildModelView(
 }
 
 /**
- * Orphan detection scope follows CONFIG_OVERHAUL_PLAN.md §2.3: GGUFs found
+ * Orphan detection scope follows docs/plans/CONFIG_OVERHAUL_PLAN.md §2.3: GGUFs found
  * under `model_dirs` that no config entry references. `scanForGgufs` also
  * probes the default HF cache dirs as a fallback (same as the scan-picker) —
  * those are included too since they're real, unreferenced disk usage; skipped

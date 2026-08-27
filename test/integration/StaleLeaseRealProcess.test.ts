@@ -7,7 +7,7 @@
  * the pid-liveness probe — the thing that decides whether an owner may unload —
  * is checked against the OS on whichever platform CI runs.
  *
- * Manual equivalent: test 3 in TWO_WINDOW_SMOKE_TEST.md (kill the borrowing
+ * Manual equivalent: test 3 in docs/reports/TWO_WINDOW_SMOKE_TEST.md (kill the borrowing
  * window from Task Manager, then unload in the owner). This covers the
  * bookkeeping half of it; the VRAM half still needs a real llama-server.
  */

@@ -45,7 +45,7 @@ export interface PromptRunContext {
  * These exist because compaction needs a different request shape from the rest:
  * measured, not assumed — a minimal system prompt scored 1.00 written-file
  * recall against the agent persona's 0.81, with zero fabricated paths and no
- * run-to-run variance (COMPACTION_SUMMARIZER_REQUEST_PLAN.md).
+ * run-to-run variance (docs/plans/COMPACTION_SUMMARIZER_REQUEST_PLAN.md).
  *
  * There is deliberately no `disableThinking`: the same measurement put thinking
  * at ~0.40 recall on this task. Do not add one.

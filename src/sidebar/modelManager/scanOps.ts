@@ -37,7 +37,7 @@ export async function scanDirectoryForCandidates(
 }
 
 /** Family-specific sampling defaults for a flat (no matching group) new
- *  entry — matches CONFIG_OVERHAUL_PLAN.md §2.3's stated conventions. */
+ *  entry — matches docs/plans/CONFIG_OVERHAUL_PLAN.md §2.3's stated conventions. */
 function familySamplingDefaults(family: string): SamplingConfig | undefined {
   if (family === 'gemma4') return { top_k: 64, stop: '<end_of_turn>' };
   if (family === 'qwen3') return { top_k: 20 };

@@ -22,8 +22,17 @@ assets/.coordination/
 # Scratch / demo files
 fireworks.html
 
-# Internal planning docs — not user-facing
+# Internal planning docs — not user-facing.
+#
+# `docs/*` ignores every direct child, so anything meant to be tracked is
+# re-admitted by name below. Plans and reports moved out of the repo root live
+# in docs/plans/ and docs/reports/ and ARE tracked; docs/local/ is deliberately
+# left ignored and holds the machine-local scratch that used to sit at the root.
 docs/*
+!docs/plans/
+!docs/plans/**
+!docs/reports/
+!docs/reports/**
 !docs/TOOL_COVERAGE.md
 !docs/live-reports/
 !docs/live-reports/*.json

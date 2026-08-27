@@ -5,7 +5,7 @@
  * system prompt scored 1.00 written-file recall against the agent persona's
  * 0.81 with zero fabricated paths, and `max_tokens` must clear the reasoning
  * reserve because thinking spends from the same budget as the prose.
- * See COMPACTION_SUMMARIZER_REQUEST_PLAN.md.
+ * See docs/plans/COMPACTION_SUMMARIZER_REQUEST_PLAN.md.
  */
 
 import { describe, expect, it, vi, beforeEach } from 'vitest';

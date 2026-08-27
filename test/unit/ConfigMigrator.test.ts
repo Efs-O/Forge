@@ -9,7 +9,7 @@ import type { ForgeConfig } from '../../src/config/types';
 
 /**
  * Weighted toward the real config's dominant bloat pattern
- * (CONFIG_OVERHAUL_PLAN.md §0: "identical 8-line spawn + 7-line sampling
+ * (docs/plans/CONFIG_OVERHAUL_PLAN.md §0: "identical 8-line spawn + 7-line sampling
  * blocks × 12 models"): several gemma workers that are FULL duplicates of
  * `gemma-main` (same GGUF spawned again for parallel worker capacity, per
  * config.example.yaml's own documented pattern), one genuine fine-tune

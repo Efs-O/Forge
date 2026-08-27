@@ -26,7 +26,7 @@ export interface CliDelegationSessionDeps {
 }
 
 /**
- * ask_local_agent for a `provider: cli` target (CONFIG_OVERHAUL_PLAN.md §2.4/§4
+ * ask_local_agent for a `provider: cli` target (docs/plans/CONFIG_OVERHAUL_PLAN.md §2.4/§4
  * step 7): read-only analysis run by the external CLI's OWN tools — it can
  * read/list files itself (unlike a regular delegated model, which only gets
  * the task + context text). Never routes through backendPool: cli targets

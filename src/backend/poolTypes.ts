@@ -40,7 +40,7 @@ export interface IBackendPool {
   isModelReady(modelName: string): boolean;
   /** Cheap change-detection key over every slot's residency AND readiness.
    *  Pure reads. Equal signatures mean nothing observable moved, so the sidebar
-   *  can skip a repost; see MODEL_READINESS_DOT_PLAN.md for why this is polled
+   *  can skip a repost; see docs/plans/MODEL_READINESS_DOT_PLAN.md for why this is polled
    *  rather than emitted. */
   residencySignature(): string;
 }

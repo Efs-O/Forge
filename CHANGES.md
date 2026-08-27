@@ -182,7 +182,7 @@
 - The dot is polled, not pushed, and lags reality by at most 1.5s. Slot state
   mutates in nine places across five files; a signature compare cannot rot the
   way an emit call that someone forgets to add can. It only runs while the
-  sidebar is visible. See `MODEL_READINESS_DOT_PLAN.md`.
+  sidebar is visible. See `docs/plans/MODEL_READINESS_DOT_PLAN.md`.
 
 ## 0.13.7 - rename a chat from the history row; model picker by the prompt
 
