@@ -1,5 +1,79 @@
 # Forge — Recent Changes
 
+## 0.13.15
+
+- Delegation to an Ollama model whose `provider` is inherited from a `group`
+  works again. `BackendPool.isOllamaModel()` scanned the raw `config.models`
+  entry, but group merge runs at request time only, so every such model was
+  classified as llama.cpp: gated on a free llama-server slot it did not need,
+  reported as a guaranteed rather than best-effort hold, and — with
+  `shared_runtime` enabled — dragged into the shared-runtime key derivation,
+  which composes a llama-server argv and threw `missing gguf_path for llama.cpp`
+  before the daemon was ever contacted. That last path made `ask_local_agent`
+  delegation to those models fail outright. Confirmed live against a running
+  daemon, pre- and post-fix (`test/live/OllamaGroupDelegation.live.test.ts`,
+  gated on `FORGE_LIVE_OLLAMA=1`). The classifier is group-resolved now, the
+  same fix `ControlModelCatalog.entryFor` already carries for the identical
+  defect.
+
+- The command-palette model picker resolves `provider` through the model's
+  group too. It read the raw entry, so a grouped model was labelled
+  "llama.cpp" in the quick pick and, on selection, handed to the backend pool
+  — a grouped `provider: cli` agent or cloud model would have been routed as
+  a local llama.cpp load instead of being recognised. Third instance of the
+  same raw-scan defect.
+
+- An expanded tool result only renders as Markdown when the tool actually
+  returns prose. `read_file`, `exec_command`, `git_diff` and everything else now
+  render verbatim in a monospace block, because their output is not prose: a
+  `# comment` line in `config.yaml` was being parsed as an H1, and since nothing
+  in the stylesheet sized headings, it painted at the browser default 2em inside
+  a 12px row. Reading a commented YAML or shell file turned the transcript into
+  banners. `rendersAsMarkdown()` in `src/sidebar/toolResultView.ts` owns the
+  split — an allowlist, so a tool added later renders verbatim by default rather
+  than exploding. Headings are also sized now, in both the tool body and the
+  assistant message body, so a delegated agent's `# Report` stays proportionate.
+
+- The streaming status line now deals its phrases from a shuffled bag instead of
+  drawing one at random each rotation. With 26 phrases in the local + Clanker
+  pool and a 12s hold, independent draws needed roughly 100 picks — about twenty
+  minutes of unbroken streaming — before every phrase had shown once, so the
+  rarer ones went unseen for days. The bag deals each phrase exactly once per
+  cycle and persists across turns, which is the part that matters: most turns
+  are short enough to show two or three phrases, so a deck reset per turn would
+  never get past the top. Each pool composition keeps its own deck, so toggling
+  Clanker Mode or switching to a cloud model does not discard progress through
+  the other one, and the rotation still never repeats the phrase on screen.
+
+- A compaction summary now carries what the agent *did*, recorded by Forge from
+  the tool calls rather than described by the summarizer. Every entry is
+  classified from its paired tool result: a write that failed reads `FAILED`, a
+  write whose result never arrived (the normal state for a compaction that
+  fires mid-turn) reads `ATTEMPTED … outcome unknown`, and commands carry their
+  exit codes — `ran \`npm run ci\` → exit 0`. Previously a resumed agent had only
+  model-written prose, could not tell a claim from a verified fact, and re-read
+  the files to find out; that re-verification is the cost this removes. The
+  classifier uses Forge's own result contract (`Error:`, `User declined:`, both
+  ToolBudget refusals, the reload marker), because a check for `Error:` alone
+  would have reported a user-declined write as a completed one.
+- Compaction also records the working tree: unstaged, staged, and
+  `git status --short` together, so untracked files and staged work are visible
+  — a plain `git diff --stat` shows neither, and an agent that had just created
+  and staged three files would have read an empty diff and concluded nothing
+  happened. The three commands run concurrently, are bounded at 3s, and a
+  failure returns nothing rather than losing the summary.
+- New `update_plan` tool: the agent's task list is now conversation state
+  rather than transcript text, so a compaction cannot summarize it away. It is
+  re-injected verbatim each round (after the system prompt, never between an
+  assistant's tool calls and their results), bounded at 20 items × 200 chars,
+  auto-approved so marking an item done is never gated behind a confirmation,
+  and persisted for live *and* archived conversations. Worst case after a
+  compaction is one stale item instead of a plan rebuilt from prose.
+- The post-compaction resume prompt no longer says "do not redo work" — a
+  prohibition a model breaks the moment it feels uncertain. It now points at
+  the host-recorded blocks and permits verification exactly where they are
+  silent: entries marked FAILED or unknown.
+
 ## 0.13.14
 
 - `ask_local_agent` can now delegate to a configured cloud model (xAI,

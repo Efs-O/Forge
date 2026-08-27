@@ -285,6 +285,34 @@ describe('BackendPool delegation safety', () => {
       bestEffort: true,
     });
   });
+
+  it('recognises an Ollama target whose provider comes from a group', () => {
+    // Group merge runs at request time only, so a raw scan of config.models
+    // saw provider: undefined here and classified the model as llama.cpp. It
+    // was then gated on a free llama-server slot and dragged through the
+    // shared-runtime key derivation, which fails on the absent gguf_path
+    // before the daemon is ever reached.
+    const config = makeConfig(1);
+    config.models.push({ name: 'grouped-ollama', group: 'ollama-board' });
+    config.groups = { 'ollama-board': { provider: 'ollama', endpoint: 'http://127.0.0.1:11434' } };
+    const pool = new BackendPool(config);
+
+    expect(pool.canDelegate('A', 'grouped-ollama')).toEqual({
+      safe: true,
+      bestEffort: true,
+    });
+  });
+
+  it('does not spend a llama.cpp slot on a group-inherited Ollama target', () => {
+    const config = makeConfig(1);
+    config.models.push({ name: 'grouped-ollama', group: 'ollama-board' });
+    config.groups = { 'ollama-board': { provider: 'ollama', endpoint: 'http://127.0.0.1:11434' } };
+    const pool = new BackendPool(config);
+
+    // The single port stays free: the daemon needs none.
+    void pool.acquire('grouped-ollama').catch(() => {});
+    expect(freePortsOf(pool)).toEqual([8080]);
+  });
 });
 
 describe('BackendPool delegation holds', () => {

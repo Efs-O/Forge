@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import type { AppMessage } from '../reducer';
 import { vscode } from '../vscode';
 import { normalizeMarkdownForRender } from '../markdown';
+import { rendersAsMarkdown } from '../../../src/sidebar/toolResultView';
 
 const ChevronDown = (): React.ReactElement => (
   <svg width="10" height="6" viewBox="0 0 10 6" fill="currentColor" aria-hidden="true">
@@ -38,6 +39,7 @@ export function ToolRow({ message }: { message: AppMessage }): React.ReactElemen
 
   const result = message.toolResult ?? '';
   const expandable = result.length >= EXPANDABLE_MIN_CHARS || detail.length >= EXPANDABLE_MIN_CHARS;
+  const asMarkdown = rendersAsMarkdown(message.toolName ?? '');
   const body = useMemo(() => normalizeMarkdownForRender(result), [result]);
 
   return (
@@ -91,7 +93,12 @@ export function ToolRow({ message }: { message: AppMessage }): React.ReactElemen
               <code>{detail}</code>
             </div>
           )}
-          {result && <Markdown remarkPlugins={[remarkGfm]}>{body}</Markdown>}
+          {result &&
+            (asMarkdown ? (
+              <Markdown remarkPlugins={[remarkGfm]}>{body}</Markdown>
+            ) : (
+              <pre className="tool-row-verbatim">{result}</pre>
+            ))}
         </div>
       )}
     </div>

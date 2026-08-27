@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { isFailureResult, readPathArg, resultLabel } from '../../src/sidebar/toolResultView';
+import {
+  isFailureResult,
+  readPathArg,
+  rendersAsMarkdown,
+  resultLabel,
+} from '../../src/sidebar/toolResultView';
 import { capDisplayText, MAX_DISPLAY_RESULT_CHARS } from '../../src/tools/resultCap';
 
 describe('resultLabel', () => {
@@ -68,5 +73,20 @@ describe('readPathArg / isFailureResult', () => {
     expect(isFailureResult('Error: nope')).toBe(true);
     expect(isFailureResult('User declined: write_file')).toBe(true);
     expect(isFailureResult('wrote 12 lines')).toBe(false);
+  });
+});
+
+describe('rendersAsMarkdown', () => {
+  it('renders a delegated agent report as prose', () => {
+    expect(rendersAsMarkdown('ask_local_agent')).toBe(true);
+    expect(rendersAsMarkdown('web_search')).toBe(true);
+  });
+
+  it('keeps file and command output verbatim', () => {
+    // A YAML/shell/Python comment line is not a heading.
+    expect(rendersAsMarkdown('read_file')).toBe(false);
+    expect(rendersAsMarkdown('exec_command')).toBe(false);
+    expect(rendersAsMarkdown('git_diff')).toBe(false);
+    expect(rendersAsMarkdown('unknown_tool')).toBe(false);
   });
 });

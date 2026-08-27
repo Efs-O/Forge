@@ -33,3 +33,24 @@ export function resultLabel(toolName: string, result: string, pathArg: string | 
   const cleaned = firstLine.replace(/\[(file|dir|staged)\]\s*/g, '').trim();
   return cleaned.length > 120 ? `${cleaned.slice(0, 120)}…` : cleaned;
 }
+
+/**
+ * Tools whose result is prose and should render as Markdown in the transcript.
+ * Everything else is verbatim text — file contents, command output, diffs — and
+ * rendering those as Markdown misreads them: a `# comment` line in a YAML file
+ * became an H1 at the browser's default 2em, which is how a config.yaml read
+ * exploded to banner size inside a 12px tool row.
+ */
+export const PROSE_RESULT_TOOLS = new Set([
+  'ask_local_agent',
+  'ask_user',
+  'web_search',
+  'web_fetch',
+  'recall',
+  'list_memories',
+]);
+
+/** True when a finished tool's result should render as Markdown, not verbatim. */
+export function rendersAsMarkdown(toolName: string): boolean {
+  return PROSE_RESULT_TOOLS.has(toolName);
+}

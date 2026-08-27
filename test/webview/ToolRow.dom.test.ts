@@ -76,8 +76,14 @@ describe('ToolRow', () => {
     expect(container.querySelector('.tool-row-size')?.textContent).toBe('3.1k chars');
   });
 
-  it('expands to the full report with its structure intact', () => {
-    render(toolMessage({ toolResult: LONG_REPORT, toolResultTotal: 3100 }));
+  it('expands a prose result to the full report with its structure intact', () => {
+    render(
+      toolMessage({
+        toolName: 'ask_local_agent',
+        toolResult: LONG_REPORT,
+        toolResultTotal: 3100,
+      }),
+    );
 
     act(() => {
       container.querySelector<HTMLButtonElement>('.tool-row-toggle')!.click();
@@ -88,6 +94,21 @@ describe('ToolRow', () => {
     expect(body.querySelector('h1')?.textContent).toBe('Report');
     expect(body.querySelectorAll('p').length).toBeGreaterThanOrEqual(2);
     expect(body.textContent).toContain('Second paragraph.');
+  });
+
+  it('renders a file read verbatim rather than as markdown', () => {
+    // A YAML comment is not an H1. Rendering read_file as markdown turned every
+    // `# comment` line in config.yaml into a 2em banner inside a 12px row.
+    const yaml = ['# personal', 'models:', '  - name: gemma'].join('\n').padEnd(400, ' ');
+    render(toolMessage({ toolName: 'read_file', toolResult: yaml, toolResultTotal: 400 }));
+
+    act(() => {
+      container.querySelector<HTMLButtonElement>('.tool-row-toggle')!.click();
+    });
+
+    const body = container.querySelector('.tool-row-body')!;
+    expect(body.querySelector('h1')).toBeNull();
+    expect(body.querySelector('.tool-row-verbatim')?.textContent).toContain('# personal');
   });
 
   it('marks a failed call', () => {

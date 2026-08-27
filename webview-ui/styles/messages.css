@@ -55,6 +55,26 @@
   border: 1px solid var(--forge-border);
 }
 
+.msg.assistant h1,
+.msg.assistant h2,
+.msg.assistant h3,
+.msg.assistant h4,
+.msg.assistant h5,
+.msg.assistant h6 {
+  margin: 12px 0 6px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.msg.assistant h1 { font-size: 1.3em; }
+.msg.assistant h2 { font-size: 1.2em; }
+.msg.assistant h3 { font-size: 1.1em; }
+.msg.assistant h4,
+.msg.assistant h5,
+.msg.assistant h6 { font-size: 1em; }
+.msg.assistant h1:first-child,
+.msg.assistant h2:first-child,
+.msg.assistant h3:first-child { margin-top: 0; }
+
 .msg.error {
   color: var(--vscode-errorForeground, #f48771);
   font-style: italic;

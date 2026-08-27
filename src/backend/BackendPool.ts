@@ -3,6 +3,7 @@ import { DirectBackend } from './DirectBackend';
 import type { ForgeConfig } from '../config/types';
 import {
   expandAlias,
+  mergeGroupsIntoModel,
   resolveRequestModel,
   resolveSpawnModel,
   splitModelProfile,
@@ -351,8 +352,15 @@ export class BackendPool implements IBackendPool {
     };
   }
 
+  /** Group-resolved, never raw: `provider` is routinely inherited from a
+   *  `group`, and `mergeGroupsIntoModel` runs at request time only. Reading the
+   *  raw entry classified every group-inherited Ollama model as llama.cpp, which
+   *  dragged it through the shared-runtime key derivation and failed it with
+   *  "missing gguf_path for llama.cpp" before it ever reached the daemon. Same
+   *  defect as the one fixed in ControlModelCatalog.entryFor. */
   private isOllamaModel(modelName: string): boolean {
-    return this.config.models.find((m) => m.name === modelName)?.provider === 'ollama';
+    const raw = this.config.models.find((m) => m.name === modelName);
+    return raw ? mergeGroupsIntoModel(this.config, raw).provider === 'ollama' : false;
   }
 
   /** Identity of the llama-server this model would spawn. Uses the SPAWN model:

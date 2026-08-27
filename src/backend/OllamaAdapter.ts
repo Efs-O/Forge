@@ -71,8 +71,18 @@ function trySpawnServe(candidate: SpawnCandidate): Promise<boolean> {
       // Windows: do NOT detach — a detached process has no console, so every
       // console child ollama spawns (runners, GPU probes) flashes its own DOS
       // window. Non-detached + windowsHide gives the daemon one HIDDEN console
-      // that all its children inherit. Orphaned children survive extension
-      // host exit on Windows, so the daemon outlives reloads anyway.
+      // that all its children inherit.
+      //
+      // The cost, measured (2026-08-27, A/B with the same parent and command):
+      // a non-detached daemon DIES with the process that spawned it, so it does
+      // NOT survive an extension host reload — every reload pays a cold daemon
+      // start and a cold model load. Detached survives, but showed one visible
+      // console window during inference; that is the trade this keeps. Forge
+      // itself never stops the daemon: stop() only sends keep_alive:0 to unload
+      // the model. A daemon the USER started (tray app, `ollama serve`) is not
+      // our child, so none of this touches it — ensureOllamaReady probes first
+      // and spawns nothing when one is already up. An idle daemon holds no
+      // VRAM (measured: 582 MiB with it up vs 584 MiB baseline).
       const child = spawn(candidate.exe, candidate.args, {
         detached: process.platform !== 'win32',
         stdio: 'ignore',

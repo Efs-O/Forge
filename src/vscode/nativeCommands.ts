@@ -6,6 +6,7 @@ import { runBackendAction } from './commandHelpers';
 import { registerEditorCommands } from './editorCommands';
 import { runAddModelWizard } from '../sidebar/AddModelWizard';
 import { migrateConfig } from '../config/ConfigMigrator';
+import { mergeGroupsIntoModel } from '../config/ConfigResolver';
 
 export function registerNativeCommands(
   context: vscode.ExtensionContext,
@@ -67,7 +68,10 @@ export function registerNativeCommands(
       const pick = await vscode.window.showQuickPick(
         config.models.map((model) => ({
           label: model.name,
-          description: model.provider ?? 'llama.cpp',
+          // Group-resolved: `provider` is routinely inherited from a `group`,
+          // and the raw entry carries none — every such model was labelled
+          // "llama.cpp" here and routed as one below.
+          description: mergeGroupsIntoModel(config, model).provider ?? 'llama.cpp',
           modelName: model.name,
         })),
         { placeHolder: 'Pick the Forge model to use' },
@@ -88,7 +92,8 @@ export function registerNativeCommands(
         if (!profilePick) return;
         if (profilePick.profile) selectedId = `${pick.modelName}@${profilePick.profile}`;
       }
-      const selectedModel = config.models.find((m) => m.name === pick.modelName);
+      const rawSelected = config.models.find((m) => m.name === pick.modelName);
+      const selectedModel = rawSelected ? mergeGroupsIntoModel(config, rawSelected) : undefined;
       deps.statusBar.setStarting(selectedId);
       try {
         // Route native picking through the same conversation-aware transition
