@@ -84,3 +84,60 @@ describe('DirectBackend stop() teardown ordering', () => {
     expect(backend.isReady()).toBe(false);
   });
 });
+
+/**
+ * hotSwap() must NOT mutate the shared ForgeConfig.active_model.
+ *
+ * Before the fix, all three hotSwap branches (fast-path, Ollama, llama.cpp)
+ * wrote `this.config.active_model = modelName`. Because the config object is
+ * shared by reference with SidebarProvider, a throwaway delegation backend
+ * (e.g. pinging an Ollama :cloud model) would stamp the live config with the
+ * target model name, corrupting the picker and seeding new tabs with a
+ * potentially paywalled model (402 hazard).
+ *
+ * loadedModel() already reports what a backend is serving via this.activeModel,
+ * so no reader depends on hotSwap setting config.active_model.
+ */
+describe('DirectBackend hotSwap() must not mutate config.active_model', () => {
+  it('fast path: already-active model does not overwrite config.active_model', async () => {
+    probeHealthy.mockResolvedValue(true);
+    probeServedModel.mockResolvedValue('N:/models/Qwen.gguf');
+    const cfg = config();
+    const backend = new DirectBackend(cfg);
+
+    // First swap loads 'qwen' (active_model is already 'qwen').
+    await backend.hotSwap('qwen');
+    // Second swap hits the fast path (same model, ready).
+    await backend.hotSwap('qwen');
+
+    expect(cfg.active_model).toBe('qwen');
+  });
+
+  it('Ollama branch: swapping to an Ollama model does not overwrite config.active_model', async () => {
+    probeHealthy.mockResolvedValue(true);
+    ensureOllamaReady.mockResolvedValue(undefined);
+    releaseOllamaModel.mockClear();
+    const cfg = config();
+    const backend = new DirectBackend(cfg);
+
+    await backend.hotSwap('llama3');
+
+    expect(backend.loadedModel()).toBe('llama3');
+    expect(cfg.active_model).toBe('qwen'); // unchanged
+  });
+
+  it('llama.cpp branch: swapping to a llama.cpp model does not overwrite config.active_model', async () => {
+    probeHealthy.mockResolvedValue(true);
+    probeServedModel.mockResolvedValue('N:/models/Qwen.gguf');
+    const cfg = config();
+    // Start with a different active_model so we can detect a write.
+    cfg.active_model = 'some-other-model';
+    const backend = new DirectBackend(cfg);
+
+    // Swap to 'qwen' (llama.cpp) from a fresh backend.
+    await backend.hotSwap('qwen');
+
+    expect(backend.loadedModel()).toBe('qwen');
+    expect(cfg.active_model).toBe('some-other-model'); // unchanged — hotSwap must not write it
+  });
+});

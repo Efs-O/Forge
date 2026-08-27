@@ -150,7 +150,6 @@ export class DirectBackend implements BackendController {
       // have died since. Re-verify cheaply; if dead, fall through to the full
       // re-ensure (which can auto-start the daemon).
       if (nextModel.provider !== 'ollama' || (await probeHealthy(this.currentBaseUrl))) {
-        this.config.active_model = modelName;
         return;
       }
       this.ready = false;
@@ -180,7 +179,6 @@ export class DirectBackend implements BackendController {
       this.activeModel = nextModel;
       this.currentBaseUrl = normalizeOllamaEndpoint(nextModel.endpoint);
       this.ready = true;
-      this.config.active_model = modelName;
       log.info(`[DirectBackend] switched to Ollama model ${modelName}`);
       return;
     }
@@ -189,7 +187,6 @@ export class DirectBackend implements BackendController {
     this.activeModel = nextModel;
     this.currentBaseUrl = `http://${this.host}:${this.port}`;
     this.ready = true;
-    this.config.active_model = modelName;
     log.info(`[DirectBackend] switched to llama.cpp model ${modelName}`);
   }
 
