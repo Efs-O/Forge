@@ -1,412 +1,397 @@
-# Forge config example — F6 models-vs-profiles shape
+# =============================================================================
+# Forge — example configuration
+# =============================================================================
 #
-# Copy this file to <your-project>/.forge/config.yaml and edit.
-# The setup wizard (first run) can also generate this file for you.
+# QUICK START
+#   1. In your project, create a folder named  .forge
+#   2. Copy this file into it and rename it to  config.yaml
+#      (final path: <your-project>/.forge/config.yaml)
+#   3. Edit the two things that CANNOT be guessed:
+#        - llama_server.binary   -> where your llama-server executable lives
+#        - models[].gguf_path    -> where your .gguf model file lives
+#   4. Set `active_model` to the name of the model you want on startup.
+#   5. Reload the VS Code window.
 #
-# All paths are absolute or relative to the workspace root.
-# API keys are stored in VS Code SecretStorage — never put them here.
+# Forge will not start a local model until those paths are real. If a path is
+# wrong it says so out loud — it never silently falls back to something else.
 #
-# THREE layers decide what a request looks like:
-#   models:   one entry per GGUF/endpoint — FACTS ONLY. Spawn-time facts for
-#             llama.cpp live under `spawn:`. Vision is auto-derived from
-#             `mmproj_path` (no `capabilities: [vision]` needed).
-#   defaults: request-time fields shared by every model (system_prompt, sampling).
-#   profiles: request-time role presets, selected via `active_model: name@profile`.
+# You do NOT need every section below. The only required keys are `models` and
+# `active_model`; `llama_server.binary` is required if you run a local GGUF.
+# Everything else has a sensible default and is here to be discovered.
 #
-# Merge precedence (request-time): defaults < model fields < profile.
-# Spawn-time:                      model flat/spawn < spawn_profiles[<name>].
+# API KEYS ARE NEVER STORED IN THIS FILE.
+# Use the Command Palette -> "Forge: Set Cloud Provider Token". Keys go into VS
+# Code SecretStorage. This file only ever names the secret (`api_key_secret`),
+# so it is safe to commit.
+#
+# -----------------------------------------------------------------------------
+# THE MENTAL MODEL — three layers decide what a request looks like
+# -----------------------------------------------------------------------------
+#   models:   one entry per GGUF / endpoint / CLI. FACTS ONLY — where it lives,
+#             how big its context is. Spawn-time facts for llama.cpp go under
+#             `spawn:`. Vision is auto-derived from `mmproj_path` (you do not
+#             write `capabilities: [vision]`).
+#   groups:   settings shared by a family of models — the provider, the endpoint,
+#             the VRAM budget, the sampling recipe. A model joins with `group:`.
+#   defaults: request-time fields shared by EVERY model (system prompt, sampling).
+#   profiles: request-time role presets, picked with `active_model: name@profile`.
+#
+#   Request-time precedence:  defaults  <  group  <  model fields  <  profile
+#   Spawn-time precedence:    group.spawn  <  model.spawn
+# =============================================================================
 
-# Model to activate on startup. `name` or `name@profile` (profile optional).
-active_model: my-model@main
 
-# Optional command capability for native local models. `headless` exposes
-# shell-free direct commands plus Forge's structured read-only PowerShell
-# inspection tool; ordinary terminal pasting remains off unless enabled too.
-# NOTE: a permissions block naming only `exec` denies every OTHER group by
-# schema default. Prefer the full block near the bottom of this file.
-# permissions:
-#   exec:
-#     headless: true
+# Which model to load on startup. Either `name` or `name@profile`.
+# This MUST match one of the `name:` values under `models:` below.
+active_model: my-local-model@main
 
-# -------------------------------------------------------------------
-# llama-server settings (direct GGUF mode)
-# -------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+# Project memory
+# -----------------------------------------------------------------------------
+# Forge can drop a small FORGE.md into your project as a scratchpad of durable
+# project instructions. The agent reads it automatically every turn; it only
+# writes to it when you explicitly ask it to remember something.
+forge_instructions:
+  auto_create: true
+
+custom_instructions: >-
+  Use the repository-specific FORGE.md injected by Forge.
+  Keep it concise and update it only when the user explicitly asks to record
+  durable project instructions.
+
+
+# -----------------------------------------------------------------------------
+# Permissions — what the agent is allowed to do
+# -----------------------------------------------------------------------------
+# READ THIS BEFORE EDITING. The block is all-or-nothing: as soon as a
+# `permissions:` key exists, every group you do NOT list falls back to its
+# schema default, which is mostly `false`. Writing only an `exec:` block
+# silently disables web search, file deletion and git writes.
+#
+# So: keep all five groups present and flip individual booleans. If you delete
+# this block entirely you get the defaults, which are deliberately cautious.
+#
+# Every action is still gated by the per-action confirmation prompt in the
+# sidebar — these switches decide which tools the model is even TOLD about.
+permissions:
+  fs:
+    read: true
+    write: true
+    # `delete: false` does not just refuse — it removes `delete_file` from the
+    # tool list entirely, so the model does not know it exists and reaches for a
+    # shell `rm` instead (which is denied). If you want deletes, say so here.
+    delete: true
+
+  exec:
+    # Bounded, structured, shell-free commands + read-only inspection.
+    headless: true
+    # Terminal commands are PASTE-ONLY: Forge types the command into your
+    # terminal but never sends the final Enter. You press it.
+    terminal: false
+
+  git:
+    read: true
+    # Grants four structured, flag-free tools: create_branch, switch_branch,
+    # stage, commit. This is NOT a security boundary — with exec.headless on,
+    # the agent can already run git directly. The real guard is the denylist
+    # (reset --hard, clean -f, checkout --, restore, push, rebase, branch -D,
+    # stash drop/clear, filter-branch), which is always on.
+    write: false
+
+  net:
+    # Requires a search key — see the `search:` section below.
+    search: false
+    # web_fetch is GET-only and SSRF-guarded (loopback, link-local and private
+    # ranges are rejected). The residual risk is prompt injection from page
+    # content, which is inherent to reading the web.
+    fetch: false
+
+  agents:
+    # Allows delegating a task to a local CLI agent (claude / codex below).
+    delegate: false
+
+
+# -----------------------------------------------------------------------------
+# llama.cpp — required only if you run local GGUF models
+# -----------------------------------------------------------------------------
 llama_server:
-  binary: /path/to/llama-server      # required for direct mode
-  host: 127.0.0.1
+  # The llama-server executable from your llama.cpp build. No default — Forge
+  # cannot guess this, and will tell you plainly if it is missing.
+  #   Windows:      "C:/llama.cpp/llama-server.exe"
+  #   macOS/Linux:  "/usr/local/bin/llama-server"
+  binary: "C:/path/to/llama.cpp/llama-server.exe"
+  host: "127.0.0.1"
   port: 8080
-
-# Opt-in: let other Forge VS Code windows borrow a compatible direct
-# llama.cpp runtime. Unload releases this workspace's lease; the owner will
-# not stop while another workspace is borrowing it.
-# shared_runtime:
-#   enabled: true
-  # NOTE (llama.cpp b10430+): `-ngl` is an AUTO-FIT parameter ("exact number,
-  # 'auto', or 'all'; default auto"), not a plain "all layers" switch. Auto holds
-  # back a ~1024 MiB margin and may leave a layer on CPU. On hybrid architectures
-  # (Gated Delta Net / linear-attention models) ONE layer on CPU makes llama.cpp
-  # disable the fused kernel for the WHOLE model — a >2x generation hit, not a
-  # proportional one. An explicit count also DISABLES auto-fit entirely
-  # ("already set by user to N, abort"), so the memory budget becomes yours —
-  # which is why 999 ("every layer") is the default here and what Forge uses when
-  # this key is absent. A model that no longer fits then fails loudly at startup
-  # instead of silently half-running on the CPU; lower num_ctx, or set a real
-  # layer count here, rather than going back to -1.
-  n_gpu_layers: 999
-  default_num_ctx: 32768             # fallback when a model omits num_ctx/spawn.num_ctx
-  n_batch: 512
-  n_parallel: 4                      # default concurrent worker slots
-  # KV cache quantization. q8_0 is the safe default; q4_0 roughly halves KV VRAM
-  # at some cost to long-context recall precision — worth it only when the saving
-  # keeps layers on the GPU that would otherwise spill.
-  type_k: q8_0
-  type_v: q8_0
   flash_attn_default: true
 
-  # Sizing num_ctx by hand? `llama-fit-params` (ships with llama.cpp) prints the
-  # exact per-device split:
-  #   llama-fit-params -m MODEL -ngl all --fit off -fitp on -c N --cache-type-k q4_0
-  #   -> "CUDA0 <model> <ctx> <compute>"  (MiB)
-  # Two gotchas: it REJECTS --spec-type, so a speculative/MTP draft context is NOT
-  # counted (budget it by hand — it can be ~700-900 MiB), and note that --ctx-size
-  # is the TOTAL split across n_parallel slots, so per-slot ctx = num_ctx/n_parallel.
-  # Leave headroom: on Windows, WDDM does not fail a too-tight allocation, it pages
-  # VRAM over PCIe and throughput collapses. Keep >= ~1 GB free.
 
-# -------------------------------------------------------------------
-# Request-time defaults — applied beneath each model's own fields and profile.
-# -------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# Optional conveniences
+# -----------------------------------------------------------------------------
+
+# Summarise the conversation automatically as it approaches the context limit.
+auto_compact:
+  enabled: true
+  at: 0.85       # trigger at 85% of the per-conversation context window
+  resume: true   # carry on with the task after compacting
+
+# How many models may be loaded at once across all VS Code windows.
+# Local GGUFs are VRAM-bound; raise this only if you have the memory.
+max_simultaneous_models: 4
+
+# Let other Forge VS Code windows on this machine borrow a compatible, already
+# running llama.cpp process instead of each spawning their own copy.
+shared_runtime:
+  enabled: true
+
+# Small local HTTP API for external tools (scripts, Forge Relay). Off by
+# default; nothing outside your machine can reach it.
+control_server:
+  enabled: false
+  port: 8799
+
+# Web search. Bring your own key: Command Palette -> "Forge: Set Cloud Provider
+# Token", using the secret name below. Also needs `permissions.net.search: true`.
+# search:
+#   provider: tavily          # tavily | brave
+#   secret_key_name: forge.tavily.apiKey
+#   max_results: 5
+
+# Local semantic code search (the `search_codebase` tool). Spawns a SECOND
+# llama-server on its own port holding a small embedding model (~265 MB VRAM)
+# alongside your chat model. The index is a plain JSON file under .forge/ —
+# no native dependencies, nothing leaves your machine.
+# embeddings:
+#   enabled: true
+#   model_path: "C:/path/to/embeddinggemma-300m-Q4_0.gguf"
+#   port: 8091
+#   # EmbeddingGemma is trained with task prefixes; using them is a large win.
+#   # Measured on a real repo (2679 chunks, 10 queries): MRR 0.384 -> 0.634.
+#   prompt_style: gemma
+#   auto_index_on_search: true
+#   confirm_on_start: true
+#   idle_timeout_ms: 120000
+#   max_file_size_kb: 256
+#   # Scope this deliberately. The schema default is `**/*`, which happily
+#   # embeds package-lock.json and every stray file in your repo.
+#   # These globs are anchored at the WORKSPACE ROOT and are depth-agnostic on
+#   # purpose: "src/**" would never reach a nested subproject/src/**.
+#   include_globs: [ "**/src/**", "**/test/**", "**/tests/**", "**/docs/**" ]
+#   exclude_globs: [ "**/node_modules/**", "**/dist/**", "**/out/**", "**/.git/**", "**/.forge/**" ]
+
+
+# -----------------------------------------------------------------------------
+# Request-time defaults — the base layer under every model and profile
+# -----------------------------------------------------------------------------
 defaults:
-  # NOTE: this is APPENDED beneath Forge's built-in template (execute.njk),
-  # which already establishes the coding-agent persona and tool rules. To send
-  # a prompt INSTEAD of the template — e.g. for a fine-tune that must not be
-  # told it is Forge — set `system_prompt_mode: replace` on that model.
-  # Caveat: `replace` also drops the template's fenced-JSON tool-call fallback,
-  # so pair it with `strip_tools: true` or a natively tool-calling model.
+  # Tool calls allowed in a single turn before Forge stops the loop. This is a
+  # runaway guard, NOT a judgement about how big a task may be — the built-in
+  # default of 40 has killed refactors that had already landed 28 good edits.
+  max_tool_rounds: 80
+
   system_prompt: |
     You are Forge, a local AI coding assistant running inside VS Code.
-    ALWAYS use tools to accomplish tasks. Never just describe what you would do.
-    After each tool result, continue until the task is complete, then summarize.
+    ALWAYS use tools to accomplish tasks. Never describe what you would do - do it by calling the tools directly.
+    When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
+    After each tool result, continue calling tools until the task is complete, then give a short summary.
+
   sampling:
     temperature: 0.6
     top_p: 0.95
-    # Upper bound only. Forge lowers this per request to the room actually left
-    # in the slot (num_ctx / n_parallel, minus the prompt), so a value larger
-    # than the context is harmless — but a small one still binds.
-    max_tokens: 8192
+    max_tokens: 32768
 
-# -------------------------------------------------------------------
-# Request-time role presets. One loaded GGUF serves every role.
-# -------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+# Profiles — request-time role presets
+# -----------------------------------------------------------------------------
+# Select one by suffixing the model name: `active_model: my-local-model@main`.
+# One loaded model can serve every role, so you do not need a separate entry
+# per role. Precedence: defaults < group < model fields < profile.
 profiles:
-  main:                              # interactive coding driver
+  # Interactive coding driver — the everyday one.
+  main:
     think: true
     reasoning_effort: medium
-  subcoordinator:                    # plans + delegates
+
+  # Plans and delegates, still reasons.
+  subcoordinator:
     think: true
     reasoning_effort: low
-  worker:                            # headless fleet worker — no reasoning
+
+  # Headless worker: no reasoning, tight sampling, for dispatched sub-tasks.
+  worker:
     think: false
     reasoning_effort: none
     sampling:
       temperature: 0.2
 
-# -------------------------------------------------------------------
-# Optional back-compat aliases: old name -> base@profile.
-# -------------------------------------------------------------------
+
+# Optional back-compat shim: map an old model name to a current one, so
+# anything still dispatching by the old name keeps working.
 # aliases:
-#   my-model-worker: my-model@worker
+#   my-old-model-name: my-local-model
 
-# -------------------------------------------------------------------
-# Automatic context compaction (optional, OFF by default).
-# /compact summarizes the conversation and sends the model that summary plus
-# the recent turns. It is non-destructive: your chat transcript is kept whole,
-# only what the model is sent shrinks.
-# `at` is the fraction of the context window that triggers it. Keep it well
-# under 1.0 — the summarization request itself sends the transcript, so at
-# ~0.95 there is no room left for it to run. Max accepted is 0.95.
-# -------------------------------------------------------------------
-# `resume` continues the active task from the summary and retained tail once
-# the context has been freed. Default true.
-# A user-typed /compact never resumes at all.
-# -------------------------------------------------------------------
-# auto_compact:
-#   enabled: true
-#   at: 0.85
-#   resume: true
 
-# Create a small FORGE.md in every discovered repository that does not have
-# one. Forge prefers FORGE.md over AGENTS.md and injects the repository-specific
-# file into native local-agent prompts; it never overwrites existing files.
-# forge_instructions:
-#   auto_create: true
-
-# -------------------------------------------------------------------
-# Control server (optional) — localhost API so an external orchestrator can
-# load models on demand and discover the OpenAI-compatible endpoint.
-#   GET /healthz  GET /models  POST /ensure {model}  POST /release {model}
-#   POST /unload {model}  POST /chat {model, messages}   (model may be name@profile)
-# -------------------------------------------------------------------
-# control_server:
-#   enabled: true
-#   port: 8799
-
-# -------------------------------------------------------------------
-# Ollama daemon supervision (optional) — when a model's LOCAL Ollama endpoint
-# refuses connection, Forge can start "ollama serve" itself. Remote endpoints
-# are never auto-started.
-# -------------------------------------------------------------------
-# ollama:
-#   auto_start: true                   # default: true
-#   executable: C:\path\to\ollama.exe  # only for non-standard installs
-
-# -------------------------------------------------------------------
-# Optional: groups — shared settings folded into every model that names them.
-# Precedence: defaults < group(s) < the model's own fields. `sampling`, `spawn`
-# and `tool_call_limits` merge key by key; EVERY OTHER FIELD IS A WHOLESALE
-# OVERRIDE. That matters most for `capabilities`: a model adding `vision` must
-# restate `tool-call` here or it silently loses tool calling.
-# -------------------------------------------------------------------
-# groups:
-#   external-agents:
-#     provider: cli
-#   openrouter-cloud:
-#     provider: openrouter
-#     num_ctx: 262144
-#     capabilities: [tool-call, long-context]
-#     sampling: { max_tokens: 16384 }
-
-# -------------------------------------------------------------------
-# Optional: extra directories the Model Manager scans for GGUF files.
-# With no `model_dirs` Forge scans NOTHING, and the "add a model" browser comes
-# up empty even when the drive is full of GGUFs. Sibling `mmproj-*.gguf` files
-# found next to a model are auto-suggested as its `mmproj_path`.
-# -------------------------------------------------------------------
-# model_dirs:
-#   - D:/models
-#   - /home/me/gguf
-
-# -------------------------------------------------------------------
-# Optional: a short instruction appended to every system prompt, for things
-# true of this workspace regardless of model. Per-repo guidance belongs in
-# FORGE.md instead — Forge injects that automatically.
-# -------------------------------------------------------------------
-# custom_instructions: >-
-#   Prefer the repository's existing patterns over introducing new dependencies.
-
-# Optional: 'trace' | 'debug' | 'info' | 'warn' | 'error'. Raise this before
-# reporting a bug — the Forge output channel is the only record of a failed
-# spawn or a rejected request.
-# log_level: info
-
-# -------------------------------------------------------------------
-# Models — array form. `name` is the id shown in the picker.
-# -------------------------------------------------------------------
+# =============================================================================
+# MODELS
+# =============================================================================
+# `name` is what you see in the picker AND, for cloud providers, the model id
+# sent upstream verbatim — so cloud names must match the provider's id exactly.
+# Local GGUF entries can be named whatever you like.
 models:
 
-  # --- GGUF / direct llama-server ---
-  - name: my-model
-    gguf_path: /path/to/model.gguf
-    mmproj_path: /path/to/mmproj-F16.gguf   # optional → enables vision
+  # ---------------------------------------------------------------------------
+  # 1. Local GGUF via llama.cpp — the main event
+  # ---------------------------------------------------------------------------
+  - name: my-local-model
+    # The only line you MUST change. Absolute path to your .gguf file.
+    gguf_path: "C:/path/to/models/your-model-Q4_K_M.gguf"
+
+    # OPTIONAL: vision projector. Its mere presence turns on image support —
+    # do not also write `capabilities: [vision]`.
+    # mmproj_path: "C:/path/to/models/mmproj-F16.gguf"
+
+    think: true
+    reasoning_effort: low
+
     spawn:
+      # TOTAL context across all slots. Per-conversation context is
+      # num_ctx / n_parallel — with n_parallel: 4, a num_ctx of 131072 gives
+      # each conversation 32768, not 131072. This trips people up constantly.
       num_ctx: 32768
-      n_parallel: 4
-      n_batch: 512
-      type_k: q8_0
-      type_v: q8_0
-      flash_attn: true
-      n_gpu_layers: 999                # every layer on GPU; -1 is auto-fit, see above
-      # extra_llama_server_args: ["--reasoning-budget", "4096"]
-    # Rare spawn-time overrides (force a respawn when selected, e.g. via tools):
-    # spawn_profiles:
-    #   long-context: { num_ctx: 131072, n_parallel: 1 }
-    sampling:
-      top_k: 64
-      stop: "<end_of_turn>"          # gemma stop token (qwen/ChatML use <|im_end|>)
+      # Concurrent slots. 1 = the interactive driver gets the whole window.
+      n_parallel: 1
+      extra_llama_server_args:
+        # Cap thinking so the model cannot spend a whole turn reasoning.
+        - "--reasoning-budget"
+        - "3072"
+        # What llama.cpp appends when that budget is hit. Nudging the model back
+        # toward tool calls works far better than letting it stall.
+        - "--reasoning-budget-message"
+        - "I have been reasoning too long. If I am unsure whether a tool exists, or whether a path is right, I should call it and read the result instead of reasoning further."
 
-  # Need the SAME GGUF launched two different ways (e.g. one server with
-  # reasoning on for the agent, one with `--reasoning off` for headless workers)?
-  # Don't reach for spawn_profiles — just add a SECOND model entry with the same
-  # gguf_path and the different launch args. Two entries = two independent
-  # llama-server slots / holds / pool keys with zero special-casing; dispatch the
-  # name you want. (A trailing @profile is request-time ONLY and never changes
-  # the launch command, so it can't flip a spawn flag like --reasoning.)
-  # - name: my-model-worker
-  #   gguf_path: /path/to/model.gguf        # same file as my-model
-  #   think: false
-  #   spawn:
-  #     extra_llama_server_args: ["--reasoning", "off"]
+    group: llamacpp-local
 
-  # --- Ollama (local daemon) ---
-  # For concurrent same-model workers on Ollama, set the daemon env var
-  # OLLAMA_NUM_PARALLEL=4 (configured on the daemon, not here in Forge).
-  # - name: "gemma4:26b"
-  #   provider: ollama
-  #   endpoint: http://127.0.0.1:11434
-  #   num_ctx: 262144
-  #   think: true
-  #   reasoning_effort: medium
-  #   sampling: { max_tokens: 131072 }
+  # ---------------------------------------------------------------------------
+  # 2. Ollama, running locally
+  # ---------------------------------------------------------------------------
+  # Requires the Ollama daemon plus `ollama pull <model>` first. `name` must be
+  # the exact Ollama tag.
+  - name: "qwen3:8b"
+    num_ctx: 32768
+    sampling: { max_tokens: 32768 }
+    group: ollama-local
 
-  # --- Ollama cloud (routed through local daemon; auth via `ollama auth login`) ---
-  # - name: "deepseek-v4-flash:cloud"
-  #   provider: ollama
-  #   endpoint: http://127.0.0.1:11434
-  #   num_ctx: 1000000
-  #   think: true
-  #   sampling: { max_tokens: 65536 }
+  # ---------------------------------------------------------------------------
+  # 3. External CLI agents — Claude Code and Codex
+  # ---------------------------------------------------------------------------
+  # These shell out to a coding CLI already installed and logged in on your
+  # machine. Auth is that CLI's own login (`claude` / `codex`) and uses your
+  # existing subscription — Forge stores NO key for them and sends no traffic
+  # of its own. They run with their OWN tools, not Forge's.
+  #
+  # Requires `permissions.agents.delegate: true` above.
+  #
+  # Find the paths with:  where claude   /   where codex     (Windows)
+  #                       which claude   /   which codex     (macOS/Linux)
+  - name: claude-code
+    provider: cli
+    cli: "C:/Users/<you>/AppData/Roaming/npm/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
+    comment: "Claude Code CLI — external agent, uses your existing Claude subscription"
 
-  # --- Cloud OpenAI-compatible providers (key in SecretStorage) ---
-  # Set the token with: Command Palette -> Forge: Set Cloud Provider Token
-  # - name: grok-4.3
-  #   provider: xai                  # xai | openrouter | openai | openai-compatible
-  #   api_key_secret: xai
-  #   capabilities: [tool-call]
-  #   num_ctx: 1000000
-  #   sampling: { temperature: 0.7, max_tokens: 30000 }
-  # --- External CLI agents via existing subscriptions (no API key in Forge) ---
-  # Forge spawns the already-logged-in CLI locally; auth is entirely the CLI's
-  # own login (`claude login` / `codex login`), never a key in config.yaml.
-  # These are FULL-RIGHTS external agents using their OWN tools. They can be
-  # selected for direct sidebar chat and used as ask_local_agent targets.
-  # - name: claude-code
-  #   provider: cli
-  #   cli: claude          # bare name resolved on PATH, or an absolute path
-  #   cli_model: opus      # optional explicit override; omit to use the CLI's configured/default model
-  #   group: external-agents
-  # - name: codex
-  #   provider: cli
-  #   cli: codex
+  - name: codex
+    provider: cli
+    cli: "C:/Users/<you>/AppData/Roaming/npm/node_modules/@openai/codex/bin/codex.js"
+    comment: "Codex CLI — external agent, uses your existing OpenAI subscription"
 
-# -------------------------------------------------------------------
-# Optional: web search (Tavily or Brave)
-# Store the key with: Command Palette → Forge: Set Search API Key
-# -------------------------------------------------------------------
-# search:
-#   provider: tavily
-#   secret_key_name: forge.tavily.apiKey
-#   max_results: 5
+  # ---------------------------------------------------------------------------
+  # 4. Cloud, via an OpenAI-compatible endpoint (optional)
+  # ---------------------------------------------------------------------------
+  # Opt-in and off unless you configure it. Store the key with
+  # "Forge: Set Cloud Provider Token" under the secret name in `api_key_secret`.
+  # `name` is sent upstream verbatim, so it must be the provider's exact id.
+  # - name: "some-vendor/some-model"
+  #   api_key_secret: my-provider
+  #   num_ctx: 131072
+  #   # `capabilities` REPLACES the group's list wholesale — it does not merge.
+  #   # So restate tool-call/long-context whenever you add vision.
+  #   capabilities: [tool-call, long-context]
+  #   sampling: { max_tokens: 32768 }
+  #   group: openai-compatible-cloud
 
-# -------------------------------------------------------------------
-# Tool permissions. Once this block is present, these switches are
-# authoritative for both tool advertising and dispatch.
-#
-# These switches hand real capability to an agent that will sometimes be wrong.
-# `fs.delete`, `exec.*` and `git.write` let it delete files, run commands and
-# change history. Forge gates and checkpoints them, but the software is provided
-# AS IS with no warranty — see "Responsibility and Risk" in the README.
-#
-# ALL-OR-NOTHING: naming ANY group makes the schema defaults authoritative for
-# EVERY group, not just the one you named. Omit `net:` here and web_search and
-# web_fetch are denied — the tools are not advertised to the model at all, and
-# it will report that it has no web search, whether or not you stored an API
-# key. Forge warns at startup naming any capability that went off this way.
-# An explicit `false` (as below) is a decision and is never warned about.
-#
-# `net.search: true` is necessary but NOT sufficient: web_search is only
-# registered when a `search:` block exists too (see above).
-# -------------------------------------------------------------------
-permissions:
-  fs: { read: true, write: true, delete: false }
-  net: { search: false, fetch: false }
-  exec: { terminal: false, headless: false }
-  git: { read: true, write: false }
-  agents:
-    delegate: false       # set true to expose delegation tools
 
-# Native local delegation is advisory and read-only: the secondary model can
-# analyze supplied context but receives no tools and cannot edit or execute.
-# To consult two different direct llama.cpp models, set this to at least 2;
-# slots prevent eviction but do not guarantee sufficient RAM/VRAM.
-# max_simultaneous_models: 2
-
-# Warm direct-chat Claude/Codex process limits. Worker and delegation CLI runs
-# remain one-shot and do not consume these slots.
-# max_cli_agents: 4
-# cli_idle_timeout_ms: 900000
-
-# -------------------------------------------------------------------
-# Optional: external MCP stdio servers — their tools are bridged into the
-# Forge tool registry on activation, after the config has loaded. Unlisted MCP
-# tools default to `read`; classify sensitive tools explicitly. A slow or
-# missing server binary never blocks Forge startup.
-# -------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# External MCP servers (optional)
+# -----------------------------------------------------------------------------
+# stdio MCP servers bridged into the tool registry, read-only and auto-discovered.
+# Cap each server's output: an uncapped result can fill the whole context window
+# and stall the turn with no visible error.
 # mcp_servers:
-#   - name: forgerelay
-#     command: C:/path/to/forgerelay-mcp.exe
-#     tool_permissions:
-#       dispatch_subagent: delegate  # requires permissions.agents.delegate: true
-#     max_result_chars: 24000   # truncate oversized tool results (default 24000)
+#   - name: my-server
+#     command: "C:/path/to/my-mcp-server.exe"
+#     max_result_chars: 20000
 
-# -------------------------------------------------------------------
-# Optional: local semantic code search
-# Requires a second local GGUF embedding model served by llama.cpp
-# Forge starts it lazily on the first semantic search or /reindex, keeps it
-# warm during active indexing/search, asks before a cold start, and unloads it
-# after the configured idle timeout. It stops when the window deactivates too.
-# Each workspace keeps its own persisted index at .forge/embeddings.index.json.
-# -------------------------------------------------------------------
-# embeddings:
-#   enabled: true
-#   model_path: /path/to/embedding-model.gguf
-#   port: 8091
-#   # Embedding model's context window (default 2048). Also pins llama-server's
-#   # --batch-size/--ubatch-size: an embedding input cannot be split across
-#   # physical batches, so this must exceed your largest chunk or requests fail
-#   # with HTTP 500 "input is too large to process".
-#   n_ctx: 2048
-#   # Task prefixes for documents and queries. `gemma` is correct ONLY for
-#   # EmbeddingGemma (measured on a 2679-chunk index: MRR 0.384 -> 0.634); it
-#   # would corrupt nomic-embed/bge results. Default `none`. Changing this
-#   # invalidates the stored index and forces a rebuild.
-#   prompt_style: gemma
-#   auto_index_on_search: true
-#   # Show an Accept/Cancel warning before starting the server from a cold state.
-#   confirm_on_start: true
-#   # Forge-owned server is stopped after this long without indexing/search use.
-#   idle_timeout_ms: 120000
-#   max_file_size_kb: 256
-#   # Anchored at the WORKSPACE ROOT, like every other glob Forge takes. In a
-#   # workspace holding several projects, "src/**" matches only a top-level
-#   # src/ — it will not reach subproject/src/**, and the index comes out
-#   # nearly empty while looking like it built fine. Omit this key to index
-#   # everything (**/*), or list each project: ["app/src/**", "lib/src/**"].
-#   include_globs: ["src/**", "test/**"]
-#   exclude_globs: ["**/node_modules/**", "**/dist/**", "**/.git/**"]
 
-# -------------------------------------------------------------------
-# view_video — frame extraction (optional)
-# -------------------------------------------------------------------
-# The agent's `view_video` tool samples still frames across a short clip with
-# ffmpeg and sends them as images. It requires ffmpeg AND ffprobe; without them
-# the tool fails with a message naming the install command. It does not send
-# audio, and it does not send motion — only the sampled stills.
-#
-# frame_max_dimension is a CONTEXT knob before it is a quality one. Measured on
-# a 5 s clip, prompt tokens for the whole request:
-#
-#   1920x1088 unscaled   Qwen3.8-27B   22,501   (rejected outright at 16k ctx)
-#   1920x1088 unscaled   Gemma 4 12B    5,363
-#   640 px               Qwen3.8-27B    2,479
-#   384 px               Qwen3.8-27B      983
-#
-# If a clip is rejected for exceeding the context, lower this before anything
-# else. Settings are global — tools are registered once at activation, so these
-# cannot be overridden per model or per group.
-# -------------------------------------------------------------------
-# video:
-#   # Clips longer than this are refused before any frame is decoded.
-#   max_duration_seconds: 30
-#   # Hard ceiling on frames per call. When the agent passes max_frames it is
-#   # honoured exactly, up to this number. When it does not, the count comes
-#   # from clip length (roughly one frame per 5 s, minimum 3) — which lands on
-#   # the floor of 3 for any clip under ~17 s, so short clips need max_frames.
-#   max_frames: 26
-#   # Longest edge of each frame, in pixels. See the table above. The agent can
-#   # override this per call (64..4096) when detail is too small to read.
-#   frame_max_dimension: 640
-#   # ffmpeg -q:v. 2 is best quality, higher is smaller. 2..31.
-#   frame_quality: 3
-#   # Explicit ffmpeg executable. Omit to resolve from PATH, then (on Windows)
-#   # the WinGet package tree. ffprobe must sit beside it.
-#   ffmpeg_path: ""
+# =============================================================================
+# GROUPS — shared settings for a family of models
+# =============================================================================
+groups:
+
+  llamacpp-local:
+    provider: llama.cpp
+    think: true
+
+    # ---- VRAM: the part that actually bites ---------------------------------
+    # n_gpu_layers: 999, NOT -1.
+    #   `-ngl -1` is AUTO-FIT, not "all". It holds back a ~1024 MiB margin and
+    #   parks whatever it thinks will not fit on the CPU. The tell in the loader
+    #   log is "tensor overrides to CPU are used with mmap enabled" — your model
+    #   is silently running partly on CPU at a fraction of the speed. On hybrid
+    #   (Gated Delta Net) models, ONE stranded CPU layer disables the fused
+    #   kernel for the WHOLE model: measured 26 t/s -> 12 t/s.
+    #   Setting it explicitly also disables auto-fit, so the num_ctx budget is
+    #   yours to keep. An over-budget load then FAILS LOUDLY at startup instead
+    #   of degrading silently — which is what you want.
+    #
+    # If a load fails, cut `num_ctx` — do not restore auto-fit.
+    #
+    # Also: on Windows, WDDM pages VRAM over PCIe rather than refusing to
+    # allocate. Leaving under ~1 GB free does not crash, it just goes very slow
+    # (measured 35 t/s -> 5 t/s). Budget for headroom.
+    #
+    # type_k/type_v q4_0 quantises the KV cache, which is usually where the
+    # context window's memory goes. q8_0 is higher quality and roughly double.
+    spawn:
+      n_batch: 512
+      type_k: q4_0
+      type_v: q4_0
+      flash_attn: true
+      n_gpu_layers: 999
+
+    # Sampling recipes are model-family specific — use the one the model's
+    # authors publish. Two worth knowing:
+    #   Gemma:  temperature 1.0, top_p 0.95, top_k 64
+    #   Qwen:   temperature 0.6, top_p 0.95, top_k 20
+    # Use `repeat_penalty`, NOT `repetition_penalty` — llama.cpp ignores unknown
+    # keys in SILENCE, so the wrong spelling does nothing and never says so.
+    # 1.0 is off; 1.05-1.15 helps if output repeats; above 1.2 hurts coherence.
+    sampling: { top_k: 64, top_p: 0.95, min_p: 0, repeat_penalty: 1.0 }
+
+    # Cap or disable individual tools for this family. A limit of 0 un-advertises
+    # the tool completely, so its schema stops being rendered into every prompt —
+    # useful for keeping a small local model's tool list short and reliable.
+    # tool_call_limits:
+    #   some_noisy_tool: 0
+
+  ollama-local:
+    provider: ollama
+    endpoint: http://127.0.0.1:11434
+    think: true
+    reasoning_effort: medium
+
+  # openai-compatible-cloud:
+  #   provider: openai-compatible
+  #   endpoint: https://api.your-provider.com
+  #   capabilities: [tool-call, long-context]
+  #   sampling: { temperature: 0.7, max_tokens: 32768 }
