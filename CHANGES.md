@@ -1,5 +1,36 @@
 # Forge — Recent Changes
 
+## 0.13.18
+
+- Volatile turn state no longer sits at the head of the prompt, where it was
+  destroying llama.cpp's KV-cache reuse on every turn. The active editor file
+  was rendered into the *system prompt*, and the task plan was folded into the
+  *first user message* - so changing editor tabs, or an `update_plan`, rewrote
+  the prompt behind the entire conversation. llama-server reuses the longest
+  common prefix and re-evaluates everything after the first divergent token,
+  so the whole transcript was being re-processed.
+  Measured against b10430 on a 4.9K-token prompt: an append-only turn
+  re-evaluated 21 tokens in 618 ms, while changing one line near the head
+  re-evaluated 4971 tokens in 7605 ms - a 12x prompt-eval penalty with a cache
+  hit of exactly zero. Reproduced on gemma-4-E2B (CPU) and Qwen3.8-27B (GPU).
+  Both are now injected at the *latest user message* instead, by the new
+  `injectTurnContext`. Everything above it stays byte-identical.
+- The task plan no longer carries relative age text ("updated about 2 min
+  ago"). It was re-rendered on every tool round, so a turn that crossed a
+  minute boundary rewrote the prompt head *mid-turn* with nothing else having
+  changed. `updatedAt` is still kept on the conversation for the UI; it just
+  never reaches the model.
+- Forge now logs how much of each prompt the server served from cache
+  (`[cache] prompt=24610 cached=24102 (97.9%) evaluated=508`, debug level, no
+  prompt contents). llama.cpp reports this directly as
+  `usage.prompt_tokens_details.cached_tokens`, so a future regression of this
+  kind is visible rather than inferred.
+- `--cache-reuse` was evaluated as a cheaper alternative and rejected: it is
+  disabled by llama.cpp itself for both gemma (sliding-window) and Qwen3.8
+  (hybrid/recurrent) on b10430 and b10621 alike, since neither architecture
+  supports KV shifting. No config knob was added for a flag that silently does
+  nothing.
+
 ## 0.13.17
 
 - Switching a conversation that contains images to a projector-less model no

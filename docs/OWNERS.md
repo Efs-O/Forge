@@ -41,7 +41,9 @@ overlaps with an existing owner, extend the owner instead.
 | Applying the compaction window to a request| `src/sidebar/compactionWindow.ts`    |
 | Host-recorded summary facts (from messages)| `src/sidebar/compactionLedger.ts`    |
 | Working-tree snapshot for a compaction     | `src/sidebar/repoSnapshot.ts`        |
-| Agent task plan tool + prompt injection    | `src/tools/planTools.ts`             |
+| Agent task plan tool + plan rendering      | `src/tools/planTools.ts`             |
+| Volatile turn context (active file, plan)  | `src/sidebar/turnContext.ts`         |
+| Prompt KV-cache reuse stats from `usage`   | `src/llm/promptCacheStats.ts`        |
 | Webview HTML builder                       | `src/sidebar/WebviewBuilder.ts`      |
 | Multi-conversation session types + persist | `src/sidebar/sessionTypes.ts`        |
 | Image content parts: count/strip/age out   | `src/sidebar/imageParts.ts`          |

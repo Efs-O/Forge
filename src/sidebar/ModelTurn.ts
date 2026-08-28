@@ -30,7 +30,9 @@ import { resolveToolPermissions } from '../tools/PermissionResolver';
 import { ToolBudget } from '../tools/ToolBudget';
 import { deriveStaticCapabilities } from '../config/ConfigResolver';
 import { extractToolDetail } from './toolSummary';
-import { withPlan } from '../tools/planTools';
+import { injectTurnContext } from './turnContext';
+import { formatPromptCacheStats, readPromptCacheStats } from '../llm/promptCacheStats';
+import { getLogger } from '../util/logger';
 import { visionUnavailableMessage } from '../tools/imageTool';
 import { videoUnavailableMessage } from '../tools/videoTool';
 import {
@@ -43,6 +45,8 @@ import {
   canUseThinkingKwargs,
   shouldStripThinking,
 } from './turnModelBehavior';
+
+const log = getLogger();
 
 /** Tools that need an mmproj projector. Gated in two places below; keep in sync. */
 const VISION_ONLY_TOOLS = new Set(['view_image', 'view_video']);
@@ -245,8 +249,16 @@ export async function runModelTurn(
         // Runs BEFORE the excerpting below so the budget sees the freed room:
         // on a turn that would not otherwise fit, the surviving results get
         // excerpted less aggressively.
+        // Layer C last, so the volatile block lands as close to the tail as a
+        // strict chat template allows. Everything above it -- system prompt and
+        // the whole conversation -- stays byte-identical while the active file
+        // or the plan changes, which is what keeps the KV cache warm.
+        const withTurnContext = injectTurnContext(injected, {
+          activeFile,
+          plan: conv.plan,
+        });
         return prepareToolResultContext({
-          messages: supersedeStaleReads(withPlan(injected, conv.plan)),
+          messages: supersedeStaleReads(withTurnContext),
           toolTokens: estimateToolTokens(toolDefinitions),
           model,
           server: config.llama_server,
@@ -312,6 +324,12 @@ export async function runModelTurn(
         // reports usage once per round and the bar stays live mid-turn.
         ctx.onUsage?.(conv, usage.prompt_tokens, usage.completion_tokens);
         ctx.onContextChanged?.(conv.id);
+        // How much of the prompt llama-server served from its KV cache. A turn
+        // that only grew should sit in the high 90s; a drop to 0 means
+        // something rewrote the prompt head. Debug-level and contents-free --
+        // this fires on every round of every turn.
+        const cache = readPromptCacheStats(usage);
+        if (cache) log.debug(formatPromptCacheStats(cache));
       },
       // A status line, not an error: the turn continues and the model is being
       // asked for the same write in chunks.

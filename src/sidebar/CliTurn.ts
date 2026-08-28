@@ -19,7 +19,8 @@ import type { SidebarProviderEvents } from './AgentLoop';
 import type { TurnLifecycle } from './TurnLifecycle';
 import { getLogger } from '../util/logger';
 import type { UserPromptOptions } from './transcriptMutations';
-import { renderPlan, withPlan } from '../tools/planTools';
+import { renderPlan } from '../tools/planTools';
+import { injectTurnContext } from './turnContext';
 
 const log = getLogger();
 
@@ -82,13 +83,11 @@ export async function runCliTurn(
     // update_plan handler. They still receive any existing Forge plan on every
     // turn, including a warm-session resume that otherwise sends only the
     // latest user request.
-    const planPrompt = conv.plan
-      ? renderPlan(conv.plan.items, conv.plan.updatedAt, Date.now())
-      : undefined;
+    const planPrompt = conv.plan ? renderPlan(conv.plan.items) : undefined;
     const common = {
       prepared,
       model,
-      messages: withPlan(conv.messages, conv.plan),
+      messages: injectTurnContext(conv.messages, { plan: conv.plan }),
       ...(planPrompt ? { planPrompt } : {}),
       workspaceRoot: ctx.workspaceRoot,
       checkpoint,

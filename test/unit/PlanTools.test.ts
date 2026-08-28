@@ -1,6 +1,6 @@
 import type { Memento } from 'vscode';
 import { describe, expect, it } from 'vitest';
-import { makeUpdatePlanTool, renderPlan, withPlan } from '../../src/tools/planTools';
+import { makeUpdatePlanTool, renderPlan } from '../../src/tools/planTools';
 import {
   loadSidebarSession,
   runtimeToPersisted,
@@ -103,116 +103,19 @@ describe('update_plan', () => {
 });
 
 describe('renderPlan', () => {
-  it('reports elapsed time, not a round count', () => {
-    const now = 1_000_000_000;
-    expect(renderPlan(ITEMS, now, now)).toContain('updated just now');
-    expect(renderPlan(ITEMS, now - 6 * 60_000, now)).toContain('updated about 6 min ago');
-    expect(renderPlan(ITEMS, now - 3 * 3_600_000, now)).toContain('updated about 3 h ago');
+  it('is a pure function of the items, so the clock cannot move the prompt', () => {
+    // The age suffix used to be re-rendered every tool round. A turn that
+    // crossed a minute boundary rewrote the prompt head mid-turn and dropped
+    // the KV cache hit to zero for no reason the user could see.
+    expect(renderPlan(ITEMS)).toBe(renderPlan(ITEMS));
+    expect(renderPlan(ITEMS)).not.toMatch(/ago|just now|updated/);
   });
 
   it('marks each status distinctly', () => {
-    const text = renderPlan(ITEMS, 0, 0);
+    const text = renderPlan(ITEMS);
     expect(text).toContain('- [x] done: write the ledger');
     expect(text).toContain('- [>] in progress: wire the snapshot');
     expect(text).toContain('- [ ] pending: add tests');
-  });
-});
-
-describe('withPlan', () => {
-  const plan: ConversationPlan = { items: ITEMS, updatedAt: 0 };
-
-  it('leaves the messages untouched when there is no plan', () => {
-    const messages: ChatMessage[] = [{ role: 'user', content: 'hi' }];
-    expect(withPlan(messages, undefined)).toBe(messages);
-    expect(withPlan(messages, { items: [], updatedAt: 0 })).toBe(messages);
-  });
-
-  it('goes at the head, never between tool calls and their results', () => {
-    // A user message landing after an assistant's tool_calls is the shape
-    // strict chat templates reject.
-    const messages: ChatMessage[] = [
-      { role: 'system', content: 'you are forge' },
-      { role: 'user', content: 'do it' },
-      { role: 'assistant', content: null, tool_calls: [] },
-      { role: 'tool', content: 'done', tool_call_id: 'a' },
-    ];
-    const out = withPlan(messages, plan, 0);
-    expect(out).toHaveLength(4);
-    expect(out[0]?.role).toBe('system');
-    expect(out[1]?.content).toContain('Task plan (recorded by Forge');
-    expect(out[1]?.content).toContain('do it');
-    expect(out[3]?.role).toBe('tool');
-  });
-
-  it('never creates two consecutive user turns, which strict templates refuse', () => {
-    // After a compaction the first non-system message is always the summary
-    // preamble, so inserting beside it would produce that pair every time.
-    const messages: ChatMessage[] = [
-      { role: 'system', content: 'you are forge' },
-      { role: 'user', content: 'Conversation summary. Use this as the working context.' },
-      { role: 'assistant', content: 'Goal: ship it. Next: continue.' },
-    ];
-    const out = withPlan(messages, plan, 0);
-    const roles = out.map((m) => m.role);
-    expect(roles).toEqual(['system', 'user', 'assistant']);
-    expect(out[1]?.content).toContain('Task plan');
-    expect(out[1]?.content).toContain('Conversation summary');
-    // The caller's own message object must not be mutated — only the
-    // model-facing copy changes.
-    expect(messages[1]?.content).toBe('Conversation summary. Use this as the working context.');
-  });
-
-  it('folds into the first user message when there is no system message', () => {
-    const out = withPlan([{ role: 'user', content: 'do it' }], plan, 0);
-    expect(out).toHaveLength(1);
-    expect(out[0]?.content).toContain('Task plan');
-    expect(out[0]?.content).toContain('do it');
-  });
-
-  it('folds into an attachment-bearing user message without adding a second user turn', () => {
-    const messages: ChatMessage[] = [
-      { role: 'system', content: 's' },
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: 'Inspect this screenshot.' },
-          { type: 'image_url', image_url: { url: 'data:image/png;base64,abc' } },
-        ],
-      },
-    ];
-
-    const out = withPlan(messages, plan, 0);
-    expect(out.map((m) => m.role)).toEqual(['system', 'user']);
-    expect(Array.isArray(out[1]?.content)).toBe(true);
-    const content = out[1]?.content;
-    expect(Array.isArray(content) && content[0]).toEqual(
-      expect.objectContaining({ type: 'text', text: expect.stringContaining('Task plan') }),
-    );
-    expect(Array.isArray(content) && content[2]).toEqual({
-      type: 'image_url',
-      image_url: { url: 'data:image/png;base64,abc' },
-    });
-  });
-
-  it('stands alone only when there is nothing to fold into', () => {
-    const messages: ChatMessage[] = [
-      { role: 'system', content: 's' },
-      { role: 'assistant', content: 'resuming' },
-    ];
-    const out = withPlan(messages, plan, 0);
-    expect(out.map((m) => m.role)).toEqual(['system', 'user', 'assistant']);
-    expect(out[1]?.internal).toBe(true);
-  });
-
-  it('emits exactly one plan block per call, however often it runs', () => {
-    const messages: ChatMessage[] = [
-      { role: 'system', content: 's' },
-      { role: 'user', content: 'u' },
-    ];
-    const once = withPlan(messages, plan, 0);
-    const twice = withPlan(messages, plan, 0);
-    expect(once.filter((m) => String(m.content).includes('Task plan'))).toHaveLength(1);
-    expect(twice).toHaveLength(once.length);
   });
 });
 

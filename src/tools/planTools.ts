@@ -15,12 +15,10 @@
 
 import { z } from 'zod';
 import type { RegisteredTool } from './ToolRegistry';
-import type { ChatMessage } from '../llm/types';
 import {
   PLAN_ITEM_MAX_CHARS,
   PLAN_MAX_ITEMS,
   planItemSchema,
-  type ConversationPlan,
   type PlanItem,
 } from '../sidebar/sessionTypes';
 
@@ -30,28 +28,25 @@ const argsSchema = z
   })
   .strict();
 
-/** One line per item, with the status leading so it survives a skim. */
-export function renderPlan(items: readonly PlanItem[], updatedAt: number, now: number): string {
+/**
+ * One line per item, with the status leading so it survives a skim.
+ *
+ * Deterministic in `items` alone. It used to append the plan's age
+ * ("updated about 2 min ago"), which meant the model-facing prompt changed on
+ * its own as the clock ran -- including BETWEEN ROUNDS OF ONE TURN, since this
+ * is re-rendered every round. That dropped the KV cache hit to zero mid-turn
+ * for no reason a user could see. `updatedAt` stays on `ConversationPlan` for
+ * the webview; it just never reaches the model.
+ * See docs/plans/PROMPT_PREFIX_STABILITY_PLAN.md.
+ */
+export function renderPlan(items: readonly PlanItem[]): string {
   const marks: Record<PlanItem['status'], string> = {
     done: '[x] done',
     active: '[>] in progress',
     pending: '[ ] pending',
   };
   const lines = items.map((item) => `- ${marks[item.status]}: ${item.text}`);
-  return `**Task plan (recorded by Forge, ${describeAge(now - updatedAt)}):**\n${lines.join('\n')}`;
-}
-
-/**
- * Elapsed time, not a round count: `updatedAt` is epoch ms and there is no
- * round counter to read. A plan that has not moved in twenty minutes should say
- * so rather than looking as authoritative as one written this turn.
- */
-function describeAge(elapsedMs: number): string {
-  if (elapsedMs < 60_000) return 'updated just now';
-  const minutes = Math.round(elapsedMs / 60_000);
-  if (minutes < 60) return `updated about ${minutes} min ago`;
-  const hours = Math.round(minutes / 60);
-  return `updated about ${hours} h ago`;
+  return `**Task plan (recorded by Forge):**\n${lines.join('\n')}`;
 }
 
 export function makeUpdatePlanTool(): RegisteredTool {
@@ -126,53 +121,4 @@ export function makeUpdatePlanTool(): RegisteredTool {
  * chars cannot reach this, so in practice it never truncates — it exists so
  * that a plan loaded from a corrupted session cannot grow the context either.
  */
-const PLAN_RENDER_MAX_CHARS = 1500;
-
-/**
- * Put the conversation's plan in front of the model, in the model-facing copy
- * only.
- *
- * Placed at the head rather than the tail: a `user` message injected between an
- * assistant's tool_calls and the model's continuation is exactly the shape
- * strict chat templates reject, and `applyCompactionWindow` already carries the
- * summary at the front for the same reason.
- *
- * It is FOLDED INTO the first user message wherever there is one, instead of
- * being inserted beside it. Templates that demand strict user/model alternation
- * (gemma among them) refuse two consecutive user turns, and after a compaction
- * the first non-system message is always the summary preamble — so inserting
- * would have produced that exact pair on every compacted conversation. A
- * standalone message is used only when nothing suitable is there to fold into.
- *
- * Rebuilt from live state every round, so it is never stale within a turn and
- * never accumulates duplicates.
- */
-export function withPlan(
-  messages: ChatMessage[],
-  plan: ConversationPlan | undefined,
-  now: number = Date.now(),
-): ChatMessage[] {
-  if (!plan || plan.items.length === 0) return messages;
-  const rendered = renderPlan(plan.items, plan.updatedAt, now).slice(0, PLAN_RENDER_MAX_CHARS);
-  const head = messages.findIndex((m) => m.role !== 'system');
-  const target = head === -1 ? undefined : messages[head];
-
-  if (target?.role === 'user' && typeof target.content === 'string') {
-    const merged: ChatMessage = { ...target, content: `${rendered}\n\n${target.content}` };
-    return [...messages.slice(0, head), merged, ...messages.slice(head + 1)];
-  }
-  if (target?.role === 'user' && Array.isArray(target.content)) {
-    // Attachment-bearing prompts use content parts. Keep them in the same user
-    // turn: inserting another user message recreates the strict-template
-    // alternation failure this helper exists to prevent.
-    const merged: ChatMessage = {
-      ...target,
-      content: [{ type: 'text', text: `${rendered}\n\n` }, ...target.content],
-    };
-    return [...messages.slice(0, head), merged, ...messages.slice(head + 1)];
-  }
-
-  const block: ChatMessage = { role: 'user', content: rendered, internal: true };
-  if (head === -1) return [...messages, block];
-  return [...messages.slice(0, head), block, ...messages.slice(head)];
-}
+export const PLAN_RENDER_MAX_CHARS = 1500;

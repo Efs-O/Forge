@@ -39,7 +39,13 @@ export function buildTemplateContext(
   activeFile: string | undefined,
 ): Record<string, string> {
   const ctx: Record<string, string> = {};
-  if (activeFile) ctx['activeFile'] = activeFile;
+  // `activeFile` is deliberately NOT a template variable any more. Rendering it
+  // into the system prompt put volatile state at the prompt head, and one
+  // changed line there measured a 12-17x prompt-eval penalty with a KV cache
+  // hit of zero. It is injected at the tail now, by `injectTurnContext`.
+  // The parameter stays because scoped project instructions are resolved from
+  // it below -- that lookup is semantically load-bearing and keeps its place.
+  // See docs/plans/PROMPT_PREFIX_STABILITY_PLAN.md.
   if (config.custom_instructions) ctx['customInstructions'] = config.custom_instructions;
   if (forgeLoader?.root) ctx['workspaceRoot'] = forgeLoader.root;
   const projectInstructions = forgeLoader?.instructionsFor(activeFile);
