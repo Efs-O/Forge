@@ -1,6 +1,6 @@
 # Slot Affinity and Context Checkpoints
 
-Status: **measured, implementation proposed**. Follows
+Status: **measured and validated end-to-end**. Follows
 `docs/plans/PROMPT_PREFIX_STABILITY_PLAN.md`, which shipped in 0.13.18
 (`8a01579`). Phase 1 is done — numbers in §8. Phases 2 and 3 are not started.
 
@@ -361,7 +361,7 @@ below which WDDM starts paging (§8.3). Essentially all of that is the model, th
 KV cache and the MTP draft context; the checkpoint flag contributes nothing
 (§8.4). The margin is set by `num_ctx`, not by anything in this plan.
 
-### 8.4 Retraction: the checkpoint flags are free
+### 8.4 Retraction, and a second correction: the cost is host RAM
 
 A revision of this document reported that `--checkpoint-min-step 1024` cost
 ~2.02 GiB of preallocated VRAM, and that `num_ctx` had to be cut to pay for it.
@@ -385,7 +385,30 @@ And across spacings, flag alone:
 Flat within ±8 MiB. Doubling `--ctx-checkpoints` to 64 changes nothing either,
 so the buffers are not preallocated per checkpoint at load.
 
-**Root cause.** The 12375 MiB baseline in the original §8.2 was read while the
+**Correction to this section's own conclusion.** Everything above measured VRAM
+**at load** — and checkpoints do not exist at load. They are created while a
+prompt is processed, so a load-time reading cannot see them, and "flat within
+±8 MiB" was measured at a moment with nothing to measure. Re-run, same argv,
+one 31K prompt processed between the readings:
+
+| `-cms` | VRAM at load | VRAM after prompt | host RAM at load | host RAM after prompt |
+|---|---|---|---|---|
+| 8192 | 14028 | 14082 | 12286 | **14169** |
+| 1024 | 13981 | 14042 | 12286 | **14469** |
+
+VRAM really is flat — that part stands. The cost is **~300 MB of host RAM** at a
+31K prompt, which is where llama.cpp keeps checkpoints (bounded by `--cache-ram`,
+default 8192 MiB). At 1024 spacing a 31K prompt fills close to the
+`--ctx-checkpoints 32` cap; at 8192 it creates about four. ~300 MB over ~26 extra
+checkpoints is ~11 MiB each, at the low end of the 60-215 MiB per checkpoint
+that upstream issue threads report for larger/denser models — plausible for a
+GDN hybrid with q4_0 KV, where the recurrent state is small.
+
+So: **cheap, not free**, and cheap in a resource that is not the scarce one on
+this machine. The performance result is unchanged and reproduced exactly on the
+re-run: 7272 tokens / 11064 ms at 8192 versus 32 tokens / 385 ms at 1024.
+
+**Root cause of the original 2 GiB figure.** The 12375 MiB baseline in §8.2 was read while the
 model was still loading. The wait loop used `curl -s -m 2 /health` and treated
 *any* HTTP response as ready — but llama-server answers `/health` with **503
 while loading**, so the loop returned almost immediately. Re-running run A's
@@ -411,6 +434,73 @@ response-based check silently sample a partially-loaded model.
 first-edit prefill on these architectures, not a trade. There is no reason not
 to set it on every hybrid/recurrent entry. `num_ctx` on this machine remains 50000
 by explicit request, not to fund the flag.
+
+### 8.5 Live end-to-end validation (0.13.19)
+
+Everything above §8.4 is a synthetic probe: hand-built prompts posted straight
+at `llama-server`. This is the first measurement of a **real Forge agent turn**,
+and it both confirmed the mechanism and found a bug the probes could not have.
+
+Method: the same prompt run twice against the same repo, reading
+`n_prompt_tokens_cache` / `n_prompt_tokens_processed` from `/slots` at ~2.5 Hz.
+The build that served each run is recorded in its own session header
+(`forge_version` in `~/.forge/sessions/*.jsonl`), so the pairing is evidence,
+not assumption:
+
+| run | session mtime | `forge_version` |
+|---|---|---|
+| before | 18:54:54 | 0.13.18 |
+| after | 19:04:37 | 0.13.19 |
+
+**Before — 0.13.18, prefix fix shipped, block rebuilt every round:**
+
+| round | prompt | cached | hit | evaluated |
+|---|---|---|---|---|
+| 1 | 21412 | 16116 | 76% | 4595 |
+| 2 | 26431 | 10321 | **39%** | **16110** |
+| 3 | 26617 | 11216 | **42%** | **15401** |
+
+Rounds 2 and 3 grew the conversation by 186 tokens and re-evaluated 15401.
+
+**After — 0.13.19, block snapshotted at turn start:**
+
+| round | prompt | cached | hit | evaluated |
+|---|---|---|---|---|
+| 1 | 20557 | 11347 | 55% | 9210 |
+| 2 | 26058 | 20553 | 79% | 5505 |
+| 3 | 26814 | 26054 | **97%** | 760 |
+| 4 | 27450 | 26810 | **98%** | 640 |
+| 5 | 28370 | 27446 | **97%** | 924 |
+
+Raw hit% understates the result, because it is diluted by content that is
+legitimately new — the first read of `schema.ts` and `config.example.yaml` has
+to be evaluated once no matter what. The metric that isolates the fix is **how
+much of the PREVIOUS round survived**:
+
+| round | previous round's prompt | cached now | reused |
+|---|---|---|---|
+| 2 | 20557 | 20553 | **99.98%** |
+| 3 | 26058 | 26054 | **99.98%** |
+| 4 | 26814 | 26810 | **99.99%** |
+| 5 | 27450 | 27446 | **99.99%** |
+
+Every round now reuses the whole previous prompt bar ~4 tokens. On 0.13.18
+`cached` sat pinned near 10-11K however large the conversation grew — that
+figure is the system prompt plus tool schemas, i.e. everything *above* the
+turn's opening user message. Steady-state re-evaluation fell from ~15700 tokens
+per round to ~770, about **20x less prefill work**.
+
+**What this says about the synthetic probes.** They were directionally right and
+they missed the biggest real-world cost. §8's runs A-C tested a *conversation*
+growing one user turn at a time, where the volatile block sits at the tail. A
+real agent turn is many tool rounds deep, and there the last USER message is the
+request that opened the turn — near the head. The probe never modelled a tool
+loop, so it never saw it. The bug survived the entire synthetic campaign and
+died to the first real turn.
+
+**Caveat on timings.** Wall-clock per round in the trace includes generation, so
+only the token counts above are prefill measurements. Round 4's 35 s was the
+model writing a long answer, not prompt processing.
 
 ### 8.3 Method note
 

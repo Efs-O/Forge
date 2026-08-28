@@ -300,8 +300,9 @@ models:
         # 8192, an edit to the last message of a 31K prompt still re-evaluated
         # 7272 tokens (~11 s); at 1024 it cost 32 tokens (~0.6 s).
         #
-        # Measured free: resident VRAM was flat within +-8 MiB across
-        # none/8192/4096/2048/1024, and unchanged by --ctx-checkpoints 32 vs 64.
+        # Cheap, not free: no measurable VRAM, but ~300 MB of HOST RAM at a 31K
+        # prompt, since checkpoints live in RAM under --cache-ram (default 8192
+        # MiB). Measure AFTER processing a prompt -- none exist at load.
         # Measured on Qwen3.8-27B (GDN) with llama.cpp b10621 and b10673; the
         # flag is spelled --ctx-checkpoints/--swa-checkpoints so it should serve
         # gemma's SWA cache too, but that has not been measured.
