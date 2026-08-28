@@ -178,6 +178,8 @@ overlaps with an existing owner, extend the owner instead.
 | Shared native/fallback tool-calling loop   | `src/agent/ToolCallingLoop.ts`               |
 | Truncated tool call: detection + recovery  | `src/agent/truncationRecovery.ts`            |
 | Repeated identical tool call detection     | `src/agent/ToolLoopGuard.ts`                 |
+| Fit-only tool-result excerpting (model copy) | `src/agent/toolResultContext.ts`           |
+| Superseded read_file elision (model copy)  | `src/agent/staleReadSupersede.ts`            |
 | Chat message / tool call wire types        | `src/llm/types.ts`                           |
 | Buffered in-host chat for POST /chat       | `src/llm/ControlChatProxy.ts`                |
 | xAI token resolution (SecretStorage/OAuth) | `src/llm/XaiAuth.ts`                         |
@@ -208,6 +210,7 @@ overlaps with an existing owner, extend the owner instead.
 | `old_str` matching + line-ending handling  | `src/tools/editMatch.ts`              |
 | Structured line-edit validation + tool     | `src/tools/structuredEditTool.ts`     |
 | Code + file search tools (ripgrep)         | `src/tools/dirTools.ts`               |
+| search_code snippet/result size bounds     | `src/tools/searchSnippet.ts`          |
 | list_directory + size/age formatting       | `src/tools/listDirectoryTool.ts`      |
 | Terminal + headless exec tools             | `src/tools/execTools.ts`              |
 | Exec child-process helpers                 | `src/tools/execHelpers.ts`            |

@@ -2,6 +2,8 @@ import { spawn } from 'child_process';
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveRipgrep, type RipgrepResolution } from './RipgrepResolver';
+import { capResultText } from './resultCap';
+import { capSnippetLine, MAX_SEARCH_RESULT_CHARS } from './searchSnippet';
 
 const OUTPUT_LINE_LIMIT = 50;
 const CONTEXT_LINES = 2;
@@ -284,7 +286,12 @@ export function makeSearchCodeTool(
         }
       }
 
-      return outputLines.join('\n');
+      return capResultText(
+        outputLines.join('\n'),
+        MAX_SEARCH_RESULT_CHARS,
+        'search_code',
+        'Narrow the search with a more specific query or an `include` glob.',
+      );
     },
   };
 }
@@ -373,7 +380,13 @@ async function searchWorkspaceText(
         return;
       }
       const marker = event.type === 'match' ? '>' : ' ';
-      const snippet = `${marker} ${lineNumber}: ${line.replace(/\r?\n$/, '')}`;
+      // Cap before the dedupe check below, so two distinct cuts of the same
+      // giant line are still compared as the strings the model will receive.
+      const text = capSnippetLine(
+        line.replace(/\r?\n$/, ''),
+        isMatchEvent(event) ? event.data.submatches?.[0]?.start : undefined,
+      );
+      const snippet = `${marker} ${lineNumber}: ${text}`;
       if (!entry.snippets.includes(snippet)) entry.snippets.push(snippet);
       stopIfEnoughMatches();
     };

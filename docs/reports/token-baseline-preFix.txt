@@ -1,0 +1,39 @@
+sessions            : 197
+turns               : 2351
+unique content      : 15.97 M tokens
+actually sent       : 129.99 M tokens
+AMPLIFICATION       : 8.14 x
+rounds/turn         : median 1  p90 12  max 64
+
+NOTE: 89 of 197 sessions share an opening prompt (resume
+copies). Absolute totals over-count; ratios and rankings do not.
+
+tool                        calls  raw kTok  resend kTok     avg       max
+read_file                    3522    6057.3      68024.3    1720     23969
+search_code                  1170    5145.8      16803.6    4398    542853
+git_diff                      119     274.4       3152.4    2306     38400
+exec_command                 1366     378.0       2787.5     277      3776
+web_fetch                     114     294.6       1486.1    2584     38723
+list_directory               1146     129.9        730.1     113     10680
+git_show                       18      73.8        649.8    4101     17373
+run_tests                     129      72.2        535.4     560      5344
+web_search                    158      89.4        383.2     566       822
+edit_file                    1458      35.0        344.7      24       206
+git_log                       107      26.8        242.9     250       779
+find_files                    268      18.0        214.9      67      1835
+get_document_symbols           30      51.4        182.6    1713      5248
+search_codebase                25      14.7        181.2     588      3186
+write_file                    668      17.0        177.3      25       206
+
+tool-result resend cost: 97.17 M tokens
+top 3 tools           : 91% of it
+re-read same path/turn: 507/3514 (14.4%)
+duplicate tool calls  : 319
+
+=== counterfactual: what the shipped fixes remove from THESE sessions ===
+                        before kTok  after kTok     saved
+search_code cap             16803.6      1934.6     88.5%
+superseded read_file        67975.2     55396.6     18.5%
+combined                    84778.8     57331.2     32.4%
+
+largest single search_code result: 542,853 -> 3,542 tokens

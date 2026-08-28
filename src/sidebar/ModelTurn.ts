@@ -21,6 +21,7 @@ import type { ToolFailureTracker } from '../tools/StripTools';
 import type { TurnLifecycle } from './TurnLifecycle';
 import { computeContextBudget, estimateToolTokens, perSlotContext } from '../util/contextBudget';
 import { prepareToolResultContext } from '../agent/toolResultContext';
+import { supersedeStaleReads } from '../agent/staleReadSupersede';
 import { applyCompactionWindow } from './compactionWindow';
 import { injectSystemPrompt } from '../llm/SystemPromptInjector';
 import { resolveToolPermissions } from '../tools/PermissionResolver';
@@ -224,8 +225,11 @@ export async function runModelTurn(
         // Only the model-facing copy is reduced. `conv.messages` remains the
         // full raw transcript for sidebar, persistence, and exact recovery via
         // read_tool_result when an excerpt calls for more detail.
+        // Runs BEFORE the excerpting below so the budget sees the freed room:
+        // on a turn that would not otherwise fit, the surviving results get
+        // excerpted less aggressively.
         return prepareToolResultContext({
-          messages: withPlan(injected, conv.plan),
+          messages: supersedeStaleReads(withPlan(injected, conv.plan)),
           toolTokens: estimateToolTokens(toolDefinitions),
           model,
           server: config.llama_server,
