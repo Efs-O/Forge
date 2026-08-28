@@ -52,7 +52,7 @@ concluded the prefix layer had not landed.
 | Volatile turn state off the prompt head | shipped 0.13.18 (`8a01579`) |
 | Deterministic plan rendering (no clock in prompt) | shipped 0.13.18 |
 | Cache-reuse telemetry per request | shipped 0.13.18 (`src/llm/promptCacheStats.ts`) |
-| Checkpoint / slot-affinity flags | **not set — this plan** |
+| Checkpoint / slot-affinity flags | **not set — but reachable via `extra_llama_server_args`** |
 | Slot pinning | **not possible from the extension — §5** |
 
 ---
@@ -60,7 +60,9 @@ concluded the prefix layer had not landed.
 ## 3. The three unset flags
 
 `src/backend/LlamaServerArgs.ts` pushes eleven flags. None of these is among
-them, so every Forge server runs the llama.cpp defaults:
+them, so every Forge server runs the llama.cpp defaults — though all three are
+already reachable today through `extra_llama_server_args` (§6.0), which is
+passed straight through at `LlamaServerArgs.ts:78`:
 
 | Flag | Default | Why it matters here |
 |---|---|---|
@@ -154,6 +156,22 @@ Two cheaper mitigations exist and should be priced first:
 
 ## 6. Implementation
 
+### Phase 0 — nothing to build: the escape hatch already works
+
+`extra_llama_server_args` (model or `spawn`, resolved in `ConfigResolver.ts:305`)
+appends arbitrary argv to llama-server. So a user with VRAM to spare can set
+
+```yaml
+    spawn:
+      extra_llama_server_args:
+        - "--checkpoint-min-step"
+        - "1024"
+```
+
+without any change to Forge. Phase 2 is therefore about **discoverability and
+validation**, not capability — which lowers its priority considerably. Anyone
+who needs this before Phase 2 lands is not blocked.
+
 ### Phase 1 — measure before configuring — **DONE**
 
 Two controlled runs at a 31K prompt, `--checkpoint-min-step` 8192 vs 1024, all
@@ -161,7 +179,11 @@ other conditions identical. Results and VRAM cost in §8. The tail-change
 benefit is real and large, so Phase 2 is justified — but the 2 GiB price means
 it must be **opt-in per model**, not a new default.
 
-### Phase 2 — expose the flags
+### Phase 2 — expose the flags as first-class config
+
+Only worth doing for the reasons Phase 0 does not cover: a typo in
+`extra_llama_server_args` fails at llama-server startup rather than at config
+validation, and an undocumented flag is a flag nobody finds.
 
 Add optional `ctx_checkpoints` and `checkpoint_min_step` to the model/spawn
 schema (`src/config/schemaShared.ts`, `src/config/schema.ts`,
