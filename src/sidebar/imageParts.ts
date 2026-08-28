@@ -11,6 +11,13 @@
 
 import type { ChatMessage, ContentPart } from '../llm/types';
 
+/**
+ * The phrase both persist notes share. A restored conversation carries these as
+ * plain text where an image used to be — it is the only surviving evidence that
+ * the turn ever had one.
+ */
+const RELOAD_LOSS_MARKER = 'not retained across the reload';
+
 /** Image parts never reach workspaceState, so a restored turn must say so. */
 export const TOOL_IMAGE_DROPPED_NOTE =
   '[The image itself was not retained across the reload and is NOT visible to you now. ' +
@@ -134,4 +141,20 @@ export function ageOutImageParts(
       ? { ...message, content: replaceIn(message.content, { reason: 'aged-out' }, message.role) }
       : message,
   );
+}
+
+/**
+ * How many images this conversation lost to a window reload.
+ *
+ * Counts the persist notes, not `image_url` parts: by the time a transcript is
+ * restored the pixels are gone and the note is all that is left. Returns 0 in a
+ * live session, where the parts themselves are still present.
+ */
+export function countReloadDroppedImages(messages: readonly ChatMessage[]): number {
+  let total = 0;
+  for (const message of messages) {
+    if (typeof message.content !== 'string') continue;
+    total += message.content.split(RELOAD_LOSS_MARKER).length - 1;
+  }
+  return total;
 }

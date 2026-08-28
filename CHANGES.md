@@ -28,6 +28,16 @@
   path and streamed SSE error frames — the same treatment truncation parse
   errors already got. Only the response path reports an HTTP status; a stream is
   already 200 and has none to report.
+- A reloaded conversation now says that it lost its images, which affects
+  vision models exactly as much as text-only ones: image data has never been
+  written to `workspaceState`, so a restored transcript carries a note where its
+  pixels used to be. Previously the model would correctly ask for a re-attach
+  while the user saw only a bracketed note in their own message and no
+  explanation — the same "looks like a broken model" shape as the capability
+  case, triggered by a reload instead. Announced once per conversation per
+  session, because unlike a model switch there is nothing the user can do to
+  undo it. Unloading a model does not trigger this; only a window reload,
+  extension host restart, or reopening the workspace does.
 - New optional per-model `image_retention_turns` ages images out of long
   conversations even on a vision model, where they otherwise occupy the
   per-slot context forever (worst with `view_video`, which injects N frames at

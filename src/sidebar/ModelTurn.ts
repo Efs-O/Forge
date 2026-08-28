@@ -23,7 +23,8 @@ import { computeContextBudget, estimateToolTokens, perSlotContext } from '../uti
 import { prepareToolResultContext } from '../agent/toolResultContext';
 import { supersedeStaleReads } from '../agent/staleReadSupersede';
 import { applyCompactionWindow } from './compactionWindow';
-import { ageOutImageParts, countImageParts, stripImageParts } from './imageParts';
+import { ageOutImageParts, stripImageParts } from './imageParts';
+import { announceMissingImages } from './imageNotices';
 import { injectSystemPrompt } from '../llm/SystemPromptInjector';
 import { resolveToolPermissions } from '../tools/PermissionResolver';
 import { ToolBudget } from '../tools/ToolBudget';
@@ -196,43 +197,7 @@ export async function runModelTurn(
     );
   }
 
-  // Announce stripping, every turn it happens. A model that silently loses
-  // the images sitting visibly above it either says it cannot see them (and the
-  // user re-attaches, tripping a second, differently-worded guard) or invents a
-  // description nothing can contradict. Both look like a broken model rather
-  // than a missing `capabilities: [vision]` line.
-  //
-  // Counted once per turn, against the FIRST model-facing window: `prepareMessages`
-  // re-runs every tool round and would re-post on each. Counting the compacted
-  // window rather than all of `conv.messages` also avoids warning about images
-  // compaction had already dropped. A non-vision model cannot add image parts
-  // later in the turn — view_image/view_video are withheld AND dispatch-refused
-  // for it above.
-  if (!isVisionModel) {
-    const strippedImages = countImageParts(applyCompactionWindow(conv.messages, conv.compaction));
-    if (strippedImages > 0) {
-      // `postC` is already conversation-scoped (AgentLoop stamps conversationId
-      // onto every message it sends), so do not pass one here, and do not add an
-      // onNotice hook to ModelTurnContext — that would be a second status
-      // channel alongside one that already works.
-      postC({
-        type: 'notice',
-        message:
-          `⚠ Forge: "${model.name}" cannot see images. ${strippedImages} image(s) earlier in ` +
-          'this conversation were replaced with a placeholder for this turn. Switch back to a ' +
-          'vision-capable model to use them — before reloading the window, as images are not ' +
-          `kept across a reload. If "${model.name}" is multimodal, add ` +
-          '`capabilities: [vision]` (or `mmproj_path` for llama.cpp) to it in config.yaml.',
-      });
-      // Belt and braces for the user who switched models in the picker and is not
-      // looking at the transcript yet. The notice is the one that matters.
-      ctx.warnOnce(
-        `${model.name}:vision-strip`,
-        `Forge: model "${model.name}" cannot see images; images already in this conversation ` +
-          'are being replaced with a placeholder.',
-      );
-    }
-  }
+  announceMissingImages(conv, model, isVisionModel, { postC, warnOnce: ctx.warnOnce });
 
   const result = await trackTurnCompletion(ctx.lifecycle, conv.id, () =>
     runToolCallingLoop({

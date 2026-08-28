@@ -248,6 +248,15 @@ export interface ConversationRuntime {
   /** Durable presentation previews, deliberately separate from LLM messages. */
   displayDiffs?: ConversationDisplayDiff[];
   /**
+   * Set once the user has been told this conversation lost images to a reload.
+   *
+   * Deliberately NOT persisted — `runtimeToPersisted` is an allowlist and this
+   * field is not on it. Resetting per session is the point: each reload is a
+   * fresh loss worth announcing once, and repeating it every turn would be noise
+   * for a condition the user cannot undo.
+   */
+  imageLossNoticed?: boolean;
+  /**
    * Accumulated active-agent time in milliseconds (model work + tool execution,
    * excluding approval waits). Set after each completed generation interval.
    */

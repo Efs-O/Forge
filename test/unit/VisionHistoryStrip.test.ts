@@ -11,7 +11,12 @@ import type { ToolFailureTracker } from '../../src/tools/StripTools';
 import type { DiffDecorations } from '../../src/sidebar/DiffDecorations';
 import { ToolRegistry } from '../../src/tools/ToolRegistry';
 import type { ChatMessage } from '../../src/llm/types';
-import { ageOutImageParts, countImageParts, stripImageParts } from '../../src/sidebar/imageParts';
+import {
+  ageOutImageParts,
+  countImageParts,
+  countReloadDroppedImages,
+  stripImageParts,
+} from '../../src/sidebar/imageParts';
 import {
   imageUnsupportedMessage,
   isImageUnsupportedError,
@@ -270,6 +275,58 @@ describe('ageOutImageParts', () => {
       0,
     );
     expect(JSON.stringify(aged)).toContain('Call view_image again');
+  });
+});
+
+describe('reload-dropped images', () => {
+  /** What a restored transcript looks like: notes where the pixels used to be. */
+  function restored(): ChatMessage[] {
+    const persisted = slimPersistMessages([
+      imageMessage('user', 'here is a screenshot'),
+      { role: 'assistant', content: 'I see it' },
+      imageMessage('tool', 'view_image read chart.png'),
+    ]);
+    return persisted.map((m) => ({ ...m, content: m.content ?? '' }) as ChatMessage);
+  }
+
+  it('counts persist notes, and finds none in a live transcript', () => {
+    expect(countReloadDroppedImages(restored())).toBe(2);
+    expect(countReloadDroppedImages([imageMessage('user', 'live pixels')])).toBe(0);
+    expect(countReloadDroppedImages([{ role: 'user', content: 'plain text' }])).toBe(0);
+  });
+
+  it('announces the loss once per conversation, on a vision model too', async () => {
+    const config = makeConfig({ mmproj_path: '/models/mmproj-F16.gguf' });
+    const posted: Array<Record<string, unknown>> = [];
+    replyOnce();
+    const loop = makeLoop(config, (message) => posted.push(message as Record<string, unknown>));
+    const conv = makeConversation(restored());
+
+    await loop.runTurn(conv, config.models[0]!, 'what did that chart show?');
+    await loop.runTurn(conv, config.models[0]!, 'and the other one?');
+
+    const lossNotices = notices(posted).filter((text) => text.includes('lost when the window'));
+    expect(lossNotices).toHaveLength(1);
+    expect(lossNotices[0]).toContain('2 image(s)');
+    expect(lossNotices[0]).toContain('switching models will not bring it back');
+    expect(conv.imageLossNoticed).toBe(true);
+  });
+
+  it('says nothing when a restored conversation never had an image', async () => {
+    const { posted } = await runTurn(
+      makeConfig({ mmproj_path: '/models/mmproj-F16.gguf' }),
+      makeConversation([{ role: 'user', content: 'text only' }, { role: 'assistant', content: 'ok' }]),
+    );
+    expect(notices(posted)).toHaveLength(0);
+  });
+
+  it('does not fire alongside the vision notice in a live session', async () => {
+    const { posted } = await runTurn(
+      makeConfig(),
+      makeConversation([imageMessage('user', 'live screenshot')]),
+    );
+    expect(notices(posted).filter((t) => t.includes('lost when the window'))).toHaveLength(0);
+    expect(notices(posted).filter((t) => t.includes('cannot see images'))).toHaveLength(1);
   });
 });
 

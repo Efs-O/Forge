@@ -45,6 +45,7 @@ overlaps with an existing owner, extend the owner instead.
 | Webview HTML builder                       | `src/sidebar/WebviewBuilder.ts`      |
 | Multi-conversation session types + persist | `src/sidebar/sessionTypes.ts`        |
 | Image content parts: count/strip/age out   | `src/sidebar/imageParts.ts`          |
+| Missing-image notices to the user          | `src/sidebar/imageNotices.ts`        |
 | Session load/save/migrate (workspaceState) | `src/sidebar/sessionPersistence.ts`  |
 | First-run setup wizard                     | `src/sidebar/FirstRunWizard.ts`      |
 | Add-model setup wizard                     | `src/sidebar/AddModelWizard.ts`      |
