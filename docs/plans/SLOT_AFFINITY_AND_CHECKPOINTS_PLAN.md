@@ -75,11 +75,11 @@ passed straight through at `LlamaServerArgs.ts:78`:
 checkpoints, and the cap of 32 is never approached. The rewind granularity is
 therefore coarse at exactly the sizes Forge runs at: a divergence 3K tokens
 into a 20K prompt rewinds to a checkpoint up to 8K earlier than it needed to.
-Lowering the spacing trades VRAM for finer rewind points.
 
 **Measured in §8.2:** at a 31K prompt, dropping the spacing from 8192 to 1024
 cut the first tail-change from 7272 evaluated tokens to 553 — 13.2x fewer, 8.2x
-less prompt time — for ~2.02 GiB of preallocated VRAM.
+less prompt time. **It is free**: §8.4 measures resident VRAM across four
+spacings and finds no difference beyond ±8 MiB of noise.
 
 The cap of 32 is not the binding constraint and should not be raised blindly;
 `--cache-ram` (default 8192 MiB) bounds the total.
@@ -312,15 +312,9 @@ checkpoint near the divergence point. So the penalty is paid on the first edit
 at a new location, not on repeats - which maps onto exactly the case Forge hits
 when the user switches files or the plan updates.
 
-**Cost.** Resident VRAM immediately after load, same context size:
-
-| `--checkpoint-min-step` | VRAM |
-|---|---|
-| 8192 | 12375 MiB |
-| 1024 | 14441 MiB |
-
-**~2.02 GiB**, preallocated at load, on a 16 GiB card holding a 12.2 GB model.
-That is most of the remaining headroom, and it is not a free win — see §7.
+**Cost.** None. An earlier revision of this document reported ~2.02 GiB here,
+from comparing 12375 MiB against 14441 MiB. The 12375 reading was invalid —
+see §8.4, which retracts it and measures the real figure.
 
 ### Run C - production config on b10673
 
@@ -362,10 +356,61 @@ a head change still reports `cached_tokens: 0` and pays the full prefill on
 every build and every setting tried. Nothing at the server level fixes that —
 only not moving the head does.
 
-**VRAM.** 15070 MiB of 16311 at load, 1241 MiB free. That is above the ~1 GB
-floor below which WDDM starts paging (§8.3), but it is the whole remaining
-margin: this config does not have room for a larger `num_ctx`, a vision
-projector, or a second resident model.
+**VRAM.** 15070 MiB of 16311 at load, 1241 MiB free — above the ~1 GB floor
+below which WDDM starts paging (§8.3). Essentially all of that is the model, the
+KV cache and the MTP draft context; the checkpoint flag contributes nothing
+(§8.4). The margin is set by `num_ctx`, not by anything in this plan.
+
+### 8.4 Retraction: the checkpoint flags are free
+
+A revision of this document reported that `--checkpoint-min-step 1024` cost
+~2.02 GiB of preallocated VRAM, and that `num_ctx` had to be cut to pay for it.
+**That was a measurement error. The flags cost nothing.**
+
+Resident VRAM at load, production config, `--ctx-size 50000`, one variable:
+
+| flags | VRAM | free |
+|---|---|---|
+| none | 15073 MiB | 1238 |
+| `--ctx-checkpoints 32` | 15065 MiB | 1246 |
+| `--checkpoint-min-step 1024 --ctx-checkpoints 32` | 15065 MiB | 1246 |
+| `--checkpoint-min-step 1024 --ctx-checkpoints 64` | 15066 MiB | 1245 |
+
+And across spacings, flag alone:
+
+| `--checkpoint-min-step` | none | 8192 | 4096 | 2048 | 1024 |
+|---|---|---|---|---|---|
+| VRAM (MiB) | 15064 | 15066 | 15065 | 15065 | 15065 |
+
+Flat within ±8 MiB. Doubling `--ctx-checkpoints` to 64 changes nothing either,
+so the buffers are not preallocated per checkpoint at load.
+
+**Root cause.** The 12375 MiB baseline in the original §8.2 was read while the
+model was still loading. The wait loop used `curl -s -m 2 /health` and treated
+*any* HTTP response as ready — but llama-server answers `/health` with **503
+while loading**, so the loop returned almost immediately. Re-running run A's
+exact argv, with no checkpoint flags at all, and both checks side by side:
+
+```
+loose check  (what run A used):  UP at  1s   vram=768 MiB
+strict check (HTTP 200):         UP at 10s   vram=14614 MiB
+settled:                                     vram=14603 MiB
+```
+
+The true flagless baseline is **14603 MiB**, not 12375. Run B *with* the flags
+read 14441 — slightly lower, i.e. the difference is run-to-run variation and the
+flags are free. The same loose check had already produced a false "UP" that made
+a probe fail with 503 earlier in the session; it was fixed for run B but nobody
+went back to invalidate run A's VRAM number.
+
+**Lesson for anything measured here:** a VRAM figure is only meaningful after
+`/health` returns **200**, and llama.cpp's 503-while-loading makes a
+response-based check silently sample a partially-loaded model.
+
+**What this changes.** `--checkpoint-min-step 1024` is a free ~13x reduction in
+first-edit prefill on these architectures, not a trade. There is no reason not
+to set it on every hybrid/recurrent entry. `num_ctx` on this machine remains 50000
+by explicit request, not to fund the flag.
 
 ### 8.3 Method note
 
