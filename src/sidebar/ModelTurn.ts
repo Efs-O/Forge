@@ -30,7 +30,7 @@ import { resolveToolPermissions } from '../tools/PermissionResolver';
 import { ToolBudget } from '../tools/ToolBudget';
 import { deriveStaticCapabilities } from '../config/ConfigResolver';
 import { extractToolDetail } from './toolSummary';
-import { injectTurnContext } from './turnContext';
+import { injectTurnContext, type TurnContextState } from './turnContext';
 import { formatPromptCacheStats, readPromptCacheStats } from '../llm/promptCacheStats';
 import { getLogger } from '../util/logger';
 import { visionUnavailableMessage } from '../tools/imageTool';
@@ -203,6 +203,25 @@ export async function runModelTurn(
 
   announceMissingImages(conv, model, isVisionModel, { postC, warnOnce: ctx.warnOnce });
 
+  // Layer C is snapshotted HERE, once per turn, not rebuilt per round.
+  // `prepareMessages` runs again on every tool round, so reading `conv.plan`
+  // live meant an `update_plan` mid-turn rewrote a message sitting just after
+  // the system prompt -- the block folds into the last USER message, and on
+  // round N that is the request that opened the turn. Measured on a 4-round
+  // turn with three update_plan calls: cache reuse fell from 76% to 39%, and
+  // two consecutive rounds that grew the prompt by 186 tokens re-evaluated
+  // 15401 of them (~20 s of prefill each).
+  //
+  // The model does not need the block re-rendered to know what it just did:
+  // update_plan returns a tool result confirming the write, and the new plan
+  // reaches the prompt on the next USER turn, where the prefix is being
+  // extended anyway. `items` is copied so a later in-place mutation of
+  // conv.plan cannot reach back into this turn's prompt.
+  const turnContext: TurnContextState = {
+    activeFile,
+    ...(conv.plan ? { plan: { items: [...conv.plan.items], updatedAt: conv.plan.updatedAt } } : {}),
+  };
+
   const result = await trackTurnCompletion(ctx.lifecycle, conv.id, () =>
     runToolCallingLoop({
       baseUrl,
@@ -252,11 +271,10 @@ export async function runModelTurn(
         // Layer C last, so the volatile block lands as close to the tail as a
         // strict chat template allows. Everything above it -- system prompt and
         // the whole conversation -- stays byte-identical while the active file
-        // or the plan changes, which is what keeps the KV cache warm.
-        const withTurnContext = injectTurnContext(injected, {
-          activeFile,
-          plan: conv.plan,
-        });
+        // or the plan changes, which is what keeps the KV cache warm. The state
+        // is the turn-start snapshot above, so it is byte-identical across the
+        // rounds WITHIN this turn too.
+        const withTurnContext = injectTurnContext(injected, turnContext);
         return prepareToolResultContext({
           messages: supersedeStaleReads(withTurnContext),
           toolTokens: estimateToolTokens(toolDefinitions),

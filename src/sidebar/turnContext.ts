@@ -84,8 +84,12 @@ function foldInto(messages: ChatMessage[], index: number, block: string): ChatMe
  * `messages` is never mutated — `conv.messages` stays the raw transcript for
  * the sidebar, persistence, and exact recovery.
  *
- * Rebuilt from live state on every round, so it is never stale within a turn
- * and never accumulates duplicates.
+ * Deterministic in its inputs and free of duplicates however often it runs.
+ * Callers in a tool loop should pass the SAME state object for every round of a
+ * turn rather than re-reading live state -- see the snapshot in
+ * `ModelTurn.ts`. The block folds into the last user message, which on round N
+ * is the request that opened the turn, so re-rendering it mid-turn rewrites the
+ * prompt near the head and invalidates that turn's own rounds.
  */
 export function injectTurnContext(messages: ChatMessage[], state: TurnContextState): ChatMessage[] {
   const block = renderTurnContext(state);

@@ -197,6 +197,47 @@ describe('strict chat-template safety', () => {
   });
 });
 
+describe('a turn held across tool rounds', () => {
+  // The block folds into the last USER message, which on round N of a tool loop
+  // is the request that OPENED the turn -- close to the head. So the state must
+  // be snapshotted at turn start; rebuilding it from live state each round
+  // rewrites the prompt near the head and invalidates the turn's own rounds.
+  // Measured before the fix: reuse 76% -> 39%, 15401 tokens re-evaluated on a
+  // round that grew the prompt by 186.
+  const round = (n: number): ChatMessage[] => {
+    const out = conversation();
+    for (let i = 0; i < n; i += 1) {
+      out.push({ role: 'assistant', content: null, tool_calls: [] });
+      out.push({ role: 'tool', content: `result ${i}`, tool_call_id: `t${i}` });
+    }
+    return out;
+  };
+
+  it('keeps every round byte-identical up to the new tool turns', () => {
+    const state = { activeFile: '/repo/a.ts', plan: PLAN };
+    const r1 = injectTurnContext(round(1), state);
+    const r3 = injectTurnContext(round(3), state);
+    // r1 is a strict prefix of r3: the rounds only appended.
+    expect(r3.slice(0, r1.length)).toEqual(r1);
+  });
+
+  it('diverges near the HEAD when the plan is re-read mid-turn', () => {
+    // This is the failure the snapshot prevents, asserted so a regression is
+    // visible as a divergence index rather than as a slow agent.
+    const before = injectTurnContext(round(3), { plan: PLAN });
+    const after = injectTurnContext(round(3), {
+      plan: { items: [...ITEMS, { text: 'and this', status: 'pending' }], updatedAt: 2_000 },
+    });
+    const idx = firstDivergence(before, after);
+    // Divergence lands on the turn's opening request -- the last user message,
+    // with this turn's tool rounds appended after it.
+    expect(idx).toBe(before.map((m) => m.role).lastIndexOf('user'));
+    // And everything from there to the tail is this turn's rounds, all of which
+    // the server would have to re-evaluate. That is the cost being avoided.
+    expect(before.length - idx).toBeGreaterThan(6);
+  });
+});
+
 describe('the stored transcript', () => {
   it('is never mutated — only the model-facing copy changes', () => {
     const stored = conversation();

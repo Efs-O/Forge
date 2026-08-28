@@ -1,5 +1,18 @@
 # Forge — Recent Changes
 
+## 0.13.19
+
+- Hold the volatile turn-context block fixed for the whole turn instead of
+  rebuilding it on every tool round. The block folds into the last user
+  message, which on round N of a tool loop is the request that OPENED the turn
+  -- so an `update_plan` mid-turn rewrote the prompt just after the system
+  prompt and invalidated that turn's own rounds. Measured live on a 4-round
+  turn with three plan updates: llama.cpp prompt reuse fell from 76% to 39%,
+  and two consecutive rounds that grew the prompt by 186 tokens re-evaluated
+  15401 of them, ~20 s of prefill each. The plan now reaches the prompt on the
+  next user turn, where the prefix is being extended anyway; the model still
+  sees the tool result confirming its own write.
+
 ## 0.13.18
 
 - Volatile turn state no longer sits at the head of the prompt, where it was
