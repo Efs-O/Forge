@@ -16,6 +16,14 @@ models:
       # which quietly leaves part of the model on the CPU.
       n_gpu_layers: 999
       flash_attn: true
+      extra_llama_server_args:
+        # How much of the prompt is re-evaluated when an edit lands mid-prompt.
+        # llama.cpp can only rewind cached state to a checkpoint, and its default
+        # spacing (8192) is coarser than a chat edit — measured 7272 re-evaluated
+        # tokens vs 32 at 1024, for no extra VRAM. Safe to delete if unsupported
+        # by your llama.cpp build.
+        - "--checkpoint-min-step"
+        - "1024"
 
 permissions:
   fs: { read: true, write: true, delete: false }

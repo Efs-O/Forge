@@ -278,6 +278,22 @@ models:
         # toward tool calls works far better than letting it stall.
         - "--reasoning-budget-message"
         - "I have been reasoning too long. If I am unsure whether a tool exists, or whether a path is right, I should call it and read the result instead of reasoning further."
+        # How much of the prompt gets re-evaluated when an edit lands mid-prompt.
+        # llama.cpp reuses the longest prefix its slot already holds, but on
+        # hybrid/recurrent (Qwen GDN) and sliding-window (gemma) models it can
+        # only rewind to a context CHECKPOINT, never to an arbitrary token — so
+        # this spacing is the real granularity of that reuse. At the default
+        # 8192, an edit to the last message of a 31K prompt still re-evaluated
+        # 7272 tokens (~11 s); at 1024 it cost 32 tokens (~0.6 s).
+        #
+        # Measured free: resident VRAM was flat within +-8 MiB across
+        # none/8192/4096/2048/1024, and unchanged by --ctx-checkpoints 32 vs 64.
+        # Measured on Qwen3.8-27B (GDN) with llama.cpp b10621 and b10673; the
+        # flag is spelled --ctx-checkpoints/--swa-checkpoints so it should serve
+        # gemma's SWA cache too, but that has not been measured.
+        # See docs/plans/SLOT_AFFINITY_AND_CHECKPOINTS_PLAN.md.
+        - "--checkpoint-min-step"
+        - "1024"
 
     group: llamacpp-local
 
