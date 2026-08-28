@@ -34,14 +34,24 @@ function sidebar(models: string[]): SidebarRuntime {
   };
 }
 
-function harness(options: { tabs?: string[]; streaming?: boolean; loaded?: string[] } = {}) {
+function harness(
+  options: {
+    tabs?: string[];
+    /** Conversation ids mid-turn when the model is re-picked. */
+    streamingIds?: string[];
+    /** Whether awaiting cancellation clears them (a Stop still unwinding). */
+    cancelClearsStreaming?: boolean;
+    loaded?: string[];
+  } = {},
+) {
   let state = sidebar(options.tabs ?? ['12b']);
   const release = vi.fn(async () => {});
   const posted: HostToWebview[] = [];
   const loaded = new Set(options.loaded ?? ['12b']);
+  const streamingIds = new Set(options.streamingIds ?? []);
   const deps = {
     workspaceState: { get: () => undefined, update: async () => {} },
-    isStreaming: () => options.streaming ?? false,
+    isStreaming: () => streamingIds.size > 0,
     forgetBudget: () => {},
     getConfig: config,
     getSidebar: () => state,
@@ -53,7 +63,16 @@ function harness(options: { tabs?: string[]; streaming?: boolean; loaded?: strin
     postModels: () => {},
     postSessionSync: () => {},
     pool: { release, isLoaded: (name: string) => loaded.has(name) },
-    agentLoop: { stopStreamingIfNeeded: async () => {}, disposeConversation: async () => {} },
+    agentLoop: {
+      stopStreamingIfNeeded: async () => {},
+      disposeConversation: async () => {},
+      // Stop returns to the webview before the turn unwinds; this is the wait
+      // that lets the release see an idle tab instead of a streaming one.
+      waitForCancelledTurns: async () => {
+        if (options.cancelClearsStreaming) streamingIds.clear();
+      },
+      getStreamingIds: () => streamingIds,
+    },
     checkpoints: { disposeConversation: async () => {} },
     failureTracker: { reset: () => {} },
     events: {},
@@ -88,12 +107,39 @@ describe('ConversationTabs.pinModel VRAM release', () => {
   });
 
   it('does not stop a backend mid-stream', async () => {
-    const { tabs, release } = harness({ streaming: true });
+    const { tabs, release, posted } = harness({ streamingIds: ['tab0'] });
 
     tabs.pinModel('27b');
     await flush();
 
     expect(release).not.toHaveBeenCalled();
+    expect(posted).toContainEqual({
+      type: 'error',
+      message:
+        '"12b" stays loaded — a turn is still running on it. Stop that turn and re-pick the ' +
+        'model to free its VRAM.',
+    });
+  });
+
+  it('frees the model after a Stop whose turn is still unwinding', async () => {
+    // The reported OOM: Stop, re-pick the model, send. The tab was still marked
+    // streaming when the switch arrived, the 12B was never released, and the
+    // next prompt spawned a second llama-server next to it.
+    const { tabs, release } = harness({ streamingIds: ['tab0'], cancelClearsStreaming: true });
+
+    tabs.pinModel('27b');
+    await flush();
+
+    expect(release).toHaveBeenCalledWith('12b');
+  });
+
+  it('is not blocked by a turn streaming on a different model in another tab', async () => {
+    const { tabs, release } = harness({ tabs: ['12b', '27b'], streamingIds: ['tab1'] });
+
+    tabs.pinModel('grok');
+    await flush();
+
+    expect(release).toHaveBeenCalledWith('12b');
   });
 
   it('ignores cloud models, which hold no VRAM', async () => {

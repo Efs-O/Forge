@@ -110,7 +110,8 @@ export class ConversationTabs {
   /** A model chosen in the picker also re-pins the active conversation, so a
    *  failed CLI model is not silently retried while the header shows another. */
   async pinModel(name: string | null): Promise<void> {
-    const outgoing = this.active().active_model ?? this.deps.getConfig().active_model ?? null;
+    const conv = this.active();
+    const outgoing = conv.active_model ?? this.deps.getConfig().active_model ?? null;
     this.deps.setActiveModel(name);
     opSetActiveConversationModel(this.deps.getSidebar(), name);
     this.deps.persistSession();
@@ -121,7 +122,7 @@ export class ConversationTabs {
     // request for a second resident model: without this, picking a 27B while a
     // 12B was loaded spawned a second llama-server alongside it and OOM'd the
     // GPU, because the pool only evicts once every port is taken.
-    if (outgoing) await this.releaseIfUnused(outgoing, name);
+    if (outgoing) await this.releaseIfUnused(outgoing, name, conv.id);
   }
 
   switch(id: string): void {
@@ -219,6 +220,28 @@ export class ConversationTabs {
   }
 
   /**
+   * Is a live turn still holding the outgoing backend?
+   *
+   * Per-conversation, not the pool-wide `isStreaming()`: a turn in another tab
+   * on an unrelated model is no reason to strand this one's VRAM. This tab is
+   * always a holder while it streams — its `active_model` has already been
+   * re-pointed at the incoming model, so it no longer names what its request is
+   * actually running on. A tab that pinned no model followed the old global
+   * default and is counted as a holder too.
+   */
+  private streamingHolder(outgoing: string, convId: string): boolean {
+    const base = this.deps.baseOf(outgoing) ?? outgoing;
+    const conversations = this.deps.getSidebar().conversations;
+    for (const id of this.deps.agentLoop.getStreamingIds()) {
+      if (id === convId) return true;
+      const conv = conversations.find((c) => c.id === id);
+      if (!conv) return true;
+      if ((this.deps.baseOf(conv.active_model ?? outgoing) ?? outgoing) === base) return true;
+    }
+    return false;
+  }
+
+  /**
    * The base model behind `modelName` if unloading it would free VRAM without
    * taking a model out from under another tab, else null.
    *
@@ -236,13 +259,32 @@ export class ConversationTabs {
   }
 
   /** Free the model a tab just switched away from, if nothing else wants it. */
-  private async releaseIfUnused(outgoing: string, incoming: string | null): Promise<void> {
-    // A turn in flight is still using the old backend — stopping it mid-stream
-    // would kill the generation the user is watching.
-    if (this.deps.isStreaming()) return;
+  private async releaseIfUnused(
+    outgoing: string,
+    incoming: string | null,
+    convId: string,
+  ): Promise<void> {
+    // Stop is fire-and-forget: the abort returns to the webview long before the
+    // turn finishes unwinding, so a Stop-then-switch arrived here with the tab
+    // still marked streaming and skipped the release entirely — the old
+    // llama-server kept its VRAM and the next prompt spawned a second one
+    // beside it (OOM, since `max_simultaneous_models` only evicts once every
+    // port is taken). Wait for cancelled turns exactly as SendPipeline does.
+    await this.deps.agentLoop.waitForCancelledTurns();
     const base = this.unloadCandidate(outgoing);
     if (!base || base === this.deps.baseOf(incoming)) return;
     if (!this.deps.pool.isLoaded(base)) return;
+    // A turn in flight is still using the old backend — stopping it mid-stream
+    // would kill the generation the user is watching. Say so: the VRAM stays
+    // occupied, and the next prompt on the new model will load beside it.
+    if (this.streamingHolder(outgoing, convId)) {
+      log.warn(`[ConversationTabs] "${base}" still streaming — not freed on model switch`);
+      this.deps.post({
+        type: 'error',
+        message: `"${base}" stays loaded — a turn is still running on it. Stop that turn and re-pick the model to free its VRAM.`,
+      });
+      return;
+    }
     try {
       await this.deps.pool.release(base);
     } catch (err) {
