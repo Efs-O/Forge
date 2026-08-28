@@ -45,6 +45,20 @@
 # This MUST match one of the `name:` values under `models:` below.
 active_model: my-local-model@main
 
+# trace | debug | info | warn | error. Defaults to info. Set here, this WINS over
+# the `forge.logLevel` VS Code setting — that setting only applies when this key
+# is absent.
+#
+# `debug` additionally surfaces the per-request prompt-cache line in the Forge
+# output channel:
+#     [cache] prompt=24610 cached=24102 (97.9%) evaluated=508
+# `cached` is how much of the prompt llama-server reused from its KV cache
+# instead of re-running it, so it is the fastest way to tell whether Forge is
+# keeping your prompt prefix stable. High 90s is healthy on an agent turn; a
+# drop to 0 on a conversation that only grew means something rewrote the HEAD of
+# the prompt. See docs/plans/PROMPT_PREFIX_STABILITY_PLAN.md.
+# log_level: debug
+
 
 # -----------------------------------------------------------------------------
 # Project memory
