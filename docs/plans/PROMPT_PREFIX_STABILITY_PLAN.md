@@ -218,17 +218,27 @@ transcript untouched, empty context adds nothing.
 - [x] Volatile editor/task state is injected only at the latest user message.
 - [x] Stored conversation history remains untouched.
 - [x] Strict user/assistant alternation remains valid (gemma-family templates).
-- [ ] Live llama.cpp A/B at 30K-50K on GPU. The 4.9K CPU measurement in §1
-      stands in for it; the mechanism is confirmed, the magnitude at production
-      context is not yet measured.
+- [x] Live llama.cpp A/B at 30K-50K on GPU. **Measured at a 31.2K prompt on
+      b10621 / Qwen3.8-27B / RTX 5060 Ti: the old shape re-evaluated 31207
+      tokens in 40.8 s at `cached_tokens: 0`; the new shape re-evaluated 32
+      tokens in 0.40 s. 975x fewer tokens, 102x less prompt time.** The 4.9K
+      measurement in §1 understated it by 8x — the penalty scales with
+      conversation length. Full tables in
+      `docs/plans/SLOT_AFFINITY_AND_CHECKPOINTS_PLAN.md` §8.
 
 ---
 
 ## 7. Remaining work
 
-- GPU A/B at representative context sizes, reading the `[cache]` debug line
-  added in Phase 1.
+- ~~GPU A/B at representative context sizes~~ — done, §6.
+- ~~Re-test `--cache-reuse` on a newer llama.cpp build~~ — done. Still disabled
+  on b10621 for both SWA and hybrid/recurrent architectures, because it needs
+  `can_shift`. Nothing to configure; see
+  `SLOT_AFFINITY_AND_CHECKPOINTS_PLAN.md` §4.
 - Measure the `supersedeStaleReads` tradeoff — it is a deliberate invalidation,
   but nobody has priced it.
-- Re-test `--cache-reuse` on a newer llama.cpp build. It is disabled in b10430
-  for every model tried, so there is nothing to configure today.
+- **`--checkpoint-min-step` is the follow-on.** Prefix stability keeps the
+  common prefix long; checkpoint spacing decides how much of it llama.cpp can
+  actually rewind to. At the default 8192 the first edit at a new position still
+  costs ~7.3K tokens even when only the last message changed. See
+  `SLOT_AFFINITY_AND_CHECKPOINTS_PLAN.md`.
