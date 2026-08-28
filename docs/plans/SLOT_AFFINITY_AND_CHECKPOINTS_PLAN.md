@@ -172,6 +172,12 @@ without any change to Forge. Phase 2 is therefore about **discoverability and
 validation**, not capability — which lowers its priority considerably. Anyone
 who needs this before Phase 2 lands is not blocked.
 
+**Done for this machine, 2026-08-28.** `.forge/config.yaml` now runs b10673,
+sets `--checkpoint-min-step 1024` on `qwen38-27b-mtp-ud-q3kxl-no-vision`, and
+drops the `llamacpp-qwen3` group `num_ctx` from 62000 to 50000 to pay for the
+checkpoints. Measured as Run C in §8. The rationale is in the config comments,
+where the rest of this machine's VRAM budget lives.
+
 ### Phase 1 — measure before configuring — **DONE**
 
 Two controlled runs at a 31K prompt, `--checkpoint-min-step` 8192 vs 1024, all
@@ -211,8 +217,9 @@ line already emitted by `ModelTurn`. Establishes whether thrash is real at
 ## 7. Acceptance criteria
 
 - [x] Checkpoint spacing measured at 31K; the VRAM cost of finer spacing
-      recorded alongside the latency benefit (§8.2). Not yet measured at 20K,
-      or on gemma/SWA (§9).
+      recorded alongside the latency benefit (§8.2), and re-measured on the
+      production config (§8, Run C). Not yet measured at 20K, or on gemma/SWA
+      (§9).
 - [ ] Flags added only if the measurement shows a benefit, and omitted from the
       command line when unconfigured.
 - [ ] Slot thrash under `--parallel 4` either demonstrated with numbers or
@@ -314,6 +321,51 @@ when the user switches files or the plan updates.
 
 **~2.02 GiB**, preallocated at load, on a 16 GiB card holding a 12.2 GB model.
 That is most of the remaining headroom, and it is not a free win — see §7.
+
+### Run C - production config on b10673
+
+`--checkpoint-min-step 1024` on the build and settings Forge actually spawns:
+llama.cpp **b10673**, `--ctx-size 50000 --parallel 1 --cache-type-k q4_0
+--cache-type-v q4_0 --ubatch-size 1024 --flash-attn on` plus the MTP
+speculative-decoding flags the `qwen38-27b-mtp-ud-q3kxl-no-vision` entry
+carries.
+
+| # | request | prompt | cached | eval | prompt_ms |
+|---|---|---|---|---|---|
+| 1 | cold | 31182 | 0 (0.0%) | 31182 | 43799 |
+| 2 | append-only turn | 31199 | 31178 (99.9%) | 21 | 868 |
+| 3 | repeat of 2 (warm) | 31199 | 31195 (100%) | 4 | 402 |
+| 4 | HEAD mutated (old shape) | 31207 | 0 (0.0%) | 31207 | 42995 |
+| 5 | re-warm after head change | 31199 | 31195 (100%) | 4 | 400 |
+| 6 | **TAIL mutated** (new shape) | 31219 | **31187 (99.9%)** | **32** | **632** |
+| 7 | TAIL mutated again | 31219 | 31187 (99.9%) | 32 | 640 |
+
+Row 6 — the first edit at a new position, the case that costs the most — across
+all three runs:
+
+| run | build / spacing | eval | prompt_ms |
+|---|---|---|---|
+| A | b10621, 8192 (default) | 7272 | 10955 |
+| B | b10621, 1024 | 553 | 1331 |
+| C | b10673, 1024, q4_0 KV, ubatch 1024 | **32** | **632** |
+
+Run C reaches the floor: the first tail edit now costs the same 32 tokens as a
+repeat. The residual 553 in run B is gone, most likely because `--ubatch-size
+1024` aligns checkpoint placement with a smaller evaluation granule — that
+attribution is an inference from the one variable that plausibly moves it, not
+a controlled result, since C changed build, KV quant, ubatch and context at
+once.
+
+Cold and head-change prefill are ~7% slower in C (43.8 s vs 40.4 s), consistent
+with q4_0 KV and 1241 MiB free rather than 3.9 GB. Row 4 is unchanged in kind:
+a head change still reports `cached_tokens: 0` and pays the full prefill on
+every build and every setting tried. Nothing at the server level fixes that —
+only not moving the head does.
+
+**VRAM.** 15070 MiB of 16311 at load, 1241 MiB free. That is above the ~1 GB
+floor below which WDDM starts paging (§8.3), but it is the whole remaining
+margin: this config does not have room for a larger `num_ctx`, a vision
+projector, or a second resident model.
 
 ### 8.3 Method note
 
