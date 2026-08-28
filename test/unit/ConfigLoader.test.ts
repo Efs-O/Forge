@@ -58,6 +58,64 @@ models:
     expect(config.active_model).toBe('z-cloud');
   });
 
+  it('loads explicit image retention values and leaves omission disabled', () => {
+    const dir = mkTempDir();
+    fs.writeFileSync(
+      path.join(dir, 'config.yaml'),
+      `active_model: retention-zero
+llama_server:
+  binary: llama-server
+models:
+  - name: retention-zero
+    provider: llama.cpp
+    gguf_path: C:/models/zero.gguf
+    image_retention_turns: 0
+  - name: retention-four
+    provider: llama.cpp
+    gguf_path: C:/models/four.gguf
+    image_retention_turns: 4
+  - name: retention-disabled
+    provider: llama.cpp
+    gguf_path: C:/models/disabled.gguf
+`,
+      'utf8',
+    );
+
+    const config = loadConfig(dir);
+    expect(config.models.find((model) => model.name === 'retention-zero')?.image_retention_turns).toBe(
+      0,
+    );
+    expect(config.models.find((model) => model.name === 'retention-four')?.image_retention_turns).toBe(
+      4,
+    );
+    expect(
+      config.models.find((model) => model.name === 'retention-disabled')?.image_retention_turns,
+    ).toBeUndefined();
+  });
+
+  it.each([
+    ['negative', '-1'],
+    ['fractional', '1.5'],
+    ['null', 'null'],
+  ])('rejects a %s image_retention_turns value', (_label, value) => {
+    const dir = mkTempDir();
+    fs.writeFileSync(
+      path.join(dir, 'config.yaml'),
+      `active_model: invalid-retention
+llama_server:
+  binary: llama-server
+models:
+  - name: invalid-retention
+    provider: llama.cpp
+    gguf_path: C:/models/invalid.gguf
+    image_retention_turns: ${value}
+`,
+      'utf8',
+    );
+
+    expect(() => loadConfig(dir)).toThrow(/image_retention_turns/i);
+  });
+
   it('rejects duplicate model names in config.yaml', () => {
     const dir = mkTempDir();
     fs.writeFileSync(

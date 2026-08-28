@@ -97,7 +97,11 @@ function makePool(): IBackendPool {
   };
 }
 
-function makeLoop(config: ForgeConfig, post: (message: unknown) => void): AgentLoop {
+function makeLoop(
+  config: ForgeConfig,
+  post: (message: unknown) => void,
+  toolRegistry = new ToolRegistry(),
+): AgentLoop {
   const checkpoints = {
     beginTurn: vi.fn(() => ({
       snapshotBefore: vi.fn(),
@@ -121,7 +125,7 @@ function makeLoop(config: ForgeConfig, post: (message: unknown) => void): AgentL
   return new AgentLoop(
     makePool(),
     () => config,
-    new ToolRegistry(),
+    toolRegistry,
     checkpoints,
     { markPending: vi.fn(), clearPending: vi.fn() } as unknown as KeepUndoCodeLensProvider,
     {} as DiffDecorations,
@@ -381,6 +385,8 @@ describe('vision history stripping through a real turn', () => {
 
     expect(countImageParts(sent[0]!)).toBe(1);
     expect(JSON.stringify(sent[0])).not.toContain('has no vision projector');
+    const sentImageMessage = sent[0]!.find((message) => countImageParts([message]) > 0);
+    expect(JSON.stringify(sentImageMessage)).toBe(JSON.stringify(before[0]));
     expect(conv.messages.slice(0, 1)).toEqual(before);
     expect(notices(posted)).toHaveLength(0);
   });
@@ -418,6 +424,71 @@ describe('vision history stripping through a real turn', () => {
 
     expect(countImageParts(sent[0]!)).toBe(0);
     expect(notices(posted)).toHaveLength(0);
+  });
+
+  it('posts exactly one vision-strip notice across multiple tool rounds', async () => {
+    const config = makeConfig();
+    const posted: Array<Record<string, unknown>> = [];
+    const registry = new ToolRegistry();
+    const inspect = vi.fn().mockResolvedValue('inspection complete');
+    registry.register({
+      definition: {
+        type: 'function',
+        function: {
+          name: 'inspect_stub',
+          description: 'Bounded read-only test tool',
+          parameters: { type: 'object', properties: {}, additionalProperties: false },
+        },
+      },
+      permission: 'read',
+      autoApprove: true,
+      handler: inspect,
+    });
+
+    let round = 0;
+    streamModelChatCompletion.mockImplementation(
+      (
+        _baseUrl: string,
+        _request: unknown,
+        _model: ModelConfig,
+        handlers: {
+          onToken: (token: string) => void;
+          onDone: (reason: string | null) => void;
+          onToolCalls: (calls: unknown[] | null) => void;
+        },
+      ) => {
+        round += 1;
+        if (round <= 2) {
+          handlers.onToolCalls([
+            {
+              id: `inspect-${round}`,
+              type: 'function',
+              function: { name: 'inspect_stub', arguments: '{}' },
+            },
+          ]);
+          handlers.onDone('tool_calls');
+          return;
+        }
+        handlers.onToken('done');
+        handlers.onToolCalls(null);
+        handlers.onDone('stop');
+      },
+    );
+
+    const loop = makeLoop(
+      config,
+      (message) => posted.push(message as Record<string, unknown>),
+      registry,
+    );
+    await loop.runTurn(
+      makeConversation([imageMessage('user', 'screenshot')]),
+      config.models[0]!,
+      'inspect twice',
+    );
+
+    expect(round).toBe(3);
+    expect(inspect).toHaveBeenCalledTimes(2);
+    expect(notices(posted).filter((text) => text.includes('cannot see images'))).toHaveLength(1);
   });
 
   it('repeats the transcript notice every affected turn while the toast fires once', async () => {

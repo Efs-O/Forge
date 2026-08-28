@@ -31,13 +31,15 @@ adds one config key. Ship and verify Phase 1 first; Phase 2 does not block it.
 
 ### 1.1 One owner for image-part handling
 
-`sessionTypes.ts` already owns `hasImageParts` (private) and the two
-`*_IMAGE_DROPPED_NOTE` strings. It stays the owner: `hasImageParts` remains its
-private content-level primitive, while counting and replacement become the two
-exported message-level helpers. No new module, no new `docs/OWNERS.md` row.
+The implementation keeps image-part inspection and replacement in the dedicated
+`src/sidebar/imageParts.ts` module. `sessionTypes.ts` imports the persistence
+stripper from it; `ModelTurn.ts` imports the model-facing stripping and aging
+helpers. This preserves one implementation without pushing the already-large
+session types/persistence file further past the practical source-file limit.
+`docs/OWNERS.md` records `imageParts.ts` as the owner.
 
 ```ts
-// src/sidebar/sessionTypes.ts
+// src/sidebar/imageParts.ts
 export function countImageParts(messages: readonly ChatMessage[]): number
 
 /** Replace every image_url part with a note saying why it is not there.
@@ -172,7 +174,7 @@ excluded every image. A non-vision model cannot introduce later legitimate
 image tool results because `view_image` and `view_video` are withheld and
 dispatch-refused for that model.
 
-Import `countImageParts` from `sessionTypes.ts`; do not duplicate image-part
+Import `countImageParts` from `imageParts.ts`; do not duplicate image-part
 traversal in `ModelTurn.ts`.
 
 The `capabilities` sentence is not decoration: it is the only thing pointing at
