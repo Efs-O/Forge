@@ -59,6 +59,9 @@ const ModelConfigSchema = z.object({
   cli_model: z.string().min(1).optional(),
   gguf_path: z.string().min(1).optional(),
   mmproj_path: z.string().min(1).optional(),
+  // Omitted = disabled. No implicit default, and YAML `null` is rejected rather
+  // than silently meaning "off" — opting in is explicit.
+  image_retention_turns: z.number().int().nonnegative().optional(),
   endpoint: z.string().url().optional(),
   n_gpu_layers: z.number().int().optional(),
   num_ctx: z.number().int().positive().optional(),

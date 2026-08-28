@@ -201,3 +201,52 @@ describe('OpenAIClient truncation handling', () => {
     expect(err.message).toContain('404');
   });
 });
+
+describe('OpenAIClient no-projector mapping', () => {
+  const projectorBody = JSON.stringify({
+    error: {
+      message:
+        'image input is not supported - hint: if this is unexpected, you may ' +
+        'need to provide the mmproj',
+      code: 500,
+    },
+  });
+
+  it('maps a non-2xx projector rejection to an actionable error with the status', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(projectorBody, { status: 500 })),
+    );
+    const h = handlers();
+
+    await streamChatCompletion('http://127.0.0.1:8080', request, h);
+
+    const error = h.onError.mock.calls[0]?.[0] as Error;
+    expect(error.message).toContain('has no vision projector');
+    expect(error.message).toContain('mmproj_path');
+    expect(error.message).toContain('(HTTP 500)');
+    expect(error).not.toBeInstanceOf(ToolCallTruncatedError);
+  });
+
+  it('maps a streamed error frame without inventing an HTTP status', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        sseResponse([
+          `data: ${JSON.stringify({
+            error: {
+              message: 'image input is not supported - hint: provide the mmproj',
+            },
+          })}`,
+        ]),
+      ),
+    );
+    const h = handlers();
+
+    await streamChatCompletion('http://127.0.0.1:8080', request, h);
+
+    const error = h.onError.mock.calls[0]?.[0] as Error;
+    expect(error.message).toContain('has no vision projector');
+    expect(error.message).not.toContain('HTTP');
+  });
+});

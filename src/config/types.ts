@@ -104,6 +104,13 @@ export interface ModelConfig {
   gguf_path?: string;
   /** Optional path to the vision projector .gguf (mmproj). Enables multimodal image input. */
   mmproj_path?: string;
+  /**
+   * Drop images from the model-facing copy once this many later USER messages
+   * exist. `0` removes an image on the next user prompt; omitted = never age out
+   * (the default). Counts user turns, not protocol messages, so a tool-heavy
+   * round cannot evict an image the user just attached.
+   */
+  image_retention_turns?: number;
   /** Base URL for Ollama or OpenAI-compatible HTTP providers. */
   endpoint?: string;
   /** Per-model GPU layer override. Falls back to LlamaServerConfig.n_gpu_layers. */

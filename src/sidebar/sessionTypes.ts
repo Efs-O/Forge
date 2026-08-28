@@ -19,6 +19,7 @@ export {
   upsertHistoryConversation,
 } from './sessionPersistence';
 import type { ChatMessage } from '../llm/types';
+import { stripImageParts } from './imageParts';
 import type { DiffHunk, SessionHistoryMeta, SessionTabMeta } from './messageBridge';
 import { capDisplayText } from '../tools/resultCap';
 import { isFailureResult, resultLabel } from './toolResultView';
@@ -288,18 +289,6 @@ export function deriveTitle(firstUserLine: string): string {
   return line.length > TITLE_MAX_LEN ? `${line.slice(0, TITLE_MAX_LEN)}…` : line;
 }
 
-/** Image parts never reach workspaceState, so a restored turn must say so. */
-const TOOL_IMAGE_DROPPED_NOTE =
-  '[The image itself was not retained across the reload and is NOT visible to you now. ' +
-  'Call view_image again before describing it.]';
-const USER_IMAGE_DROPPED_NOTE =
-  '[The user attached an image here. It was not retained across the reload and is NOT ' +
-  'visible to you now. Ask the user to re-attach it before describing it.]';
-
-function hasImageParts(content: ChatMessage['content']): boolean {
-  return Array.isArray(content) && content.some((part) => part.type === 'image_url');
-}
-
 /**
  * Persistence view: keeps tool-call turns and tool results so a reloaded
  * conversation still knows what the agent actually did.
@@ -314,14 +303,12 @@ function hasImageParts(content: ChatMessage['content']): boolean {
  */
 export function slimPersistMessages(messages: ChatMessage[]): SlimPersistMessage[] {
   const out: SlimPersistMessage[] = [];
-  for (const m of messages) {
+  // One implementation of image-part replacement, shared with the model-facing
+  // strip in ModelTurn. The reason picks the note, and `persist` is the only one
+  // that may claim the pixels are actually gone.
+  for (const m of stripImageParts(messages, { reason: 'persist' })) {
     if (m.role !== 'user' && m.role !== 'assistant' && m.role !== 'tool') continue;
-    const asText = typeof m.content === 'string' ? m.content : textContent(m.content);
-    const persistedText = hasImageParts(m.content)
-      ? [asText, m.role === 'tool' ? TOOL_IMAGE_DROPPED_NOTE : USER_IMAGE_DROPPED_NOTE]
-          .filter((part): part is string => typeof part === 'string' && part.length > 0)
-          .join('\n\n')
-      : asText;
+    const persistedText = typeof m.content === 'string' ? m.content : textContent(m.content);
     const hasText = typeof persistedText === 'string';
     const hasToolCalls = Array.isArray(m.tool_calls) && m.tool_calls.length > 0;
     // An assistant turn with tool_calls legitimately has content: null.

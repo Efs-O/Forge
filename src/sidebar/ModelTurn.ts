@@ -23,6 +23,7 @@ import { computeContextBudget, estimateToolTokens, perSlotContext } from '../uti
 import { prepareToolResultContext } from '../agent/toolResultContext';
 import { supersedeStaleReads } from '../agent/staleReadSupersede';
 import { applyCompactionWindow } from './compactionWindow';
+import { ageOutImageParts, countImageParts, stripImageParts } from './imageParts';
 import { injectSystemPrompt } from '../llm/SystemPromptInjector';
 import { resolveToolPermissions } from '../tools/PermissionResolver';
 import { ToolBudget } from '../tools/ToolBudget';
@@ -195,6 +196,43 @@ export async function runModelTurn(
     );
   }
 
+  // Announce stripping, every turn it happens. A model that silently loses
+  // the images sitting visibly above it either says it cannot see them (and the
+  // user re-attaches, tripping a second, differently-worded guard) or invents a
+  // description nothing can contradict. Both look like a broken model rather
+  // than a missing `capabilities: [vision]` line.
+  //
+  // Counted once per turn, against the FIRST model-facing window: `prepareMessages`
+  // re-runs every tool round and would re-post on each. Counting the compacted
+  // window rather than all of `conv.messages` also avoids warning about images
+  // compaction had already dropped. A non-vision model cannot add image parts
+  // later in the turn — view_image/view_video are withheld AND dispatch-refused
+  // for it above.
+  if (!isVisionModel) {
+    const strippedImages = countImageParts(applyCompactionWindow(conv.messages, conv.compaction));
+    if (strippedImages > 0) {
+      // `postC` is already conversation-scoped (AgentLoop stamps conversationId
+      // onto every message it sends), so do not pass one here, and do not add an
+      // onNotice hook to ModelTurnContext — that would be a second status
+      // channel alongside one that already works.
+      postC({
+        type: 'notice',
+        message:
+          `⚠ Forge: "${model.name}" cannot see images. ${strippedImages} image(s) earlier in ` +
+          'this conversation were replaced with a placeholder for this turn. Switch back to a ' +
+          `vision-capable model to use them. If "${model.name}" is multimodal, add ` +
+          '`capabilities: [vision]` (or `mmproj_path` for llama.cpp) to it in config.yaml.',
+      });
+      // Belt and braces for the user who switched models in the picker and is not
+      // looking at the transcript yet. The notice is the one that matters.
+      ctx.warnOnce(
+        `${model.name}:vision-strip`,
+        `Forge: model "${model.name}" cannot see images; images already in this conversation ` +
+          'are being replaced with a placeholder.',
+      );
+    }
+  }
+
   const result = await trackTurnCompletion(ctx.lifecycle, conv.id, () =>
     runToolCallingLoop({
       baseUrl,
@@ -215,8 +253,21 @@ export async function runModelTurn(
         // The loop hands us a copy and re-runs this every round, so the window
         // holds for the whole turn without touching conv.messages.
         const windowed = applyCompactionWindow(messages, conv.compaction);
+        // The one place images ever leave the model-facing copy. Aging and the
+        // no-vision strip are mutually exclusive: on a projector-less model the
+        // `no-vision` note wins, because it explains why the image is missing
+        // now rather than implying it can be recovered by re-calling view_image.
+        //
+        // Runs AFTER the window (no point rewriting messages it drops) and
+        // BEFORE injection/excerpting, so the freed tokens reach the budget math.
+        const visible = isVisionModel
+          ? ageOutImageParts(windowed, model.image_retention_turns)
+          : stripImageParts(windowed, {
+              reason: 'no-vision',
+              modelName: model.name,
+            });
         const injected = injectSystemPrompt(
-          windowed,
+          visible,
           ctx.templateEngine,
           buildTemplateContext(config, ctx.forgeLoader, activeFile),
           model.system_prompt,

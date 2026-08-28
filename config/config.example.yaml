@@ -252,6 +252,14 @@ models:
     # do not also write `capabilities: [vision]`.
     # mmproj_path: "C:/path/to/models/mmproj-F16.gguf"
 
+    # OPTIONAL: drop images from the model-facing copy once this many later USER
+    # messages exist, to reclaim context on long conversations. Counts user turns,
+    # not tool rounds, so a tool-heavy round cannot evict an image you just
+    # attached. `0` = keep it for the turn it arrived in, drop it on your next
+    # prompt. OMIT to never age images out (the default). 4 is a sane starting
+    # point; there is no implicit fallback, so nothing happens until you set it.
+    # image_retention_turns: 4
+
     think: true
     reasoning_effort: low
 

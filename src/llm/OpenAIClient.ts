@@ -5,6 +5,7 @@ import {
   isTruncationParseError,
   parseErrorColumn,
 } from './ToolCallTruncatedError';
+import { imageUnsupportedMessage, isImageUnsupportedError } from './imageUnsupportedError';
 import { getLogger } from '../util/logger';
 
 const log = getLogger();
@@ -155,6 +156,11 @@ export async function streamChatCompletion(
       );
       return;
     }
+    // Same server, same 500, different cause: no mmproj. Nothing to retry.
+    if (isImageUnsupportedError(body)) {
+      handlers.onError(new Error(imageUnsupportedMessage(request.model, response.status)));
+      return;
+    }
     handlers.onError(new Error(msg));
     return;
   }
@@ -272,6 +278,9 @@ export async function streamChatCompletion(
                 message: detail,
               }),
             );
+          } else if (isImageUnsupportedError(detail)) {
+            // No status: the stream is already HTTP 200 and the frame carries none.
+            handlers.onError(new Error(imageUnsupportedMessage(request.model)));
           } else {
             handlers.onError(new Error(detail));
           }

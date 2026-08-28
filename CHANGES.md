@@ -1,5 +1,39 @@
 # Forge — Recent Changes
 
+## 0.13.17
+
+- Switching a conversation that contains images to a projector-less model no
+  longer kills the turn. The vision gate only ever checked the *new* prompt's
+  attachments, so with nothing freshly attached it was a no-op and the
+  `image_url` parts already in history — from an attachment, `view_image`, or
+  `view_video` — went on the wire anyway and came back as
+  `HTTP 500: image input is not supported`. The conversation stayed dead until
+  the images were cleared or the window reloaded. Images are now replaced with
+  an explanatory note in the model-facing copy only; `conv.messages` keeps the
+  pixels, so switching back to a vision model restores them. Covers llama.cpp,
+  Ollama and cloud in one place, because the strip happens at the single
+  `prepareMessages` choke point.
+- The strip is never silent. Every turn it happens posts a `notice` row in the
+  transcript naming the model, the number of images affected, and the
+  `capabilities: [vision]` / `mmproj_path` line to add if the model actually is
+  multimodal — plus a once-per-model toast for the user who just switched in the
+  picker and is not reading the transcript. Silence here has two failure modes,
+  both of which look like a broken model rather than a config fact: the model
+  says it cannot see an image that is visibly sitting above it, or it guesses at
+  one and nothing is left to contradict the guess.
+- `HTTP 500: image input is not supported` is now translated at the client into
+  a message naming the model and `mmproj_path`, on both the non-2xx response
+  path and streamed SSE error frames — the same treatment truncation parse
+  errors already got. Only the response path reports an HTTP status; a stream is
+  already 200 and has none to report.
+- New optional per-model `image_retention_turns` ages images out of long
+  conversations even on a vision model, where they otherwise occupy the
+  per-slot context forever (worst with `view_video`, which injects N frames at
+  once). It counts later **user** messages, not protocol messages, so a
+  tool-heavy round cannot evict an image you just attached, and the note says
+  how to get the image back rather than implying it is gone. Omitted means
+  never age out, which stays the default — there is no implicit fallback.
+
 ## 0.13.16
 
 - A background job that prints nothing no longer costs the turn. `monitor_execution`

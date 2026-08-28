@@ -44,6 +44,7 @@ overlaps with an existing owner, extend the owner instead.
 | Agent task plan tool + prompt injection    | `src/tools/planTools.ts`             |
 | Webview HTML builder                       | `src/sidebar/WebviewBuilder.ts`      |
 | Multi-conversation session types + persist | `src/sidebar/sessionTypes.ts`        |
+| Image content parts: count/strip/age out   | `src/sidebar/imageParts.ts`          |
 | Session load/save/migrate (workspaceState) | `src/sidebar/sessionPersistence.ts`  |
 | First-run setup wizard                     | `src/sidebar/FirstRunWizard.ts`      |
 | Add-model setup wizard                     | `src/sidebar/AddModelWizard.ts`      |
@@ -186,6 +187,7 @@ overlaps with an existing owner, extend the owner instead.
 | FORGE.md workspace instructions loader     | `src/llm/ForgeInstructionsLoader.ts`         |
 | Streaming OpenAI-compat client             | `src/llm/OpenAIClient.ts`                    |
 | Cut-off tool call: type + classification   | `src/llm/ToolCallTruncatedError.ts`          |
+| No-projector backend error classification  | `src/llm/imageUnsupportedError.ts`           |
 | Context measured + output budget estimate  | `src/util/contextBudget.ts`                  |
 | Token-count display formatting             | `src/util/formatTokens.ts`                   |
 | Streaming Ollama native client             | `src/llm/OllamaNativeClient.ts`              |
