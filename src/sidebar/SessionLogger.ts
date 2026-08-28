@@ -36,9 +36,56 @@ export interface SessionContext {
   forgeVersion?: string;
 }
 
+/**
+ * How much of the file's tail is scanned for the resume cursor. The cursor is
+ * appended at the end of every flush that wrote anything, so it sits within a
+ * few hundred bytes of EOF in practice; the window only has to be wider than
+ * one turn's worth of trailing lines.
+ */
+const CURSOR_SCAN_BYTES = 1024 * 1024;
+
+/**
+ * Recover `writtenCount` from a file an earlier run left behind.
+ *
+ * Returns 0 when there is nothing to recover, which reproduces the old
+ * behaviour (re-write the history) rather than risking the opposite error of
+ * skipping messages that were never logged.
+ */
+function readResumeCursor(filePath: string): number {
+  let fd: number | undefined;
+  try {
+    const size = fs.statSync(filePath).size;
+    if (size === 0) return 0;
+    const start = Math.max(0, size - CURSOR_SCAN_BYTES);
+    const buf = Buffer.alloc(size - start);
+    fd = fs.openSync(filePath, 'r');
+    fs.readSync(fd, buf, 0, buf.length, start);
+    const lines = buf.toString('utf8').split('\n');
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i]?.trim();
+      if (!line || !line.includes('"cursor"')) continue;
+      const parsed = JSON.parse(line) as { type?: string; written_count?: unknown };
+      if (parsed.type === 'cursor' && typeof parsed.written_count === 'number') {
+        return parsed.written_count;
+      }
+    }
+    return 0;
+  } catch {
+    return 0;
+  } finally {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        /* non-fatal */
+      }
+    }
+  }
+}
+
 export class SessionLogger {
   private readonly filePath: string;
-  private writtenCount = 0;
+  private writtenCount: number;
   private headerWritten = false;
   private lastUsage: SessionUsage | null = null;
 
@@ -54,6 +101,17 @@ export class SessionLogger {
       /* non-fatal */
     }
     this.filePath = path.join(SESSIONS_DIR, `${sessionId}.jsonl`);
+    // A reload builds a fresh logger over the *same* file, since the path comes
+    // from the persisted conversation id. With the cursor living only in
+    // memory, `messages.slice(0)` then re-appended the entire conversation on
+    // the first flush of every run: one audited session had seven copies of its
+    // own history, 14 MB of a 20 MB file, and every per-tool failure rate read
+    // off it was inflated sevenfold.
+    //
+    // Seeding from disk is safe because `conv.messages` is append-only —
+    // compaction is non-destructive (it records a summary and a cut index; see
+    // CompactionService), so the array the cursor indexes into never shrinks.
+    this.writtenCount = readResumeCursor(this.filePath);
   }
 
   updateTitle(title: string): void {
@@ -61,6 +119,7 @@ export class SessionLogger {
   }
 
   flush(messages: ChatMessage[], model: string, usage?: SessionUsage): void {
+    const startedAt = this.writtenCount;
     if (!this.headerWritten) {
       const { workspaceName, workspacePath, forgeVersion } = this.context;
       this.append({
@@ -134,6 +193,16 @@ export class SessionLogger {
     }
 
     this.appendUsage(usage, model);
+    // Written last so the value is only durable once the lines it accounts for
+    // are. A reader that does not know this row can skip it the way it skips
+    // `usage`; a crash between the two loses at most one turn to a re-write.
+    if (this.writtenCount !== startedAt) {
+      this.append({
+        type: 'cursor',
+        written_count: this.writtenCount,
+        timestamp_ms: Date.now(),
+      });
+    }
   }
 
   /**

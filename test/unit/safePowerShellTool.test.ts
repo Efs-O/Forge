@@ -1,4 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import * as vscode from 'vscode';
 import {
   buildSafePowerShellInvocation,
   makeSafePowerShellTool,
@@ -35,5 +39,56 @@ describe('query_powershell', () => {
       expect.arrayContaining(['-NoLogo', '-NoProfile', '-NonInteractive', '-Command']),
     );
     expect(invocation.env['FORGE_SAFE_PS_OPERATION']).toBe('workspace_overview');
+  });
+});
+
+describe('query_powershell refusals name the sanctioned alternative', () => {
+  // The confinement is deliberate — this tool skips the confirmation gate — so
+  // the tests below assert the *wording*, not the boundary. A bare refusal is
+  // what made an agent burn 7 of 9 calls re-attempting the same path.
+  let root: string;
+  let outside: string;
+
+  beforeAll(() => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-sps-'));
+    root = path.join(base, 'workspace');
+    outside = path.join(base, 'elsewhere');
+    fs.mkdirSync(root);
+    fs.mkdirSync(outside);
+    vscode.workspace.workspaceFolders.push({ uri: { fsPath: root } });
+  });
+
+  afterAll(() => {
+    vscode.workspace.workspaceFolders.length = 0;
+  });
+
+  const run = (args: Record<string, unknown>) => makeSafePowerShellTool().handler(args);
+
+  it('points an out-of-workspace list_directory at the gated file tools', async () => {
+    await expect(run({ operation: 'list_directory', path: outside })).rejects.toThrow(
+      /outside the workspace[\s\S]*`list_directory` tool/,
+    );
+  });
+
+  it('points an out-of-workspace get_file_hash at exec_command', async () => {
+    await expect(
+      run({ operation: 'get_file_hash', path: path.join(outside, 'f.txt') }),
+    ).rejects.toThrow(/`exec_command`/);
+  });
+
+  it('hands back the relative form for an absolute path inside the workspace', async () => {
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    await expect(
+      run({ operation: 'list_directory', path: path.join(root, 'src') }),
+    ).rejects.toThrow(/workspace-relative path[\s\S]*that is src/);
+  });
+
+  it('never refuses without saying where to go instead', async () => {
+    const message = await run({ operation: 'list_directory', path: outside }).then(
+      () => '',
+      (e: Error) => e.message,
+    );
+    expect(message).not.toMatch(/^Absolute paths are not allowed/);
+    expect(message).toMatch(/instead/);
   });
 });

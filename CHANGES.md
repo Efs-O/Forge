@@ -1,5 +1,34 @@
 # Forge — Recent Changes
 
+## 0.13.20
+
+- Session transcripts no longer re-write their whole history on every window
+  reload. `SessionLogger` keyed its file off the persisted conversation id but
+  kept `writtenCount` only in memory, so each reload built a fresh logger over
+  the same file and `messages.slice(0)` appended the entire conversation again.
+  One audited session held seven copies of itself — 65% duplicate rows, 14 MB
+  of a 20 MB file. The cursor is now written to the file as a `cursor` row at
+  the end of each flush and recovered from the tail on construction; a
+  `session_start` is still emitted per run, so `forge_version` stays per build.
+  Safe because `conv.messages` is append-only: compaction is non-destructive
+  (it records a summary and a cut index rather than rewriting the transcript).
+  This mattered beyond disk — the duplicates inflate exactly the per-tool
+  failure audit CLAUDE.md tells you to run on these files, sevenfold in that
+  session.
+
+- `query_powershell` refusals now name the tool that will work. It is confined
+  to the workspace on purpose — it is the one tool that runs without the
+  confirmation gate — but it answered an out-of-workspace path with a bare
+  "Absolute paths are not allowed", while `list_directory`, `read_file` and
+  `find_files` accept those paths happily. With a workspace at
+  `N:\vs code apps\Ssuno` and the actual work under `N:\AI\ComfyUI`, an agent
+  spent 7 of its 9 `query_powershell` calls re-attempting the same refused
+  shape after every compaction. The refusal now points at the gated file tools
+  (or `exec_command` for `get_file_hash`), an absolute path *inside* the
+  workspace is answered with its relative form, and the schema says so up
+  front. Same rule as the `rm -rf` denylist fix: a refusal that names no
+  alternative teaches the agent the capability does not exist.
+
 ## 0.13.19
 
 - Hold the volatile turn-context block fixed for the whole turn instead of
