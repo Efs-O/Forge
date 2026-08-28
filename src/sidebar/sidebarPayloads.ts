@@ -47,6 +47,8 @@ export interface ModelResidencySource {
 export function buildModelsMessage(
   config: ForgeConfig,
   pool?: ModelResidencySource,
+  /** The active tab's pin wins over the config default, just like sending does. */
+  activeModel: string | null = config.active_model,
 ): HostToWebview {
   return {
     type: 'models',
@@ -63,7 +65,7 @@ export function buildModelsMessage(
         ...(residency ? { residency } : {}),
       };
     }),
-    active: config.active_model,
+    active: activeModel,
   };
 }
 

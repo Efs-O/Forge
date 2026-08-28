@@ -271,7 +271,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   // ── Internal ──────────────────────────────────────────────────────────────
 
   private postModels(): void {
-    this.post(buildModelsMessage(this.config, this.pool));
+    const active = this.sidebar.conversations.find(
+      (conversation) => conversation.id === this.sidebar.activeConversationId,
+    );
+    // A conversation pin is the model SendPipeline will use. The picker must
+    // show that same selection, including after a restored session.
+    this.post(
+      buildModelsMessage(this.config, this.pool, active?.active_model ?? this.config.active_model),
+    );
   }
 
   private post(msg: HostToWebview): void {

@@ -22,6 +22,19 @@ describe('buildModelsMessage', () => {
     ]);
   });
 
+  it('uses an active conversation pin instead of the config default when supplied', () => {
+    const msg = buildModelsMessage(
+      {
+        active_model: 'no-vision',
+        models: [{ name: 'vision' }, { name: 'no-vision' }],
+      } as ForgeConfig,
+      undefined,
+      'vision',
+    );
+
+    expect(msg).toMatchObject({ type: 'models', active: 'vision' });
+  });
+
   it('omits residency entirely when no pool is supplied', () => {
     const msg = buildModelsMessage({ active_model: 'a', models: [{ name: 'a' }] } as ForgeConfig);
     expect((msg as { models: ModelEntry[] }).models[0]).not.toHaveProperty('residency');
