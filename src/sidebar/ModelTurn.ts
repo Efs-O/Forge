@@ -220,7 +220,8 @@ export async function runModelTurn(
         message:
           `⚠ Forge: "${model.name}" cannot see images. ${strippedImages} image(s) earlier in ` +
           'this conversation were replaced with a placeholder for this turn. Switch back to a ' +
-          `vision-capable model to use them. If "${model.name}" is multimodal, add ` +
+          'vision-capable model to use them — before reloading the window, as images are not ' +
+          `kept across a reload. If "${model.name}" is multimodal, add ` +
           '`capabilities: [vision]` (or `mmproj_path` for llama.cpp) to it in config.yaml.',
       });
       // Belt and braces for the user who switched models in the picker and is not

@@ -17,7 +17,9 @@
   transcript naming the model, the number of images affected, and the
   `capabilities: [vision]` / `mmproj_path` line to add if the model actually is
   multimodal — plus a once-per-model toast for the user who just switched in the
-  picker and is not reading the transcript. Silence here has two failure modes,
+  picker and is not reading the transcript. It also says the remedy expires at
+  the next window reload, because base64 has never been written to
+  `workspaceState`: switch models first, or the images are gone either way. Silence here has two failure modes,
   both of which look like a broken model rather than a config fact: the model
   says it cannot see an image that is visibly sitting above it, or it guesses at
   one and nothing is left to contradict the guess.

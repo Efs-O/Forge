@@ -337,6 +337,9 @@ describe('vision history stripping through a real turn', () => {
     expect(notices(withImages.posted)[0]).toContain('cannot see images');
     expect(notices(withImages.posted)[0]).toContain('1 image(s)');
     expect(notices(withImages.posted)[0]).toContain('capabilities: [vision]');
+    // The remedy has a shelf life: base64 never reaches workspaceState, so
+    // "switch back to a vision model" stops working after a window reload.
+    expect(notices(withImages.posted)[0]).toContain('not kept across a reload');
 
     const withoutImages = await runTurn(
       makeConfig(),
