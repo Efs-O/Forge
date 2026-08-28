@@ -3,6 +3,14 @@
  */
 
 import { z } from 'zod';
+import {
+  COMPACTION_REPO_STATE_MAX_CHARS,
+  RECORDED_ACTION_KEY_MAX_CHARS,
+  RECORDED_ACTION_LINE_MAX_CHARS,
+  RECORDED_ACTION_MAX_ITEMS,
+  type CompactionState,
+} from './compactionTypes';
+import { USER_CONTEXT_MAX_MESSAGES, USER_CONTEXT_MESSAGE_MAX_CHARS } from './compactionUserContext';
 export {
   createDefaultSession,
   loadSidebarSession,
@@ -148,7 +156,36 @@ export const conversationPersistedSchema = z.object({
   cli_sessions: z.record(z.string(), z.string().min(1)).optional(),
   // Optional, so records written before compaction existed still parse.
   compaction: z
-    .object({ summary: z.string().min(1), fromIndex: z.number().int().min(0) })
+    .object({
+      summary: z.string().min(1),
+      fromIndex: z.number().int().min(0),
+      generation: z.number().int().min(1).optional(),
+      userMessages: z
+        .array(
+          z
+            .string()
+            .min(1)
+            .max(USER_CONTEXT_MESSAGE_MAX_CHARS + 40),
+        )
+        .max(USER_CONTEXT_MAX_MESSAGES)
+        .optional(),
+      recordedActions: z
+        .array(
+          z
+            .object({
+              kind: z.enum(['file', 'command']),
+              key: z.string().min(1).max(RECORDED_ACTION_KEY_MAX_CHARS),
+              outcome: z.enum(['ok', 'failed', 'unknown']),
+              line: z.string().min(1).max(RECORDED_ACTION_LINE_MAX_CHARS),
+              durableEvidence: z.boolean().optional(),
+            })
+            .strict(),
+        )
+        .max(RECORDED_ACTION_MAX_ITEMS)
+        .optional(),
+      repoState: z.string().max(COMPACTION_REPO_STATE_MAX_CHARS).optional(),
+    })
+    .strict()
     .optional(),
   // The bounds are re-asserted here, not just in the tool schema: a hand-edited
   // or corrupted session.json must not be able to reintroduce an unbounded plan
@@ -196,7 +233,7 @@ export interface ConversationRuntime {
    * `messages` itself is never truncated, so the sidebar transcript and the
    * persisted record stay whole. Clearing this restores full context.
    */
-  compaction?: { summary: string; fromIndex: number };
+  compaction?: CompactionState;
   /**
    * Agent-maintained task ledger, written by the `update_plan` tool.
    *

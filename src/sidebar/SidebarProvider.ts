@@ -103,7 +103,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         persistSession: () => this.persistSession(),
         baseOf: (id) => this.baseOf(id),
         autoCompact: (conv) => this.autoCompact(conv),
-        resumeAfterManualCompact: (conversationId) => this.resumeAfterManualCompact(conversationId),
+        resumeAfterManualCompact: (conversationId, reason) =>
+          this.resumeAfterManualCompact(conversationId, reason),
         reindexCodebase: () => this.reindexCodebase(),
         newConversation: () => this.newConversation(),
         clearMessages: () => this.tabs.clearActive(),
@@ -318,8 +319,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return runAutoCompact(this.compactionDeps(), conv.id);
   }
 
-  private resumeAfterManualCompact(conversationId: string): Promise<void> {
-    return runManualCompactResume(this.compactionDeps(), conversationId);
+  private resumeAfterManualCompact(conversationId: string, reason: string): Promise<void> {
+    return runManualCompactResume(this.compactionDeps(), conversationId, reason);
   }
 
   private getActive(): ConversationRuntime {

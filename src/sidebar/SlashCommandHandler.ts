@@ -28,7 +28,8 @@ export interface SlashCommandDeps extends CompactionDeps {
   undo: () => Promise<string[]>;
   keep: () => Promise<void>;
   toggleClanker: () => boolean;
-  resumeAfterManualCompact: (conversationId: string) => Promise<void>;
+  incompleteTurnReason: (conversationId: string) => string | undefined;
+  resumeAfterManualCompact: (conversationId: string, reason: string) => Promise<void>;
 }
 
 export class SlashCommandHandler {
@@ -107,9 +108,13 @@ export class SlashCommandHandler {
       case 'compact':
         {
           const conversationId = deps.getActiveConv().id;
+          // Capture this before compaction starts. The summarization is
+          // background work, not a model turn, and must not make a cleanly
+          // idle conversation look like it needs another response.
+          const incompleteReason = deps.incompleteTurnReason(conversationId);
           const outcome = await this.compact({ auto: false });
-          if (outcome === 'compacted') {
-            await deps.resumeAfterManualCompact(conversationId);
+          if (outcome === 'compacted' && incompleteReason !== undefined) {
+            await deps.resumeAfterManualCompact(conversationId, incompleteReason);
           }
         }
         return;

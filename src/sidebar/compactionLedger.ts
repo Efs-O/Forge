@@ -17,6 +17,8 @@
  */
 
 import type { ChatMessage } from '../llm/types';
+import { RECORDED_ACTION_KEY_MAX_CHARS, type RecordedCompactionAction } from './compactionTypes';
+import { renderRecordedActionsBlock } from './compactionRecordedState';
 import { isFailureResult } from './toolResultView';
 import { TOOL_INTERRUPTED_RESULT } from './sessionPersistence';
 
@@ -58,9 +60,6 @@ const COMMAND_TOOLS = new Set([
  */
 const NEVER_COMPLETES = new Set(['run_terminal']);
 
-/** Cap per section, so recorded facts cannot crowd out the summary. */
-const RECORDED_ENTRIES_MAX = 24;
-
 /** ToolBudget refusals. Neither carries the `Error:` prefix `isFailureResult`
  *  looks for, and both mean the call never ran. */
 const BUDGET_REFUSAL = /^Budget exhausted:/;
@@ -70,15 +69,8 @@ const UNAVAILABLE_REFUSAL = /^Tool \S+ is not available for this model\./;
  *  code-owned string, not a model phrasing. */
 const EXIT_CODE = /\[exit code: (\d+|null)\]/g;
 
-export type ActionOutcome = 'ok' | 'failed' | 'unknown';
-
-interface Action {
-  outcome: ActionOutcome;
-  line: string;
-  /** Command output named an artifact or durable state. Preserve these ahead
-   * of ordinary successes when the ledger must be capped. */
-  durableEvidence?: boolean;
-}
+export type ActionOutcome = RecordedCompactionAction['outcome'];
+type Action = RecordedCompactionAction;
 
 /**
  * What a paired tool result says happened.
@@ -156,16 +148,22 @@ export function collectWrittenFiles(messages: readonly ChatMessage[]): string[] 
 
 function writeAction(tool: string, paths: string[], result: string | undefined): Action {
   const target = paths.length > 0 ? paths.join(' → ') : '(unnamed path)';
+  const key = truncate(
+    `file:${paths.map((path) => path.toLowerCase()).join('>') || '(unnamed)'}`,
+    RECORDED_ACTION_KEY_MAX_CHARS - 1,
+  );
   const outcome = classifyResult(result);
-  if (outcome === 'ok') return { outcome, line: `- ${tool} ${target}` };
+  if (outcome === 'ok') return { kind: 'file', key, outcome, line: `- ${tool} ${target}` };
   if (outcome === 'unknown') {
     return {
+      kind: 'file',
+      key,
       outcome,
       line: `- ATTEMPTED ${tool} ${target} (no result recorded — outcome unknown)`,
     };
   }
   const why = truncate((result ?? '').trim().split(/\r?\n/, 1)[0] ?? '', 100);
-  return { outcome, line: `- FAILED ${tool} ${target} — ${why}` };
+  return { kind: 'file', key, outcome, line: `- FAILED ${tool} ${target} — ${why}` };
 }
 
 /** Writes, classified by their paired result rather than by the call alone. */
@@ -224,9 +222,24 @@ function lastExitCode(result: string): string | undefined {
  * host assertion that an installation exists.
  */
 const DURABLE_OUTPUT_LINE =
-  /\b(?:download(?:ed|ing)?|install(?:ed|ing)?|saved|wrote|created|copied|extracted|verified|available|present|complete(?:d)?|success(?:fully)?|exists?)\b|(?:[A-Za-z]:[\\/]|\/[\w.-]+\/)/i;
+  /\b(?:download(?:ed|ing)?|install(?:ed|ing)?|uninstall(?:ed|ing)?|saved|wrote|created|copied|extracted|verified|available|present|removed|deleted|complete(?:d)?|success(?:fully)?|exists?)\b|(?:[A-Za-z]:[\\/]|\/[\w.-]+\/)/i;
 const COMMAND_EVIDENCE_MAX_LINES = 2;
 const COMMAND_EVIDENCE_LINE_MAX_CHARS = 220;
+
+const ABSOLUTE_PATH = /(?:[A-Za-z]:[\\/][^\s|;,'"]+|\/(?:[\w.-]+\/)+[\w.-]+)/;
+
+function commandFactKey(label: string, evidence: readonly string[]): string {
+  for (const source of [...evidence, label]) {
+    const path = source.match(ABSOLUTE_PATH)?.[0];
+    if (path) {
+      return truncate(
+        `artifact:${path.replace(/\\/g, '/').toLowerCase()}`,
+        RECORDED_ACTION_KEY_MAX_CHARS - 1,
+      );
+    }
+  }
+  return truncate(`command:${label.trim().toLowerCase()}`, RECORDED_ACTION_KEY_MAX_CHARS - 1);
+}
 
 function commandEvidence(result: string): string[] {
   const found: string[] = [];
@@ -244,30 +257,51 @@ function commandAction(tool: string, label: string, result: string | undefined):
   const outcome = classifyResult(result);
   if (outcome === 'failed') {
     const why = truncate((result ?? '').trim().split(/\r?\n/, 1)[0] ?? '', 100);
-    return { outcome, line: `- ran \`${label}\` → FAILED — ${why}` };
+    return {
+      kind: 'command',
+      key: commandFactKey(label, [why]),
+      outcome,
+      line: `- ran \`${label}\` → FAILED — ${why}`,
+    };
   }
   if (outcome === 'unknown' || result === undefined) {
     return {
+      kind: 'command',
+      key: commandFactKey(label, []),
       outcome: 'unknown',
       line: `- ran \`${label}\` → outcome unknown (no result recorded)`,
     };
   }
   if (NEVER_COMPLETES.has(tool)) {
     return {
+      kind: 'command',
+      key: commandFactKey(label, []),
       outcome: 'unknown',
       line: `- pasted \`${label}\` into the terminal → outcome unknown (never runs unattended)`,
     };
   }
   const exit = lastExitCode(result);
   if (exit === undefined) {
-    return { outcome: 'unknown', line: `- ran \`${label}\` → outcome unknown (no exit code)` };
+    return {
+      kind: 'command',
+      key: commandFactKey(label, []),
+      outcome: 'unknown',
+      line: `- ran \`${label}\` → outcome unknown (no exit code)`,
+    };
   }
   if (exit === 'null') {
-    return { outcome: 'unknown', line: `- ran \`${label}\` → did not complete (exit null)` };
+    return {
+      kind: 'command',
+      key: commandFactKey(label, []),
+      outcome: 'unknown',
+      line: `- ran \`${label}\` → did not complete (exit null)`,
+    };
   }
   if (exit === '0') {
     const evidence = commandEvidence(result);
     return {
+      kind: 'command',
+      key: commandFactKey(label, evidence),
       outcome: 'ok',
       line:
         `- ran \`${label}\` → exit 0` +
@@ -275,7 +309,12 @@ function commandAction(tool: string, label: string, result: string | undefined):
       ...(evidence.length > 0 ? { durableEvidence: true } : {}),
     };
   }
-  return { outcome: 'failed', line: `- ran \`${label}\` → exit ${exit} (FAILED)` };
+  return {
+    kind: 'command',
+    key: commandFactKey(label, []),
+    outcome: 'failed',
+    line: `- ran \`${label}\` → exit ${exit} (FAILED)`,
+  };
 }
 
 /** Commands, with their exit codes where the host recorded one. */
@@ -293,40 +332,11 @@ export function collectCommandActions(messages: readonly ChatMessage[]): Action[
   return actions;
 }
 
-/**
- * Apply the per-section cap without letting truncation launder failures.
- *
- * A cap that dropped the tail would turn a section whose failures came last
- * into an all-success list — the ledger would then assert, in Forge's own
- * voice, that work which failed had succeeded. Failed and unknown entries are
- * therefore selected first, and what survives is rendered in original order.
- */
-function capActions(actions: readonly Action[]): { lines: string[]; omitted: number } {
-  if (actions.length <= RECORDED_ENTRIES_MAX) {
-    return { lines: actions.map((a) => a.line), omitted: 0 };
-  }
-  const kept = new Set<number>();
-  for (const [index, action] of actions.entries()) {
-    if (action.outcome !== 'ok' && kept.size < RECORDED_ENTRIES_MAX) kept.add(index);
-  }
-  for (const [index, action] of actions.entries()) {
-    if (action.durableEvidence && kept.size < RECORDED_ENTRIES_MAX) kept.add(index);
-  }
-  for (const [index] of actions.entries()) {
-    if (kept.size >= RECORDED_ENTRIES_MAX) break;
-    kept.add(index);
-  }
-  return {
-    lines: actions.filter((_, index) => kept.has(index)).map((a) => a.line),
-    omitted: actions.length - kept.size,
-  };
-}
-
-function section(title: string, actions: readonly Action[]): string {
-  if (actions.length === 0) return '';
-  const { lines, omitted } = capActions(actions);
-  const more = omitted > 0 ? `\n- …and ${omitted} more` : '';
-  return `\n\n**${title} (recorded by Forge, not written by the model):**\n${lines.join('\n')}${more}`;
+/** Every structured action observed in one compaction window. */
+export function collectRecordedActions(
+  messages: readonly ChatMessage[],
+): RecordedCompactionAction[] {
+  return [...collectWriteActions(messages), ...collectCommandActions(messages)];
 }
 
 /**
@@ -336,8 +346,7 @@ function section(title: string, actions: readonly Action[]): string {
  * hallucinated.
  */
 export function recordedActionsBlock(messages: readonly ChatMessage[]): string {
-  return (
-    section('File changes', collectWriteActions(messages)) +
-    section('Commands run', collectCommandActions(messages))
-  );
+  return renderRecordedActionsBlock(collectRecordedActions(messages));
 }
+
+export { mergeRecordedActions, renderRecordedActionsBlock } from './compactionRecordedState';

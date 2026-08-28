@@ -43,7 +43,7 @@ export interface SidebarHost {
   persistSession: () => void;
   baseOf: (id: string | null | undefined) => string | null;
   autoCompact: (conv: ConversationRuntime) => Promise<void>;
-  resumeAfterManualCompact: (conversationId: string) => Promise<void>;
+  resumeAfterManualCompact: (conversationId: string, reason: string) => Promise<void>;
   reindexCodebase: () => Promise<void>;
   newConversation: () => Promise<void>;
   clearMessages: () => void;
@@ -136,7 +136,9 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     isStreaming: () => agentLoop.streaming,
     beginCompaction: (convId) => agentLoop.beginBackgroundWork(convId),
     snapshotRepoState,
-    resumeAfterManualCompact: (conversationId) => host.resumeAfterManualCompact(conversationId),
+    incompleteTurnReason: (conversationId) => agentLoop.incompleteTurnReason(conversationId),
+    resumeAfterManualCompact: (conversationId, reason) =>
+      host.resumeAfterManualCompact(conversationId, reason),
     toggleClanker: () => {
       const on = agentLoop.toggleClanker();
       host.rememberClankerMode(on);

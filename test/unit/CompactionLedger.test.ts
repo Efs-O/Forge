@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   classifyResult,
   collectCommandActions,
+  collectRecordedActions,
   collectWriteActions,
   collectWrittenFiles,
+  mergeRecordedActions,
   recordedActionsBlock,
+  renderRecordedActionsBlock,
 } from '../../src/sidebar/compactionLedger';
 import { TOOL_INTERRUPTED_RESULT } from '../../src/sidebar/sessionPersistence';
 import type { ChatMessage } from '../../src/llm/types';
@@ -50,7 +53,14 @@ describe('collectWriteActions', () => {
       call('a', 'write_file', { path: 'src/foo.ts' }),
       result('a', 'Wrote src/foo.ts'),
     ]);
-    expect(actions).toEqual([{ outcome: 'ok', line: '- write_file src/foo.ts' }]);
+    expect(actions).toEqual([
+      {
+        kind: 'file',
+        key: 'file:src/foo.ts',
+        outcome: 'ok',
+        line: '- write_file src/foo.ts',
+      },
+    ]);
   });
 
   it('never reports a failed write as a completed one', () => {
@@ -101,7 +111,7 @@ describe('collectWriteActions', () => {
       result('b', 'Error: disk full'),
       result('a', 'Wrote a.ts'),
     ]);
-    expect(actions[0]).toEqual({ outcome: 'ok', line: '- write_file a.ts' });
+    expect(actions[0]).toMatchObject({ outcome: 'ok', line: '- write_file a.ts' });
     expect(actions[1]?.outcome).toBe('failed');
   });
 
@@ -121,7 +131,14 @@ describe('collectCommandActions', () => {
       call('a', 'exec_command', { command: 'npm', args: ['run', 'ci'] }),
       result('a', 'all good\n[exit code: 0]'),
     ]);
-    expect(actions).toEqual([{ outcome: 'ok', line: '- ran `npm run ci` → exit 0' }]);
+    expect(actions).toEqual([
+      {
+        kind: 'command',
+        key: 'command:npm run ci',
+        outcome: 'ok',
+        line: '- ran `npm run ci` → exit 0',
+      },
+    ]);
   });
 
   it('pins concrete download evidence from a successful command', () => {
@@ -228,6 +245,35 @@ describe('recordedActionsBlock', () => {
     );
 
     expect(recordedActionsBlock(messages)).toContain('Downloaded krea2_turbo_fp8_scaled.safetensors');
+  });
+
+  it('carries structured facts across generations with latest observation winning', () => {
+    const first = collectRecordedActions([
+      call('old', 'exec_command', {
+        command: 'download',
+        args: ['N:\\AI\\models\\krea.safetensors'],
+      }),
+      result(
+        'old',
+        'Saved to N:\\AI\\models\\krea.safetensors\n[exit code: 0]',
+      ),
+    ]);
+    const later = collectRecordedActions([
+      call('new', 'exec_command', {
+        command: 'remove',
+        args: ['N:\\AI\\models\\krea.safetensors'],
+      }),
+      result(
+        'new',
+        'Removed N:\\AI\\models\\krea.safetensors\n[exit code: 0]',
+      ),
+    ]);
+
+    const merged = mergeRecordedActions(first, later);
+    const rendered = renderRecordedActionsBlock(merged);
+    expect(merged).toHaveLength(1);
+    expect(rendered).toContain('Removed N:\\AI\\models\\krea.safetensors');
+    expect(rendered).not.toContain('Saved to');
   });
 });
 

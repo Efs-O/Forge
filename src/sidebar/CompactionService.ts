@@ -7,7 +7,6 @@
  */
 
 import * as vscode from 'vscode';
-import type { ChatMessage } from '../llm/types';
 import type { HostToWebview } from './messageBridge';
 import type { ConversationRuntime } from './sessionTypes';
 import {
@@ -16,10 +15,19 @@ import {
   isUsableSummary,
   SUMMARY_OUTPUT_TOKENS,
 } from './compactionPrompt';
-import { recordedActionsBlock } from './compactionLedger';
+import {
+  collectRecordedActions,
+  mergeRecordedActions,
+  renderRecordedActionsBlock,
+} from './compactionLedger';
+import {
+  collectCompactionUserMessages,
+  renderCompactionUserMessages,
+} from './compactionUserContext';
 import type { PromptRunOptions } from './PromptRun';
 import { getLogger } from '../util/logger';
 import type { UserPromptOptions } from './transcriptMutations';
+import { selectCompactionSplit } from './compactionSplit';
 
 const log = getLogger();
 
@@ -52,14 +60,6 @@ export interface CompactionDeps {
 
 export type CompactionOutcome = 'compacted' | 'skipped' | 'failed';
 
-/** Cap on the verbatim tail kept out of the summary. One large tool dump must
- *  not be retained in full — that would defeat the compaction that just ran. */
-export const RETAINED_TAIL_MAX_CHARS = 4000;
-
-/** Messages that must remain on the summarized side of the cut. Below this the
- *  summary has nothing to say and compaction is not worth a request. */
-const MIN_SUMMARIZED_MESSAGES = 2;
-
 /**
  * Prompt used to continue the active task after a compaction. Every noun must
  * name something already in the model's window, in that window's own words:
@@ -74,68 +74,17 @@ const MIN_SUMMARIZED_MESSAGES = 2;
  * agent burned a turn hunting for it. `buildSummaryPrompt` now always emits
  * Next, and this prompt no longer assumes what that section says.
  *
- * Fourth instance, 2026-08-27: "do not redo work it records as done" is a
- * prohibition a model violates the moment it feels uncertain, and prose it
- * cannot verify makes it uncertain constantly. The wording now points at the
- * host-recorded blocks `compactionLedger.ts` appends and permits exactly the
- * verification those blocks cannot supply. This is guidance, not enforcement —
- * nothing here stops a model re-reading a file, and the fix for that is
- * removing the REASON to re-read, not scolding it harder.
+ * Fourth instance, 2026-08-27: increasingly forceful resume wording still
+ * drifted because the missing state was structural, not instructional. The
+ * replacement context now carries user intent and host facts independently,
+ * so this is deliberately only a neutral protocol trigger. Chat Completions
+ * still needs a user-role input to begin another response; no task state is
+ * entrusted to that input.
  */
-export const RESUME_PROMPT =
-  'Context was compacted. The conversation summary above is your working context - nothing else is being withheld. ' +
-  'The blocks marked "recorded by Forge" are host-recorded outcomes, not model claims: prefer them over re-checking. ' +
-  'A successful command with named output evidence means that artifact or state was already observed; do not repeat its download or installation unless the user asks or an entry is marked FAILED or unknown. ' +
-  'Do what the Next section of that summary records. If Next says the task is complete, report that to the user instead of starting new work.';
+export const RESUME_PROMPT = 'Continue the active task from the compacted context.';
 
 /** Consecutive auto-resumes allowed without an intervening user prompt. */
 export const MAX_CONSECUTIVE_AUTO_CONTINUES = 2;
-
-function isSummarizable(m: ChatMessage): boolean {
-  return (
-    ((m.role === 'user' || m.role === 'tool') && typeof m.content === 'string') ||
-    (m.role === 'assistant' && (typeof m.content === 'string' || Boolean(m.tool_calls?.length)))
-  );
-}
-
-export interface CompactionSplit {
-  /** Messages fed to the summarizer. */
-  summarize: ChatMessage[];
-  /** Index into `pending` where the retained verbatim tail begins. */
-  tailStart: number;
-}
-
-/**
- * Splits the still-uncompacted messages into "summarize this" and "keep this
- * verbatim".
- *
- * The tail is the last user message and everything after it, so the model keeps
- * one concrete exchange instead of a paraphrase alone. It is bounded by
- * `RETAINED_TAIL_MAX_CHARS` and by leaving `MIN_SUMMARIZED_MESSAGES` behind, so
- * a single huge exchange cannot swallow the whole window.
- */
-export function selectCompactionSplit(pending: ChatMessage[]): CompactionSplit | null {
-  const summarizable = pending.filter(isSummarizable);
-  if (summarizable.length < MIN_SUMMARIZED_MESSAGES) return null;
-
-  let tailStart = pending.length;
-  for (let i = pending.length - 1; i >= 0; i--) {
-    if (pending[i]?.role !== 'user') continue;
-    const candidate = pending.slice(i);
-    const chars = candidate.reduce(
-      (sum, m) => sum + (typeof m.content === 'string' ? m.content.length : 0),
-      0,
-    );
-    if (chars > RETAINED_TAIL_MAX_CHARS) break;
-    // Never retain so much that the summary side falls under the minimum —
-    // otherwise a short chat "compacts" into a copy of itself.
-    if (pending.slice(0, i).filter(isSummarizable).length < MIN_SUMMARIZED_MESSAGES) break;
-    tailStart = i;
-    break;
-  }
-
-  return { summarize: pending.slice(0, tailStart).filter(isSummarizable), tailStart };
-}
 
 /**
  * Runs one compaction against the active conversation.
@@ -173,6 +122,14 @@ export async function runCompaction(
   // and sliced away by applyCompactionWindow — visible in the transcript,
   // invisible to the model.
   const fromIndex = from + split.tailStart;
+  const currentActions = collectRecordedActions(split.summarize);
+  const recordedActions = mergeRecordedActions(conv.compaction?.recordedActions, currentActions);
+  const recordedActionsText = renderRecordedActionsBlock(recordedActions);
+  const userMessages = collectCompactionUserMessages(
+    conv.compaction?.userMessages,
+    split.summarize,
+  );
+  const userContext = renderCompactionUserMessages(userMessages);
 
   deps.post({ type: 'notice', message: 'Compacting conversation…', conversationId: conv.id });
   // The webview treats the conversation as streaming between these two, so a
@@ -199,9 +156,13 @@ export async function runCompaction(
     // Supply the deterministic ledger to the summarizer as well as pinning it
     // below. A long tool dump used to hide an already-completed download from
     // the model that wrote the summary, leaving only an earlier "next" step.
-    const recordedActions = recordedActionsBlock(split.summarize);
     summary = await deps.runPromptToMarkdown(
-      buildSummaryPrompt(conv.compaction?.summary, split.summarize, recordedActions),
+      buildSummaryPrompt(
+        conv.compaction?.summary,
+        split.summarize,
+        recordedActionsText + repoState,
+        userContext,
+      ),
       conv.id,
       {
         // The conversation's OWN model, not the picker's global default: a
@@ -225,11 +186,7 @@ export async function runCompaction(
     deps.post({ type: 'done', finishReason: 'stop', conversationId: conv.id });
   }
 
-  // Recorded by code from the tool calls, so what the agent did survives even
-  // when the source cap kept it out of the summarizer's view — and so a failed
-  // write is never reported as a completed one.
-  const recorded = recordedActionsBlock(split.summarize) + repoState;
-  const trimmed = capSummary(summary, recorded.length);
+  const trimmed = capSummary(summary);
   if (!isUsableSummary(trimmed)) {
     log.info(`[compact] rejected unusable summary (${trimmed.length} chars)`);
     void vscode.window.showWarningMessage(
@@ -244,7 +201,14 @@ export async function runCompaction(
   // overwriting the transcript. conv.messages stays whole, so the sidebar
   // scrollback and the persisted record survive; only what the model is sent
   // shrinks (see applyCompactionWindow).
-  conv.compaction = { summary: `${trimmed}${recorded}`, fromIndex };
+  conv.compaction = {
+    summary: trimmed,
+    fromIndex,
+    generation: (conv.compaction?.generation ?? 0) + 1,
+    ...(userMessages.length > 0 ? { userMessages } : {}),
+    ...(recordedActions.length > 0 ? { recordedActions } : {}),
+    ...(repoState ? { repoState } : {}),
+  };
   conv.updatedAt = Date.now();
   deps.persistSession();
   deps.postSessionSync();
@@ -358,3 +322,9 @@ export async function autoCompactAndResume(deps: AutoCompactDeps): Promise<void>
     ...(reason !== undefined ? { reason } : {}),
   });
 }
+
+export {
+  RETAINED_TAIL_MAX_CHARS,
+  selectCompactionSplit,
+  type CompactionSplit,
+} from './compactionSplit';

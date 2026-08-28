@@ -18,6 +18,60 @@ NOT built, see that phase). Tests: `test/unit/CompactionLedger.test.ts` (20),
 `test/unit/PlanTools.test.ts` (18), four added to
 `test/unit/CompactionService.test.ts`.
 
+## 2026-08-28 follow-up — structured replacement context
+
+**Status: IMPLEMENTED 2026-08-28; validation green.** Older Forge sessions show the same drift outside the
+Krea download case: corrected external identities were searched again, user
+creative decisions disappeared, completed validations became uncertain, and
+an earlier task displaced the active one. Command evidence alone cannot fix
+those failures because several distinct kinds of memory still compete inside
+one lossy Markdown summary.
+
+The follow-up adopts the useful *shape* of Codex compaction without depending
+on the cloud Responses API. Forge's local Chat Completions backends receive a
+bounded replacement context with independently owned layers:
+
+1. **Verbatim user context** — non-internal user requests and decisions,
+   deduplicated and bounded, carried across compaction generations outside the
+   model-authored summary.
+2. **Model summary** — goal, progress, constraints, errors, and next action.
+3. **Structured host actions** — typed file/command outcomes with stable keys;
+   later observations supersede earlier ones and the array is persisted rather
+   than re-summarized.
+4. **Current repository snapshot** — replaced on each compaction, never merged
+   with a stale snapshot.
+5. **Verbatim protocol tail and task plan** — the recent exchange remains a
+   valid call/result sequence; the existing plan stays independently injected.
+
+An automatic continuation remains a user-role message because Chat Completions
+requires an input turn, but it becomes a neutral continuation signal. Manual
+`/compact` leaves a cleanly finished, idle conversation asleep; it only sends
+that signal when Forge recorded the preceding turn as interrupted. All
+behavioural detail moves into the replacement context so repeated compaction
+does not accumulate increasingly forceful resume prompts.
+
+### Acceptance
+
+- Two compactions preserve the original request and later user decisions.
+- Host action facts survive repeated compaction without model paraphrase.
+- A later outcome for the same file/command/artifact supersedes the old one.
+- Oversized tool results no longer force a zero-message tail; call/result
+  protocol remains valid and the existing context excerpting bounds payloads.
+- Legacy `{ summary, fromIndex }` records still load unchanged.
+- Automatic continuation sends only the neutral internal trigger.
+- Manual compaction does not wake an idle conversation, but an interrupted turn
+  resumes once after a successful compact.
+- `npm run ci` and `npm run package` pass.
+
+Implementation owners: `compactionUserContext.ts` preserves bounded verbatim
+user text; `compactionLedger.ts` extracts structured facts;
+`compactionRecordedState.ts` merges and renders them;
+`compactionSplit.ts` owns the complete-tail cut; `compactionWindow.ts` assembles
+the replacement context. The persisted schema remains backward compatible.
+
+Validation: `npm run ci` passed with 1,260 tests passed and 14 skipped;
+`npm run package` produced `forge-llm-0.13.17.vsix` successfully.
+
 ## Revisions from implementation
 
 1. **`compactionLedger.ts` was split in two.** It reached 377 lines carrying

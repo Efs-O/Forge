@@ -319,6 +319,35 @@ describe('sessionTypes', () => {
     expect(restored.conversations[0]!.messages).toHaveLength(2);
   });
 
+  it('round-trips structured replacement context without aliasing its arrays', () => {
+    const session = createDefaultSession();
+    session.conversations[0]!.compaction = {
+      summary: 'Goal: finish. Next: test.',
+      fromIndex: 4,
+      generation: 2,
+      userMessages: ['original request', 'later decision'],
+      recordedActions: [
+        {
+          kind: 'command',
+          key: 'command:npm run ci',
+          outcome: 'ok',
+          line: '- ran `npm run ci` → exit 0',
+        },
+      ],
+      repoState: '\n\nWORKING TREE: clean',
+    };
+
+    const persisted = runtimeToPersisted(session);
+    const restored = loadSidebarSession(makeMemento({ [SESSION_KEY_V1]: persisted }));
+    expect(restored.conversations[0]!.compaction).toEqual(session.conversations[0]!.compaction);
+    expect(restored.conversations[0]!.compaction?.userMessages).not.toBe(
+      persisted.conversations[0]!.compaction?.userMessages,
+    );
+    expect(restored.conversations[0]!.compaction?.recordedActions).not.toBe(
+      persisted.conversations[0]!.compaction?.recordedActions,
+    );
+  });
+
   // Records written before the schema widened must still load.
   it('sidebarSessionPersistedSchema accepts pre-migration records', () => {
     const legacy = {

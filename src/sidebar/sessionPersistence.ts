@@ -9,6 +9,7 @@
 
 import type { Memento } from 'vscode';
 import type { ChatMessage } from '../llm/types';
+import type { CompactionState } from './compactionTypes';
 import {
   HISTORY_KEY_LEGACY,
   MAX_HISTORY_CONVERSATIONS,
@@ -34,6 +35,44 @@ function emptyConversation(id: string, now: number): ConversationRuntime {
   };
 }
 
+function copyCompaction(compaction: {
+  summary: string;
+  fromIndex: number;
+  generation?: number | undefined;
+  userMessages?: string[] | undefined;
+  recordedActions?:
+    | Array<{
+        kind: 'file' | 'command';
+        key: string;
+        outcome: 'ok' | 'failed' | 'unknown';
+        line: string;
+        durableEvidence?: boolean | undefined;
+      }>
+    | undefined;
+  repoState?: string | undefined;
+}): CompactionState {
+  return {
+    summary: compaction.summary,
+    fromIndex: compaction.fromIndex,
+    ...(compaction.generation !== undefined ? { generation: compaction.generation } : {}),
+    ...(compaction.userMessages ? { userMessages: [...compaction.userMessages] } : {}),
+    ...(compaction.recordedActions
+      ? {
+          recordedActions: compaction.recordedActions.map((action) => ({
+            kind: action.kind,
+            key: action.key,
+            outcome: action.outcome,
+            line: action.line,
+            ...(action.durableEvidence !== undefined
+              ? { durableEvidence: action.durableEvidence }
+              : {}),
+          })),
+        }
+      : {}),
+    ...(compaction.repoState !== undefined ? { repoState: compaction.repoState } : {}),
+  };
+}
+
 export function createDefaultSession(): SidebarRuntime {
   const id = newConversationId();
   const now = Date.now();
@@ -53,7 +92,7 @@ function persistedToRuntime(p: ConversationPersisted): ConversationRuntime {
     messages: repairInterruptedToolCalls(chatMessagesFromSlim(p.messages)),
     ...(p.active_model !== undefined ? { active_model: p.active_model } : {}),
     ...(p.cli_sessions !== undefined ? { cli_sessions: { ...p.cli_sessions } } : {}),
-    ...(p.compaction !== undefined ? { compaction: { ...p.compaction } } : {}),
+    ...(p.compaction !== undefined ? { compaction: copyCompaction(p.compaction) } : {}),
     ...(p.plan !== undefined
       ? { plan: { ...p.plan, items: p.plan.items.map((i) => ({ ...i })) } }
       : {}),
@@ -123,7 +162,7 @@ export function runtimeToPersisted(session: SidebarRuntime): SidebarSessionPersi
       messages: slimPersistMessages(c.messages),
       ...(c.active_model !== undefined ? { active_model: c.active_model } : {}),
       ...(c.cli_sessions !== undefined ? { cli_sessions: { ...c.cli_sessions } } : {}),
-      ...(c.compaction !== undefined ? { compaction: { ...c.compaction } } : {}),
+      ...(c.compaction !== undefined ? { compaction: copyCompaction(c.compaction) } : {}),
       ...(c.plan !== undefined
         ? { plan: { ...c.plan, items: c.plan.items.map((i) => ({ ...i })) } }
         : {}),
@@ -148,7 +187,7 @@ export function runtimeToPersisted(session: SidebarRuntime): SidebarSessionPersi
       messages: slimPersistMessages(c.messages),
       ...(c.active_model !== undefined ? { active_model: c.active_model } : {}),
       ...(c.cli_sessions !== undefined ? { cli_sessions: { ...c.cli_sessions } } : {}),
-      ...(c.compaction !== undefined ? { compaction: { ...c.compaction } } : {}),
+      ...(c.compaction !== undefined ? { compaction: copyCompaction(c.compaction) } : {}),
       ...(c.plan !== undefined
         ? { plan: { ...c.plan, items: c.plan.items.map((i) => ({ ...i })) } }
         : {}),

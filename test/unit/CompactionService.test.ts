@@ -19,6 +19,7 @@ import {
 import {
   collectWrittenFiles,
   recordedActionsBlock,
+  renderRecordedActionsBlock,
 } from '../../src/sidebar/compactionLedger';
 import { applyCompactionWindow } from '../../src/sidebar/compactionWindow';
 import type { ChatMessage } from '../../src/llm/types';
@@ -103,6 +104,34 @@ describe('selectCompactionSplit', () => {
     ];
     const split = selectCompactionSplit(messages);
     expect(split?.tailStart).toBe(messages.length);
+  });
+
+  it('retains a complete tool exchange when only the result is oversized', () => {
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'first task' },
+      { role: 'assistant', content: 'did the first task' },
+      { role: 'user', content: 'inspect the generated report' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'read',
+            type: 'function',
+            function: { name: 'read_file', arguments: '{"path":"report.txt"}' },
+          },
+        ],
+      },
+      { role: 'tool', content: 'x'.repeat(120_000), tool_call_id: 'read' },
+    ];
+
+    const split = selectCompactionSplit(messages);
+    expect(split?.tailStart).toBe(2);
+    expect(messages.slice(split!.tailStart).map((message) => message.role)).toEqual([
+      'user',
+      'assistant',
+      'tool',
+    ]);
   });
 
   it('does not retain so much that nothing is left to summarize', () => {
@@ -258,13 +287,14 @@ describe('runCompaction repo snapshot', () => {
     { role: 'user', content: 'second task' },
   ];
 
-  it('appends the injected working-tree state to the recorded summary', async () => {
+  it('keeps the current working-tree snapshot outside the model summary', async () => {
     const c = conv([...messages]);
     const h = harness(c, async () => long('summary'));
     h.deps.snapshotRepoState = async () => '\n\nWORKING TREE: 2 files changed';
 
     await expect(runCompaction(h.deps, { auto: true })).resolves.toBe('compacted');
-    expect(c.compaction?.summary).toContain('WORKING TREE: 2 files changed');
+    expect(c.compaction?.repoState).toContain('WORKING TREE: 2 files changed');
+    expect(c.compaction?.summary).not.toContain('WORKING TREE: 2 files changed');
   });
 
   it('captures the snapshot before the summarization request, not after', async () => {
@@ -346,8 +376,10 @@ describe('runCompaction', () => {
     await expect(runCompaction(h.deps, { auto: true })).resolves.toBe('compacted');
 
     expect(runPrompt.mock.calls[0]?.[0]).toContain('Downloaded krea2_turbo_fp8_scaled.safetensors');
-    expect(c.compaction?.summary).toContain('Downloaded krea2_turbo_fp8_scaled.safetensors');
-    expect(RESUME_PROMPT).toContain('do not repeat its download or installation');
+    expect(renderRecordedActionsBlock(c.compaction?.recordedActions ?? [])).toContain(
+      'Downloaded krea2_turbo_fp8_scaled.safetensors',
+    );
+    expect(RESUME_PROMPT).toBe('Continue the active task from the compacted context.');
   });
 
   it('associates its summary request with the compacted conversation', async () => {
@@ -370,6 +402,57 @@ describe('runCompaction', () => {
         alwaysStripThinking: true,
       }),
     );
+  });
+
+  it('preserves user decisions and host facts across repeated compactions', async () => {
+    const c = conv([
+      { role: 'user', content: 'build the music-video workflow' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'write',
+            type: 'function',
+            function: { name: 'write_file', arguments: '{"path":"workflow.json"}' },
+          },
+        ],
+      },
+      { role: 'tool', content: 'Wrote workflow.json', tool_call_id: 'write' },
+      { role: 'assistant', content: 'Workflow created.' },
+      { role: 'user', content: 'keep the walking-toward-camera version' },
+      { role: 'assistant', content: 'Decision recorded.' },
+    ]);
+    const h = harness(c, async () => long('summary'));
+
+    await runCompaction(h.deps, { auto: true });
+    c.messages.push(
+      { role: 'user', content: 'do not add a camera push' },
+      { role: 'assistant', content: 'I will keep the camera fixed.' },
+    );
+    await runCompaction(h.deps, { auto: true });
+    c.messages.push(
+      { role: 'user', content: 'continue with that exact direction' },
+      { role: 'assistant', content: 'Continuing.' },
+    );
+    await runCompaction(h.deps, { auto: true });
+
+    expect(c.compaction?.generation).toBe(3);
+    expect(c.compaction?.userMessages).toEqual([
+      'build the music-video workflow',
+      'keep the walking-toward-camera version',
+      'do not add a camera push',
+    ]);
+    expect(renderRecordedActionsBlock(c.compaction?.recordedActions ?? [])).toContain(
+      'workflow.json',
+    );
+    const modelContext = applyCompactionWindow(c.messages, c.compaction)
+      .map((message) => (typeof message.content === 'string' ? message.content : ''))
+      .join('\n');
+    expect(modelContext).toContain('build the music-video workflow');
+    expect(modelContext).toContain('keep the walking-toward-camera version');
+    expect(modelContext).toContain('do not add a camera push');
+    expect(modelContext).toContain('continue with that exact direction');
   });
 
   const base: ChatMessage[] = [
@@ -416,8 +499,9 @@ describe('runCompaction', () => {
 
     await runCompaction(h.deps, { auto: true });
 
-    expect(c.compaction?.summary).toContain('index.html');
-    expect(c.compaction?.summary).toContain('recorded by Forge');
+    const recorded = renderRecordedActionsBlock(c.compaction?.recordedActions ?? []);
+    expect(recorded).toContain('index.html');
+    expect(recorded).toContain('recorded by Forge');
   });
 
   it('records the cut point from the pre-await snapshot, not the later length', async () => {
@@ -433,7 +517,12 @@ describe('runCompaction', () => {
     const outcome = await runCompaction(h.deps, { auto: true });
 
     expect(outcome).toBe('compacted');
-    expect(c.compaction).toEqual({ summary: long('summary of the first task'), fromIndex: 2 });
+    expect(c.compaction).toMatchObject({
+      summary: long('summary of the first task'),
+      fromIndex: 2,
+      generation: 1,
+      userMessages: ['first task'],
+    });
     const sent = applyCompactionWindow(c.messages, c.compaction);
     expect(sent.map((m) => m.content)).toContain('raced prompt');
     expect(sent.map((m) => m.content)).toContain('second task');

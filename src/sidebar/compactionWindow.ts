@@ -7,14 +7,28 @@
  */
 
 import type { ChatMessage } from '../llm/types';
-
-export interface CompactionState {
-  summary: string;
-  fromIndex: number;
-}
+import { renderRecordedActionsBlock } from './compactionRecordedState';
+import { renderCompactionUserMessages } from './compactionUserContext';
+import type { CompactionState } from './compactionTypes';
 
 const SUMMARY_PREAMBLE =
-  'Conversation summary. Use this as the working context for future turns in this chat.';
+  'Compacted replacement context. Continue the same conversation and active task from this state.';
+
+function replacementUserContext(compaction: CompactionState): string {
+  const userContext = renderCompactionUserMessages(compaction.userMessages);
+  const generation = compaction.generation
+    ? `Compaction generation: ${compaction.generation}.`
+    : '';
+  return [SUMMARY_PREAMBLE, generation, userContext].filter(Boolean).join('\n\n');
+}
+
+function replacementAssistantContext(compaction: CompactionState): string {
+  return (
+    compaction.summary +
+    renderRecordedActionsBlock(compaction.recordedActions ?? []) +
+    (compaction.repoState ?? '')
+  );
+}
 
 /**
  * Returns `summary` + `messages.slice(fromIndex)`, or the input untouched when
@@ -38,10 +52,11 @@ export function applyCompactionWindow(
   while (start < tail.length && tail[start]?.role === 'tool') start += 1;
 
   return [
-    { role: 'user', content: SUMMARY_PREAMBLE },
-    { role: 'assistant', content: compaction.summary },
+    { role: 'user', content: replacementUserContext(compaction) },
+    { role: 'assistant', content: replacementAssistantContext(compaction) },
     ...tail.slice(start),
   ];
 }
 
 export { SUMMARY_PREAMBLE };
+export type { CompactionState } from './compactionTypes';

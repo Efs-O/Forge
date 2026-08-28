@@ -9,8 +9,9 @@
  * - threshold-triggered compaction resumes only when the user has left it
  *   enabled, and is bounded by the auto-continue counter so a stuck task cannot
  *   resume itself forever;
- * - a manual `/compact` always resumes once and is never counted, because the
- *   user just asked for it.
+ * - a manual `/compact` leaves an idle conversation idle, but resumes once
+ *   when the preceding turn was interrupted. That recovery is never counted
+ *   against the automatic continuation cap.
  */
 
 import type { HostToWebview } from './messageBridge';
@@ -44,18 +45,22 @@ export function runAutoCompact(deps: CompactionPolicyDeps, convId: string): Prom
   });
 }
 
-/** User-invoked `/compact`: always resumes once, never counted against the cap. */
-export function runManualCompactResume(deps: CompactionPolicyDeps, convId: string): Promise<void> {
+/** User-invoked recovery after `/compact`: only called for an interrupted turn. */
+export function runManualCompactResume(
+  deps: CompactionPolicyDeps,
+  convId: string,
+  reason: string,
+): Promise<void> {
   return resumeAfterCompaction(
     {
       convId,
       post: deps.post,
-      incompleteTurnReason: () => deps.incompleteTurnReason(convId),
+      incompleteTurnReason: () => reason,
       resumeEnabled: true,
       autoContinues: () => 0,
       noteAutoContinue: () => undefined,
       send: (text, options) => deps.send(text, convId, options),
     },
-    { automatic: false },
+    { automatic: false, reason },
   );
 }
