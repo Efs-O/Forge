@@ -1,7 +1,25 @@
 import * as vscode from 'vscode';
 import type { HostToWebview } from './messageBridge';
 
-interface PendingApproval {
+export interface ToolApprovalRequestEvent {
+  id: string;
+  toolName: string;
+  detail: string;
+  dangerous: boolean;
+  conversationId?: string;
+}
+
+export interface ToolApprovalResolvedEvent extends ToolApprovalRequestEvent {
+  approved: boolean;
+  reason: 'resolved' | 'cancelled';
+}
+
+export interface ToolApprovalSink {
+  requested(event: ToolApprovalRequestEvent): void;
+  resolved(event: ToolApprovalResolvedEvent): void;
+}
+
+interface PendingApproval extends ToolApprovalRequestEvent {
   id: string;
   toolName: string;
   detail: string;
@@ -17,11 +35,21 @@ export class ToolApprovalService {
   private clankerMode = false;
   private onApprovalStart?: (conversationId: string) => void;
   private onApprovalEnd?: (conversationId: string) => void;
+  private readonly sinks = new Set<ToolApprovalSink>();
 
   constructor(
     private readonly post: (message: HostToWebview) => void,
     private readonly getView: () => vscode.WebviewView | undefined,
   ) {}
+
+  addSink(sink: ToolApprovalSink): { dispose(): void } {
+    this.sinks.add(sink);
+    return { dispose: () => this.sinks.delete(sink) };
+  }
+
+  pending(): ToolApprovalRequestEvent | undefined {
+    return this.active ? this.eventOf(this.active) : undefined;
+  }
 
   /** Register callbacks fired when an approval request is shown / resolved. */
   setApprovalLifecycle(
@@ -54,7 +82,7 @@ export class ToolApprovalService {
     signal?: AbortSignal,
   ): Promise<boolean> {
     if (this.clankerMode && !dangerous) return Promise.resolve(true);
-    if (!this.getView()) {
+    if (!this.getView() && this.sinks.size === 0) {
       return Promise.reject(
         new Error(`Forge: sidebar is unavailable for tool approval (${toolName}).`),
       );
@@ -82,6 +110,7 @@ export class ToolApprovalService {
       const current = this.active;
       this.active = null;
       if (current.conversationId) this.onApprovalEnd?.(current.conversationId);
+      this.emitResolved(current, approved, 'resolved');
       current.resolve(approved);
       this.pump();
       return;
@@ -90,6 +119,7 @@ export class ToolApprovalService {
     if (index >= 0) {
       const item = this.queue.splice(index, 1)[0];
       if (item.conversationId) this.onApprovalEnd?.(item.conversationId);
+      this.emitResolved(item, approved, 'resolved');
       item.resolve(approved);
     }
   }
@@ -99,6 +129,7 @@ export class ToolApprovalService {
       const current = this.active;
       this.active = null;
       if (current.conversationId) this.onApprovalEnd?.(current.conversationId);
+      this.emitResolved(current, false, 'cancelled');
       current.resolve(false);
     }
     for (let index = this.queue.length - 1; index >= 0; index--) {
@@ -106,6 +137,7 @@ export class ToolApprovalService {
       if (item && (!conversationId || item.conversationId === conversationId)) {
         this.queue.splice(index, 1);
         if (item.conversationId) this.onApprovalEnd?.(item.conversationId);
+        this.emitResolved(item, false, 'cancelled');
         item.resolve(false);
       }
     }
@@ -122,19 +154,43 @@ export class ToolApprovalService {
     if (!next) return;
     if (next.signal?.aborted) {
       if (next.conversationId) this.onApprovalEnd?.(next.conversationId);
+      this.emitResolved(next, false, 'cancelled');
       next.resolve(false);
       this.pump();
       return;
     }
     this.active = next;
-    void vscode.commands.executeCommand('workbench.view.extension.forge-sidebar');
-    this.post({
-      type: 'confirmRequest',
-      id: next.id,
-      toolName: next.toolName,
-      detail: next.detail,
-      ...(next.dangerous ? { isDangerous: true } : {}),
-      ...(next.conversationId ? { conversationId: next.conversationId } : {}),
-    });
+    const event = this.eventOf(next);
+    if (this.getView()) {
+      void vscode.commands.executeCommand('workbench.view.extension.forge-sidebar');
+      this.post({
+        type: 'confirmRequest',
+        id: next.id,
+        toolName: next.toolName,
+        detail: next.detail,
+        ...(next.dangerous ? { isDangerous: true } : {}),
+        ...(next.conversationId ? { conversationId: next.conversationId } : {}),
+      });
+    }
+    for (const sink of this.sinks) sink.requested(event);
+  }
+
+  private eventOf(item: PendingApproval): ToolApprovalRequestEvent {
+    return {
+      id: item.id,
+      toolName: item.toolName,
+      detail: item.detail,
+      dangerous: item.dangerous,
+      ...(item.conversationId ? { conversationId: item.conversationId } : {}),
+    };
+  }
+
+  private emitResolved(
+    item: PendingApproval,
+    approved: boolean,
+    reason: ToolApprovalResolvedEvent['reason'],
+  ): void {
+    const event = { ...this.eventOf(item), approved, reason };
+    for (const sink of this.sinks) sink.resolved(event);
   }
 }

@@ -25,6 +25,9 @@ describe('SidebarHostFacade', () => {
       send: vi.fn(),
       cancel: vi.fn(),
       queueIntent: vi.fn(),
+      addApprovalSink: vi.fn(() => ({ dispose: vi.fn() })),
+      resolveApproval: vi.fn(),
+      getPendingApproval: () => undefined,
       getActiveConversationId: () => 'visible',
       getOpenConversations: () => [created, restored],
       getRequestChains: () => [],
@@ -48,6 +51,9 @@ describe('SidebarHostFacade', () => {
       send,
       cancel: vi.fn(),
       queueIntent: vi.fn(),
+      addApprovalSink: vi.fn(() => ({ dispose: vi.fn() })),
+      resolveApproval: vi.fn(),
+      getPendingApproval: () => undefined,
       getActiveConversationId: () => 'c1',
       getOpenConversations: () => [conv],
       getRequestChains: () => [],
@@ -58,7 +64,7 @@ describe('SidebarHostFacade', () => {
       kind: 'completed',
       finalText: 'done',
     });
-    expect(send).toHaveBeenCalledWith('c1', 'hello', undefined);
+    expect(send).toHaveBeenCalledWith('c1', 'hello', undefined, undefined);
     expect(facade.status()).toMatchObject({
       activeConversationId: 'c1',
       streamingConversationIds: ['c1'],

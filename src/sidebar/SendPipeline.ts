@@ -62,6 +62,7 @@ export class SendPipeline {
     attachments?: AttachmentData[],
     conversationId?: string,
     promptOptions?: UserPromptOptions,
+    metadata?: { remoteRequestId?: string },
   ): Promise<ForgeRequestOutcome> {
     const { deps } = this;
     let conv = conversationId
@@ -180,7 +181,7 @@ export class SendPipeline {
         finalText: '',
       };
     }
-    const chain = deps.requestChains.accept(admission.reservation);
+    const chain = deps.requestChains.accept(admission.reservation, metadata?.remoteRequestId);
     // Persist the full selection (incl. @profile) on the conversation so tab
     // switches restore the same profile, not just the base model (F6).
     conv.active_model = modelName;

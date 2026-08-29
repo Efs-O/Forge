@@ -11,6 +11,7 @@ import { RemoteLeaseError, RemoteTransportLease } from '../../src/remote/RemoteT
 import type { RemoteInboundEvent, RemoteRequestRecord } from '../../src/remote/types';
 import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
 import { ForgeConfigSchema } from '../../src/config/schema';
+import type { ToolApprovalSink } from '../../src/sidebar/ToolApprovalService';
 
 const tempDirs: string[] = [];
 
@@ -166,6 +167,7 @@ describe('RemoteController with fake channel', () => {
       restoreConversation: vi.fn(),
       send,
       cancel: vi.fn(),
+      addApprovalSink: () => ({ dispose: () => undefined }),
       status: () => ({
         activeConversationId: 'visible',
         conversations: [],
@@ -200,7 +202,14 @@ describe('RemoteController with fake channel', () => {
     };
     const accepted = await channel.emit(prompt);
     expect(accepted.kind).toBe('accepted');
-    await vi.waitFor(() => expect(send).toHaveBeenCalledWith('c1', 'implement it'));
+    await vi.waitFor(() =>
+      expect(send).toHaveBeenCalledWith(
+        'c1',
+        'implement it',
+        undefined,
+        expect.objectContaining({ remoteRequestId: expect.any(String) }),
+      ),
+    );
     await vi.waitFor(() =>
       expect(channel.sent.some((item) => item.text === 'real answer')).toBe(true),
     );
@@ -213,7 +222,10 @@ describe('RemoteController with fake channel', () => {
     const state = await store();
     const auth = new RemoteAuth(new MemorySecrets() as unknown as vscode.SecretStorage);
     const channel = new FakeRemoteChannel();
-    const host = { send: vi.fn() } as unknown as ForgeHostFacade;
+    const host = {
+      send: vi.fn(),
+      addApprovalSink: () => ({ dispose: () => undefined }),
+    } as unknown as ForgeHostFacade;
     const controller = new RemoteController(channel, state, auth, host, {
       workspaceId: 'workspace',
       queueLimit: 5,
@@ -255,6 +267,7 @@ describe('RemoteController with fake channel', () => {
         return { kind: 'completed' as const, finalText: `done ${text}` };
       }),
       queueIntent,
+      addApprovalSink: () => ({ dispose: () => undefined }),
       status: () => ({
         activeConversationId: 'visible',
         conversations: [],
@@ -310,6 +323,7 @@ describe('RemoteController with fake channel', () => {
     const channel = new FakeRemoteChannel();
     const host = {
       send: vi.fn(),
+      addApprovalSink: () => ({ dispose: () => undefined }),
       status: () => ({
         activeConversationId: 'visible',
         conversations: [],
@@ -337,6 +351,131 @@ describe('RemoteController with fake channel', () => {
     });
     expect(disposition).toMatchObject({ kind: 'retry' });
     expect(host.send).not.toHaveBeenCalled();
+    await controller.stop();
+  });
+
+  it('routes a Forge-owned approval to the correlated chat and accepts only that action', async () => {
+    const state = await store();
+    await state.setBinding({
+      channel: 'fake',
+      chatId: 'chat',
+      workspaceId: 'workspace',
+      conversationId: 'c1',
+    });
+    const secrets = new MemorySecrets();
+    secrets.values.set('forge.remote.fake.ownerId', 'owner');
+    const channel = new FakeRemoteChannel();
+    let sink: ToolApprovalSink | undefined;
+    let remoteRequestId: string | undefined;
+    let finishApproval: ((approved: boolean) => void) | undefined;
+    const host = {
+      addApprovalSink: (next: ToolApprovalSink) => {
+        sink = next;
+        return { dispose: () => (sink = undefined) };
+      },
+      status: () => ({
+        activeConversationId: 'visible',
+        conversations: [],
+        requestChains: remoteRequestId
+          ? [
+              {
+                conversationId: 'c1',
+                userIntentEpoch: 1,
+                stage: 'running' as const,
+                managed: true,
+                remoteRequestId,
+              },
+            ]
+          : [],
+        streamingConversationIds: remoteRequestId ? ['c1'] : [],
+      }),
+      queueIntent: vi.fn(),
+      send: vi.fn(
+        async (
+          _conversationId: string,
+          _text: string,
+          _attachments: undefined,
+          options: { remoteRequestId?: string },
+        ) => {
+          remoteRequestId = options.remoteRequestId;
+          sink?.requested({
+            id: 'approval-1',
+            toolName: 'write_file',
+            detail: 'src/a.ts',
+            dangerous: false,
+            conversationId: 'c1',
+          });
+          const approved = await new Promise<boolean>((resolve) => (finishApproval = resolve));
+          return approved
+            ? { kind: 'completed' as const, finalText: 'approved work done' }
+            : { kind: 'failed' as const, error: 'denied' };
+        },
+      ),
+      resolveApproval: (id: string, approved: boolean) => {
+        sink?.resolved({
+          id,
+          toolName: 'write_file',
+          detail: 'src/a.ts',
+          dangerous: false,
+          conversationId: 'c1',
+          approved,
+          reason: 'resolved',
+        });
+        finishApproval?.(approved);
+      },
+    } as unknown as ForgeHostFacade;
+    const controller = new RemoteController(
+      channel,
+      state,
+      new RemoteAuth(secrets as unknown as vscode.SecretStorage),
+      host,
+      { workspaceId: 'workspace', queueLimit: 5, maxMessageChars: 1000 },
+    );
+    await controller.start();
+    await channel.emit({
+      channel: 'fake',
+      kind: 'text',
+      providerMessageId: 'prompt',
+      senderId: 'owner',
+      chatId: 'chat',
+      chatType: 'private',
+      receivedAt: 1,
+      text: 'edit it',
+    });
+    await vi.waitFor(() =>
+      expect(channel.sent).toContainEqual(
+        expect.objectContaining({ chatId: 'chat', correlationId: 'approval-1' }),
+      ),
+    );
+    await expect(
+      channel.emit({
+        channel: 'fake',
+        kind: 'action',
+        providerMessageId: 'action',
+        senderId: 'owner',
+        chatId: 'chat',
+        chatType: 'private',
+        receivedAt: 2,
+        action: 'approve',
+        correlationId: 'approval-1',
+      }),
+    ).resolves.toEqual({ kind: 'handled' });
+    await vi.waitFor(() =>
+      expect(channel.sent.some((item) => item.text === 'approved work done')).toBe(true),
+    );
+    await expect(
+      channel.emit({
+        channel: 'fake',
+        kind: 'action',
+        providerMessageId: 'replay',
+        senderId: 'owner',
+        chatId: 'chat',
+        chatType: 'private',
+        receivedAt: 3,
+        action: 'deny',
+        correlationId: 'approval-1',
+      }),
+    ).resolves.toMatchObject({ kind: 'rejected' });
     await controller.stop();
   });
 });

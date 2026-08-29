@@ -10,6 +10,10 @@ import {
   type RemoteInboundEvent,
   type RemoteRequestRecord,
 } from './types';
+import type {
+  ToolApprovalRequestEvent,
+  ToolApprovalResolvedEvent,
+} from '../sidebar/ToolApprovalService';
 
 export interface RemoteControllerOptions {
   workspaceId: string;
@@ -23,6 +27,8 @@ export class RemoteController {
   private readonly drains = new Map<string, Promise<void>>();
   private subscription: { dispose(): void } | undefined;
   private accepting = false;
+  private approvalSubscription: { dispose(): void } | undefined;
+  private readonly remoteApprovals = new Map<string, { requestId: string; chatId: string }>();
 
   constructor(
     private readonly channel: RemoteChannel,
@@ -36,6 +42,10 @@ export class RemoteController {
     await this.store.load();
     this.accepting = true;
     this.subscription = this.channel.onEvent((event) => this.handle(event));
+    this.approvalSubscription = this.host.addApprovalSink({
+      requested: (event) => this.onApprovalRequested(event),
+      resolved: (event) => this.onApprovalResolved(event),
+    });
     await this.channel.start(this.abort.signal);
     for (const request of this.store.queued()) this.kickDrain(request.conversationId);
     void this.flushOutbox();
@@ -46,6 +56,8 @@ export class RemoteController {
     this.abort.abort();
     this.subscription?.dispose();
     this.subscription = undefined;
+    this.approvalSubscription?.dispose();
+    this.approvalSubscription = undefined;
     await Promise.allSettled([...this.drains.values()]);
   }
 
@@ -64,7 +76,12 @@ export class RemoteController {
       return { kind: 'rejected', reason: 'sender is not paired' };
     }
     if (event.kind === 'action') {
-      return { kind: 'rejected', reason: 'approval actions are not enabled yet' };
+      const pending = this.remoteApprovals.get(event.correlationId);
+      if (!pending || pending.chatId !== event.chatId) {
+        return { kind: 'rejected', reason: 'approval is stale or not owned by this chat' };
+      }
+      this.host.resolveApproval(event.correlationId, event.action === 'approve');
+      return { kind: 'handled' };
     }
     if (event.text.length > this.options.maxMessageChars) {
       return { kind: 'rejected', reason: 'message exceeds configured limit' };
@@ -203,7 +220,9 @@ export class RemoteController {
       }
       await this.store.markRunning(next.id);
       try {
-        const outcome = await this.host.send(conversationId, next.text);
+        const outcome = await this.host.send(conversationId, next.text, undefined, {
+          remoteRequestId: next.id,
+        });
         if (outcome.kind === 'completed') {
           await this.store.finish(next.id, 'completed', {
             finalText: outcome.finalText,
@@ -242,6 +261,41 @@ export class RemoteController {
         await this.store.markOutbox(item.id, 'pending');
       }
     }
+  }
+
+  private onApprovalRequested(event: ToolApprovalRequestEvent): void {
+    if (!event.conversationId) return;
+    const chain = this.host
+      .status()
+      .requestChains.find((item) => item.conversationId === event.conversationId);
+    if (!chain?.remoteRequestId) return;
+    const request = this.store.getRequest(chain.remoteRequestId);
+    if (!request || request.channel !== this.channel.name) return;
+    this.remoteApprovals.set(event.id, { requestId: request.id, chatId: request.chatId });
+    const danger = event.dangerous ? ' DANGEROUS' : '';
+    void this.channel
+      .send(
+        request.chatId,
+        `Forge approval${danger}: ${event.toolName}\n${event.detail}`.slice(
+          0,
+          this.options.maxMessageChars,
+        ),
+        { correlationId: event.id },
+      )
+      .catch(() => undefined);
+  }
+
+  private onApprovalResolved(event: ToolApprovalResolvedEvent): void {
+    const pending = this.remoteApprovals.get(event.id);
+    if (!pending) return;
+    this.remoteApprovals.delete(event.id);
+    void this.channel
+      .send(
+        pending.chatId,
+        `Forge approval ${event.approved ? 'approved' : 'denied'} (${event.reason}).`,
+        { correlationId: event.id },
+      )
+      .catch(() => undefined);
   }
 
   private delay(ms: number): Promise<void> {

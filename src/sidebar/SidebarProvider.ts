@@ -143,13 +143,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.hostFacade = new SidebarHostFacade({
       createConversation: (options) => this.tabs.create(options),
       restoreConversation: (conversationId, options) => this.tabs.restore(conversationId, options),
-      send: (conversationId, text, attachments) =>
-        this.send.send(text, attachments, conversationId),
+      send: (conversationId, text, attachments, options) =>
+        this.send.send(text, attachments, conversationId, undefined, options),
       cancel: async (conversationId) => {
         this.requestChains.markCancelling(conversationId);
         await this.agentLoop.cancel(conversationId);
       },
       queueIntent: (conversationId) => this.requestChains.suppressContinuation(conversationId),
+      addApprovalSink: (sink) => this.agentLoop.addApprovalSink(sink),
+      resolveApproval: (id, approved) => this.agentLoop.resolveConfirmation(id, approved),
+      getPendingApproval: () => this.agentLoop.pendingApproval(),
       getActiveConversationId: () => this.sidebar.activeConversationId,
       getOpenConversations: () => this.sidebar.conversations,
       getRequestChains: () => this.requestChains.status(),

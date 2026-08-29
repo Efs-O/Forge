@@ -2,6 +2,7 @@ import type { AttachmentData } from './messageBridge';
 import type { ConversationRuntime } from './sessionTypes';
 import type { ForgeRequestOutcome } from './turnOutcome';
 import type { RequestChainStatus } from './RequestChainLifecycle';
+import type { ToolApprovalRequestEvent, ToolApprovalSink } from './ToolApprovalService';
 
 export interface ForgeConversationSummary {
   id: string;
@@ -15,6 +16,7 @@ export interface ForgeHostStatus {
   conversations: ForgeConversationSummary[];
   requestChains: RequestChainStatus[];
   streamingConversationIds: string[];
+  pendingApproval?: ToolApprovalRequestEvent;
 }
 
 export interface ForgeHostFacade {
@@ -27,9 +29,12 @@ export interface ForgeHostFacade {
     conversationId: string,
     text: string,
     attachments?: AttachmentData[],
+    options?: { remoteRequestId?: string },
   ): Promise<ForgeRequestOutcome>;
   cancel(conversationId: string): Promise<void>;
   queueIntent(conversationId: string): void;
+  addApprovalSink(sink: ToolApprovalSink): { dispose(): void };
+  resolveApproval(id: string, approved: boolean): void;
   status(): ForgeHostStatus;
 }
 
@@ -43,9 +48,13 @@ export interface SidebarHostFacadeDeps {
     conversationId: string,
     text: string,
     attachments?: AttachmentData[],
+    options?: { remoteRequestId?: string },
   ) => Promise<ForgeRequestOutcome>;
   cancel: (conversationId: string) => Promise<void>;
   queueIntent: (conversationId: string) => void;
+  addApprovalSink: (sink: ToolApprovalSink) => { dispose(): void };
+  resolveApproval: (id: string, approved: boolean) => void;
+  getPendingApproval: () => ToolApprovalRequestEvent | undefined;
   getActiveConversationId: () => string;
   getOpenConversations: () => ConversationRuntime[];
   getRequestChains: () => RequestChainStatus[];
@@ -88,8 +97,9 @@ export class SidebarHostFacade implements ForgeHostFacade {
     conversationId: string,
     text: string,
     attachments?: AttachmentData[],
+    options?: { remoteRequestId?: string },
   ): Promise<ForgeRequestOutcome> {
-    return this.deps.send(conversationId, text, attachments);
+    return this.deps.send(conversationId, text, attachments, options);
   }
 
   cancel(conversationId: string): Promise<void> {
@@ -100,12 +110,22 @@ export class SidebarHostFacade implements ForgeHostFacade {
     this.deps.queueIntent(conversationId);
   }
 
+  addApprovalSink(sink: ToolApprovalSink): { dispose(): void } {
+    return this.deps.addApprovalSink(sink);
+  }
+
+  resolveApproval(id: string, approved: boolean): void {
+    this.deps.resolveApproval(id, approved);
+  }
+
   status(): ForgeHostStatus {
+    const pendingApproval = this.deps.getPendingApproval();
     return {
       activeConversationId: this.deps.getActiveConversationId(),
       conversations: this.deps.getOpenConversations().map(summarize),
       requestChains: this.deps.getRequestChains(),
       streamingConversationIds: [...this.deps.getStreamingConversationIds()],
+      ...(pendingApproval ? { pendingApproval } : {}),
     };
   }
 }

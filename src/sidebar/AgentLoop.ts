@@ -29,6 +29,7 @@ import { runCloudProviderTurn, runLocalProviderTurn } from './ProviderTurn';
 import type { ForgeTurnOutcome } from './turnOutcome';
 import type { DiffDecorations } from './DiffDecorations';
 import { ToolApprovalService } from './ToolApprovalService';
+import type { ToolApprovalSink, ToolApprovalRequestEvent } from './ToolApprovalService';
 import { recordModelUsage } from './modelManager/usageTracker';
 import { CliAgentDriver } from '../agents/CliAgentDriver';
 import {
@@ -261,6 +262,14 @@ export class AgentLoop {
 
   resolveConfirmation(id: string, approved: boolean): void {
     this.approvals.resolve(id, approved);
+  }
+
+  addApprovalSink(sink: ToolApprovalSink): { dispose(): void } {
+    return this.approvals.addSink(sink);
+  }
+
+  pendingApproval(): ToolApprovalRequestEvent | undefined {
+    return this.approvals.pending();
   }
 
   clearCapabilityCache(): void {
