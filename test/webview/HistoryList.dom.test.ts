@@ -205,4 +205,13 @@ describe('sessions panel — open section', () => {
     render({}, { tabs: OPEN_TABS, activeId: 'open-1' });
     expect(container.querySelectorAll('.session-list .history-item-kebab')).toHaveLength(0);
   });
+
+  it('keeps element ids unique across both sections', () => {
+    // Both sections share a wrapper, so it is a class: two elements carrying
+    // one id is invalid and makes getElementById order-dependent.
+    render({}, { tabs: OPEN_TABS, activeId: 'open-1' });
+    const ids = Array.from(container.querySelectorAll('[id]'), (el) => el.id);
+    expect(ids).toHaveLength(new Set(ids).size);
+    expect(container.querySelectorAll('.history-list-wrap')).toHaveLength(2);
+  });
 });

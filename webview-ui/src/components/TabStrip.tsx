@@ -132,14 +132,14 @@ export function TabStrip({
   return (
     <div id="tab-strip-wrap" aria-label="Conversation tabs">
       <div id="chats-toolbar">
-        <span id="chats-heading">Chats</span>
+        <span id="chats-heading">Sessions</span>
         <div id="chats-toolbar-actions">
           <button
             id="history-toolbar-btn"
             type="button"
-            aria-label="Sessions"
+            aria-label="All sessions"
             aria-expanded={historyExpanded}
-            title="Sessions"
+            title="All sessions"
             onClick={onToggleHistory}
           >
             <ClockIcon />

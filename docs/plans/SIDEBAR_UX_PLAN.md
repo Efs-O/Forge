@@ -347,10 +347,24 @@ CLOSED
   keeps counting **closed** sessions only, so its meaning does not change.
   Rename its `title` from "Chat history" to "Sessions".
 
-Rename the heading and labels in the UI to "Sessions"; **do not rename the
-`historyRestore` / `restoreConversation` / `deleteConversation` message types
-or `SessionHistoryMeta`** — those are the host contract and renaming them buys
-nothing but churn.
+Rename the heading and labels in the UI to "Sessions" — the strip's own
+`#chats-heading` included, since the word above the flyout should match it. The
+toggle button is labelled "All sessions" rather than "Sessions" so the toolbar
+does not announce the same word twice. **Do not rename the `historyRestore` /
+`restoreConversation` / `deleteConversation` message types or
+`SessionHistoryMeta`** — those are the host contract and renaming them buys
+nothing but churn; the same goes for element ids like `#chats-heading` and
+`#history-panel`, which are structural.
+
+The wrapper shared by both sections is a **class** (`.history-list-wrap`), not
+the id it started as: two elements carrying one id is invalid HTML and makes
+`getElementById` order-dependent.
+
+The active Open row stays a live button. "Not clickable-to-restore" means it
+gets no restore action, unlike a Closed row — not that it is disabled: the
+strip's active chip is clickable too, `switchConversation` on the current id is
+an idempotent no-op, and a disabled button would leave a hole in the panel's
+keyboard order. `aria-current="true"` carries the "you are here" meaning.
 
 ### Where the data comes from
 

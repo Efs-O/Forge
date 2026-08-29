@@ -376,7 +376,7 @@ export function App(): React.ReactElement {
   return (
     <div id="forge-root">
       <Header tokenUsed={tokenUsed} tokenMax={tokenMax} />
-      <aside id="chats-panel" aria-label="Forge chats">
+      <aside id="chats-panel" aria-label="Forge sessions">
         {!state.sessionHydrated && (
           <span id="chats-loading" role="status">
             Loading…

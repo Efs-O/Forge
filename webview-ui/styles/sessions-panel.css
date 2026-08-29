@@ -16,7 +16,7 @@
   color: var(--vscode-descriptionForeground);
 }
 
-#history-list-wrap {
+.history-list-wrap {
   margin-top: 6px;
 }
 

@@ -271,7 +271,7 @@ export function HistoryList({
   return (
     <section id="history-panel" aria-label="Sessions" hidden={!expanded}>
       <p className="session-section-label">Open</p>
-      <div id="history-list-wrap">
+      <div className="history-list-wrap">
         <div className="session-list">
           {tabs.map((tab) => (
             <OpenRow
@@ -289,7 +289,7 @@ export function HistoryList({
       {items.length === 0 ? (
         <p id="history-empty">Closed chats appear here.</p>
       ) : (
-        <div id="history-list-wrap">
+        <div className="history-list-wrap">
           <div id="history-list">
             {items.map((item) => (
               <HistoryRow
