@@ -1,6 +1,6 @@
 # Forge Remote Control — Architecture and Implementation Plan V2
 
-Status: revised after Codex architecture review; ready for blocker-only re-review
+Status: blocker-only Codex re-review completed; remaining corrections required
 Branch: `feat/remote-control-plan`
 Target: Forge VS Code extension; no daemon/service extraction in V1
 
@@ -990,3 +990,77 @@ Implementation is complete only when:
 Use exactly this intent before implementation:
 
 > Review `docs/plans/REMOTE_CONTROL_PLAN_V2.md` on branch `feat/remote-control-plan` against current Forge `main` and your previous architecture review in `REMOTE_CONTROL_PLAN.md` section 24.1. Verify that every required correction is actually resolved. CLI providers are intentionally supported remotely with their existing local CLI security semantics; remote origin adds no privilege and the remote layer exposes no generic shell/Git/filesystem API. Report only remaining blockers, contradictions, race conditions, false assumptions, or necessary plan corrections. Do not implement code. If there are no blockers, say explicitly that the plan is ready for implementation.
+
+### 31.1 Codex blocker-only re-review response (2026-08-29)
+
+Review decision: **remaining corrections required before implementation**. V2 resolves the prior
+review's main architectural and security objections, including the intentional CLI-provider
+security model. The following are the remaining blockers found against current `main`.
+
+1. **Post-turn context evaluation is still active-tab-scoped, not addressed-conversation-scoped.**
+   `SendPipeline.send()` correctly resolves an addressed `conv`, but its post-turn dependency is
+   only `postTokenBudget(true)`. `SidebarProvider.postTokenBudget()` currently publishes and
+   evaluates `this.getActive()`, and `ContextBudgetPublisher` then starts compaction for that
+   active conversation. A remote `activate:false` turn can therefore evaluate/compact the visible
+   tab instead of the remote target, or fail to compact the remote target at all. Phase 1 must
+   split active-tab UI publication from addressed post-turn context evaluation, passing the
+   completed conversation ID through the threshold/compaction path. The warning/reset state used
+   by that path must also be reviewed for conversation scope.
+
+2. **Idle validation and canonical send admission have a local/remote TOCTOU race.** Section 10
+   checks that a conversation is idle, persists `running`, acknowledges `accepted`, and only then
+   enters `SendPipeline`. A sidebar send can start between the idle check and that call, causing
+   `SendPipeline` to reject a task already reported as accepted/running. A remote-only mutex does
+   not solve this because local sends bypass it. Phase 1 needs one shared, conversation-scoped
+   admission primitive used by sidebar and remote callers, or a two-phase addressed-send API that
+   atomically reserves the turn before acknowledgement and cannot start model work until the
+   durable `running` transition succeeds. Busy-at-admission must produce a durable queued state,
+   not a false accepted/running state.
+
+3. **Queued-user supersession and request-chain settlement contradict each other.** Sections 12
+   and 13 say a queued request waits through compaction and automatic resume, while section 13 and
+   the request-chain tests also say a new real user request supersedes pending automatic
+   continuation. Specify when the new intent epoch is created. Recommended rule: accepting the
+   queued user request advances the conversation's user-intent epoch immediately; the current
+   turn may settle and compaction may finish, but `resumeAfterCompaction` for the older epoch must
+   not start. The queued request then drains after that shortened old chain settles. The same rule
+   must be used for sidebar-originated user intent.
+
+4. **The channel callback cannot enforce durable delivery ordering.** `RemoteChannel.onEvent`
+   currently accepts a `(event) => void` handler. A Telegram adapter cannot await authentication,
+   durable request creation/dedup, and queue admission before advancing its `getUpdates` offset.
+   Advancing first can lose a task on crash; not advancing in a controlled way can cause an
+   uncontrolled redelivery loop. Make event handling awaitable, for example
+   `(event) => Promise<RemoteInboundDisposition>`, and define that provider cursor advancement or
+   equivalent delivery acknowledgement occurs only after the controller returns a durable
+   disposition. Handler failures must leave the update replayable and safe under dedup.
+
+5. **Pairing needs an explicit, tightly bounded pre-authorization route.** Section 7 requires
+   authorization before command routing, but an unpaired sender must send `/pair <code>` before
+   an authorized identity exists. Define pairing as the sole pre-auth exception: only while local
+   pairing mode is active, only in a private chat, only the exact pairing command, with expiry,
+   one-time use and rate limiting. It must invoke neither normal host commands nor the LLM. After
+   successful validation, persist the owner identity before confirming pairing and return to the
+   normal default-deny path.
+
+6. **Execution state and final-notification delivery state are not durably separated.** V2 says
+   notification failure never reruns execution, but `RemoteRequestRecord` has no delivery/outbox
+   state and does not retain the terminal outcome needed after restart. A crash after marking the
+   task completed but before sending its final message silently loses a primary feature; retrying
+   without state can duplicate notifications. Add a durable notification outbox or explicit
+   delivery fields separate from request execution state, with bounded final payload, receipt/
+   attempt state and conservative retry. Delivery transitions must never move execution back to
+   queued/running or invoke Forge again.
+
+7. **The existing shared-runtime lease is not the required exclusive lock and has no real PID-
+   reuse defense.** `SharedRuntimeRegistry.acquireLease()` writes an ordinary file, and stale
+   cleanup considers only whether the recorded PID is alive; its `createdAt` is not used to
+   distinguish PID reuse. `RemoteTransportLease` must therefore not reuse that implementation as
+   its ownership primitive. It may reuse process-liveness helpers and test patterns, but needs
+   atomic exclusive acquisition (for example `open(..., 'wx')`), a unique fencing/owner token,
+   conservative stale recovery, and periodic verification that the running consumer still owns
+   the same token before continuing to poll.
+
+Once these seven corrections are incorporated, no remaining objection from the first review
+needs to be reopened. In particular, remote CLI support is an explicit product/security decision
+in V2 and is no longer an architecture blocker.
