@@ -59,4 +59,8 @@ export class RemoteAuth {
   async unpair(channel: RemoteInboundEvent['channel']): Promise<void> {
     await this.secrets.delete(ownerSecretKey(channel));
   }
+
+  async hasOwner(channel: RemoteInboundEvent['channel']): Promise<boolean> {
+    return (await this.secrets.get(ownerSecretKey(channel))) !== undefined;
+  }
 }

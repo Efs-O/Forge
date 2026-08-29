@@ -101,6 +101,22 @@ export class TelegramChannel implements RemoteChannel {
     }
   }
 
+  async healthCheck(): Promise<{ ok: boolean; detail: string }> {
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), 10_000);
+    try {
+      await this.call('getMe', {}, abort.signal);
+      return { ok: true, detail: 'Bot API authentication succeeded.' };
+    } catch (err) {
+      return {
+        ok: false,
+        detail: err instanceof Error ? err.message : String(err),
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   private async poll(signal: AbortSignal): Promise<void> {
     let offset = Number(this.options.getCursor(CURSOR_KEY) ?? '0');
     let consecutiveFailures = 0;

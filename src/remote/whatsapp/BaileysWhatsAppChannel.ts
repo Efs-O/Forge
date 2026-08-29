@@ -46,6 +46,7 @@ export class BaileysWhatsAppChannel implements RemoteChannel {
   private inboundTail: Promise<void> = Promise.resolve();
   private linkingNoticeShown = false;
   private reconnectAttempts = 0;
+  private connected = false;
 
   constructor(private readonly options: BaileysWhatsAppChannelOptions) {}
 
@@ -107,6 +108,14 @@ export class BaileysWhatsAppChannel implements RemoteChannel {
     this.auth = undefined;
   }
 
+  async healthCheck(): Promise<{ ok: boolean; detail: string }> {
+    const linked = this.auth?.state.creds.registered === true;
+    if (!linked) return { ok: false, detail: 'Linked-device authentication is not configured.' };
+    return this.connected
+      ? { ok: true, detail: 'Linked device is connected.' }
+      : { ok: false, detail: 'Linked-device authentication exists, but the socket is offline.' };
+  }
+
   private async connect(): Promise<void> {
     if (this.connecting || this.signal?.aborted) return this.connecting;
     const operation = this.openSocket();
@@ -144,8 +153,12 @@ export class BaileysWhatsAppChannel implements RemoteChannel {
           'Forge WhatsApp needs linking. Run “Forge: Link WhatsApp Device” locally.',
         );
       }
-      if (update.connection === 'open') this.reconnectAttempts = 0;
+      if (update.connection === 'open') {
+        this.connected = true;
+        this.reconnectAttempts = 0;
+      }
       if (update.connection !== 'close' || this.socket !== socket) return;
+      this.connected = false;
       this.socket = undefined;
       const code = disconnectStatus(update.lastDisconnect?.error);
       if (code === DisconnectReason.loggedOut) {
@@ -191,6 +204,7 @@ export class BaileysWhatsAppChannel implements RemoteChannel {
     this.reconnectTimer = undefined;
     const socket = this.socket;
     this.socket = undefined;
+    this.connected = false;
     socket?.end(new Error('Forge WhatsApp transport stopped.'));
   }
 }

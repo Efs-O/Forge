@@ -14,6 +14,7 @@ export function registerRemoteCommands(
       const pick = await vscode.window.showQuickPick(
         [
           { label: 'Set Telegram bot token', command: 'forge.remote.setTelegramToken' },
+          { label: 'Validate remote control', command: 'forge.remote.validate' },
           { label: 'Pair Telegram owner', command: 'forge.remote.pairTelegram' },
           { label: 'Unpair Telegram owner', command: 'forge.remote.unpairTelegram' },
           { label: 'Link WhatsApp device', command: 'forge.remote.linkWhatsApp' },
@@ -38,6 +39,25 @@ export function registerRemoteCommands(
       await context.secrets.store(TELEGRAM_BOT_TOKEN_SECRET, token.trim());
       await runtime.applyConfig(getConfig());
       void vscode.window.showInformationMessage('Forge: Telegram bot token stored securely.');
+    }),
+    vscode.commands.registerCommand('forge.remote.validate', async () => {
+      try {
+        const status = await runtime.validationStatus(getConfig());
+        const lines = [
+          `Remote control: ${status.enabled ? 'enabled' : 'disabled'}`,
+          ...status.transports.map(
+            (item) =>
+              `${item.name}: configured=${item.configured}, active=${item.active}, lease=${item.leaseOwned}, owner=${item.ownerPaired}, provider=${item.providerOk} — ${item.detail}`,
+          ),
+          `Requests: queued=${status.requests.queued}, running=${status.requests.running}, crash-unknown=${status.requests.unknown}`,
+          `Notifications: pending=${status.outbox.pending}, sending=${status.outbox.sending}, abandoned=${status.outbox.abandoned}`,
+        ];
+        void vscode.window.showInformationMessage(lines.join('\n'), { modal: true });
+      } catch (err) {
+        void vscode.window.showErrorMessage(
+          `Forge remote validation failed: ${(err as Error).message}`,
+        );
+      }
     }),
     vscode.commands.registerCommand('forge.remote.pairTelegram', () => {
       try {

@@ -6,6 +6,22 @@ function response(result: unknown): Response {
 }
 
 describe('TelegramChannel', () => {
+  it('validates Bot API authentication without exposing the token', async () => {
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor: async () => undefined,
+      fetch: (async (url: string | URL | Request) => {
+        expect(String(url)).toContain('/getMe');
+        return response({ id: 1, username: 'forge_bot' });
+      }) as typeof fetch,
+    });
+    await expect(channel.healthCheck()).resolves.toEqual({
+      ok: true,
+      detail: 'Bot API authentication succeeded.',
+    });
+  });
+
   it('advances the durable cursor only after an awaited handled disposition', async () => {
     const abort = new AbortController();
     let polls = 0;

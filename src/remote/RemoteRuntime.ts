@@ -33,6 +33,21 @@ interface ActiveTransport {
   lease: RemoteTransportLease;
 }
 
+export interface RemoteValidationStatus {
+  enabled: boolean;
+  transports: Array<{
+    name: 'telegram' | 'whatsapp';
+    configured: boolean;
+    active: boolean;
+    ownerPaired: boolean;
+    leaseOwned: boolean;
+    providerOk: boolean;
+    detail: string;
+  }>;
+  requests: ReturnType<RemoteRequestStore['requestHealth']>;
+  outbox: ReturnType<RemoteRequestStore['outboxHealth']>;
+}
+
 /** Extension-scoped, serially reconfigurable owner of all remote transports. */
 export class RemoteRuntime {
   private readonly auth: RemoteAuth;
@@ -87,6 +102,44 @@ export class RemoteRuntime {
 
   activeTransports(): string[] {
     return [...this.active.keys()];
+  }
+
+  async validationStatus(config: ForgeConfig): Promise<RemoteValidationStatus> {
+    const transports: RemoteValidationStatus['transports'] = [];
+    for (const name of ['telegram', 'whatsapp'] as const) {
+      const configured = config.remote?.enabled === true && config.remote[name].enabled === true;
+      const active = this.active.get(name);
+      const leaseOwned = active ? await active.lease.verify() : false;
+      let health = {
+        ok: active !== undefined,
+        detail: active ? 'Transport is active; no provider probe is available.' : 'Not active.',
+      };
+      if (active?.channel.healthCheck) {
+        try {
+          health = await active.channel.healthCheck();
+        } catch (err) {
+          health = {
+            ok: false,
+            detail: err instanceof Error ? err.message : String(err),
+          };
+        }
+      }
+      transports.push({
+        name,
+        configured,
+        active: active !== undefined,
+        ownerPaired: await this.auth.hasOwner(name),
+        leaseOwned,
+        providerOk: health.ok,
+        detail: health.detail,
+      });
+    }
+    return {
+      enabled: config.remote?.enabled === true,
+      transports,
+      requests: this.store.requestHealth(),
+      outbox: this.store.outboxHealth(),
+    };
   }
 
   async dispose(): Promise<void> {

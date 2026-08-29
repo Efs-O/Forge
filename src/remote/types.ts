@@ -70,6 +70,11 @@ export interface RemoteOutboxRecord {
   updatedAt: number;
 }
 
+export interface RemoteTransportHealth {
+  ok: boolean;
+  detail: string;
+}
+
 export interface RemoteChannel {
   readonly name: RemoteInboundEvent['channel'];
   onEvent(handler: (event: RemoteInboundEvent) => Promise<RemoteInboundDisposition>): {
@@ -83,4 +88,5 @@ export interface RemoteChannel {
   start(signal: AbortSignal): Promise<void>;
   requestPairingCode?(phoneNumber: string): Promise<string>;
   unlink?(): Promise<void>;
+  healthCheck?(): Promise<RemoteTransportHealth>;
 }

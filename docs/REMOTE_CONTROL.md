@@ -41,6 +41,12 @@ Use `Forge: Configure Remote Control` for setup/status actions. To revoke access
 run `Forge: Unpair Telegram Owner` and rotate the bot token with BotFather if the
 token itself may have been exposed.
 
+Run `Forge: Validate Remote Control` for a credential-safe local report covering
+configuration, active consumers, lease ownership, paired-owner presence,
+provider reachability, durable request health, and notification delivery. The
+complete release checklist is in
+[real-device validation](REMOTE_CONTROL_VALIDATION.md).
+
 Remote commands are `/help`, `/status`, `/stop`, `/new`, and
 `/resume <conversation-id>`. `/stop` cancels the active addressed request; it
 does not unload the model, and durable queued requests remain queued.

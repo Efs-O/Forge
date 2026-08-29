@@ -4,7 +4,10 @@ import * as path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type * as vscode from 'vscode';
 import type { WAMessage } from '@whiskeysockets/baileys';
-import { toRemoteEvent } from '../../src/remote/whatsapp/BaileysWhatsAppChannel';
+import {
+  BaileysWhatsAppChannel,
+  toRemoteEvent,
+} from '../../src/remote/whatsapp/BaileysWhatsAppChannel';
 import { WhatsAppAuthStore } from '../../src/remote/whatsapp/WhatsAppAuthStore';
 
 const tempDirs: string[] = [];
@@ -80,6 +83,18 @@ describe('WhatsAppAuthStore', () => {
 });
 
 describe('Baileys WhatsApp event mapping', () => {
+  it('reports unlinked health without starting a provider connection', async () => {
+    const channel = new BaileysWhatsAppChannel({
+      authStore: {} as WhatsAppAuthStore,
+      onError: vi.fn(),
+      onPairingCode: vi.fn(),
+    });
+    await expect(channel.healthCheck()).resolves.toEqual({
+      ok: false,
+      detail: 'Linked-device authentication is not configured.',
+    });
+  });
+
   it('maps direct text to a private stable-identity event', () => {
     const message = {
       key: { id: 'message-1', remoteJid: '15551234567@s.whatsapp.net', fromMe: false },

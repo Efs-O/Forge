@@ -231,6 +231,10 @@
         "title": "Forge: Configure Remote Control"
       },
       {
+        "command": "forge.remote.validate",
+        "title": "Forge: Validate Remote Control"
+      },
+      {
         "command": "forge.remote.setTelegramToken",
         "title": "Forge: Set Telegram Bot Token"
       },

@@ -402,6 +402,20 @@ describe('remote runtime lifecycle', () => {
     });
     await runtime.applyConfig(enabled);
     expect(runtime.activeTransports()).toEqual(['telegram']);
+    await expect(runtime.validationStatus(enabled)).resolves.toMatchObject({
+      enabled: true,
+      transports: [
+        {
+          name: 'telegram',
+          configured: true,
+          active: true,
+          leaseOwned: true,
+          ownerPaired: false,
+          providerOk: true,
+        },
+        { name: 'whatsapp', configured: false, active: false, leaseOwned: false },
+      ],
+    });
     await runtime.applyConfig(enabled);
     expect(channels).toHaveLength(2);
     await expect(channels[0]!.emit(event())).resolves.toMatchObject({ kind: 'retry' });

@@ -789,3 +789,20 @@ Release candidate `0.14.0` passed `npm run ci` with 1,384 tests passed and 14 sk
 bundle loading, `npm run package`, packaged-file review, and `npm audit --omit=dev` with zero reported
 vulnerabilities. The resulting VSIX is 8.02 MB. Credential-free implementation is complete; only
 the explicitly external real-device Telegram and WhatsApp validation remains.
+
+## 27. Real-device validation handoff
+
+The credential-free validation handoff is implemented:
+
+- `Forge: Validate Remote Control` reports only non-secret configuration, active-consumer, fenced
+  lease, paired-owner presence, provider health, request-state, and outbox-state information;
+- Telegram health uses an authenticated, bounded `getMe` probe without returning token or raw owner
+  data; WhatsApp health reports linked/connected state without starting a connection solely for the
+  probe;
+- `docs/REMOTE_CONTROL_VALIDATION.md` defines the exact private-owner, approval, stop/queue,
+  multi-window, restart, delivery-retry, negative-authorization, and unlink checks for real devices.
+
+The follow-up gate passed with 1,386 tests passed and 14 skipped. Production build, bundle-load
+check, `npm run package`, packaged-file review, and `npm audit --omit=dev` also passed. No test or
+documentation artifact contains a provider credential, phone identity, pairing code, or raw owner
+identifier.
