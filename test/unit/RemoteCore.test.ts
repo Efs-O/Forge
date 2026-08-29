@@ -267,6 +267,7 @@ describe('RemoteController with fake channel', () => {
         return { kind: 'completed' as const, finalText: `done ${text}` };
       }),
       queueIntent,
+      cancel: vi.fn(async () => undefined),
       addApprovalSink: () => ({ dispose: () => undefined }),
       status: () => ({
         activeConversationId: 'visible',
@@ -373,6 +374,7 @@ describe('RemoteController with fake channel', () => {
         sink = next;
         return { dispose: () => (sink = undefined) };
       },
+      cancel: vi.fn(async () => undefined),
       status: () => ({
         activeConversationId: 'visible',
         conversations: [],

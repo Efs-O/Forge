@@ -29,6 +29,7 @@ export class RemoteController {
   private accepting = false;
   private approvalSubscription: { dispose(): void } | undefined;
   private readonly remoteApprovals = new Map<string, { requestId: string; chatId: string }>();
+  private readonly activeConversations = new Set<string>();
 
   constructor(
     private readonly channel: RemoteChannel,
@@ -58,6 +59,9 @@ export class RemoteController {
     this.subscription = undefined;
     this.approvalSubscription?.dispose();
     this.approvalSubscription = undefined;
+    await Promise.allSettled(
+      [...this.activeConversations].map((conversationId) => this.host.cancel(conversationId)),
+    );
     await Promise.allSettled([...this.drains.values()]);
   }
 
@@ -219,6 +223,7 @@ export class RemoteController {
         continue;
       }
       await this.store.markRunning(next.id);
+      this.activeConversations.add(conversationId);
       try {
         const outcome = await this.host.send(conversationId, next.text, undefined, {
           remoteRequestId: next.id,
@@ -246,6 +251,8 @@ export class RemoteController {
           error,
           notification: `Forge request failed: ${error}`,
         });
+      } finally {
+        this.activeConversations.delete(conversationId);
       }
       await this.flushOutbox();
     }

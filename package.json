@@ -227,6 +227,18 @@
         "shortTitle": "Set Cloud Token"
       },
       {
+        "command": "forge.remote.setTelegramToken",
+        "title": "Forge: Set Telegram Bot Token"
+      },
+      {
+        "command": "forge.remote.pairTelegram",
+        "title": "Forge: Pair Telegram Remote"
+      },
+      {
+        "command": "forge.remote.unpairTelegram",
+        "title": "Forge: Unpair Telegram Remote"
+      },
+      {
         "command": "forge.setupWizard",
         "title": "Forge: Setup Wizard"
       }

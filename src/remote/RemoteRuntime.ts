@@ -9,7 +9,13 @@ import { RemoteRequestStore } from './RemoteRequestStore';
 import { RemoteTransportLease } from './RemoteTransportLease';
 import type { RemoteChannel } from './types';
 
-export type RemoteChannelFactory = () => Promise<RemoteChannel> | RemoteChannel;
+export interface RemoteChannelFactoryContext {
+  getCursor: (key: string) => string | undefined;
+  setCursor: (key: string, value: string) => Promise<void>;
+}
+export type RemoteChannelFactory = (
+  context: RemoteChannelFactoryContext,
+) => Promise<RemoteChannel> | RemoteChannel;
 
 export interface RemoteRuntimeOptions {
   storageDirectory: string;
@@ -54,6 +60,10 @@ export class RemoteRuntime {
     return this.auth.beginPairing(channel);
   }
 
+  unpair(channel: 'telegram' | 'whatsapp'): Promise<void> {
+    return this.auth.unpair(channel);
+  }
+
   async dispose(): Promise<void> {
     this.disposed = true;
     await this.applySerializedStop();
@@ -83,7 +93,10 @@ export class RemoteRuntime {
         },
       });
       try {
-        const channel = await factory();
+        const channel = await factory({
+          getCursor: (key) => this.store.cursor(key),
+          setCursor: (key, value) => this.store.setCursor(key, value),
+        });
         const controller = new RemoteController(channel, this.store, this.auth, this.options.host, {
           workspaceId: this.options.workspaceId,
           queueLimit: config.remote.queue_limit,

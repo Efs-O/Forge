@@ -44,6 +44,8 @@ import { registerSidebarCommands } from './vscode/sidebarCommands';
 import { flushPendingModelUsage } from './sidebar/modelManager/usageTracker';
 import { backgroundExecutionManager } from './tools/BackgroundExecutionManager';
 import { RemoteRuntime } from './remote/RemoteRuntime';
+import { TelegramChannel, TELEGRAM_BOT_TOKEN_SECRET } from './remote/TelegramChannel';
+import { registerRemoteCommands } from './vscode/remoteCommands';
 
 let activeRemoteRuntime: RemoteRuntime | undefined;
 
@@ -258,6 +260,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     workspaceId,
     host: sidebarProvider.getHostFacade(),
     secrets: context.secrets,
+    channelFactories: {
+      telegram: async (cursor) => {
+        const token = await context.secrets.get(TELEGRAM_BOT_TOKEN_SECRET);
+        if (!token) {
+          throw new Error(
+            'Telegram is enabled but no bot token is stored. Run “Forge: Set Telegram Bot Token”.',
+          );
+        }
+        return new TelegramChannel({ token, ...cursor });
+      },
+    },
     notifyLocal: (message) => void vscode.window.showErrorMessage(message),
   });
   activeRemoteRuntime = remoteRuntime;
@@ -270,6 +283,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
   });
   context.subscriptions.push({ dispose: () => void remoteRuntime.dispose() });
+  registerRemoteCommands(context, remoteRuntime, () => config);
   const sessionTimeBar = new SessionTimeStatusBar(() => sidebarProvider.getActiveSessionMetrics());
   refreshSessionTime = () => sessionTimeBar.refresh();
   context.subscriptions.push(sessionTimeBar);
