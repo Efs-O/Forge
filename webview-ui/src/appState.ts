@@ -19,6 +19,13 @@ export interface State {
    * pending checkpoint into every other tab.
    */
   checkpointPendingIds: Set<string>;
+  /**
+   * Conversations currently showing a "Starting backend…" row. `READY` appends
+   * its "Backend ready." reply only for these: a warm pool resolves the acquire
+   * in milliseconds and announces nothing, and an unconditional reply would
+   * leave a permanent row answering a question nobody asked.
+   */
+  backendStartAnnouncedIds: Set<string>;
   sessionHydrated: boolean;
   tabs: SessionTabMeta[];
   history: SessionHistoryMeta[];
@@ -34,6 +41,7 @@ export const initialState: State = {
   activeModel: null,
   backendReady: false,
   checkpointPendingIds: new Set(),
+  backendStartAnnouncedIds: new Set(),
   sessionHydrated: false,
   tabs: [],
   history: [],

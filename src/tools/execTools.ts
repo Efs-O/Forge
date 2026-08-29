@@ -25,6 +25,7 @@ import {
 import { checkDenyList, getBuiltinDenyList } from './DenyList';
 import { backgroundExecutionManager } from './BackgroundExecutionManager';
 import { formatBackgroundObservation } from './backgroundExecutionTools';
+import { terminalCommandTracker } from './TerminalCommandTracker';
 
 // ── run_terminal ───────────────────────────────────────────────────────────────
 
@@ -51,7 +52,7 @@ export function makeRunTerminalTool(): RegisteredTool {
       },
     },
     permission: 'terminal',
-    handler: async (args) => {
+    handler: async (args, context) => {
       const command = args['command'] as string;
       const cwd = resolveExecCwd(args['cwd'] as string | undefined);
 
@@ -64,6 +65,7 @@ export function makeRunTerminalTool(): RegisteredTool {
       }
 
       const terminal = vscode.window.createTerminal({ name: 'Forge', cwd });
+      terminalCommandTracker.trackPastedCommand(terminal, command, cwd, context?.conversationId);
       terminal.show(false); // show but don't steal focus
 
       // NEVER pass `addNewLine: true` — user must press Enter intentionally

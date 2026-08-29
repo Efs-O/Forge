@@ -116,6 +116,19 @@ export async function runCloudProviderTurn(
   }
 }
 
+/**
+ * How long `pool.acquire` may run before the turn admits it is waiting on the
+ * backend.
+ *
+ * The announcement used to be unconditional, which put "Starting backend…" and
+ * "Backend ready." in the transcript on every single prompt — a warm pool
+ * returns in single-digit milliseconds, so both rows described nothing. A cold
+ * `llama-server` spawn takes seconds, so the message still lands long before
+ * the wait becomes uncomfortable. `CliTurn` gates the same pair on the first
+ * prompt of a session; this is the local-backend equivalent.
+ */
+const BACKEND_START_NOTICE_MS = 500;
+
 /** Local providers: acquire (and if necessary start) the backend first. */
 export async function runLocalProviderTurn(
   ctx: ProviderTurnContext,
@@ -123,9 +136,18 @@ export async function runLocalProviderTurn(
 ): Promise<void> {
   const convId = conv.id;
   let backend: BackendController;
+  const notice = setTimeout(
+    () => postC({ type: 'backendStarting', message: 'Starting backend, please wait…' }),
+    BACKEND_START_NOTICE_MS,
+  );
   try {
-    postC({ type: 'backendStarting', message: 'Starting backend, please wait…' });
-    backend = await ctx.pool.acquire(model.name);
+    try {
+      backend = await ctx.pool.acquire(model.name);
+    } finally {
+      // Cleared on the failure path too: a spawn that fails inside the window
+      // reports its own error, and the notice would arrive after it.
+      clearTimeout(notice);
+    }
     ctx.lifecycle.setBackend(convId, backend);
     ctx.events.onBackendReady?.(model.name);
     if (ctrl.signal.aborted) {

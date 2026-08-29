@@ -42,6 +42,7 @@ import { ModelManagerPanel } from './sidebar/modelManager/ModelManagerPanel';
 import { registerSidebarCommands } from './vscode/sidebarCommands';
 import { flushPendingModelUsage } from './sidebar/modelManager/usageTracker';
 import { backgroundExecutionManager } from './tools/BackgroundExecutionManager';
+import { terminalCommandTracker } from './tools/TerminalCommandTracker';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   initLogger(context);
@@ -126,6 +127,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     secrets: context.secrets,
   });
   const toolRegistry = new ToolRegistry();
+  terminalCommandTracker.start();
+  context.subscriptions.push(terminalCommandTracker);
   registerAllTools(
     toolRegistry,
     context.workspaceState,

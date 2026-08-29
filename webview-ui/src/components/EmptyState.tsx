@@ -69,7 +69,7 @@ function formatContext(tokens: number): string {
 
 /** The Forge mark, from assets/icon.svg. Inlined the way TabStrip inlines its icons. */
 const ForgeMark = (): React.ReactElement => (
-  <svg id="empty-mark" viewBox="0 0 24 24" width="52" height="52" aria-hidden="true">
+  <svg id="empty-mark" viewBox="0 0 24 24" width="76" height="76" aria-hidden="true">
     <rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" />
     <rect x="9" y="4" width="1.5" height="3" rx="0.5" fill="currentColor" />
     <rect x="13.5" y="4" width="1.5" height="3" rx="0.5" fill="currentColor" />

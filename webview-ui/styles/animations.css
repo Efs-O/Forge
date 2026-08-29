@@ -22,7 +22,7 @@
   gap: 6px;
   min-height: 24px;
   padding: 0 12px;
-  font-size: 0.92em;
+  font-size: 1.12em;
   color: var(--forge-accent, #0090ff);
   user-select: none;
   letter-spacing: 0.02em;

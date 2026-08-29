@@ -12,23 +12,24 @@ const TITLE_MAX_LEN = 48;
 
 /**
  * What a conversation is called until its first user message names it via
- * `deriveTitle`. A placeholder, not a name — which is why it reads as one.
+ * `deriveTitle`. A placeholder, not an action — so it cannot be mistaken for
+ * the New chat button.
  */
-export const UNTITLED_TITLE = 'New chat';
+export const UNTITLED_TITLE = 'Untitled chat';
 
-/** The placeholder used before 0.13.21. Still on disk in every older session. */
-const UNTITLED_TITLE_LEGACY = 'Chat';
+/** Placeholders used before 0.13.22. They remain in already-saved sessions. */
+const UNTITLED_TITLES_LEGACY = new Set(['Chat', 'New chat']);
 
 /** Whether a title is a placeholder rather than one a prompt or the user chose. */
 export function isUntitled(title: string): boolean {
-  return title === UNTITLED_TITLE || title === UNTITLED_TITLE_LEGACY;
+  return title === UNTITLED_TITLE || UNTITLED_TITLES_LEGACY.has(title);
 }
 
 /**
- * The title the webview shows. Sessions written before the rename keep their
- * stored 'Chat' — rewriting them would mean a migration pass over every file in
- * ~/.forge/sessions/ to change a string that is only ever displayed, so the
- * translation happens at the meta builders that feed the webview instead.
+ * The title the webview shows. Sessions written before this rename keep their
+ * stored placeholder — rewriting them would mean a migration pass over every
+ * file in ~/.forge/sessions/ to change a string that is only ever displayed, so
+ * the translation happens at the meta builders that feed the webview instead.
  */
 export function displayTitle(title: string): string {
   return isUntitled(title) ? UNTITLED_TITLE : title;

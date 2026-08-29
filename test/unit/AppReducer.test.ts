@@ -39,6 +39,7 @@ interface AppModule {
       | { type: 'DONE'; convId?: string }
       | { type: 'ERROR'; message: string; convId?: string }
       | { type: 'READY'; convId?: string }
+      | { type: 'BACKEND_STARTING'; message: string; convId?: string }
       | { type: 'BACKEND_DOWN'; message: string; convId?: string }
       | {
           type: 'SESSION_SYNC';
@@ -247,6 +248,74 @@ describe('webview App reducer', () => {
         expect.objectContaining({ role: 'error', content: 'HTTP 404: cloud model unavailable' }),
       ]),
     );
+  });
+
+  it('answers a start announcement with "Backend ready." exactly once', () => {
+    const starting = appModule.reducer(appModule.initialState, {
+      type: 'BACKEND_STARTING',
+      convId: 'tab-1',
+      message: 'Starting backend, please wait…',
+    });
+    const ready = appModule.reducer(starting, { type: 'READY', convId: 'tab-1' });
+
+    expect(ready.backendReady).toBe(true);
+    expect(ready.messagesById['tab-1']?.map((m) => m.content)).toEqual([
+      'Starting backend, please wait…',
+      'Backend ready.',
+    ]);
+  });
+
+  it('stays silent on a warm acquire that never announced a start', () => {
+    const ready = appModule.reducer(appModule.initialState, { type: 'READY', convId: 'tab-1' });
+
+    // The flag still flips — it drives the composer placeholder — but a warm
+    // pool resolves in milliseconds and has nothing to report.
+    expect(ready.backendReady).toBe(true);
+    expect(ready.messagesById['tab-1'] ?? []).toEqual([]);
+  });
+
+  it('does not reply to a start announcement a second time', () => {
+    const starting = appModule.reducer(appModule.initialState, {
+      type: 'BACKEND_STARTING',
+      convId: 'tab-1',
+      message: 'Starting backend, please wait…',
+    });
+    const ready = appModule.reducer(starting, { type: 'READY', convId: 'tab-1' });
+    const readyAgain = appModule.reducer(ready, { type: 'READY', convId: 'tab-1' });
+
+    expect(readyAgain.messagesById['tab-1']).toHaveLength(2);
+  });
+
+  it('lets a failed start close its own announcement', () => {
+    const starting = appModule.reducer(appModule.initialState, {
+      type: 'BACKEND_STARTING',
+      convId: 'tab-1',
+      message: 'Starting backend, please wait…',
+    });
+    const failed = appModule.reducer(starting, {
+      type: 'BACKEND_DOWN',
+      convId: 'tab-1',
+      message: 'Backend failed to start: llama-server exited with code 1',
+    });
+    const ready = appModule.reducer(failed, { type: 'READY', convId: 'tab-1' });
+
+    // READY sweeps the failure row; it must not also append a reply to an
+    // announcement the failure already answered.
+    expect(ready.messagesById['tab-1']?.map((m) => m.content)).toEqual([
+      'Starting backend, please wait…',
+    ]);
+  });
+
+  it('keeps start announcements per conversation', () => {
+    const starting = appModule.reducer(appModule.initialState, {
+      type: 'BACKEND_STARTING',
+      convId: 'tab-1',
+      message: 'Starting backend, please wait…',
+    });
+    const otherReady = appModule.reducer(starting, { type: 'READY', convId: 'tab-2' });
+
+    expect(otherReady.messagesById['tab-2'] ?? []).toEqual([]);
+    expect(otherReady.messagesById['tab-1']).toHaveLength(1);
   });
 
 });

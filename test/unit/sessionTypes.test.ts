@@ -46,17 +46,19 @@ describe('sessionTypes', () => {
     expect(deriveTitle('   ')).toBe(UNTITLED_TITLE);
   });
 
-  it('treats both the current and the pre-0.13.21 placeholder as untitled', () => {
+  it('treats current and legacy placeholders as untitled', () => {
     // Sessions on disk still carry the old string; the rename box must go on
     // opening empty for them rather than pre-filling a placeholder as a name.
+    expect(isUntitled('Untitled chat')).toBe(true);
     expect(isUntitled('New chat')).toBe(true);
     expect(isUntitled('Chat')).toBe(true);
     expect(isUntitled('Chat about chat')).toBe(false);
     expect(isUntitled('fix the parser')).toBe(false);
   });
 
-  it('displays a legacy placeholder as the current one, leaving real titles alone', () => {
+  it('displays legacy placeholders as the current one, leaving real titles alone', () => {
     expect(displayTitle('Chat')).toBe(UNTITLED_TITLE);
+    expect(displayTitle('New chat')).toBe(UNTITLED_TITLE);
     expect(displayTitle('fix the parser')).toBe('fix the parser');
   });
 

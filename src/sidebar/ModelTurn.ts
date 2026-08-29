@@ -31,6 +31,8 @@ import { ToolBudget } from '../tools/ToolBudget';
 import { deriveStaticCapabilities } from '../config/ConfigResolver';
 import { extractToolDetail } from './toolSummary';
 import { injectTurnContext, type TurnContextState } from './turnContext';
+import { latestPastedTerminalCommand } from './compactionLedger';
+import { terminalCommandTracker } from '../tools/TerminalCommandTracker';
 import { formatPromptCacheStats, readPromptCacheStats } from '../llm/promptCacheStats';
 import { getLogger } from '../util/logger';
 import { visionUnavailableMessage } from '../tools/imageTool';
@@ -50,6 +52,12 @@ const log = getLogger();
 
 /** Tools that need an mmproj projector. Gated in two places below; keep in sync. */
 const VISION_ONLY_TOOLS = new Set(['view_image', 'view_video']);
+
+function activeTerminalCwd(): string | undefined {
+  const cwd = vscode.window.activeTerminal?.shellIntegration?.cwd;
+  if (!cwd) return undefined;
+  return cwd.scheme === 'file' ? cwd.fsPath : cwd.toString(true);
+}
 
 /** Tool rounds per sidebar turn when the model does not set `max_tool_rounds`.
  */
@@ -217,8 +225,18 @@ export async function runModelTurn(
   // reaches the prompt on the next USER turn, where the prefix is being
   // extended anyway. `items` is copied so a later in-place mutation of
   // conv.plan cannot reach back into this turn's prompt.
+  const pastedTerminalCommand = latestPastedTerminalCommand(conv.messages);
+  const terminalCommandResult = terminalCommandTracker.latestForConversation(conv.id);
+  const terminalCwd =
+    pastedTerminalCommand || terminalCommandResult ? activeTerminalCwd() : undefined;
   const turnContext: TurnContextState = {
     activeFile,
+    ...(terminalCommandResult
+      ? { terminalCommandResult }
+      : pastedTerminalCommand
+        ? { pastedTerminalCommand }
+        : {}),
+    ...(terminalCwd ? { activeTerminalCwd: terminalCwd } : {}),
     ...(conv.plan ? { plan: { items: [...conv.plan.items], updatedAt: conv.plan.updatedAt } } : {}),
   };
 

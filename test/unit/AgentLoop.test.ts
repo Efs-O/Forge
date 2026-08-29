@@ -155,6 +155,26 @@ function makeLoop(
   );
 }
 
+function postedTypes(post: ReturnType<typeof vi.fn>): string[] {
+  return post.mock.calls.map(([m]) => (m as { type?: string }).type ?? '');
+}
+
+/** Streams nothing and ends the turn, so a test can assert on the turn's edges. */
+function completeTurnImmediately(): void {
+  streamModelChatCompletion.mockImplementation(
+    (
+      _baseUrl: string,
+      _request: unknown,
+      _model: ModelConfig,
+      handlers: { onDone: (reason: string | null) => void; onToolCalls: (c: unknown[] | null) => void },
+    ) => {
+      handlers.onToolCalls(null);
+      handlers.onDone('stop');
+      return Promise.resolve();
+    },
+  );
+}
+
 describe('AgentLoop', () => {
   afterEach(() => {
     vi.clearAllMocks();
@@ -174,6 +194,47 @@ describe('AgentLoop', () => {
 
     expect(conv.messages).toHaveLength(0);
     expect(conv.title).toBe('Chat');
+  });
+
+  it('says nothing about starting a backend the warm pool hands over instantly', async () => {
+    completeTurnImmediately();
+    const config = makeConfig();
+    const post = vi.fn();
+    const loop = makeLoop(makePool(), config, post);
+
+    await loop.runTurn(makeConversation(), config.models[0]!, 'warm prompt');
+
+    // Two permanent transcript rows per prompt, describing an acquire that took
+    // no measurable time, was the whole complaint.
+    expect(postedTypes(post)).not.toContain('backendStarting');
+    expect(postedTypes(post)).toContain('ready');
+  });
+
+  it('announces a start once the acquire outlasts the notice window', async () => {
+    completeTurnImmediately();
+    vi.useFakeTimers();
+    try {
+      let release: (() => void) | undefined;
+      const held = new Promise<BackendController>((resolve) => {
+        release = () => resolve(makeBackend());
+      });
+      const config = makeConfig();
+      const post = vi.fn();
+      const loop = makeLoop(makePool(() => held), config, post);
+
+      const turn = loop.runTurn(makeConversation(), config.models[0]!, 'cold prompt');
+      await vi.advanceTimersByTimeAsync(600);
+      expect(postedTypes(post)).toContain('backendStarting');
+
+      release?.();
+      // Back to real timers before awaiting: the turn itself schedules
+      // intervals that a fake clock would run forever.
+      vi.useRealTimers();
+      await turn;
+      expect(postedTypes(post)).toContain('ready');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('waits for a cancelled turn to settle before allowing a new backend acquire', async () => {

@@ -154,24 +154,32 @@ export function reducer(state: State, action: Action): State {
 
     case 'READY': {
       const cid = resolveConvId(state, action.convId);
-      return appendToConv(
-        { ...clearRecoveredBackendStartErrors(state, cid), backendReady: true },
-        cid,
-        {
-          id: mkId(),
-          role: 'system',
-          content: 'Backend ready.',
-        },
-      );
+      // The flag flips either way — it drives the composer placeholder and the
+      // recovered-error sweep, neither of which depends on a row being shown.
+      const next: State = {
+        ...clearRecoveredBackendStartErrors(state, cid),
+        backendReady: true,
+        backendStartAnnouncedIds: withoutId(state.backendStartAnnouncedIds, cid),
+      };
+      if (!state.backendStartAnnouncedIds.has(cid)) return next;
+      return appendToConv(next, cid, {
+        id: mkId(),
+        role: 'system',
+        content: 'Backend ready.',
+      });
     }
 
     case 'BACKEND_STARTING': {
       const cid = resolveConvId(state, action.convId);
-      return appendToConv({ ...state, backendReady: false }, cid, {
-        id: mkId(),
-        role: 'system',
-        content: action.message,
-      });
+      return appendToConv(
+        {
+          ...state,
+          backendReady: false,
+          backendStartAnnouncedIds: new Set([...state.backendStartAnnouncedIds, cid]),
+        },
+        cid,
+        { id: mkId(), role: 'system', content: action.message },
+      );
     }
 
     case 'BACKEND_DOWN': {
@@ -181,7 +189,15 @@ export function reducer(state: State, action: Action): State {
       newStreaming.delete(cid);
       newGenerating.delete(cid);
       return appendToConv(
-        { ...state, streamingIds: newStreaming, generatingIds: newGenerating, backendReady: false },
+        {
+          ...state,
+          streamingIds: newStreaming,
+          generatingIds: newGenerating,
+          backendReady: false,
+          // The failure row is the answer to the announcement; a later READY
+          // must not also reply to it.
+          backendStartAnnouncedIds: withoutId(state.backendStartAnnouncedIds, cid),
+        },
         cid,
         { id: mkId(), role: 'error', content: action.message },
       );

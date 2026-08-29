@@ -16,7 +16,9 @@
 
 #empty-mark {
   color: var(--vscode-foreground, #ccc);
-  opacity: 0.16;
+  /* Faint enough to stay a watermark, not a logo. Raised with the size bump:
+     0.16 read as smudged rather than restrained at this scale. */
+  opacity: 0.2;
 }
 
 #empty-status {

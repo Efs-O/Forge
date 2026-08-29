@@ -2,15 +2,42 @@
 
 ## Unreleased
 
-- **A new conversation is called "New chat", not "Chat".** The old default read
-  like a name when it is really a placeholder — `deriveTitle()` overwrites it
-  the moment the first prompt lands, so it is only ever visible on an unused
-  tab. `UNTITLED_TITLE` in `sessionTypes.ts` now owns the string, and
-  `isUntitled()` matches the pre-0.13.21 `'Chat'` too, so the rename box still
-  opens empty for sessions already on disk. Those keep their stored title;
-  `displayTitle()` translates at the two meta builders that feed the webview,
-  which avoids a migration pass over every file in `~/.forge/sessions/` to
-  change a string that is only ever displayed.
+- **The agent can see how a command it pasted turned out.** `run_terminal`
+  pastes into a terminal Forge creates and never presses Enter, so until now the
+  outcome was invisible: the agent suggested a command, the user ran it, it
+  failed, and the agent's only move was to ask them to paste the error back.
+  `TerminalCommandTracker` registers each pasted command against the terminal it
+  went to and reads the result off VS Code's shell-integration execution events,
+  so the next turn carries the command, its intended and actual working
+  directory, the exit code, and up to 12k characters of output. Scope is
+  deliberately narrow: the listeners drop any execution in a terminal Forge did
+  not create, no scrollback or terminal history is ever read, and captured
+  output is labelled untrusted in the turn context. `execute.njk` tells the
+  agent to consult that context before asking the user to repeat something Forge
+  already supplied.
+
+- **"Starting backend, please wait…" / "Backend ready." only appear when a
+  backend actually starts.** `runLocalProviderTurn` announced the start
+  unconditionally and answered it unconditionally, so every prompt in a session
+  left two permanent system rows in the transcript — on a warm pool the acquire
+  they described returned in single-digit milliseconds. The announcement is now
+  armed on a 500 ms timer that the acquire cancels, so a cold `llama-server`
+  spawn still reports itself seconds before the wait gets uncomfortable and a
+  warm one says nothing. The reply is gated in the reducer rather than at the
+  post site: `READY` still flips `backendReady` (it drives the composer
+  placeholder and the recovered-error sweep) but appends "Backend ready." only
+  for a conversation that has an open announcement, tracked per conversation in
+  `backendStartAnnouncedIds`. A failed start clears it, so the error row is the
+  only answer given. `CliTurn` has gated the same pair on the first prompt of a
+  session all along; this is the local-backend equivalent. As a side effect
+  cloud turns, which post `ready` with no backend to start, stop claiming a
+  backend became ready.
+
+- **New conversations are labelled "Untitled chat".** It is a placeholder, not
+  an action, so it cannot be confused with the New chat button. `deriveTitle()`
+  replaces it with the first prompt's first line. `isUntitled()` recognises
+  older stored `'Chat'` and `'New chat'` placeholders too, while `displayTitle()`
+  translates them at the webview boundary without a migration pass.
 
 - **The sessions panel closes when you pick a session.** Selecting a row is a
   navigation, and leaving the accordion open hid the conversation just chosen

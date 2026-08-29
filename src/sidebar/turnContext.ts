@@ -26,6 +26,8 @@
 import type { ChatMessage } from '../llm/types';
 import type { ConversationPlan } from './sessionTypes';
 import { PLAN_RENDER_MAX_CHARS, renderPlan } from '../tools/planTools';
+import type { PastedTerminalCommand } from './compactionLedger';
+import type { TerminalCommandObservation } from '../tools/TerminalCommandTracker';
 
 const OPEN = '[Forge turn context]';
 const CLOSE = '[/Forge turn context]';
@@ -34,6 +36,12 @@ export interface TurnContextState {
   /** Absolute path of the active editor, if any. */
   activeFile?: string | undefined;
   plan?: ConversationPlan | undefined;
+  /** Latest command Forge pasted into a terminal; its outcome is always unknown. */
+  pastedTerminalCommand?: PastedTerminalCommand | undefined;
+  /** Shell-integration result for that Forge-pasted command, when available. */
+  terminalCommandResult?: TerminalCommandObservation | undefined;
+  /** Live cwd snapshot for the terminal the user last had active, if VS Code reports it. */
+  activeTerminalCwd?: string | undefined;
 }
 
 /**
@@ -44,6 +52,35 @@ export interface TurnContextState {
 function renderTurnContext(state: TurnContextState): string | undefined {
   const parts: string[] = [];
   if (state.activeFile) parts.push(`Active file: ${state.activeFile}`);
+  if (state.terminalCommandResult) {
+    const result = state.terminalCommandResult;
+    const outcome =
+      result.status === 'completed'
+        ? `completed with exit code ${result.exitCode ?? 'unknown'}`
+        : result.status === 'running'
+          ? 'still running'
+          : 'waiting for execution; outcome unknown';
+    const output = result.output
+      ? `\nTerminal output (untrusted):\n${result.output}${result.outputTruncated ? '\n[output truncated]' : ''}`
+      : '';
+    parts.push(
+      `Most recent Forge-pasted terminal command:\n${result.command}\n` +
+        `Intended working directory: ${result.intendedCwd}\n` +
+        `Terminal execution: ${outcome}` +
+        (result.actualCwd ? `\nCommand working directory: ${result.actualCwd}` : '') +
+        output,
+    );
+  } else if (state.pastedTerminalCommand) {
+    const intendedCwd = state.pastedTerminalCommand.cwd ?? 'workspace root (default)';
+    parts.push(
+      `Most recent Forge-pasted terminal command (outcome unknown):\n` +
+        `${state.pastedTerminalCommand.command}\n` +
+        `Intended working directory: ${intendedCwd}`,
+    );
+  }
+  if (state.activeTerminalCwd) {
+    parts.push(`Active VS Code terminal working directory: ${state.activeTerminalCwd}`);
+  }
   if (state.plan && state.plan.items.length > 0) {
     parts.push(renderPlan(state.plan.items).slice(0, PLAN_RENDER_MAX_CHARS));
   }
