@@ -155,7 +155,7 @@ remote:
   telegram:
     enabled: false
   whatsapp:
-    enabled: false
+    enabled: false # experimental linked-device adapter; see docs/REMOTE_CONTROL.md
 
 # How many models may be loaded at once across all VS Code windows.
 # Local GGUFs are VRAM-bound; raise this only if you have the memory.

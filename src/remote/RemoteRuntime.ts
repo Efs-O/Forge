@@ -28,6 +28,7 @@ export interface RemoteRuntimeOptions {
 }
 
 interface ActiveTransport {
+  channel: RemoteChannel;
   controller: RemoteController;
   lease: RemoteTransportLease;
 }
@@ -65,6 +66,20 @@ export class RemoteRuntime {
 
   unpair(channel: 'telegram' | 'whatsapp'): Promise<void> {
     return this.auth.unpair(channel);
+  }
+
+  requestWhatsAppPairingCode(phoneNumber: string): Promise<string> {
+    const channel = this.active.get('whatsapp')?.channel;
+    if (!channel?.requestPairingCode) throw new Error('Forge remote WhatsApp is not running.');
+    return channel.requestPairingCode(phoneNumber);
+  }
+
+  async unlinkWhatsApp(): Promise<void> {
+    const transport = this.active.get('whatsapp');
+    if (!transport?.channel.unlink) throw new Error('Forge remote WhatsApp is not running.');
+    await transport.channel.unlink();
+    await this.stopTransport('whatsapp');
+    await this.auth.unpair('whatsapp');
   }
 
   activeTransports(): string[] {
@@ -119,7 +134,7 @@ export class RemoteRuntime {
             this.audit,
           );
           await controller.start();
-          this.active.set(channelName, { controller, lease });
+          this.active.set(channelName, { channel, controller, lease });
         } catch (err) {
           await lease.release();
           throw err;

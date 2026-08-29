@@ -756,5 +756,12 @@ duplicate canonical owner remains in the Phase 0 contract.
   config-reload, and disposal hardening completed. Targeted tests passed (20 tests),
   `npm run ci` passed (1,375 tests passed, 14 skipped), and `npm run package` passed.
 
-Phase 6 remains experimental and isolated. Real-device Telegram validation remains a release
-validation step because no provider credential or phone identity is stored in the repository.
+- Phase 6: the separately authorized experimental WhatsApp linked-device adapter is complete.
+  Baileys `7.0.0-rc14` is exactly pinned after license/Node/API review; linked-device state is
+  AES-256-GCM encrypted in global storage with its key in SecretStorage; adapter tests, production
+  bundling, and VSIX packaging passed. The focused remote suite passed 22 tests, `npm audit
+  --omit=dev` reported zero vulnerabilities, `npm run ci` passed (1,380 tests passed, 14 skipped),
+  and `npm run package` passed with an 8.02 MB VSIX.
+
+Real-device Telegram and WhatsApp validation remains a release validation step because no provider
+credential, phone identity, or linked-device account is stored in the repository.

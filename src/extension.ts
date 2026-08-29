@@ -274,6 +274,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           onError: (message) => void vscode.window.showErrorMessage(message),
         });
       },
+      whatsapp: async () => {
+        const [{ BaileysWhatsAppChannel }, { WhatsAppAuthStore }] = await Promise.all([
+          import('./remote/whatsapp/BaileysWhatsAppChannel'),
+          import('./remote/whatsapp/WhatsAppAuthStore'),
+        ]);
+        return new BaileysWhatsAppChannel({
+          authStore: new WhatsAppAuthStore(
+            path.join(context.globalStorageUri.fsPath, 'whatsapp-auth-v1.enc.json'),
+            context.secrets,
+          ),
+          onError: (message) => void vscode.window.showErrorMessage(message),
+          onPairingCode: (code) =>
+            void vscode.window.showInformationMessage(
+              `Forge WhatsApp pairing code: ${code}. Enter it in WhatsApp Linked Devices.`,
+              { modal: true },
+            ),
+        });
+      },
     },
     notifyLocal: (message) => void vscode.window.showErrorMessage(message),
   });

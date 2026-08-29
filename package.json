@@ -243,6 +243,18 @@
         "title": "Forge: Unpair Telegram Remote"
       },
       {
+        "command": "forge.remote.linkWhatsApp",
+        "title": "Forge: Link WhatsApp Device (Experimental)"
+      },
+      {
+        "command": "forge.remote.pairWhatsApp",
+        "title": "Forge: Pair WhatsApp Remote Owner (Experimental)"
+      },
+      {
+        "command": "forge.remote.unlinkWhatsApp",
+        "title": "Forge: Unlink WhatsApp Device (Experimental)"
+      },
+      {
         "command": "forge.setupWizard",
         "title": "Forge: Setup Wizard"
       }
@@ -438,6 +450,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@mozilla/readability": "^0.6.0",
+    "@whiskeysockets/baileys": "7.0.0-rc14",
     "highlight.js": "^11.11.1",
     "js-yaml": "^4.3.1",
     "nunjucks": "^3.2.4",

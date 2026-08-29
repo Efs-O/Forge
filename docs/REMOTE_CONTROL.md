@@ -51,7 +51,17 @@ separate from execution and uses an at-least-once outbox with bounded retries.
 
 ## WhatsApp status
 
-WhatsApp is an experimental, separately opt-in linked-device adapter. Its
-dependency, license, runtime compatibility, and authentication persistence are
-documented in the adapter ADR. Enabling it does not change the shared remote
-admission, authorization, queue, outbox, approval, or lease semantics.
+WhatsApp is an experimental, separately opt-in linked-device adapter. Enable
+`remote.whatsapp.enabled`, run `Forge: Link WhatsApp Device`, and enter the
+locally displayed code under the receiving WhatsApp account's Linked Devices
+flow. Use a dedicated receiving account (or a second account): Forge ignores
+messages sent by the linked account itself to prevent notification loops. Then
+run `Forge: Pair WhatsApp Remote Owner` and send the one-time `/pair` command
+from the separate private account that will control Forge. `Forge: Unlink
+WhatsApp Device` revokes both the linked device and remote owner.
+
+Its dependency, license, runtime compatibility, encrypted authentication
+persistence, risks, and rollback are documented in the
+[adapter ADR](adr/WHATSAPP_REMOTE_ADAPTER.md). Enabling it does not change the
+shared remote admission, authorization, queue, outbox, approval, or lease
+semantics.

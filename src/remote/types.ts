@@ -80,4 +80,6 @@ export interface RemoteChannel {
     options?: { correlationId?: string; signal?: AbortSignal },
   ): Promise<void>;
   start(signal: AbortSignal): Promise<void>;
+  requestPairingCode?(phoneNumber: string): Promise<string>;
+  unlink?(): Promise<void>;
 }

@@ -16,6 +16,9 @@ export function registerRemoteCommands(
           { label: 'Set Telegram bot token', command: 'forge.remote.setTelegramToken' },
           { label: 'Pair Telegram owner', command: 'forge.remote.pairTelegram' },
           { label: 'Unpair Telegram owner', command: 'forge.remote.unpairTelegram' },
+          { label: 'Link WhatsApp device', command: 'forge.remote.linkWhatsApp' },
+          { label: 'Pair WhatsApp owner', command: 'forge.remote.pairWhatsApp' },
+          { label: 'Unlink WhatsApp device', command: 'forge.remote.unlinkWhatsApp' },
           { label: 'Open Forge config', command: 'forge.openConfig' },
         ],
         {
@@ -50,6 +53,43 @@ export function registerRemoteCommands(
     vscode.commands.registerCommand('forge.remote.unpairTelegram', async () => {
       await runtime.unpair('telegram');
       void vscode.window.showInformationMessage('Forge: Telegram remote owner unpaired.');
+    }),
+    vscode.commands.registerCommand('forge.remote.linkWhatsApp', async () => {
+      const phone = await vscode.window.showInputBox({
+        prompt: 'WhatsApp phone number, digits only, including country code',
+        password: true,
+        ignoreFocusOut: true,
+        validateInput: (value) =>
+          /^\d{7,15}$/.test(value) ? undefined : 'Enter 7-15 digits with country code.',
+      });
+      if (!phone) return;
+      try {
+        await runtime.requestWhatsAppPairingCode(phone);
+      } catch (err) {
+        void vscode.window.showErrorMessage((err as Error).message);
+      }
+    }),
+    vscode.commands.registerCommand('forge.remote.pairWhatsApp', () => {
+      try {
+        const code = runtime.beginPairing('whatsapp');
+        void vscode.window.showInformationMessage(
+          `Forge: send /pair ${code} from your private WhatsApp chat within 5 minutes.`,
+          { modal: true },
+        );
+      } catch (err) {
+        void vscode.window.showErrorMessage((err as Error).message);
+      }
+    }),
+    vscode.commands.registerCommand('forge.remote.unlinkWhatsApp', async () => {
+      try {
+        await runtime.unlinkWhatsApp();
+        await runtime.applyConfig(getConfig());
+        void vscode.window.showInformationMessage(
+          'Forge: WhatsApp device and remote owner were unlinked.',
+        );
+      } catch (err) {
+        void vscode.window.showErrorMessage((err as Error).message);
+      }
     }),
   );
 }
