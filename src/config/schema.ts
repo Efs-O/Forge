@@ -233,6 +233,7 @@ const RemoteConfigSchema = z
     enabled: z.boolean().default(false),
     queue_limit: z.number().int().min(1).max(100).default(5),
     max_message_chars: z.number().int().min(1).max(50_000).default(12_000),
+    rate_limit_per_minute: z.number().int().min(1).max(600).default(30),
     telegram: z.object({ enabled: z.boolean().default(false) }).default({ enabled: false }),
     whatsapp: z.object({ enabled: z.boolean().default(false) }).default({ enabled: false }),
   })

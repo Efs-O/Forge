@@ -104,18 +104,21 @@ export class RemoteTransportLease {
   }
 
   private async heartbeat(): Promise<void> {
-    if (!(await this.verify())) {
-      this.lose('Forge remote transport lease was lost; inbound control has stopped.');
-      return;
-    }
-    this.record.heartbeatAt = Date.now();
+    let handle: fs.FileHandle | undefined;
     try {
-      await fs.writeFile(this.filePath, JSON.stringify(this.record), {
-        encoding: 'utf8',
-        mode: 0o600,
-      });
+      handle = await fs.open(this.filePath, 'r+');
+      const current = LeaseSchema.parse(JSON.parse(await handle.readFile('utf8')));
+      if (current.token !== this.record.token) {
+        this.lose('Forge remote transport lease was lost; inbound control has stopped.');
+        return;
+      }
+      this.record.heartbeatAt = Date.now();
+      await handle.truncate(0);
+      await handle.writeFile(JSON.stringify(this.record), 'utf8');
     } catch (err) {
       this.lose(`Forge remote lease heartbeat failed: ${(err as Error).message}`);
+    } finally {
+      await handle?.close();
     }
   }
 

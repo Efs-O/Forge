@@ -9,6 +9,22 @@ export function registerRemoteCommands(
   getConfig: () => ForgeConfig,
 ): void {
   context.subscriptions.push(
+    vscode.commands.registerCommand('forge.remote.configure', async () => {
+      const active = runtime.activeTransports();
+      const pick = await vscode.window.showQuickPick(
+        [
+          { label: 'Set Telegram bot token', command: 'forge.remote.setTelegramToken' },
+          { label: 'Pair Telegram owner', command: 'forge.remote.pairTelegram' },
+          { label: 'Unpair Telegram owner', command: 'forge.remote.unpairTelegram' },
+          { label: 'Open Forge config', command: 'forge.openConfig' },
+        ],
+        {
+          title: `Forge Remote Control — active: ${active.join(', ') || 'none'}`,
+          placeHolder: 'Choose a setup action',
+        },
+      );
+      if (pick) await vscode.commands.executeCommand(pick.command);
+    }),
     vscode.commands.registerCommand('forge.remote.setTelegramToken', async () => {
       const token = await vscode.window.showInputBox({
         prompt: 'Paste the Telegram bot token from BotFather',

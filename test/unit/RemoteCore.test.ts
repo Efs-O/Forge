@@ -104,6 +104,7 @@ describe('remote configuration and lease', () => {
       enabled: true,
       queue_limit: 5,
       max_message_chars: 12_000,
+      rate_limit_per_minute: 30,
       telegram: { enabled: true },
       whatsapp: { enabled: false },
     });
@@ -179,6 +180,7 @@ describe('RemoteController with fake channel', () => {
       workspaceId: 'workspace',
       queueLimit: 5,
       maxMessageChars: 12_000,
+      rateLimitPerMinute: 30,
     });
     await controller.start();
 
@@ -230,6 +232,7 @@ describe('RemoteController with fake channel', () => {
       workspaceId: 'workspace',
       queueLimit: 5,
       maxMessageChars: 100,
+      rateLimitPerMinute: 30,
     });
     await controller.start();
     const disposition = await channel.emit({
@@ -283,7 +286,12 @@ describe('RemoteController with fake channel', () => {
       state,
       new RemoteAuth(secrets as unknown as vscode.SecretStorage),
       host,
-      { workspaceId: 'workspace', queueLimit: 5, maxMessageChars: 100 },
+      {
+        workspaceId: 'workspace',
+        queueLimit: 5,
+        maxMessageChars: 100,
+        rateLimitPerMinute: 30,
+      },
     );
     await controller.start();
     const event = (id: string, text: string): RemoteInboundEvent => ({
@@ -337,7 +345,12 @@ describe('RemoteController with fake channel', () => {
       state,
       new RemoteAuth(secrets as unknown as vscode.SecretStorage),
       host,
-      { workspaceId: 'workspace', queueLimit: 5, maxMessageChars: 100 },
+      {
+        workspaceId: 'workspace',
+        queueLimit: 5,
+        maxMessageChars: 100,
+        rateLimitPerMinute: 30,
+      },
     );
     await controller.start();
     const disposition = await channel.emit({
@@ -431,7 +444,12 @@ describe('RemoteController with fake channel', () => {
       state,
       new RemoteAuth(secrets as unknown as vscode.SecretStorage),
       host,
-      { workspaceId: 'workspace', queueLimit: 5, maxMessageChars: 1000 },
+      {
+        workspaceId: 'workspace',
+        queueLimit: 5,
+        maxMessageChars: 1000,
+        rateLimitPerMinute: 30,
+      },
     );
     await controller.start();
     await channel.emit({

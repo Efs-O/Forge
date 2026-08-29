@@ -339,6 +339,7 @@ export interface ForgeConfig {
     enabled: boolean;
     queue_limit: number;
     max_message_chars: number;
+    rate_limit_per_minute: number;
     telegram: { enabled: boolean };
     whatsapp: { enabled: boolean };
   };

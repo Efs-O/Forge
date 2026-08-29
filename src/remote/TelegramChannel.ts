@@ -40,6 +40,7 @@ export interface TelegramChannelOptions {
   getCursor: (key: string) => string | undefined;
   setCursor: (key: string, value: string) => Promise<void>;
   fetch?: Fetch;
+  onError?: (message: string) => void;
 }
 
 /** Telegram Bot API long polling with disposition-before-cursor ordering. */
@@ -60,34 +61,49 @@ export class TelegramChannel implements RemoteChannel {
   }
 
   async start(signal: AbortSignal): Promise<void> {
-    void this.poll(signal).catch(() => undefined);
+    void this.poll(signal).catch((err) => {
+      if (!signal.aborted) {
+        this.options.onError?.(
+          `Forge Telegram polling stopped: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    });
   }
 
-  async send(chatId: string, text: string, options?: { correlationId?: string }): Promise<void> {
+  async send(
+    chatId: string,
+    text: string,
+    options?: { correlationId?: string; signal?: AbortSignal },
+  ): Promise<void> {
     const chunks = splitTelegramText(text);
     for (let index = 0; index < chunks.length; index++) {
       const correlationId = index === 0 ? options?.correlationId : undefined;
-      await this.call('sendMessage', {
-        chat_id: chatId,
-        text: chunks[index],
-        ...(correlationId
-          ? {
-              reply_markup: {
-                inline_keyboard: [
-                  [
-                    { text: 'Approve', callback_data: `a:${correlationId}` },
-                    { text: 'Deny', callback_data: `d:${correlationId}` },
+      await this.call(
+        'sendMessage',
+        {
+          chat_id: chatId,
+          text: chunks[index],
+          ...(correlationId
+            ? {
+                reply_markup: {
+                  inline_keyboard: [
+                    [
+                      { text: 'Approve', callback_data: `a:${correlationId}` },
+                      { text: 'Deny', callback_data: `d:${correlationId}` },
+                    ],
                   ],
-                ],
-              },
-            }
-          : {}),
-      });
+                },
+              }
+            : {}),
+        },
+        options?.signal,
+      );
     }
   }
 
   private async poll(signal: AbortSignal): Promise<void> {
     let offset = Number(this.options.getCursor(CURSOR_KEY) ?? '0');
+    let consecutiveFailures = 0;
     if (!Number.isSafeInteger(offset) || offset < 0) offset = 0;
     while (!signal.aborted) {
       let updates: z.infer<typeof TelegramUpdateSchema>[];
@@ -102,8 +118,15 @@ export class TelegramChannel implements RemoteChannel {
           signal,
         );
         updates = z.array(TelegramUpdateSchema).parse(result);
-      } catch {
+        consecutiveFailures = 0;
+      } catch (err) {
         if (signal.aborted) return;
+        consecutiveFailures += 1;
+        if (consecutiveFailures === 3) {
+          this.options.onError?.(
+            `Forge Telegram polling is retrying: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
         await abortableDelay(1_000, signal);
         continue;
       }
@@ -121,10 +144,14 @@ export class TelegramChannel implements RemoteChannel {
           }
         }
         if (update.callback_query) {
-          await this.call('answerCallbackQuery', {
-            callback_query_id: update.callback_query.id,
-            text: disposition.kind === 'rejected' ? disposition.reason.slice(0, 200) : 'Received',
-          }).catch(() => undefined);
+          await this.call(
+            'answerCallbackQuery',
+            {
+              callback_query_id: update.callback_query.id,
+              text: disposition.kind === 'rejected' ? disposition.reason.slice(0, 200) : 'Received',
+            },
+            signal,
+          ).catch(() => undefined);
         }
         if (disposition.kind === 'retry') break;
         offset = update.update_id + 1;

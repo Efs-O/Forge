@@ -227,6 +227,10 @@
         "shortTitle": "Set Cloud Token"
       },
       {
+        "command": "forge.remote.configure",
+        "title": "Forge: Configure Remote Control"
+      },
+      {
         "command": "forge.remote.setTelegramToken",
         "title": "Forge: Set Telegram Bot Token"
       },

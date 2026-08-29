@@ -48,13 +48,10 @@ export class RemoteAuth {
       return 'rejected';
     }
     session.attempts += 1;
-    if (session.attempts > MAX_PAIR_ATTEMPTS) {
-      this.pairing = undefined;
-      return 'rejected';
-    }
     const supplied = Buffer.from(match[1]!, 'utf8');
     const expected = Buffer.from(session.code, 'utf8');
     if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) {
+      if (session.attempts >= MAX_PAIR_ATTEMPTS) this.pairing = undefined;
       return 'rejected';
     }
     // Persist authority before invalidating the one-time code or confirming.

@@ -14,11 +14,15 @@ import type {
   ToolApprovalRequestEvent,
   ToolApprovalResolvedEvent,
 } from '../sidebar/ToolApprovalService';
+import type { RemoteAuditLog } from './RemoteAuditLog';
+import { RemoteRateLimiter } from './RemoteRateLimiter';
+import { RemoteOutboxDelivery } from './RemoteOutboxDelivery';
 
 export interface RemoteControllerOptions {
   workspaceId: string;
   queueLimit: number;
   maxMessageChars: number;
+  rateLimitPerMinute: number;
 }
 
 /** Durable transport-independent admission, FIFO execution, and notification. */
@@ -30,6 +34,8 @@ export class RemoteController {
   private approvalSubscription: { dispose(): void } | undefined;
   private readonly remoteApprovals = new Map<string, { requestId: string; chatId: string }>();
   private readonly activeConversations = new Set<string>();
+  private readonly rateLimiter: RemoteRateLimiter;
+  private readonly outbox: RemoteOutboxDelivery;
 
   constructor(
     private readonly channel: RemoteChannel,
@@ -37,7 +43,16 @@ export class RemoteController {
     private readonly auth: RemoteAuth,
     private readonly host: ForgeHostFacade,
     private readonly options: RemoteControllerOptions,
-  ) {}
+    private readonly audit?: RemoteAuditLog,
+  ) {
+    this.rateLimiter = new RemoteRateLimiter(options.rateLimitPerMinute);
+    this.outbox = new RemoteOutboxDelivery(
+      channel,
+      store,
+      options.maxMessageChars,
+      this.abort.signal,
+    );
+  }
 
   async start(): Promise<void> {
     await this.store.load();
@@ -49,7 +64,7 @@ export class RemoteController {
     });
     await this.channel.start(this.abort.signal);
     for (const request of this.store.queued()) this.kickDrain(request.conversationId);
-    void this.flushOutbox();
+    this.outbox.start();
   }
 
   async stop(): Promise<void> {
@@ -63,6 +78,7 @@ export class RemoteController {
       [...this.activeConversations].map((conversationId) => this.host.cancel(conversationId)),
     );
     await Promise.allSettled([...this.drains.values()]);
+    await this.outbox.stop();
   }
 
   async handle(raw: RemoteInboundEvent): Promise<RemoteInboundDisposition> {
@@ -70,20 +86,27 @@ export class RemoteController {
     const parsed = RemoteInboundEventSchema.safeParse(raw);
     if (!parsed.success) return { kind: 'rejected', reason: 'invalid remote event' };
     const event = parsed.data;
+    await this.audit?.record(event, 'inbound').catch(() => undefined);
     if (event.chatType !== 'private') return { kind: 'rejected', reason: 'private chats only' };
 
     if (!(await this.auth.isOwner(event))) {
       if ((await this.auth.tryPair(event)) === 'paired') {
-        await this.channel.send(event.chatId, 'Forge remote pairing complete.');
+        await this.channel.send(event.chatId, 'Forge remote pairing complete.', {
+          signal: this.abort.signal,
+        });
         return { kind: 'handled' };
       }
       return { kind: 'rejected', reason: 'sender is not paired' };
+    }
+    if (!this.rateLimiter.allow(`${event.channel}:${event.senderId}:${event.chatId}`)) {
+      return { kind: 'rejected', reason: 'remote rate limit exceeded' };
     }
     if (event.kind === 'action') {
       const pending = this.remoteApprovals.get(event.correlationId);
       if (!pending || pending.chatId !== event.chatId) {
         return { kind: 'rejected', reason: 'approval is stale or not owned by this chat' };
       }
+      this.remoteApprovals.delete(event.correlationId);
       this.host.resolveApproval(event.correlationId, event.action === 'approve');
       return { kind: 'handled' };
     }
@@ -98,6 +121,9 @@ export class RemoteController {
       return { kind: 'duplicate', requestId: duplicate.id, state: duplicate.state };
     }
     let binding = this.store.binding(event.channel, event.chatId);
+    if (binding && binding.workspaceId !== this.options.workspaceId) {
+      return { kind: 'rejected', reason: 'chat is bound to a different workspace' };
+    }
     if (!binding) {
       const conv = await this.host.createConversation({ activate: false });
       binding = {
@@ -136,6 +162,9 @@ export class RemoteController {
       return { kind: 'retry', reason: `durable admission failed: ${(err as Error).message}` };
     }
     if (busy) this.host.queueIntent(binding.conversationId);
+    await this.audit
+      ?.record(event, busy ? 'request_queued' : 'request_accepted', request.id)
+      .catch(() => undefined);
     this.kickDrain(request.conversationId);
     return busy || queued.length > 0
       ? { kind: 'queued', requestId: request.id, position: queued.length + 1 }
@@ -150,6 +179,7 @@ export class RemoteController {
       await this.channel.send(
         event.chatId,
         'Forge commands: /status, /stop, /new, /resume <conversation-id>. /stop cancels the current request; queued requests remain queued.',
+        { signal: this.abort.signal },
       );
       return { kind: 'handled' };
     }
@@ -159,7 +189,8 @@ export class RemoteController {
       const queued = binding ? this.store.queued(binding.conversationId).length : 0;
       await this.channel.send(
         event.chatId,
-        `Forge: ${status.requestChains.length} active request(s), ${queued} queued, ${status.streamingConversationIds.length} streaming.`,
+        `Forge: ${status.requestChains.length} active request(s), ${queued} queued, ${status.streamingConversationIds.length} streaming, ${this.store.outboxHealth().pending} notifications pending.`,
+        { signal: this.abort.signal },
       );
       return { kind: 'handled' };
     }
@@ -170,6 +201,7 @@ export class RemoteController {
       await this.channel.send(
         event.chatId,
         'Forge: current request stopped; queued requests remain queued.',
+        { signal: this.abort.signal },
       );
       return { kind: 'handled' };
     }
@@ -181,7 +213,9 @@ export class RemoteController {
         workspaceId: this.options.workspaceId,
         conversationId: conv.id,
       });
-      await this.channel.send(event.chatId, `Forge: bound to new conversation ${conv.id}.`);
+      await this.channel.send(event.chatId, `Forge: bound to new conversation ${conv.id}.`, {
+        signal: this.abort.signal,
+      });
       return { kind: 'handled' };
     }
     if (command === '/resume' && argument) {
@@ -192,7 +226,9 @@ export class RemoteController {
         workspaceId: this.options.workspaceId,
         conversationId: conv.id,
       });
-      await this.channel.send(event.chatId, `Forge: resumed conversation ${conv.id}.`);
+      await this.channel.send(event.chatId, `Forge: resumed conversation ${conv.id}.`, {
+        signal: this.abort.signal,
+      });
       return { kind: 'handled' };
     }
     return { kind: 'rejected', reason: 'unknown command' };
@@ -254,19 +290,7 @@ export class RemoteController {
       } finally {
         this.activeConversations.delete(conversationId);
       }
-      await this.flushOutbox();
-    }
-  }
-
-  private async flushOutbox(): Promise<void> {
-    for (const item of this.store.pendingOutbox()) {
-      await this.store.markOutbox(item.id, 'sending');
-      try {
-        await this.channel.send(item.chatId, item.text.slice(0, this.options.maxMessageChars));
-        await this.store.markOutbox(item.id, 'delivered');
-      } catch {
-        await this.store.markOutbox(item.id, 'pending');
-      }
+      this.outbox.kick();
     }
   }
 
@@ -287,7 +311,7 @@ export class RemoteController {
           0,
           this.options.maxMessageChars,
         ),
-        { correlationId: event.id },
+        { correlationId: event.id, signal: this.abort.signal },
       )
       .catch(() => undefined);
   }
@@ -300,7 +324,7 @@ export class RemoteController {
       .send(
         pending.chatId,
         `Forge approval ${event.approved ? 'approved' : 'denied'} (${event.reason}).`,
-        { correlationId: event.id },
+        { correlationId: event.id, signal: this.abort.signal },
       )
       .catch(() => undefined);
   }

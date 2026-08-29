@@ -21,7 +21,11 @@ export class FakeRemoteChannel implements RemoteChannel {
     return this.handler(event);
   }
 
-  async send(chatId: string, text: string, options?: { correlationId?: string }): Promise<void> {
+  async send(
+    chatId: string,
+    text: string,
+    options?: { correlationId?: string; signal?: AbortSignal },
+  ): Promise<void> {
     this.sent.push({ chatId, text, ...(options?.correlationId ? options : {}) });
   }
 }

@@ -268,7 +268,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             'Telegram is enabled but no bot token is stored. Run “Forge: Set Telegram Bot Token”.',
           );
         }
-        return new TelegramChannel({ token, ...cursor });
+        return new TelegramChannel({
+          token,
+          ...cursor,
+          onError: (message) => void vscode.window.showErrorMessage(message),
+        });
       },
     },
     notifyLocal: (message) => void vscode.window.showErrorMessage(message),

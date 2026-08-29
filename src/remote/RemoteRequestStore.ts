@@ -53,6 +53,8 @@ const StateSchema = z.object({
 type StoreState = z.infer<typeof StateSchema>;
 const EMPTY_STATE: StoreState = { version: 1, requests: [], outbox: [], bindings: [], cursors: {} };
 const MAX_RECORDS = 1_000;
+const MAX_OUTBOX_RECORDS = 1_000;
+const RETENTION_MS = 30 * 24 * 60 * 60_000;
 
 export function remoteDedupKey(channel: string, chatId: string, messageId: string): string {
   return `${channel}\u0000${chatId}\u0000${messageId}`;
@@ -108,8 +110,18 @@ export class RemoteRequestStore {
       .sort((a, b) => a.receivedAt - b.receivedAt || a.id.localeCompare(b.id));
   }
 
-  pendingOutbox(): RemoteOutboxRecord[] {
-    return this.state.outbox.filter((item) => item.state === 'pending');
+  pendingOutbox(channel?: RemoteOutboxRecord['channel']): RemoteOutboxRecord[] {
+    return this.state.outbox.filter(
+      (item) => item.state === 'pending' && (channel === undefined || item.channel === channel),
+    );
+  }
+
+  outboxHealth(): { pending: number; sending: number; abandoned: number } {
+    return {
+      pending: this.state.outbox.filter((item) => item.state === 'pending').length,
+      sending: this.state.outbox.filter((item) => item.state === 'sending').length,
+      abandoned: this.state.outbox.filter((item) => item.state === 'abandoned').length,
+    };
   }
 
   binding(channel: string, chatId: string): RemoteBinding | undefined {
@@ -205,6 +217,16 @@ export class RemoteRequestStore {
     const operation = this.mutationTail.then(async () => {
       const draft = structuredClone(this.state);
       mutator(draft);
+      const cutoff = Date.now() - RETENTION_MS;
+      draft.requests = draft.requests.filter(
+        (item) => item.updatedAt >= cutoff || item.state === 'queued' || item.state === 'running',
+      );
+      draft.outbox = draft.outbox
+        .filter(
+          (item) =>
+            item.updatedAt >= cutoff || item.state === 'pending' || item.state === 'sending',
+        )
+        .slice(-MAX_OUTBOX_RECORDS);
       StateSchema.parse(draft);
       await this.persist(draft);
       this.state = draft;

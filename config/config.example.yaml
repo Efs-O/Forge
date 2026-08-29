@@ -151,6 +151,7 @@ remote:
   enabled: false
   queue_limit: 5
   max_message_chars: 12000
+  rate_limit_per_minute: 30
   telegram:
     enabled: false
   whatsapp:

@@ -741,3 +741,20 @@ No implementation-blocking contradiction, false code assumption, missing securit
 duplicate canonical owner remains in the Phase 0 contract.
 
 `READY FOR IMPLEMENTATION`
+
+## 25. Implementation record
+
+- Phase 0: V4 consolidated, reviewed, gated, and committed in `963b670`.
+- Phase 1A: shared validated admission and accepted-intent epochs committed in `3e7a130`.
+- Phase 1B: managed request-chain lifecycle and typed outcomes committed in `99dc152`.
+- Phase 1C: addressed budget/compaction/resume behavior committed in `e6b9ae0`.
+- Phase 1D: non-activating addressed host facade committed in `b5efe27`.
+- Phase 2: durable transport-independent core and fake-channel tests committed in `35c31f0`.
+- Phase 3: correlated multi-sink Forge approvals committed in `3107895`.
+- Phase 4: Telegram Bot API long-poll transport and setup commands committed in `808f4e3`.
+- Phase 5: authorization, privacy, retention, rate-limit, outbox retry, lease-fencing,
+  config-reload, and disposal hardening completed. Targeted tests passed (20 tests),
+  `npm run ci` passed (1,375 tests passed, 14 skipped), and `npm run package` passed.
+
+Phase 6 remains experimental and isolated. Real-device Telegram validation remains a release
+validation step because no provider credential or phone identity is stored in the repository.

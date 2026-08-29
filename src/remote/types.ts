@@ -74,6 +74,10 @@ export interface RemoteChannel {
   onEvent(handler: (event: RemoteInboundEvent) => Promise<RemoteInboundDisposition>): {
     dispose(): void;
   };
-  send(chatId: string, text: string, options?: { correlationId?: string }): Promise<void>;
+  send(
+    chatId: string,
+    text: string,
+    options?: { correlationId?: string; signal?: AbortSignal },
+  ): Promise<void>;
   start(signal: AbortSignal): Promise<void>;
 }

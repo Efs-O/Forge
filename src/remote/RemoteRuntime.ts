@@ -8,6 +8,7 @@ import { RemoteController } from './RemoteController';
 import { RemoteRequestStore } from './RemoteRequestStore';
 import { RemoteTransportLease } from './RemoteTransportLease';
 import type { RemoteChannel } from './types';
+import { RemoteAuditLog } from './RemoteAuditLog';
 
 export interface RemoteChannelFactoryContext {
   getCursor: (key: string) => string | undefined;
@@ -36,6 +37,7 @@ export class RemoteRuntime {
   private readonly auth: RemoteAuth;
   private readonly store: RemoteRequestStore;
   private readonly instanceId = randomUUID();
+  private readonly audit: RemoteAuditLog;
   private readonly active = new Map<string, ActiveTransport>();
   private lifecycleTail: Promise<void> = Promise.resolve();
   private disposed = false;
@@ -45,6 +47,7 @@ export class RemoteRuntime {
     this.store = new RemoteRequestStore(
       path.join(options.storageDirectory, 'remote-state-v1.json'),
     );
+    this.audit = new RemoteAuditLog(path.join(options.storageDirectory, 'remote-audit-v1.json'));
   }
 
   applyConfig(config: ForgeConfig): Promise<void> {
@@ -64,6 +67,10 @@ export class RemoteRuntime {
     return this.auth.unpair(channel);
   }
 
+  activeTransports(): string[] {
+    return [...this.active.keys()];
+  }
+
   async dispose(): Promise<void> {
     this.disposed = true;
     await this.applySerializedStop();
@@ -73,41 +80,54 @@ export class RemoteRuntime {
     await this.stopActive();
     if (this.disposed || config.remote?.enabled !== true) return;
     await this.store.load();
-    for (const channelName of ['telegram', 'whatsapp'] as const) {
-      if (config.remote[channelName].enabled !== true) continue;
-      const factory = this.options.channelFactories?.[channelName];
-      if (!factory) {
-        this.options.notifyLocal(
-          `Forge remote ${channelName} is enabled but its transport is unavailable.`,
-        );
-        continue;
-      }
-      const lease = await RemoteTransportLease.acquire({
-        directory: path.join(this.options.storageDirectory, 'remote-leases'),
-        key: channelName,
-        workspaceId: this.options.workspaceId,
-        instanceId: this.instanceId,
-        onLost: (message) => {
-          this.options.notifyLocal(message);
-          void this.stopTransport(channelName);
-        },
-      });
-      try {
-        const channel = await factory({
-          getCursor: (key) => this.store.cursor(key),
-          setCursor: (key, value) => this.store.setCursor(key, value),
-        });
-        const controller = new RemoteController(channel, this.store, this.auth, this.options.host, {
+    try {
+      for (const channelName of ['telegram', 'whatsapp'] as const) {
+        if (config.remote[channelName].enabled !== true) continue;
+        const factory = this.options.channelFactories?.[channelName];
+        if (!factory) {
+          this.options.notifyLocal(
+            `Forge remote ${channelName} is enabled but its transport is unavailable.`,
+          );
+          continue;
+        }
+        const lease = await RemoteTransportLease.acquire({
+          directory: path.join(this.options.storageDirectory, 'remote-leases'),
+          key: channelName,
           workspaceId: this.options.workspaceId,
-          queueLimit: config.remote.queue_limit,
-          maxMessageChars: config.remote.max_message_chars,
+          instanceId: this.instanceId,
+          onLost: (message) => {
+            this.options.notifyLocal(message);
+            void this.stopTransport(channelName);
+          },
         });
-        await controller.start();
-        this.active.set(channelName, { controller, lease });
-      } catch (err) {
-        await lease.release();
-        throw err;
+        try {
+          const channel = await factory({
+            getCursor: (key) => this.store.cursor(key),
+            setCursor: (key, value) => this.store.setCursor(key, value),
+          });
+          const controller = new RemoteController(
+            channel,
+            this.store,
+            this.auth,
+            this.options.host,
+            {
+              workspaceId: this.options.workspaceId,
+              queueLimit: config.remote.queue_limit,
+              maxMessageChars: config.remote.max_message_chars,
+              rateLimitPerMinute: config.remote.rate_limit_per_minute,
+            },
+            this.audit,
+          );
+          await controller.start();
+          this.active.set(channelName, { controller, lease });
+        } catch (err) {
+          await lease.release();
+          throw err;
+        }
       }
+    } catch (err) {
+      await this.stopActive();
+      throw err;
     }
   }
 
