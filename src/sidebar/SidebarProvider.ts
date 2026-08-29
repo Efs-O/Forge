@@ -30,12 +30,15 @@ import {
   buildSessionMetrics,
   buildSessionSyncMessage,
 } from './sidebarPayloads';
-import { runAutoCompact, runManualCompactResume } from './compactionPolicy';
+import { runManualCompactResume } from './compactionPolicy';
 import type { CompactionPolicyDeps } from './compactionPolicy';
 import { buildWebviewHtml } from './WebviewBuilder';
 import type { IndexManager } from '../search/IndexManager';
 import type { SessionTimeSnapshot } from '../vscode/SessionTimeStatusBar';
 import type { RequestChainLifecycle } from './RequestChainLifecycle';
+import type { RequestChainContext } from './RequestChainLifecycle';
+import type { ContextThresholdAction } from './ContextBudgetPublisher';
+import { runAddressedAutoCompact } from './autoCompactionPolicy';
 
 export type { SidebarProviderEvents };
 
@@ -59,9 +62,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly agentLoop: AgentLoop;
   private readonly slashHandler: SlashCommandHandler;
   private readonly review = new CheckpointReview();
-  /** Auto-compact resumes issued since the last user prompt. Bounded so a task
-   *  that keeps filling the window cannot drive Forge in a loop. */
-  private autoContinues = 0;
   private readonly budget: ContextBudgetPublisher;
   private readonly tabs: ConversationTabs;
   private readonly send: SendPipeline;
@@ -101,10 +101,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         post: (msg) => this.post(msg),
         postModels: () => this.postModels(),
         postSessionSync: () => this.postSessionSync(),
-        postTokenBudget: (evaluate) => this.postTokenBudget(evaluate),
+        postTokenBudget: () => this.postTokenBudget(),
         persistSession: () => this.persistSession(),
         baseOf: (id) => this.baseOf(id),
-        autoCompact: (conv) => this.autoCompact(conv),
+        autoCompact: (conv, chain) => this.autoCompact(conv, chain),
         resumeAfterManualCompact: (conversationId, reason) =>
           this.resumeAfterManualCompact(conversationId, reason),
         reindexCodebase: () => this.reindexCodebase(),
@@ -307,28 +307,36 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   /** Recomputes and posts the budget for the ACTIVE conversation. */
-  private postTokenBudget(evaluateThresholds = false): void {
-    this.budget.publish(this.getActive(), evaluateThresholds);
+  private postTokenBudget(): void {
+    this.budget.publish(this.getActive());
   }
 
   private compactionDeps(): CompactionPolicyDeps {
     return {
       post: (msg) => this.post(msg),
-      compact: (options) => this.slashHandler.compact(options),
-      incompleteTurnReason: (convId) => this.agentLoop.incompleteTurnReason(convId),
       send: async (text, convId, options) => {
         await this.send.send(text, undefined, convId, options);
-      },
-      resumeEnabled: this.config.auto_compact?.resume !== false,
-      autoContinues: () => this.autoContinues,
-      noteAutoContinue: () => {
-        this.autoContinues += 1;
       },
     };
   }
 
-  private autoCompact(conv: ConversationRuntime): Promise<void> {
-    return runAutoCompact(this.compactionDeps(), conv.id);
+  private async autoCompact(
+    conv: ConversationRuntime,
+    chain: RequestChainContext,
+  ): Promise<ContextThresholdAction | undefined> {
+    return runAddressedAutoCompact(
+      {
+        post: (message) => this.post(message),
+        requestChains: this.requestChains,
+        compact: (conversationId) =>
+          this.slashHandler.compactConversation(conversationId, { auto: true }),
+        incompleteTurnReason: (conversationId) =>
+          this.agentLoop.incompleteTurnReason(conversationId),
+        resumeEnabled: () => this.config.auto_compact?.resume !== false,
+      },
+      conv,
+      chain,
+    );
   }
 
   private resumeAfterManualCompact(conversationId: string, reason: string): Promise<void> {
@@ -373,17 +381,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         isBackendReady: () => this.pool.isAnyReady(),
         getClankerMode: () => this.agentLoop.getClankerMode(),
         send: (text, attachments, conversationId) => {
-          // A prompt from the user ends the auto-resume chain: whatever happens
-          // next is their call again, not a continuation Forge chose.
-          this.autoContinues = 0;
           void this.send.send(text, attachments, conversationId);
         },
         steer: async (text, attachments, conversationId) => {
           // Steering ends only the request/turn. Unlike Stop, it deliberately
           // leaves the backend loaded so the redirected turn starts without a
           // llama-server model reload.
-          this.autoContinues = 0;
-          this.requestChains.markCancelling(conversationId);
+          this.requestChains.markCancelling(conversationId, 'interrupted');
           await this.agentLoop.interrupt(conversationId);
           await this.send.send(text, attachments, conversationId);
         },

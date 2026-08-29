@@ -1,15 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  autoCompactAndResume,
-  MAX_CONSECUTIVE_AUTO_CONTINUES,
   RESUME_PROMPT,
   RETAINED_TAIL_MAX_CHARS,
-  resumeAfterCompaction,
   runCompaction,
   selectCompactionSplit,
-  type AutoCompactDeps,
   type CompactionDeps,
-  type CompactionOutcome,
 } from '../../src/sidebar/CompactionService';
 import {
   buildSummaryPrompt,
@@ -50,7 +45,8 @@ function harness(
   let busy = false;
   state.deps = {
     post: (msg) => state.posted.push(msg),
-    getActiveConv: () => conversation,
+    getConversation: (conversationId) =>
+      conversationId === conversation.id ? conversation : undefined,
     persistSession: () => undefined,
     postSessionSync: () => undefined,
     invalidateExactTokenBudget: () => undefined,
@@ -244,10 +240,18 @@ describe('recorded file facts', () => {
     function: { name, arguments: JSON.stringify(args) },
   });
 
-  it('reads every changed file off the tool calls, including edit_file\'s filepath', () => {
+  it("reads every changed file off the tool calls, including edit_file's filepath", () => {
     const messages: ChatMessage[] = [
-      { role: 'assistant', content: null, tool_calls: [call('edit_file', { filepath: 'js/a.js' })] },
-      { role: 'assistant', content: null, tool_calls: [call('write_file', { path: 'index.html' })] },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [call('edit_file', { filepath: 'js/a.js' })],
+      },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [call('write_file', { path: 'index.html' })],
+      },
       {
         role: 'assistant',
         content: null,
@@ -292,7 +296,7 @@ describe('runCompaction repo snapshot', () => {
     const h = harness(c, async () => long('summary'));
     h.deps.snapshotRepoState = async () => '\n\nWORKING TREE: 2 files changed';
 
-    await expect(runCompaction(h.deps, { auto: true })).resolves.toBe('compacted');
+    await expect(runCompaction(h.deps, c.id, { auto: true })).resolves.toBe('compacted');
     expect(c.compaction?.repoState).toContain('WORKING TREE: 2 files changed');
     expect(c.compaction?.summary).not.toContain('WORKING TREE: 2 files changed');
   });
@@ -309,7 +313,7 @@ describe('runCompaction repo snapshot', () => {
       return '';
     };
 
-    await runCompaction(h.deps, { auto: true });
+    await runCompaction(h.deps, c.id, { auto: true });
     expect(order).toEqual(['snapshot', 'summarize']);
   });
 
@@ -318,7 +322,7 @@ describe('runCompaction repo snapshot', () => {
     const h = harness(c, async () => long('summary'));
     h.deps.snapshotRepoState = async () => '';
 
-    await expect(runCompaction(h.deps, { auto: true })).resolves.toBe('compacted');
+    await expect(runCompaction(h.deps, c.id, { auto: true })).resolves.toBe('compacted');
     expect(c.compaction?.summary).toContain('summary');
   });
 
@@ -329,7 +333,7 @@ describe('runCompaction repo snapshot', () => {
       throw new Error('injected snapshot failed');
     };
 
-    await expect(runCompaction(h.deps, { auto: true })).resolves.toBe('compacted');
+    await expect(runCompaction(h.deps, c.id, { auto: true })).resolves.toBe('compacted');
     expect(c.compaction?.summary).toContain('summary');
     expect(h.posted.some((m) => m.type === 'generationStarted')).toBe(true);
   });
@@ -339,7 +343,7 @@ describe('runCompaction repo snapshot', () => {
     const h = harness(c, async () => long('summary'));
     expect(h.deps.snapshotRepoState).toBeUndefined();
 
-    await expect(runCompaction(h.deps, { auto: true })).resolves.toBe('compacted');
+    await expect(runCompaction(h.deps, c.id, { auto: true })).resolves.toBe('compacted');
   });
 });
 
@@ -373,7 +377,7 @@ describe('runCompaction', () => {
     const runPrompt = vi.fn(async () => long('summary'));
     h.deps.runPromptToMarkdown = runPrompt;
 
-    await expect(runCompaction(h.deps, { auto: true })).resolves.toBe('compacted');
+    await expect(runCompaction(h.deps, c.id, { auto: true })).resolves.toBe('compacted');
 
     expect(runPrompt.mock.calls[0]?.[0]).toContain('Downloaded krea2_turbo_fp8_scaled.safetensors');
     expect(renderRecordedActionsBlock(c.compaction?.recordedActions ?? [])).toContain(
@@ -392,7 +396,7 @@ describe('runCompaction', () => {
     const runPrompt = vi.fn(async () => long('summary'));
     h.deps.runPromptToMarkdown = runPrompt;
 
-    await runCompaction(h.deps, { auto: true });
+    await runCompaction(h.deps, c.id, { auto: true });
 
     expect(runPrompt).toHaveBeenCalledWith(
       expect.any(String),
@@ -425,17 +429,17 @@ describe('runCompaction', () => {
     ]);
     const h = harness(c, async () => long('summary'));
 
-    await runCompaction(h.deps, { auto: true });
+    await runCompaction(h.deps, c.id, { auto: true });
     c.messages.push(
       { role: 'user', content: 'do not add a camera push' },
       { role: 'assistant', content: 'I will keep the camera fixed.' },
     );
-    await runCompaction(h.deps, { auto: true });
+    await runCompaction(h.deps, c.id, { auto: true });
     c.messages.push(
       { role: 'user', content: 'continue with that exact direction' },
       { role: 'assistant', content: 'Continuing.' },
     );
-    await runCompaction(h.deps, { auto: true });
+    await runCompaction(h.deps, c.id, { auto: true });
 
     expect(c.compaction?.generation).toBe(3);
     expect(c.compaction?.userMessages).toEqual([
@@ -470,7 +474,7 @@ describe('runCompaction', () => {
     ]);
     const h = harness(c, async () => '{ "tool": "read_file", "arguments": { "path": "a.md" } }');
 
-    const outcome = await runCompaction(h.deps, { auto: true });
+    const outcome = await runCompaction(h.deps, c.id, { auto: true });
 
     expect(outcome).toBe('failed');
     expect(c.compaction).toBeUndefined();
@@ -497,7 +501,7 @@ describe('runCompaction', () => {
     // file from the model. Measured on session 39c9bf42: 2 of 6 changed files.
     const h = harness(c, async () => long('Goal: fix the fetch'));
 
-    await runCompaction(h.deps, { auto: true });
+    await runCompaction(h.deps, c.id, { auto: true });
 
     const recorded = renderRecordedActionsBlock(c.compaction?.recordedActions ?? []);
     expect(recorded).toContain('index.html');
@@ -514,7 +518,7 @@ describe('runCompaction', () => {
       return long('summary of the first task');
     });
 
-    const outcome = await runCompaction(h.deps, { auto: true });
+    const outcome = await runCompaction(h.deps, c.id, { auto: true });
 
     expect(outcome).toBe('compacted');
     expect(c.compaction).toMatchObject({
@@ -532,7 +536,7 @@ describe('runCompaction', () => {
     const c = conv([...base]);
     const h = harness(c, async () => long('summary'));
 
-    await runCompaction(h.deps, { auto: true });
+    await runCompaction(h.deps, c.id, { auto: true });
 
     expect(h.busyDuringSummary).toBe(true);
     expect(h.released).toBe(true);
@@ -548,7 +552,7 @@ describe('runCompaction', () => {
       throw new Error('backend down');
     });
 
-    const outcome = await runCompaction(h.deps, { auto: true });
+    const outcome = await runCompaction(h.deps, c.id, { auto: true });
 
     expect(outcome).toBe('failed');
     expect(c.compaction).toBeUndefined();
@@ -561,7 +565,7 @@ describe('runCompaction', () => {
     const c = conv([...base]);
     const h = harness(c, async () => 'x'.repeat(COMPACTION_SUMMARY_MAX_CHARS + 100));
 
-    expect(await runCompaction(h.deps, { auto: true })).toBe('compacted');
+    expect(await runCompaction(h.deps, c.id, { auto: true })).toBe('compacted');
     expect(c.compaction?.summary.length).toBe(COMPACTION_SUMMARY_MAX_CHARS + 13);
     expect(c.compaction?.summary).toContain('…[truncated]');
   });
@@ -571,7 +575,7 @@ describe('runCompaction', () => {
     const h = harness(c, async () => long('summary'));
     const deps = { ...h.deps, isStreaming: () => true };
 
-    expect(await runCompaction(deps, { auto: false })).toBe('skipped');
+    expect(await runCompaction(deps, c.id, { auto: false })).toBe('skipped');
     expect(c.compaction).toBeUndefined();
   });
 
@@ -590,120 +594,11 @@ describe('runCompaction', () => {
       },
     };
 
-    await runCompaction(deps, { auto: true });
+    await runCompaction(deps, c.id, { auto: true });
 
     expect(prompt).toContain('EARLIER SUMMARY:\nearlier summary');
     expect(prompt).toContain('second task');
     expect(prompt).not.toContain('third task');
     expect(c.compaction?.fromIndex).toBe(4);
-  });
-});
-
-describe('autoCompactAndResume', () => {
-  function autoDeps(overrides: Partial<AutoCompactDeps> = {}): {
-    deps: AutoCompactDeps;
-    sent: string[];
-    continues: { count: number };
-  } {
-    const sent: string[] = [];
-    const posted: HostToWebview[] = [];
-    const continues = { count: 0 };
-    const deps: AutoCompactDeps = {
-      convId: 'c1',
-      post: (msg) => {
-        posted.push(msg);
-      },
-      compact: async (): Promise<CompactionOutcome> => 'compacted',
-      incompleteTurnReason: () => 'the reply was cut off by the output limit',
-      resumeEnabled: true,
-      autoContinues: () => continues.count,
-      noteAutoContinue: () => {
-        continues.count += 1;
-      },
-      send: async (text, options) => {
-        sent.push(`${text}:${options?.internal === true ? 'internal' : 'visible'}`);
-      },
-      ...overrides,
-    };
-    return { deps, sent, continues, posted };
-  }
-
-  // `compact()` posts `done` in its finally, which clears the webview's
-  // streaming state. The resume is host-initiated, so it produces no USER_SEND
-  // either — without an explicit generationStarted the resumed turn generated
-  // with the Stop button hidden and no way to cancel it.
-  it('re-arms the webview streaming state before resuming', async () => {
-    const { deps, sent, posted } = autoDeps();
-    await autoCompactAndResume(deps);
-    expect(sent).toEqual([`${RESUME_PROMPT}:internal`]);
-    const started = posted.findIndex(
-      (m) => m.type === 'generationStarted' && m.conversationId === 'c1',
-    );
-    expect(started).toBeGreaterThanOrEqual(0);
-  });
-
-  it('resumes after an explicit compact even when the automatic chain limit is reached', async () => {
-    const { deps, sent, continues, posted } = autoDeps({
-      autoContinues: () => MAX_CONSECUTIVE_AUTO_CONTINUES,
-    });
-
-    await resumeAfterCompaction(deps, { automatic: false });
-
-    expect(sent).toEqual([`${RESUME_PROMPT}:internal`]);
-    expect(continues.count).toBe(0);
-    expect(posted).toContainEqual({
-      type: 'generationStarted',
-      conversationId: 'c1',
-    });
-  });
-
-  it('does not re-arm streaming when the resume is skipped', async () => {
-    const { deps, posted } = autoDeps({ resumeEnabled: false });
-    await autoCompactAndResume(deps);
-    expect(posted.some((m) => m.type === 'generationStarted')).toBe(false);
-  });
-
-  it('resumes a turn that was cut off', async () => {
-    const { deps, sent, continues } = autoDeps();
-    await autoCompactAndResume(deps);
-    expect(sent).toEqual([`${RESUME_PROMPT}:internal`]);
-    expect(continues.count).toBe(1);
-  });
-
-  it('continues after compaction even when the preceding turn finished cleanly', async () => {
-    const { deps, sent, continues } = autoDeps({ incompleteTurnReason: () => undefined });
-    await autoCompactAndResume(deps);
-    expect(sent).toEqual([`${RESUME_PROMPT}:internal`]);
-    expect(continues.count).toBe(1);
-  });
-
-  it('does not resume when the compaction did not happen', async () => {
-    const { deps, sent } = autoDeps({ compact: async () => 'failed' });
-    await autoCompactAndResume(deps);
-    expect(sent).toEqual([]);
-  });
-
-  it('honours resume: false', async () => {
-    const { deps, sent } = autoDeps({ resumeEnabled: false });
-    await autoCompactAndResume(deps);
-    expect(sent).toEqual([]);
-  });
-
-  it('stops after the consecutive-resume limit', async () => {
-    const { deps, sent } = autoDeps({ autoContinues: () => MAX_CONSECUTIVE_AUTO_CONTINUES });
-    await autoCompactAndResume(deps);
-    expect(sent).toEqual([]);
-  });
-
-  it('surfaces a failed resume instead of swallowing it', async () => {
-    const posted: string[] = [];
-    const { deps } = autoDeps({
-      post: (msg) => posted.push(msg.type),
-      send: async () => {
-        throw new Error('no model selected');
-      },
-    });
-    await autoCompactAndResume(deps);
-    expect(posted).toContain('error');
   });
 });

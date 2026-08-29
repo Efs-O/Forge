@@ -15,9 +15,11 @@ import {
   activeSelectionBlock,
   formatContextBlocks,
 } from '../vscode/editorContext';
-import { deriveTitle, isUntitled } from './sessionTypes';
+import { deriveTitle, isUntitled, type ConversationRuntime } from './sessionTypes';
 
 export interface SlashCommandDeps extends CompactionDeps {
+  /** UI-only commands still target the selected tab. */
+  getActiveConv: () => ConversationRuntime;
   getConfig: () => ForgeConfig;
   pool: IBackendPool;
   events: SidebarProviderEvents;
@@ -112,7 +114,7 @@ export class SlashCommandHandler {
           // background work, not a model turn, and must not make a cleanly
           // idle conversation look like it needs another response.
           const incompleteReason = deps.incompleteTurnReason(conversationId);
-          const outcome = await this.compact({ auto: false });
+          const outcome = await this.compactConversation(conversationId, { auto: false });
           if (outcome === 'compacted' && incompleteReason !== undefined) {
             await deps.resumeAfterManualCompact(conversationId, incompleteReason);
           }
@@ -416,6 +418,14 @@ Be specific and factual. Do not invent paths or names not present in the scan re
    * caller decides whether to resume from the returned outcome.
    */
   async compact(options: { auto: boolean } = { auto: false }): Promise<CompactionOutcome> {
-    return runCompaction(this.deps, options);
+    return this.compactConversation(this.deps.getActiveConv().id, options);
+  }
+
+  /** Addressed entry point used by background request chains. */
+  async compactConversation(
+    conversationId: string,
+    options: { auto: boolean } = { auto: false },
+  ): Promise<CompactionOutcome> {
+    return runCompaction(this.deps, conversationId, options);
   }
 }

@@ -50,9 +50,8 @@ export class AgentLoop {
   private readonly cliSessions: CliSessionRegistry;
   /** Collaborators handed to every turn module. Assembled once, in the ctor. */
   private readonly services: TurnServices;
-  private promptRunCtrl: AbortController | null = null;
-  /** Conversation that owns the current out-of-band prompt, if any. */
-  private promptRunConversationId: string | null = null;
+  /** Every out-of-band prompt remains independently cancellable by owner. */
+  private readonly promptRunControllers = new Map<AbortController, string | undefined>();
   private readonly sessionTimer = new SessionTimer();
   /**
    * Resolves a conversation id to its runtime object. Set by the SidebarProvider
@@ -197,14 +196,10 @@ export class AgentLoop {
       runModelTurn: makeRunModelTurn(() => this.services, runModelTurn),
       waitForCancelledTurns: () => this.waitForCancelledTurns(),
       setController: (ctrl, conversationId) => {
-        this.promptRunCtrl = ctrl;
-        this.promptRunConversationId = conversationId ?? null;
+        this.promptRunControllers.set(ctrl, conversationId);
       },
       releaseController: (ctrl) => {
-        if (this.promptRunCtrl === ctrl) {
-          this.promptRunCtrl = null;
-          this.promptRunConversationId = null;
-        }
+        this.promptRunControllers.delete(ctrl);
       },
     };
   }
@@ -229,15 +224,21 @@ export class AgentLoop {
     // lifecycle's: a pending confirmation and a /compact summary are neither
     // of them a turn.
     this.approvals.cancelConversation(convId);
-    if (!convId || this.promptRunConversationId === convId) this.promptRunCtrl?.abort();
+    this.abortPromptRuns(convId);
     return this.lifecycle.cancel(convId);
   }
 
   /** Interrupt a turn for steering without unloading its backend/model. */
   interrupt(convId: string): Promise<void> {
     this.approvals.cancelConversation(convId);
-    if (this.promptRunConversationId === convId) this.promptRunCtrl?.abort();
+    this.abortPromptRuns(convId);
     return this.lifecycle.interrupt(convId);
+  }
+
+  private abortPromptRuns(conversationId?: string): void {
+    for (const [ctrl, owner] of this.promptRunControllers) {
+      if (conversationId === undefined || owner === conversationId) ctrl.abort();
+    }
   }
 
   /** Wait for cancelled turns to release their backend/delegation resources.

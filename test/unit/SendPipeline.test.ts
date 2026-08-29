@@ -83,7 +83,7 @@ function harness(
     post: (msg) => posted.push(msg),
     persistSession: vi.fn(),
     postSessionSync: vi.fn(),
-    postTokenBudget: vi.fn(),
+    evaluateAfterTurn: vi.fn(async () => undefined),
     resetContextWarning: vi.fn(),
   };
 
@@ -214,6 +214,24 @@ describe('SendPipeline.send', () => {
     expect(h.requestChains.isReserved('conv-1')).toBe(false);
   });
 
+  it('runs an internal continuation under the same reservation and intent epoch', async () => {
+    const h = harness();
+    vi.mocked(h.deps.evaluateAfterTurn)
+      .mockResolvedValueOnce({ kind: 'continue', text: 'resume', options: { internal: true } })
+      .mockResolvedValueOnce(undefined);
+    h.runTurn
+      .mockResolvedValueOnce({ kind: 'completed', finalText: 'partial', finishReason: 'length' })
+      .mockResolvedValueOnce({ kind: 'completed', finalText: 'final', finishReason: 'stop' });
+
+    const outcome = await h.pipeline.send('start');
+
+    expect(h.runTurn).toHaveBeenCalledTimes(2);
+    expect(h.runTurn.mock.calls[1]?.[2]).toBe('resume');
+    expect(h.runTurn.mock.calls[1]?.[4]).toEqual({ internal: true });
+    expect(h.requestChains.currentEpoch('conv-1')).toBe(1);
+    expect(outcome).toEqual({ kind: 'completed', finalText: 'final' });
+  });
+
   it('pins the full selection including @profile on the conversation', async () => {
     const h = harness({
       config: {
@@ -236,7 +254,7 @@ describe('SendPipeline.send', () => {
     expect(h.deps.persistSession).toHaveBeenCalledOnce();
     expect(h.deps.postSessionSync).toHaveBeenCalledOnce();
     expect(h.deps.failureTracker.reset).toHaveBeenCalledOnce();
-    expect(h.deps.postTokenBudget).toHaveBeenCalledWith(true);
+    expect(h.deps.evaluateAfterTurn).not.toHaveBeenCalled();
   });
 
   it('only writes a session log for a conversation that has messages', async () => {

@@ -26,24 +26,23 @@ import {
 } from './compactionUserContext';
 import type { PromptRunOptions } from './PromptRun';
 import { getLogger } from '../util/logger';
-import type { UserPromptOptions } from './transcriptMutations';
 import { selectCompactionSplit } from './compactionSplit';
 
 const log = getLogger();
 
 export interface CompactionDeps {
   post: (msg: HostToWebview) => void;
-  getActiveConv: () => ConversationRuntime;
+  getConversation: (conversationId: string) => ConversationRuntime | undefined;
   persistSession: () => void;
   postSessionSync: () => void;
-  invalidateExactTokenBudget: () => void;
-  postTokenBudget: () => void;
+  invalidateExactTokenBudget: (conv: ConversationRuntime) => void;
+  postTokenBudget: (conv: ConversationRuntime) => void;
   runPromptToMarkdown: (
     text: string,
     conversationId?: string,
     options?: PromptRunOptions,
   ) => Promise<string>;
-  isStreaming: () => boolean;
+  isStreaming: (conversationId: string) => boolean;
   /** Marks the conversation busy for the duration of the summarization call.
    *  Returns the release. */
   beginCompaction: (convId: string) => () => void;
@@ -94,15 +93,24 @@ export const MAX_CONSECUTIVE_AUTO_CONTINUES = 2;
  */
 export async function runCompaction(
   deps: CompactionDeps,
+  conversationId: string,
   options: { auto: boolean } = { auto: false },
 ): Promise<CompactionOutcome> {
-  if (deps.isStreaming()) {
+  if (deps.isStreaming(conversationId)) {
     void vscode.window.showInformationMessage(
       'Forge: wait for the current response to finish before compacting.',
     );
     return 'skipped';
   }
-  const conv = deps.getActiveConv();
+  const conv = deps.getConversation(conversationId);
+  if (!conv) {
+    deps.post({
+      type: 'error',
+      message: 'Forge: the conversation to compact is no longer open.',
+      conversationId,
+    });
+    return 'failed';
+  }
   // Only summarize what the model is actually still being sent: re-compacting
   // must not re-summarize turns already folded into the previous summary.
   const from = conv.compaction ? Math.min(conv.compaction.fromIndex, conv.messages.length) : 0;
@@ -212,8 +220,8 @@ export async function runCompaction(
   conv.updatedAt = Date.now();
   deps.persistSession();
   deps.postSessionSync();
-  deps.invalidateExactTokenBudget();
-  deps.postTokenBudget();
+  deps.invalidateExactTokenBudget(conv);
+  deps.postTokenBudget(conv);
   deps.post({
     type: 'notice',
     message: 'Conversation compacted. Chat history is unchanged.',
@@ -225,102 +233,6 @@ export async function runCompaction(
     );
   }
   return 'compacted';
-}
-
-export interface AutoCompactDeps {
-  convId: string;
-  post: (msg: HostToWebview) => void;
-  compact: (options: { auto: boolean }) => Promise<CompactionOutcome>;
-  /** Why the last turn stopped short, or undefined if it finished. */
-  incompleteTurnReason: () => string | undefined;
-  resumeEnabled: boolean;
-  autoContinues: () => number;
-  noteAutoContinue: () => void;
-  send: (text: string, options?: UserPromptOptions) => Promise<void>;
-}
-
-export type CompactionResumeDeps = Pick<
-  AutoCompactDeps,
-  | 'convId'
-  | 'post'
-  | 'incompleteTurnReason'
-  | 'resumeEnabled'
-  | 'autoContinues'
-  | 'noteAutoContinue'
-  | 'send'
->;
-
-/** Continue the conversation after a successful compaction. */
-export async function resumeAfterCompaction(
-  deps: CompactionResumeDeps,
-  options: { automatic: boolean; reason?: string } = { automatic: true },
-): Promise<void> {
-  const reason = options.reason ?? deps.incompleteTurnReason();
-  if (!deps.resumeEnabled) return;
-  if (deps.autoContinues() >= MAX_CONSECUTIVE_AUTO_CONTINUES) {
-    if (!options.automatic) {
-      // An explicit /compact is a deliberate user action and starts a fresh
-      // continuation; the automatic-chain guard must not block it.
-      log.info('[manual-compact] continuing after explicit compaction');
-    } else {
-      log.info('[auto-compact] resume limit reached — waiting for the user');
-      deps.post({
-        type: 'notice',
-        message:
-          'Forge: compacted again without finishing. Stopping here so this does not loop — send a prompt to continue.',
-        conversationId: deps.convId,
-      });
-      return;
-    }
-  }
-
-  if (options.automatic) deps.noteAutoContinue();
-  // Re-arm the webview's streaming state before the resume turn.
-  //
-  // The webview sets `streaming` from its own USER_SEND (a click on Send) or
-  // from a host `generationStarted`. `compact()` posts `done` in its finally,
-  // which clears it — and this resume is host-initiated, so it never produces a
-  // USER_SEND. Without this the resumed turn generated with `streaming: false`:
-  // the Stop button vanished and only Send was left, with no way to cancel a
-  // turn that was still running.
-  deps.post({ type: 'generationStarted', conversationId: deps.convId });
-  log.info(
-    options.automatic
-      ? reason
-        ? `[auto-compact] resuming: ${reason}`
-        : '[auto-compact] continuing after successful compaction'
-      : '[manual-compact] continuing after successful compaction',
-  );
-  deps.post({
-    type: 'notice',
-    message: reason
-      ? `Context compacted mid-task (${reason}). Resuming.`
-      : 'Context compacted. Continuing the active task.',
-    conversationId: deps.convId,
-  });
-  try {
-    await deps.send(RESUME_PROMPT, { internal: true });
-  } catch (err) {
-    deps.post({
-      type: 'error',
-      message: `Forge: could not resume after compaction — ${(err as Error).message}`,
-      conversationId: deps.convId,
-    });
-  }
-}
-
-/** Run threshold compaction and, when enabled, resume the active conversation. */
-export async function autoCompactAndResume(deps: AutoCompactDeps): Promise<void> {
-  // Read before compacting: the summarization call itself must not determine
-  // the status shown for the turn it interrupted.
-  const reason = deps.incompleteTurnReason();
-  const outcome = await deps.compact({ auto: true });
-  if (outcome !== 'compacted') return;
-
-  await resumeAfterCompaction(deps, {
-    automatic: true,
-    ...(reason !== undefined ? { reason } : {}),
-  });
 }
 
 export {

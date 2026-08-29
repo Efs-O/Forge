@@ -21,7 +21,9 @@ import type { UserPromptOptions } from './transcriptMutations';
 import { validateAttachments } from './attachmentValidation';
 import type { ModelConfig } from '../config/types';
 import type { RequestChainLifecycle } from './RequestChainLifecycle';
-import { toRequestOutcome, type ForgeRequestOutcome } from './turnOutcome';
+import type { RequestChainContext } from './RequestChainLifecycle';
+import { toRequestOutcome, type ForgeRequestOutcome, type ForgeTurnOutcome } from './turnOutcome';
+import type { ContextThresholdAction } from './ContextBudgetPublisher';
 
 const log = getLogger();
 
@@ -42,9 +44,12 @@ export interface SendPipelineDeps {
   post: (msg: HostToWebview) => void;
   persistSession: () => void;
   postSessionSync: () => void;
-  /** Republishes the budget; `true` lets it act on the warning/compact thresholds. */
-  postTokenBudget: (evaluateThresholds?: boolean) => void;
-  resetContextWarning: () => void;
+  evaluateAfterTurn: (
+    conv: ConversationRuntime,
+    chain: RequestChainContext,
+    turn: ForgeTurnOutcome,
+  ) => Promise<ContextThresholdAction | undefined>;
+  resetContextWarning: (conversationId: string) => void;
 }
 
 export class SendPipeline {
@@ -179,27 +184,49 @@ export class SendPipeline {
     // Persist the full selection (incl. @profile) on the conversation so tab
     // switches restore the same profile, not just the base model (F6).
     conv.active_model = modelName;
-    deps.resetContextWarning();
+    deps.resetContextWarning(conv.id);
     // USER_SEND covers clicks in the current webview, but auto-compaction
     // resumes, commands, and restored webviews have no such action. Announce
     // every accepted turn here so Stop does not depend on its caller.
     deps.post({ type: 'generationStarted', conversationId: conv.id });
     return deps.requestChains.run(chain, async () => {
-      try {
-        const turn = await deps.agentLoop.runTurn(
-          conv,
-          selectedModel,
-          text,
-          attachments,
-          promptOptions,
-        );
-        return toRequestOutcome(turn);
-      } finally {
-        deps.failureTracker.reset();
-        deps.persistSession();
-        deps.postSessionSync();
-        deps.postTokenBudget(true);
-        this.flushSessionLog(conv.id);
+      let nextText = text;
+      let nextAttachments = attachments;
+      let nextOptions = promptOptions;
+      for (;;) {
+        let turn: ForgeTurnOutcome;
+        try {
+          turn = await deps.agentLoop.runTurn(
+            conv,
+            selectedModel,
+            nextText,
+            nextAttachments,
+            nextOptions,
+          );
+        } finally {
+          deps.failureTracker.reset();
+          deps.persistSession();
+          deps.postSessionSync();
+          this.flushSessionLog(conv.id);
+        }
+        if (turn.kind !== 'completed') return toRequestOutcome(turn);
+        deps.requestChains.setStage(chain, 'evaluating');
+        const action = await deps.evaluateAfterTurn(conv, chain, turn);
+        const terminationKind = deps.requestChains.terminationKind(chain);
+        if (terminationKind) {
+          return {
+            kind: terminationKind,
+            ...(turn.finalText ? { finalText: turn.finalText } : {}),
+            ...(turn.incompleteReason ? { incompleteReason: turn.incompleteReason } : {}),
+          };
+        }
+        if (!action) return toRequestOutcome(turn);
+
+        deps.requestChains.setStage(chain, 'continuing');
+        deps.post({ type: 'generationStarted', conversationId: conv.id });
+        nextText = action.text;
+        nextAttachments = undefined;
+        nextOptions = action.options;
       }
     });
   }

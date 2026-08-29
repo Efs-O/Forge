@@ -14,6 +14,7 @@ import { ToolRegistry } from '../../src/tools/ToolRegistry';
 import type { ForgeConfig, ModelConfig } from '../../src/config/types';
 import type { HostToWebview } from '../../src/sidebar/messageBridge';
 import type { ConversationRuntime, SidebarRuntime } from '../../src/sidebar/sessionTypes';
+import type { RequestChainContext } from '../../src/sidebar/RequestChainLifecycle';
 
 function registry(): ToolRegistry {
   const reg = new ToolRegistry();
@@ -69,7 +70,6 @@ function conversation(usage?: Partial<ConversationRuntime>): ConversationRuntime
 function publish(
   conv: ConversationRuntime,
   overrides: Partial<ContextBudgetDeps> = {},
-  evaluateThresholds = false,
 ): HostToWebview[] {
   const sidebar: SidebarRuntime = {
     activeConversationId: conv.id,
@@ -82,11 +82,11 @@ function publish(
     getSidebar: () => sidebar,
     post: (msg) => posted.push(msg),
     baseOf: (id) => (id ? (id.split('@')[0] ?? null) : null),
-    autoCompact: async () => {},
+    autoCompact: async () => undefined,
     manualCompact: () => {},
     ...overrides,
   } as ContextBudgetDeps);
-  publisher.publish(conv, evaluateThresholds);
+  publisher.publish(conv);
   return posted;
 }
 
@@ -132,61 +132,96 @@ describe('ContextBudgetPublisher reports measured context only', () => {
 });
 
 describe('ContextBudgetPublisher thresholds', () => {
-  function withAutoCompact(fraction: number, at?: number): boolean {
+  const chain = {
+    conversationId: 'tab0',
+    userIntentEpoch: 1,
+    reservation: { conversationId: 'tab0', token: 'test' },
+    autoContinueCount: 0,
+  } as RequestChainContext;
+
+  async function withAutoCompact(fraction: number, at?: number): Promise<boolean> {
     const used = Math.round(32_768 * fraction);
     const conv = conversation({ last_input_tokens: used, last_output_tokens: 0 });
     let compacted = false;
-    publish(
-      conv,
-      {
-        getConfig: () =>
-          ({
-            ...config(),
-            auto_compact: { enabled: true, ...(at !== undefined ? { at } : {}) },
-          }) as unknown as ForgeConfig,
-        autoCompact: async () => {
-          compacted = true;
-        },
+    const sidebar = { activeConversationId: conv.id, conversations: [conv] } as SidebarRuntime;
+    const publisher = new ContextBudgetPublisher({
+      getSidebar: () => sidebar,
+      post: () => undefined,
+      baseOf: (id) => id,
+      manualCompact: () => undefined,
+      getConfig: () =>
+        ({
+          ...config(),
+          auto_compact: { enabled: true, ...(at !== undefined ? { at } : {}) },
+        }) as unknown as ForgeConfig,
+      autoCompact: async () => {
+        compacted = true;
+        return undefined;
       },
-      true,
-    );
+    });
+    await publisher.evaluateAfterTurn(conv, chain);
     return compacted;
   }
 
-  it('fires auto-compaction at the default 85% and not below it', () => {
-    expect(withAutoCompact(0.84)).toBe(false);
-    expect(withAutoCompact(0.85)).toBe(true);
+  it('fires auto-compaction at the default 85% and not below it', async () => {
+    await expect(withAutoCompact(0.84)).resolves.toBe(false);
+    await expect(withAutoCompact(0.85)).resolves.toBe(true);
   });
 
-  it('auto-compacts a locally detected next-request overflow even below the usage threshold', () => {
+  it('auto-compacts a locally detected next-request overflow even below the usage threshold', async () => {
     const conv = conversation({ last_input_tokens: 12_000, last_output_tokens: 0 });
     let compacted = false;
-    publish(
-      conv,
-      {
-        getConfig: () => ({ ...config(), auto_compact: { enabled: true } }) as unknown as ForgeConfig,
-        incompleteTurnReason: () =>
-          "Forge: the next model request cannot fit in this conversation's remaining context. Earlier context must be compacted before continuing.",
-        autoCompact: async () => {
-          compacted = true;
-        },
+    const sidebar = { activeConversationId: conv.id, conversations: [conv] } as SidebarRuntime;
+    const publisher = new ContextBudgetPublisher({
+      getSidebar: () => sidebar,
+      post: () => undefined,
+      baseOf: (id) => id,
+      manualCompact: () => undefined,
+      getConfig: () => ({ ...config(), auto_compact: { enabled: true } }) as unknown as ForgeConfig,
+      incompleteTurnReason: () =>
+        "Forge: the next model request cannot fit in this conversation's remaining context. Earlier context must be compacted before continuing.",
+      autoCompact: async () => {
+        compacted = true;
+        return undefined;
       },
-      true,
-    );
+    });
+    await publisher.evaluateAfterTurn(conv, chain);
     expect(compacted).toBe(true);
   });
 
-  it('honours an explicit threshold', () => {
-    expect(withAutoCompact(0.62, 0.6)).toBe(true);
+  it('honours an explicit threshold', async () => {
+    await expect(withAutoCompact(0.62, 0.6)).resolves.toBe(true);
   });
 
-  it('never evaluates thresholds when the caller did not ask', () => {
+  it('evaluates a background conversation without publishing it as the active budget', async () => {
+    const conv = conversation({ id: 'background', last_input_tokens: 32_000 });
+    const posted: HostToWebview[] = [];
+    let compacted = false;
+    const publisher = new ContextBudgetPublisher({
+      getSidebar: () =>
+        ({ activeConversationId: 'foreground', conversations: [conv] }) as SidebarRuntime,
+      post: (msg) => posted.push(msg),
+      baseOf: (id) => id,
+      manualCompact: () => undefined,
+      getConfig: () => ({ ...config(), auto_compact: { enabled: true } }) as unknown as ForgeConfig,
+      autoCompact: async () => {
+        compacted = true;
+        return undefined;
+      },
+    });
+    await publisher.evaluateAfterTurn(conv, { ...chain, conversationId: conv.id });
+    expect(compacted).toBe(true);
+    expect(posted).toEqual([]);
+  });
+
+  it('never evaluates thresholds during a display-only publish', () => {
     const conv = conversation({ last_input_tokens: 32_000, last_output_tokens: 0 });
     let compacted = false;
     publish(conv, {
       getConfig: () => ({ ...config(), auto_compact: { enabled: true } }) as unknown as ForgeConfig,
       autoCompact: async () => {
         compacted = true;
+        return undefined;
       },
     });
     expect(compacted).toBe(false);

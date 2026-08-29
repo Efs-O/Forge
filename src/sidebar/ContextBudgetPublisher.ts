@@ -25,6 +25,8 @@ import { perSlotContext, reportedContextTokens } from '../util/contextBudget';
 import { mergeGroupsIntoModel } from '../config/ConfigResolver';
 import { getLogger } from '../util/logger';
 import { isContextExhaustionReason } from '../agent/truncationRecovery';
+import type { RequestChainContext } from './RequestChainLifecycle';
+import type { UserPromptOptions } from './transcriptMutations';
 
 const log = getLogger();
 
@@ -60,7 +62,10 @@ export interface ContextBudgetDeps {
   /** Strips @profile and expands aliases to the base model name (F6). */
   baseOf: (id: string | null | undefined) => string | null;
   /** Runs the threshold-triggered compaction (and its resume). */
-  autoCompact: (conv: ConversationRuntime) => Promise<void>;
+  autoCompact: (
+    conv: ConversationRuntime,
+    chain: RequestChainContext,
+  ) => Promise<ContextThresholdAction | undefined>;
   /** Runs a user-accepted `/compact` from the 85% warning. */
   manualCompact: () => void;
   /** A preflight context failure can need compaction even when the last server
@@ -68,42 +73,47 @@ export interface ContextBudgetDeps {
   incompleteTurnReason?: (convId: string) => string | undefined;
 }
 
+export interface ContextThresholdAction {
+  kind: 'continue';
+  text: string;
+  options?: UserPromptOptions;
+}
+
 export class ContextBudgetPublisher {
-  private warningShown = false;
-  private lastTickAt = 0;
-  private tickTimer: ReturnType<typeof setTimeout> | undefined;
-  private pendingTickConvId: string | undefined;
+  private readonly warningShown = new Set<string>();
+  private readonly lastTickAt = new Map<string, number>();
+  private readonly tickTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(private readonly deps: ContextBudgetDeps) {}
 
   /** A new prompt starts a fresh warning cycle. */
-  resetWarning(): void {
-    this.warningShown = false;
+  resetWarning(conversationId: string): void {
+    this.warningShown.delete(conversationId);
   }
 
   /** Cancels a pending throttled tick so a disposed provider is not published to. */
   dispose(): void {
-    if (this.tickTimer) clearTimeout(this.tickTimer);
-    this.tickTimer = undefined;
-    this.pendingTickConvId = undefined;
+    for (const timer of this.tickTimers.values()) clearTimeout(timer);
+    this.tickTimers.clear();
+    this.lastTickAt.clear();
   }
 
   /**
    * Recomputes and posts the budget for `conv`.
    *
-   * `evaluateThresholds` gates the warning and auto-compact, and is set only
-   * where a turn actually added context. Opening or switching a conversation
-   * must refresh the numbers without acting on them — otherwise merely visiting
-   * a full chat would compact it, and the refresh that follows a compaction
-   * could immediately trigger another one.
+   * This is display-only. Addressed threshold action lives in
+   * `evaluateAfterTurn`, so opening or switching a conversation can refresh the
+   * numbers without compacting it.
    */
-  publish(conv: ConversationRuntime, evaluateThresholds: boolean): void {
+  publish(conv: ConversationRuntime): void {
     const config = this.deps.getConfig();
     // The bar renders only the active conversation, and letting a background
     // turn write the bridge would point HalluMeter at a model the user is not
     // looking at. Switching tabs republishes, so the number is refreshed on
     // arrival either way.
-    if (conv.id !== this.deps.getSidebar().activeConversationId) return;
+    if (conv.id !== this.deps.getSidebar().activeConversationId) {
+      return;
+    }
     // The model the user is actually talking to lives on the conversation; the
     // config-level active_model is only a fallback default. Reading the config
     // alone measured the budget for the wrong model whenever the two differed —
@@ -128,7 +138,22 @@ export class ContextBudgetPublisher {
         `token budget unavailable for '${activeSelection}' — no num_ctx on the model or its group(s); context warning and HalluMeter bridge disabled`,
       );
     }
-    if (evaluateThresholds) this.evaluateThresholds(config, conv, used, max);
+  }
+
+  /** Evaluate the completed conversation even when another tab is active. */
+  async evaluateAfterTurn(
+    conv: ConversationRuntime,
+    chain: RequestChainContext,
+  ): Promise<ContextThresholdAction | undefined> {
+    const config = this.deps.getConfig();
+    const selection = conv.active_model ?? config.active_model;
+    const model = this.resolveModel(config, this.deps.baseOf(selection));
+    const max = model ? perSlotContext(model, config.llama_server) : 0;
+    const used = reportedContextTokens(conv);
+    const action = await this.evaluateThresholds(config, conv, used, max, chain);
+    // Publication remains active-tab-only, independently of evaluation.
+    this.publish(conv);
+    return action;
   }
 
   /**
@@ -141,21 +166,19 @@ export class ContextBudgetPublisher {
    * meant to keep current.
    */
   onTurnContextChanged(convId: string): void {
-    const elapsed = Date.now() - this.lastTickAt;
+    const elapsed = Date.now() - (this.lastTickAt.get(convId) ?? 0);
     if (elapsed >= CONTEXT_TICK_THROTTLE_MS) {
-      this.lastTickAt = Date.now();
+      this.lastTickAt.set(convId, Date.now());
       this.publishFor(convId);
       return;
     }
-    this.pendingTickConvId = convId;
-    if (this.tickTimer) return;
-    this.tickTimer = setTimeout(() => {
-      this.tickTimer = undefined;
-      this.lastTickAt = Date.now();
-      const pending = this.pendingTickConvId;
-      this.pendingTickConvId = undefined;
-      if (pending) this.publishFor(pending);
+    if (this.tickTimers.has(convId)) return;
+    const timer = setTimeout(() => {
+      this.tickTimers.delete(convId);
+      this.lastTickAt.set(convId, Date.now());
+      this.publishFor(convId);
     }, CONTEXT_TICK_THROTTLE_MS - elapsed);
+    this.tickTimers.set(convId, timer);
   }
 
   /**
@@ -177,16 +200,17 @@ export class ContextBudgetPublisher {
     // Mid-turn ticks never evaluate thresholds: /compact refuses to run while
     // streaming, and compacting the transcript the tool loop is iterating would
     // corrupt the turn. Auto-compact stays in the post-turn path.
-    if (conv) this.publish(conv, false);
+    if (conv) this.publish(conv);
   }
 
-  private evaluateThresholds(
+  private async evaluateThresholds(
     config: ForgeConfig,
     conv: ConversationRuntime,
     used: number,
     max: number,
-  ): void {
-    if (max <= 0) return;
+    chain: RequestChainContext,
+  ): Promise<ContextThresholdAction | undefined> {
+    if (max <= 0) return undefined;
     const fraction = used / max;
     // Opt-in automatic compaction. Only reached post-turn, so compaction's
     // not-while-streaming guard is already satisfied. It is non-destructive —
@@ -197,16 +221,18 @@ export class ContextBudgetPublisher {
       isContextExhaustionReason(this.deps.incompleteTurnReason?.(conv.id))
     ) {
       log.info('[auto-compact] next request cannot fit — compacting before resume');
-      void this.deps.autoCompact(conv);
-      return;
+      return this.deps.autoCompact(conv, chain);
     }
     if (auto?.enabled === true && fraction >= (auto.at ?? DEFAULT_AUTO_COMPACT_AT)) {
       log.info(`[auto-compact] context at ${Math.round(fraction * 100)}% — compacting`);
-      void this.deps.autoCompact(conv);
-      return;
+      return this.deps.autoCompact(conv, chain);
     }
-    if (fraction >= WARN_AT && !this.warningShown) {
-      this.warningShown = true;
+    if (
+      fraction >= WARN_AT &&
+      conv.id === this.deps.getSidebar().activeConversationId &&
+      !this.warningShown.has(conv.id)
+    ) {
+      this.warningShown.add(conv.id);
       void vscode.window
         .showWarningMessage(
           'Forge: context window is 85% full — run /compact to keep the agent coherent.',
@@ -216,5 +242,6 @@ export class ContextBudgetPublisher {
           if (choice === 'Run /compact') this.deps.manualCompact();
         });
     }
+    return undefined;
   }
 }

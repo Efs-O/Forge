@@ -34,6 +34,7 @@ interface ActiveChain {
   context: RequestChainContext;
   stage: RequestChainStage;
   managedPromise?: Promise<unknown>;
+  terminationKind?: 'cancelled' | 'interrupted';
 }
 
 export type TurnAdmissionResult =
@@ -104,9 +105,19 @@ export class RequestChainLifecycle {
     this.assertContext(context).stage = stage;
   }
 
-  markCancelling(conversationId: string): void {
+  markCancelling(
+    conversationId: string,
+    terminationKind: 'cancelled' | 'interrupted' = 'cancelled',
+  ): void {
     const active = this.chains.get(conversationId);
-    if (active) active.stage = 'cancelling';
+    if (active) {
+      active.stage = 'cancelling';
+      active.terminationKind = terminationKind;
+    }
+  }
+
+  terminationKind(context: RequestChainContext): 'cancelled' | 'interrupted' | undefined {
+    return this.assertContext(context).terminationKind;
   }
 
   release(reservation: TurnReservation): void {
