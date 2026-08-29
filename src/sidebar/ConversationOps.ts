@@ -35,6 +35,7 @@ export type RenameConvResult = { notFound: true } | { ok: true; sidebar: Sidebar
 export function opNewConversation(
   sidebar: SidebarRuntime,
   defaultModel?: string | null,
+  options: { activate?: boolean } = {},
 ): NewConvResult {
   if (sidebar.conversations.length >= MAX_CONVERSATIONS) return { atCap: true };
   const id = newConversationId();
@@ -50,7 +51,7 @@ export function opNewConversation(
   const updated: SidebarRuntime = {
     ...sidebar,
     conversations: [...sidebar.conversations, conv],
-    activeConversationId: id,
+    activeConversationId: options.activate === false ? sidebar.activeConversationId : id,
   };
   return { atCap: false, sidebar: updated, newId: id };
 }
@@ -178,14 +179,18 @@ export function opRenameConversation(
 }
 
 /** Restore a conversation from history (or re-activate if already open). */
-export function opRestoreConversation(sidebar: SidebarRuntime, id: string): RestoreConvResult {
+export function opRestoreConversation(
+  sidebar: SidebarRuntime,
+  id: string,
+  options: { activate?: boolean } = {},
+): RestoreConvResult {
   const existing = sidebar.conversations.find((c) => c.id === id);
   if (existing) {
     return {
       ok: true as const,
-      sidebar: { ...sidebar, activeConversationId: id },
-      newActiveId: id,
-      ...(existing.active_model !== undefined
+      sidebar: options.activate === false ? sidebar : { ...sidebar, activeConversationId: id },
+      newActiveId: options.activate === false ? sidebar.activeConversationId : id,
+      ...(options.activate !== false && existing.active_model !== undefined
         ? { activeModelOverride: existing.active_model }
         : {}),
     };
@@ -205,13 +210,15 @@ export function opRestoreConversation(sidebar: SidebarRuntime, id: string): Rest
     ...sidebar,
     conversations: [...sidebar.conversations, restored],
     history: sidebar.history.filter((c) => c.id !== id),
-    activeConversationId: restored.id,
+    activeConversationId: options.activate === false ? sidebar.activeConversationId : restored.id,
   };
   return {
     ok: true as const,
     sidebar: updated,
-    newActiveId: restored.id,
-    ...(archived.active_model !== undefined ? { activeModelOverride: archived.active_model } : {}),
+    newActiveId: options.activate === false ? sidebar.activeConversationId : restored.id,
+    ...(options.activate !== false && archived.active_model !== undefined
+      ? { activeModelOverride: archived.active_model }
+      : {}),
   };
 }
 

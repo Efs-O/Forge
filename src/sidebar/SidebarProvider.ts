@@ -39,6 +39,7 @@ import type { RequestChainLifecycle } from './RequestChainLifecycle';
 import type { RequestChainContext } from './RequestChainLifecycle';
 import type { ContextThresholdAction } from './ContextBudgetPublisher';
 import { runAddressedAutoCompact } from './autoCompactionPolicy';
+import { SidebarHostFacade, type ForgeHostFacade } from './ForgeHostFacade';
 
 export type { SidebarProviderEvents };
 
@@ -66,6 +67,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly tabs: ConversationTabs;
   private readonly send: SendPipeline;
   private readonly requestChains: RequestChainLifecycle;
+  private readonly hostFacade: ForgeHostFacade;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -138,6 +140,20 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.tabs = runtime.tabs;
     this.send = runtime.send;
     this.requestChains = runtime.requestChains;
+    this.hostFacade = new SidebarHostFacade({
+      createConversation: (options) => this.tabs.create(options),
+      restoreConversation: (conversationId, options) => this.tabs.restore(conversationId, options),
+      send: (conversationId, text, attachments) =>
+        this.send.send(text, attachments, conversationId),
+      cancel: async (conversationId) => {
+        this.requestChains.markCancelling(conversationId);
+        await this.agentLoop.cancel(conversationId);
+      },
+      getActiveConversationId: () => this.sidebar.activeConversationId,
+      getOpenConversations: () => this.sidebar.conversations,
+      getRequestChains: () => this.requestChains.status(),
+      getStreamingConversationIds: () => this.agentLoop.getStreamingIds(),
+    });
     // Register the conversation lookup so the session timer can resolve ids,
     // then fold any unfinished intervals from a previous session into the
     // persisted totals.
@@ -215,6 +231,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   async newConversation(): Promise<void> {
     this.tabs.create();
+  }
+
+  /** Stable addressed seam for the extension-scoped remote runtime. */
+  getHostFacade(): ForgeHostFacade {
+    return this.hostFacade;
   }
 
   /** @deprecated Use newConversation — kept for command registration compatibility. */

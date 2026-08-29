@@ -78,21 +78,32 @@ export class ConversationTabs {
     return conv;
   }
 
-  create(): void {
+  create(options: { activate?: boolean } = {}): ConversationRuntime | undefined {
     // Pin the current selection onto the new tab. Left unpinned it tracked the
     // global default, so switching to another tab and back silently re-pointed
     // this one at that tab's model.
-    const result = opNewConversation(this.deps.getSidebar(), this.deps.getConfig().active_model);
+    const result = opNewConversation(
+      this.deps.getSidebar(),
+      this.deps.getConfig().active_model,
+      options,
+    );
     if (result.atCap) {
       void vscode.window.showWarningMessage(
         `Forge: maximum ${MAX_CONVERSATIONS} conversations. Close one to add another.`,
       );
-      return;
+      return undefined;
     }
     this.deps.setSidebar(result.sidebar);
-    this.deps.failureTracker.reset();
-    this.deps.refreshUi();
+    const created = result.sidebar.conversations.find((conv) => conv.id === result.newId);
+    if (options.activate === false) {
+      this.deps.persistSession();
+      this.deps.postSessionSync();
+    } else {
+      this.deps.failureTracker.reset();
+      this.deps.refreshUi();
+    }
     log.debug('[ConversationTabs] new conversation tab');
+    return created;
   }
 
   /** Empties the active conversation without closing its tab. */
@@ -203,20 +214,26 @@ export class ConversationTabs {
     this.deps.refreshUi();
   }
 
-  restore(id: string): void {
-    const result = opRestoreConversation(this.deps.getSidebar(), id);
+  restore(id: string, options: { activate?: boolean } = {}): ConversationRuntime | undefined {
+    const result = opRestoreConversation(this.deps.getSidebar(), id, options);
     if ('atCap' in result && result.atCap) {
       void vscode.window.showWarningMessage(
         'Forge: maximum open conversations. Close one tab before reopening history.',
       );
-      return;
+      return undefined;
     }
-    if ('notFound' in result) return;
-    if (!('ok' in result)) return;
+    if ('notFound' in result) return undefined;
+    if (!('ok' in result)) return undefined;
     this.deps.setSidebar(result.sidebar);
-    if (result.activeModelOverride) this.deps.setActiveModel(result.activeModelOverride);
-    this.deps.failureTracker.reset();
-    this.deps.refreshUi();
+    if (options.activate === false) {
+      this.deps.persistSession();
+      this.deps.postSessionSync();
+    } else {
+      if (result.activeModelOverride) this.deps.setActiveModel(result.activeModelOverride);
+      this.deps.failureTracker.reset();
+      this.deps.refreshUi();
+    }
+    return result.sidebar.conversations.find((conv) => conv.id === id);
   }
 
   /**
