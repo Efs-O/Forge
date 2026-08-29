@@ -13,6 +13,7 @@ import { SendPipeline, type SendPipelineDeps } from '../../src/sidebar/SendPipel
 import type { ForgeConfig } from '../../src/config/types';
 import type { ConversationRuntime, SidebarRuntime } from '../../src/sidebar/sessionTypes';
 import type { HostToWebview } from '../../src/sidebar/messageBridge';
+import { RequestChainLifecycle } from '../../src/sidebar/RequestChainLifecycle';
 
 function conversation(overrides: Partial<ConversationRuntime> = {}): ConversationRuntime {
   return {
@@ -33,6 +34,7 @@ interface Harness {
   runTurn: ReturnType<typeof vi.fn>;
   deps: SendPipelineDeps;
   conv: ConversationRuntime;
+  requestChains: RequestChainLifecycle;
 }
 
 function harness(options: {
@@ -54,6 +56,7 @@ function harness(options: {
   } as ForgeConfig;
 
   const sidebar = { activeConversationId: conv.id, conversations: [conv] } as SidebarRuntime;
+  const requestChains = new RequestChainLifecycle();
 
   const deps: SendPipelineDeps = {
     getConfig: () => config,
@@ -68,6 +71,7 @@ function harness(options: {
       },
       runTurn,
     } as unknown as SendPipelineDeps['agentLoop'],
+    requestChains,
     failureTracker: { reset: vi.fn() } as unknown as SendPipelineDeps['failureTracker'],
     events: { onBackendError: vi.fn() },
     post: (msg) => posted.push(msg),
@@ -77,7 +81,7 @@ function harness(options: {
     resetContextWarning: vi.fn(),
   };
 
-  return { pipeline: new SendPipeline(deps), posted, runTurn, deps, conv };
+  return { pipeline: new SendPipeline(deps), posted, runTurn, deps, conv, requestChains };
 }
 
 function errors(posted: HostToWebview[]): string[] {
@@ -158,6 +162,43 @@ describe('SendPipeline.send', () => {
 
     expect(h.runTurn).not.toHaveBeenCalled();
     expect(errors(h.posted)).toHaveLength(1);
+  });
+
+  it('does not advance the accepted-intent epoch for rejected preflight', async () => {
+    const missing = harness({ config: { active_model: undefined } as Partial<ForgeConfig> });
+    await missing.pipeline.send('hello');
+    expect(missing.requestChains.currentEpoch('conv-1')).toBe(0);
+
+    const invalid = harness({ config: { active_model: 'ghost', models: [] } as Partial<ForgeConfig> });
+    await invalid.pipeline.send('hello');
+    expect(invalid.requestChains.currentEpoch('conv-1')).toBe(0);
+  });
+
+  it('rejects incompatible image input before admission', async () => {
+    const h = harness();
+    await h.pipeline.send('look', [
+      { name: 'image.png', mediaType: 'image/png', data: 'aGVsbG8=' },
+    ]);
+    expect(h.runTurn).not.toHaveBeenCalled();
+    expect(h.requestChains.currentEpoch('conv-1')).toBe(0);
+    expect(errors(h.posted)[0]).toContain('not configured for image input');
+  });
+
+  it('holds one admission until the accepted turn settles', async () => {
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const h = harness();
+    h.runTurn.mockReturnValueOnce(pending);
+    const first = h.pipeline.send('first');
+    await vi.waitFor(() => expect(h.runTurn).toHaveBeenCalledOnce());
+    await h.pipeline.send('second');
+    expect(h.runTurn).toHaveBeenCalledOnce();
+    expect(h.requestChains.currentEpoch('conv-1')).toBe(1);
+    finish();
+    await first;
+    expect(h.requestChains.isReserved('conv-1')).toBe(false);
   });
 
   it('pins the full selection including @profile on the conversation', async () => {

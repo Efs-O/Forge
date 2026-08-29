@@ -15,9 +15,12 @@ import type { ToolFailureTracker } from '../tools/StripTools';
 import type { AgentLoop, SidebarProviderEvents } from './AgentLoop';
 import { SessionLogger } from './SessionLogger';
 import { resolveRequestModel } from '../config/ConfigResolver';
+import { deriveStaticCapabilities } from '../config/ConfigResolver';
 import { getLogger } from '../util/logger';
 import type { UserPromptOptions } from './transcriptMutations';
 import { validateAttachments } from './attachmentValidation';
+import type { ModelConfig } from '../config/types';
+import type { RequestChainLifecycle } from './RequestChainLifecycle';
 
 const log = getLogger();
 
@@ -32,6 +35,7 @@ export interface SendPipelineDeps {
   getSidebar: () => SidebarRuntime;
   getActive: () => ConversationRuntime;
   agentLoop: AgentLoop;
+  requestChains: RequestChainLifecycle;
   failureTracker: ToolFailureTracker;
   events: SidebarProviderEvents;
   post: (msg: HostToWebview) => void;
@@ -54,7 +58,7 @@ export class SendPipeline {
     promptOptions?: UserPromptOptions,
   ): Promise<void> {
     const { deps } = this;
-    const conv = conversationId
+    let conv = conversationId
       ? deps.getSidebar().conversations.find((candidate) => candidate.id === conversationId)
       : deps.getActive();
     if (!conv) {
@@ -84,6 +88,20 @@ export class SendPipeline {
       return;
     }
     await deps.agentLoop.waitForCancelledTurns();
+    // Everything after the await is the final preflight. No asynchronous gap
+    // is allowed between these checks and the synchronous reservation below.
+    conv = conversationId
+      ? deps.getSidebar().conversations.find((candidate) => candidate.id === conversationId)
+      : deps.getActive();
+    if (!conv) {
+      deps.post({ type: 'error', message: 'Forge: the queued conversation is no longer open.' });
+      return;
+    }
+    const finalAttachmentError = validateAttachments(attachments);
+    if (finalAttachmentError) {
+      deps.post({ type: 'error', message: finalAttachmentError, conversationId: conv.id });
+      return;
+    }
     if (deps.agentLoop.isStreamingConv(conv.id)) {
       deps.post({
         type: 'error',
@@ -102,13 +120,37 @@ export class SendPipeline {
     }
     // Request-time resolution: active_model may carry @profile (F6). Flattens
     // defaults + base + profile into a legacy ModelConfig for the agent loop.
-    let selectedModel;
+    let selectedModel: ModelConfig;
     try {
       selectedModel = resolveRequestModel(config, modelName, (m) => log.info(m));
     } catch (err) {
       deps.post({ type: 'error', message: (err as Error).message, conversationId: conv.id });
       return;
     }
+    const hasImage = attachments?.some((attachment) => attachment.mediaType.startsWith('image/'));
+    if (hasImage && !deriveStaticCapabilities(selectedModel).includes('vision')) {
+      deps.post({
+        type: 'error',
+        message:
+          `Forge: model "${selectedModel.name}" is not configured for image input. ` +
+          'Choose a vision-capable model. For llama.cpp, set mmproj_path to its compatible ' +
+          'projector; for other providers, declare the vision capability only when supported.',
+        conversationId: conv.id,
+      });
+      return;
+    }
+    const admission = deps.requestChains.reserve(conv.id, () =>
+      deps.agentLoop.isStreamingConv(conv.id),
+    );
+    if (admission.kind === 'busy') {
+      deps.post({
+        type: 'error',
+        message: 'Forge: this conversation is still generating. Cancel it before sending again.',
+        conversationId: conv.id,
+      });
+      return;
+    }
+    const chain = deps.requestChains.accept(admission.reservation);
     // Persist the full selection (incl. @profile) on the conversation so tab
     // switches restore the same profile, not just the base model (F6).
     conv.active_model = modelName;
@@ -120,11 +162,15 @@ export class SendPipeline {
     try {
       await deps.agentLoop.runTurn(conv, selectedModel, text, attachments, promptOptions);
     } finally {
-      deps.failureTracker.reset();
-      deps.persistSession();
-      deps.postSessionSync();
-      deps.postTokenBudget(true);
-      this.flushSessionLog(conv.id);
+      try {
+        deps.failureTracker.reset();
+        deps.persistSession();
+        deps.postSessionSync();
+        deps.postTokenBudget(true);
+        this.flushSessionLog(conv.id);
+      } finally {
+        deps.requestChains.release(chain.reservation);
+      }
     }
   }
 

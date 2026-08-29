@@ -27,6 +27,7 @@ import { ConversationTabs } from './ConversationTabs';
 import { SendPipeline } from './SendPipeline';
 import { opResetReportedContext } from './ConversationOps';
 import { snapshotRepoState } from './repoSnapshot';
+import { RequestChainLifecycle } from './RequestChainLifecycle';
 
 /** What the provider lends its collaborators. */
 export interface SidebarHost {
@@ -79,10 +80,12 @@ export interface SidebarRuntimeParts {
   budget: ContextBudgetPublisher;
   tabs: ConversationTabs;
   send: SendPipeline;
+  requestChains: RequestChainLifecycle;
 }
 
 export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRuntimeParts {
   const { pool, checkpoints, toolRegistry, failureTracker, events, workspaceState } = parts;
+  const requestChains = new RequestChainLifecycle();
 
   const agentLoop = new AgentLoop(
     pool,
@@ -159,6 +162,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     getSidebar: host.getSidebar,
     getActive: host.getActive,
     agentLoop,
+    requestChains,
     failureTracker,
     events,
     post: host.post,
@@ -193,5 +197,5 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     },
   });
 
-  return { agentLoop, slashHandler, budget, tabs, send };
+  return { agentLoop, slashHandler, budget, tabs, send, requestChains };
 }
