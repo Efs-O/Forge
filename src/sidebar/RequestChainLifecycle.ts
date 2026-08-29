@@ -35,6 +35,7 @@ interface ActiveChain {
   stage: RequestChainStage;
   managedPromise?: Promise<unknown>;
   terminationKind?: 'cancelled' | 'interrupted';
+  continuationSuppressed?: boolean;
 }
 
 export type TurnAdmissionResult =
@@ -118,6 +119,15 @@ export class RequestChainLifecycle {
 
   terminationKind(context: RequestChainContext): 'cancelled' | 'interrupted' | undefined {
     return this.assertContext(context).terminationKind;
+  }
+
+  suppressContinuation(conversationId: string): void {
+    const active = this.chains.get(conversationId);
+    if (active) active.continuationSuppressed = true;
+  }
+
+  isContinuationSuppressed(context: RequestChainContext): boolean {
+    return this.assertContext(context).continuationSuppressed === true;
   }
 
   release(reservation: TurnReservation): void {

@@ -210,6 +210,7 @@ export class SendPipeline {
           this.flushSessionLog(conv.id);
         }
         if (turn.kind !== 'completed') return toRequestOutcome(turn);
+        if (deps.requestChains.isContinuationSuppressed(chain)) return toRequestOutcome(turn);
         deps.requestChains.setStage(chain, 'evaluating');
         const action = await deps.evaluateAfterTurn(conv, chain, turn);
         const terminationKind = deps.requestChains.terminationKind(chain);

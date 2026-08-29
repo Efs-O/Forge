@@ -149,6 +149,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.requestChains.markCancelling(conversationId);
         await this.agentLoop.cancel(conversationId);
       },
+      queueIntent: (conversationId) => this.requestChains.suppressContinuation(conversationId),
       getActiveConversationId: () => this.sidebar.activeConversationId,
       getOpenConversations: () => this.sidebar.conversations,
       getRequestChains: () => this.requestChains.status(),

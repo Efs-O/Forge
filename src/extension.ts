@@ -1,4 +1,5 @@
 import * as path from 'path';
+import { createHash } from 'crypto';
 import * as vscode from 'vscode';
 import { SidebarProvider } from './sidebar/SidebarProvider';
 import { BackendPool } from './backend/BackendPool';
@@ -42,6 +43,9 @@ import { ModelManagerPanel } from './sidebar/modelManager/ModelManagerPanel';
 import { registerSidebarCommands } from './vscode/sidebarCommands';
 import { flushPendingModelUsage } from './sidebar/modelManager/usageTracker';
 import { backgroundExecutionManager } from './tools/BackgroundExecutionManager';
+import { RemoteRuntime } from './remote/RemoteRuntime';
+
+let activeRemoteRuntime: RemoteRuntime | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   initLogger(context);
@@ -246,11 +250,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     () => activeConfigPath,
     cliSessions,
   );
+  const workspaceId = createHash('sha256')
+    .update(workspaceRoot || `no-workspace:${activeConfigPath}`)
+    .digest('hex');
+  const remoteRuntime = new RemoteRuntime({
+    storageDirectory: context.globalStorageUri.fsPath,
+    workspaceId,
+    host: sidebarProvider.getHostFacade(),
+    secrets: context.secrets,
+    notifyLocal: (message) => void vscode.window.showErrorMessage(message),
+  });
+  activeRemoteRuntime = remoteRuntime;
+  await remoteRuntime.applyConfig(config).catch((err) => {
+    void vscode.window.showErrorMessage(`Forge remote failed to start: ${(err as Error).message}`);
+  });
   context.subscriptions.push({
     dispose: () => {
       void sidebarProvider.dispose();
     },
   });
+  context.subscriptions.push({ dispose: () => void remoteRuntime.dispose() });
   const sessionTimeBar = new SessionTimeStatusBar(() => sidebarProvider.getActiveSessionMetrics());
   refreshSessionTime = () => sessionTimeBar.refresh();
   context.subscriptions.push(sessionTimeBar);
@@ -292,6 +311,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (config.control_server?.enabled) controlServer.start();
         statusBar.setStopped(config.active_model);
         ModelManagerPanel.current?.refresh();
+        void remoteRuntime.applyConfig(config).catch((err) => {
+          void vscode.window.showErrorMessage(
+            `Forge remote failed to reload: ${(err as Error).message}`,
+          );
+        });
       },
     }),
   );
@@ -338,10 +362,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   log.info('Forge activated');
 }
 
-export function deactivate(): void {
+export async function deactivate(): Promise<void> {
   // backend.stop() called via subscription above.
   disposeServerChannel();
   // Debounced last_used writes would otherwise be lost when the window closes
   // within DEBOUNCE_MS of a turn — the exact case the Model Manager cares about.
   flushPendingModelUsage();
+  await activeRemoteRuntime?.dispose();
+  activeRemoteRuntime = undefined;
 }

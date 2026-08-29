@@ -29,6 +29,7 @@ export interface ForgeHostFacade {
     attachments?: AttachmentData[],
   ): Promise<ForgeRequestOutcome>;
   cancel(conversationId: string): Promise<void>;
+  queueIntent(conversationId: string): void;
   status(): ForgeHostStatus;
 }
 
@@ -44,6 +45,7 @@ export interface SidebarHostFacadeDeps {
     attachments?: AttachmentData[],
   ) => Promise<ForgeRequestOutcome>;
   cancel: (conversationId: string) => Promise<void>;
+  queueIntent: (conversationId: string) => void;
   getActiveConversationId: () => string;
   getOpenConversations: () => ConversationRuntime[];
   getRequestChains: () => RequestChainStatus[];
@@ -92,6 +94,10 @@ export class SidebarHostFacade implements ForgeHostFacade {
 
   cancel(conversationId: string): Promise<void> {
     return this.deps.cancel(conversationId);
+  }
+
+  queueIntent(conversationId: string): void {
+    this.deps.queueIntent(conversationId);
   }
 
   status(): ForgeHostStatus {

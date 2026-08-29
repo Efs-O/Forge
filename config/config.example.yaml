@@ -40,7 +40,6 @@
 #   Spawn-time precedence:    group.spawn  <  model.spawn
 # =============================================================================
 
-
 # Which model to load on startup. Either `name` or `name@profile`.
 # This MUST match one of the `name:` values under `models:` below.
 active_model: my-local-model@main
@@ -59,7 +58,6 @@ active_model: my-local-model@main
 # the prompt. See docs/plans/PROMPT_PREFIX_STABILITY_PLAN.md.
 # log_level: debug
 
-
 # -----------------------------------------------------------------------------
 # Project memory
 # -----------------------------------------------------------------------------
@@ -73,7 +71,6 @@ custom_instructions: >-
   Use the repository-specific FORGE.md injected by Forge.
   Keep it concise and update it only when the user explicitly asks to record
   durable project instructions.
-
 
 # -----------------------------------------------------------------------------
 # Permissions — what the agent is allowed to do
@@ -125,7 +122,6 @@ permissions:
     # Allows delegating a task to a local CLI agent (claude / codex below).
     delegate: false
 
-
 # -----------------------------------------------------------------------------
 # llama.cpp — required only if you run local GGUF models
 # -----------------------------------------------------------------------------
@@ -134,11 +130,10 @@ llama_server:
   # cannot guess this, and will tell you plainly if it is missing.
   #   Windows:      "C:/llama.cpp/llama-server.exe"
   #   macOS/Linux:  "/usr/local/bin/llama-server"
-  binary: "C:/path/to/llama.cpp/llama-server.exe"
-  host: "127.0.0.1"
+  binary: 'C:/path/to/llama.cpp/llama-server.exe'
+  host: '127.0.0.1'
   port: 8080
   flash_attn_default: true
-
 
 # -----------------------------------------------------------------------------
 # Optional conveniences
@@ -147,8 +142,19 @@ llama_server:
 # Summarise the conversation automatically as it approaches the context limit.
 auto_compact:
   enabled: true
-  at: 0.85       # trigger at 85% of the per-conversation context window
-  resume: true   # carry on with the task after compacting
+  at: 0.85 # trigger at 85% of the per-conversation context window
+  resume: true # carry on with the task after compacting
+
+# Remote control is default-deny. Provider tokens and paired owner IDs are
+# stored through VS Code SecretStorage, never in this file.
+remote:
+  enabled: false
+  queue_limit: 5
+  max_message_chars: 12000
+  telegram:
+    enabled: false
+  whatsapp:
+    enabled: false
 
 # How many models may be loaded at once across all VS Code windows.
 # Local GGUFs are VRAM-bound; raise this only if you have the memory.
@@ -194,7 +200,6 @@ control_server:
 #   include_globs: [ "**/src/**", "**/test/**", "**/tests/**", "**/docs/**" ]
 #   exclude_globs: [ "**/node_modules/**", "**/dist/**", "**/out/**", "**/.git/**", "**/.forge/**" ]
 
-
 # -----------------------------------------------------------------------------
 # Request-time defaults — the base layer under every model and profile
 # -----------------------------------------------------------------------------
@@ -214,7 +219,6 @@ defaults:
     temperature: 0.6
     top_p: 0.95
     max_tokens: 32768
-
 
 # -----------------------------------------------------------------------------
 # Profiles — request-time role presets
@@ -240,12 +244,10 @@ profiles:
     sampling:
       temperature: 0.2
 
-
 # Optional back-compat shim: map an old model name to a current one, so
 # anything still dispatching by the old name keeps working.
 # aliases:
 #   my-old-model-name: my-local-model
-
 
 # =============================================================================
 # MODELS
@@ -254,13 +256,12 @@ profiles:
 # sent upstream verbatim — so cloud names must match the provider's id exactly.
 # Local GGUF entries can be named whatever you like.
 models:
-
   # ---------------------------------------------------------------------------
   # 1. Local GGUF via llama.cpp — the main event
   # ---------------------------------------------------------------------------
   - name: my-local-model
     # The only line you MUST change. Absolute path to your .gguf file.
-    gguf_path: "C:/path/to/models/your-model-Q4_K_M.gguf"
+    gguf_path: 'C:/path/to/models/your-model-Q4_K_M.gguf'
 
     # OPTIONAL: vision projector. Its mere presence turns on image support —
     # do not also write `capabilities: [vision]`.
@@ -286,12 +287,12 @@ models:
       n_parallel: 1
       extra_llama_server_args:
         # Cap thinking so the model cannot spend a whole turn reasoning.
-        - "--reasoning-budget"
-        - "3072"
+        - '--reasoning-budget'
+        - '3072'
         # What llama.cpp appends when that budget is hit. Nudging the model back
         # toward tool calls works far better than letting it stall.
-        - "--reasoning-budget-message"
-        - "I have been reasoning too long. If I am unsure whether a tool exists, or whether a path is right, I should call it and read the result instead of reasoning further."
+        - '--reasoning-budget-message'
+        - 'I have been reasoning too long. If I am unsure whether a tool exists, or whether a path is right, I should call it and read the result instead of reasoning further.'
         # How much of the prompt gets re-evaluated when an edit lands mid-prompt.
         # llama.cpp reuses the longest prefix its slot already holds, but on
         # hybrid/recurrent (Qwen GDN) and sliding-window (gemma) models it can
@@ -307,8 +308,8 @@ models:
         # flag is spelled --ctx-checkpoints/--swa-checkpoints so it should serve
         # gemma's SWA cache too, but that has not been measured.
         # See docs/plans/SLOT_AFFINITY_AND_CHECKPOINTS_PLAN.md.
-        - "--checkpoint-min-step"
-        - "1024"
+        - '--checkpoint-min-step'
+        - '1024'
 
     group: llamacpp-local
 
@@ -317,7 +318,7 @@ models:
   # ---------------------------------------------------------------------------
   # Requires the Ollama daemon plus `ollama pull <model>` first. `name` must be
   # the exact Ollama tag.
-  - name: "qwen3:8b"
+  - name: 'qwen3:8b'
     num_ctx: 32768
     sampling: { max_tokens: 32768 }
     group: ollama-local
@@ -336,13 +337,13 @@ models:
   #                       which claude   /   which codex     (macOS/Linux)
   - name: claude-code
     provider: cli
-    cli: "C:/Users/<you>/AppData/Roaming/npm/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
-    comment: "Claude Code CLI — external agent, uses your existing Claude subscription"
+    cli: 'C:/Users/<you>/AppData/Roaming/npm/node_modules/@anthropic-ai/claude-code/bin/claude.exe'
+    comment: 'Claude Code CLI — external agent, uses your existing Claude subscription'
 
   - name: codex
     provider: cli
-    cli: "C:/Users/<you>/AppData/Roaming/npm/node_modules/@openai/codex/bin/codex.js"
-    comment: "Codex CLI — external agent, uses your existing OpenAI subscription"
+    cli: 'C:/Users/<you>/AppData/Roaming/npm/node_modules/@openai/codex/bin/codex.js'
+    comment: 'Codex CLI — external agent, uses your existing OpenAI subscription'
 
   # ---------------------------------------------------------------------------
   # 4. Cloud, via an OpenAI-compatible endpoint (optional)
@@ -359,7 +360,6 @@ models:
   #   sampling: { max_tokens: 32768 }
   #   group: openai-compatible-cloud
 
-
 # -----------------------------------------------------------------------------
 # External MCP servers (optional)
 # -----------------------------------------------------------------------------
@@ -371,12 +371,10 @@ models:
 #     command: "C:/path/to/my-mcp-server.exe"
 #     max_result_chars: 20000
 
-
 # =============================================================================
 # GROUPS — shared settings for a family of models
 # =============================================================================
 groups:
-
   llamacpp-local:
     provider: llama.cpp
     think: true

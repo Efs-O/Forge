@@ -69,4 +69,14 @@ describe('RequestChainLifecycle', () => {
     expect(lifecycle.reconcile('a', { providerBusy: false, backgroundBusy: false })).toBe(true);
     expect(lifecycle.isReserved('a')).toBe(false);
   });
+
+  it('lets a durable newer intent suppress only automatic continuation', () => {
+    const lifecycle = new RequestChainLifecycle();
+    const admitted = lifecycle.reserve('a', () => false);
+    if (admitted.kind !== 'reserved') throw new Error('expected reservation');
+    const chain = lifecycle.accept(admitted.reservation);
+    lifecycle.suppressContinuation('a');
+    expect(lifecycle.isContinuationSuppressed(chain)).toBe(true);
+    expect(lifecycle.currentEpoch('a')).toBe(1);
+  });
 });
