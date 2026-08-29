@@ -26,6 +26,7 @@ import type { TurnServices } from './turnServices';
 import { makeRunModelTurn } from './turnServices';
 import { runPromptToMarkdown, type PromptRunOptions } from './PromptRun';
 import { runCloudProviderTurn, runLocalProviderTurn } from './ProviderTurn';
+import type { ForgeTurnOutcome } from './turnOutcome';
 import type { DiffDecorations } from './DiffDecorations';
 import { ToolApprovalService } from './ToolApprovalService';
 import { recordModelUsage } from './modelManager/usageTracker';
@@ -275,7 +276,7 @@ export class AgentLoop {
     text: string,
     attachments?: AttachmentData[],
     promptOptions?: UserPromptOptions,
-  ): Promise<void> {
+  ): Promise<ForgeTurnOutcome> {
     await this.waitForCancelledTurns();
     const convId = conv.id;
     // A new turn supersedes whatever the previous one ended as; auto-compact
@@ -292,11 +293,14 @@ export class AgentLoop {
           'Choose a vision-capable model. For llama.cpp, set mmproj_path to its compatible ' +
           'projector; for other providers, declare the vision capability only when supported.',
       });
-      return;
+      return {
+        kind: 'failed',
+        error: `Forge: model "${model.name}" is not configured for image input.`,
+        finalText: '',
+      };
     }
     if (model.provider === 'cli') {
-      await runCliTurn(this.services, conv, model, text, attachments, postC, promptOptions);
-      return;
+      return runCliTurn(this.services, conv, model, text, attachments, postC, promptOptions);
     }
     const ctrl = new AbortController();
     this.lifecycle.register(convId, ctrl);
@@ -323,10 +327,9 @@ export class AgentLoop {
       postC,
     };
     if (isCloudProvider(model.provider)) {
-      await runCloudProviderTurn(this.services, request);
-      return;
+      return runCloudProviderTurn(this.services, request);
     }
-    await runLocalProviderTurn(this.services, request);
+    return runLocalProviderTurn(this.services, request);
   }
   private commitUserPrompt(
     conv: ConversationRuntime,

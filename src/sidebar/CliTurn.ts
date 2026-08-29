@@ -21,6 +21,7 @@ import { getLogger } from '../util/logger';
 import type { UserPromptOptions } from './transcriptMutations';
 import { renderPlan } from '../tools/planTools';
 import { injectTurnContext } from './turnContext';
+import type { ForgeTurnOutcome } from './turnOutcome';
 
 const log = getLogger();
 
@@ -50,7 +51,7 @@ export async function runCliTurn(
   attachments: AttachmentData[] | undefined,
   postC: (msg: HostToWebview) => void,
   promptOptions?: UserPromptOptions,
-): Promise<void> {
+): Promise<ForgeTurnOutcome> {
   const convId = conv.id;
   // Only the first prompt in a conversation actually starts the CLI agent;
   // later turns resume the warm session, so suppress the start/ready chatter.
@@ -63,7 +64,7 @@ export async function runCliTurn(
     const message = err instanceof Error ? err.message : String(err);
     ctx.events.onBackendError?.(message);
     postC({ type: 'backendDown', message });
-    return;
+    return { kind: 'failed', error: message, finalText: '' };
   }
 
   const ctrl = new AbortController();
@@ -76,6 +77,7 @@ export async function runCliTurn(
   const checkpoint = ctx.checkpoints.beginTurn(`cli-chat-${Date.now()}`, convId);
   ctx.lifecycle.markStreaming(convId);
   let generationStarted = false;
+  let outcome: ForgeTurnOutcome;
 
   try {
     const sessionId = conv.cli_sessions?.[model.name];
@@ -145,12 +147,31 @@ export async function runCliTurn(
       type: 'done',
       finishReason: result.status === 'completed' ? 'stop' : result.status,
     });
+    if (result.status === 'completed') {
+      outcome = { kind: 'completed', finalText: result.finalText, finishReason: 'stop' };
+    } else if (result.status === 'cancelled') {
+      outcome =
+        ctx.lifecycle.terminationKind(convId) === 'interrupted'
+          ? { kind: 'interrupted', finalText: result.finalText }
+          : { kind: 'cancelled', finalText: result.finalText };
+    } else {
+      outcome = {
+        kind: 'failed',
+        error: result.error ?? `${model.name} failed.`,
+        finalText: result.finalText,
+      };
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.error(`[AgentLoop] cli chat failed model=${model.name}: ${message}`);
     ctx.events.onBackendError?.(message);
     postC({ type: 'error', message });
     postC({ type: 'done', finishReason: 'error' });
+    outcome = ctrl.signal.aborted
+      ? ctx.lifecycle.terminationKind(convId) === 'interrupted'
+        ? { kind: 'interrupted', finalText: '' }
+        : { kind: 'cancelled', finalText: '' }
+      : { kind: 'failed', error: message, finalText: '' };
   } finally {
     ctx.lifecycle.clearStreaming(convId);
     conv.updatedAt = Date.now();
@@ -160,4 +181,5 @@ export async function runCliTurn(
     if (generationStarted) ctx.events.onGenerationFinished?.(model.name, convId);
     ctx.lifecycle.settle(convId);
   }
+  return outcome;
 }

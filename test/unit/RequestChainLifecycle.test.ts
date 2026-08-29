@@ -29,4 +29,44 @@ describe('RequestChainLifecycle', () => {
     lifecycle.release(admitted.reservation);
     expect(lifecycle.isReserved('a')).toBe(false);
   });
+
+  it('manages the whole chain promise and reports its cancellation stage', async () => {
+    const lifecycle = new RequestChainLifecycle();
+    const admitted = lifecycle.reserve('a', () => false);
+    if (admitted.kind !== 'reserved') throw new Error('expected reservation');
+    const chain = lifecycle.accept(admitted.reservation, 'remote-1');
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+
+    const run = lifecycle.run(chain, () => pending);
+    await Promise.resolve();
+    expect(lifecycle.status('a')).toEqual([
+      {
+        conversationId: 'a',
+        userIntentEpoch: 1,
+        stage: 'running',
+        managed: true,
+        remoteRequestId: 'remote-1',
+      },
+    ]);
+    lifecycle.markCancelling('a');
+    expect(lifecycle.status('a')[0]?.stage).toBe('cancelling');
+    finish();
+    await run;
+    expect(lifecycle.status('a')).toEqual([]);
+    expect(lifecycle.isReserved('a')).toBe(false);
+  });
+
+  it('reconciles only an unmanaged settling owner with idle lifecycle evidence', () => {
+    const lifecycle = new RequestChainLifecycle();
+    const admitted = lifecycle.reserve('a', () => false);
+    if (admitted.kind !== 'reserved') throw new Error('expected reservation');
+    const chain = lifecycle.accept(admitted.reservation);
+    lifecycle.setStage(chain, 'settling');
+    expect(lifecycle.reconcile('a', { providerBusy: true, backgroundBusy: false })).toBe(false);
+    expect(lifecycle.reconcile('a', { providerBusy: false, backgroundBusy: false })).toBe(true);
+    expect(lifecycle.isReserved('a')).toBe(false);
+  });
 });

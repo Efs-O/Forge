@@ -35,6 +35,7 @@ import type { CompactionPolicyDeps } from './compactionPolicy';
 import { buildWebviewHtml } from './WebviewBuilder';
 import type { IndexManager } from '../search/IndexManager';
 import type { SessionTimeSnapshot } from '../vscode/SessionTimeStatusBar';
+import type { RequestChainLifecycle } from './RequestChainLifecycle';
 
 export type { SidebarProviderEvents };
 
@@ -64,6 +65,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly budget: ContextBudgetPublisher;
   private readonly tabs: ConversationTabs;
   private readonly send: SendPipeline;
+  private readonly requestChains: RequestChainLifecycle;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -135,6 +137,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.budget = runtime.budget;
     this.tabs = runtime.tabs;
     this.send = runtime.send;
+    this.requestChains = runtime.requestChains;
     // Register the conversation lookup so the session timer can resolve ids,
     // then fold any unfinished intervals from a previous session into the
     // persisted totals.
@@ -313,7 +316,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       post: (msg) => this.post(msg),
       compact: (options) => this.slashHandler.compact(options),
       incompleteTurnReason: (convId) => this.agentLoop.incompleteTurnReason(convId),
-      send: (text, convId, options) => this.send.send(text, undefined, convId, options),
+      send: async (text, convId, options) => {
+        await this.send.send(text, undefined, convId, options);
+      },
       resumeEnabled: this.config.auto_compact?.resume !== false,
       autoContinues: () => this.autoContinues,
       noteAutoContinue: () => {
@@ -378,10 +383,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           // leaves the backend loaded so the redirected turn starts without a
           // llama-server model reload.
           this.autoContinues = 0;
+          this.requestChains.markCancelling(conversationId);
           await this.agentLoop.interrupt(conversationId);
           await this.send.send(text, attachments, conversationId);
         },
-        cancel: () => void this.agentLoop.cancel(this.sidebar.activeConversationId),
+        cancel: () => {
+          this.requestChains.markCancelling(this.sidebar.activeConversationId);
+          void this.agentLoop.cancel(this.sidebar.activeConversationId);
+        },
         switchModel: (name) => this.tabs.pinModel(name),
         undo: () => this.undo(),
         keep: () => this.keep(),

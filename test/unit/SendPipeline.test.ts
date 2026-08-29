@@ -37,16 +37,22 @@ interface Harness {
   requestChains: RequestChainLifecycle;
 }
 
-function harness(options: {
-  config?: Partial<ForgeConfig>;
-  conv?: Partial<ConversationRuntime>;
-  streaming?: boolean;
-  cancellationPending?: boolean;
-  streamingAfterWait?: boolean;
-} = {}): Harness {
+function harness(
+  options: {
+    config?: Partial<ForgeConfig>;
+    conv?: Partial<ConversationRuntime>;
+    streaming?: boolean;
+    cancellationPending?: boolean;
+    streamingAfterWait?: boolean;
+  } = {},
+): Harness {
   const conv = conversation(options.conv);
   const posted: HostToWebview[] = [];
-  const runTurn = vi.fn().mockResolvedValue(undefined);
+  const runTurn = vi.fn().mockResolvedValue({
+    kind: 'completed',
+    finalText: 'finished',
+    finishReason: 'stop',
+  });
   let waited = false;
 
   const config = {
@@ -93,7 +99,7 @@ describe('SendPipeline.send', () => {
 
   it('runs the turn on the active conversation', async () => {
     const h = harness();
-    await h.pipeline.send('hello');
+    const outcome = await h.pipeline.send('hello');
 
     expect(h.runTurn).toHaveBeenCalledOnce();
     const [conv, model, text] = h.runTurn.mock.calls[0]!;
@@ -101,6 +107,7 @@ describe('SendPipeline.send', () => {
     expect(model.name).toBe('qwen');
     expect(text).toBe('hello');
     expect(errors(h.posted)).toEqual([]);
+    expect(outcome).toEqual({ kind: 'completed', finalText: 'finished' });
   });
 
   it('announces an accepted host-initiated turn so Stop is available', async () => {
@@ -169,7 +176,9 @@ describe('SendPipeline.send', () => {
     await missing.pipeline.send('hello');
     expect(missing.requestChains.currentEpoch('conv-1')).toBe(0);
 
-    const invalid = harness({ config: { active_model: 'ghost', models: [] } as Partial<ForgeConfig> });
+    const invalid = harness({
+      config: { active_model: 'ghost', models: [] } as Partial<ForgeConfig>,
+    });
     await invalid.pipeline.send('hello');
     expect(invalid.requestChains.currentEpoch('conv-1')).toBe(0);
   });
@@ -186,8 +195,12 @@ describe('SendPipeline.send', () => {
 
   it('holds one admission until the accepted turn settles', async () => {
     let finish!: () => void;
-    const pending = new Promise<void>((resolve) => {
-      finish = resolve;
+    const pending = new Promise<{
+      kind: 'completed';
+      finalText: string;
+      finishReason: string;
+    }>((resolve) => {
+      finish = () => resolve({ kind: 'completed', finalText: 'first done', finishReason: 'stop' });
     });
     const h = harness();
     h.runTurn.mockReturnValueOnce(pending);

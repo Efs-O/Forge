@@ -21,6 +21,7 @@ import type { UserPromptOptions } from './transcriptMutations';
 import { validateAttachments } from './attachmentValidation';
 import type { ModelConfig } from '../config/types';
 import type { RequestChainLifecycle } from './RequestChainLifecycle';
+import { toRequestOutcome, type ForgeRequestOutcome } from './turnOutcome';
 
 const log = getLogger();
 
@@ -56,7 +57,7 @@ export class SendPipeline {
     attachments?: AttachmentData[],
     conversationId?: string,
     promptOptions?: UserPromptOptions,
-  ): Promise<void> {
+  ): Promise<ForgeRequestOutcome> {
     const { deps } = this;
     let conv = conversationId
       ? deps.getSidebar().conversations.find((candidate) => candidate.id === conversationId)
@@ -66,12 +67,16 @@ export class SendPipeline {
       // there is no tab to route it to. The active tab is the only place the
       // user can actually see it, and nothing is left streaming to clear.
       deps.post({ type: 'error', message: 'Forge: the queued conversation is no longer open.' });
-      return;
+      return {
+        kind: 'failed',
+        error: 'Forge: the queued conversation is no longer open.',
+        finalText: '',
+      };
     }
     const attachmentError = validateAttachments(attachments);
     if (attachmentError) {
       deps.post({ type: 'error', message: attachmentError, conversationId: conv.id });
-      return;
+      return { kind: 'failed', error: attachmentError, finalText: '' };
     }
     // Every refusal below MUST name the conversation it refers to. The webview
     // resolves an unaddressed message against the ACTIVE tab, and its ERROR
@@ -85,7 +90,11 @@ export class SendPipeline {
         message: 'Forge: this conversation is still generating. Cancel it first or open a new tab.',
         conversationId: conv.id,
       });
-      return;
+      return {
+        kind: 'failed',
+        error: 'Forge: this conversation is still generating.',
+        finalText: '',
+      };
     }
     await deps.agentLoop.waitForCancelledTurns();
     // Everything after the await is the final preflight. No asynchronous gap
@@ -95,12 +104,16 @@ export class SendPipeline {
       : deps.getActive();
     if (!conv) {
       deps.post({ type: 'error', message: 'Forge: the queued conversation is no longer open.' });
-      return;
+      return {
+        kind: 'failed',
+        error: 'Forge: the queued conversation is no longer open.',
+        finalText: '',
+      };
     }
     const finalAttachmentError = validateAttachments(attachments);
     if (finalAttachmentError) {
       deps.post({ type: 'error', message: finalAttachmentError, conversationId: conv.id });
-      return;
+      return { kind: 'failed', error: finalAttachmentError, finalText: '' };
     }
     if (deps.agentLoop.isStreamingConv(conv.id)) {
       deps.post({
@@ -108,7 +121,11 @@ export class SendPipeline {
         message: 'Forge: this conversation is still generating. Cancel it before sending again.',
         conversationId: conv.id,
       });
-      return;
+      return {
+        kind: 'failed',
+        error: 'Forge: this conversation is still generating.',
+        finalText: '',
+      };
     }
     const config = deps.getConfig();
     const modelName = conv.active_model ?? config.active_model;
@@ -116,7 +133,7 @@ export class SendPipeline {
       const message = 'Forge: no active model selected. Pick a model before sending.';
       deps.events.onBackendError?.(message);
       deps.post({ type: 'error', message, conversationId: conv.id });
-      return;
+      return { kind: 'failed', error: message, finalText: '' };
     }
     // Request-time resolution: active_model may carry @profile (F6). Flattens
     // defaults + base + profile into a legacy ModelConfig for the agent loop.
@@ -125,7 +142,7 @@ export class SendPipeline {
       selectedModel = resolveRequestModel(config, modelName, (m) => log.info(m));
     } catch (err) {
       deps.post({ type: 'error', message: (err as Error).message, conversationId: conv.id });
-      return;
+      return { kind: 'failed', error: (err as Error).message, finalText: '' };
     }
     const hasImage = attachments?.some((attachment) => attachment.mediaType.startsWith('image/'));
     if (hasImage && !deriveStaticCapabilities(selectedModel).includes('vision')) {
@@ -137,7 +154,11 @@ export class SendPipeline {
           'projector; for other providers, declare the vision capability only when supported.',
         conversationId: conv.id,
       });
-      return;
+      return {
+        kind: 'failed',
+        error: `Forge: model "${selectedModel.name}" is not configured for image input.`,
+        finalText: '',
+      };
     }
     const admission = deps.requestChains.reserve(conv.id, () =>
       deps.agentLoop.isStreamingConv(conv.id),
@@ -148,7 +169,11 @@ export class SendPipeline {
         message: 'Forge: this conversation is still generating. Cancel it before sending again.',
         conversationId: conv.id,
       });
-      return;
+      return {
+        kind: 'failed',
+        error: 'Forge: this conversation is still generating.',
+        finalText: '',
+      };
     }
     const chain = deps.requestChains.accept(admission.reservation);
     // Persist the full selection (incl. @profile) on the conversation so tab
@@ -159,19 +184,24 @@ export class SendPipeline {
     // resumes, commands, and restored webviews have no such action. Announce
     // every accepted turn here so Stop does not depend on its caller.
     deps.post({ type: 'generationStarted', conversationId: conv.id });
-    try {
-      await deps.agentLoop.runTurn(conv, selectedModel, text, attachments, promptOptions);
-    } finally {
+    return deps.requestChains.run(chain, async () => {
       try {
+        const turn = await deps.agentLoop.runTurn(
+          conv,
+          selectedModel,
+          text,
+          attachments,
+          promptOptions,
+        );
+        return toRequestOutcome(turn);
+      } finally {
         deps.failureTracker.reset();
         deps.persistSession();
         deps.postSessionSync();
         deps.postTokenBudget(true);
         this.flushSessionLog(conv.id);
-      } finally {
-        deps.requestChains.release(chain.reservation);
       }
-    }
+    });
   }
 
   /**

@@ -39,6 +39,7 @@ import {
   isTurnCutOffError,
   ROUND_CAP_INCOMPLETE_PREFIX,
   runToolCallingLoop,
+  type ToolCallingLoopResult,
 } from '../agent/ToolCallingLoop';
 import {
   buildTemplateContext,
@@ -158,7 +159,7 @@ async function trackTurnCompletion<T>(
 export async function runModelTurn(
   ctx: ModelTurnContext,
   { baseUrl, conv, model, activeFile, ctrl, postC, apiKey, checkpoint }: ModelTurnRequest,
-): Promise<void> {
+): Promise<ToolCallingLoopResult> {
   const config = ctx.getConfig();
   const allowed = resolveToolPermissions(config);
   // One budget per turn — model is already resolveRequestModel()'d
@@ -391,4 +392,5 @@ export async function runModelTurn(
         `(or its group) if this task legitimately needs more.`,
     });
   }
+  return result;
 }

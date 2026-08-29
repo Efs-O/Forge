@@ -12,6 +12,7 @@ import type { ForgeConfig, ModelConfig } from '../config/types';
 import type { AttachmentData, HostToWebview } from './messageBridge';
 import type { ConversationRuntime } from './sessionTypes';
 import type { ModelTurnRequest } from './ModelTurn';
+import type { ToolCallingLoopResult } from '../agent/ToolCallingLoop';
 import type { IBackendPool } from '../backend/BackendPool';
 import type { CheckpointStack, CheckpointSession } from '../checkpoint/CheckpointStack';
 import type { RuntimeModelCapabilities } from '../backend/ModelCapabilities';
@@ -66,7 +67,7 @@ export interface TurnServices {
     postC: (msg: HostToWebview) => void,
     apiKey: string | undefined,
     checkpoint: CheckpointSession,
-  ) => Promise<void>;
+  ) => Promise<ToolCallingLoopResult>;
   waitForCancelledTurns: () => Promise<void>;
   /** Associates an out-of-band model request with its owning conversation when
    * one exists, so that tab's Stop action can abort it. */
@@ -81,7 +82,7 @@ export interface TurnServices {
  */
 export function makeRunModelTurn(
   getServices: () => TurnServices,
-  run: (services: TurnServices, options: ModelTurnRequest) => Promise<void>,
+  run: (services: TurnServices, options: ModelTurnRequest) => Promise<ToolCallingLoopResult>,
 ): TurnServices['runModelTurn'] {
   return (baseUrl, conv, model, activeFile, ctrl, postC, apiKey, checkpoint) =>
     run(getServices(), {

@@ -13,6 +13,29 @@ export interface RequestChainContext {
   readonly remoteRequestId?: string;
 }
 
+export type RequestChainStage =
+  | 'reserved'
+  | 'running'
+  | 'evaluating'
+  | 'compacting'
+  | 'continuing'
+  | 'cancelling'
+  | 'settling';
+
+export interface RequestChainStatus {
+  conversationId: string;
+  userIntentEpoch: number;
+  stage: RequestChainStage;
+  managed: boolean;
+  remoteRequestId?: string;
+}
+
+interface ActiveChain {
+  context: RequestChainContext;
+  stage: RequestChainStage;
+  managedPromise?: Promise<unknown>;
+}
+
 export type TurnAdmissionResult =
   | { kind: 'reserved'; reservation: TurnReservation }
   | { kind: 'busy'; conversationId: string };
@@ -29,6 +52,7 @@ export type TurnAdmissionResult =
 export class RequestChainLifecycle {
   private readonly reservations = new Map<string, TurnReservation>();
   private readonly epochs = new Map<string, number>();
+  private readonly chains = new Map<string, ActiveChain>();
 
   reserve(conversationId: string, externallyBusy: () => boolean): TurnAdmissionResult {
     if (this.reservations.has(conversationId) || externallyBusy()) {
@@ -44,18 +68,52 @@ export class RequestChainLifecycle {
     this.assertOwner(reservation);
     const userIntentEpoch = (this.epochs.get(reservation.conversationId) ?? 0) + 1;
     this.epochs.set(reservation.conversationId, userIntentEpoch);
-    return {
+    const context: RequestChainContext = {
       conversationId: reservation.conversationId,
       userIntentEpoch,
       reservation,
       autoContinueCount: 0,
       ...(remoteRequestId ? { remoteRequestId } : {}),
     };
+    this.chains.set(reservation.conversationId, { context, stage: 'reserved' });
+    return context;
+  }
+
+  /** Own the complete request promise, including post-turn work and settlement. */
+  async run<T>(context: RequestChainContext, task: () => Promise<T>): Promise<T> {
+    const active = this.assertContext(context);
+    if (active.managedPromise) {
+      throw new Error(`Forge: request chain ${context.conversationId} is already running.`);
+    }
+    active.stage = 'running';
+    const managed = Promise.resolve().then(task);
+    active.managedPromise = managed;
+    try {
+      return await managed;
+    } finally {
+      const current = this.chains.get(context.conversationId);
+      if (current === active) {
+        current.stage = 'settling';
+        delete current.managedPromise;
+      }
+      this.release(context.reservation);
+    }
+  }
+
+  setStage(context: RequestChainContext, stage: RequestChainStage): void {
+    this.assertContext(context).stage = stage;
+  }
+
+  markCancelling(conversationId: string): void {
+    const active = this.chains.get(conversationId);
+    if (active) active.stage = 'cancelling';
   }
 
   release(reservation: TurnReservation): void {
     const current = this.reservations.get(reservation.conversationId);
-    if (current?.token === reservation.token) this.reservations.delete(reservation.conversationId);
+    if (current?.token !== reservation.token) return;
+    this.reservations.delete(reservation.conversationId);
+    this.chains.delete(reservation.conversationId);
   }
 
   currentEpoch(conversationId: string): number {
@@ -70,6 +128,41 @@ export class RequestChainLifecycle {
     return this.reservations.has(conversationId);
   }
 
+  status(conversationId?: string): RequestChainStatus[] {
+    const active = conversationId
+      ? [this.chains.get(conversationId)].filter((chain): chain is ActiveChain => !!chain)
+      : [...this.chains.values()];
+    return active.map(({ context, stage, managedPromise }) => ({
+      conversationId: context.conversationId,
+      userIntentEpoch: context.userIntentEpoch,
+      stage,
+      managed: managedPromise !== undefined,
+      ...(context.remoteRequestId ? { remoteRequestId: context.remoteRequestId } : {}),
+    }));
+  }
+
+  /**
+   * Release only with positive evidence that no owner can still mutate state.
+   * Elapsed time is intentionally absent: a slow model is not an orphan.
+   */
+  reconcile(
+    conversationId: string,
+    evidence: { providerBusy: boolean; backgroundBusy: boolean },
+  ): boolean {
+    const active = this.chains.get(conversationId);
+    if (
+      !active ||
+      active.managedPromise ||
+      evidence.providerBusy ||
+      evidence.backgroundBusy ||
+      (active.stage !== 'settling' && active.stage !== 'cancelling')
+    ) {
+      return false;
+    }
+    this.release(active.context.reservation);
+    return true;
+  }
+
   private assertOwner(reservation: TurnReservation): void {
     const current = this.reservations.get(reservation.conversationId);
     if (current?.token !== reservation.token) {
@@ -77,5 +170,14 @@ export class RequestChainLifecycle {
         `Forge: request-chain reservation was lost for ${reservation.conversationId}.`,
       );
     }
+  }
+
+  private assertContext(context: RequestChainContext): ActiveChain {
+    this.assertOwner(context.reservation);
+    const active = this.chains.get(context.conversationId);
+    if (active?.context !== context || !this.isCurrent(context)) {
+      throw new Error(`Forge: request chain is stale for ${context.conversationId}.`);
+    }
+    return active;
   }
 }
