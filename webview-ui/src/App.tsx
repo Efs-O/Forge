@@ -29,6 +29,7 @@ import { resumedNoteFor, resumedTabIds } from './resumedTabs';
 import { StreamingStatus } from './components/StreamingStatus';
 import { SLASH_COMMANDS } from './slashCommands';
 import { webviewDiagnostics } from './WebviewDiagnostics';
+import { useHostCommands } from './hostCommands';
 
 interface QueuedPrompt {
   id: string;
@@ -162,6 +163,11 @@ export function App(): React.ReactElement {
             isDangerous: msg.isDangerous,
           });
           break;
+        case 'confirmResolved':
+          // Only clear the dialog we are actually showing: a late resolve for an
+          // older approval must not dismiss the one now on screen.
+          setConfirmRequest((current) => (current?.id === msg.id ? null : current));
+          break;
         case 'tokenBudget':
           setTokenUsed(msg.used);
           setTokenMax(msg.max);
@@ -262,31 +268,16 @@ export function App(): React.ReactElement {
     [clearResumed, queuedPrompts],
   );
 
-  const handleCancel = useCallback(() => {
-    vscode.postMessage({ type: 'cancel' });
-  }, []);
-  const handleModelChange = useCallback((name: string | null) => {
-    dispatch({ type: 'SET_MODEL', name });
-    vscode.postMessage({ type: 'switchModel', name });
-  }, []);
-  const handleNewConversation = useCallback(() => {
-    vscode.postMessage({ type: 'newConversation' });
-  }, []);
-  const handleSwitchTab = useCallback((id: string) => {
-    vscode.postMessage({ type: 'switchConversation', id });
-  }, []);
-  const handleCloseTab = useCallback((id: string) => {
-    vscode.postMessage({ type: 'closeConversation', id });
-  }, []);
-  const handleRestoreConversation = useCallback((id: string) => {
-    vscode.postMessage({ type: 'restoreConversation', id });
-  }, []);
-  const handleDeleteConversation = useCallback((id: string) => {
-    vscode.postMessage({ type: 'deleteConversation', id });
-  }, []);
-  const handleRenameConversation = useCallback((id: string, title: string) => {
-    vscode.postMessage({ type: 'renameConversation', id, title });
-  }, []);
+  const {
+    handleCancel,
+    handleModelChange,
+    handleNewConversation,
+    handleSwitchTab,
+    handleCloseTab,
+    handleRestoreConversation,
+    handleDeleteConversation,
+    handleRenameConversation,
+  } = useHostCommands(dispatch);
 
   // Picking a session from the panel is a navigation, so the panel dismisses
   // itself — left open it hides the very conversation just selected behind the

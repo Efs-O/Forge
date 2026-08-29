@@ -31,7 +31,11 @@ const TelegramResponseSchema = z.object({
 });
 
 type Fetch = typeof fetch;
+const TelegramSentMessageSchema = z.object({ message_id: z.number().int() });
+
 const CURSOR_KEY = 'telegram:update-offset';
+/** Unanswered prompts are rare; this only bounds a pathological case. */
+const PROMPT_MESSAGE_LIMIT = 256;
 const TELEGRAM_TEXT_LIMIT = 4096;
 export const TELEGRAM_BOT_TOKEN_SECRET = 'forge.remote.telegram.botToken';
 
@@ -48,6 +52,13 @@ export class TelegramChannel implements RemoteChannel {
   readonly name = 'telegram' as const;
   private handler: ((event: RemoteInboundEvent) => Promise<RemoteInboundDisposition>) | undefined;
   private readonly fetchImpl: Fetch;
+  /**
+   * correlationId -> message_id of the prompt that carries its keyboard, so a
+   * resolved approval can have its buttons removed. Bounded by
+   * PROMPT_MESSAGE_LIMIT: an approval nobody ever answers would otherwise leak
+   * an entry per prompt for the life of the window.
+   */
+  private readonly promptMessages = new Map<string, number>();
 
   constructor(private readonly options: TelegramChannelOptions) {
     this.fetchImpl = options.fetch ?? fetch;
@@ -78,7 +89,7 @@ export class TelegramChannel implements RemoteChannel {
     const chunks = splitTelegramText(text);
     for (let index = 0; index < chunks.length; index++) {
       const correlationId = index === 0 ? options?.correlationId : undefined;
-      await this.call(
+      const sent = await this.call(
         'sendMessage',
         {
           chat_id: chatId,
@@ -98,7 +109,35 @@ export class TelegramChannel implements RemoteChannel {
         },
         options?.signal,
       );
+      if (correlationId) this.rememberPrompt(correlationId, sent);
     }
+  }
+
+  /**
+   * Clears the inline keyboard, leaving the prompt text in place as the record
+   * of what was asked. A prompt already edited, deleted, or unknown to this
+   * process (a window reload drops the map) is not an error: there is nothing
+   * left to retract, and failing here would surface as a spurious remote error.
+   */
+  async retractPrompt(chatId: string, correlationId: string, signal?: AbortSignal): Promise<void> {
+    const messageId = this.promptMessages.get(correlationId);
+    this.promptMessages.delete(correlationId);
+    if (messageId === undefined) return;
+    await this.call(
+      'editMessageReplyMarkup',
+      { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } },
+      signal,
+    ).catch(() => undefined);
+  }
+
+  private rememberPrompt(correlationId: string, sent: unknown): void {
+    const parsed = TelegramSentMessageSchema.safeParse(sent);
+    if (!parsed.success) return;
+    if (this.promptMessages.size >= PROMPT_MESSAGE_LIMIT) {
+      const oldest = this.promptMessages.keys().next();
+      if (!oldest.done) this.promptMessages.delete(oldest.value);
+    }
+    this.promptMessages.set(correlationId, parsed.data.message_id);
   }
 
   async healthCheck(): Promise<{ ok: boolean; detail: string }> {

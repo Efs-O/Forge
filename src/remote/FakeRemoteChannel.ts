@@ -3,6 +3,7 @@ import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from
 export class FakeRemoteChannel implements RemoteChannel {
   readonly name = 'fake' as const;
   readonly sent: Array<{ chatId: string; text: string; correlationId?: string }> = [];
+  readonly retracted: Array<{ chatId: string; correlationId: string }> = [];
   private handler: ((event: RemoteInboundEvent) => Promise<RemoteInboundDisposition>) | undefined;
 
   onEvent(handler: (event: RemoteInboundEvent) => Promise<RemoteInboundDisposition>): {
@@ -27,5 +28,9 @@ export class FakeRemoteChannel implements RemoteChannel {
     options?: { correlationId?: string; signal?: AbortSignal },
   ): Promise<void> {
     this.sent.push({ chatId, text, ...(options?.correlationId ? options : {}) });
+  }
+
+  async retractPrompt(chatId: string, correlationId: string): Promise<void> {
+    this.retracted.push({ chatId, correlationId });
   }
 }

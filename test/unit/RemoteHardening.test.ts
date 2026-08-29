@@ -84,6 +84,10 @@ function host(overrides: Partial<ForgeHostFacade> = {}): ForgeHostFacade {
       requestChains: [],
       streamingConversationIds: [],
     }),
+    clankerMode: vi.fn(() => false),
+    setClankerMode: vi.fn(),
+    contextBudget: vi.fn(() => ({ used: 1000, max: 4000 })),
+    compact: vi.fn(async () => 'compacted' as const),
     ...overrides,
   } as ForgeHostFacade;
 }
@@ -139,6 +143,130 @@ describe('remote authorization and privacy hardening', () => {
       action: 'request_accepted',
       requestId: 'request-1',
     });
+  });
+});
+
+describe('remote owner commands', () => {
+  async function ownerController(overrides = {}) {
+    const { store } = await newStore();
+    const secrets = new MemorySecrets();
+    secrets.values.set('forge.remote.fake.ownerId', 'owner-raw-id');
+    const channel = new FakeRemoteChannel();
+    const forgeHost = host(overrides);
+    const controller = new RemoteController(
+      channel,
+      store,
+      new RemoteAuth(secrets as unknown as vscode.SecretStorage),
+      forgeHost,
+      { workspaceId: 'workspace', queueLimit: 5, maxMessageChars: 500, rateLimitPerMinute: 30 },
+    );
+    await controller.start();
+    return { channel, controller, forgeHost };
+  }
+
+  it('reports the context meter and the approval gate in /status', async () => {
+    const { channel, controller } = await ownerController({ clankerMode: vi.fn(() => true) });
+    await channel.emit(event({ providerMessageId: 'new', text: '/new' }));
+    await channel.emit(event({ providerMessageId: 'status', text: '/status' }));
+    const reply = channel.sent.at(-1)?.text ?? '';
+    expect(reply).toContain('1000/4000 tokens (25%)');
+    // A remote owner cannot see the sidebar, so a disabled gate must be stated.
+    expect(reply).toContain('CLANKER');
+    await controller.stop();
+  });
+
+  it('confirms a pressed approval button, clears its keyboard, and rejects a replay', async () => {
+    let sink: { requested: (e: never) => void; resolved: (e: never) => void } | undefined;
+    // The chain is what ties an approval back to the remote request that caused
+    // it; filled in once the prompt below has been admitted.
+    let chainRequestId: string | undefined;
+    const { channel, controller, forgeHost } = await ownerController({
+      addApprovalSink: (registered: never) => {
+        sink = registered as unknown as typeof sink;
+        return { dispose: () => undefined };
+      },
+      status: () => ({
+        activeConversationId: 'c1',
+        conversations: [],
+        requestChains: [
+          {
+            conversationId: 'c1',
+            userIntentEpoch: 1,
+            stage: 'running',
+            managed: true,
+            ...(chainRequestId ? { remoteRequestId: chainRequestId } : {}),
+          },
+        ],
+        streamingConversationIds: [],
+      }),
+    });
+    await channel.emit(event({ providerMessageId: 'new', text: '/new' }));
+    const accepted = await channel.emit(event({ providerMessageId: 'ask', text: 'edit README' }));
+    const requestId = 'requestId' in accepted ? accepted.requestId : undefined;
+    expect(requestId).toBeDefined();
+    chainRequestId = requestId;
+
+    const approval = {
+      id: 'approval-1',
+      conversationId: 'c1',
+      toolName: 'edit_file',
+      detail: '{}',
+      dangerous: false,
+    };
+    sink?.requested(approval as never);
+    const prompt = channel.sent.at(-1);
+    expect(prompt?.correlationId).toBe('approval-1');
+
+    const action = event({
+      providerMessageId: 'press',
+      kind: 'action',
+      action: 'approve',
+      correlationId: 'approval-1',
+    });
+    await expect(channel.emit(action)).resolves.toEqual({ kind: 'handled' });
+    expect(forgeHost.resolveApproval).toHaveBeenCalledWith('approval-1', true);
+    // A second press of a button Telegram never takes away must not re-resolve.
+    await expect(
+      channel.emit({ ...action, providerMessageId: 'press-again' }),
+    ).resolves.toMatchObject({ kind: 'rejected' });
+    expect(forgeHost.resolveApproval).toHaveBeenCalledTimes(1);
+
+    sink?.resolved({ ...approval, approved: true, reason: 'remote' } as never);
+    await Promise.resolve();
+    expect(channel.retracted).toEqual([{ chatId: 'chat-raw-id', correlationId: 'approval-1' }]);
+    const confirmation = channel.sent.at(-1);
+    expect(confirmation?.text).toContain('approved');
+    // A correlationId here would hang a second live keyboard on the notice.
+    expect(confirmation?.correlationId).toBeUndefined();
+    await controller.stop();
+  });
+
+  it('toggles clanker mode only for the owner and only with a valid argument', async () => {
+    const { channel, controller, forgeHost } = await ownerController();
+    await expect(
+      channel.emit(event({ providerMessageId: 'bad', text: '/clanker maybe' })),
+    ).resolves.toMatchObject({ kind: 'rejected' });
+    expect(forgeHost.setClankerMode).not.toHaveBeenCalled();
+    await expect(
+      channel.emit(event({ providerMessageId: 'on', text: '/clanker on' })),
+    ).resolves.toEqual({ kind: 'handled' });
+    expect(forgeHost.setClankerMode).toHaveBeenCalledWith(true);
+    await controller.stop();
+  });
+
+  it('compacts the bound conversation and reports the new budget', async () => {
+    const { channel, controller, forgeHost } = await ownerController();
+    // Unbound chats have nothing to compact.
+    await expect(
+      channel.emit(event({ providerMessageId: 'early', text: '/compact' })),
+    ).resolves.toMatchObject({ kind: 'rejected' });
+    await channel.emit(event({ providerMessageId: 'new', text: '/new' }));
+    await expect(
+      channel.emit(event({ providerMessageId: 'compact', text: '/compact' })),
+    ).resolves.toEqual({ kind: 'handled' });
+    expect(forgeHost.compact).toHaveBeenCalledWith('c1');
+    expect(channel.sent.at(-1)?.text).toContain('compaction compacted');
+    await controller.stop();
   });
 });
 
@@ -375,6 +503,53 @@ describe('remote durable boundaries', () => {
     await vi.waitFor(() => expect(lost).toHaveBeenCalled(), { timeout: 500 });
     await lease.release();
     expect(JSON.parse(await fs.readFile(leasePath, 'utf8')).token).toBe(replacement.token);
+  });
+
+  it('rewrites the lease in place instead of zero-filling it on heartbeat', async () => {
+    const { directory } = await newStore();
+    const lost = vi.fn();
+    const lease = await RemoteTransportLease.acquire({
+      directory,
+      key: 'telegram',
+      workspaceId: 'w1',
+      instanceId: 'one',
+      heartbeatMs: 10,
+      onLost: lost,
+    });
+    const leasePath = path.join(directory, 'telegram.lease.json');
+    const first = JSON.parse(await fs.readFile(leasePath, 'utf8'));
+    // Several heartbeats must each land at offset 0. Appending past a truncated
+    // length would zero-fill the gap and every later parse would fail.
+    await vi.waitFor(
+      async () =>
+        expect(
+          JSON.parse(await fs.readFile(leasePath, 'utf8')).heartbeatAt,
+        ).toBeGreaterThan(first.heartbeatAt),
+      { timeout: 500 },
+    );
+    const raw = await fs.readFile(leasePath);
+    expect(raw.includes(0)).toBe(false);
+    expect(JSON.parse(raw.toString('utf8')).token).toBe(first.token);
+    expect(await lease.verify()).toBe(true);
+    expect(lost).not.toHaveBeenCalled();
+    await lease.release();
+  });
+
+  it('reclaims a corrupt lease file instead of wedging acquisition', async () => {
+    const { directory } = await newStore();
+    await fs.mkdir(directory, { recursive: true });
+    const leasePath = path.join(directory, 'telegram.lease.json');
+    await fs.writeFile(leasePath, Buffer.alloc(283));
+    const lease = await RemoteTransportLease.acquire({
+      directory,
+      key: 'telegram',
+      workspaceId: 'w1',
+      instanceId: 'one',
+      heartbeatMs: 10_000,
+      onLost: vi.fn(),
+    });
+    expect(await lease.verify()).toBe(true);
+    await lease.release();
   });
 });
 

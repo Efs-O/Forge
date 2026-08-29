@@ -1,6 +1,7 @@
 import type { AttachmentData } from './messageBridge';
 import type { ConversationRuntime } from './sessionTypes';
 import type { ForgeRequestOutcome } from './turnOutcome';
+import type { CompactionOutcome } from './CompactionService';
 import type { RequestChainStatus } from './RequestChainLifecycle';
 import type { ToolApprovalRequestEvent, ToolApprovalSink } from './ToolApprovalService';
 
@@ -36,6 +37,16 @@ export interface ForgeHostFacade {
   addApprovalSink(sink: ToolApprovalSink): { dispose(): void };
   resolveApproval(id: string, approved: boolean): void;
   status(): ForgeHostStatus;
+  /**
+   * Clanker mode auto-approves every non-dangerous tool. It is deliberately NOT
+   * a tool: a model able to switch it on could disable its own approval gate.
+   * Only owner-authenticated surfaces (the sidebar, a remote `/clanker`) reach it.
+   */
+  clankerMode(): boolean;
+  setClankerMode(on: boolean): void;
+  /** Per-slot context for one conversation — `num_ctx / n_parallel`, not num_ctx. */
+  contextBudget(conversationId: string): { used: number; max: number } | undefined;
+  compact(conversationId: string): Promise<CompactionOutcome>;
 }
 
 export interface SidebarHostFacadeDeps {
@@ -59,6 +70,10 @@ export interface SidebarHostFacadeDeps {
   getOpenConversations: () => ConversationRuntime[];
   getRequestChains: () => RequestChainStatus[];
   getStreamingConversationIds: () => ReadonlySet<string>;
+  clankerMode: () => boolean;
+  setClankerMode: (on: boolean) => void;
+  contextBudget: (conversationId: string) => { used: number; max: number } | undefined;
+  compact: (conversationId: string) => Promise<CompactionOutcome>;
 }
 
 function summarize(conv: ConversationRuntime): ForgeConversationSummary {
@@ -116,6 +131,22 @@ export class SidebarHostFacade implements ForgeHostFacade {
 
   resolveApproval(id: string, approved: boolean): void {
     this.deps.resolveApproval(id, approved);
+  }
+
+  clankerMode(): boolean {
+    return this.deps.clankerMode();
+  }
+
+  setClankerMode(on: boolean): void {
+    this.deps.setClankerMode(on);
+  }
+
+  contextBudget(conversationId: string): { used: number; max: number } | undefined {
+    return this.deps.contextBudget(conversationId);
+  }
+
+  compact(conversationId: string): Promise<CompactionOutcome> {
+    return this.deps.compact(conversationId);
   }
 
   status(): ForgeHostStatus {

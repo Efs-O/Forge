@@ -57,8 +57,10 @@ export class RemoteTransportLease {
       await RemoteTransportLease.createExclusive(filePath, record);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-      const existing = await RemoteTransportLease.read(filePath);
-      if (Date.now() - existing.heartbeatAt <= staleAfterMs) {
+      // An unreadable lease is garbage, not a live owner: treat it as stale so a
+      // corrupt file cannot wedge remote control with no recovery path.
+      const existing = await RemoteTransportLease.read(filePath).catch(() => undefined);
+      if (existing && Date.now() - existing.heartbeatAt <= staleAfterMs) {
         throw new RemoteLeaseError('Forge remote transport is already owned by another window.');
       }
       const stalePath = `${filePath}.stale-${record.token}`;
@@ -113,8 +115,12 @@ export class RemoteTransportLease {
         return;
       }
       this.record.heartbeatAt = Date.now();
+      // readFile() left the handle at EOF and truncate() does not rewind it, so
+      // writeFile() here would append past the new length and the kernel would
+      // zero-fill the gap — the lease then reads back as NUL bytes and every
+      // later parse of it fails. Write at an explicit position instead.
       await handle.truncate(0);
-      await handle.writeFile(JSON.stringify(this.record), 'utf8');
+      await handle.write(JSON.stringify(this.record), 0, 'utf8');
     } catch (err) {
       this.lose(`Forge remote lease heartbeat failed: ${(err as Error).message}`);
     } finally {

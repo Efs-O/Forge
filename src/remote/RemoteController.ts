@@ -35,7 +35,10 @@ export class RemoteController {
   private subscription: { dispose(): void } | undefined;
   private accepting = false;
   private approvalSubscription: { dispose(): void } | undefined;
-  private readonly remoteApprovals = new Map<string, { requestId: string; chatId: string }>();
+  private readonly remoteApprovals = new Map<
+    string,
+    { requestId: string; chatId: string; resolving?: boolean }
+  >();
   private readonly activeConversations = new Set<string>();
   private readonly rateLimiter: RemoteRateLimiter;
   private readonly outbox: RemoteOutboxDelivery;
@@ -110,10 +113,13 @@ export class RemoteController {
     }
     if (event.kind === 'action') {
       const pending = this.remoteApprovals.get(event.correlationId);
-      if (!pending || pending.chatId !== event.chatId) {
+      if (!pending || pending.chatId !== event.chatId || pending.resolving) {
         return { kind: 'rejected', reason: 'approval is stale or not owned by this chat' };
       }
-      this.remoteApprovals.delete(event.correlationId);
+      // Marked, not deleted: deleting here made `onApprovalResolved` bail on its
+      // `!pending` guard, so a button press produced no confirmation and left
+      // its keyboard on the message. The flag still rejects a replayed callback.
+      pending.resolving = true;
       this.host.resolveApproval(event.correlationId, event.action === 'approve');
       return { kind: 'handled' };
     }
@@ -296,11 +302,16 @@ export class RemoteController {
     const pending = this.remoteApprovals.get(event.id);
     if (!pending) return;
     this.remoteApprovals.delete(event.id);
+    // No correlationId on the confirmation: passing it attached a SECOND live
+    // approve/deny keyboard to the "approved/denied" notice itself.
+    void this.channel
+      .retractPrompt?.(pending.chatId, event.id, this.abort.signal)
+      .catch(() => undefined);
     void this.channel
       .send(
         pending.chatId,
         `Forge approval ${event.approved ? 'approved' : 'denied'} (${event.reason}).`,
-        { correlationId: event.id, signal: this.abort.signal },
+        { signal: this.abort.signal },
       )
       .catch((err) =>
         this.options.onError?.(

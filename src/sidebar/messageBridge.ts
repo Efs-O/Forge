@@ -137,6 +137,15 @@ export interface ConfirmRequestMsg {
   conversationId?: string;
 }
 /**
+ * A pending approval that something OTHER than this webview settled — a remote
+ * transport button, or a cancelled turn. Without it the sidebar keeps showing
+ * live-looking Approve/Deny buttons for an approval that is already resolved.
+ */
+export interface ConfirmResolvedMsg {
+  type: 'confirmResolved';
+  id: string;
+}
+/**
  * A finished tool call. Replaces the old practice of injecting a flattened
  * 600-char preview into the assistant token stream as fake markdown: that could
  * not be collapsed (it was not a message) and destroyed the newlines of any
@@ -257,6 +266,7 @@ export type HostToWebview =
   | CheckpointDismissedMsg
   | NewChatMsg
   | ConfirmRequestMsg
+  | ConfirmResolvedMsg
   | ToolActivityMsg
   | ToolResultMsg
   | TokenBudgetMsg

@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import type { IBackendPool } from '../backend/BackendPool';
-import type { ForgeConfig } from '../config/types';
-import { expandAlias, splitModelProfile } from '../config/ConfigResolver';
+import type { ForgeConfig, ModelConfig } from '../config/types';
+import { perSlotContext, reportedContextTokens } from '../util/contextBudget';
+import { expandAlias, mergeGroupsIntoModel, splitModelProfile } from '../config/ConfigResolver';
 import type { HostToWebview, WebviewToHost } from './messageBridge';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
 import type { CliSessionRegistry } from '../agents/CliSessionRegistry';
@@ -157,6 +158,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       getOpenConversations: () => this.sidebar.conversations,
       getRequestChains: () => this.requestChains.status(),
       getStreamingConversationIds: () => this.agentLoop.getStreamingIds(),
+      clankerMode: () => this.agentLoop.getClankerMode(),
+      // Not persisted here: a remote toggle must not silently outlive the window
+      // it was set from. The sidebar toggle keeps its own workspaceState memory.
+      setClankerMode: (on) => this.agentLoop.setClankerMode(on),
+      contextBudget: (conversationId) => this.contextBudgetOf(conversationId),
+      compact: (conversationId) =>
+        this.slashHandler.compactConversation(conversationId, { auto: false }),
     });
     // Register the conversation lookup so the session timer can resolve ids,
     // then fold any unfinished intervals from a previous session into the
@@ -373,6 +381,31 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   /** Look up a conversation by id across open tabs and history. */
+  /**
+   * Per-slot context for any conversation, not just the active one — the
+   * publisher renders the active tab only, but a remote chat can be bound to a
+   * background conversation and still needs a truthful meter.
+   */
+  private contextBudgetOf(conversationId: string): { used: number; max: number } | undefined {
+    const conv = this.getConversation(conversationId);
+    if (!conv) return undefined;
+    const model = this.resolveModelFor(conv.active_model ?? this.config.active_model);
+    if (!model) return undefined;
+    return {
+      used: reportedContextTokens(conv),
+      max: perSlotContext(model, this.config.llama_server),
+    };
+  }
+
+  private resolveModelFor(selection: string | null | undefined): ModelConfig | undefined {
+    const base = this.baseOf(selection);
+    const raw = base ? this.config.models.find((entry) => entry.name === base) : undefined;
+    // Group inheritance first: a model taking its ctx from a group (e.g.
+    // `group: llamacpp-qwen3`) carries no num_ctx of its own, and the raw entry
+    // reads 0 — which surfaced remotely as "no num_ctx for this model".
+    return raw ? mergeGroupsIntoModel(this.config, raw) : undefined;
+  }
+
   getConversation(id: string): ConversationRuntime | undefined {
     return (
       this.sidebar.conversations.find((c) => c.id === id) ??

@@ -67,6 +67,7 @@ overlaps with an existing owner, extend the owner instead.
 | ------------------------------------------------ | ---------------------------------------------- |
 | Streamed assistant turn finalization             | `src/agent/StreamedAssistantTurn.ts`           |
 | Webview state reducer (per-conversation keying)  | `webview-ui/src/reducer.ts`                    |
+| Fire-and-forget webview→host commands            | `webview-ui/src/hostCommands.ts`               |
 | Transcript row folding (diff / thinking runs)    | `webview-ui/src/components/MessageList.tsx`    |
 | Single-file diff rendering + stats               | `webview-ui/src/components/DiffBlock.tsx`      |
 | Per-turn multi-file diff summary card            | `webview-ui/src/components/DiffGroup.tsx`      |

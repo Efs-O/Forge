@@ -191,6 +191,10 @@ export class ToolApprovalService {
     reason: ToolApprovalResolvedEvent['reason'],
   ): void {
     const event = { ...this.eventOf(item), approved, reason };
+    // The webview is not a sink, so tell it separately: an approval settled from
+    // a remote transport (or cancelled) must not leave live-looking buttons in
+    // the sidebar for a decision that has already been made.
+    if (this.getView()) this.post({ type: 'confirmResolved', id: item.id });
     for (const sink of this.sinks) sink.resolved(event);
   }
 }

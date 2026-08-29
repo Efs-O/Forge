@@ -80,9 +80,16 @@ Telegram account owns and messages it.
    it in VS Code SecretStorage, not in `.forge/config.yaml`.
 3. Confirm `remote.enabled: true` and `remote.telegram.enabled: true` in the
    config shown above.
-4. Run `Forge: Validate Remote Control`. Require the Telegram line to show
-   `configured=true`, `active=true`, `lease=true`, and `provider=true`.
-   `owner=false` is still expected.
+4. Wait about 30 seconds, then run `Forge: Validate Remote Control`. Require the
+   Telegram line to show `configured=true`, `active=true`, `lease=true`, and
+   `provider=true`. `owner=false` is still expected. `provider=true` reports a
+   live Bot API probe, so it also confirms the token itself is valid.
+
+   Read `configured` narrowly: it is computed from `remote.enabled` and
+   `telegram.enabled` alone and says nothing about whether a token is stored.
+   `active` is the field that reflects a running transport. Wait before trusting
+   it — the lease heartbeat runs every 5 seconds, so a transport that starts and
+   then dies looks healthy for the first few seconds.
 
 If the token is ever exposed, use BotFather's `/revoke` command, store the new
 token with `Forge: Set Telegram Bot Token`, and do not reuse the old token.
@@ -106,18 +113,89 @@ rejected.
 
 1. Send `/new`, a harmless coding question, and a request that uses a read-only
    tool. Confirm FIFO responses arrive in the same private chat.
-2. Trigger a Forge-native write approval. Confirm the private chat receives the
+   `/status` reports the per-slot context meter and whether approvals are gated;
+   `/compact` compacts the bound conversation; `/clanker on|off` toggles
+   auto-approval. `/clanker` is an owner command, never a tool — a model able to
+   call it could switch off its own approval gate. Confirm a `/clanker on` set
+   remotely does NOT survive a window reload.
+2. Turn clanker mode OFF in the sidebar before this check. It auto-approves
+   every non-dangerous tool ahead of any approval sink, so with it on the write
+   lands with no prompt on either surface and the check passes without testing
+   anything.
+3. Trigger a Forge-native write approval. Confirm the private chat receives the
    approval buttons, resolve it once, and verify replaying the callback is
    rejected. Repeat once with VS Code resolving first and confirm the remote
-   callback becomes stale.
-3. Start a slow request, queue another message, and send `/stop`. Confirm only
+   callback becomes stale. The approval is expected on BOTH surfaces at once:
+   one pending approval fans out to the webview and to every transport, and
+   either one resolves it. Resolving remotely must also dismiss the sidebar
+   dialog.
+4. Start a slow request, queue another message, and send `/stop`. Confirm only
    the current request is cancelled, the backend stays loaded, and the queued
    request subsequently runs.
-4. Send from an unpaired Telegram account and from a group. Confirm neither can
+5. Send from an unpaired Telegram account and from a group. Confirm neither can
    control Forge.
-5. Open the same workspace in a second VS Code window. Confirm one window owns
+6. Open the same workspace in a second VS Code window. Confirm one window owns
    the Telegram lease and the other reports a visible ownership failure. Close
    the second window before continuing.
+
+## Traps found in the first real-device run (2026-08-29)
+
+Every one of these cost time on the first pass. Check them before concluding a
+transport is broken.
+
+**Failures arrive as toasts, not modals.** `Forge: Pair Telegram Remote` shows
+its code in a modal, but throws through `showErrorMessage` — a small
+auto-dismissing notification that is easy to miss entirely. A pairing command
+that appears to "do nothing" has usually reported an error already. When a
+remote command seems inert, read the extension host log rather than guessing:
+`%APPDATA%\Code\logs\<timestamp>\window<N>\exthost\exthost.log`, which
+carries the stack.
+
+**`Forge: Pair Telegram Remote` is a VS Code command, not a chat message.** It
+only generates and displays an 8-digit code. You then type `/pair <code>` into
+the bot chat yourself. Forge cannot message first — it does not know who the
+owner is until pairing completes.
+
+**Talk to your bot, not to BotFather.** BotFather is Telegram's own account and
+replies with a token and a command menu; your bot is a separate, initially
+silent chat. Sending `/pair` to BotFather does nothing.
+
+**Silence from the bot before pairing is correct.** Non-owner senders are
+rejected with no reply at all, so `/start` and ordinary text vanish without
+acknowledgement. The first message a bot ever sends is the pairing confirmation.
+
+**The pair matcher is exact:** `^\/pair ([0-9]{8})$`. A trailing space, an
+autocorrect period, or the wrong digit count is rejected silently. Use the code
+from your own dialog — five malformed-but-well-shaped attempts destroy the
+session and force a new code. Type it by hand rather than pasting.
+
+**Bind a conversation before prompting.** A freshly paired chat has no
+conversation attached; send `/new` first or prompts are rejected.
+
+**One owner per instance.** The owner is a single value under
+`forge.remote.<channel>.ownerId`. Pairing a second person silently revokes the
+first, and a paired owner drives the entire agent — writes and terminal
+included, not just reads. There is no read-only remote role.
+
+**Remote replies leave the machine.** The model may be local, but answers transit
+the provider's servers to reach the phone. Weigh that before enabling tools that
+read personal archives or secrets over a transport.
+
+### Two lease bugs fixed in this build
+
+Both were found here and are fixed; a build predating them cannot be validated.
+
+1. The heartbeat corrupted its own lease. `readFile()` left the handle at EOF and
+   `truncate(0)` does not rewind, so the follow-up write landed past the new
+   length and the kernel zero-filled the gap. The lease then read back as NUL
+   bytes and the transport shut itself down roughly 10 seconds after every
+   start, surfacing as `SyntaxError: Unexpected token ... is not valid JSON`.
+2. A corrupt lease wedged acquisition permanently, because `acquire()` parsed the
+   existing file before the staleness check. An unreadable lease is now treated
+   as stale and reclaimed.
+
+If a lease ever does go bad, `remote-leases/<channel>.lease.json` under the
+extension's global storage can be deleted while the transport is stopped.
 
 ## WhatsApp: prerequisites and risk
 
@@ -233,3 +311,27 @@ linked-device credentials.
 
 A release is accepted when every applicable check passes and `npm run ci` plus
 `npm run package` remain green on the exact commit being tested.
+
+### Telegram run, 0.14.0, 2026-08-29
+
+| Check | Result |
+| --- | --- |
+| Config, token storage, provider auth | pass |
+| Pairing, `/status`, `/new`, prompt round-trip | pass |
+| Remote write reaches disk (verified in git, not from the reply) | pass |
+| Approval delivered to the private chat | pass |
+| Sidebar dismisses when an approval is resolved remotely | fail, then fixed |
+| Approval replay rejected as stale | not run |
+| `/stop` with queued work behind it | not run |
+| Unpaired-account and group rejection | not run |
+| Two-window lease conflict | not run |
+| Reload mid-request: `crash-unknown`, never rerun | not run |
+| Delivery retry after connectivity loss | not run |
+| Repeated idle config saves keep one consumer | not run |
+
+WhatsApp was not exercised. The run is therefore incomplete and does not
+constitute acceptance; the outstanding rows above are the remaining work.
+
+Always confirm a reported write against the repository rather than the model's
+own summary — one claim here ("renamed the file") read as false against a stale
+directory listing and was in fact true, and the reverse mistake is just as easy.

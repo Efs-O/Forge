@@ -85,6 +85,15 @@ export interface RemoteChannel {
     text: string,
     options?: { correlationId?: string; signal?: AbortSignal },
   ): Promise<void>;
+  /**
+   * Drop the approve/deny buttons from a prompt that has been resolved.
+   *
+   * Telegram keeps an inline keyboard on a message forever unless the message
+   * is edited, so a resolved prompt stays pressable and — with several
+   * identical prompts stacked — unreadable. Optional: channels with no such
+   * affordance simply do not implement it.
+   */
+  retractPrompt?(chatId: string, correlationId: string, signal?: AbortSignal): Promise<void>;
   start(signal: AbortSignal): Promise<void>;
   requestPairingCode?(phoneNumber: string): Promise<string>;
   unlink?(): Promise<void>;

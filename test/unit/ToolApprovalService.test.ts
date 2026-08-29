@@ -26,6 +26,21 @@ describe('ToolApprovalService', () => {
     await expect(pending).resolves.toBe(false);
   });
 
+  it('tells the webview to drop a dialog a sink resolved', async () => {
+    const posted: HostToWebview[] = [];
+    const service = new ToolApprovalService(
+      (message) => posted.push(message),
+      () => ({}) as never,
+    );
+    const pending = service.request('edit_file', 'README.md', false, 'conv');
+    const request = posted.find((message) => message.type === 'confirmRequest');
+    if (request?.type !== 'confirmRequest') throw new Error('confirmation was not posted');
+    // Stands in for a remote transport button: the webview never clicked.
+    service.resolve(request.id, true);
+    await expect(pending).resolves.toBe(true);
+    expect(posted).toContainEqual({ type: 'confirmResolved', id: request.id });
+  });
+
   it('queues approvals and cancels every approval for a conversation', async () => {
     const service = new ToolApprovalService(
       () => {},
