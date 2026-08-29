@@ -7,6 +7,7 @@ import {
   opSetActiveConversationModel,
 } from '../../src/sidebar/ConversationOps';
 import type { SidebarRuntime } from '../../src/sidebar/sessionTypes';
+import { UNTITLED_TITLE } from '../../src/sidebar/sessionTypes';
 
 function sidebar(): SidebarRuntime {
   return {
@@ -122,7 +123,7 @@ describe('opDeleteConversation', () => {
     expect(result).toMatchObject({ ok: true });
     if (!('ok' in result)) return;
     expect(result.sidebar.conversations).toHaveLength(1);
-    expect(result.sidebar.conversations[0]?.title).toBe('Chat');
+    expect(result.sidebar.conversations[0]?.title).toBe(UNTITLED_TITLE);
     expect(result.sidebar.conversations[0]?.messages).toEqual([]);
     expect(result.sidebar.conversations[0]?.id).not.toBe('active');
     expect(result.sidebar.activeConversationId).toBe(result.sidebar.conversations[0]?.id);

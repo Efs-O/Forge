@@ -4,6 +4,7 @@ import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
 import {
   MAX_CONVERSATIONS,
   displayPersistMessages,
+  UNTITLED_TITLE,
   newConversationId,
   upsertHistoryConversation,
 } from './sessionTypes';
@@ -40,7 +41,7 @@ export function opNewConversation(
   const now = Date.now();
   const conv: ConversationRuntime = {
     id,
-    title: 'Chat',
+    title: UNTITLED_TITLE,
     createdAt: now,
     updatedAt: now,
     messages: [],
@@ -84,7 +85,7 @@ export function opCloseConversation(
     const freshId = newConversationId();
     updated.conversations[0] = {
       id: freshId,
-      title: 'Chat',
+      title: UNTITLED_TITLE,
       createdAt: Date.now(),
       updatedAt: Date.now(),
       messages: [],
@@ -123,7 +124,7 @@ export function opDeleteConversation(sidebar: SidebarRuntime, id: string): Delet
     const now = Date.now();
     updated.conversations[0] = {
       id: newConversationId(),
-      title: 'Chat',
+      title: UNTITLED_TITLE,
       createdAt: now,
       updatedAt: now,
       messages: [],
@@ -225,7 +226,7 @@ export function opRestoreConversation(sidebar: SidebarRuntime, id: string): Rest
 export function opClearMessages(conv: ConversationRuntime): void {
   conv.messages = [];
   conv.displayDiffs = [];
-  conv.title = 'Chat';
+  conv.title = UNTITLED_TITLE;
   conv.updatedAt = Date.now();
   opResetReportedContext(conv);
 }

@@ -288,6 +288,39 @@ export function App(): React.ReactElement {
     vscode.postMessage({ type: 'renameConversation', id, title });
   }, []);
 
+  // Picking a session from the panel is a navigation, so the panel dismisses
+  // itself — left open it hides the very conversation just selected behind the
+  // list it was selected from. Only the two selecting actions collapse it:
+  // rename and delete are management, and walking down the list should survive
+  // them. The handlers live here rather than in HistoryList so the panel never
+  // owns its own dismissal.
+  const refocusToggle = useRef(false);
+  useEffect(() => {
+    if (historyExpanded || !refocusToggle.current) return;
+    refocusToggle.current = false;
+    // The row that had focus is hidden along with the panel; without this,
+    // focus falls to <body> and keyboard users lose their place.
+    document.getElementById('history-toolbar-btn')?.focus();
+  }, [historyExpanded]);
+  const collapseHistory = useCallback(() => {
+    refocusToggle.current = true;
+    setHistoryExpanded(false);
+  }, []);
+  const handleSwitchFromPanel = useCallback(
+    (id: string) => {
+      handleSwitchTab(id);
+      collapseHistory();
+    },
+    [handleSwitchTab, collapseHistory],
+  );
+  const handleRestoreFromPanel = useCallback(
+    (id: string) => {
+      handleRestoreConversation(id);
+      collapseHistory();
+    },
+    [handleRestoreConversation, collapseHistory],
+  );
+
   // The panel now also lists open tabs, so an empty history no longer means an
   // empty panel. Collapse only when there is genuinely nothing but the one tab
   // already visible in the strip.
@@ -403,8 +436,8 @@ export function App(): React.ReactElement {
               streamingIds={state.streamingIds}
               queuedIds={queuedIds}
               expanded={historyExpanded}
-              onSwitch={handleSwitchTab}
-              onRestore={handleRestoreConversation}
+              onSwitch={handleSwitchFromPanel}
+              onRestore={handleRestoreFromPanel}
               onDelete={handleDeleteConversation}
               onRename={handleRenameConversation}
             />

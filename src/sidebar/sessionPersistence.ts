@@ -15,6 +15,7 @@ import {
   MAX_HISTORY_CONVERSATIONS,
   SESSION_KEY_V1,
   chatMessagesFromSlim,
+  UNTITLED_TITLE,
   deriveTitle,
   newConversationId,
   sidebarSessionPersistedSchema,
@@ -28,7 +29,7 @@ import {
 function emptyConversation(id: string, now: number): ConversationRuntime {
   return {
     id,
-    title: 'Chat',
+    title: UNTITLED_TITLE,
     createdAt: now,
     updatedAt: now,
     messages: [],
@@ -242,7 +243,7 @@ function migrateLegacyHistory(
   const id = newConversationId();
   const now = Date.now();
   const firstUser = legacy.find((m) => m.role === 'user');
-  const title = firstUser ? deriveTitle(firstUser.content.split('\n')[0] ?? '') : 'Chat';
+  const title = firstUser ? deriveTitle(firstUser.content.split('\n')[0] ?? '') : UNTITLED_TITLE;
   return {
     activeConversationId: id,
     conversations: [

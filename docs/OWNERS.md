@@ -46,6 +46,7 @@ overlaps with an existing owner, extend the owner instead.
 | Prompt KV-cache reuse stats from `usage`   | `src/llm/promptCacheStats.ts`        |
 | Webview HTML builder                       | `src/sidebar/WebviewBuilder.ts`      |
 | Multi-conversation session types + persist | `src/sidebar/sessionTypes.ts`        |
+| Conversation titles: placeholder + derive   | `src/sidebar/conversationTitle.ts`   |
 | Image content parts: count/strip/age out   | `src/sidebar/imageParts.ts`          |
 | Missing-image notices to the user          | `src/sidebar/imageNotices.ts`        |
 | Session load/save/migrate (workspaceState) | `src/sidebar/sessionPersistence.ts`  |

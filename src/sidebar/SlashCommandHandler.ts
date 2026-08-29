@@ -15,7 +15,7 @@ import {
   activeSelectionBlock,
   formatContextBlocks,
 } from '../vscode/editorContext';
-import { deriveTitle } from './sessionTypes';
+import { deriveTitle, isUntitled } from './sessionTypes';
 
 export interface SlashCommandDeps extends CompactionDeps {
   getConfig: () => ForgeConfig;
@@ -174,7 +174,7 @@ export class SlashCommandHandler {
     const conversation = this.deps.getActiveConv();
     const title = await vscode.window.showInputBox({
       prompt: 'Rename active conversation',
-      value: conversation.title === 'Chat' ? '' : conversation.title,
+      value: isUntitled(conversation.title) ? '' : conversation.title,
       placeHolder: 'Conversation title',
       validateInput: (value) => (value.trim() ? undefined : 'Enter a title.'),
     });
