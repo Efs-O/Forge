@@ -1,6 +1,6 @@
 # Forge Remote Control — Architecture and Implementation Plan
 
-Status: design for Codex review before implementation
+Status: Codex architecture review completed; changes requested before implementation
 Branch: `feat/remote-control-plan`
 Target: Forge VS Code extension; no daemon/service extraction in V1
 
@@ -690,6 +690,150 @@ Codex should inspect current `main`, not just this document, and report on each 
 20. Identify any existing tests/utilities that should be reused instead of creating parallel remote test scaffolding.
 
 Codex should return blockers, architectural corrections and recommended plan edits BEFORE writing implementation code.
+
+### 24.1 Codex architecture review response (2026-08-29)
+
+Review decision: **changes requested before implementation**. The central design principle is
+correct: remote control should be another Forge input/output surface, not another agent runtime.
+The following answers are based on the current `main` implementation.
+
+1. **Canonical addressed-turn seam.** `SendPipeline` is the correct layer. Add an addressed,
+   non-UI API there and keep all of the existing model resolution, overlap guards, persistence,
+   session synchronization and post-turn accounting in that one path. Do not use
+   `submitExternal()`, because it targets the active conversation and reveals the sidebar, and do
+   not duplicate `send()` in `RemoteController`.
+
+2. **Final result capture.** The current `SendPipeline.send()` and `AgentLoop.runTurn()` both
+   return `Promise<void>` and report several failures through webview posts. The safe change is a
+   typed result propagated from `AgentLoop.runTurn()` through the addressed send API, with at
+   least `completed`, `failed`, `cancelled` and `interrupted` outcomes, final assistant content,
+   and any incomplete-turn reason. Reading the last rendered message or session log is not an
+   acceptable completion contract.
+
+3. **Approval multi-sink feasibility.** Yes. Keep `ToolApprovalService` as the single owner of
+   its active item, queue, opaque IDs, abort handling, Clanker behavior and approval-timer
+   callbacks. Replace its webview availability precondition and direct presentation with typed
+   requested/resolved events or registered sinks. The current exact-ID resolution already gives
+   first-valid-resolution-wins behavior; add a resolved event so the losing surface can dismiss
+   stale UI.
+
+4. **`post(...)` correctness side effects.** Most host posts are presentation only: token text,
+   notices, errors, generation state and session synchronization. Transcript mutation,
+   persistence, lifecycle state and context accounting are maintained separately. Approval is
+   the important exception: `ToolApprovalService.request()` currently rejects when `getView()`
+   is unavailable, so remote-only execution cannot pass an approval until that coupling is
+   removed. `postTokenBudget(true)` also causes threshold evaluation outside `post(...)` itself
+   and must remain in the canonical turn path.
+
+5. **Other unresolved-webview assumptions.** No other model/tool execution flow currently has a
+   direct `getView()` requirement. A missing view drops UI posts, but does not by itself prevent
+   the agent loop, persistence or normal tool dispatch. File pickers and other webview commands
+   are presentation workflows, not remote agent execution paths. Approval is the concrete
+   blocking dependency.
+
+6. **Conversation concurrency.** `TurnLifecycle` and the agent loop track streaming and
+   cancellation per conversation, so independent conversations can run concurrently. Capacity
+   is still constrained separately by backend-pool/VRAM admission, llama-server parallel slots,
+   CLI session limits and provider limits. `ToolApprovalService` also has one global active
+   approval queue, so approvals remain serialized even when model turns are concurrent.
+
+7. **Remote queue scope and settlement race.** The queue should be per conversation, with each
+   entry retaining its origin channel/chat for replies. It must not drain merely when
+   `SendPipeline.send()` resolves. That method calls `postTokenBudget(true)` in `finally`, and
+   auto-compaction is currently launched asynchronously from threshold evaluation, so a remote
+   drain can race compaction and automatic continuation. Add a conversation-scoped
+   request-chain-settled signal first.
+
+8. **Auto-compaction interaction.** Treat the initial turn, compaction and automatic resume as
+   one request chain. A queued remote user prompt must supersede/cancel automatic continuation
+   under the same per-conversation intent/epoch rule as a sidebar prompt. Do not use a brief
+   non-streaming interval between compaction phases as permission to start the queued prompt.
+
+9. **Non-activating create/restore.** Current conversation restore sets
+   `activeConversationId`, and tab-level orchestration performs additional UI/model work around
+   the pure state transition. Add canonical create/restore operations with an explicit
+   `activate: false` path. Do not restore and then manually switch the active ID back, because
+   observable side effects may already have occurred.
+
+10. **Persistence requirements.** Keep the existing turn persistence in the canonical send
+    path. Creating or restoring a remote target must persist the sidebar session and republish
+    session state. Remote bindings, inbound dedup entries and queued-message state require a
+    separate awaited persistence path. Provider routing IDs must not be written into model-facing
+    messages or session transcripts.
+
+11. **Cross-window transport ownership.** VS Code `globalState`/Memento alone is not a safe
+    lease because it has no atomic compare-and-set across extension hosts. Use an OS-level
+    exclusive lock or equivalent atomic ownership primitive, keyed by transport/account identity,
+    with heartbeat and stale-owner recovery. A best-effort Memento record may describe the owner
+    but must not be the exclusivity mechanism.
+
+12. **Telegram dependency.** Prefer the official Bot API over HTTPS using the extension runtime's
+    existing HTTP capability unless a library provides a demonstrated benefit. Before adding a
+    dependency, verify the current VS Code Node runtime, long-poll cancellation behavior, proxy
+    handling, esbuild bundling and license. A dependency is not required merely to call
+    `getUpdates` and `sendMessage`.
+
+13. **WhatsApp dependency.** Keep this as a separate post-Telegram spike/ADR. Verify current
+    maintenance, license, supported Node versions, linked-device credential persistence,
+    reconnect behavior and esbuild compatibility at implementation time. No WhatsApp package or
+    provider-specific assumption should enter remote core during V1.
+
+14. **Tool security boundary.** The stated guarantee is valid for Forge-native providers, whose
+    tools pass through `ToolRegistry`/`ToolDispatch`. It is **not valid for `provider: cli`**:
+    Claude Code and Codex CLI direct-chat models use their own tools, and current full-access
+    mappings bypass Forge's tool permission gate and command denylist by design. V1 must either
+    reject remote turns targeting CLI models or require a separate explicit, strongly warned
+    authorization such as `allow_remote_cli`. Host slash commands must never expose generic
+    terminal, Git or filesystem execution.
+
+15. **Project-instruction injection.** Forge-native remote turns will preserve `FORGE.md` and
+    `AGENTS.md` compatibility behavior when routed through the existing send/agent path. Do not
+    claim identical injection for CLI providers until the CLI adapter path has been separately
+    verified; CLI agents have their own session and instruction-loading semantics.
+
+16. **Privacy-sensitive state.** Tokens, owner identities, phone/JID values, linked-device auth,
+    callback data and full approval payloads must stay out of workspace files, transcripts and
+    normal logs. Remote prompt text necessarily enters the conversation transcript once accepted.
+    Bindings and dedup state should use protected host storage, and logs should use redacted or
+    hashed identifiers. Documentation must warn that final answers and approval details are sent
+    through a third-party messaging provider.
+
+17. **Activation, reload and disposal.** Give each adapter an `AbortController` covering long
+    polling, reconnect waits and backoff timers. Disposal must synchronously stop accepting new
+    inbound work, then close polling/sockets, remove listeners and release the lease. Config
+    reload must replace the existing runtime rather than start a second consumer, and extension
+    deactivation should await remote shutdown where the VS Code lifecycle permits it.
+
+18. **Restart and duplicate execution.** Durably record a provider message as queued/accepted
+    before acknowledging or executing it, then transition it to `running` before calling Forge.
+    After a crash, never automatically replay a record found in `running`; report its outcome as
+    unknown. Only a definitely queued item may be resumed. A provider redelivery received before
+    the first durable write may be accepted, but once an ID is recorded it must remain at-most-once.
+
+19. **Shared controller abstraction.** One `RemoteController` remains appropriate. The transport
+    contract needs a discriminated inbound event for ordinary text versus provider button/callback
+    actions, plus chat type so groups can be rejected authoritatively. Callback acknowledgement,
+    message chunk limits, formatting and interactive-feature differences remain adapter concerns;
+    they do not justify separate agent/session semantics.
+
+20. **Existing test infrastructure to reuse.** Extend the existing `SendPipeline`,
+    `ToolApprovalService`, `PermissionResolver`, conversation/session persistence,
+    context-budget/compaction and backend/control-registry tests. `FakeRemoteChannel` is useful,
+    but it should drive the existing fake backend/model and turn infrastructure instead of
+    creating a parallel agent harness.
+
+Required plan corrections before Phase 1:
+
+- define a typed addressed-turn result and a full request-chain settlement boundary;
+- decide whether remote CLI models are prohibited or separately authorized;
+- make accepted queues durable, or reject busy input in V1 rather than acknowledging volatile work;
+- store authorized owner identities outside workspace-controlled YAML;
+- specify an atomic cross-window transport lock;
+- add non-activating create/restore operations;
+- expose `cancel()` for `/stop` and reserve `interrupt()` for future explicit steering;
+- add discriminated inbound text/action events and secure pairing with a short-lived local code;
+- correlate completion and approval events to the originating remote request so unrelated local
+  turns are not reported as remote completions.
 
 ## 25. Acceptance criteria
 
