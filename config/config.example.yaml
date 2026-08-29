@@ -402,11 +402,32 @@ groups:
     # type_k/type_v q4_0 quantises the KV cache, which is usually where the
     # context window's memory goes. q8_0 is higher quality and roughly double.
     spawn:
+      # Conservative default for arbitrary GGUFs. The 2,048 Qwen result below
+      # is model- and GPU-specific; do not copy it to a tight model blindly.
       n_batch: 512
       type_k: q4_0
       type_v: q4_0
       flash_attn: true
       n_gpu_layers: 999
+
+    # Qwen 3.8 27B Q3_K_XL MTP on the 16 GB RTX 5060 Ti used this measured
+    # profile at a 50k context. It is NOT a general GGUF recipe: it requires a
+    # Qwen MTP-capable model and should be benchmarked on the target hardware.
+    #
+    # n_batch: 2048
+    # extra_llama_server_args:
+    #   - "--ubatch-size"
+    #   - "1024"
+    #   - "--spec-type"
+    #   - "draft-mtp,ngram-mod"
+    #   - "--spec-draft-n-max"
+    #   - "2"
+    #   - "--spec-ngram-mod-n-match"
+    #   - "16"
+    #   - "--spec-ngram-mod-n-min"
+    #   - "16"
+    #   - "--spec-ngram-mod-n-max"
+    #   - "64"
 
     # Sampling recipes are model-family specific — use the one the model's
     # authors publish. Two worth knowing:
