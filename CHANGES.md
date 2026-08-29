@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **The agent sees the commands you run in your own terminal, and corrects
+  them.** Watching only Forge-pasted commands solved half the problem: the
+  common case is the user typing a command themselves, getting an error, and
+  asking the sidebar what went wrong — at which point the agent had nothing but
+  the question. `TerminalCommandTracker` now records every shell-integration
+  execution, keeping the last five with their exit codes and up to 4k characters
+  of output each. The turn context carries the newest command plus any recent
+  failures, and `execute.njk` tells the agent to name the mistake and reply with
+  the corrected command rather than asking for output it already has. Commands
+  are still only visible from the moment they run: scrollback and shell history
+  are never read, and `forge.terminal.watchUserCommands` turns the capture off
+  for anyone who would rather keep their terminal to themselves.
+
 - **The agent can see how a command it pasted turned out.** `run_terminal`
   pastes into a terminal Forge creates and never presses Enter, so until now the
   outcome was invisible: the agent suggested a command, the user ran it, it

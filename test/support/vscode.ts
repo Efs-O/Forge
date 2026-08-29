@@ -32,6 +32,9 @@ export enum SymbolKind {
 
 export const workspace = {
   workspaceFolders: [] as Array<{ uri: { fsPath: string } }>,
+  getConfiguration: (_section?: string) => ({
+    get: <T>(_key: string, fallback?: T): T | undefined => fallback,
+  }),
   fs: {
     async readDirectory(uri: { fsPath: string }): Promise<Array<[string, FileType]>> {
       const entries = await fs.readdir(uri.fsPath, { withFileTypes: true });

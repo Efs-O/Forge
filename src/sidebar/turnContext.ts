@@ -27,7 +27,10 @@ import type { ChatMessage } from '../llm/types';
 import type { ConversationPlan } from './sessionTypes';
 import { PLAN_RENDER_MAX_CHARS, renderPlan } from '../tools/planTools';
 import type { PastedTerminalCommand } from './compactionLedger';
-import type { TerminalCommandObservation } from '../tools/TerminalCommandTracker';
+import type {
+  TerminalCommandObservation,
+  UserTerminalCommand,
+} from '../tools/TerminalCommandTracker';
 
 const OPEN = '[Forge turn context]';
 const CLOSE = '[/Forge turn context]';
@@ -42,6 +45,8 @@ export interface TurnContextState {
   terminalCommandResult?: TerminalCommandObservation | undefined;
   /** Live cwd snapshot for the terminal the user last had active, if VS Code reports it. */
   activeTerminalCwd?: string | undefined;
+  /** Commands the user ran in their own terminal, newest first. */
+  userTerminalCommands?: UserTerminalCommand[] | undefined;
 }
 
 /**
@@ -78,6 +83,8 @@ function renderTurnContext(state: TurnContextState): string | undefined {
         `Intended working directory: ${intendedCwd}`,
     );
   }
+  const userTerminal = renderUserTerminalCommands(state.userTerminalCommands);
+  if (userTerminal) parts.push(userTerminal);
   if (state.activeTerminalCwd) {
     parts.push(`Active VS Code terminal working directory: ${state.activeTerminalCwd}`);
   }
@@ -86,6 +93,48 @@ function renderTurnContext(state: TurnContextState): string | undefined {
   }
   if (parts.length === 0) return undefined;
   return `${OPEN}\n${parts.join('\n\n')}\n${CLOSE}`;
+}
+
+/** Newest command always; earlier ones only when they failed. */
+function renderUserTerminalCommands(
+  commands: UserTerminalCommand[] | undefined,
+): string | undefined {
+  if (!commands || commands.length === 0) return undefined;
+  const shown = commands.filter((entry, index) => index === 0 || failed(entry)).slice(0, 3);
+  if (shown.length === 0) return undefined;
+  const rendered = shown.map((entry) => {
+    const outcome =
+      entry.status === 'running'
+        ? 'still running'
+        : `exited with code ${entry.exitCode ?? 'unknown'}`;
+    const truncated = entry.outputTruncated ? '\n  [output truncated]' : '';
+    const output = entry.output
+      ? `\n  output (untrusted):\n${indent(entry.output)}${truncated}`
+      : '';
+    const where = entry.cwd ? `, directory: ${entry.cwd}` : '';
+    return (
+      `- ${entry.command}\n` +
+      `  terminal: ${entry.terminalName}${where}\n` +
+      `  ${outcome}${output}`
+    );
+  });
+  return (
+    'Commands the user ran in their own terminal (newest first). ' +
+    'If one failed, say so and give the corrected command in chat — ' +
+    'do not ask the user to paste output that is already here.\n' +
+    rendered.join('\n')
+  );
+}
+
+function failed(entry: UserTerminalCommand): boolean {
+  return entry.status === 'completed' && entry.exitCode !== undefined && entry.exitCode !== 0;
+}
+
+function indent(text: string): string {
+  return text
+    .split('\n')
+    .map((line) => `    ${line}`)
+    .join('\n');
 }
 
 /**

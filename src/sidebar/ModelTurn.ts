@@ -228,8 +228,11 @@ export async function runModelTurn(
   // conv.plan cannot reach back into this turn's prompt.
   const pastedTerminalCommand = latestPastedTerminalCommand(conv.messages);
   const terminalCommandResult = terminalCommandTracker.latestForConversation(conv.id);
+  const userTerminalCommands = terminalCommandTracker.recentUserCommands();
   const terminalCwd =
-    pastedTerminalCommand || terminalCommandResult ? activeTerminalCwd() : undefined;
+    pastedTerminalCommand || terminalCommandResult || userTerminalCommands.length > 0
+      ? activeTerminalCwd()
+      : undefined;
   const turnContext: TurnContextState = {
     activeFile,
     ...(terminalCommandResult
@@ -237,6 +240,7 @@ export async function runModelTurn(
       : pastedTerminalCommand
         ? { pastedTerminalCommand }
         : {}),
+    ...(userTerminalCommands.length > 0 ? { userTerminalCommands } : {}),
     ...(terminalCwd ? { activeTerminalCwd: terminalCwd } : {}),
     ...(conv.plan ? { plan: { items: [...conv.plan.items], updatedAt: conv.plan.updatedAt } } : {}),
   };

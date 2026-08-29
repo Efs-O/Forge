@@ -359,7 +359,12 @@
           "default": true,
           "description": "Keep webview state when sidebar is hidden"
         },
-        "forge.editor.autoOpenChangedFiles": {
+        "forge.terminal.watchUserCommands": {
+      "type": "boolean",
+      "default": true,
+      "description": "Let the agent see commands you run in your own VS Code terminals, so it can spot a failure and reply with the corrected command. Requires VS Code shell integration. Only executions that start while Forge is active are seen; terminal scrollback and history are never read. Turn this off to keep your own terminal private to you."
+    },
+    "forge.editor.autoOpenChangedFiles": {
           "type": "boolean",
           "default": false,
           "description": "Automatically open files changed by Forge in the editor"

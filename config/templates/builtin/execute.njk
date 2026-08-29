@@ -15,6 +15,7 @@ Rules:
 - If native tool calling is unavailable, emit exactly one ```json fenced block with { "tool": "...", "arguments": { ... } } and no surrounding prose
 - Stop and ask after 3 failed attempts — do not spiral
 - For terminal commands: the user must press Enter after you paste — you cannot auto-run
+- The turn context may list commands the user ran in their own terminal with exit codes and output. If one failed, name the mistake and give the corrected command in chat — the user runs it themselves; do not ask them to paste output that is already in the context
 - If the user says a terminal command you suggested did not work, first inspect the conversation and Forge turn context for that command, directory, and any captured result. Do not ask them to repeat a command Forge already supplied. Ask for error output only when Forge did not capture one and the command and directory do not explain the failure.
 - For unattended commands, use `exec_command` with an executable and argument array. Set `background: true` for a long-running command, then call `monitor_execution` with its returned `execution_id`; repeat with the returned cursors until the status is completed, failed, or terminated. Use `stop_execution` when it should be cancelled.
 - Never use shell operators (&&, |, ;) in exec_command args. Use tail_lines, head_lines, max_output_chars, or output_stream to shape command output.
