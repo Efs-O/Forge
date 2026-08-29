@@ -61,6 +61,12 @@ interface Props {
    *  must jump to the bottom instantly instead of smooth-scrolling the whole
    *  (different) conversation top-to-bottom. */
   conversationId: string;
+  /** Rendered in place of the rows when the conversation has nothing to show. */
+  emptyState?: React.ReactNode;
+  /** "resumed · 3 days ago · 12 msgs" hairline, or null when this is not a resumed tab. */
+  resumedNote?: string | null;
+  /** Names the model a queued prompt is waiting on; absent when none is selected. */
+  queuedModelName?: string | null;
 }
 
 const SCROLL_THRESHOLD = 80; // px from bottom — within this, auto-scroll is active
@@ -72,6 +78,9 @@ export function MessageList({
   onSteerQueuedPrompt,
   streaming,
   conversationId,
+  emptyState,
+  resumedNote,
+  queuedModelName,
 }: Props): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null);
   const userScrolledUp = useRef(false);
@@ -131,8 +140,11 @@ export function MessageList({
     }
   }, [messages, conversationId, scrollToBottom, streaming]);
 
+  const isEmpty = rows.length === 0 && queuedPrompts.length === 0;
+
   return (
     <div id="messages" ref={containerRef}>
+      {isEmpty && emptyState}
       {rows.map((row) =>
         row.kind === 'diffGroup' ? (
           <DiffGroup key={row.diffs[0]!.id} diffs={row.diffs} />
@@ -150,11 +162,17 @@ export function MessageList({
           />
         ),
       )}
+      {resumedNote && (
+        <div className="resumed-marker" role="separator">
+          <span>{resumedNote}</span>
+        </div>
+      )}
       {queuedPrompts.map((prompt) => (
         <QueuedPromptRow
           key={prompt.id}
           text={prompt.text}
           attachmentCount={prompt.attachments.length}
+          waitingOn={queuedModelName ?? null}
           onSteer={() => onSteerQueuedPrompt(prompt.id)}
           onCancel={() => onCancelQueuedPrompt(prompt.id)}
         />

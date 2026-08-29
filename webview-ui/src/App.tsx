@@ -23,7 +23,9 @@ import { diffStats } from './components/DiffBlock';
 import { InputRow } from './components/InputRow';
 import { ConfirmationDialog } from './components/ConfirmationDialog';
 import { TabStrip } from './components/TabStrip';
-import { HistoryList } from './components/HistoryList';
+import { HistoryList, relativeTime } from './components/HistoryList';
+import { EmptyState } from './components/EmptyState';
+import { resumedNoteFor, resumedTabIds } from './resumedTabs';
 import { StreamingStatus } from './components/StreamingStatus';
 import { SLASH_COMMANDS } from './slashCommands';
 import { webviewDiagnostics } from './WebviewDiagnostics';
@@ -49,6 +51,11 @@ export function App(): React.ReactElement {
   const [tokenMax, setTokenMax] = useState(0);
   const [prefillText, setPrefillText] = useState<string | null>(null);
   const [historyExpanded, setHistoryExpanded] = useState(false);
+  // Conversations restored from an earlier window session, snapshotted once at
+  // hydration. State rather than a ref: the snapshot lands after the first
+  // render and must schedule another one.
+  const [resumedIds, setResumedIds] = useState<ReadonlySet<string>>(() => new Set<string>());
+  const resumedCaptured = useRef(false);
   // Queued prompts belong in state so the user can see and cancel them before
   // Forge submits them to the extension host.
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
@@ -177,6 +184,23 @@ export function App(): React.ReactElement {
     return () => window.removeEventListener('message', handler);
   }, []);
 
+  // One-shot: the first hydrated sync decides which tabs read as resumed.
+  useEffect(() => {
+    if (resumedCaptured.current || !state.sessionHydrated) return;
+    resumedCaptured.current = true;
+    setResumedIds(resumedTabIds(state.tabs, Date.now()));
+  }, [state.sessionHydrated, state.tabs]);
+
+  /** Sending in a tab settles it: the marker never returns for that tab. */
+  const clearResumed = useCallback((convId: string) => {
+    setResumedIds((current) => {
+      if (!current.has(convId)) return current;
+      const next = new Set(current);
+      next.delete(convId);
+      return next;
+    });
+  }, []);
+
   const postPrompt = useCallback((prompt: QueuedPrompt) => {
     dispatch({ type: 'USER_SEND', text: prompt.text, convId: prompt.conversationId });
     vscode.postMessage({
@@ -190,13 +214,14 @@ export function App(): React.ReactElement {
   const handleSend = useCallback(
     (text: string, attachments: AttachmentData[]) => {
       const prompt = { conversationId: state.activeConversationId, text, attachments };
+      clearResumed(prompt.conversationId);
       if (state.streamingIds.has(prompt.conversationId)) {
         setQueuedPrompts((current) => [...current, { ...prompt, id: crypto.randomUUID() }]);
         return;
       }
       postPrompt({ ...prompt, id: crypto.randomUUID() });
     },
-    [postPrompt, state.activeConversationId, state.streamingIds],
+    [clearResumed, postPrompt, state.activeConversationId, state.streamingIds],
   );
 
   useEffect(() => {
@@ -220,6 +245,7 @@ export function App(): React.ReactElement {
     (id: string) => {
       const prompt = queuedPrompts.find((candidate) => candidate.id === id);
       if (!prompt) return;
+      clearResumed(prompt.conversationId);
       steeringConversationIds.current.add(prompt.conversationId);
       setQueuedPrompts((current) => current.filter((candidate) => candidate.id !== id));
       // Replace the queued presentation with the same optimistic user row used
@@ -233,7 +259,7 @@ export function App(): React.ReactElement {
         conversationId: prompt.conversationId,
       });
     },
-    [queuedPrompts],
+    [clearResumed, queuedPrompts],
   );
 
   const handleCancel = useCallback(() => {
@@ -262,9 +288,12 @@ export function App(): React.ReactElement {
     vscode.postMessage({ type: 'renameConversation', id, title });
   }, []);
 
+  // The panel now also lists open tabs, so an empty history no longer means an
+  // empty panel. Collapse only when there is genuinely nothing but the one tab
+  // already visible in the strip.
   useEffect(() => {
-    if (state.history.length === 0) setHistoryExpanded(false);
-  }, [state.history.length]);
+    if (state.history.length === 0 && state.tabs.length <= 1) setHistoryExpanded(false);
+  }, [state.history.length, state.tabs.length]);
 
   const handleConfirmApprove = useCallback(() => {
     if (!confirmRequest) return;
@@ -293,8 +322,30 @@ export function App(): React.ReactElement {
   const uiBusy = generating;
   // `residency` is sent only for models Forge itself hosts, so its presence is
   // the local/remote answer already — no second heuristic to drift from it.
-  const activeModelIsLocal =
-    state.models.find((model) => model.name === state.activeModel)?.residency !== undefined;
+  const activeModelEntry = state.models.find((model) => model.name === state.activeModel);
+  const activeModelIsLocal = activeModelEntry?.residency !== undefined;
+
+  const activeTab = state.tabs.find((tab) => tab.id === state.activeConversationId);
+  const resumedNote = resumedNoteFor(activeTab, resumedIds, relativeTime);
+  // A background tab may be on a different model than the picker shows, and
+  // `active_model` is only set once a conversation picks one explicitly.
+  const queuedModelName = activeTab?.active_model ?? state.activeModel;
+  const queuedIds = useMemo(
+    () => new Set(queuedPrompts.map((prompt) => prompt.conversationId)),
+    [queuedPrompts],
+  );
+
+  const emptyState = useMemo(
+    () => (
+      <EmptyState
+        modelName={state.activeModel}
+        residency={activeModelEntry?.residency}
+        provider={activeModelEntry?.provider}
+        contextMax={tokenMax}
+      />
+    ),
+    [state.activeModel, activeModelEntry?.residency, activeModelEntry?.provider, tokenMax],
+  );
 
   useEffect(() => {
     webviewDiagnostics.recordState({
@@ -337,6 +388,7 @@ export function App(): React.ReactElement {
               tabs={state.tabs}
               activeId={state.activeConversationId}
               streamingIds={state.streamingIds}
+              queuedIds={queuedIds}
               historyCount={state.history.length}
               historyExpanded={historyExpanded}
               onSwitch={handleSwitchTab}
@@ -346,7 +398,12 @@ export function App(): React.ReactElement {
             />
             <HistoryList
               items={state.history}
+              tabs={state.tabs}
+              activeId={state.activeConversationId}
+              streamingIds={state.streamingIds}
+              queuedIds={queuedIds}
               expanded={historyExpanded}
+              onSwitch={handleSwitchTab}
               onRestore={handleRestoreConversation}
               onDelete={handleDeleteConversation}
               onRename={handleRenameConversation}
@@ -363,6 +420,9 @@ export function App(): React.ReactElement {
         onSteerQueuedPrompt={steerQueuedPrompt}
         streaming={streaming}
         conversationId={state.activeConversationId}
+        emptyState={emptyState}
+        resumedNote={resumedNote}
+        queuedModelName={queuedModelName}
       />
       <StreamingStatus
         streaming={streaming}

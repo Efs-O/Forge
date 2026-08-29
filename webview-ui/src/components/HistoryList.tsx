@@ -1,15 +1,22 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import type { SessionHistoryMeta } from '../../../src/sidebar/messageBridge';
+import type { SessionHistoryMeta, SessionTabMeta } from '../../../src/sidebar/messageBridge';
 
 interface Props {
   items: SessionHistoryMeta[];
+  /** Open tabs, listed above the closed ones so running work is visible here. */
+  tabs: SessionTabMeta[];
+  activeId: string;
+  streamingIds: ReadonlySet<string>;
+  queuedIds: ReadonlySet<string>;
   expanded: boolean;
+  onSwitch: (id: string) => void;
   onRestore: (id: string) => void;
   onDelete: (id: string) => void;
   onRename: (id: string, title: string) => void;
 }
 
-function relativeTime(ts: number): string {
+/** Shared with the resumed marker in App; single owner for this wording. */
+export function relativeTime(ts: number): string {
   const diff = Date.now() - ts;
   const mins = Math.floor(diff / 60_000);
   if (mins < 2) return 'just now';
@@ -205,9 +212,53 @@ function HistoryRow({
   );
 }
 
+/**
+ * An open tab. Leaner than `HistoryRow` on purpose: no kebab, because an open
+ * tab is renamed and closed from the strip, not from here.
+ */
+function OpenRow({
+  tab,
+  isActive,
+  streaming,
+  queued,
+  onSwitch,
+}: {
+  tab: SessionTabMeta;
+  isActive: boolean;
+  streaming: boolean;
+  queued: boolean;
+  onSwitch: (id: string) => void;
+}): React.ReactElement {
+  return (
+    <div className={`history-item-row${isActive ? ' history-item-row-current' : ''}`}>
+      <button
+        type="button"
+        className="history-item"
+        aria-current={isActive ? 'true' : undefined}
+        onClick={() => onSwitch(tab.id)}
+        title={absoluteTime(tab.updatedAt)}
+      >
+        <span className="history-item-title">
+          {streaming && <span className="tab-streaming-spinner" aria-label="generating" />}
+          {queued && <span className="tab-waiting-dot" aria-label="queued" />}
+          {tab.title}
+        </span>
+        <span className="history-item-meta">
+          {tab.messageCount ?? 0} msg · {relativeTime(tab.updatedAt)}
+        </span>
+      </button>
+    </div>
+  );
+}
+
 export function HistoryList({
   items,
+  tabs,
+  activeId,
+  streamingIds,
+  queuedIds,
   expanded,
+  onSwitch,
   onRestore,
   onDelete,
   onRename,
@@ -218,7 +269,23 @@ export function HistoryList({
   const [renamingId, setRenamingId] = useState<string | null>(null);
 
   return (
-    <section id="history-panel" aria-label="Chat history" hidden={!expanded}>
+    <section id="history-panel" aria-label="Sessions" hidden={!expanded}>
+      <p className="session-section-label">Open</p>
+      <div id="history-list-wrap">
+        <div className="session-list">
+          {tabs.map((tab) => (
+            <OpenRow
+              key={tab.id}
+              tab={tab}
+              isActive={tab.id === activeId}
+              streaming={streamingIds.has(tab.id)}
+              queued={!streamingIds.has(tab.id) && queuedIds.has(tab.id)}
+              onSwitch={onSwitch}
+            />
+          ))}
+        </div>
+      </div>
+      <p className="session-section-label">Closed</p>
       {items.length === 0 ? (
         <p id="history-empty">Closed chats appear here.</p>
       ) : (

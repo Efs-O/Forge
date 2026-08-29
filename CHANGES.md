@@ -1,5 +1,58 @@
 # Forge — Recent Changes
 
+## Unreleased
+
+- **An empty tab now says what the backend is doing.** It rendered nothing at
+  all — `MessageList` mapped an empty array — so the only way to learn whether
+  the model was resident was to send a prompt and wait out a possible 40-second
+  load. A new tab shows the Forge mark plus the model, its residency, and the
+  **per-slot** context window (`perSlotContext()`, i.e. `num_ctx / n_parallel`,
+  not the over-reported total). Remote routes name their provider instead of a
+  load state, because `ModelEntry.residency` is deliberately absent for them
+  and rendering `cold` would advertise a VRAM cost that does not exist. This is
+  the one thing Forge can put on an empty screen that a hosted-endpoint CLI
+  cannot: it drives a `llama-server` you spawned, so it has facts to report.
+  Deliberately says nothing about `backendReady` — that flag is global while
+  conversations run independently, so a failure in one tab would otherwise mark
+  an unrelated empty tab unavailable.
+
+- **A restored tab says it was restored.** Reopening the sidebar dropped you
+  mid-conversation with no indication whether that exchange was ten minutes or
+  three days old. Tabs idle longer than `RESUMED_AFTER_MS` (4h) now draw a
+  `resumed · 3 days ago · 12 msgs` hairline above the composer. The set is
+  snapshotted once at hydration and held in state, not recomputed per render:
+  `updatedAt` moves on any activity, so a live read made the marker vanish
+  mid-session and reappear on unrelated syncs. Sending in a tab clears it, via
+  both the ordinary send and the Steer path.
+
+- **A queued prompt now names what it is waiting on, and its tab shows it.**
+  The row read a bare `Queued`, and `App` filtered queued prompts to the active
+  conversation — so a prompt queued in a background tab was *completely*
+  invisible, with nothing distinguishing "waiting for the VRAM slot" from
+  "hung". The row now reads `Queued — waiting on <model>`, taken from that
+  tab's own `active_model` (falling back to the selected model) so a background
+  tab on a different model stays honest, and the tab chip carries a static
+  amber dot. The dot is deliberately not a spinner: a tab spinning while it is
+  merely waiting reads as a hang. Spinner = generating; dot = waiting.
+
+- **The sessions panel lists open tabs, not just closed ones.** The flyout
+  behind the clock button showed only closed conversations —
+  `historyMetasFromSession()` filters open ids out — so there was no single
+  place to see which tabs were running. It now has an **Open** section fed from
+  `state.tabs`, reusing the strip's own spinner and waiting dot so the two
+  displays cannot disagree, above the existing **Closed** rows (restore,
+  rename, delete unchanged). Open rows get no kebab: an open tab is closed from
+  the strip. Zero host changes — `SessionTabMeta.streaming` already shipped.
+  The badge on the clock button still counts closed sessions only, so its
+  meaning is unchanged.
+
+- Split `webview-ui/styles/sessions-panel.css` out of `tabs.css` (408 → 245
+  LOC) along the real seam: the tab strip and the sessions flyout are separate
+  concerns, and the panel had just grown a second section.
+
+Plan and mockups: `docs/plans/SIDEBAR_UX_PLAN.md`,
+`docs/plans/SIDEBAR_UX_MOCKUPS.html`.
+
 ## 0.13.20
 
 - Session transcripts no longer re-write their whole history on every window

@@ -223,3 +223,26 @@
   text-decoration: none;
   border-bottom-style: solid;
 }
+
+/* ── Resumed marker ──────────────────────────────────────────────────────── */
+
+/* Drawn once on a tab restored from an earlier window session, so landing
+   mid-thought reads as a hand-off rather than as unexplained state. */
+.resumed-marker {
+  display: flex;
+  align-items: center;
+  gap: var(--forge-space-2);
+  margin: var(--forge-space-1) 0 var(--forge-space-3);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 9.5px;
+  letter-spacing: 0.05em;
+  color: var(--vscode-descriptionForeground, #8b8b8b);
+}
+
+.resumed-marker::before,
+.resumed-marker::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--vscode-sideBarSectionHeader-border, #333);
+}

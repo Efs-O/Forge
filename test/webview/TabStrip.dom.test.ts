@@ -36,6 +36,7 @@ describe('TabStrip', () => {
           tabs,
           activeId: 'one',
           streamingIds: new Set<string>(),
+          queuedIds: new Set<string>(),
           historyCount: 0,
           historyExpanded: false,
           onSwitch: () => {},
@@ -50,5 +51,57 @@ describe('TabStrip', () => {
     expect(container.querySelector<HTMLButtonElement>('.tab-chip-label')?.title).toContain(
       'active time 01:01:01',
     );
+  });
+
+  it('marks a queued tab with a static dot, not the generating spinner', () => {
+    const tabs = [
+      { id: 'one', title: 'first', createdAt: 1, updatedAt: 2 },
+      { id: 'two', title: 'second', createdAt: 1, updatedAt: 2 },
+    ];
+    act(() => {
+      root.render(
+        React.createElement(TabStrip, {
+          tabs,
+          activeId: 'one',
+          streamingIds: new Set<string>(['one']),
+          queuedIds: new Set<string>(['two']),
+          historyCount: 0,
+          historyExpanded: false,
+          onSwitch: () => {},
+          onNew: () => {},
+          onClose: () => {},
+          onToggleHistory: () => {},
+        }),
+      );
+    });
+
+    // A spinner on a tab that is merely waiting would read as a hang.
+    expect(container.querySelectorAll('.tab-waiting-dot')).toHaveLength(1);
+    const chips = container.querySelectorAll('.tab-chip');
+    expect(chips[1]!.querySelector('.tab-waiting-dot')).not.toBeNull();
+    expect(chips[1]!.querySelector('.tab-streaming-spinner')).toBeNull();
+  });
+
+  it('never draws both marks on one tab', () => {
+    const tabs = [{ id: 'one', title: 'first', createdAt: 1, updatedAt: 2 }];
+    act(() => {
+      root.render(
+        React.createElement(TabStrip, {
+          tabs,
+          activeId: 'other',
+          streamingIds: new Set<string>(['one']),
+          queuedIds: new Set<string>(['one']),
+          historyCount: 0,
+          historyExpanded: false,
+          onSwitch: () => {},
+          onNew: () => {},
+          onClose: () => {},
+          onToggleHistory: () => {},
+        }),
+      );
+    });
+
+    expect(container.querySelectorAll('.tab-streaming-spinner')).toHaveLength(1);
+    expect(container.querySelectorAll('.tab-waiting-dot')).toHaveLength(0);
   });
 });

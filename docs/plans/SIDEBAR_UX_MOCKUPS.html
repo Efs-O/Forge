@@ -1,0 +1,1069 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  Forge sidebar UI mockups — companion to docs/plans/SIDEBAR_UX_PLAN.md.
+  Standalone: open directly in a browser. Self-contained except for the
+  Google Fonts stylesheet; without network it falls back to system faces.
+-->
+<title>Forge Sidebar Mockups</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+
+<style>
+/* ────────────────────────────────────────────────────────────────────────
+   Tokens. Light is the bare :root; dark redefines only the token values.
+   ──────────────────────────────────────────────────────────────────────── */
+:root {
+  --bg:        #eef1f5;
+  --surface:   #ffffff;
+  --surface-2: #f6f8fa;
+  --text:      #12171d;
+  --muted:     #5d6975;
+  --faint:     #8b96a2;
+  --border:    #dbe1e8;
+  --rule:      #c7d0da;
+  --accent:    #0072cc;
+  --accent-dim:#e2eefb;
+
+  --ok:   #1a7f37;
+  --warn: #9a6700;
+  --bad:  #b62324;
+
+  --f-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+
+  --measure: 62ch;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:        #101418;
+    --surface:   #171c21;
+    --surface-2: #1d232a;
+    --text:      #dfe6ee;
+    --muted:     #94a1af;
+    --faint:     #6d7b89;
+    --border:    #262e36;
+    --rule:      #323c46;
+    --accent:    #4ba9ff;
+    --accent-dim:#12293e;
+
+    --ok:   #4cc766;
+    --warn: #e0a53a;
+    --bad:  #f2666b;
+  }
+}
+:root[data-theme="dark"] {
+  --bg:        #101418;
+  --surface:   #171c21;
+  --surface-2: #1d232a;
+  --text:      #dfe6ee;
+  --muted:     #94a1af;
+  --faint:     #6d7b89;
+  --border:    #262e36;
+  --rule:      #323c46;
+  --accent:    #4ba9ff;
+  --accent-dim:#12293e;
+
+  --ok:   #4cc766;
+  --warn: #e0a53a;
+  --bad:  #f2666b;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--f-sans);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 0 24px 96px;
+}
+
+/* ── Masthead ───────────────────────────────────────────────────────────── */
+.masthead {
+  padding: 56px 0 32px;
+  border-bottom: 2px solid var(--text);
+  margin-bottom: 8px;
+}
+.eyebrow {
+  font-family: var(--f-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 14px;
+}
+h1 {
+  font-size: clamp(30px, 5vw, 46px);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.08;
+  margin: 0 0 16px;
+  text-wrap: balance;
+}
+.lede {
+  font-size: 17px;
+  color: var(--muted);
+  max-width: var(--measure);
+  margin: 0;
+}
+.masthead-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin-top: 24px;
+  font-family: var(--f-mono);
+  font-size: 11.5px;
+  color: var(--faint);
+}
+.masthead-meta b { color: var(--muted); font-weight: 500; }
+
+/* ── Sections ───────────────────────────────────────────────────────────── */
+.proposal {
+  padding-top: 56px;
+  border-top: 1px solid var(--rule);
+  margin-top: 56px;
+}
+.proposal:first-of-type { border-top: none; margin-top: 0; }
+
+.p-head {
+  display: grid;
+  grid-template-columns: 46px 1fr;
+  gap: 0 18px;
+  align-items: start;
+  margin-bottom: 8px;
+}
+.p-num {
+  font-family: var(--f-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  width: 46px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  letter-spacing: 0.04em;
+}
+h2 {
+  font-size: clamp(21px, 2.6vw, 27px);
+  font-weight: 600;
+  letter-spacing: -0.018em;
+  margin: 0;
+  line-height: 1.25;
+  text-wrap: balance;
+}
+.p-sub {
+  grid-column: 2;
+  color: var(--muted);
+  margin: 6px 0 0;
+  max-width: var(--measure);
+}
+.verdict {
+  grid-column: 2;
+  margin-top: 14px;
+  font-family: var(--f-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px;
+  border-radius: 2px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  width: fit-content;
+  font-weight: 500;
+}
+
+/* ── Mock rail: horizontal scroller of sidebar panels ───────────────────── */
+.rail {
+  display: flex;
+  gap: 22px;
+  overflow-x: auto;
+  padding: 30px 0 18px;
+  scrollbar-width: thin;
+}
+.spec { flex: 0 0 auto; width: 300px; }
+.spec-cap {
+  font-family: var(--f-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.spec-cap::before {
+  content: "";
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--rule);
+  flex: none;
+}
+.spec-cap.is-now::before  { background: var(--faint); }
+.spec-cap.is-alt::before  { background: var(--warn); }
+.spec-cap.is-pick::before { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+.spec-note {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 12px 2px 0;
+  line-height: 1.5;
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+   THE PANEL — a VS Code sidebar replica. Deliberately single-theme (VS Code
+   Dark+), because it stands in for a screenshot: a screenshot does not
+   invert with the page around it.
+   ──────────────────────────────────────────────────────────────────────── */
+.vsc {
+  --v-bg:     #181818;
+  --v-panel:  #1f1f1f;
+  --v-fg:     #cccccc;
+  --v-dim:    #8b8b8b;
+  --v-line:   #2b2b2b;
+  --v-chip:   #2a2d2e;
+  --v-accent: #0090ff;
+  --v-ok:     #3fb950;
+  --v-warn:   #d29922;
+  --v-bad:    #f85149;
+
+  background: var(--v-bg);
+  color: var(--v-fg);
+  border: 1px solid #000;
+  border-radius: 4px;
+  overflow: hidden;
+  font-family: var(--f-sans);
+  font-size: 12px;
+  line-height: 1.45;
+  box-shadow: 0 6px 22px rgba(0,0,0,0.18);
+  display: flex;
+  flex-direction: column;
+  height: 430px;
+}
+
+.vsc-title {
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--v-dim);
+  padding: 8px 10px 7px;
+  background: var(--v-panel);
+  border-bottom: 1px solid var(--v-line);
+}
+
+/* Chats toolbar + tab strip */
+.vsc-tabs { padding: 7px 8px 8px; border-bottom: 1px solid var(--v-line); }
+.vsc-tabsbar {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 7px;
+}
+.vsc-tabsbar span {
+  font-size: 10px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--v-dim);
+}
+.vsc-tabsbar div { display: flex; gap: 5px; color: var(--v-dim); }
+.vsc-ico {
+  width: 19px; height: 19px; border-radius: 3px;
+  display: grid; place-items: center;
+  border: 1px solid transparent;
+  font-size: 12px;
+}
+.vsc-ico.boxed { border-color: #3c3c3c; }
+
+.vsc-strip { display: flex; gap: 5px; align-items: center; }
+.chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 7px;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--v-dim);
+  font-size: 11.5px;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+.chip.on { background: var(--v-chip); color: var(--v-fg); border-color: #37373d; }
+.chip.live { color: var(--v-accent); }
+.chip .x { opacity: 0.45; font-size: 10px; }
+
+/* the spinner from tabs.css, reproduced */
+.spin {
+  width: 9px; height: 9px; flex: none;
+  border: 2px solid rgba(0,144,255,0.3);
+  border-top-color: var(--v-accent);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+
+.dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.dot.ok   { background: var(--v-ok); }
+.dot.warn { background: var(--v-warn); }
+.dot.bad  { background: var(--v-bad); }
+
+.pill {
+  font-family: var(--f-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.05em;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: rgba(0,144,255,0.14);
+  color: var(--v-accent);
+  white-space: nowrap;
+}
+
+/* Body area */
+.vsc-body { flex: 1; overflow: hidden; position: relative; padding: 10px; }
+.vsc-body.center {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 0; text-align: center;
+}
+
+/* Empty-state mark */
+.mark { color: var(--v-fg); opacity: 0.9; }
+.mark.ghost { opacity: 0.16; }
+.mark.fading { animation: pulse 3.2s ease-in-out infinite; }
+@keyframes pulse {
+  0%, 100% { opacity: 0.05; }
+  40%, 60% { opacity: 0.3; }
+}
+@media (prefers-reduced-motion: reduce) { .mark.fading { animation: none; opacity: 0.2; } }
+
+.status-lines {
+  margin-top: 16px;
+  display: flex; flex-direction: column; gap: 6px;
+  font-family: var(--f-mono);
+  font-size: 10.5px;
+  color: var(--v-dim);
+}
+.status-lines .row {
+  display: flex; align-items: center; gap: 6px; justify-content: center;
+}
+.status-lines .row b { color: var(--v-fg); font-weight: 500; }
+.starters {
+  margin-top: 20px;
+  display: flex; flex-wrap: wrap; gap: 6px; justify-content: center;
+}
+.starter {
+  font-size: 10.5px;
+  padding: 3px 8px;
+  border: 1px solid #3c3c3c;
+  border-radius: 10px;
+  color: var(--v-dim);
+}
+.starter.acc { color: var(--v-accent); border-color: rgba(0,144,255,0.4); }
+
+/* Conversation rows */
+.msg { margin-bottom: 9px; }
+.msg .who {
+  font-size: 9.5px; letter-spacing: 0.09em; text-transform: uppercase;
+  color: var(--v-dim); margin-bottom: 2px;
+}
+.msg.user { border-left: 2px solid var(--v-accent); padding-left: 7px; }
+.msg .txt { color: var(--v-fg); }
+.msg .txt.dim { color: var(--v-dim); }
+
+.resumed {
+  display: flex; align-items: center; gap: 8px;
+  margin: 4px 0 12px;
+  font-family: var(--f-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.05em;
+  color: var(--v-dim);
+}
+.resumed::before, .resumed::after {
+  content: ""; height: 1px; background: var(--v-line); flex: 1;
+}
+
+/* Composer */
+.vsc-input {
+  border-top: 1px solid var(--v-line);
+  padding: 8px;
+  background: var(--v-panel);
+}
+.vsc-field {
+  border: 1px solid #3c3c3c;
+  border-radius: 3px;
+  padding: 6px 8px;
+  color: var(--v-dim);
+  font-size: 11.5px;
+  background: #1a1a1a;
+}
+.vsc-field.focus { border-color: var(--v-accent); }
+.vsc-queued {
+  margin-top: 6px;
+  display: flex; align-items: center; gap: 6px;
+  font-family: var(--f-mono);
+  font-size: 9.5px;
+  color: var(--v-warn);
+}
+.vsc-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 6px;
+  font-family: var(--f-mono);
+  font-size: 9.5px;
+  color: var(--v-dim);
+}
+
+/* History flyout inside a panel */
+.hist { border-top: 1px solid var(--v-line); margin-top: 8px; padding-top: 7px; }
+.hist-row {
+  display: flex; align-items: center; gap: 7px;
+  padding: 5px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+.hist-row.hot { background: rgba(0,144,255,0.08); }
+.hist-row .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hist-row .when { font-family: var(--f-mono); font-size: 9.5px; color: var(--v-dim); }
+
+/* ── Commentary ─────────────────────────────────────────────────────────── */
+.notes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 26px 40px;
+  margin-top: 26px;
+  padding-top: 26px;
+  border-top: 1px solid var(--border);
+}
+.note h3 {
+  font-family: var(--f-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 8px;
+}
+.note p { margin: 0 0 10px; font-size: 14.5px; color: var(--muted); }
+.note p:last-child { margin-bottom: 0; }
+.note strong { color: var(--text); font-weight: 600; }
+
+code {
+  font-family: var(--f-mono);
+  font-size: 0.87em;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 4px;
+  color: var(--text);
+}
+
+.callout {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 3px;
+  padding: 14px 16px;
+  margin-top: 24px;
+  font-size: 14.5px;
+  color: var(--muted);
+}
+.callout b { color: var(--text); }
+
+/* ── Closing table ──────────────────────────────────────────────────────── */
+.summary { margin-top: 72px; padding-top: 40px; border-top: 2px solid var(--text); }
+.tablewrap { overflow-x: auto; margin-top: 20px; }
+table { border-collapse: collapse; width: 100%; min-width: 560px; font-size: 14px; }
+th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th {
+  font-family: var(--f-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+  border-bottom: 1px solid var(--rule);
+}
+td:first-child { font-weight: 600; white-space: nowrap; }
+td.eff { font-family: var(--f-mono); font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+tbody tr:last-child td { border-bottom: none; }
+
+@media (max-width: 620px) {
+  .wrap { padding: 0 16px 64px; }
+  .p-head { grid-template-columns: 1fr; gap: 10px; }
+  .p-sub, .verdict { grid-column: 1; }
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">Forge · sidebar UI review · 29 Aug 2026</p>
+    <h1>Four sidebar changes, drawn out</h1>
+    <p class="lede">Mockups of the empty tab, the startup behaviour, and the running-tab indicators — so the trade-offs can be looked at instead of described. Panels are drawn at true sidebar width in VS&nbsp;Code Dark+.</p>
+    <div class="masthead-meta">
+      <span><b>Accent</b> #0090ff — Forge's own <code style="font-size:11px">--forge-accent</code></span>
+      <span><b>Mark</b> assets/icon.svg</span>
+      <span><b>Width</b> 300px</span>
+    </div>
+  </header>
+
+  <!-- ══════════════════════════════════════════════════════════ 01 ══ -->
+  <section class="proposal">
+    <div class="p-head">
+      <div class="p-num">01</div>
+      <h2>The empty tab</h2>
+      <p class="p-sub">A new tab renders nothing at all today — <code>MessageList</code> maps an empty array. Three ways to fill it.</p>
+      <div class="verdict">Recommended · panel C</div>
+    </div>
+
+    <div class="rail">
+
+      <!-- A: today -->
+      <div class="spec">
+        <div class="spec-cap is-now">A · today</div>
+        <div class="vsc">
+          <div class="vsc-title">Forge</div>
+          <div class="vsc-tabs">
+            <div class="vsc-tabsbar">
+              <span>Chats</span>
+              <div><span class="vsc-ico">◷</span><span class="vsc-ico boxed">+</span></div>
+            </div>
+            <div class="vsc-strip"><span class="chip on">New chat <span class="x">✕</span></span></div>
+          </div>
+          <div class="vsc-body"></div>
+          <div class="vsc-input">
+            <div class="vsc-field">Ask Forge…</div>
+            <div class="vsc-foot"><span>qwen3.8-27b</span><span>0 / —</span></div>
+          </div>
+        </div>
+        <p class="spec-note">A blank rectangle. Nothing tells you whether the model is loaded, so you find out by sending and waiting.</p>
+      </div>
+
+      <!-- B: logo only -->
+      <div class="spec">
+        <div class="spec-cap is-alt">B · mark only (Codex-style)</div>
+        <div class="vsc">
+          <div class="vsc-title">Forge</div>
+          <div class="vsc-tabs">
+            <div class="vsc-tabsbar">
+              <span>Chats</span>
+              <div><span class="vsc-ico">◷</span><span class="vsc-ico boxed">+</span></div>
+            </div>
+            <div class="vsc-strip"><span class="chip on">New chat <span class="x">✕</span></span></div>
+          </div>
+          <div class="vsc-body center">
+            <svg class="mark fading" width="60" height="60" viewBox="0 0 24 24" aria-label="Forge mark">
+              <rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor"/>
+              <rect x="9" y="4" width="1.5" height="3" rx="0.5" fill="currentColor"/>
+              <rect x="13.5" y="4" width="1.5" height="3" rx="0.5" fill="currentColor"/>
+              <rect x="9" y="17" width="1.5" height="3" rx="0.5" fill="currentColor"/>
+              <rect x="13.5" y="17" width="1.5" height="3" rx="0.5" fill="currentColor"/>
+              <rect x="4" y="9" width="3" height="1.5" rx="0.5" fill="currentColor"/>
+              <rect x="4" y="13.5" width="3" height="1.5" rx="0.5" fill="currentColor"/>
+              <rect x="17" y="9" width="3" height="1.5" rx="0.5" fill="currentColor"/>
+              <rect x="17" y="13.5" width="3" height="1.5" rx="0.5" fill="currentColor"/>
+            </svg>
+          </div>
+          <div class="vsc-input">
+            <div class="vsc-field">Ask Forge…</div>
+            <div class="vsc-foot"><span>qwen3.8-27b</span><span>0 / —</span></div>
+          </div>
+        </div>
+        <p class="spec-note">What you described in Codex — the mark breathing, then gone. Looks considered. Says nothing. Identical on every launch, so your eye stops reading it by the third time.</p>
+      </div>
+
+      <!-- C: recommended -->
+      <div class="spec">
+        <div class="spec-cap is-pick">C · mark + live state</div>
+        <div class="vsc">
+          <div class="vsc-title">Forge</div>
+          <div class="vsc-tabs">
+            <div class="vsc-tabsbar">
+              <span>Chats</span>
+              <div><span class="vsc-ico">◷</span><span class="vsc-ico boxed">+</span></div>
+            </div>
+            <div class="vsc-strip"><span class="chip on">New chat <span class="x">✕</span></span></div>
+          </div>
+          <div class="vsc-body center">
+            <svg class="mark ghost" width="52" height="52" viewBox="0 0 24 24" aria-label="Forge mark">
+              <rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor"/>
+              <rect x="9" y="4" width="1.5" height="3" rx="0.5" fill="currentColor"/>
+              <rect x="13.5" y="4" width="1.5" height="3" rx="0.5" fill="currentColor"/>
+              <rect x="9" y="17" width="1.5" height="3" rx="0.5" fill="currentColor"/>
+              <rect x="13.5" y="17" width="1.5" height="3" rx="0.5" fill="currentColor"/>
+              <rect x="4" y="9" width="3" height="1.5" rx="0.5" fill="currentColor"/>
+              <rect x="4" y="13.5" width="3" height="1.5" rx="0.5" fill="currentColor"/>
+              <rect x="17" y="9" width="3" height="1.5" rx="0.5" fill="currentColor"/>
+              <rect x="17" y="13.5" width="3" height="1.5" rx="0.5" fill="currentColor"/>
+            </svg>
+            <div class="status-lines">
+              <div class="row"><span class="dot ok"></span><b>qwen3.8-27b</b> · resident</div>
+              <div class="row">32,768 ctx per slot · 2 slots</div>
+              <div class="row" style="opacity:0.7">llama-server · :8080</div>
+            </div>
+            <div class="starters">
+              <span class="starter acc">/review</span>
+              <span class="starter">explain this file</span>
+              <span class="starter">npm run ci</span>
+            </div>
+          </div>
+          <div class="vsc-input">
+            <div class="vsc-field focus">Ask Forge…</div>
+            <div class="vsc-foot"><span>qwen3.8-27b</span><span>0 / 32k</span></div>
+          </div>
+        </div>
+        <p class="spec-note">Same mark, quieter, plus three facts that change. <b style="color:var(--text)">This is what I meant by "live state".</b></p>
+      </div>
+
+      <!-- D: the other states -->
+      <div class="spec">
+        <div class="spec-cap is-pick">C · the same slot, other days</div>
+        <div class="vsc">
+          <div class="vsc-title">Forge</div>
+          <div class="vsc-tabs">
+            <div class="vsc-tabsbar">
+              <span>Chats</span>
+              <div><span class="vsc-ico">◷</span><span class="vsc-ico boxed">+</span></div>
+            </div>
+            <div class="vsc-strip"><span class="chip on">New chat <span class="x">✕</span></span></div>
+          </div>
+          <div class="vsc-body center" style="justify-content:space-evenly">
+            <div class="status-lines" style="margin:0">
+              <div class="row"><span class="dot warn"></span><b>qwen3.8-27b</b> · loading</div>
+              <div class="row" style="opacity:0.7">spawning llama-server…</div>
+            </div>
+            <div style="width:80%;height:1px;background:var(--v-line)"></div>
+            <div class="status-lines" style="margin:0">
+              <div class="row"><span class="dot bad"></span><b>backend down</b></div>
+              <div class="row" style="opacity:0.7">llama_server_binary not found</div>
+              <div class="row"><span class="starter acc">Open config.yaml</span></div>
+            </div>
+            <div style="width:80%;height:1px;background:var(--v-line)"></div>
+            <div class="status-lines" style="margin:0">
+              <div class="row"><span class="dot ok"></span><b>grok-4</b> · cloud</div>
+              <div class="row" style="opacity:0.7">xai · key in SecretStorage</div>
+            </div>
+          </div>
+          <div class="vsc-input">
+            <div class="vsc-field">Ask Forge…</div>
+            <div class="vsc-foot"><span>—</span><span>0 / —</span></div>
+          </div>
+        </div>
+        <p class="spec-note">Three separate launches stacked into one panel to save space. <b style="color:var(--text)">This is the argument:</b> the block is worth reading because it is different each time.</p>
+      </div>
+
+    </div>
+
+    <div class="notes">
+      <div class="note">
+        <h3>Why this beats a logo</h3>
+        <p><strong>Ready vs loading is the gap between an instant reply and a 40-second model load.</strong> Right now that costs you a send and a wait to discover.</p>
+        <p>And it still does the branding job — the mark is right there, just not doing all the work alone.</p>
+      </div>
+      <div class="note">
+        <h3>Why Claude and Codex can't</h3>
+        <p>They talk to a hosted endpoint. No local process, no VRAM, no context window you configured. Their empty screen has nothing true to say, so a mark is the only honest thing to put there.</p>
+        <p>Forge drives a <code>llama-server</code> you spawned with flags you chose. It has facts.</p>
+      </div>
+      <div class="note">
+        <h3>What it costs</h3>
+        <p>No new host plumbing. <code>App.tsx</code> already holds all three values — <code>ModelsMsg.residency</code>, <code>TokenBudgetMsg.max</code> (that's <code>perSlotContext()</code>, already dividing by <code>n_parallel</code>), and <code>backendDown</code>.</p>
+        <p>It's a presentational component reading the reducer. Gone the moment the first token lands.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════ 02 ══ -->
+  <section class="proposal">
+    <div class="p-head">
+      <div class="p-num">02</div>
+      <h2>Restore, or start blank</h2>
+      <p class="p-sub">Forge reopens the last tab with its context. Claude and Codex hand you an empty room. You called theirs more "pro" and Forge more ready-to-go.</p>
+      <div class="verdict">Recommended · keep restoring, mark the seam</div>
+    </div>
+
+    <div class="rail">
+
+      <div class="spec">
+        <div class="spec-cap is-now">A · today — silent restore</div>
+        <div class="vsc">
+          <div class="vsc-title">Forge</div>
+          <div class="vsc-tabs">
+            <div class="vsc-tabsbar">
+              <span>Chats</span>
+              <div><span class="vsc-ico">◷</span><span class="vsc-ico boxed">+</span></div>
+            </div>
+            <div class="vsc-strip">
+              <span class="chip on">refactor ConfigLoad… <span class="x">✕</span></span>
+            </div>
+          </div>
+          <div class="vsc-body">
+            <div class="msg user"><div class="txt">and now split the writer out</div></div>
+            <div class="msg"><div class="who">Forge</div><div class="txt dim">Done — <code style="font-size:10px;padding:0 3px">ConfigWriterHelpers.ts</code> now owns the comment-preserving path. Want me to run the tests?</div></div>
+          </div>
+          <div class="vsc-input">
+            <div class="vsc-field">Ask Forge…</div>
+            <div class="vsc-foot"><span>qwen3.8-27b</span><span>18k / 32k</span></div>
+          </div>
+        </div>
+        <p class="spec-note">You land mid-thought with no idea whether that was ten minutes ago or last Tuesday. That's the part that feels unfinished — not the restoring.</p>
+      </div>
+
+      <div class="spec">
+        <div class="spec-cap is-pick">B · restore + resumed marker</div>
+        <div class="vsc">
+          <div class="vsc-title">Forge</div>
+          <div class="vsc-tabs">
+            <div class="vsc-tabsbar">
+              <span>Chats</span>
+              <div><span class="vsc-ico">◷</span><span class="vsc-ico boxed">+</span></div>
+            </div>
+            <div class="vsc-strip">
+              <span class="chip on">refactor ConfigLoad… <span class="x">✕</span></span>
+            </div>
+          </div>
+          <div class="vsc-body">
+            <div class="msg user"><div class="txt">and now split the writer out</div></div>
+            <div class="msg"><div class="who">Forge</div><div class="txt dim">Done — <code style="font-size:10px;padding:0 3px">ConfigWriterHelpers.ts</code> now owns the comment-preserving path. Want me to run the tests?</div></div>
+            <div class="resumed">resumed · 3 days ago · 12 msgs</div>
+          </div>
+          <div class="vsc-input">
+            <div class="vsc-field focus">Ask Forge…</div>
+            <div class="vsc-foot"><span>qwen3.8-27b</span><span>18k / 32k</span></div>
+          </div>
+        </div>
+        <p class="spec-note">One hairline rule above the composer. You keep the context <em>and</em> get the deliberate hand-off moment. Only drawn when the tab has been idle past some threshold.</p>
+      </div>
+
+      <div class="spec">
+        <div class="spec-cap is-alt">C · blank start (their way)</div>
+        <div class="vsc">
+          <div class="vsc-title">Forge</div>
+          <div class="vsc-tabs">
+            <div class="vsc-tabsbar">
+              <span>Chats</span>
+              <div><span class="vsc-ico">◷</span><span class="vsc-ico boxed">+</span></div>
+            </div>
+            <div class="vsc-strip"><span class="chip on">New chat <span class="x">✕</span></span></div>
+          </div>
+          <div class="vsc-body center">
+            <svg class="mark ghost" width="52" height="52" viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor"/>
+              <rect x="9" y="4" width="1.5" height="3" rx="0.5" fill="currentColor"/>
+              <rect x="13.5" y="4" width="1.5" height="3" rx="0.5" fill="currentColor"/>
+              <rect x="9" y="17" width="1.5" height="3" rx="0.5" fill="currentColor"/>
+              <rect x="13.5" y="17" width="1.5" height="3" rx="0.5" fill="currentColor"/>
+              <rect x="4" y="9" width="3" height="1.5" rx="0.5" fill="currentColor"/>
+              <rect x="4" y="13.5" width="3" height="1.5" rx="0.5" fill="currentColor"/>
+              <rect x="17" y="9" width="3" height="1.5" rx="0.5" fill="currentColor"/>
+              <rect x="17" y="13.5" width="3" height="1.5" rx="0.5" fill="currentColor"/>
+            </svg>
+            <div class="status-lines">
+              <div class="row"><span class="dot ok"></span><b>qwen3.8-27b</b> · resident</div>
+            </div>
+            <div class="starters" style="margin-top:14px">
+              <span class="starter">◷ refactor ConfigLoader — 3d</span>
+            </div>
+          </div>
+          <div class="vsc-input">
+            <div class="vsc-field">Ask Forge…</div>
+            <div class="vsc-foot"><span>qwen3.8-27b</span><span>0 / 32k</span></div>
+          </div>
+        </div>
+        <p class="spec-note">If you go this way, put the last session one click away in the empty state — otherwise you've traded a real advantage for a look.</p>
+      </div>
+
+    </div>
+
+    <div class="notes">
+      <div class="note">
+        <h3>Why they start blank</h3>
+        <p>Claude and Codex are terminal processes with no persistent workspace binding. <strong>A fresh shell has nothing to restore.</strong> Their blank start isn't a design decision you can copy — it's their architecture showing through.</p>
+      </div>
+      <div class="note">
+        <h3>Why Forge shouldn't</h3>
+        <p>Forge is a sidebar pinned to a workspace folder. Restoring is what VS Code itself does with your open editors — it's the <em>correct</em> behaviour for that shape.</p>
+        <p>"Looks more pro" is really "looks more deliberate", and panel B buys that without giving up the resumption.</p>
+      </div>
+      <div class="note">
+        <h3>Or just settle it</h3>
+        <p><code>forge.startup: restore | new</code>, defaulting to <code>restore</code>. One line of config, ends the debate, costs nothing, and lets you live with each for a week.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════ 03 ══ -->
+  <section class="proposal">
+    <div class="p-head">
+      <div class="p-num">03</div>
+      <h2>Whether tabs earn their keep</h2>
+      <p class="p-sub">One VRAM slot means one local turn at a time — so what are three tabs for?</p>
+      <div class="verdict">Recommended · keep them, make queueing honest</div>
+    </div>
+
+    <div class="rail">
+
+      <div class="spec">
+        <div class="spec-cap is-now">A · today — tab B looks stalled</div>
+        <div class="vsc">
+          <div class="vsc-title">Forge</div>
+          <div class="vsc-tabs">
+            <div class="vsc-tabsbar">
+              <span>Chats</span>
+              <div><span class="vsc-ico">◷</span><span class="vsc-ico boxed">+</span></div>
+            </div>
+            <div class="vsc-strip">
+              <span class="chip live"><span class="spin"></span>refactor Con…</span>
+              <span class="chip on">write tests <span class="x">✕</span></span>
+            </div>
+          </div>
+          <div class="vsc-body">
+            <div class="msg user"><div class="txt">add a test for perSlotContext</div></div>
+            <div style="height:60px"></div>
+            <div class="status-lines" style="opacity:0.5"><div class="row">…</div></div>
+          </div>
+          <div class="vsc-input">
+            <div class="vsc-field">Ask Forge…</div>
+            <div class="vsc-foot"><span>qwen3.8-27b</span><span>4k / 32k</span></div>
+          </div>
+        </div>
+        <p class="spec-note">You sent in tab B while tab A is streaming. B sits there. Nothing says it's queued rather than hung.</p>
+      </div>
+
+      <div class="spec">
+        <div class="spec-cap is-pick">B · queueing said out loud</div>
+        <div class="vsc">
+          <div class="vsc-title">Forge</div>
+          <div class="vsc-tabs">
+            <div class="vsc-tabsbar">
+              <span>Chats</span>
+              <div><span class="vsc-ico">◷</span><span class="vsc-ico boxed">+</span></div>
+            </div>
+            <div class="vsc-strip">
+              <span class="chip live"><span class="spin"></span>refactor Con…</span>
+              <span class="chip on"><span class="dot warn"></span>write tests <span class="x">✕</span></span>
+            </div>
+          </div>
+          <div class="vsc-body">
+            <div class="msg user"><div class="txt">add a test for perSlotContext</div></div>
+          </div>
+          <div class="vsc-input">
+            <div class="vsc-field">Ask Forge…</div>
+            <div class="vsc-queued">◷ queued — waiting on qwen3.8-27b (tab 1)</div>
+            <div class="vsc-foot"><span>qwen3.8-27b</span><span>4k / 32k</span></div>
+          </div>
+        </div>
+        <p class="spec-note">Same constraint, stated. An amber dot for <em>waiting</em>, never a spinner — a tab spinning forever reads as a hang.</p>
+      </div>
+
+      <div class="spec">
+        <div class="spec-cap is-pick">C · two really do run at once</div>
+        <div class="vsc">
+          <div class="vsc-title">Forge</div>
+          <div class="vsc-tabs">
+            <div class="vsc-tabsbar">
+              <span>Chats</span>
+              <div><span class="vsc-ico">◷</span><span class="vsc-ico boxed">+</span></div>
+            </div>
+            <div class="vsc-strip">
+              <span class="chip live"><span class="spin"></span>refactor Con…</span>
+              <span class="chip on live"><span class="spin"></span>audit deps <span class="x">✕</span></span>
+            </div>
+          </div>
+          <div class="vsc-body">
+            <div class="msg user"><div class="txt">audit the dependency tree for anything unused</div></div>
+            <div class="msg"><div class="who">Forge · grok-4</div><div class="txt dim">Scanning <code style="font-size:10px;padding:0 3px">package.json</code> against imports…</div></div>
+            <div class="status-lines" style="margin-top:14px">
+              <div class="row" style="justify-content:flex-start"><span class="pill">local slot busy · this tab is cloud</span></div>
+            </div>
+          </div>
+          <div class="vsc-input">
+            <div class="vsc-field">Ask Forge…</div>
+            <div class="vsc-foot"><span>grok-4 · xai</span><span>7k / 128k</span></div>
+          </div>
+        </div>
+        <p class="spec-note">Tab 1 on the local model, tab 2 on a cloud provider. <b style="color:var(--text)">Concurrency 1 is a VRAM fact, not an architecture fact</b> — and it stops being true the moment one tab is cloud, or you spawn with <code style="font-size:10px;padding:0 3px">--parallel 2</code>.</p>
+      </div>
+
+    </div>
+
+    <div class="notes">
+      <div class="note">
+        <h3>They're parallel context, not parallel execution</h3>
+        <p>You're right that one slot means one turn. But tabs give you <strong>three separate histories you switch between without compacting or losing state</strong> — and that is exactly what a single-threaded CLI cannot do.</p>
+        <p>That value holds even at concurrency 1.</p>
+      </div>
+      <div class="note">
+        <h3>The code already assumes N</h3>
+        <p><code>streamingIds</code> is a <code>Set</code>, not a single id — <code>TurnLifecycle.ts:37</code>. Queued prompts are keyed per conversation. The ceiling isn't the UI.</p>
+        <p>Don't design a temporary constraint in permanently.</p>
+      </div>
+      <div class="note">
+        <h3>If you do collapse to one tab</h3>
+        <p>The spinner is currently suppressed on the <em>active</em> tab — <code>live &amp;&amp; !sel</code> in <code>TabStrip.tsx:171</code> — because <code>StreamingStatus</code> covers the foreground turn.</p>
+        <p>Collapse the strip and that condition has to go, or the indicator vanishes exactly when you need it.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════ 04 ══ -->
+  <section class="proposal">
+    <div class="p-head">
+      <div class="p-num">04</div>
+      <h2>Knowing which tabs are running</h2>
+      <p class="p-sub">The thing you asked for — a loop icon next to active tabs. Half of it already ships; the selector is the real gap.</p>
+      <div class="verdict">Recommended · reuse the spinner in the history panel</div>
+    </div>
+
+    <div class="rail">
+
+      <div class="spec">
+        <div class="spec-cap is-now">A · already shipping</div>
+        <div class="vsc" style="height:300px">
+          <div class="vsc-title">Forge</div>
+          <div class="vsc-tabs">
+            <div class="vsc-tabsbar">
+              <span>Chats</span>
+              <div><span class="vsc-ico">◷</span><span class="vsc-ico boxed">+</span></div>
+            </div>
+            <div class="vsc-strip">
+              <span class="chip live"><span class="spin"></span>refactor Con…</span>
+              <span class="chip on">write tests <span class="x">✕</span></span>
+              <span class="chip live"><span class="spin"></span>audit deps</span>
+            </div>
+          </div>
+          <div class="vsc-body">
+            <div class="status-lines" style="margin-top:4px">
+              <div class="row" style="justify-content:flex-start;opacity:0.7">tab strip · TabStrip.tsx:171</div>
+            </div>
+          </div>
+        </div>
+        <p class="spec-note">The rotating accent ring and the accent-tinted label are real, in <code style="font-size:10px;padding:0 3px">tabs.css:210</code>. You may simply not have run two tabs at once to see it.</p>
+      </div>
+
+      <div class="spec">
+        <div class="spec-cap is-pick">B · the gap — history panel</div>
+        <div class="vsc" style="height:300px">
+          <div class="vsc-title">Forge</div>
+          <div class="vsc-tabs">
+            <div class="vsc-tabsbar">
+              <span>Chats</span>
+              <div><span class="vsc-ico boxed">◷</span><span class="vsc-ico">+</span></div>
+            </div>
+            <div class="vsc-strip">
+              <span class="chip live"><span class="spin"></span>refactor Con…</span>
+              <span class="chip on">write tests <span class="x">✕</span></span>
+            </div>
+            <div class="hist">
+              <div class="hist-row hot"><span class="spin"></span><span class="name" style="color:var(--v-accent)">refactor ConfigLoader</span><span class="when">now</span></div>
+              <div class="hist-row hot"><span class="spin"></span><span class="name" style="color:var(--v-accent)">audit deps</span><span class="when">now</span></div>
+              <div class="hist-row"><span class="dot warn"></span><span class="name">write tests</span><span class="when">2m</span></div>
+              <div class="hist-row"><span style="width:7px"></span><span class="name">port gitCwd to relay</span><span class="when">3d</span></div>
+              <div class="hist-row"><span style="width:7px"></span><span class="name">embeddings ubatch bug</span><span class="when">6d</span></div>
+            </div>
+          </div>
+          <div class="vsc-body"></div>
+        </div>
+        <p class="spec-note"><b style="color:var(--text)">This is your loop icon.</b> <code style="font-size:10px;padding:0 3px">SessionHistoryMeta</code> carries no streaming flag at all today, so the selector can't show one.</p>
+      </div>
+
+      <div class="spec">
+        <div class="spec-cap is-pick">C · collapsed strip, count badge</div>
+        <div class="vsc" style="height:300px">
+          <div class="vsc-title">Forge</div>
+          <div class="vsc-tabs">
+            <div class="vsc-tabsbar">
+              <span>Chats</span>
+              <div><span class="vsc-ico">◷</span><span class="vsc-ico boxed">+</span></div>
+            </div>
+            <div class="vsc-strip">
+              <span style="color:var(--v-dim);font-size:11px">‹</span>
+              <span class="chip on live"><span class="spin"></span>refactor Con… <span class="x">✕</span></span>
+              <span class="pill"><span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--v-accent);margin-right:4px;vertical-align:middle"></span>2 running</span>
+              <span style="color:var(--v-dim);font-size:11px">›</span>
+            </div>
+          </div>
+          <div class="vsc-body">
+            <div class="msg user"><div class="txt">and now split the writer out</div></div>
+            <div class="msg"><div class="who">Forge</div><div class="txt dim">Splitting <code style="font-size:10px;padding:0 3px">ConfigWriter</code>…</div></div>
+          </div>
+        </div>
+        <p class="spec-note">If you go one-visible-tab: the count sits between the chevrons, so the state is readable without opening the selector. Note the spinner is now on the <em>active</em> chip — that's the <code style="font-size:10px;padding:0 3px">!sel</code> condition being dropped.</p>
+      </div>
+
+    </div>
+
+    <div class="notes">
+      <div class="note">
+        <h3>What's missing, exactly</h3>
+        <p>Add <code>streaming?: boolean</code> to <code>SessionHistoryMeta</code> and pass <code>streamingIds</code> through <code>sidebarPayloads.ts:75</code> — the same way <code>tabMetasFromSession</code> already does for the strip.</p>
+        <p>Then reuse <code>.tab-streaming-spinner</code>. No new CSS.</p>
+      </div>
+      <div class="note">
+        <h3>Two marks, two meanings</h3>
+        <p><strong>Spinner = generating.</strong> <strong>Static amber dot = waiting on you.</strong></p>
+        <p>If a tab is blocked on the confirmation gate, a spinner is a lie — it says the machine is busy when it's actually you that's holding things up.</p>
+      </div>
+      <div class="note">
+        <h3>Accessibility comes free</h3>
+        <p><code>tabs.css:227</code> already kills the animation under <code>prefers-reduced-motion</code>. Keep that on any new indicator — under reduced motion the ring becomes a static accent circle, which still reads.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <section class="summary">
+    <p class="eyebrow">If you only do one</p>
+    <h2 style="margin-bottom:14px">Start with the empty state</h2>
+    <p style="max-width:var(--measure);color:var(--muted);margin:0">It's the visible gap, it needs no host plumbing, and it's the one that buys the "pro" feel you're after without giving up Forge's ready-to-go advantage.</p>
+
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>Change</th><th>Effort</th><th>Touches</th><th>What it buys</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>01 · Empty state</td>
+            <td class="eff">Small</td>
+            <td class="eff">MessageList.tsx<br>+ 1 new component</td>
+            <td>First-impression polish, and model readiness before you commit a prompt</td>
+          </tr>
+          <tr>
+            <td>02 · Resumed marker</td>
+            <td class="eff">Small</td>
+            <td class="eff">MessageList.tsx<br>sessionTypes.ts</td>
+            <td>The deliberate hand-off moment, without losing the restore</td>
+          </tr>
+          <tr>
+            <td>03 · Queue feedback</td>
+            <td class="eff">Medium</td>
+            <td class="eff">InputRow.tsx<br>TurnLifecycle.ts</td>
+            <td>A queued tab stops looking hung; makes multi-tab defensible</td>
+          </tr>
+          <tr>
+            <td>04 · Selector indicators</td>
+            <td class="eff">Small</td>
+            <td class="eff">HistoryList.tsx<br>sidebarPayloads.ts<br>messageBridge.ts</td>
+            <td>Running tabs visible from the selector — the thing you asked for</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

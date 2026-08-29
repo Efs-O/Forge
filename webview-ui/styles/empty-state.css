@@ -1,0 +1,46 @@
+/* ── Empty tab ───────────────────────────────────────────────────────────── */
+
+/* Centred inside the #messages scroll container, which keeps its own flex and
+   scroll contract — the empty state replaces the rows, not the shell. */
+#empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--forge-space-4);
+  min-height: 100%;
+  padding: var(--forge-space-4);
+  text-align: center;
+  user-select: none;
+}
+
+#empty-mark {
+  color: var(--vscode-foreground, #ccc);
+  opacity: 0.16;
+}
+
+#empty-status {
+  display: flex;
+  flex-direction: column;
+  gap: var(--forge-space-1);
+}
+
+.empty-line {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--vscode-descriptionForeground, #8b8b8b);
+}
+
+.empty-line--primary {
+  color: var(--vscode-foreground, #ccc);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* The residency dot is the picker's, so the two displays can never disagree
+   about what "ready" looks like. Its own margin-right supplies the gap. */
+#empty-status .ms-dot {
+  margin-right: var(--forge-space-2);
+}

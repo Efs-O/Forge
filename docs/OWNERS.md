@@ -72,7 +72,10 @@ overlaps with an existing owner, extend the owner instead.
 | Compact per-round reasoning rows                 | `webview-ui/src/components/ThinkingGroup.tsx`  |
 | Tool call rows + expandable results              | `webview-ui/src/components/ToolRow.tsx`        |
 | Model picker dropdown (grouped, opens upward)    | `webview-ui/src/components/ModelSelector.tsx`  |
-| Chat history rows: restore, rename, delete       | `webview-ui/src/components/HistoryList.tsx`    |
+| Sessions panel: open tabs + closed-chat rows     | `webview-ui/src/components/HistoryList.tsx`    |
+| Empty-tab backend state (mark + residency line)  | `webview-ui/src/components/EmptyState.tsx`     |
+| Resumed-tab rule + marker wording                | `webview-ui/src/resumedTabs.ts`                |
+| Relative timestamp wording (`relativeTime`)      | `webview-ui/src/components/HistoryList.tsx`    |
 | Staged attachment state + file validation        | `webview-ui/src/components/useAttachments.ts`  |
 | Attachment tiles, size budget, reject notices    | `webview-ui/src/components/AttachmentTray.tsx` |
 | Message list ops + session-sync reconciliation   | `webview-ui/src/messageOps.ts`                 |
@@ -83,6 +86,9 @@ overlaps with an existing owner, extend the owner instead.
 | Undo-history depth cap + review snapshots        | `src/checkpoint/checkpointHistory.ts`          |
 | Diff card styles                                 | `webview-ui/styles/diff.css`                   |
 | Tool + thinking row styles                       | `webview-ui/styles/tool-rows.css`              |
+| Empty-tab styles                                 | `webview-ui/styles/empty-state.css`            |
+| Sessions panel styles (split from `tabs.css`)    | `webview-ui/styles/sessions-panel.css`         |
+| Residency dot colours (reused by the empty tab)  | `webview-ui/styles/model-selector.css`         |
 
 ## Model Manager (F7/§2.3)
 

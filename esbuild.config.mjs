@@ -53,6 +53,7 @@ const CSS_PARTIALS = [
   'webview-ui/styles/animations.css',
   'webview-ui/styles/layout.css',
   'webview-ui/styles/tabs.css',
+  'webview-ui/styles/sessions-panel.css',
   'webview-ui/styles/messages.css',
   'webview-ui/styles/tool-rows.css',
   'webview-ui/styles/diff.css',
@@ -60,6 +61,7 @@ const CSS_PARTIALS = [
   'webview-ui/styles/input.css',
   'webview-ui/styles/dialogs.css',
   'webview-ui/styles/model-selector.css',
+  'webview-ui/styles/empty-state.css',
 ];
 
 const MODEL_MANAGER_CSS_PARTIALS = [

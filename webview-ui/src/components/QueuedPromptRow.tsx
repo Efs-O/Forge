@@ -3,6 +3,8 @@ import React from 'react';
 interface Props {
   text: string;
   attachmentCount: number;
+  /** The model this prompt is waiting on; null when none is selected anywhere. */
+  waitingOn: string | null;
   onSteer: () => void;
   onCancel: () => void;
 }
@@ -11,6 +13,7 @@ interface Props {
 export function QueuedPromptRow({
   text,
   attachmentCount,
+  waitingOn,
   onSteer,
   onCancel,
 }: Props): React.ReactElement {
@@ -22,7 +25,10 @@ export function QueuedPromptRow({
       <span className="msg-role role-user">You</span>
       <div className="msg user msg-queued">{text || 'Attachment queued'}</div>
       <div className="queued-prompt-actions">
-        <span className="queued-prompt-status">Queued{attachmentLabel}</span>
+        <span className="queued-prompt-status">
+          {waitingOn ? `Queued — waiting on ${waitingOn}` : 'Queued'}
+          {attachmentLabel}
+        </span>
         <button className="btn-action" type="button" onClick={onSteer}>
           Steer
         </button>

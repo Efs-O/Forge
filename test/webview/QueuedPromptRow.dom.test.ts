@@ -31,6 +31,7 @@ describe('QueuedPromptRow', () => {
         React.createElement(QueuedPromptRow, {
           text: 'Run the tests after this task.',
           attachmentCount: 1,
+          waitingOn: null,
           onSteer,
           onCancel,
         }),
@@ -46,5 +47,22 @@ describe('QueuedPromptRow', () => {
     expect(onCancel).not.toHaveBeenCalled();
     act(() => buttons[1]!.click());
     expect(onCancel).toHaveBeenCalledOnce();
+  });
+
+  it('names the model the prompt is waiting on', () => {
+    act(() => {
+      root.render(
+        React.createElement(QueuedPromptRow, {
+          text: 'add a test for perSlotContext',
+          attachmentCount: 0,
+          waitingOn: 'qwen3.8-27b',
+          onSteer: vi.fn(),
+          onCancel: vi.fn(),
+        }),
+      );
+    });
+
+    // Without the model name a queued tab is indistinguishable from a hung one.
+    expect(container.textContent).toContain('Queued — waiting on qwen3.8-27b');
   });
 });

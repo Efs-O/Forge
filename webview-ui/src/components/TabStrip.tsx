@@ -5,6 +5,8 @@ interface Props {
   tabs: SessionTabMeta[];
   activeId: string;
   streamingIds: ReadonlySet<string>;
+  /** Tabs holding a prompt that has not been submitted yet. */
+  queuedIds: ReadonlySet<string>;
   historyCount: number;
   historyExpanded: boolean;
   onSwitch: (id: string) => void;
@@ -65,6 +67,7 @@ export function TabStrip({
   tabs,
   activeId,
   streamingIds,
+  queuedIds,
   historyCount,
   historyExpanded,
   onSwitch,
@@ -134,9 +137,9 @@ export function TabStrip({
           <button
             id="history-toolbar-btn"
             type="button"
-            aria-label="Chat history"
+            aria-label="Sessions"
             aria-expanded={historyExpanded}
-            title="Chat history"
+            title="Sessions"
             onClick={onToggleHistory}
           >
             <ClockIcon />
@@ -168,6 +171,9 @@ export function TabStrip({
           {tabs.map((tab) => {
             const sel = tab.id === activeId;
             const live = streamingIds.has(tab.id);
+            // Distinct from `live` on purpose: a spinner on a tab that is
+            // merely waiting reads as a hang.
+            const waiting = !live && queuedIds.has(tab.id);
             const label = tab.title.length > 20 ? `${tab.title.slice(0, 20)}…` : tab.title;
             return (
               <div
@@ -181,10 +187,11 @@ export function TabStrip({
                   className="tab-chip-label"
                   data-tab-id={tab.id}
                   tabIndex={sel ? 0 : -1}
-                  title={`${tab.title} — active time ${formatSessionDuration(tab.active_time_ms ?? 0)}`}
+                  title={`${tab.title}${waiting ? ' — queued' : ''} — active time ${formatSessionDuration(tab.active_time_ms ?? 0)}`}
                   onClick={() => onSwitch(tab.id)}
                 >
                   {live && <span className="tab-streaming-spinner" aria-label="generating" />}
+                  {waiting && <span className="tab-waiting-dot" aria-label="queued" />}
                   {label}
                 </button>
                 <button
