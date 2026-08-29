@@ -4,6 +4,7 @@ import {
   chatMessagesFromSlim,
   createDefaultSession,
   deriveTitle,
+  displayTitle,
   displayPersistMessages,
   historyMetasFromSession,
   HISTORY_KEY_LEGACY,
@@ -12,6 +13,8 @@ import {
   SESSION_KEY_V1,
   sidebarSessionPersistedSchema,
   slimPersistMessages,
+  UNTITLED_TITLE,
+  isUntitled,
   upsertHistoryConversation,
 } from '../../src/sidebar/sessionTypes';
 import type { ChatMessage } from '../../src/llm/types';
@@ -37,6 +40,24 @@ describe('sessionTypes', () => {
     const long = 'x'.repeat(60);
     expect(deriveTitle(long)).toMatch(/…$/);
     expect(deriveTitle(long).length).toBeLessThanOrEqual(49);
+  });
+
+  it('deriveTitle falls back to the untitled placeholder on an empty line', () => {
+    expect(deriveTitle('   ')).toBe(UNTITLED_TITLE);
+  });
+
+  it('treats both the current and the pre-0.13.21 placeholder as untitled', () => {
+    // Sessions on disk still carry the old string; the rename box must go on
+    // opening empty for them rather than pre-filling a placeholder as a name.
+    expect(isUntitled('New chat')).toBe(true);
+    expect(isUntitled('Chat')).toBe(true);
+    expect(isUntitled('Chat about chat')).toBe(false);
+    expect(isUntitled('fix the parser')).toBe(false);
+  });
+
+  it('displays a legacy placeholder as the current one, leaving real titles alone', () => {
+    expect(displayTitle('Chat')).toBe(UNTITLED_TITLE);
+    expect(displayTitle('fix the parser')).toBe('fix the parser');
   });
 
   it('sidebarSessionPersistedSchema rejects invalid payloads', () => {

@@ -193,7 +193,7 @@ export class ConversationTabs {
    * Retitle a tab or a history row. `deriveTitle` caps the length and collapses
    * whitespace exactly as an auto-derived title is capped, so a hand-typed name
    * cannot blow out the row it renders in. An all-whitespace title is a no-op
-   * rather than a reset to 'Chat' — the webview treats an empty box as cancel.
+   * rather than a reset to the untitled placeholder — the webview treats an empty box as cancel.
    */
   rename(id: string, title: string): void {
     if (!title.trim()) return;

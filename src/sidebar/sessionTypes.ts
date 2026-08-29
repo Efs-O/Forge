@@ -23,8 +23,13 @@ import { stripImageParts } from './imageParts';
 import type { DiffHunk, SessionHistoryMeta, SessionTabMeta } from './messageBridge';
 import { capDisplayText } from '../tools/resultCap';
 import { isFailureResult, resultLabel } from './toolResultView';
+import { displayTitle } from './conversationTitle';
 
 export type { SessionHistoryMeta, SessionTabMeta };
+
+// Naming lives in its own module; re-exported here because sessionTypes is
+// the import site every caller already reaches for.
+export { UNTITLED_TITLE, deriveTitle, displayTitle, isUntitled } from './conversationTitle';
 
 /** Max open tabs — bounds workspaceState size and UI. */
 export const MAX_CONVERSATIONS = 12;
@@ -33,8 +38,6 @@ export const MAX_HISTORY_CONVERSATIONS = 40;
 export const HISTORY_KEY_LEGACY = 'forge.conversation.history';
 
 export const SESSION_KEY_V1 = 'forge.conversations.v1';
-
-const TITLE_MAX_LEN = 48;
 
 const toolCallSchema = z.object({
   id: z.string(),
@@ -292,12 +295,6 @@ export function newConversationId(): string {
   }
 }
 
-export function deriveTitle(firstUserLine: string): string {
-  const line = firstUserLine.replace(/\s+/g, ' ').trim();
-  if (!line) return 'Chat';
-  return line.length > TITLE_MAX_LEN ? `${line.slice(0, TITLE_MAX_LEN)}…` : line;
-}
-
 /**
  * Persistence view: keeps tool-call turns and tool results so a reloaded
  * conversation still knows what the agent actually did.
@@ -437,7 +434,7 @@ export function tabMetasFromSession(
     );
     return {
       id: c.id,
-      title: c.title,
+      title: displayTitle(c.title),
       createdAt: c.createdAt,
       updatedAt: c.updatedAt,
       messageCount: shown.length,
@@ -459,7 +456,7 @@ export function historyMetasFromSession(session: SidebarRuntime): SessionHistory
       );
       return {
         id: c.id,
-        title: c.title,
+        title: displayTitle(c.title),
         createdAt: c.createdAt,
         updatedAt: c.updatedAt,
         messageCount: shown.length,

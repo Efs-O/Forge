@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **A new conversation is called "New chat", not "Chat".** The old default read
+  like a name when it is really a placeholder — `deriveTitle()` overwrites it
+  the moment the first prompt lands, so it is only ever visible on an unused
+  tab. `UNTITLED_TITLE` in `sessionTypes.ts` now owns the string, and
+  `isUntitled()` matches the pre-0.13.21 `'Chat'` too, so the rename box still
+  opens empty for sessions already on disk. Those keep their stored title;
+  `displayTitle()` translates at the two meta builders that feed the webview,
+  which avoids a migration pass over every file in `~/.forge/sessions/` to
+  change a string that is only ever displayed.
+
+- **The sessions panel closes when you pick a session.** Selecting a row is a
+  navigation, and leaving the accordion open hid the conversation just chosen
+  behind the list it was chosen from. Both selecting actions collapse it —
+  switching to an open tab and restoring a closed one — while rename and delete
+  leave it open, because walking down the list should survive them. Focus moves
+  back to the "All sessions" toggle: the row that had it is hidden along with
+  the panel, and without the handoff focus falls to `<body>`.
+
 - **An empty tab now says what the backend is doing.** It rendered nothing at
   all — `MessageList` mapped an empty array — so the only way to learn whether
   the model was resident was to send a prompt and wait out a possible 40-second
