@@ -57,9 +57,14 @@ telemetry, analytics, or auto-update pings.
 - Optional Tavily or Brave web search with keys stored in VS Code SecretStorage
 - Local semantic code search and reindex support
 - External MCP tool servers: bridge tools from any MCP stdio server into the agent's tool catalog with explicit capability classification
+- Optional private-owner remote control through Telegram; see [remote control setup and security](docs/REMOTE_CONTROL.md)
 
 ## What's New Since v0.12.3
 
+- Added opt-in, private-owner remote control with durable FIFO execution, deduplication,
+  notification outbox, multi-window fencing, and the existing Forge approval gate
+- Added Telegram Bot API long polling with SecretStorage-backed setup and local pairing
+- Added an experimental WhatsApp linked-device adapter with encrypted authentication state
 - Added OpenAI-compatible cloud-provider support, including `xai`, `openrouter`, `openai`, and generic `openai-compatible`
 - Added automatic xAI token resolution and refresh support
 - Added localhost control-server support for load-on-demand model orchestration
@@ -179,14 +184,14 @@ Each window counts **its own** conversation against `perSlotContext()` —
 ceiling and measure only their own messages, so compaction triggers per window
 on that window's history. A borrowing window has no idea the other exists.
 
-That number describes the *slot*. With `--parallel 1` there is one slot serving
+That number describes the _slot_. With `--parallel 1` there is one slot serving
 both windows: neither is over its limit, but they contend for one cache.
 Compaction stays correct — it simply cannot see the contention.
 
 ### If you have VRAM to spare
 
 `max_simultaneous_models` is **not** the setting for this. It controls how many
-*different* models Forge keeps loaded at once. Two windows asking for the same
+_different_ models Forge keeps loaded at once. Two windows asking for the same
 model resolve to the same runtime key and share one server regardless — that is
 the feature working as designed.
 
@@ -196,7 +201,7 @@ Two real options:
   spawns its own llama-server with its own full context and no contention, at
   double the VRAM. That is precisely the cost sharing exists to avoid.
 - **Keep sharing, drop the thrashing** — raise `--parallel` to 2 or more so each
-  window gets its own slot. `--ctx-size` is the *total* and gets divided, so
+  window gets its own slot. `--ctx-size` is the _total_ and gets divided, so
   `--parallel 2` halves each window's context unless you raise `--ctx-size` to
   match.
 
@@ -430,24 +435,24 @@ External CLI checkpoint controls are explicit VS Code settings. `forge.checkpoin
 
 Type `/` in chat to open the built-in command list.
 
-| Slash command | What it does                                |
-| ------------- | ------------------------------------------- |
-| `/unload`     | Stop all backends and release loaded models |
-| `/restart`    | Restart or reconnect the backend            |
-| `/reindex`    | Rebuild the local semantic search index     |
-| `/new`        | Open a new conversation tab                 |
-| `/rename`     | Rename the active conversation              |
+| Slash command | What it does                                     |
+| ------------- | ------------------------------------------------ |
+| `/unload`     | Stop all backends and release loaded models      |
+| `/restart`    | Restart or reconnect the backend                 |
+| `/reindex`    | Rebuild the local semantic search index          |
+| `/new`        | Open a new conversation tab                      |
+| `/rename`     | Rename the active conversation                   |
 | `/context`    | Add a file, selection, tabs, or files as context |
-| `/config`     | Open the active Forge config                |
-| `/logs`       | Show the Forge backend output               |
-| `/clear`      | Clear the active tab only                   |
-| `/review`     | Run an immediate review prompt              |
-| `/compact`    | Summarize and compress the current chat     |
-| `/undo`       | Restore files from the last checkpoint      |
-| `/keep`       | Keep current checkpoint changes             |
-| `/reload`     | Reload the VS Code window                   |
-| `/initForge`  | Generate the active repository's `FORGE.md`   |
-| `/clanker`    | Toggle full-auto mode for confirmations     |
+| `/config`     | Open the active Forge config                     |
+| `/logs`       | Show the Forge backend output                    |
+| `/clear`      | Clear the active tab only                        |
+| `/review`     | Run an immediate review prompt                   |
+| `/compact`    | Summarize and compress the current chat          |
+| `/undo`       | Restore files from the last checkpoint           |
+| `/keep`       | Keep current checkpoint changes                  |
+| `/reload`     | Reload the VS Code window                        |
+| `/initForge`  | Generate the active repository's `FORGE.md`      |
+| `/clanker`    | Toggle full-auto mode for confirmations          |
 
 ## VS Code Commands
 

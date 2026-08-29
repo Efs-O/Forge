@@ -15,11 +15,18 @@ import type { ToolFailureTracker } from '../tools/StripTools';
 import type { AgentLoop, SidebarProviderEvents } from './AgentLoop';
 import { SessionLogger } from './SessionLogger';
 import { resolveRequestModel } from '../config/ConfigResolver';
+import { deriveStaticCapabilities } from '../config/ConfigResolver';
 import { getLogger } from '../util/logger';
 import type { UserPromptOptions } from './transcriptMutations';
 import { validateAttachments } from './attachmentValidation';
+import type { ModelConfig } from '../config/types';
+import type { RequestChainLifecycle } from './RequestChainLifecycle';
+import type { RequestChainContext } from './RequestChainLifecycle';
+import { toRequestOutcome, type ForgeRequestOutcome, type ForgeTurnOutcome } from './turnOutcome';
+import type { ContextThresholdAction } from './ContextBudgetPublisher';
 
 const log = getLogger();
+export const CONVERSATION_BUSY_ERROR = 'Forge: this conversation is still generating.';
 
 /** Undefined outside a real host (tests, or an unresolvable extension id). */
 function forgeVersion(): string | undefined {
@@ -32,14 +39,18 @@ export interface SendPipelineDeps {
   getSidebar: () => SidebarRuntime;
   getActive: () => ConversationRuntime;
   agentLoop: AgentLoop;
+  requestChains: RequestChainLifecycle;
   failureTracker: ToolFailureTracker;
   events: SidebarProviderEvents;
   post: (msg: HostToWebview) => void;
   persistSession: () => void;
   postSessionSync: () => void;
-  /** Republishes the budget; `true` lets it act on the warning/compact thresholds. */
-  postTokenBudget: (evaluateThresholds?: boolean) => void;
-  resetContextWarning: () => void;
+  evaluateAfterTurn: (
+    conv: ConversationRuntime,
+    chain: RequestChainContext,
+    turn: ForgeTurnOutcome,
+  ) => Promise<ContextThresholdAction | undefined>;
+  resetContextWarning: (conversationId: string) => void;
 }
 
 export class SendPipeline {
@@ -52,9 +63,10 @@ export class SendPipeline {
     attachments?: AttachmentData[],
     conversationId?: string,
     promptOptions?: UserPromptOptions,
-  ): Promise<void> {
+    metadata?: { remoteRequestId?: string },
+  ): Promise<ForgeRequestOutcome> {
     const { deps } = this;
-    const conv = conversationId
+    let conv = conversationId
       ? deps.getSidebar().conversations.find((candidate) => candidate.id === conversationId)
       : deps.getActive();
     if (!conv) {
@@ -62,12 +74,16 @@ export class SendPipeline {
       // there is no tab to route it to. The active tab is the only place the
       // user can actually see it, and nothing is left streaming to clear.
       deps.post({ type: 'error', message: 'Forge: the queued conversation is no longer open.' });
-      return;
+      return {
+        kind: 'failed',
+        error: 'Forge: the queued conversation is no longer open.',
+        finalText: '',
+      };
     }
     const attachmentError = validateAttachments(attachments);
     if (attachmentError) {
       deps.post({ type: 'error', message: attachmentError, conversationId: conv.id });
-      return;
+      return { kind: 'failed', error: attachmentError, finalText: '' };
     }
     // Every refusal below MUST name the conversation it refers to. The webview
     // resolves an unaddressed message against the ACTIVE tab, and its ERROR
@@ -81,16 +97,42 @@ export class SendPipeline {
         message: 'Forge: this conversation is still generating. Cancel it first or open a new tab.',
         conversationId: conv.id,
       });
-      return;
+      return {
+        kind: 'failed',
+        error: CONVERSATION_BUSY_ERROR,
+        finalText: '',
+      };
     }
     await deps.agentLoop.waitForCancelledTurns();
+    // Everything after the await is the final preflight. No asynchronous gap
+    // is allowed between these checks and the synchronous reservation below.
+    conv = conversationId
+      ? deps.getSidebar().conversations.find((candidate) => candidate.id === conversationId)
+      : deps.getActive();
+    if (!conv) {
+      deps.post({ type: 'error', message: 'Forge: the queued conversation is no longer open.' });
+      return {
+        kind: 'failed',
+        error: 'Forge: the queued conversation is no longer open.',
+        finalText: '',
+      };
+    }
+    const finalAttachmentError = validateAttachments(attachments);
+    if (finalAttachmentError) {
+      deps.post({ type: 'error', message: finalAttachmentError, conversationId: conv.id });
+      return { kind: 'failed', error: finalAttachmentError, finalText: '' };
+    }
     if (deps.agentLoop.isStreamingConv(conv.id)) {
       deps.post({
         type: 'error',
         message: 'Forge: this conversation is still generating. Cancel it before sending again.',
         conversationId: conv.id,
       });
-      return;
+      return {
+        kind: 'failed',
+        error: CONVERSATION_BUSY_ERROR,
+        finalText: '',
+      };
     }
     const config = deps.getConfig();
     const modelName = conv.active_model ?? config.active_model;
@@ -98,34 +140,98 @@ export class SendPipeline {
       const message = 'Forge: no active model selected. Pick a model before sending.';
       deps.events.onBackendError?.(message);
       deps.post({ type: 'error', message, conversationId: conv.id });
-      return;
+      return { kind: 'failed', error: message, finalText: '' };
     }
     // Request-time resolution: active_model may carry @profile (F6). Flattens
     // defaults + base + profile into a legacy ModelConfig for the agent loop.
-    let selectedModel;
+    let selectedModel: ModelConfig;
     try {
       selectedModel = resolveRequestModel(config, modelName, (m) => log.info(m));
     } catch (err) {
       deps.post({ type: 'error', message: (err as Error).message, conversationId: conv.id });
-      return;
+      return { kind: 'failed', error: (err as Error).message, finalText: '' };
     }
+    const hasImage = attachments?.some((attachment) => attachment.mediaType.startsWith('image/'));
+    if (hasImage && !deriveStaticCapabilities(selectedModel).includes('vision')) {
+      deps.post({
+        type: 'error',
+        message:
+          `Forge: model "${selectedModel.name}" is not configured for image input. ` +
+          'Choose a vision-capable model. For llama.cpp, set mmproj_path to its compatible ' +
+          'projector; for other providers, declare the vision capability only when supported.',
+        conversationId: conv.id,
+      });
+      return {
+        kind: 'failed',
+        error: `Forge: model "${selectedModel.name}" is not configured for image input.`,
+        finalText: '',
+      };
+    }
+    const admission = deps.requestChains.reserve(conv.id, () =>
+      deps.agentLoop.isStreamingConv(conv.id),
+    );
+    if (admission.kind === 'busy') {
+      deps.post({
+        type: 'error',
+        message: 'Forge: this conversation is still generating. Cancel it before sending again.',
+        conversationId: conv.id,
+      });
+      return {
+        kind: 'failed',
+        error: CONVERSATION_BUSY_ERROR,
+        finalText: '',
+      };
+    }
+    const chain = deps.requestChains.accept(admission.reservation, metadata?.remoteRequestId);
     // Persist the full selection (incl. @profile) on the conversation so tab
     // switches restore the same profile, not just the base model (F6).
     conv.active_model = modelName;
-    deps.resetContextWarning();
+    deps.resetContextWarning(conv.id);
     // USER_SEND covers clicks in the current webview, but auto-compaction
     // resumes, commands, and restored webviews have no such action. Announce
     // every accepted turn here so Stop does not depend on its caller.
     deps.post({ type: 'generationStarted', conversationId: conv.id });
-    try {
-      await deps.agentLoop.runTurn(conv, selectedModel, text, attachments, promptOptions);
-    } finally {
-      deps.failureTracker.reset();
-      deps.persistSession();
-      deps.postSessionSync();
-      deps.postTokenBudget(true);
-      this.flushSessionLog(conv.id);
-    }
+    return deps.requestChains.run(chain, async () => {
+      let nextText = text;
+      let nextAttachments = attachments;
+      let nextOptions = promptOptions;
+      for (;;) {
+        let turn: ForgeTurnOutcome;
+        try {
+          turn = await deps.agentLoop.runTurn(
+            conv,
+            selectedModel,
+            nextText,
+            nextAttachments,
+            nextOptions,
+          );
+        } finally {
+          deps.failureTracker.reset();
+          deps.persistSession();
+          deps.postSessionSync();
+          this.flushSessionLog(conv.id);
+        }
+        if (turn.kind !== 'completed') return toRequestOutcome(turn);
+        if (deps.requestChains.isContinuationSuppressed(chain)) return toRequestOutcome(turn);
+        deps.requestChains.setStage(chain, 'evaluating');
+        const action = await deps.evaluateAfterTurn(conv, chain, turn);
+        const terminationKind = deps.requestChains.terminationKind(chain);
+        if (terminationKind) {
+          return {
+            kind: terminationKind,
+            ...(turn.finalText ? { finalText: turn.finalText } : {}),
+            ...(turn.incompleteReason ? { incompleteReason: turn.incompleteReason } : {}),
+          };
+        }
+        if (!action) return toRequestOutcome(turn);
+
+        deps.requestChains.setStage(chain, 'continuing');
+        deps.post({ type: 'generationStarted', conversationId: conv.id });
+        nextText = action.text;
+        nextAttachments = undefined;
+        nextOptions = action.options;
+      }
+    });
   }
 
   /**

@@ -52,6 +52,8 @@ describe('SlashCommandHandler', () => {
     const postSessionSync = vi.fn();
     const deps = {
       getActiveConv: () => conversation,
+      getConversation: (conversationId: string) =>
+        conversationId === conversation.id ? conversation : undefined,
       persistSession,
       postSessionSync,
     } as unknown as SlashCommandDeps;
@@ -76,6 +78,8 @@ describe('SlashCommandHandler', () => {
     const persistSession = vi.fn();
     const deps = {
       getActiveConv: () => conversation,
+      getConversation: (conversationId: string) =>
+        conversationId === conversation.id ? conversation : undefined,
       persistSession,
       postSessionSync: vi.fn(),
     } as unknown as SlashCommandDeps;
@@ -101,6 +105,8 @@ describe('SlashCommandHandler', () => {
     const resumeAfterManualCompact = vi.fn(async () => undefined);
     const deps = {
       getActiveConv: () => conversation,
+      getConversation: (conversationId: string) =>
+        conversationId === conversation.id ? conversation : undefined,
       persistSession: () => undefined,
       postSessionSync: () => undefined,
       invalidateExactTokenBudget: () => undefined,
@@ -108,7 +114,8 @@ describe('SlashCommandHandler', () => {
       post: () => undefined,
       // Long enough to clear runCompaction's plausibility floor, which now
       // rejects a short candidate as an unusable summary.
-      runPromptToMarkdown: async () => 'Goal: continue the second task. State: the first task is done and the second is in progress. Next: finish it. Files: src/a.ts, src/b.ts. Constraints: none recorded. Errors: none. This body exists only to clear the plausibility floor that rejects tool-call-shaped summaries.',
+      runPromptToMarkdown: async () =>
+        'Goal: continue the second task. State: the first task is done and the second is in progress. Next: finish it. Files: src/a.ts, src/b.ts. Constraints: none recorded. Errors: none. This body exists only to clear the plausibility floor that rejects tool-call-shaped summaries.',
       isStreaming: () => false,
       beginCompaction: () => () => undefined,
       incompleteTurnReason: () => 'the reply was cut off by the output limit',
@@ -148,6 +155,8 @@ describe('SlashCommandHandler', () => {
     const resumeAfterManualCompact = vi.fn(async () => undefined);
     const deps = {
       getActiveConv: () => conversation,
+      getConversation: (conversationId: string) =>
+        conversationId === conversation.id ? conversation : undefined,
       persistSession: () => undefined,
       postSessionSync: () => undefined,
       invalidateExactTokenBudget: () => undefined,

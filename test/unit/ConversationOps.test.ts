@@ -4,6 +4,7 @@ import {
   opDeleteConversation,
   opNewConversation,
   opRenameConversation,
+  opRestoreConversation,
   opSetActiveConversationModel,
 } from '../../src/sidebar/ConversationOps';
 import type { SidebarRuntime } from '../../src/sidebar/sessionTypes';
@@ -65,6 +66,18 @@ describe('opNewConversation', () => {
     expect(created?.active_model).toBe('codex');
   });
 
+  it('can create without changing the visible active conversation', () => {
+    const state = sidebar();
+    const activeBefore = state.activeConversationId;
+    const result = opNewConversation(state, 'codex', { activate: false });
+    if (result.atCap) throw new Error('unexpected cap');
+    expect(result.sidebar.activeConversationId).toBe(activeBefore);
+    expect(result.newId).not.toBe(activeBefore);
+    expect(
+      result.sidebar.conversations.find((conv) => conv.id === result.newId)?.active_model,
+    ).toBe('codex');
+  });
+
   it('leaves the tab unpinned when there is no default model', () => {
     const state = sidebar();
 
@@ -74,6 +87,24 @@ describe('opNewConversation', () => {
     if (result.atCap) return;
     const created = result.sidebar.conversations.find((c) => c.id === result.newId);
     expect(created).not.toHaveProperty('active_model');
+  });
+});
+
+describe('opRestoreConversation', () => {
+  it('can restore history without changing the visible active conversation', () => {
+    const state = sidebar();
+    state.history.push({
+      id: 'archived',
+      title: 'Archived',
+      createdAt: 1,
+      updatedAt: 1,
+      messages: [{ role: 'user', content: 'remember me' }],
+    });
+    const result = opRestoreConversation(state, 'archived', { activate: false });
+    if (!('ok' in result)) throw new Error('restore failed');
+    expect(result.sidebar.activeConversationId).toBe('active');
+    expect(result.sidebar.conversations.some((conv) => conv.id === 'archived')).toBe(true);
+    expect(result.sidebar.history.some((conv) => conv.id === 'archived')).toBe(false);
   });
 });
 
@@ -133,9 +164,7 @@ describe('opDeleteConversation', () => {
 describe('opRenameConversation', () => {
   it('renames an archived conversation without restoring it', () => {
     const state = sidebar();
-    state.history = [
-      { id: 'old', title: 'hello man', createdAt: 1, updatedAt: 2, messages: [] },
-    ];
+    state.history = [{ id: 'old', title: 'hello man', createdAt: 1, updatedAt: 2, messages: [] }];
 
     const result = opRenameConversation(state, 'old', 'Background test-suite run');
 

@@ -741,3 +741,68 @@ No implementation-blocking contradiction, false code assumption, missing securit
 duplicate canonical owner remains in the Phase 0 contract.
 
 `READY FOR IMPLEMENTATION`
+
+## 25. Implementation record
+
+- Phase 0: V4 consolidated, reviewed, gated, and committed in `963b670`.
+- Phase 1A: shared validated admission and accepted-intent epochs committed in `3e7a130`.
+- Phase 1B: managed request-chain lifecycle and typed outcomes committed in `99dc152`.
+- Phase 1C: addressed budget/compaction/resume behavior committed in `e6b9ae0`.
+- Phase 1D: non-activating addressed host facade committed in `b5efe27`.
+- Phase 2: durable transport-independent core and fake-channel tests committed in `35c31f0`.
+- Phase 3: correlated multi-sink Forge approvals committed in `3107895`.
+- Phase 4: Telegram Bot API long-poll transport and setup commands committed in `808f4e3`.
+- Phase 5: authorization, privacy, retention, rate-limit, outbox retry, lease-fencing,
+  config-reload, and disposal hardening completed. Targeted tests passed (20 tests),
+  `npm run ci` passed (1,375 tests passed, 14 skipped), and `npm run package` passed.
+
+- Phase 6: the separately authorized experimental WhatsApp linked-device adapter is complete.
+  Baileys `7.0.0-rc14` is exactly pinned after license/Node/API review; linked-device state is
+  AES-256-GCM encrypted in global storage with its key in SecretStorage; adapter tests, production
+  bundling, and VSIX packaging passed. The focused remote suite passed 22 tests, `npm audit
+  --omit=dev` reported zero vulnerabilities, `npm run ci` passed (1,380 tests passed, 14 skipped),
+  and `npm run package` passed with an 8.02 MB VSIX.
+
+Real-device Telegram and WhatsApp validation remains a release validation step because no provider
+credential, phone identity, or linked-device account is stored in the repository.
+
+## 26. Final implementation audit
+
+The acceptance audit closed the remaining multi-transport and privacy edges:
+
+- durable request claiming is atomic across transport controllers, globally FIFO per conversation,
+  and transport-owned so one lease loss cannot cancel another transport's request;
+- a durable request that loses a last-millisecond local admission race is requeued rather than
+  incorrectly marked failed;
+- control-command side effects use crash-aware durable receipts, so provider replay cannot repeat
+  `/new` or another command with the same provider event ID;
+- crash-unknown requests and abandoned notifications are visible through `/status`;
+- audit identity hashes use a per-install HMAC key from SecretStorage rather than an enumerable
+  unsalted digest;
+- Telegram shutdown never advances a cursor for an event whose handler is unavailable;
+- WhatsApp unknown/broadcast JIDs fail closed as channels, required LID mapping state remains
+  available, and provider protocol logging is silenced;
+- remote orchestration remains split from canonical `SendPipeline`, `RequestChainLifecycle`,
+  `ContextBudgetPublisher`, `ToolApprovalService`, and conversation/session owners.
+
+Release candidate `0.14.0` passed `npm run ci` with 1,384 tests passed and 14 skipped, production
+bundle loading, `npm run package`, packaged-file review, and `npm audit --omit=dev` with zero reported
+vulnerabilities. The resulting VSIX is 8.02 MB. Credential-free implementation is complete; only
+the explicitly external real-device Telegram and WhatsApp validation remains.
+
+## 27. Real-device validation handoff
+
+The credential-free validation handoff is implemented:
+
+- `Forge: Validate Remote Control` reports only non-secret configuration, active-consumer, fenced
+  lease, paired-owner presence, provider health, request-state, and outbox-state information;
+- Telegram health uses an authenticated, bounded `getMe` probe without returning token or raw owner
+  data; WhatsApp health reports linked/connected state without starting a connection solely for the
+  probe;
+- `docs/REMOTE_CONTROL_VALIDATION.md` defines the exact private-owner, approval, stop/queue,
+  multi-window, restart, delivery-retry, negative-authorization, and unlink checks for real devices.
+
+The follow-up gate passed with 1,386 tests passed and 14 skipped. Production build, bundle-load
+check, `npm run package`, packaged-file review, and `npm audit --omit=dev` also passed. No test or
+documentation artifact contains a provider credential, phone identity, pairing code, or raw owner
+identifier.

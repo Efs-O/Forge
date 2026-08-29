@@ -2,7 +2,7 @@
   "name": "forge-llm",
   "displayName": "Forge LLM",
   "description": "Local coding agent with first-class llama.cpp/GGUF control, reliable tools, and Keep/Undo checkpoints",
-  "version": "0.13.21",
+  "version": "0.14.0",
   "publisher": "Efsoo",
   "icon": "assets/publisher-logo.png",
   "galleryBanner": {
@@ -227,6 +227,38 @@
         "shortTitle": "Set Cloud Token"
       },
       {
+        "command": "forge.remote.configure",
+        "title": "Forge: Configure Remote Control"
+      },
+      {
+        "command": "forge.remote.validate",
+        "title": "Forge: Validate Remote Control"
+      },
+      {
+        "command": "forge.remote.setTelegramToken",
+        "title": "Forge: Set Telegram Bot Token"
+      },
+      {
+        "command": "forge.remote.pairTelegram",
+        "title": "Forge: Pair Telegram Remote"
+      },
+      {
+        "command": "forge.remote.unpairTelegram",
+        "title": "Forge: Unpair Telegram Remote"
+      },
+      {
+        "command": "forge.remote.linkWhatsApp",
+        "title": "Forge: Link WhatsApp Device (Experimental)"
+      },
+      {
+        "command": "forge.remote.pairWhatsApp",
+        "title": "Forge: Pair WhatsApp Remote Owner (Experimental)"
+      },
+      {
+        "command": "forge.remote.unlinkWhatsApp",
+        "title": "Forge: Unlink WhatsApp Device (Experimental)"
+      },
+      {
         "command": "forge.setupWizard",
         "title": "Forge: Setup Wizard"
       }
@@ -422,6 +454,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@mozilla/readability": "^0.6.0",
+    "@whiskeysockets/baileys": "7.0.0-rc14",
     "highlight.js": "^11.11.1",
     "js-yaml": "^4.3.1",
     "nunjucks": "^3.2.4",

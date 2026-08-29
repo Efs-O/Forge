@@ -334,6 +334,15 @@ export interface ForgeConfig {
     /** Port for the localhost control API. Default: 8799. */
     port?: number;
   };
+  /** Remote behavior only. Tokens and owner IDs live in SecretStorage. */
+  remote?: {
+    enabled: boolean;
+    queue_limit: number;
+    max_message_chars: number;
+    rate_limit_per_minute: number;
+    telegram: { enabled: boolean };
+    whatsapp: { enabled: boolean };
+  };
   /** Tool permission gates. Defaults to read-only fs, no net/exec/git-write. */
   permissions?: {
     fs?: { read?: boolean; write?: boolean; delete?: boolean };

@@ -58,4 +58,24 @@ describe('ToolApprovalService', () => {
 
     expect(lifecycle).toEqual(['start:conv-1', 'start:conv-2', 'end:conv-2', 'end:conv-1']);
   });
+
+  it('supports a non-webview sink and dismisses every surface on first resolution', async () => {
+    const requested = vi.fn();
+    const resolved = vi.fn();
+    const service = new ToolApprovalService(
+      () => undefined,
+      () => undefined,
+    );
+    service.addSink({ requested, resolved });
+    const pending = service.request('write_file', 'src/a.ts', false, 'conv');
+    expect(requested).toHaveBeenCalledOnce();
+    const id = requested.mock.calls[0]?.[0].id as string;
+    service.resolve(id, true);
+    service.resolve(id, false);
+    await expect(pending).resolves.toBe(true);
+    expect(resolved).toHaveBeenCalledOnce();
+    expect(resolved).toHaveBeenCalledWith(
+      expect.objectContaining({ id, approved: true, reason: 'resolved' }),
+    );
+  });
 });

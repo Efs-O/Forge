@@ -1,4 +1,5 @@
 import * as path from 'path';
+import { createHash } from 'crypto';
 import * as vscode from 'vscode';
 import { SidebarProvider } from './sidebar/SidebarProvider';
 import { BackendPool } from './backend/BackendPool';
@@ -43,6 +44,11 @@ import { registerSidebarCommands } from './vscode/sidebarCommands';
 import { flushPendingModelUsage } from './sidebar/modelManager/usageTracker';
 import { backgroundExecutionManager } from './tools/BackgroundExecutionManager';
 import { terminalCommandTracker } from './tools/TerminalCommandTracker';
+import { RemoteRuntime } from './remote/RemoteRuntime';
+import { TelegramChannel, TELEGRAM_BOT_TOKEN_SECRET } from './remote/TelegramChannel';
+import { registerRemoteCommands } from './vscode/remoteCommands';
+
+let activeRemoteRuntime: RemoteRuntime | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   initLogger(context);
@@ -249,11 +255,60 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     () => activeConfigPath,
     cliSessions,
   );
+  const workspaceId = createHash('sha256')
+    .update(workspaceRoot || `no-workspace:${activeConfigPath}`)
+    .digest('hex');
+  const remoteRuntime = new RemoteRuntime({
+    storageDirectory: context.globalStorageUri.fsPath,
+    workspaceId,
+    host: sidebarProvider.getHostFacade(),
+    secrets: context.secrets,
+    channelFactories: {
+      telegram: async (cursor) => {
+        const token = await context.secrets.get(TELEGRAM_BOT_TOKEN_SECRET);
+        if (!token) {
+          throw new Error(
+            'Telegram is enabled but no bot token is stored. Run “Forge: Set Telegram Bot Token”.',
+          );
+        }
+        return new TelegramChannel({
+          token,
+          ...cursor,
+          onError: (message) => void vscode.window.showErrorMessage(message),
+        });
+      },
+      whatsapp: async () => {
+        const [{ BaileysWhatsAppChannel }, { WhatsAppAuthStore }] = await Promise.all([
+          import('./remote/whatsapp/BaileysWhatsAppChannel'),
+          import('./remote/whatsapp/WhatsAppAuthStore'),
+        ]);
+        return new BaileysWhatsAppChannel({
+          authStore: new WhatsAppAuthStore(
+            path.join(context.globalStorageUri.fsPath, 'whatsapp-auth-v1.enc.json'),
+            context.secrets,
+          ),
+          onError: (message) => void vscode.window.showErrorMessage(message),
+          onPairingCode: (code) =>
+            void vscode.window.showInformationMessage(
+              `Forge WhatsApp pairing code: ${code}. Enter it in WhatsApp Linked Devices.`,
+              { modal: true },
+            ),
+        });
+      },
+    },
+    notifyLocal: (message) => void vscode.window.showErrorMessage(message),
+  });
+  activeRemoteRuntime = remoteRuntime;
+  await remoteRuntime.applyConfig(config).catch((err) => {
+    void vscode.window.showErrorMessage(`Forge remote failed to start: ${(err as Error).message}`);
+  });
   context.subscriptions.push({
     dispose: () => {
       void sidebarProvider.dispose();
     },
   });
+  context.subscriptions.push({ dispose: () => void remoteRuntime.dispose() });
+  registerRemoteCommands(context, remoteRuntime, () => config);
   const sessionTimeBar = new SessionTimeStatusBar(() => sidebarProvider.getActiveSessionMetrics());
   refreshSessionTime = () => sessionTimeBar.refresh();
   context.subscriptions.push(sessionTimeBar);
@@ -295,6 +350,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (config.control_server?.enabled) controlServer.start();
         statusBar.setStopped(config.active_model);
         ModelManagerPanel.current?.refresh();
+        void remoteRuntime.applyConfig(config).catch((err) => {
+          void vscode.window.showErrorMessage(
+            `Forge remote failed to reload: ${(err as Error).message}`,
+          );
+        });
       },
     }),
   );
@@ -341,10 +401,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   log.info('Forge activated');
 }
 
-export function deactivate(): void {
+export async function deactivate(): Promise<void> {
   // backend.stop() called via subscription above.
   disposeServerChannel();
   // Debounced last_used writes would otherwise be lost when the window closes
   // within DEBOUNCE_MS of a turn — the exact case the Model Manager cares about.
   flushPendingModelUsage();
+  await activeRemoteRuntime?.dispose();
+  activeRemoteRuntime = undefined;
 }

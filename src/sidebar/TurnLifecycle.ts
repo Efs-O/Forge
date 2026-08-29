@@ -9,6 +9,7 @@
 
 import type { BackendController } from '../backend/BackendController';
 import { getLogger } from '../util/logger';
+import type { ForgeTurnOutcome } from './turnOutcome';
 
 const log = getLogger();
 
@@ -22,6 +23,10 @@ export class TurnLifecycle {
    * request can acquire a backend. This includes worker delegation holds. */
   private readonly cancellingConvIds = new Set<string>();
   private readonly cancellationSettlements = new Set<Promise<void>>();
+  private readonly terminationKinds = new Map<
+    string,
+    Extract<ForgeTurnOutcome['kind'], 'cancelled' | 'interrupted'>
+  >();
   /** convId → why the last turn ended short. Set only when the turn was cut off
    *  rather than finished, so auto-compact can decide whether to resume it. */
   private readonly incompleteTurns = new Map<string, string>();
@@ -44,6 +49,7 @@ export class TurnLifecycle {
 
   /** Registers the turn's abort controller and the promise a cancel awaits. */
   register(convId: string, ctrl: AbortController): void {
+    this.terminationKinds.delete(convId);
     this.cancelControllers.set(convId, ctrl);
     this.settledMap.set(
       convId,
@@ -74,6 +80,12 @@ export class TurnLifecycle {
     this.resolveSettledMap.delete(convId);
     this.settledMap.delete(convId);
     this.cancelControllers.delete(convId);
+  }
+
+  terminationKind(
+    convId: string,
+  ): Extract<ForgeTurnOutcome['kind'], 'cancelled' | 'interrupted'> | undefined {
+    return this.terminationKinds.get(convId);
   }
 
   /** Marks a conversation busy for background work that is not a turn (the
@@ -141,15 +153,19 @@ export class TurnLifecycle {
    * slot when the socket closes.
    */
   cancel(convId?: string): Promise<void> {
-    return this.beginCancellation(convId, false);
+    return this.beginCancellation(convId, false, 'cancelled');
   }
 
   /** Abort only the active request and retain its loaded backend for steering. */
   interrupt(convId: string): Promise<void> {
-    return this.beginCancellation(convId, false);
+    return this.beginCancellation(convId, false, 'interrupted');
   }
 
-  private beginCancellation(convId: string | undefined, stopBackend: boolean): Promise<void> {
+  private beginCancellation(
+    convId: string | undefined,
+    stopBackend: boolean,
+    kind: 'cancelled' | 'interrupted',
+  ): Promise<void> {
     const cancelling = convId
       ? this.cancelControllers.has(convId)
         ? [convId]
@@ -157,7 +173,10 @@ export class TurnLifecycle {
       : [...this.cancelControllers.keys()];
     if (cancelling.length === 0) return Promise.resolve();
 
-    for (const id of cancelling) this.cancellingConvIds.add(id);
+    for (const id of cancelling) {
+      this.cancellingConvIds.add(id);
+      this.terminationKinds.set(id, kind);
+    }
     const settled = this.stopStreaming(convId, stopBackend)
       .catch((err) => {
         log.debug(`[AgentLoop] cancellation cleanup failed: ${(err as Error).message}`);

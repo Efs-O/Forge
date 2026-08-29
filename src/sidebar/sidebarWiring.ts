@@ -27,6 +27,9 @@ import { ConversationTabs } from './ConversationTabs';
 import { SendPipeline } from './SendPipeline';
 import { opResetReportedContext } from './ConversationOps';
 import { snapshotRepoState } from './repoSnapshot';
+import { RequestChainLifecycle } from './RequestChainLifecycle';
+import type { RequestChainContext } from './RequestChainLifecycle';
+import type { ContextThresholdAction } from './ContextBudgetPublisher';
 
 /** What the provider lends its collaborators. */
 export interface SidebarHost {
@@ -39,10 +42,13 @@ export interface SidebarHost {
   post: (msg: HostToWebview) => void;
   postModels: () => void;
   postSessionSync: () => void;
-  postTokenBudget: (evaluateThresholds?: boolean) => void;
+  postTokenBudget: () => void;
   persistSession: () => void;
   baseOf: (id: string | null | undefined) => string | null;
-  autoCompact: (conv: ConversationRuntime) => Promise<void>;
+  autoCompact: (
+    conv: ConversationRuntime,
+    chain: RequestChainContext,
+  ) => Promise<ContextThresholdAction | undefined>;
   resumeAfterManualCompact: (conversationId: string, reason: string) => Promise<void>;
   reindexCodebase: () => Promise<void>;
   newConversation: () => Promise<void>;
@@ -79,10 +85,12 @@ export interface SidebarRuntimeParts {
   budget: ContextBudgetPublisher;
   tabs: ConversationTabs;
   send: SendPipeline;
+  requestChains: RequestChainLifecycle;
 }
 
 export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRuntimeParts {
   const { pool, checkpoints, toolRegistry, failureTracker, events, workspaceState } = parts;
+  const requestChains = new RequestChainLifecycle();
 
   const agentLoop = new AgentLoop(
     pool,
@@ -110,7 +118,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     getSidebar: host.getSidebar,
     post: host.post,
     baseOf: host.baseOf,
-    autoCompact: host.autoCompact,
+    autoCompact: (conv, chain) => host.autoCompact(conv, chain),
     manualCompact: () => void slashHandler.handle('compact'),
     incompleteTurnReason: (convId) => agentLoop.incompleteTurnReason(convId),
   });
@@ -127,13 +135,15 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     keep: host.keep,
     post: host.post,
     getActiveConv: host.getActive,
+    getConversation: (conversationId) =>
+      host.getSidebar().conversations.find((conv) => conv.id === conversationId),
     persistSession: host.persistSession,
     postSessionSync: host.postSessionSync,
-    invalidateExactTokenBudget: () => opResetReportedContext(host.getActive()),
-    postTokenBudget: () => host.postTokenBudget(),
+    invalidateExactTokenBudget: (conv) => opResetReportedContext(conv),
+    postTokenBudget: (conv) => budget.publish(conv),
     runPromptToMarkdown: (text, conversationId, options) =>
       agentLoop.runPromptToMarkdown(text, conversationId, options),
-    isStreaming: () => agentLoop.streaming,
+    isStreaming: (conversationId) => agentLoop.isStreamingConv(conversationId),
     beginCompaction: (convId) => agentLoop.beginBackgroundWork(convId),
     snapshotRepoState,
     incompleteTurnReason: (conversationId) => agentLoop.incompleteTurnReason(conversationId),
@@ -159,13 +169,14 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     getSidebar: host.getSidebar,
     getActive: host.getActive,
     agentLoop,
+    requestChains,
     failureTracker,
     events,
     post: host.post,
     persistSession: host.persistSession,
     postSessionSync: host.postSessionSync,
-    postTokenBudget: host.postTokenBudget,
-    resetContextWarning: () => budget.resetWarning(),
+    evaluateAfterTurn: (conv, chain) => budget.evaluateAfterTurn(conv, chain),
+    resetContextWarning: (conversationId) => budget.resetWarning(conversationId),
   });
 
   const tabs = new ConversationTabs({
@@ -193,5 +204,5 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     },
   });
 
-  return { agentLoop, slashHandler, budget, tabs, send };
+  return { agentLoop, slashHandler, budget, tabs, send, requestChains };
 }

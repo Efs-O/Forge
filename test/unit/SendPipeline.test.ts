@@ -13,6 +13,7 @@ import { SendPipeline, type SendPipelineDeps } from '../../src/sidebar/SendPipel
 import type { ForgeConfig } from '../../src/config/types';
 import type { ConversationRuntime, SidebarRuntime } from '../../src/sidebar/sessionTypes';
 import type { HostToWebview } from '../../src/sidebar/messageBridge';
+import { RequestChainLifecycle } from '../../src/sidebar/RequestChainLifecycle';
 
 function conversation(overrides: Partial<ConversationRuntime> = {}): ConversationRuntime {
   return {
@@ -33,18 +34,25 @@ interface Harness {
   runTurn: ReturnType<typeof vi.fn>;
   deps: SendPipelineDeps;
   conv: ConversationRuntime;
+  requestChains: RequestChainLifecycle;
 }
 
-function harness(options: {
-  config?: Partial<ForgeConfig>;
-  conv?: Partial<ConversationRuntime>;
-  streaming?: boolean;
-  cancellationPending?: boolean;
-  streamingAfterWait?: boolean;
-} = {}): Harness {
+function harness(
+  options: {
+    config?: Partial<ForgeConfig>;
+    conv?: Partial<ConversationRuntime>;
+    streaming?: boolean;
+    cancellationPending?: boolean;
+    streamingAfterWait?: boolean;
+  } = {},
+): Harness {
   const conv = conversation(options.conv);
   const posted: HostToWebview[] = [];
-  const runTurn = vi.fn().mockResolvedValue(undefined);
+  const runTurn = vi.fn().mockResolvedValue({
+    kind: 'completed',
+    finalText: 'finished',
+    finishReason: 'stop',
+  });
   let waited = false;
 
   const config = {
@@ -54,6 +62,7 @@ function harness(options: {
   } as ForgeConfig;
 
   const sidebar = { activeConversationId: conv.id, conversations: [conv] } as SidebarRuntime;
+  const requestChains = new RequestChainLifecycle();
 
   const deps: SendPipelineDeps = {
     getConfig: () => config,
@@ -68,16 +77,17 @@ function harness(options: {
       },
       runTurn,
     } as unknown as SendPipelineDeps['agentLoop'],
+    requestChains,
     failureTracker: { reset: vi.fn() } as unknown as SendPipelineDeps['failureTracker'],
     events: { onBackendError: vi.fn() },
     post: (msg) => posted.push(msg),
     persistSession: vi.fn(),
     postSessionSync: vi.fn(),
-    postTokenBudget: vi.fn(),
+    evaluateAfterTurn: vi.fn(async () => undefined),
     resetContextWarning: vi.fn(),
   };
 
-  return { pipeline: new SendPipeline(deps), posted, runTurn, deps, conv };
+  return { pipeline: new SendPipeline(deps), posted, runTurn, deps, conv, requestChains };
 }
 
 function errors(posted: HostToWebview[]): string[] {
@@ -89,7 +99,7 @@ describe('SendPipeline.send', () => {
 
   it('runs the turn on the active conversation', async () => {
     const h = harness();
-    await h.pipeline.send('hello');
+    const outcome = await h.pipeline.send('hello');
 
     expect(h.runTurn).toHaveBeenCalledOnce();
     const [conv, model, text] = h.runTurn.mock.calls[0]!;
@@ -97,6 +107,7 @@ describe('SendPipeline.send', () => {
     expect(model.name).toBe('qwen');
     expect(text).toBe('hello');
     expect(errors(h.posted)).toEqual([]);
+    expect(outcome).toEqual({ kind: 'completed', finalText: 'finished' });
   });
 
   it('announces an accepted host-initiated turn so Stop is available', async () => {
@@ -160,6 +171,67 @@ describe('SendPipeline.send', () => {
     expect(errors(h.posted)).toHaveLength(1);
   });
 
+  it('does not advance the accepted-intent epoch for rejected preflight', async () => {
+    const missing = harness({ config: { active_model: undefined } as Partial<ForgeConfig> });
+    await missing.pipeline.send('hello');
+    expect(missing.requestChains.currentEpoch('conv-1')).toBe(0);
+
+    const invalid = harness({
+      config: { active_model: 'ghost', models: [] } as Partial<ForgeConfig>,
+    });
+    await invalid.pipeline.send('hello');
+    expect(invalid.requestChains.currentEpoch('conv-1')).toBe(0);
+  });
+
+  it('rejects incompatible image input before admission', async () => {
+    const h = harness();
+    await h.pipeline.send('look', [
+      { name: 'image.png', mediaType: 'image/png', data: 'aGVsbG8=' },
+    ]);
+    expect(h.runTurn).not.toHaveBeenCalled();
+    expect(h.requestChains.currentEpoch('conv-1')).toBe(0);
+    expect(errors(h.posted)[0]).toContain('not configured for image input');
+  });
+
+  it('holds one admission until the accepted turn settles', async () => {
+    let finish!: () => void;
+    const pending = new Promise<{
+      kind: 'completed';
+      finalText: string;
+      finishReason: string;
+    }>((resolve) => {
+      finish = () => resolve({ kind: 'completed', finalText: 'first done', finishReason: 'stop' });
+    });
+    const h = harness();
+    h.runTurn.mockReturnValueOnce(pending);
+    const first = h.pipeline.send('first');
+    await vi.waitFor(() => expect(h.runTurn).toHaveBeenCalledOnce());
+    await h.pipeline.send('second');
+    expect(h.runTurn).toHaveBeenCalledOnce();
+    expect(h.requestChains.currentEpoch('conv-1')).toBe(1);
+    finish();
+    await first;
+    expect(h.requestChains.isReserved('conv-1')).toBe(false);
+  });
+
+  it('runs an internal continuation under the same reservation and intent epoch', async () => {
+    const h = harness();
+    vi.mocked(h.deps.evaluateAfterTurn)
+      .mockResolvedValueOnce({ kind: 'continue', text: 'resume', options: { internal: true } })
+      .mockResolvedValueOnce(undefined);
+    h.runTurn
+      .mockResolvedValueOnce({ kind: 'completed', finalText: 'partial', finishReason: 'length' })
+      .mockResolvedValueOnce({ kind: 'completed', finalText: 'final', finishReason: 'stop' });
+
+    const outcome = await h.pipeline.send('start');
+
+    expect(h.runTurn).toHaveBeenCalledTimes(2);
+    expect(h.runTurn.mock.calls[1]?.[2]).toBe('resume');
+    expect(h.runTurn.mock.calls[1]?.[4]).toEqual({ internal: true });
+    expect(h.requestChains.currentEpoch('conv-1')).toBe(1);
+    expect(outcome).toEqual({ kind: 'completed', finalText: 'final' });
+  });
+
   it('pins the full selection including @profile on the conversation', async () => {
     const h = harness({
       config: {
@@ -182,7 +254,7 @@ describe('SendPipeline.send', () => {
     expect(h.deps.persistSession).toHaveBeenCalledOnce();
     expect(h.deps.postSessionSync).toHaveBeenCalledOnce();
     expect(h.deps.failureTracker.reset).toHaveBeenCalledOnce();
-    expect(h.deps.postTokenBudget).toHaveBeenCalledWith(true);
+    expect(h.deps.evaluateAfterTurn).not.toHaveBeenCalled();
   });
 
   it('only writes a session log for a conversation that has messages', async () => {

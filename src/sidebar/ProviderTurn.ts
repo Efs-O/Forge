@@ -19,6 +19,8 @@ import { resolveCloudRequestTarget } from '../llm/CloudRequestResolver';
 import { getLogger } from '../util/logger';
 import type * as vscode from 'vscode';
 import type { UserPromptOptions } from './transcriptMutations';
+import type { ToolCallingLoopResult } from '../agent/ToolCallingLoop';
+import { abortedTurnOutcome, type ForgeTurnOutcome } from './turnOutcome';
 
 const log = getLogger();
 
@@ -43,7 +45,7 @@ export interface ProviderTurnContext {
     postC: (msg: HostToWebview) => void,
     apiKey: string | undefined,
     checkpoint: CheckpointSession,
-  ) => Promise<void>;
+  ) => Promise<ToolCallingLoopResult>;
 }
 
 export interface ProviderTurnRequest {
@@ -82,7 +84,7 @@ function finishTurn(
 export async function runCloudProviderTurn(
   ctx: ProviderTurnContext,
   { conv, model, text, attachments, promptOptions, activeFile, ctrl, postC }: ProviderTurnRequest,
-): Promise<void> {
+): Promise<ForgeTurnOutcome> {
   const convId = conv.id;
   let apiKey: string;
   let baseUrl: string;
@@ -94,7 +96,7 @@ export async function runCloudProviderTurn(
     log.error(`[AgentLoop] ${model.provider} setup failed: ${msg}`);
     postC({ type: 'error', message: msg });
     ctx.lifecycle.settle(convId);
-    return;
+    return { kind: 'failed', error: msg, finalText: '' };
   }
   ctx.commitUserPrompt(conv, text, attachments, promptOptions);
   ctx.events.onBackendReady?.(model.name);
@@ -102,18 +104,39 @@ export async function runCloudProviderTurn(
   const checkpoint = ctx.checkpoints.beginTurn(`turn-${Date.now()}`, convId);
   ctx.lifecycle.markStreaming(convId);
   ctx.events.onGenerationStarted?.(model.name, convId);
+  let outcome: ForgeTurnOutcome;
   try {
-    await ctx.runModelTurn(baseUrl, conv, model, activeFile, ctrl, postC, apiKey, checkpoint);
+    const result = await ctx.runModelTurn(
+      baseUrl,
+      conv,
+      model,
+      activeFile,
+      ctrl,
+      postC,
+      apiKey,
+      checkpoint,
+    );
+    const incompleteReason = ctx.lifecycle.incompleteReason(convId);
+    outcome = {
+      kind: 'completed',
+      finalText: result.finalText,
+      finishReason: result.finishReason,
+      ...(incompleteReason ? { incompleteReason } : {}),
+    };
   } catch (err) {
     if (ctrl.signal.aborted) {
       postC({ type: 'done', finishReason: 'cancelled' });
+      outcome = abortedTurnOutcome(ctx.lifecycle.terminationKind(convId));
     } else {
-      log.error(`[AgentLoop] ${model.provider} agent loop error: ${(err as Error).message}`);
-      postC({ type: 'error', message: (err as Error).message });
+      const message = err instanceof Error ? err.message : String(err);
+      log.error(`[AgentLoop] ${model.provider} agent loop error: ${message}`);
+      postC({ type: 'error', message });
+      outcome = { kind: 'failed', error: message, finalText: '' };
     }
   } finally {
     finishTurn(ctx, conv, model, checkpoint, postC, false);
   }
+  return outcome;
 }
 
 /**
@@ -133,7 +156,7 @@ const BACKEND_START_NOTICE_MS = 500;
 export async function runLocalProviderTurn(
   ctx: ProviderTurnContext,
   { conv, model, text, attachments, promptOptions, activeFile, ctrl, postC }: ProviderTurnRequest,
-): Promise<void> {
+): Promise<ForgeTurnOutcome> {
   const convId = conv.id;
   let backend: BackendController;
   const notice = setTimeout(
@@ -153,7 +176,7 @@ export async function runLocalProviderTurn(
     if (ctrl.signal.aborted) {
       postC({ type: 'done', finishReason: 'cancelled' });
       ctx.lifecycle.settle(convId);
-      return;
+      return abortedTurnOutcome(ctx.lifecycle.terminationKind(convId));
     }
     ctx.commitUserPrompt(conv, text, attachments, promptOptions);
     postC({ type: 'ready' });
@@ -164,14 +187,17 @@ export async function runLocalProviderTurn(
     ctx.events.onBackendError?.(msg);
     postC({ type: 'backendDown', message: msg });
     ctx.lifecycle.settle(convId);
-    return;
+    return ctrl.signal.aborted
+      ? abortedTurnOutcome(ctx.lifecycle.terminationKind(convId))
+      : { kind: 'failed', error: msg, finalText: '' };
   }
 
   const checkpoint = ctx.checkpoints.beginTurn(`turn-${Date.now()}`, convId);
   ctx.lifecycle.markStreaming(convId);
   ctx.events.onGenerationStarted?.(model.name, convId);
+  let outcome: ForgeTurnOutcome;
   try {
-    await ctx.runModelTurn(
+    const result = await ctx.runModelTurn(
       backend.baseUrl(),
       conv,
       model,
@@ -181,16 +207,26 @@ export async function runLocalProviderTurn(
       undefined,
       checkpoint,
     );
+    const incompleteReason = ctx.lifecycle.incompleteReason(convId);
+    outcome = {
+      kind: 'completed',
+      finalText: result.finalText,
+      finishReason: result.finishReason,
+      ...(incompleteReason ? { incompleteReason } : {}),
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (ctrl.signal.aborted) {
       postC({ type: 'done', finishReason: 'cancelled' });
+      outcome = abortedTurnOutcome(ctx.lifecycle.terminationKind(convId));
     } else {
       log.error(`[AgentLoop] ${model.provider} chat failed model=${model.name}: ${message}`);
       ctx.events.onBackendError?.(message);
       postC({ type: 'error', message });
+      outcome = { kind: 'failed', error: message, finalText: '' };
     }
   } finally {
     finishTurn(ctx, conv, model, checkpoint, postC, true);
   }
+  return outcome;
 }
