@@ -1,6 +1,6 @@
 # Forge Remote Control — Architecture and Implementation Plan V3
 
-Status: final architecture revision after second Codex blocker review; ready for yes/no implementation review
+Status: final architecture revision; awaiting two Codex sequencing clarifications
 Branch: `feat/remote-control-plan`
 Target: Forge VS Code extension; no daemon/service extraction in V1
 
@@ -674,3 +674,23 @@ The feature is ready only when all V2 criteria still hold plus:
 Use this exact review intent:
 
 > Review `docs/plans/REMOTE_CONTROL_PLAN_V3.md` on branch `feat/remote-control-plan` against current Forge `main`, `REMOTE_CONTROL_PLAN.md` section 24.1, and `REMOTE_CONTROL_PLAN_V2.md` section 31.1. This V3 is intended to resolve all seven remaining blockers: addressed context evaluation, shared local/remote turn admission, precise user-intent epoch supersession, awaitable durable inbound disposition before provider cursor advancement, bounded pre-auth pairing, a separate durable notification outbox, and atomic fenced transport ownership. CLI providers remain intentionally supported remotely with their existing local security/tool semantics. Report only whether any implementation-blocking contradiction, race, false code assumption, or missing security boundary remains. Do not implement code. If no blocker remains, reply explicitly: `READY FOR IMPLEMENTATION`.
+
+### 21.1 Codex final clarification request (2026-08-29)
+
+V3 resolves the seven previously reported blockers. Two sequencing details must be answered
+explicitly before the final `READY FOR IMPLEMENTATION` decision:
+
+1. **Does the user-intent epoch advance only after the request is durably accepted as `queued` or
+   `running`?** Sections 4 and 10 currently imply different ordering. A failed admission or
+   persistence attempt must not advance the epoch and suppress the current chain's otherwise
+   eligible auto-resume. Please state the authoritative ordering for reserved, busy/queued, and
+   failed admission paths.
+
+2. **Does auto-compaction continuation reuse the existing turn reservation and epoch?** Current
+   compaction code calls back into the send path. The automatic continuation must be an internal
+   re-entry belonging to the already-admitted request chain; it must not attempt to acquire the
+   user-send admission gate again and block against its own still-held reservation. Please state
+   this invariant and where the reservation/epoch is carried through compaction and resume.
+
+If both answers are yes and V3 makes these invariants explicit, Codex has no remaining blocker and
+will mark the architecture `READY FOR IMPLEMENTATION`.
