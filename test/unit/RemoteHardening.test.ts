@@ -16,6 +16,7 @@ import { RemoteRuntime } from '../../src/remote/RemoteRuntime';
 import { RemoteTransportLease } from '../../src/remote/RemoteTransportLease';
 import type { RemoteInboundEvent, RemoteRequestRecord } from '../../src/remote/types';
 import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
+import { CONVERSATION_BUSY_ERROR } from '../../src/sidebar/SendPipeline';
 
 const tempDirs: string[] = [];
 
@@ -125,12 +126,14 @@ describe('remote authorization and privacy hardening', () => {
   it('writes only bounded hashed audit metadata', async () => {
     const { directory } = await newStore();
     const filePath = path.join(directory, 'audit.json');
-    const audit = new RemoteAuditLog(filePath);
+    const secrets = new MemorySecrets();
+    const audit = new RemoteAuditLog(filePath, secrets as unknown as vscode.SecretStorage);
     await audit.record(event(), 'request_accepted', 'request-1');
     const raw = await fs.readFile(filePath, 'utf8');
     expect(raw).not.toContain('owner-raw-id');
     expect(raw).not.toContain('chat-raw-id');
     expect(raw).not.toContain('TOP SECRET PROMPT');
+    expect(secrets.values.size).toBe(1);
     expect(JSON.parse(raw).entries[0]).toMatchObject({
       channel: 'fake',
       action: 'request_accepted',
@@ -140,6 +143,27 @@ describe('remote authorization and privacy hardening', () => {
 });
 
 describe('remote durable boundaries', () => {
+  it('durably suppresses replayed control-command side effects', async () => {
+    const { store } = await newStore();
+    const secrets = new MemorySecrets();
+    secrets.values.set('forge.remote.fake.ownerId', 'owner-raw-id');
+    const channel = new FakeRemoteChannel();
+    const forgeHost = host();
+    const controller = new RemoteController(
+      channel,
+      store,
+      new RemoteAuth(secrets as unknown as vscode.SecretStorage),
+      forgeHost,
+      { workspaceId: 'workspace', queueLimit: 5, maxMessageChars: 100, rateLimitPerMinute: 30 },
+    );
+    await controller.start();
+    const command = event({ providerMessageId: 'command', text: '/new' });
+    await expect(channel.emit(command)).resolves.toEqual({ kind: 'handled' });
+    await expect(channel.emit(command)).resolves.toEqual({ kind: 'handled' });
+    expect(forgeHost.createConversation).toHaveBeenCalledTimes(1);
+    await controller.stop();
+  });
+
   it('rejects stale cross-workspace bindings and queue overflow before host execution', async () => {
     const { store } = await newStore();
     await store.setBinding({
@@ -178,7 +202,8 @@ describe('remote durable boundaries', () => {
       providerMessageId: 'old',
       conversationId: 'c1',
       text: 'old',
-      receivedAt: 1,
+      receivedAt: 100,
+      admittedAt: 1,
       state: 'queued',
       updatedAt: Date.now(),
     };
@@ -236,6 +261,75 @@ describe('remote durable boundaries', () => {
     });
     expect(store.getRequest('old-terminal')).toBeUndefined();
     expect(store.getRequest('old-queued')).toBeDefined();
+  });
+
+  it('atomically claims only one request across competing transport drains', async () => {
+    const { store } = await newStore();
+    const first: RemoteRequestRecord = {
+      id: 'first',
+      dedupKey: 'first',
+      channel: 'telegram',
+      chatId: 'telegram-chat',
+      providerMessageId: 'first',
+      conversationId: 'shared',
+      text: 'first',
+      receivedAt: 100,
+      admittedAt: 1,
+      state: 'queued',
+      updatedAt: Date.now(),
+    };
+    await store.enqueue(first);
+    await store.enqueue({
+      ...first,
+      id: 'second',
+      dedupKey: 'second',
+      channel: 'whatsapp',
+      chatId: 'whatsapp-chat',
+      providerMessageId: 'second',
+      text: 'second',
+      receivedAt: 1,
+      admittedAt: 2,
+    });
+    const claims = await Promise.all([
+      store.claimNext('shared', 'telegram'),
+      store.claimNext('shared', 'whatsapp'),
+    ]);
+    expect(claims.filter(Boolean)).toHaveLength(1);
+    expect(claims.find(Boolean)?.id).toBe('first');
+    expect(store.queued('shared').map((item) => item.id)).toEqual(['second']);
+  });
+
+  it('requeues durable work that loses a last-millisecond local admission race', async () => {
+    const { store } = await newStore();
+    await store.setBinding({
+      channel: 'fake',
+      chatId: 'chat-raw-id',
+      workspaceId: 'workspace',
+      conversationId: 'c1',
+    });
+    const secrets = new MemorySecrets();
+    secrets.values.set('forge.remote.fake.ownerId', 'owner-raw-id');
+    const channel = new FakeRemoteChannel();
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({ kind: 'failed', error: CONVERSATION_BUSY_ERROR })
+      .mockResolvedValueOnce({ kind: 'completed', finalText: 'done' });
+    const controller = new RemoteController(
+      channel,
+      store,
+      new RemoteAuth(secrets as unknown as vscode.SecretStorage),
+      host({ send }),
+      { workspaceId: 'workspace', queueLimit: 5, maxMessageChars: 100, rateLimitPerMinute: 30 },
+    );
+    await controller.start();
+    const accepted = await channel.emit(event());
+    expect(accepted.kind).toBe('accepted');
+    const requestId = accepted.kind === 'accepted' ? accepted.requestId : '';
+    await vi.waitFor(() => expect(store.getRequest(requestId)?.state).toBe('completed'), {
+      timeout: 1_000,
+    });
+    expect(send).toHaveBeenCalledTimes(2);
+    await controller.stop();
   });
 
   it('abandons a notification after bounded channel-scoped delivery attempts', async () => {

@@ -48,7 +48,10 @@ export class RemoteRuntime {
     this.store = new RemoteRequestStore(
       path.join(options.storageDirectory, 'remote-state-v1.json'),
     );
-    this.audit = new RemoteAuditLog(path.join(options.storageDirectory, 'remote-audit-v1.json'));
+    this.audit = new RemoteAuditLog(
+      path.join(options.storageDirectory, 'remote-audit-v1.json'),
+      options.secrets,
+    );
   }
 
   applyConfig(config: ForgeConfig): Promise<void> {
@@ -112,7 +115,11 @@ export class RemoteRuntime {
           instanceId: this.instanceId,
           onLost: (message) => {
             this.options.notifyLocal(message);
-            void this.stopTransport(channelName);
+            void this.stopTransport(channelName).catch((err) =>
+              this.options.notifyLocal(
+                `Forge remote ${channelName} shutdown failed: ${(err as Error).message}`,
+              ),
+            );
           },
         });
         try {
@@ -130,6 +137,7 @@ export class RemoteRuntime {
               queueLimit: config.remote.queue_limit,
               maxMessageChars: config.remote.max_message_chars,
               rateLimitPerMinute: config.remote.rate_limit_per_minute,
+              onError: this.options.notifyLocal,
             },
             this.audit,
           );

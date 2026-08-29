@@ -52,6 +52,7 @@ export interface RemoteRequestRecord {
   conversationId: string;
   text: string;
   receivedAt: number;
+  admittedAt?: number | undefined;
   state: RemoteExecutionState;
   updatedAt: number;
   finalText?: string | undefined;

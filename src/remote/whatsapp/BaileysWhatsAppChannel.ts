@@ -9,6 +9,24 @@ import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from
 import type { WhatsAppAuthStore, WhatsAppAuthSession } from './WhatsAppAuthStore';
 
 const TEXT_CHUNK_LIMIT = 4096;
+interface SilentLogger {
+  level: string;
+  child(): SilentLogger;
+  trace(): void;
+  debug(): void;
+  info(): void;
+  warn(): void;
+  error(): void;
+}
+const SILENT_LOGGER: SilentLogger = {
+  level: 'silent',
+  child: () => SILENT_LOGGER,
+  trace: () => undefined,
+  debug: () => undefined,
+  info: () => undefined,
+  warn: () => undefined,
+  error: () => undefined,
+};
 
 export interface BaileysWhatsAppChannelOptions {
   authStore: WhatsAppAuthStore;
@@ -27,6 +45,7 @@ export class BaileysWhatsAppChannel implements RemoteChannel {
   private connecting: Promise<void> | undefined;
   private inboundTail: Promise<void> = Promise.resolve();
   private linkingNoticeShown = false;
+  private reconnectAttempts = 0;
 
   constructor(private readonly options: BaileysWhatsAppChannelOptions) {}
 
@@ -102,7 +121,7 @@ export class BaileysWhatsAppChannel implements RemoteChannel {
       emitOwnEvents: false,
       markOnlineOnConnect: false,
       syncFullHistory: false,
-      shouldSyncHistoryMessage: () => false,
+      logger: SILENT_LOGGER,
     });
     this.socket = socket;
     socket.ev.on('creds.update', this.auth.saveCreds);
@@ -125,6 +144,7 @@ export class BaileysWhatsAppChannel implements RemoteChannel {
           'Forge WhatsApp needs linking. Run “Forge: Link WhatsApp Device” locally.',
         );
       }
+      if (update.connection === 'open') this.reconnectAttempts = 0;
       if (update.connection !== 'close' || this.socket !== socket) return;
       this.socket = undefined;
       const code = disconnectStatus(update.lastDisconnect?.error);
@@ -154,6 +174,7 @@ export class BaileysWhatsAppChannel implements RemoteChannel {
 
   private scheduleReconnect(): void {
     if (this.signal?.aborted || this.reconnectTimer) return;
+    const delay = Math.min(2_000 * 2 ** Math.min(this.reconnectAttempts++, 5), 60_000);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = undefined;
       void this.connect().catch((err) => {
@@ -162,7 +183,7 @@ export class BaileysWhatsAppChannel implements RemoteChannel {
         );
         this.scheduleReconnect();
       });
-    }, 2_000);
+    }, delay);
   }
 
   private close(): void {
@@ -203,8 +224,8 @@ export function toRemoteEvent(message: WAMessage): RemoteInboundEvent | undefine
 
 function whatsappChatType(jid: string): RemoteInboundEvent['chatType'] {
   if (jid.endsWith('@g.us')) return 'group';
-  if (jid.endsWith('@newsletter')) return 'channel';
-  return 'private';
+  if (jid.endsWith('@s.whatsapp.net') || jid.endsWith('@lid')) return 'private';
+  return 'channel';
 }
 
 function timestampMs(value: WAMessage['messageTimestamp']): number {

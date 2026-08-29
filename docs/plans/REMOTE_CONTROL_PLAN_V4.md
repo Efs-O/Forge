@@ -765,3 +765,27 @@ duplicate canonical owner remains in the Phase 0 contract.
 
 Real-device Telegram and WhatsApp validation remains a release validation step because no provider
 credential, phone identity, or linked-device account is stored in the repository.
+
+## 26. Final implementation audit
+
+The acceptance audit closed the remaining multi-transport and privacy edges:
+
+- durable request claiming is atomic across transport controllers, globally FIFO per conversation,
+  and transport-owned so one lease loss cannot cancel another transport's request;
+- a durable request that loses a last-millisecond local admission race is requeued rather than
+  incorrectly marked failed;
+- control-command side effects use crash-aware durable receipts, so provider replay cannot repeat
+  `/new` or another command with the same provider event ID;
+- crash-unknown requests and abandoned notifications are visible through `/status`;
+- audit identity hashes use a per-install HMAC key from SecretStorage rather than an enumerable
+  unsalted digest;
+- Telegram shutdown never advances a cursor for an event whose handler is unavailable;
+- WhatsApp unknown/broadcast JIDs fail closed as channels, required LID mapping state remains
+  available, and provider protocol logging is silenced;
+- remote orchestration remains split from canonical `SendPipeline`, `RequestChainLifecycle`,
+  `ContextBudgetPublisher`, `ToolApprovalService`, and conversation/session owners.
+
+Release candidate `0.14.0` passed `npm run ci` with 1,384 tests passed and 14 skipped, production
+bundle loading, `npm run package`, packaged-file review, and `npm audit --omit=dev` with zero reported
+vulnerabilities. The resulting VSIX is 8.02 MB. Credential-free implementation is complete; only
+the explicitly external real-device Telegram and WhatsApp validation remains.

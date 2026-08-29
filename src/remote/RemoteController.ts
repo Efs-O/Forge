@@ -17,12 +17,15 @@ import type {
 import type { RemoteAuditLog } from './RemoteAuditLog';
 import { RemoteRateLimiter } from './RemoteRateLimiter';
 import { RemoteOutboxDelivery } from './RemoteOutboxDelivery';
+import { CONVERSATION_BUSY_ERROR } from '../sidebar/SendPipeline';
+import { handleRemoteCommand } from './RemoteCommandHandler';
 
 export interface RemoteControllerOptions {
   workspaceId: string;
   queueLimit: number;
   maxMessageChars: number;
   rateLimitPerMinute: number;
+  onError?: (message: string) => void;
 }
 
 /** Durable transport-independent admission, FIFO execution, and notification. */
@@ -51,6 +54,8 @@ export class RemoteController {
       store,
       options.maxMessageChars,
       this.abort.signal,
+      1_000,
+      options.onError,
     );
   }
 
@@ -63,7 +68,9 @@ export class RemoteController {
       resolved: (event) => this.onApprovalResolved(event),
     });
     await this.channel.start(this.abort.signal);
-    for (const request of this.store.queued()) this.kickDrain(request.conversationId);
+    for (const request of this.store.queued(undefined, this.channel.name)) {
+      this.kickDrain(request.conversationId);
+    }
     this.outbox.start();
   }
 
@@ -113,9 +120,21 @@ export class RemoteController {
     if (event.text.length > this.options.maxMessageChars) {
       return { kind: 'rejected', reason: 'message exceeds configured limit' };
     }
-    if (event.text.startsWith('/')) return this.handleCommand(event);
-
     const key = remoteDedupKey(event.channel, event.chatId, event.providerMessageId);
+    if (event.text.startsWith('/')) {
+      return handleRemoteCommand(
+        event,
+        {
+          channel: this.channel,
+          store: this.store,
+          host: this.host,
+          workspaceId: this.options.workspaceId,
+          signal: this.abort.signal,
+        },
+        key,
+      );
+    }
+
     const duplicate = this.store.getByDedupKey(key);
     if (duplicate) {
       return { kind: 'duplicate', requestId: duplicate.id, state: duplicate.state };
@@ -148,6 +167,7 @@ export class RemoteController {
       conversationId: binding.conversationId,
       text: event.text,
       receivedAt: event.receivedAt,
+      admittedAt: Date.now(),
       state: 'queued',
       updatedAt: Date.now(),
     };
@@ -171,69 +191,6 @@ export class RemoteController {
       : { kind: 'accepted', requestId: request.id };
   }
 
-  private async handleCommand(
-    event: Extract<RemoteInboundEvent, { kind: 'text' }>,
-  ): Promise<RemoteInboundDisposition> {
-    const [command, argument] = event.text.trim().split(/\s+/, 2);
-    if (command === '/help') {
-      await this.channel.send(
-        event.chatId,
-        'Forge commands: /status, /stop, /new, /resume <conversation-id>. /stop cancels the current request; queued requests remain queued.',
-        { signal: this.abort.signal },
-      );
-      return { kind: 'handled' };
-    }
-    if (command === '/status') {
-      const status = this.host.status();
-      const binding = this.store.binding(event.channel, event.chatId);
-      const queued = binding ? this.store.queued(binding.conversationId).length : 0;
-      await this.channel.send(
-        event.chatId,
-        `Forge: ${status.requestChains.length} active request(s), ${queued} queued, ${status.streamingConversationIds.length} streaming, ${this.store.outboxHealth().pending} notifications pending.`,
-        { signal: this.abort.signal },
-      );
-      return { kind: 'handled' };
-    }
-    if (command === '/stop') {
-      const binding = this.store.binding(event.channel, event.chatId);
-      if (!binding) return { kind: 'rejected', reason: 'no conversation is bound' };
-      await this.host.cancel(binding.conversationId);
-      await this.channel.send(
-        event.chatId,
-        'Forge: current request stopped; queued requests remain queued.',
-        { signal: this.abort.signal },
-      );
-      return { kind: 'handled' };
-    }
-    if (command === '/new') {
-      const conv = await this.host.createConversation({ activate: false });
-      await this.store.setBinding({
-        channel: event.channel,
-        chatId: event.chatId,
-        workspaceId: this.options.workspaceId,
-        conversationId: conv.id,
-      });
-      await this.channel.send(event.chatId, `Forge: bound to new conversation ${conv.id}.`, {
-        signal: this.abort.signal,
-      });
-      return { kind: 'handled' };
-    }
-    if (command === '/resume' && argument) {
-      const conv = await this.host.restoreConversation(argument, { activate: false });
-      await this.store.setBinding({
-        channel: event.channel,
-        chatId: event.chatId,
-        workspaceId: this.options.workspaceId,
-        conversationId: conv.id,
-      });
-      await this.channel.send(event.chatId, `Forge: resumed conversation ${conv.id}.`, {
-        signal: this.abort.signal,
-      });
-      return { kind: 'handled' };
-    }
-    return { kind: 'rejected', reason: 'unknown command' };
-  }
-
   private isBusy(conversationId: string): boolean {
     const status = this.host.status();
     return (
@@ -245,20 +202,31 @@ export class RemoteController {
   private kickDrain(conversationId: string): void {
     if (this.drains.has(conversationId)) return;
     const drain = this.drain(conversationId)
-      .catch(() => undefined)
+      .catch((err) =>
+        this.options.onError?.(
+          `Forge remote queue stopped: ${err instanceof Error ? err.message : String(err)}`,
+        ),
+      )
       .finally(() => this.drains.delete(conversationId));
     this.drains.set(conversationId, drain);
   }
 
   private async drain(conversationId: string): Promise<void> {
     while (!this.abort.signal.aborted) {
-      const next = this.store.queued(conversationId)[0];
-      if (!next) return;
       if (this.isBusy(conversationId)) {
         await this.delay(250);
         continue;
       }
-      await this.store.markRunning(next.id);
+      const next = await this.store.claimNext(conversationId, this.channel.name);
+      if (!next) {
+        if (this.store.queued(conversationId, this.channel.name).length === 0) return;
+        await this.delay(250);
+        continue;
+      }
+      if (this.abort.signal.aborted) {
+        await this.store.requeue(next.id);
+        return;
+      }
       this.activeConversations.add(conversationId);
       try {
         const outcome = await this.host.send(conversationId, next.text, undefined, {
@@ -274,6 +242,10 @@ export class RemoteController {
             ...(outcome.finalText ? { finalText: outcome.finalText } : {}),
             notification: outcome.finalText || 'Forge request cancelled.',
           });
+        } else if (outcome.error === CONVERSATION_BUSY_ERROR) {
+          await this.store.requeue(next.id);
+          await this.delay(250);
+          continue;
         } else {
           await this.store.finish(next.id, 'failed', {
             error: outcome.error,
@@ -313,7 +285,11 @@ export class RemoteController {
         ),
         { correlationId: event.id, signal: this.abort.signal },
       )
-      .catch(() => undefined);
+      .catch((err) =>
+        this.options.onError?.(
+          `Forge remote approval delivery failed: ${err instanceof Error ? err.message : String(err)}`,
+        ),
+      );
   }
 
   private onApprovalResolved(event: ToolApprovalResolvedEvent): void {
@@ -326,7 +302,11 @@ export class RemoteController {
         `Forge approval ${event.approved ? 'approved' : 'denied'} (${event.reason}).`,
         { correlationId: event.id, signal: this.abort.signal },
       )
-      .catch(() => undefined);
+      .catch((err) =>
+        this.options.onError?.(
+          `Forge remote approval update failed: ${err instanceof Error ? err.message : String(err)}`,
+        ),
+      );
   }
 
   private delay(ms: number): Promise<void> {

@@ -123,4 +123,13 @@ describe('Baileys WhatsApp event mapping', () => {
       toRemoteEvent({ key: { remoteJid: 'owner@s.whatsapp.net' }, message: {} } as WAMessage),
     ).toBeUndefined();
   });
+
+  it('fails closed by classifying unknown and broadcast JIDs as channels', () => {
+    const mapped = toRemoteEvent({
+      key: { id: 'status', remoteJid: 'status@broadcast', fromMe: false },
+      messageTimestamp: 12,
+      message: { conversation: 'hello' },
+    } as WAMessage);
+    expect(mapped).toMatchObject({ chatType: 'channel' });
+  });
 });

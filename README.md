@@ -61,6 +61,10 @@ telemetry, analytics, or auto-update pings.
 
 ## What's New Since v0.12.3
 
+- Added opt-in, private-owner remote control with durable FIFO execution, deduplication,
+  notification outbox, multi-window fencing, and the existing Forge approval gate
+- Added Telegram Bot API long polling with SecretStorage-backed setup and local pairing
+- Added an experimental WhatsApp linked-device adapter with encrypted authentication state
 - Added OpenAI-compatible cloud-provider support, including `xai`, `openrouter`, `openai`, and generic `openai-compatible`
 - Added automatic xAI token resolution and refresh support
 - Added localhost control-server support for load-on-demand model orchestration

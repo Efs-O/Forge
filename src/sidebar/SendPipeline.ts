@@ -26,6 +26,7 @@ import { toRequestOutcome, type ForgeRequestOutcome, type ForgeTurnOutcome } fro
 import type { ContextThresholdAction } from './ContextBudgetPublisher';
 
 const log = getLogger();
+export const CONVERSATION_BUSY_ERROR = 'Forge: this conversation is still generating.';
 
 /** Undefined outside a real host (tests, or an unresolvable extension id). */
 function forgeVersion(): string | undefined {
@@ -98,7 +99,7 @@ export class SendPipeline {
       });
       return {
         kind: 'failed',
-        error: 'Forge: this conversation is still generating.',
+        error: CONVERSATION_BUSY_ERROR,
         finalText: '',
       };
     }
@@ -129,7 +130,7 @@ export class SendPipeline {
       });
       return {
         kind: 'failed',
-        error: 'Forge: this conversation is still generating.',
+        error: CONVERSATION_BUSY_ERROR,
         finalText: '',
       };
     }
@@ -177,7 +178,7 @@ export class SendPipeline {
       });
       return {
         kind: 'failed',
-        error: 'Forge: this conversation is still generating.',
+        error: CONVERSATION_BUSY_ERROR,
         finalText: '',
       };
     }

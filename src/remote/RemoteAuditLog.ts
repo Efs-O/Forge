@@ -1,8 +1,8 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { randomUUID } from 'crypto';
+import { createHmac, randomBytes, randomUUID } from 'crypto';
 import { z } from 'zod';
-import { redactRemoteIdentity } from './RemoteAuth';
+import type * as vscode from 'vscode';
 import type { RemoteInboundEvent } from './types';
 
 const AuditEntrySchema = z.object({
@@ -16,6 +16,7 @@ const AuditEntrySchema = z.object({
 const AuditSchema = z.object({ version: z.literal(1), entries: z.array(AuditEntrySchema) });
 type AuditState = z.infer<typeof AuditSchema>;
 const MAX_AUDIT_ENTRIES = 2_000;
+const AUDIT_HASH_KEY_SECRET = 'forge.remote.auditHashKey';
 
 /** Metadata-only audit trail: no prompt, response, path, token, or raw identity. */
 export class RemoteAuditLog {
@@ -23,17 +24,21 @@ export class RemoteAuditLog {
   private tail: Promise<void> = Promise.resolve();
   private loaded = false;
 
-  constructor(private readonly filePath: string) {}
+  constructor(
+    private readonly filePath: string,
+    private readonly secrets: vscode.SecretStorage,
+  ) {}
 
   async record(event: RemoteInboundEvent, action: string, requestId?: string): Promise<void> {
     const operation = this.tail.then(async () => {
       await this.load();
+      const key = await this.hashKey();
       this.state.entries.push({
         timestamp: Date.now(),
         channel: event.channel,
         action: action.slice(0, 80),
-        senderHash: redactRemoteIdentity(event.senderId),
-        chatHash: redactRemoteIdentity(event.chatId),
+        senderHash: this.hashIdentity(event.senderId, key),
+        chatHash: this.hashIdentity(event.chatId, key),
         ...(requestId ? { requestId } : {}),
       });
       this.state.entries = this.state.entries.slice(-MAX_AUDIT_ENTRIES);
@@ -58,5 +63,21 @@ export class RemoteAuditLog {
     const temporary = `${this.filePath}.${randomUUID()}.tmp`;
     await fs.writeFile(temporary, JSON.stringify(this.state), { encoding: 'utf8', mode: 0o600 });
     await fs.rename(temporary, this.filePath);
+  }
+
+  private async hashKey(): Promise<Buffer> {
+    const existing = await this.secrets.get(AUDIT_HASH_KEY_SECRET);
+    if (existing) {
+      const key = Buffer.from(existing, 'base64');
+      if (key.length !== 32) throw new Error('Forge remote audit hash key is invalid.');
+      return key;
+    }
+    const key = randomBytes(32);
+    await this.secrets.store(AUDIT_HASH_KEY_SECRET, key.toString('base64'));
+    return key;
+  }
+
+  private hashIdentity(value: string, key: Buffer): string {
+    return createHmac('sha256', key).update(value).digest('hex').slice(0, 12);
   }
 }

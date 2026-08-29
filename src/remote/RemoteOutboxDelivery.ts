@@ -7,6 +7,7 @@ const MAX_ATTEMPTS = 10;
 export class RemoteOutboxDelivery {
   private running: Promise<void> | undefined;
   private stopped = false;
+  private retryTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
     private readonly channel: RemoteChannel,
@@ -14,6 +15,7 @@ export class RemoteOutboxDelivery {
     private readonly maxMessageChars: number,
     private readonly signal: AbortSignal,
     private readonly retryDelayMs = 1_000,
+    private readonly onError?: (message: string) => void,
   ) {}
 
   start(): void {
@@ -23,16 +25,30 @@ export class RemoteOutboxDelivery {
 
   kick(): void {
     if (this.stopped || this.running) return;
-    this.running = this.deliver().finally(() => {
-      this.running = undefined;
-      if (!this.stopped && this.store.pendingOutbox(this.channel.name).length > 0) {
-        setTimeout(() => this.kick(), this.retryDelayMs);
-      }
-    });
+    this.running = this.deliver()
+      .catch((err) =>
+        this.onError?.(
+          `Forge remote notification delivery failed: ${err instanceof Error ? err.message : String(err)}`,
+        ),
+      )
+      .finally(() => {
+        this.running = undefined;
+        const pending = this.store.pendingOutbox(this.channel.name);
+        if (!this.stopped && pending.length > 0) {
+          const exponent = Math.max(0, Math.min((pending[0]?.attempts ?? 1) - 1, 6));
+          const delay = Math.min(this.retryDelayMs * 2 ** exponent, 60_000);
+          this.retryTimer = setTimeout(() => {
+            this.retryTimer = undefined;
+            this.kick();
+          }, delay);
+        }
+      });
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = undefined;
     await this.running;
   }
 

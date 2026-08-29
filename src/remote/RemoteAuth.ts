@@ -1,4 +1,4 @@
-import { createHash, randomInt, timingSafeEqual } from 'crypto';
+import { randomInt, timingSafeEqual } from 'crypto';
 import type * as vscode from 'vscode';
 import type { RemoteInboundEvent } from './types';
 
@@ -14,10 +14,6 @@ interface PairingSession {
 
 function ownerSecretKey(channel: string): string {
   return `forge.remote.${channel}.ownerId`;
-}
-
-export function redactRemoteIdentity(value: string): string {
-  return createHash('sha256').update(value).digest('hex').slice(0, 12);
 }
 
 export class RemoteAuth {

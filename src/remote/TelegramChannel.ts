@@ -127,12 +127,16 @@ export class TelegramChannel implements RemoteChannel {
             `Forge Telegram polling is retrying: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
-        await abortableDelay(1_000, signal);
+        const delay = Math.min(1_000 * 2 ** Math.min(consecutiveFailures - 1, 5), 30_000);
+        await abortableDelay(delay, signal);
         continue;
       }
       for (const update of updates.sort((a, b) => a.update_id - b.update_id)) {
+        if (signal.aborted) return;
         const event = this.toEvent(update);
-        let disposition: RemoteInboundDisposition = { kind: 'handled' };
+        let disposition: RemoteInboundDisposition = event
+          ? { kind: 'retry', reason: 'remote event handler is unavailable' }
+          : { kind: 'handled' };
         if (event && this.handler) {
           try {
             disposition = await this.handler(event);

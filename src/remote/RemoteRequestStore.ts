@@ -18,6 +18,7 @@ const RequestSchema = z.object({
   conversationId: z.string(),
   text: z.string(),
   receivedAt: z.number(),
+  admittedAt: z.number().optional(),
   state: z.enum(['queued', 'running', 'completed', 'failed', 'cancelled', 'unknown']),
   updatedAt: z.number(),
   finalText: z.string().optional(),
@@ -41,6 +42,11 @@ const BindingSchema = z.object({
   workspaceId: z.string(),
   conversationId: z.string(),
 });
+const ControlReceiptSchema = z.object({
+  dedupKey: z.string(),
+  state: z.enum(['pending', 'completed', 'unknown']),
+  updatedAt: z.number(),
+});
 
 const StateSchema = z.object({
   version: z.literal(1),
@@ -48,10 +54,18 @@ const StateSchema = z.object({
   outbox: z.array(OutboxSchema),
   bindings: z.array(BindingSchema),
   cursors: z.record(z.string(), z.string()),
+  controlReceipts: z.array(ControlReceiptSchema).default([]),
 });
 
 type StoreState = z.infer<typeof StateSchema>;
-const EMPTY_STATE: StoreState = { version: 1, requests: [], outbox: [], bindings: [], cursors: {} };
+const EMPTY_STATE: StoreState = {
+  version: 1,
+  requests: [],
+  outbox: [],
+  bindings: [],
+  cursors: {},
+  controlReceipts: [],
+};
 const MAX_RECORDS = 1_000;
 const MAX_OUTBOX_RECORDS = 1_000;
 const RETENTION_MS = 30 * 24 * 60 * 60_000;
@@ -88,6 +102,9 @@ export class RemoteRequestStore {
       for (const item of draft.outbox) {
         if (item.state === 'sending') item.state = 'pending';
       }
+      for (const receipt of draft.controlReceipts) {
+        if (receipt.state === 'pending') receipt.state = 'unknown';
+      }
     });
     this.loaded = true;
   }
@@ -100,14 +117,15 @@ export class RemoteRequestStore {
     return this.state.requests.find((request) => request.id === id);
   }
 
-  queued(conversationId?: string): RemoteRequestRecord[] {
+  queued(conversationId?: string, channel?: RemoteRequestRecord['channel']): RemoteRequestRecord[] {
     return this.state.requests
       .filter(
         (request) =>
           request.state === 'queued' &&
-          (conversationId === undefined || request.conversationId === conversationId),
+          (conversationId === undefined || request.conversationId === conversationId) &&
+          (channel === undefined || request.channel === channel),
       )
-      .sort((a, b) => a.receivedAt - b.receivedAt || a.id.localeCompare(b.id));
+      .sort((a, b) => (a.admittedAt ?? a.receivedAt) - (b.admittedAt ?? b.receivedAt));
   }
 
   pendingOutbox(channel?: RemoteOutboxRecord['channel']): RemoteOutboxRecord[] {
@@ -121,6 +139,14 @@ export class RemoteRequestStore {
       pending: this.state.outbox.filter((item) => item.state === 'pending').length,
       sending: this.state.outbox.filter((item) => item.state === 'sending').length,
       abandoned: this.state.outbox.filter((item) => item.state === 'abandoned').length,
+    };
+  }
+
+  requestHealth(): { queued: number; running: number; unknown: number } {
+    return {
+      queued: this.state.requests.filter((item) => item.state === 'queued').length,
+      running: this.state.requests.filter((item) => item.state === 'running').length,
+      unknown: this.state.requests.filter((item) => item.state === 'unknown').length,
     };
   }
 
@@ -157,6 +183,34 @@ export class RemoteRequestStore {
 
   async markRunning(id: string): Promise<void> {
     await this.setRequestState(id, 'running');
+  }
+
+  async claimNext(
+    conversationId: string,
+    channel: RemoteRequestRecord['channel'],
+  ): Promise<RemoteRequestRecord | undefined> {
+    let claimedId: string | undefined;
+    await this.mutate((draft) => {
+      if (
+        draft.requests.some(
+          (item) => item.conversationId === conversationId && item.state === 'running',
+        )
+      ) {
+        return;
+      }
+      const next = draft.requests
+        .filter((item) => item.conversationId === conversationId && item.state === 'queued')
+        .sort((a, b) => (a.admittedAt ?? a.receivedAt) - (b.admittedAt ?? b.receivedAt))[0];
+      if (!next || next.channel !== channel) return;
+      next.state = 'running';
+      next.updatedAt = Date.now();
+      claimedId = next.id;
+    });
+    return claimedId ? this.getRequest(claimedId) : undefined;
+  }
+
+  async requeue(id: string): Promise<void> {
+    await this.setRequestState(id, 'queued');
   }
 
   async finish(
@@ -204,6 +258,34 @@ export class RemoteRequestStore {
     return this.state.cursors[key];
   }
 
+  async beginControlEvent(dedupKey: string): Promise<'admitted' | 'completed' | 'unknown'> {
+    let result: 'admitted' | 'completed' | 'unknown' = 'admitted';
+    await this.mutate((draft) => {
+      const existing = draft.controlReceipts.find((item) => item.dedupKey === dedupKey);
+      if (existing) {
+        result = existing.state === 'completed' ? 'completed' : 'unknown';
+        return;
+      }
+      draft.controlReceipts.push({ dedupKey, state: 'pending', updatedAt: Date.now() });
+    });
+    return result;
+  }
+
+  async finishControlEvent(dedupKey: string): Promise<void> {
+    await this.mutate((draft) => {
+      const receipt = draft.controlReceipts.find((item) => item.dedupKey === dedupKey);
+      if (!receipt) throw new Error('Forge remote control receipt is missing.');
+      receipt.state = 'completed';
+      receipt.updatedAt = Date.now();
+    });
+  }
+
+  async discardControlEvent(dedupKey: string): Promise<void> {
+    await this.mutate((draft) => {
+      draft.controlReceipts = draft.controlReceipts.filter((item) => item.dedupKey !== dedupKey);
+    });
+  }
+
   private async setRequestState(id: string, state: RemoteExecutionState): Promise<void> {
     await this.mutate((draft) => {
       const request = draft.requests.find((item) => item.id === id);
@@ -227,6 +309,9 @@ export class RemoteRequestStore {
             item.updatedAt >= cutoff || item.state === 'pending' || item.state === 'sending',
         )
         .slice(-MAX_OUTBOX_RECORDS);
+      draft.controlReceipts = draft.controlReceipts
+        .filter((item) => item.updatedAt >= cutoff || item.state === 'pending')
+        .slice(-MAX_RECORDS);
       StateSchema.parse(draft);
       await this.persist(draft);
       this.state = draft;

@@ -77,12 +77,14 @@ describe('RemoteRequestStore', () => {
     await state.finish('r1', 'completed', { notification: 'done' });
     const outbox = state.pendingOutbox()[0]!;
     await state.markOutbox(outbox.id, 'sending');
+    await state.beginControlEvent('command-in-flight');
 
     const reloaded = new RemoteRequestStore(
       path.join(tempDirs[tempDirs.length - 1]!, 'state.json'),
     );
     await reloaded.load();
     expect(reloaded.pendingOutbox()).toHaveLength(1);
+    await expect(reloaded.beginControlEvent('command-in-flight')).resolves.toBe('unknown');
 
     const running = request({ id: 'r2', dedupKey: 'r2', state: 'running' });
     await reloaded.enqueue(running);

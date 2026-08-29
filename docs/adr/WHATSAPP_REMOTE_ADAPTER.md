@@ -25,10 +25,12 @@ with documented breaking changes.
   `remote.whatsapp.enabled` are true.
 - It opens only an outbound linked-device WebSocket. Forge exposes no webhook,
   HTTP listener, or public control API.
-- History synchronization, online-presence marking, and own-message emission
-  are disabled. Only new text notifications are admitted. This requires a
-  dedicated receiving account (or second account); the controlling owner sends
-  private messages from a separate WhatsApp identity.
+- Full-history synchronization, online-presence marking, own-message emission,
+  and Baileys protocol logging are disabled. The library may still synchronize
+  account state required for stable device/LID mappings, but Forge admits only
+  new text notifications. This requires a dedicated receiving account (or
+  second account); the controlling owner sends private messages from a separate
+  WhatsApp identity.
 - Group/newsletter classification is preserved so the shared core rejects it;
   only the separately paired private owner can control Forge.
 - Forge-native approvals use exact `APPROVE <id>` / `DENY <id>` replies.
