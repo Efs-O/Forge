@@ -62,3 +62,18 @@ plus authenticated Claude Code and Codex CLI agents.
 - **Test layout:** `test/unit` (fast, no models), `test/integration` (real
   processes/git, still hermetic), `test/live` (real model calls — skipped by
   default), `test/webview` (DOM). `npm test` runs the non-live set.
+
+- **Current session title lives in VS Code's `state.vscdb`, not in the repo.**
+  The `.forge/sessions/*.jsonl` and `.coordination/sessions/*` files are
+  decoys (stale/test data). The real live title is in
+  `%APPDATA%\Code\User\workspaceStorage\<hash>\state.vscdb`, SQLite table
+  `ItemTable`, key **`Efsoo.forge-llm`** (a JSON blob). Inside it,
+  `forge.conversations.v1.activeConversationId` → match that id in
+  `forge.conversations.v1.conversations[].title`.
+  - Find the `<hash>` folder by reading each
+    `workspaceStorage\<hash>\workspace.json` and matching `"folder"` to the
+    workspace URL. For `n:\vs code apps\Forge` it is currently
+    `e9a4155d14fdbca95fcae964471e7762` (re-derive if it ever differs).
+  - No `better-sqlite3`/`sqlite3` CLI here; use Python's stdlib:
+    `python -c "import sqlite3,json,sys;sys.stdout.reconfigure(encoding='utf-8');d=json.loads(sqlite3.connect(r'<ws>\state.vscdb').execute(\"SELECT value FROM ItemTable WHERE key='Efsoo.forge-llm'\").fetchone()[0]);c=d['forge.conversations.v1'];a=c['activeConversationId'];print([x['title'] for x in c['conversations'] if x['id']==a])"`
+    (force UTF-8 or emoji in titles crash the cp1253 console).
