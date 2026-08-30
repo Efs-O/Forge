@@ -261,6 +261,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     .digest('hex');
   const remoteRuntime = new RemoteRuntime({
     storageDirectory: context.globalStorageUri.fsPath,
+    ...(workspaceRoot ? { workspaceRoot } : {}),
     workspaceId,
     host: sidebarProvider.getHostFacade(),
     secrets: context.secrets,

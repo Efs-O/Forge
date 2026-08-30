@@ -10,6 +10,21 @@ export const RequestSchema = z.object({
   providerMessageId: z.string(),
   conversationId: z.string(),
   text: z.string(),
+  attachments: z
+    .array(
+      z.object({
+        name: z.string().min(1).max(255),
+        mediaType: z.string().min(1).max(128),
+        relativePath: z.string().min(1).max(512),
+        bytes: z
+          .number()
+          .int()
+          .nonnegative()
+          .max(25 * 1024 * 1024),
+      }),
+    )
+    .max(10)
+    .optional(),
   receivedAt: z.number(),
   admittedAt: z.number().optional(),
   state: z.enum(['queued', 'running', 'completed', 'failed', 'cancelled', 'unknown']),

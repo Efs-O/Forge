@@ -345,6 +345,11 @@ export interface ForgeConfig {
       /** 0 disables inactivity expiry; otherwise 1–1440 minutes. */
       inactivity_timeout_minutes: number;
     };
+    attachments: {
+      enabled: boolean;
+      retain_days: number;
+      accept_pdf: boolean;
+    };
     telegram: { enabled: boolean };
     whatsapp: { enabled: boolean };
   };

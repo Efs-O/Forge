@@ -8,6 +8,20 @@ const TelegramUpdateSchema = z.object({
       message_id: z.number().int(),
       date: z.number().int(),
       text: z.string().optional(),
+      caption: z.string().optional(),
+      document: z
+        .object({
+          file_id: z.string(),
+          file_name: z.string().optional(),
+          mime_type: z.string().optional(),
+          file_size: z.number().int().nonnegative().optional(),
+        })
+        .optional(),
+      photo: z
+        .array(
+          z.object({ file_id: z.string(), file_size: z.number().int().nonnegative().optional() }),
+        )
+        .optional(),
       chat: z.object({ id: z.union([z.number(), z.string()]), type: z.string() }),
       from: z.object({ id: z.union([z.number(), z.string()]) }).optional(),
     })
@@ -111,6 +125,29 @@ export class TelegramChannel implements RemoteChannel {
       );
       if (correlationId) this.rememberPrompt(correlationId, sent);
     }
+  }
+
+  async sendProgress(
+    chatId: string,
+    text: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<string | undefined> {
+    const sent = await this.call('sendMessage', { chat_id: chatId, text }, options?.signal);
+    const parsed = TelegramSentMessageSchema.safeParse(sent);
+    return parsed.success ? String(parsed.data.message_id) : undefined;
+  }
+
+  async editMessage(
+    chatId: string,
+    messageId: string,
+    text: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<void> {
+    await this.call(
+      'editMessageText',
+      { chat_id: chatId, message_id: Number(messageId), text },
+      options?.signal,
+    );
   }
 
   /**
@@ -219,9 +256,45 @@ export class TelegramChannel implements RemoteChannel {
     }
   }
 
+  async downloadAttachment(
+    attachment: import('./types').RemoteInboundAttachment,
+  ): Promise<import('./types').RemoteInboundAttachment> {
+    if (!attachment.providerFileId) throw new Error('Telegram attachment has no file id.');
+    const file = z
+      .object({ file_path: z.string().min(1) })
+      .parse(await this.call('getFile', { file_id: attachment.providerFileId }));
+    const response = await this.fetchImpl(
+      `https://api.telegram.org/file/bot${this.options.token}/${file.file_path}`,
+    );
+    if (!response.ok) throw new Error(`Telegram file download HTTP ${response.status}.`);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    return {
+      ...attachment,
+      data:
+        attachment.mediaType.startsWith('image/') || attachment.mediaType === 'application/pdf'
+          ? bytes.toString('base64')
+          : bytes.toString('utf8'),
+    };
+  }
+
   private toEvent(update: z.infer<typeof TelegramUpdateSchema>): RemoteInboundEvent | undefined {
     const message = update.message;
-    if (message?.text !== undefined && message.from) {
+    if (
+      message &&
+      message.from &&
+      (message.text !== undefined || message.document || message.photo)
+    ) {
+      const document = message.document;
+      const photo = message.photo?.at(-1);
+      const attachment = document
+        ? {
+            name: document.file_name ?? 'telegram-document',
+            mediaType: document.mime_type ?? 'application/octet-stream',
+            providerFileId: document.file_id,
+          }
+        : photo
+          ? { name: 'telegram-photo.jpg', mediaType: 'image/jpeg', providerFileId: photo.file_id }
+          : undefined;
       return {
         channel: 'telegram',
         kind: 'text',
@@ -230,7 +303,8 @@ export class TelegramChannel implements RemoteChannel {
         chatId: String(message.chat.id),
         chatType: telegramChatType(message.chat.type),
         receivedAt: message.date * 1000,
-        text: message.text,
+        text: message.text ?? message.caption ?? '',
+        ...(attachment ? { attachments: [attachment] } : {}),
       };
     }
     const callback = update.callback_query;

@@ -17,6 +17,7 @@ import { CONVERSATION_BUSY_ERROR } from '../sidebar/SendPipeline';
 import { handleRemoteCommand } from './RemoteCommandHandler';
 import { RemoteApprovalBridge } from './RemoteApprovalBridge';
 import { withConversationIdentity } from './RemoteReplyIdentity';
+import type { RemoteAttachmentStore } from './RemoteAttachmentStore';
 
 export interface RemoteControllerOptions {
   workspaceId: string;
@@ -25,6 +26,9 @@ export interface RemoteControllerOptions {
   rateLimitPerMinute: number;
   /** Snapshot of model names from the active, validated Forge config. */
   modelNames: readonly string[];
+  attachmentStore?: RemoteAttachmentStore | undefined;
+  attachmentsEnabled: boolean;
+  acceptPdfAttachments: boolean;
   inactivityTimeoutMinutes?: number;
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
   onError?: (message: string) => void;
@@ -213,14 +217,48 @@ export class RemoteController {
       return { kind: 'rejected', reason: 'remote queue is full' };
     }
     const busy = this.isBusy(binding.conversationId);
+    const requestId = randomUUID();
+    let attachments: RemoteRequestRecord['attachments'];
+    if (event.attachments?.length) {
+      if (!this.options.attachmentsEnabled) {
+        return {
+          kind: 'rejected',
+          reason: 'remote attachments are disabled in Forge configuration',
+        };
+      }
+      if (!this.options.attachmentStore) {
+        return { kind: 'rejected', reason: 'remote attachments require an open workspace' };
+      }
+      try {
+        const inboundAttachments = await Promise.all(
+          event.attachments.map(async (attachment) => {
+            if (attachment.mediaType === 'application/pdf' && !this.options.acceptPdfAttachments) {
+              throw new Error('PDF attachments are disabled in Forge configuration');
+            }
+            if (attachment.data) return attachment;
+            if (!this.channel.downloadAttachment)
+              throw new Error('transport cannot download attachments');
+            return this.channel.downloadAttachment(attachment);
+          }),
+        );
+        attachments = await this.options.attachmentStore.save(
+          binding.conversationId,
+          requestId,
+          inboundAttachments,
+        );
+      } catch (err) {
+        return { kind: 'rejected', reason: `attachment rejected: ${(err as Error).message}` };
+      }
+    }
     const request: RemoteRequestRecord = {
-      id: randomUUID(),
+      id: requestId,
       dedupKey: key,
       channel: event.channel,
       chatId: event.chatId,
       providerMessageId: event.providerMessageId,
       conversationId: binding.conversationId,
       text: event.text,
+      ...(attachments ? { attachments } : {}),
       receivedAt: event.receivedAt,
       admittedAt: Date.now(),
       state: 'queued',
@@ -292,8 +330,17 @@ export class RemoteController {
         return;
       }
       this.activeConversations.add(conversationId);
+      const progressId = await this.channel
+        .sendProgress?.(next.chatId, 'Forge: working…', { signal: this.abort.signal })
+        .catch(() => undefined);
       try {
-        const outcome = await this.host.send(conversationId, next.text, undefined, {
+        const attachments = next.attachments?.length
+          ? await this.options.attachmentStore?.load(next.attachments)
+          : undefined;
+        if (next.attachments?.length && !attachments) {
+          throw new Error('remote attachment sidecar is unavailable');
+        }
+        const outcome = await this.host.send(conversationId, next.text, attachments, {
           remoteRequestId: next.id,
         });
         if (outcome.kind === 'completed') {
@@ -331,6 +378,13 @@ export class RemoteController {
           notification: `Forge request failed: ${error}`,
         });
       } finally {
+        if (progressId) {
+          await this.channel
+            .editMessage?.(next.chatId, progressId, 'Forge: completed.', {
+              signal: this.abort.signal,
+            })
+            .catch(() => undefined);
+        }
         this.activeConversations.delete(conversationId);
       }
       this.outbox.kick();

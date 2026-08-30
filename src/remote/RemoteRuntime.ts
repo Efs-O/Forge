@@ -9,6 +9,7 @@ import { RemoteRequestStore } from './RemoteRequestStore';
 import { RemoteTransportLease } from './RemoteTransportLease';
 import type { RemoteChannel } from './types';
 import { RemoteAuditLog } from './RemoteAuditLog';
+import { RemoteAttachmentStore } from './RemoteAttachmentStore';
 
 export interface RemoteChannelFactoryContext {
   getCursor: (key: string) => string | undefined;
@@ -20,6 +21,7 @@ export type RemoteChannelFactory = (
 
 export interface RemoteRuntimeOptions {
   storageDirectory: string;
+  workspaceRoot?: string | undefined;
   workspaceId: string;
   host: ForgeHostFacade;
   secrets: vscode.SecretStorage;
@@ -225,6 +227,11 @@ export class RemoteRuntime {
               maxMessageChars: config.remote.max_message_chars,
               rateLimitPerMinute: config.remote.rate_limit_per_minute,
               modelNames: config.models.map((model) => model.name),
+              ...(this.options.workspaceRoot
+                ? { attachmentStore: new RemoteAttachmentStore(this.options.workspaceRoot) }
+                : {}),
+              attachmentsEnabled: config.remote.attachments.enabled,
+              acceptPdfAttachments: config.remote.attachments.accept_pdf,
               inactivityTimeoutMinutes: config.remote.auth.inactivity_timeout_minutes,
               setInactivityTimeout: this.options.setInactivityTimeout,
               onError: this.options.notifyLocal,
@@ -268,6 +275,11 @@ export class RemoteRuntime {
         maxMessageChars: remote.max_message_chars,
         rateLimitPerMinute: remote.rate_limit_per_minute,
         modelNames: config.models.map((model) => model.name),
+        ...(this.options.workspaceRoot
+          ? { attachmentStore: new RemoteAttachmentStore(this.options.workspaceRoot) }
+          : {}),
+        attachmentsEnabled: remote.attachments.enabled,
+        acceptPdfAttachments: remote.attachments.accept_pdf,
         inactivityTimeoutMinutes: remote.auth.inactivity_timeout_minutes,
         setInactivityTimeout: this.options.setInactivityTimeout,
         onError: this.options.notifyLocal,

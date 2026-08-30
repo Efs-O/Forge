@@ -4,6 +4,8 @@ export class FakeRemoteChannel implements RemoteChannel {
   readonly name = 'fake' as const;
   readonly sent: Array<{ chatId: string; text: string; correlationId?: string }> = [];
   readonly retracted: Array<{ chatId: string; correlationId: string }> = [];
+  readonly progress: Array<{ chatId: string; text: string }> = [];
+  readonly edits: Array<{ chatId: string; messageId: string; text: string }> = [];
   private handler: ((event: RemoteInboundEvent) => Promise<RemoteInboundDisposition>) | undefined;
 
   onEvent(handler: (event: RemoteInboundEvent) => Promise<RemoteInboundDisposition>): {
@@ -32,5 +34,14 @@ export class FakeRemoteChannel implements RemoteChannel {
 
   async retractPrompt(chatId: string, correlationId: string): Promise<void> {
     this.retracted.push({ chatId, correlationId });
+  }
+
+  async sendProgress(chatId: string, text: string): Promise<string> {
+    this.progress.push({ chatId, text });
+    return String(this.progress.length);
+  }
+
+  async editMessage(chatId: string, messageId: string, text: string): Promise<void> {
+    this.edits.push({ chatId, messageId, text });
   }
 }

@@ -480,6 +480,7 @@
     "highlight.js": "^11.11.1",
     "js-yaml": "^4.3.1",
     "nunjucks": "^3.2.4",
+    "pdfjs-dist": "5.5.207",
     "qrcode": "^1.5.4",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",

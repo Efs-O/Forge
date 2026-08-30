@@ -9,8 +9,26 @@ const InboundBaseSchema = z.object({
   receivedAt: z.number().int().nonnegative(),
 });
 
+export const RemoteInboundAttachmentSchema = z.object({
+  name: z.string().min(1).max(255),
+  mediaType: z.string().min(1).max(128),
+  /** Base64 for binary input, UTF-8 for text. Never persisted in remote state. */
+  data: z
+    .string()
+    .min(1)
+    .max(14 * 1024 * 1024)
+    .optional(),
+  providerFileId: z.string().min(1).max(256).optional(),
+});
+
+export type RemoteInboundAttachment = z.infer<typeof RemoteInboundAttachmentSchema>;
+
 export const RemoteInboundEventSchema = z.discriminatedUnion('kind', [
-  InboundBaseSchema.extend({ kind: z.literal('text'), text: z.string() }),
+  InboundBaseSchema.extend({
+    kind: z.literal('text'),
+    text: z.string(),
+    attachments: z.array(RemoteInboundAttachmentSchema).max(10).optional(),
+  }),
   InboundBaseSchema.extend({
     kind: z.literal('action'),
     action: z.enum(['approve', 'deny']),
@@ -53,12 +71,21 @@ export interface RemoteRequestRecord {
   providerMessageId: string;
   conversationId: string;
   text: string;
+  attachments?: RemoteAttachmentReference[] | undefined;
   receivedAt: number;
   admittedAt?: number | undefined;
   state: RemoteExecutionState;
   updatedAt: number;
   finalText?: string | undefined;
   error?: string | undefined;
+}
+
+/** Durable state contains only a sidecar-relative name and validated metadata. */
+export interface RemoteAttachmentReference {
+  name: string;
+  mediaType: string;
+  relativePath: string;
+  bytes: number;
 }
 
 export interface RemoteOutboxRecord {
@@ -87,6 +114,21 @@ export interface RemoteChannel {
     text: string,
     options?: { correlationId?: string; signal?: AbortSignal },
   ): Promise<void>;
+  /** Best-effort presentation only; never an authoritative remote reply. */
+  sendProgress?(
+    chatId: string,
+    text: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<string | undefined>;
+  /** Best-effort presentation only; a reload may lose the provider message id. */
+  editMessage?(
+    chatId: string,
+    messageId: string,
+    text: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<void>;
+  /** Fetches attachment bytes only after the controller has authenticated the sender. */
+  downloadAttachment?(attachment: RemoteInboundAttachment): Promise<RemoteInboundAttachment>;
   /**
    * Drop the approve/deny buttons from a prompt that has been resolved.
    *

@@ -155,6 +155,11 @@ remote:
   auth:
     # 0 disables only inactivity expiry; TOTP still locks after restart or /lock.
     inactivity_timeout_minutes: 30
+  attachments:
+    # Stored below .forge/remote-inbox, never as tracked project files.
+    enabled: false
+    retain_days: 30
+    accept_pdf: true
   telegram:
     enabled: false
   whatsapp:

@@ -239,6 +239,13 @@ const RemoteConfigSchema = z
         inactivity_timeout_minutes: z.number().int().min(0).max(1_440).default(30),
       })
       .default({ inactivity_timeout_minutes: 30 }),
+    attachments: z
+      .object({
+        enabled: z.boolean().default(false),
+        retain_days: z.number().int().min(1).max(30).default(30),
+        accept_pdf: z.boolean().default(true),
+      })
+      .default({ enabled: false, retain_days: 30, accept_pdf: true }),
     telegram: z.object({ enabled: z.boolean().default(false) }).default({ enabled: false }),
     whatsapp: z.object({ enabled: z.boolean().default(false) }).default({ enabled: false }),
   })
