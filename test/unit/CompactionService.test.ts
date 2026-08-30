@@ -598,6 +598,26 @@ describe('runCompaction', () => {
     ]);
   });
 
+  it('emits finished(failed) when persisting a usable summary throws', async () => {
+    const c = conv([...base]);
+    const h = harness(c, async () => long('summary'));
+    const events: unknown[] = [];
+    const deps: CompactionDeps = {
+      ...h.deps,
+      persistSession: () => {
+        throw new Error('storage unavailable');
+      },
+      emitCompactionEvent: (event) => events.push(event),
+    };
+
+    expect(await runCompaction(deps, c.id, { auto: true, trigger: 'auto' })).toBe('failed');
+    expect(events).toEqual([
+      { conversationId: c.id, phase: 'started', trigger: 'auto' },
+      { conversationId: c.id, phase: 'finished', outcome: 'failed', trigger: 'auto' },
+    ]);
+    expect(h.released).toBe(true);
+  });
+
   it('emits nothing when there is not enough history to compact', async () => {
     const c = conv([]);
     const h = harness(c, async () => long('summary'));

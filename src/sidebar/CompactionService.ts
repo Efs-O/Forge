@@ -179,73 +179,100 @@ export async function runCompaction(
     trigger,
     ...(remoteOrigin ? { remoteOrigin } : {}),
   });
-  let summary: string;
+  let summary = '';
   let repoState = '';
   let outcome: CompactionOutcome = 'failed';
   try {
-    // Keep the conversation busy while the bounded snapshot runs. Awaiting it
-    // before beginCompaction left a window in which a new turn could start and
-    // invalidate the cut point we just selected.
-    if (deps.snapshotRepoState) {
-      try {
-        repoState = await deps.snapshotRepoState();
-      } catch (err) {
-        // Evidence is optional even when an injected implementation is faulty.
-        // The real snapshotter already catches its own git errors; this guard
-        // preserves CompactionDeps' promise that it can never block compaction.
-        log.info(`[compact] repo snapshot unavailable — ${(err as Error).message}`);
+    try {
+      // Keep the conversation busy while the bounded snapshot runs. Awaiting it
+      // before beginCompaction left a window in which a new turn could start and
+      // invalidate the cut point we just selected.
+      if (deps.snapshotRepoState) {
+        try {
+          repoState = await deps.snapshotRepoState();
+        } catch (err) {
+          // Evidence is optional even when an injected implementation is faulty.
+          // The real snapshotter already catches its own git errors; this guard
+          // preserves CompactionDeps' promise that it can never block compaction.
+          log.info(`[compact] repo snapshot unavailable — ${(err as Error).message}`);
+        }
       }
+      // Supply the deterministic ledger to the summarizer as well as pinning it
+      // below. A long tool dump used to hide an already-completed download from
+      // the model that wrote the summary, leaving only an earlier "next" step.
+      summary = await deps.runPromptToMarkdown(
+        buildSummaryPrompt(
+          conv.compaction?.summary,
+          split.summarize,
+          recordedActionsText + repoState,
+          userContext,
+        ),
+        conv.id,
+        {
+          // The conversation's OWN model, not the picker's global default: a
+          // pinned conversation was being summarized by whatever was last
+          // selected elsewhere.
+          ...(conv.active_model ? { modelName: conv.active_model } : {}),
+          systemPromptTemplate: 'summarize',
+          outputTokens: SUMMARY_OUTPUT_TOKENS,
+          alwaysStripThinking: true,
+        },
+      );
+    } finally {
+      release();
+      deps.post({ type: 'done', finishReason: 'stop', conversationId: conv.id });
     }
-    // Supply the deterministic ledger to the summarizer as well as pinning it
-    // below. A long tool dump used to hide an already-completed download from
-    // the model that wrote the summary, leaving only an earlier "next" step.
-    summary = await deps.runPromptToMarkdown(
-      buildSummaryPrompt(
-        conv.compaction?.summary,
-        split.summarize,
-        recordedActionsText + repoState,
-        userContext,
-      ),
-      conv.id,
-      {
-        // The conversation's OWN model, not the picker's global default: a
-        // pinned conversation was being summarized by whatever was last
-        // selected elsewhere.
-        ...(conv.active_model ? { modelName: conv.active_model } : {}),
-        systemPromptTemplate: 'summarize',
-        outputTokens: SUMMARY_OUTPUT_TOKENS,
-        alwaysStripThinking: true,
-      },
-    );
+
+    const trimmed = capSummary(summary);
+    if (!isUsableSummary(trimmed)) {
+      log.info(`[compact] rejected unusable summary (${trimmed.length} chars)`);
+      void vscode.window.showWarningMessage(
+        trimmed
+          ? 'Forge: compaction produced no usable summary — context is unchanged.'
+          : 'Forge: compaction returned no summary.',
+      );
+      return 'failed';
+    }
+
+    // Non-destructive: record the summary and the cut point instead of
+    // overwriting the transcript. conv.messages stays whole, so the sidebar
+    // scrollback and the persisted record survive; only what the model is sent
+    // shrinks (see applyCompactionWindow).
+    conv.compaction = {
+      summary: trimmed,
+      fromIndex,
+      generation: (conv.compaction?.generation ?? 0) + 1,
+      ...(userMessages.length > 0 ? { userMessages } : {}),
+      ...(recordedActions.length > 0 ? { recordedActions } : {}),
+      ...(repoState ? { repoState } : {}),
+    };
+    conv.updatedAt = Date.now();
+    deps.persistSession();
+    deps.postSessionSync();
+    deps.invalidateExactTokenBudget(conv);
+    deps.postTokenBudget(conv);
+    deps.post({
+      type: 'notice',
+      message: 'Conversation compacted. Chat history is unchanged.',
+      conversationId: conv.id,
+    });
+    if (!options.auto) {
+      void vscode.window.showInformationMessage(
+        'Forge: context compacted. Your chat history is unchanged.',
+      );
+    }
+    outcome = 'compacted';
+    return outcome;
   } catch (err) {
     deps.post({
       type: 'error',
       message: `Forge: compaction failed — ${(err as Error).message}`,
       conversationId: conv.id,
     });
-    outcome = 'failed';
-    deps.emitCompactionEvent?.({
-      conversationId: conv.id,
-      phase: 'finished',
-      outcome,
-      trigger,
-      ...(remoteOrigin ? { remoteOrigin } : {}),
-    });
     return 'failed';
   } finally {
-    release();
-    deps.post({ type: 'done', finishReason: 'stop', conversationId: conv.id });
-  }
-
-  const trimmed = capSummary(summary);
-  if (!isUsableSummary(trimmed)) {
-    log.info(`[compact] rejected unusable summary (${trimmed.length} chars)`);
-    void vscode.window.showWarningMessage(
-      trimmed
-        ? 'Forge: compaction produced no usable summary — context is unchanged.'
-        : 'Forge: compaction returned no summary.',
-    );
-    outcome = 'failed';
+    // Every started compaction has one terminal event, including failures while
+    // applying or persisting an otherwise usable summary.
     deps.emitCompactionEvent?.({
       conversationId: conv.id,
       phase: 'finished',
@@ -253,48 +280,7 @@ export async function runCompaction(
       trigger,
       ...(remoteOrigin ? { remoteOrigin } : {}),
     });
-    return 'failed';
   }
-
-  // Non-destructive: record the summary and the cut point instead of
-  // overwriting the transcript. conv.messages stays whole, so the sidebar
-  // scrollback and the persisted record survive; only what the model is sent
-  // shrinks (see applyCompactionWindow).
-  conv.compaction = {
-    summary: trimmed,
-    fromIndex,
-    generation: (conv.compaction?.generation ?? 0) + 1,
-    ...(userMessages.length > 0 ? { userMessages } : {}),
-    ...(recordedActions.length > 0 ? { recordedActions } : {}),
-    ...(repoState ? { repoState } : {}),
-  };
-  conv.updatedAt = Date.now();
-  deps.persistSession();
-  deps.postSessionSync();
-  deps.invalidateExactTokenBudget(conv);
-  deps.postTokenBudget(conv);
-  deps.post({
-    type: 'notice',
-    message: 'Conversation compacted. Chat history is unchanged.',
-    conversationId: conv.id,
-  });
-  if (!options.auto) {
-    void vscode.window.showInformationMessage(
-      'Forge: context compacted. Your chat history is unchanged.',
-    );
-  }
-  outcome = 'compacted';
-  // Exactly one 'finished', after validation, carrying the true terminal
-  // outcome. Not emitted in the summarization finally — that runs before the
-  // summary is checked and would lie about a rejected summary.
-  deps.emitCompactionEvent?.({
-    conversationId: conv.id,
-    phase: 'finished',
-    outcome,
-    trigger,
-    ...(remoteOrigin ? { remoteOrigin } : {}),
-  });
-  return outcome;
 }
 
 export {

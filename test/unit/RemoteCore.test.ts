@@ -694,6 +694,60 @@ describe('remote compaction progress notifications', () => {
     );
   });
 
+  it('keeps progress as complete when the result send throws after a successful compaction', async () => {
+    const state = await store();
+    await state.setBinding({
+      channel: 'fake',
+      chatId: 'chat-a',
+      workspaceId: 'workspace',
+      conversationId: 'c1',
+    });
+    const compact = vi.fn(async () => 'compacted' as const);
+    const channel = new FakeRemoteChannel();
+    // Make the authoritative result send fail — the progress edit must still
+    // read "complete", not "failed".
+    const origSend = channel.send.bind(channel);
+    channel.send = async (chatId: string, text: string) => {
+      if (text.includes('Forge: compaction compacted')) throw new Error('send failure');
+      await origSend(chatId, text);
+    };
+    const context = {
+      channel,
+      store: state,
+      host: {
+        compact,
+        contextBudget: () => ({ used: 1, max: 2 }),
+      },
+      workspaceId: 'workspace',
+      signal: new AbortController().signal,
+      inactivityTimeoutMinutes: 30,
+      modelNames: [],
+      workspaceAliases: {},
+    };
+    // The result send throws, so the handler rejects — but the progress edit
+    // must already be "complete" before the throw propagates.
+    await expect(
+      handleRemoteCommand(
+        {
+          channel: 'fake',
+          kind: 'text',
+          providerMessageId: 'compact-2',
+          senderId: 'owner',
+          chatId: 'chat-a',
+          chatType: 'private',
+          receivedAt: 1,
+          text: '/compact',
+        } as RemoteInboundEvent,
+        context as never,
+        'compact-dedup-2',
+      ),
+    ).rejects.toThrow('send failure');
+    expect(channel.progress).toContainEqual({ chatId: 'chat-a', text: 'Forge: compacting…' });
+    expect(channel.edits).toContainEqual(
+      expect.objectContaining({ chatId: 'chat-a', text: 'Forge: compaction complete.' }),
+    );
+  });
+
   it('reports a /compact host failure as failed, not complete', async () => {
     const state = await store();
     await state.setBinding({

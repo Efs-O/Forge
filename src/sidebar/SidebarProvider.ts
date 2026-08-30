@@ -42,7 +42,6 @@ import { runAddressedAutoCompact } from './autoCompactionPolicy';
 import { SidebarHostFacade, type ForgeHostFacade } from './ForgeHostFacade';
 
 export type { SidebarProviderEvents };
-
 /**
  * How often the sidebar re-checks model residency while visible. Slow enough to
  * be free (a string compare over a handful of slots), fast enough that a dot
@@ -54,8 +53,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewId = 'forge.sidebar';
 
   private view?: vscode.WebviewView;
-  /** Residency poll: see docs/plans/MODEL_READINESS_DOT_PLAN.md for why this is a tick and
-   *  not an event. Runs only while the sidebar is visible. */
+  /** Residency poll: see docs/plans/MODEL_READINESS_DOT_PLAN.md — why a tick, not an event; runs only while the sidebar is visible. */
   private residencyTimer: ReturnType<typeof setInterval> | undefined;
   private lastResidencySignature = '';
   private sidebar: SidebarRuntime;
@@ -167,6 +165,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       setClankerMode: (on) => this.agentLoop.setClankerMode(on),
       contextBudget: (conversationId) => this.contextBudgetOf(conversationId),
       onCompactionEvent: (listener) => this.slashHandler.onCompactionEvent(listener),
+      onAgentProgress: (listener) => this.agentLoop.onAgentProgress(listener),
       compact: (conversationId, options) =>
         this.slashHandler.compactConversation(conversationId, {
           auto: false,
