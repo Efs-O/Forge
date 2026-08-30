@@ -53,7 +53,6 @@ export function makeListDirectoryTool(): RegisteredTool {
         return plain.join('\n');
       }
 
-      const now = Date.now();
       const stats = await Promise.all(
         entries.map(async ([name]) => {
           try {
@@ -66,6 +65,9 @@ export function makeListDirectoryTool(): RegisteredTool {
           }
         }),
       );
+      // Read the clock after the asynchronous stats. Capturing it before them
+      // can make a concurrently written file appear newer than "now".
+      const now = Date.now();
 
       return entries
         .map(([name, type], index) => {
@@ -107,10 +109,12 @@ function formatSize(bytes: number): string {
  * answer it directly rather than making the caller subtract. Mirrors the same
  * decision in `list_executions`.
  */
-function formatAge(ms: number): string {
+export function formatAge(ms: number): string {
   // Clock skew on a network share can date a file in the future.
-  if (ms < 0) return 'modified in the future';
-  const seconds = Math.round(ms / 1000);
+  // Local filesystems also round timestamps differently; tolerate the normal
+  // sub-two-second skew instead of calling a file created "now" futuristic.
+  if (ms < -2_000) return 'modified in the future';
+  const seconds = Math.max(0, Math.round(ms / 1000));
   if (seconds < 60) return `${String(seconds)}s ago`;
   const minutes = Math.round(seconds / 60);
   if (minutes < 60) return `${String(minutes)}m ago`;
