@@ -88,7 +88,9 @@ export function makeDeleteFileTool(): RegisteredTool {
       function: {
         name: 'delete_file',
         description:
-          'Delete a file or directory. Set recursive=true to delete a non-empty directory.',
+          'Delete a file or directory. By default the target is moved to the OS recycle bin / ' +
+          'trash so it can be restored; set to_trash=false to delete it permanently. ' +
+          'Set recursive=true to delete a non-empty directory.',
         parameters: {
           type: 'object',
           properties: {
@@ -99,6 +101,13 @@ export function makeDeleteFileTool(): RegisteredTool {
             recursive: {
               type: 'boolean',
               description: 'If true, delete directory and all its contents. Default false.',
+            },
+            to_trash: {
+              type: 'boolean',
+              description:
+                'If true (default), move to the recycle bin instead of deleting permanently. ' +
+                'Set false for permanent deletion, or when the target lives on a filesystem ' +
+                'with no recycle bin (network shares, most remote/WSL paths).',
             },
           },
           required: ['path'],
@@ -111,8 +120,25 @@ export function makeDeleteFileTool(): RegisteredTool {
     handler: async (args) => {
       const filePath = args['path'] as string;
       const resolved = resolveWorkspacePath(filePath);
-      fs.rmSync(resolved, { recursive: args['recursive'] === true });
-      return `Deleted: ${filePath}`;
+      const recursive = args['recursive'] === true;
+      if (args['to_trash'] === false) {
+        fs.rmSync(resolved, { recursive });
+        return `Permanently deleted: ${filePath}`;
+      }
+      try {
+        await vscode.workspace.fs.delete(vscode.Uri.file(resolved), {
+          recursive,
+          useTrash: true,
+        });
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        throw new Error(
+          `Could not move ${filePath} to the recycle bin: ${reason}. ` +
+            'Filesystems such as network shares have no recycle bin — ' +
+            'call delete_file again with to_trash: false to delete it permanently.',
+        );
+      }
+      return `Moved to recycle bin: ${filePath}`;
     },
   };
 }

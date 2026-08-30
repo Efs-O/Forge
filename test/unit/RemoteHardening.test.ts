@@ -13,6 +13,7 @@ import { RemoteOutboxDelivery } from '../../src/remote/RemoteOutboxDelivery';
 import { RemoteRateLimiter } from '../../src/remote/RemoteRateLimiter';
 import { RemoteRequestStore, remoteDedupKey } from '../../src/remote/RemoteRequestStore';
 import { RemoteRuntime } from '../../src/remote/RemoteRuntime';
+import { generateTotp } from '../../src/remote/RemoteTotp';
 import { RemoteTransportLease } from '../../src/remote/RemoteTransportLease';
 import type { RemoteInboundEvent, RemoteRequestRecord } from '../../src/remote/types';
 import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
@@ -93,6 +94,57 @@ function host(overrides: Partial<ForgeHostFacade> = {}): ForgeHostFacade {
 }
 
 describe('remote authorization and privacy hardening', () => {
+  it('blocks all owner routing while TOTP is locked, then drains only after authentication', async () => {
+    const { store } = await newStore();
+    await store.setBinding({
+      channel: 'fake',
+      chatId: 'chat-raw-id',
+      workspaceId: 'workspace',
+      conversationId: 'c1',
+    });
+    await store.enqueue({
+      id: 'queued-totp',
+      dedupKey: 'queued-totp',
+      channel: 'fake',
+      chatId: 'chat-raw-id',
+      providerMessageId: 'queued-totp',
+      conversationId: 'c1',
+      text: 'queued prompt',
+      receivedAt: 1,
+      state: 'queued',
+      updatedAt: 1,
+    });
+    const secrets = new MemorySecrets();
+    secrets.values.set('forge.remote.fake.ownerId', 'owner-raw-id');
+    const auth = new RemoteAuth(secrets as unknown as vscode.SecretStorage);
+    const secret = await auth.createTotpEnrollmentSecret('fake');
+    const now = Date.now();
+    const code = generateTotp(secret, now).code;
+    await auth.confirmTotpEnrollment('fake', secret, code, now);
+    const channel = new FakeRemoteChannel();
+    const forgeHost = host();
+    const controller = new RemoteController(
+      channel,
+      store,
+      auth,
+      forgeHost,
+      { workspaceId: 'workspace', queueLimit: 5, maxMessageChars: 100, rateLimitPerMinute: 30 },
+    );
+    await controller.start();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(forgeHost.send).not.toHaveBeenCalled();
+    await expect(channel.emit(event({ providerMessageId: 'status', text: '/status' }))).resolves.toEqual({
+      kind: 'handled',
+    });
+    await expect(channel.emit(event({ providerMessageId: 'auth', text: code }))).resolves.toEqual({
+      kind: 'handled',
+    });
+    await vi.waitFor(() => expect(forgeHost.send).toHaveBeenCalledWith('c1', 'queued prompt', undefined, {
+      remoteRequestId: 'queued-totp',
+    }));
+    await controller.stop();
+  });
+
   it('enforces pairing grammar, expiry, one-time use, and stable exact owner identity', async () => {
     const secrets = new MemorySecrets();
     const auth = new RemoteAuth(secrets as unknown as vscode.SecretStorage);
@@ -214,6 +266,7 @@ describe('remote owner commands', () => {
       dangerous: false,
     };
     sink?.requested(approval as never);
+    await vi.waitFor(() => expect(channel.sent.at(-1)?.correlationId).toBe('approval-1'));
     const prompt = channel.sent.at(-1);
     expect(prompt?.correlationId).toBe('approval-1');
 
@@ -232,8 +285,9 @@ describe('remote owner commands', () => {
     expect(forgeHost.resolveApproval).toHaveBeenCalledTimes(1);
 
     sink?.resolved({ ...approval, approved: true, reason: 'remote' } as never);
-    await Promise.resolve();
-    expect(channel.retracted).toEqual([{ chatId: 'chat-raw-id', correlationId: 'approval-1' }]);
+    await vi.waitFor(() =>
+      expect(channel.retracted).toEqual([{ chatId: 'chat-raw-id', correlationId: 'approval-1' }]),
+    );
     const confirmation = channel.sent.at(-1);
     expect(confirmation?.text).toContain('approved');
     // A correlationId here would hang a second live keyboard on the notice.
@@ -484,6 +538,42 @@ describe('remote durable boundaries', () => {
     expect(channel.send).toHaveBeenCalledTimes(10);
   });
 
+  it('leaves a locked outbox item pending without retrying until explicitly kicked', async () => {
+    const { store } = await newStore();
+    await store.enqueue({
+      id: 'locked-request',
+      dedupKey: 'locked-request',
+      channel: 'fake',
+      chatId: 'chat',
+      providerMessageId: 'message',
+      conversationId: 'c1',
+      text: 'prompt',
+      receivedAt: 1,
+      state: 'queued',
+      updatedAt: 1,
+    });
+    await store.finish('locked-request', 'completed', { notification: 'answer' });
+    const channel = new FakeRemoteChannel();
+    let unlocked = false;
+    const delivery = new RemoteOutboxDelivery(
+      channel,
+      store,
+      100,
+      new AbortController().signal,
+      1,
+      undefined,
+      () => unlocked,
+    );
+    delivery.start();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(channel.sent).toHaveLength(0);
+    expect(store.pendingOutbox()[0]).toMatchObject({ attempts: 0, state: 'pending' });
+    unlocked = true;
+    delivery.kick();
+    await vi.waitFor(() => expect(channel.sent.at(-1)?.text).toBe('answer'));
+    await delivery.stop();
+  });
+
   it('detects fencing loss and never removes the replacement lease', async () => {
     const { directory } = await newStore();
     const lost = vi.fn();
@@ -592,10 +682,10 @@ describe('remote runtime lifecycle', () => {
       ],
     });
     await runtime.applyConfig(enabled);
-    expect(channels).toHaveLength(2);
-    await expect(channels[0]!.emit(event())).resolves.toMatchObject({ kind: 'retry' });
+    expect(channels).toHaveLength(1);
+    await expect(channels[0]!.emit(event())).resolves.toMatchObject({ kind: 'rejected' });
     await runtime.dispose();
     expect(runtime.activeTransports()).toEqual([]);
-    await expect(channels[1]!.emit(event())).resolves.toMatchObject({ kind: 'retry' });
+    await expect(channels[0]!.emit(event())).resolves.toMatchObject({ kind: 'retry' });
   });
 });

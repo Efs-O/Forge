@@ -9,6 +9,7 @@ import {
   makeAppendFileTool,
   makeReplaceSelectionTool,
   makeInsertCodeTool,
+  makeGetEditorContextTool,
 } from './builtinTools';
 import { makeSearchCodeTool, makeFindFilesTool } from './dirTools';
 import { makeListDirectoryTool } from './listDirectoryTool';
@@ -19,6 +20,7 @@ import {
   makeGetHoverTool,
   makeGoToDefinitionTool,
   makeFindReferencesTool,
+  makeFindImplementationsTool,
 } from './lspTools';
 import { makeApplyCodeActionTool, makeGetCodeActionsTool } from './codeActionTools';
 import { makeEditNotebookCellTool, makeReadNotebookTool } from './notebookTools';
@@ -94,6 +96,7 @@ export function registerAllTools(
   registry.register(makeAppendFileTool());
   registry.register(makeReplaceSelectionTool());
   registry.register(makeInsertCodeTool());
+  registry.register(makeGetEditorContextTool());
 
   // v0.5 read-only
   registry.register(makeListDirectoryTool());
@@ -108,6 +111,7 @@ export function registerAllTools(
   registry.register(makeGetHoverTool());
   registry.register(makeGoToDefinitionTool());
   registry.register(makeFindReferencesTool());
+  registry.register(makeFindImplementationsTool());
   registry.register(makeGetCodeActionsTool());
   registry.register(makeReadNotebookTool());
   registry.register(makeListWorkspaceTasksTool());

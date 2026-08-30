@@ -283,3 +283,83 @@ export function makeInsertCodeTool(): RegisteredTool {
     },
   };
 }
+
+/**
+ * The read-side counterpart to replace_selection / insert_code.
+ *
+ * Those two write into the active editor, but nothing could read it back: a
+ * user saying "fix this" with a selection highlighted gave the model no way to
+ * see what "this" was, so it re-read whole files and guessed. One call returns
+ * the whole "what is the user looking at" picture — active file, selection,
+ * cursor, and the other open tabs — because a separate tool per fact would
+ * cost three tool rounds and three tool definitions to answer one question.
+ */
+export function makeGetEditorContextTool(): RegisteredTool {
+  return {
+    definition: {
+      type: 'function',
+      function: {
+        name: 'get_editor_context',
+        description:
+          'Read what the user currently has open: the active file, the selected text and its ' +
+          'range, the cursor position, and the paths of all open editor tabs. Use this when the ' +
+          'user refers to "this", "here", or "the selection" without naming a file.',
+        parameters: {
+          type: 'object',
+          properties: {},
+          required: [],
+          additionalProperties: false,
+        },
+      },
+    },
+    permission: 'read',
+    handler: async () => {
+      const lines: string[] = [];
+      const editor = vscode.window.activeTextEditor;
+
+      if (!editor) {
+        lines.push('Active editor: (none)');
+      } else {
+        const doc = editor.document;
+        const rel = vscode.workspace.asRelativePath(doc.uri);
+        const sel = editor.selection;
+        lines.push(`Active editor: ${rel} (${doc.languageId}, ${doc.lineCount} lines)`);
+        // One-based to match every other position the user sees in the UI and
+        // the gutter; the write-side tools take zero-based lines, so the
+        // convention is stated rather than left to be inferred.
+        lines.push(
+          `Cursor (1-based): line ${sel.active.line + 1}, column ${sel.active.character + 1}`,
+        );
+        if (sel.isEmpty) {
+          lines.push('Selection: (empty)');
+        } else {
+          const text = doc.getText(sel);
+          lines.push(
+            `Selection (1-based): lines ${sel.start.line + 1}-${sel.end.line + 1}, ` +
+              `${text.length} chars`,
+          );
+          lines.push('--- selected text ---');
+          lines.push(text);
+          lines.push('--- end selected text ---');
+        }
+      }
+
+      // tabGroups sees every open tab, including ones scrolled out of view and
+      // non-text tabs; visibleTextEditors only sees split panes currently on
+      // screen, which under-reports what the user considers "open".
+      const tabs: string[] = [];
+      for (const group of vscode.window.tabGroups?.all ?? []) {
+        for (const tab of group.tabs) {
+          const input = tab.input as { uri?: vscode.Uri } | undefined;
+          if (input?.uri) tabs.push(vscode.workspace.asRelativePath(input.uri));
+        }
+      }
+      const unique = [...new Set(tabs)];
+      lines.push(
+        unique.length ? `Open tabs (${unique.length}):\n${unique.join('\n')}` : 'Open tabs: (none)',
+      );
+
+      return lines.join('\n');
+    },
+  };
+}

@@ -2,6 +2,7 @@ import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteChannel } from './types';
 
 const MAX_ATTEMPTS = 10;
+type CanDeliver = (chatId: string) => boolean | Promise<boolean>;
 
 /** One serialized, channel-scoped at-least-once notification delivery loop. */
 export class RemoteOutboxDelivery {
@@ -12,15 +13,20 @@ export class RemoteOutboxDelivery {
   constructor(
     private readonly channel: RemoteChannel,
     private readonly store: RemoteRequestStore,
-    private readonly maxMessageChars: number,
+    private maxMessageChars: number,
     private readonly signal: AbortSignal,
     private readonly retryDelayMs = 1_000,
     private readonly onError?: (message: string) => void,
+    private readonly canDeliver: CanDeliver = () => true,
   ) {}
 
   start(): void {
     this.stopped = false;
     this.kick();
+  }
+
+  updateMaxMessageChars(maxMessageChars: number): void {
+    this.maxMessageChars = maxMessageChars;
   }
 
   kick(): void {
@@ -33,15 +39,7 @@ export class RemoteOutboxDelivery {
       )
       .finally(() => {
         this.running = undefined;
-        const pending = this.store.pendingOutbox(this.channel.name);
-        if (!this.stopped && pending.length > 0) {
-          const exponent = Math.max(0, Math.min((pending[0]?.attempts ?? 1) - 1, 6));
-          const delay = Math.min(this.retryDelayMs * 2 ** exponent, 60_000);
-          this.retryTimer = setTimeout(() => {
-            this.retryTimer = undefined;
-            this.kick();
-          }, delay);
-        }
+        void this.scheduleRetry();
       });
   }
 
@@ -55,6 +53,7 @@ export class RemoteOutboxDelivery {
   private async deliver(): Promise<void> {
     for (const item of this.store.pendingOutbox(this.channel.name)) {
       if (this.stopped) return;
+      if (!(await this.canDeliver(item.chatId))) continue;
       await this.store.markOutbox(item.id, 'sending');
       try {
         await this.channel.send(item.chatId, item.text.slice(0, this.maxMessageChars), {
@@ -69,5 +68,31 @@ export class RemoteOutboxDelivery {
         return;
       }
     }
+  }
+
+  private async scheduleRetry(): Promise<void> {
+    if (this.stopped || this.retryTimer) return;
+    try {
+      const pending = this.store.pendingOutbox(this.channel.name);
+      const next = await this.nextDeliverable(pending);
+      if (!next || this.stopped) return;
+      const exponent = Math.max(0, Math.min(next.attempts - 1, 6));
+      const delay = Math.min(this.retryDelayMs * 2 ** exponent, 60_000);
+      this.retryTimer = setTimeout(() => {
+        this.retryTimer = undefined;
+        this.kick();
+      }, delay);
+    } catch (err) {
+      this.onError?.(
+        `Forge remote notification scheduling failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  private async nextDeliverable<T extends { chatId: string }>(items: T[]): Promise<T | undefined> {
+    for (const item of items) {
+      if (await this.canDeliver(item.chatId)) return item;
+    }
+    return undefined;
   }
 }

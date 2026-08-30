@@ -36,6 +36,14 @@ export const workspace = {
     get: <T>(_key: string, fallback?: T): T | undefined => fallback,
   }),
   fs: {
+    lastDeleteOptions: undefined as { recursive?: boolean; useTrash?: boolean } | undefined,
+    async delete(
+      uri: { fsPath: string },
+      options?: { recursive?: boolean; useTrash?: boolean },
+    ): Promise<void> {
+      workspace.fs.lastDeleteOptions = options;
+      await fs.rm(uri.fsPath, { recursive: options?.recursive === true });
+    },
     async readDirectory(uri: { fsPath: string }): Promise<Array<[string, FileType]>> {
       const entries = await fs.readdir(uri.fsPath, { withFileTypes: true });
       return entries.map((entry) => [
@@ -79,6 +87,7 @@ export const workspace = {
 export const window = {
   activeTextEditor: undefined as unknown,
   visibleTextEditors: [] as Array<{ document: { uri: { fsPath: string } } }>,
+  tabGroups: { all: [] as Array<{ tabs: Array<{ input?: unknown }> }> },
   createOutputChannel: () => ({
     appendLine: () => undefined,
     clear: () => undefined,

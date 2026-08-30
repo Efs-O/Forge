@@ -25,6 +25,7 @@ export interface RemoteRuntimeOptions {
   secrets: vscode.SecretStorage;
   channelFactories?: Partial<Record<'telegram' | 'whatsapp', RemoteChannelFactory>>;
   notifyLocal: (message: string) => void;
+  setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
 }
 
 interface ActiveTransport {
@@ -40,6 +41,7 @@ export interface RemoteValidationStatus {
     configured: boolean;
     active: boolean;
     ownerPaired: boolean;
+    totpEnrolled: boolean;
     leaseOwned: boolean;
     providerOk: boolean;
     detail: string;
@@ -57,6 +59,7 @@ export class RemoteRuntime {
   private readonly active = new Map<string, ActiveTransport>();
   private lifecycleTail: Promise<void> = Promise.resolve();
   private disposed = false;
+  private appliedConfig: ForgeConfig | undefined;
 
   constructor(private readonly options: RemoteRuntimeOptions) {
     this.auth = new RemoteAuth(options.secrets);
@@ -84,6 +87,23 @@ export class RemoteRuntime {
 
   unpair(channel: 'telegram' | 'whatsapp'): Promise<void> {
     return this.auth.unpair(channel);
+  }
+
+  createTotpEnrollmentSecret(channel: 'telegram' | 'whatsapp'): Promise<string> {
+    if (!this.active.has(channel)) throw new Error(`Forge remote ${channel} is not running.`);
+    return this.auth.createTotpEnrollmentSecret(channel);
+  }
+
+  confirmTotpEnrollment(
+    channel: 'telegram' | 'whatsapp',
+    secret: string,
+    code: string,
+  ): Promise<void> {
+    return this.auth.confirmTotpEnrollment(channel, secret, code);
+  }
+
+  disableTotp(channel: 'telegram' | 'whatsapp'): Promise<void> {
+    return this.auth.disableTotp(channel);
   }
 
   requestWhatsAppPairingCode(phoneNumber: string): Promise<string> {
@@ -129,6 +149,7 @@ export class RemoteRuntime {
         configured,
         active: active !== undefined,
         ownerPaired: await this.auth.hasOwner(name),
+        totpEnrolled: await this.auth.totpEnrolled(name),
         leaseOwned,
         providerOk: health.ok,
         detail: health.detail,
@@ -148,8 +169,20 @@ export class RemoteRuntime {
   }
 
   private async replace(config: ForgeConfig): Promise<void> {
+    if (this.canUpdateInPlace(config)) {
+      this.updateActiveOptions(config);
+      this.appliedConfig = config;
+      return;
+    }
     await this.stopActive();
-    if (this.disposed || config.remote?.enabled !== true) return;
+    if (this.disposed || config.remote?.enabled !== true) {
+      this.auth.updateSessionPolicy({ inactivityTimeoutMinutes: 30 });
+      this.appliedConfig = config;
+      return;
+    }
+    this.auth.updateSessionPolicy({
+      inactivityTimeoutMinutes: config.remote.auth.inactivity_timeout_minutes,
+    });
     await this.store.load();
     try {
       for (const channelName of ['telegram', 'whatsapp'] as const) {
@@ -190,6 +223,8 @@ export class RemoteRuntime {
               queueLimit: config.remote.queue_limit,
               maxMessageChars: config.remote.max_message_chars,
               rateLimitPerMinute: config.remote.rate_limit_per_minute,
+              inactivityTimeoutMinutes: config.remote.auth.inactivity_timeout_minutes,
+              setInactivityTimeout: this.options.setInactivityTimeout,
               onError: this.options.notifyLocal,
             },
             this.audit,
@@ -204,6 +239,36 @@ export class RemoteRuntime {
     } catch (err) {
       await this.stopActive();
       throw err;
+    }
+    this.appliedConfig = config;
+  }
+
+  private canUpdateInPlace(config: ForgeConfig): boolean {
+    if (!this.appliedConfig || this.disposed) return false;
+    const configured = transportNames(config);
+    const active = [...this.active.keys()].sort();
+    return (
+      configured.length === active.length &&
+      configured.every((name, index) => name === active[index])
+    );
+  }
+
+  private updateActiveOptions(config: ForgeConfig): void {
+    const remote = config.remote;
+    if (!remote) return;
+    this.auth.updateSessionPolicy({
+      inactivityTimeoutMinutes: remote.auth.inactivity_timeout_minutes,
+    });
+    for (const transport of this.active.values()) {
+      transport.controller.updateOptions({
+        workspaceId: this.options.workspaceId,
+        queueLimit: remote.queue_limit,
+        maxMessageChars: remote.max_message_chars,
+        rateLimitPerMinute: remote.rate_limit_per_minute,
+        inactivityTimeoutMinutes: remote.auth.inactivity_timeout_minutes,
+        setInactivityTimeout: this.options.setInactivityTimeout,
+        onError: this.options.notifyLocal,
+      });
     }
   }
 
@@ -224,4 +289,11 @@ export class RemoteRuntime {
   private async stopActive(): Promise<void> {
     await Promise.all([...this.active.keys()].map((name) => this.stopTransport(name)));
   }
+}
+
+function transportNames(config: ForgeConfig): string[] {
+  if (config.remote?.enabled !== true) return [];
+  return (['telegram', 'whatsapp'] as const).filter(
+    (name) => config.remote?.[name].enabled === true,
+  );
 }

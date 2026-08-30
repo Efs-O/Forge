@@ -100,7 +100,9 @@ export function getBuiltinDenyList(): DenyListEntry[] {
     {
       match: isRecursiveForceDelete,
       description: 'rm -rf (recursive force delete)',
-      alternative: 'To remove a path, use the delete_file tool (recursive: true for a directory).',
+      alternative:
+        'To remove a path, use the delete_file tool (recursive: true for a directory). ' +
+        'It moves the target to the recycle bin unless you pass to_trash: false.',
     },
     { pattern: /git\s+reset\s+--(hard|mixed|soft)/, description: 'git reset (hard/mixed/soft)' },
     {

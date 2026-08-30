@@ -10,21 +10,20 @@ import {
   type RemoteInboundEvent,
   type RemoteRequestRecord,
 } from './types';
-import type {
-  ToolApprovalRequestEvent,
-  ToolApprovalResolvedEvent,
-} from '../sidebar/ToolApprovalService';
 import type { RemoteAuditLog } from './RemoteAuditLog';
 import { RemoteRateLimiter } from './RemoteRateLimiter';
 import { RemoteOutboxDelivery } from './RemoteOutboxDelivery';
 import { CONVERSATION_BUSY_ERROR } from '../sidebar/SendPipeline';
 import { handleRemoteCommand } from './RemoteCommandHandler';
+import { RemoteApprovalBridge } from './RemoteApprovalBridge';
 
 export interface RemoteControllerOptions {
   workspaceId: string;
   queueLimit: number;
   maxMessageChars: number;
   rateLimitPerMinute: number;
+  inactivityTimeoutMinutes?: number;
+  setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
   onError?: (message: string) => void;
 }
 
@@ -34,21 +33,17 @@ export class RemoteController {
   private readonly drains = new Map<string, Promise<void>>();
   private subscription: { dispose(): void } | undefined;
   private accepting = false;
-  private approvalSubscription: { dispose(): void } | undefined;
-  private readonly remoteApprovals = new Map<
-    string,
-    { requestId: string; chatId: string; resolving?: boolean }
-  >();
   private readonly activeConversations = new Set<string>();
-  private readonly rateLimiter: RemoteRateLimiter;
+  private rateLimiter: RemoteRateLimiter;
   private readonly outbox: RemoteOutboxDelivery;
+  private readonly approvals: RemoteApprovalBridge;
 
   constructor(
     private readonly channel: RemoteChannel,
     private readonly store: RemoteRequestStore,
     private readonly auth: RemoteAuth,
     private readonly host: ForgeHostFacade,
-    private readonly options: RemoteControllerOptions,
+    private options: RemoteControllerOptions,
     private readonly audit?: RemoteAuditLog,
   ) {
     this.rateLimiter = new RemoteRateLimiter(options.rateLimitPerMinute);
@@ -59,6 +54,16 @@ export class RemoteController {
       this.abort.signal,
       1_000,
       options.onError,
+      (chatId) => this.auth.canDeliver(this.channel.name, chatId),
+    );
+    this.approvals = new RemoteApprovalBridge(
+      channel,
+      store,
+      auth,
+      host,
+      this.abort.signal,
+      options.maxMessageChars,
+      options.onError,
     );
   }
 
@@ -66,10 +71,7 @@ export class RemoteController {
     await this.store.load();
     this.accepting = true;
     this.subscription = this.channel.onEvent((event) => this.handle(event));
-    this.approvalSubscription = this.host.addApprovalSink({
-      requested: (event) => this.onApprovalRequested(event),
-      resolved: (event) => this.onApprovalResolved(event),
-    });
+    this.approvals.start();
     await this.channel.start(this.abort.signal);
     for (const request of this.store.queued(undefined, this.channel.name)) {
       this.kickDrain(request.conversationId);
@@ -77,13 +79,19 @@ export class RemoteController {
     this.outbox.start();
   }
 
+  updateOptions(options: RemoteControllerOptions): void {
+    this.options = options;
+    this.rateLimiter = new RemoteRateLimiter(options.rateLimitPerMinute);
+    this.outbox.updateMaxMessageChars(options.maxMessageChars);
+    this.approvals.updateMaxMessageChars(options.maxMessageChars);
+  }
+
   async stop(): Promise<void> {
     this.accepting = false;
     this.abort.abort();
     this.subscription?.dispose();
     this.subscription = undefined;
-    this.approvalSubscription?.dispose();
-    this.approvalSubscription = undefined;
+    this.approvals.stop();
     await Promise.allSettled(
       [...this.activeConversations].map((conversationId) => this.host.cancel(conversationId)),
     );
@@ -108,19 +116,50 @@ export class RemoteController {
       }
       return { kind: 'rejected', reason: 'sender is not paired' };
     }
+    const gate = await this.auth.gate(event);
+    if (gate.kind === 'challenge') {
+      await this.channel.send(
+        event.chatId,
+        'Forge: authentication required. Enter your 6-digit authenticator code.',
+        { signal: this.abort.signal },
+      );
+      return { kind: 'handled' };
+    }
+    if (gate.kind === 'failed') {
+      await this.channel.send(event.chatId, 'Forge: authentication failed.', {
+        signal: this.abort.signal,
+      });
+      return { kind: 'handled' };
+    }
+    if (gate.kind === 'locked_out') {
+      return { kind: 'rejected', reason: 'remote authentication is temporarily locked' };
+    }
+    if (gate.kind === 'blocked') {
+      return { kind: 'rejected', reason: 'remote authentication is required' };
+    }
+    if (gate.newlyAuthenticated) {
+      this.outbox.kick();
+      const binding = this.store.binding(event.channel, event.chatId);
+      if (binding) this.kickDrain(binding.conversationId);
+      this.approvals.republish(event.chatId);
+      await this.channel.send(event.chatId, 'Forge: authenticated.', { signal: this.abort.signal });
+      return { kind: 'handled' };
+    }
+    if (event.kind === 'text' && event.text === '/lock') {
+      this.auth.lock(event);
+      await this.channel.send(event.chatId, 'Forge: remote session locked.', {
+        signal: this.abort.signal,
+      });
+      return { kind: 'handled' };
+    }
     if (!this.rateLimiter.allow(`${event.channel}:${event.senderId}:${event.chatId}`)) {
       return { kind: 'rejected', reason: 'remote rate limit exceeded' };
     }
     if (event.kind === 'action') {
-      const pending = this.remoteApprovals.get(event.correlationId);
-      if (!pending || pending.chatId !== event.chatId || pending.resolving) {
+      if (!this.approvals.resolveAction(event, gate.nonce)) {
         return { kind: 'rejected', reason: 'approval is stale or not owned by this chat' };
       }
-      // Marked, not deleted: deleting here made `onApprovalResolved` bail on its
-      // `!pending` guard, so a button press produced no confirmation and left
-      // its keyboard on the message. The flag still rejects a replayed callback.
-      pending.resolving = true;
-      this.host.resolveApproval(event.correlationId, event.action === 'approve');
+      this.auth.touch(event);
       return { kind: 'handled' };
     }
     if (event.text.length > this.options.maxMessageChars) {
@@ -128,7 +167,7 @@ export class RemoteController {
     }
     const key = remoteDedupKey(event.channel, event.chatId, event.providerMessageId);
     if (event.text.startsWith('/')) {
-      return handleRemoteCommand(
+      const result = await handleRemoteCommand(
         event,
         {
           channel: this.channel,
@@ -136,9 +175,15 @@ export class RemoteController {
           host: this.host,
           workspaceId: this.options.workspaceId,
           signal: this.abort.signal,
+          inactivityTimeoutMinutes: this.options.inactivityTimeoutMinutes ?? 30,
+          ...(this.options.setInactivityTimeout
+            ? { setInactivityTimeout: this.options.setInactivityTimeout }
+            : {}),
         },
         key,
       );
+      if (result.kind !== 'rejected' && result.kind !== 'retry') this.auth.touch(event);
+      return result;
     }
 
     const duplicate = this.store.getByDedupKey(key);
@@ -192,6 +237,7 @@ export class RemoteController {
       ?.record(event, busy ? 'request_queued' : 'request_accepted', request.id)
       .catch(() => undefined);
     this.kickDrain(request.conversationId);
+    this.auth.touch(event);
     return busy || queued.length > 0
       ? { kind: 'queued', requestId: request.id, position: queued.length + 1 }
       : { kind: 'accepted', requestId: request.id };
@@ -223,6 +269,10 @@ export class RemoteController {
         await this.delay(250);
         continue;
       }
+      const queued = this.store.queued(conversationId, this.channel.name);
+      const first = queued[0];
+      if (!first) return;
+      if (!(await this.auth.canDeliver(first.channel, first.chatId))) return;
       const next = await this.store.claimNext(conversationId, this.channel.name);
       if (!next) {
         if (this.store.queued(conversationId, this.channel.name).length === 0) return;
@@ -230,6 +280,10 @@ export class RemoteController {
         continue;
       }
       if (this.abort.signal.aborted) {
+        await this.store.requeue(next.id);
+        return;
+      }
+      if (!(await this.auth.canDeliver(next.channel, next.chatId))) {
         await this.store.requeue(next.id);
         return;
       }
@@ -270,54 +324,6 @@ export class RemoteController {
       }
       this.outbox.kick();
     }
-  }
-
-  private onApprovalRequested(event: ToolApprovalRequestEvent): void {
-    if (!event.conversationId) return;
-    const chain = this.host
-      .status()
-      .requestChains.find((item) => item.conversationId === event.conversationId);
-    if (!chain?.remoteRequestId) return;
-    const request = this.store.getRequest(chain.remoteRequestId);
-    if (!request || request.channel !== this.channel.name) return;
-    this.remoteApprovals.set(event.id, { requestId: request.id, chatId: request.chatId });
-    const danger = event.dangerous ? ' DANGEROUS' : '';
-    void this.channel
-      .send(
-        request.chatId,
-        `Forge approval${danger}: ${event.toolName}\n${event.detail}`.slice(
-          0,
-          this.options.maxMessageChars,
-        ),
-        { correlationId: event.id, signal: this.abort.signal },
-      )
-      .catch((err) =>
-        this.options.onError?.(
-          `Forge remote approval delivery failed: ${err instanceof Error ? err.message : String(err)}`,
-        ),
-      );
-  }
-
-  private onApprovalResolved(event: ToolApprovalResolvedEvent): void {
-    const pending = this.remoteApprovals.get(event.id);
-    if (!pending) return;
-    this.remoteApprovals.delete(event.id);
-    // No correlationId on the confirmation: passing it attached a SECOND live
-    // approve/deny keyboard to the "approved/denied" notice itself.
-    void this.channel
-      .retractPrompt?.(pending.chatId, event.id, this.abort.signal)
-      .catch(() => undefined);
-    void this.channel
-      .send(
-        pending.chatId,
-        `Forge approval ${event.approved ? 'approved' : 'denied'} (${event.reason}).`,
-        { signal: this.abort.signal },
-      )
-      .catch((err) =>
-        this.options.onError?.(
-          `Forge remote approval update failed: ${err instanceof Error ? err.message : String(err)}`,
-        ),
-      );
   }
 
   private delay(ms: number): Promise<void> {

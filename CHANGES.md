@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+- **The agent can read the editor you are looking at, not just write to it.**
+  `replace_selection` and `insert_code` have always written into the active
+  editor, but nothing could read it back — so "fix this" with a block
+  highlighted gave the model no way to see what "this" was, and it fell back to
+  re-reading whole files and guessing. `get_editor_context` returns the active
+  file, the selected text with its one-based range, the cursor position, and the
+  paths of every open tab. It is one call rather than three tools because the
+  three facts answer one question, and every tool definition is prompt weight on
+  each request.
+
+- **`find_implementations` answers "who implements this?"** On an interface or
+  an abstract method, `find_references` buries the handful of implementations in
+  every call site. The implementation provider returns only the concrete types.
+  It reads `LocationLink` as well as `Location`, the shape mismatch that broke
+  `go_to_definition` on every JS file.
+
+- **`git_show` could always read a file at a past commit; nothing said so.** The
+  ref is passed straight to `git show`, so `HEAD~1:src/app.ts` has worked from
+  the start — but the description said "show a commit or object" and the agent
+  never tried the `<ref>:<path>` form, checking branches out instead. The schema
+  now spells it out. No behaviour change.
+
+- **`delete_file` moves things to the recycle bin instead of destroying them.**
+  Every deletion went through `fs.rmSync`, so an approved mistake was gone —
+  the per-turn checkpoint covers file *edits*, not a directory the agent removed
+  outright. Deletions now route through `vscode.workspace.fs.delete` with
+  `useTrash`, and the confirmation dialog says "About to move to the recycle
+  bin" and names the deletion as recoverable. A new `to_trash: false` argument
+  restores the permanent behaviour for build output and other cases where
+  filling the bin is the wrong trade. Filesystems without a recycle bin —
+  network shares, most remote paths — surface the failure and tell the agent to
+  retry with `to_trash: false` rather than silently deleting for real.
+
 - **The agent sees the commands you run in your own terminal, and corrects
   them.** Watching only Forge-pasted commands solved half the problem: the
   common case is the user typing a command themselves, getting an error, and

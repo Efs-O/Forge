@@ -216,7 +216,7 @@ overlaps with an existing owner, extend the owner instead.
 | Tool dispatch + capability/permission gate | `src/tools/ToolRegistry.ts`           |
 | Config-to-tool permission resolution       | `src/tools/PermissionResolver.ts`     |
 | Tool registration entry point              | `src/tools/registerAllTools.ts`       |
-| Built-in tool definitions                  | `src/tools/builtinTools.ts`           |
+| Built-in tools + active-editor access      | `src/tools/builtinTools.ts`           |
 | Single-write size ceiling + chunk advice   | `src/tools/writeChunking.ts`          |
 | File read/write tools                      | `src/tools/fileEditTools.ts`          |
 | `edit_file` tool                           | `src/tools/editFileTool.ts`           |
@@ -233,7 +233,7 @@ overlaps with an existing owner, extend the owner instead.
 | VS Code Git API access + path/status maps  | `src/tools/gitRepo.ts`                |
 | Search (Tavily / Brave)                    | `src/tools/searchTool.ts`             |
 | URL fetch tool (SSRF-guarded)              | `src/tools/fetchTool.ts`              |
-| LSP tools (go-to-def, refs, diagnostics)   | `src/tools/lspTools.ts`               |
+| LSP tools (go-to-def, refs, impls, diags)  | `src/tools/lspTools.ts`               |
 | In-memory workspace memory tool            | `src/tools/memoryTools.ts`            |
 | UX tools (show_diff, open_file)            | `src/tools/uxTools.ts`                |
 | Denylist (dangerous command filter)        | `src/tools/DenyList.ts`               |

@@ -107,6 +107,7 @@ describe('remote configuration and lease', () => {
       queue_limit: 5,
       max_message_chars: 12_000,
       rate_limit_per_minute: 30,
+      auth: { inactivity_timeout_minutes: 30 },
       telegram: { enabled: true },
       whatsapp: { enabled: false },
     });

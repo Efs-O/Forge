@@ -340,6 +340,11 @@ export interface ForgeConfig {
     queue_limit: number;
     max_message_chars: number;
     rate_limit_per_minute: number;
+    /** Remote TOTP session policy. Enrollment/secrets remain in SecretStorage. */
+    auth: {
+      /** 0 disables inactivity expiry; otherwise 1–1440 minutes. */
+      inactivity_timeout_minutes: number;
+    };
     telegram: { enabled: boolean };
     whatsapp: { enabled: boolean };
   };

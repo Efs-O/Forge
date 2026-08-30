@@ -318,3 +318,50 @@ export function makeFindReferencesTool(): RegisteredTool {
     },
   };
 }
+
+// ── find_implementations ──────────────────────────────────────────────────────
+
+/**
+ * "Who implements this?" — the question find_references answers badly.
+ *
+ * On an interface or abstract method, references returns every call site mixed
+ * in with the implementations, and the implementations are usually the few
+ * rows the reader wanted. The implementation provider returns only those.
+ *
+ * Like the definition provider, this one may answer with LocationLink[] rather
+ * than the Location[] its type claims, so it goes through locationToString.
+ */
+export function makeFindImplementationsTool(): RegisteredTool {
+  return {
+    definition: {
+      type: 'function',
+      function: {
+        name: 'find_implementations',
+        description:
+          'Find the implementations of the interface, abstract class, or abstract method at the ' +
+          'given position (max 50). Prefer this over find_references when you want the concrete ' +
+          'types implementing something rather than every call site.',
+        parameters: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: 'File path (absolute or workspace-relative).' },
+            line: { type: 'integer', description: 'Zero-based line number.' },
+            character: { type: 'integer', description: 'Zero-based character offset.' },
+          },
+          required: ['path', 'line', 'character'],
+          additionalProperties: false,
+        },
+      },
+    },
+    permission: 'read',
+    handler: async (args) => {
+      const uri = await openForAnalysis(args['path'] as string);
+      const position = new vscode.Position(args['line'] as number, args['character'] as number);
+      const result = await vscode.commands.executeCommand<
+        Array<vscode.Location | vscode.LocationLink> | undefined
+      >('vscode.executeImplementationProvider', uri, position);
+      if (!result?.length) return 'No implementations found.';
+      return result.slice(0, 50).map(locationToString).join('\n');
+    },
+  };
+}

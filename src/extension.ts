@@ -10,6 +10,7 @@ import { buildControlChatProxy } from './llm/ControlChatProxy';
 import { registerControlServerCommands } from './vscode/controlCommands';
 import type { ForgeConfig } from './config/types';
 import { loadConfig, findConfigPath } from './config/ConfigLoader';
+import { updateConfigFile } from './config/ConfigWriter';
 import { initLogger, getLogger } from './util/logger';
 import { ToolRegistry } from './tools/ToolRegistry';
 import { createCheckpointStack } from './vscode/checkpointSetup';
@@ -297,6 +298,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       },
     },
     notifyLocal: (message) => void vscode.window.showErrorMessage(message),
+    setInactivityTimeout: async (minutes) => {
+      updateConfigFile(activeConfigPath, (doc) => {
+        doc.setIn(['remote', 'auth', 'inactivity_timeout_minutes'], minutes);
+      });
+      config = loadConfig(path.dirname(activeConfigPath));
+      await activeRemoteRuntime?.applyConfig(config);
+    },
   });
   activeRemoteRuntime = remoteRuntime;
   await remoteRuntime.applyConfig(config).catch((err) => {
@@ -308,7 +316,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
   });
   context.subscriptions.push({ dispose: () => void remoteRuntime.dispose() });
-  registerRemoteCommands(context, remoteRuntime, () => config);
+  registerRemoteCommands(context, remoteRuntime, () => config, activeConfigPath);
   const sessionTimeBar = new SessionTimeStatusBar(() => sidebarProvider.getActiveSessionMetrics());
   refreshSessionTime = () => sessionTimeBar.refresh();
   context.subscriptions.push(sessionTimeBar);

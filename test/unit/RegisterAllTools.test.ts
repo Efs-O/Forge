@@ -35,11 +35,13 @@ const EXPECTED_NATIVE_NAMES = [
   'edit_notebook_cell',
   'exec_command',
   'find_files',
+  'find_implementations',
   'find_references',
   'format_file',
   'get_code_actions',
   'get_diagnostics',
   'get_document_symbols',
+  'get_editor_context',
   'get_hover',
   'get_workspace_symbols',
   'git_blame',
@@ -134,6 +136,6 @@ describe('registerAllTools canonical coordinator catalog', () => {
     const names = makeRegistry().names();
     expect(names).not.toContain('web_search');
     expect(names).not.toContain('ask_local_agent');
-    expect(names).toHaveLength(59);
+    expect(names).toHaveLength(61);
   });
 });

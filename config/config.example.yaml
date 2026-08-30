@@ -152,6 +152,9 @@ remote:
   queue_limit: 5
   max_message_chars: 12000
   rate_limit_per_minute: 30
+  auth:
+    # 0 disables only inactivity expiry; TOTP still locks after restart or /lock.
+    inactivity_timeout_minutes: 30
   telegram:
     enabled: false
   whatsapp:

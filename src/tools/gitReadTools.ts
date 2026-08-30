@@ -189,11 +189,19 @@ export function makeGitShowTool(): RegisteredTool {
       type: 'function',
       function: {
         name: 'git_show',
-        description: 'Show a commit or object (git show <ref>).',
+        description:
+          'Show a commit or object (git show <ref>). The ref accepts the <ref>:<path> form, ' +
+          'so "HEAD~1:src/app.ts" prints that file as it was in the previous commit — the way ' +
+          'to read a past version of a file without checking anything out.',
         parameters: {
           type: 'object',
           properties: {
-            ref: { type: 'string', description: 'Commit hash, tag, or ref to show.' },
+            ref: {
+              type: 'string',
+              description:
+                'Commit hash, tag, or ref to show. Append :<path> to show one file at that ' +
+                'ref, e.g. "HEAD~1:src/app.ts" or "main:package.json".',
+            },
             cwd: cwdParameter,
           },
           required: ['ref'],

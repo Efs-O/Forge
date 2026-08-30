@@ -104,6 +104,35 @@ describe('isolated file and directory tool execution', () => {
     expect(fs.existsSync(path.join(root, 'moved'))).toBe(false);
   });
 
+  it('routes deletions through the recycle bin unless to_trash is false', async () => {
+    fs.writeFileSync(path.join(root, 'recycled.txt'), 'bin me', 'utf8');
+    vscode.workspace.fs.lastDeleteOptions = undefined;
+
+    const trashed = await makeDeleteFileTool().handler({ path: 'recycled.txt' });
+    expect(vscode.workspace.fs.lastDeleteOptions).toEqual({ recursive: false, useTrash: true });
+    expect(trashed).toContain('recycle bin');
+    expect(fs.existsSync(path.join(root, 'recycled.txt'))).toBe(false);
+
+    fs.writeFileSync(path.join(root, 'gone.txt'), 'forever', 'utf8');
+    vscode.workspace.fs.lastDeleteOptions = undefined;
+    const purged = await makeDeleteFileTool().handler({ path: 'gone.txt', to_trash: false });
+    expect(vscode.workspace.fs.lastDeleteOptions).toBeUndefined();
+    expect(purged).toContain('Permanently deleted');
+    expect(fs.existsSync(path.join(root, 'gone.txt'))).toBe(false);
+  });
+
+  it('does not silently delete permanently when the recycle bin is unavailable', async () => {
+    fs.writeFileSync(path.join(root, 'onshare.txt'), 'keep me', 'utf8');
+    vi.spyOn(vscode.workspace.fs, 'delete').mockRejectedValueOnce(
+      new Error('trash is not supported on this filesystem'),
+    );
+
+    await expect(makeDeleteFileTool().handler({ path: 'onshare.txt' })).rejects.toThrow(
+      /to_trash: false/,
+    );
+    expect(fs.existsSync(path.join(root, 'onshare.txt'))).toBe(true);
+  });
+
   it('rejects stale structured edits without modifying the fixture', async () => {
     const target = path.join(root, 'stale.txt');
     fs.writeFileSync(target, 'current\n', 'utf8');

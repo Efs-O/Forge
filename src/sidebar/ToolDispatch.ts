@@ -48,7 +48,11 @@ export interface RecordedFileDiff {
 function describeDelete(args: Record<string, unknown>): string {
   const requestedPath = typeof args['path'] === 'string' ? args['path'] : '(invalid path)';
   const recursive = args['recursive'] === true;
-  const lines = ['About to permanently delete:', `Target: ${requestedPath}`];
+  const toTrash = args['to_trash'] !== false;
+  const lines = [
+    toTrash ? 'About to move to the recycle bin:' : 'About to permanently delete:',
+    `Target: ${requestedPath}`,
+  ];
 
   try {
     const target = resolveToolPath(requestedPath);
@@ -86,7 +90,13 @@ function describeDelete(args: Record<string, unknown>): string {
     );
   }
 
-  lines.push("Forge will create this turn's Undo checkpoint immediately before deletion.");
+  lines.push(
+    toTrash
+      ? "Recoverable from the recycle bin. Forge will also create this turn's Undo " +
+          'checkpoint immediately before deletion.'
+      : "Not recoverable from the recycle bin. Forge will create this turn's Undo " +
+          'checkpoint immediately before deletion.',
+  );
   return lines.join('\n');
 }
 

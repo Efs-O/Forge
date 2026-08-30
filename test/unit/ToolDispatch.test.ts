@@ -339,7 +339,7 @@ describe('ToolDispatch', () => {
       false,
       undefined,
     );
-    expect(requestApproval.mock.calls[0]?.[1]).toContain('About to permanently delete:');
+    expect(requestApproval.mock.calls[0]?.[1]).toContain('About to move to the recycle bin:');
     expect(requestApproval.mock.calls[0]?.[1]).toContain('Target: test.txt');
   });
 

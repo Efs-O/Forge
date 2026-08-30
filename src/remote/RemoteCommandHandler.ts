@@ -8,6 +8,8 @@ export interface RemoteCommandContext {
   host: ForgeHostFacade;
   workspaceId: string;
   signal: AbortSignal;
+  inactivityTimeoutMinutes: number;
+  setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
 }
 
 export async function handleRemoteCommand(
@@ -45,8 +47,8 @@ async function executeRemoteCommand(
   if (command === '/help') {
     await context.channel.send(
       event.chatId,
-      'Forge commands: /status, /stop, /new, /resume <conversation-id>, /compact, ' +
-        '/clanker on|off. /stop cancels the current request; queued requests remain ' +
+      'Forge commands: /status, /stop, /new, /resume <conversation-id>, /compact, /lock, ' +
+        '/timeout [1-1440|off], /clanker on|off. /stop cancels the current request; queued requests remain ' +
         'queued. /clanker on auto-approves non-dangerous tools until this window ' +
         'reloads — writes then land with no confirmation anywhere.',
       { signal: context.signal },
@@ -86,6 +88,34 @@ async function executeRemoteCommand(
       desired === 'on'
         ? 'Forge: clanker mode ON — non-dangerous tools now run with no approval, here or in the sidebar. It does not survive a window reload.'
         : 'Forge: clanker mode OFF — tool approvals are gated again.',
+      { signal: context.signal },
+    );
+    return { kind: 'handled' };
+  }
+  if (command === '/timeout') {
+    if (!argument) {
+      await context.channel.send(
+        event.chatId,
+        `Forge: remote inactivity timeout is ${
+          context.inactivityTimeoutMinutes === 0
+            ? 'off'
+            : `${context.inactivityTimeoutMinutes} minutes`
+        }.`,
+        { signal: context.signal },
+      );
+      return { kind: 'handled' };
+    }
+    const minutes = argument.toLowerCase() === 'off' ? 0 : Number(argument);
+    if (!Number.isInteger(minutes) || minutes < 0 || minutes > 1_440) {
+      return { kind: 'rejected', reason: 'usage: /timeout <1-1440|off>' };
+    }
+    if (!context.setInactivityTimeout) {
+      return { kind: 'rejected', reason: 'remote timeout configuration is unavailable' };
+    }
+    await context.setInactivityTimeout(minutes);
+    await context.channel.send(
+      event.chatId,
+      `Forge: remote inactivity timeout ${minutes === 0 ? 'disabled' : `set to ${minutes} minutes`}.`,
       { signal: context.signal },
     );
     return { kind: 'handled' };
