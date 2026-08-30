@@ -60,6 +60,16 @@ criteria.
   `wmic process where name='llama-server.exe' get ProcessId,CommandLine /format:list`
   to list servers, then `taskkill /PID <id> /F` to kill one.
 
+- **`exec_command` runs with NO shell — never wrap paths in quotes.** Pass the
+  executable as the bare `command` string; spaces in the path are fine
+  (`C:\Program Files (x86)\Llamacpp\llama.cpp-b10673\llama-tokenize.exe` works
+  as-is). Quoting it (`` `"C:\Program Files (x86)\..."` ``) makes the quotes part
+  of the program name → `ENOENT` / `missing_executable`. Same rule for `args`:
+  no shell operators, no quoting ceremony — one plain string per arg.
+  `llama-tokenize.exe` reads the prompt via `--stdin --show-count` (NOT `-` or a
+  file arg — both are rejected); the count is the final stdout line
+  `Total number of tokens: N`.
+
 - **Pinging models with `ask_local_agent`:** each local (GGUF/Ollama) ping
   spawns a *second* llama-server (delegation backend is separate from the one
   serving the primary agent). Use the smallest GGUF
