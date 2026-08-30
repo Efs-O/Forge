@@ -189,6 +189,11 @@ export class RemoteRuntime {
       inactivityTimeoutMinutes: config.remote.auth.inactivity_timeout_minutes,
     });
     await this.store.load();
+    if (this.options.workspaceRoot && config.remote.attachments.enabled) {
+      await new RemoteAttachmentStore(this.options.workspaceRoot).prune(
+        config.remote.attachments.retain_days,
+      );
+    }
     await this.resumeWorkspaceHandoffs();
     try {
       for (const channelName of ['telegram', 'whatsapp'] as const) {

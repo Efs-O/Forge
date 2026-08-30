@@ -1,4 +1,5 @@
 import * as fs from 'fs/promises';
+import type { Dirent } from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
 import {
@@ -65,6 +66,25 @@ export class RemoteAttachmentStore {
         };
       }),
     );
+  }
+
+  /** Retention is opt-in configuration for this sidecar only, never project files. */
+  async prune(retainDays: number): Promise<void> {
+    const inbox = path.join(this.workspaceRoot, '.forge', 'remote-inbox');
+    const cutoff = Date.now() - retainDays * 24 * 60 * 60_000;
+    let conversations: Dirent[];
+    try {
+      conversations = await fs.readdir(inbox, { withFileTypes: true });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw err;
+    }
+    for (const conversation of conversations) {
+      if (!conversation.isDirectory()) continue;
+      const directory = path.join(inbox, conversation.name);
+      const stat = await fs.stat(directory);
+      if (stat.mtimeMs < cutoff) await fs.rm(directory, { recursive: true, force: true });
+    }
   }
 
   private async prepare(attachment: RemoteInboundAttachment): Promise<{
