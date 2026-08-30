@@ -142,9 +142,9 @@ Estimated +35 LOC; file is 98 today, well under the limit.
 
 ### `src/sidebar/CompactionService.ts`
 
-- Export `SUMMARY_OUTPUT_TOKENS = 2048` (the 5000-char
-  `COMPACTION_SUMMARY_MAX_CHARS` is ~1600 tokens at 3.1 chars/token; 2048 leaves
-  margin without inviting a rambling summary).
+- Export `SUMMARY_OUTPUT_TOKENS = 3072` (the 8000-char
+  `COMPACTION_SUMMARY_MAX_CHARS` is ~2600 tokens at 3.1 chars/token; 3072 leaves
+  room for a detailed, structured implementation handoff).
 - Widen the `runPromptToMarkdown` dep signature to carry `PromptRunOptions`.
 - `runCompaction` passes `{ modelName: conv.active_model, systemPromptTemplate:
   'summarize', outputTokens: SUMMARY_OUTPUT_TOKENS, alwaysStripThinking: true }`.
@@ -336,7 +336,7 @@ Effects are consistent and separable:
 2. **`disableThinking` — REFUTED, do NOT implement.** The reasoning in the
    Design section ("summarization is compression, not reasoning") is wrong on
    this model: turning thinking off costs 0.39-0.42 recall. Drop the option.
-3. **`max_tokens = reserve + 2048` — validated.** The worst thinking run emitted
+3. **`max_tokens = reserve + 3072` — validated.** The worst thinking run emitted
    4060 tokens against a 5120 ceiling; 26% headroom. Keep the formula.
 4. `conv.active_model` and `alwaysStripThinking` stand (no thinking leaked in 12
    runs, but the guard is free).
@@ -383,7 +383,7 @@ with the Design section above, this list wins.
    `commandHelpers`) pass nothing and must be unaffected — assert this in a test.
 3. **`modelName: conv.active_model`** in `runCompaction`; falls back to
    `config.active_model`. `resolveRequestModel` handles an `@profile` suffix.
-4. **`max_tokens = reasoningReserve(model) + 2048`**, applied only when
+4. **`max_tokens = reasoningReserve(model) + 3072`**, applied only when
    `outputTokens` is set.
 5. **`alwaysStripThinking: true`** for the summarizer path.
 6. **Validate before storing** — reject tool-call-shaped / JSON / <200-char

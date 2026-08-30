@@ -64,7 +64,7 @@ user's call, even once it is non-destructive.
 
 **Known limit:** `postTokenBudget()` runs only between turns, so a single turn
 that fills the window mid-loop is not protected. More relevant now that
-`MAX_TOOL_ROUNDS` is 40. A per-round budget check inside `ToolCallingLoop` is
+`MAX_TOOL_ROUNDS` is 500. A per-round budget check inside `ToolCallingLoop` is
 the real fix and is deliberately out of scope here.
 
 ## T4 — Token budget on webview restore
@@ -76,7 +76,7 @@ cannot fire on the first turn. Call it in the `webviewReady` handler.
 
 ## T5 — Raise the sidebar tool-round cap
 
-`MAX_TOOL_ROUNDS` 20 → 40 (user request; agent was hitting the ceiling
+`MAX_TOOL_ROUNDS` 20 → 500 (user request; agent was hitting the ceiling
 mid-task). Workers keep their own lower cap in `src/workers/limits.ts`.
 
 ---

@@ -413,16 +413,18 @@ A release is accepted when every applicable check passes and `npm run ci` plus
 | Remote write reaches disk (verified in git, not from the reply) | pass |
 | Approval delivered to the private chat | pass |
 | Sidebar dismisses when an approval is resolved remotely | fail, then fixed |
-| Approval replay rejected as stale | not run |
-| `/stop` with queued work behind it | not run |
-| Unpaired-account and group rejection | not run |
-| Two-window lease conflict | not run |
-| Reload mid-request: `crash-unknown`, never rerun | not run |
-| Delivery retry after connectivity loss | not run |
-| Repeated idle config saves keep one consumer | not run |
+| Approval replay rejected as stale | pass (follow-up 2026-08-30) |
+| `/stop` with queued work behind it | pass (follow-up 2026-08-30) |
+| Unpaired-account and group rejection | pass (follow-up 2026-08-30) |
+| Two-window lease conflict | pass (follow-up 2026-08-30) |
+| Reload mid-request: `crash-unknown`, never rerun | pass (follow-up 2026-08-30) |
+| Delivery retry after connectivity loss | pass (follow-up 2026-08-30) |
+| Repeated idle config saves keep one consumer | pass (follow-up 2026-08-30) |
+| Google Authenticator-compatible TOTP enrollment/authentication | pass (follow-up 2026-08-30) |
 
-WhatsApp was not exercised. The run is therefore incomplete and does not
-constitute acceptance; the outstanding rows above are the remaining work.
+The Telegram and TOTP acceptance matrix is complete. WhatsApp was not exercised and remains a
+separate, optional acceptance activity for the experimental adapter; it does not block Telegram
+remote-control acceptance.
 
 Always confirm a reported write against the repository rather than the model's
 own summary — one claim here ("renamed the file") read as false against a stale

@@ -16,6 +16,30 @@ plus authenticated Claude Code and Codex CLI agents.
   session persistence. Never claim a delegate ran unless `ask_local_agent`
   returned its result; respect all required confirmations.
 
+## Planned implementation and resumed work
+
+For work governed by a plan, the plan is the authoritative specification.
+Conversation summaries, tool-limit continuations, and test failures are
+navigation aids only; they do not replace the plan's invariants or acceptance
+criteria.
+
+- At the start of implementation, after any compaction or forced continuation
+  (including a tool-call limit), and immediately before handoff, re-read the
+  active plan's design, edge-case, and acceptance sections. Do this before
+  making the next code change or deciding the work is complete.
+- Turn every explicit requirement and edge case into a traceable check: a
+  focused automated test where practical, otherwise a named manual-validation
+  step. Keep the mapping visible in the implementation notes or final handoff.
+- Do not let an existing local code shape override an explicit plan constraint.
+  When the plan calls for a different lifetime, ordering, error boundary, or
+  ownership model, restructure the code and test that distinction directly.
+- A green test suite is necessary but not proof of plan conformance. Before
+  handoff, compare the implementation and tests against every acceptance item,
+  including failure paths that are easy to omit when following the happy path.
+- Every plan doc must end with an "Acceptance criteria" section: a checklist of
+  invariants and edge cases, each mapped to a test or a named validation step.
+  Plans without one are incomplete; add the section before implementation starts.
+
 ## Workspace facts (discovered the hard way — read before re-doing this work)
 
 - **Config is `.forge/config.yaml`** (F6 models-vs-profiles shape). Top-level:

@@ -256,11 +256,19 @@ export class RemoteRuntime {
             },
             this.audit,
           );
-          await controller.start();
           const compactionSubscription = this.options.host.onCompactionEvent?.((event) =>
             this.onCompactionEvent(event, controller),
           );
-          this.active.set(channelName, { channel, controller, lease, compactionSubscription });
+          try {
+            // Subscribe before channel startup: an automatic compaction can
+            // complete while a transport is activating. Controller.start()
+            // starts the durable outbox, which flushes anything queued here.
+            await controller.start();
+            this.active.set(channelName, { channel, controller, lease, compactionSubscription });
+          } catch (err) {
+            compactionSubscription?.dispose();
+            throw err;
+          }
         } catch (err) {
           await lease.release();
           throw err;

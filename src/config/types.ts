@@ -186,7 +186,7 @@ export interface ModelConfig {
   max_output_tokens?: number;
   /**
    * Tool rounds this model may spend on one sidebar turn before the loop stops.
-   * Falls back to `MAX_TOOL_ROUNDS` (80).
+   * Falls back to `MAX_TOOL_ROUNDS` (500).
    *
    * A round is one model reply, so this is a ceiling on how many steps a single
    * request may take — and the right value is a property of the WORK, not of

@@ -43,14 +43,14 @@ describe('max_tool_rounds through the config layers', () => {
 
   it('applies a defaults value to every model', () => {
     // One setting for the whole config, rather than repeating it per entry.
-    const resolved = resolveRequestModel(cfg({ defaults: { max_tool_rounds: 80 } }), 'm');
-    expect(resolveMaxToolRounds(resolved)).toBe(80);
+    const resolved = resolveRequestModel(cfg({ defaults: { max_tool_rounds: 500 } }), 'm');
+    expect(resolveMaxToolRounds(resolved)).toBe(500);
   });
 
   it('lets a model override the default', () => {
     const resolved = resolveRequestModel(
       cfg({
-        defaults: { max_tool_rounds: 80 },
+        defaults: { max_tool_rounds: 500 },
         models: [
           { name: 'm', provider: 'llama.cpp', gguf_path: 'x.gguf', max_tool_rounds: 200 },
         ],

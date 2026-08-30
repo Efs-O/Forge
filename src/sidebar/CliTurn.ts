@@ -22,6 +22,7 @@ import type { UserPromptOptions } from './transcriptMutations';
 import { renderPlan } from '../tools/planTools';
 import { injectTurnContext } from './turnContext';
 import type { ForgeTurnOutcome } from './turnOutcome';
+import { summarizeCliProgress, type AgentProgressEvent } from './AgentProgress';
 
 const log = getLogger();
 
@@ -41,6 +42,7 @@ export interface CliTurnContext {
     options?: UserPromptOptions,
   ) => void;
   onTranscriptChanged: (conv: ConversationRuntime) => void;
+  emitAgentProgress: (event: AgentProgressEvent) => void;
 }
 
 export async function runCliTurn(
@@ -94,7 +96,10 @@ export async function runCliTurn(
       workspaceRoot: ctx.workspaceRoot,
       checkpoint,
       signal: ctrl.signal,
-      onText: (chunk: string) => postC({ type: 'token', text: chunk }),
+      onText: (chunk: string) => {
+        postC({ type: 'token', text: chunk });
+        ctx.emitAgentProgress({ conversationId: convId, kind: 'commentary', text: chunk });
+      },
       onStatus: (detail: string) => {
         // CLI agents execute their tools outside Forge's ToolDispatch, so no
         // native tool-result turn is added to `conv.messages`. Keeping the
@@ -113,6 +118,11 @@ export async function runCliTurn(
           ctx.onTranscriptChanged(conv);
         }
         postC({ type: 'toolActivity', toolName: prepared.cliName, detail });
+        ctx.emitAgentProgress({
+          conversationId: convId,
+          kind: 'status',
+          text: summarizeCliProgress(prepared.cliName, detail),
+        });
       },
       onPrepared: () => {
         ctx.commitUserPrompt(conv, text, attachments, promptOptions);

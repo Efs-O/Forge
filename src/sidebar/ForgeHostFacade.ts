@@ -4,6 +4,7 @@ import type { ForgeRequestOutcome } from './turnOutcome';
 import type { CompactionEvent, CompactionOutcome, CompactionTrigger } from './CompactionService';
 import type { RequestChainStatus } from './RequestChainLifecycle';
 import type { ToolApprovalRequestEvent, ToolApprovalSink } from './ToolApprovalService';
+import type { AgentProgressEvent } from './AgentProgress';
 
 export interface ForgeConversationSummary {
   id: string;
@@ -63,6 +64,7 @@ export interface ForgeHostFacade {
    * chaining so a missing method is a no-op, not an error.
    */
   onCompactionEvent?(listener: (event: CompactionEvent) => void): { dispose(): void };
+  onAgentProgress?(listener: (event: AgentProgressEvent) => void): { dispose(): void };
 }
 
 export interface SidebarHostFacadeDeps {
@@ -101,6 +103,7 @@ export interface SidebarHostFacadeDeps {
   unloadModels: () => Promise<void>;
   restartModel: (modelName: string) => Promise<void>;
   onCompactionEvent?: (listener: (event: CompactionEvent) => void) => { dispose(): void };
+  onAgentProgress: (listener: (event: AgentProgressEvent) => void) => { dispose(): void };
 }
 
 function summarize(conv: ConversationRuntime, archived: boolean): ForgeConversationSummary {
@@ -199,6 +202,10 @@ export class SidebarHostFacade implements ForgeHostFacade {
 
   onCompactionEvent(listener: (event: CompactionEvent) => void): { dispose(): void } {
     return this.deps.onCompactionEvent!(listener);
+  }
+
+  onAgentProgress(listener: (event: AgentProgressEvent) => void): { dispose(): void } {
+    return this.deps.onAgentProgress(listener);
   }
 
   status(): ForgeHostStatus {

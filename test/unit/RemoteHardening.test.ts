@@ -15,7 +15,8 @@ import { RemoteRequestStore, remoteDedupKey } from '../../src/remote/RemoteReque
 import { RemoteRuntime } from '../../src/remote/RemoteRuntime';
 import { generateTotp } from '../../src/remote/RemoteTotp';
 import { RemoteTransportLease } from '../../src/remote/RemoteTransportLease';
-import type { RemoteInboundEvent, RemoteRequestRecord } from '../../src/remote/types';
+import type { RemoteChannel, RemoteInboundEvent, RemoteRequestRecord } from '../../src/remote/types';
+import type { CompactionEvent } from '../../src/sidebar/CompactionService';
 import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
 import { CONVERSATION_BUSY_ERROR } from '../../src/sidebar/SendPipeline';
 
@@ -644,6 +645,58 @@ describe('remote durable boundaries', () => {
 });
 
 describe('remote runtime lifecycle', () => {
+  it('subscribes to compaction before channel startup', async () => {
+    const { directory } = await newStore();
+    const persisted = new RemoteRequestStore(path.join(directory, 'remote-state-v2.json'));
+    await persisted.load();
+    await persisted.setBinding({
+      channel: 'telegram',
+      chatId: 'chat-a',
+      workspaceId: 'workspace',
+      conversationId: 'c1',
+    });
+    let compactionListener: ((event: CompactionEvent) => void) | undefined;
+    const sent: Array<{ chatId: string; text: string }> = [];
+    const secrets = new MemorySecrets();
+    secrets.values.set('forge.remote.telegram.ownerId', 'owner');
+    const channel: RemoteChannel = {
+      name: 'telegram',
+      onEvent: () => ({ dispose: () => undefined }),
+      async start() {
+        compactionListener?.({ conversationId: 'c1', phase: 'started', trigger: 'auto' });
+      },
+      async send(chatId, text) {
+        sent.push({ chatId, text });
+      },
+      async retractPrompt() {
+        // Not used by this lifecycle test.
+      },
+    };
+    const runtime = new RemoteRuntime({
+      storageDirectory: directory,
+      workspaceId: 'workspace',
+      host: host({
+        onCompactionEvent: (listener) => {
+          compactionListener = listener;
+          return { dispose: () => (compactionListener = undefined) };
+        },
+      }),
+      secrets: secrets as unknown as vscode.SecretStorage,
+      channelFactories: { telegram: () => channel },
+      notifyLocal: vi.fn(),
+    });
+    const enabled = ForgeConfigSchema.parse({
+      models: [{ name: 'm', provider: 'ollama', endpoint: 'http://127.0.0.1:11434' }],
+      remote: { enabled: true, telegram: { enabled: true } },
+    });
+
+    await runtime.applyConfig(enabled);
+    await vi.waitFor(() =>
+      expect(sent).toContainEqual({ chatId: 'chat-a', text: 'Forge: compacting…' }),
+    );
+    await runtime.dispose();
+  });
+
   it('replaces channel subscriptions on config reload and fully disposes', async () => {
     const { directory } = await newStore();
     const channels: FakeRemoteChannel[] = [];

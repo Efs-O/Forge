@@ -27,6 +27,7 @@ import type { ToolDispatch } from './ToolDispatch';
 import type { TurnLifecycle } from './TurnLifecycle';
 import type { SidebarProviderEvents } from './AgentLoop';
 import type { UserPromptOptions } from './transcriptMutations';
+import type { AgentProgressEvent } from './AgentProgress';
 
 export interface TurnServices {
   pool: IBackendPool;
@@ -52,6 +53,8 @@ export interface TurnServices {
   onUsage: (conv: ConversationRuntime, inputTokens: number, outputTokens: number) => void;
   /** Persists a transcript mutation immediately, including an in-flight turn. */
   onTranscriptChanged: (conv: ConversationRuntime) => void;
+  /** Emits visible progress only; reasoning has no route into this seam. */
+  emitAgentProgress: (event: AgentProgressEvent) => void;
   commitUserPrompt: (
     conv: ConversationRuntime,
     text: string,

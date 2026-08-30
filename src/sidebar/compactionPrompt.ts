@@ -21,7 +21,7 @@ export function truncateForSummary(text: string): string {
 }
 
 /** Keep the summary small enough to be useful, not a second transcript. */
-export const COMPACTION_SUMMARY_MAX_CHARS = 5000;
+export const COMPACTION_SUMMARY_MAX_CHARS = 8000;
 
 /** Bound the input to the summarization turn as well as its output. */
 const SUMMARY_SOURCE_MAX_CHARS = 24000;
@@ -123,10 +123,10 @@ export function capSummary(summary: string, reserve = 0): string {
 
 /**
  * Room for the summary itself, ON TOP of whatever the model reserves for
- * thinking. COMPACTION_SUMMARY_MAX_CHARS is ~1600 tokens at 3.1 chars/token;
- * the worst measured thinking run used 4060 of a 5120 ceiling.
+ * thinking. COMPACTION_SUMMARY_MAX_CHARS is ~2600 tokens at 3.1 chars/token;
+ * 3072 leaves room for a detailed, structured implementation handoff.
  */
-export const SUMMARY_OUTPUT_TOKENS = 2048;
+export const SUMMARY_OUTPUT_TOKENS = 3072;
 
 /** Below this a "summary" cannot be one — the shortest measured good run was
  *  several thousand characters, the failures were 117 and 150. */

@@ -18,6 +18,7 @@ import { handleRemoteCommand } from './RemoteCommandHandler';
 import { RemoteApprovalBridge } from './RemoteApprovalBridge';
 import { withConversationIdentity } from './RemoteReplyIdentity';
 import type { RemoteAttachmentStore } from './RemoteAttachmentStore';
+import { RemoteAgentProgress } from './RemoteAgentProgress';
 
 export interface RemoteControllerOptions {
   workspaceId: string;
@@ -46,6 +47,8 @@ export class RemoteController {
   private rateLimiter: RemoteRateLimiter;
   private readonly outbox: RemoteOutboxDelivery;
   private readonly approvals: RemoteApprovalBridge;
+  private readonly progress: RemoteAgentProgress;
+  private progressSubscription: { dispose(): void } | undefined;
 
   constructor(
     private readonly channel: RemoteChannel,
@@ -74,6 +77,14 @@ export class RemoteController {
       options.maxMessageChars,
       options.onError,
     );
+    this.progress = new RemoteAgentProgress(
+      channel,
+      this.abort.signal,
+      (chatId) => this.auth.canDeliver(this.channel.name, chatId),
+      Math.min(options.maxMessageChars, 3_900),
+      1_500,
+      options.onError,
+    );
   }
 
   async start(): Promise<void> {
@@ -82,6 +93,7 @@ export class RemoteController {
     this.subscription = this.channel.onEvent((event) => this.handle(event));
     this.approvals.start();
     await this.channel.start(this.abort.signal);
+    this.progressSubscription = this.host.onAgentProgress?.((event) => this.progress.handle(event));
     for (const request of this.store.queued(undefined, this.channel.name)) {
       this.kickDrain(request.conversationId);
     }
@@ -93,6 +105,7 @@ export class RemoteController {
     this.rateLimiter = new RemoteRateLimiter(options.rateLimitPerMinute);
     this.outbox.updateMaxMessageChars(options.maxMessageChars);
     this.approvals.updateMaxMessageChars(options.maxMessageChars);
+    this.progress.updateMaxMessageChars(Math.min(options.maxMessageChars, 3_900));
   }
 
   async stop(): Promise<void> {
@@ -100,11 +113,14 @@ export class RemoteController {
     this.abort.abort();
     this.subscription?.dispose();
     this.subscription = undefined;
+    this.progressSubscription?.dispose();
+    this.progressSubscription = undefined;
     this.approvals.stop();
     await Promise.allSettled(
       [...this.activeConversations].map((conversationId) => this.host.cancel(conversationId)),
     );
     await Promise.allSettled([...this.drains.values()]);
+    await this.progress.dispose();
     await this.outbox.stop();
   }
 
@@ -356,6 +372,7 @@ export class RemoteController {
       const progressId = await this.channel
         .sendProgress?.(next.chatId, 'Forge: working…', { signal: this.abort.signal })
         .catch(() => undefined);
+      if (progressId) this.progress.begin(conversationId, next.chatId, progressId);
       try {
         const attachments = next.attachments?.length
           ? await this.options.attachmentStore?.load(next.attachments)
@@ -401,13 +418,7 @@ export class RemoteController {
           notification: `Forge request failed: ${error}`,
         });
       } finally {
-        if (progressId) {
-          await this.channel
-            .editMessage?.(next.chatId, progressId, 'Forge: completed.', {
-              signal: this.abort.signal,
-            })
-            .catch(() => undefined);
-        }
+        if (progressId) await this.progress.finish(conversationId, 'Forge: completed.');
         this.activeConversations.delete(conversationId);
       }
       this.outbox.kick();

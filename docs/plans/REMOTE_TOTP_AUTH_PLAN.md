@@ -1,6 +1,6 @@
 # Remote TOTP Session Authentication Plan
 
-Status: implementation plan
+Status: implemented; automated tests and Telegram real-device TOTP validation passed
 Target baseline: `main` after the remote-control implementation
 Primary rollout: Telegram
 
@@ -580,3 +580,13 @@ Before coding, review this plan specifically for **authentication bypasses**, no
 7. Is local enrollment/reset the only path that can reveal/change the TOTP secret?
 
 Implementation should begin only after these invariants are answered cleanly.
+
+## 20. Implementation and validation record
+
+- The transport-independent TOTP gate, owner-bound SecretStorage enrollment, replay protection,
+  inactivity locking, `/lock`, `/timeout`, QR enrollment, nonce-bound approvals, deferred outbox
+  delivery, and authenticated queue draining were implemented in `2a97df4`.
+- The automated remote/TOTP tests passed.
+- The Google Authenticator-compatible Telegram real-device TOTP flow and the complete Telegram
+  remote-control validation matrix were reported passed on 2026-08-30.
+- Experimental WhatsApp real-device validation is independent of this Telegram/TOTP acceptance.

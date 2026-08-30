@@ -1,6 +1,7 @@
 # Forge Remote Control — Consolidated Architecture and Implementation Plan V4
 
-Status: Phase 0 complete; READY FOR IMPLEMENTATION
+Status: implementation complete; Telegram and TOTP real-device validation complete;
+experimental WhatsApp real-device validation remains optional
 Branch: `feat/remote-control-plan`
 Target: Forge VS Code extension; Telegram V1, optional experimental WhatsApp later
 Date: 2026-08-29
@@ -28,8 +29,11 @@ V1 must support:
 - durable FIFO follow-up queuing while the conversation is busy;
 - final completion/failure notification;
 - Forge-owned tool approval from VS Code or the authorized remote owner;
-- deterministic `/status`, `/sessions`, `/use`, `/resume`, `/new`, `/stop`, `/approve`,
-  `/deny`, and `/help` host commands;
+- deterministic `/status`, `/stop`, `/new`, `/list`, `/resume`, `/models`, `/model`,
+  `/queue`, `/unload`, `/restart`, `/compact`, `/lock`, `/timeout`, `/clanker`,
+  `/workspace list`, and `/help` host commands;
+- correlated approval/denial through Telegram buttons and exact `APPROVE <id>` /
+  `DENY <id>` responses on transports without buttons;
 - deduplication, crash recovery, and single-consumer transport ownership.
 
 Telegram is the V1 reference transport. WhatsApp linked-device support is a later, explicitly
@@ -763,8 +767,10 @@ duplicate canonical owner remains in the Phase 0 contract.
   --omit=dev` reported zero vulnerabilities, `npm run ci` passed (1,380 tests passed, 14 skipped),
   and `npm run package` passed with an 8.02 MB VSIX.
 
-Real-device Telegram and WhatsApp validation remains a release validation step because no provider
-credential, phone identity, or linked-device account is stored in the repository.
+Real-device Telegram and WhatsApp validation was left as a release validation step because no
+provider credential, phone identity, or linked-device account is stored in the repository.
+Telegram validation, including the TOTP gate, was subsequently completed on 2026-08-30.
+Experimental WhatsApp real-device validation remains separate and optional.
 
 ## 26. Final implementation audit
 
@@ -787,8 +793,9 @@ The acceptance audit closed the remaining multi-transport and privacy edges:
 
 Release candidate `0.14.0` passed `npm run ci` with 1,384 tests passed and 14 skipped, production
 bundle loading, `npm run package`, packaged-file review, and `npm audit --omit=dev` with zero reported
-vulnerabilities. The resulting VSIX is 8.02 MB. Credential-free implementation is complete; only
-the explicitly external real-device Telegram and WhatsApp validation remains.
+vulnerabilities. The resulting VSIX is 8.02 MB. Credential-free implementation is complete.
+Telegram and TOTP real-device acceptance was subsequently confirmed on 2026-08-30; only optional
+experimental WhatsApp real-device validation remains unrecorded.
 
 ## 27. Real-device validation handoff
 
@@ -806,3 +813,9 @@ The follow-up gate passed with 1,386 tests passed and 14 skipped. Production bui
 check, `npm run package`, packaged-file review, and `npm audit --omit=dev` also passed. No test or
 documentation artifact contains a provider credential, phone identity, pairing code, or raw owner
 identifier.
+
+The Telegram follow-up acceptance matrix and Google Authenticator-compatible TOTP flow were
+reported passed on 2026-08-30 and are recorded in `docs/REMOTE_CONTROL_VALIDATION.md`. The final
+implemented command vocabulary is the one listed in section 1; the earlier `/sessions`, `/use`,
+`/approve`, and `/deny` proposal was superseded by `/list`, `/resume`, `/models`, `/model`, and
+transport-native correlated approval actions.

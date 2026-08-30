@@ -1,5 +1,6 @@
 import type { CompactionOutcome } from '../sidebar/CompactionService';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
+import { formatRemoteDateTime } from './RemoteDateTime';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
 
@@ -245,7 +246,7 @@ async function executeRemoteCommand(
           (conversation, index) =>
             `${index + 1}. ${conversation.title} · ${shortId(conversation.id)} · ${
               conversation.activeModel ?? 'default model'
-            } · ${formatActivity(conversation.updatedAt)}${conversation.archived ? ' · archived' : ''}`,
+            } · ${formatRemoteDateTime(conversation.updatedAt)}${conversation.archived ? ' · archived' : ''}`,
         )
         .join('\n'),
       { signal: context.signal },
@@ -393,10 +394,6 @@ function resolveSelection(
 
 function shortId(id: string): string {
   return id.length > 7 ? `${id.slice(0, 3)}…${id.slice(-3)}` : id;
-}
-
-function formatActivity(timestamp: number): string {
-  return new Date(timestamp).toLocaleString('en-CA', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
 function truncate(value: string, maximum: number): string {

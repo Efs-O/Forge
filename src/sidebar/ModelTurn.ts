@@ -48,6 +48,7 @@ import {
   canUseThinkingKwargs,
   shouldStripThinking,
 } from './turnModelBehavior';
+import type { AgentProgressEvent } from './AgentProgress';
 
 const log = getLogger();
 
@@ -62,11 +63,11 @@ function activeTerminalCwd(): string | undefined {
 
 /** Tool rounds per sidebar turn when the model does not set `max_tool_rounds`.
  */
-export const MAX_TOOL_ROUNDS = 80;
+export const MAX_TOOL_ROUNDS = 500;
 
 /** Ceiling on a configured `max_tool_rounds`. The cap's job is to stop a
  *  runaway loop eventually; an unbounded value would remove that guarantee. */
-export const MAX_CONFIGURABLE_TOOL_ROUNDS = 400;
+export const MAX_CONFIGURABLE_TOOL_ROUNDS = 500;
 
 /**
  * Rounds this model may spend on one turn.
@@ -96,6 +97,7 @@ export interface ModelTurnContext {
   onContextChanged?: (convId: string) => void;
   onUsage?: (conv: ConversationRuntime, inputTokens: number, outputTokens: number) => void;
   onTranscriptChanged?: (conv: ConversationRuntime) => void;
+  emitAgentProgress: (event: AgentProgressEvent) => void;
 }
 
 export interface ModelTurnRequest {
@@ -307,6 +309,11 @@ export async function runModelTurn(
       },
       dispatchToolCalls: async (toolCalls, messages) => {
         for (const call of toolCalls) {
+          ctx.emitAgentProgress({
+            conversationId: conv.id,
+            kind: 'tool',
+            toolName: call.function.name,
+          });
           const detail = extractToolDetail(call.function.arguments);
           postC({
             type: 'toolActivity',
@@ -342,7 +349,10 @@ export async function runModelTurn(
         // tick therefore lives in `onUsage` below.
       },
       onMessagesChanged: () => ctx.onTranscriptChanged?.(conv),
-      onToken: (text) => postC({ type: 'token', text }),
+      onToken: (text) => {
+        postC({ type: 'token', text });
+        ctx.emitAgentProgress({ conversationId: conv.id, kind: 'commentary', text });
+      },
       onReasoning: (text) => postC({ type: 'reasoningToken', text }),
       onDone: (finishReason) => {
         postC({ type: 'done', finishReason });
@@ -374,12 +384,19 @@ export async function runModelTurn(
       },
       // A status line, not an error: the turn continues and the model is being
       // asked for the same write in chunks.
-      onTruncatedToolCall: ({ toolName, approxBytes }) =>
+      onTruncatedToolCall: ({ toolName, approxBytes }) => {
+        const safeToolName = toolName ?? 'tool call';
         postC({
           type: 'toolActivity',
-          toolName: toolName ?? 'tool call',
+          toolName: safeToolName,
           detail: `output cut off after ${approxBytes} bytes — retrying in chunks`,
-        }),
+        });
+        ctx.emitAgentProgress({
+          conversationId: conv.id,
+          kind: 'tool',
+          toolName: safeToolName,
+        });
+      },
       getOutputRoom: (messages) =>
         computeContextBudget({
           messages,

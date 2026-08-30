@@ -222,8 +222,9 @@ control_server:
 defaults:
   # Tool calls allowed in a single turn before Forge stops the loop. This is a
   # runaway guard, NOT a judgement about how big a task may be — the built-in
-  # default of 40 has killed refactors that had already landed 28 good edits.
-  max_tool_rounds: 80
+  # default of 500 permits long-running implementation work while retaining a
+  # finite runaway guard.
+  max_tool_rounds: 500
 
   system_prompt: |
     You are Forge, a local AI coding assistant running inside VS Code.

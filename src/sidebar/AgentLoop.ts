@@ -31,6 +31,7 @@ import type { DiffDecorations } from './DiffDecorations';
 import { ToolApprovalService } from './ToolApprovalService';
 import type { ToolApprovalSink, ToolApprovalRequestEvent } from './ToolApprovalService';
 import { recordModelUsage } from './modelManager/usageTracker';
+import type { AgentProgressEvent, AgentProgressListener } from './AgentProgress';
 import { CliAgentDriver } from '../agents/CliAgentDriver';
 import {
   CliSessionRegistry,
@@ -61,6 +62,7 @@ export class AgentLoop {
   private conversationLookup: ((id: string) => ConversationRuntime | undefined) | null = null;
   private onContextChanged?: (convId: string) => void;
   private onTranscriptChanged?: (convId: string) => void;
+  private readonly progressListeners = new Set<AgentProgressListener>();
 
   /**
    * Registers the mid-turn context listener. A setter rather than an 18th
@@ -94,6 +96,11 @@ export class AgentLoop {
   /** Snapshots transcript mutations while a turn is still in progress. */
   setTranscriptChangedListener(listener: (convId: string) => void): void {
     this.onTranscriptChanged = listener;
+  }
+
+  onAgentProgress(listener: AgentProgressListener): { dispose(): void } {
+    this.progressListeners.add(listener);
+    return { dispose: () => this.progressListeners.delete(listener) };
   }
 
   get streaming(): boolean {
@@ -193,6 +200,7 @@ export class AgentLoop {
         this.recordTranscriptMutation(conv);
       },
       onTranscriptChanged: (conv) => this.recordTranscriptMutation(conv),
+      emitAgentProgress: (event) => this.emitAgentProgress(event),
       commitUserPrompt: (conv, text, attachments) => this.commitUserPrompt(conv, text, attachments),
       runModelTurn: makeRunModelTurn(() => this.services, runModelTurn),
       waitForCancelledTurns: () => this.waitForCancelledTurns(),
@@ -213,6 +221,7 @@ export class AgentLoop {
 
   dispose(): Promise<void> {
     this.sessionTimer.dispose();
+    this.progressListeners.clear();
     return this.cliSessions.dispose();
   }
 
@@ -354,6 +363,18 @@ export class AgentLoop {
   private recordTranscriptMutation(conv: ConversationRuntime): void {
     conv.updatedAt = Date.now();
     this.onTranscriptChanged?.(conv.id);
+  }
+
+  private emitAgentProgress(event: AgentProgressEvent): void {
+    for (const listener of this.progressListeners) {
+      try {
+        listener(event);
+      } catch (err) {
+        log.warn(
+          `[AgentLoop] progress listener failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
   }
 
   runPromptToMarkdown(
