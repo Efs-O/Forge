@@ -9,6 +9,7 @@ export interface RemoteCommandContext {
   workspaceId: string;
   signal: AbortSignal;
   inactivityTimeoutMinutes: number;
+  modelNames: readonly string[];
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
 }
 
@@ -47,7 +48,8 @@ async function executeRemoteCommand(
   if (command === '/help') {
     await context.channel.send(
       event.chatId,
-      'Forge commands: /status, /stop, /new, /resume <conversation-id>, /compact, /lock, ' +
+      'Forge commands: /status, /stop, /new, /list, /resume <number-or-id>, /models, ' +
+        '/model <number-or-name>, /queue, /unload, /restart, /compact, /lock, ' +
         '/timeout [1-1440|off], /clanker on|off. /stop cancels the current request; queued requests remain ' +
         'queued. /clanker on auto-approves non-dangerous tools until this window ' +
         'reloads — writes then land with no confirmation anywhere.',
@@ -61,9 +63,12 @@ async function executeRemoteCommand(
     const queued = binding ? context.store.queued(binding.conversationId).length : 0;
     const requests = context.store.requestHealth();
     const outbox = context.store.outboxHealth();
+    const conversation = status.conversations.find((item) => item.id === binding?.conversationId);
     await context.channel.send(
       event.chatId,
-      `Forge: ${status.requestChains.length} active request(s), ${queued} queued here, ${status.streamingConversationIds.length} streaming, ${requests.unknown} crash-unknown, ${outbox.pending} notifications pending, ${outbox.abandoned} abandoned.
+      `Chat: ${conversation ? `${conversation.title} · ${conversation.id}` : 'none bound'}\n` +
+        `Model: ${conversation?.activeModel ?? 'default'}\n` +
+        `Forge: ${status.requestChains.length} active request(s), ${queued} queued here, ${status.streamingConversationIds.length} streaming, ${requests.unknown} crash-unknown, ${outbox.pending} notifications pending, ${outbox.abandoned} abandoned.
 ` +
         `Context: ${describeBudget(binding && context.host.contextBudget(binding.conversationId))}
 ` +
@@ -151,23 +156,179 @@ async function executeRemoteCommand(
       workspaceId: context.workspaceId,
       conversationId: conv.id,
     });
-    await context.channel.send(event.chatId, `Forge: bound to new conversation ${conv.id}.`, {
+    await context.channel.send(event.chatId, `Forge: bound to a new chat (${shortId(conv.id)}).`, {
       signal: context.signal,
     });
     return { kind: 'handled' };
   }
+  if (command === '/list') {
+    const conversations = context.host
+      .status()
+      .conversations.slice()
+      .sort((left, right) => right.updatedAt - left.updatedAt);
+    if (conversations.length === 0) {
+      await context.channel.send(event.chatId, 'Forge: no conversations are available.', {
+        signal: context.signal,
+      });
+      return { kind: 'handled' };
+    }
+    await context.store.issueSelection(
+      event.channel,
+      event.chatId,
+      'conversations',
+      conversations.map((conversation) => conversation.id),
+      10 * 60_000,
+    );
+    await context.channel.send(
+      event.chatId,
+      conversations
+        .map(
+          (conversation, index) =>
+            `${index + 1}. ${conversation.title} · ${shortId(conversation.id)} · ${
+              conversation.activeModel ?? 'default model'
+            } · ${formatActivity(conversation.updatedAt)}${conversation.archived ? ' · archived' : ''}`,
+        )
+        .join('\n'),
+      { signal: context.signal },
+    );
+    return { kind: 'handled' };
+  }
   if (command === '/resume' && argument) {
-    const conv = await context.host.restoreConversation(argument, { activate: false });
+    const conversationId = resolveSelection(context, event, 'conversations', argument) ?? argument;
+    const conv = await context.host.restoreConversation(conversationId, { activate: false });
     await context.store.setBinding({
       channel: event.channel,
       chatId: event.chatId,
       workspaceId: context.workspaceId,
       conversationId: conv.id,
     });
-    await context.channel.send(event.chatId, `Forge: resumed conversation ${conv.id}.`, {
+    await context.channel.send(
+      event.chatId,
+      `Forge: resumed ${conv.title} (${shortId(conv.id)}).`,
+      {
+        signal: context.signal,
+      },
+    );
+    return { kind: 'handled' };
+  }
+  if (command === '/models') {
+    if (context.modelNames.length === 0) {
+      return { kind: 'rejected', reason: 'no configured models are available' };
+    }
+    await context.store.issueSelection(
+      event.channel,
+      event.chatId,
+      'models',
+      [...context.modelNames],
+      10 * 60_000,
+    );
+    await context.channel.send(
+      event.chatId,
+      context.modelNames.map((name, index) => `${index + 1}. ${name}`).join('\n'),
+      { signal: context.signal },
+    );
+    return { kind: 'handled' };
+  }
+  if (command === '/model' && argument) {
+    const binding = context.store.binding(event.channel, event.chatId);
+    if (!binding) return { kind: 'rejected', reason: 'no conversation is bound' };
+    const status = context.host.status();
+    if (
+      status.requestChains.some((chain) => chain.conversationId === binding.conversationId) ||
+      status.streamingConversationIds.includes(binding.conversationId) ||
+      context.store.queued(binding.conversationId).length > 0
+    ) {
+      return { kind: 'rejected', reason: 'the bound conversation is busy or has queued work' };
+    }
+    const modelName = resolveSelection(context, event, 'models', argument) ?? argument;
+    if (!context.modelNames.includes(modelName)) {
+      return { kind: 'rejected', reason: 'model is unavailable; use /models' };
+    }
+    await context.host.setConversationModel(binding.conversationId, modelName);
+    await context.channel.send(event.chatId, `Forge: pinned ${modelName} to this chat.`, {
+      signal: context.signal,
+    });
+    return { kind: 'handled' };
+  }
+  if (command === '/queue') {
+    const binding = context.store.binding(event.channel, event.chatId);
+    if (!binding) return { kind: 'rejected', reason: 'no conversation is bound' };
+    const queued = context.store.queued(binding.conversationId);
+    await context.channel.send(
+      event.chatId,
+      queued.length === 0
+        ? 'Forge: no queued prompts for this chat.'
+        : queued.map((item, index) => `${index + 1}. ${truncate(item.text, 160)}`).join('\n'),
+      { signal: context.signal },
+    );
+    return { kind: 'handled' };
+  }
+  if (command === '/unload') {
+    const idleReason = globalBusyReason(context);
+    if (idleReason) return { kind: 'rejected', reason: idleReason };
+    await context.host.unloadModels();
+    await context.channel.send(event.chatId, 'Forge: loaded backends released.', {
+      signal: context.signal,
+    });
+    return { kind: 'handled' };
+  }
+  if (command === '/restart') {
+    const idleReason = globalBusyReason(context);
+    if (idleReason) return { kind: 'rejected', reason: idleReason };
+    const binding = context.store.binding(event.channel, event.chatId);
+    const modelName = binding
+      ? context.host.status().conversations.find((item) => item.id === binding.conversationId)
+          ?.activeModel
+      : undefined;
+    if (!modelName) {
+      return {
+        kind: 'rejected',
+        reason: 'this chat has no explicitly pinned model; use /models then /model',
+      };
+    }
+    await context.host.restartModel(modelName);
+    await context.channel.send(event.chatId, `Forge: restarted ${modelName}.`, {
       signal: context.signal,
     });
     return { kind: 'handled' };
   }
   return { kind: 'rejected', reason: 'unknown command' };
+}
+
+function globalBusyReason(context: RemoteCommandContext): string | undefined {
+  const status = context.host.status();
+  if (
+    status.requestChains.length ||
+    status.streamingConversationIds.length ||
+    status.pendingApproval
+  ) {
+    return 'Forge is busy; wait for requests, streams, and approvals to finish';
+  }
+  return context.store.queued().length > 0 ? 'Forge has queued remote requests' : undefined;
+}
+
+function resolveSelection(
+  context: RemoteCommandContext,
+  event: Extract<RemoteInboundEvent, { kind: 'text' }>,
+  kind: 'models' | 'conversations',
+  argument: string,
+): string | undefined {
+  if (!/^\d+$/.test(argument)) return undefined;
+  const selection = context.store.selection(event.channel, event.chatId, kind);
+  const index = Number(argument) - 1;
+  return selection && index >= 0 && index < selection.values.length
+    ? selection.values[index]
+    : undefined;
+}
+
+function shortId(id: string): string {
+  return id.length > 7 ? `${id.slice(0, 3)}…${id.slice(-3)}` : id;
+}
+
+function formatActivity(timestamp: number): string {
+  return new Date(timestamp).toLocaleString('en-CA', { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function truncate(value: string, maximum: number): string {
+  return value.length > maximum ? `${value.slice(0, maximum - 1)}…` : value;
 }

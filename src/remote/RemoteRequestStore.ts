@@ -1,74 +1,22 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
-import { z } from 'zod';
 import type {
   RemoteBinding,
   RemoteExecutionState,
   RemoteOutboxRecord,
   RemoteRequestRecord,
 } from './types';
-
-const RequestSchema = z.object({
-  id: z.string(),
-  dedupKey: z.string(),
-  channel: z.enum(['fake', 'telegram', 'whatsapp']),
-  chatId: z.string(),
-  providerMessageId: z.string(),
-  conversationId: z.string(),
-  text: z.string(),
-  receivedAt: z.number(),
-  admittedAt: z.number().optional(),
-  state: z.enum(['queued', 'running', 'completed', 'failed', 'cancelled', 'unknown']),
-  updatedAt: z.number(),
-  finalText: z.string().optional(),
-  error: z.string().optional(),
-});
-
-const OutboxSchema = z.object({
-  id: z.string(),
-  requestId: z.string(),
-  channel: z.enum(['fake', 'telegram', 'whatsapp']),
-  chatId: z.string(),
-  text: z.string(),
-  state: z.enum(['pending', 'sending', 'delivered', 'abandoned']),
-  attempts: z.number().int().nonnegative(),
-  updatedAt: z.number(),
-});
-
-const BindingSchema = z.object({
-  channel: z.enum(['fake', 'telegram', 'whatsapp']),
-  chatId: z.string(),
-  workspaceId: z.string(),
-  conversationId: z.string(),
-});
-const ControlReceiptSchema = z.object({
-  dedupKey: z.string(),
-  state: z.enum(['pending', 'completed', 'unknown']),
-  updatedAt: z.number(),
-});
-
-const StateSchema = z.object({
-  version: z.literal(1),
-  requests: z.array(RequestSchema),
-  outbox: z.array(OutboxSchema),
-  bindings: z.array(BindingSchema),
-  cursors: z.record(z.string(), z.string()),
-  controlReceipts: z.array(ControlReceiptSchema).default([]),
-});
-
-type StoreState = z.infer<typeof StateSchema>;
-const EMPTY_STATE: StoreState = {
-  version: 1,
-  requests: [],
-  outbox: [],
-  bindings: [],
-  cursors: {},
-  controlReceipts: [],
-};
-const MAX_RECORDS = 1_000;
-const MAX_OUTBOX_RECORDS = 1_000;
-const RETENTION_MS = 30 * 24 * 60 * 60_000;
+import {
+  EMPTY_REMOTE_STATE,
+  LegacyRemoteStateSchema,
+  MAX_OUTBOX_RECORDS,
+  MAX_RECORDS,
+  RemoteStateSchema,
+  RETENTION_MS,
+  type RemoteSelection,
+  type RemoteStoreState,
+} from './RemoteStoreSchemas';
 
 export function remoteDedupKey(channel: string, chatId: string, messageId: string): string {
   return `${channel}\u0000${chatId}\u0000${messageId}`;
@@ -76,20 +24,23 @@ export function remoteDedupKey(channel: string, chatId: string, messageId: strin
 
 /** Versioned global-storage state with one serialized atomic mutation owner. */
 export class RemoteRequestStore {
-  private state: StoreState = structuredClone(EMPTY_STATE);
+  private state: RemoteStoreState = structuredClone(EMPTY_REMOTE_STATE);
   private mutationTail: Promise<void> = Promise.resolve();
   private loaded = false;
 
-  constructor(private readonly filePath: string) {}
+  constructor(
+    private readonly filePath: string,
+    private readonly legacyFilePath?: string,
+  ) {}
 
   async load(): Promise<void> {
     if (this.loaded) return;
     try {
-      const parsed = StateSchema.parse(JSON.parse(await fs.readFile(this.filePath, 'utf8')));
+      const parsed = RemoteStateSchema.parse(JSON.parse(await fs.readFile(this.filePath, 'utf8')));
       this.state = parsed;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-      await this.persist(this.state);
+      await this.importLegacyOrCreate();
     }
     await this.mutate((draft) => {
       const now = Date.now();
@@ -163,6 +114,41 @@ export class RemoteRequestStore {
     });
   }
 
+  async issueSelection(
+    channel: RemoteBinding['channel'],
+    chatId: string,
+    kind: RemoteSelection['kind'],
+    values: string[],
+    ttlMs: number,
+  ): Promise<void> {
+    const issuedAt = Date.now();
+    await this.mutate((draft) => {
+      draft.selections = draft.selections.filter(
+        (item) => item.channel !== channel || item.chatId !== chatId || item.kind !== kind,
+      );
+      draft.selections.push({
+        channel,
+        chatId,
+        kind,
+        values,
+        issuedAt,
+        expiresAt: issuedAt + ttlMs,
+      });
+    });
+  }
+
+  selection(
+    channel: RemoteBinding['channel'],
+    chatId: string,
+    kind: RemoteSelection['kind'],
+  ): RemoteSelection | undefined {
+    const item = this.state.selections.find(
+      (candidate) =>
+        candidate.channel === channel && candidate.chatId === chatId && candidate.kind === kind,
+    );
+    return item && item.expiresAt > Date.now() ? structuredClone(item) : undefined;
+  }
+
   async enqueue(record: RemoteRequestRecord): Promise<boolean> {
     let inserted = false;
     await this.mutate((draft) => {
@@ -216,7 +202,12 @@ export class RemoteRequestStore {
   async finish(
     id: string,
     state: Extract<RemoteExecutionState, 'completed' | 'failed' | 'cancelled'>,
-    payload: { finalText?: string; error?: string; notification: string },
+    payload: {
+      finalText?: string;
+      error?: string;
+      notification: string;
+      announceConversationId?: string;
+    },
   ): Promise<void> {
     await this.mutate((draft) => {
       const request = draft.requests.find((item) => item.id === id);
@@ -235,6 +226,14 @@ export class RemoteRequestStore {
         attempts: 0,
         updatedAt: Date.now(),
       });
+      if (payload.announceConversationId) {
+        const binding = draft.bindings.find(
+          (item) => item.channel === request.channel && item.chatId === request.chatId,
+        );
+        if (binding && binding.conversationId === payload.announceConversationId) {
+          binding.announcedConversationId = payload.announceConversationId;
+        }
+      }
     });
   }
 
@@ -295,7 +294,7 @@ export class RemoteRequestStore {
     });
   }
 
-  private mutate(mutator: (draft: StoreState) => void): Promise<void> {
+  private mutate(mutator: (draft: RemoteStoreState) => void): Promise<void> {
     const operation = this.mutationTail.then(async () => {
       const draft = structuredClone(this.state);
       mutator(draft);
@@ -312,7 +311,8 @@ export class RemoteRequestStore {
       draft.controlReceipts = draft.controlReceipts
         .filter((item) => item.updatedAt >= cutoff || item.state === 'pending')
         .slice(-MAX_RECORDS);
-      StateSchema.parse(draft);
+      draft.selections = draft.selections.filter((item) => item.expiresAt >= Date.now());
+      RemoteStateSchema.parse(draft);
       await this.persist(draft);
       this.state = draft;
     });
@@ -320,7 +320,31 @@ export class RemoteRequestStore {
     return operation;
   }
 
-  private async persist(state: StoreState): Promise<void> {
+  private async importLegacyOrCreate(): Promise<void> {
+    if (!this.legacyFilePath) {
+      await this.persist(this.state);
+      return;
+    }
+    try {
+      const legacy = LegacyRemoteStateSchema.parse(
+        JSON.parse(await fs.readFile(this.legacyFilePath, 'utf8')),
+      );
+      this.state = {
+        version: 2,
+        requests: legacy.requests,
+        outbox: legacy.outbox,
+        bindings: legacy.bindings,
+        cursors: legacy.cursors,
+        controlReceipts: legacy.controlReceipts,
+        selections: [],
+      };
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    }
+    await this.persist(this.state);
+  }
+
+  private async persist(state: RemoteStoreState): Promise<void> {
     await fs.mkdir(path.dirname(this.filePath), { recursive: true });
     const temporary = `${this.filePath}.${randomUUID()}.tmp`;
     await fs.writeFile(temporary, JSON.stringify(state), { encoding: 'utf8', mode: 0o600 });

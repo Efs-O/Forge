@@ -21,6 +21,7 @@ import {
   opDeleteConversation,
   opNewConversation,
   opSetActiveConversationModel,
+  opSetConversationModel,
   opRenameConversation,
   opRestoreConversation,
   opSwitchConversation,
@@ -134,6 +135,15 @@ export class ConversationTabs {
     // 12B was loaded spawned a second llama-server alongside it and OOM'd the
     // GPU, because the pool only evicts once every port is taken.
     if (outgoing) await this.releaseIfUnused(outgoing, name, conv.id);
+  }
+
+  /** Remote/addressed pin: preserve active sidebar focus and global default. */
+  setModelById(id: string, name: string | null): boolean {
+    const updated = opSetConversationModel(this.deps.getSidebar(), id, name);
+    if (!updated) return false;
+    this.deps.persistSession();
+    this.deps.postSessionSync();
+    return true;
   }
 
   switch(id: string): void {

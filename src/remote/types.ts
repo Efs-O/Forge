@@ -41,6 +41,8 @@ export interface RemoteBinding {
   chatId: string;
   workspaceId: string;
   conversationId: string;
+  /** Last conversation whose identity label was included in a durable reply. */
+  announcedConversationId?: string | undefined;
 }
 
 export interface RemoteRequestRecord {

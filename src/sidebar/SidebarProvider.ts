@@ -156,6 +156,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       getPendingApproval: () => this.agentLoop.pendingApproval(),
       getActiveConversationId: () => this.sidebar.activeConversationId,
       getOpenConversations: () => this.sidebar.conversations,
+      getArchivedConversations: () => this.sidebar.history,
       getRequestChains: () => this.requestChains.status(),
       getStreamingConversationIds: () => this.agentLoop.getStreamingIds(),
       clankerMode: () => this.agentLoop.getClankerMode(),
@@ -165,6 +166,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       contextBudget: (conversationId) => this.contextBudgetOf(conversationId),
       compact: (conversationId) =>
         this.slashHandler.compactConversation(conversationId, { auto: false }),
+      setConversationModel: (conversationId, modelName) =>
+        this.tabs.setModelById(conversationId, modelName),
+      unloadModels: () => this.unloadModels(),
+      restartModel: (modelName) => this.restartModel(modelName),
     });
     // Register the conversation lookup so the session timer can resolve ids,
     // then fold any unfinished intervals from a previous session into the
@@ -275,6 +280,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       type: 'backendDown',
       message: 'All models unloaded. Send a prompt to start the backend again.',
     });
+  }
+
+  /** Addressed lifecycle seam for owner-authenticated remote controls. */
+  async restartModel(modelName: string): Promise<void> {
+    await this.pool.release(modelName);
+    await this.pool.acquire(modelName);
   }
 
   notifyBackendError(message: string): void {

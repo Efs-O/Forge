@@ -16,12 +16,15 @@ import { RemoteOutboxDelivery } from './RemoteOutboxDelivery';
 import { CONVERSATION_BUSY_ERROR } from '../sidebar/SendPipeline';
 import { handleRemoteCommand } from './RemoteCommandHandler';
 import { RemoteApprovalBridge } from './RemoteApprovalBridge';
+import { withConversationIdentity } from './RemoteReplyIdentity';
 
 export interface RemoteControllerOptions {
   workspaceId: string;
   queueLimit: number;
   maxMessageChars: number;
   rateLimitPerMinute: number;
+  /** Snapshot of model names from the active, validated Forge config. */
+  modelNames: readonly string[];
   inactivityTimeoutMinutes?: number;
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
   onError?: (message: string) => void;
@@ -176,6 +179,7 @@ export class RemoteController {
           workspaceId: this.options.workspaceId,
           signal: this.abort.signal,
           inactivityTimeoutMinutes: this.options.inactivityTimeoutMinutes ?? 30,
+          modelNames: this.options.modelNames,
           ...(this.options.setInactivityTimeout
             ? { setInactivityTimeout: this.options.setInactivityTimeout }
             : {}),
@@ -293,9 +297,16 @@ export class RemoteController {
           remoteRequestId: next.id,
         });
         if (outcome.kind === 'completed') {
+          const notification = withConversationIdentity(
+            this.store,
+            this.host,
+            next,
+            outcome.finalText,
+          );
           await this.store.finish(next.id, 'completed', {
             finalText: outcome.finalText,
-            notification: outcome.finalText || 'Forge request completed.',
+            notification: notification ?? 'Forge request completed.',
+            ...(notification ? { announceConversationId: next.conversationId } : {}),
           });
         } else if (outcome.kind === 'cancelled' || outcome.kind === 'interrupted') {
           await this.store.finish(next.id, 'cancelled', {

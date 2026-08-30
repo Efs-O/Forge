@@ -272,6 +272,20 @@ export function opSetActiveConversationModel(
   conversation.updatedAt = Date.now();
 }
 
+/** Pin a model on one addressed open conversation without changing sidebar focus/default. */
+export function opSetConversationModel(
+  sidebar: SidebarRuntime,
+  conversationId: string,
+  modelName: string | null,
+): boolean {
+  const conversation = sidebar.conversations.find((candidate) => candidate.id === conversationId);
+  if (!conversation) return false;
+  if (modelName) conversation.active_model = modelName;
+  else delete conversation.active_model;
+  conversation.updatedAt = Date.now();
+  return true;
+}
+
 export function buildUserContent(
   text: string,
   attachments?: AttachmentData[],

@@ -64,6 +64,7 @@ export class RemoteRuntime {
   constructor(private readonly options: RemoteRuntimeOptions) {
     this.auth = new RemoteAuth(options.secrets);
     this.store = new RemoteRequestStore(
+      path.join(options.storageDirectory, 'remote-state-v2.json'),
       path.join(options.storageDirectory, 'remote-state-v1.json'),
     );
     this.audit = new RemoteAuditLog(
@@ -223,6 +224,7 @@ export class RemoteRuntime {
               queueLimit: config.remote.queue_limit,
               maxMessageChars: config.remote.max_message_chars,
               rateLimitPerMinute: config.remote.rate_limit_per_minute,
+              modelNames: config.models.map((model) => model.name),
               inactivityTimeoutMinutes: config.remote.auth.inactivity_timeout_minutes,
               setInactivityTimeout: this.options.setInactivityTimeout,
               onError: this.options.notifyLocal,
@@ -265,6 +267,7 @@ export class RemoteRuntime {
         queueLimit: remote.queue_limit,
         maxMessageChars: remote.max_message_chars,
         rateLimitPerMinute: remote.rate_limit_per_minute,
+        modelNames: config.models.map((model) => model.name),
         inactivityTimeoutMinutes: remote.auth.inactivity_timeout_minutes,
         setInactivityTimeout: this.options.setInactivityTimeout,
         onError: this.options.notifyLocal,

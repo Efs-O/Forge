@@ -10,6 +10,7 @@ export interface ForgeConversationSummary {
   title: string;
   activeModel: string | null;
   archived: boolean;
+  updatedAt: number;
 }
 
 export interface ForgeHostStatus {
@@ -47,6 +48,9 @@ export interface ForgeHostFacade {
   /** Per-slot context for one conversation — `num_ctx / n_parallel`, not num_ctx. */
   contextBudget(conversationId: string): { used: number; max: number } | undefined;
   compact(conversationId: string): Promise<CompactionOutcome>;
+  setConversationModel(conversationId: string, modelName: string | null): Promise<void>;
+  unloadModels(): Promise<void>;
+  restartModel(modelName: string): Promise<void>;
 }
 
 export interface SidebarHostFacadeDeps {
@@ -68,20 +72,25 @@ export interface SidebarHostFacadeDeps {
   getPendingApproval: () => ToolApprovalRequestEvent | undefined;
   getActiveConversationId: () => string;
   getOpenConversations: () => ConversationRuntime[];
+  getArchivedConversations?: () => ConversationRuntime[];
   getRequestChains: () => RequestChainStatus[];
   getStreamingConversationIds: () => ReadonlySet<string>;
   clankerMode: () => boolean;
   setClankerMode: (on: boolean) => void;
   contextBudget: (conversationId: string) => { used: number; max: number } | undefined;
   compact: (conversationId: string) => Promise<CompactionOutcome>;
+  setConversationModel: (conversationId: string, modelName: string | null) => boolean;
+  unloadModels: () => Promise<void>;
+  restartModel: (modelName: string) => Promise<void>;
 }
 
-function summarize(conv: ConversationRuntime): ForgeConversationSummary {
+function summarize(conv: ConversationRuntime, archived: boolean): ForgeConversationSummary {
   return {
     id: conv.id,
     title: conv.title,
     activeModel: conv.active_model ?? null,
-    archived: false,
+    archived,
+    updatedAt: conv.updatedAt,
   };
 }
 
@@ -94,7 +103,7 @@ export class SidebarHostFacade implements ForgeHostFacade {
   ): Promise<ForgeConversationSummary> {
     const conv = this.deps.createConversation({ activate: options.activate ?? false });
     if (!conv) throw new Error('Forge: maximum open conversations reached.');
-    return summarize(conv);
+    return summarize(conv, false);
   }
 
   async restoreConversation(
@@ -105,7 +114,7 @@ export class SidebarHostFacade implements ForgeHostFacade {
       activate: options.activate ?? false,
     });
     if (!conv) throw new Error('Forge: conversation could not be restored.');
-    return summarize(conv);
+    return summarize(conv, false);
   }
 
   send(
@@ -149,11 +158,30 @@ export class SidebarHostFacade implements ForgeHostFacade {
     return this.deps.compact(conversationId);
   }
 
+  async setConversationModel(conversationId: string, modelName: string | null): Promise<void> {
+    if (!this.deps.setConversationModel(conversationId, modelName)) {
+      throw new Error('Forge: conversation could not be found for model selection.');
+    }
+  }
+
+  unloadModels(): Promise<void> {
+    return this.deps.unloadModels();
+  }
+
+  restartModel(modelName: string): Promise<void> {
+    return this.deps.restartModel(modelName);
+  }
+
   status(): ForgeHostStatus {
     const pendingApproval = this.deps.getPendingApproval();
     return {
       activeConversationId: this.deps.getActiveConversationId(),
-      conversations: this.deps.getOpenConversations().map(summarize),
+      conversations: [
+        ...this.deps.getOpenConversations().map((conversation) => summarize(conversation, false)),
+        ...(this.deps.getArchivedConversations?.() ?? []).map((conversation) =>
+          summarize(conversation, true),
+        ),
+      ],
       requestChains: this.deps.getRequestChains(),
       streamingConversationIds: [...this.deps.getStreamingConversationIds()],
       ...(pendingApproval ? { pendingApproval } : {}),
