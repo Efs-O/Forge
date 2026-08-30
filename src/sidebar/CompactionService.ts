@@ -55,6 +55,25 @@ export interface CompactionDeps {
    * compacts — the block is evidence, never a precondition.
    */
   snapshotRepoState?: () => Promise<string>;
+  /**
+   * Host-originated compaction progress, consumed by the remote layer so a
+   * Telegram/WhatsApp user sees "compacting…" for work they did not start.
+   * Optional: sidebar-only callers (and tests) omit it.
+   */
+  emitCompactionEvent?: (event: CompactionEvent) => void;
+}
+
+export type CompactionTrigger = 'auto' | 'sidebar' | 'remote';
+
+export interface CompactionEvent {
+  conversationId: string;
+  phase: 'started' | 'finished';
+  /** Set on 'finished' only — the true terminal outcome. */
+  outcome?: CompactionOutcome;
+  /** Which path started this compaction; drives remote delivery policy. */
+  trigger: CompactionTrigger;
+  /** Set when trigger === 'remote' so the origin chat is identifiable. */
+  remoteOrigin?: { channel: string; chatId: string };
 }
 
 export type CompactionOutcome = 'compacted' | 'skipped' | 'failed';
@@ -94,8 +113,14 @@ export const MAX_CONSECUTIVE_AUTO_CONTINUES = 2;
 export async function runCompaction(
   deps: CompactionDeps,
   conversationId: string,
-  options: { auto: boolean } = { auto: false },
+  options: {
+    auto: boolean;
+    trigger?: CompactionTrigger;
+    remoteOrigin?: { channel: string; chatId: string };
+  } = { auto: false },
 ): Promise<CompactionOutcome> {
+  const trigger: CompactionTrigger = options.trigger ?? 'sidebar';
+  const remoteOrigin = options.trigger === 'remote' ? options.remoteOrigin : undefined;
   if (deps.isStreaming(conversationId)) {
     void vscode.window.showInformationMessage(
       'Forge: wait for the current response to finish before compacting.',
@@ -145,8 +170,18 @@ export async function runCompaction(
   // than racing the cut point.
   deps.post({ type: 'generationStarted', conversationId: conv.id });
   const release = deps.beginCompaction(conv.id);
+  // 'started' only after the split is valid — pre-start skips/failures (no
+  // conversation, not enough history, still streaming) emit nothing, so the
+  // remote layer never reports progress for a compaction that never began.
+  deps.emitCompactionEvent?.({
+    conversationId: conv.id,
+    phase: 'started',
+    trigger,
+    ...(remoteOrigin ? { remoteOrigin } : {}),
+  });
   let summary: string;
   let repoState = '';
+  let outcome: CompactionOutcome = 'failed';
   try {
     // Keep the conversation busy while the bounded snapshot runs. Awaiting it
     // before beginCompaction left a window in which a new turn could start and
@@ -188,6 +223,14 @@ export async function runCompaction(
       message: `Forge: compaction failed — ${(err as Error).message}`,
       conversationId: conv.id,
     });
+    outcome = 'failed';
+    deps.emitCompactionEvent?.({
+      conversationId: conv.id,
+      phase: 'finished',
+      outcome,
+      trigger,
+      ...(remoteOrigin ? { remoteOrigin } : {}),
+    });
     return 'failed';
   } finally {
     release();
@@ -202,6 +245,14 @@ export async function runCompaction(
         ? 'Forge: compaction produced no usable summary — context is unchanged.'
         : 'Forge: compaction returned no summary.',
     );
+    outcome = 'failed';
+    deps.emitCompactionEvent?.({
+      conversationId: conv.id,
+      phase: 'finished',
+      outcome,
+      trigger,
+      ...(remoteOrigin ? { remoteOrigin } : {}),
+    });
     return 'failed';
   }
 
@@ -232,7 +283,18 @@ export async function runCompaction(
       'Forge: context compacted. Your chat history is unchanged.',
     );
   }
-  return 'compacted';
+  outcome = 'compacted';
+  // Exactly one 'finished', after validation, carrying the true terminal
+  // outcome. Not emitted in the summarization finally — that runs before the
+  // summary is checked and would lie about a rejected summary.
+  deps.emitCompactionEvent?.({
+    conversationId: conv.id,
+    phase: 'finished',
+    outcome,
+    trigger,
+    ...(remoteOrigin ? { remoteOrigin } : {}),
+  });
+  return outcome;
 }
 
 export {

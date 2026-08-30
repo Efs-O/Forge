@@ -318,7 +318,7 @@ describe('remote owner commands', () => {
     await expect(
       channel.emit(event({ providerMessageId: 'compact', text: '/compact' })),
     ).resolves.toEqual({ kind: 'handled' });
-    expect(forgeHost.compact).toHaveBeenCalledWith('c1');
+    expect(forgeHost.compact).toHaveBeenCalledWith('c1', expect.objectContaining({ trigger: 'remote' }));
     expect(channel.sent.at(-1)?.text).toContain('compaction compacted');
     await controller.stop();
   });

@@ -1,3 +1,4 @@
+import type { CompactionOutcome } from '../sidebar/CompactionService';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
@@ -130,7 +131,35 @@ async function executeRemoteCommand(
   if (command === '/compact') {
     const binding = context.store.binding(event.channel, event.chatId);
     if (!binding) return { kind: 'rejected', reason: 'no conversation is bound' };
-    const outcome = await context.host.compact(binding.conversationId);
+    const progressId = await context.channel
+      .sendProgress?.(event.chatId, 'Forge: compacting…', { signal: context.signal })
+      .catch(() => undefined);
+    let outcome: CompactionOutcome;
+    try {
+      outcome = await context.host.compact(binding.conversationId, {
+        trigger: 'remote',
+        remoteOrigin: { channel: event.channel, chatId: event.chatId },
+      });
+    } catch (err) {
+      // Only a throw from host.compact itself (no outcome available) edits the
+      // progress line to failed; the error then flows through the existing
+      // command error path below.
+      await editProgress(context.channel, event.chatId, progressId, 'Forge: compaction failed.');
+      throw err;
+    }
+    // Edit the progress line from the captured outcome BEFORE the authoritative
+    // result send, so a send failure after a successful compaction never
+    // displays a false "failed" state.
+    await editProgress(
+      context.channel,
+      event.chatId,
+      progressId,
+      outcome === 'compacted'
+        ? 'Forge: compaction complete.'
+        : outcome === 'skipped'
+          ? 'Forge: compaction skipped.'
+          : 'Forge: compaction failed.',
+    );
     const budget = context.host.contextBudget(binding.conversationId);
     await context.channel.send(
       event.chatId,
@@ -323,6 +352,17 @@ async function executeRemoteCommand(
     return { kind: 'handled' };
   }
   return { kind: 'rejected', reason: 'unknown command' };
+}
+
+/** Best-effort edit of a progress message; silently skipped when unsupported. */
+async function editProgress(
+  channel: RemoteChannel,
+  chatId: string,
+  messageId: string | undefined,
+  text: string,
+): Promise<void> {
+  if (!messageId || !channel.editMessage) return;
+  await channel.editMessage(chatId, messageId, text).catch(() => undefined);
 }
 
 function globalBusyReason(context: RemoteCommandContext): string | undefined {

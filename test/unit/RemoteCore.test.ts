@@ -6,9 +6,11 @@ import type * as vscode from 'vscode';
 import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
 import { RemoteAuth } from '../../src/remote/RemoteAuth';
 import { RemoteController } from '../../src/remote/RemoteController';
+import { handleRemoteCommand } from '../../src/remote/RemoteCommandHandler';
 import { RemoteRequestStore, remoteDedupKey } from '../../src/remote/RemoteRequestStore';
 import { RemoteLeaseError, RemoteTransportLease } from '../../src/remote/RemoteTransportLease';
 import type { RemoteInboundEvent, RemoteRequestRecord } from '../../src/remote/types';
+import type { CompactionOutcome } from '../../src/sidebar/CompactionService';
 import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
 import { ForgeConfigSchema } from '../../src/config/schema';
 import type { ToolApprovalSink } from '../../src/sidebar/ToolApprovalService';
@@ -502,5 +504,287 @@ describe('RemoteController with fake channel', () => {
       }),
     ).resolves.toMatchObject({ kind: 'rejected' });
     await controller.stop();
+  });
+});
+
+describe('remote compaction progress notifications', () => {
+  function authFixture(): RemoteAuth {
+    const secrets = new MemorySecrets();
+    secrets.values.set('forge.remote.fake.ownerId', 'owner');
+    return new RemoteAuth(secrets as unknown as vscode.SecretStorage);
+  }
+
+  function controllerFixture(
+    channel: FakeRemoteChannel,
+    store: RemoteRequestStore,
+    host: Partial<ForgeHostFacade>,
+  ): RemoteController {
+    return new RemoteController(
+      channel,
+      store,
+      authFixture(),
+      host as unknown as ForgeHostFacade,
+      {
+        workspaceId: 'workspace',
+        queueLimit: 5,
+        maxMessageChars: 4000,
+        rateLimitPerMinute: 30,
+        modelNames: [],
+      },
+    );
+  }
+
+  it('reverse-looks-up bindings per conversation and filters by transport', async () => {
+    const state = await store();
+    await state.setBinding({
+      channel: 'fake',
+      chatId: 'chat-a',
+      workspaceId: 'workspace',
+      conversationId: 'c1',
+    });
+    await state.setBinding({
+      channel: 'fake',
+      chatId: 'chat-b',
+      workspaceId: 'workspace',
+      conversationId: 'c1',
+    });
+    await state.setBinding({
+      channel: 'telegram',
+      chatId: 'tg-1',
+      workspaceId: 'workspace',
+      conversationId: 'c1',
+    });
+
+    const all = state.bindingsForConversation('c1');
+    expect(all.map((item) => item.chatId).sort()).toEqual(['chat-a', 'chat-b', 'tg-1']);
+
+    const fakeOnly = state.bindingsForConversation('c1', 'fake');
+    expect(fakeOnly.map((item) => item.chatId).sort()).toEqual(['chat-a', 'chat-b']);
+
+    expect(state.bindingsForConversation('missing')).toEqual([]);
+  });
+
+  it('notifies the outbox once per bound chat and only for its own transport', async () => {
+    const state = await store();
+    await state.setBinding({
+      channel: 'fake',
+      chatId: 'chat-a',
+      workspaceId: 'workspace',
+      conversationId: 'c1',
+    });
+    await state.setBinding({
+      channel: 'telegram',
+      chatId: 'tg-1',
+      workspaceId: 'workspace',
+      conversationId: 'c1',
+    });
+
+    const channel = new FakeRemoteChannel();
+    const controller = controllerFixture(channel, state, {
+      addApprovalSink: () => ({ dispose: () => undefined }),
+    });
+    await controller.start();
+    try {
+      await controller.enqueueHostNotification('c1', 'Forge: compacting…');
+      const pending = state.pendingOutbox('fake');
+      expect(pending).toHaveLength(1);
+      expect(pending[0].chatId).toBe('chat-a');
+      expect(pending[0].text).toBe('Forge: compacting…');
+      expect(pending[0].requestId).toMatch(/^host-/);
+      // The telegram binding belongs to another transport's controller.
+      expect(state.pendingOutbox('telegram')).toHaveLength(0);
+    } finally {
+      await controller.stop();
+    }
+  });
+
+  it('is a no-op when the conversation has no binding on this transport', async () => {
+    const state = await store();
+    const channel = new FakeRemoteChannel();
+    const controller = controllerFixture(channel, state, {
+      addApprovalSink: () => ({ dispose: () => undefined }),
+    });
+    await controller.start();
+    try {
+      await controller.enqueueHostNotification('unbound', 'Forge: compacting…');
+      expect(state.pendingOutbox()).toHaveLength(0);
+    } finally {
+      await controller.stop();
+    }
+  });
+
+  it('delivers an enqueued host notification through the outbox loop', async () => {
+    const state = await store();
+    await state.setBinding({
+      channel: 'fake',
+      chatId: 'chat-a',
+      workspaceId: 'workspace',
+      conversationId: 'c1',
+    });
+    const channel = new FakeRemoteChannel();
+    const controller = controllerFixture(channel, state, {
+      addApprovalSink: () => ({ dispose: () => undefined }),
+    });
+    await controller.start();
+    try {
+      await controller.enqueueHostNotification('c1', 'Forge: compacting…');
+      // The delivery loop is async; wait for the outbox to drain.
+      for (let i = 0; i < 50 && state.pendingOutbox().length > 0; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(channel.sent).toContainEqual(
+        expect.objectContaining({ chatId: 'chat-a', text: 'Forge: compacting…' }),
+      );
+      expect(state.outboxHealth().pending).toBe(0);
+    } finally {
+      await controller.stop();
+    }
+  });
+
+  it('edits /compact progress from the outcome and still sends the result', async () => {
+    const state = await store();
+    await state.setBinding({
+      channel: 'fake',
+      chatId: 'chat-a',
+      workspaceId: 'workspace',
+      conversationId: 'c1',
+    });
+    const compact = vi.fn(async () => 'compacted' as const);
+    const channel = new FakeRemoteChannel();
+    const context = {
+      channel,
+      store: state,
+      host: {
+        compact,
+        contextBudget: () => ({ used: 1, max: 2 }),
+      },
+      workspaceId: 'workspace',
+      signal: new AbortController().signal,
+      inactivityTimeoutMinutes: 30,
+      modelNames: [],
+      workspaceAliases: {},
+    };
+    await handleRemoteCommand(
+      {
+        channel: 'fake',
+        kind: 'text',
+        providerMessageId: 'compact-1',
+        senderId: 'owner',
+        chatId: 'chat-a',
+        chatType: 'private',
+        receivedAt: 1,
+        text: '/compact',
+      } as RemoteInboundEvent,
+      context as never,
+      'compact-dedup',
+    );
+    expect(compact).toHaveBeenCalledWith('c1', {
+      trigger: 'remote',
+      remoteOrigin: { channel: 'fake', chatId: 'chat-a' },
+    });
+    expect(channel.progress).toContainEqual({ chatId: 'chat-a', text: 'Forge: compacting…' });
+    expect(channel.edits).toContainEqual(
+      expect.objectContaining({ chatId: 'chat-a', text: 'Forge: compaction complete.' }),
+    );
+    expect(channel.sent).toContainEqual(
+      expect.objectContaining({
+        chatId: 'chat-a',
+        text: expect.stringContaining('Forge: compaction compacted'),
+      }),
+    );
+  });
+
+  it('reports a /compact host failure as failed, not complete', async () => {
+    const state = await store();
+    await state.setBinding({
+      channel: 'fake',
+      chatId: 'chat-a',
+      workspaceId: 'workspace',
+      conversationId: 'c1',
+    });
+    const compact = vi.fn(async () => 'failed' as const);
+    const channel = new FakeRemoteChannel();
+    const context = {
+      channel,
+      store: state,
+      host: {
+        compact,
+        contextBudget: () => ({ used: 1, max: 2 }),
+      },
+      workspaceId: 'workspace',
+      signal: new AbortController().signal,
+      inactivityTimeoutMinutes: 30,
+      modelNames: [],
+      workspaceAliases: {},
+    };
+    await handleRemoteCommand(
+      {
+        channel: 'fake',
+        kind: 'text',
+        providerMessageId: 'compact-2',
+        senderId: 'owner',
+        chatId: 'chat-a',
+        chatType: 'private',
+        receivedAt: 2,
+        text: '/compact',
+      } as RemoteInboundEvent,
+      context as never,
+      'compact-dedup-2',
+    );
+    expect(channel.edits).toContainEqual(
+      expect.objectContaining({ chatId: 'chat-a', text: 'Forge: compaction failed.' }),
+    );
+    expect(channel.sent).toContainEqual(
+      expect.objectContaining({
+        chatId: 'chat-a',
+        text: expect.stringContaining('Forge: compaction failed'),
+      }),
+    );
+  });
+
+  it('edits /compact progress to failed when host.compact throws', async () => {
+    const state = await store();
+    await state.setBinding({
+      channel: 'fake',
+      chatId: 'chat-a',
+      workspaceId: 'workspace',
+      conversationId: 'c1',
+    });
+    const compact = vi.fn(async (): Promise<CompactionOutcome> => {
+      throw new Error('backend down');
+    });
+    const channel = new FakeRemoteChannel();
+    const context = {
+      channel,
+      store: state,
+      host: {
+        compact,
+        contextBudget: () => ({ used: 1, max: 2 }),
+      },
+      workspaceId: 'workspace',
+      signal: new AbortController().signal,
+      inactivityTimeoutMinutes: 30,
+      modelNames: [],
+      workspaceAliases: {},
+    };
+    await expect(
+      handleRemoteCommand(
+        {
+          channel: 'fake',
+          kind: 'text',
+          providerMessageId: 'compact-3',
+          senderId: 'owner',
+          chatId: 'chat-a',
+          chatType: 'private',
+          receivedAt: 3,
+          text: '/compact',
+        } as RemoteInboundEvent,
+        context as never,
+        'compact-dedup-3',
+      ),
+    ).rejects.toThrow('backend down');
+    expect(channel.edits).toContainEqual(
+      expect.objectContaining({ chatId: 'chat-a', text: 'Forge: compaction failed.' }),
+    );
   });
 });

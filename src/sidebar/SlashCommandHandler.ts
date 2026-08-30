@@ -5,7 +5,13 @@ import type { IBackendPool } from '../backend/BackendPool';
 import type { ForgeConfig } from '../config/types';
 import type { ForgeSlashCommandId } from './messageBridge';
 import type { SidebarProviderEvents } from './AgentLoop';
-import { runCompaction, type CompactionDeps, type CompactionOutcome } from './CompactionService';
+import {
+  runCompaction,
+  type CompactionDeps,
+  type CompactionEvent,
+  type CompactionOutcome,
+  type CompactionTrigger,
+} from './CompactionService';
 import {
   preferredProjectInstructionsPath,
   resolveInstructionScopeRoot,
@@ -35,7 +41,15 @@ export interface SlashCommandDeps extends CompactionDeps {
 }
 
 export class SlashCommandHandler {
+  /** Remote transports subscribe here to observe compaction progress. */
+  readonly compactionListeners = new Set<(event: CompactionEvent) => void>();
+
   constructor(private readonly deps: SlashCommandDeps) {}
+
+  onCompactionEvent(listener: (event: CompactionEvent) => void): { dispose(): void } {
+    this.compactionListeners.add(listener);
+    return { dispose: () => this.compactionListeners.delete(listener) };
+  }
 
   async handle(commandId: ForgeSlashCommandId): Promise<void> {
     const { deps } = this;
@@ -424,7 +438,11 @@ Be specific and factual. Do not invent paths or names not present in the scan re
   /** Addressed entry point used by background request chains. */
   async compactConversation(
     conversationId: string,
-    options: { auto: boolean } = { auto: false },
+    options: {
+      auto: boolean;
+      trigger?: CompactionTrigger;
+      remoteOrigin?: { channel: string; chatId: string };
+    } = { auto: false },
   ): Promise<CompactionOutcome> {
     return runCompaction(this.deps, conversationId, options);
   }

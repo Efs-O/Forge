@@ -570,6 +570,44 @@ describe('runCompaction', () => {
     expect(c.compaction?.summary).toContain('…[truncated]');
   });
 
+  it('emits started once and finished(compacted) after validation', async () => {
+    const c = conv([...base]);
+    const h = harness(c, async () => long('summary'));
+    const events: unknown[] = [];
+    const deps: CompactionDeps = { ...h.deps, emitCompactionEvent: (event) => events.push(event) };
+
+    expect(await runCompaction(deps, c.id, { auto: true, trigger: 'auto' })).toBe('compacted');
+    expect(events).toEqual([
+      { conversationId: c.id, phase: 'started', trigger: 'auto' },
+      { conversationId: c.id, phase: 'finished', outcome: 'compacted', trigger: 'auto' },
+    ]);
+  });
+
+  it('emits finished(failed) when the summarization throws', async () => {
+    const c = conv([...base]);
+    const h = harness(c, async () => {
+      throw new Error('backend down');
+    });
+    const events: unknown[] = [];
+    const deps: CompactionDeps = { ...h.deps, emitCompactionEvent: (event) => events.push(event) };
+
+    expect(await runCompaction(deps, c.id, { auto: true, trigger: 'auto' })).toBe('failed');
+    expect(events).toEqual([
+      { conversationId: c.id, phase: 'started', trigger: 'auto' },
+      { conversationId: c.id, phase: 'finished', outcome: 'failed', trigger: 'auto' },
+    ]);
+  });
+
+  it('emits nothing when there is not enough history to compact', async () => {
+    const c = conv([]);
+    const h = harness(c, async () => long('summary'));
+    const events: unknown[] = [];
+    const deps: CompactionDeps = { ...h.deps, emitCompactionEvent: (event) => events.push(event) };
+
+    expect(await runCompaction(deps, c.id, { auto: true, trigger: 'auto' })).toBe('skipped');
+    expect(events).toEqual([]);
+  });
+
   it('skips while a turn is streaming', async () => {
     const c = conv([...base]);
     const h = harness(c, async () => long('summary'));

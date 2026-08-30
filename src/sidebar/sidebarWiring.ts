@@ -22,6 +22,7 @@ import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
 import type { CliSessionRegistry } from '../agents/CliSessionRegistry';
 import { AgentLoop, type SidebarProviderEvents } from './AgentLoop';
 import { SlashCommandHandler } from './SlashCommandHandler';
+import type { CompactionEvent } from './CompactionService';
 import { ContextBudgetPublisher } from './ContextBudgetPublisher';
 import { ConversationTabs } from './ConversationTabs';
 import { SendPipeline } from './SendPipeline';
@@ -50,6 +51,7 @@ export interface SidebarHost {
     chain: RequestChainContext,
   ) => Promise<ContextThresholdAction | undefined>;
   resumeAfterManualCompact: (conversationId: string, reason: string) => Promise<void>;
+  emitCompactionEvent: (event: CompactionEvent) => void;
   reindexCodebase: () => Promise<void>;
   newConversation: () => Promise<void>;
   clearMessages: () => void;
@@ -149,6 +151,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     incompleteTurnReason: (conversationId) => agentLoop.incompleteTurnReason(conversationId),
     resumeAfterManualCompact: (conversationId, reason) =>
       host.resumeAfterManualCompact(conversationId, reason),
+    emitCompactionEvent: (event) => host.emitCompactionEvent(event),
     toggleClanker: () => {
       const on = agentLoop.toggleClanker();
       host.rememberClankerMode(on);

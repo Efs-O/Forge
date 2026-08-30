@@ -138,6 +138,98 @@ rejected.
    the Telegram lease and the other reports a visible ownership failure. Close
    the second window before continuing.
 
+### 5. Validate the extended remote controls
+
+Run these checks after pairing, in a private chat with the paired owner. Keep
+the VS Code Extension Host log open while testing so a failed command has a
+visible local error as well as its Telegram reply.
+
+#### Conversation identity, list, and model selection
+
+1. Send `/new`, then send one harmless prompt such as `Say hello in one
+   sentence.` The first completed answer must start with `Chat:` and contain a
+   short conversation ID. Send a second prompt: the label must not repeat.
+2. Send `/status`. Confirm it shows the bound chat title/ID, selected model
+   (or `default`), context meter, queue count, and approval mode.
+3. Send `/list`. Confirm numbered entries show a title, short ID, model, last
+   activity, and `archived` where applicable. Send `/resume 1`; it must bind
+   exactly the first entry from that list. Also test `/resume <full-id>`.
+4. Send `/models`, then `/model 1`. Confirm Forge reports the selected model.
+   In VS Code, restore that conversation and confirm its model pin is visible.
+   Confirm the sidebar's global/default model and currently visible tab do not
+   change. Start a request, queue another, then try `/model 1`: it must refuse
+   while the chat is busy.
+
+#### Queue and backend controls
+
+1. Start a slow prompt and send two more prompts. `/queue` must list only the
+   bound chat's queued prompts, truncated rather than exposing unlimited text.
+2. While any request, stream, queue, or approval is active, send `/unload` and
+   `/restart`. Both must refuse without cancelling unrelated work.
+3. Once Forge is globally idle, send `/unload`. Confirm loaded Forge-owned
+   backends are released and the next prompt can load normally.
+4. With a model explicitly selected by `/model`, send `/restart`. Confirm only
+   that model is released/reacquired. In a chat with no explicit pin, `/restart`
+   must refuse and must not silently restart the global default.
+
+#### Attachments
+
+First enable the feature in `.forge/config.yaml`, reload the window, and pair
+again if needed:
+
+```yaml
+remote:
+  attachments:
+    enabled: true
+    retain_days: 30
+    accept_pdf: true
+```
+
+1. Send a PNG or JPEG under 10 MiB, then ask a vision-capable selected model to
+   describe it. Confirm it is accepted only when the model supports vision.
+2. Send a `.md`, `.txt`, `.ts`, or another supported source file under 2 MiB
+   and ask the agent to summarise it. Confirm it is available to that turn.
+3. Send a text PDF under 10 MiB and ask for a summary. Confirm the original is
+   preserved in `.forge/remote-inbox/` and extracted text, not raw PDF bytes,
+   reaches the agent.
+4. Confirm voice notes, audio/video, archives, executables, Office files,
+   oversized files, malformed PDFs, and scanned/image-only PDFs receive a
+   clear rejection. A rejected file must not create a tracked project file.
+5. Inspect the workspace: sidecar files belong only below
+   `.forge/remote-inbox/<conversation-id>/<request-id>/`. They must never land
+   in the repository's normal tracked directories. After reducing
+   `retain_days` for a controlled test and reloading Forge, old sidecar
+   conversation directories should be removed; nothing outside that inbox may
+   be touched.
+
+#### Workspace handoff
+
+Configure only explicit existing paths; aliases are case-sensitive command
+names and are never inferred from a message:
+
+```yaml
+remote:
+  workspace_aliases:
+    ssuno:
+      path: N:/vs code apps/Ssuno
+      display_name: Ssuno
+```
+
+1. Send `/workspace list`; it must list `ssuno — Ssuno` and no filesystem
+   paths.
+2. Send `/new not-a-real-workspace`. It must reply `Forge: workspace
+   “not-a-real-workspace” was not found. Use /workspace list.` It must not
+   create a folder.
+3. Send `/new ssuno`. Forge should acknowledge the switch, release the source
+   Telegram lease, and open the Ssuno workspace. Wait for its VS Code window to
+   finish loading, then send `/status` in the same Telegram chat. It must be
+   bound to a new conversation in Ssuno; the source conversation remains in
+   the source workspace unchanged.
+4. Verify only one VS Code window owns the Telegram lease after handoff. If
+   target activation fails, do not retry blindly: inspect the Extension Host
+   log and keep the source workspace open until the durable handoff state is
+   understood.
+
 ## Traps found in the first real-device run (2026-08-29)
 
 Every one of these cost time on the first pass. Check them before concluding a

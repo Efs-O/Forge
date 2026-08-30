@@ -106,6 +106,49 @@ export class RemoteRequestStore {
     return this.state.bindings.find((item) => item.channel === channel && item.chatId === chatId);
   }
 
+  /**
+   * Reverse of `binding()`: every chat bound to a conversation, optionally
+   * restricted to one transport. Returns clones — callers must not mutate the
+   * store's state. A conversation may be bound to several chats/transports, so
+   * this returns an array, not one record.
+   */
+  bindingsForConversation(
+    conversationId: string,
+    channel?: RemoteBinding['channel'],
+  ): RemoteBinding[] {
+    return this.state.bindings
+      .filter(
+        (item) =>
+          item.conversationId === conversationId &&
+          (channel === undefined || item.channel === channel),
+      )
+      .map((item) => ({ ...item }));
+  }
+
+  /**
+   * Enqueue a host-originated notification that has no backing request (e.g. a
+   * compaction progress line). Durable write only — it does NOT wake the
+   * delivery loop; the caller (RemoteController) must kick delivery after this.
+   */
+  async notifyOutbox(
+    channel: RemoteOutboxRecord['channel'],
+    chatId: string,
+    text: string,
+  ): Promise<void> {
+    await this.mutate((draft) => {
+      draft.outbox.push({
+        id: randomUUID(),
+        requestId: `host-${randomUUID()}`,
+        channel,
+        chatId,
+        text,
+        state: 'pending',
+        attempts: 0,
+        updatedAt: Date.now(),
+      });
+    });
+  }
+
   async setBinding(binding: RemoteBinding): Promise<void> {
     await this.mutate((draft) => {
       draft.bindings = draft.bindings.filter(

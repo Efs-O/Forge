@@ -1,7 +1,7 @@
 import type { AttachmentData } from './messageBridge';
 import type { ConversationRuntime } from './sessionTypes';
 import type { ForgeRequestOutcome } from './turnOutcome';
-import type { CompactionOutcome } from './CompactionService';
+import type { CompactionEvent, CompactionOutcome, CompactionTrigger } from './CompactionService';
 import type { RequestChainStatus } from './RequestChainLifecycle';
 import type { ToolApprovalRequestEvent, ToolApprovalSink } from './ToolApprovalService';
 
@@ -47,10 +47,22 @@ export interface ForgeHostFacade {
   setClankerMode(on: boolean): void;
   /** Per-slot context for one conversation — `num_ctx / n_parallel`, not num_ctx. */
   contextBudget(conversationId: string): { used: number; max: number } | undefined;
-  compact(conversationId: string): Promise<CompactionOutcome>;
+  compact(
+    conversationId: string,
+    options?: {
+      trigger?: CompactionTrigger;
+      remoteOrigin?: { channel: string; chatId: string };
+    },
+  ): Promise<CompactionOutcome>;
   setConversationModel(conversationId: string, modelName: string | null): Promise<void>;
   unloadModels(): Promise<void>;
   restartModel(modelName: string): Promise<void>;
+  /**
+   * Subscribe to compaction progress events emitted by the sidebar.
+   * Optional: fakes that omit it keep compiling; the runtime uses optional
+   * chaining so a missing method is a no-op, not an error.
+   */
+  onCompactionEvent?(listener: (event: CompactionEvent) => void): { dispose(): void };
 }
 
 export interface SidebarHostFacadeDeps {
@@ -78,10 +90,17 @@ export interface SidebarHostFacadeDeps {
   clankerMode: () => boolean;
   setClankerMode: (on: boolean) => void;
   contextBudget: (conversationId: string) => { used: number; max: number } | undefined;
-  compact: (conversationId: string) => Promise<CompactionOutcome>;
+  compact: (
+    conversationId: string,
+    options?: {
+      trigger?: CompactionTrigger;
+      remoteOrigin?: { channel: string; chatId: string };
+    },
+  ) => Promise<CompactionOutcome>;
   setConversationModel: (conversationId: string, modelName: string | null) => boolean;
   unloadModels: () => Promise<void>;
   restartModel: (modelName: string) => Promise<void>;
+  onCompactionEvent?: (listener: (event: CompactionEvent) => void) => { dispose(): void };
 }
 
 function summarize(conv: ConversationRuntime, archived: boolean): ForgeConversationSummary {
@@ -154,8 +173,14 @@ export class SidebarHostFacade implements ForgeHostFacade {
     return this.deps.contextBudget(conversationId);
   }
 
-  compact(conversationId: string): Promise<CompactionOutcome> {
-    return this.deps.compact(conversationId);
+  compact(
+    conversationId: string,
+    options?: {
+      trigger?: CompactionTrigger;
+      remoteOrigin?: { channel: string; chatId: string };
+    },
+  ): Promise<CompactionOutcome> {
+    return this.deps.compact(conversationId, options);
   }
 
   async setConversationModel(conversationId: string, modelName: string | null): Promise<void> {
@@ -170,6 +195,10 @@ export class SidebarHostFacade implements ForgeHostFacade {
 
   restartModel(modelName: string): Promise<void> {
     return this.deps.restartModel(modelName);
+  }
+
+  onCompactionEvent(listener: (event: CompactionEvent) => void): { dispose(): void } {
+    return this.deps.onCompactionEvent!(listener);
   }
 
   status(): ForgeHostStatus {

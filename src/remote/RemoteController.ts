@@ -108,6 +108,23 @@ export class RemoteController {
     await this.outbox.stop();
   }
 
+  /**
+   * Enqueue a host-originated notification (e.g. a compaction progress line)
+   * for every chat on THIS transport bound to the conversation, then wake the
+   * delivery loop. `notifyOutbox` is a durable write only; without the kick an
+   * idle outbox would sit on the item until an unrelated retry. Filtering by
+   * this channel's name is what keeps a Telegram+WhatsApp setup from
+   * double-delivering: each transport's controller only reaches its own chats.
+   */
+  async enqueueHostNotification(conversationId: string, text: string): Promise<void> {
+    const bindings = this.store.bindingsForConversation(conversationId, this.channel.name);
+    if (bindings.length === 0) return;
+    for (const binding of bindings) {
+      await this.store.notifyOutbox(binding.channel, binding.chatId, text);
+    }
+    this.outbox.kick();
+  }
+
   async handle(raw: RemoteInboundEvent): Promise<RemoteInboundDisposition> {
     if (!this.accepting) return { kind: 'retry', reason: 'remote runtime is stopping' };
     const parsed = RemoteInboundEventSchema.safeParse(raw);

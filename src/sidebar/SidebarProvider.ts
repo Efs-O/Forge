@@ -3,11 +3,10 @@ import type { IBackendPool } from '../backend/BackendPool';
 import type { ForgeConfig, ModelConfig } from '../config/types';
 import { perSlotContext, reportedContextTokens } from '../util/contextBudget';
 import { expandAlias, mergeGroupsIntoModel, splitModelProfile } from '../config/ConfigResolver';
-import type { HostToWebview, WebviewToHost } from './messageBridge';
+import type { HostToWebview, WebviewToHost, AttachmentData } from './messageBridge';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
 import type { CliSessionRegistry } from '../agents/CliSessionRegistry';
 import { loadSidebarSession, saveSidebarSession } from './sessionTypes';
-import type { AttachmentData } from './messageBridge';
 import { CheckpointStack } from '../checkpoint/CheckpointStack';
 import { ToolRegistry } from '../tools/ToolRegistry';
 import type { KeepUndoCodeLensProvider } from './KeepUndoCodeLens';
@@ -110,6 +109,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         autoCompact: (conv, chain) => this.autoCompact(conv, chain),
         resumeAfterManualCompact: (conversationId, reason) =>
           this.resumeAfterManualCompact(conversationId, reason),
+        emitCompactionEvent: (event) => {
+          for (const listener of this.slashHandler.compactionListeners) listener(event);
+        },
         reindexCodebase: () => this.reindexCodebase(),
         newConversation: () => this.newConversation(),
         clearMessages: () => this.tabs.clearActive(),
@@ -164,8 +166,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       // it was set from. The sidebar toggle keeps its own workspaceState memory.
       setClankerMode: (on) => this.agentLoop.setClankerMode(on),
       contextBudget: (conversationId) => this.contextBudgetOf(conversationId),
-      compact: (conversationId) =>
-        this.slashHandler.compactConversation(conversationId, { auto: false }),
+      onCompactionEvent: (listener) => this.slashHandler.onCompactionEvent(listener),
+      compact: (conversationId, options) =>
+        this.slashHandler.compactConversation(conversationId, {
+          auto: false,
+          ...(options?.trigger ? { trigger: options.trigger } : {}),
+          ...(options?.remoteOrigin ? { remoteOrigin: options.remoteOrigin } : {}),
+        }),
       setConversationModel: (conversationId, modelName) =>
         this.tabs.setModelById(conversationId, modelName),
       unloadModels: () => this.unloadModels(),
@@ -373,7 +380,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         post: (message) => this.post(message),
         requestChains: this.requestChains,
         compact: (conversationId) =>
-          this.slashHandler.compactConversation(conversationId, { auto: true }),
+          this.slashHandler.compactConversation(conversationId, { auto: true, trigger: 'auto' }),
         incompleteTurnReason: (conversationId) =>
           this.agentLoop.incompleteTurnReason(conversationId),
         resumeEnabled: () => this.config.auto_compact?.resume !== false,

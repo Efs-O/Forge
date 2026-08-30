@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { createHash } from 'crypto';
 import type * as vscode from 'vscode';
 import type { ForgeConfig } from '../config/types';
+import type { CompactionEvent } from '../sidebar/CompactionService';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import { RemoteAuth } from './RemoteAuth';
 import { RemoteController } from './RemoteController';
@@ -36,6 +37,7 @@ interface ActiveTransport {
   channel: RemoteChannel;
   controller: RemoteController;
   lease: RemoteTransportLease;
+  compactionSubscription?: { dispose(): void } | undefined;
 }
 
 export interface RemoteValidationStatus {
@@ -255,7 +257,10 @@ export class RemoteRuntime {
             this.audit,
           );
           await controller.start();
-          this.active.set(channelName, { channel, controller, lease });
+          const compactionSubscription = this.options.host.onCompactionEvent?.((event) =>
+            this.onCompactionEvent(event, controller),
+          );
+          this.active.set(channelName, { channel, controller, lease, compactionSubscription });
         } catch (err) {
           await lease.release();
           throw err;
@@ -355,8 +360,33 @@ export class RemoteRuntime {
     const transport = this.active.get(name);
     if (!transport) return;
     this.active.delete(name);
+    transport.compactionSubscription?.dispose();
     await transport.controller.stop();
     await transport.lease.release();
+  }
+
+  /**
+   * Delivery policy for host-originated compaction events:
+   * - trigger 'auto'  → notify on started + finished (primary new capability)
+   * - trigger 'remote' → suppress (the /compact handler already sent progress)
+   * - trigger 'sidebar' → suppress (local actions are not mirrored by default)
+   */
+  private onCompactionEvent(event: CompactionEvent, controller: RemoteController): void {
+    if (event.trigger !== 'auto') return;
+    const text =
+      event.phase === 'started'
+        ? 'Forge: compacting…'
+        : event.outcome === 'compacted'
+          ? 'Forge: compaction complete.'
+          : event.outcome === 'skipped'
+            ? undefined
+            : 'Forge: compaction failed.';
+    if (text === undefined) return;
+    void controller.enqueueHostNotification(event.conversationId, text).catch((err) => {
+      this.options.notifyLocal(
+        `Forge remote compaction notification failed: ${(err as Error).message}`,
+      );
+    });
   }
 
   private async stopActive(): Promise<void> {
