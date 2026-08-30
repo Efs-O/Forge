@@ -278,10 +278,10 @@ read personal archives or secrets over a transport.
 Both were found here and are fixed; a build predating them cannot be validated.
 
 1. The heartbeat corrupted its own lease. `readFile()` left the handle at EOF and
-   `truncate(0)` does not rewind, so the follow-up write landed past the new
-   length and the kernel zero-filled the gap. The lease then read back as NUL
-   bytes and the transport shut itself down roughly 10 seconds after every
-   start, surfacing as `SyntaxError: Unexpected token ... is not valid JSON`.
+   the original rewrite could either zero-fill the file or expose an empty
+   truncate/write interval to another heartbeat or verifier. Heartbeats are now
+   serialized and replace the record with one complete offset-zero buffer, never
+   truncating first.
 2. A corrupt lease wedged acquisition permanently, because `acquire()` parsed the
    existing file before the staleness check. An unreadable lease is now treated
    as stale and reclaimed.

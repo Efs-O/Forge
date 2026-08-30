@@ -19,6 +19,7 @@ export class RemoteLeaseError extends Error {}
 
 export class RemoteTransportLease {
   private timer: ReturnType<typeof setInterval> | undefined;
+  private heartbeatTask: Promise<void> | undefined;
   private lost = false;
 
   private constructor(
@@ -95,6 +96,7 @@ export class RemoteTransportLease {
   async release(): Promise<void> {
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
+    await this.heartbeatTask;
     if (!(await this.verify())) return;
     await fs.unlink(this.filePath).catch((err: NodeJS.ErrnoException) => {
       if (err.code !== 'ENOENT') throw err;
@@ -102,25 +104,40 @@ export class RemoteTransportLease {
   }
 
   private startHeartbeat(): void {
-    this.timer = setInterval(() => void this.heartbeat(), this.heartbeatMs);
+    this.timer = setInterval(() => this.scheduleHeartbeat(), this.heartbeatMs);
+  }
+
+  private scheduleHeartbeat(): void {
+    if (this.heartbeatTask || this.lost) return;
+    const task = this.heartbeat();
+    const tracked = task.finally(() => {
+      if (this.heartbeatTask === tracked) this.heartbeatTask = undefined;
+    });
+    this.heartbeatTask = tracked;
   }
 
   private async heartbeat(): Promise<void> {
     let handle: fs.FileHandle | undefined;
     try {
       handle = await fs.open(this.filePath, 'r+');
-      const current = LeaseSchema.parse(JSON.parse(await handle.readFile('utf8')));
+      const previous = Buffer.from(await handle.readFile('utf8'));
+      const current = LeaseSchema.parse(JSON.parse(previous.toString('utf8')));
       if (current.token !== this.record.token) {
         this.lose('Forge remote transport lease was lost; inbound control has stopped.');
         return;
       }
       this.record.heartbeatAt = Date.now();
-      // readFile() left the handle at EOF and truncate() does not rewind it, so
-      // writeFile() here would append past the new length and the kernel would
-      // zero-fill the gap — the lease then reads back as NUL bytes and every
-      // later parse of it fails. Write at an explicit position instead.
-      await handle.truncate(0);
-      await handle.write(JSON.stringify(this.record), 0, 'utf8');
+      // Never truncate before writing: another heartbeat, verifier, or process
+      // could observe the empty interval and mistake this live lease for stale
+      // garbage. Write one complete buffer at offset zero. Padding preserves the
+      // previous file length if a field ever becomes shorter; JSON permits the
+      // trailing spaces. The normal heartbeat timestamp has fixed width.
+      const serialized = Buffer.from(JSON.stringify(this.record), 'utf8');
+      const next =
+        serialized.length < previous.length
+          ? Buffer.concat([serialized, Buffer.alloc(previous.length - serialized.length, 0x20)])
+          : serialized;
+      await handle.write(next, 0, next.length, 0);
     } catch (err) {
       this.lose(`Forge remote lease heartbeat failed: ${(err as Error).message}`);
     } finally {
