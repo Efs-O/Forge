@@ -10,8 +10,13 @@ to the configured messaging provider, and VS Code must remain running.
 - Only private chats are accepted. Group and channel messages fail closed.
 - Pairing uses an eight-digit, one-time code that expires after five minutes and
   stops accepting guesses after five failed attempts.
-- Provider credentials, owner IDs, and pairing codes use VS Code SecretStorage.
-  They never belong in `config.yaml`, workspace files, transcripts, or Git.
+- Provider credentials and owner IDs use VS Code SecretStorage. Pairing codes
+  and authenticated-session state exist only in memory. None of them belongs in
+  `config.yaml`, workspace files, transcripts, logs, or Git.
+- A locally enrolled Google Authenticator-compatible TOTP secret adds a second
+  gate. It is owner-bound in SecretStorage; the authenticated session and its
+  replay protection are memory-only, start locked after a reload, and lock
+  again after the configured inactivity timeout or `/lock`.
 - One fenced global-storage lease prevents two Forge windows from consuming the
   same transport. A window stops accepting input if it loses that lease.
 - Durable prompts, deduplication records, bindings, provider cursors, and the
@@ -34,11 +39,15 @@ internal permission prompts cannot be intercepted by Forge.
 2. Run `Forge: Set Telegram Bot Token`. The token is written to SecretStorage.
 3. Enable `remote.enabled` and `remote.telegram.enabled` in Forge config, then
    save/reload the configuration.
-4. Run `Forge: Pair Telegram Owner` and send the displayed `/pair 12345678`
+4. Run `Forge: Pair Telegram Remote` and send the displayed `/pair 12345678`
    command to the bot from a private chat before it expires.
+5. Recommended: run `Forge: Set Up Telegram Authenticator`, scan the local QR
+   code, and confirm one current six-digit code. The QR and manual key are never
+   sent through Telegram. After enrollment, send a current code whenever Forge
+   challenges you; use `/lock` when you want to end the remote session.
 
 Use `Forge: Configure Remote Control` for setup/status actions. To revoke access,
-run `Forge: Unpair Telegram Owner` and rotate the bot token with BotFather if the
+run `Forge: Unpair Telegram Remote` and rotate the bot token with BotFather if the
 token itself may have been exposed.
 
 Run `Forge: Validate Remote Control` for a credential-safe local report covering
@@ -47,13 +56,20 @@ provider reachability, durable request health, and notification delivery. The
 complete release checklist is in
 [real-device validation](REMOTE_CONTROL_VALIDATION.md).
 
-Remote commands are `/help`, `/status`, `/stop`, `/new`, and
-`/resume <conversation-id>`. `/stop` cancels the active addressed request; it
-does not unload the model, and durable queued requests remain queued.
+Remote commands are `/help`, `/status`, `/stop`, `/new`, `/list`,
+`/resume <number-or-id>`, `/models`, `/model <number-or-name>`, `/queue`,
+`/unload`, `/restart`, `/compact`, `/lock`, `/timeout [1-1440|off]`, and
+`/clanker on|off`. Configured workspace aliases are listed with
+`/workspace list` and opened with `/new <alias>`. `/stop` cancels the active
+addressed request; it does not unload the model, and durable queued requests
+remain queued. `/clanker on` removes the normal confirmation step for
+non-dangerous Forge-native tools and should be used deliberately.
 
 Telegram update offsets advance only after Forge has durably accepted, handled,
 rejected, or recognized an event as a duplicate. Final-response notification is
 separate from execution and uses an at-least-once outbox with bounded retries.
+Replacing the token with `Forge: Set Telegram Bot Token` recreates only the
+Telegram transport immediately; a VS Code reload is not required.
 
 ## WhatsApp status
 

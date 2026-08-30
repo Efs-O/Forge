@@ -22,7 +22,7 @@
   gap: 6px;
   min-height: 24px;
   padding: 0 12px;
-  font-size: 14px;
+  font-size: calc(var(--vscode-font-size, 13px) + 1px);
   color: var(--forge-accent, #0090ff);
   user-select: none;
   letter-spacing: 0.02em;

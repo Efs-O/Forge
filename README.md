@@ -57,13 +57,16 @@ telemetry, analytics, or auto-update pings.
 - Optional Tavily or Brave web search with keys stored in VS Code SecretStorage
 - Local semantic code search and reindex support
 - External MCP tool servers: bridge tools from any MCP stdio server into the agent's tool catalog with explicit capability classification
-- Optional private-owner remote control through Telegram; see [remote control setup and security](docs/REMOTE_CONTROL.md)
+- Optional private-owner remote control through Telegram, with local pairing and
+  Google Authenticator-compatible session locking; see [remote control setup and security](docs/REMOTE_CONTROL.md)
 
 ## What's New Since v0.12.3
 
 - Added opt-in, private-owner remote control with durable FIFO execution, deduplication,
   notification outbox, multi-window fencing, and the existing Forge approval gate
 - Added Telegram Bot API long polling with SecretStorage-backed setup and local pairing
+- Added owner-bound TOTP sessions, inactivity locking, remote conversation/model
+  controls, attachment handoff, and live agent/compaction progress
 - Added an experimental WhatsApp linked-device adapter with encrypted authentication state
 - Added OpenAI-compatible cloud-provider support, including `xai`, `openrouter`, `openai`, and generic `openai-compatible`
 - Added automatic xAI token resolution and refresh support

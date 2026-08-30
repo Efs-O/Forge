@@ -373,6 +373,7 @@ export class RemoteController {
         .sendProgress?.(next.chatId, 'Forge: working…', { signal: this.abort.signal })
         .catch(() => undefined);
       if (progressId) this.progress.begin(conversationId, next.chatId, progressId);
+      let progressOutcome: 'completed' | 'cancelled' | 'failed' | 'queued' = 'failed';
       try {
         const attachments = next.attachments?.length
           ? await this.options.attachmentStore?.load(next.attachments)
@@ -384,6 +385,7 @@ export class RemoteController {
           remoteRequestId: next.id,
         });
         if (outcome.kind === 'completed') {
+          progressOutcome = 'completed';
           const notification = withConversationIdentity(
             this.store,
             this.host,
@@ -396,11 +398,13 @@ export class RemoteController {
             ...(notification ? { announceConversationId: next.conversationId } : {}),
           });
         } else if (outcome.kind === 'cancelled' || outcome.kind === 'interrupted') {
+          progressOutcome = 'cancelled';
           await this.store.finish(next.id, 'cancelled', {
             ...(outcome.finalText ? { finalText: outcome.finalText } : {}),
             notification: outcome.finalText || 'Forge request cancelled.',
           });
         } else if (outcome.error === CONVERSATION_BUSY_ERROR) {
+          progressOutcome = 'queued';
           await this.store.requeue(next.id);
           await this.delay(250);
           continue;
@@ -412,13 +416,16 @@ export class RemoteController {
           });
         }
       } catch (err) {
+        progressOutcome = 'failed';
         const error = err instanceof Error ? err.message : String(err);
         await this.store.finish(next.id, 'failed', {
           error,
           notification: `Forge request failed: ${error}`,
         });
       } finally {
-        if (progressId) await this.progress.finish(conversationId, 'Forge: completed.');
+        if (progressId) {
+          await this.progress.finish(conversationId, progressTerminalText(progressOutcome));
+        }
         this.activeConversations.delete(conversationId);
       }
       this.outbox.kick();
@@ -438,4 +445,11 @@ export class RemoteController {
       );
     });
   }
+}
+
+function progressTerminalText(outcome: 'completed' | 'cancelled' | 'failed' | 'queued'): string {
+  if (outcome === 'completed') return 'Forge: completed.';
+  if (outcome === 'cancelled') return 'Forge: cancelled.';
+  if (outcome === 'queued') return 'Forge: queued.';
+  return 'Forge: failed.';
 }

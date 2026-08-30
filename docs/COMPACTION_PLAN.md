@@ -1,5 +1,6 @@
 # Non-Destructive Compaction + Auto-Compact
 
+**Status:** implemented; this document preserves the pre-implementation problem statement
 **Branch:** `fix/nondestructive-compaction`
 **Date:** 2026-08-15
 

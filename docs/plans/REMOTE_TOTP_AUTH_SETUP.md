@@ -58,7 +58,9 @@ The Telegram row should eventually report `configured=true`, `active=true`,
 until the next two steps are complete.
 
 If the token is exposed, revoke it through BotFather, store the replacement
-with the same Forge command, and do not reuse the old token.
+with the same Forge command, and do not reuse the old token. Forge recreates
+only the Telegram transport as soon as the replacement is stored; a window
+reload is not required.
 
 ## 3. Pair the Telegram owner
 
@@ -72,8 +74,9 @@ TOTP authentication.
    the new bot and send that command exactly.
 4. Run **Forge: Validate Remote Control** again and require `owner=true`.
 
-Group chats and other Telegram accounts cannot pair or control Forge. A
-successful pairing starts in the locked state; it does not bypass TOTP.
+Group chats and other Telegram accounts cannot pair or control Forge. Pairing
+alone has no second factor; once an authenticator is enrolled, its session
+starts locked and pairing does not bypass it.
 
 ## 4. Enroll an authenticator locally
 
@@ -122,9 +125,18 @@ commands include:
 | --- | --- |
 | `/status` | Shows bounded runtime, queue, notification, context, and approval state. |
 | `/new` | Binds the chat to a new non-active Forge conversation. |
-| `/resume <conversation-id>` | Binds the chat to an existing conversation. |
+| `/list` | Lists conversations and issues short-lived numeric selections. |
+| `/resume <number-or-id>` | Binds the chat to an existing conversation. |
+| `/models` | Lists configured models and issues numeric selections. |
+| `/model <number-or-name>` | Pins a model while the bound conversation is idle. |
+| `/queue` | Lists durable prompts waiting for the bound conversation. |
 | `/compact` | Compacts the bound conversation. |
 | `/stop` | Cancels the active request only; queued requests remain queued. |
+| `/unload` | Releases loaded backends while Forge is globally idle. |
+| `/restart` | Restarts the bound conversation's explicitly pinned model while idle. |
+| `/workspace list` | Lists configured remote workspace aliases. |
+| `/new <alias>` | Hands the chat off to the configured workspace alias. |
+| `/clanker on|off` | Changes the normal non-dangerous tool confirmation gate for this window. |
 | `/lock` | Immediately locks the remote session. |
 | `/timeout` | Shows the inactivity timeout. |
 | `/timeout 30` | Sets a 30-minute timeout. Valid range is 1–1440. |

@@ -206,15 +206,16 @@ describe('remote owner commands', () => {
     secrets.values.set('forge.remote.fake.ownerId', 'owner-raw-id');
     const channel = new FakeRemoteChannel();
     const forgeHost = host(overrides);
+    const auth = new RemoteAuth(secrets as unknown as vscode.SecretStorage);
     const controller = new RemoteController(
       channel,
       store,
-      new RemoteAuth(secrets as unknown as vscode.SecretStorage),
+      auth,
       forgeHost,
       { workspaceId: 'workspace', queueLimit: 5, maxMessageChars: 500, rateLimitPerMinute: 30 },
     );
     await controller.start();
-    return { channel, controller, forgeHost };
+    return { channel, controller, forgeHost, auth };
   }
 
   it('reports the context meter and the approval gate in /status', async () => {
@@ -233,7 +234,7 @@ describe('remote owner commands', () => {
     // The chain is what ties an approval back to the remote request that caused
     // it; filled in once the prompt below has been admitted.
     let chainRequestId: string | undefined;
-    const { channel, controller, forgeHost } = await ownerController({
+    const { channel, controller, forgeHost, auth } = await ownerController({
       addApprovalSink: (registered: never) => {
         sink = registered as unknown as typeof sink;
         return { dispose: () => undefined };
@@ -253,32 +254,41 @@ describe('remote owner commands', () => {
         streamingConversationIds: [],
       }),
     });
+    const secret = await auth.createTotpEnrollmentSecret('fake');
+    const now = Date.now();
+    const code = generateTotp(secret, now).code;
+    await auth.confirmTotpEnrollment('fake', secret, code, now);
+    await expect(
+      channel.emit(event({ providerMessageId: 'authenticate', text: code })),
+    ).resolves.toEqual({ kind: 'handled' });
     await channel.emit(event({ providerMessageId: 'new', text: '/new' }));
     const accepted = await channel.emit(event({ providerMessageId: 'ask', text: 'edit README' }));
     const requestId = 'requestId' in accepted ? accepted.requestId : undefined;
     expect(requestId).toBeDefined();
     chainRequestId = requestId;
 
+    const approvalId = 'confirm-1788120000000-abcdefghij';
     const approval = {
-      id: 'approval-1',
+      id: approvalId,
       conversationId: 'c1',
       toolName: 'edit_file',
       detail: '{}',
       dangerous: false,
     };
     sink?.requested(approval as never);
-    await vi.waitFor(() => expect(channel.sent.at(-1)?.correlationId).toBe('approval-1'));
+    await vi.waitFor(() => expect(channel.sent.at(-1)?.correlationId).toBeDefined());
     const prompt = channel.sent.at(-1);
-    expect(prompt?.correlationId).toBe('approval-1');
+    expect(prompt?.correlationId).not.toBe(approvalId);
+    expect(prompt?.correlationId?.length).toBeLessThanOrEqual(62);
 
     const action = event({
       providerMessageId: 'press',
       kind: 'action',
       action: 'approve',
-      correlationId: 'approval-1',
+      correlationId: prompt!.correlationId!,
     });
     await expect(channel.emit(action)).resolves.toEqual({ kind: 'handled' });
-    expect(forgeHost.resolveApproval).toHaveBeenCalledWith('approval-1', true);
+    expect(forgeHost.resolveApproval).toHaveBeenCalledWith(approvalId, true);
     // A second press of a button Telegram never takes away must not re-resolve.
     await expect(
       channel.emit({ ...action, providerMessageId: 'press-again' }),
@@ -287,7 +297,9 @@ describe('remote owner commands', () => {
 
     sink?.resolved({ ...approval, approved: true, reason: 'remote' } as never);
     await vi.waitFor(() =>
-      expect(channel.retracted).toEqual([{ chatId: 'chat-raw-id', correlationId: 'approval-1' }]),
+      expect(channel.retracted).toEqual([
+        { chatId: 'chat-raw-id', correlationId: prompt!.correlationId! },
+      ]),
     );
     const confirmation = channel.sent.at(-1);
     expect(confirmation?.text).toContain('approved');
@@ -697,7 +709,7 @@ describe('remote runtime lifecycle', () => {
     await runtime.dispose();
   });
 
-  it('replaces channel subscriptions on config reload and fully disposes', async () => {
+  it('keeps channel subscriptions on ordinary config reload and fully disposes', async () => {
     const { directory } = await newStore();
     const channels: FakeRemoteChannel[] = [];
     const runtime = new RemoteRuntime({
@@ -740,5 +752,48 @@ describe('remote runtime lifecycle', () => {
     await runtime.dispose();
     expect(runtime.activeTransports()).toEqual([]);
     await expect(channels[0]!.emit(event())).resolves.toMatchObject({ kind: 'retry' });
+  });
+
+  it('recreates only the requested transport after its credential changes', async () => {
+    const { directory } = await newStore();
+    const telegramChannels: FakeRemoteChannel[] = [];
+    const whatsappChannels: FakeRemoteChannel[] = [];
+    const runtime = new RemoteRuntime({
+      storageDirectory: directory,
+      workspaceId: 'workspace',
+      host: host(),
+      secrets: new MemorySecrets() as unknown as vscode.SecretStorage,
+      channelFactories: {
+        telegram: () => {
+          const channel = new FakeRemoteChannel();
+          telegramChannels.push(channel);
+          return channel;
+        },
+        whatsapp: () => {
+          const channel = new FakeRemoteChannel();
+          whatsappChannels.push(channel);
+          return channel;
+        },
+      },
+      notifyLocal: vi.fn(),
+    });
+    const enabled = ForgeConfigSchema.parse({
+      models: [{ name: 'm', provider: 'ollama', endpoint: 'http://127.0.0.1:11434' }],
+      remote: {
+        enabled: true,
+        telegram: { enabled: true },
+        whatsapp: { enabled: true },
+      },
+    });
+
+    await runtime.applyConfig(enabled);
+    await runtime.refreshTransport('telegram', enabled);
+
+    expect(telegramChannels).toHaveLength(2);
+    expect(whatsappChannels).toHaveLength(1);
+    await expect(telegramChannels[0]!.emit(event())).resolves.toMatchObject({ kind: 'retry' });
+    await expect(telegramChannels[1]!.emit(event())).resolves.toMatchObject({ kind: 'rejected' });
+    await expect(whatsappChannels[0]!.emit(event())).resolves.toMatchObject({ kind: 'rejected' });
+    await runtime.dispose();
   });
 });

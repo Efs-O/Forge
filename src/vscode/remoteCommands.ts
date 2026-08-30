@@ -43,7 +43,7 @@ export function registerRemoteCommands(
       });
       if (!token?.trim()) return;
       await context.secrets.store(TELEGRAM_BOT_TOKEN_SECRET, token.trim());
-      await runtime.applyConfig(getConfig());
+      await runtime.refreshTransport('telegram', getConfig());
       void vscode.window.showInformationMessage('Forge: Telegram bot token stored securely.');
     }),
     vscode.commands.registerCommand('forge.remote.validate', async () => {

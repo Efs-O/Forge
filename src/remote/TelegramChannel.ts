@@ -51,6 +51,7 @@ const CURSOR_KEY = 'telegram:update-offset';
 /** Unanswered prompts are rare; this only bounds a pathological case. */
 const PROMPT_MESSAGE_LIMIT = 256;
 const TELEGRAM_TEXT_LIMIT = 4096;
+const TELEGRAM_CALLBACK_DATA_LIMIT_BYTES = 64;
 export const TELEGRAM_BOT_TOKEN_SECRET = 'forge.remote.telegram.botToken';
 
 export interface TelegramChannelOptions {
@@ -103,6 +104,15 @@ export class TelegramChannel implements RemoteChannel {
     const chunks = splitTelegramText(text);
     for (let index = 0; index < chunks.length; index++) {
       const correlationId = index === 0 ? options?.correlationId : undefined;
+      const approveData = correlationId ? `a:${correlationId}` : undefined;
+      const denyData = correlationId ? `d:${correlationId}` : undefined;
+      if (
+        (approveData &&
+          Buffer.byteLength(approveData, 'utf8') > TELEGRAM_CALLBACK_DATA_LIMIT_BYTES) ||
+        (denyData && Buffer.byteLength(denyData, 'utf8') > TELEGRAM_CALLBACK_DATA_LIMIT_BYTES)
+      ) {
+        throw new Error('Forge Telegram approval identifier exceeds the Bot API limit.');
+      }
       const sent = await this.call(
         'sendMessage',
         {
@@ -113,8 +123,8 @@ export class TelegramChannel implements RemoteChannel {
                 reply_markup: {
                   inline_keyboard: [
                     [
-                      { text: 'Approve', callback_data: `a:${correlationId}` },
-                      { text: 'Deny', callback_data: `d:${correlationId}` },
+                      { text: 'Approve', callback_data: approveData },
+                      { text: 'Deny', callback_data: denyData },
                     ],
                   ],
                 },
@@ -352,9 +362,18 @@ function telegramChatType(value: string): RemoteInboundEvent['chatType'] {
 export function splitTelegramText(text: string): string[] {
   if (!text) return [''];
   const chunks: string[] = [];
-  for (let offset = 0; offset < text.length; offset += TELEGRAM_TEXT_LIMIT) {
-    chunks.push(text.slice(offset, offset + TELEGRAM_TEXT_LIMIT));
+  let chunk = '';
+  let characters = 0;
+  for (const character of text) {
+    if (characters === TELEGRAM_TEXT_LIMIT) {
+      chunks.push(chunk);
+      chunk = '';
+      characters = 0;
+    }
+    chunk += character;
+    characters += 1;
   }
+  if (chunk) chunks.push(chunk);
   return chunks;
 }
 

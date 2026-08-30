@@ -222,8 +222,68 @@ describe('RemoteController with fake channel', () => {
     await vi.waitFor(() =>
       expect(channel.sent.some((item) => item.text === 'real answer')).toBe(true),
     );
+    await vi.waitFor(() =>
+      expect(channel.edits.some((item) => item.text === 'Forge: completed.')).toBe(true),
+    );
     const duplicate = await channel.emit(prompt);
     expect(duplicate).toMatchObject({ kind: 'duplicate', state: 'completed' });
+    await controller.stop();
+  });
+
+  it.each([
+    ['cancelled', { kind: 'cancelled' as const }, 'Forge: cancelled.'],
+    ['failed', { kind: 'failed' as const, error: 'model failed' }, 'Forge: failed.'],
+  ])('ends progress with the real %s outcome', async (_label, outcome, terminalText) => {
+    const state = await store();
+    const secrets = new MemorySecrets();
+    secrets.values.set('forge.remote.fake.ownerId', 'owner');
+    const channel = new FakeRemoteChannel();
+    const host = {
+      createConversation: vi.fn(async () => ({
+        id: 'c1',
+        title: 'Remote',
+        activeModel: 'local',
+        archived: false,
+      })),
+      send: vi.fn(async () => outcome),
+      cancel: vi.fn(async () => undefined),
+      queueIntent: vi.fn(),
+      addApprovalSink: () => ({ dispose: () => undefined }),
+      status: () => ({
+        activeConversationId: 'visible',
+        conversations: [],
+        requestChains: [],
+        streamingConversationIds: [],
+      }),
+    } as unknown as ForgeHostFacade;
+    const controller = new RemoteController(
+      channel,
+      state,
+      new RemoteAuth(secrets as unknown as vscode.SecretStorage),
+      host,
+      {
+        workspaceId: 'workspace',
+        queueLimit: 5,
+        maxMessageChars: 12_000,
+        rateLimitPerMinute: 30,
+      },
+    );
+    await controller.start();
+
+    await channel.emit({
+      channel: 'fake',
+      kind: 'text',
+      providerMessageId: `outcome-${_label}`,
+      senderId: 'owner',
+      chatId: 'chat',
+      chatType: 'private',
+      receivedAt: Date.now(),
+      text: 'run it',
+    });
+
+    await vi.waitFor(() =>
+      expect(channel.edits.some((item) => item.text === terminalText)).toBe(true),
+    );
     await controller.stop();
   });
 
@@ -470,10 +530,11 @@ describe('RemoteController with fake channel', () => {
       text: 'edit it',
     });
     await vi.waitFor(() =>
-      expect(channel.sent).toContainEqual(
-        expect.objectContaining({ chatId: 'chat', correlationId: 'approval-1' }),
-      ),
+      expect(channel.sent.some((item) => item.chatId === 'chat' && item.correlationId)).toBe(true),
     );
+    const actionId = channel.sent.find((item) => item.correlationId)?.correlationId;
+    expect(actionId).toBeDefined();
+    expect(actionId).not.toBe('approval-1');
     await expect(
       channel.emit({
         channel: 'fake',
@@ -484,7 +545,7 @@ describe('RemoteController with fake channel', () => {
         chatType: 'private',
         receivedAt: 2,
         action: 'approve',
-        correlationId: 'approval-1',
+        correlationId: actionId!,
       }),
     ).resolves.toEqual({ kind: 'handled' });
     await vi.waitFor(() =>
@@ -500,7 +561,7 @@ describe('RemoteController with fake channel', () => {
         chatType: 'private',
         receivedAt: 3,
         action: 'deny',
-        correlationId: 'approval-1',
+        correlationId: actionId!,
       }),
     ).resolves.toMatchObject({ kind: 'rejected' });
     await controller.stop();

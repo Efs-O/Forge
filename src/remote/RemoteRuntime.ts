@@ -6,7 +6,7 @@ import type { ForgeConfig } from '../config/types';
 import type { CompactionEvent } from '../sidebar/CompactionService';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import { RemoteAuth } from './RemoteAuth';
-import { RemoteController } from './RemoteController';
+import { RemoteController, type RemoteControllerOptions } from './RemoteController';
 import { RemoteRequestStore } from './RemoteRequestStore';
 import { RemoteTransportLease } from './RemoteTransportLease';
 import type { RemoteChannel } from './types';
@@ -81,6 +81,32 @@ export class RemoteRuntime {
 
   applyConfig(config: ForgeConfig): Promise<void> {
     const operation = this.lifecycleTail.then(() => this.replace(config));
+    this.lifecycleTail = operation.catch(() => undefined);
+    return operation;
+  }
+
+  /**
+   * Recreates one provider after an out-of-band credential change. Secrets are
+   * intentionally absent from ForgeConfig, so an ordinary config diff cannot
+   * detect a replaced Telegram token.
+   */
+  refreshTransport(name: 'telegram' | 'whatsapp', config: ForgeConfig): Promise<void> {
+    const operation = this.lifecycleTail.then(async () => {
+      if (this.disposed) return;
+      if (!this.appliedConfig) {
+        await this.replace(config);
+        return;
+      }
+      await this.stopTransport(name);
+      this.auth.updateSessionPolicy({
+        inactivityTimeoutMinutes: config.remote?.auth.inactivity_timeout_minutes ?? 30,
+      });
+      if (config.remote?.enabled === true && config.remote[name].enabled === true) {
+        await this.store.load();
+        await this.startTransport(name, config);
+      }
+      this.appliedConfig = config;
+    });
     this.lifecycleTail = operation.catch(() => undefined);
     return operation;
   }
@@ -199,80 +225,7 @@ export class RemoteRuntime {
     await this.resumeWorkspaceHandoffs();
     try {
       for (const channelName of ['telegram', 'whatsapp'] as const) {
-        if (config.remote[channelName].enabled !== true) continue;
-        const factory = this.options.channelFactories?.[channelName];
-        if (!factory) {
-          this.options.notifyLocal(
-            `Forge remote ${channelName} is enabled but its transport is unavailable.`,
-          );
-          continue;
-        }
-        const lease = await RemoteTransportLease.acquire({
-          directory: path.join(this.options.storageDirectory, 'remote-leases'),
-          key: channelName,
-          workspaceId: this.options.workspaceId,
-          instanceId: this.instanceId,
-          onLost: (message) => {
-            this.options.notifyLocal(message);
-            void this.stopTransport(channelName).catch((err) =>
-              this.options.notifyLocal(
-                `Forge remote ${channelName} shutdown failed: ${(err as Error).message}`,
-              ),
-            );
-          },
-        });
-        try {
-          const channel = await factory({
-            getCursor: (key) => this.store.cursor(key),
-            setCursor: (key, value) => this.store.setCursor(key, value),
-          });
-          const controller = new RemoteController(
-            channel,
-            this.store,
-            this.auth,
-            this.options.host,
-            {
-              workspaceId: this.options.workspaceId,
-              queueLimit: config.remote.queue_limit,
-              maxMessageChars: config.remote.max_message_chars,
-              rateLimitPerMinute: config.remote.rate_limit_per_minute,
-              modelNames: config.models.map((model) => model.name),
-              ...(this.options.workspaceRoot
-                ? { attachmentStore: new RemoteAttachmentStore(this.options.workspaceRoot) }
-                : {}),
-              attachmentsEnabled: config.remote.attachments.enabled,
-              acceptPdfAttachments: config.remote.attachments.accept_pdf,
-              workspaceAliases: Object.fromEntries(
-                Object.entries(config.remote.workspace_aliases).map(([alias, value]) => [
-                  alias,
-                  value.display_name,
-                ]),
-              ),
-              switchWorkspace: (alias, channel, chatId) =>
-                this.handoff(config, alias, channel, chatId),
-              inactivityTimeoutMinutes: config.remote.auth.inactivity_timeout_minutes,
-              setInactivityTimeout: this.options.setInactivityTimeout,
-              onError: this.options.notifyLocal,
-            },
-            this.audit,
-          );
-          const compactionSubscription = this.options.host.onCompactionEvent?.((event) =>
-            this.onCompactionEvent(event, controller),
-          );
-          try {
-            // Subscribe before channel startup: an automatic compaction can
-            // complete while a transport is activating. Controller.start()
-            // starts the durable outbox, which flushes anything queued here.
-            await controller.start();
-            this.active.set(channelName, { channel, controller, lease, compactionSubscription });
-          } catch (err) {
-            compactionSubscription?.dispose();
-            throw err;
-          }
-        } catch (err) {
-          await lease.release();
-          throw err;
-        }
+        await this.startTransport(channelName, config);
       }
     } catch (err) {
       await this.stopActive();
@@ -292,35 +245,98 @@ export class RemoteRuntime {
   }
 
   private updateActiveOptions(config: ForgeConfig): void {
-    const remote = config.remote;
-    if (!remote) return;
+    if (!config.remote) return;
     this.auth.updateSessionPolicy({
-      inactivityTimeoutMinutes: remote.auth.inactivity_timeout_minutes,
+      inactivityTimeoutMinutes: config.remote.auth.inactivity_timeout_minutes,
     });
     for (const transport of this.active.values()) {
-      transport.controller.updateOptions({
-        workspaceId: this.options.workspaceId,
-        queueLimit: remote.queue_limit,
-        maxMessageChars: remote.max_message_chars,
-        rateLimitPerMinute: remote.rate_limit_per_minute,
-        modelNames: config.models.map((model) => model.name),
-        ...(this.options.workspaceRoot
-          ? { attachmentStore: new RemoteAttachmentStore(this.options.workspaceRoot) }
-          : {}),
-        attachmentsEnabled: remote.attachments.enabled,
-        acceptPdfAttachments: remote.attachments.accept_pdf,
-        workspaceAliases: Object.fromEntries(
-          Object.entries(remote.workspace_aliases).map(([alias, value]) => [
-            alias,
-            value.display_name,
-          ]),
-        ),
-        switchWorkspace: (alias, channel, chatId) => this.handoff(config, alias, channel, chatId),
-        inactivityTimeoutMinutes: remote.auth.inactivity_timeout_minutes,
-        setInactivityTimeout: this.options.setInactivityTimeout,
-        onError: this.options.notifyLocal,
-      });
+      transport.controller.updateOptions(this.controllerOptions(config));
     }
+  }
+
+  private async startTransport(
+    channelName: 'telegram' | 'whatsapp',
+    config: ForgeConfig,
+  ): Promise<void> {
+    if (config.remote?.enabled !== true || config.remote[channelName].enabled !== true) return;
+    const factory = this.options.channelFactories?.[channelName];
+    if (!factory) {
+      this.options.notifyLocal(
+        `Forge remote ${channelName} is enabled but its transport is unavailable.`,
+      );
+      return;
+    }
+    const lease = await RemoteTransportLease.acquire({
+      directory: path.join(this.options.storageDirectory, 'remote-leases'),
+      key: channelName,
+      workspaceId: this.options.workspaceId,
+      instanceId: this.instanceId,
+      onLost: (message) => {
+        this.options.notifyLocal(message);
+        void this.stopTransport(channelName).catch((err) =>
+          this.options.notifyLocal(
+            `Forge remote ${channelName} shutdown failed: ${(err as Error).message}`,
+          ),
+        );
+      },
+    });
+    try {
+      const channel = await factory({
+        getCursor: (key) => this.store.cursor(key),
+        setCursor: (key, value) => this.store.setCursor(key, value),
+      });
+      const controller = new RemoteController(
+        channel,
+        this.store,
+        this.auth,
+        this.options.host,
+        this.controllerOptions(config),
+        this.audit,
+      );
+      const compactionSubscription = this.options.host.onCompactionEvent?.((event) =>
+        this.onCompactionEvent(event, controller),
+      );
+      try {
+        // Subscribe before channel startup: an automatic compaction can
+        // complete while a transport is activating. Controller.start() starts
+        // the durable outbox, which flushes anything queued here.
+        await controller.start();
+        this.active.set(channelName, { channel, controller, lease, compactionSubscription });
+      } catch (err) {
+        compactionSubscription?.dispose();
+        throw err;
+      }
+    } catch (err) {
+      await lease.release();
+      throw err;
+    }
+  }
+
+  private controllerOptions(config: ForgeConfig): RemoteControllerOptions {
+    const remote = config.remote;
+    if (!remote) throw new Error('Forge remote configuration is unavailable.');
+    return {
+      workspaceId: this.options.workspaceId,
+      queueLimit: remote.queue_limit,
+      maxMessageChars: remote.max_message_chars,
+      rateLimitPerMinute: remote.rate_limit_per_minute,
+      modelNames: config.models.map((model) => model.name),
+      ...(this.options.workspaceRoot
+        ? { attachmentStore: new RemoteAttachmentStore(this.options.workspaceRoot) }
+        : {}),
+      attachmentsEnabled: remote.attachments.enabled,
+      acceptPdfAttachments: remote.attachments.accept_pdf,
+      workspaceAliases: Object.fromEntries(
+        Object.entries(remote.workspace_aliases).map(([alias, value]) => [
+          alias,
+          value.display_name,
+        ]),
+      ),
+      switchWorkspace: (alias, channel, chatId) => this.handoff(config, alias, channel, chatId),
+      inactivityTimeoutMinutes: remote.auth.inactivity_timeout_minutes,
+      setInactivityTimeout: this.options.setInactivityTimeout,
+      onError: this.options.notifyLocal,
+    };
   }
 
   private applySerializedStop(): Promise<void> {

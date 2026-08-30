@@ -117,4 +117,25 @@ describe('TelegramChannel', () => {
     expect(bodies[0]).toHaveProperty('reply_markup');
     expect(bodies[1]).not.toHaveProperty('reply_markup');
   });
+
+  it('keeps Unicode code points intact at the Telegram message boundary', () => {
+    const chunks = splitTelegramText(`${'x'.repeat(4095)}😀tail`);
+    expect(chunks).toEqual([`${'x'.repeat(4095)}😀`, 'tail']);
+    expect(chunks.join('')).toBe(`${'x'.repeat(4095)}😀tail`);
+  });
+
+  it('rejects approval callback data beyond Telegram\'s 64-byte limit before sending', async () => {
+    const fetchMock = vi.fn(async () => response({ message_id: 1 }));
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor: async () => undefined,
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await expect(
+      channel.send('chat', 'approval', { correlationId: 'x'.repeat(63) }),
+    ).rejects.toThrow('approval identifier exceeds');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

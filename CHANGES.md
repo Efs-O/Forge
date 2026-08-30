@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+- **Telegram remote control now applies replaced bot credentials immediately.**
+  `Forge: Set Telegram Bot Token` used to update SecretStorage and then take the
+  ordinary in-place config path, leaving the active poller on the old token
+  until the extension reloaded. Credential refresh now recreates only the
+  Telegram transport; unrelated transports stay up.
+
+- **TOTP-protected Telegram approvals fit the provider protocol.** The approval
+  id and auth-session UUID together exceeded Telegram's 64-byte callback-data
+  limit, so enabling the authenticator could make every Approve/Deny keyboard
+  fail to send. Telegram now receives a short opaque handle while the Forge
+  approval id and auth nonce remain server-side and are checked together.
+
+- **Remote progress reports the real terminal state.** Failed and cancelled
+  turns no longer edit their live Telegram progress row to “completed,” and a
+  busy retry is labelled queued. Telegram text chunking also preserves complete
+  Unicode code points at the 4,096-character boundary instead of splitting an
+  emoji in half.
+
+- **The activity line follows the editor's configured font size.** It keeps the
+  intended one-pixel emphasis without freezing the webview at 14px for users
+  who increase or reduce VS Code's UI font.
+
+- **Remote control gained a complete authenticated phone workflow.** The
+  optional Telegram surface now includes owner-bound Google
+  Authenticator-compatible TOTP sessions, inactivity locking, conversation and
+  model controls, workspace handoff, attachments, durable notifications, and
+  live agent/compaction progress. It remains opt-in and uses the normal Forge
+  execution, confirmation, checkpoint, and model paths.
+
 - **The agent can read the editor you are looking at, not just write to it.**
   `replace_selection` and `insert_code` have always written into the active
   editor, but nothing could read it back — so "fix this" with a block

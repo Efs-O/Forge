@@ -1,5 +1,6 @@
 # Remote Compaction Progress Notifications
 
+**Status:** implemented; automated tests passed; real-device progress smoke remains pending
 **Date:** 2026-08-30
 **Scope:** Telegram/WhatsApp remote control + compaction
 **Goal:** A user who sends a prompt through Telegram gets a `"Forge: working…"`
@@ -19,7 +20,7 @@ autocompaction (medium).
 
 ---
 
-## Current behaviour (verified in source)
+## Pre-implementation behaviour (verified in source at the time)
 
 - `RemoteController.drain()` (src/remote/RemoteController.ts:339) sends
   `'Forge: working…'` via `channel.sendProgress` before `host.send`, and edits

@@ -109,7 +109,24 @@ If pairing expires or the digits are mistyped, run the pairing command again
 and use only the newest code. Pairing in a Telegram group is intentionally
 rejected.
 
-### 4. Validate Telegram behavior
+### 4. Enroll and validate the authenticator gate
+
+1. In VS Code, run `Forge: Set Up Telegram Authenticator`. Scan the QR code
+   locally and enter one current six-digit code in the hidden VS Code input.
+   The QR/manual secret must never be sent through Telegram or written into the
+   workspace.
+2. Run `Developer: Reload Window`, then send `/status` in Telegram. Forge must
+   ask for a six-digit authenticator code and must not disclose status yet.
+3. Send the current code as a plain six-digit message. Forge should answer
+   `Forge: authenticated.`. Send `/status` again and confirm it now works.
+4. Send `/lock`, then press any old approval button or send another owner
+   command. Both must fail closed until a fresh code is accepted. Reusing the
+   already accepted timestep must fail.
+5. Run `/timeout`, then test one short timeout with `/timeout 1` if practical.
+   Restore the intended value afterward. Timeout changes must not restart the
+   transport or cancel a turn already running.
+
+### 5. Validate Telegram behavior
 
 1. Send `/new`, a harmless coding question, and a request that uses a read-only
    tool. Confirm FIFO responses arrive in the same private chat.
@@ -138,7 +155,7 @@ rejected.
    the Telegram lease and the other reports a visible ownership failure. Close
    the second window before continuing.
 
-### 5. Validate the extended remote controls
+### 6. Validate the extended remote controls
 
 Run these checks after pairing, in a private chat with the paired owner. Keep
 the VS Code Extension Host log open while testing so a failed command has a

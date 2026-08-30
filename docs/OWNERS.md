@@ -109,6 +109,22 @@ overlaps with an existing owner, extend the owner instead.
 | Webview state reducer                           | `webview-ui/src/modelManager/reducer.ts`          |
 | Webview host bridge wrapper                     | `webview-ui/src/modelManager/vscode.ts`           |
 
+## Remote control
+
+| Concern                                      | Owner                                  |
+| -------------------------------------------- | -------------------------------------- |
+| Extension-scoped transport lifecycle         | `src/remote/RemoteRuntime.ts`          |
+| Inbound admission, queue drain, notifications | `src/remote/RemoteController.ts`       |
+| Pairing + session-auth facade                | `src/remote/RemoteAuth.ts`             |
+| TOTP session state + enrollment boundary     | `src/remote/RemoteSessionAuth.ts`      |
+| RFC 6238 generation/verification             | `src/remote/RemoteTotp.ts`             |
+| Durable requests, bindings, cursors, outbox  | `src/remote/RemoteRequestStore.ts`     |
+| Remote owner command behavior                | `src/remote/RemoteCommandHandler.ts`   |
+| Forge approval presentation + correlation    | `src/remote/RemoteApprovalBridge.ts`   |
+| Telegram Bot API transport                   | `src/remote/TelegramChannel.ts`        |
+| WhatsApp linked-device transport             | `src/remote/whatsapp/BaileysWhatsAppChannel.ts` |
+| Local setup/validation commands              | `src/vscode/remoteCommands.ts`         |
+
 ## CLI agent lifecycle
 
 | Concern                                      | Owner                                |

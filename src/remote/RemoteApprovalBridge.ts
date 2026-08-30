@@ -1,3 +1,4 @@
+import { randomBytes } from 'crypto';
 import type {
   ToolApprovalRequestEvent,
   ToolApprovalResolvedEvent,
@@ -14,6 +15,17 @@ interface RemoteApprovalEntry {
   nonce?: string;
   actionId?: string;
   resolving?: boolean;
+}
+
+/**
+ * Provider-facing approval handles must stay short. Telegram limits callback
+ * data to 64 UTF-8 bytes, while a Forge approval id plus the auth-session UUID
+ * already exceeds that limit. The nonce remains server-side in the entry; an
+ * opaque handle is sufficient to find it and does not expose authorization
+ * state to the transport.
+ */
+function newActionId(): string {
+  return randomBytes(18).toString('base64url');
 }
 
 /** Auth-nonce-bound remote presentation for Forge's one approval queue. */
@@ -64,7 +76,7 @@ export class RemoteApprovalBridge {
       return false;
     }
     pending.resolving = true;
-    this.host.resolveApproval(event.correlationId, event.action === 'approve');
+    this.host.resolveApproval(pending.event.id, event.action === 'approve');
     return true;
   }
 
@@ -100,7 +112,7 @@ export class RemoteApprovalBridge {
     const nonce = await this.auth.approvalNonce(this.channel.name, pending.chatId);
     if (nonce) pending.nonce = nonce;
     else delete pending.nonce;
-    pending.actionId = nonce ? `${id}:${nonce}` : id;
+    pending.actionId = newActionId();
     const danger = pending.event.dangerous ? ' DANGEROUS' : '';
     try {
       await this.channel.send(
