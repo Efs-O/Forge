@@ -160,6 +160,13 @@ remote:
     enabled: false
     retain_days: 30
     accept_pdf: true
+  # Aliases are the only remote workspace-switch targets; paths are never
+  # inferred from an incoming Telegram command.
+  workspace_aliases: {}
+  # Example:
+  #   ssuno:
+  #     path: N:/vs code apps/Ssuno
+  #     display_name: Ssuno
   telegram:
     enabled: false
   whatsapp:

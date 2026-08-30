@@ -16,6 +16,7 @@ import {
   RETENTION_MS,
   type RemoteSelection,
   type RemoteStoreState,
+  type WorkspaceHandoff,
 } from './RemoteStoreSchemas';
 
 export function remoteDedupKey(channel: string, chatId: string, messageId: string): string {
@@ -147,6 +148,53 @@ export class RemoteRequestStore {
         candidate.channel === channel && candidate.chatId === chatId && candidate.kind === kind,
     );
     return item && item.expiresAt > Date.now() ? structuredClone(item) : undefined;
+  }
+
+  async beginWorkspaceHandoff(
+    handoff: Omit<WorkspaceHandoff, 'id' | 'state' | 'createdAt' | 'updatedAt' | 'expiresAt'>,
+  ): Promise<void> {
+    const now = Date.now();
+    await this.mutate((draft) => {
+      draft.workspaceHandoffs = draft.workspaceHandoffs.filter(
+        (item) => item.channel !== handoff.channel || item.chatId !== handoff.chatId,
+      );
+      draft.workspaceHandoffs.push({
+        ...handoff,
+        id: randomUUID(),
+        state: 'pending',
+        createdAt: now,
+        updatedAt: now,
+        expiresAt: now + 5 * 60_000,
+      });
+    });
+  }
+
+  async claimWorkspaceHandoffs(workspaceId: string): Promise<WorkspaceHandoff[]> {
+    const claimed: WorkspaceHandoff[] = [];
+    await this.mutate((draft) => {
+      const now = Date.now();
+      for (const handoff of draft.workspaceHandoffs) {
+        if (
+          handoff.state === 'pending' &&
+          handoff.targetWorkspaceId === workspaceId &&
+          handoff.expiresAt > now
+        ) {
+          handoff.state = 'claimed';
+          handoff.updatedAt = now;
+          claimed.push(structuredClone(handoff));
+        }
+      }
+    });
+    return claimed;
+  }
+
+  async completeWorkspaceHandoff(id: string): Promise<void> {
+    await this.mutate((draft) => {
+      const handoff = draft.workspaceHandoffs.find((item) => item.id === id);
+      if (!handoff) return;
+      handoff.state = 'completed';
+      handoff.updatedAt = Date.now();
+    });
   }
 
   async enqueue(record: RemoteRequestRecord): Promise<boolean> {
@@ -312,6 +360,9 @@ export class RemoteRequestStore {
         .filter((item) => item.updatedAt >= cutoff || item.state === 'pending')
         .slice(-MAX_RECORDS);
       draft.selections = draft.selections.filter((item) => item.expiresAt >= Date.now());
+      draft.workspaceHandoffs = draft.workspaceHandoffs.filter(
+        (item) => item.expiresAt >= Date.now(),
+      );
       RemoteStateSchema.parse(draft);
       await this.persist(draft);
       this.state = draft;
@@ -337,6 +388,7 @@ export class RemoteRequestStore {
         cursors: legacy.cursors,
         controlReceipts: legacy.controlReceipts,
         selections: [],
+        workspaceHandoffs: [],
       };
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;

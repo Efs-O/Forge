@@ -29,6 +29,8 @@ export interface RemoteControllerOptions {
   attachmentStore?: RemoteAttachmentStore | undefined;
   attachmentsEnabled: boolean;
   acceptPdfAttachments: boolean;
+  workspaceAliases: Readonly<Record<string, string>>;
+  switchWorkspace?: ((alias: string, channel: string, chatId: string) => Promise<void>) | undefined;
   inactivityTimeoutMinutes?: number;
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
   onError?: (message: string) => void;
@@ -184,6 +186,10 @@ export class RemoteController {
           signal: this.abort.signal,
           inactivityTimeoutMinutes: this.options.inactivityTimeoutMinutes ?? 30,
           modelNames: this.options.modelNames,
+          workspaceAliases: this.options.workspaceAliases,
+          ...(this.options.switchWorkspace
+            ? { switchWorkspace: this.options.switchWorkspace }
+            : {}),
           ...(this.options.setInactivityTimeout
             ? { setInactivityTimeout: this.options.setInactivityTimeout }
             : {}),

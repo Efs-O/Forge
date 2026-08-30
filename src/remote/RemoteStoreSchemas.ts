@@ -67,6 +67,18 @@ export const RemoteSelectionSchema = z.object({
   issuedAt: z.number(),
   expiresAt: z.number(),
 });
+const WorkspaceHandoffSchema = z.object({
+  id: z.string(),
+  channel: ChannelSchema,
+  chatId: z.string(),
+  sourceWorkspaceId: z.string(),
+  targetWorkspaceId: z.string(),
+  targetAlias: z.string(),
+  state: z.enum(['pending', 'claimed', 'completed', 'failed', 'expired']),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+  expiresAt: z.number(),
+});
 
 export const LegacyRemoteStateSchema = z.object({
   version: z.literal(1),
@@ -85,10 +97,12 @@ export const RemoteStateSchema = z.object({
   cursors: z.record(z.string(), z.string()),
   controlReceipts: z.array(ControlReceiptSchema).default([]),
   selections: z.array(RemoteSelectionSchema).default([]),
+  workspaceHandoffs: z.array(WorkspaceHandoffSchema).default([]),
 });
 
 export type RemoteStoreState = z.infer<typeof RemoteStateSchema>;
 export type RemoteSelection = z.infer<typeof RemoteSelectionSchema>;
+export type WorkspaceHandoff = z.infer<typeof WorkspaceHandoffSchema>;
 
 export const EMPTY_REMOTE_STATE: RemoteStoreState = {
   version: 2,
@@ -98,6 +112,7 @@ export const EMPTY_REMOTE_STATE: RemoteStoreState = {
   cursors: {},
   controlReceipts: [],
   selections: [],
+  workspaceHandoffs: [],
 };
 
 export const MAX_RECORDS = 1_000;

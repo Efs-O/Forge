@@ -10,6 +10,8 @@ export interface RemoteCommandContext {
   signal: AbortSignal;
   inactivityTimeoutMinutes: number;
   modelNames: readonly string[];
+  workspaceAliases: Readonly<Record<string, string>>;
+  switchWorkspace?: ((alias: string, channel: string, chatId: string) => Promise<void>) | undefined;
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
 }
 
@@ -146,6 +148,34 @@ async function executeRemoteCommand(
       'Forge: current request stopped; queued requests remain queued.',
       { signal: context.signal },
     );
+    return { kind: 'handled' };
+  }
+  if (command === '/workspace' && argument === 'list') {
+    const entries = Object.entries(context.workspaceAliases);
+    await context.channel.send(
+      event.chatId,
+      entries.length === 0
+        ? 'Forge: no remote workspace aliases are configured.'
+        : entries.map(([alias, display]) => `${alias} — ${display}`).join('\n'),
+      { signal: context.signal },
+    );
+    return { kind: 'handled' };
+  }
+  if (command === '/new' && argument) {
+    if (!context.workspaceAliases[argument] || !context.switchWorkspace) {
+      return {
+        kind: 'rejected',
+        reason: `workspace “${argument}” was not found. Use /workspace list.`,
+      };
+    }
+    await context.channel.send(
+      event.chatId,
+      `Forge: switching to ${context.workspaceAliases[argument]}…`,
+      {
+        signal: context.signal,
+      },
+    );
+    await context.switchWorkspace(argument, event.channel, event.chatId);
     return { kind: 'handled' };
   }
   if (command === '/new') {

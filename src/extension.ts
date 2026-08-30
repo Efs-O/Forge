@@ -306,6 +306,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       config = loadConfig(path.dirname(activeConfigPath));
       await activeRemoteRuntime?.applyConfig(config);
     },
+    openWorkspace: async (directory) => {
+      await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(directory), false);
+    },
   });
   activeRemoteRuntime = remoteRuntime;
   await remoteRuntime.applyConfig(config).catch((err) => {

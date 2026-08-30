@@ -1,5 +1,6 @@
 import * as path from 'path';
 import { randomUUID } from 'crypto';
+import { createHash } from 'crypto';
 import type * as vscode from 'vscode';
 import type { ForgeConfig } from '../config/types';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
@@ -28,6 +29,7 @@ export interface RemoteRuntimeOptions {
   channelFactories?: Partial<Record<'telegram' | 'whatsapp', RemoteChannelFactory>>;
   notifyLocal: (message: string) => void;
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
+  openWorkspace?: ((directory: string) => Promise<void>) | undefined;
 }
 
 interface ActiveTransport {
@@ -187,6 +189,7 @@ export class RemoteRuntime {
       inactivityTimeoutMinutes: config.remote.auth.inactivity_timeout_minutes,
     });
     await this.store.load();
+    await this.resumeWorkspaceHandoffs();
     try {
       for (const channelName of ['telegram', 'whatsapp'] as const) {
         if (config.remote[channelName].enabled !== true) continue;
@@ -232,6 +235,14 @@ export class RemoteRuntime {
                 : {}),
               attachmentsEnabled: config.remote.attachments.enabled,
               acceptPdfAttachments: config.remote.attachments.accept_pdf,
+              workspaceAliases: Object.fromEntries(
+                Object.entries(config.remote.workspace_aliases).map(([alias, value]) => [
+                  alias,
+                  value.display_name,
+                ]),
+              ),
+              switchWorkspace: (alias, channel, chatId) =>
+                this.handoff(config, alias, channel, chatId),
               inactivityTimeoutMinutes: config.remote.auth.inactivity_timeout_minutes,
               setInactivityTimeout: this.options.setInactivityTimeout,
               onError: this.options.notifyLocal,
@@ -280,6 +291,13 @@ export class RemoteRuntime {
           : {}),
         attachmentsEnabled: remote.attachments.enabled,
         acceptPdfAttachments: remote.attachments.accept_pdf,
+        workspaceAliases: Object.fromEntries(
+          Object.entries(remote.workspace_aliases).map(([alias, value]) => [
+            alias,
+            value.display_name,
+          ]),
+        ),
+        switchWorkspace: (alias, channel, chatId) => this.handoff(config, alias, channel, chatId),
         inactivityTimeoutMinutes: remote.auth.inactivity_timeout_minutes,
         setInactivityTimeout: this.options.setInactivityTimeout,
         onError: this.options.notifyLocal,
@@ -291,6 +309,41 @@ export class RemoteRuntime {
     const operation = this.lifecycleTail.then(() => this.stopActive());
     this.lifecycleTail = operation.catch(() => undefined);
     return operation;
+  }
+
+  private async handoff(
+    config: ForgeConfig,
+    alias: string,
+    channel: string,
+    chatId: string,
+  ): Promise<void> {
+    const target = config.remote?.workspace_aliases[alias];
+    if (!target || !this.options.openWorkspace)
+      throw new Error(`workspace “${alias}” was not found.`);
+    const targetWorkspaceId = createHash('sha256').update(path.resolve(target.path)).digest('hex');
+    await this.store.beginWorkspaceHandoff({
+      channel: channel as 'telegram' | 'whatsapp' | 'fake',
+      chatId,
+      sourceWorkspaceId: this.options.workspaceId,
+      targetWorkspaceId,
+      targetAlias: alias,
+    });
+    await this.stopActive();
+    await this.options.openWorkspace(target.path);
+  }
+
+  private async resumeWorkspaceHandoffs(): Promise<void> {
+    const handoffs = await this.store.claimWorkspaceHandoffs(this.options.workspaceId);
+    for (const handoff of handoffs) {
+      const conversation = await this.options.host.createConversation({ activate: false });
+      await this.store.setBinding({
+        channel: handoff.channel,
+        chatId: handoff.chatId,
+        workspaceId: this.options.workspaceId,
+        conversationId: conversation.id,
+      });
+      await this.store.completeWorkspaceHandoff(handoff.id);
+    }
   }
 
   private async stopTransport(name: string): Promise<void> {

@@ -246,6 +246,12 @@ const RemoteConfigSchema = z
         accept_pdf: z.boolean().default(true),
       })
       .default({ enabled: false, retain_days: 30, accept_pdf: true }),
+    workspace_aliases: z
+      .record(
+        z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/),
+        z.object({ path: z.string().min(1), display_name: z.string().min(1).max(80) }),
+      )
+      .default({}),
     telegram: z.object({ enabled: z.boolean().default(false) }).default({ enabled: false }),
     whatsapp: z.object({ enabled: z.boolean().default(false) }).default({ enabled: false }),
   })

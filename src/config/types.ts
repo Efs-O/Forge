@@ -350,6 +350,7 @@ export interface ForgeConfig {
       retain_days: number;
       accept_pdf: boolean;
     };
+    workspace_aliases: Record<string, { path: string; display_name: string }>;
     telegram: { enabled: boolean };
     whatsapp: { enabled: boolean };
   };
