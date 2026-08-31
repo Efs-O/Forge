@@ -126,6 +126,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         undo: () => this.undo(),
         keep: () => this.keep(),
         rememberClankerMode: (on) => void this.workspaceState.update('forge.clankerMode', on),
+        unloadModels: () => this.unloadModels(),
       },
       {
         pool,

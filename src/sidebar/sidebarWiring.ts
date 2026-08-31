@@ -59,6 +59,8 @@ export interface SidebarHost {
   undo: () => Promise<string[]>;
   keep: () => Promise<void>;
   rememberClankerMode: (on: boolean) => void;
+  /** Sole owner of the unload sequence; the slash command routes through it. */
+  unloadModels: () => Promise<void>;
 }
 
 /** The construction-time collaborators, straight from the provider's ctor. */
@@ -127,6 +129,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
 
   const slashHandler = new SlashCommandHandler({
     getConfig: host.getConfig,
+    unloadModels: host.unloadModels,
     pool,
     events,
     reindexCodebase: host.reindexCodebase,

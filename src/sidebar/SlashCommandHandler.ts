@@ -29,6 +29,8 @@ export interface SlashCommandDeps extends CompactionDeps {
   getConfig: () => ForgeConfig;
   pool: IBackendPool;
   events: SidebarProviderEvents;
+  /** Owned by SidebarProvider. Throws on failure; this handler reports it. */
+  unloadModels: () => Promise<void>;
   reindexCodebase: () => Promise<void>;
   newConversation: () => Promise<void>;
   clearMessages: () => void;
@@ -55,13 +57,12 @@ export class SlashCommandHandler {
     const { deps } = this;
     switch (commandId) {
       case 'unloadModel':
+        // One owner for the sequence (SidebarProvider.unloadModels), so the
+        // sidebar and a paired chat cannot drift apart. It throws rather than
+        // reporting; the remote caller needs the failure to reach the chat, so
+        // only this surface swallows it into the webview.
         try {
-          await deps.pool.stopAll();
-          deps.events.onBackendStopped?.(deps.getConfig().active_model);
-          deps.post({
-            type: 'backendDown',
-            message: 'All models unloaded. Send a prompt to start the backend again.',
-          });
+          await deps.unloadModels();
         } catch (err) {
           deps.post({
             type: 'error',

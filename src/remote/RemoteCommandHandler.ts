@@ -267,9 +267,11 @@ async function executeRemoteCommand(
     const idleReason = globalBusyReason(context);
     if (idleReason) return { kind: 'rejected', reason: idleReason };
     await context.host.unloadModels();
-    await context.channel.send(event.chatId, 'Forge: loaded backends released.', {
-      signal: context.signal,
-    });
+    await context.channel.send(
+      event.chatId,
+      'Forge: all models unloaded, memory released. Send a prompt to start the backend again.',
+      { signal: context.signal },
+    );
     return { kind: 'handled' };
   }
   if (command === '/restart') {
