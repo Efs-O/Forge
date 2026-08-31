@@ -66,6 +66,7 @@ export const TELEGRAM_BOT_COMMANDS = [
   { command: 'model', description: 'Pin a model to this chat' },
   { command: 'models', description: 'List configured models' },
   { command: 'new', description: 'Start a new chat' },
+  { command: 'notify', description: 'Agent notifications on/off' },
   { command: 'queue', description: 'List queued prompts' },
   { command: 'reload', description: 'Reload VS Code window' },
   { command: 'resume', description: 'Resume a conversation' },

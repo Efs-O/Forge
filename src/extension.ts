@@ -2,6 +2,7 @@ import * as path from 'path';
 import { createHash } from 'crypto';
 import * as vscode from 'vscode';
 import { UserQuestionService } from './sidebar/UserQuestionService';
+import { UserNotificationService } from './sidebar/UserNotificationService';
 import { SidebarProvider } from './sidebar/SidebarProvider';
 import { BackendPool } from './backend/BackendPool';
 import { disposeServerChannel } from './backend/DirectBackend';
@@ -138,6 +139,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // One owner for agent questions, shared by ask_user and the sidebar facade so
   // a remotely driven turn can answer from the chat that started it.
   const userQuestions = new UserQuestionService();
+  // One owner for agent-authored notifications, shared by notify_user and the
+  // sidebar facade so a remotely driven turn reaches the chat that started it.
+  const userNotifications = new UserNotificationService(
+    (message) => void vscode.window.showWarningMessage(message),
+  );
   terminalCommandTracker.start();
   context.subscriptions.push(terminalCommandTracker);
   registerAllTools(
@@ -147,6 +153,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     config.search,
     indexManager,
     userQuestions,
+    userNotifications,
     delegationService,
     () => config,
   );
@@ -234,13 +241,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     toolRegistry,
     indexManager,
     userQuestions,
+    userNotifications,
     context.workspaceState,
     codeLensProvider,
     diffDecorations,
     templateEngine,
     {
-      onGenerationStarted: (modelName) => {
+      onGenerationStarted: (modelName, conversationId) => {
         statusBar.setGenerating(modelName);
+        // Turn START, not end: a cancelled or thrown turn never reaches its end,
+        // and a leaked counter would silently mute the agent from then on.
+        if (conversationId !== undefined) userNotifications.resetTurn(conversationId);
         refreshSessionTime();
       },
       onGenerationFinished: (modelName) => {

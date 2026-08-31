@@ -23,6 +23,7 @@ export interface ForgeHostStatus {
 }
 
 import type { UserQuestionSink } from './UserQuestionService';
+import type { UserNotificationSink } from './UserNotificationService';
 
 export interface ForgeHostFacade {
   createConversation(options?: { activate?: boolean }): Promise<ForgeConversationSummary>;
@@ -71,6 +72,14 @@ export interface ForgeHostFacade {
    * chaining so a missing method is a no-op, not an error.
    */
   onCompactionEvent?(listener: (event: CompactionEvent) => void): { dispose(): void };
+  /**
+   * Subscribe to agent-authored notify_user messages.
+   *
+   * The listener resolves to the number of chats it reached, which the tool
+   * reports to the model verbatim -- so a transport that delivered nothing must
+   * return 0 rather than pretending.
+   */
+  onUserNotification?(sink: UserNotificationSink): { dispose(): void };
   onAgentProgress?(listener: (event: AgentProgressEvent) => void): { dispose(): void };
 }
 
@@ -113,6 +122,7 @@ export interface SidebarHostFacadeDeps {
   unloadModels: () => Promise<void>;
   restartModel: (modelName: string) => Promise<void>;
   onCompactionEvent?: (listener: (event: CompactionEvent) => void) => { dispose(): void };
+  onUserNotification?: (sink: UserNotificationSink) => { dispose(): void };
   onAgentProgress: (listener: (event: AgentProgressEvent) => void) => { dispose(): void };
 }
 
@@ -224,6 +234,10 @@ export class SidebarHostFacade implements ForgeHostFacade {
 
   onCompactionEvent(listener: (event: CompactionEvent) => void): { dispose(): void } {
     return this.deps.onCompactionEvent!(listener);
+  }
+
+  onUserNotification(sink: UserNotificationSink): { dispose(): void } {
+    return this.deps.onUserNotification!(sink);
   }
 
   onAgentProgress(listener: (event: AgentProgressEvent) => void): { dispose(): void } {

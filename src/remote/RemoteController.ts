@@ -45,6 +45,8 @@ export class RemoteController {
   private subscription: { dispose(): void } | undefined;
   private accepting = false;
   private readonly activeConversations = new Set<string>();
+  /** Chats that have run /notify off. Cleared by a window reload, like clanker mode. */
+  private readonly mutedChats = new Set<string>();
   private rateLimiter: RemoteRateLimiter;
   private readonly outbox: RemoteOutboxDelivery;
   private readonly approvals: RemoteApprovalBridge;
@@ -155,14 +157,37 @@ export class RemoteController {
    * idle outbox would sit on the item until an unrelated retry. Filtering by
    * this channel's name is what keeps a Telegram+WhatsApp setup from
    * double-delivering: each transport's controller only reaches its own chats.
+   *
+   * Returns how many chats it reached. notify_user reports that number straight
+   * to the model, so a silent zero here is what stops the agent claiming it
+   * notified a user whose phone never buzzed.
    */
-  async enqueueHostNotification(conversationId: string, text: string): Promise<void> {
-    const bindings = this.store.bindingsForConversation(conversationId, this.channel.name);
-    if (bindings.length === 0) return;
+  async enqueueHostNotification(conversationId: string, text: string): Promise<number> {
+    const bindings = this.store
+      .bindingsForConversation(conversationId, this.channel.name)
+      .filter((binding) => !this.mutedChats.has(binding.chatId));
+    if (bindings.length === 0) return 0;
     for (const binding of bindings) {
       await this.store.notifyOutbox(binding.channel, binding.chatId, text);
     }
     this.outbox.kick();
+    return bindings.length;
+  }
+
+  /**
+   * Per-chat notification mute, driven by /notify on|off.
+   *
+   * In memory, so it lasts until the window reloads -- the same lifetime as
+   * /clanker. Persisting it would mean a BindingSchema field and a legacy
+   * migration for what is a toggle.
+   */
+  setNotify(chatId: string, on: boolean): void {
+    if (on) this.mutedChats.delete(chatId);
+    else this.mutedChats.add(chatId);
+  }
+
+  isNotifyOn(chatId: string): boolean {
+    return !this.mutedChats.has(chatId);
   }
 
   async handle(raw: RemoteInboundEvent): Promise<RemoteInboundDisposition> {
@@ -287,6 +312,10 @@ export class RemoteController {
           inactivityTimeoutMinutes: this.options.inactivityTimeoutMinutes ?? 30,
           modelNames: this.options.modelNames,
           workspaceAliases: this.options.workspaceAliases,
+          notifyMute: {
+            get: (chatId: string) => this.isNotifyOn(chatId),
+            set: (chatId: string, on: boolean) => this.setNotify(chatId, on),
+          },
           ...(this.options.switchWorkspace
             ? { switchWorkspace: this.options.switchWorkspace }
             : {}),

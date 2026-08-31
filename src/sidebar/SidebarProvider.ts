@@ -42,6 +42,7 @@ import { runAddressedAutoCompact } from './autoCompactionPolicy';
 import { SidebarHostFacade, type ForgeHostFacade } from './ForgeHostFacade';
 import { ResidencyPoller } from './ResidencyPoller';
 import type { UserQuestionService } from './UserQuestionService';
+import type { UserNotificationService } from './UserNotificationService';
 
 export type { SidebarProviderEvents };
 /** Residency refresh while visible: cheap, but fast enough to avoid a stale dot. */
@@ -79,6 +80,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     // caller silently own a second service, and ask_user's questions would then
     // never reach the facade the remote bridge subscribes to.
     private readonly questions: UserQuestionService,
+    // Same reasoning as `questions`: one owner, so notify_user and the remote
+    // bridge share a single fan-out.
+    private readonly notifications: UserNotificationService,
     private readonly workspaceState: vscode.Memento,
     private readonly codeLens: KeepUndoCodeLensProvider,
     diffDecorations: DiffDecorations,
@@ -173,6 +177,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       setClankerMode: (on) => this.agentLoop.setClankerMode(on),
       contextBudget: (conversationId) => this.contextBudgetOf(conversationId),
       onCompactionEvent: (listener) => this.slashHandler.onCompactionEvent(listener),
+      onUserNotification: (sink) => this.notifications.addSink(sink),
       onAgentProgress: (listener) => this.agentLoop.onAgentProgress(listener),
       compact: (conversationId, options) =>
         this.slashHandler.compactConversation(conversationId, {

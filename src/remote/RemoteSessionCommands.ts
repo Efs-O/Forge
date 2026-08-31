@@ -17,7 +17,7 @@ export async function handleRemoteSessionCommand(
       event.chatId,
       `Forge commands:
 
-Session: /status · /context · /stop · /new · /list · /resume <n-or-id>
+Session: /status · /context · /stop · /new · /list · /resume <n-or-id> · /notify on|off
 Queue: /queue · /drop <n|all> · /steer <prompt>
 Models: /models · /model <n-or-name> · /unload · /restart
 Window: /compact · /lock · /reload · /timeout [1-1440|off] · /clanker on|off
@@ -26,7 +26,8 @@ Notes:
 • /stop cancels the current request; queued prompts stay queued
 • /steer interrupts the current turn and runs its prompt before queued ones
 • /clanker on auto-approves non-dangerous tools until the window reloads — writes then land with no confirmation anywhere
-• /reload restarts the extension host: a held prompt and this session are dropped`,
+• /reload restarts the extension host: a held prompt and this session are dropped
+• /notify off silences agent notify_user messages for this chat until the window reloads`,
       { signal: context.signal },
     );
     return { kind: 'handled' };
@@ -66,6 +67,24 @@ Notes:
     await context.channel.send(
       event.chatId,
       'Forge: current request stopped; queued requests remain queued.',
+      { signal: context.signal },
+    );
+    return { kind: 'handled' };
+  }
+  if (command === '/notify') {
+    if (!context.notifyMute) return { kind: 'rejected', reason: 'notifications are unavailable' };
+    const desired = argument?.toLowerCase();
+    if (desired !== 'on' && desired !== 'off' && desired !== undefined && desired !== 'status') {
+      return { kind: 'rejected', reason: 'usage: /notify on|off|status' };
+    }
+    if (desired === 'on' || desired === 'off')
+      context.notifyMute.set(event.chatId, desired === 'on');
+    const on = context.notifyMute.get(event.chatId);
+    await context.channel.send(
+      event.chatId,
+      on
+        ? 'Forge: agent notifications ON for this chat.'
+        : 'Forge: agent notifications OFF for this chat — the agent is told its message did not reach you. It does not survive a window reload.',
       { signal: context.signal },
     );
     return { kind: 'handled' };

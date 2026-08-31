@@ -4,6 +4,7 @@ import type { ForgeConfig } from '../../src/config/types';
 import type { LocalDelegationService } from '../../src/delegation/LocalDelegationService';
 import type { IndexManager } from '../../src/search/IndexManager';
 import { UserQuestionService } from '../../src/sidebar/UserQuestionService';
+import { UserNotificationService } from '../../src/sidebar/UserNotificationService';
 import { registerAllTools } from '../../src/tools/registerAllTools';
 import { ToolRegistry, type ToolPermission } from '../../src/tools/ToolRegistry';
 
@@ -58,6 +59,7 @@ const EXPECTED_NATIVE_NAMES = [
   'list_workspace_tasks',
   'monitor_execution',
   'move_file',
+  'notify_user',
   'open_url_in_browser',
   'query_powershell',
   'read_clipboard',
@@ -116,6 +118,7 @@ function makeRegistry(options: { search?: boolean; delegation?: boolean } = {}):
     options.search ? { provider: 'tavily', secret_key_name: 'audit-key' } : undefined,
     indexManager,
     new UserQuestionService(),
+    new UserNotificationService(),
     delegation,
     options.delegation ? () => config : undefined,
   );
@@ -123,7 +126,7 @@ function makeRegistry(options: { search?: boolean; delegation?: boolean } = {}):
 }
 
 describe('registerAllTools canonical coordinator catalog', () => {
-  it('exposes the exact 61-tool native catalog when all optional wiring is present', () => {
+  it('exposes the exact 62-tool native catalog when all optional wiring is present', () => {
     const registry = makeRegistry({ search: true, delegation: true });
     expect(registry.names().sort()).toEqual(EXPECTED_NATIVE_NAMES);
     expect(
@@ -138,6 +141,6 @@ describe('registerAllTools canonical coordinator catalog', () => {
     const names = makeRegistry().names();
     expect(names).not.toContain('web_search');
     expect(names).not.toContain('ask_local_agent');
-    expect(names).toHaveLength(61);
+    expect(names).toHaveLength(62);
   });
 });

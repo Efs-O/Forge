@@ -2,6 +2,10 @@ import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveWorkspaceUri } from '../util/WorkspacePaths';
 import type { UserQuestionService } from '../sidebar/UserQuestionService';
+import {
+  NOTIFY_TURN_LIMIT,
+  type UserNotificationService,
+} from '../sidebar/UserNotificationService';
 
 // ── show_diff ─────────────────────────────────────────────────────────────────
 
@@ -85,6 +89,58 @@ export function makeAskUserTool(questions: UserQuestionService): RegisteredTool 
         'The user did not answer: the question was dismissed without a response. ' +
           'Do not call ask_user again for this question -- ask it in your chat reply and end the turn.'
       );
+    },
+  };
+}
+
+// ── notify_user ───────────────────────────────────────────────────────────────
+
+export function makeNotifyUserTool(notifications: UserNotificationService): RegisteredTool {
+  return {
+    definition: {
+      type: 'function',
+      function: {
+        name: 'notify_user',
+        description:
+          'Send the user a short message that reaches whichever surface started the ' +
+          'turn -- the VS Code window, and the chat it was driven from remotely if ' +
+          'there is one. Fire-and-forget: it does NOT wait for a reply and does NOT ' +
+          'pause your work. Use it for something worth knowing now that should not ' +
+          'stop the task -- a long build finishing, or the first real failure in a ' +
+          'long sweep. To ask a question and wait for an answer, use ask_user instead.',
+        parameters: {
+          type: 'object',
+          properties: {
+            message: { type: 'string', description: 'Message shown to the user.' },
+          },
+          required: ['message'],
+          additionalProperties: false,
+        },
+      },
+    },
+    permission: 'read',
+    handler: async (args, context) => {
+      const message = args['message'] as string;
+      if (notifications.remaining(context?.conversationId) <= 0) {
+        return (
+          `Notification limit reached for this turn (${NOTIFY_TURN_LIMIT}). ` +
+          'The message was not sent -- put it in your final reply instead.'
+        );
+      }
+      // The desktop toast is unconditional: it has to work with remote disabled,
+      // and a user sitting at the machine should see what the phone was sent.
+      void vscode.window.showInformationMessage(message);
+      const chats = await notifications.notify({
+        text: message,
+        ...(context?.conversationId ? { conversationId: context.conversationId } : {}),
+      });
+      // Say where it actually landed. A "sent" that means nothing left the
+      // machine is how ask_user taught the model to trust a lie.
+      return chats > 0
+        ? `Message delivered to the VS Code window and ${chats} remote chat(s).`
+        : 'Shown in the VS Code window only. No remote chat is bound to this ' +
+            'conversation, so the user did NOT receive it on their phone. Do not ' +
+            'claim you notified them remotely.';
     },
   };
 }

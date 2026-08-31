@@ -28,6 +28,7 @@ import { makeListWorkspaceTasksTool, makeRunWorkspaceTaskTool } from './taskTool
 import {
   makeShowDiffTool,
   makeAskUserTool,
+  makeNotifyUserTool,
   makeShowNotificationTool,
   makeCopyToClipboardTool,
   makeReadClipboardTool,
@@ -78,6 +79,7 @@ import {
 } from './backgroundExecutionTools';
 
 import type { UserQuestionService } from '../sidebar/UserQuestionService';
+import type { UserNotificationService } from '../sidebar/UserNotificationService';
 
 export function registerAllTools(
   registry: ToolRegistry,
@@ -86,6 +88,7 @@ export function registerAllTools(
   searchConfig: SearchConfig | undefined,
   indexManager: IndexManager,
   questions: UserQuestionService,
+  notifications: UserNotificationService,
   delegationService?: LocalDelegationService,
   getConfig?: () => ForgeConfig,
 ): void {
@@ -120,6 +123,7 @@ export function registerAllTools(
   registry.register(makeListWorkspaceTasksTool());
   registry.register(makeShowDiffTool());
   registry.register(makeAskUserTool(questions));
+  registry.register(makeNotifyUserTool(notifications));
   registry.register(makeShowNotificationTool());
   registry.register(makeCopyToClipboardTool());
   registry.register(makeReadClipboardTool());

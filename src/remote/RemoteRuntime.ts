@@ -39,6 +39,7 @@ interface ActiveTransport {
   controller: RemoteController;
   lease: RemoteTransportLease;
   compactionSubscription?: { dispose(): void } | undefined;
+  notificationSubscription?: { dispose(): void } | undefined;
 }
 
 export interface RemoteValidationStatus {
@@ -302,14 +303,28 @@ export class RemoteRuntime {
       const compactionSubscription = this.options.host.onCompactionEvent?.((event) =>
         this.onCompactionEvent(event, controller),
       );
+      // No trigger filter, unlike compaction: every notify_user call is
+      // explicitly agent-authored and addressed to the user.
+      const notificationSubscription = this.options.host.onUserNotification?.(async (event) =>
+        event.conversationId === undefined
+          ? 0
+          : controller.enqueueHostNotification(event.conversationId, event.text),
+      );
       try {
         // Subscribe before channel startup: an automatic compaction can
         // complete while a transport is activating. Controller.start() starts
         // the durable outbox, which flushes anything queued here.
         await controller.start();
-        this.active.set(channelName, { channel, controller, lease, compactionSubscription });
+        this.active.set(channelName, {
+          channel,
+          controller,
+          lease,
+          compactionSubscription,
+          notificationSubscription,
+        });
       } catch (err) {
         compactionSubscription?.dispose();
+        notificationSubscription?.dispose();
         throw err;
       }
     } catch (err) {
@@ -392,6 +407,7 @@ export class RemoteRuntime {
     if (!transport) return;
     this.active.delete(name);
     transport.compactionSubscription?.dispose();
+    transport.notificationSubscription?.dispose();
     await transport.controller.stop();
     await transport.lease.release();
   }

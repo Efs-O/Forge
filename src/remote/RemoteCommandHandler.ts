@@ -14,6 +14,8 @@ export interface RemoteCommandContext {
   inactivityTimeoutMinutes: number;
   modelNames: readonly string[];
   workspaceAliases: Readonly<Record<string, string>>;
+  /** Per-chat notify_user mute, backed by RemoteController's in-memory set. */
+  notifyMute?: { get: (chatId: string) => boolean; set: (chatId: string, on: boolean) => void };
   switchWorkspace?: ((alias: string, channel: string, chatId: string) => Promise<void>) | undefined;
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
   reloadWindow?: (() => Promise<void>) | undefined;
