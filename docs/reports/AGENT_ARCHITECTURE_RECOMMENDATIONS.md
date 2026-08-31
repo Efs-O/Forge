@@ -503,3 +503,278 @@ Messaging breadth, generic personal-assistant integrations, and broad consumer a
 | **5** | Scheduler + durable/conditional jobs | High | Low-Medium |
 
 These five should be evaluated independently. None requires abandoning Forge's current architecture, and several can reuse systems that already exist.
+
+---
+
+# README update recommendation
+
+**Priority:** HIGH as a one-time packaging/discoverability task, not as ongoing marketing.  
+**Goal:** make the README's first screen describe the product Forge has actually become.
+
+Forge's implementation has outgrown the narrow mental model implied by a phrase such as "VS Code coding agent for local models." That description is true, but incomplete enough that a technically relevant user may leave before discovering the capabilities that differentiate Forge from a conventional local-chat extension.
+
+The README should therefore optimize the first 30-60 seconds for **recognition**, not promotion. A user who already wants local coding agents, llama.cpp, MCP, Codex/Claude interoperability, or remote engineering control should be able to determine immediately that Forge is relevant.
+
+## Recommended first-screen positioning
+
+Keep the product identity precise. A strong positioning line should communicate three things at once:
+
+1. Forge is a **coding/engineering agent runtime**, not merely a chat UI.
+2. Local GGUF/llama.cpp support is **first-class runtime management**, not just another OpenAI-compatible endpoint.
+3. Forge can coordinate **heterogeneous agents and shared project knowledge**, not only one local model.
+
+Candidate direction:
+
+> **Forge is a local-first engineering-agent runtime for VS Code: run GGUF models through llama.cpp, work with Ollama/Claude/Codex/cloud agents, connect shared MCP knowledge and tools, and control long-running engineering work locally or remotely.**
+
+This is deliberately broader than "local LLM extension" but narrower than "general AI agent platform."
+
+## Put the differentiators before the long feature inventory
+
+The current README contains many strong features, but they should be grouped by why they matter rather than presented only as an expanding catalog.
+
+The first-screen hierarchy should emphasize roughly:
+
+### 1. Local-model-native agent runtime
+
+- direct `llama-server` lifecycle management,
+- GGUF loading and model switching,
+- shared runtimes across VS Code windows,
+- per-slot context accounting,
+- local-model-aware tool/context protections,
+- Ollama support.
+
+This is Forge's clearest distinction from harnesses that merely accept an OpenAI-compatible URL.
+
+### 2. Full engineering-agent loop
+
+- file/LSP/Git/terminal/search tools,
+- checkpoints and Keep/Undo,
+- inline diffs,
+- approval gates and Clanker mode,
+- long-running execution monitoring,
+- truncation recovery and context management.
+
+Make it clear that a local model can actually **do engineering work**, not only answer questions about code.
+
+### 3. Mixed-agent interoperability
+
+- persistent Codex CLI sessions,
+- persistent Claude Code sessions,
+- delegation to other agents,
+- MCP client bridge,
+- HalluScribe/shared project-session knowledge where configured.
+
+This is architecturally important and currently easy to underestimate. Forge is not forced into a local-versus-cloud choice; local and commercial agents can coexist around the same engineering environment.
+
+### 4. Remote engineering control
+
+- Telegram owner pairing,
+- TOTP/security model,
+- durable FIFO requests,
+- remote approvals,
+- conversation/model/workspace control,
+- attachments,
+- crash-safe queue/outbox semantics.
+
+Describe this as **remote control of the same Forge agent runtime**, not as a Telegram chatbot feature.
+
+## Add one compact architecture diagram near the top
+
+A diagram can communicate the system faster than several paragraphs:
+
+```text
+                 VS Code / Telegram
+                        |
+                        v
+                      Forge
+          engineering-agent runtime
+             /          |          \
+            /           |           \
+      local GGUF      Codex       Claude
+      llama.cpp         CLI          CLI
+            \           |           /
+             \----------+----------/
+                        |
+                    MCP tools
+                        |
+                  HalluScribe
+              shared project history
+```
+
+The exact diagram should reflect only currently supported paths. Do not imply that HalluScribe is bundled with Forge if it remains an external MCP server.
+
+## Make HalluScribe/MCP understandable without requiring prior context
+
+The README already documents generic MCP support. Add a small example explaining the architectural consequence:
+
+> Forge can consume external MCP servers. In one deployed configuration, HalluScribe exposes shared session/archive tools to Forge while the same MCP knowledge layer can also be used by Codex or Claude Code. This allows heterogeneous agents to recover common project history without embedding that memory system inside Forge.
+
+Keep this as an example, not a hard dependency or bundled feature claim.
+
+## Explain local-agent context engineering as a product feature
+
+Forge has invested unusually deeply in failure modes that become important on 20-40B local models. The README should surface this without drowning the reader in internals.
+
+A short section such as **Built for local-model limits** can mention:
+
+- per-slot context budgeting,
+- measured rather than guessed context usage,
+- bounded tool results,
+- recoverable excerpts,
+- superseded stale-read removal,
+- prompt-prefix stability work,
+- truncated tool-call recovery,
+- compaction designed to preserve the raw transcript.
+
+This explains why Forge is not equivalent to wiring a GGUF endpoint into a cloud-first harness.
+
+## Improve search/discovery metadata once, not continuously
+
+This recommendation is explicitly **not** a social-media or advertising program.
+
+Audit the static metadata that search engines, GitHub, Marketplace, and users already consume:
+
+- VS Code Marketplace display name/subtitle/description,
+- extension keywords in `package.json`,
+- GitHub repository description,
+- GitHub topics,
+- README title/first paragraph/headings,
+- Open VSX description if applicable.
+
+Useful terms should be present naturally where accurate, for example:
+
+- local coding agent,
+- local LLM,
+- llama.cpp,
+- GGUF,
+- VS Code agent,
+- MCP,
+- Codex CLI,
+- Claude Code,
+- Ollama,
+- agentic coding,
+- local AI coding assistant,
+- multi-agent coding.
+
+Do not keyword-stuff. The objective is that someone already searching for the capability can find the project.
+
+## Include a capability comparison, but avoid a marketing scoreboard
+
+A small factual table can answer "why would I use Forge instead of connecting a model to another extension?"
+
+Candidate rows:
+
+| Capability | Forge approach |
+| --- | --- |
+| GGUF / llama.cpp | Forge owns and manages the runtime |
+| Ollama | Native local-daemon/cloud routing |
+| Codex / Claude | Persistent authenticated CLI sessions |
+| External tools | MCP stdio bridge with capability classification |
+| Local-model context | Per-slot accounting, bounded/recoverable tool context, compaction |
+| File-changing work | Approval gates, inline diffs, Keep/Undo checkpoints |
+| Remote control | Authenticated Telegram transport over the same agent runtime |
+| Shared knowledge | External MCP knowledge layers such as HalluScribe |
+
+Avoid claims such as "better than OpenClaw/Hermes/Cline/Cursor" in the README unless backed by a concrete benchmark. Explain architecture instead.
+
+## Show one end-to-end workflow
+
+Feature lists make Forge look like a collection of integrations. One workflow demonstrates that the pieces compose:
+
+```text
+Telegram request
+   -> Forge opens/binds project conversation
+   -> local Qwen investigates code
+   -> HalluScribe retrieves relevant prior project work
+   -> Qwen delegates a review to Codex
+   -> Forge edits/tests with approval/checkpoint protection
+   -> final result returns to Telegram
+```
+
+Use only a workflow that is actually supported and validated. If a step requires configuration, say so.
+
+## Keep installation early and simple
+
+Do not let architectural depth make the README intimidating. After the positioning/differentiators, users should reach a minimal quick-start path quickly:
+
+1. install Forge,
+2. point it at `llama-server`, Ollama, an OpenAI-compatible endpoint, or an authenticated CLI,
+3. select/configure a model,
+4. start a conversation.
+
+Advanced MCP, HalluScribe, Telegram, shared-runtime, embedding, and control-server setup should remain linked subsections rather than prerequisites.
+
+## Preserve trust signals
+
+Forge's no-telemetry/local-first behavior deserves prominent but precise wording:
+
+- local execution is the default,
+- external providers/services are opt-in,
+- credentials are stored in SecretStorage where applicable,
+- remote messages necessarily traverse their configured messaging provider,
+- external MCP servers have their own trust boundary.
+
+Do not imply "everything stays local" once Telegram, cloud providers, web search, external MCP servers, or CLI providers are enabled.
+
+## README work that is not worth doing
+
+Avoid turning README maintenance into another project:
+
+- no release-by-release marketing copy at the top,
+- no giant badge wall,
+- no competitor attack section,
+- no exaggerated benchmark claims,
+- no duplicated documentation for every config field,
+- no requirement to continuously produce screenshots/videos,
+- no social-media workflow tied to releases.
+
+The target is a **one-time structural rewrite plus occasional factual maintenance**.
+
+## Recommended README structure
+
+```text
+Forge LLM
+  one-sentence positioning
+  4-6 differentiators
+  compact architecture diagram
+  screenshots/demo
+
+Why Forge
+  local-model-native runtime
+  engineering agent loop
+  mixed agents + MCP/shared knowledge
+  remote control
+  reversible/safe execution
+
+Quick Start
+
+How it works
+  backends
+  agent/tool model
+  context handling
+
+MCP + HalluScribe example
+Codex / Claude CLI agents
+Remote control
+Shared runtimes
+Search / semantic code search
+Configuration
+Security / privacy
+Development / testing
+```
+
+The first screen should answer **what Forge is and why it is technically different**. The remainder can continue to serve as the detailed operator documentation it already is.
+
+## Acceptance criterion
+
+The README update succeeds if a technically relevant developer can look at the first screen and correctly answer, without scrolling through the entire document:
+
+- Is Forge a real coding agent or only a chat UI?
+- Does it manage local GGUF/llama.cpp itself?
+- Can it coexist with Codex/Claude/Ollama/cloud models?
+- Does it support MCP/shared external knowledge?
+- Can it safely perform and reverse file-changing work?
+- Can it be controlled remotely?
+
+If those answers are obvious, discoverability has improved without requiring the project maintainer to become a marketer.
