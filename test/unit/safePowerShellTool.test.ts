@@ -6,6 +6,7 @@ import * as vscode from 'vscode';
 import {
   buildSafePowerShellInvocation,
   makeSafePowerShellTool,
+  requireProcessName,
 } from '../../src/tools/safePowerShellTool';
 
 describe('query_powershell', () => {
@@ -52,6 +53,19 @@ describe('query_powershell', () => {
     await expect(
       tool.handler({ operation: 'list_processes', name: 'x'.repeat(121) }),
     ).rejects.toThrow(/120 characters or fewer/u);
+  });
+
+  it('substring-matches a bare name so llama-server finds llama-server.exe', () => {
+    // The dangerous shape is a plausible wrong answer: -like 'llama-server'
+    // never matches 'llama-server.exe', and the empty result reads as "nothing
+    // is running". Measured against the live model, 4 of 14 sampled calls
+    // passed the bare name.
+    expect(requireProcessName('llama-server')).toBe('*llama-server*');
+    expect(requireProcessName('  node  ')).toBe('*node*');
+    // An explicit pattern is the caller's business -- do not second-guess it.
+    expect(requireProcessName('llama-server*')).toBe('llama-server*');
+    expect(requireProcessName('*llama*')).toBe('*llama*');
+    expect(requireProcessName('node?.exe')).toBe('node?.exe');
   });
 
   it('offers list_processes in its schema', () => {

@@ -93,7 +93,7 @@ function outsideWorkspaceError(operation: SafePowerShellOperation, pathValue: st
  * every command line on the machine must not be one un-gated call away.
  * Wildcards are allowed -- it is a match pattern, never source text.
  */
-function requireProcessName(value: unknown): string {
+export function requireProcessName(value: unknown): string {
   if (typeof value !== 'string' || !value.trim()) {
     throw new Error(
       'query_powershell: name is required for list_processes, e.g. "llama-server*". ' +
@@ -103,7 +103,13 @@ function requireProcessName(value: unknown): string {
   if (value.length > 120) {
     throw new Error('query_powershell: name must be 120 characters or fewer.');
   }
-  return value.trim();
+  const trimmed = value.trim();
+  // A bare "llama-server" never matches "llama-server.exe" under -like, and the
+  // empty result reads as "nothing is running" -- a plausible wrong answer, the
+  // one failure shape an agent cannot recover from. Measured: 4 of 14 sampled
+  // calls passed the bare name. Substring-match unless the caller used
+  // wildcards themselves, and say so in the schema.
+  return /[*?]/u.test(trimmed) ? trimmed : `*${trimmed}*`;
 }
 
 async function resolveReadOnlyPath(
@@ -215,9 +221,9 @@ export function makeSafePowerShellTool(): RegisteredTool {
             name: {
               type: 'string',
               description:
-                'Process name pattern for list_processes, wildcards allowed ' +
-                '(e.g. "llama-server*"). Required for that operation; every process at ' +
-                'once is not supported.',
+                'Process name pattern for list_processes. Matched as a substring, so ' +
+                '"llama-server" finds llama-server.exe; use * or ? for explicit wildcard ' +
+                'control. Required for that operation; every process at once is not supported.',
             },
             max_entries: {
               type: 'integer',
