@@ -17,7 +17,8 @@ export function extractToolDetail(argsJson: string): string {
         : [];
       return [cmd, ...commandArgs].map(displayArgument).join(' ');
     }
-    const short = args['query'] ?? args['pattern'] ?? args['message'] ?? args['text'];
+    const short =
+      args['query'] ?? args['pattern'] ?? args['message'] ?? args['text'] ?? args['prompt'];
     if (typeof short === 'string') return short.length > 50 ? short.slice(0, 50) + '…' : short;
   } catch {
     /* malformed args — show nothing */

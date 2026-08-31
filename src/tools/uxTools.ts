@@ -68,15 +68,30 @@ export function makeAskUserTool(): RegisteredTool {
       const placeholder = args['placeholder'] as string | undefined;
       const options = args['options'] as string[] | undefined;
 
+      // The quick input is raised mid-turn, while the sidebar is streaming and
+      // may pull focus back. Without ignoreFocusOut that dismisses the box
+      // before the user ever sees the question, and the resolved `undefined` is
+      // indistinguishable from a real cancel -- the model then re-asks into the
+      // same race. Every other prompt in the extension sets this; so does this one.
       let answer: string | undefined;
       if (options?.length) {
-        answer = await vscode.window.showQuickPick(options, { placeHolder: prompt });
+        answer = await vscode.window.showQuickPick(options, {
+          placeHolder: prompt,
+          ignoreFocusOut: true,
+        });
       } else {
-        const inputOpts: vscode.InputBoxOptions = { prompt };
+        const inputOpts: vscode.InputBoxOptions = { prompt, ignoreFocusOut: true };
         if (placeholder !== undefined) inputOpts.placeHolder = placeholder;
         answer = await vscode.window.showInputBox(inputOpts);
       }
-      return answer ?? '(cancelled)';
+      // Say what happened rather than returning a bare "(cancelled)" the model
+      // reads as an answer -- and name the alternative, so a dismissal ends the
+      // turn in chat instead of retrying the dialog.
+      return (
+        answer ??
+        'The user did not answer: the input box was dismissed without a response. ' +
+          'Do not call ask_user again for this question -- ask it in your chat reply and end the turn.'
+      );
     },
   };
 }
