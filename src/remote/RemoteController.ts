@@ -122,6 +122,15 @@ export class RemoteController {
     this.progress.updateMaxMessageChars(Math.min(options.maxMessageChars, 3_900));
   }
 
+  /**
+   * Drops anything held for a channel whose owner has just been unpaired.
+   * A held prompt outlives session state otherwise, and the next owner to pair
+   * would inherit the last one's queued work on their first successful code.
+   */
+  forgetChannel(channel: RemoteInboundEvent['channel']): void {
+    this.pending.clearChannel(channel);
+  }
+
   async stop(): Promise<void> {
     this.accepting = false;
     this.abort.abort();

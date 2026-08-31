@@ -40,13 +40,12 @@ import type { RequestChainContext } from './RequestChainLifecycle';
 import type { ContextThresholdAction } from './ContextBudgetPublisher';
 import { runAddressedAutoCompact } from './autoCompactionPolicy';
 import { SidebarHostFacade, type ForgeHostFacade } from './ForgeHostFacade';
+import { ResidencyPoller } from './ResidencyPoller';
+import type { UserQuestionService } from './UserQuestionService';
 
 export type { SidebarProviderEvents };
 /** Residency refresh while visible: cheap, but fast enough to avoid a stale dot. */
 const RESIDENCY_POLL_MS = 1500;
-
-import { ResidencyPoller } from './ResidencyPoller';
-import { UserQuestionService } from './UserQuestionService';
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewId = 'forge.sidebar';
@@ -76,6 +75,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private readonly checkpoints: CheckpointStack,
     toolRegistry: ToolRegistry,
     private readonly indexManager: IndexManager,
+    // Required, and deliberately not defaulted: a defaulted instance would let a
+    // caller silently own a second service, and ask_user's questions would then
+    // never reach the facade the remote bridge subscribes to.
+    private readonly questions: UserQuestionService,
     private readonly workspaceState: vscode.Memento,
     private readonly codeLens: KeepUndoCodeLensProvider,
     diffDecorations: DiffDecorations,
@@ -86,7 +89,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     workspaceRoot?: string,
     getConfigPath?: () => string,
     cliSessions?: CliSessionRegistry,
-    private readonly questions: UserQuestionService = new UserQuestionService(),
   ) {
     this.sidebar = loadSidebarSession(workspaceState);
     const runtime = wireSidebar(

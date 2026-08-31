@@ -73,6 +73,9 @@ export function makeAskUserTool(questions: UserQuestionService): RegisteredTool 
         placeholder: args['placeholder'] as string | undefined,
         options: args['options'] as string[] | undefined,
         conversationId: context?.conversationId,
+        // Without this a cancelled turn leaves the question open forever: the
+        // box no longer self-dismisses on blur, and a remote asker has no Esc.
+        signal: context?.abortSignal,
       });
       // Say what happened rather than returning a bare "(cancelled)" the model
       // reads as an answer -- and name the alternative, so a dismissal ends the

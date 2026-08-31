@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **Agent questions reach whichever surface started the turn.** `ask_user` used
+  to talk straight to `vscode.window`, so a question raised during a Telegram
+  turn opened a box nobody was looking at, and the desktop box was dismissed by
+  any focus change — the model saw `(cancelled)` for a question the user never
+  received. `UserQuestionService` now owns the question, the local box and the
+  remote chat race to answer it, and cancelling the turn cancels the question.
+
+- **A prompt sent to an expired remote session is held, not lost.** The TOTP
+  challenge now names its cause, holds the prompt for 10 minutes, and replays it
+  with an echo once the code lands. Repeated wrong codes, `/lock`, and unpairing
+  the owner all drop the held prompt.
+
+- **`/reload` restarts the extension host from the remote chat**, and
+  `remote.attachments.retain_days` accepts up to 365 days or `null` to keep
+  attachments forever — previously capped at 30 with no way to disable pruning.
+  Both shipped inside commit `15894f2`, whose message mentions neither; `git
+  bisect` on either will point at the wrong change.
+
 - **Auto-compaction now recovers context-exhausted remote turns.** A tool-call
   exhaustion was recorded as an incomplete turn but returned through the failed
   branch before the post-turn compaction policy ran. The shared send pipeline

@@ -55,13 +55,6 @@ export class UserQuestionService {
     return false;
   }
 
-  pendingFor(conversationId: string): UserQuestionRequestEvent | undefined {
-    for (const question of this.pending.values()) {
-      if (question.conversationId === conversationId) return eventOf(question);
-    }
-    return undefined;
-  }
-
   ask(request: UserQuestion): Promise<string | undefined> {
     if (request.signal?.aborted) return Promise.resolve(undefined);
     const id = `ask-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -109,10 +102,6 @@ export class UserQuestionService {
     if (!question) return false;
     question.settle(resolveSelection(text, question.options), 'answered');
     return true;
-  }
-
-  cancel(id: string): void {
-    this.pending.get(id)?.settle(undefined, 'cancelled');
   }
 
   private showLocal(

@@ -171,6 +171,19 @@ describe('held remote prompt', () => {
     await controller.stop();
   });
 
+  it('drops the held prompt when the owner is unpaired', async () => {
+    const { controller, channel, forgeHost, code } = await enrolledRig();
+    await channel.emit(event({ providerMessageId: 'p1', text: 'dangerous work' }));
+
+    // Unpairing clears session state; the held prompt must go with it, or the
+    // next owner to pair inherits the last one's queued work.
+    controller.forgetChannel('fake');
+    await channel.emit(event({ providerMessageId: 'auth', text: code }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(forgeHost.send).not.toHaveBeenCalled();
+    await controller.stop();
+  });
+
   it('does not hold a prompt from a sender who is not the owner', async () => {
     const { controller, channel, forgeHost } = await enrolledRig();
     await channel.emit(

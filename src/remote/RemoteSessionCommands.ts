@@ -1,5 +1,4 @@
 import type { RemoteCommandContext } from './RemoteCommandHandler';
-import { TELEGRAM_BOT_COMMANDS } from './TelegramChannel';
 import type { RemoteInboundDisposition, RemoteInboundEvent } from './types';
 
 type TextEvent = Extract<RemoteInboundEvent, { kind: 'text' }>;
@@ -12,7 +11,8 @@ export async function handleRemoteSessionCommand(
   context: RemoteCommandContext,
 ): Promise<RemoteInboundDisposition | undefined> {
   if (command === '/help' || command === '/commands') {
-    const notes = TELEGRAM_BOT_COMMANDS.map((item) => `• /${item.command} — ${item.description}`);
+    // Per-command descriptions already ship as Telegram's native command menu,
+    // so repeating them here only doubled the length of the message.
     await context.channel.send(
       event.chatId,
       `Forge commands:
@@ -23,8 +23,10 @@ Models: /models · /model <n-or-name> · /unload · /restart
 Window: /compact · /lock · /reload · /timeout [1-1440|off] · /clanker on|off
 
 Notes:
+• /stop cancels the current request; queued prompts stay queued
 • /steer interrupts the current turn and runs its prompt before queued ones
-${notes.filter((line) => !line.startsWith('• /steer ')).join('\n')}`,
+• /clanker on auto-approves non-dangerous tools until the window reloads — writes then land with no confirmation anywhere
+• /reload restarts the extension host: a held prompt and this session are dropped`,
       { signal: context.signal },
     );
     return { kind: 'handled' };

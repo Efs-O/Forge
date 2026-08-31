@@ -233,6 +233,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     checkpoints,
     toolRegistry,
     indexManager,
+    userQuestions,
     context.workspaceState,
     codeLensProvider,
     diffDecorations,
@@ -260,7 +261,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     workspaceRoot,
     () => activeConfigPath,
     cliSessions,
-    userQuestions,
   );
   const workspaceId = createHash('sha256')
     .update(workspaceRoot || `no-workspace:${activeConfigPath}`)

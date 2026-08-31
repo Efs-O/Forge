@@ -119,8 +119,9 @@ export class RemoteRuntime {
     return this.auth.beginPairing(channel);
   }
 
-  unpair(channel: 'telegram' | 'whatsapp'): Promise<void> {
-    return this.auth.unpair(channel);
+  async unpair(channel: 'telegram' | 'whatsapp'): Promise<void> {
+    await this.auth.unpair(channel);
+    this.active.get(channel)?.controller.forgetChannel(channel);
   }
 
   createTotpEnrollmentSecret(channel: 'telegram' | 'whatsapp'): Promise<string> {

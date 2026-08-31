@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as vscode from 'vscode';
 import { openQuickInputs } from '../support/vscode';
 import { UserQuestionService } from '../../src/sidebar/UserQuestionService';
+import { makeAskUserTool } from '../../src/tools/uxTools';
 import { RemoteQuestionBridge } from '../../src/remote/RemoteQuestionBridge';
 import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
 import { RemoteAuth } from '../../src/remote/RemoteAuth';
@@ -332,5 +333,39 @@ describe('RemoteController question routing', () => {
     await channel.emit(chatEvent('src/index.ts', 'answer'));
     await expect(pending).resolves.toBe('src/index.ts');
     await cleanup();
+  });
+});
+
+describe('ask_user tool', () => {
+  it('cancels the question when the turn is aborted', async () => {
+    const service = new UserQuestionService();
+    const tool = makeAskUserTool(service);
+    const controller = new AbortController();
+    const call = tool.handler(
+      { prompt: 'Which file?' },
+      { beforeMutate: () => undefined, abortSignal: controller.signal },
+    );
+    expect(currentInput().visible).toBe(true);
+
+    // Without the signal threaded through, this box stays open forever: it no
+    // longer self-dismisses on blur, and a remote asker has no Esc key.
+    controller.abort();
+    await expect(call).resolves.toContain('did not answer');
+    expect(currentInput().disposed).toBe(true);
+  });
+
+  it('routes the answer back through the service, whatever surface gave it', async () => {
+    const service = new UserQuestionService();
+    const tool = makeAskUserTool(service);
+    const asked = vi.fn();
+    service.addSink({ asked, answered: () => undefined });
+    const call = tool.handler(
+      { prompt: 'Which file?' },
+      { beforeMutate: () => undefined, conversationId: 'c1' },
+    );
+
+    const id = asked.mock.calls[0]?.[0].id as string;
+    expect(service.answer(id, 'src/index.ts')).toBe(true);
+    await expect(call).resolves.toBe('src/index.ts');
   });
 });
