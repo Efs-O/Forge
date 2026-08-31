@@ -1,7 +1,17 @@
 import type { RegisteredTool } from './ToolRegistry';
 
-/** Longest single pause, matching monitor_execution's wait_ms ceiling. */
-export const MAX_WAIT_SECONDS = 60;
+/**
+ * Longest single pause, in seconds.
+ *
+ * Deliberately NOT monitor_execution's 60s ceiling: that one is a polling
+ * interval on a wait that returns early the moment the process exits, so it
+ * caps a check, not a duration. Nothing returns early here, so a low cap does
+ * not prevent a long wait -- it just forces wait(60) ten times to sleep ten
+ * minutes, spending ten of the turn's max_tool_rounds on sleeping. That budget
+ * is for work. A runaway is bounded by max_tool_rounds anyway, and /stop
+ * cancels a wait in flight, so the ceiling only needs to stop an absurd value.
+ */
+export const MAX_WAIT_SECONDS = 900;
 
 /**
  * A plain timed pause.
@@ -28,10 +38,13 @@ export function makeWaitTool(): RegisteredTool {
           'Start-Sleep or "timeout /t", but built in, so it needs no shell and works ' +
           'when those are unavailable. Use it to space work out over time, such as ' +
           'pinging the user on an interval or leaving a slow process a moment to ' +
-          `settle. Maximum ${MAX_WAIT_SECONDS} seconds per call. To wait for a ` +
-          'specific background command rather than a fixed delay, use ' +
-          'monitor_execution instead -- it returns as soon as that command finishes, ' +
-          'which is quicker and more precise than guessing a duration here.',
+          'settle, or to back off before retrying something rate-limited. Maximum ' +
+          `${MAX_WAIT_SECONDS} seconds (${MAX_WAIT_SECONDS / 60} minutes) per call; ` +
+          'prefer one wait of the length you need over several short ones, which ' +
+          'spend your tool-call budget on sleeping. To wait for a specific ' +
+          'background command rather than a fixed delay, use monitor_execution ' +
+          'instead -- it returns as soon as that command finishes, which is quicker ' +
+          'and more precise than guessing a duration here.',
         parameters: {
           type: 'object',
           properties: {

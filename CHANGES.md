@@ -272,7 +272,7 @@
   Start-Sleep` banned, Windows `timeout` needing console stdin it never gets
   under `shell: false` -- before landing on `python -c "time.sleep(15)"`, which
   is luck rather than a capability. `wait` is in-process: no shell, no binary to
-  be missing, capped at 60s, and it honours the turn's abort signal so /stop
+  be missing, capped at 15 minutes, and it honours the turn's abort signal so /stop
   never leaves a turn parked on a timer. It reports the time it actually waited,
   not the time requested. The PowerShell refusal now names it first.
 - **`notify_user`: the agent can reach the chat that started the turn.** Its

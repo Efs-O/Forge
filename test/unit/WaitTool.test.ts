@@ -38,9 +38,11 @@ describe('wait tool', () => {
   });
 
   it('rejects a duration outside the allowed range', async () => {
-    await expect(tool.handler({ seconds: 0 }, ctx())).rejects.toThrow(/1 to 60/u);
+    await expect(tool.handler({ seconds: 0 }, ctx())).rejects.toThrow(
+      new RegExp(`1 to ${MAX_WAIT_SECONDS}`, 'u'),
+    );
     await expect(tool.handler({ seconds: MAX_WAIT_SECONDS + 1 }, ctx())).rejects.toThrow(
-      /1 to 60/u,
+      new RegExp(`1 to ${MAX_WAIT_SECONDS}`, 'u'),
     );
     await expect(tool.handler({ seconds: 1.5 }, ctx())).rejects.toThrow(/whole number/u);
   });
