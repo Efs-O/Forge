@@ -27,7 +27,7 @@ Notes:
 • /stop cancels the current request; queued prompts stay queued
 • /steer interrupts the current turn and runs its prompt before queued ones
 • /clanker on auto-approves non-dangerous tools until the window reloads — writes then land with no confirmation anywhere
-• /reload restarts the extension host: a held prompt and this session are dropped
+• /reload fully reloads the VS Code window: it picks up a newly installed build, and drops a held prompt, the queue, and this session
 • /notify off silences agent notify_user messages for this chat until the window reloads
 • /new <alias> switches this chat to another configured workspace; /workspace list names them`,
       { signal: context.signal },
