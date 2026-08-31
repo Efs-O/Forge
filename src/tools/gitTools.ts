@@ -159,7 +159,10 @@ export function makeCommitTool(): RegisteredTool {
       );
       if (!staged) {
         const root = repo.rootUri?.fsPath ?? '(repository root unavailable)';
-        throw new Error(`git commit failed in repository "${root}": No staged changes to commit.`);
+        throw new Error(
+          `git commit failed in repository "${root}": nothing is staged. ` +
+            'Call stage with the paths to commit first, or git_status to see what changed.',
+        );
       }
       await runGit(repo, ['commit', '-m', message]);
       return `Committed: ${message}`;

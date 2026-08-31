@@ -6,6 +6,7 @@ import { resolveWorkspacePath } from '../util/WorkspacePaths';
 import { CHUNKED_WRITE_ADVICE } from './writeChunking';
 import { mimeFromHeader } from './imageTool';
 import { MAX_READ_FILE_CHARS, capResultText } from './resultCap';
+import { describePathMiss } from './pathErrorHint';
 
 /** How much of a file to sniff for NUL bytes before calling it binary. */
 const BINARY_SNIFF_BYTES = 8000;
@@ -86,7 +87,7 @@ export function makeReadFileTool(): RegisteredTool {
       try {
         bytes = fs.readFileSync(filePath);
       } catch (err) {
-        throw new Error(`read_file: ${(err as Error).message}`);
+        throw new Error(describePathMiss('read_file', args['path'] as string, err));
       }
       const refusal = binaryRefusal(bytes, args['path'] as string);
       if (refusal) throw new Error(refusal);

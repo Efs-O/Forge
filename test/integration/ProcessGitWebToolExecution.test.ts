@@ -139,8 +139,10 @@ describe('isolated process, Git, and web tool execution', () => {
     await expect(makeSwitchBranchTool().handler({ name: 'main' })).resolves.toBe(
       'Switched to main',
     );
+    // Acceptance #9: the refusal must name the tool that fixes it, not just
+    // state the rule -- see docs/plans/TOOL_ERROR_PROMPT_PLAN.md.
     await expect(makeCommitTool().handler({ message: 'empty' })).rejects.toThrow(
-      'No staged changes to commit',
+      /nothing is staged\. Call stage with the paths to commit first, or git_status/u,
     );
     await expect(makeStageTool().handler({ paths: ['tracked.txt'] })).resolves.toContain(
       'tracked.txt',

@@ -27,7 +27,11 @@ export class ExecCommandError extends Error {
     readonly program: string,
     detail: string,
   ) {
-    super(JSON.stringify({ kind, program, detail }));
+    // Prose, not JSON. This message is read by the model as the result of the
+    // call it just made -- the highest-salience prompt in the system -- and a
+    // serialized object taught it nothing. `kind` and `program` remain
+    // properties for code; they were noise in the string.
+    super(`${program}: ${detail}`);
     this.name = 'ExecCommandError';
   }
 }

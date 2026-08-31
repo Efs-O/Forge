@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveWorkspaceUri } from '../util/WorkspacePaths';
+import { describePathMiss } from './pathErrorHint';
 
 /**
  * Above this many entries the per-entry `stat` is skipped.
@@ -41,7 +42,7 @@ export function makeListDirectoryTool(): RegisteredTool {
       try {
         entries = await vscode.workspace.fs.readDirectory(uri);
       } catch (err) {
-        throw new Error(`list_directory: ${(err as Error).message}`);
+        throw new Error(describePathMiss('list_directory', args['path'] as string, err));
       }
       if (!entries.length) return '(empty directory)';
 

@@ -58,17 +58,15 @@ criteria.
   last *manually* edited value — it is **not** evidence of the live in-memory
   `active_model`. Don't read the file to verify runtime model state.
 
-- **Process inspection:** PowerShell `-Command` is policy-refused in this
-  workspace. Use `wmic` via `exec_command` instead:
+- **Process inspection:** list llama-servers with `wmic` via `exec_command`:
   `wmic process where name='llama-server.exe' get ProcessId,CommandLine /format:list`
-  to list servers, then `taskkill /PID <id> /F` to kill one.
+  then `taskkill /PID <id> /F` to kill one. (The tools refuse PowerShell
+  `-Command` and shell operators themselves, and their refusals name the
+  replacement — that guidance no longer needs to live here.)
 
-- **`exec_command` runs with NO shell — never wrap paths in quotes.** Pass the
-  executable as the bare `command` string; spaces in the path are fine
-  (`C:\Program Files (x86)\Llamacpp\llama.cpp-b10673\llama-tokenize.exe` works
-  as-is). Quoting it (`` `"C:\Program Files (x86)\..."` ``) makes the quotes part
-  of the program name → `ENOENT` / `missing_executable`. Same rule for `args`:
-  no shell operators, no quoting ceremony — one plain string per arg.
+- **Never quote a path passed to `exec_command`.** Spaces are fine as-is
+  (`C:\Program Files (x86)\Llamacpp\llama.cpp-b10673\llama-tokenize.exe`);
+  quoting makes the quotes part of the program name → `missing_executable`.
   `llama-tokenize.exe` reads the prompt via `--stdin --show-count` (NOT `-` or a
   file arg — both are rejected); the count is the final stdout line
   `Total number of tokens: N`.
@@ -107,8 +105,9 @@ criteria.
   default), `test/webview` (DOM). `npm test` runs the non-live set.
 
 - **Current session title lives in VS Code's `state.vscdb`, not in the repo.**
-  The `.forge/sessions/*.jsonl` and `.coordination/sessions/*` files are
-  decoys (stale/test data). The real live title is in
+  `.forge/sessions/*.jsonl` does not carry it — but those logs are the project's
+  forensic record (every tool call, argument and result; dedupe rows before
+  counting). The real live title is in
   `%APPDATA%\Code\User\workspaceStorage\<hash>\state.vscdb`, SQLite table
   `ItemTable`, key **`Efsoo.forge-llm`** (a JSON blob). Inside it,
   `forge.conversations.v1.activeConversationId` → match that id in

@@ -35,6 +35,7 @@ overlaps with an existing owner, extend the owner instead.
 | Confirmation FIFO + clanker bypass policy  | `src/sidebar/ToolApprovalService.ts` |
 | Agent question: local box + remote answer  | `src/sidebar/UserQuestionService.ts` |
 | Model residency polling timer              | `src/sidebar/ResidencyPoller.ts`     |
+| Filesystem-miss error text for tools       | `src/tools/pathErrorHint.ts`         |
 | Tool call execution + result formatting    | `src/sidebar/ToolDispatch.ts`        |
 | Conversation CRUD pure ops                 | `src/sidebar/ConversationOps.ts`     |
 | Slash command dispatch                     | `src/sidebar/SlashCommandHandler.ts` |
