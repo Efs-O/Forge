@@ -1,6 +1,6 @@
 # Tool Error Messages as Prompts
 
-**Status:** implemented 2026-08-31; §2 dropped during implementation (see Review pass and §2). All 13 acceptance criteria verified.
+**Status:** implemented 2026-08-31, then MEASURED AND LARGELY DISCONFIRMED — see "Outcome" at the end; §2 dropped during implementation (see Review pass and §2). All 13 acceptance criteria verified.
 **Evidence:** audit of 9,607 deduped tool calls across 215 session logs in
 `~/.forge/sessions/`. Method and headline numbers in
 `project_forge_tool_audit` (memory) and CLAUDE.md's Agent-Ergonomics Traps.
@@ -251,3 +251,68 @@ again would have been busywork justified by a stale number.
 5. `commit` (§4).
 6. FORGE.md deletion (§5 second half).
 7. Tests for all thirteen criteria; `npm run ci`; `npm run package`.
+
+---
+
+## Outcome: measured against the live model, 2026-08-31
+
+Two independent measurements, both after implementation. Both say the premise
+was wrong.
+
+**1. A/B against the running Qwen3.8-27B** (llama-server on :8080, n=14 per
+arm, same seeds, identical conversation, only the tool-result text differing):
+
+| next action after the refusal | OLD (JSON blob) | NEW (prose) |
+|---|---:|---:|
+| retried `powershell` | 0 | 0 |
+| moved to a working tool | 8 | 9 |
+| answered in text | 6 | 5 |
+
+No difference worth the name, and **zero retries in either arm**. Presentation
+was not the barrier.
+
+**2. What actually followed each failure in the archive** — the check that
+should have come before any of this work:
+
+| error | occurrences | recovered on the very next call |
+|---|---:|---:|
+| `commit` nothing staged | 6 | **100%** (4 went straight to `stage`) |
+| `exec_command` shell operators | 14 | **100%** |
+| `-Command` refusal | 24 | 92% (2 retries) |
+| `list_directory` ENOENT | 21 | 81% |
+| `read_file` ENOENT | 48 | 77% |
+
+The model was never trapped. It reached for `stage` unprompted in the exact
+case where this plan added text telling it to reach for `stage`.
+
+### What this costs the plan
+
+The headline was wrong twice, in the same direction, and I should name both.
+First I called `exec_command` "the biggest single win in the archive" when its
+advice was already correct (caught during implementation). Then I kept the
+framing that these failures were *wasted rounds*. They are not. They cost one
+round each, and the agent recovers from ~85% of them immediately. Across 9,607
+calls that is roughly 2.6% of rounds spent on recoverable misses — which is
+what exploration costs, not a defect.
+
+**The correct metric was never the failure rate. It is the recovery rate.** A
+tool with a 10% failure rate that always recovers is healthy. A tool with a
+2% failure rate the model cannot recover from is broken. `ask_user` was the
+second kind, which is why fixing it mattered: it returned `(cancelled)`, a
+*plausible* answer, so there was nothing to recover from — the model believed
+the user had declined and stopped. Nothing else found in this investigation is
+that shape.
+
+### What stays
+
+The shipped changes are kept, on much weaker grounds than they were made:
+prose beats JSON for anyone reading a log, and naming the resolution base helps
+the ~20% of ENOENTs that do not recover immediately. All 13 acceptance criteria
+still hold. But the expected benefit is *marginal*, not the headline win the
+plan opened with, and no further work in this direction is justified.
+
+### The rule worth keeping
+
+Before changing a tool because its failure rate looks bad, measure what the
+agent did on the **next** call. If it recovered, the rate is exploration cost
+and the tool is fine.
