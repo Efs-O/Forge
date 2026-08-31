@@ -31,6 +31,37 @@ describe('query_powershell', () => {
     expect(invocation.env['FORGE_SAFE_PS_PATH']).toBe(hostilePath);
   });
 
+  it('lists processes with the name as a comparison value, never as source text', () => {
+    const hostile = "llama*'; Remove-Item -Recurse -Force C:\; #";
+    const invocation = buildSafePowerShellInvocation('list_processes', 'N:\ws', 15, hostile);
+    const script = invocation.args.at(-1) ?? '';
+
+    expect(script).not.toContain(hostile);
+    expect(invocation.env['FORGE_SAFE_PS_NAME']).toBe(hostile);
+    // -like against the env var, not a WQL -Filter built by string concatenation.
+    expect(script).toContain('$_.Name -like $env:FORGE_SAFE_PS_NAME');
+    expect(script).not.toContain('-Filter');
+    expect(script).toContain('ProcessId, Name, CommandLine');
+  });
+
+  it('refuses list_processes without a name, and says why', async () => {
+    const tool = makeSafePowerShellTool();
+    await expect(tool.handler({ operation: 'list_processes' })).rejects.toThrow(
+      /name is required for list_processes.*llama-server/su,
+    );
+    await expect(
+      tool.handler({ operation: 'list_processes', name: 'x'.repeat(121) }),
+    ).rejects.toThrow(/120 characters or fewer/u);
+  });
+
+  it('offers list_processes in its schema', () => {
+    const params = makeSafePowerShellTool().definition.function.parameters as {
+      properties: { operation: { enum: string[] }; name: { type: string } };
+    };
+    expect(params.properties.operation.enum).toContain('list_processes');
+    expect(params.properties.name.type).toBe('string');
+  });
+
   it('uses a non-interactive profile-free PowerShell invocation', () => {
     const invocation = buildSafePowerShellInvocation('workspace_overview', 'N:\\workspace', 15);
 

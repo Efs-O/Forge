@@ -16,7 +16,8 @@ export type SafePowerShellOperation =
   | 'workspace_overview'
   | 'get_location'
   | 'list_directory'
-  | 'get_file_hash';
+  | 'get_file_hash'
+  | 'list_processes';
 
 interface SafePowerShellInvocation {
   readonly program: string;
@@ -29,6 +30,7 @@ const SAFE_OPERATIONS = new Set<SafePowerShellOperation>([
   'get_location',
   'list_directory',
   'get_file_hash',
+  'list_processes',
 ]);
 
 // This script is source-controlled and fixed. Model-controlled values travel
@@ -40,6 +42,10 @@ const SAFE_POWERSHELL_SCRIPT = [
   "  'get_location' { (Get-Location).Path; break }",
   "  'list_directory' { Get-ChildItem -LiteralPath $env:FORGE_SAFE_PS_PATH -Force -Name | Select-Object -First ([int] $env:FORGE_SAFE_PS_LIMIT); break }",
   "  'get_file_hash' { (Get-FileHash -LiteralPath $env:FORGE_SAFE_PS_PATH -Algorithm SHA256).Hash; break }",
+  // `-like` against the env var compares a VALUE; a WQL -Filter string would
+  // have meant splicing model input into query source, which is the one thing
+  // this script exists to avoid.
+  "  'list_processes' { Get-CimInstance Win32_Process | Where-Object { $_.Name -like $env:FORGE_SAFE_PS_NAME } | Select-Object -First ([int] $env:FORGE_SAFE_PS_LIMIT) ProcessId, Name, CommandLine | Format-List; break }",
   "  default { throw 'Forge safe PowerShell operation was rejected.' }",
   '}',
 ].join('\n');
@@ -81,12 +87,37 @@ function outsideWorkspaceError(operation: SafePowerShellOperation, pathValue: st
   );
 }
 
+/**
+ * The process-name pattern. Required, not optional: query_powershell is
+ * auto-approved and bypasses the confirmation gate, so an unbounded dump of
+ * every command line on the machine must not be one un-gated call away.
+ * Wildcards are allowed -- it is a match pattern, never source text.
+ */
+function requireProcessName(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error(
+      'query_powershell: name is required for list_processes, e.g. "llama-server*". ' +
+        'Listing every process at once is not supported.',
+    );
+  }
+  if (value.length > 120) {
+    throw new Error('query_powershell: name must be 120 characters or fewer.');
+  }
+  return value.trim();
+}
+
 async function resolveReadOnlyPath(
   operation: SafePowerShellOperation,
   pathValue: unknown,
 ): Promise<string> {
   const root = getWorkspaceRoot();
-  if (operation === 'workspace_overview' || operation === 'get_location') return root;
+  if (
+    operation === 'workspace_overview' ||
+    operation === 'get_location' ||
+    operation === 'list_processes'
+  ) {
+    return root;
+  }
   if (typeof pathValue !== 'string' || !pathValue.trim()) {
     throw new Error(`query_powershell: path is required for ${operation}.`);
   }
@@ -126,6 +157,7 @@ export function buildSafePowerShellInvocation(
   operation: SafePowerShellOperation,
   targetPath: string,
   maxEntries: number,
+  processName = '',
 ): SafePowerShellInvocation {
   return {
     program: 'powershell.exe',
@@ -134,6 +166,7 @@ export function buildSafePowerShellInvocation(
       FORGE_SAFE_PS_OPERATION: operation,
       FORGE_SAFE_PS_PATH: targetPath,
       FORGE_SAFE_PS_LIMIT: String(maxEntries),
+      FORGE_SAFE_PS_NAME: processName,
     },
   };
 }
@@ -157,13 +190,19 @@ export function makeSafePowerShellTool(): RegisteredTool {
       function: {
         name: 'query_powershell',
         description:
-          'Run one structured, read-only PowerShell inspection in this workspace without user confirmation. Supports workspace_overview, get_location, list_directory, and get_file_hash. It never accepts a raw PowerShell command or script.',
+          'Run one structured, read-only PowerShell inspection without user confirmation. Supports workspace_overview, get_location, list_directory, get_file_hash, and list_processes (PID, name and command line for processes matching a name pattern -- use this to find a running llama-server). It never accepts a raw PowerShell command or script.',
         parameters: {
           type: 'object',
           properties: {
             operation: {
               type: 'string',
-              enum: ['workspace_overview', 'get_location', 'list_directory', 'get_file_hash'],
+              enum: [
+                'workspace_overview',
+                'get_location',
+                'list_directory',
+                'get_file_hash',
+                'list_processes',
+              ],
               description: 'The fixed read-only PowerShell operation to run.',
             },
             path: {
@@ -173,11 +212,18 @@ export function makeSafePowerShellTool(): RegisteredTool {
                 'and get_file_hash. For anything outside the workspace root, use list_directory / ' +
                 'read_file / find_files instead — this tool cannot reach it.',
             },
+            name: {
+              type: 'string',
+              description:
+                'Process name pattern for list_processes, wildcards allowed ' +
+                '(e.g. "llama-server*"). Required for that operation; every process at ' +
+                'once is not supported.',
+            },
             max_entries: {
               type: 'integer',
               minimum: 1,
               maximum: MAX_LIST_ENTRIES,
-              description: 'Maximum directory entries to return. Default 15.',
+              description: 'Maximum directory entries, or processes, to return. Default 15.',
             },
           },
           required: ['operation'],
@@ -190,8 +236,16 @@ export function makeSafePowerShellTool(): RegisteredTool {
     handler: async (args) => {
       const operation = requireOperation(args['operation']);
       const maxEntries = requireListLimit(args['max_entries']);
+      // Argument validation before workspace resolution: a bad argument should
+      // report itself, not surface as whatever the workspace state happens to be.
+      const processName = operation === 'list_processes' ? requireProcessName(args['name']) : '';
       const targetPath = await resolveReadOnlyPath(operation, args['path']);
-      const invocation = buildSafePowerShellInvocation(operation, targetPath, maxEntries);
+      const invocation = buildSafePowerShellInvocation(
+        operation,
+        targetPath,
+        maxEntries,
+        processName,
+      );
       const result = await spawnAndWait(
         invocation.program,
         [...invocation.args],

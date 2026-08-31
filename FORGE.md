@@ -58,11 +58,11 @@ criteria.
   last *manually* edited value — it is **not** evidence of the live in-memory
   `active_model`. Don't read the file to verify runtime model state.
 
-- **Process inspection:** list llama-servers with `wmic` via `exec_command`:
-  `wmic process where name='llama-server.exe' get ProcessId,CommandLine /format:list`
-  then `taskkill /PID <id> /F` to kill one. (The tools refuse PowerShell
-  `-Command` and shell operators themselves, and their refusals name the
-  replacement — that guidance no longer needs to live here.)
+- **Process inspection:** `query_powershell` with
+  `operation: list_processes, name: "llama-server*"` returns PID, name and
+  command line; then `taskkill /PID <id> /F` via `exec_command` to kill one.
+  (`wmic` also works today but reports itself deprecated and is being removed
+  from Windows — do not reach for it.)
 
 - **Never quote a path passed to `exec_command`.** Spaces are fine as-is
   (`C:\Program Files (x86)\Llamacpp\llama.cpp-b10673\llama-tokenize.exe`);
