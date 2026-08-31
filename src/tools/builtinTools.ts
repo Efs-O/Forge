@@ -53,7 +53,7 @@ export function makeReadFileTool(): RegisteredTool {
             path: {
               type: 'string',
               description:
-                'File path, relative to the WORKSPACE ROOT (not to any project directory named in the task) or absolute. For a repository nested in the workspace, keep its directory as a prefix, e.g. "subproject/src/main.ts".',
+                'Workspace-relative or absolute path. Include a nested repository directory prefix.',
             },
             start_line: {
               type: 'integer',
@@ -135,7 +135,7 @@ export function makeWriteFileTool(): RegisteredTool {
             path: {
               type: 'string',
               description:
-                'File path, relative to the WORKSPACE ROOT (not to any project directory named in the task) or absolute. For a repository nested in the workspace, keep its directory as a prefix, e.g. "subproject/src/main.ts".',
+                'Workspace-relative or absolute path. Include a nested repository directory prefix.',
             },
             content: {
               type: 'string',
@@ -174,7 +174,7 @@ export function makeAppendFileTool(): RegisteredTool {
             path: {
               type: 'string',
               description:
-                'File path, relative to the WORKSPACE ROOT (not to any project directory named in the task) or absolute. For a repository nested in the workspace, keep its directory as a prefix, e.g. "subproject/src/main.ts".',
+                'Workspace-relative or absolute path. Include a nested repository directory prefix.',
             },
             content: {
               type: 'string',

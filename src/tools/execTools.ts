@@ -85,21 +85,20 @@ export function makeExecCommandTool(): RegisteredTool {
       function: {
         name: 'exec_command',
         description:
-          'Execute a binary directly (no shell). "npm" and "npx" work as-is on every platform — do not wrap them in cmd or add .cmd. Shell builtins (dir, echo, type) are not programs and will not run; use list_directory, write_file, and read_file instead. Shell operators in args and dangerous commands are refused. Use tail_lines, head_lines, max_output_chars, or output_stream to shape returned output instead of piping.',
+          'Run an executable directly without a shell; pass args separately. npm/npx work cross-platform. Shell builtins, operators, and dangerous commands are refused. Use the output options instead of pipes; use background=true with monitor_execution for long jobs.',
         parameters: {
           type: 'object',
           properties: {
             command: {
               type: 'string',
-              description:
-                'Executable to run, with no shell. Bare "npm" and "npx" are resolved for you on Windows.',
+              description: 'Executable name or path. Bare npm/npx are resolved on Windows.',
             },
             args: { type: 'array', items: { type: 'string' }, description: 'Arguments array.' },
             cwd: { type: 'string', description: 'Working directory. Optional.' },
             timeout_ms: {
               type: 'integer',
               description:
-                'Timeout in ms. Default 30000. With background=true there is no default deadline — the job runs until it exits or stop_execution is called — and setting this makes it a kill deadline instead.',
+                'Deadline in ms (foreground default 30000; background has none unless set).',
             },
             tail_lines: {
               type: 'integer',

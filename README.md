@@ -66,7 +66,8 @@ telemetry, analytics, or auto-update pings.
   notification outbox, multi-window fencing, and the existing Forge approval gate
 - Added Telegram Bot API long polling with SecretStorage-backed setup and local pairing
 - Added owner-bound TOTP sessions, inactivity locking, remote conversation/model
-  controls, attachment handoff, and live agent/compaction progress
+  controls, queue steering/drop commands, attachment handoff, and live
+  agent/compaction progress
 - Added an experimental WhatsApp linked-device adapter with encrypted authentication state
 - Added OpenAI-compatible cloud-provider support, including `xai`, `openrouter`, `openai`, and generic `openai-compatible`
 - Added automatic xAI token resolution and refresh support

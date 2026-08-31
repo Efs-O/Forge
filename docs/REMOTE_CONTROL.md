@@ -56,13 +56,18 @@ provider reachability, durable request health, and notification delivery. The
 complete release checklist is in
 [real-device validation](REMOTE_CONTROL_VALIDATION.md).
 
-Remote commands are `/help`, `/status`, `/stop`, `/new`, `/list`,
-`/resume <number-or-id>`, `/models`, `/model <number-or-name>`, `/queue`,
-`/unload`, `/restart`, `/compact`, `/lock`, `/timeout [1-1440|off]`, and
-`/clanker on|off`. Configured workspace aliases are listed with
+Remote commands are `/help`, `/commands`, `/status`, `/context`, `/stop`,
+`/steer <prompt>`, `/new`, `/list`, `/resume <number-or-id>`, `/models`,
+`/model <number-or-name>`, `/queue`, `/drop <number|all>`, `/unload`,
+`/restart`, `/compact`, `/lock`, `/timeout [1-1440|off]`, and `/clanker on|off`.
+Telegram publishes the main commands in its native slash-command menu.
+Configured workspace aliases are listed with
 `/workspace list` and opened with `/new <alias>`. `/stop` cancels the active
 addressed request; it does not unload the model, and durable queued requests
-remain queued. `/clanker on` removes the normal confirmation step for
+remain queued. `/steer` first saves its prompt durably, interrupts only the
+active turn, and runs before ordinary queued prompts. `/drop` changes queued
+records to cancelled instead of deleting their durable history. `/clanker on`
+removes the normal confirmation step for
 non-dangerous Forge-native tools and should be used deliberately.
 
 Telegram update offsets advance only after Forge has durably accepted, handled,
@@ -70,6 +75,13 @@ rejected, or recognized an event as a duplicate. Final-response notification is
 separate from execution and uses an at-least-once outbox with bounded retries.
 Replacing the token with `Forge: Set Telegram Bot Token` recreates only the
 Telegram transport immediately; a VS Code reload is not required.
+
+If a model exhausts the remaining output room, an enabled auto-compaction now
+runs for the failed turn and resumes the same addressed request. This is shared
+send-pipeline behavior, not a Telegram-only fallback. The Forge output channel
+logs request/conversation ids, terminal state, and context totals to help
+diagnose remote sessions; it never logs message content or authentication
+secrets.
 
 ## WhatsApp status
 

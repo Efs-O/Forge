@@ -18,7 +18,7 @@ export function makeMonitorExecutionTool(): RegisteredTool {
       function: {
         name: 'monitor_execution',
         description:
-          'Wait for a background exec_command to finish or until wait_ms elapses, then return new output and status. Output is capped per call: keep calling with the returned next_stdout_cursor / next_stderr_cursor while stdout_more_available is true. Only a bounded tail of a noisy job is retained — if stdout_dropped_chars appears, that much output is gone for good and stdout_note says what to do. waited_ms is the time actually waited; ran_for_ms is the process runtime. Always pass the returned suggested_next_wait_ms as your next wait_ms: a job that prints nothing is not necessarily stuck, and re-polling it every 10s burns the tool-round budget of the turn before a long job can finish. If output stays empty while status is running, the job is silent — progress bars redraw with a carriage return and never reach a pipe — so stop watching stdout and watch the artifact instead: poll the SIZE of the file the job is writing. Downloaders and archivers write to a temporary or partial file (.part, .incomplete, .tmp, .download) beside or BELOW the destination, not to the final path, so list the destination recursively before concluding nothing is happening.',
+          'Wait for a background exec_command and return new output plus status. Reuse the returned cursors and suggested_next_wait_ms; *_dropped_chars means that output is gone. A running job with no output may be silent: inspect its artifact, including nearby or nested .part/.tmp files, instead of polling rapidly.',
         parameters: {
           type: 'object',
           properties: {
@@ -30,8 +30,7 @@ export function makeMonitorExecutionTool(): RegisteredTool {
               type: 'integer',
               minimum: 0,
               maximum: 60000,
-              description:
-                'Maximum time to wait for completion, in milliseconds. Default 10000. Pass the suggested_next_wait_ms from the previous call rather than re-sending the default.',
+              description: 'Max wait in ms (default 10000). Reuse suggested_next_wait_ms.',
             },
             stdout_cursor: {
               type: 'integer',

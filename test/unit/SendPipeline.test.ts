@@ -14,6 +14,7 @@ import type { ForgeConfig } from '../../src/config/types';
 import type { ConversationRuntime, SidebarRuntime } from '../../src/sidebar/sessionTypes';
 import type { HostToWebview } from '../../src/sidebar/messageBridge';
 import { RequestChainLifecycle } from '../../src/sidebar/RequestChainLifecycle';
+import { CONTEXT_EXHAUSTED_MESSAGE } from '../../src/agent/truncationRecovery';
 
 function conversation(overrides: Partial<ConversationRuntime> = {}): ConversationRuntime {
   return {
@@ -230,6 +231,22 @@ describe('SendPipeline.send', () => {
     expect(h.runTurn.mock.calls[1]?.[4]).toEqual({ internal: true });
     expect(h.requestChains.currentEpoch('conv-1')).toBe(1);
     expect(outcome).toEqual({ kind: 'completed', finalText: 'final' });
+  });
+
+  it('auto-compacts and resumes a recoverable context-exhaustion failure', async () => {
+    const h = harness();
+    vi.mocked(h.deps.evaluateAfterTurn)
+      .mockResolvedValueOnce({ kind: 'continue', text: 'resume', options: { internal: true } })
+      .mockResolvedValueOnce(undefined);
+    h.runTurn
+      .mockResolvedValueOnce({ kind: 'failed', error: CONTEXT_EXHAUSTED_MESSAGE, finalText: '' })
+      .mockResolvedValueOnce({ kind: 'completed', finalText: 'recovered', finishReason: 'stop' });
+
+    const outcome = await h.pipeline.send('start remotely');
+
+    expect(h.deps.evaluateAfterTurn).toHaveBeenCalledTimes(2);
+    expect(h.runTurn.mock.calls[1]?.[2]).toBe('resume');
+    expect(outcome).toEqual({ kind: 'completed', finalText: 'recovered' });
   });
 
   it('pins the full selection including @profile on the conversation', async () => {

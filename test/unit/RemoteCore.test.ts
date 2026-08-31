@@ -96,6 +96,19 @@ describe('RemoteRequestStore', () => {
     await secondReload.load();
     expect(secondReload.getRequest('r2')?.state).toBe('unknown');
   });
+
+  it('prioritizes steering prompts and can durably cancel selected queued work', async () => {
+    const state = await store();
+    await state.enqueue(request({ id: 'normal', dedupKey: 'normal', admittedAt: 1 }));
+    await state.enqueue(
+      request({ id: 'steer', dedupKey: 'steer', admittedAt: 2, priority: 'steer' }),
+    );
+
+    expect(state.queued('c1').map((item) => item.id)).toEqual(['steer', 'normal']);
+    await expect(state.cancelQueued('c1', new Set(['normal']))).resolves.toBe(1);
+    expect(state.queued('c1').map((item) => item.id)).toEqual(['steer']);
+    expect(state.getRequest('normal')?.state).toBe('cancelled');
+  });
 });
 
 describe('remote configuration and lease', () => {
@@ -227,6 +240,75 @@ describe('RemoteController with fake channel', () => {
     );
     const duplicate = await channel.emit(prompt);
     expect(duplicate).toMatchObject({ kind: 'duplicate', state: 'completed' });
+    await controller.stop();
+  });
+
+  it('durably prioritizes /steer before interrupting the active turn', async () => {
+    const state = await store();
+    await state.setBinding({
+      channel: 'fake',
+      chatId: 'chat',
+      workspaceId: 'workspace',
+      conversationId: 'c1',
+    });
+    await state.enqueue(request({ id: 'ordinary', dedupKey: 'ordinary', admittedAt: 1 }));
+    const secrets = new MemorySecrets();
+    secrets.values.set('forge.remote.fake.ownerId', 'owner');
+    const auth = new RemoteAuth(secrets as unknown as vscode.SecretStorage);
+    const channel = new FakeRemoteChannel();
+    let busy = true;
+    const send = vi.fn(async () => ({ kind: 'completed' as const, finalText: 'done' }));
+    const interrupt = vi.fn(async () => {
+      busy = false;
+    });
+    const host = {
+      createConversation: vi.fn(),
+      restoreConversation: vi.fn(),
+      send,
+      cancel: vi.fn(),
+      interrupt,
+      queueIntent: vi.fn(),
+      addApprovalSink: () => ({ dispose: () => undefined }),
+      resolveApproval: vi.fn(),
+      status: () => ({
+        activeConversationId: 'c1',
+        conversations: [],
+        requestChains: busy
+          ? [{ conversationId: 'c1', userIntentEpoch: 1, stage: 'running', managed: true }]
+          : [],
+        streamingConversationIds: busy ? ['c1'] : [],
+      }),
+      contextBudget: () => ({ used: 10, max: 100 }),
+      clankerMode: () => false,
+      setClankerMode: vi.fn(),
+    } as unknown as ForgeHostFacade;
+    const controller = new RemoteController(channel, state, auth, host, {
+      workspaceId: 'workspace',
+      queueLimit: 5,
+      maxMessageChars: 12_000,
+      rateLimitPerMinute: 30,
+      modelNames: [],
+      attachmentsEnabled: false,
+      acceptPdfAttachments: false,
+      workspaceAliases: {},
+    });
+    await controller.start();
+
+    const disposition = await channel.emit({
+      channel: 'fake',
+      kind: 'text',
+      providerMessageId: 'steer-message',
+      senderId: 'owner',
+      chatId: 'chat',
+      chatType: 'private',
+      receivedAt: 2,
+      text: '/steer change direction now',
+    });
+
+    expect(disposition).toMatchObject({ kind: 'queued', position: 1 });
+    expect(interrupt).toHaveBeenCalledWith('c1');
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    expect(send.mock.calls.map((call) => call[1])).toEqual(['change direction now', 'hello']);
     await controller.stop();
   });
 
@@ -901,5 +983,55 @@ describe('remote compaction progress notifications', () => {
     expect(channel.edits).toContainEqual(
       expect.objectContaining({ chatId: 'chat-a', text: 'Forge: compaction failed.' }),
     );
+  });
+
+  it('reports context and drops only this remote chat queue', async () => {
+    const state = await store();
+    await state.setBinding({
+      channel: 'fake',
+      chatId: 'chat-a',
+      workspaceId: 'workspace',
+      conversationId: 'c1',
+    });
+    await state.enqueue(
+      request({ id: 'mine', dedupKey: 'mine', chatId: 'chat-a', providerMessageId: 'mine' }),
+    );
+    await state.enqueue(
+      request({ id: 'other', dedupKey: 'other', chatId: 'chat-b', providerMessageId: 'other' }),
+    );
+    const channel = new FakeRemoteChannel();
+    const context = {
+      channel,
+      store: state,
+      host: { contextBudget: () => ({ used: 75, max: 100 }) },
+      workspaceId: 'workspace',
+      signal: new AbortController().signal,
+      inactivityTimeoutMinutes: 30,
+      modelNames: [],
+      workspaceAliases: {},
+    };
+    const command = (text: string, dedupKey: string) =>
+      handleRemoteCommand(
+        {
+          channel: 'fake',
+          kind: 'text',
+          providerMessageId: dedupKey,
+          senderId: 'owner',
+          chatId: 'chat-a',
+          chatType: 'private',
+          receivedAt: 1,
+          text,
+        } as RemoteInboundEvent,
+        context as never,
+        dedupKey,
+      );
+
+    await command('/context', 'context-command');
+    expect(channel.sent.at(-1)?.text).toContain('Remaining: 25 tokens');
+    await command('/queue', 'queue-command');
+    expect(channel.sent.at(-1)?.text).toContain('hello');
+    await command('/drop all', 'drop-command');
+    expect(state.getRequest('mine')?.state).toBe('cancelled');
+    expect(state.getRequest('other')?.state).toBe('queued');
   });
 });

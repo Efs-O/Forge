@@ -1,4 +1,3 @@
-import { randomUUID } from 'crypto';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import type { RemoteAuth } from './RemoteAuth';
 import type { RemoteRequestStore } from './RemoteRequestStore';
@@ -8,17 +7,16 @@ import {
   type RemoteChannel,
   type RemoteInboundDisposition,
   type RemoteInboundEvent,
-  type RemoteRequestRecord,
 } from './types';
 import type { RemoteAuditLog } from './RemoteAuditLog';
 import { RemoteRateLimiter } from './RemoteRateLimiter';
 import { RemoteOutboxDelivery } from './RemoteOutboxDelivery';
-import { CONVERSATION_BUSY_ERROR } from '../sidebar/SendPipeline';
 import { handleRemoteCommand } from './RemoteCommandHandler';
 import { RemoteApprovalBridge } from './RemoteApprovalBridge';
-import { withConversationIdentity } from './RemoteReplyIdentity';
 import type { RemoteAttachmentStore } from './RemoteAttachmentStore';
 import { RemoteAgentProgress } from './RemoteAgentProgress';
+import { admitRemotePrompt, parseSteerCommand } from './RemotePromptAdmission';
+import { drainRemoteQueue } from './RemoteQueueDrain';
 
 export interface RemoteControllerOptions {
   workspaceId: string;
@@ -151,6 +149,7 @@ export class RemoteController {
 
     if (!(await this.auth.isOwner(event))) {
       if ((await this.auth.tryPair(event)) === 'paired') {
+        await this.audit?.record(event, 'paired').catch(() => undefined);
         await this.channel.send(event.chatId, 'Forge remote pairing complete.', {
           signal: this.abort.signal,
         });
@@ -160,6 +159,7 @@ export class RemoteController {
     }
     const gate = await this.auth.gate(event);
     if (gate.kind === 'challenge') {
+      await this.audit?.record(event, 'authentication_challenge').catch(() => undefined);
       await this.channel.send(
         event.chatId,
         'Forge: authentication required. Enter your 6-digit authenticator code.',
@@ -168,18 +168,21 @@ export class RemoteController {
       return { kind: 'handled' };
     }
     if (gate.kind === 'failed') {
+      await this.audit?.record(event, 'authentication_failed').catch(() => undefined);
       await this.channel.send(event.chatId, 'Forge: authentication failed.', {
         signal: this.abort.signal,
       });
       return { kind: 'handled' };
     }
     if (gate.kind === 'locked_out') {
+      await this.audit?.record(event, 'authentication_locked_out').catch(() => undefined);
       return { kind: 'rejected', reason: 'remote authentication is temporarily locked' };
     }
     if (gate.kind === 'blocked') {
       return { kind: 'rejected', reason: 'remote authentication is required' };
     }
     if (gate.newlyAuthenticated) {
+      await this.audit?.record(event, 'authenticated').catch(() => undefined);
       this.outbox.kick();
       const binding = this.store.binding(event.channel, event.chatId);
       if (binding) this.kickDrain(binding.conversationId);
@@ -189,6 +192,7 @@ export class RemoteController {
     }
     if (event.kind === 'text' && event.text === '/lock') {
       this.auth.lock(event);
+      await this.audit?.record(event, 'session_locked').catch(() => undefined);
       await this.channel.send(event.chatId, 'Forge: remote session locked.', {
         signal: this.abort.signal,
       });
@@ -208,7 +212,11 @@ export class RemoteController {
       return { kind: 'rejected', reason: 'message exceeds configured limit' };
     }
     const key = remoteDedupKey(event.channel, event.chatId, event.providerMessageId);
-    if (event.text.startsWith('/')) {
+    const steer = parseSteerCommand(event.text);
+    if (steer.matched && !steer.text) {
+      return { kind: 'rejected', reason: 'usage: /steer <prompt>' };
+    }
+    if (event.text.startsWith('/') && !steer.matched) {
       const result = await handleRemoteCommand(
         event,
         {
@@ -232,96 +240,24 @@ export class RemoteController {
       if (result.kind !== 'rejected' && result.kind !== 'retry') this.auth.touch(event);
       return result;
     }
-
-    const duplicate = this.store.getByDedupKey(key);
-    if (duplicate) {
-      return { kind: 'duplicate', requestId: duplicate.id, state: duplicate.state };
-    }
-    let binding = this.store.binding(event.channel, event.chatId);
-    if (binding && binding.workspaceId !== this.options.workspaceId) {
-      return { kind: 'rejected', reason: 'chat is bound to a different workspace' };
-    }
-    if (!binding) {
-      const conv = await this.host.createConversation({ activate: false });
-      binding = {
-        channel: event.channel,
-        chatId: event.chatId,
-        workspaceId: this.options.workspaceId,
-        conversationId: conv.id,
-      };
-      await this.store.setBinding(binding);
-    }
-    const queued = this.store.queued(binding.conversationId);
-    if (queued.length >= this.options.queueLimit) {
-      return { kind: 'rejected', reason: 'remote queue is full' };
-    }
-    const busy = this.isBusy(binding.conversationId);
-    const requestId = randomUUID();
-    let attachments: RemoteRequestRecord['attachments'];
-    if (event.attachments?.length) {
-      if (!this.options.attachmentsEnabled) {
-        return {
-          kind: 'rejected',
-          reason: 'remote attachments are disabled in Forge configuration',
-        };
-      }
-      if (!this.options.attachmentStore) {
-        return { kind: 'rejected', reason: 'remote attachments require an open workspace' };
-      }
-      try {
-        const inboundAttachments = await Promise.all(
-          event.attachments.map(async (attachment) => {
-            if (attachment.mediaType === 'application/pdf' && !this.options.acceptPdfAttachments) {
-              throw new Error('PDF attachments are disabled in Forge configuration');
-            }
-            if (attachment.data) return attachment;
-            if (!this.channel.downloadAttachment)
-              throw new Error('transport cannot download attachments');
-            return this.channel.downloadAttachment(attachment);
-          }),
-        );
-        attachments = await this.options.attachmentStore.save(
-          binding.conversationId,
-          requestId,
-          inboundAttachments,
-        );
-      } catch (err) {
-        return { kind: 'rejected', reason: `attachment rejected: ${(err as Error).message}` };
-      }
-    }
-    const request: RemoteRequestRecord = {
-      id: requestId,
-      dedupKey: key,
-      channel: event.channel,
-      chatId: event.chatId,
-      providerMessageId: event.providerMessageId,
-      conversationId: binding.conversationId,
-      text: event.text,
-      ...(attachments ? { attachments } : {}),
-      receivedAt: event.receivedAt,
-      admittedAt: Date.now(),
-      state: 'queued',
-      updatedAt: Date.now(),
-    };
-    try {
-      const inserted = await this.store.enqueue(request);
-      if (!inserted) {
-        const existing = this.store.getByDedupKey(key);
-        if (!existing) return { kind: 'retry', reason: 'dedup state changed during admission' };
-        return { kind: 'duplicate', requestId: existing.id, state: existing.state };
-      }
-    } catch (err) {
-      return { kind: 'retry', reason: `durable admission failed: ${(err as Error).message}` };
-    }
-    if (busy) this.host.queueIntent(binding.conversationId);
-    await this.audit
-      ?.record(event, busy ? 'request_queued' : 'request_accepted', request.id)
-      .catch(() => undefined);
-    this.kickDrain(request.conversationId);
-    this.auth.touch(event);
-    return busy || queued.length > 0
-      ? { kind: 'queued', requestId: request.id, position: queued.length + 1 }
-      : { kind: 'accepted', requestId: request.id };
+    const result = await admitRemotePrompt(
+      event,
+      steer.text ?? event.text,
+      key,
+      steer.matched ? 'steer' : undefined,
+      {
+        channel: this.channel,
+        store: this.store,
+        host: this.host,
+        options: this.options,
+        isBusy: (conversationId) => this.isBusy(conversationId),
+        kickDrain: (conversationId) => this.kickDrain(conversationId),
+        audit: this.audit,
+        onError: this.options.onError,
+      },
+    );
+    if (result.kind !== 'rejected' && result.kind !== 'retry') this.auth.touch(event);
+    return result;
   }
 
   private isBusy(conversationId: string): boolean {
@@ -334,7 +270,18 @@ export class RemoteController {
 
   private kickDrain(conversationId: string): void {
     if (this.drains.has(conversationId)) return;
-    const drain = this.drain(conversationId)
+    const drain = drainRemoteQueue(conversationId, {
+      signal: this.abort.signal,
+      channel: this.channel,
+      store: this.store,
+      auth: this.auth,
+      host: this.host,
+      progress: this.progress,
+      outbox: this.outbox,
+      activeConversations: this.activeConversations,
+      attachmentStore: () => this.options.attachmentStore,
+      isBusy: (id) => this.isBusy(id),
+    })
       .catch((err) =>
         this.options.onError?.(
           `Forge remote queue stopped: ${err instanceof Error ? err.message : String(err)}`,
@@ -343,113 +290,4 @@ export class RemoteController {
       .finally(() => this.drains.delete(conversationId));
     this.drains.set(conversationId, drain);
   }
-
-  private async drain(conversationId: string): Promise<void> {
-    while (!this.abort.signal.aborted) {
-      if (this.isBusy(conversationId)) {
-        await this.delay(250);
-        continue;
-      }
-      const queued = this.store.queued(conversationId, this.channel.name);
-      const first = queued[0];
-      if (!first) return;
-      if (!(await this.auth.canDeliver(first.channel, first.chatId))) return;
-      const next = await this.store.claimNext(conversationId, this.channel.name);
-      if (!next) {
-        if (this.store.queued(conversationId, this.channel.name).length === 0) return;
-        await this.delay(250);
-        continue;
-      }
-      if (this.abort.signal.aborted) {
-        await this.store.requeue(next.id);
-        return;
-      }
-      if (!(await this.auth.canDeliver(next.channel, next.chatId))) {
-        await this.store.requeue(next.id);
-        return;
-      }
-      this.activeConversations.add(conversationId);
-      const progressId = await this.channel
-        .sendProgress?.(next.chatId, 'Forge: working…', { signal: this.abort.signal })
-        .catch(() => undefined);
-      if (progressId) this.progress.begin(conversationId, next.chatId, progressId);
-      let progressOutcome: 'completed' | 'cancelled' | 'failed' | 'queued' = 'failed';
-      try {
-        const attachments = next.attachments?.length
-          ? await this.options.attachmentStore?.load(next.attachments)
-          : undefined;
-        if (next.attachments?.length && !attachments) {
-          throw new Error('remote attachment sidecar is unavailable');
-        }
-        const outcome = await this.host.send(conversationId, next.text, attachments, {
-          remoteRequestId: next.id,
-        });
-        if (outcome.kind === 'completed') {
-          progressOutcome = 'completed';
-          const notification = withConversationIdentity(
-            this.store,
-            this.host,
-            next,
-            outcome.finalText,
-          );
-          await this.store.finish(next.id, 'completed', {
-            finalText: outcome.finalText,
-            notification: notification ?? 'Forge request completed.',
-            ...(notification ? { announceConversationId: next.conversationId } : {}),
-          });
-        } else if (outcome.kind === 'cancelled' || outcome.kind === 'interrupted') {
-          progressOutcome = 'cancelled';
-          await this.store.finish(next.id, 'cancelled', {
-            ...(outcome.finalText ? { finalText: outcome.finalText } : {}),
-            notification: outcome.finalText || 'Forge request cancelled.',
-          });
-        } else if (outcome.error === CONVERSATION_BUSY_ERROR) {
-          progressOutcome = 'queued';
-          await this.store.requeue(next.id);
-          await this.delay(250);
-          continue;
-        } else {
-          await this.store.finish(next.id, 'failed', {
-            error: outcome.error,
-            ...(outcome.finalText ? { finalText: outcome.finalText } : {}),
-            notification: `Forge request failed: ${outcome.error}`,
-          });
-        }
-      } catch (err) {
-        progressOutcome = 'failed';
-        const error = err instanceof Error ? err.message : String(err);
-        await this.store.finish(next.id, 'failed', {
-          error,
-          notification: `Forge request failed: ${error}`,
-        });
-      } finally {
-        if (progressId) {
-          await this.progress.finish(conversationId, progressTerminalText(progressOutcome));
-        }
-        this.activeConversations.delete(conversationId);
-      }
-      this.outbox.kick();
-    }
-  }
-
-  private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => {
-      const timer = setTimeout(resolve, ms);
-      this.abort.signal.addEventListener(
-        'abort',
-        () => {
-          clearTimeout(timer);
-          resolve();
-        },
-        { once: true },
-      );
-    });
-  }
-}
-
-function progressTerminalText(outcome: 'completed' | 'cancelled' | 'failed' | 'queued'): string {
-  if (outcome === 'completed') return 'Forge: completed.';
-  if (outcome === 'cancelled') return 'Forge: cancelled.';
-  if (outcome === 'queued') return 'Forge: queued.';
-  return 'Forge: failed.';
 }

@@ -24,6 +24,7 @@ import type { RequestChainLifecycle } from './RequestChainLifecycle';
 import type { RequestChainContext } from './RequestChainLifecycle';
 import { toRequestOutcome, type ForgeRequestOutcome, type ForgeTurnOutcome } from './turnOutcome';
 import type { ContextThresholdAction } from './ContextBudgetPublisher';
+import { isContextExhaustionReason } from '../agent/truncationRecovery';
 
 const log = getLogger();
 export const CONVERSATION_BUSY_ERROR = 'Forge: this conversation is still generating.';
@@ -211,16 +212,24 @@ export class SendPipeline {
           deps.postSessionSync();
           this.flushSessionLog(conv.id);
         }
-        if (turn.kind !== 'completed') return toRequestOutcome(turn);
+        // Context exhaustion is a failed provider turn, but it is also the one
+        // failure auto-compaction can repair. Returning here used to bypass the
+        // compaction policy entirely (most visible in background Telegram
+        // conversations). Let that failure reach the addressed post-turn
+        // policy; all other failures still retain their original outcome.
+        const recoverableContextFailure =
+          turn.kind === 'failed' && isContextExhaustionReason(turn.error);
+        if (turn.kind !== 'completed' && !recoverableContextFailure) return toRequestOutcome(turn);
         if (deps.requestChains.isContinuationSuppressed(chain)) return toRequestOutcome(turn);
         deps.requestChains.setStage(chain, 'evaluating');
         const action = await deps.evaluateAfterTurn(conv, chain, turn);
         const terminationKind = deps.requestChains.terminationKind(chain);
         if (terminationKind) {
+          const incompleteReason = turn.kind === 'completed' ? turn.incompleteReason : undefined;
           return {
             kind: terminationKind,
             ...(turn.finalText ? { finalText: turn.finalText } : {}),
-            ...(turn.incompleteReason ? { incompleteReason: turn.incompleteReason } : {}),
+            ...(incompleteReason ? { incompleteReason } : {}),
           };
         }
         if (!action) return toRequestOutcome(turn);

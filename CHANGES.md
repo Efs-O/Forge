@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- **Auto-compaction now recovers context-exhausted remote turns.** A tool-call
+  exhaustion was recorded as an incomplete turn but returned through the failed
+  branch before the post-turn compaction policy ran. The shared send pipeline
+  now compacts and resumes this recoverable failure for Telegram and every
+  other entry surface when auto-compaction is enabled.
+
+- **Telegram prompts can steer instead of waiting behind the queue.**
+  `/steer <prompt>` is durably recorded before Forge interrupts the active turn,
+  then runs ahead of ordinary queued prompts while keeping FIFO order between
+  steering prompts. `/drop <number|all>` cancels queued work, `/context` reports
+  remaining room, and Telegram now publishes the supported commands in its
+  native command menu.
+
+- **Remote sessions are easier to diagnose without recording content.** The
+  metadata-only audit records pairing, authentication challenges/failures,
+  successful authentication, locking, and steering admission. The Forge output
+  log records request id, conversation id, outcome, and context use, never the
+  prompt, response, bot token, TOTP code, or raw Telegram identity.
+
+- **The full tool surface uses less starting context.** Concise schemas for the
+  largest native tools preserve their arguments, constraints, safety rules,
+  and capabilities while saving 475 exact Qwen tokens in the measured tool
+  catalog. No tool was removed or hidden.
+
 - **Telegram remote control now applies replaced bot credentials immediately.**
   `Forge: Set Telegram Bot Token` used to update SecretStorage and then take the
   ordinary in-place config path, leaving the active poller on the old token

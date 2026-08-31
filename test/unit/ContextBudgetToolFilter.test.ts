@@ -15,6 +15,7 @@ import type { ForgeConfig, ModelConfig } from '../../src/config/types';
 import type { HostToWebview } from '../../src/sidebar/messageBridge';
 import type { ConversationRuntime, SidebarRuntime } from '../../src/sidebar/sessionTypes';
 import type { RequestChainContext } from '../../src/sidebar/RequestChainLifecycle';
+import { CONTEXT_INPUT_EXHAUSTED_MESSAGE } from '../../src/agent/truncationRecovery';
 
 function registry(): ToolRegistry {
   const reg = new ToolRegistry();
@@ -178,13 +179,35 @@ describe('ContextBudgetPublisher thresholds', () => {
       baseOf: (id) => id,
       manualCompact: () => undefined,
       getConfig: () => ({ ...config(), auto_compact: { enabled: true } }) as unknown as ForgeConfig,
-      incompleteTurnReason: () =>
-        "Forge: the next model request cannot fit in this conversation's remaining context. Earlier context must be compacted before continuing.",
+      incompleteTurnReason: () => CONTEXT_INPUT_EXHAUSTED_MESSAGE,
       autoCompact: async () => {
         compacted = true;
         return undefined;
       },
     });
+    await publisher.evaluateAfterTurn(conv, chain);
+    expect(compacted).toBe(true);
+  });
+
+  it('trusts an explicit exhaustion even when the configured window is unavailable', async () => {
+    const unresolved = config();
+    delete unresolved.models[0]!.num_ctx;
+    const conv = conversation({ last_input_tokens: 12_000, last_output_tokens: 0 });
+    let compacted = false;
+    const publisher = new ContextBudgetPublisher({
+      getSidebar: () =>
+        ({ activeConversationId: conv.id, conversations: [conv] }) as SidebarRuntime,
+      post: () => undefined,
+      baseOf: (id) => id,
+      manualCompact: () => undefined,
+      getConfig: () => ({ ...unresolved, auto_compact: { enabled: true } }),
+      incompleteTurnReason: () => CONTEXT_INPUT_EXHAUSTED_MESSAGE,
+      autoCompact: async () => {
+        compacted = true;
+        return undefined;
+      },
+    });
+
     await publisher.evaluateAfterTurn(conv, chain);
     expect(compacted).toBe(true);
   });

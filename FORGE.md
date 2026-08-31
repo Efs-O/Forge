@@ -69,6 +69,12 @@ criteria.
   `llama-tokenize.exe` reads the prompt via `--stdin --show-count` (NOT `-` or a
   file arg — both are rejected); the count is the final stdout line
   `Total number of tokens: N`.
+- **A tool call cut off at a byte limit is context pressure, not a path bug.**
+  When an edit/write call is truncated at N bytes, the remaining context cannot
+  hold the arguments — the fix is to split the write across several calls
+  (write_file first chunk, then append_file), not to retry the same call.
+  Distinct from the quoting ENOENT above: quoting = missing executable;
+  truncation = context full.
 
 - **Pinging models with `ask_local_agent`:** each local (GGUF/Ollama) ping
   spawns a *second* llama-server (delegation backend is separate from the one
@@ -111,3 +117,12 @@ criteria.
   - No `better-sqlite3`/`sqlite3` CLI here; use Python's stdlib:
     `python -c "import sqlite3,json,sys;sys.stdout.reconfigure(encoding='utf-8');d=json.loads(sqlite3.connect(r'<ws>\state.vscdb').execute(\"SELECT value FROM ItemTable WHERE key='Efsoo.forge-llm'\").fetchone()[0]);c=d['forge.conversations.v1'];a=c['activeConversationId'];print([x['title'] for x in c['conversations'] if x['id']==a])"`
     (force UTF-8 or emoji in titles crash the cp1253 console).
+
+- **Auto-compact fires only post-turn, on a completed turn or a recoverable
+  context-exhaustion failure.** The fraction trigger needs the *server-reported*
+  context ≥ `auto_compact.at` (0.85); the exhaustion trigger needs the last
+  turn to have failed with a context-exhaustion reason. A turn that is 77% full
+  and still generating is NOT a trigger — that is expected, not a bug. The
+  `recoverableContextFailure` gate in `SendPipeline` is what lets a failed
+  context-exhaustion turn reach the policy;
+  without it, exhaustion failures bypassed auto-compact entirely.

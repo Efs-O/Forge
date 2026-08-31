@@ -115,6 +115,8 @@ overlaps with an existing owner, extend the owner instead.
 | -------------------------------------------- | -------------------------------------- |
 | Extension-scoped transport lifecycle         | `src/remote/RemoteRuntime.ts`          |
 | Inbound admission, queue drain, notifications | `src/remote/RemoteController.ts`       |
+| Durable normal/steering prompt admission     | `src/remote/RemotePromptAdmission.ts`  |
+| Durable queue execution + terminal outcome  | `src/remote/RemoteQueueDrain.ts`       |
 | Pairing + session-auth facade                | `src/remote/RemoteAuth.ts`             |
 | TOTP session state + enrollment boundary     | `src/remote/RemoteSessionAuth.ts`      |
 | RFC 6238 generation/verification             | `src/remote/RemoteTotp.ts`             |

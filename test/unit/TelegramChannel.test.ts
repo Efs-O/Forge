@@ -1,11 +1,44 @@
 import { describe, expect, it, vi } from 'vitest';
-import { splitTelegramText, TelegramChannel } from '../../src/remote/TelegramChannel';
+import {
+  splitTelegramText,
+  TelegramChannel,
+  TELEGRAM_BOT_COMMANDS,
+} from '../../src/remote/TelegramChannel';
 
 function response(result: unknown): Response {
   return { ok: true, status: 200, json: async () => ({ ok: true, result }) } as Response;
 }
 
 describe('TelegramChannel', () => {
+  it('registers the supported command menu when polling starts', async () => {
+    const abort = new AbortController();
+    const calls: Array<{ method: string; body: Record<string, unknown> }> = [];
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor: async () => undefined,
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        const method = String(url).split('/').at(-1)!;
+        calls.push({ method, body: JSON.parse(String(init?.body)) as Record<string, unknown> });
+        if (method === 'setMyCommands') return response(true);
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+            once: true,
+          });
+        });
+      }) as typeof fetch,
+    });
+
+    await channel.start(abort.signal);
+    await vi.waitFor(() =>
+      expect(calls).toContainEqual({
+        method: 'setMyCommands',
+        body: { commands: TELEGRAM_BOT_COMMANDS },
+      }),
+    );
+    abort.abort();
+  });
+
   it('validates Bot API authentication without exposing the token', async () => {
     const channel = new TelegramChannel({
       token: 'secret-token',
@@ -98,6 +131,51 @@ describe('TelegramChannel', () => {
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(setCursor).not.toHaveBeenCalled();
+  });
+
+  it('tells a queued Telegram prompt how to steer the conversation', async () => {
+    const abort = new AbortController();
+    let firstPoll = true;
+    const acknowledgements: string[] = [];
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor: async () => undefined,
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        const method = String(url).split('/').at(-1);
+        if (method === 'setMyCommands') return response(true);
+        if (method === 'getUpdates' && firstPoll) {
+          firstPoll = false;
+          return response([
+            {
+              update_id: 9,
+              message: {
+                message_id: 4,
+                date: 1,
+                text: 'follow up',
+                chat: { id: 2, type: 'private' },
+                from: { id: 3 },
+              },
+            },
+          ]);
+        }
+        if (method === 'sendMessage') {
+          const body = JSON.parse(String(init?.body)) as { text: string };
+          acknowledgements.push(body.text);
+          abort.abort();
+          return response({ message_id: 10 });
+        }
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+            once: true,
+          });
+        });
+      }) as typeof fetch,
+    });
+    channel.onEvent(async () => ({ kind: 'queued', requestId: 'r1', position: 2 }));
+
+    await channel.start(abort.signal);
+    await vi.waitFor(() => expect(acknowledgements[0]).toContain('/steer <prompt>'));
   });
 
   it('splits long messages and attaches approval callbacks only to the first chunk', async () => {

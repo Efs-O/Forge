@@ -210,8 +210,6 @@ export class ContextBudgetPublisher {
     max: number,
     chain: RequestChainContext,
   ): Promise<ContextThresholdAction | undefined> {
-    if (max <= 0) return undefined;
-    const fraction = used / max;
     // Opt-in automatic compaction. Only reached post-turn, so compaction's
     // not-while-streaming guard is already satisfied. It is non-destructive —
     // the transcript is kept, only the model's window shrinks.
@@ -223,6 +221,11 @@ export class ContextBudgetPublisher {
       log.info('[auto-compact] next request cannot fit — compacting before resume');
       return this.deps.autoCompact(conv, chain);
     }
+    // An explicit provider exhaustion is authoritative even if this model's
+    // configured window cannot be resolved. Percentage thresholds need max;
+    // recovery from a known failed request does not.
+    if (max <= 0) return undefined;
+    const fraction = used / max;
     if (auto?.enabled === true && fraction >= (auto.at ?? DEFAULT_AUTO_COMPACT_AT)) {
       log.info(`[auto-compact] context at ${Math.round(fraction * 100)}% — compacting`);
       return this.deps.autoCompact(conv, chain);

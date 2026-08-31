@@ -35,6 +35,8 @@ export interface ForgeHostFacade {
     options?: { remoteRequestId?: string },
   ): Promise<ForgeRequestOutcome>;
   cancel(conversationId: string): Promise<void>;
+  /** Interrupt only the active turn so a durable steering prompt can run next. */
+  interrupt(conversationId: string): Promise<void>;
   queueIntent(conversationId: string): void;
   addApprovalSink(sink: ToolApprovalSink): { dispose(): void };
   resolveApproval(id: string, approved: boolean): void;
@@ -80,6 +82,7 @@ export interface SidebarHostFacadeDeps {
     options?: { remoteRequestId?: string },
   ) => Promise<ForgeRequestOutcome>;
   cancel: (conversationId: string) => Promise<void>;
+  interrupt: (conversationId: string) => Promise<void>;
   queueIntent: (conversationId: string) => void;
   addApprovalSink: (sink: ToolApprovalSink) => { dispose(): void };
   resolveApproval: (id: string, approved: boolean) => void;
@@ -150,6 +153,10 @@ export class SidebarHostFacade implements ForgeHostFacade {
 
   cancel(conversationId: string): Promise<void> {
     return this.deps.cancel(conversationId);
+  }
+
+  interrupt(conversationId: string): Promise<void> {
+    return this.deps.interrupt(conversationId);
   }
 
   queueIntent(conversationId: string): void {

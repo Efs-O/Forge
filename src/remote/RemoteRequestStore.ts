@@ -19,6 +19,11 @@ import {
   type WorkspaceHandoff,
 } from './RemoteStoreSchemas';
 
+function compareQueuedRequests(left: RemoteRequestRecord, right: RemoteRequestRecord): number {
+  const priority = Number(right.priority === 'steer') - Number(left.priority === 'steer');
+  return priority || (left.admittedAt ?? left.receivedAt) - (right.admittedAt ?? right.receivedAt);
+}
+
 export function remoteDedupKey(channel: string, chatId: string, messageId: string): string {
   return `${channel}\u0000${chatId}\u0000${messageId}`;
 }
@@ -77,7 +82,7 @@ export class RemoteRequestStore {
           (conversationId === undefined || request.conversationId === conversationId) &&
           (channel === undefined || request.channel === channel),
       )
-      .sort((a, b) => (a.admittedAt ?? a.receivedAt) - (b.admittedAt ?? b.receivedAt));
+      .sort(compareQueuedRequests);
   }
 
   pendingOutbox(channel?: RemoteOutboxRecord['channel']): RemoteOutboxRecord[] {
@@ -277,7 +282,7 @@ export class RemoteRequestStore {
       }
       const next = draft.requests
         .filter((item) => item.conversationId === conversationId && item.state === 'queued')
-        .sort((a, b) => (a.admittedAt ?? a.receivedAt) - (b.admittedAt ?? b.receivedAt))[0];
+        .sort(compareQueuedRequests)[0];
       if (!next || next.channel !== channel) return;
       next.state = 'running';
       next.updatedAt = Date.now();
@@ -288,6 +293,26 @@ export class RemoteRequestStore {
 
   async requeue(id: string): Promise<void> {
     await this.setRequestState(id, 'queued');
+  }
+
+  /** Mark selected queued prompts cancelled without deleting their audit record. */
+  async cancelQueued(conversationId: string, requestIds?: ReadonlySet<string>): Promise<number> {
+    let cancelled = 0;
+    await this.mutate((draft) => {
+      for (const request of draft.requests) {
+        if (
+          request.conversationId !== conversationId ||
+          request.state !== 'queued' ||
+          (requestIds && !requestIds.has(request.id))
+        ) {
+          continue;
+        }
+        request.state = 'cancelled';
+        request.updatedAt = Date.now();
+        cancelled += 1;
+      }
+    });
+    return cancelled;
   }
 
   async finish(

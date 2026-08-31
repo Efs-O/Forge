@@ -1,6 +1,7 @@
 import type { CompactionOutcome } from '../sidebar/CompactionService';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import { formatRemoteDateTime } from './RemoteDateTime';
+import { describeBudget, handleRemoteSessionCommand } from './RemoteSessionCommands';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
 
@@ -37,53 +38,13 @@ export async function handleRemoteCommand(
   }
 }
 
-/** `max` is the PER-SLOT window; a model with no resolvable num_ctx reports none. */
-function describeBudget(budget: { used: number; max: number } | undefined): string {
-  if (!budget || budget.max <= 0) return 'unavailable (no num_ctx for this model)';
-  const percent = Math.round((budget.used / budget.max) * 100);
-  return `${budget.used}/${budget.max} tokens (${percent}%)`;
-}
-
 async function executeRemoteCommand(
   event: Extract<RemoteInboundEvent, { kind: 'text' }>,
   context: RemoteCommandContext,
 ): Promise<RemoteInboundDisposition> {
   const [command, argument] = event.text.trim().split(/\s+/, 2);
-  if (command === '/help') {
-    await context.channel.send(
-      event.chatId,
-      'Forge commands: /status, /stop, /new, /list, /resume <number-or-id>, /models, ' +
-        '/model <number-or-name>, /queue, /unload, /restart, /compact, /lock, ' +
-        '/timeout [1-1440|off], /clanker on|off. /stop cancels the current request; queued requests remain ' +
-        'queued. /clanker on auto-approves non-dangerous tools until this window ' +
-        'reloads — writes then land with no confirmation anywhere.',
-      { signal: context.signal },
-    );
-    return { kind: 'handled' };
-  }
-  if (command === '/status') {
-    const status = context.host.status();
-    const binding = context.store.binding(event.channel, event.chatId);
-    const queued = binding ? context.store.queued(binding.conversationId).length : 0;
-    const requests = context.store.requestHealth();
-    const outbox = context.store.outboxHealth();
-    const conversation = status.conversations.find((item) => item.id === binding?.conversationId);
-    await context.channel.send(
-      event.chatId,
-      `Chat: ${conversation ? `${conversation.title} · ${conversation.id}` : 'none bound'}\n` +
-        `Model: ${conversation?.activeModel ?? 'default'}\n` +
-        `Forge: ${status.requestChains.length} active request(s), ${queued} queued here, ${status.streamingConversationIds.length} streaming, ${requests.unknown} crash-unknown, ${outbox.pending} notifications pending, ${outbox.abandoned} abandoned.
-` +
-        `Context: ${describeBudget(binding && context.host.contextBudget(binding.conversationId))}
-` +
-        // Stated on every /status, not only when asked: a remote owner cannot
-        // see the sidebar, and not knowing whether writes are gated is the one
-        // thing they must never have to guess.
-        `Approvals: ${context.host.clankerMode() ? 'CLANKER — non-dangerous tools auto-approved' : 'gated'}`,
-      { signal: context.signal },
-    );
-    return { kind: 'handled' };
-  }
+  const sessionCommand = await handleRemoteSessionCommand(command, argument, event, context);
+  if (sessionCommand) return sessionCommand;
   if (command === '/clanker') {
     const desired = argument?.toLowerCase();
     if (desired !== 'on' && desired !== 'off') {
@@ -165,17 +126,6 @@ async function executeRemoteCommand(
     await context.channel.send(
       event.chatId,
       `Forge: compaction ${outcome}. Context: ${describeBudget(budget)}`,
-      { signal: context.signal },
-    );
-    return { kind: 'handled' };
-  }
-  if (command === '/stop') {
-    const binding = context.store.binding(event.channel, event.chatId);
-    if (!binding) return { kind: 'rejected', reason: 'no conversation is bound' };
-    await context.host.cancel(binding.conversationId);
-    await context.channel.send(
-      event.chatId,
-      'Forge: current request stopped; queued requests remain queued.',
       { signal: context.signal },
     );
     return { kind: 'handled' };
@@ -310,19 +260,6 @@ async function executeRemoteCommand(
     });
     return { kind: 'handled' };
   }
-  if (command === '/queue') {
-    const binding = context.store.binding(event.channel, event.chatId);
-    if (!binding) return { kind: 'rejected', reason: 'no conversation is bound' };
-    const queued = context.store.queued(binding.conversationId);
-    await context.channel.send(
-      event.chatId,
-      queued.length === 0
-        ? 'Forge: no queued prompts for this chat.'
-        : queued.map((item, index) => `${index + 1}. ${truncate(item.text, 160)}`).join('\n'),
-      { signal: context.signal },
-    );
-    return { kind: 'handled' };
-  }
   if (command === '/unload') {
     const idleReason = globalBusyReason(context);
     if (idleReason) return { kind: 'rejected', reason: idleReason };
@@ -394,8 +331,4 @@ function resolveSelection(
 
 function shortId(id: string): string {
   return id.length > 7 ? `${id.slice(0, 3)}…${id.slice(-3)}` : id;
-}
-
-function truncate(value: string, maximum: number): string {
-  return value.length > maximum ? `${value.slice(0, maximum - 1)}…` : value;
 }

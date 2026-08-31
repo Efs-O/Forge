@@ -42,11 +42,7 @@ import { runAddressedAutoCompact } from './autoCompactionPolicy';
 import { SidebarHostFacade, type ForgeHostFacade } from './ForgeHostFacade';
 
 export type { SidebarProviderEvents };
-/**
- * How often the sidebar re-checks model residency while visible. Slow enough to
- * be free (a string compare over a handful of slots), fast enough that a dot
- * never sits visibly wrong after a load or an eviction.
- */
+/** Residency refresh while visible: cheap, but fast enough to avoid a stale dot. */
 const RESIDENCY_POLL_MS = 1500;
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
@@ -150,6 +146,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.requestChains.markCancelling(conversationId);
         await this.agentLoop.cancel(conversationId);
       },
+      interrupt: (conversationId) => this.interruptForSteering(conversationId),
       queueIntent: (conversationId) => this.requestChains.suppressContinuation(conversationId),
       addApprovalSink: (sink) => this.agentLoop.addApprovalSink(sink),
       resolveApproval: (id, approved) => this.agentLoop.resolveConfirmation(id, approved),
@@ -393,6 +390,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return runManualCompactResume(this.compactionDeps(), conversationId, reason);
   }
 
+  private async interruptForSteering(conversationId: string): Promise<void> {
+    this.requestChains.markCancelling(conversationId, 'interrupted');
+    await this.agentLoop.interrupt(conversationId);
+  }
+
   private getActive(): ConversationRuntime {
     return this.tabs.active();
   }
@@ -462,8 +464,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           // Steering ends only the request/turn. Unlike Stop, it deliberately
           // leaves the backend loaded so the redirected turn starts without a
           // llama-server model reload.
-          this.requestChains.markCancelling(conversationId, 'interrupted');
-          await this.agentLoop.interrupt(conversationId);
+          await this.interruptForSteering(conversationId);
           await this.send.send(text, attachments, conversationId);
         },
         cancel: () => {

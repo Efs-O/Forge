@@ -2,11 +2,8 @@ import type { RegisteredTool } from './ToolRegistry';
 import type { ToolDefinition } from '../llm/types';
 import type { LocalDelegationService } from '../delegation/LocalDelegationService';
 import type { ForgeConfig } from '../config/types';
-import {
-  listEligibleDelegationTargets,
-  resolveDelegationTarget,
-  type EligibleDelegationTarget,
-} from '../delegation/eligibility';
+import { listEligibleDelegationTargets, resolveDelegationTarget } from '../delegation/eligibility';
+import type { EligibleDelegationTarget } from '../delegation/eligibility';
 import {
   MAX_DELEGATION_TASK_CHARS,
   MAX_DELEGATION_CONTEXT_FILES,
@@ -22,6 +19,13 @@ const FOCUS_VALUES = [
   'second-opinion',
 ] as const;
 
+const KIND_LABELS: Record<EligibleDelegationTarget['provider'], string> = {
+  'llama.cpp': 'local',
+  ollama: 'local Ollama',
+  cloud: 'cloud',
+  cli: 'CLI agent, has its own tools',
+};
+
 /** Returns true when at least one configured model can accept a delegation. */
 export function hasEligibleDelegationTargets(config: ForgeConfig): boolean {
   for (const model of config.models) {
@@ -35,13 +39,6 @@ export function hasEligibleDelegationTargets(config: ForgeConfig): boolean {
   return false;
 }
 
-const KIND_LABELS: Record<EligibleDelegationTarget['provider'], string> = {
-  'llama.cpp': 'local',
-  ollama: 'local Ollama',
-  cloud: 'cloud',
-  cli: 'CLI agent, has its own tools',
-};
-
 /**
  * Names the callable targets inside the `model` arg description.
  *
@@ -52,8 +49,10 @@ const KIND_LABELS: Record<EligibleDelegationTarget['provider'], string> = {
 export function describeDelegationTargets(config: ForgeConfig): string {
   const targets = listEligibleDelegationTargets(config);
   if (targets.length === 0) return '';
-  const listed = targets.map((t) => `"${t.name}" (${KIND_LABELS[t.provider]})`).join(', ');
-  return ` Configured targets: ${listed}. Aliases, short_names and "model@profile" also resolve.`;
+  const listed = targets
+    .map((target) => `"${target.name}" (${KIND_LABELS[target.provider]})`)
+    .join(', ');
+  return ` Targets: ${listed}. Aliases, short_names, and "model@profile" also work.`;
 }
 
 /**
@@ -104,14 +103,7 @@ export function makeLocalAgentTool(
       function: {
         name: 'ask_local_agent',
         description:
-          'Delegate an analysis task to a secondary model: a local llama.cpp or Ollama model, a ' +
-          'configured cloud model (xAI, OpenRouter, OpenAI-compatible — this is how you reach ' +
-          'OpenRouter), or a provider: cli external agent (Claude Code, Codex). Use for second ' +
-          'opinions, security reviews, test suggestions, or correctness checks. Local and cloud ' +
-          'models receive only the task and optional context files — they have no tools. A cli ' +
-          'target instead runs read-only with ITS OWN tools (it can read/list files itself) but is ' +
-          'instructed not to modify anything. ' +
-          'This tool requires only the delegate permission; do not request terminal, write, or other permissions.',
+          'Delegate read-only analysis to a configured model or CLI agent. Local/cloud targets get only the task and optional context files; CLI targets use their own read-only tools. Use for independent correctness, security, test, or architecture review. Requires only the delegate permission.',
         parameters: {
           type: 'object',
           properties: {
@@ -122,13 +114,13 @@ export function makeLocalAgentTool(
             task: {
               type: 'string',
               maxLength: MAX_DELEGATION_TASK_CHARS,
-              description: `Analysis task to send to the delegated model. Max ${MAX_DELEGATION_TASK_CHARS} characters.`,
+              description: `Analysis task (max ${MAX_DELEGATION_TASK_CHARS} characters).`,
             },
             context_files: {
               type: 'array',
               items: { type: 'string' },
               maxItems: MAX_DELEGATION_CONTEXT_FILES,
-              description: `Workspace-relative file paths to supply as read-only context (max ${MAX_DELEGATION_CONTEXT_FILES}).`,
+              description: `Read-only workspace paths (max ${MAX_DELEGATION_CONTEXT_FILES}).`,
             },
             focus: {
               type: 'string',

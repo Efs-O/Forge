@@ -71,6 +71,8 @@ export interface RemoteRequestRecord {
   providerMessageId: string;
   conversationId: string;
   text: string;
+  /** Steering prompts run before ordinary queued prompts, FIFO within each class. */
+  priority?: 'steer' | undefined;
   attachments?: RemoteAttachmentReference[] | undefined;
   receivedAt: number;
   admittedAt?: number | undefined;

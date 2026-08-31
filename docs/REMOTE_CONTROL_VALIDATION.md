@@ -1,6 +1,6 @@
 # Remote control real-device validation
 
-This guide validates Forge 0.14.0 from a Windows computer and an iPhone. Start
+This guide validates Forge 0.14.1 from a Windows computer and an iPhone. Start
 with Telegram. It uses Telegram's official bot interface and needs only one
 personal Telegram account. Treat the WhatsApp transport as an optional,
 experimental follow-up.
@@ -12,7 +12,7 @@ linked-device files into issues, screenshots, logs, or Git.
 
 | Device | Required | Not required |
 | --- | --- | --- |
-| Windows computer | [Visual Studio Code](https://code.visualstudio.com/download), the Forge 0.14.0 VSIX, and the workspace to control | Telegram Desktop, WhatsApp Desktop, Docker, Python, Node.js, a public server, a webhook, port forwarding, or ngrok |
+| Windows computer | [Visual Studio Code](https://code.visualstudio.com/download), the Forge 0.14.1 VSIX, and the workspace to control | Telegram Desktop, WhatsApp Desktop, Docker, Python, Node.js, a public server, a webhook, port forwarding, or ngrok |
 | Owner iPhone for Telegram | The official [Telegram app](https://telegram.org/apps) and your normal Telegram account | A second SIM/phone number or a Forge iOS app |
 | Receiving iPhone for WhatsApp | The official [WhatsApp app](https://www.whatsapp.com/download) registered to a dedicated receiving number | WhatsApp Desktop or a Forge iOS app |
 | WhatsApp owner device | A second private WhatsApp account on a different number, on an iPhone or Android phone | It does not have to be another Windows computer |
@@ -25,7 +25,7 @@ Only normal outbound internet access is required; do not open inbound router or
 firewall ports.
 
 Install the VSIX on Windows from **Extensions > ... > Install from VSIX...**,
-select `forge-llm-0.14.0.vsix`, and run **Developer: Reload Window**. You do not
+select `forge-llm-0.14.1.vsix`, and run **Developer: Reload Window**. You do not
 need to install Baileys, Telegram libraries, or any other package separately;
 the transport code is bundled with Forge.
 
@@ -130,28 +130,36 @@ rejected.
 
 1. Send `/new`, a harmless coding question, and a request that uses a read-only
    tool. Confirm FIFO responses arrive in the same private chat.
-   `/status` reports the per-slot context meter and whether approvals are gated;
-   `/compact` compacts the bound conversation; `/clanker on|off` toggles
+   Confirm Telegram's slash-command menu includes `status`, `context`, `steer`,
+   `queue`, `drop`, and `compact`.
+2. While a long request is running, send one ordinary prompt and check `/queue`.
+   Then send `/steer change direction and do X`. The active turn should end as
+   interrupted, the steering prompt should run next, and the ordinary prompt
+   should remain after it. Use `/drop 1` or `/drop all` and confirm only this
+   private chat's queued work is cancelled.
+3. `/status` reports the per-slot context meter and whether approvals are gated;
+   `/context` reports used and remaining tokens; `/compact` compacts the bound
+   conversation; `/clanker on|off` toggles
    auto-approval. `/clanker` is an owner command, never a tool — a model able to
    call it could switch off its own approval gate. Confirm a `/clanker on` set
    remotely does NOT survive a window reload.
-2. Turn clanker mode OFF in the sidebar before this check. It auto-approves
+4. Turn clanker mode OFF in the sidebar before this check. It auto-approves
    every non-dangerous tool ahead of any approval sink, so with it on the write
    lands with no prompt on either surface and the check passes without testing
    anything.
-3. Trigger a Forge-native write approval. Confirm the private chat receives the
+5. Trigger a Forge-native write approval. Confirm the private chat receives the
    approval buttons, resolve it once, and verify replaying the callback is
    rejected. Repeat once with VS Code resolving first and confirm the remote
    callback becomes stale. The approval is expected on BOTH surfaces at once:
    one pending approval fans out to the webview and to every transport, and
    either one resolves it. Resolving remotely must also dismiss the sidebar
    dialog.
-4. Start a slow request, queue another message, and send `/stop`. Confirm only
+6. Start a slow request, queue another message, and send `/stop`. Confirm only
    the current request is cancelled, the backend stays loaded, and the queued
    request subsequently runs.
-5. Send from an unpaired Telegram account and from a group. Confirm neither can
+7. Send from an unpaired Telegram account and from a group. Confirm neither can
    control Forge.
-6. Open the same workspace in a second VS Code window. Confirm one window owns
+8. Open the same workspace in a second VS Code window. Confirm one window owns
    the Telegram lease and the other reports a visible ownership failure. Close
    the second window before continuing.
 

@@ -54,6 +54,28 @@ const TELEGRAM_TEXT_LIMIT = 4096;
 const TELEGRAM_CALLBACK_DATA_LIMIT_BYTES = 64;
 export const TELEGRAM_BOT_TOKEN_SECRET = 'forge.remote.telegram.botToken';
 
+/** Native Telegram command menu. Parsing remains transport-independent. */
+export const TELEGRAM_BOT_COMMANDS = [
+  { command: 'status', description: 'Session, model, queue, and context status' },
+  { command: 'context', description: 'Context usage and remaining tokens' },
+  { command: 'steer', description: 'Interrupt and prioritize a new prompt' },
+  { command: 'stop', description: 'Stop the current request' },
+  { command: 'queue', description: 'List queued prompts' },
+  { command: 'drop', description: 'Cancel a queued prompt or all' },
+  { command: 'compact', description: 'Compact the bound conversation' },
+  { command: 'new', description: 'Start a new chat or switch workspace' },
+  { command: 'list', description: 'List recent conversations' },
+  { command: 'resume', description: 'Resume a listed conversation' },
+  { command: 'models', description: 'List configured models' },
+  { command: 'model', description: 'Pin a model to this chat' },
+  { command: 'clanker', description: 'Set approval-gate mode' },
+  { command: 'timeout', description: 'Show or set session timeout' },
+  { command: 'unload', description: 'Release loaded model backends' },
+  { command: 'restart', description: 'Restart the pinned model' },
+  { command: 'lock', description: 'Lock this remote session' },
+  { command: 'help', description: 'Show all Forge commands' },
+] as const;
+
 export interface TelegramChannelOptions {
   token: string;
   getCursor: (key: string) => string | undefined;
@@ -87,6 +109,15 @@ export class TelegramChannel implements RemoteChannel {
   }
 
   async start(signal: AbortSignal): Promise<void> {
+    void this.call('setMyCommands', { commands: TELEGRAM_BOT_COMMANDS }, signal).catch((err) => {
+      if (!signal.aborted) {
+        this.options.onError?.(
+          `Forge Telegram command-menu registration failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    });
     void this.poll(signal).catch((err) => {
       if (!signal.aborted) {
         this.options.onError?.(
@@ -249,6 +280,9 @@ export class TelegramChannel implements RemoteChannel {
             };
           }
         }
+        if (event?.kind === 'text') {
+          await this.acknowledgeTextDisposition(event, disposition, signal);
+        }
         if (update.callback_query) {
           await this.call(
             'answerCallbackQuery',
@@ -285,6 +319,32 @@ export class TelegramChannel implements RemoteChannel {
           ? bytes.toString('base64')
           : bytes.toString('utf8'),
     };
+  }
+
+  private async acknowledgeTextDisposition(
+    event: Extract<RemoteInboundEvent, { kind: 'text' }>,
+    disposition: RemoteInboundDisposition,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (event.chatType !== 'private') return;
+    let text: string | undefined;
+    if (disposition.kind === 'queued') {
+      text = event.text.trim().toLowerCase().startsWith('/steer')
+        ? `Forge: steering prompt queued next (position ${disposition.position}).`
+        : `Forge: queued at position ${disposition.position}. Use /steer <prompt> to interrupt the current turn and run a new instruction next, or /queue to review pending work.`;
+    } else if (disposition.kind === 'rejected') {
+      text = `Forge: ${disposition.reason}`;
+    }
+    if (!text) return;
+    await this.send(event.chatId, text, { signal }).catch((err) => {
+      if (!signal.aborted) {
+        this.options.onError?.(
+          `Forge Telegram acknowledgement failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    });
   }
 
   private toEvent(update: z.infer<typeof TelegramUpdateSchema>): RemoteInboundEvent | undefined {

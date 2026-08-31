@@ -10,6 +10,7 @@ export const RequestSchema = z.object({
   providerMessageId: z.string(),
   conversationId: z.string(),
   text: z.string(),
+  priority: z.literal('steer').optional(),
   attachments: z
     .array(
       z.object({
