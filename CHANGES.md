@@ -1,6 +1,10 @@
 # Forge — Recent Changes
 
-## Unreleased
+## 0.14.3
+
+First changelog entry for the 0.14 line: 0.14.0 through 0.14.2 shipped as
+local builds without their own sections, so everything below has accumulated
+since 0.13.20. All of it is in 0.14.3.
 
 - **HalluScribe's six MCP schemas are demand-loaded.** They cost 2382 tokens of
   every single request — measured, `test/prompt-context-measurement.txt` — on
@@ -297,6 +301,7 @@
   `/new <alias>`.** Both were handled and neither was listed anywhere, so the
   only pointer to `/workspace list` was the error text you got after already
   guessing a bad alias. A capability nothing names is one that does not exist.
+
 Plan and mockups: `docs/plans/SIDEBAR_UX_PLAN.md`,
 `docs/plans/SIDEBAR_UX_MOCKUPS.html`.
 
