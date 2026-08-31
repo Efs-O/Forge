@@ -102,12 +102,14 @@ export function makeNotifyUserTool(notifications: UserNotificationService): Regi
       function: {
         name: 'notify_user',
         description:
-          'Send the user a short message that reaches whichever surface started the ' +
-          'turn -- the VS Code window, and the chat it was driven from remotely if ' +
-          'there is one. Fire-and-forget: it does NOT wait for a reply and does NOT ' +
-          'pause your work. Use it for something worth knowing now that should not ' +
-          'stop the task -- a long build finishing, or the first real failure in a ' +
-          'long sweep. To ask a question and wait for an answer, use ask_user instead.',
+          'Ping the user. THIS is the tool when they say "ping me", "notify me", ' +
+          '"let me know", "tell me when", or "message me" -- prefer it over ' +
+          'show_notification, which is only visible at the machine. Sends a short ' +
+          'message that reaches whichever surface started the turn: the VS Code ' +
+          'window, and the chat it was driven from remotely if there is one, so it ' +
+          'still reaches a user who has walked away. Fire-and-forget -- it does NOT ' +
+          'wait for a reply and does NOT pause your work. To ask a question and wait ' +
+          'for an answer, use ask_user instead.',
         parameters: {
           type: 'object',
           properties: {
@@ -155,7 +157,13 @@ export function makeShowNotificationTool(): RegisteredTool {
       type: 'function',
       function: {
         name: 'show_notification',
-        description: 'Show a VS Code notification message (info, warning, or error).',
+        description:
+          'Show a notification in the VS Code window ONLY (info, warning, or error). ' +
+          'It is invisible to a user who has stepped away from the machine or is ' +
+          'driving this turn from a phone. If the user asked to be pinged, notified, ' +
+          'told, or messaged, call notify_user instead -- it reaches this window AND ' +
+          'the chat that started the turn. Use this one only for a cue that matters ' +
+          'solely to someone sitting at the editor.',
         parameters: {
           type: 'object',
           properties: {
