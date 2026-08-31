@@ -18,6 +18,7 @@ export async function handleRemoteSessionCommand(
       `Forge commands:
 
 Session: /status · /context · /stop · /new · /list · /resume <n-or-id> · /notify on|off
+Workspace: /workspace list · /new <alias>
 Queue: /queue · /drop <n|all> · /steer <prompt>
 Models: /models · /model <n-or-name> · /unload · /restart
 Window: /compact · /lock · /reload · /timeout [1-1440|off] · /clanker on|off
@@ -27,7 +28,8 @@ Notes:
 • /steer interrupts the current turn and runs its prompt before queued ones
 • /clanker on auto-approves non-dangerous tools until the window reloads — writes then land with no confirmation anywhere
 • /reload restarts the extension host: a held prompt and this session are dropped
-• /notify off silences agent notify_user messages for this chat until the window reloads`,
+• /notify off silences agent notify_user messages for this chat until the window reloads
+• /new <alias> switches this chat to another configured workspace; /workspace list names them`,
       { signal: context.signal },
     );
     return { kind: 'handled' };

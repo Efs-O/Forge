@@ -258,6 +258,28 @@
   LOC) along the real seam: the tab strip and the sessions flyout are separate
   concerns, and the panel had just grown a second section.
 
+- **`notify_user`: the agent can reach the chat that started the turn.** Its
+  only outbound signal was `show_notification`, a VS Code desktop toast, so a
+  turn driven from Telegram lit up a window nobody was looking at. `notify_user`
+  is a second producer on the road auto-compaction notices already travel:
+  conversationId to bindings to the durable outbox. Fire-and-forget -- no wake,
+  heartbeat, or poll; an agent that needs an answer still uses `ask_user`.
+
+  `RemoteController.enqueueHostNotification` now returns how many chats it
+  reached instead of `void`. That count is load-bearing: it is what lets the
+  tool say "the user did NOT receive it on their phone" rather than reporting
+  success into a void, which is how `ask_user`'s bare `(cancelled)` taught the
+  model to trust a lie. Capped at 5 per turn, reset on turn START via
+  `onGenerationStarted` -- a cancelled turn never reaches its end, and a leaked
+  counter would silently mute the agent for the rest of the conversation.
+
+  `/notify on|off|status` mutes one chat, in memory until the window reloads,
+  the same lifetime as `/clanker`. Plan: `docs/plans/NOTIFY_USER_PLAN.md`.
+
+- **`/help` and the Telegram command menu now document `/workspace list` and
+  `/new <alias>`.** Both were handled and neither was listed anywhere, so the
+  only pointer to `/workspace list` was the error text you got after already
+  guessing a bad alias. A capability nothing names is one that does not exist.
 Plan and mockups: `docs/plans/SIDEBAR_UX_PLAN.md`,
 `docs/plans/SIDEBAR_UX_MOCKUPS.html`.
 
