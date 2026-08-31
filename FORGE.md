@@ -120,6 +120,19 @@ criteria.
     `python -c "import sqlite3,json,sys;sys.stdout.reconfigure(encoding='utf-8');d=json.loads(sqlite3.connect(r'<ws>\state.vscdb').execute(\"SELECT value FROM ItemTable WHERE key='Efsoo.forge-llm'\").fetchone()[0]);c=d['forge.conversations.v1'];a=c['activeConversationId'];print([x['title'] for x in c['conversations'] if x['id']==a])"`
     (force UTF-8 or emoji in titles crash the cp1253 console).
 
+- **Attachments are persisted; pasted chat text is NOT.** Remote attachments
+  (phone → Telegram/WhatsApp) are written to
+  `.forge/remote-inbox/<conversationId>/<requestId>/N-<uuid>.<ext>` (0600,
+  atomic temp→rename). Text/code files are stored as `.txt`, PDFs as extracted
+  text (the original PDF binary is NOT kept); images keep their real extension.
+  Retention follows `remote.attachments.retain_days` (currently `null` =
+  forever). Local VS Code chat attachments are in-memory only (`AttachmentData`
+  base64/utf8 through `buildUserContent`) — never written to disk. So: a file
+  the user *attached* from the phone is on disk and readable back; text the user
+  *pasted* into the chat lives only in the transcript. Don't call an attachment
+  "pasted" — if you need to find or re-read an attached file, search
+  `.forge/remote-inbox/` — it's on disk there.
+
 - **Auto-compact fires only post-turn, on a completed turn or a recoverable
   context-exhaustion failure.** The fraction trigger needs the *server-reported*
   context ≥ `auto_compact.at` (0.85); the exhaustion trigger needs the last
