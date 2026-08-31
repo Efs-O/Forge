@@ -1,6 +1,10 @@
 docs/**
 gifs and screenshots/**
 ScreenShot*.jpg
+# Root-level images are never referenced by the README (it uses assets/),
+# so a screenshot dropped in the repo root must not ship to users.
+*.jpg
+*.png
 legacy/**
 .claude/**
 .cursor/**
