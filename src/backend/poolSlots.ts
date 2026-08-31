@@ -51,6 +51,16 @@ export function claimPort(table: SlotTable, allowEvict: boolean): PortClaim {
   }
   const lruEntry = lruSlot(table);
   if (!lruEntry) {
+    // Two very different states reach here, and conflating them sent a real
+    // port-leak investigation hunting delegation for hours. An empty slot table
+    // with no free ports is never a capacity problem — it is a bookkeeping bug.
+    if (table.slots.size === 0) {
+      throw new Error(
+        'BackendPool: no free port and no resident model to evict — the pool has ' +
+          'leaked its ports. This is a Forge bug; reload the window to recover ' +
+          'and report it.',
+      );
+    }
     throw new Error(
       'BackendPool: no free slot and no eviction candidate — all resident models ' +
         'are pinned by active delegation holds. Retry after delegation completes.',

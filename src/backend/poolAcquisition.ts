@@ -12,6 +12,7 @@ import { DirectBackend } from './DirectBackend';
 import { probeHealthy } from './HealthCheck';
 import type { ForgeConfig } from '../config/types';
 import type { SharedRuntimeRegistry } from './SharedRuntimeRegistry';
+import type { PoolSlot } from './poolSlots';
 import { getLogger } from '../util/logger';
 
 const log = getLogger();
@@ -87,12 +88,19 @@ export function acquireOllamaSlot(
 }
 
 export interface StopAllContext {
-  slots: Map<string, { backend: DirectBackend; starting: Promise<void> | null }>;
+  slots: Map<string, PoolSlot>;
   ollamaSlots: Map<string, DirectBackend>;
   sharedSlots: Map<string, SharedSlotRecord>;
   registry: SharedRuntimeRegistry;
   sharedRuntimeEnabled: boolean;
   runtimeKey: (modelName: string) => string;
+  /**
+   * Drops the slot AND returns its port to the free list. Deleting the map
+   * entry directly here leaked a port per stop: `freePorts` is built once in
+   * the BackendPool constructor, so four stops exhausted a four-slot pool and
+   * only a window reload restored it.
+   */
+  freeSlot: (modelName: string, slot: PoolSlot) => void;
 }
 
 /**
@@ -139,10 +147,10 @@ export async function stopAllSlots(ctx: StopAllContext): Promise<void> {
     );
   if (failures.length) throw new Error(failures.join('\n'));
 
-  for (const model of [...ctx.slots.keys()]) {
+  for (const [model, slot] of [...ctx.slots.entries()]) {
     if (retained(model)) continue;
     ctx.registry.removeOwner(ctx.runtimeKey(model));
-    ctx.slots.delete(model);
+    ctx.freeSlot(model, slot);
   }
   ctx.ollamaSlots.clear();
   log.info('[BackendPool] all slots stopped');

@@ -238,6 +238,39 @@ describe('BackendPool port accounting', () => {
     expect(pool.loadedModelNames()).toEqual(['B']);
     expect(freePortsOf(pool)).toEqual([]);
   });
+
+  /**
+   * stopAll() deleted slot map entries directly instead of freeing them, so it
+   * leaked one port per call. `freePorts` is built once in the constructor, so
+   * a four-slot pool died on the fifth load and only a window reload recovered
+   * it. The release() path was tested; this one never was.
+   */
+  it('stopAll returns every port to the free list', async () => {
+    const pool = new BackendPool(makeConfig(2)); // freePorts [8080, 8081]
+
+    const acquireA = pool.acquire('A');
+    harness.pending[0].resolve();
+    await acquireA;
+    expect(freePortsOf(pool)).toEqual([8081]);
+
+    await pool.stopAll();
+    expect(pool.loadedModelNames()).toEqual([]);
+    expect([...freePortsOf(pool)].sort()).toEqual([8080, 8081]);
+  });
+
+  it('survives more load/stop cycles than it has ports', async () => {
+    const pool = new BackendPool(makeConfig(1)); // freePorts [8080]
+
+    const sequence = ['A', 'B', 'C', 'A'];
+    for (const [cycle, model] of sequence.entries()) {
+      const acquire = pool.acquire(model);
+      harness.pending[cycle].resolve();
+      await acquire;
+      expect(pool.loadedModelNames()).toEqual([model]);
+      await pool.stopAll();
+      expect(freePortsOf(pool)).toEqual([8080]);
+    }
+  });
 });
 
 describe('BackendPool delegation safety', () => {

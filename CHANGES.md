@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Stopping the backend no longer leaks a llama.cpp port.** `stopAll()` deleted
+  its slot map entries directly instead of freeing them, so every Stop,
+  `/unloadModel`, `forge.stopBackend`, and `forge.restartBackend` permanently
+  lost that slot's port. `freePorts` is built once in the `BackendPool`
+  constructor and never rebuilt, so with `max_simultaneous_models: 4` the fourth
+  stop exhausted the pool and every later load failed until the window was
+  reloaded. `StopAllContext` now carries the real `PoolSlot` (its old structural
+  slot type did not even include `port`, so the leak was not expressible) and a
+  `freeSlot` callback. The port-accounting tests covered `release()` thoroughly
+  and never called `stopAll()` once; two regression tests now do.
+
+- **An exhausted pool no longer blames delegation.** `claimPort` threw "all
+  resident models are pinned by active delegation holds" whenever `lruSlot`
+  returned nothing — including when the slot table was *empty*, which is a
+  bookkeeping bug rather than capacity pressure. The empty case now says so.
+
 - **Agent questions reach whichever surface started the turn.** `ask_user` used
   to talk straight to `vscode.window`, so a question raised during a Telegram
   turn opened a box nobody was looking at, and the desktop box was dismissed by

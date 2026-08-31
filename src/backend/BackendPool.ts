@@ -212,6 +212,7 @@ export class BackendPool implements IBackendPool {
       registry: this.sharedRegistry,
       sharedRuntimeEnabled: this.config.shared_runtime?.enabled === true,
       runtimeKey: (model) => this.runtimeKey(model),
+      freeSlot: (model, slot) => this.freeSlot(model, slot),
     });
   }
 
