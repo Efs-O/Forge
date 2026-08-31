@@ -306,6 +306,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       config = loadConfig(path.dirname(activeConfigPath));
       await activeRemoteRuntime?.applyConfig(config);
     },
+    reloadWindow: async () => {
+      await vscode.commands.executeCommand('workbench.action.reloadWindow');
+    },
     openWorkspace: async (directory) => {
       await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(directory), false);
     },

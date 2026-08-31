@@ -30,6 +30,7 @@ export interface RemoteRuntimeOptions {
   channelFactories?: Partial<Record<'telegram' | 'whatsapp', RemoteChannelFactory>>;
   notifyLocal: (message: string) => void;
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
+  reloadWindow?: (() => Promise<void>) | undefined;
   openWorkspace?: ((directory: string) => Promise<void>) | undefined;
 }
 
@@ -217,7 +218,11 @@ export class RemoteRuntime {
       inactivityTimeoutMinutes: config.remote.auth.inactivity_timeout_minutes,
     });
     await this.store.load();
-    if (this.options.workspaceRoot && config.remote.attachments.enabled) {
+    if (
+      this.options.workspaceRoot &&
+      config.remote.attachments.enabled &&
+      config.remote.attachments.retain_days !== null
+    ) {
       await new RemoteAttachmentStore(this.options.workspaceRoot).prune(
         config.remote.attachments.retain_days,
       );
@@ -335,6 +340,7 @@ export class RemoteRuntime {
       switchWorkspace: (alias, channel, chatId) => this.handoff(config, alias, channel, chatId),
       inactivityTimeoutMinutes: remote.auth.inactivity_timeout_minutes,
       setInactivityTimeout: this.options.setInactivityTimeout,
+      reloadWindow: this.options.reloadWindow,
       onError: this.options.notifyLocal,
     };
   }

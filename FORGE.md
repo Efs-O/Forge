@@ -12,6 +12,9 @@ plus authenticated Claude Code and Codex CLI agents.
   and models. Do not launch Claude Code, Codex, or llama-server executables
   directly unless the user explicitly asks to test an underlying executable or
   startup path.
+- **"Reply only" means reply only.** When the user says "reply only" (or
+  "answer only", "just tell me"), do NOT call any tools — no builds, no
+  commands, no file writes. Answer in chat and stop.
 - Forge owns local model loading, pooling, checkpoints, permissions, and
   session persistence. Never claim a delegate ran unless `ask_local_agent`
   returned its result; respect all required confirmations.

@@ -16,6 +16,7 @@ export interface RemoteCommandContext {
   workspaceAliases: Readonly<Record<string, string>>;
   switchWorkspace?: ((alias: string, channel: string, chatId: string) => Promise<void>) | undefined;
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
+  reloadWindow?: (() => Promise<void>) | undefined;
 }
 
 export async function handleRemoteCommand(

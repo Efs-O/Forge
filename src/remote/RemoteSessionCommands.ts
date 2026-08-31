@@ -1,4 +1,5 @@
 import type { RemoteCommandContext } from './RemoteCommandHandler';
+import { TELEGRAM_BOT_COMMANDS } from './TelegramChannel';
 import type { RemoteInboundDisposition, RemoteInboundEvent } from './types';
 
 type TextEvent = Extract<RemoteInboundEvent, { kind: 'text' }>;
@@ -11,15 +12,19 @@ export async function handleRemoteSessionCommand(
   context: RemoteCommandContext,
 ): Promise<RemoteInboundDisposition | undefined> {
   if (command === '/help' || command === '/commands') {
+    const notes = TELEGRAM_BOT_COMMANDS.map((item) => `• /${item.command} — ${item.description}`);
     await context.channel.send(
       event.chatId,
-      'Forge commands: /status, /context, /stop, /steer <prompt>, /new, /list, ' +
-        '/resume <number-or-id>, /models, /model <number-or-name>, /queue, ' +
-        '/drop <number|all>, /unload, /restart, /compact, /lock, ' +
-        '/timeout [1-1440|off], /clanker on|off. /stop cancels the current request; queued requests remain ' +
-        'queued. /steer interrupts the current turn and runs its prompt before ordinary queued prompts. ' +
-        '/clanker on auto-approves non-dangerous tools until this window ' +
-        'reloads — writes then land with no confirmation anywhere.',
+      `Forge commands:
+
+Session: /status · /context · /stop · /new · /list · /resume <n-or-id>
+Queue: /queue · /drop <n|all> · /steer <prompt>
+Models: /models · /model <n-or-name> · /unload · /restart
+Window: /compact · /lock · /reload · /timeout [1-1440|off] · /clanker on|off
+
+Notes:
+• /steer interrupts the current turn and runs its prompt before queued ones
+${notes.filter((line) => !line.startsWith('• /steer ')).join('\n')}`,
       { signal: context.signal },
     );
     return { kind: 'handled' };
@@ -61,6 +66,16 @@ export async function handleRemoteSessionCommand(
       'Forge: current request stopped; queued requests remain queued.',
       { signal: context.signal },
     );
+    return { kind: 'handled' };
+  }
+  if (command === '/reload') {
+    if (!context.reloadWindow) {
+      return { kind: 'rejected', reason: 'remote reload is unavailable' };
+    }
+    await context.channel.send(event.chatId, 'Forge: reloading the window…', {
+      signal: context.signal,
+    });
+    await context.reloadWindow();
     return { kind: 'handled' };
   }
   if (command === '/queue') {

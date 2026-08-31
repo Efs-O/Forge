@@ -119,6 +119,7 @@ overlaps with an existing owner, extend the owner instead.
 | Durable queue execution + terminal outcome  | `src/remote/RemoteQueueDrain.ts`       |
 | Pairing + session-auth facade                | `src/remote/RemoteAuth.ts`             |
 | TOTP session state + enrollment boundary     | `src/remote/RemoteSessionAuth.ts`      |
+| Prompt held across a TOTP challenge          | `src/remote/RemotePendingPrompt.ts`    |
 | RFC 6238 generation/verification             | `src/remote/RemoteTotp.ts`             |
 | Durable requests, bindings, cursors, outbox  | `src/remote/RemoteRequestStore.ts`     |
 | Remote owner command behavior                | `src/remote/RemoteCommandHandler.ts`   |

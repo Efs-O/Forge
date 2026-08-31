@@ -28,11 +28,13 @@ interface AuthSession {
   lastAcceptedStep?: number;
   failedAttempts: number;
   lockedOutUntil?: number;
+  /** Set only when inactivity is what locked this session, so the challenge can say so. */
+  expiredFromInactivity?: boolean;
 }
 
 export type RemoteGateResult =
   | { kind: 'authorized'; nonce?: string; newlyAuthenticated?: boolean }
-  | { kind: 'challenge' }
+  | { kind: 'challenge'; reason: 'expired' | 'locked' }
   | { kind: 'failed' }
   | { kind: 'locked_out' }
   | { kind: 'blocked' };
@@ -124,7 +126,10 @@ export class RemoteSessionAuth {
     const candidate = extractCode(event.text);
     if (!candidate) {
       session.state = 'awaiting_totp';
-      return { kind: 'challenge' };
+      return {
+        kind: 'challenge',
+        reason: session.expiredFromInactivity ? 'expired' : 'locked',
+      };
     }
     const step = verifyTotp(enrollment.secret, candidate, {
       now,
@@ -151,6 +156,7 @@ export class RemoteSessionAuth {
     session.lastAcceptedStep = step;
     session.failedAttempts = 0;
     delete session.lockedOutUntil;
+    delete session.expiredFromInactivity;
     return { kind: 'authorized', nonce: session.nonce, newlyAuthenticated: true };
   }
 
@@ -198,6 +204,9 @@ export class RemoteSessionAuth {
     delete existing.lastActivityAt;
     existing.failedAttempts = 0;
     delete existing.lockedOutUntil;
+    // A deliberate lock is not an inactivity expiry -- do not let the next
+    // challenge blame a timeout the user did not hit.
+    delete existing.expiredFromInactivity;
   }
 
   clearChannel(channel: RemoteInboundEvent['channel']): void {
@@ -249,6 +258,7 @@ export class RemoteSessionAuth {
       now - session.lastActivityAt >= timeout * 60_000
     ) {
       this.lockSession(session);
+      session.expiredFromInactivity = true;
     }
   }
 

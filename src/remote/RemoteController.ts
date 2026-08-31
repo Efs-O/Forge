@@ -17,6 +17,7 @@ import type { RemoteAttachmentStore } from './RemoteAttachmentStore';
 import { RemoteAgentProgress } from './RemoteAgentProgress';
 import { admitRemotePrompt, parseSteerCommand } from './RemotePromptAdmission';
 import { drainRemoteQueue } from './RemoteQueueDrain';
+import { RemotePendingPrompt } from './RemotePendingPrompt';
 
 export interface RemoteControllerOptions {
   workspaceId: string;
@@ -32,6 +33,7 @@ export interface RemoteControllerOptions {
   switchWorkspace?: ((alias: string, channel: string, chatId: string) => Promise<void>) | undefined;
   inactivityTimeoutMinutes?: number;
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
+  reloadWindow?: (() => Promise<void>) | undefined;
   onError?: (message: string) => void;
 }
 
@@ -46,6 +48,7 @@ export class RemoteController {
   private readonly outbox: RemoteOutboxDelivery;
   private readonly approvals: RemoteApprovalBridge;
   private readonly progress: RemoteAgentProgress;
+  private readonly pending = new RemotePendingPrompt();
   private progressSubscription: { dispose(): void } | undefined;
 
   constructor(
@@ -160,9 +163,19 @@ export class RemoteController {
     const gate = await this.auth.gate(event);
     if (gate.kind === 'challenge') {
       await this.audit?.record(event, 'authentication_challenge').catch(() => undefined);
+      // Hold the prompt rather than discarding it: the sender is already proven
+      // to be the enrolled owner, so only the second factor is outstanding, and
+      // retyping a long prompt on a phone is the whole cost of expiry.
+      if (event.kind === 'text') this.pending.hold(event);
+      const idleMinutes = this.options.inactivityTimeoutMinutes ?? 30;
+      const cause =
+        gate.reason === 'expired'
+          ? `session expired after ${idleMinutes} min idle`
+          : 'authentication required';
       await this.channel.send(
         event.chatId,
-        'Forge: authentication required. Enter your 6-digit authenticator code.',
+        `Forge: ${cause}. Your prompt is held and will run once you verify — ` +
+          'send your 6-digit code.',
         { signal: this.abort.signal },
       );
       return { kind: 'handled' };
@@ -176,6 +189,8 @@ export class RemoteController {
     }
     if (gate.kind === 'locked_out') {
       await this.audit?.record(event, 'authentication_locked_out').catch(() => undefined);
+      // Repeated wrong codes must not leave a prompt armed to fire later.
+      this.pending.clear(event.channel, event.chatId);
       return { kind: 'rejected', reason: 'remote authentication is temporarily locked' };
     }
     if (gate.kind === 'blocked') {
@@ -188,10 +203,23 @@ export class RemoteController {
       if (binding) this.kickDrain(binding.conversationId);
       this.approvals.republish(event.chatId);
       await this.channel.send(event.chatId, 'Forge: authenticated.', { signal: this.abort.signal });
-      return { kind: 'handled' };
+      const heldPrompt = this.pending.take(event.channel, event.chatId);
+      if (!heldPrompt) return { kind: 'handled' };
+      await this.audit?.record(heldPrompt, 'held_prompt_replayed').catch(() => undefined);
+      await this.channel.send(
+        event.chatId,
+        `Forge: running your held prompt — ${previewPrompt(heldPrompt.text)}`,
+        { signal: this.abort.signal },
+      );
+      // Re-entering handle() is what keeps /commands, /steer, attachments and the
+      // length check working on a replay. It cannot recurse: the held event now
+      // gates as authorized without newlyAuthenticated, so this branch is
+      // unreachable the second time.
+      return await this.handle(heldPrompt);
     }
     if (event.kind === 'text' && event.text === '/lock') {
       this.auth.lock(event);
+      this.pending.clear(event.channel, event.chatId);
       await this.audit?.record(event, 'session_locked').catch(() => undefined);
       await this.channel.send(event.chatId, 'Forge: remote session locked.', {
         signal: this.abort.signal,
@@ -234,6 +262,7 @@ export class RemoteController {
           ...(this.options.setInactivityTimeout
             ? { setInactivityTimeout: this.options.setInactivityTimeout }
             : {}),
+          ...(this.options.reloadWindow ? { reloadWindow: this.options.reloadWindow } : {}),
         },
         key,
       );
@@ -290,4 +319,10 @@ export class RemoteController {
       .finally(() => this.drains.delete(conversationId));
     this.drains.set(conversationId, drain);
   }
+}
+
+/** Short, single-line echo so a replayed prompt is never silent. */
+function previewPrompt(text: string): string {
+  const flat = text.replace(/\s+/gu, ' ').trim();
+  return flat.length > 120 ? `"${flat.slice(0, 120)}…"` : `"${flat}"`;
 }

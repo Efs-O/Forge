@@ -158,6 +158,7 @@ remote:
   attachments:
     # Stored below .forge/remote-inbox, never as tracked project files.
     enabled: false
+    # 1-365 days; null keeps attachments forever (no pruning).
     retain_days: 30
     accept_pdf: true
   # Aliases are the only remote workspace-switch targets; paths are never

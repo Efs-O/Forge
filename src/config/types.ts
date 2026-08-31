@@ -347,7 +347,7 @@ export interface ForgeConfig {
     };
     attachments: {
       enabled: boolean;
-      retain_days: number;
+      retain_days: number | null;
       accept_pdf: boolean;
     };
     workspace_aliases: Record<string, { path: string; display_name: string }>;

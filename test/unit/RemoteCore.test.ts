@@ -837,6 +837,65 @@ describe('remote compaction progress notifications', () => {
     );
   });
 
+  it('reloads the window on /reload and rejects when reload is unavailable', async () => {
+    const state = await store();
+    const channel = new FakeRemoteChannel();
+    const reloadWindow = vi.fn(async () => undefined);
+    const context = {
+      channel,
+      store: state,
+      host: {},
+      workspaceId: 'workspace',
+      signal: new AbortController().signal,
+      inactivityTimeoutMinutes: 30,
+      modelNames: [],
+      workspaceAliases: {},
+      reloadWindow,
+    };
+    await expect(
+      handleRemoteCommand(
+        {
+          channel: 'fake',
+          kind: 'text',
+          providerMessageId: 'reload-1',
+          senderId: 'owner',
+          chatId: 'chat-a',
+          chatType: 'private',
+          receivedAt: 1,
+          text: '/reload',
+        } as RemoteInboundEvent,
+        context as never,
+        'reload-1',
+      ),
+    ).resolves.toEqual({ kind: 'handled' });
+    expect(reloadWindow).toHaveBeenCalledTimes(1);
+    expect(channel.sent).toContainEqual(
+      expect.objectContaining({
+        chatId: 'chat-a',
+        text: expect.stringContaining('reloading'),
+      }),
+    );
+
+    const noReload = { ...context, reloadWindow: undefined };
+    await expect(
+      handleRemoteCommand(
+        {
+          channel: 'fake',
+          kind: 'text',
+          providerMessageId: 'reload-2',
+          senderId: 'owner',
+          chatId: 'chat-a',
+          chatType: 'private',
+          receivedAt: 1,
+          text: '/reload',
+        } as RemoteInboundEvent,
+        noReload as never,
+        'reload-2',
+      ),
+    ).resolves.toEqual({ kind: 'rejected', reason: 'remote reload is unavailable' });
+    expect(reloadWindow).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps progress as complete when the result send throws after a successful compaction', async () => {
     const state = await store();
     await state.setBinding({

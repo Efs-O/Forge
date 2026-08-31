@@ -242,7 +242,7 @@ const RemoteConfigSchema = z
     attachments: z
       .object({
         enabled: z.boolean().default(false),
-        retain_days: z.number().int().min(1).max(30).default(30),
+        retain_days: z.union([z.number().int().min(1).max(365), z.null()]).default(30),
         accept_pdf: z.boolean().default(true),
       })
       .default({ enabled: false, retain_days: 30, accept_pdf: true }),
