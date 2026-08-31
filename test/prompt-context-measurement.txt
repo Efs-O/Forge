@@ -1,0 +1,87 @@
+=== FORGE PROMPT CONTEXT MEASUREMENT ===
+active_model: qwen38-27b-mtp-ud-q3kxl-no-vision
+num_ctx (spawn): 58000
+
+system prompt (execute.njk + FORGE.md)        12643 chars    3156 tok
+native tools (62 advertised)                  35979 chars    7733 tok
+load_tool_group (discovery, always on)          616 chars     125 tok
+halluscribe MCP tools (6, on demand)          10336 chars    2382 tok
+
+TOTAL static -- halluscribe UNLOADED          49238 chars   11014 tok
+TOTAL static -- halluscribe ACTIVATED         59574 chars   13396 tok
+recovered on a conversation that never        10336 chars    2382 tok
+  asks about past sessions
+
+--- per native tool (chars / exact tokens of its JSON) ---
+ask_local_agent                 2191 ch     697 tok
+exec_command                    1543 ch     331 tok
+query_powershell                1360 ch     273 tok
+monitor_execution               1219 ch     274 tok
+edit_file                       1146 ch     245 tok
+read_file                        958 ch     212 tok
+apply_line_edits                 945 ch     221 tok
+update_plan                      908 ch     203 tok
+delete_file                      831 ch     172 tok
+search_code                      732 ch     157 tok
+apply_code_action                726 ch     149 tok
+write_file                       717 ch     149 tok
+git_show                         716 ch     169 tok
+find_files                       678 ch     147 tok
+notify_user                      676 ch     142 tok
+append_file                      671 ch     138 tok
+find_implementations             647 ch     125 tok
+run_tests                        635 ch     142 tok
+ask_user                         633 ch     128 tok
+read_tool_result                 617 ch     137 tok
+load_tool_group                  614 ch     123 tok
+list_directory                   610 ch     126 tok
+rename_symbol                    602 ch     120 tok
+insert_code                      585 ch     124 tok
+search_codebase                  557 ch     115 tok
+run_build                        544 ch     117 tok
+edit_notebook_cell               534 ch     109 tok
+git_diff                         521 ch     105 tok
+get_code_actions                 506 ch     105 tok
+create_branch                    499 ch     101 tok
+git_log                          491 ch     100 tok
+go_to_definition                 484 ch      96 tok
+get_hover                        482 ch      98 tok
+web_fetch                        482 ch     108 tok
+find_references                  480 ch      98 tok
+replace_selection                479 ch      96 tok
+show_diff                        479 ch     100 tok
+run_terminal                     468 ch      90 tok
+move_file                        457 ch      83 tok
+git_blame                        452 ch      91 tok
+read_notebook                    443 ch      93 tok
+switch_branch                    421 ch      81 tok
+commit                           420 ch      79 tok
+show_notification                413 ch      84 tok
+get_editor_context               412 ch      88 tok
+stage                            405 ch      81 tok
+git_status                       380 ch      73 tok
+remember                         366 ch      76 tok
+get_diagnostics                  362 ch      72 tok
+get_document_symbols             344 ch      71 tok
+stop_execution                   339 ch      63 tok
+format_file                      335 ch      73 tok
+run_workspace_task               330 ch      68 tok
+create_directory                 322 ch      60 tok
+open_url_in_browser              305 ch      65 tok
+list_executions                  297 ch      59 tok
+get_workspace_symbols            292 ch      56 tok
+web_search                       288 ch      58 tok
+recall                           271 ch      55 tok
+copy_to_clipboard                260 ch      54 tok
+list_workspace_tasks             229 ch      45 tok
+read_clipboard                   213 ch      42 tok
+list_memories                    208 ch      42 tok
+--- per MCP tool (chars / exact tokens of its JSON) ---
+search_raw_transcripts          2975 ch     649 tok
+search_sessions                 2639 ch     604 tok
+read_raw_session                1789 ch     441 tok
+get_digest                      1526 ch     374 tok
+get_profile                      955 ch     215 tok
+read_session                     445 ch     103 tok
+
+(elapsed 68297 ms)

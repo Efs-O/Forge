@@ -43,7 +43,13 @@ export interface ToolCallingLoopOptions {
   baseUrl: string;
   model: ModelConfig;
   messages: ChatMessage[];
-  toolDefinitions: ToolDefinition[];
+  /**
+   * The model-facing tool list, re-read on EVERY round rather than snapshotted
+   * once per turn. A demand-loaded tool group (`load_tool_group`) activates
+   * mid-turn, and a tool that reports itself enabled while the next request
+   * still omits its schemas is a tool that lies.
+   */
+  getToolDefinitions: () => ToolDefinition[];
   dispatchToolCalls: (calls: ToolCall[], messages: ChatMessage[]) => Promise<void>;
   prepareMessages?: (messages: ChatMessage[]) => ChatMessage[];
   signal: AbortSignal;
@@ -159,18 +165,18 @@ export async function runToolCallingLoop(
     // LESS room than the attempt that just failed, and cut at the identical
     // byte. Spending the whole budget on the write is the point of the retry.
     const suppressThinking = truncationRecoveries > 0 && (options.canUseThinkingKwargs ?? false);
+    const toolDefinitions = options.getToolDefinitions();
     const fallbackMessages =
-      options.toolDefinitions.length > 0
+      toolDefinitions.length > 0
         ? [
             ...prepared,
             {
               role: 'system' as const,
-              content: buildFallbackToolInstructions(options.toolDefinitions),
+              content: buildFallbackToolInstructions(toolDefinitions),
             },
           ]
         : prepared;
-    const nativeDefinitions =
-      options.nativeTools && !options.stripAllTools ? options.toolDefinitions : [];
+    const nativeDefinitions = options.nativeTools && !options.stripAllTools ? toolDefinitions : [];
     const base: ChatCompletionRequest = {
       model: options.model.name,
       messages: nativeDefinitions.length > 0 ? prepared : fallbackMessages,
@@ -302,7 +308,7 @@ export async function runToolCallingLoop(
       : sanitizeText(rawReasoning, false);
     const calls = streamed.toolCalls?.length
       ? streamed.toolCalls
-      : options.toolDefinitions.length > 0 && rawAssistant
+      : toolDefinitions.length > 0 && rawAssistant
         ? extractFallbackToolCalls(rawAssistant)
         : null;
     if (calls?.length) {

@@ -16,6 +16,7 @@ import type { RuntimeModelCapabilities } from '../backend/ModelCapabilities';
 import type { TemplateEngine } from '../llm/TemplateEngine';
 import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
 import type { ToolRegistry } from '../tools/ToolRegistry';
+import type { ToolDefinition } from '../llm/types';
 import type { ToolDispatch } from './ToolDispatch';
 import type { ToolFailureTracker } from '../tools/StripTools';
 import type { TurnLifecycle } from './TurnLifecycle';
@@ -28,6 +29,7 @@ import { announceMissingImages } from './imageNotices';
 import { injectSystemPrompt } from '../llm/SystemPromptInjector';
 import { resolveToolPermissions } from '../tools/PermissionResolver';
 import { ToolBudget } from '../tools/ToolBudget';
+import { hiddenLazyToolNames } from '../tools/lazyToolGroups';
 import { deriveStaticCapabilities } from '../config/ConfigResolver';
 import { extractToolDetail } from './toolSummary';
 import { injectTurnContext, type TurnContextState } from './turnContext';
@@ -200,12 +202,23 @@ export async function runModelTurn(
   // Both halves of the gate must list the same tools. Advertising without
   // refusing ships base64 at a projector-less backend; refusing without
   // withholding advertises a tool that always fails.
-  const advertisedDefinitions = ctx.toolRegistry
-    .definitions(allowed)
-    .filter((definition) => isVisionModel || !VISION_ONLY_TOOLS.has(definition.function.name));
-  const toolDefinitions = budget.filterDefinitions(advertisedDefinitions);
+  //
+  // Rebuilt on every round rather than snapshotted once per turn: a lazy tool
+  // group activates mid-turn via `load_tool_group`, and its schemas have to
+  // reach the request that immediately follows.
+  const buildToolDefinitions = (): ToolDefinition[] => {
+    const hiddenLazyTools = hiddenLazyToolNames(conv.id);
+    const advertised = ctx.toolRegistry
+      .definitions(allowed)
+      .filter(
+        (definition) =>
+          (isVisionModel || !VISION_ONLY_TOOLS.has(definition.function.name)) &&
+          !hiddenLazyTools.has(definition.function.name),
+      );
+    return budget.filterDefinitions(advertised);
+  };
   const nativeTools = runtimeCaps?.likelySupportsTools !== false;
-  if (toolDefinitions.length > 0 && !nativeTools) {
+  if (buildToolDefinitions().length > 0 && !nativeTools) {
     ctx.warnOnce(
       `${model.name}:tools`,
       `Forge: model "${model.name}" does not appear to have a tool-aware chat template. Forge will use its fallback tool format.`,
@@ -252,7 +265,7 @@ export async function runModelTurn(
       baseUrl,
       model,
       messages: conv.messages,
-      toolDefinitions,
+      getToolDefinitions: buildToolDefinitions,
       signal: ctrl.signal,
       maxRounds,
       nativeTools,
@@ -302,7 +315,7 @@ export async function runModelTurn(
         const withTurnContext = injectTurnContext(injected, turnContext);
         return prepareToolResultContext({
           messages: supersedeStaleReads(withTurnContext),
-          toolTokens: estimateToolTokens(toolDefinitions),
+          toolTokens: estimateToolTokens(buildToolDefinitions()),
           model,
           server: config.llama_server,
         }).messages;
@@ -400,7 +413,7 @@ export async function runModelTurn(
       getOutputRoom: (messages) =>
         computeContextBudget({
           messages,
-          toolTokens: estimateToolTokens(toolDefinitions),
+          toolTokens: estimateToolTokens(buildToolDefinitions()),
           model,
           server: config.llama_server,
         }).outputRoom || undefined,

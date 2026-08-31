@@ -38,7 +38,7 @@ function runOptions(messages: ChatMessage[], extra: Record<string, unknown> = {}
     baseUrl: 'http://localhost:0',
     model: { name: 'test-model' } as never,
     messages,
-    toolDefinitions: [{ type: 'function', function: { name: 'write_file' } }] as never,
+    getToolDefinitions: () => [{ type: 'function', function: { name: 'write_file' } }] as never,
     dispatchToolCalls: async (calls: ToolCall[], msgs: ChatMessage[]) => {
       for (const c of calls) {
         msgs.push({ role: 'tool', content: 'ok', tool_call_id: c.id, name: c.function.name });

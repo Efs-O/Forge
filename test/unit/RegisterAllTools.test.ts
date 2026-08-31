@@ -57,6 +57,7 @@ const EXPECTED_NATIVE_NAMES = [
   'list_executions',
   'list_memories',
   'list_workspace_tasks',
+  'load_tool_group',
   'monitor_execution',
   'move_file',
   'notify_user',
@@ -126,21 +127,24 @@ function makeRegistry(options: { search?: boolean; delegation?: boolean } = {}):
 }
 
 describe('registerAllTools canonical coordinator catalog', () => {
-  it('exposes the exact 62-tool native catalog when all optional wiring is present', () => {
+  it('exposes the exact 63-tool native catalog when all optional wiring is present', () => {
     const registry = makeRegistry({ search: true, delegation: true });
     expect(registry.names().sort()).toEqual(EXPECTED_NATIVE_NAMES);
+    // load_tool_group is registered but suppresses its own advertisement while
+    // no lazy MCP group has been bridged in, so the 62 tools the model actually
+    // sees are unchanged from before the demand-loading experiment.
     expect(
       registry
         .definitions(ALL_PERMISSIONS)
         .map((tool) => tool.function.name)
         .sort(),
-    ).toEqual(EXPECTED_NATIVE_NAMES);
+    ).toEqual(EXPECTED_NATIVE_NAMES.filter((name) => name !== 'load_tool_group'));
   });
 
   it('lets search and delegation wiring control only their documented tools', () => {
     const names = makeRegistry().names();
     expect(names).not.toContain('web_search');
     expect(names).not.toContain('ask_local_agent');
-    expect(names).toHaveLength(62);
+    expect(names).toHaveLength(63);
   });
 });

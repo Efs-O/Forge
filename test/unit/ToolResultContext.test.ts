@@ -77,7 +77,7 @@ describe('tool-loop context preflight', () => {
         baseUrl: 'http://localhost:0',
         model: { name: 'local' } as never,
         messages: [{ role: 'user', content: 'x' }],
-        toolDefinitions: [],
+        getToolDefinitions: () => [],
         dispatchToolCalls: async () => undefined,
         signal: new AbortController().signal,
         maxRounds: 1,

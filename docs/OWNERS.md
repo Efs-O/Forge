@@ -269,6 +269,8 @@ overlaps with an existing owner, extend the owner instead.
 | Allowlisted PowerShell query tool          | `src/tools/safePowerShellTool.ts`     |
 | Semantic codebase search tool              | `src/tools/semanticSearchTool.ts`     |
 | MCP client bridge (external MCP servers)   | `src/tools/mcpBridge.ts`              |
+| Demand-loaded MCP tool groups (lazy)       | `src/tools/lazyToolGroups.ts`         |
+| `load_tool_group` discovery tool           | `src/tools/toolGroupTools.ts`         |
 | Tool-result size capping                   | `src/tools/resultCap.ts`              |
 | Bundled ripgrep executable resolution      | `src/tools/RipgrepResolver.ts`        |
 | Local agent delegation tool                | `src/tools/localAgentTool.ts`         |

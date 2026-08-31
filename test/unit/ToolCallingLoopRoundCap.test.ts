@@ -40,7 +40,7 @@ function runOptions(messages: ChatMessage[], maxRounds: number) {
     baseUrl: 'http://localhost:0',
     model: { name: 'test-model' } as never,
     messages,
-    toolDefinitions: [{ type: 'function', function: { name: 'edit_file' } }] as never,
+    getToolDefinitions: () => [{ type: 'function', function: { name: 'edit_file' } }] as never,
     dispatchToolCalls: async (calls: ToolCall[], msgs: ChatMessage[]) => {
       for (const c of calls) {
         msgs.push({ role: 'tool', content: `edited ${c.id}`, tool_call_id: c.id, name: 'edit_file' });

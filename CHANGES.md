@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+- **HalluScribe's six MCP schemas are demand-loaded.** They cost 2382 tokens of
+  every single request — measured, `test/prompt-context-measurement.txt` — on
+  conversations that never ask about a past session. A fresh conversation now
+  sees one 125-token `load_tool_group` tool instead; calling it with
+  `group: "halluscribe"` marks the group active and the six real schemas arrive,
+  unchanged, on the next round. Net recovery on an ordinary coding
+  conversation: 2382 tokens (11014 static instead of 13396). Activation is per
+  conversation and in memory only — a new chat starts unloaded, and nothing is
+  written to `config.yaml`. HalluScribe stays connected and dispatchable
+  throughout; only advertisement changes, and no other MCP server is affected.
+  `src/tools/lazyToolGroups.ts` is the sole owner of which server is lazy.
+
+  Validated live against Qwen3.8-27B (`test/live/LazyToolGroups.live.test.ts`,
+  gated on `FORGE_LIVE_LAZY_TOOLS=1`). From the 125-token description alone and
+  with no prompt hinting, the model opened both history questions with
+  `load_tool_group` and went straight into the real tools --
+  `load_tool_group -> search_sessions -> read_session -> read_tool_result` for
+  "what did we decide about the prompt cache", and
+  `load_tool_group -> search_sessions -> search_raw_transcripts -> ...` for
+  "find the exact llama-tokenize error". An ordinary read-package.json request
+  in a separate conversation never touched it.
+
+- **The model-facing tool list is rebuilt every round, not once per turn.**
+  `ModelTurn` snapshotted `toolDefinitions` before the loop started, so a group
+  activated mid-turn could not reach the request that followed — the tool would
+  have reported itself enabled while the next request still omitted its schemas.
+  `ToolCallingLoopOptions.toolDefinitions` is now `getToolDefinitions()`, called
+  once per round; the context-budget math reads the same live list, so the
+  2382 tokens are accounted for on the turn they appear.
+
 - **Stopping the backend no longer leaks a llama.cpp port.** `stopAll()` deleted
   its slot map entries directly instead of freeing them, so every Stop,
   `/unloadModel`, `forge.stopBackend`, and `forge.restartBackend` permanently

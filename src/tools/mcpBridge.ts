@@ -4,6 +4,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import type { ToolPermission, ToolRegistry, RegisteredTool } from './ToolRegistry';
 import type { McpServerConfig } from '../config/types';
 import { DEFAULT_MAX_RESULT_CHARS, capResultText } from './resultCap';
+import { lazyGroupForServer, recordLazyGroupTool } from './lazyToolGroups';
 
 /** Minimal logging surface — matches util/logger's Logger so callers can pass getLogger() directly. */
 export interface McpBridgeLogger {
@@ -97,6 +98,9 @@ async function connectOne(
 
   try {
     const { tools } = await client.listTools();
+    // Set only for a server whose schemas are demand-loaded; every other
+    // server bridges in exactly as before.
+    const lazyGroup = lazyGroupForServer(server.name);
     let bridged = 0;
     for (const tool of tools) {
       try {
@@ -110,6 +114,9 @@ async function connectOne(
             server.max_result_chars ?? DEFAULT_MAX_RESULT_CHARS,
           ),
         );
+        // After register(): a duplicate name throws above, and a tool that is
+        // not in the registry must never be counted as a hideable member.
+        if (lazyGroup) recordLazyGroupTool(lazyGroup, tool.name);
         bridged += 1;
       } catch (err) {
         // ToolRegistry.register throws on a duplicate name — skip that one

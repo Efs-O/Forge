@@ -50,7 +50,7 @@ function runOptions(messages: ChatMessage[]) {
     baseUrl: 'http://localhost:0',
     model: { name: 'test-model' } as never,
     messages,
-    toolDefinitions: [{ type: 'function', function: { name: 'read_file' } }] as never,
+    getToolDefinitions: () => [{ type: 'function', function: { name: 'read_file' } }] as never,
     dispatchToolCalls: async (calls: ToolCall[], msgs: ChatMessage[]) => {
       for (const c of calls) {
         msgs.push({

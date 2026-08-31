@@ -52,6 +52,7 @@ import {
   makeRunBuildTool,
 } from './execTools';
 import { makeSafePowerShellTool } from './safePowerShellTool';
+import { makeLoadToolGroupTool } from './toolGroupTools';
 import { makeReadToolResultTool } from './toolResultTools';
 import { makeUpdatePlanTool } from './planTools';
 import {
@@ -171,4 +172,9 @@ export function registerAllTools(
   if (delegationService && getConfig) {
     registry.register(makeLocalAgentTool(delegationService, getConfig));
   }
+
+  // Registered last, and self-suppressing until a lazy group is actually
+  // bridged in: definitions() follows insertion order, so appending here
+  // leaves the native prefix above byte-identical for the KV cache.
+  registry.register(makeLoadToolGroupTool());
 }
