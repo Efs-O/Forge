@@ -19,6 +19,7 @@ import {
   makeRememberTool,
 } from '../../src/tools/memoryTools';
 import { makeSearchCodebaseTool } from '../../src/tools/semanticSearchTool';
+import type { UserQuestionService } from '../../src/sidebar/UserQuestionService';
 import {
   makeAskUserTool,
   makeCopyToClipboardTool,
@@ -153,7 +154,13 @@ describe('isolated editor, language, search, and memory tool execution', () => {
       expect.anything(),
       'Forge Diff',
     );
-    await expect(makeAskUserTool().handler({ prompt: 'Question?' })).resolves.toBe(
+    // ask_user no longer owns presentation: it asks the question service, which
+    // races the local box against a remote chat. The box mechanics are covered
+    // in UserQuestionService's own tests, so a stub is the honest double here.
+    const questions = {
+      ask: vi.fn(async () => 'fixture answer'),
+    } as unknown as UserQuestionService;
+    await expect(makeAskUserTool(questions).handler({ prompt: 'Question?' })).resolves.toBe(
       'fixture answer',
     );
     await makeShowNotificationTool().handler({ message: 'notice', level: 'warning' });

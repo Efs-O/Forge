@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveWorkspaceUri } from '../util/WorkspacePaths';
+import type { UserQuestionService } from '../sidebar/UserQuestionService';
 
 // ── show_diff ─────────────────────────────────────────────────────────────────
 
@@ -36,13 +37,16 @@ export function makeShowDiffTool(): RegisteredTool {
 
 // ── ask_user ──────────────────────────────────────────────────────────────────
 
-export function makeAskUserTool(): RegisteredTool {
+export function makeAskUserTool(questions: UserQuestionService): RegisteredTool {
   return {
     definition: {
       type: 'function',
       function: {
         name: 'ask_user',
-        description: 'Prompt the user for input via a VS Code input box or quick-pick menu.',
+        description:
+          'Ask the user a question and wait for their answer. The question reaches ' +
+          'whichever surface started the turn -- the VS Code window, or the chat it ' +
+          'was driven from remotely.',
         parameters: {
           type: 'object',
           properties: {
@@ -54,7 +58,7 @@ export function makeAskUserTool(): RegisteredTool {
             options: {
               type: 'array',
               items: { type: 'string' },
-              description: 'If provided, shows a quick-pick list instead of a free-text box.',
+              description: 'If provided, offers a fixed choice instead of free text.',
             },
           },
           required: ['prompt'],
@@ -63,33 +67,19 @@ export function makeAskUserTool(): RegisteredTool {
       },
     },
     permission: 'read',
-    handler: async (args) => {
-      const prompt = args['prompt'] as string;
-      const placeholder = args['placeholder'] as string | undefined;
-      const options = args['options'] as string[] | undefined;
-
-      // The quick input is raised mid-turn, while the sidebar is streaming and
-      // may pull focus back. Without ignoreFocusOut that dismisses the box
-      // before the user ever sees the question, and the resolved `undefined` is
-      // indistinguishable from a real cancel -- the model then re-asks into the
-      // same race. Every other prompt in the extension sets this; so does this one.
-      let answer: string | undefined;
-      if (options?.length) {
-        answer = await vscode.window.showQuickPick(options, {
-          placeHolder: prompt,
-          ignoreFocusOut: true,
-        });
-      } else {
-        const inputOpts: vscode.InputBoxOptions = { prompt, ignoreFocusOut: true };
-        if (placeholder !== undefined) inputOpts.placeHolder = placeholder;
-        answer = await vscode.window.showInputBox(inputOpts);
-      }
+    handler: async (args, context) => {
+      const answer = await questions.ask({
+        prompt: args['prompt'] as string,
+        placeholder: args['placeholder'] as string | undefined,
+        options: args['options'] as string[] | undefined,
+        conversationId: context?.conversationId,
+      });
       // Say what happened rather than returning a bare "(cancelled)" the model
       // reads as an answer -- and name the alternative, so a dismissal ends the
-      // turn in chat instead of retrying the dialog.
+      // turn in chat instead of re-asking into the same dead end.
       return (
         answer ??
-        'The user did not answer: the input box was dismissed without a response. ' +
+        'The user did not answer: the question was dismissed without a response. ' +
           'Do not call ask_user again for this question -- ask it in your chat reply and end the turn.'
       );
     },

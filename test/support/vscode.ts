@@ -101,7 +101,72 @@ export const window = {
   showInputBox: async (): Promise<string | undefined> => undefined,
   showTextDocument: async (document: unknown) => document,
   createTerminal: () => ({ show: () => undefined, sendText: () => undefined }),
+  createInputBox: () => makeQuickInput(),
+  createQuickPick: () => makeQuickInput(),
 };
+
+/**
+ * Minimal stand-in for a VS Code quick input. Tests drive it by calling the
+ * captured accept/hide handlers, which is how the real widget reports a typed
+ * answer or an Escape.
+ */
+export interface FakeQuickInput {
+  value: string;
+  prompt?: string;
+  placeholder?: string;
+  ignoreFocusOut: boolean;
+  items: Array<{ label: string }>;
+  selectedItems: Array<{ label: string }>;
+  visible: boolean;
+  disposed: boolean;
+  show(): void;
+  hide(): void;
+  dispose(): void;
+  onDidAccept(handler: () => void): { dispose(): void };
+  onDidHide(handler: () => void): { dispose(): void };
+  accept(text?: string): void;
+}
+
+export const openQuickInputs: FakeQuickInput[] = [];
+
+function makeQuickInput(): FakeQuickInput {
+  let acceptHandler: (() => void) | undefined;
+  let hideHandler: (() => void) | undefined;
+  const input: FakeQuickInput = {
+    value: '',
+    ignoreFocusOut: false,
+    items: [],
+    selectedItems: [],
+    visible: false,
+    disposed: false,
+    show() {
+      this.visible = true;
+    },
+    hide() {
+      if (!this.visible) return;
+      this.visible = false;
+      hideHandler?.();
+    },
+    dispose() {
+      this.disposed = true;
+      this.hide();
+    },
+    onDidAccept(handler) {
+      acceptHandler = handler;
+      return { dispose: () => undefined };
+    },
+    onDidHide(handler) {
+      hideHandler = handler;
+      return { dispose: () => undefined };
+    },
+    accept(text?: string) {
+      if (text !== undefined) this.value = text;
+      acceptHandler?.();
+    },
+  };
+  openQuickInputs.push(input);
+  return input;
+}
 
 let clipboardText = '';
 export const env = {

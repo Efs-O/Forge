@@ -33,6 +33,8 @@ overlaps with an existing owner, extend the owner instead.
 | Thinking kwargs, strip, template context   | `src/sidebar/turnModelBehavior.ts`   |
 | Collaborator set handed to turn modules    | `src/sidebar/turnServices.ts`        |
 | Confirmation FIFO + clanker bypass policy  | `src/sidebar/ToolApprovalService.ts` |
+| Agent question: local box + remote answer  | `src/sidebar/UserQuestionService.ts` |
+| Model residency polling timer              | `src/sidebar/ResidencyPoller.ts`     |
 | Tool call execution + result formatting    | `src/sidebar/ToolDispatch.ts`        |
 | Conversation CRUD pure ops                 | `src/sidebar/ConversationOps.ts`     |
 | Slash command dispatch                     | `src/sidebar/SlashCommandHandler.ts` |
@@ -120,6 +122,7 @@ overlaps with an existing owner, extend the owner instead.
 | Pairing + session-auth facade                | `src/remote/RemoteAuth.ts`             |
 | TOTP session state + enrollment boundary     | `src/remote/RemoteSessionAuth.ts`      |
 | Prompt held across a TOTP challenge          | `src/remote/RemotePendingPrompt.ts`    |
+| Agent question presented in the remote chat  | `src/remote/RemoteQuestionBridge.ts`   |
 | RFC 6238 generation/verification             | `src/remote/RemoteTotp.ts`             |
 | Durable requests, bindings, cursors, outbox  | `src/remote/RemoteRequestStore.ts`     |
 | Remote owner command behavior                | `src/remote/RemoteCommandHandler.ts`   |

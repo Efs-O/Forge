@@ -13,6 +13,7 @@ import { RemoteRateLimiter } from './RemoteRateLimiter';
 import { RemoteOutboxDelivery } from './RemoteOutboxDelivery';
 import { handleRemoteCommand } from './RemoteCommandHandler';
 import { RemoteApprovalBridge } from './RemoteApprovalBridge';
+import { RemoteQuestionBridge } from './RemoteQuestionBridge';
 import type { RemoteAttachmentStore } from './RemoteAttachmentStore';
 import { RemoteAgentProgress } from './RemoteAgentProgress';
 import { admitRemotePrompt, parseSteerCommand } from './RemotePromptAdmission';
@@ -47,6 +48,7 @@ export class RemoteController {
   private rateLimiter: RemoteRateLimiter;
   private readonly outbox: RemoteOutboxDelivery;
   private readonly approvals: RemoteApprovalBridge;
+  private readonly questions: RemoteQuestionBridge;
   private readonly progress: RemoteAgentProgress;
   private readonly pending = new RemotePendingPrompt();
   private progressSubscription: { dispose(): void } | undefined;
@@ -78,6 +80,15 @@ export class RemoteController {
       options.maxMessageChars,
       options.onError,
     );
+    this.questions = new RemoteQuestionBridge(
+      channel,
+      store,
+      auth,
+      host,
+      this.abort.signal,
+      options.maxMessageChars,
+      options.onError,
+    );
     this.progress = new RemoteAgentProgress(
       channel,
       this.abort.signal,
@@ -93,6 +104,7 @@ export class RemoteController {
     this.accepting = true;
     this.subscription = this.channel.onEvent((event) => this.handle(event));
     this.approvals.start();
+    this.questions.start();
     await this.channel.start(this.abort.signal);
     this.progressSubscription = this.host.onAgentProgress?.((event) => this.progress.handle(event));
     for (const request of this.store.queued(undefined, this.channel.name)) {
@@ -106,6 +118,7 @@ export class RemoteController {
     this.rateLimiter = new RemoteRateLimiter(options.rateLimitPerMinute);
     this.outbox.updateMaxMessageChars(options.maxMessageChars);
     this.approvals.updateMaxMessageChars(options.maxMessageChars);
+    this.questions.updateMaxMessageChars(options.maxMessageChars);
     this.progress.updateMaxMessageChars(Math.min(options.maxMessageChars, 3_900));
   }
 
@@ -117,6 +130,7 @@ export class RemoteController {
     this.progressSubscription?.dispose();
     this.progressSubscription = undefined;
     this.approvals.stop();
+    this.questions.stop();
     await Promise.allSettled(
       [...this.activeConversations].map((conversationId) => this.host.cancel(conversationId)),
     );
@@ -238,6 +252,14 @@ export class RemoteController {
     }
     if (event.text.length > this.options.maxMessageChars) {
       return { kind: 'rejected', reason: 'message exceeds configured limit' };
+    }
+    // An outstanding question owns the chat's next plain text: the agent is
+    // blocked on it, so admitting the reply as a new prompt would both strand
+    // the turn and queue work the user never asked for. Commands stay commands,
+    // or a pending question would leave the chat with no way out.
+    if (!event.text.startsWith('/') && this.questions.answerText(event.chatId, event.text)) {
+      this.auth.touch(event);
+      return { kind: 'handled' };
     }
     const key = remoteDedupKey(event.channel, event.chatId, event.providerMessageId);
     const steer = parseSteerCommand(event.text);

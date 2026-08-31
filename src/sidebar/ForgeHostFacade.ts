@@ -22,6 +22,8 @@ export interface ForgeHostStatus {
   pendingApproval?: ToolApprovalRequestEvent;
 }
 
+import type { UserQuestionSink } from './UserQuestionService';
+
 export interface ForgeHostFacade {
   createConversation(options?: { activate?: boolean }): Promise<ForgeConversationSummary>;
   restoreConversation(
@@ -40,6 +42,9 @@ export interface ForgeHostFacade {
   queueIntent(conversationId: string): void;
   addApprovalSink(sink: ToolApprovalSink): { dispose(): void };
   resolveApproval(id: string, approved: boolean): void;
+  addQuestionSink(sink: UserQuestionSink): { dispose(): void };
+  /** Answers an outstanding agent question from a non-local surface. */
+  answerQuestion(id: string, text: string): boolean;
   status(): ForgeHostStatus;
   /**
    * Clanker mode auto-approves every non-dangerous tool. It is deliberately NOT
@@ -86,6 +91,8 @@ export interface SidebarHostFacadeDeps {
   queueIntent: (conversationId: string) => void;
   addApprovalSink: (sink: ToolApprovalSink) => { dispose(): void };
   resolveApproval: (id: string, approved: boolean) => void;
+  addQuestionSink: (sink: UserQuestionSink) => { dispose(): void };
+  answerQuestion: (id: string, text: string) => boolean;
   getPendingApproval: () => ToolApprovalRequestEvent | undefined;
   getActiveConversationId: () => string;
   getOpenConversations: () => ConversationRuntime[];
@@ -169,6 +176,14 @@ export class SidebarHostFacade implements ForgeHostFacade {
 
   resolveApproval(id: string, approved: boolean): void {
     this.deps.resolveApproval(id, approved);
+  }
+
+  addQuestionSink(sink: UserQuestionSink): { dispose(): void } {
+    return this.deps.addQuestionSink(sink);
+  }
+
+  answerQuestion(id: string, text: string): boolean {
+    return this.deps.answerQuestion(id, text);
   }
 
   clankerMode(): boolean {

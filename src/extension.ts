@@ -1,6 +1,7 @@
 import * as path from 'path';
 import { createHash } from 'crypto';
 import * as vscode from 'vscode';
+import { UserQuestionService } from './sidebar/UserQuestionService';
 import { SidebarProvider } from './sidebar/SidebarProvider';
 import { BackendPool } from './backend/BackendPool';
 import { disposeServerChannel } from './backend/DirectBackend';
@@ -134,6 +135,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     secrets: context.secrets,
   });
   const toolRegistry = new ToolRegistry();
+  // One owner for agent questions, shared by ask_user and the sidebar facade so
+  // a remotely driven turn can answer from the chat that started it.
+  const userQuestions = new UserQuestionService();
   terminalCommandTracker.start();
   context.subscriptions.push(terminalCommandTracker);
   registerAllTools(
@@ -142,6 +146,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     context.secrets,
     config.search,
     indexManager,
+    userQuestions,
     delegationService,
     () => config,
   );
@@ -255,6 +260,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     workspaceRoot,
     () => activeConfigPath,
     cliSessions,
+    userQuestions,
   );
   const workspaceId = createHash('sha256')
     .update(workspaceRoot || `no-workspace:${activeConfigPath}`)

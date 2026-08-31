@@ -77,12 +77,15 @@ import {
   makeStopExecutionTool,
 } from './backgroundExecutionTools';
 
+import type { UserQuestionService } from '../sidebar/UserQuestionService';
+
 export function registerAllTools(
   registry: ToolRegistry,
   workspaceState: vscode.Memento,
   secrets: vscode.SecretStorage,
   searchConfig: SearchConfig | undefined,
   indexManager: IndexManager,
+  questions: UserQuestionService,
   delegationService?: LocalDelegationService,
   getConfig?: () => ForgeConfig,
 ): void {
@@ -116,7 +119,7 @@ export function registerAllTools(
   registry.register(makeReadNotebookTool());
   registry.register(makeListWorkspaceTasksTool());
   registry.register(makeShowDiffTool());
-  registry.register(makeAskUserTool());
+  registry.register(makeAskUserTool(questions));
   registry.register(makeShowNotificationTool());
   registry.register(makeCopyToClipboardTool());
   registry.register(makeReadClipboardTool());

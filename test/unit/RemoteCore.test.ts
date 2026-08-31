@@ -189,6 +189,8 @@ describe('RemoteController with fake channel', () => {
       send,
       cancel: vi.fn(),
       addApprovalSink: () => ({ dispose: () => undefined }),
+      addQuestionSink: () => ({ dispose: () => undefined }),
+      answerQuestion: () => false,
       status: () => ({
         activeConversationId: 'visible',
         conversations: [],
@@ -269,6 +271,8 @@ describe('RemoteController with fake channel', () => {
       interrupt,
       queueIntent: vi.fn(),
       addApprovalSink: () => ({ dispose: () => undefined }),
+      addQuestionSink: () => ({ dispose: () => undefined }),
+      answerQuestion: () => false,
       resolveApproval: vi.fn(),
       status: () => ({
         activeConversationId: 'c1',
@@ -331,6 +335,8 @@ describe('RemoteController with fake channel', () => {
       cancel: vi.fn(async () => undefined),
       queueIntent: vi.fn(),
       addApprovalSink: () => ({ dispose: () => undefined }),
+      addQuestionSink: () => ({ dispose: () => undefined }),
+      answerQuestion: () => false,
       status: () => ({
         activeConversationId: 'visible',
         conversations: [],
@@ -376,6 +382,8 @@ describe('RemoteController with fake channel', () => {
     const host = {
       send: vi.fn(),
       addApprovalSink: () => ({ dispose: () => undefined }),
+      addQuestionSink: () => ({ dispose: () => undefined }),
+      answerQuestion: () => false,
     } as unknown as ForgeHostFacade;
     const controller = new RemoteController(channel, state, auth, host, {
       workspaceId: 'workspace',
@@ -421,6 +429,8 @@ describe('RemoteController with fake channel', () => {
       queueIntent,
       cancel: vi.fn(async () => undefined),
       addApprovalSink: () => ({ dispose: () => undefined }),
+      addQuestionSink: () => ({ dispose: () => undefined }),
+      answerQuestion: () => false,
       status: () => ({
         activeConversationId: 'visible',
         conversations: [],
@@ -482,6 +492,8 @@ describe('RemoteController with fake channel', () => {
     const host = {
       send: vi.fn(),
       addApprovalSink: () => ({ dispose: () => undefined }),
+      addQuestionSink: () => ({ dispose: () => undefined }),
+      answerQuestion: () => false,
       status: () => ({
         activeConversationId: 'visible',
         conversations: [],
@@ -536,6 +548,8 @@ describe('RemoteController with fake channel', () => {
         sink = next;
         return { dispose: () => (sink = undefined) };
       },
+      addQuestionSink: () => ({ dispose: () => undefined }),
+      answerQuestion: () => false,
       cancel: vi.fn(async () => undefined),
       status: () => ({
         activeConversationId: 'visible',
@@ -725,6 +739,8 @@ describe('remote compaction progress notifications', () => {
     const channel = new FakeRemoteChannel();
     const controller = controllerFixture(channel, state, {
       addApprovalSink: () => ({ dispose: () => undefined }),
+      addQuestionSink: () => ({ dispose: () => undefined }),
+      answerQuestion: () => false,
     });
     await controller.start();
     try {
@@ -746,6 +762,8 @@ describe('remote compaction progress notifications', () => {
     const channel = new FakeRemoteChannel();
     const controller = controllerFixture(channel, state, {
       addApprovalSink: () => ({ dispose: () => undefined }),
+      addQuestionSink: () => ({ dispose: () => undefined }),
+      answerQuestion: () => false,
     });
     await controller.start();
     try {
@@ -767,6 +785,8 @@ describe('remote compaction progress notifications', () => {
     const channel = new FakeRemoteChannel();
     const controller = controllerFixture(channel, state, {
       addApprovalSink: () => ({ dispose: () => undefined }),
+      addQuestionSink: () => ({ dispose: () => undefined }),
+      answerQuestion: () => false,
     });
     await controller.start();
     try {

@@ -3,6 +3,7 @@ import type * as vscode from 'vscode';
 import type { ForgeConfig } from '../../src/config/types';
 import type { LocalDelegationService } from '../../src/delegation/LocalDelegationService';
 import type { IndexManager } from '../../src/search/IndexManager';
+import { UserQuestionService } from '../../src/sidebar/UserQuestionService';
 import { registerAllTools } from '../../src/tools/registerAllTools';
 import { ToolRegistry, type ToolPermission } from '../../src/tools/ToolRegistry';
 
@@ -114,6 +115,7 @@ function makeRegistry(options: { search?: boolean; delegation?: boolean } = {}):
     secrets,
     options.search ? { provider: 'tavily', secret_key_name: 'audit-key' } : undefined,
     indexManager,
+    new UserQuestionService(),
     delegation,
     options.delegation ? () => config : undefined,
   );

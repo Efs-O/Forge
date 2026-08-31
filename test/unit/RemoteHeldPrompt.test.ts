@@ -68,6 +68,8 @@ function host(overrides: Partial<ForgeHostFacade> = {}): ForgeHostFacade {
     queueIntent: vi.fn(),
     resolveApproval: vi.fn(),
     addApprovalSink: () => ({ dispose: () => undefined }),
+    addQuestionSink: () => ({ dispose: () => undefined }),
+    answerQuestion: () => false,
     status: () => ({
       activeConversationId: 'visible',
       conversations: [],

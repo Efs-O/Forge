@@ -45,13 +45,14 @@ export type { SidebarProviderEvents };
 /** Residency refresh while visible: cheap, but fast enough to avoid a stale dot. */
 const RESIDENCY_POLL_MS = 1500;
 
+import { ResidencyPoller } from './ResidencyPoller';
+import { UserQuestionService } from './UserQuestionService';
+
 export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewId = 'forge.sidebar';
 
   private view?: vscode.WebviewView;
   /** Residency poll: see docs/plans/MODEL_READINESS_DOT_PLAN.md — why a tick, not an event; runs only while the sidebar is visible. */
-  private residencyTimer: ReturnType<typeof setInterval> | undefined;
-  private lastResidencySignature = '';
   private sidebar: SidebarRuntime;
   private readonly failureTracker = new ToolFailureTracker();
   private readonly agentLoop: AgentLoop;
@@ -62,6 +63,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly send: SendPipeline;
   private readonly requestChains: RequestChainLifecycle;
   private readonly hostFacade: ForgeHostFacade;
+  private readonly residency = new ResidencyPoller(
+    () => this.pool.residencySignature(),
+    () => this.postModels(),
+    RESIDENCY_POLL_MS,
+  );
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -80,6 +86,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     workspaceRoot?: string,
     getConfigPath?: () => string,
     cliSessions?: CliSessionRegistry,
+    private readonly questions: UserQuestionService = new UserQuestionService(),
   ) {
     this.sidebar = loadSidebarSession(workspaceState);
     const runtime = wireSidebar(
@@ -150,6 +157,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       queueIntent: (conversationId) => this.requestChains.suppressContinuation(conversationId),
       addApprovalSink: (sink) => this.agentLoop.addApprovalSink(sink),
       resolveApproval: (id, approved) => this.agentLoop.resolveConfirmation(id, approved),
+      addQuestionSink: (sink) => this.questions.addSink(sink),
+      answerQuestion: (id, text) => this.questions.answer(id, text),
       getPendingApproval: () => this.agentLoop.pendingApproval(),
       getActiveConversationId: () => this.sidebar.activeConversationId,
       getOpenConversations: () => this.sidebar.conversations,
@@ -196,31 +205,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     webviewView.webview.onDidReceiveMessage((raw: unknown) => {
       this.handleMessage(raw as WebviewToHost);
     });
-    webviewView.onDidChangeVisibility(() => this.syncResidencyPolling());
-    webviewView.onDidDispose(() => this.stopResidencyPolling());
-    this.syncResidencyPolling();
-  }
-
-  /** Poll only while someone can see the result. */
-  private syncResidencyPolling(): void {
-    if (this.view?.visible) this.startResidencyPolling();
-    else this.stopResidencyPolling();
-  }
-
-  private startResidencyPolling(): void {
-    if (this.residencyTimer) return;
-    this.residencyTimer = setInterval(() => {
-      const signature = this.pool.residencySignature();
-      if (signature === this.lastResidencySignature) return;
-      this.lastResidencySignature = signature;
-      this.postModels();
-    }, RESIDENCY_POLL_MS);
-  }
-
-  private stopResidencyPolling(): void {
-    if (!this.residencyTimer) return;
-    clearInterval(this.residencyTimer);
-    this.residencyTimer = undefined;
+    webviewView.onDidChangeVisibility(() => this.residency.sync(this.view?.visible ?? false));
+    webviewView.onDidDispose(() => this.residency.stop());
+    this.residency.sync(this.view?.visible ?? false);
   }
 
   // ── Public API ────────────────────────────────────────────────────────────
@@ -491,7 +478,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   async dispose(): Promise<void> {
-    this.stopResidencyPolling();
+    this.residency.stop();
     this.budget.dispose();
     this.review.dispose();
     await this.agentLoop.dispose();
