@@ -72,6 +72,7 @@ import { makeSearchCodebaseTool } from './semanticSearchTool';
 import type { IndexManager } from '../search/IndexManager';
 import { makeApplyLineEditsTool } from './structuredEditTool';
 import { makeViewImageTool } from './imageTool';
+import { makeWaitTool } from './waitTool';
 import { makeViewVideoTool } from './videoTool';
 import {
   makeListExecutionsTool,
@@ -125,6 +126,7 @@ export function registerAllTools(
   registry.register(makeShowDiffTool());
   registry.register(makeAskUserTool(questions));
   registry.register(makeNotifyUserTool(notifications));
+  registry.register(makeWaitTool());
   registry.register(makeShowNotificationTool());
   registry.register(makeCopyToClipboardTool());
   registry.register(makeReadClipboardTool());

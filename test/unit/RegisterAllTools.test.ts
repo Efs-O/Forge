@@ -85,6 +85,7 @@ const EXPECTED_NATIVE_NAMES = [
   'update_plan',
   'view_image',
   'view_video',
+  'wait',
   'web_fetch',
   'web_search',
   'write_file',
@@ -127,7 +128,7 @@ function makeRegistry(options: { search?: boolean; delegation?: boolean } = {}):
 }
 
 describe('registerAllTools canonical coordinator catalog', () => {
-  it('exposes the exact 63-tool native catalog when all optional wiring is present', () => {
+  it('exposes the exact 66-tool native catalog when all optional wiring is present', () => {
     const registry = makeRegistry({ search: true, delegation: true });
     expect(registry.names().sort()).toEqual(EXPECTED_NATIVE_NAMES);
     // load_tool_group is registered but suppresses its own advertisement while
@@ -145,6 +146,6 @@ describe('registerAllTools canonical coordinator catalog', () => {
     const names = makeRegistry().names();
     expect(names).not.toContain('web_search');
     expect(names).not.toContain('ask_local_agent');
-    expect(names).toHaveLength(63);
+    expect(names).toHaveLength(64);
   });
 });

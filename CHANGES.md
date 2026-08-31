@@ -258,6 +258,23 @@
   LOC) along the real seam: the tab strip and the sessions flyout are separate
   concerns, and the panel had just grown a second section.
 
+- **`pwsh` was not covered by the PowerShell ban.** `checkPowerShellBan`
+  matched `powershell` and `powershell.exe` only, so `pwsh -Command <script>`
+  -- PowerShell 7, present on any machine set up for Codex -- walked straight
+  past a guard whose stated rationale is that a model-authored script cannot be
+  checked by the denylist. The launcher list is now matched as a set, so a new
+  PowerShell binary is a new hole rather than a variant of an old one.
+
+- **New tool: `wait`.** Forge could wait for a *process* (`exec_command`
+  background plus `monitor_execution`) but had no way to produce a delay: that
+  wait resolves the instant the process exits. Asked to ping on an interval the
+  agent burned two rounds hunting a sleep binary -- `powershell -Command
+  Start-Sleep` banned, Windows `timeout` needing console stdin it never gets
+  under `shell: false` -- before landing on `python -c "time.sleep(15)"`, which
+  is luck rather than a capability. `wait` is in-process: no shell, no binary to
+  be missing, capped at 60s, and it honours the turn's abort signal so /stop
+  never leaves a turn parked on a timer. It reports the time it actually waited,
+  not the time requested. The PowerShell refusal now names it first.
 - **`notify_user`: the agent can reach the chat that started the turn.** Its
   only outbound signal was `show_notification`, a VS Code desktop toast, so a
   turn driven from Telegram lit up a window nobody was looking at. `notify_user`

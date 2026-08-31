@@ -36,6 +36,7 @@ overlaps with an existing owner, extend the owner instead.
 | Agent question: local box + remote answer  | `src/sidebar/UserQuestionService.ts` |
 | Agent notification: toast + remote fan-out  | `src/sidebar/UserNotificationService.ts` |
 | Model residency polling timer              | `src/sidebar/ResidencyPoller.ts`     |
+| Timed pause for the agent loop             | `src/tools/waitTool.ts`              |
 | Filesystem-miss error text for tools       | `src/tools/pathErrorHint.ts`         |
 | Tool call execution + result formatting    | `src/sidebar/ToolDispatch.ts`        |
 | Conversation CRUD pure ops                 | `src/sidebar/ConversationOps.ts`     |

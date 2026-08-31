@@ -120,10 +120,19 @@ export function checkShellOperators(args: string[]): void {
 // ── PowerShell ban ─────────────────────────────────────────────────────────────
 
 const PS_DANGEROUS_FLAGS = ['-Command', '-EncodedCommand', '-enc'];
+/**
+ * Every shell that runs a model-authored script string.
+ *
+ * `pwsh` is PowerShell 7 and was missing here, so `pwsh -Command <script>`
+ * walked straight past a ban whose whole rationale is that such a script
+ * cannot be checked by the denylist. Matching the launcher name is the point:
+ * a new PowerShell binary is a new hole, not a variant of an old one.
+ */
+const PS_LAUNCHERS = ['powershell.exe', 'powershell', 'pwsh.exe', 'pwsh'];
 
 export function checkPowerShellBan(command: string, args: string[]): void {
   const cmd = command.toLowerCase();
-  if (cmd === 'powershell.exe' || cmd === 'powershell') {
+  if (PS_LAUNCHERS.includes(cmd)) {
     for (const arg of args) {
       if (PS_DANGEROUS_FLAGS.includes(arg)) {
         // Name the route that works. "Use a non-shell binary instead" told the
@@ -133,9 +142,10 @@ export function checkPowerShellBan(command: string, args: string[]): void {
         throw new Error(
           `PowerShell flag "${arg}" is banned — a model-authored script cannot be checked ` +
             'by the denylist, so it is never run. Use the dedicated tools instead: ' +
-            'list_directory to list files, read_file to read them, search_code to search, ' +
-            'query_powershell for a read-only workspace overview or a file hash, or ' +
-            'exec_command with a real executable and an args array.',
+            'wait to pause for a number of seconds, list_directory to list files, ' +
+            'read_file to read them, search_code to search, query_powershell for a ' +
+            'read-only workspace overview or a file hash, or exec_command with a real ' +
+            'executable and an args array.',
         );
       }
     }
