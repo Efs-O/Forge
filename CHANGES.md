@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## Unreleased
+## 0.15.0
 
 - **The system prompt is 585 tokens lighter, with nothing lost.** It was 3156
   tokens on every request — `execute.njk` plus this workspace's `FORGE.md` —

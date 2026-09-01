@@ -27,3 +27,19 @@ jobs:
         run: npm run publish
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      # Open VSX lagged the Marketplace from 0.13.3 to 0.15.0 because the step
+      # that published it was deleted in a954ead and never restored. It is
+      # guarded on the secret rather than assumed: without the guard a missing
+      # OVSX_PAT fails the job AFTER the Marketplace publish has already gone
+      # out, turning a half-finished release into a red one. Set the secret
+      # with `gh secret set OVSX_PAT` and this starts running on the next tag.
+      - name: Package the VSIX for Open VSX
+        if: ${{ secrets.OVSX_PAT != '' }}
+        run: npx vsce package --no-dependencies
+
+      - name: Publish to Open VSX
+        if: ${{ secrets.OVSX_PAT != '' }}
+        run: npx ovsx publish "$(ls *.vsix)" -p "$OVSX_PAT"
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
