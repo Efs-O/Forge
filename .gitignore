@@ -1,6 +1,8 @@
 node_modules/
 dist/
 *.vsix
+# Generated from CHANGES.md at package time; CHANGES.md is the real one.
+/CHANGELOG.md
 coverage/
 tool-result-context-ab-results/
 .forge/

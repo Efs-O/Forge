@@ -1,5 +1,20 @@
 # Forge — Recent Changes
 
+## 0.15.1
+
+- **Both registries said "No changelog available" — every release, since the
+  first.** They look for `CHANGELOG.md` at the package root; this repo's
+  changelog has always been `CHANGES.md`, and `.vscodeignore` excludes `*.md`
+  with only `README.md` re-admitted, so even a correctly named file would not
+  have reached the VSIX. `scripts/sync-changelog.mjs` now generates
+  `CHANGELOG.md` from `CHANGES.md` as part of `npm run package` and
+  `npm run publish`, and `.vscodeignore` re-admits it. A generated copy rather
+  than a rename: `CHANGES.md` is referenced by `CLAUDE.md`, `docs/OWNERS.md`
+  and years of commit messages, and churning all of that to satisfy a
+  packaging convention would be the wrong trade. The copy is gitignored — it
+  is a build artifact, and committing it would create a second file that
+  drifts from the real one.
+
 ## 0.15.0
 
 - **The system prompt is 585 tokens lighter, with nothing lost.** It was 3156

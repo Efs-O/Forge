@@ -23,6 +23,9 @@ tsconfig.json
 vitest.config.*
 *.md
 !README.md
+# Generated from CHANGES.md by scripts/sync-changelog.mjs. Without this line the
+# `*.md` rule above strips it and both registries show "No changelog available".
+!CHANGELOG.md
 src/**
 webview-ui/**
 node_modules/**

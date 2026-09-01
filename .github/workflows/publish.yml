@@ -42,7 +42,7 @@ jobs:
       # with `gh secret set OVSX_PAT` and this starts running on the next tag.
       - name: Package the VSIX for Open VSX
         if: env.OVSX_PAT != ''
-        run: npx vsce package --no-dependencies
+        run: node scripts/sync-changelog.mjs && npx vsce package --no-dependencies
 
       - name: Publish to Open VSX
         if: env.OVSX_PAT != ''
