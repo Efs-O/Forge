@@ -49,6 +49,36 @@ export function renderPlan(items: readonly PlanItem[]): string {
   return `**Task plan (recorded by Forge):**\n${lines.join('\n')}`;
 }
 
+/**
+ * How to treat a plan, delivered WITH the plan.
+ *
+ * These rules lived in the workspace's FORGE.md, which means they sat in the
+ * system prompt of every request — 378 tokens on every conversation, including
+ * the majority that never record a plan at all. They are only ever actionable
+ * when a plan exists, so they ride along with it.
+ *
+ * The tail, specifically, and never a conditional block at the head: making
+ * system-prompt content appear when `update_plan` first fires would invalidate
+ * the whole KV cache mid-conversation, which is the failure
+ * docs/plans/PROMPT_PREFIX_STABILITY_PLAN.md measured at 4971 re-evaluated
+ * tokens for a single changed line. `renderUserTerminalCommands` in
+ * turnContext.ts already pairs its guidance with its data the same way.
+ *
+ * Deterministic and constant, so it costs no cache churn between rounds.
+ */
+export const PLAN_GUIDANCE =
+  'The plan above is the authoritative specification for this work. ' +
+  'Conversation summaries, tool-limit continuations, and test failures are ' +
+  'navigation aids only — they do not replace its invariants or acceptance ' +
+  'criteria. Re-read it after any compaction or forced continuation and before ' +
+  'declaring the work done. Do not let the shape of existing code override an ' +
+  'explicit plan constraint: when the plan calls for a different lifetime, ' +
+  'ordering, error boundary, or ownership model, restructure the code and test ' +
+  'that distinction directly. A green test suite is necessary but is not proof ' +
+  'of conformance — check every requirement and edge case against a test or a ' +
+  'named manual step, including the failure paths that are easy to omit when ' +
+  'following the happy path.';
+
 export function makeUpdatePlanTool(): RegisteredTool {
   return {
     definition: {

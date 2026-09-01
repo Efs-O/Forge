@@ -17,7 +17,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { injectTurnContext } from '../../src/sidebar/turnContext';
-import { renderPlan } from '../../src/tools/planTools';
+import { PLAN_GUIDANCE, renderPlan } from '../../src/tools/planTools';
 import { applyCompactionWindow } from '../../src/sidebar/compactionWindow';
 import type { ChatMessage } from '../../src/llm/types';
 import type { ConversationPlan, PlanItem } from '../../src/sidebar/sessionTypes';
@@ -267,5 +267,26 @@ describe('the stored transcript', () => {
     expect(tail).toContain('Active file: /repo/a.ts');
     expect(tail).toContain(renderPlan(ITEMS));
     expect(tail).toContain('second request');
+  });
+
+  // The guidance moved out of FORGE.md (and so out of the system prompt) to
+  // ride with the plan. Two things must hold: it arrives WITH a plan, and it
+  // costs nothing at all when there is none.
+  it('delivers the plan guidance with the plan, and not without one', () => {
+    const withPlan = String(
+      injectTurnContext(conversation(), { activeFile: '/repo/a.ts', plan: PLAN }).at(-1)?.content,
+    );
+    expect(withPlan).toContain(PLAN_GUIDANCE);
+
+    const noPlan = JSON.stringify(injectTurnContext(conversation(), { activeFile: '/repo/a.ts' }));
+    expect(noPlan).not.toContain('authoritative specification');
+  });
+
+  // It rides in the tail block, never the system message: content that appears
+  // at the head when update_plan first fires invalidates the whole KV cache.
+  it('keeps the guidance out of the system prompt', () => {
+    const messages = injectTurnContext(conversation(), { plan: PLAN });
+    const system = messages.filter((message) => message.role === 'system');
+    expect(JSON.stringify(system)).not.toContain('authoritative specification');
   });
 });

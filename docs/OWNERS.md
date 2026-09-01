@@ -275,7 +275,10 @@ overlaps with an existing owner, extend the owner instead.
 | Tool-result size capping                   | `src/tools/resultCap.ts`              |
 | Bundled ripgrep executable resolution      | `src/tools/RipgrepResolver.ts`        |
 | Local agent delegation tool                | `src/tools/localAgentTool.ts`         |
+| `list_delegation_targets` + target ranking | `src/tools/localAgentTool.ts`         |
+| Delegation target VRAM classification      | `src/delegation/eligibility.ts`       |
 | Per-turn tool allowlist + call-budget      | `src/tools/ToolBudget.ts`             |
+| Plan rendering + `PLAN_GUIDANCE`           | `src/tools/planTools.ts`              |
 | `view_image` tool                          | `src/tools/imageTool.ts`              |
 | `view_video` tool definition + handler     | `src/tools/videoTool.ts`              |
 | ffmpeg probe + frame extraction            | `src/tools/videoExtract.ts`           |

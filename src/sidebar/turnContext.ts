@@ -25,7 +25,7 @@
 
 import type { ChatMessage } from '../llm/types';
 import type { ConversationPlan } from './sessionTypes';
-import { PLAN_RENDER_MAX_CHARS, renderPlan } from '../tools/planTools';
+import { PLAN_GUIDANCE, PLAN_RENDER_MAX_CHARS, renderPlan } from '../tools/planTools';
 import type { PastedTerminalCommand } from './compactionLedger';
 import type {
   TerminalCommandObservation,
@@ -89,7 +89,12 @@ function renderTurnContext(state: TurnContextState): string | undefined {
     parts.push(`Active VS Code terminal working directory: ${state.activeTerminalCwd}`);
   }
   if (state.plan && state.plan.items.length > 0) {
-    parts.push(renderPlan(state.plan.items).slice(0, PLAN_RENDER_MAX_CHARS));
+    // Guidance appended AFTER the slice, not folded into it: the cap belongs to
+    // the plan's own items, and a long plan must not be what truncates the
+    // rules for reading it.
+    parts.push(
+      `${renderPlan(state.plan.items).slice(0, PLAN_RENDER_MAX_CHARS)}\n\n${PLAN_GUIDANCE}`,
+    );
   }
   if (parts.length === 0) return undefined;
   return `${OPEN}\n${parts.join('\n\n')}\n${CLOSE}`;

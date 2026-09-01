@@ -1,5 +1,94 @@
 # Forge — Recent Changes
 
+## Unreleased
+
+- **The system prompt is 585 tokens lighter, with nothing lost.** It was 3156
+  tokens on every request — `execute.njk` plus this workspace's `FORGE.md` —
+  and four blocks in it were paying rent they did not earn.
+
+  *Plan governance moved to the tail.* 378 tokens of rules for how to follow a
+  recorded plan sat in the system prompt of every conversation, including the
+  majority that never record one. They are only actionable when a plan exists,
+  so they now ship with it: `PLAN_GUIDANCE` in `src/tools/planTools.ts`,
+  appended to the plan in the turn-context block. The tail specifically, never
+  a conditional at the head — content that appears when `update_plan` first
+  fires would invalidate the whole KV cache mid-conversation, the failure
+  `PROMPT_PREFIX_STABILITY_PLAN.md` measured at 4971 re-evaluated tokens for a
+  single changed line. It is appended after `PLAN_RENDER_MAX_CHARS` is applied,
+  so a long plan truncates its own items rather than the rules for reading
+  them. The one workspace-specific rule (plan docs must end with an acceptance
+  checklist) stays in `FORGE.md`, where it belongs.
+
+  *The `state.vscdb` session-title recipe moved to
+  `docs/WORKSPACE_FORENSICS.md`.* 313 tokens — 14% of `FORGE.md`, embedded
+  Python one-liner included — for a lookup needed perhaps once a month. A
+  four-line pointer replaces it.
+
+  *The model-status block is gone.* It was captioned "verify before relying on
+  it": a rule the prompt told the model not to trust, charged in full on every
+  turn, and it documented `zai-glm-4.7` as archived — a model not in the
+  config.
+
+  *The delegation block was rewritten*, since it still said to pick the
+  smallest GGUF to minimise OOM risk. Forge now asks the user before any target
+  that loads local weights, and the ranked list prefers CLI agents outright.
+
+  Not touched, deliberately: the scripts and test-layout facts look equally
+  derivable from a tool call, but a round trip on a local model costs far more
+  than their 157 tokens. And `execute.njk` appears to restate roughly 150
+  tokens of tool descriptions — that needs an A/B, not a guess.
+
+- **`ask_local_agent` no longer spends 285 tokens a turn listing every model.**
+  The target list was spliced into its `model` argument description on every
+  request — 1027 characters against a real config, ~40% of it ten
+  near-identical GGUF quant names, every entry weighted the same as
+  `claude-code`. The schema now names only the configured CLI agents and says
+  to call `list_delegation_targets`, a new no-arg tool that returns the full
+  live list ranked by what each target costs: CLI agents first (their own
+  tools, their own process, no VRAM), then cloud, then local with the VRAM
+  warning. The same `load_tool_group` trade — one round when the agent needs
+  the list, nothing on the turns it does not. Net ~151 tokens back per request.
+  The list stays generated from config, so a model deleted from `config.yaml`
+  still disappears without a reload.
+
+- **Delegating to a model that loads local weights now asks the user first.**
+  `DelegationGate` counts free SLOTS (`max_simultaneous_models`), not
+  gigabytes. Set to 4 on a single 16 GB card, delegating from a resident 27B to
+  another large GGUF passes every check Forge makes and then thrashes WDDM
+  instead of failing — silent degradation, the worst shape a failure can take.
+  `ask_local_agent` now returns approval metadata for any target that loads
+  local weights, routing it through the existing per-action confirmation gate.
+  Cloud and CLI targets take no slot and are not gated, and an Ollama entry
+  tagged `:cloud` is correctly classed as cloud (it reaches the daemon like a
+  local one but runs remotely) — `classifyModelRoute` is the owner of that
+  distinction, and `eligibility.ts` now carries `localWeights` per target. A
+  name that does not match a known target — a fuzzy alias or `model@profile`
+  the handler still resolves — falls to the safe side and asks.
+
+- **`wait` names its coding uses.** Its description covered interval pinging
+  and rate-limit backoff but not the two cases where it is the only option: a
+  dev server or file watcher launched in the background needing a moment before
+  it will answer, and a file just written needing one before an index or
+  watcher reflects it. Waiting once beats retrying a check that cannot succeed
+  yet. `monitor_execution` is still the answer for waiting on a specific
+  command.
+
+- **A remote command is no longer held across a TOTP challenge, and `/reload`
+  no longer runs twice.** Two separate mistakes stacked into one bug. First,
+  the challenge branch held *any* text, so `/reload` typed at a locked session
+  was armed and fired the moment the 6-digit code arrived — a command running
+  at a moment its sender did not choose. Second, `/reload` awaited
+  `workbench.action.reloadWindow`, which tears down the extension host: the
+  code after it never ran, so `handleRemoteCommand` never marked the durable
+  control receipt completed and the Telegram transport never committed its
+  update cursor. The command was redelivered on the next start, un-receipted,
+  and ran again. Now only a prompt is held (the reason to hold one is that it
+  is expensive to retype, which a command is not), and `/reload` returns first
+  and reloads a second later, so both the receipt and the cursor land and a
+  redelivery is recognised as already handled. `/steer` still holds — it
+  carries a prompt.
+
+
 ## 0.14.3
 
 First changelog entry for the 0.14 line: 0.14.0 through 0.14.2 shipped as

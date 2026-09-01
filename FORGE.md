@@ -19,29 +19,13 @@ plus authenticated Claude Code and Codex CLI agents.
   session persistence. Never claim a delegate ran unless `ask_local_agent`
   returned its result; respect all required confirmations.
 
-## Planned implementation and resumed work
+## Plan docs
 
-For work governed by a plan, the plan is the authoritative specification.
-Conversation summaries, tool-limit continuations, and test failures are
-navigation aids only; they do not replace the plan's invariants or acceptance
-criteria.
-
-- At the start of implementation, after any compaction or forced continuation
-  (including a tool-call limit), and immediately before handoff, re-read the
-  active plan's design, edge-case, and acceptance sections. Do this before
-  making the next code change or deciding the work is complete.
-- Turn every explicit requirement and edge case into a traceable check: a
-  focused automated test where practical, otherwise a named manual-validation
-  step. Keep the mapping visible in the implementation notes or final handoff.
-- Do not let an existing local code shape override an explicit plan constraint.
-  When the plan calls for a different lifetime, ordering, error boundary, or
-  ownership model, restructure the code and test that distinction directly.
-- A green test suite is necessary but not proof of plan conformance. Before
-  handoff, compare the implementation and tests against every acceptance item,
-  including failure paths that are easy to omit when following the happy path.
-- Every plan doc must end with an "Acceptance criteria" section: a checklist of
-  invariants and edge cases, each mapped to a test or a named validation step.
-  Plans without one are incomplete; add the section before implementation starts.
+Every plan doc in `docs/plans/` must end with an "Acceptance criteria" section:
+a checklist of invariants and edge cases, each mapped to a test or a named
+validation step. Plans without one are incomplete; add the section before
+implementation starts. (How to *follow* a recorded plan is delivered with the
+plan itself, by `update_plan` — it is not repeated here.)
 
 ## Workspace facts (discovered the hard way — read before re-doing this work)
 
@@ -77,21 +61,15 @@ criteria.
   Distinct from the quoting ENOENT above: quoting = missing executable;
   truncation = context full.
 
-- **Pinging models with `ask_local_agent`:** each local (GGUF/Ollama) ping
-  spawns a *second* llama-server (delegation backend is separate from the one
-  serving the primary agent). Use the smallest GGUF
-  (`gemma4-e4b-it-ud-q4kxl-vision`) to minimise OOM risk, and **kill the
-  spawned server after** (see process inspection above). API models
-  (OpenRouter/xAI/Cerebras) never touch `hotSwap` — they're routed straight to
-  the provider client.
+- **Delegating with `ask_local_agent`:** prefer the CLI agents — they read the
+  repo with their own tools and use no VRAM. A local (GGUF/Ollama) target
+  spawns a *second* llama-server alongside the one serving you, so Forge asks
+  the user before one runs; kill the spawned server afterwards (see process
+  inspection above). Call `list_delegation_targets` for the current list.
 
 - **The loaded extension host is the pre-reload build.** After building a
   VSIX (`npm run package`), the running session still executes the OLD code
   until the user installs + reloads. Re-ping only after a reload to test a fix.
-
-- **Model status (verify before relying on it):** the five `ollama-local`
-  `:cloud` models are paywalled (HTTP 402); `grok-4.20-multi-agent-0309`
-  400s on token refresh; `zai-glm-4.7` is archived (404, not in config).
 
 - **Scripts (from `package.json`):** `npm test` (vitest), `npm run build`
   (dev), `npm run build:release`, `npm run type-check`, `npm run lint`,
@@ -104,21 +82,10 @@ criteria.
   processes/git, still hermetic), `test/live` (real model calls — skipped by
   default), `test/webview` (DOM). `npm test` runs the non-live set.
 
-- **Current session title lives in VS Code's `state.vscdb`, not in the repo.**
-  `.forge/sessions/*.jsonl` does not carry it — but those logs are the project's
-  forensic record (every tool call, argument and result; dedupe rows before
-  counting). The real live title is in
-  `%APPDATA%\Code\User\workspaceStorage\<hash>\state.vscdb`, SQLite table
-  `ItemTable`, key **`Efsoo.forge-llm`** (a JSON blob). Inside it,
-  `forge.conversations.v1.activeConversationId` → match that id in
-  `forge.conversations.v1.conversations[].title`.
-  - Find the `<hash>` folder by reading each
-    `workspaceStorage\<hash>\workspace.json` and matching `"folder"` to the
-    workspace URL. For `n:\vs code apps\Forge` it is currently
-    `e9a4155d14fdbca95fcae964471e7762` (re-derive if it ever differs).
-  - No `better-sqlite3`/`sqlite3` CLI here; use Python's stdlib:
-    `python -c "import sqlite3,json,sys;sys.stdout.reconfigure(encoding='utf-8');d=json.loads(sqlite3.connect(r'<ws>\state.vscdb').execute(\"SELECT value FROM ItemTable WHERE key='Efsoo.forge-llm'\").fetchone()[0]);c=d['forge.conversations.v1'];a=c['activeConversationId'];print([x['title'] for x in c['conversations'] if x['id']==a])"`
-    (force UTF-8 or emoji in titles crash the cp1253 console).
+- **Session titles, and other rare lookups, are in `docs/WORKSPACE_FORENSICS.md`.**
+  The current conversation's title is NOT in `.forge/sessions/*.jsonl` — those
+  logs are still the forensic record of every tool call (dedupe rows before
+  counting). Read that doc when you actually need one of these.
 
 - **Attachments are persisted; pasted chat text is NOT.** Remote attachments
   (phone → Telegram/WhatsApp) are written to
