@@ -130,6 +130,9 @@ overlaps with an existing owner, extend the owner instead.
 | RFC 6238 generation/verification             | `src/remote/RemoteTotp.ts`             |
 | Durable requests, bindings, cursors, outbox  | `src/remote/RemoteRequestStore.ts`     |
 | Remote owner command behavior                | `src/remote/RemoteCommandHandler.ts`   |
+| Paged /list, /models, /workspace selections  | `src/remote/RemoteSelectionPager.ts`   |
+| Selection list identity, token, expiry       | `src/remote/RemoteSelectionState.ts`   |
+| Telegram selection keyboard + callback codec | `src/remote/TelegramSelectionPagination.ts` |
 | Forge approval presentation + correlation    | `src/remote/RemoteApprovalBridge.ts`   |
 | Telegram Bot API transport                   | `src/remote/TelegramChannel.ts`        |
 | WhatsApp linked-device transport             | `src/remote/whatsapp/BaileysWhatsAppChannel.ts` |

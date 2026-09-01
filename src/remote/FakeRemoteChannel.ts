@@ -1,4 +1,9 @@
-import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
+import type {
+  RemoteChannel,
+  RemoteInboundDisposition,
+  RemoteInboundEvent,
+  RemoteSelectionControls,
+} from './types';
 
 export class FakeRemoteChannel implements RemoteChannel {
   readonly name = 'fake' as const;
@@ -6,6 +11,38 @@ export class FakeRemoteChannel implements RemoteChannel {
   readonly retracted: Array<{ chatId: string; correlationId: string }> = [];
   readonly progress: Array<{ chatId: string; text: string }> = [];
   readonly edits: Array<{ chatId: string; messageId: string; text: string }> = [];
+  readonly selectionPageSends: Array<{
+    chatId: string;
+    text: string;
+    controls: RemoteSelectionControls;
+  }> = [];
+  readonly selectionEdits: Array<{
+    chatId: string;
+    messageId: string;
+    text: string;
+    controls: RemoteSelectionControls;
+  }> = [];
+  readonly selectionCloses: Array<{ chatId: string; messageId: string }> = [];
+  readonly selectionPages = {
+    send: async (
+      chatId: string,
+      text: string,
+      controls: RemoteSelectionControls,
+    ): Promise<void> => {
+      this.selectionPageSends.push({ chatId, text, controls });
+    },
+    edit: async (
+      chatId: string,
+      messageId: string,
+      text: string,
+      controls: RemoteSelectionControls,
+    ): Promise<void> => {
+      this.selectionEdits.push({ chatId, messageId, text, controls });
+    },
+    close: async (chatId: string, messageId: string): Promise<void> => {
+      this.selectionCloses.push({ chatId, messageId });
+    },
+  };
   private handler: ((event: RemoteInboundEvent) => Promise<RemoteInboundDisposition>) | undefined;
 
   onEvent(handler: (event: RemoteInboundEvent) => Promise<RemoteInboundDisposition>): {

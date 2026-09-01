@@ -27,10 +27,10 @@ export async function handleRemoteSessionCommand(
       event.chatId,
       `Forge commands:
 
-Session: /status · /context · /stop · /new · /list · /resume <n-or-id> · /notify on|off
-Workspace: /workspace list · /new <alias>
+Session: /status · /context · /stop · /new · /list [page] · /resume <n-or-id> · /notify on|off
+Workspace: /workspace list [page] · /new <n-or-alias>
 Queue: /queue · /drop <n|all> · /steer <prompt>
-Models: /models · /model <n-or-name> · /unload · /restart
+Models: /models [page] · /model <n-or-name> · /unload · /restart
 Window: /compact · /lock · /reload · /timeout [1-1440|off] · /clanker on|off
 
 Notes:
@@ -40,7 +40,7 @@ Notes:
 • /reload fully reloads the VS Code window: it picks up a newly installed build, and drops a held prompt, the queue, and this session
 • /unload releases every loaded model and frees its memory, exactly like Unload Model in the sidebar; unlike /reload it refuses while a turn is running
 • /notify off silences agent notify_user messages for this chat until the window reloads
-• /new <alias> switches this chat to another configured workspace; /workspace list names them`,
+• /new <n-or-alias> switches this chat to another configured workspace; /workspace list numbers them and marks the current one`,
       { signal: context.signal },
     );
     return { kind: 'handled' };

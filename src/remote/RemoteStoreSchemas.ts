@@ -63,7 +63,12 @@ const ControlReceiptSchema = z.object({
 export const RemoteSelectionSchema = z.object({
   channel: ChannelSchema,
   chatId: z.string(),
-  kind: z.enum(['models', 'conversations']),
+  kind: z.enum(['models', 'conversations', 'workspaces']),
+  /** Opaque pagination capability. Optional for state written before 0.15.7. */
+  token: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{12}$/)
+    .optional(),
   values: z.array(z.string().min(1).max(512)).min(1).max(100),
   issuedAt: z.number(),
   expiresAt: z.number(),

@@ -121,26 +121,26 @@ handler, or conversation binding.
 After authenticating, the paired owner can use normal remote control. Useful
 commands include:
 
-| Command | Behavior |
-| --- | --- |
-| `/status` | Shows bounded runtime, queue, notification, context, and approval state. |
-| `/new` | Binds the chat to a new non-active Forge conversation. |
-| `/list` | Lists conversations and issues short-lived numeric selections. |
-| `/resume <number-or-id>` | Binds the chat to an existing conversation. |
-| `/models` | Lists configured models and issues numeric selections. |
-| `/model <number-or-name>` | Pins a model while the bound conversation is idle. |
-| `/queue` | Lists durable prompts waiting for the bound conversation. |
-| `/compact` | Compacts the bound conversation. |
-| `/stop` | Cancels the active request only; queued requests remain queued. |
-| `/unload` | Releases loaded backends while Forge is globally idle. |
-| `/restart` | Restarts the bound conversation's explicitly pinned model while idle. |
-| `/workspace list` | Lists configured remote workspace aliases. |
-| `/new <alias>` | Hands the chat off to the configured workspace alias. |
-| `/clanker on|off` | Changes the normal non-dangerous tool confirmation gate for this window. |
-| `/lock` | Immediately locks the remote session. |
-| `/timeout` | Shows the inactivity timeout. |
-| `/timeout 30` | Sets a 30-minute timeout. Valid range is 1–1440. |
-| `/timeout off` | Disables only inactivity expiry. Restart and `/lock` still require TOTP. |
+| Command                   | Behavior                                                                                                        |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `/status`                 | Shows bounded runtime, queue, notification, context, and approval state.                                        |
+| `/new`                    | Binds the chat to a new non-active Forge conversation.                                                          |
+| `/list [page]`            | Lists conversations ten at a time with Previous/Next/Close buttons and short-lived absolute numeric selections. |
+| `/resume <number-or-id>`  | Binds the chat to an existing conversation.                                                                     |
+| `/models [page]`          | Lists configured models ten at a time with Previous/Next/Close buttons and absolute numeric selections.         |
+| `/model <number-or-name>` | Pins a model while the bound conversation is idle.                                                              |
+| `/queue`                  | Lists durable prompts waiting for the bound conversation.                                                       |
+| `/compact`                | Compacts the bound conversation.                                                                                |
+| `/stop`                   | Cancels the active request only; queued requests remain queued.                                                 |
+| `/unload`                 | Releases loaded backends while Forge is globally idle.                                                          |
+| `/restart`                | Restarts the bound conversation's explicitly pinned model while idle.                                           |
+| `/workspace list [page]`  | Lists workspace aliases ten at a time, numbered, marking the one this chat is in.                                |
+| `/new <number-or-alias>`  | Hands the chat off to a configured workspace, by list number or alias.                                           |
+| `/clanker on\|off`         | Changes the normal non-dangerous tool confirmation gate for this window.                                         |
+| `/lock`                   | Immediately locks the remote session.                                                                           |
+| `/timeout`                | Shows the inactivity timeout.                                                                                   |
+| `/timeout 30`             | Sets a 30-minute timeout. Valid range is 1–1440.                                                                |
+| `/timeout off`            | Disables only inactivity expiry. Restart and `/lock` still require TOTP.                                        |
 
 `/timeout` is accepted only after TOTP authentication. It updates the same
 configuration value used by the local extension and does not restart the

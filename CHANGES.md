@@ -1,5 +1,50 @@
 # Forge — Recent Changes
 
+## 0.15.7
+
+- **`/list` sent every conversation in one Telegram message.** A workspace with
+  forty conversations produced a wall of text that had to be scrolled past on a
+  phone, and left it in the chat history forever. `/list`, `/models` and
+  `/workspace list` now send ten entries at a time with native inline-keyboard
+  `Previous` / `Next` / `Close` buttons: navigation edits the original message
+  rather than posting another one, and `Close` deletes it. Numbering stays
+  absolute across pages, so `/resume 17` and `/model 17` mean the seventeenth
+  item whichever page is on screen. `/list 2` and `/models 2` are the text
+  fallback for transports without buttons.
+
+  Every callback runs the full inbound gauntlet before it can move a page —
+  private chat, paired owner, TOTP, rate limit — and carries an opaque
+  twelve-character token instead of a conversation ID, so a button reveals
+  nothing and cannot drive another chat, another list kind, or an expired
+  selection. Issuing a list invalidates the previous one of its kind. Stored
+  remote state migrates implicitly: the token is optional, so state written by
+  an older build still parses.
+
+- **Workspace pages were encoded as model pages.** The Telegram callback codec
+  mapped selection kinds with `kind === 'conversations' ? 'c' : 'm'`, which
+  gave `/workspace list` a keyboard stamped `m`. Pressing `Next` on it looked
+  up a *models* selection under a workspace token, missed, and reported the
+  list as expired — the security check working correctly against a bug on our
+  own side. Encoding and parsing now share one table covering all three kinds.
+
+- **`/workspace list` never marked where you were.** `RemoteRuntime` computed
+  which configured alias matches this window's root and `RemoteCommandHandler`
+  read it, but the controller passed it only to the selection-callback path, so
+  on the command path it was always undefined: the `· current` marker never
+  appeared, and the guard that stops `/new <alias>` from reloading the window to
+  arrive where the chat already is could never fire.
+
+- **A successful `move_file` on a directory reported `EISDIR`.** The move
+  itself worked — the failure came afterwards, from the per-turn diff trying to
+  read the moved directory as text, and the dispatcher turned that render error
+  into the tool's result and charged the failure tracker for it. The agent then
+  spent three rounds trying to recover a move that had already happened, and
+  reached for `powershell -Command` on the way. Diff rendering now runs in its
+  own try/catch and skips directories, `move_file`'s schema says it takes a
+  file *or a directory*, and the PowerShell refusal names the write tools
+  (`write_file`, `edit_file`, `move_file`, `create_directory`, `delete_file`)
+  instead of only the read-only ones.
+
 ## 0.15.6
 
 - **A cold backend start looked like a hung turn from the phone.** The sidebar

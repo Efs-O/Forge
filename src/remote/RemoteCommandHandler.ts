@@ -1,7 +1,11 @@
 import type { CompactionOutcome } from '../sidebar/CompactionService';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
-import { formatRemoteDateTime } from './RemoteDateTime';
 import { describeBudget, handleRemoteSessionCommand } from './RemoteSessionCommands';
+import {
+  sendConversationSelection,
+  sendModelSelection,
+  sendWorkspaceSelection,
+} from './RemoteSelectionPager';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
 
@@ -14,6 +18,8 @@ export interface RemoteCommandContext {
   inactivityTimeoutMinutes: number;
   modelNames: readonly string[];
   workspaceAliases: Readonly<Record<string, string>>;
+  /** The alias whose configured path is this window's root, when one matches. */
+  currentWorkspaceAlias?: string | undefined;
   /** Per-chat notify_user mute, backed by RemoteController's in-memory set. */
   notifyMute?: { get: (chatId: string) => boolean; set: (chatId: string, on: boolean) => void };
   switchWorkspace?: ((alias: string, channel: string, chatId: string) => Promise<void>) | undefined;
@@ -133,32 +139,38 @@ async function executeRemoteCommand(
     );
     return { kind: 'handled' };
   }
-  if (command === '/workspace' && argument === 'list') {
-    const entries = Object.entries(context.workspaceAliases);
-    await context.channel.send(
-      event.chatId,
-      entries.length === 0
-        ? 'Forge: no remote workspace aliases are configured.'
-        : entries.map(([alias, display]) => `${alias} — ${display}`).join('\n'),
-      { signal: context.signal },
-    );
-    return { kind: 'handled' };
+  if (command === '/workspace') {
+    const [subcommand, page] = argument ? argument.split(/\s+/) : [];
+    if (subcommand !== 'list') return { kind: 'rejected', reason: 'usage: /workspace list [page]' };
+    return sendWorkspaceSelection(event, context, page);
   }
   if (command === '/new' && argument) {
-    if (!context.workspaceAliases[argument] || !context.switchWorkspace) {
+    // A number means the last `/workspace list`, matching /model <n> and
+    // /resume <n>; the alias keeps working so a remembered name does not
+    // depend on having listed first.
+    const alias = resolveSelection(context, event, 'workspaces', argument) ?? argument;
+    if (!context.workspaceAliases[alias] || !context.switchWorkspace) {
       return {
         kind: 'rejected',
         reason: `workspace “${argument}” was not found. Use /workspace list.`,
       };
     }
+    // Switching costs a window reload and a fresh conversation, so doing it to
+    // arrive where the chat already is would silently drop the session.
+    if (alias === context.currentWorkspaceAlias) {
+      return {
+        kind: 'rejected',
+        reason: `this chat is already in ${context.workspaceAliases[alias]}; /new alone starts a chat here`,
+      };
+    }
     await context.channel.send(
       event.chatId,
-      `Forge: switching to ${context.workspaceAliases[argument]}…`,
+      `Forge: switching to ${context.workspaceAliases[alias]}…`,
       {
         signal: context.signal,
       },
     );
-    await context.switchWorkspace(argument, event.channel, event.chatId);
+    await context.switchWorkspace(alias, event.channel, event.chatId);
     return { kind: 'handled' };
   }
   if (command === '/new') {
@@ -175,36 +187,7 @@ async function executeRemoteCommand(
     return { kind: 'handled' };
   }
   if (command === '/list') {
-    const conversations = context.host
-      .status()
-      .conversations.slice()
-      .sort((left, right) => right.updatedAt - left.updatedAt);
-    if (conversations.length === 0) {
-      await context.channel.send(event.chatId, 'Forge: no conversations are available.', {
-        signal: context.signal,
-      });
-      return { kind: 'handled' };
-    }
-    await context.store.issueSelection(
-      event.channel,
-      event.chatId,
-      'conversations',
-      conversations.map((conversation) => conversation.id),
-      10 * 60_000,
-    );
-    await context.channel.send(
-      event.chatId,
-      conversations
-        .map(
-          (conversation, index) =>
-            `${index + 1}. ${conversation.title} · ${shortId(conversation.id)} · ${
-              conversation.activeModel ?? 'default model'
-            } · ${formatRemoteDateTime(conversation.updatedAt)}${conversation.archived ? ' · archived' : ''}`,
-        )
-        .join('\n'),
-      { signal: context.signal },
-    );
-    return { kind: 'handled' };
+    return sendConversationSelection(event, context, argument);
   }
   if (command === '/resume' && argument) {
     const conversationId = resolveSelection(context, event, 'conversations', argument) ?? argument;
@@ -225,22 +208,7 @@ async function executeRemoteCommand(
     return { kind: 'handled' };
   }
   if (command === '/models') {
-    if (context.modelNames.length === 0) {
-      return { kind: 'rejected', reason: 'no configured models are available' };
-    }
-    await context.store.issueSelection(
-      event.channel,
-      event.chatId,
-      'models',
-      [...context.modelNames],
-      10 * 60_000,
-    );
-    await context.channel.send(
-      event.chatId,
-      context.modelNames.map((name, index) => `${index + 1}. ${name}`).join('\n'),
-      { signal: context.signal },
-    );
-    return { kind: 'handled' };
+    return sendModelSelection(event, context, argument);
   }
   if (command === '/model' && argument) {
     const binding = context.store.binding(event.channel, event.chatId);
@@ -323,7 +291,7 @@ function globalBusyReason(context: RemoteCommandContext): string | undefined {
 function resolveSelection(
   context: RemoteCommandContext,
   event: Extract<RemoteInboundEvent, { kind: 'text' }>,
-  kind: 'models' | 'conversations',
+  kind: 'models' | 'conversations' | 'workspaces',
   argument: string,
 ): string | undefined {
   if (!/^\d+$/.test(argument)) return undefined;

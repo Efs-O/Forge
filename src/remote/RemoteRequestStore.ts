@@ -18,6 +18,12 @@ import {
   type RemoteStoreState,
   type WorkspaceHandoff,
 } from './RemoteStoreSchemas';
+import {
+  findSelection,
+  newSelectionToken,
+  removeSelection,
+  replaceSelection,
+} from './RemoteSelectionState';
 
 function compareQueuedRequests(left: RemoteRequestRecord, right: RemoteRequestRecord): number {
   const priority = Number(right.priority === 'steer') - Number(left.priority === 'steer');
@@ -169,33 +175,46 @@ export class RemoteRequestStore {
     kind: RemoteSelection['kind'],
     values: string[],
     ttlMs: number,
-  ): Promise<void> {
+  ): Promise<string> {
     const issuedAt = Date.now();
+    const token = newSelectionToken();
     await this.mutate((draft) => {
-      draft.selections = draft.selections.filter(
-        (item) => item.channel !== channel || item.chatId !== chatId || item.kind !== kind,
-      );
-      draft.selections.push({
+      draft.selections = replaceSelection(draft.selections, {
         channel,
         chatId,
         kind,
+        token,
         values,
         issuedAt,
         expiresAt: issuedAt + ttlMs,
       });
     });
+    return token;
   }
 
   selection(
     channel: RemoteBinding['channel'],
     chatId: string,
     kind: RemoteSelection['kind'],
+    token?: string,
   ): RemoteSelection | undefined {
-    const item = this.state.selections.find(
-      (candidate) =>
-        candidate.channel === channel && candidate.chatId === chatId && candidate.kind === kind,
-    );
-    return item && item.expiresAt > Date.now() ? structuredClone(item) : undefined;
+    const item = findSelection(this.state.selections, { channel, chatId, kind }, token, Date.now());
+    return item && structuredClone(item);
+  }
+
+  async clearSelection(
+    channel: RemoteBinding['channel'],
+    chatId: string,
+    kind: RemoteSelection['kind'],
+    token: string,
+  ): Promise<boolean> {
+    let removed = false;
+    await this.mutate((draft) => {
+      const result = removeSelection(draft.selections, { channel, chatId, kind }, token);
+      draft.selections = result.selections;
+      removed = result.removed;
+    });
+    return removed;
   }
 
   async beginWorkspaceHandoff(

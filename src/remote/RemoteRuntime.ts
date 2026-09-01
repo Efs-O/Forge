@@ -353,6 +353,16 @@ export class RemoteRuntime {
           value.display_name,
         ]),
       ),
+      // Hash each configured path exactly as extension.ts derives workspaceId,
+      // so the list can mark which entry this chat is actually sitting in.
+      ...(() => {
+        const current = Object.entries(remote.workspace_aliases).find(
+          ([, value]) =>
+            createHash('sha256').update(path.resolve(value.path)).digest('hex') ===
+            this.options.workspaceId,
+        );
+        return current ? { currentWorkspaceAlias: current[0] } : {};
+      })(),
       switchWorkspace: (alias, channel, chatId) => this.handoff(config, alias, channel, chatId),
       inactivityTimeoutMinutes: remote.auth.inactivity_timeout_minutes,
       setInactivityTimeout: this.options.setInactivityTimeout,

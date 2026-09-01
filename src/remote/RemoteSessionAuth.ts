@@ -114,7 +114,7 @@ export class RemoteSessionAuth {
     if (session.lockedOutUntil && now < session.lockedOutUntil) return { kind: 'locked_out' };
 
     if (session.state === 'authenticated') {
-      return event.kind === 'action' || event.kind === 'text'
+      return event.kind === 'action' || event.kind === 'selection' || event.kind === 'text'
         ? {
             kind: 'authorized',
             ...(session.nonce ? { nonce: session.nonce } : {}),

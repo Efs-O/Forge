@@ -34,6 +34,14 @@ export const RemoteInboundEventSchema = z.discriminatedUnion('kind', [
     action: z.enum(['approve', 'deny']),
     correlationId: z.string().min(1).max(256),
   }),
+  InboundBaseSchema.extend({
+    kind: z.literal('selection'),
+    selectionKind: z.enum(['models', 'conversations', 'workspaces']),
+    selectionToken: z.string().regex(/^[A-Za-z0-9_-]{12}$/),
+    action: z.enum(['show', 'close']),
+    page: z.number().int().min(0).max(9).optional(),
+    messageId: z.string().min(1).max(256),
+  }),
 ]);
 
 export type RemoteInboundEvent = z.infer<typeof RemoteInboundEventSchema>;
@@ -106,6 +114,30 @@ export interface RemoteTransportHealth {
   detail: string;
 }
 
+export interface RemoteSelectionControls {
+  kind: 'models' | 'conversations' | 'workspaces';
+  token: string;
+  page: number;
+  pageCount: number;
+}
+
+export interface RemoteSelectionPages {
+  send(
+    chatId: string,
+    text: string,
+    controls: RemoteSelectionControls,
+    options?: { signal?: AbortSignal },
+  ): Promise<void>;
+  edit(
+    chatId: string,
+    messageId: string,
+    text: string,
+    controls: RemoteSelectionControls,
+    options?: { signal?: AbortSignal },
+  ): Promise<void>;
+  close(chatId: string, messageId: string, options?: { signal?: AbortSignal }): Promise<void>;
+}
+
 export interface RemoteChannel {
   readonly name: RemoteInboundEvent['channel'];
   onEvent(handler: (event: RemoteInboundEvent) => Promise<RemoteInboundDisposition>): {
@@ -129,6 +161,8 @@ export interface RemoteChannel {
     text: string,
     options?: { signal?: AbortSignal },
   ): Promise<void>;
+  /** Optional native pagination surface (Telegram inline keyboard). */
+  selectionPages?: RemoteSelectionPages;
   /** Fetches attachment bytes only after the controller has authenticated the sender. */
   downloadAttachment?(attachment: RemoteInboundAttachment): Promise<RemoteInboundAttachment>;
   /**

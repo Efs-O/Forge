@@ -19,6 +19,7 @@ import { RemoteAgentProgress } from './RemoteAgentProgress';
 import { admitRemotePrompt, isRemoteCommand, parseSteerCommand } from './RemotePromptAdmission';
 import { drainRemoteQueue } from './RemoteQueueDrain';
 import { RemotePendingPrompt } from './RemotePendingPrompt';
+import { handleRemoteSelectionAction } from './RemoteSelectionPager';
 
 export interface RemoteControllerOptions {
   workspaceId: string;
@@ -31,6 +32,8 @@ export interface RemoteControllerOptions {
   attachmentsEnabled: boolean;
   acceptPdfAttachments: boolean;
   workspaceAliases: Readonly<Record<string, string>>;
+  /** Alias whose configured path resolves to this window's root, if any. */
+  currentWorkspaceAlias?: string | undefined;
   switchWorkspace?: ((alias: string, channel: string, chatId: string) => Promise<void>) | undefined;
   inactivityTimeoutMinutes?: number;
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
@@ -288,6 +291,25 @@ export class RemoteController {
     if (!this.rateLimiter.allow(`${event.channel}:${event.senderId}:${event.chatId}`)) {
       return { kind: 'rejected', reason: 'remote rate limit exceeded' };
     }
+    if (event.kind === 'selection') {
+      const result = await handleRemoteSelectionAction(
+        event,
+        {
+          channel: this.channel,
+          store: this.store,
+          host: this.host,
+          signal: this.abort.signal,
+          modelNames: this.options.modelNames,
+          workspaceAliases: this.options.workspaceAliases,
+          ...(this.options.currentWorkspaceAlias
+            ? { currentWorkspaceAlias: this.options.currentWorkspaceAlias }
+            : {}),
+        },
+        remoteDedupKey(event.channel, event.chatId, event.providerMessageId),
+      );
+      if (result.kind !== 'rejected' && result.kind !== 'retry') this.auth.touch(event);
+      return result;
+    }
     if (event.kind === 'action') {
       if (!this.approvals.resolveAction(event, gate.nonce)) {
         return { kind: 'rejected', reason: 'approval is stale or not owned by this chat' };
@@ -323,6 +345,13 @@ export class RemoteController {
           inactivityTimeoutMinutes: this.options.inactivityTimeoutMinutes ?? 30,
           modelNames: this.options.modelNames,
           workspaceAliases: this.options.workspaceAliases,
+          // Without this, `/workspace list` never marks the current entry and
+          // the "already in this workspace" guard on `/new <alias>` can never
+          // fire — RemoteRuntime computes the alias and the handler reads it,
+          // but nothing joined the two.
+          ...(this.options.currentWorkspaceAlias
+            ? { currentWorkspaceAlias: this.options.currentWorkspaceAlias }
+            : {}),
           notifyMute: {
             get: (chatId: string) => this.isNotifyOn(chatId),
             set: (chatId: string, on: boolean) => this.setNotify(chatId, on),

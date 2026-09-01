@@ -4,6 +4,10 @@ import {
   TelegramChannel,
   TELEGRAM_BOT_COMMANDS,
 } from '../../src/remote/TelegramChannel';
+import {
+  parseTelegramSelectionCallback,
+  telegramSelectionKeyboard,
+} from '../../src/remote/TelegramSelectionPagination';
 
 function response(result: unknown): Response {
   return { ok: true, status: 200, json: async () => ({ ok: true, result }) } as Response;
@@ -202,7 +206,7 @@ describe('TelegramChannel', () => {
     expect(chunks.join('')).toBe(`${'x'.repeat(4095)}😀tail`);
   });
 
-  it('rejects approval callback data beyond Telegram\'s 64-byte limit before sending', async () => {
+  it("rejects approval callback data beyond Telegram's 64-byte limit before sending", async () => {
     const fetchMock = vi.fn(async () => response({ message_id: 1 }));
     const channel = new TelegramChannel({
       token: 'secret-token',
@@ -215,5 +219,145 @@ describe('TelegramChannel', () => {
       channel.send('chat', 'approval', { correlationId: 'x'.repeat(63) }),
     ).rejects.toThrow('approval identifier exceeds');
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('sends, edits, and deletes paginated selection messages', async () => {
+    const calls: Array<{ method: string; body: Record<string, unknown> }> = [];
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor: async () => undefined,
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        calls.push({
+          method: String(url).split('/').at(-1)!,
+          body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+        });
+        return response({ message_id: 42 });
+      }) as typeof fetch,
+    });
+    const controls = {
+      kind: 'conversations' as const,
+      token: 'abcdefghijkl',
+      page: 1,
+      pageCount: 3,
+    };
+
+    await channel.selectionPages.send('chat', 'page two', controls);
+    await channel.selectionPages.edit('chat', '42', 'page three', { ...controls, page: 2 });
+    await channel.selectionPages.close('chat', '42');
+
+    expect(calls.map((call) => call.method)).toEqual([
+      'sendMessage',
+      'editMessageText',
+      'deleteMessage',
+    ]);
+    expect(calls[0]!.body).toMatchObject({
+      chat_id: 'chat',
+      text: 'page two',
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '◀ Previous', callback_data: 's:abcdefghijkl:c:0' },
+            { text: 'Next ▶', callback_data: 's:abcdefghijkl:c:2' },
+          ],
+          [{ text: '✕ Close', callback_data: 's:abcdefghijkl:c:x' }],
+        ],
+      },
+    });
+    expect(calls[1]!.body).toMatchObject({ message_id: 42, text: 'page three' });
+    expect(calls[2]!.body).toEqual({ chat_id: 'chat', message_id: 42 });
+  });
+
+  it('encodes and strictly parses selection callbacks within Telegram limits', () => {
+    const keyboard = telegramSelectionKeyboard({
+      kind: 'models',
+      token: 'abcdefghijkl',
+      page: 0,
+      pageCount: 2,
+    });
+    const next = keyboard.inline_keyboard[0]![0]!.callback_data;
+    const close = keyboard.inline_keyboard[1]![0]!.callback_data;
+    expect(Buffer.byteLength(next, 'utf8')).toBeLessThanOrEqual(64);
+    expect(parseTelegramSelectionCallback(next)).toEqual({
+      kind: 'models',
+      token: 'abcdefghijkl',
+      action: 'show',
+      page: 1,
+    });
+    expect(parseTelegramSelectionCallback(close)).toEqual({
+      kind: 'models',
+      token: 'abcdefghijkl',
+      action: 'close',
+    });
+    expect(parseTelegramSelectionCallback('s:bad-token:m:1')).toBeUndefined();
+    expect(parseTelegramSelectionCallback('a:approval')).toBeUndefined();
+  });
+
+  it('round-trips every selection kind, so a workspace page is not stamped as models', () => {
+    for (const kind of ['conversations', 'models', 'workspaces'] as const) {
+      const keyboard = telegramSelectionKeyboard({
+        kind,
+        token: 'abcdefghijkl',
+        page: 1,
+        pageCount: 3,
+      });
+      for (const button of keyboard.inline_keyboard.flat()) {
+        expect(Buffer.byteLength(button.callback_data, 'utf8')).toBeLessThanOrEqual(64);
+        expect(parseTelegramSelectionCallback(button.callback_data)?.kind).toBe(kind);
+      }
+    }
+  });
+
+  it('converts a Telegram selection callback into a strict remote event', async () => {
+    const abort = new AbortController();
+    const setCursor = vi.fn(async () => undefined);
+    let delivered = false;
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor,
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        const method = String(url).split('/').at(-1);
+        if (method === 'setMyCommands' || method === 'answerCallbackQuery') return response(true);
+        if (method === 'getUpdates' && !delivered) {
+          delivered = true;
+          return response([
+            {
+              update_id: 77,
+              callback_query: {
+                id: 'callback-1',
+                data: 's:abcdefghijkl:c:1',
+                from: { id: 123 },
+                message: { message_id: 42, chat: { id: 99, type: 'private' } },
+              },
+            },
+          ]);
+        }
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+            once: true,
+          });
+        });
+      }) as typeof fetch,
+    });
+    channel.onEvent(async (event) => {
+      expect(event).toMatchObject({
+        channel: 'telegram',
+        kind: 'selection',
+        providerMessageId: 'callback-1',
+        senderId: '123',
+        chatId: '99',
+        selectionKind: 'conversations',
+        selectionToken: 'abcdefghijkl',
+        action: 'show',
+        page: 1,
+        messageId: '42',
+      });
+      abort.abort();
+      return { kind: 'handled' };
+    });
+
+    await channel.start(abort.signal);
+    await vi.waitFor(() => expect(setCursor).toHaveBeenCalledWith('telegram:update-offset', '78'));
   });
 });

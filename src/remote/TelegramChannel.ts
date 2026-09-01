@@ -1,5 +1,9 @@
 import { z } from 'zod';
 import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
+import {
+  createTelegramSelectionPages,
+  parseTelegramSelectionCallback,
+} from './TelegramSelectionPagination';
 
 const TelegramUpdateSchema = z.object({
   update_id: z.number().int(),
@@ -32,7 +36,10 @@ const TelegramUpdateSchema = z.object({
       data: z.string().optional(),
       from: z.object({ id: z.union([z.number(), z.string()]) }),
       message: z
-        .object({ chat: z.object({ id: z.union([z.number(), z.string()]), type: z.string() }) })
+        .object({
+          message_id: z.number().int(),
+          chat: z.object({ id: z.union([z.number(), z.string()]), type: z.string() }),
+        })
         .optional(),
     })
     .optional(),
@@ -90,6 +97,9 @@ export interface TelegramChannelOptions {
 /** Telegram Bot API long polling with disposition-before-cursor ordering. */
 export class TelegramChannel implements RemoteChannel {
   readonly name = 'telegram' as const;
+  readonly selectionPages = createTelegramSelectionPages((method, body, signal) =>
+    this.call(method, body, signal),
+  );
   private handler: ((event: RemoteInboundEvent) => Promise<RemoteInboundDisposition>) | undefined;
   private readonly fetchImpl: Fetch;
   /**
@@ -381,8 +391,26 @@ export class TelegramChannel implements RemoteChannel {
       };
     }
     const callback = update.callback_query;
-    const match = callback?.data ? /^([ad]):(.+)$/.exec(callback.data) : undefined;
-    if (!callback || !callback.message || !match) return undefined;
+    if (!callback || !callback.message || !callback.data) return undefined;
+    const selection = parseTelegramSelectionCallback(callback.data);
+    if (selection) {
+      return {
+        channel: 'telegram',
+        kind: 'selection',
+        providerMessageId: callback.id,
+        senderId: String(callback.from.id),
+        chatId: String(callback.message.chat.id),
+        chatType: telegramChatType(callback.message.chat.type),
+        receivedAt: Date.now(),
+        selectionKind: selection.kind,
+        selectionToken: selection.token,
+        action: selection.action,
+        ...(selection.page === undefined ? {} : { page: selection.page }),
+        messageId: String(callback.message.message_id),
+      };
+    }
+    const match = /^([ad]):(.+)$/.exec(callback.data);
+    if (!match) return undefined;
     return {
       channel: 'telegram',
       kind: 'action',
