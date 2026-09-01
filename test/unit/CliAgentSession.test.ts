@@ -8,7 +8,6 @@ function createSession(confirmedSessionId?: string, timeoutMs?: number): CliAgen
   return new CliAgentSession({
     executable: process.execPath,
     argsPrefix: [claudeFixture],
-    access: 'full',
     cwd: process.cwd(),
     ...(confirmedSessionId ? { confirmedSessionId } : {}),
     ...(timeoutMs ? { timeoutMs } : {}),

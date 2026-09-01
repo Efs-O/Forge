@@ -59,16 +59,15 @@ describe('CodexAppServerSession', () => {
     await current.dispose();
   });
 
-  it('enforces workspace-write access for the Forge-owned app-server process', async () => {
+  it('applies the full-access, never-approval policy to the Forge-owned app-server process', async () => {
     const current = new CodexAppServerSession({
       cliName: 'codex',
       executable: process.execPath,
       argsPrefix: [
         fixture,
-        'REQUIRE_FORGE_WORKSPACE_WRITE',
-        'REQUIRE_FORGE_UNTRUSTED_APPROVAL',
+        'REQUIRE_FORGE_FULL_ACCESS',
+        'REQUIRE_FORGE_NEVER_APPROVAL',
       ],
-      access: 'full',
       cwd: process.cwd(),
     });
     const result = await current.send('verify global sandbox policy');
@@ -76,7 +75,7 @@ describe('CodexAppServerSession', () => {
     await current.dispose();
   });
 
-  it('automatically allows ordinary workspace commands through the approval channel', async () => {
+  it('answers an approval request rather than leaving the turn stalled', async () => {
     const current = session();
     const statuses: string[] = [];
     const result = await current.send('TRIGGER_COMMAND_APPROVAL', {
@@ -85,11 +84,13 @@ describe('CodexAppServerSession', () => {
       },
     });
     expect(result.finalText).toBe('Approval accept');
-    expect(statuses).toContain('[codex policy: allowed workspace command]');
+    expect(statuses).toContain('[codex policy: allowed command]');
     await current.dispose();
   });
 
-  it('automatically denies dangerous commands through the approval channel', async () => {
+  // Codex runs unrestricted, so nothing is screened out — but every request
+  // still gets an answer, because an unanswered one hangs the turn forever.
+  it('allows a command an earlier build would have screened out', async () => {
     const current = session();
     const statuses: string[] = [];
     const result = await current.send('TRIGGER_COMMAND_APPROVAL TRIGGER_DANGEROUS_APPROVAL', {
@@ -97,12 +98,12 @@ describe('CodexAppServerSession', () => {
         if (event.kind === 'status') statuses.push(event.text);
       },
     });
-    expect(result.finalText).toBe('Approval decline');
-    expect(statuses.some((status) => status.startsWith('[codex policy: denied command:'))).toBe(true);
+    expect(result.finalText).toBe('Approval accept');
+    expect(statuses).toContain('[codex policy: allowed command]');
     await current.dispose();
   });
 
-  it('automatically denies network-expansion requests through the command channel', async () => {
+  it('allows network-expansion requests through the command channel', async () => {
     const current = session();
     const statuses: string[] = [];
     const result = await current.send('TRIGGER_NETWORK_APPROVAL', {
@@ -110,8 +111,8 @@ describe('CodexAppServerSession', () => {
         if (event.kind === 'status') statuses.push(event.text);
       },
     });
-    expect(result.finalText).toBe('Approval decline');
-    expect(statuses).toContain('[codex policy: denied sandbox or network expansion]');
+    expect(result.finalText).toBe('Approval accept');
+    expect(statuses).toContain('[codex policy: allowed command]');
     await current.dispose();
   });
 

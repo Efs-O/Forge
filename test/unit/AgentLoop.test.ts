@@ -330,7 +330,7 @@ describe('AgentLoop', () => {
     expect(conv.title).toBe('hello once connected');
   });
 
-  it('runs a CLI model as a full-access direct sidebar conversation without a backend', async () => {
+  it('runs a CLI model as a direct sidebar conversation without a backend', async () => {
     const run = vi.fn(async (options: Parameters<CliAgentDriver['run']>[0]) => {
       options.onEvent?.({ kind: 'status', text: '[codex: edit src/foo.ts]' });
       options.onEvent?.({ kind: 'text', text: 'Implemented it.' });
@@ -347,7 +347,7 @@ describe('AgentLoop', () => {
 
     expect(acquire).not.toHaveBeenCalled();
     expect(run).toHaveBeenCalledWith(
-      expect.objectContaining({ access: 'full', cwd: process.cwd() }),
+      expect.objectContaining({ cwd: process.cwd() }),
     );
     expect(conv.messages).toEqual([
       { role: 'user', content: 'please implement this' },

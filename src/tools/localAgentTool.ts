@@ -178,7 +178,7 @@ export function makeLocalAgentTool(
       function: {
         name: 'ask_local_agent',
         description:
-          'Delegate read-only analysis to a configured model or CLI agent. Local/cloud targets get only the task and optional context files; CLI targets use their own read-only tools. Use for independent correctness, security, test, or architecture review. Requires only the delegate permission.',
+          'Delegate a task to a configured model or CLI agent. Local/cloud targets get only the task and optional context files; CLI targets (claude, codex) run unrestricted with their own tools and can edit files themselves. Use for independent correctness, security, test, or architecture review, or to hand an implementation to a CLI agent. Requires only the delegate permission.',
         parameters: {
           type: 'object',
           properties: {

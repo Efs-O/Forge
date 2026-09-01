@@ -27,11 +27,11 @@ function fakeContext() {
 }
 
 describe('claudeAdapter', () => {
-  // Read access must NOT use plan mode: `-p` is non-interactive, so plan's
-  // approval prompt is unanswerable and the delegate deadlocks. Read-only is
-  // expressed as an allow-list of non-mutating tools instead.
-  it('builds argv for read access with a non-mutating tool allow-list, never plan mode', () => {
-    const args = claudeAdapter.buildArgs('do it', 'read');
+  // Forge launches the CLI and then gets out of its way: Claude owns its own
+  // tools and agent loop, so no permission narrowing and no allow-list. `plan`
+  // in particular must never appear — it deadlocks under `-p`.
+  it('builds unrestricted argv with no tool allow-list and never plan mode', () => {
+    const args = claudeAdapter.buildArgs('do it');
     expect(args).toEqual([
       '-p',
       'do it',
@@ -40,42 +40,14 @@ describe('claudeAdapter', () => {
       '--verbose',
       '--permission-mode',
       'bypassPermissions',
-      '--allowedTools',
-      'Read,Grep,Glob,Bash,WebFetch,WebSearch',
     ]);
     expect(args).not.toContain('plan');
-  });
-
-  it('never grants a read delegate a mutating tool', () => {
-    const allowed = claudeAdapter.buildArgs('do it', 'read')[
-      claudeAdapter.buildArgs('do it', 'read').indexOf('--allowedTools') + 1
-    ] as string;
-    for (const mutating of ['Write', 'Edit', 'NotebookEdit']) {
-      expect(allowed.split(',')).not.toContain(mutating);
-    }
-  });
-
-  it('does not pass an allow-list for write or full access', () => {
-    expect(claudeAdapter.buildArgs('do it', 'write')).not.toContain('--allowedTools');
-    expect(claudeAdapter.buildArgs('do it', 'full')).not.toContain('--allowedTools');
-  });
-
-  it('builds argv with --permission-mode acceptEdits for write access', () => {
-    expect(claudeAdapter.buildArgs('do it', 'write')).toContain('acceptEdits');
-  });
-
-  it('uses bypassPermissions for a full-access sidebar agent', () => {
-    const args = claudeAdapter.buildArgs('do it', 'full');
-    expect(args).toContain('bypassPermissions');
+    expect(args).not.toContain('--allowedTools');
     expect(args).not.toContain('acceptEdits');
   });
 
-  it('keeps acceptEdits for write access', () => {
-    expect(claudeAdapter.buildArgs('do it', 'write')).toContain('acceptEdits');
-  });
-
   it('resumes the same session and selects the configured model', () => {
-    const args = claudeAdapter.buildArgs('continue', 'full', {
+    const args = claudeAdapter.buildArgs('continue', {
       sessionId: 'session-1',
       model: 'opus',
     });
@@ -103,39 +75,29 @@ describe('claudeAdapter', () => {
 });
 
 describe('codexAdapter', () => {
-  it('builds argv with --sandbox read-only for read access', () => {
-    expect(codexAdapter.buildArgs('do it', 'read')).toEqual([
+  it('builds unrestricted argv for a one-shot run', () => {
+    expect(codexAdapter.buildArgs('do it')).toEqual([
       'exec',
       'do it',
       '--json',
       '--skip-git-repo-check',
       '--sandbox',
-      'read-only',
+      'danger-full-access',
     ]);
   });
 
   // codex exec refuses to start outside a trusted git repo, which fails every
-  // delegation in a non-git workspace. --sandbox is what actually bounds it.
-  it('always skips the git repo check so non-git workspaces can delegate', () => {
-    for (const access of ['read', 'write', 'full'] as const) {
-      expect(codexAdapter.buildArgs('do it', access)).toContain('--skip-git-repo-check');
-    }
-    expect(codexAdapter.buildArgs('continue', 'read', { sessionId: 't-1' })).toContain(
+  // run in a non-git workspace.
+  it('always skips the git repo check so non-git workspaces can run', () => {
+    expect(codexAdapter.buildArgs('do it')).toContain('--skip-git-repo-check');
+    expect(codexAdapter.buildArgs('continue', { sessionId: 't-1' })).toContain(
       '--skip-git-repo-check',
     );
   });
 
-  it('builds argv with --sandbox workspace-write for write access', () => {
-    expect(codexAdapter.buildArgs('do it', 'write')).toContain('workspace-write');
-  });
-
-  it('uses danger-full-access only for a full-access sidebar agent', () => {
-    expect(codexAdapter.buildArgs('do it', 'full')).toContain('danger-full-access');
-  });
-
   it('uses exec resume for an existing thread and selects the configured model', () => {
     expect(
-      codexAdapter.buildArgs('continue', 'full', { sessionId: 'thread-1', model: 'gpt-5' }),
+      codexAdapter.buildArgs('continue', { sessionId: 'thread-1', model: 'gpt-5' }),
     ).toEqual([
       'exec',
       'resume',

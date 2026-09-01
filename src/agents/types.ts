@@ -7,10 +7,6 @@
 
 export type CliAgentName = 'claude' | 'codex';
 
-/** Mirrors WorkerAccess ('read' | 'write') without depending on the workers/
- *  module — this driver is also used by ask_local_agent (no worker concept). */
-export type CliAccessMode = 'read' | 'write' | 'full';
-
 export interface CliAgentEvent {
   /** 'text': assistant text delta. 'status': concise tool-use status line, e.g. "[claude: Edit src/foo.ts]". */
   kind: 'text' | 'status';
@@ -44,7 +40,7 @@ export interface CliInvocationOptions {
 export interface CliAdapter {
   readonly name: CliAgentName;
   /** Build the CLI-specific argv (excluding the executable itself). */
-  buildArgs(task: string, access: CliAccessMode, options?: CliInvocationOptions): string[];
+  buildArgs(task: string, options?: CliInvocationOptions): string[];
   /** Parse one line of the CLI's streamed stdout (stream-json / JSONL). */
   handleLine(line: string, ctx: CliParseContext): void;
 }

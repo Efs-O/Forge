@@ -22,7 +22,7 @@ describe('CliChatRunner', () => {
     expect(prompt).toContain('USER:\nFirst request');
     expect(prompt).toContain('ASSISTANT:\nFirst answer');
     expect(prompt).toContain('USER:\nNow implement it');
-    expect(prompt).toContain('selected agent session policy');
+    expect(prompt).toContain('using your own tools');
   });
 
   it('sends only the latest user request when resuming a CLI session', () => {
@@ -49,7 +49,7 @@ describe('CliChatRunner', () => {
     expect(prompt).not.toContain('First request');
   });
 
-  it('keeps one-shot Codex chat read-only, streams activity, and joins streamed and final text', async () => {
+  it('runs one-shot Codex chat unrestricted, streams activity, and joins streamed and final text', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-cli-chat-'));
     roots.push(root);
     fs.writeFileSync(path.join(root, 'existing.txt'), 'before');
@@ -80,7 +80,7 @@ describe('CliChatRunner', () => {
       driver: { run } as unknown as CliAgentDriver,
     });
 
-    expect(run).toHaveBeenCalledWith(expect.objectContaining({ access: 'read', cwd: root }));
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ cwd: root }));
     expect(onStatus).toHaveBeenCalledWith('[codex: edit existing.txt]');
     expect(result.assistantText).toBe('Working.\n\nDone.');
     expect(onText).toHaveBeenLastCalledWith('\nDone.');

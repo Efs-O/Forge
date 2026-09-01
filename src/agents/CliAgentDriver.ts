@@ -2,13 +2,7 @@ import * as readline from 'readline';
 import { getLogger } from '../util/logger';
 import { getCliAdapter } from './adapters';
 import { spawnCliProcess, terminateCliProcessTree, waitForCliProcessExit } from './cliProcess';
-import type {
-  CliAccessMode,
-  CliAgentEvent,
-  CliAgentName,
-  CliAgentRunResult,
-  CliParseContext,
-} from './types';
+import type { CliAgentEvent, CliAgentName, CliAgentRunResult, CliParseContext } from './types';
 
 const log = getLogger();
 
@@ -24,7 +18,6 @@ export interface CliAgentRunOptions {
    *  is `process.execPath` — production callers never set this. */
   argsPrefix?: string[];
   task: string;
-  access: CliAccessMode;
   sessionId?: string;
   model?: string;
   cwd: string;
@@ -64,7 +57,7 @@ export class CliAgentDriver {
 
     const args = [
       ...(options.argsPrefix ?? []),
-      ...adapter.buildArgs(options.task, options.access, {
+      ...adapter.buildArgs(options.task, {
         ...(options.sessionId ? { sessionId: options.sessionId } : {}),
         ...(options.model ? { model: options.model } : {}),
       }),
@@ -119,11 +112,9 @@ export class CliAgentDriver {
     // of state.vscdb. A delegate that cannot run must say so out loud.
     const outcome = (result: CliAgentRunResult): CliAgentRunResult => {
       if (result.status === 'completed') {
-        log.info(`[cli-agent] ${options.cliName} (${options.access}) completed`);
+        log.info(`[cli-agent] ${options.cliName} completed`);
       } else {
-        log.warn(
-          `[cli-agent] ${options.cliName} (${options.access}) ${result.status}: ${result.error ?? 'no detail'}`,
-        );
+        log.warn(`[cli-agent] ${options.cliName} ${result.status}: ${result.error ?? 'no detail'}`);
       }
       return result;
     };

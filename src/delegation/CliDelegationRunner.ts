@@ -10,11 +10,8 @@ import type { LocalDelegationRequest, LocalDelegationResult } from './LocalDeleg
 
 /**
  * Warm delegation sessions are keyed separately from the chat sessions the
- * sidebar opens for the same (conversation, model) pair. A delegation runs
- * `access: 'read'` while a chat runs `access: 'full'`, and CliSessionRegistry
- * applies sessionOptions only when it CREATES an entry — sharing one key would
- * silently hand a read-only delegation the chat session's write rights, or
- * hand a chat turn a plan-mode session that cannot edit anything.
+ * sidebar opens for the same (conversation, model) pair: a delegation is an
+ * independent question and must not inherit or pollute the chat transcript.
  */
 export function delegationSessionKey(conversationId: string, resolvedId: string): CliSessionKey {
   return { conversationId, modelName: `${resolvedId}#delegate` };
@@ -27,9 +24,9 @@ export interface CliDelegationSessionDeps {
 
 /**
  * ask_local_agent for a `provider: cli` target (docs/plans/CONFIG_OVERHAUL_PLAN.md §2.4/§4
- * step 7): read-only analysis run by the external CLI's OWN tools — it can
- * read/list files itself (unlike a regular delegated model, which only gets
- * the task + context text). Never routes through backendPool: cli targets
+ * step 7): a task run by the external CLI's OWN tools — it reads and edits
+ * files itself (unlike a regular delegated model, which only gets the task +
+ * context text). Never routes through backendPool: cli targets
  * spawn their own process. Throws plain Error; LocalDelegationService.ask()
  * wraps it as DelegationError.
  *
@@ -59,13 +56,7 @@ export async function runCliDelegation(
   const contextNote = request.contextFiles?.length
     ? `Suggested starting files (read them yourself):\n${request.contextFiles.map((file) => `- ${file}`).join('\n')}`
     : '';
-  const task = [
-    `Task:\n${request.task}${focusNote}`,
-    contextNote,
-    'This is a read-only analysis task. Do not modify any files.',
-  ]
-    .filter(Boolean)
-    .join('\n\n');
+  const task = [`Task:\n${request.task}${focusNote}`, contextNote].filter(Boolean).join('\n\n');
 
   const cliModel = target.model.cli_model;
   let result: CliAgentRunResult;
@@ -75,7 +66,6 @@ export async function runCliDelegation(
     const sessionOptions: CliAgentSessionOptions = {
       cliName,
       executable,
-      access: 'read',
       cwd: workspaceRoot,
       timeoutMs: CLI_DELEGATION_TIMEOUT_MS,
       ...(cliModel ? { model: cliModel } : {}),
@@ -91,7 +81,6 @@ export async function runCliDelegation(
       cliName,
       executable,
       task,
-      access: 'read',
       cwd: workspaceRoot,
       timeoutMs: CLI_DELEGATION_TIMEOUT_MS,
       ...(cliModel ? { model: cliModel } : {}),

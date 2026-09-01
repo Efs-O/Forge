@@ -11,11 +11,8 @@ function line(obj) {
 
 if (process.argv.includes('app-server')) {
   const input = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
-  const hasForgeWorkspaceWriteOverride = process.argv.includes('sandbox_mode="workspace-write"');
-  const hasForgeUntrustedApprovalOverride = process.argv.includes('approval_policy="untrusted"');
-  const hasForgeNetworkDisabledOverride = process.argv.includes(
-    'sandbox_workspace_write.network_access=false',
-  );
+  const hasForgeFullAccessOverride = process.argv.includes('sandbox_mode="danger-full-access"');
+  const hasForgeNeverApprovalOverride = process.argv.includes('approval_policy="never"');
   let threadId = 'fixture-thread-id';
   let turn = 0;
   let activeTurn;
@@ -47,20 +44,15 @@ if (process.argv.includes('app-server')) {
       return;
     }
     if (message.method === 'thread/start') {
-      if (
-        process.argv.includes('REQUIRE_FORGE_WORKSPACE_WRITE') &&
-        !hasForgeWorkspaceWriteOverride
-      ) {
-        line({ id: message.id, error: { message: 'missing Forge workspace-write override' } });
+      if (process.argv.includes('REQUIRE_FORGE_FULL_ACCESS') && !hasForgeFullAccessOverride) {
+        line({ id: message.id, error: { message: 'missing Forge full-access override' } });
         return;
       }
       if (
-        process.argv.includes('REQUIRE_FORGE_UNTRUSTED_APPROVAL') &&
-        (!hasForgeUntrustedApprovalOverride ||
-          !hasForgeNetworkDisabledOverride ||
-          message.params.approvalPolicy !== 'untrusted')
+        process.argv.includes('REQUIRE_FORGE_NEVER_APPROVAL') &&
+        (!hasForgeNeverApprovalOverride || message.params.approvalPolicy !== 'never')
       ) {
-        line({ id: message.id, error: { message: 'missing Forge untrusted approval policy' } });
+        line({ id: message.id, error: { message: 'missing Forge never approval policy' } });
         return;
       }
       line({ id: message.id, result: { thread: { id: threadId } } });

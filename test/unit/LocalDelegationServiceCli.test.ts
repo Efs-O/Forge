@@ -34,7 +34,7 @@ function fakeDriver(run: CliAgentDriver['run']): CliAgentDriver {
 }
 
 describe('LocalDelegationService ask() for provider: cli targets', () => {
-  it('runs the cli driver read-only and never touches the backend pool', async () => {
+  it('runs the cli driver and never touches the backend pool', async () => {
     const run = vi.fn(async () => ({ status: 'completed' as const, finalText: 'looks fine' }));
     const canDelegate = vi.fn();
     const acquireForDelegation = vi.fn();
@@ -57,7 +57,6 @@ describe('LocalDelegationService ask() for provider: cli targets', () => {
     expect(acquireForDelegation).not.toHaveBeenCalled();
     const call = run.mock.calls[0][0];
     expect(call.cliName).toBe('claude');
-    expect(call.access).toBe('read');
   });
 
   it('wraps a non-completed cli run as a delegation error', async () => {
@@ -134,11 +133,10 @@ describe('warm CLI delegation sessions', () => {
     // Each delegation carries its own complete task, not a chat-style follow-up.
     expect(recorded.sent[0]).toContain('review the auth module');
     expect(recorded.sent[1]).toContain('now review the parser');
-    expect(recorded.sent[1]).toContain('read-only analysis task');
     await registry.dispose();
   });
 
-  it('creates the session read-only, on the delegate key, with the cli timeout', async () => {
+  it('creates the session on the delegate key, with the cli timeout', async () => {
     const recorded = recordingFactory();
     const registry = new CliSessionRegistry(4, 60_000, recorded.factory);
     const service = new LocalDelegationService({
@@ -157,11 +155,10 @@ describe('warm CLI delegation sessions', () => {
     });
 
     const options = recorded.created[0];
-    expect(options.access).toBe('read');
     expect(options.cliName).toBe('claude');
     // The 120s local-model ceiling would abort a real review mid-flight.
     expect(options.timeoutMs).toBe(CLI_DELEGATION_TIMEOUT_MS);
-    // Namespaced away from the sidebar's full-access chat session for the same
+    // Namespaced away from the sidebar's chat session for the same
     // (conversation, model): registry options apply only at creation, so a
     // shared key would hand one of the two the other's permission mode.
     const key = delegationSessionKey('conv-1', 'claude-code');

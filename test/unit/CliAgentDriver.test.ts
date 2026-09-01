@@ -14,7 +14,6 @@ describe('CliAgentDriver', () => {
       executable: process.execPath,
       argsPrefix: [claudeFixture],
       task: 'do the thing',
-      access: 'read',
       cwd: process.cwd(),
       onEvent: (event) => events.push(event),
     });
@@ -31,7 +30,6 @@ describe('CliAgentDriver', () => {
       executable: process.execPath,
       argsPrefix: [codexFixture],
       task: 'do the thing',
-      access: 'write',
       cwd: process.cwd(),
       onEvent: (event) => events.push(event),
     });
@@ -48,7 +46,6 @@ describe('CliAgentDriver', () => {
       executable: process.execPath,
       argsPrefix: [claudeFixture],
       task: 'TRIGGER_FAIL',
-      access: 'read',
       cwd: process.cwd(),
     });
     expect(result.status).toBe('failed');
@@ -62,7 +59,6 @@ describe('CliAgentDriver', () => {
       executable: process.execPath,
       argsPrefix: [claudeFixture],
       task: 'TRIGGER_ERROR_RESULT',
-      access: 'read',
       cwd: process.cwd(),
     });
     expect(result.status).toBe('failed');
@@ -75,7 +71,6 @@ describe('CliAgentDriver', () => {
       executable: process.execPath,
       argsPrefix: [codexFixture],
       task: 'TRIGGER_ERROR_RESULT',
-      access: 'read',
       cwd: process.cwd(),
     });
     expect(result.status).toBe('failed');
@@ -89,7 +84,6 @@ describe('CliAgentDriver', () => {
       executable: process.execPath,
       argsPrefix: [claudeFixture],
       task: 'TRIGGER_SLOW',
-      access: 'read',
       cwd: process.cwd(),
       signal: controller.signal,
     });
@@ -104,7 +98,6 @@ describe('CliAgentDriver', () => {
       executable: process.execPath,
       argsPrefix: [claudeFixture],
       task: 'TRIGGER_SLOW',
-      access: 'read',
       cwd: process.cwd(),
       timeoutMs: 200,
     });

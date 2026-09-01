@@ -1,12 +1,5 @@
 import type { CliAdapter } from '../types';
 
-/**
- * Tools a `read` delegate may use. Deliberately excludes every mutating tool
- * (Write, Edit, NotebookEdit) so "read-only" is enforced by the allow-list
- * rather than by an approval prompt no one can answer under `-p`.
- */
-const READ_ONLY_TOOLS = ['Read', 'Grep', 'Glob', 'Bash', 'WebFetch', 'WebSearch'] as const;
-
 function summarizeToolInput(name: string, input: unknown): string {
   if (input && typeof input === 'object') {
     const record = input as Record<string, unknown>;
@@ -26,7 +19,7 @@ function summarizeToolInput(name: string, input: unknown): string {
  */
 export const claudeAdapter: CliAdapter = {
   name: 'claude',
-  buildArgs(task, access, options) {
+  buildArgs(task, options) {
     const args = [
       '-p',
       task,
@@ -34,19 +27,8 @@ export const claudeAdapter: CliAdapter = {
       'stream-json',
       '--verbose',
       '--permission-mode',
-      access === 'full'
-        ? 'bypassPermissions'
-        : access === 'write'
-          ? 'acceptEdits'
-          : 'bypassPermissions',
+      'bypassPermissions',
     ];
-    // Read access used to map to `plan`, which deadlocks: `-p` is non-interactive,
-    // so nothing can answer plan mode's approval prompt — not the user, not the
-    // orchestrating model. Plan means "don't act, ask a human first"; we want
-    // "act, but don't mutate". Express that as an allow-list of non-mutating
-    // tools instead — no Write/Edit/NotebookEdit, so the read-only contract holds
-    // while investigation and verification actually run.
-    if (access === 'read') args.push('--allowedTools', READ_ONLY_TOOLS.join(','));
     if (options?.sessionId) args.push('--resume', options.sessionId);
     if (options?.model) args.push('--model', options.model);
     return args;

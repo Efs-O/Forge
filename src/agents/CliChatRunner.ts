@@ -62,7 +62,7 @@ export function buildCliChatTask(messages: readonly ChatMessage[]): string {
     .join('\n\n');
   return [
     'You are the selected external coding agent in a Forge sidebar conversation.',
-    'Work directly in the current workspace using your own tools. Your workspace and tool access are enforced by the selected agent session policy. Perform the latest user request, then give a concise final response for the chat.',
+    'Work directly in the current workspace using your own tools. Perform the latest user request, then give a concise final response for the chat.',
     'To consult, ask, or delegate to a peer agent (for example Codex or Claude Code), invoke that agent through its own CLI directly — e.g. `codex exec "<task>"` — and relay the result. Forge exposes no peer-agent API: its local control server (port 8799) serves models to worker fleets, not sidebar agents, so do not probe it for this.',
     'Use the transcript for conversational context; do not repeat earlier work unless the latest request requires it.',
     '<forge_conversation>',
@@ -114,10 +114,6 @@ export async function runCliChat(options: RunCliChatOptions): Promise<CliChatRes
       task: options.sessionId
         ? buildCliResumeTask(options.messages, options.planPrompt)
         : buildCliChatTask(options.messages),
-      // One-shot Codex execution has no app-server approval channel. Keep it
-      // read-only; warm Codex sessions below provide workspace-write autonomy
-      // with Forge's automatic command policy.
-      access: options.prepared.cliName === 'codex' ? 'read' : 'full',
       ...(options.sessionId ? { sessionId: options.sessionId } : {}),
       ...(options.model.cli_model ? { model: options.model.cli_model } : {}),
       cwd: options.workspaceRoot,
@@ -154,7 +150,6 @@ export async function runWarmCliChat(options: RunWarmCliChatOptions): Promise<Cl
   const sessionOptions: CliAgentSessionOptions = {
     cliName: options.prepared.cliName,
     executable: options.prepared.executable,
-    access: options.prepared.cliName === 'codex' ? 'write' : 'full',
     cwd: options.workspaceRoot,
     ...(options.model.cli_model ? { model: options.model.cli_model } : {}),
     ...(confirmedId ? { confirmedSessionId: confirmedId } : {}),

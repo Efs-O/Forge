@@ -2,7 +2,7 @@ import * as readline from 'readline';
 import { randomUUID } from 'crypto';
 import { claudeAdapter } from './adapters/claudeAdapter';
 import { spawnCliProcess, terminateCliProcessTree, waitForCliProcessExit } from './cliProcess';
-import type { CliAccessMode, CliAgentEvent, CliAgentRunResult, CliParseContext } from './types';
+import type { CliAgentEvent, CliAgentRunResult, CliParseContext } from './types';
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -12,7 +12,6 @@ export interface CliAgentSessionOptions {
   cliName?: 'claude' | 'codex';
   executable: string;
   argsPrefix?: string[];
-  access: CliAccessMode;
   cwd: string;
   model?: string;
   confirmedSessionId?: string;
@@ -118,11 +117,7 @@ export class CliAgentSession {
       'stream-json',
       '--verbose',
       '--permission-mode',
-      this.options.access === 'full'
-        ? 'bypassPermissions'
-        : this.options.access === 'write'
-          ? 'acceptEdits'
-          : 'plan',
+      'bypassPermissions',
       ...(this.confirmedId ? ['--resume', this.confirmedId] : ['--session-id', requestedId]),
     ];
     if (this.options.model) args.push('--model', this.options.model);

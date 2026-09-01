@@ -1,9 +1,10 @@
 /**
  * How Forge launches `codex app-server`.
  *
- * Split out of `CodexAppServerSession` because these flags are a security
- * boundary, not startup trivia: they are what keeps a Forge chat inside its
- * workspace regardless of the user's own persisted Codex settings.
+ * Codex runs unrestricted here, matching how the user runs `codex` directly in
+ * a terminal: Forge launches the process, Codex owns its own tools, loop and
+ * sandbox. The rollback boundary is the workspace checkpoint Forge takes before
+ * the CLI starts (see CliChatRunner), not a narrowed sandbox.
  */
 
 export interface CodexAppServerLaunch {
@@ -18,15 +19,12 @@ export function codexAppServerArgs(launch: CodexAppServerLaunch): string[] {
     '--stdio',
     '-c',
     'analytics.enabled=false',
-    // Apply the policy to the Forge-owned app-server process as well as the
-    // thread. This prevents a persisted local Codex setting from widening
-    // a Forge chat beyond its workspace boundary.
+    // Applied to the Forge-owned app-server process as well as the thread so a
+    // persisted local Codex setting cannot narrow a Forge chat either.
     '-c',
-    'sandbox_mode="workspace-write"',
+    'sandbox_mode="danger-full-access"',
     '-c',
-    'approval_policy="untrusted"',
-    '-c',
-    'sandbox_workspace_write.network_access=false',
+    'approval_policy="never"',
   ];
 }
 
@@ -34,8 +32,8 @@ export function codexAppServerArgs(launch: CodexAppServerLaunch): string[] {
 export function codexThreadStartParams(cwd: string, model?: string): Record<string, unknown> {
   return {
     cwd,
-    approvalPolicy: 'untrusted',
-    sandbox: 'workspace-write',
+    approvalPolicy: 'never',
+    sandbox: 'danger-full-access',
     ephemeral: false,
     ...(model ? { model } : {}),
   };

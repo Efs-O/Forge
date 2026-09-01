@@ -10,7 +10,6 @@ const fixture = path.resolve(__dirname, '../fixtures/fake-claude-cli.mjs');
 const options = {
   executable: process.execPath,
   argsPrefix: [fixture],
-  access: 'full' as const,
   cwd: process.cwd(),
 };
 
