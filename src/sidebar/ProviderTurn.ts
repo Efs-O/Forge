@@ -21,6 +21,7 @@ import type * as vscode from 'vscode';
 import type { UserPromptOptions } from './transcriptMutations';
 import type { ToolCallingLoopResult } from '../agent/ToolCallingLoop';
 import { abortedTurnOutcome, type ForgeTurnOutcome } from './turnOutcome';
+import type { AgentProgressEvent } from './AgentProgress';
 
 const log = getLogger();
 
@@ -30,6 +31,8 @@ export interface ProviderTurnContext {
   checkpoints: CheckpointStack;
   events: SidebarProviderEvents;
   secrets?: vscode.SecretStorage;
+  /** Mirrors visible progress to remote surfaces (Telegram, WhatsApp). */
+  emitAgentProgress: (event: AgentProgressEvent) => void;
   commitUserPrompt: (
     conv: ConversationRuntime,
     text: string,
@@ -152,6 +155,15 @@ export async function runCloudProviderTurn(
  */
 const BACKEND_START_NOTICE_MS = 500;
 
+/**
+ * Headline for the remote progress message while the local backend is still
+ * coming up. A remote reader cannot see the sidebar's `backendStarting` row, so
+ * without this the message reads "Forge: working…" through a cold
+ * `llama-server` spawn plus a multi-second model load — which looks like a
+ * stalled turn rather than a startup.
+ */
+const BACKEND_START_PHASE = 'Forge: starting the local backend and loading the model…';
+
 /** Local providers: acquire (and if necessary start) the backend first. */
 export async function runLocalProviderTurn(
   ctx: ProviderTurnContext,
@@ -159,10 +171,12 @@ export async function runLocalProviderTurn(
 ): Promise<ForgeTurnOutcome> {
   const convId = conv.id;
   let backend: BackendController;
-  const notice = setTimeout(
-    () => postC({ type: 'backendStarting', message: 'Starting backend, please wait…' }),
-    BACKEND_START_NOTICE_MS,
-  );
+  let announcedStart = false;
+  const notice = setTimeout(() => {
+    announcedStart = true;
+    postC({ type: 'backendStarting', message: 'Starting backend, please wait…' });
+    ctx.emitAgentProgress({ conversationId: convId, kind: 'phase', text: BACKEND_START_PHASE });
+  }, BACKEND_START_NOTICE_MS);
   try {
     try {
       backend = await ctx.pool.acquire(model.name);
@@ -170,6 +184,11 @@ export async function runLocalProviderTurn(
       // Cleared on the failure path too: a spawn that fails inside the window
       // reports its own error, and the notice would arrive after it.
       clearTimeout(notice);
+      // Restore the default headline whichever way the wait ended, so the
+      // startup phase never outlives the startup.
+      if (announcedStart) {
+        ctx.emitAgentProgress({ conversationId: convId, kind: 'phase', text: undefined });
+      }
     }
     ctx.lifecycle.setBackend(convId, backend);
     ctx.events.onBackendReady?.(model.name);

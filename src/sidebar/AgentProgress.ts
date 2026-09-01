@@ -2,7 +2,13 @@
 export type AgentProgressEvent =
   | { conversationId: string; kind: 'commentary'; text: string }
   | { conversationId: string; kind: 'tool'; toolName: string }
-  | { conversationId: string; kind: 'status'; text: string };
+  | { conversationId: string; kind: 'status'; text: string }
+  /**
+   * Replaces the headline of a mirrored progress message while the turn is
+   * stuck on something that is not the model thinking — a cold `llama-server`
+   * spawn, say. `text: undefined` restores the default headline.
+   */
+  | { conversationId: string; kind: 'phase'; text: string | undefined };
 
 export type AgentProgressListener = (event: AgentProgressEvent) => void;
 

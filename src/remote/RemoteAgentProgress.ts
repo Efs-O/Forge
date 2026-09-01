@@ -5,12 +5,15 @@ const DEFAULT_EDIT_INTERVAL_MS = 1_500;
 const MAX_COMMENTARY_CHARS = 2_400;
 const MAX_STATUS_CHARS = 500;
 const MAX_TOOL_NAME_CHARS = 80;
+const DEFAULT_HEADLINE = 'Forge: working…';
+const MAX_HEADLINE_CHARS = 160;
 
 type CanDeliver = (chatId: string) => boolean | Promise<boolean>;
 
 interface ActiveProgress {
   chatId: string;
   messageId: string;
+  headline: string;
   commentary: string;
   milestone?: string;
   lastText: string;
@@ -41,8 +44,9 @@ export class RemoteAgentProgress {
     this.active.set(conversationId, {
       chatId,
       messageId,
+      headline: DEFAULT_HEADLINE,
       commentary: '',
-      lastText: 'Forge: working…',
+      lastText: DEFAULT_HEADLINE,
       tail: Promise.resolve(),
       closed: false,
     });
@@ -55,6 +59,11 @@ export class RemoteAgentProgress {
       const delta = sanitize(event.text);
       if (!delta) return;
       state.commentary = keepTail(state.commentary + delta, MAX_COMMENTARY_CHARS);
+    } else if (event.kind === 'phase') {
+      const headline = keepTail(sanitize(event.text ?? '').trim(), MAX_HEADLINE_CHARS);
+      const next = headline || DEFAULT_HEADLINE;
+      if (next === state.headline) return;
+      state.headline = next;
     } else if (event.kind === 'tool') {
       const toolName = sanitizeToolName(event.toolName);
       if (!toolName) return;
@@ -144,11 +153,11 @@ export class RemoteAgentProgress {
 }
 
 function render(state: ActiveProgress, maximum: number): string {
-  const sections = ['Forge: working…'];
+  const sections = [state.headline];
   const commentary = state.commentary.trim();
   if (commentary) sections.push(commentary);
   if (state.milestone) sections.push(state.milestone);
-  return keepTailWithPrefix(sections.join('\n\n'), maximum, 'Forge: working…\n\n');
+  return keepTailWithPrefix(sections.join('\n\n'), maximum, `${state.headline}\n\n`);
 }
 
 function sanitize(value: string): string {

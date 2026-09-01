@@ -1,5 +1,20 @@
 # Forge — Recent Changes
 
+## 0.15.6
+
+- **A cold backend start looked like a hung turn from the phone.** The sidebar
+  shows a `backendStarting` row while `llama-server` spawns and the weights
+  load, but a remote reader cannot see it: the mirrored Telegram progress
+  message just said "Forge: working…" through the whole spawn plus a
+  multi-second model load, which reads as a stall rather than a startup. A new
+  `phase` agent-progress event replaces the headline of the mirrored message
+  for exactly as long as the wait lasts, and `text: undefined` restores the
+  default. It is emitted from the same 500 ms timer that already gates the
+  sidebar notice — so a warm backend, which returns well inside that window,
+  still shows nothing at all. The restore sits in the `finally` alongside
+  `clearTimeout`, so a spawn that fails cannot leave the startup headline
+  outliving the startup.
+
 ## 0.15.5
 
 - **The store description was 157 characters, and the Marketplace truncates

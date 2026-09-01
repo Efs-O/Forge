@@ -50,6 +50,35 @@ describe('RemoteAgentProgress', () => {
     expect(channel.edits).toHaveLength(1);
   });
 
+  it('shows a startup headline while the backend loads, then restores the default', async () => {
+    vi.useFakeTimers();
+    const channel = new FakeRemoteChannel();
+    const progress = new RemoteAgentProgress(
+      channel,
+      new AbortController().signal,
+      () => true,
+      3_900,
+      1_000,
+    );
+    progress.begin('c1', 'chat-a', 'message-1');
+
+    progress.handle({ conversationId: 'c1', kind: 'phase', text: 'Forge: loading the model…' });
+    await vi.advanceTimersByTimeAsync(999);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(channel.edits).toEqual([
+      { chatId: 'chat-a', messageId: 'message-1', text: 'Forge: loading the model…' },
+    ]);
+
+    progress.handle({ conversationId: 'c1', kind: 'phase', text: undefined });
+    progress.handle({ conversationId: 'c1', kind: 'commentary', text: 'On it.' });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(channel.edits.at(-1)).toEqual({
+      chatId: 'chat-a',
+      messageId: 'message-1',
+      text: 'Forge: working…\n\nOn it.',
+    });
+  });
+
   it('ignores events without an active remote request and suppresses edits while locked', async () => {
     vi.useFakeTimers();
     const channel = new FakeRemoteChannel();
