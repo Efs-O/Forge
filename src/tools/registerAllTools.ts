@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import type { ToolRegistry } from './ToolRegistry';
 import type { SearchConfig, ForgeConfig } from '../config/types';
 import type { LocalDelegationService } from '../delegation/LocalDelegationService';
-import { makeLocalAgentTool } from './localAgentTool';
+import { makeLocalAgentTool, makeListDelegationTargetsTool } from './localAgentTool';
 import {
   makeReadFileTool,
   makeWriteFileTool,
@@ -173,6 +173,7 @@ export function registerAllTools(
   // delegation — only registered when a LocalDelegationService is wired in
   if (delegationService && getConfig) {
     registry.register(makeLocalAgentTool(delegationService, getConfig));
+    registry.register(makeListDelegationTargetsTool(getConfig));
   }
 
   // Registered last, and self-suppressing until a lazy group is actually

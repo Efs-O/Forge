@@ -2,7 +2,12 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { ForgeConfig, ModelConfig } from '../../src/config/types';
 import type { LocalDelegationService, LocalDelegationResult } from '../../src/delegation/LocalDelegationService';
 import { ToolRegistry } from '../../src/tools/ToolRegistry';
-import { makeLocalAgentTool, hasEligibleDelegationTargets, describeDelegationTargets } from '../../src/tools/localAgentTool';
+import {
+  makeLocalAgentTool,
+  makeListDelegationTargetsTool,
+  hasEligibleDelegationTargets,
+  describeDelegationTargets,
+} from '../../src/tools/localAgentTool';
 import {
   MAX_DELEGATION_TASK_CHARS,
   MAX_DELEGATION_CONTEXT_FILES,
@@ -31,6 +36,13 @@ function makeConfig(models: ModelConfig[]): ForgeConfig {
 const localConfig = makeConfig([
   model('llama', 'llama.cpp'),
   model('ollama-local', 'ollama', 'http://127.0.0.1:11434'),
+]);
+
+const mixedConfig = makeConfig([
+  model('llama', 'llama.cpp'),
+  model('ollama-local', 'ollama', 'http://127.0.0.1:11434'),
+  model('openrouter-model', 'openrouter'),
+  { name: 'claude-code', provider: 'cli', cli: 'claude' },
 ]);
 
 const cloudOnlyConfig = makeConfig([
@@ -381,18 +393,40 @@ describe('describeDelegationTargets', () => {
     expect(describeDelegationTargets(ineligibleConfig)).toBe('');
   });
 
-  it('is carried in the model arg description ToolRegistry advertises', () => {
+  // The whole list used to live in the schema on every turn. Only the CLI
+  // agents are named there now; the rest is one list_delegation_targets away.
+  it('names only the cli agents in the model arg description ToolRegistry advertises', () => {
     const { service } = makeMockService();
     const registry = new ToolRegistry();
-    registry.register(makeLocalAgentTool(service, () => localConfig));
+    registry.register(makeLocalAgentTool(service, () => mixedConfig));
     const def = registry
       .definitions(new Set(['delegate']))
       .find((d) => d.function.name === 'ask_local_agent');
     const params = def?.function.parameters as {
       properties: { model: { description: string } };
     };
-    expect(params.properties.model.description).toContain('"llama" (local)');
+    expect(params.properties.model.description).toContain('"claude-code"');
+    expect(params.properties.model.description).toContain('list_delegation_targets');
+    expect(params.properties.model.description).not.toContain('"llama"');
     expect(params.properties.model.description).toContain('do NOT read');
+  });
+
+  it('ranks cli agents above cloud above local, and warns on the local section', () => {
+    const listed = describeDelegationTargets(mixedConfig);
+    expect(listed.indexOf('"claude-code"')).toBeLessThan(listed.indexOf('"openrouter-model"'));
+    expect(listed.indexOf('"openrouter-model"')).toBeLessThan(listed.indexOf('"llama"'));
+    expect(listed).toContain('VRAM');
+  });
+
+  // Cloud-routed Ollama reaches the daemon like a local one but runs remotely,
+  // so it must not be filed under the VRAM warning.
+  it('files a cloud-routed ollama model with cloud, not local', () => {
+    const cfg = makeConfig([
+      model('llama', 'llama.cpp'),
+      model('kimi-k2.6:cloud', 'ollama'),
+    ]);
+    const listed = describeDelegationTargets(cfg);
+    expect(listed.indexOf('"kimi-k2.6:cloud"')).toBeLessThan(listed.indexOf('"llama"'));
   });
 
   // The canonical `definition` literal stays static — scripts/tool-audit-catalog.mjs
@@ -410,7 +444,7 @@ describe('describeDelegationTargets', () => {
   // reload must show up without re-registering the tool.
   it('refreshes when the config changes', () => {
     const { service } = makeMockService();
-    let cfg = localConfig;
+    let cfg = mixedConfig;
     const tool = makeLocalAgentTool(service, () => cfg);
     const read = () =>
       (
@@ -418,9 +452,49 @@ describe('describeDelegationTargets', () => {
           properties: { model: { description: string } };
         }
       ).properties.model.description;
-    expect(read()).toContain('"llama" (local)');
+    expect(read()).toContain('"claude-code"');
     cfg = cloudOnlyConfig;
-    expect(read()).toContain('"openrouter-model" (cloud)');
-    expect(read()).not.toContain('"llama" (local)');
+    expect(read()).not.toContain('"claude-code"');
+  });
+});
+
+// ── Discovery tool and the local-VRAM approval gate ─────────────────────────
+
+describe('list_delegation_targets', () => {
+  it('returns the ranked list, and says so when there is nothing to list', async () => {
+    const listed = await makeListDelegationTargetsTool(() => mixedConfig).handler({});
+    expect(listed).toContain('"claude-code"');
+    expect(listed).toContain('"llama"');
+    expect(await makeListDelegationTargetsTool(() => ineligibleConfig).handler({})).toContain(
+      'No delegation targets',
+    );
+  });
+
+  it('is advertised only alongside an eligible target', () => {
+    expect(makeListDelegationTargetsTool(() => mixedConfig).advertise!()).toBe(true);
+    expect(makeListDelegationTargetsTool(() => ineligibleConfig).advertise!()).toBe(false);
+  });
+});
+
+describe('ask_local_agent local-VRAM approval', () => {
+  const approvalFor = (target: string) => {
+    const { service } = makeMockService();
+    return makeLocalAgentTool(service, () => mixedConfig).approval!({ model: target });
+  };
+
+  it('asks before a target that loads local weights', () => {
+    expect(approvalFor('llama')?.detail).toContain('local VRAM');
+    expect(approvalFor('ollama-local')?.detail).toContain('local VRAM');
+  });
+
+  it('does not ask for cli or cloud targets, which take no slot', () => {
+    expect(approvalFor('claude-code')).toBeUndefined();
+    expect(approvalFor('openrouter-model')).toBeUndefined();
+  });
+
+  // A fuzzy alias or `model@profile` still resolves in the handler, so an
+  // unrecognised name must fall to the safe side rather than through the gate.
+  it('asks when the name does not match a known target', () => {
+    expect(approvalFor('llama@fast')?.detail).toContain('local VRAM');
   });
 });

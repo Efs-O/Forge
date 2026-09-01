@@ -1,6 +1,7 @@
 import type { ForgeConfig, ModelConfig } from '../config/types';
 import { expandAlias, resolveRequestModel, splitModelProfile } from '../config/ConfigResolver';
 import { isCloudProvider } from '../llm/CloudProviders';
+import { classifyModelRoute, type ModelRoute } from '../llm/ModelRouteClassifier';
 
 export interface DelegationTarget {
   requested: string;
@@ -82,6 +83,22 @@ export function resolveDelegationTarget(config: ForgeConfig, requested: string):
 export interface EligibleDelegationTarget {
   name: string;
   provider: DelegationTarget['provider'];
+  /** Canonical route, from ModelRouteClassifier — the sole owner of the
+   *  cloud-routed-Ollama distinction `provider` alone cannot express. */
+  route: ModelRoute;
+  /** True when running this target loads weights into local VRAM.
+   *
+   *  Not derivable from `provider`: an Ollama entry tagged `:cloud` reaches the
+   *  daemon like any other but runs remotely and costs no VRAM, while a plain
+   *  Ollama entry with no endpoint set is local and does. DelegationGate counts
+   *  free SLOTS (max_simultaneous_models), not gigabytes, so on a single card
+   *  it will permit a second large local model the hardware cannot hold. */
+  localWeights: boolean;
+}
+
+/** Whether a delegation target loads weights into local VRAM. */
+export function targetUsesLocalWeights(route: ModelRoute): boolean {
+  return route === 'local-llama' || route === 'local-ollama';
 }
 
 /**
@@ -97,7 +114,13 @@ export function listEligibleDelegationTargets(config: ForgeConfig): EligibleDele
   for (const model of config.models) {
     try {
       const target = resolveDelegationTarget(config, model.name);
-      targets.push({ name: model.name, provider: target.provider });
+      const route = classifyModelRoute(target.model);
+      targets.push({
+        name: model.name,
+        provider: target.provider,
+        route,
+        localWeights: targetUsesLocalWeights(route),
+      });
     } catch {
       // not an eligible delegation target
     }
