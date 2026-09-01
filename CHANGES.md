@@ -1,5 +1,33 @@
 # Forge — Recent Changes
 
+## 0.15.3
+
+- **The README never said what the agent can do.** It documented backends,
+  config, sharing and delegation in real depth, and then described the agent
+  itself with a bullet list. An entire category was missing outright:
+  **LSP-backed code intelligence** — `go_to_definition`, `find_references`,
+  `find_implementations`, `get_diagnostics`, `apply_code_action`,
+  `rename_symbol` and the rest run through VS Code's own language servers, so
+  the agent answers "who implements this?" from real analysis rather than
+  guessing from a name, and none of it appeared anywhere in the README. So was
+  durable cross-session memory (`remember` / `recall` / `list_memories`). A new
+  "What the agent can do" section covers all sixty-plus native tools by group,
+  and every tool name in it was verified against `src/tools/` rather than
+  written from memory.
+
+- **Remote control had one bullet and a link.** Telegram control — a real Forge
+  session in a private chat, with approval gates resolvable from either the
+  phone or the desktop, live agent and compaction progress, attachments, and a
+  queue you can steer — was a single line at the bottom of Highlights. It now
+  has a section: the two gates (exact-ID pairing, private chats only, plus an
+  enrolled Google Authenticator-compatible TOTP whose QR is shown locally and
+  never sent through Telegram), the durability design that makes a dropped
+  connection re-deliver rather than lose, the full command list, and the fact
+  that the audit log is metadata only.
+
+- **"Why Forge" gained the two reasons it was missing** — the depth of the tool
+  surface, and that Forge follows you out of the room.
+
 ## 0.15.2
 
 - **The releases page stopped at v0.12.29 in July while 0.13, 0.14 and 0.15

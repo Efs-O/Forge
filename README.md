@@ -24,6 +24,12 @@ available only when you explicitly configure them.
 - **Bring the runtime you prefer.** Use direct GGUF loading, local or
   daemon-routed Ollama, an explicitly configured OpenAI-compatible provider, or
   an already-authenticated Claude Code or Codex CLI.
+- **Depth, not a chat box.** Background execution, LSP-backed code
+  intelligence, terminal awareness in both directions, git, vision, and durable
+  memory — see [what the agent can do](#what-the-agent-can-do).
+- **It follows you out of the room.** Optional Telegram control with
+  authenticator-based session locking lets you run a turn, answer its approval
+  gate, and read the diff from your phone.
 
 Local execution is the default. Search, fetch, cloud providers, and external
 CLI agents run only when you configure or invoke them, and Forge sends no
@@ -62,8 +68,12 @@ telemetry, analytics, or auto-update pings.
 - Optional Tavily or Brave web search with keys stored in VS Code SecretStorage
 - Local semantic code search and reindex support
 - External MCP tool servers: bridge tools from any MCP stdio server into the agent's tool catalog with explicit capability classification
-- Optional private-owner remote control through Telegram, with local pairing and
-  Google Authenticator-compatible session locking; see [remote control setup and security](docs/REMOTE_CONTROL.md)
+- Optional private-owner remote control through Telegram: local pairing,
+  Google Authenticator-compatible session locking, approval gates and live
+  progress on your phone — see [run it from your phone](#run-it-from-your-phone)
+- LSP-backed code intelligence: definitions, references, implementations,
+  diagnostics, code actions, and symbol rename through VS Code's own language servers
+- Durable agent memory across sessions (`remember` / `recall`)
 
 ## What's New
 
@@ -126,6 +136,108 @@ Highlights since the 0.12 line. Full detail, every release, in
   and releasing a borrowed model no longer strands its owner.
 - Worker dispatch removed — `dispatch_workers` and `list_worker_models` are gone.
 - Clean production and development dependency audits.
+
+## What the agent can do
+
+More than sixty native tools, all strict-schema, all permission-gated, and all
+advertised per round rather than per turn — so a capability you enable becomes
+usable immediately. Groups an agent rarely needs are demand-loaded through
+`load_tool_group` and cost no context until called.
+
+**Files and edits.** `read_file`, `write_file`, `append_file`, `edit_file` with
+batched `edits[]`, `apply_line_edits`, `insert_code`, `create_directory`,
+`move_file`, `list_directory`. `delete_file` moves to the recycle bin rather
+than destroying. Every write is checkpointed and shown as a diff.
+
+**Code intelligence, through VS Code's own language servers** — not grep
+heuristics. `go_to_definition`, `find_references`, `find_implementations`,
+`get_hover`, `get_document_symbols`, `get_workspace_symbols`,
+`get_diagnostics`, `get_code_actions`, `apply_code_action`, `rename_symbol`,
+`format_file`. The agent sees the same analysis your editor does, so it answers
+"who implements this?" instead of guessing from a name.
+
+**Search.** `search_code` and `find_files` (both ripgrep — one index, so they
+cannot disagree), plus `search_codebase` for local semantic search over your
+own embeddings.
+
+**Background execution.** `exec_command` starts a long-running command and
+returns immediately; `monitor_execution` reads its output as it accumulates,
+`list_executions` recovers an id the agent lost, `stop_execution` ends it. Also
+`wait`, for the gap nothing else covers: giving a dev server you just launched
+or a file you just wrote a moment to become observable, instead of retrying a
+check that cannot succeed yet.
+
+**Terminal awareness, in both directions.** `run_terminal` pastes into your
+real terminal and reports how it turned out via shell integration. The agent
+also *sees the commands you run yourself* — including the ones that failed — so
+it corrects them in chat instead of asking you to paste output it already has.
+`query_powershell` and `run_build` / `run_tests` / `run_workspace_task` /
+`list_workspace_tasks` cover the structured cases.
+
+**Git.** `git_status`, `git_diff`, `git_log`, `git_blame`, `git_show` (which
+reads a file at any past commit), `stage`, `commit`, `create_branch`,
+`switch_branch`.
+
+**Editor context.** `get_editor_context` lets the agent read the file and
+selection you are actually looking at; `replace_selection` and `show_diff`
+write back into it.
+
+**Vision.** `view_image` for screenshots and diagrams, `view_video` for frames
+sampled out of a workspace clip (needs ffmpeg).
+
+**Memory that outlives the conversation.** `remember`, `recall`, and
+`list_memories` give the agent durable notes across sessions, separate from
+transcript history.
+
+**A task plan that survives compaction.** `update_plan` records the work as
+conversation state, re-injected verbatim every round and never summarized — so
+a context compaction costs at most one stale item instead of the whole thread.
+
+**Reaching you.** `notify_user` and `show_notification` reach whichever surface
+started the turn — the sidebar, or your phone. `ask_user` asks a real question.
+
+**Web, when you configure it.** `web_search` (Tavily or Brave, your key) and
+`web_fetch`.
+
+## Run it from your phone
+
+Optional, off by default, and it opens no inbound port: Forge makes an
+**outbound** connection to Telegram, and VS Code has to stay running. Full
+setup and threat model in
+[remote control](docs/REMOTE_CONTROL.md).
+
+Once paired you have a real Forge session in a private chat — send a prompt,
+watch live agent and compaction progress, resolve approval gates from the
+phone or the desktop (first resolution wins), and send attachments.
+
+**Locked behind two gates.** One exactly-matched provider user ID is paired,
+private chats only, group and channel messages fail closed. Pairing is an
+eight-digit one-time code that expires in five minutes and stops accepting
+guesses after five tries. On top of that, an enrolled
+**Google Authenticator-compatible TOTP secret**: the QR is displayed locally and
+never sent through Telegram, the session starts locked after every reload,
+re-locks on an inactivity timeout you set with `/timeout`, and `/lock` ends it
+on demand. Bot token and owner ID live in SecretStorage; the session and its
+replay protection are memory-only.
+
+**Built to survive the transport.** Prompts, deduplication records, and the
+provider cursor are durable, and the update offset advances only after Forge
+has genuinely accepted, handled, rejected or recognised an event as a
+duplicate — a dropped connection re-delivers rather than loses, and a
+re-delivery is recognised rather than run twice. Final responses go out through
+an at-least-once outbox. One fenced lease stops two VS Code windows consuming
+the same bot.
+
+**Commands.** `/status`, `/context`, `/stop`, `/steer <prompt>` (jumps the
+queue and interrupts the active turn), `/new`, `/list`, `/resume`, `/models`,
+`/model`, `/queue`, `/drop`, `/unload`, `/restart`, `/reload`, `/compact`,
+`/lock`, `/timeout`, `/clanker on|off`, `/workspace list`. Telegram shows the
+main ones in its native command menu.
+
+The audit log is metadata only — timestamps, channel, action, request id, and
+truncated identity hashes. No prompt text, no responses, no secrets, no paths.
+
+WhatsApp exists as a separately opt-in experimental linked-device adapter.
 
 ## Requirements
 
