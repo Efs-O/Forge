@@ -1,9 +1,17 @@
 import React from 'react';
 import { formatTokens } from '../../../src/util/formatTokens';
 
+export interface WorkspaceInfo {
+  name: string;
+  path: string;
+  extraRoots: number;
+  stale: boolean;
+}
+
 interface Props {
   tokenUsed: number;
   tokenMax: number;
+  workspace?: WorkspaceInfo | undefined;
 }
 
 function budgetColor(used: number, max: number): string {
@@ -24,12 +32,35 @@ function budgetColor(used: number, max: number): string {
  * The budget stayed because it has to stay readable while scrolling, not only
  * when you look down to type.
  */
-export function Header({ tokenUsed, tokenMax }: Props): React.ReactElement {
+export function Header({ tokenUsed, tokenMax, workspace }: Props): React.ReactElement {
   const showBudget = tokenMax > 0;
   const fillPct = tokenMax > 0 ? Math.min(100, (tokenUsed / tokenMax) * 100) : 0;
 
   return (
     <div id="forge-header">
+      {workspace && (
+        <div
+          id="workspace-root"
+          className={workspace.stale ? 'stale' : undefined}
+          title={[
+            workspace.path || 'No folder is open - relative paths will not resolve.',
+            workspace.extraRoots > 0
+              ? `+${workspace.extraRoots} more folder(s); tools only use this first one.`
+              : '',
+            workspace.stale
+              ? 'The folder list changed since Forge started. Reload the window so tools follow it.'
+              : '',
+          ]
+            .filter(Boolean)
+            .join('\n')}
+        >
+          <span id="workspace-root-name">{workspace.name || 'no folder'}</span>
+          {workspace.extraRoots > 0 && (
+            <span id="workspace-root-extra">+{workspace.extraRoots}</span>
+          )}
+          {workspace.stale && <span id="workspace-root-stale">reload needed</span>}
+        </div>
+      )}
       {showBudget && (
         <div
           id="token-budget"

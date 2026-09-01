@@ -31,7 +31,7 @@ export enum SymbolKind {
 }
 
 export const workspace = {
-  workspaceFolders: [] as Array<{ uri: { fsPath: string } }>,
+  workspaceFolders: [] as Array<{ uri: { fsPath: string }; name?: string }>,
   getConfiguration: (_section?: string) => ({
     get: <T>(_key: string, fallback?: T): T | undefined => fallback,
   }),

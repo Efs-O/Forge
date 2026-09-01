@@ -251,6 +251,27 @@ export interface SessionSyncMsg {
   >;
 }
 
+/**
+ * Which folder this window's tools actually resolve against.
+ *
+ * Every `path`, `cwd`, and glob resolves against `workspaceFolders[0]`, which
+ * is not always the folder the user believes they opened — a multi-root
+ * workspace listing another project first silently aims the whole agent at it.
+ * The header shows this so the answer is visible before a turn runs, not after
+ * the model reports a surprising root.
+ */
+export interface WorkspaceInfoMsg {
+  type: 'workspaceInfo';
+  /** Basename of `workspaceFolders[0]`, or '' when no folder is open. */
+  name: string;
+  /** Absolute path of `workspaceFolders[0]`, for the hover title. */
+  path: string;
+  /** Count of additional roots; > 0 means the folder order is load-bearing. */
+  extraRoots: number;
+  /** True once the roots changed since activation — the captured root is stale. */
+  stale: boolean;
+}
+
 export type HostToWebview =
   | TokenMsg
   | NoticeMsg
@@ -276,7 +297,8 @@ export type HostToWebview =
   | ThreadReadStateChangedMsg
   | SessionSyncMsg
   | FileDiffMsg
-  | ClankerChangedMsg;
+  | ClankerChangedMsg
+  | WorkspaceInfoMsg;
 
 // ── Webview → Host ────────────────────────────────────────────────────────────
 

@@ -20,6 +20,7 @@ export interface WebviewActions {
   postModels: () => void;
   postSessionSync: () => void;
   postTokenBudget: () => void;
+  postWorkspaceInfo: () => void;
   isBackendReady: () => boolean;
   getClankerMode: () => boolean;
   send: (text: string, attachments?: AttachmentData[], conversationId?: string) => void;
@@ -55,6 +56,8 @@ export function routeWebviewMessage(actions: WebviewActions, msg: WebviewToHost)
       // Without this the bar reads 0 until the next turn completes, and the
       // context warning cannot fire on the first turn after a window reload.
       actions.postTokenBudget();
+      // Which root the tools will aim at, before the first turn rather than after.
+      actions.postWorkspaceInfo();
       if (actions.isBackendReady()) actions.post({ type: 'ready' });
       actions.post({ type: 'clankerChanged', enabled: actions.getClankerMode() });
       break;

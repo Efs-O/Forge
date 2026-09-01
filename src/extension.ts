@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import { UserQuestionService } from './sidebar/UserQuestionService';
 import { UserNotificationService } from './sidebar/UserNotificationService';
 import { SidebarProvider } from './sidebar/SidebarProvider';
+import { watchWorkspaceFolders } from './sidebar/workspaceInfo';
 import { BackendPool } from './backend/BackendPool';
 import { disposeServerChannel } from './backend/DirectBackend';
 import { ControlServer } from './backend/ControlServer';
@@ -348,6 +349,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.window.registerWebviewViewProvider(SidebarProvider.viewId, sidebarProvider, {
       webviewOptions: { retainContextWhenHidden: true },
     }),
+    watchWorkspaceFolders(workspaceRoot, () => sidebarProvider.postWorkspaceInfo()),
     vscode.workspace.onDidSaveTextDocument((document) => {
       indexManager.markDirty(document.uri.fsPath);
     }),

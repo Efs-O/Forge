@@ -14,6 +14,7 @@ overlaps with an existing owner, extend the owner instead.
 | Webview lifecycle + message bridge entry   | `src/sidebar/SidebarProvider.ts`     |
 | Webview message routing                    | `src/sidebar/webviewMessageRouter.ts`|
 | Outbound webview payloads + status metrics  | `src/sidebar/sidebarPayloads.ts`     |
+| Active workspace root + folder-change watch | `src/sidebar/workspaceInfo.ts`       |
 | Webview crash/diagnostic relay to host log  | `src/sidebar/webviewDiagnostics.ts`  |
 | Auto vs manual compaction resume policy     | `src/sidebar/compactionPolicy.ts`    |
 | Generation-event session timing             | `src/sidebar/sessionTimerWiring.ts`  |

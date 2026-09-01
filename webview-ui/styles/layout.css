@@ -148,3 +148,41 @@ body {
   background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.1));
   color: var(--vscode-foreground);
 }
+
+/* ── Active workspace root ──────────────────────────────────────────────── */
+
+/*
+ * Static by nature — the root cannot change without a window reload — so this
+ * row never collapses or re-expands, and does not reintroduce the transcript
+ * shifting that removed the old header contents.
+ */
+#workspace-root {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 4px 10px 0;
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+  overflow: hidden;
+  user-select: none;
+}
+
+#workspace-root-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#workspace-root-extra {
+  flex-shrink: 0;
+  opacity: 0.75;
+}
+
+#workspace-root.stale #workspace-root-name,
+#workspace-root-stale {
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+#workspace-root-stale {
+  flex-shrink: 0;
+}

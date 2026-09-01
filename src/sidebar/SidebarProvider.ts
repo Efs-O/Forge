@@ -32,6 +32,7 @@ import {
 } from './sidebarPayloads';
 import { runManualCompactResume } from './compactionPolicy';
 import type { CompactionPolicyDeps } from './compactionPolicy';
+import { workspaceInfoMessage } from './workspaceInfo';
 import { buildWebviewHtml } from './WebviewBuilder';
 import type { IndexManager } from '../search/IndexManager';
 import type { SessionTimeSnapshot } from '../vscode/SessionTimeStatusBar';
@@ -90,7 +91,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private readonly events: SidebarProviderEvents = {},
     forgeLoader?: ForgeInstructionsLoader,
     secrets?: vscode.SecretStorage,
-    workspaceRoot?: string,
+    // Kept as a field so `postWorkspaceInfo` can tell a live root apart from
+    // the one every by-value consumer was constructed with.
+    private readonly workspaceRoot?: string,
     getConfigPath?: () => string,
     cliSessions?: CliSessionRegistry,
   ) {
@@ -330,6 +333,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.view?.webview.postMessage(msg);
   }
 
+  postWorkspaceInfo(): void {
+    this.post(workspaceInfoMessage(this.workspaceRoot ?? ''));
+  }
+
   private postSessionSync(): void {
     this.post(
       buildSessionSyncMessage(this.sidebar, this.agentLoop.getStreamingIds(), (conversation) =>
@@ -353,15 +360,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.budget.publish(this.getActive());
   }
 
-  private compactionDeps(): CompactionPolicyDeps {
-    return {
-      post: (msg) => this.post(msg),
-      send: async (text, convId, options) => {
-        await this.send.send(text, undefined, convId, options);
-      },
-    };
-  }
-
   private async autoCompact(
     conv: ConversationRuntime,
     chain: RequestChainContext,
@@ -382,7 +380,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private resumeAfterManualCompact(conversationId: string, reason: string): Promise<void> {
-    return runManualCompactResume(this.compactionDeps(), conversationId, reason);
+    const deps: CompactionPolicyDeps = {
+      post: (msg) => this.post(msg),
+      send: async (text, convId, options) => {
+        await this.send.send(text, undefined, convId, options);
+      },
+    };
+    return runManualCompactResume(deps, conversationId, reason);
   }
 
   private async interruptForSteering(conversationId: string): Promise<void> {
@@ -450,6 +454,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         postModels: () => this.postModels(),
         postSessionSync: () => this.postSessionSync(),
         postTokenBudget: () => this.postTokenBudget(),
+        postWorkspaceInfo: () => this.postWorkspaceInfo(),
         isBackendReady: () => this.pool.isAnyReady(),
         getClankerMode: () => this.agentLoop.getClankerMode(),
         send: (text, attachments, conversationId) => {

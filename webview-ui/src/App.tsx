@@ -16,7 +16,7 @@ import {
   selectCheckpointPending,
 } from './reducer';
 export type { AppMessage } from './reducer';
-import { Header } from './components/Header';
+import { Header, type WorkspaceInfo } from './components/Header';
 import { MessageList } from './components/MessageList';
 import { CheckpointBar } from './components/CheckpointBar';
 import { diffStats } from './components/DiffBlock';
@@ -50,6 +50,7 @@ export function App(): React.ReactElement {
   } | null>(null);
   const [tokenUsed, setTokenUsed] = useState(0);
   const [tokenMax, setTokenMax] = useState(0);
+  const [workspace, setWorkspace] = useState<WorkspaceInfo | undefined>(undefined);
   const [prefillText, setPrefillText] = useState<string | null>(null);
   const [historyExpanded, setHistoryExpanded] = useState(false);
   // Conversations restored from an earlier window session, snapshotted once at
@@ -97,6 +98,14 @@ export function App(): React.ReactElement {
           break;
         case 'ready':
           dispatch({ type: 'READY', convId: msg.conversationId });
+          break;
+        case 'workspaceInfo':
+          setWorkspace({
+            name: msg.name,
+            path: msg.path,
+            extraRoots: msg.extraRoots,
+            stale: msg.stale,
+          });
           break;
         case 'backendStarting':
           dispatch({ type: 'BACKEND_STARTING', message: msg.message, convId: msg.conversationId });
@@ -399,7 +408,7 @@ export function App(): React.ReactElement {
 
   return (
     <div id="forge-root">
-      <Header tokenUsed={tokenUsed} tokenMax={tokenMax} />
+      <Header tokenUsed={tokenUsed} tokenMax={tokenMax} workspace={workspace} />
       <aside id="chats-panel" aria-label="Forge sessions">
         {!state.sessionHydrated && (
           <span id="chats-loading" role="status">
