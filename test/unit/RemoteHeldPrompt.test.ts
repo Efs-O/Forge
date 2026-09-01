@@ -184,6 +184,44 @@ describe('held remote prompt', () => {
     await controller.stop();
   });
 
+  it('does not hold a command, and never replays one after the code', async () => {
+    const { controller, channel, forgeHost, code } = await enrolledRig();
+
+    await expect(
+      channel.emit(event({ providerMessageId: 'p1', text: '/reload' })),
+    ).resolves.toEqual({ kind: 'handled' });
+    expect(channel.sent.some((item) => item.text.includes('Your prompt is held'))).toBe(false);
+    expect(channel.sent.some((item) => item.text.includes('commands are not held'))).toBe(true);
+
+    // The code authenticates and nothing else: /reload must not fire from a
+    // keystroke the user made before they were even logged in.
+    await expect(
+      channel.emit(event({ providerMessageId: 'auth', text: code })),
+    ).resolves.toEqual({ kind: 'handled' });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(forgeHost.send).not.toHaveBeenCalled();
+    expect(channel.sent.some((item) => item.text.includes('running your held prompt'))).toBe(false);
+    expect(channel.sent.some((item) => item.text.includes('reloading'))).toBe(false);
+    await controller.stop();
+  });
+
+  it('still holds /steer, which carries a prompt', async () => {
+    const { controller, channel, forgeHost, code } = await enrolledRig();
+
+    await channel.emit(event({ providerMessageId: 'p1', text: '/steer rewrite the loop' }));
+    expect(channel.sent.some((item) => item.text.includes('Your prompt is held'))).toBe(true);
+    await channel.emit(event({ providerMessageId: 'auth', text: code }));
+    await vi.waitFor(() =>
+      expect(forgeHost.send).toHaveBeenCalledWith(
+        'c1',
+        'rewrite the loop',
+        undefined,
+        expect.objectContaining({ remoteRequestId: expect.any(String) }),
+      ),
+    );
+    await controller.stop();
+  });
+
   it('does not hold a prompt from a sender who is not the owner', async () => {
     const { controller, channel, forgeHost } = await enrolledRig();
     await channel.emit(

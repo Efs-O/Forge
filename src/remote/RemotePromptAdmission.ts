@@ -42,6 +42,17 @@ export function parseSteerCommand(text: string): SteerCommand {
   return prompt ? { matched: true, text: prompt } : { matched: true };
 }
 
+/**
+ * True when inbound text is a control command rather than work for the agent.
+ *
+ * `/steer` is deliberately NOT one: it carries a prompt, so every rule that
+ * protects a prompt — holding it across a TOTP challenge, durable queue
+ * admission — has to apply to it too.
+ */
+export function isRemoteCommand(text: string): boolean {
+  return text.trim().startsWith('/') && !parseSteerCommand(text).matched;
+}
+
 /** Durable prompt admission shared by ordinary and priority steering messages. */
 export async function admitRemotePrompt(
   event: Extract<RemoteInboundEvent, { kind: 'text' }>,

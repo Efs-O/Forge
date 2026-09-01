@@ -858,6 +858,15 @@ describe('remote compaction progress notifications', () => {
   });
 
   it('reloads the window on /reload and rejects when reload is unavailable', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      await runReloadCommandCase();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  async function runReloadCommandCase(): Promise<void> {
     const state = await store();
     const channel = new FakeRemoteChannel();
     const reloadWindow = vi.fn(async () => undefined);
@@ -888,6 +897,10 @@ describe('remote compaction progress notifications', () => {
         'reload-1',
       ),
     ).resolves.toEqual({ kind: 'handled' });
+    // Deferred on purpose: the reload must not fire until the caller has
+    // written the control receipt, or the command is redelivered and reruns.
+    expect(reloadWindow).toHaveBeenCalledTimes(0);
+    await vi.advanceTimersByTimeAsync(1_000);
     expect(reloadWindow).toHaveBeenCalledTimes(1);
     expect(channel.sent).toContainEqual(
       expect.objectContaining({
@@ -914,7 +927,7 @@ describe('remote compaction progress notifications', () => {
       ),
     ).resolves.toEqual({ kind: 'rejected', reason: 'remote reload is unavailable' });
     expect(reloadWindow).toHaveBeenCalledTimes(1);
-  });
+  }
 
   it('keeps progress as complete when the result send throws after a successful compaction', async () => {
     const state = await store();

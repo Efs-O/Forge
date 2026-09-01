@@ -16,7 +16,7 @@ import { RemoteApprovalBridge } from './RemoteApprovalBridge';
 import { RemoteQuestionBridge } from './RemoteQuestionBridge';
 import type { RemoteAttachmentStore } from './RemoteAttachmentStore';
 import { RemoteAgentProgress } from './RemoteAgentProgress';
-import { admitRemotePrompt, parseSteerCommand } from './RemotePromptAdmission';
+import { admitRemotePrompt, isRemoteCommand, parseSteerCommand } from './RemotePromptAdmission';
 import { drainRemoteQueue } from './RemoteQueueDrain';
 import { RemotePendingPrompt } from './RemotePendingPrompt';
 
@@ -211,10 +211,18 @@ export class RemoteController {
     const gate = await this.auth.gate(event);
     if (gate.kind === 'challenge') {
       await this.audit?.record(event, 'authentication_challenge').catch(() => undefined);
-      // Hold the prompt rather than discarding it: the sender is already proven
-      // to be the enrolled owner, so only the second factor is outstanding, and
+      // Hold a PROMPT rather than discarding it: the sender is already proven to
+      // be the enrolled owner, so only the second factor is outstanding, and
       // retyping a long prompt on a phone is the whole cost of expiry.
-      if (event.kind === 'text') this.pending.hold(event);
+      //
+      // A command is never held. It costs nothing to retype, and holding one
+      // fires it at a moment its sender did not choose: `/reload` typed at a
+      // locked session came back with the code and reloaded the window, which
+      // locked the session again — the same command arriving twice from one
+      // keystroke. The reason a prompt is worth holding (it is expensive to
+      // reproduce) is exactly the reason a command is not.
+      const held = event.kind === 'text' && !isRemoteCommand(event.text);
+      if (held) this.pending.hold(event);
       const idleMinutes = this.options.inactivityTimeoutMinutes ?? 30;
       const cause =
         gate.reason === 'expired'
@@ -222,8 +230,11 @@ export class RemoteController {
           : 'authentication required';
       await this.channel.send(
         event.chatId,
-        `Forge: ${cause}. Your prompt is held and will run once you verify — ` +
-          'send your 6-digit code.',
+        held
+          ? `Forge: ${cause}. Your prompt is held and will run once you verify — ` +
+              'send your 6-digit code.'
+          : `Forge: ${cause}. Send your 6-digit code, then send the command again — ` +
+              'commands are not held.',
         { signal: this.abort.signal },
       );
       return { kind: 'handled' };
@@ -300,7 +311,7 @@ export class RemoteController {
     if (steer.matched && !steer.text) {
       return { kind: 'rejected', reason: 'usage: /steer <prompt>' };
     }
-    if (event.text.startsWith('/') && !steer.matched) {
+    if (isRemoteCommand(event.text)) {
       const result = await handleRemoteCommand(
         event,
         {

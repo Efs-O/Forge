@@ -3,6 +3,16 @@ import type { RemoteInboundDisposition, RemoteInboundEvent } from './types';
 
 type TextEvent = Extract<RemoteInboundEvent, { kind: 'text' }>;
 
+/**
+ * How long `/reload` waits before tearing the window down.
+ *
+ * Long enough for the durable control receipt and the transport's update
+ * cursor to be written by the code that runs after this command returns —
+ * both are small local writes. Short enough that the user, who has just been
+ * told the window is reloading, cannot tell it was deferred.
+ */
+const RELOAD_SETTLE_MS = 1_000;
+
 /** Queue/session commands split from model, workspace, and lifecycle controls. */
 export async function handleRemoteSessionCommand(
   command: string,
@@ -99,7 +109,16 @@ Notes:
     await context.channel.send(event.chatId, 'Forge: reloading the window…', {
       signal: context.signal,
     });
-    await context.reloadWindow();
+    // Detached, not awaited. The reload tears down the extension host, so
+    // anything after it never runs: awaiting it here killed the process before
+    // handleRemoteCommand could mark the control receipt completed and before
+    // the transport could commit its update cursor. The command was therefore
+    // redelivered on the next start, still un-receipted, and ran again.
+    // Returning first lets both land, after which a redelivery is recognised
+    // as already handled and dropped.
+    setTimeout(() => {
+      void context.reloadWindow?.();
+    }, RELOAD_SETTLE_MS).unref?.();
     return { kind: 'handled' };
   }
   if (command === '/queue') {
