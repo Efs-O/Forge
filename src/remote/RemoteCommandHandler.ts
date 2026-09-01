@@ -178,9 +178,12 @@ async function executeRemoteCommand(
         reason: `this chat is already in ${context.workspaceAliases[alias]}; /new alone starts a chat here`,
       };
     }
+    // Says what the silence that follows means: the VS Code window reloads, so
+    // this chat hears nothing until the new window's transport comes up and
+    // sends its own arrival receipt.
     await context.channel.send(
       event.chatId,
-      `Forge: switching to ${context.workspaceAliases[alias]}…`,
+      `Forge: switching to ${context.workspaceAliases[alias]}… the window reloads, so this chat goes quiet for a few seconds — I will message you when it is back.`,
       {
         signal: context.signal,
       },

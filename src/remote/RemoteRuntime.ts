@@ -1,6 +1,5 @@
 import * as path from 'path';
 import { randomUUID } from 'crypto';
-import { createHash } from 'crypto';
 import type * as vscode from 'vscode';
 import type { ForgeConfig } from '../config/types';
 import type { CompactionEvent } from '../sidebar/CompactionService';
@@ -9,6 +8,12 @@ import { RemoteAuth } from './RemoteAuth';
 import { RemoteController, type RemoteControllerOptions } from './RemoteController';
 import { RemoteRequestStore } from './RemoteRequestStore';
 import { resolveWorkspaceAliases, type WorkspaceAliasTarget } from './RemoteWorkspaceDiscovery';
+import {
+  announceWorkspaceArrivals,
+  recordWorkspaceHandoff,
+  resumeWorkspaceHandoffs,
+  workspaceIdFor,
+} from './RemoteWorkspaceHandoff';
 import { RemoteTransportLease } from './RemoteTransportLease';
 import type { RemoteChannel } from './types';
 import { RemoteAuditLog } from './RemoteAuditLog';
@@ -230,7 +235,11 @@ export class RemoteRuntime {
         config.remote.attachments.retain_days,
       );
     }
-    await this.resumeWorkspaceHandoffs();
+    const arrivals = await resumeWorkspaceHandoffs(
+      this.store,
+      this.options.workspaceId,
+      this.options.host,
+    );
     try {
       for (const channelName of ['telegram', 'whatsapp'] as const) {
         await this.startTransport(channelName, config);
@@ -240,6 +249,12 @@ export class RemoteRuntime {
       throw err;
     }
     this.appliedConfig = config;
+    await announceWorkspaceArrivals(arrivals, {
+      channelFor: (name) => this.active.get(name)?.channel,
+      displayNameFor: (alias) => this.workspaceAliases(config)[alias]?.display_name ?? alias,
+      totpEnrolled: (channel) => this.auth.totpEnrolled(channel),
+      notifyLocal: this.options.notifyLocal,
+    });
   }
 
   private canUpdateInPlace(config: ForgeConfig): boolean {
@@ -361,9 +376,7 @@ export class RemoteRuntime {
       // can mark which entry this chat is actually sitting in.
       ...(() => {
         const current = Object.entries(aliases).find(
-          ([, value]) =>
-            createHash('sha256').update(path.resolve(value.path)).digest('hex') ===
-            this.options.workspaceId,
+          ([, value]) => workspaceIdFor(value.path) === this.options.workspaceId,
         );
         // The name is answered from the open folder when no alias matches, so
         // "where am I?" never comes back blank just because this project was
@@ -410,30 +423,16 @@ export class RemoteRuntime {
     const target = this.workspaceAliases(config)[alias];
     if (!target || !this.options.openWorkspace)
       throw new Error(`workspace “${alias}” was not found.`);
-    const targetWorkspaceId = createHash('sha256').update(path.resolve(target.path)).digest('hex');
-    await this.store.beginWorkspaceHandoff({
-      channel: channel as 'telegram' | 'whatsapp' | 'fake',
+    await recordWorkspaceHandoff(
+      this.store,
+      this.options.workspaceId,
+      target,
+      alias,
+      channel,
       chatId,
-      sourceWorkspaceId: this.options.workspaceId,
-      targetWorkspaceId,
-      targetAlias: alias,
-    });
+    );
     await this.stopActive();
     await this.options.openWorkspace(target.path);
-  }
-
-  private async resumeWorkspaceHandoffs(): Promise<void> {
-    const handoffs = await this.store.claimWorkspaceHandoffs(this.options.workspaceId);
-    for (const handoff of handoffs) {
-      const conversation = await this.options.host.createConversation({ activate: false });
-      await this.store.setBinding({
-        channel: handoff.channel,
-        chatId: handoff.chatId,
-        workspaceId: this.options.workspaceId,
-        conversationId: conversation.id,
-      });
-      await this.store.completeWorkspaceHandoff(handoff.id);
-    }
   }
 
   private async stopTransport(name: string): Promise<void> {

@@ -711,6 +711,49 @@ describe('remote runtime lifecycle', () => {
     await runtime.dispose();
   });
 
+  it('announces arrival after a workspace switch and says the session locked', async () => {
+    const { directory } = await newStore();
+    const seed = new RemoteRequestStore(path.join(directory, 'remote-state-v2.json'));
+    await seed.load();
+    await seed.beginWorkspaceHandoff({
+      channel: 'telegram',
+      chatId: 'chat-a',
+      sourceWorkspaceId: 'other-workspace',
+      targetWorkspaceId: 'workspace',
+      targetAlias: 'qwen-testing',
+    });
+    const secrets = new MemorySecrets();
+    secrets.values.set('forge.remote.telegram.ownerId', 'owner');
+    // Enrolled TOTP is what makes the arriving window locked: sessions are
+    // memory-only, so the reload the switch performs always drops them.
+    secrets.values.set(
+      'forge.remote.telegram.totp',
+      JSON.stringify({ secret: 'A'.repeat(32), ownerId: 'owner', enrolledAt: 1 }),
+    );
+    const channel = new FakeRemoteChannel();
+    const runtime = new RemoteRuntime({
+      storageDirectory: directory,
+      workspaceId: 'workspace',
+      host: host(),
+      secrets: secrets as unknown as vscode.SecretStorage,
+      channelFactories: { telegram: () => channel },
+      notifyLocal: vi.fn(),
+    });
+
+    await runtime.applyConfig(
+      ForgeConfigSchema.parse({
+        models: [{ name: 'm', provider: 'ollama', endpoint: 'http://127.0.0.1:11434' }],
+        remote: { enabled: true, telegram: { enabled: true } },
+      }),
+    );
+
+    const arrival = channel.sent.find((message) => message.text.startsWith('Forge: now in'));
+    expect(arrival?.chatId).toBe('chat-a');
+    expect(arrival?.text).toContain('qwen-testing');
+    expect(arrival?.text).toContain('6-digit code');
+    await runtime.dispose();
+  });
+
   it('keeps channel subscriptions on ordinary config reload and fully disposes', async () => {
     const { directory } = await newStore();
     const channels: FakeRemoteChannel[] = [];

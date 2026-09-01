@@ -19,6 +19,16 @@
   entries. Both fall back to the folder's own name when it is not an alias, so
   the answer is never blank.
 
+- **A workspace switch no longer goes silent.** `/new <n>` reloads the VS Code
+  window, and remote TOTP sessions are memory-only, so the chat arrived in the
+  new project locked — with nothing to say so. The last message was
+  “switching…” and the challenge only appeared if the user happened to send
+  something, so the sane reading was that the switch had hung. The window that
+  comes up now sends its own arrival receipt (“now in X — a new chat is bound
+  here”, plus the unlock instruction when TOTP is enrolled), which doubles as
+  the signal that the switch finished, and the pre-switch line says the chat
+  will go quiet for a few seconds first.
+
 - **`/new <number>` stopped blaming the wrong thing.** A number that resolved to
   nothing reported `workspace "26" was not found` — sending the user to look for
   a missing project when the real cause was a selection list that had expired
