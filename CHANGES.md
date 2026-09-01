@@ -1,5 +1,32 @@
 # Forge — Recent Changes
 
+## 0.15.4
+
+- **The Marketplace and Open VSX Overview pages were 38 KB of contributor
+  reference.** That page is `README.md`, and nearly half of it was material a
+  store visitor scrolls past forever: a forty-row VS Code command-palette table
+  (10.6% of the page on its own), the `npm run test:local-tools` harness with
+  its vitest environment variables, `cli_idle_timeout_ms` and LRU eviction
+  rules, and a llama.cpp log line about LCP slot similarity. It also carried
+  three full release sections duplicating a Changelog tab that has existed
+  since 0.15.1.
+
+  The page is now 25 KB and product-shaped: Why Forge, screenshots, what the
+  agent can do, run it from your phone — then setup. The reference moved
+  wholesale rather than being deleted, into `docs/COMMANDS.md`,
+  `docs/TOOL_SCHEMA_AUDIT.md`, `docs/SHARED_RUNTIME.md` and
+  `docs/DELEGATION.md`, each linked from the summary that replaced it. Nothing
+  was lost; it stopped being the first thing a prospective user reads.
+
+  `docs/*` is gitignored with a per-file allowlist, so all four needed an
+  explicit `!` entry — untracked would have meant four 404s on the store page,
+  since `vsce` rewrites relative links to absolute GitHub URLs.
+
+  Added version, installs and license badges, which the page had never carried.
+  Every relative link and in-page anchor is verified to resolve — `vsce`
+  rewrites them to absolute GitHub URLs at package time, so a broken one ships
+  silently and only breaks on the store page.
+
 ## 0.15.3
 
 - **The README never said what the agent can do.** It documented backends,

@@ -1,5 +1,10 @@
 # Forge LLM
 
+[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/Efsoo.forge-llm?label=Marketplace&color=0066b8)](https://marketplace.visualstudio.com/items?itemName=Efsoo.forge-llm)
+[![Open VSX](https://img.shields.io/open-vsx/v/Efsoo/forge-llm?label=Open%20VSX&color=a60ee5)](https://open-vsx.org/extension/Efsoo/forge-llm)
+[![Installs](https://img.shields.io/visual-studio-marketplace/i/Efsoo.forge-llm?label=installs)](https://marketplace.visualstudio.com/items?itemName=Efsoo.forge-llm)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+
 > **The VS Code coding agent built for people who run their own models.**
 
 Load GGUF models through llama.cpp, share one loaded model across VS Code
@@ -77,65 +82,11 @@ telemetry, analytics, or auto-update pings.
 
 ## What's New
 
-Highlights since the 0.12 line. Full detail, every release, in
-[CHANGES.md](CHANGES.md).
-
-### 0.15 — a lighter prompt on every request
-
-- The system prompt lost 585 tokens with nothing removed from what the agent
-  knows: plan-following rules now ship attached to the plan itself rather than
-  sitting in every conversation that never records one, and a forensic recipe
-  needed once a month moved to a doc.
-- `ask_local_agent` stopped listing every configured model in its schema on
-  every turn (~285 tokens, 40% of it near-identical GGUF quant names). A new
-  `list_delegation_targets` returns the live list on demand, ranked by what
-  each target costs to call.
-- Delegating to a model that loads local weights now asks you first.
-  `max_simultaneous_models` counts slots, not gigabytes — on a single card a
-  second large GGUF passes every check and then thrashes, silently.
-- Remote `/reload` no longer runs twice, and a slash command is no longer held
-  across a TOTP challenge and fired at a moment you did not choose.
-
-### 0.14 — demand-loaded tools and a stable prompt prefix
-
-- MCP tool schemas are demand-loaded through `load_tool_group`, recovering
-  2382 tokens of starting context that every conversation used to pay.
-- The tool list is rebuilt every round rather than once per turn, so a group
-  loaded mid-turn is usable in the same turn.
-- Volatile turn context (active file, task plan) moved to the tail of the
-  prompt. Changing one line near the head cost a measured 4971 re-evaluated
-  tokens on a 4.9K prompt — llama.cpp cannot shift KV across a localized edit
-  for sliding-window or hybrid architectures, which is everything Forge runs
-  locally.
-- New `wait` tool for the gap `monitor_execution` does not cover, and
-  `notify_user` so the agent can reach the chat that started the turn.
-- The agent can read the editor you are looking at, find implementations of an
-  interface or method, and read a file at a past commit.
-- `delete_file` moves to the recycle bin rather than destroying.
-- The agent sees the commands you run in your own terminal and how the ones it
-  pasted turned out, instead of asking you to paste output it already has.
-- Remote control gained a complete authenticated phone workflow: TOTP sessions,
-  inactivity locking, queue steering, attachment handoff, `/reload`, and
-  auto-compaction recovery for context-exhausted remote turns.
-- Stopping the backend no longer leaks a llama.cpp port.
-
-### 0.13 — background execution, and a UI that says what is happening
-
-- Background execution: start a long command, keep working, and read its
-  output as it goes (`exec_command`, `monitor_execution`, `list_executions`,
-  `stop_execution`). Truncated output can be read to the end, and a job that
-  fails to launch says so immediately instead of appearing to run.
-- `view_video` samples frames from a workspace clip for a vision model.
-- The model picker shows whether your next send pays a cold load, chats are
-  renameable from the history row, and the model selector sits by the composer.
-- An empty or restored tab says what the backend is doing rather than rendering
-  nothing.
-- A queued prompt names what it is waiting on.
-- Shared-runtime reliability: leases from crashed windows are reclaimed, Stop
-  cancels the generation instead of killing a server other windows are using,
-  and releasing a borrowed model no longer strands its owner.
-- Worker dispatch removed — `dispatch_workers` and `list_worker_models` are gone.
-- Clean production and development dependency audits.
+Forge ships a **Changelog** tab next to this one — that is the full account,
+every release. The short version of the last three lines: 0.15 cut the system
+prompt and made VRAM-loading delegation ask first, 0.14 made tool schemas
+demand-loaded and the prompt prefix stable, 0.13 added background execution and
+told you what the backend is doing.
 
 ## What the agent can do
 
@@ -312,62 +263,19 @@ shared_runtime:
   enabled: true
 ```
 
-With it on, a second VS Code window asking for a model another window already
-loaded **borrows that running llama-server** instead of spawning its own. One
-copy of the weights in VRAM. The borrowing window takes a lease; the owner will
-not shut the server down while a lease is outstanding, and a lease left behind
-by a window that crashed is reclaimed once its process is confirmed gone.
+A second VS Code window asking for a model another window already loaded
+**borrows that running llama-server** instead of spawning its own. One copy of
+the weights in VRAM. The borrowing window takes a lease; the owner will not shut
+down while a lease is outstanding, and a lease left behind by a crashed window
+is reclaimed once its process is confirmed gone.
 
-### What is and is not shared
-
-**Conversation history is not shared.** Each window keeps its own tabs, its own
-messages, its own checkpoints. Windows share the loaded weights, nothing else.
-
-**KV cache slots are shared, and this is the part that surprises people.**
-`--parallel` divides `--ctx-size` into N slots, and every borrowing window draws
-from that same pool. With the default single slot, two windows take turns on one
-cache, and llama.cpp picks up whatever the last conversation left behind by
-prefix similarity:
-
-```
-slot get_availabl: id 0 | selected slot by LCP similarity, f_sim_best = 0.949
-```
-
-Alternating windows evict each other's cached prefix, so each pays full prompt
-re-processing — an 8k prompt costs about 10 s of eval on a miss instead of near
-zero on a hit. Answers stay correct (the whole prompt is sent every time); you
-only lose the cache speedup.
-
-### How the token counter behaves
-
-Each window counts **its own** conversation against `perSlotContext()` —
-`num_ctx / n_parallel`, not `num_ctx`. Both windows compute the same per-slot
-ceiling and measure only their own messages, so compaction triggers per window
-on that window's history. A borrowing window has no idea the other exists.
-
-That number describes the _slot_. With `--parallel 1` there is one slot serving
-both windows: neither is over its limit, but they contend for one cache.
-Compaction stays correct — it simply cannot see the contention.
-
-### If you have VRAM to spare
-
-`max_simultaneous_models` is **not** the setting for this. It controls how many
-_different_ models Forge keeps loaded at once. Two windows asking for the same
-model resolve to the same runtime key and share one server regardless — that is
-the feature working as designed.
-
-Two real options:
-
-- **Independent servers** — set `shared_runtime.enabled: false`. Each window
-  spawns its own llama-server with its own full context and no contention, at
-  double the VRAM. That is precisely the cost sharing exists to avoid.
-- **Keep sharing, drop the thrashing** — raise `--parallel` to 2 or more so each
-  window gets its own slot. `--ctx-size` is the _total_ and gets divided, so
-  `--parallel 2` halves each window's context unless you raise `--ctx-size` to
-  match.
-
-For two windows on a large card the second option is the better trade: one copy
-of the weights, two independent caches.
+Conversations are not shared — each window keeps its own tabs, messages and
+checkpoints. **KV cache slots are**, and that is the part that surprises people:
+alternating windows evict each other's cached prefix and each pays full prompt
+re-processing. Answers stay correct; you lose the cache speedup.
+[How sharing behaves in detail](docs/SHARED_RUNTIME.md) covers the slot maths,
+what the token counter is really measuring, and why `max_simultaneous_models`
+is not the setting for this.
 
 ## Quick Start
 
@@ -510,47 +418,6 @@ compatible `mmproj_path`; for other providers, declare the `vision` capability
 only when that model accepts images. Forge stops before starting a request and
 shows this setup guidance when an image is attached to a text-only model.
 
-## Local tool-schema audit
-
-Forge includes an opt-in local-model harness that advertises the same native
-tool constructors assembled by `registerAllTools.ts`. It asks the configured
-model to emit calls but does not execute handlers or side effects.
-
-```powershell
-npm run test:local-tools -- --list
-npm run test:local-tools -- --base-url http://127.0.0.1:8080 --strict-args
-```
-
-`--strict-args` uses structural comparison, so JSON object-key order is
-irrelevant while array order remains significant. External MCP processes are
-never started by default. Use `--include-mcp` explicitly (and optionally
-`--config <path>`) to include configured MCP schemas in the inventory or model
-sweep. Reports identify native versus MCP tools and state that the mode is
-schema emission only.
-
-Generate the canonical native coverage matrix by merging dated evidence:
-
-```powershell
-npm run test:local-tools -- --list `
-  --coverage-report docs/TOOL_COVERAGE.md `
-  --model-evidence docs/live-reports/<dated-tool-report>.json `
-  --capability-evidence docs/live-reports/<dated-capability-report>.json
-```
-
-Add `--include-mcp` for a local, configuration-dependent MCP inventory. The
-coordinator, delegation, vision, and semantic-search checks are
-hardware-dependent and skipped in ordinary CI. Run them explicitly against a
-local model and embedding endpoint:
-
-```powershell
-$env:FORGE_LIVE_CAPABILITIES = '1'
-$env:FORGE_LIVE_ENDPOINT = 'http://127.0.0.1:8080'
-$env:FORGE_LIVE_EMBEDDING_ENDPOINT = 'http://127.0.0.1:8091'
-$env:FORGE_LIVE_MODEL = '<configured-model-name>'
-$env:FORGE_LIVE_REPORT = 'docs/live-reports/capabilities-YYYY-MM-DD-HHMM.json'
-npx vitest run test/live/GemmaCapabilities.live.test.ts --reporter=verbose
-```
-
 ## MCP Tool Servers
 
 Forge can consume tools from external [MCP](https://modelcontextprotocol.io) stdio servers. Configure them in `config.yaml`:
@@ -571,30 +438,28 @@ Tool results are capped at `max_result_chars` (default 24000) before entering th
 
 ## Local Delegation
 
-Set `permissions.agents.delegate: true` to let the primary agent use `ask_local_agent` for a bounded, read-only consultation with another configured model. A regular llama.cpp or Ollama delegate receives only the task and selected workspace files and has no tools. A `provider: cli` delegate instead uses the authenticated CLI's own read-only tool set, so it can inspect files and run non-mutating investigations but cannot edit the workspace. In both cases, the response is advisory analysis returned to the primary conversation.
+Set `permissions.agents.delegate: true` and the primary agent can use
+`ask_local_agent` for a bounded, read-only consultation with another configured
+model. A llama.cpp or Ollama delegate receives only the task and the workspace
+files you allow, and has no tools; a `provider: cli` delegate uses the
+authenticated CLI's own read-only tools, so it can investigate but not edit.
+Either way the answer comes back as advisory analysis. Delegation is capped at
+120 seconds and 24,000 characters, and a target that would load weights into
+local VRAM asks you first.
 
-Worker dispatch was removed in 0.13.1. `dispatch_workers`,
-`list_worker_models`, and the coordinator/worker role hierarchy are gone;
-`ask_local_agent` is the single delegation path. `permissions.agents.cloud_workers`
-is still accepted so existing configs keep booting, but it grants nothing.
+A `provider: cli` model (Claude Code, Codex) is also a **full-rights direct
+chat model**: Forge spawns the already-authenticated CLI locally and it runs
+with its OWN tools — Forge does not inject its registry or run its tool loop for
+it. Authentication is the CLI's own login, never a key held by Forge, and a
+full-access CLI chat is still covered by Forge's checkpoint engine so Keep/Undo
+can roll it back.
 
-A profile such as `model@reviewer` shares the same underlying backend as `model`.
-
-To consult a different direct llama.cpp model without evicting the primary model, configure enough slots, for example `max_simultaneous_models: 2`. Slot availability prevents Forge from evicting the primary backend, but it does not guarantee the machine has enough RAM or VRAM to load the second model. Delegation is limited to 120 seconds and returned analysis is capped at 24,000 characters.
-
-A model configured with `provider: cli` (Claude Code, Codex) is a full-rights external agent: Forge spawns the already-authenticated CLI locally, and it runs with its OWN tools — Forge does not inject its tool registry or run its own tool loop for it. `cli` models can be selected for direct sidebar chat and are also valid `ask_local_agent` targets.
-
-Direct CLI chat owns one warm process per conversation/model. Claude uses its stream-json stdin protocol; Codex uses `app-server --stdio`. Tabs remain isolated and may generate concurrently. A completed turn confirms the persistent Claude session ID or Codex thread ID. Claude cancellation terminates its process and cold-resumes the last confirmed session on the next turn; Codex uses `turn/interrupt` and keeps a cleanly interrupted app-server warm. Forge never silently replays a failed turn. Closing a conversation, idle eviction, or extension shutdown disposes the processes it owns. Delegation deliberately remains one-shot.
-
-Warm direct-chat processes are capped by `max_cli_agents` (default `4`, per VS Code window) and idle processes are disposed after `cli_idle_timeout_ms` (default `900000`, or 15 minutes). When the cap is full, Forge evicts only the least-recently-used idle session; if every session is busy, it surfaces a capacity error. By default Forge passes no model override, so the CLI resolves its own configured/default model. Set optional `cli_model` only when an explicit per-entry override is wanted. A separate extension's per-chat model picker is private state and is not treated as configuration.
-
-Authentication is entirely the CLI's own login (`claude`/`codex`), never a key stored in Forge. Before an unrestricted direct-chat CLI starts, Forge inventories the eligible workspace and streams a rollback baseline to Forge-owned disk storage in bounded chunks; it does not retain the workspace as an extension-host memory snapshot. Full-access direct CLI chats use the same checkpoint engine over their eligible workspace paths. Finalization hashes covered files and retains only preimages needed for changed paths. Forge always excludes `.forge` and `.forge-*` from workspace checkpoints.
-
-External CLI checkpoint controls are explicit VS Code settings. `forge.checkpoint.externalCliEnabled` defaults to `true`, `forge.checkpoint.maxBytes` defaults to 2 GiB, `forge.checkpoint.maxFiles` defaults to 100,000 files, and `forge.checkpoint.storagePath` optionally selects an absolute storage directory outside the workspace. Forge checks capacity before launch and refuses the turn with a measured error when safe rollback coverage cannot be established. As an explicit temporary opt-out, setting `forge.checkpoint.externalCliEnabled` to `false` skips the external CLI scan and checkpoint; Forge displays a warning and Keep/Undo cannot restore that CLI's changes. Forge-native tools retain per-file checkpoints. Reload the VS Code window after changing these settings.
+[Delegation and CLI agents in detail](docs/DELEGATION.md) covers warm-process
+lifecycle, cancellation, capacity limits, and the checkpoint settings.
 
 ## Slash Commands
 
-Type `/` in chat to open the built-in command list.
+Type `/` in chat to open the built-in command list. Forge also contributes commands to the VS Code palette — the full list is in [docs/COMMANDS.md](docs/COMMANDS.md).
 
 | Slash command | What it does                                     |
 | ------------- | ------------------------------------------------ |
@@ -614,68 +479,6 @@ Type `/` in chat to open the built-in command list.
 | `/reload`     | Reload the VS Code window                        |
 | `/initForge`  | Generate the active repository's `FORGE.md`      |
 | `/clanker`    | Toggle full-auto mode for confirmations          |
-
-## VS Code Commands
-
-These commands are currently contributed by the extension.
-
-### Core sidebar and backend
-
-| Command                       | Description                          |
-| ----------------------------- | ------------------------------------ |
-| `Forge: Open Sidebar`         | Open the Forge sidebar               |
-| `Forge: Start Backend`        | Start the active backend             |
-| `Forge: Stop Backend`         | Stop the active backend              |
-| `Forge: Show Backend Console` | Reveal backend logs or console       |
-| `Forge: Restart Backend`      | Restart the managed backend          |
-| `Forge: Open Config`          | Open the active config file          |
-| `Forge: Validate Config`      | Validate the active config           |
-| `Forge: Pick Model`           | Pick the active model                |
-| `Forge: Pick GGUF Model File` | Pick a GGUF file during setup        |
-| `Forge: Setup Wizard`         | Run the first-run or repair flow     |
-| `Forge: Unload Model`         | Stop all backends and release models |
-| `Forge: New Chat`             | Open a new conversation tab          |
-| `Forge: Clear Active Chat`    | Clear the active tab                 |
-| `Forge: Undo Last Turn`       | Restore the previous checkpoint      |
-| `Forge: Keep Changes`         | Accept the current checkpoint        |
-
-### Control-server commands
-
-| Command                                | Description                                  |
-| -------------------------------------- | -------------------------------------------- |
-| `Forge: Ensure Model (load on demand)` | Ask the control server to load a model       |
-| `Forge: Release Model`                 | Ask the control server to release a model    |
-| `Forge: Control Server Status`         | Show control-server status and active models |
-
-### Tokens, search, and setup helpers
-
-| Command                           | Description                         |
-| --------------------------------- | ----------------------------------- |
-| `Forge: Set Search API Key`       | Store a Tavily or Brave API key     |
-| `Forge: Set Cloud Provider Token` | Store a cloud-provider bearer token |
-
-### Editor and review helpers
-
-| Command                                   | Description                                  |
-| ----------------------------------------- | -------------------------------------------- |
-| `Forge: Explain Selection`                | Explain the active selection                 |
-| `Forge: Review Selection`                 | Review the active selection                  |
-| `Forge: Generate Tests For Selection`     | Draft tests for the selection                |
-| `Forge: Refactor Selection`               | Refactor the selection                       |
-| `Forge: Run Explain Selection`            | Execute the explain flow immediately         |
-| `Forge: Run Review Selection`             | Execute the review flow immediately          |
-| `Forge: Run Generate Tests For Selection` | Execute the test-generation flow immediately |
-| `Forge: Run Refactor Selection`           | Execute the refactor flow immediately        |
-| `Forge: Explain Diagnostic`               | Explain an editor diagnostic                 |
-| `Forge: Propose Fix For Diagnostic`       | Draft a fix for a diagnostic                 |
-| `Forge: Run Fix For Diagnostic`           | Execute a fix flow for a diagnostic          |
-| `Forge: Propose Fix For File Diagnostics` | Review diagnostics across the active file    |
-| `Forge: Use Current File As Context`      | Prefill context with the current file        |
-| `Forge: Use Selection As Context`         | Prefill context with the selection           |
-| `Forge: Use Open Tabs As Context`         | Prefill context from open tabs               |
-| `Forge: Pick Files For Context`           | Pick context files manually                  |
-| `Forge: Draft Plan In Scratch Document`   | Generate a planning scratch doc              |
-| `Forge: Draft Review In Scratch Document` | Generate a review scratch doc                |
 
 ## Checkpoints, Diffs, and Clanker Mode
 

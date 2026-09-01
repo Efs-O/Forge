@@ -2,7 +2,7 @@
   "name": "forge-llm",
   "displayName": "Forge LLM",
   "description": "A coding agent for people who run their own models: real llama.cpp/GGUF control, tools built for local context limits, Keep/Undo on every turn, no telemetry.",
-  "version": "0.15.3",
+  "version": "0.15.4",
   "publisher": "Efsoo",
   "icon": "assets/publisher-logo.png",
   "galleryBanner": {

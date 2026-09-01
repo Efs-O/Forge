@@ -42,6 +42,14 @@ docs/*
 !docs/live-reports/*.json
 !docs/OWNERS.md
 !docs/WORKSPACE_FORENSICS.md
+# Reference lifted out of README.md in 0.15.4 so the store page stops being
+# contributor documentation. README links to all four, and vsce rewrites those
+# links to absolute GitHub URLs at package time -- untracked here means a 404
+# on the Marketplace Overview page.
+!docs/COMMANDS.md
+!docs/TOOL_SCHEMA_AUDIT.md
+!docs/SHARED_RUNTIME.md
+!docs/DELEGATION.md
 !docs/SAFE_WORKER_TOOL_UPGRADE_PLAN.md
 !docs/DELEGATION_UNBLOCK_PLAN.md
 AUDIT_REPORT.md
