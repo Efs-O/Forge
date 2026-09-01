@@ -1,5 +1,30 @@
 # Forge — Recent Changes
 
+## 0.15.8
+
+- **`/workspace` lists on its own now.** The namespace had exactly one verb, so
+  `/workspace list` was ceremony: `/workspace` lists, `/workspace 2` pages, and
+  `/workspace list [page]` still parses so the namespace stays open for the
+  `create`/`confirm` subcommands the remote plan has queued behind it. Anything
+  else after `/workspace` is rejected rather than silently listed.
+
+- **`/workspace list <page>` never paged.** The command line was split with a
+  limit of two, so `/workspace list 3` arrived as `['/workspace', 'list']` and
+  the page number was thrown away — the page fallback printed in every list
+  footer always returned page 1. Commands now split whole.
+
+- **"Where am I?" is answerable.** A chat moved with `/new` could be sitting in
+  any project on disk and nothing said which. `/status` now leads with
+  `Workspace:`, and the `/workspace` list names the open folder under the
+  entries. Both fall back to the folder's own name when it is not an alias, so
+  the answer is never blank.
+
+- **`/new <number>` stopped blaming the wrong thing.** A number that resolved to
+  nothing reported `workspace "26" was not found` — sending the user to look for
+  a missing project when the real cause was a selection list that had expired
+  (they live 10 minutes) or a number outside its range. The three cases now say
+  which one happened, and an unavailable switch path says that instead.
+
 ## 0.15.7
 
 - **`/workspace list` was empty on every install.** Switching the Telegram

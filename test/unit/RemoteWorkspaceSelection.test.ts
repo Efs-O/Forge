@@ -3,6 +3,10 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
+import {
+  handleRemoteCommand,
+  type RemoteCommandContext,
+} from '../../src/remote/RemoteCommandHandler';
 import { RemoteRequestStore } from '../../src/remote/RemoteRequestStore';
 import {
   sendWorkspaceSelection,
@@ -142,5 +146,92 @@ describe('workspace selection', () => {
     await sendWorkspaceSelection(textEvent('/workspace list'), ctx);
     const selection = store.selection('fake', 'chat', 'workspaces');
     expect(selection?.values).toEqual(['forge', 'qwen']);
+  });
+});
+
+function commandContext(
+  channel: FakeRemoteChannel,
+  store: RemoteRequestStore,
+  aliases: Record<string, string>,
+  extra: Partial<RemoteCommandContext> = {},
+): RemoteCommandContext {
+  return {
+    channel,
+    store,
+    host: emptyHost,
+    workspaceId: 'ws',
+    signal: new AbortController().signal,
+    inactivityTimeoutMinutes: 30,
+    modelNames: [],
+    workspaceAliases: aliases,
+    switchWorkspace: async () => undefined,
+    ...extra,
+  };
+}
+
+describe('/workspace command shape', () => {
+  it('lists with no subcommand — the namespace has one verb', async () => {
+    const store = await requestStore();
+    const channel = new FakeRemoteChannel();
+    const ctx = commandContext(channel, store, { forge: 'Forge', qwen: 'Qwen Testing' });
+
+    await expect(
+      handleRemoteCommand(textEvent('/workspace'), ctx, 'ws-bare'),
+    ).resolves.toMatchObject({ kind: 'handled' });
+    expect(channel.selectionPageSends[0]?.text).toContain('1. forge — Forge');
+  });
+
+  it('pages from the bare form and from the explicit verb', async () => {
+    const store = await requestStore();
+    const channel = new FakeRemoteChannel();
+    const ctx = commandContext(channel, store, manyAliases(23));
+
+    await handleRemoteCommand(textEvent('/workspace 2'), ctx, 'ws-page-bare');
+    expect(channel.selectionPageSends[0]?.text).toContain('11. ws-11');
+
+    // The top-level split used to drop this page number on the floor, so the
+    // documented `/workspace list <page>` fallback silently returned page 1.
+    await handleRemoteCommand(textEvent('/workspace list 3'), ctx, 'ws-page-verb');
+    expect(channel.selectionPageSends[1]?.text).toContain('21. ws-21');
+  });
+
+  it('rejects an unknown subcommand rather than listing', async () => {
+    const store = await requestStore();
+    const channel = new FakeRemoteChannel();
+    const ctx = commandContext(channel, store, { forge: 'Forge' });
+
+    await expect(
+      handleRemoteCommand(textEvent('/workspace create'), ctx, 'ws-unknown'),
+    ).resolves.toMatchObject({ kind: 'rejected' });
+    expect(channel.selectionPageSends).toHaveLength(0);
+  });
+
+  it('says which workspace you are in, alias or not', async () => {
+    const store = await requestStore();
+    const channel = new FakeRemoteChannel();
+    const ctx = context(channel, store, { forge: 'Forge' });
+    await sendWorkspaceSelection(textEvent('/workspace'), {
+      ...ctx,
+      currentWorkspaceName: 'Qwen testing',
+    });
+    expect(channel.selectionPageSends[0]?.text).toContain('You are in: Qwen testing');
+  });
+
+  it('blames the expired list, not the workspace, when a number resolves to nothing', async () => {
+    const store = await requestStore();
+    const channel = new FakeRemoteChannel();
+    const ctx = commandContext(channel, store, manyAliases(30));
+
+    const expired = await handleRemoteCommand(textEvent('/new 26'), ctx, 'new-expired');
+    expect(expired).toMatchObject({ kind: 'rejected' });
+    expect((expired as { reason: string }).reason).toContain('expired');
+
+    await handleRemoteCommand(textEvent('/workspace 3'), ctx, 'new-list');
+    await expect(handleRemoteCommand(textEvent('/new 26'), ctx, 'new-ok')).resolves.toMatchObject({
+      kind: 'handled',
+    });
+
+    const outOfRange = await handleRemoteCommand(textEvent('/new 99'), ctx, 'new-range');
+    expect((outOfRange as { reason: string }).reason).toContain('1-30');
   });
 });

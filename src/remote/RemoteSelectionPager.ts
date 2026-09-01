@@ -21,6 +21,8 @@ export interface RemoteSelectionContext {
   workspaceAliases: Readonly<Record<string, string>>;
   /** The alias whose configured path is this window's root, when one matches. */
   currentWorkspaceAlias?: string | undefined;
+  /** Display name of the folder this window has open, alias or not. */
+  currentWorkspaceName?: string | undefined;
 }
 
 type TextEvent = Extract<RemoteInboundEvent, { kind: 'text' }>;
@@ -112,7 +114,7 @@ export async function sendWorkspaceSelection(
   if (page === undefined) {
     return {
       kind: 'rejected',
-      reason: `usage: /workspace list <page 1-${pageCount(values.length)}>`,
+      reason: `usage: /workspace [list] <page 1-${pageCount(values.length)}>`,
     };
   }
   const token = await context.store.issueSelection(
@@ -235,8 +237,14 @@ function renderPage(
         ? '/new <number>'
         : '/resume <number>';
   const fallback = pages > 1 ? ` Page fallback: ${commandFor(kind)} <page>.` : '';
+  // A workspace list that does not say where you are answers half the question:
+  // the "· current" marker only appears when the open folder is in the list.
+  const here =
+    kind === 'workspaces' && context.currentWorkspaceName
+      ? `\n\nYou are in: ${clip(context.currentWorkspaceName, 180)}`
+      : '';
   return {
-    text: `${heading}\n\n${entries.join('\n')}\n\nUse ${command}.${fallback} Selection expires in 10 minutes.`,
+    text: `${heading}\n\n${entries.join('\n')}${here}\n\nUse ${command}.${fallback} Selection expires in 10 minutes.`,
     controls: (token) => ({ kind, token, page, pageCount: pages }),
   };
 }
@@ -285,9 +293,9 @@ function pageCount(itemCount: number): number {
   return Math.ceil(itemCount / PAGE_SIZE);
 }
 
-function commandFor(kind: SelectionKind): '/list' | '/models' | '/workspace list' {
+function commandFor(kind: SelectionKind): '/list' | '/models' | '/workspace' {
   if (kind === 'conversations') return '/list';
-  return kind === 'models' ? '/models' : '/workspace list';
+  return kind === 'models' ? '/models' : '/workspace';
 }
 
 function kindLabel(kind: SelectionKind): 'conversation' | 'model' | 'workspace' {

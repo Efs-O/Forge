@@ -34,6 +34,8 @@ export interface RemoteControllerOptions {
   workspaceAliases: Readonly<Record<string, string>>;
   /** Alias whose configured path resolves to this window's root, if any. */
   currentWorkspaceAlias?: string | undefined;
+  /** Display name of the folder this window has open, alias or not. */
+  currentWorkspaceName?: string | undefined;
   switchWorkspace?: ((alias: string, channel: string, chatId: string) => Promise<void>) | undefined;
   inactivityTimeoutMinutes?: number;
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
@@ -304,6 +306,9 @@ export class RemoteController {
           ...(this.options.currentWorkspaceAlias
             ? { currentWorkspaceAlias: this.options.currentWorkspaceAlias }
             : {}),
+          ...(this.options.currentWorkspaceName
+            ? { currentWorkspaceName: this.options.currentWorkspaceName }
+            : {}),
         },
         remoteDedupKey(event.channel, event.chatId, event.providerMessageId),
       );
@@ -351,6 +356,9 @@ export class RemoteController {
           // but nothing joined the two.
           ...(this.options.currentWorkspaceAlias
             ? { currentWorkspaceAlias: this.options.currentWorkspaceAlias }
+            : {}),
+          ...(this.options.currentWorkspaceName
+            ? { currentWorkspaceName: this.options.currentWorkspaceName }
             : {}),
           notifyMute: {
             get: (chatId: string) => this.isNotifyOn(chatId),

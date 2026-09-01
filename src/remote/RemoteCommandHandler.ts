@@ -20,6 +20,8 @@ export interface RemoteCommandContext {
   workspaceAliases: Readonly<Record<string, string>>;
   /** The alias whose configured path is this window's root, when one matches. */
   currentWorkspaceAlias?: string | undefined;
+  /** Display name of the folder this window has open, alias or not. */
+  currentWorkspaceName?: string | undefined;
   /** Per-chat notify_user mute, backed by RemoteController's in-memory set. */
   notifyMute?: { get: (chatId: string) => boolean; set: (chatId: string, on: boolean) => void };
   switchWorkspace?: ((alias: string, channel: string, chatId: string) => Promise<void>) | undefined;
@@ -51,7 +53,10 @@ async function executeRemoteCommand(
   event: Extract<RemoteInboundEvent, { kind: 'text' }>,
   context: RemoteCommandContext,
 ): Promise<RemoteInboundDisposition> {
-  const [command, argument] = event.text.trim().split(/\s+/, 2);
+  // Split whole: `/workspace list 2` needs two operands, and a limit of 2 threw
+  // the page number away, so the documented page fallback never paged.
+  const [command, ...operands] = event.text.trim().split(/\s+/);
+  const argument = operands[0];
   const sessionCommand = await handleRemoteSessionCommand(command, argument, event, context);
   if (sessionCommand) return sessionCommand;
   if (command === '/clanker') {
@@ -140,8 +145,15 @@ async function executeRemoteCommand(
     return { kind: 'handled' };
   }
   if (command === '/workspace') {
-    const [subcommand, page] = argument ? argument.split(/\s+/) : [];
-    if (subcommand !== 'list') return { kind: 'rejected', reason: 'usage: /workspace list [page]' };
+    // `list` is the only verb, so requiring it was pure ceremony: bare
+    // `/workspace` lists, and `/workspace 2` pages, exactly like /list and
+    // /models. The verb still parses so the namespace stays open for the
+    // create/confirm subcommands the remote plan has queued behind it.
+    const [first, second] = operands;
+    const page = first === 'list' ? second : first;
+    if (page !== undefined && !/^\d+$/.test(page)) {
+      return { kind: 'rejected', reason: 'usage: /workspace [list] [page]' };
+    }
     return sendWorkspaceSelection(event, context, page);
   }
   if (command === '/new' && argument) {
@@ -149,11 +161,14 @@ async function executeRemoteCommand(
     // /resume <n>; the alias keeps working so a remembered name does not
     // depend on having listed first.
     const alias = resolveSelection(context, event, 'workspaces', argument) ?? argument;
-    if (!context.workspaceAliases[alias] || !context.switchWorkspace) {
-      return {
-        kind: 'rejected',
-        reason: `workspace “${argument}” was not found. Use /workspace list.`,
-      };
+    if (!context.workspaceAliases[alias]) {
+      // A number that resolves to nothing means the list expired or never ran,
+      // not that the workspace is missing — saying “not found” for a number the
+      // user just read off a list sends them looking for the wrong problem.
+      return { kind: 'rejected', reason: numberedSelectionMiss(context, event, argument) };
+    }
+    if (!context.switchWorkspace) {
+      return { kind: 'rejected', reason: 'workspace switching is unavailable in this window' };
     }
     // Switching costs a window reload and a fresh conversation, so doing it to
     // arrive where the chat already is would silently drop the session.
@@ -300,6 +315,21 @@ function resolveSelection(
   return selection && index >= 0 && index < selection.values.length
     ? selection.values[index]
     : undefined;
+}
+
+/** Why `/new <number>` found nothing: an expired list, an out-of-range number,
+ *  or a genuinely unknown alias are three different fixes. */
+function numberedSelectionMiss(
+  context: RemoteCommandContext,
+  event: Extract<RemoteInboundEvent, { kind: 'text' }>,
+  argument: string,
+): string {
+  if (!/^\d+$/.test(argument)) {
+    return `workspace “${argument}” was not found. Use /workspace.`;
+  }
+  const selection = context.store.selection(event.channel, event.chatId, 'workspaces');
+  if (!selection) return 'the workspace list expired; run /workspace again, then /new <number>';
+  return `pick 1-${selection.values.length} from the last /workspace list`;
 }
 
 function shortId(id: string): string {

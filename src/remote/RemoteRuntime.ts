@@ -365,7 +365,18 @@ export class RemoteRuntime {
             createHash('sha256').update(path.resolve(value.path)).digest('hex') ===
             this.options.workspaceId,
         );
-        return current ? { currentWorkspaceAlias: current[0] } : {};
+        // The name is answered from the open folder when no alias matches, so
+        // "where am I?" never comes back blank just because this project was
+        // reached outside the alias list.
+        const name = current
+          ? current[1].display_name
+          : this.options.workspaceRoot
+            ? path.basename(path.resolve(this.options.workspaceRoot))
+            : undefined;
+        return {
+          ...(current ? { currentWorkspaceAlias: current[0] } : {}),
+          ...(name ? { currentWorkspaceName: name } : {}),
+        };
       })(),
       switchWorkspace: (alias, channel, chatId) => this.handoff(config, alias, channel, chatId),
       inactivityTimeoutMinutes: remote.auth.inactivity_timeout_minutes,

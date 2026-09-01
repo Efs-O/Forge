@@ -28,7 +28,7 @@ export async function handleRemoteSessionCommand(
       `Forge commands:
 
 Session: /status · /context · /stop · /new · /list [page] · /resume <n-or-id> · /notify on|off
-Workspace: /workspace list [page] · /new <n-or-alias>
+Workspace: /workspace [page] · /new <n-or-alias>
 Queue: /queue · /drop <n|all> · /steer <prompt>
 Models: /models [page] · /model <n-or-name> · /unload · /restart
 Window: /compact · /lock · /reload · /timeout [1-1440|off] · /clanker on|off
@@ -40,7 +40,7 @@ Notes:
 • /reload fully reloads the VS Code window: it picks up a newly installed build, and drops a held prompt, the queue, and this session
 • /unload releases every loaded model and frees its memory, exactly like Unload Model in the sidebar; unlike /reload it refuses while a turn is running
 • /notify off silences agent notify_user messages for this chat until the window reloads
-• /new <n-or-alias> switches this chat to another configured workspace; /workspace list numbers them and marks the current one`,
+• /new <n-or-alias> switches this chat to another workspace; /workspace lists them, numbers them, and says which one you are in`,
       { signal: context.signal },
     );
     return { kind: 'handled' };
@@ -54,7 +54,12 @@ Notes:
     const conversation = status.conversations.find((item) => item.id === binding?.conversationId);
     await context.channel.send(
       event.chatId,
-      `Chat: ${conversation ? `${conversation.title} · ${conversation.id}` : 'none bound'}\n` +
+      // The workspace leads: a chat reached through /new could be sitting in
+      // any project on disk, and nothing else in the session says which.
+      `Workspace: ${context.currentWorkspaceName ?? 'unknown'}${
+        context.currentWorkspaceAlias ? ` (${context.currentWorkspaceAlias})` : ''
+      }\n` +
+        `Chat: ${conversation ? `${conversation.title} · ${conversation.id}` : 'none bound'}\n` +
         `Model: ${conversation?.activeModel ?? 'default'}\n` +
         `Forge: ${status.requestChains.length} active request(s), ${queued} queued here, ${status.streamingConversationIds.length} streaming, ${requests.unknown} crash-unknown, ${outbox.pending} notifications pending, ${outbox.abandoned} abandoned.\n` +
         `Context: ${describeBudget(binding && context.host.contextBudget(binding.conversationId))}\n` +

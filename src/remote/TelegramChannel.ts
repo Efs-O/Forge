@@ -83,7 +83,7 @@ export const TELEGRAM_BOT_COMMANDS = [
   { command: 'stop', description: 'Stop the current request' },
   { command: 'timeout', description: 'Show/set session timeout' },
   { command: 'unload', description: 'Free memory: release the model' },
-  { command: 'workspace', description: 'List workspace aliases' },
+  { command: 'workspace', description: 'List workspaces and show where you are' },
 ] as const;
 
 export interface TelegramChannelOptions {

@@ -61,8 +61,10 @@ Remote commands are `/help`, `/commands`, `/status`, `/context`, `/stop`,
 `/model <number-or-name>`, `/queue`, `/drop <number|all>`, `/unload`,
 `/restart`, `/compact`, `/lock`, `/timeout [1-1440|off]`, and `/clanker on|off`.
 Telegram publishes the main commands in its native slash-command menu.
-Configured workspace aliases are listed with
-`/workspace list` and opened with `/new <alias>`. `/stop` cancels the active
+Workspaces are listed with `/workspace` (`/workspace <page>` pages, and
+`/workspace list` still parses) and opened with `/new <number-or-alias>`. The
+list marks the entry this chat is in and names the open folder underneath it;
+`/status` reports the same workspace on its first line. `/stop` cancels the active
 addressed request; it does not unload the model, and durable queued requests
 remain queued. `/steer` first saves its prompt durably, interrupts only the
 active turn, and runs before ordinary queued prompts. `/drop` changes queued

@@ -182,7 +182,7 @@ the same bot.
 **Commands.** `/status`, `/context`, `/stop`, `/steer <prompt>` (jumps the
 queue and interrupts the active turn), `/new`, `/list`, `/resume`, `/models`,
 `/model`, `/queue`, `/drop`, `/unload`, `/restart`, `/reload`, `/compact`,
-`/lock`, `/timeout`, `/clanker on|off`, `/workspace list`. Telegram shows the
+`/lock`, `/timeout`, `/clanker on|off`, `/workspace`. Telegram shows the
 main ones in its native command menu.
 
 The audit log is metadata only — timestamps, channel, action, request id, and
