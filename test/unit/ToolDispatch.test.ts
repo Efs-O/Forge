@@ -31,6 +31,14 @@ vi.mock('vscode', () => {
     },
     window: {
       showTextDocument: vi.fn().mockResolvedValue(undefined),
+      // ToolDispatch logs diff-render failures, and the logger builds its
+      // output channel at import time.
+      createOutputChannel: vi.fn(() => ({
+        appendLine: vi.fn(),
+        clear: vi.fn(),
+        show: vi.fn(),
+        dispose: vi.fn(),
+      })),
     },
     Uri: {
       file: vi.fn((s: string) => ({ fsPath: s })),
@@ -281,6 +289,42 @@ describe('ToolDispatch', () => {
     } finally {
       fs.rmSync(target, { force: true });
     }
+  });
+
+  it('reports a directory move as success instead of the diff render EISDIR', async () => {
+    // `move_file` renames directories fine, but the post-mutation diff read the
+    // destination with readFileSync and threw EISDIR, which the dispatcher
+    // turned into a tool failure for a move that had already happened.
+    const target = path.join(WS, `tool-dispatch-dir-${Date.now()}`);
+    fs.mkdirSync(target, { recursive: true });
+    // A destination that did not exist before the turn snapshots as `missing`,
+    // which readSnapshotContent reports as null — the case that got past the
+    // early return.
+    (checkpoints.readSnapshotContent as ReturnType<typeof vi.fn>).mockReturnValue(null);
+    toolRegistry.register({
+      definition: {
+        type: 'function',
+        function: { name: 'move_file', description: 'Move', parameters: { type: 'object' } },
+      },
+      permission: 'write',
+      mutation: { paths: () => [target], showDiff: true },
+      handler: vi.fn().mockResolvedValue(`Moved to ${target}`),
+    });
+    const messages: Array<{ role: string; content: string }> = [];
+
+    try {
+      await dispatch.dispatch(
+        [makeToolCall('move_file', { source: 'x', destination: target })],
+        allowed,
+        messages as never,
+      );
+    } finally {
+      fs.rmSync(target, { recursive: true, force: true });
+    }
+
+    expect(messages.at(-1)?.content).toContain('Moved to');
+    expect(messages.at(-1)?.content).not.toContain('EISDIR');
+    expect(failureTracker.record).not.toHaveBeenCalled();
   });
 
   it('snapshots a structured multi-edit exactly once before its handler', async () => {

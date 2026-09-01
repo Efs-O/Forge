@@ -46,17 +46,18 @@ export function makeMoveFileTool(): RegisteredTool {
       function: {
         name: 'move_file',
         description:
-          'Move or rename a file. Destination parent directories are created automatically.',
+          'Move or rename a file or a directory (a directory moves with all its contents). ' +
+          'Destination parent directories are created automatically.',
         parameters: {
           type: 'object',
           properties: {
             source: {
               type: 'string',
-              description: 'Source file path (absolute or workspace-relative).',
+              description: 'Source file or directory path (absolute or workspace-relative).',
             },
             destination: {
               type: 'string',
-              description: 'Destination file path (absolute or workspace-relative).',
+              description: 'Destination file or directory path (absolute or workspace-relative).',
             },
           },
           required: ['source', 'destination'],

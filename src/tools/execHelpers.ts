@@ -138,14 +138,19 @@ export function checkPowerShellBan(command: string, args: string[]): void {
         // Name the route that works. "Use a non-shell binary instead" told the
         // model what to stop doing and nothing about what to do, so it kept
         // hunting for another shell rather than reaching for the tool that
-        // already does the job.
+        // already does the job. The list named only READ tools, so a blocked
+        // `Move-Item` sent the model to `robocopy /MOVE` instead of move_file —
+        // every write route has to be named too.
         throw new Error(
           `PowerShell flag "${arg}" is banned — a model-authored script cannot be checked ` +
             'by the denylist, so it is never run. Use the dedicated tools instead: ' +
             'wait to pause for a number of seconds, list_directory to list files, ' +
             'read_file to read them, search_code to search, query_powershell for a ' +
-            'read-only workspace overview or a file hash, or exec_command with a real ' +
-            'executable and an args array.',
+            'read-only workspace overview or a file hash; to change the filesystem, ' +
+            'write_file to create or overwrite a file, edit_file to modify one, ' +
+            'move_file to move or rename a file or directory, create_directory to make ' +
+            'one, delete_file to remove one; or exec_command with a real executable and ' +
+            'an args array.',
         );
       }
     }

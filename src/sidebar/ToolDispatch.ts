@@ -19,6 +19,18 @@ import { resolveWorkspacePath, type ResolveWorkspacePathOptions } from '../util/
 import { capDisplayText } from '../tools/resultCap';
 import { isFailureResult, readPathArg, resultLabel } from './toolResultView';
 import type { PlanItem } from './sessionTypes';
+import { getLogger } from '../util/logger';
+
+const log = getLogger();
+
+/** A directory has no text to diff, and `readFileSync` on one throws EISDIR. */
+function isExistingDirectory(target: string): boolean {
+  try {
+    return fs.statSync(target).isDirectory();
+  } catch {
+    return false;
+  }
+}
 
 const WRITE_PERMISSIONS = new Set<ToolPermission>(['write', 'delete']);
 const DELETE_PREVIEW_LIMIT = 8;
@@ -344,9 +356,18 @@ export class ToolDispatch {
         if (reg.mutation) {
           this.codeLens.markPending(mutationPaths);
           if (reg.mutation.showDiff) {
+            // Rendering a diff happens AFTER the mutation succeeded, so a
+            // failure here is a display problem, not a tool failure. Letting it
+            // escape reported a completed `move_file` as EISDIR and charged the
+            // failure tracker for it — the model then spent three rounds
+            // "recovering" a move that had already happened.
             for (const resolved of mutationPaths) {
-              this.applyDiffDecorations(resolved, checkpoint);
-              this.postFileDiff(resolved, convId, checkpoint, tc.id, recordFileDiff);
+              try {
+                this.applyDiffDecorations(resolved, checkpoint);
+                this.postFileDiff(resolved, convId, checkpoint, tc.id, recordFileDiff);
+              } catch (err) {
+                log.error(`[ToolDispatch] diff render failed for ${resolved}: ${String(err)}`);
+              }
             }
           }
         }
@@ -398,6 +419,7 @@ export class ToolDispatch {
       ? checkpoint.readSnapshotContent(resolvedPath)
       : this.checkpoints.readSnapshotContent(resolvedPath);
     if (beforeContent === undefined) return;
+    if (isExistingDirectory(resolvedPath)) return;
 
     const isDeleted = !fs.existsSync(resolvedPath);
     const afterContent = isDeleted ? '' : fs.readFileSync(resolvedPath, 'utf8');
@@ -423,6 +445,7 @@ export class ToolDispatch {
       ? checkpoint.readSnapshotContent(resolvedPath)
       : this.checkpoints.readSnapshotContent(resolvedPath);
     if (beforeContent === undefined) return;
+    if (isExistingDirectory(resolvedPath)) return;
 
     this.diffDecorations.apply(resolvedPath, beforeContent);
   }
