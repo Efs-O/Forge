@@ -1,7 +1,7 @@
 # Remote Workspace Discovery Plan
 
 **Date:** 2026-09-01
-**Status:** approved in conversation, blocked on REMOTE_SELECTION_PAGINATION_PLAN
+**Status:** implemented 2026-09-01
 **Scope:** make `/workspace list` find the user's other projects with no
 configuration, and let `/new <n>` switch to one by number.
 
@@ -59,11 +59,17 @@ case that CLAUDE.md warns about. Nothing is being masked: the list shows real
 directories, names them by their real basenames, and the switch opens the real
 path. There is no invalid state for a flag to hide.
 
-### Freshness
+### Freshness — built eagerly, not per invocation
 
-Scan when `/workspace list` runs, not at startup. A project created after the
-window opened then appears without a reload, and the cost is one `readdir` per
-invocation.
+The plan called for scanning on each `/workspace list`. Implementation showed
+the price: `RemoteControllerOptions.workspaceAliases` would have to become a
+callback, and roughly a dozen controller fixtures across three test files omit
+that option entirely, so every one would need touching — for a refresh nobody
+had asked for.
+
+The scan runs in `controllerOptions`, which re-runs on every config change. A
+sibling project created after this window opened therefore appears after a
+config edit or a window reload, not instantly. That is the accepted trade.
 
 ## Numbering
 
@@ -72,13 +78,20 @@ so the pager already being built for `/list` and `/models` supplies numbering,
 absolute page-spanning indices, the ten-minute TTL, and the inline keyboard.
 29 entries is three pages; `/new 14` switches to entry 14.
 
-This is why the work is blocked rather than merely queued: it is a reuse of
-`RemoteSelectionPager`, and that file is mid-implementation.
+Reusing `RemoteSelectionPager` rather than writing a second list renderer is
+what made this cheap: no pagination logic was written for workspaces at all.
 
-## Work already written
+## Implementation
 
-`scratchpad/telegram-workspace-selection.patch` (verified `git apply --check`
-clean at 14:15) carries the numbering half of this plan:
+- `src/remote/RemoteWorkspaceDiscovery.ts` — the scan and the merge.
+- `RemoteRuntime.workspaceAliases(config)` is now the single resolver, used by
+  both `controllerOptions` and `handoff`, so a discovered alias is switchable
+  and not merely listable.
+- `test/unit/RemoteWorkspaceDiscovery.test.ts` — 8 cases.
+
+## Numbering work, already landed
+
+The numbering half of this plan:
 
 - `types.ts`, `RemoteStoreSchemas.ts` — add `'workspaces'` to the two enums
 - `RemoteSelectionPager.ts` — `sendWorkspaceSelection`, `formatWorkspaces`,
@@ -90,19 +103,9 @@ clean at 14:15) carries the numbering half of this plan:
   path exactly as `extension.ts` derives `workspaceId`
 - `RemoteSessionCommands.ts` — help text
 
-It was backed out of the working tree because a concurrent session is
-implementing the pagination plan in the same files.
-
-## Remaining work
-
-1. Apply the patch once the pagination work lands.
-2. Add the discovery scan — new module, owner row in `docs/OWNERS.md`, merged
-   under the explicit aliases in `RemoteRuntime.controllerOptions`.
-3. Unit tests: discovery excludes dotfolders and `node_modules`; explicit
-   aliases override a discovered directory at the same path; the cap holds;
-   `/new <n>` resolves through the selection and `/new <alias>` still works.
-4. `npm run ci` green — never yet achieved for this change, because the tree was
-   mid-edit by the other session every time it was run.
+Landed in `61fa4e8`, along with two bugs review caught in it: the Telegram
+callback codec stamped workspace keyboards `m`, and the controller passed
+`currentWorkspaceAlias` to only one of its two context sites.
 
 ## Open question
 

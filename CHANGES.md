@@ -2,6 +2,27 @@
 
 ## 0.15.7
 
+- **`/workspace list` was empty on every install.** Switching the Telegram
+  chat to another project needed `remote.workspace_aliases` hand-written into
+  `config.yaml` — four path/display pairs before the feature did anything — so
+  in practice the block was empty and the command answered "no remote workspace
+  aliases are configured". Forge now lists the sibling folders of whatever
+  project this window has open, with no configuration at all: the search root is
+  `dirname(workspaceFolders[0])`, derived at runtime, so it is `N:s code apps`
+  for one user and `~/dev` for another and hardcoded for nobody.
+
+  There is deliberately no `.git` filter. It was the obvious refinement and it
+  would have hidden the folder that prompted the whole change — on the disk in
+  question the parent holds 29 directories, 13 of them repositories, and the
+  `Qwen testing` folder is not one of them. Dotfolders and dependency
+  directories are skipped and the scan is capped at 100 entries. Explicit
+  `remote.workspace_aliases` still win, and an explicit entry pointing at a
+  discovered folder replaces it rather than listing the same directory twice.
+
+  The scan runs when the remote controller's options are built, so a project
+  created after this window opened appears after a config change or a reload
+  rather than instantly.
+
 - **`/list` sent every conversation in one Telegram message.** A workspace with
   forty conversations produced a wall of text that had to be scrolled past on a
   phone, and left it in the chat history forever. `/list`, `/models` and

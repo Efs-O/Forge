@@ -132,6 +132,7 @@ overlaps with an existing owner, extend the owner instead.
 | Remote owner command behavior                | `src/remote/RemoteCommandHandler.ts`   |
 | Paged /list, /models, /workspace selections  | `src/remote/RemoteSelectionPager.ts`   |
 | Selection list identity, token, expiry       | `src/remote/RemoteSelectionState.ts`   |
+| Sibling-workspace discovery + alias merge    | `src/remote/RemoteWorkspaceDiscovery.ts` |
 | Telegram selection keyboard + callback codec | `src/remote/TelegramSelectionPagination.ts` |
 | Forge approval presentation + correlation    | `src/remote/RemoteApprovalBridge.ts`   |
 | Telegram Bot API transport                   | `src/remote/TelegramChannel.ts`        |

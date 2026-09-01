@@ -8,6 +8,7 @@ import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import { RemoteAuth } from './RemoteAuth';
 import { RemoteController, type RemoteControllerOptions } from './RemoteController';
 import { RemoteRequestStore } from './RemoteRequestStore';
+import { resolveWorkspaceAliases, type WorkspaceAliasTarget } from './RemoteWorkspaceDiscovery';
 import { RemoteTransportLease } from './RemoteTransportLease';
 import type { RemoteChannel } from './types';
 import { RemoteAuditLog } from './RemoteAuditLog';
@@ -336,6 +337,7 @@ export class RemoteRuntime {
   private controllerOptions(config: ForgeConfig): RemoteControllerOptions {
     const remote = config.remote;
     if (!remote) throw new Error('Forge remote configuration is unavailable.');
+    const aliases = this.workspaceAliases(config);
     return {
       workspaceId: this.options.workspaceId,
       queueLimit: remote.queue_limit,
@@ -347,16 +349,18 @@ export class RemoteRuntime {
         : {}),
       attachmentsEnabled: remote.attachments.enabled,
       acceptPdfAttachments: remote.attachments.accept_pdf,
+      // Resolved here rather than per command: controllerOptions re-runs on
+      // every config change, so a newly created sibling project appears after
+      // a config edit or a window reload — not instantly. Making it lazy would
+      // have meant a callback type and touching a dozen controller fixtures for
+      // a refresh nobody asked for.
       workspaceAliases: Object.fromEntries(
-        Object.entries(remote.workspace_aliases).map(([alias, value]) => [
-          alias,
-          value.display_name,
-        ]),
+        Object.entries(aliases).map(([alias, value]) => [alias, value.display_name]),
       ),
-      // Hash each configured path exactly as extension.ts derives workspaceId,
-      // so the list can mark which entry this chat is actually sitting in.
+      // Hash each path exactly as extension.ts derives workspaceId, so the list
+      // can mark which entry this chat is actually sitting in.
       ...(() => {
-        const current = Object.entries(remote.workspace_aliases).find(
+        const current = Object.entries(aliases).find(
           ([, value]) =>
             createHash('sha256').update(path.resolve(value.path)).digest('hex') ===
             this.options.workspaceId,
@@ -377,13 +381,22 @@ export class RemoteRuntime {
     return operation;
   }
 
+  /** Discovered siblings merged under explicit config, re-scanned on each use
+   *  so a project created after this window opened is still reachable. */
+  private workspaceAliases(config: ForgeConfig): Record<string, WorkspaceAliasTarget> {
+    return resolveWorkspaceAliases(
+      config.remote?.workspace_aliases ?? {},
+      this.options.workspaceRoot,
+    );
+  }
+
   private async handoff(
     config: ForgeConfig,
     alias: string,
     channel: string,
     chatId: string,
   ): Promise<void> {
-    const target = config.remote?.workspace_aliases[alias];
+    const target = this.workspaceAliases(config)[alias];
     if (!target || !this.options.openWorkspace)
       throw new Error(`workspace “${alias}” was not found.`);
     const targetWorkspaceId = createHash('sha256').update(path.resolve(target.path)).digest('hex');
