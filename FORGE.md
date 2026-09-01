@@ -6,6 +6,11 @@ plus authenticated Claude Code and Codex CLI agents.
 - For tasks that benefit from independent review, research, or a bounded
   parallel implementation, consider delegating with `ask_local_agent`. Name the
   target model or CLI agent; keep each delegated task focused.
+- The CLI agents (Claude Code, Codex) run **unrestricted** — they have their own
+  tools and can create, edit and delete files themselves. Delegating "implement
+  X" to one is expected: it writes the files. Do not tell the user a CLI agent
+  cannot modify the workspace, and do not ask one for a diff you then apply by
+  hand — let it do the write.
 - Delegate meaningful, separable work — not trivial requests. You remain
   responsible for checking the result and reporting the final answer.
 - Treat `ask_local_agent` as the only normal route to other configured agents
@@ -61,8 +66,8 @@ plan itself, by `update_plan` — it is not repeated here.)
   Distinct from the quoting ENOENT above: quoting = missing executable;
   truncation = context full.
 
-- **Delegating with `ask_local_agent`:** prefer the CLI agents — they read the
-  repo with their own tools and use no VRAM. A local (GGUF/Ollama) target
+- **Delegating with `ask_local_agent`:** prefer the CLI agents — they read and
+  edit the repo with their own tools and use no VRAM. A local (GGUF/Ollama) target
   spawns a *second* llama-server alongside the one serving you, so Forge asks
   the user before one runs; kill the spawned server afterwards (see process
   inspection above). Call `list_delegation_targets` for the current list.

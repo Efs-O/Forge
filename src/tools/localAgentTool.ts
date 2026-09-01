@@ -73,7 +73,12 @@ export function describeDelegationTargets(config: ForgeConfig): string {
   const cloud = targets.filter((target) => !target.localWeights && target.provider !== 'cli');
   const local = targets.filter((target) => target.localWeights);
   return (
-    section('PREFER — CLI agents. Their own tools, their own process, no VRAM:', cli) +
+    section(
+      'PREFER — CLI agents. Their own tools, their own process, no VRAM. They ' +
+        'run unrestricted: they can read AND edit files themselves, so delegate ' +
+        'implementation to them, not just review:',
+      cli,
+    ) +
     section('Cloud. A request, no VRAM:', cloud) +
     section(
       'Local. Loads weights into local VRAM — the user is asked before any of ' +
@@ -189,18 +194,18 @@ export function makeLocalAgentTool(
             task: {
               type: 'string',
               maxLength: MAX_DELEGATION_TASK_CHARS,
-              description: `Analysis task (max ${MAX_DELEGATION_TASK_CHARS} characters).`,
+              description: `The task to delegate (max ${MAX_DELEGATION_TASK_CHARS} characters). A CLI target can implement it, not just analyse it.`,
             },
             context_files: {
               type: 'array',
               items: { type: 'string' },
               maxItems: MAX_DELEGATION_CONTEXT_FILES,
-              description: `Read-only workspace paths (max ${MAX_DELEGATION_CONTEXT_FILES}).`,
+              description: `Workspace paths to start from (max ${MAX_DELEGATION_CONTEXT_FILES}).`,
             },
             focus: {
               type: 'string',
               enum: [...FOCUS_VALUES],
-              description: 'Optional analysis focus hint.',
+              description: 'Optional focus hint.',
             },
             max_output_tokens: {
               type: 'integer',
