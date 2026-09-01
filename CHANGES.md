@@ -1,5 +1,24 @@
 # Forge — Recent Changes
 
+## 0.15.5
+
+- **The store description was 157 characters, and the Marketplace truncates
+  around 130.** "A VS Code coding agent for people who run their own models:
+  real llama.cpp/GGUF control, tools built for local context limits, Keep/Undo
+  on every turn, no telemetry" lost its last two clauses in search results —
+  including *no telemetry*, which is the one claim in the category that most
+  competitors cannot make honestly. It was also four comma-separated clauses
+  with no verb, and one of them ("tools built for local context limits") is
+  precise, true, and meaningless to anyone who has not already hit a per-slot
+  context ceiling.
+
+  Now: **"Run your own models in VS Code: full llama.cpp/GGUF control, 60+ agent
+  tools, undo any turn, no telemetry."** 106 characters, so nothing truncates.
+  Opens with a verb. `llama.cpp` and `GGUF` land inside the first 40 characters,
+  which matters twice over — the Marketplace searches description text, and
+  those two words are what make the intended reader stop scrolling. Applied to
+  both registries and the GitHub repository, which now all carry the same line.
+
 ## 0.15.4
 
 - **The Marketplace and Open VSX Overview pages were 38 KB of contributor
