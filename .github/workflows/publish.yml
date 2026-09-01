@@ -8,6 +8,10 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # `contents: write` is what lets the release step create a release with the
+    # default GITHUB_TOKEN; the default for this repo is read-only.
+    permissions:
+      contents: write
     # Lifted to job level because the `secrets` context is NOT available in a
     # step-level `if` -- using it there is not a false condition, it is an
     # invalid workflow, and GitHub fails the run at 0s before any step. `env`
@@ -34,18 +38,35 @@ jobs:
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
+      # Built once and reused by both steps below. `vsce publish` above packages
+      # internally and keeps nothing, so this is the first artifact on disk.
+      - name: Package the VSIX
+        run: |
+          node scripts/sync-changelog.mjs
+          npx vsce package --no-dependencies --out "forge-llm-${GITHUB_REF_NAME#v}.vsix"
+
       # Open VSX lagged the Marketplace from 0.13.3 to 0.15.0 because the step
       # that published it was deleted in a954ead and never restored. It is
       # guarded on the secret rather than assumed: without the guard a missing
       # OVSX_PAT fails the job AFTER the Marketplace publish has already gone
       # out, turning a half-finished release into a red one. Set the secret
       # with `gh secret set OVSX_PAT` and this starts running on the next tag.
-      - name: Package the VSIX for Open VSX
-        if: env.OVSX_PAT != ''
-        run: node scripts/sync-changelog.mjs && npx vsce package --no-dependencies
-
       - name: Publish to Open VSX
         if: env.OVSX_PAT != ''
-        run: npx ovsx publish "$(ls *.vsix)" -p "$OVSX_PAT"
+        run: npx ovsx publish "forge-llm-${GITHUB_REF_NAME#v}.vsix" -p "$OVSX_PAT"
+
+      # The releases page stopped at v0.12.29 while 0.13, 0.14 and 0.15 shipped
+      # to both registries: nothing here ever created one. Notes are cut from
+      # CHANGES.md rather than written a second time, and the VSIX is attached
+      # so the exact artifact the registries received is downloadable from the
+      # repo too. Last, so a registry failure does not leave a release
+      # announcing a version that never went out.
+      - name: Create the GitHub Release
         env:
-          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          node scripts/release-notes.mjs "$VERSION" release-notes.md
+          gh release create "$GITHUB_REF_NAME" "forge-llm-$VERSION.vsix" \
+            --title "Forge LLM $GITHUB_REF_NAME" \
+            --notes-file release-notes.md

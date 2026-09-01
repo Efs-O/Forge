@@ -1,5 +1,41 @@
 # Forge — Recent Changes
 
+## 0.15.2
+
+- **The releases page stopped at v0.12.29 in July while 0.13, 0.14 and 0.15
+  shipped to both registries.** Nothing in the publish workflow ever created a
+  GitHub Release, so the only account of three minor lines lived in a file you
+  had to know to open. The workflow now cuts the release body from `CHANGES.md`
+  via `scripts/release-notes.mjs` — the same source, not a second one written by
+  hand and left to drift — and attaches the exact VSIX the registries received.
+  It runs last, so a registry failure cannot leave a release announcing a
+  version that never went out. The job needs `permissions: contents: write`;
+  this repo's default token is read-only.
+
+  Note for anyone looking: **0.15.0 and 0.15.1 have no GitHub Release and
+  cannot get one.** This repo has immutable releases enabled, which reserves a
+  tag permanently on first use; both were created, deleted in an attempt to
+  attach their VSIX, and are now refused. Their notes are above, in this file.
+
+- **The VSIX is packaged once and reused.** `vsce publish` packages internally
+  and keeps nothing, so the Open VSX step built its own copy and the release
+  step would have built a third. One `vsce package --out` step now feeds both.
+
+- **`README.md` covered a version and a half of the eleven that shipped.** Its
+  "What's New Since v0.12.3" section predated background execution, demand-loaded
+  tool groups, the compaction-surviving task plan, terminal awareness,
+  `view_video`, recycle-bin deletes, prompt-prefix stability, and the whole 0.15
+  context-reduction pass — a reader on the Marketplace page was being told about
+  a Forge two lines behind the one they were installing. Replaced with a "What's
+  New" section organised by line, and the Highlights list gained the six
+  capabilities it never learned about.
+
+- **The extension description says what Forge is for.** "Local coding agent with
+  first-class llama.cpp/GGUF control, reliable tools, and Keep/Undo checkpoints"
+  led with a category and buried the wedge; "reliable tools" is a claim every
+  extension makes. Both registries and the GitHub repo now carry the same line,
+  and the repo gained topics and a homepage it had never been given.
+
 ## 0.15.1
 
 - **Both registries said "No changelog available" — every release, since the

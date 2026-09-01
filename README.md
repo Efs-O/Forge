@@ -48,6 +48,11 @@ telemetry, analytics, or auto-update pings.
 - Per-action confirmation gate, plus `/clanker` full-auto mode
 - Per-turn checkpoints with Keep and Undo
 - Inline chat diffs after write tools
+- Background execution: start a long command, keep working, monitor it as it runs
+- A task plan the agent keeps, re-injected verbatim so a context compaction cannot lose it
+- Demand-loaded tool groups, so a large tool surface costs starting context only when used
+- Terminal awareness: the agent sees the commands you run and how its own turned out
+- Frame extraction from workspace video for vision models (`view_video`, needs ffmpeg)
 - Direct `llama-server` lifecycle management
 - Ollama local and Ollama cloud routing through the local daemon
 - Optional cloud or self-hosted providers: `xai`, `openrouter`, `openai`, `openai-compatible`
@@ -60,27 +65,67 @@ telemetry, analytics, or auto-update pings.
 - Optional private-owner remote control through Telegram, with local pairing and
   Google Authenticator-compatible session locking; see [remote control setup and security](docs/REMOTE_CONTROL.md)
 
-## What's New Since v0.12.3
+## What's New
 
-- Added opt-in, private-owner remote control with durable FIFO execution, deduplication,
-  notification outbox, multi-window fencing, and the existing Forge approval gate
-- Added Telegram Bot API long polling with SecretStorage-backed setup and local pairing
-- Added owner-bound TOTP sessions, inactivity locking, remote conversation/model
-  controls, queue steering/drop commands, attachment handoff, and live
-  agent/compaction progress
-- Added an experimental WhatsApp linked-device adapter with encrypted authentication state
-- Added OpenAI-compatible cloud-provider support, including `xai`, `openrouter`, `openai`, and generic `openai-compatible`
-- Added automatic xAI token resolution and refresh support
-- Added localhost control-server support for load-on-demand model orchestration
-- Added control-server commands in VS Code for ensure, release, and status
-- Expanded Ollama support, including local daemon usage and cloud routing through the local Ollama daemon
-- Added shared llama-server runtimes across VS Code windows with explicit ownership, leases, and crash recovery
-- Hardened backend lifecycle, readiness, and release behavior
-- Added semantic code search reindexing flow and slash command support
-- Improved diff display, checkpoint handling, and multi-tab chat behavior
-- Added an MCP client bridge (`mcp_servers` in `config.yaml`): tools from external MCP stdio servers are auto-discovered with read-only access by default and can be explicitly classified for sensitive capabilities
-- Verified Cerebras Cloud as an `openai-compatible` provider (per-model `endpoint: https://api.cerebras.ai`) and split sampling defaults so cloud providers no longer receive local-only params (`top_k`, `min_p`)
-- Added persistent direct-chat CLI sessions: Claude stream-json and Codex app-server processes stay warm per conversation/model, with isolated concurrent tabs, protocol-aware cancellation, cold resume, LRU capacity control, and idle cleanup
+Highlights since the 0.12 line. Full detail, every release, in
+[CHANGES.md](CHANGES.md).
+
+### 0.15 — a lighter prompt on every request
+
+- The system prompt lost 585 tokens with nothing removed from what the agent
+  knows: plan-following rules now ship attached to the plan itself rather than
+  sitting in every conversation that never records one, and a forensic recipe
+  needed once a month moved to a doc.
+- `ask_local_agent` stopped listing every configured model in its schema on
+  every turn (~285 tokens, 40% of it near-identical GGUF quant names). A new
+  `list_delegation_targets` returns the live list on demand, ranked by what
+  each target costs to call.
+- Delegating to a model that loads local weights now asks you first.
+  `max_simultaneous_models` counts slots, not gigabytes — on a single card a
+  second large GGUF passes every check and then thrashes, silently.
+- Remote `/reload` no longer runs twice, and a slash command is no longer held
+  across a TOTP challenge and fired at a moment you did not choose.
+
+### 0.14 — demand-loaded tools and a stable prompt prefix
+
+- MCP tool schemas are demand-loaded through `load_tool_group`, recovering
+  2382 tokens of starting context that every conversation used to pay.
+- The tool list is rebuilt every round rather than once per turn, so a group
+  loaded mid-turn is usable in the same turn.
+- Volatile turn context (active file, task plan) moved to the tail of the
+  prompt. Changing one line near the head cost a measured 4971 re-evaluated
+  tokens on a 4.9K prompt — llama.cpp cannot shift KV across a localized edit
+  for sliding-window or hybrid architectures, which is everything Forge runs
+  locally.
+- New `wait` tool for the gap `monitor_execution` does not cover, and
+  `notify_user` so the agent can reach the chat that started the turn.
+- The agent can read the editor you are looking at, find implementations of an
+  interface or method, and read a file at a past commit.
+- `delete_file` moves to the recycle bin rather than destroying.
+- The agent sees the commands you run in your own terminal and how the ones it
+  pasted turned out, instead of asking you to paste output it already has.
+- Remote control gained a complete authenticated phone workflow: TOTP sessions,
+  inactivity locking, queue steering, attachment handoff, `/reload`, and
+  auto-compaction recovery for context-exhausted remote turns.
+- Stopping the backend no longer leaks a llama.cpp port.
+
+### 0.13 — background execution, and a UI that says what is happening
+
+- Background execution: start a long command, keep working, and read its
+  output as it goes (`exec_command`, `monitor_execution`, `list_executions`,
+  `stop_execution`). Truncated output can be read to the end, and a job that
+  fails to launch says so immediately instead of appearing to run.
+- `view_video` samples frames from a workspace clip for a vision model.
+- The model picker shows whether your next send pays a cold load, chats are
+  renameable from the history row, and the model selector sits by the composer.
+- An empty or restored tab says what the backend is doing rather than rendering
+  nothing.
+- A queued prompt names what it is waiting on.
+- Shared-runtime reliability: leases from crashed windows are reclaimed, Stop
+  cancels the generation instead of killing a server other windows are using,
+  and releasing a borrowed model no longer strands its owner.
+- Worker dispatch removed — `dispatch_workers` and `list_worker_models` are gone.
+- Clean production and development dependency audits.
 
 ## Requirements
 
