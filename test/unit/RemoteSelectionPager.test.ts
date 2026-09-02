@@ -172,6 +172,29 @@ describe('remote selection pagination', () => {
     expect(store.selection('fake', 'chat', 'conversations', first.controls.token)).toBeUndefined();
   });
 
+  // Both verbs take a number that only a list can supply, so the bare form used
+  // to fall past every branch in handleRemoteCommand to its catch-all and
+  // answer "unknown command" - the one thing that was never true about them.
+  it('answers a bare /resume and /model with the list the number comes from', async () => {
+    const store = await requestStore();
+    const channel = new FakeRemoteChannel();
+    const ctx = {
+      ...context(channel, store, 3, 2),
+      workspaceId: 'workspace',
+      inactivityTimeoutMinutes: 30,
+    };
+
+    await expect(handleRemoteCommand(textEvent('/resume'), ctx, 'bare-resume')).resolves.toEqual({
+      kind: 'handled',
+    });
+    expect(channel.selectionPageSends[0]!.controls).toMatchObject({ kind: 'conversations' });
+
+    await expect(handleRemoteCommand(textEvent('/model'), ctx, 'bare-model')).resolves.toEqual({
+      kind: 'handled',
+    });
+    expect(channel.selectionPageSends[1]!.controls).toMatchObject({ kind: 'models' });
+  });
+
   it('applies the same paging to models and supports explicit page commands', async () => {
     const store = await requestStore();
     const channel = new FakeRemoteChannel();

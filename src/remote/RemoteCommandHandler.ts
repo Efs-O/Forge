@@ -225,6 +225,13 @@ async function executeRemoteCommand(
     );
     return { kind: 'handled' };
   }
+  // Bare /resume used to fall past every branch to “unknown command” — the one
+  // answer that is never true here, since the command plainly exists and the
+  // help line advertises it. It needs a number, and the numbers come from this
+  // list, so printing the list is the whole reply rather than a correction.
+  if (command === '/resume') {
+    return sendConversationSelection(event, context, undefined);
+  }
   if (command === '/models') {
     return sendModelSelection(event, context, argument);
   }
@@ -248,6 +255,11 @@ async function executeRemoteCommand(
       signal: context.signal,
     });
     return { kind: 'handled' };
+  }
+  // Same defect as bare /resume, and the same answer: /model needs a number
+  // from /models, so hand over that list instead of denying the command exists.
+  if (command === '/model') {
+    return sendModelSelection(event, context, undefined);
   }
   if (command === '/unload') {
     const idleReason = globalBusyReason(context);

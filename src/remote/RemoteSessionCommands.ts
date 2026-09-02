@@ -27,10 +27,10 @@ export async function handleRemoteSessionCommand(
       event.chatId,
       `Forge commands:
 
-Session: /status · /context · /stop · /new · /list [page] · /resume <n-or-id> · /notify on|off
+Session: /status · /context · /stop · /new · /list [page] · /resume [n-or-id] · /notify on|off
 Workspace: /workspace [page] · /new <n-or-alias>
 Queue: /queue · /drop <n|all> · /steer <prompt>
-Models: /models [page] · /model <n-or-name> · /unload · /restart
+Models: /models [page] · /model [n-or-name] · /unload · /restart
 Window: /compact · /lock · /reload · /timeout [1-1440|off] · /clanker on|off
 
 Notes:
