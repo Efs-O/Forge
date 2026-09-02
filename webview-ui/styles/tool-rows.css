@@ -11,7 +11,7 @@
   padding: 2px 0;
   background: transparent;
   border: none;
-  color: var(--vscode-textLink-foreground, #4daafc);
+  color: var(--vscode-descriptionForeground);
   cursor: pointer;
   font-family: var(--vscode-editor-font-family, 'Cascadia Code', monospace);
   font-size: 11px;
@@ -113,7 +113,7 @@
   align-items: center;
   width: 10px;
   flex-shrink: 0;
-  color: var(--vscode-textLink-foreground, #4daafc);
+  color: var(--vscode-descriptionForeground);
 }
 
 /* Pushed to the right edge of the row so the durations of consecutive calls
@@ -138,7 +138,7 @@
   background: transparent;
   border: none;
   padding: 0 2px;
-  color: var(--vscode-textLink-foreground, #4daafc);
+  color: var(--vscode-descriptionForeground);
   cursor: pointer;
   align-self: auto;
 }
@@ -262,7 +262,7 @@
 .thinking-chevron {
   display: inline-flex;
   align-items: center;
-  color: var(--vscode-textLink-foreground, #4daafc);
+  color: var(--vscode-descriptionForeground);
 }
 
 .thinking-content {
