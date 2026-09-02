@@ -7,6 +7,7 @@
  */
 
 import type { ChatMessage } from '../llm/types';
+import { renderLastReplyBlock } from './compactionLastReply';
 import { renderRecordedActionsBlock } from './compactionRecordedState';
 import { renderCompactionUserMessages } from './compactionUserContext';
 import type { CompactionState } from './compactionTypes';
@@ -26,7 +27,10 @@ function replacementAssistantContext(compaction: CompactionState): string {
   return (
     compaction.summary +
     renderRecordedActionsBlock(compaction.recordedActions ?? []) +
-    (compaction.repoState ?? '')
+    (compaction.repoState ?? '') +
+    // Last, so it is the closest thing to the resumed turn: it is the one fact
+    // here that says where the conversation actually stopped.
+    renderLastReplyBlock(compaction.lastReply)
   );
 }
 

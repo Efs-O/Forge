@@ -1,5 +1,40 @@
 # Forge — Recent Changes
 
+## 0.15.12
+
+- **A resumed agent stops treating old requests as new ones.** After an
+  auto-compaction the agent announced that a benchmark run had "errored again"
+  and started re-investigating a fix it had already shipped and reported. The
+  summary was not at fault — it carried the right root cause and an exact Next
+  ("user presses Enter on the pasted command"). What it read instead was the
+  last line of the `VERBATIM USER REQUESTS` block: a complaint issued before the
+  fix, already answered in full, rendered in a user-role message with nothing
+  marking it as history. Everything in that block is history by construction, so
+  it now says so, and names the summary's Next as the authority on what is still
+  open. Two earlier sessions show the same misread ("User's last message [22]…"
+  when [22] was not the last message); both recovered, this one did not.
+
+- **Forge's own prompts stopped looking like yours.** The compaction resume
+  prompt is sent with an `internal` flag precisely so it is not mistaken for
+  something you typed — and the flag never arrived. The wiring adapter was
+  written with three parameters against a four-parameter signature, which
+  type-checks and silently discards the fourth. Zero of 472 messages in the
+  audited conversation carried the flag, and `Continue the active task from the
+  compacted context.` was sitting in the verbatim block as entry [12], replayed
+  to the model as one of your instructions.
+
+- **The agent's last words survive the cut.** A compaction keeps the last
+  exchange verbatim only when it fits 4,000 characters; one measured exchange
+  cost 21,860, so nothing was kept and the agent's closing message to you — the
+  one saying the command was pasted and waiting — reached the next turn only as
+  a paraphrase. When the retained tail carries no words of the agent's own, the
+  last thing it actually said is now recorded verbatim beside the summary.
+
+- **The summary is in the session log.** The row recorded `summary_chars` and
+  dropped the text. That summary *is* the working context for every turn after
+  it, and reconstructing this misread meant digging the live copy out of
+  workspaceState, which survives only until the tab is cleared.
+
 ## 0.15.9
 
 > Ships 0.15.7 and 0.15.8 as well: both were committed but never tagged, so the

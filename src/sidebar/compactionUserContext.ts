@@ -66,11 +66,41 @@ export function collectCompactionUserMessages(
   return unique.filter((_, index) => kept.has(index));
 }
 
+/**
+ * Nothing here is news.
+ *
+ * `collectCompactionUserMessages` is only ever fed the summarized prefix, so
+ * this is history by construction — but it is rendered inside a user-role
+ * message, newest last, and the header used to say only that "later entries may
+ * refine earlier ones". The newest entry then had every surface property of a
+ * fresh instruction. A resumed agent read one as exactly that: the user's [24]
+ * "It errored again man" — issued before the fix and answered in full — was
+ * taken as news of a new failure, and the agent re-investigated work it had
+ * already finished and reported. Two more sessions show the same shape ("User's
+ * last message [22] …" when [22] was not the last message).
+ *
+ * So the block says what it is, and names the authority on what is still open.
+ * The last entry is called out by number because it is the one that reads as
+ * live. The wording stops at "already received and worked on" rather than
+ * "finished": a compaction firing mid-turn cuts while the newest request is
+ * still in progress, and telling the agent that one was completed would end the
+ * task early — the opposite failure, bought at the same price.
+ */
 export function renderCompactionUserMessages(messages: readonly string[] | undefined): string {
   if (!messages?.length) return '';
   const rows = messages.map((message, index) => `[${index + 1}] ${message}`).join('\n\n');
+  const latest =
+    messages.length > 1
+      ? ` [${messages.length}] is the most recent of them, NOT a new request — it was received earlier too.`
+      : '';
   return (
-    'VERBATIM USER REQUESTS AND DECISIONS (recorded by Forge; later entries may refine earlier ones):\n' +
+    'VERBATIM USER REQUESTS AND DECISIONS ALREADY RECEIVED (recorded by Forge; ' +
+    'history, kept so the task and its corrections survive in the user’s own words). ' +
+    'Every entry below arrived earlier in this same conversation and has already been ' +
+    'worked on; later entries refine earlier ones.' +
+    latest +
+    ' None of them is news arriving now — for what is still open, and how far it got, ' +
+    'read the State and Next of the summary that follows.\n' +
     rows
   );
 }

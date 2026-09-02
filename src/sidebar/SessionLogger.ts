@@ -42,6 +42,17 @@ export interface CompactionLogEntry {
   maxTokens: number;
   /** Size of the summary that replaced the cut turns. */
   summaryChars: number;
+  /**
+   * The summary text itself.
+   *
+   * `summaryChars` alone was not an audit trail. When a resumed agent
+   * misbehaves, the summary IS its working context — the one artifact that
+   * determines every following turn — and reconstructing a misread meant
+   * digging the live record out of workspaceState, which survives only until
+   * the tab is cleared. Anything absent from the session log is undiagnosable
+   * after the fact.
+   */
+  summary: string;
   /** Which path started this compaction. */
   trigger: string;
   /** Configured `auto_compact.at` when the event fired; absent when unset. */
@@ -188,6 +199,7 @@ export class SessionLogger {
       used_tokens: entry.usedTokens,
       max_tokens: entry.maxTokens,
       summary_chars: entry.summaryChars,
+      summary: entry.summary,
       trigger: entry.trigger,
       ...(entry.threshold !== undefined ? { threshold: entry.threshold } : {}),
       timestamp_ms: Date.now(),

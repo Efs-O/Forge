@@ -201,7 +201,14 @@ export class AgentLoop {
       },
       onTranscriptChanged: (conv) => this.recordTranscriptMutation(conv),
       emitAgentProgress: (event) => this.emitAgentProgress(event),
-      commitUserPrompt: (conv, text, attachments) => this.commitUserPrompt(conv, text, attachments),
+      // `options` is load-bearing and was missing here: a narrower function is
+      // assignable, so dropping the 4th parameter type-checked while silently
+      // discarding `internal: true`. Every Forge-authored prompt — the
+      // compaction resume above all — was then indistinguishable from something
+      // the user typed, and `collectCompactionUserMessages` carried the resume
+      // prompt forward as a verbatim user request.
+      commitUserPrompt: (conv, text, attachments, options) =>
+        this.commitUserPrompt(conv, text, attachments, options),
       runModelTurn: makeRunModelTurn(() => this.services, runModelTurn),
       waitForCancelledTurns: () => this.waitForCancelledTurns(),
       setController: (ctrl, conversationId) => {

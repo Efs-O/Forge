@@ -10,6 +10,7 @@ import {
   RECORDED_ACTION_MAX_ITEMS,
   type CompactionState,
 } from './compactionTypes';
+import { LAST_REPLY_MAX_CHARS } from './compactionLastReply';
 import { USER_CONTEXT_MAX_MESSAGES, USER_CONTEXT_MESSAGE_MAX_CHARS } from './compactionUserContext';
 export {
   createDefaultSession,
@@ -192,6 +193,14 @@ export const conversationPersistedSchema = z.object({
         .max(RECORDED_ACTION_MAX_ITEMS)
         .optional(),
       repoState: z.string().max(COMPACTION_REPO_STATE_MAX_CHARS).optional(),
+      // The object is `.strict()`, so a field added to CompactionState without a
+      // row here does not degrade — it fails the parse and drops the whole
+      // compaction on reload, restoring an uncompacted window.
+      lastReply: z
+        .string()
+        .min(1)
+        .max(LAST_REPLY_MAX_CHARS + 20)
+        .optional(),
     })
     .strict()
     .optional(),

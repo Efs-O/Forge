@@ -26,6 +26,7 @@ import {
 } from './compactionUserContext';
 import type { PromptRunOptions } from './PromptRun';
 import { getLogger } from '../util/logger';
+import { collectLastReply } from './compactionLastReply';
 import { selectCompactionSplit } from './compactionSplit';
 import type { CompactionLogEntry } from './SessionLogger';
 import { reportedContextTokens } from '../util/contextBudget';
@@ -152,7 +153,8 @@ export async function runCompaction(
   // Only summarize what the model is actually still being sent: re-compacting
   // must not re-summarize turns already folded into the previous summary.
   const from = conv.compaction ? Math.min(conv.compaction.fromIndex, conv.messages.length) : 0;
-  const split = selectCompactionSplit(conv.messages.slice(from));
+  const pending = conv.messages.slice(from);
+  const split = selectCompactionSplit(pending);
   if (!split) {
     if (!options.auto) {
       void vscode.window.showInformationMessage(
@@ -176,6 +178,13 @@ export async function runCompaction(
     split.summarize,
   );
   const userContext = renderCompactionUserMessages(userMessages);
+  // Only when the retained tail has no words of the agent's own. A tail that
+  // carries them needs no copy; a tail that is empty, or is a user turn whose
+  // answer had not started yet, leaves the summarizer's paraphrase as the sole
+  // account of what the user was last told.
+  const lastReply = collectLastReply(pending.slice(split.tailStart))
+    ? undefined
+    : collectLastReply(split.summarize);
 
   deps.post({ type: 'notice', message: 'Compacting conversation…', conversationId: conv.id });
   // The webview treats the conversation as streaming between these two, so a
@@ -262,6 +271,7 @@ export async function runCompaction(
       ...(userMessages.length > 0 ? { userMessages } : {}),
       ...(recordedActions.length > 0 ? { recordedActions } : {}),
       ...(repoState ? { repoState } : {}),
+      ...(lastReply ? { lastReply } : {}),
     };
     conv.updatedAt = Date.now();
     // Before invalidateExactTokenBudget below: that deletes the very counters
@@ -274,6 +284,7 @@ export async function runCompaction(
       usedTokens: usedBefore,
       maxTokens: metrics?.max ?? 0,
       summaryChars: trimmed.length,
+      summary: trimmed,
       trigger,
       ...(metrics?.threshold !== undefined ? { threshold: metrics.threshold } : {}),
     });

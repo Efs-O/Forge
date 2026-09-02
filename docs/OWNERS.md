@@ -46,6 +46,7 @@ overlaps with an existing owner, extend the owner instead.
 | Summary prompt text + summary validation   | `src/sidebar/compactionPrompt.ts`    |
 | Applying the compaction window to a request| `src/sidebar/compactionWindow.ts`    |
 | Host-recorded summary facts (from messages)| `src/sidebar/compactionLedger.ts`    |
+| Agent's last reply carried past a compaction| `src/sidebar/compactionLastReply.ts` |
 | Working-tree snapshot for a compaction     | `src/sidebar/repoSnapshot.ts`        |
 | Agent task plan tool + plan rendering      | `src/tools/planTools.ts`             |
 | Volatile turn context (active file, plan)  | `src/sidebar/turnContext.ts`         |

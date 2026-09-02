@@ -746,4 +746,39 @@ describe('runCompaction', () => {
     expect(prompt).not.toContain('third task');
     expect(c.compaction?.fromIndex).toBe(4);
   });
+
+  it('records the agent’s last reply when the split could afford no tail', async () => {
+    // The measured failure: a 21,860-char last exchange against a 4,000 cap, so
+    // `selectCompactionSplit` retained nothing and the agent's closing words
+    // reached the next turn only as the summarizer's paraphrase.
+    const c = conv([
+      { role: 'user', content: 'first task' },
+      { role: 'assistant', content: 'did the first task' },
+      { role: 'user', content: 'second task' },
+      // Tool results are costed at their 2,000-char excerpt size, so two of
+      // these clear the 4,000-char tail budget the way a real investigation does.
+      { role: 'tool', content: 'x'.repeat(5000) },
+      { role: 'tool', content: 'y'.repeat(5000) },
+      { role: 'assistant', content: 'Command is pasted — press Enter.' },
+    ]);
+    const h = harness(c, async () => long('summary'));
+
+    await expect(runCompaction(h.deps, c.id, { auto: true })).resolves.toBe('compacted');
+    expect(c.compaction?.fromIndex).toBe(c.messages.length);
+    expect(c.compaction?.lastReply).toBe('Command is pasted — press Enter.');
+  });
+
+  it('does not duplicate words the retained tail already carries', async () => {
+    const c = conv([
+      { role: 'user', content: 'first task' },
+      { role: 'assistant', content: 'did the first task' },
+      { role: 'user', content: 'second task' },
+      { role: 'assistant', content: 'Command is pasted — press Enter.' },
+    ]);
+    const h = harness(c, async () => long('summary'));
+
+    await expect(runCompaction(h.deps, c.id, { auto: true })).resolves.toBe('compacted');
+    expect(c.compaction?.fromIndex).toBeLessThan(c.messages.length);
+    expect(c.compaction?.lastReply).toBeUndefined();
+  });
 });

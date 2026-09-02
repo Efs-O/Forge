@@ -26,4 +26,6 @@ export interface CompactionState {
   userMessages?: string[];
   recordedActions?: RecordedCompactionAction[];
   repoState?: string;
+  /** The agent's own last words before the cut. See `compactionLastReply.ts`. */
+  lastReply?: string;
 }

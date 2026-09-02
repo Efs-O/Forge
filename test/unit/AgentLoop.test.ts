@@ -196,6 +196,34 @@ describe('AgentLoop', () => {
     expect(conv.title).toBe('Chat');
   });
 
+  it('marks a Forge-authored prompt internal instead of dropping the flag', async () => {
+    completeTurnImmediately();
+    const conv = makeConversation();
+    const config = makeConfig();
+    const loop = makeLoop(makePool(), config);
+
+    await loop.runTurn(conv, config.models[0]!, 'Continue the active task.', undefined, {
+      internal: true,
+    });
+
+    // The wiring adapter used to be written with three parameters against a
+    // four-parameter signature, which type-checks and silently discards this.
+    // Every compaction resume prompt then looked user-authored, and the
+    // verbatim user-request block replayed it back as an instruction.
+    expect(conv.messages[0]?.internal).toBe(true);
+  });
+
+  it('leaves a prompt the user typed unmarked', async () => {
+    completeTurnImmediately();
+    const conv = makeConversation();
+    const config = makeConfig();
+    const loop = makeLoop(makePool(), config);
+
+    await loop.runTurn(conv, config.models[0]!, 'a real prompt');
+
+    expect(conv.messages[0]?.internal).toBeUndefined();
+  });
+
   it('says nothing about starting a backend the warm pool hands over instantly', async () => {
     completeTurnImmediately();
     const config = makeConfig();

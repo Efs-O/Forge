@@ -61,4 +61,25 @@ describe('applyCompactionWindow', () => {
       msgs.length + 2,
     );
   });
+
+  it('carries the agent’s own last words into the replacement context', () => {
+    const out = applyCompactionWindow(transcript(), {
+      summary: 'we did X',
+      fromIndex: 4,
+      lastReply: 'Command is pasted — press Enter.',
+    });
+
+    const assistant = out.find((m) => m.role === 'assistant');
+    expect(assistant?.content).toContain('Command is pasted — press Enter.');
+    // Last in the block, closest to the resumed turn.
+    expect(String(assistant?.content).indexOf('we did X')).toBeLessThan(
+      String(assistant?.content).indexOf('Command is pasted'),
+    );
+  });
+
+  it('adds nothing when no last reply was recorded', () => {
+    const out = applyCompactionWindow(transcript(), { summary: 'we did X', fromIndex: 4 });
+
+    expect(out.find((m) => m.role === 'assistant')?.content).toBe('we did X');
+  });
 });

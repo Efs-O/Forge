@@ -48,4 +48,32 @@ describe('compaction user context', () => {
       USER_CONTEXT_MAX_CHARS,
     );
   });
+
+  it('marks the block as answered history so the newest entry is not read as a new request', () => {
+    const rendered = renderCompactionUserMessages([
+      'benchmark the minimal arm',
+      'It errored again man - tell claude to investigate and fix it',
+    ]);
+
+    // Deliberately not "already finished": a compaction can fire mid-turn, and
+    // telling the agent the newest request was completed ends the task early.
+    expect(rendered).not.toContain('already been acted on and reported');
+
+    expect(rendered).toContain('ALREADY RECEIVED');
+    expect(rendered).toContain('[2] is the most recent of them, NOT a new request');
+    expect(rendered).toContain('read the State and Next of the summary');
+    expect(rendered).not.toContain('[3]');
+  });
+
+  it('omits the most-recent callout when there is only one entry to confuse', () => {
+    const rendered = renderCompactionUserMessages(['the only request']);
+
+    expect(rendered).toContain('[1] the only request');
+    expect(rendered).not.toContain('NOT a new request');
+  });
+
+  it('renders nothing when no user context survived', () => {
+    expect(renderCompactionUserMessages([])).toBe('');
+    expect(renderCompactionUserMessages(undefined)).toBe('');
+  });
 });
