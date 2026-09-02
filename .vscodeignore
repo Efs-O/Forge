@@ -15,6 +15,12 @@ test/**
 **/*.spec.ts
 coverage/**
 tool-result-context-ab-results/**
+# Benchmark run output. Not just bulk: vsce walks every path that is not
+# excluded here, and on a network drive a few thousand run directories take
+# longer than the packaging step itself - two `vsce package` runs hung for
+# over an hour on this before it was ignored. Nothing under it belongs in a
+# published extension.
+results/**
 .github/**
 esbuild.config.mjs
 tsconfig.json
