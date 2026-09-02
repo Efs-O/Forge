@@ -235,7 +235,7 @@ export function Message({
               onClick={() => setThinkingOpen((open) => !open)}
               aria-expanded={thinkingOpen}
             >
-              <span>{thinkingLabel('Thinking', reasoningMs)}</span>
+              <span>{thinkingLabel(reasoningMs)}</span>
               <span className="thinking-chevron">
                 {thinkingOpen ? <ChevronDown /> : <ChevronRight />}
               </span>

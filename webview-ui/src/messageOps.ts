@@ -24,6 +24,9 @@ export interface AppMessage {
   toolResultTotal?: number;
   toolFilePath?: string;
   toolIsError?: boolean;
+  /** Wall clock the call was announced at, and how long it ran. */
+  toolStartedAt?: number;
+  toolMs?: number;
 }
 
 export type PersistedRow =
@@ -108,6 +111,15 @@ export function mergeSyncedMessages(local: AppMessage[], rows: PersistedRow[]): 
     if (message.role === 'tool' && message.toolDetail !== undefined) {
       reconstructed[hostIndex]!.toolDetail = message.toolDetail;
     }
+    // Durations are measured live and never make it into `PersistedRow`, so a
+    // host row carries none. Without this carry-over a mid-session sync silently
+    // replaced every measured row with an unmeasured copy of itself, and the
+    // timings the reducer had just stamped disappeared from a running turn -
+    // which looked exactly like timing that had never been implemented.
+    if (message.reasoningMs !== undefined) {
+      reconstructed[hostIndex]!.reasoningMs = message.reasoningMs;
+    }
+    if (message.toolMs !== undefined) reconstructed[hostIndex]!.toolMs = message.toolMs;
     hostCursor = hostIndex + 1;
   }
 

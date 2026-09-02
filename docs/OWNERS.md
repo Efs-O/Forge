@@ -232,6 +232,7 @@ overlaps with an existing owner, extend the owner instead.
 | No-projector backend error classification  | `src/llm/imageUnsupportedError.ts`           |
 | Context measured + output budget estimate  | `src/util/contextBudget.ts`                  |
 | Token-count display formatting             | `src/util/formatTokens.ts`                   |
+| Elapsed-duration display formatting        | `src/util/formatDuration.ts`                 |
 | Streaming Ollama native client             | `src/llm/OllamaNativeClient.ts`              |
 | Request normalization (per-provider)       | `src/llm/RequestNormalizer.ts`               |
 | Sampling parameter merge                   | `src/llm/SamplingMerge.ts`                   |

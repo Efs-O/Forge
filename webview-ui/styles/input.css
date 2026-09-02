@@ -21,22 +21,24 @@
   gap: 5px;
 }
 
+/* Chips, not cards. A bordered, filled tile above the composer read as a panel
+   of its own - a second window stacked on the input - for what is a transient
+   list of two or three files. The thumbnail already delimits each entry, so the
+   box around it was drawing a boundary that was not needed. */
 .attachment-tile {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 4px 8px 4px 4px;
+  gap: 6px;
+  padding: 2px 14px 2px 0;
   max-width: 100%;
-  border: 1px solid var(--vscode-input-border, #555);
+  border: none;
+  background: none;
   border-radius: var(--forge-radius-sm);
-  background: var(--vscode-editorWidget-background, #252526);
-  transition:
-    border-color 0.12s ease,
-    background 0.12s ease;
+  transition: background 0.12s ease;
 }
 .attachment-tile:hover {
-  border-color: var(--forge-accent);
+  background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.05));
 }
 
 .attachment-preview {
@@ -76,7 +78,6 @@
   flex-direction: column;
   gap: 1px;
   min-width: 0;
-  padding-right: 10px;
 }
 
 .attachment-name {
@@ -95,8 +96,9 @@
 
 .attachment-remove {
   position: absolute;
-  top: 1px;
-  right: 1px;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
   width: 14px;
   height: 14px;
   padding: 0;
@@ -213,13 +215,22 @@
   gap: 6px;
 }
 
+/* Positioning context for the paperclip, which lives inside the field's box. */
+#prompt-shell {
+  position: relative;
+  display: flex;
+}
+
 #prompt {
   width: 100%;
   resize: none;
   background: var(--vscode-input-background);
   color: var(--vscode-input-foreground);
   border: 1px solid var(--vscode-input-border, #555);
-  padding: 8px 10px;
+  /* Bottom padding is the paperclip's lane. A textarea honours it after the
+     last line, so a prompt long enough to scroll still stops above the button
+     rather than running behind it. */
+  padding: 8px 10px 30px;
   font-family: inherit;
   font-size: inherit;
   min-height: 42px;
@@ -246,9 +257,9 @@
 /*
  * The model trigger used to be `flex: 1` and swallow the whole row. In a 380px
  * sidebar that looked like a chip; docked wide it stretched to ~1000px and read
- * as a bar of its own, which is not what it is - it is a control that sits
- * between attach and send. It shrink-wraps now (see `.ms-root`), and the slack
- * goes here instead, so send stays pinned right at every width.
+ * as a bar of its own, which is not what it is. It shrink-wraps now (see
+ * `.ms-root`), and the slack goes here instead, so send stays pinned right at
+ * every width and the model chip stays chip-sized.
  */
 #input-actions > #btn-send,
 #input-actions > #btn-stop {
@@ -272,29 +283,32 @@
   color: var(--forge-clanker);
 }
 
+/* No border. Inside the field's own box a second bordered box reads as a
+   nested input; the glyph alone is enough, and the hover fill gives back the
+   hit-target feedback the border was carrying. */
 #attach-btn {
-  width: 28px;
-  height: 28px;
+  position: absolute;
+  left: 5px;
+  bottom: 5px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   background: transparent;
-  border: 1px solid var(--vscode-input-border, #555);
+  border: none;
   color: var(--vscode-descriptionForeground);
   cursor: pointer;
   border-radius: var(--forge-radius-sm);
   flex-shrink: 0;
   transition:
     background 0.12s ease,
-    color 0.12s ease,
-    border-color 0.12s ease;
-  align-self: auto;
+    color 0.12s ease;
 }
 #attach-btn:hover {
   background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.07));
   color: var(--vscode-foreground);
-  border-color: var(--forge-accent);
 }
 
 #btn-send {

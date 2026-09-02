@@ -296,17 +296,33 @@ export function InputRow({
       />
 
       <div id="prompt-area">
-        <textarea
-          ref={textareaRef}
-          id="prompt"
-          className={clankerMode ? 'clanker-armed' : undefined}
-          value={text}
-          placeholder={placeholder}
-          onChange={handleTextChange}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          rows={5}
-        />
+        {/* The paperclip sits inside the field's own box rather than in the
+            action row: attaching is something you do *to* the message being
+            composed, and the row below is for what happens to it afterwards.
+            The field reserves the corner with its bottom padding, so a full
+            prompt scrolls above the button instead of under it. */}
+        <div id="prompt-shell">
+          <textarea
+            ref={textareaRef}
+            id="prompt"
+            className={clankerMode ? 'clanker-armed' : undefined}
+            value={text}
+            placeholder={placeholder}
+            onChange={handleTextChange}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            rows={5}
+          />
+          <button
+            id="attach-btn"
+            type="button"
+            title="Attach files — or drop them here, or paste a screenshot. Images up to 10 MiB, text and code up to 2 MiB, 10 files / 25 MiB per message."
+            aria-label="Attach files"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <PaperclipIcon />
+          </button>
+        </div>
 
         <input
           ref={fileInputRef}
@@ -318,16 +334,6 @@ export function InputRow({
         />
 
         <div id="input-actions">
-          <button
-            id="attach-btn"
-            type="button"
-            title="Attach files — or drop them here, or paste a screenshot. Images up to 10 MiB, text and code up to 2 MiB, 10 files / 25 MiB per message."
-            aria-label="Attach files"
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <PaperclipIcon />
-          </button>
-
           <ModelSelector
             models={models}
             activeModel={activeModel}

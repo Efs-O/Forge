@@ -15,25 +15,26 @@
 /* The chevron is taken out of flow deliberately: in flow, the name lays out
    inside the space *left over* beside it and lands visibly off its lane. The
    right padding reserves the chevron's lane so a long name ellipsises before
-   it reaches it. Left-aligned now that the trigger is only as wide as its
-   contents - centring text inside a shrink-wrapped box is a no-op that only
-   costs an off-centre look while the name is ellipsised. */
+   it reaches it. The horizontal padding is symmetric so that reserved lane does
+   not pull the centred name off-axis - with 8px left and 22px right the text
+   sat visibly left of the button's middle even though it was nominally
+   centred. */
 .ms-trigger {
   width: 100%;
   display: flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: center;
   gap: 4px;
   position: relative;
   background: var(--vscode-dropdown-background);
   color: var(--vscode-dropdown-foreground);
   border: 1px solid var(--vscode-dropdown-border);
-  padding: 4px 22px 4px 8px;
+  padding: 4px 22px;
   font-size: inherit;
   font-family: inherit;
   border-radius: var(--forge-radius-sm);
   cursor: pointer;
-  text-align: left;
+  text-align: center;
   min-width: 0;
 }
 

@@ -101,6 +101,16 @@
   color: var(--vscode-textLink-foreground, #4daafc);
 }
 
+/* Pushed to the right edge of the row so the durations of consecutive calls
+   line up as a column and a slow one stands out without needing a colour. */
+.tool-row-time {
+  font-family: var(--vscode-editor-font-family, 'Cascadia Code', monospace);
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
 .tool-row-size,
 .tool-row-open {
   font-family: var(--vscode-editor-font-family, 'Cascadia Code', monospace);

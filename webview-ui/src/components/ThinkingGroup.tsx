@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import type { AppMessage } from '../reducer';
+import { formatDuration } from '../../../src/util/formatDuration';
 
 const ChevronDown = (): React.ReactElement => (
   <svg width="10" height="6" viewBox="0 0 10 6" fill="currentColor" aria-hidden="true">
@@ -24,17 +25,24 @@ export function isReasoningOnly(msg: AppMessage): boolean {
 }
 
 /**
- * `Thinking · 4.2s`, or plain `Thinking` when there is no measurement.
+ * `Thought for 4.2 s`, or plain `Thinking` when there is no measurement.
  *
+ * Past tense on purpose: the row is written once the span is sealed, and a
+ * present-tense label on a finished span reads as a turn that is still running.
  * A bare chevron gives no reason to open the row and no signal that reasoning
  * was expensive - and on a shared output budget, where thinking and the answer
- * draw on the same pool, that is the number worth seeing. Rehydrated rows carry
- * no timing (`PersistedRow` does not persist it), hence the fallback.
+ * draw on the same pool, that is the number worth seeing. Rows rehydrated from
+ * the host carry no timing, hence the fallback.
  */
-export function thinkingLabel(base: string, ms: number | undefined): string {
-  if (ms === undefined || ms < 100) return base;
-  const seconds = ms / 1000;
-  return `${base} · ${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s`;
+export function thinkingLabel(ms: number | undefined): string {
+  const elapsed = formatDuration(ms);
+  return elapsed ? `Thought for ${elapsed}` : 'Thinking';
+}
+
+/** `Step 2 · 1.8 s` inside an expanded group; bare when unmeasured. */
+function stepLabel(base: string, ms: number | undefined): string {
+  const elapsed = formatDuration(ms);
+  return elapsed ? `${base} · ${elapsed}` : base;
 }
 
 /** Total measured reasoning across a run of steps; undefined when none is. */
@@ -86,7 +94,7 @@ export function ThinkingGroup({ steps }: Props): React.ReactElement | null {
   if (steps.length === 1) {
     return (
       <ThinkingRow
-        label={thinkingLabel('Thinking', steps[0]!.reasoningMs)}
+        label={thinkingLabel(steps[0]!.reasoningMs)}
         reasoning={steps[0]!.reasoning ?? ''}
       />
     );
@@ -104,7 +112,7 @@ export function ThinkingGroup({ steps }: Props): React.ReactElement | null {
           {expanded ? <ChevronDown /> : <ChevronRight />}
         </span>
         <span className="thinking-row-label">
-          {thinkingLabel(`Thinking (${steps.length} steps)`, totalReasoningMs(steps))}
+          {`${thinkingLabel(totalReasoningMs(steps))} (${steps.length} steps)`}
         </span>
       </button>
       {expanded && (
@@ -112,7 +120,7 @@ export function ThinkingGroup({ steps }: Props): React.ReactElement | null {
           {steps.map((step, i) => (
             <ThinkingRow
               key={step.id}
-              label={thinkingLabel(`Step ${i + 1}`, step.reasoningMs)}
+              label={stepLabel(`Step ${i + 1}`, step.reasoningMs)}
               reasoning={step.reasoning ?? ''}
             />
           ))}

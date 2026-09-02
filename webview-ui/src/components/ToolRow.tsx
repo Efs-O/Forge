@@ -5,6 +5,7 @@ import type { AppMessage } from '../reducer';
 import { vscode } from '../vscode';
 import { normalizeMarkdownForRender } from '../markdown';
 import { rendersAsMarkdown } from '../../../src/sidebar/toolResultView';
+import { formatDuration } from '../../../src/util/formatDuration';
 
 const ChevronDown = (): React.ReactElement => (
   <svg width="10" height="6" viewBox="0 0 10 6" fill="currentColor" aria-hidden="true">
@@ -40,6 +41,9 @@ export function ToolRow({ message }: { message: AppMessage }): React.ReactElemen
   const result = message.toolResult ?? '';
   const expandable = result.length >= EXPANDABLE_MIN_CHARS || detail.length >= EXPANDABLE_MIN_CHARS;
   const asMarkdown = rendersAsMarkdown(message.toolName ?? '');
+  // Only rows whose call Forge saw both announced and returned carry one, so an
+  // absent duration means unmeasured - never "instant".
+  const elapsed = formatDuration(message.toolMs);
   const body = useMemo(() => normalizeMarkdownForRender(result), [result]);
 
   return (
@@ -63,6 +67,7 @@ export function ToolRow({ message }: { message: AppMessage }): React.ReactElemen
           </>
         )}
         {detail && <span className="tool-row-detail">{detail}</span>}
+        {elapsed && <span className="tool-row-time">{elapsed}</span>}
         {expandable && (
           <span className="tool-row-size">
             {formatSize(message.toolResultTotal ?? result.length)}

@@ -55,9 +55,14 @@ body {
  * headline. Full-width, it was the widest element in the panel for a value
  * nobody looks at until it is close to the ceiling - which is what
  * budgetColor() is for.
+ *
+ * 80px, not 40. At 40 the whole usable range was forty pixels, so the first
+ * half of a long session moved the fill by single pixels and the bar read as
+ * static. Doubling it buys back the resolution without letting the track become
+ * the headline again.
  */
 #token-budget-bar-track {
-  width: 40px;
+  width: 80px;
   flex-shrink: 0;
   height: 3px;
   background: var(--vscode-editor-inactiveSelectionBackground, #3a3a3a);

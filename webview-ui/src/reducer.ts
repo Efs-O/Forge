@@ -1,5 +1,6 @@
 import { findPendingToolRow, mergeSyncedMessages, mkId, type AppMessage } from './messageOps';
 import type { Action, State } from './appState';
+import { formatDuration } from '../../src/util/formatDuration';
 
 export type { AppMessage } from './messageOps';
 export type { Action, State } from './appState';
@@ -86,9 +87,8 @@ function sealReasoningSpan(state: State, cid: string): State {
  * less than no duration would.
  */
 function elapsedSuffix(ms: number): string {
-  if (!Number.isFinite(ms) || ms < 500) return '.';
-  const s = ms / 1000;
-  return ` · ${s < 10 ? s.toFixed(1) : Math.round(s)} s`;
+  const elapsed = formatDuration(ms, 500);
+  return elapsed ? ` · ${elapsed}` : '.';
 }
 
 export function reducer(state: State, action: Action): State {
@@ -284,6 +284,7 @@ export function reducer(state: State, action: Action): State {
         role: 'tool' as const,
         content: action.detail ? `${action.toolName} → ${action.detail}` : action.toolName,
         toolName: action.toolName,
+        toolStartedAt: Date.now(),
         ...(action.detail ? { toolDetail: action.detail } : {}),
         ...(action.toolCallId ? { toolCallId: action.toolCallId } : {}),
       });
@@ -303,12 +304,17 @@ export function reducer(state: State, action: Action): State {
       const pending = findPendingToolRow(existing, action.toolName, action.toolCallId);
       if (pending >= 0) {
         const updated = [...existing];
+        const startedAt = existing[pending]!.toolStartedAt;
         updated[pending] = {
           ...existing[pending]!,
           content: `${action.toolName} → ${action.label}`,
           ...(existing[pending]!.toolDetail !== undefined
             ? { toolDetail: existing[pending]!.toolDetail }
             : {}),
+          // Only the announce/return pair can be timed. A result arriving with
+          // no activity row before it (the fallback branch below) is a call
+          // Forge never saw start, so it gets no duration rather than a wrong one.
+          ...(startedAt !== undefined ? { toolMs: Date.now() - startedAt } : {}),
           ...filled,
         };
         return { ...state, messagesById: { ...state.messagesById, [cid]: updated } };
