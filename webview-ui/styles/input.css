@@ -274,22 +274,42 @@
 }
 
 /*
- * A readout, not a button: bordered rather than filled, so it never reads as
- * something to press. Same height, radius and font as send/stop so it belongs
- * to the row.
+ * The row's two ends. Their geometry is declared once, here, rather than three
+ * times in three skins: the chip and send must sit at exactly the same height,
+ * and stop must match send or the row would change height the moment a turn
+ * starts. Written separately they drifted - the chip was 4px/11px against
+ * send's 6px/12px - and nothing failed, it just looked wrong. Only the skin
+ * varies below.
+ *
+ * line-height is pinned so the glyphs cannot set the content height: an 11px
+ * icon is shorter than the text's box, so send and the text-only chip agree.
  */
-#remote-chip {
+#remote-chip,
+#btn-send,
+#btn-stop {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 4px 9px;
   border-radius: var(--forge-radius-sm);
-  border: 1px solid var(--forge-accent);
-  background: color-mix(in srgb, var(--forge-accent) 10%, transparent);
-  color: var(--forge-accent);
+  border: 1px solid transparent;
+  font-family: inherit;
   font-size: inherit;
+  line-height: 16px;
   white-space: nowrap;
   min-width: 0;
+  flex-shrink: 0;
+  align-self: auto;
+}
+
+/*
+ * A readout, not a button: bordered rather than filled, so it never reads as
+ * something to press.
+ */
+#remote-chip {
+  border-color: var(--forge-accent);
+  background: color-mix(in srgb, var(--forge-accent) 10%, transparent);
+  color: var(--forge-accent);
   cursor: default;
   user-select: none;
 }
@@ -336,7 +356,9 @@
   #btn-stop span {
     display: none;
   }
-  #remote-chip {
+  #remote-chip,
+  #btn-send,
+  #btn-stop {
     padding: 4px 7px;
   }
 }
@@ -386,58 +408,48 @@
   color: var(--vscode-foreground);
 }
 
+/*
+ * Built like the remote chip on purpose: outlined, 10% accent fill, accent
+ * text. Enter already sends, so this is the slower of two ways to do the same
+ * thing and does not need to be the loudest object in the composer. Disabled
+ * borrows the unpaired chip's grey rather than dimming the accent, so an empty
+ * field reads as "not yet" instead of "broken".
+ */
 #btn-send {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  padding: 6px 14px;
-  background: var(--vscode-button-background);
-  color: var(--vscode-button-foreground);
-  border: none;
-  border-radius: var(--forge-radius-sm);
-  font-size: 12px;
-  font-family: inherit;
+  border-color: var(--forge-accent);
+  background: color-mix(in srgb, var(--forge-accent) 10%, transparent);
+  color: var(--forge-accent);
   font-weight: 500;
   cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.12s ease;
-  align-self: auto;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
 }
 #btn-send:hover:not(:disabled) {
-  background: var(--vscode-button-hoverBackground);
+  background: color-mix(in srgb, var(--forge-accent) 22%, transparent);
 }
 #btn-send:disabled {
-  opacity: 0.4;
+  border-color: var(--vscode-input-border, #555);
+  background: none;
+  color: var(--vscode-descriptionForeground);
   cursor: default;
 }
 
-#btn-send,
+/* Stop keeps its red and its fill. It is the one control in the row that must
+   never be mistaken for another, so it does not join the outlined family - it
+   only borrows the shared geometry above so the row height holds steady. */
 #btn-stop {
-  flex-shrink: 0;
-}
-
-#btn-stop {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  padding: 6px 14px;
   background: color-mix(
     in srgb,
     var(--vscode-inputValidation-errorBackground, #5a1d1d) 60%,
     transparent
   );
   color: var(--vscode-errorForeground, #f48771);
-  border: 1px solid var(--vscode-inputValidation-errorBorder, #be1100);
-  border-radius: var(--forge-radius-sm);
-  font-size: 12px;
-  font-family: inherit;
+  border-color: var(--vscode-inputValidation-errorBorder, #be1100);
   font-weight: 500;
   cursor: pointer;
-  white-space: nowrap;
   transition: background 0.12s ease;
-  align-self: auto;
 }
 #btn-stop:hover {
   background: var(--vscode-inputValidation-errorBorder, #be1100);
