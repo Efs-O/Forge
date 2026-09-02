@@ -1,96 +1,205 @@
 # Forge Voice Input / STT / TTS Implementation Plan
 
-Status: implementation handoff
-Target: Forge main
+Status: implementation handoff, research-reviewed revision
+Target: Forge `main`
 Date: 2026-09-03
 
 ## 1. Goal
 
-Add a complete local-first voice path to Forge without changing the existing agent loop semantics or forcing the coding model to understand audio directly.
+Add a complete local-first voice path to Forge without creating a second agent loop and without requiring the coding model to consume audio directly.
 
 The feature should support:
 
-- microphone input from the Forge sidebar;
+- microphone input initiated from the Forge sidebar;
 - Telegram voice messages;
 - local speech-to-text through `whisper.cpp`;
 - Greek and English transcription;
-- immediate STT model/process release after transcription;
-- delivery of the transcript through the existing normal Forge prompt path;
+- immediate and verifiable STT GPU release after transcription;
+- delivery of the transcript through the existing Forge prompt-admission path;
 - optional local text-to-speech through Piper;
 - Greek TTS using the existing JOY Piper voice;
-- English Piper voices;
-- code-aware pronunciation handling so technical responses are not spoken character-by-character;
-- pronunciation injection / raw-phoneme support where the selected Piper runtime supports it;
-- deterministic fallback text normalization when raw phoneme injection is unavailable;
-- independent per-surface output policy: text only, voice only where appropriate, or text + voice;
-- no dependency on an LLM call merely to rewrite ordinary text for TTS.
+- configurable English Piper voices;
+- code-aware speech rendering;
+- technical-term pronunciation control through Piper raw-phoneme spans when supported;
+- deterministic text-normalization fallback;
+- text-only, voice-only where appropriate, or text+voice output policies per surface;
+- no second LLM call merely to make ordinary responses speakable.
 
-The central rule is:
+Central rule:
 
 > Voice is an I/O transport around the existing Forge agent loop, not a new agent mode.
 
-The coding model should normally continue to receive UTF-8 text exactly as it does today.
+The coding model should continue to receive ordinary UTF-8 user text. The conversation should continue to store the exact original assistant text.
 
 ---
 
-## 2. Proposed architecture
+## 2. Research findings that materially change the first draft
+
+### 2.1 Do not assume a VS Code webview can directly open the microphone
+
+The initial draft proposed `navigator.mediaDevices.getUserMedia()` / `MediaRecorder` inside the Forge webview. Do **not** make that the primary implementation.
+
+VS Code has an open webview issue where microphone access is rejected by the webview permissions policy (`microphone is not allowed in this document`). This means a webview-only microphone implementation can fail even though the same browser APIs work in normal Chromium pages.
+
+Reference:
+- https://github.com/microsoft/vscode/issues/250568
+
+**Revised decision:** the sidebar microphone button is UI only. Actual microphone capture belongs in an extension-host-owned local helper/process.
+
+### 2.2 `whisper.cpp` already ships tested microphone examples
+
+`whisper.cpp` provides:
+
+- `whisper-stream`: real-time microphone transcription;
+- `whisper-command`: a basic local voice-assistant command receiver;
+- SDL2 microphone capture;
+- VAD support;
+- CPU and GPU inference;
+- Windows support in the main project;
+- current C/C++ API and CLI tools.
+
+References:
+- https://github.com/ggml-org/whisper.cpp/tree/master/examples/stream
+- https://github.com/ggml-org/whisper.cpp/tree/master/examples/command
+- https://github.com/ggml-org/whisper.cpp
+
+These are useful references and possible future helpers, but Phase 1 should still prefer a one-shot process lifecycle for the strongest VRAM-release guarantee.
+
+### 2.3 `whisper.cpp` Node addon exists, but it is not the best Phase 1 fit
+
+Current whisper.cpp includes an `examples/addon.node` implementation for Node/Electron and supports VAD, direct PCM float input, language auto-detection, GPU selection and progress callbacks.
+
+Reference:
+- https://github.com/ggml-org/whisper.cpp/tree/master/examples/addon.node
+
+This looks attractive for Forge because the extension host is Node/Electron. However:
+
+1. native addons are coupled to Node/Electron ABI and increase packaging/build complexity;
+2. Windows native-addon builds require a toolchain;
+3. Forge's hard requirement is to release Whisper GPU memory immediately after every voice command;
+4. a short-lived external process gives a stronger teardown boundary than a library loaded into the long-lived extension host.
+
+**Decision:** keep the Node addon as a Phase 2 optimization candidate, not the Phase 1 backend.
+
+### 2.4 Do not use `whisper-server` as the default STT runtime
+
+A resident transcription server saves model load time, but it intentionally keeps Whisper loaded. That conflicts with the current requirement that STT give its memory back as soon as the transcript is obtained.
+
+**Decision:** do not use a persistent Whisper server in Phase 1.
+
+### 2.5 Piper raw-phoneme injection is a real supported feature
+
+The maintained OHF Piper line supports raw espeak-ng phoneme spans inside normal input text:
+
+```text
+I am [[ bˈætmæn ]]
+```
+
+Ordinary text is phonemized normally while the `[[ ... ]]` section supplies explicit phonemes.
+
+References:
+- https://github.com/OHF-Voice/piper1-gpl/blob/main/docs/CLI.md
+- https://github.com/OHF-Voice/piper1-gpl/blob/main/CHANGELOG.md
+
+Piper also exposes lower-level phoneme/phoneme-ID APIs. For Forge, raw phoneme spans are the best initial pronunciation-control point because they do not require modifying the JOY ONNX model.
+
+### 2.6 Maintained Piper now has `libpiper` and Windows build support
+
+OHF Piper 1.5+ restored a C/C++ API/CLI and explicitly fixed Windows builds using MSVC/MSYS2-GCC.
+
+Reference:
+- https://github.com/OHF-Voice/piper1-gpl/tree/main/libpiper
+
+This is useful for a future native integration, but Phase 1 should still use a separate process interface unless there is a strong measured reason to embed it.
+
+### 2.7 Piper licensing must be treated explicitly
+
+The maintained `OHF-Voice/piper1-gpl` repository is GPL-3.0, while Forge is Apache-2.0.
+
+Phase 1 should **not** silently link or bundle GPL Piper code into the Forge extension. Prefer a user-configured external Piper executable/runtime and model path until redistribution/linking policy is intentionally decided.
+
+Invoking a separately installed executable is also architecturally cleaner for Forge's current local-runtime model.
+
+### 2.8 Current Forge Telegram attachment code needs a binary-audio path
+
+Current `TelegramChannel.ts` recognizes `document` and `photo`, but not Telegram `voice` objects. More importantly, `downloadAttachment()` currently turns non-image/non-PDF data into UTF-8 text. Audio must never pass through that branch.
+
+Therefore Telegram voice support requires:
+
+1. schema support for `message.voice`;
+2. a binary attachment representation or dedicated binary download method;
+3. no `bytes.toString('utf8')` for audio;
+4. size/duration validation before download/transcription.
+
+This is an implementation requirement, not an optional cleanup.
+
+---
+
+## 3. Revised architecture
 
 ```text
 INPUT
 
-Forge sidebar mic                 Telegram voice note
-      |                                  |
-MediaRecorder / webview                 Bot API
-      |                                  |
-WebM/Opus or supported blob            OGG/Opus
-      |                                  |
-      +-------------+--------------------+
-                    |
-               VoiceIngress
-                    |
-            normalize/decode audio
-                    |
-              whisper.cpp
-                    |
-                transcript
-                    |
-          HARD STT RELEASE BARRIER
-                    |
-        existing Forge prompt admission
-                    |
-             existing agent loop
-                    |
-                Qwen/etc.
-                    |
-            assistant response
-             /              \
-            /                \
-    visible original      SpeechRenderer
-        response               |
-                               |
-                       code-aware normalization
-                               |
-                    pronunciation dictionary
-                               |
-                  optional Piper phoneme injection
-                               |
-                            Piper
-                               |
-                         generated audio
-                         /             \
-                        /               \
-                 sidebar playback   Telegram reply
+Forge sidebar mic button                  Telegram voice note
+        |                                         |
+        |                                Telegram Bot API voice object
+        |                                         |
+        v                                         v
+extension-host capture helper              binary OGG/Opus download
+        |                                         |
+        +-------------------+---------------------+
+                            |
+                       VoiceIngress
+                            |
+                   AudioNormalizer
+                            |
+                 temporary 16 kHz mono WAV
+                            |
+                 short-lived whisper.cpp
+                      process per prompt
+                            |
+                        transcript
+                            |
+              WAIT FOR PROCESS EXIT / CLEANUP
+                            |
+                  HARD STT RELEASE BARRIER
+                            |
+                existing prompt admission
+                            |
+                  existing Forge agent loop
+                            |
+                        Qwen/etc.
+                            |
+                    assistant response
+                     /              \
+                    /                \
+          original text           SpeechRenderer
+          UI + history                 |
+                                      |
+                              code-aware normalization
+                                      |
+                              pronunciation lexicon
+                                      |
+                         optional Piper [[phonemes]]
+                                      |
+                         external local Piper process
+                                      |
+                                generated WAV/PCM
+                                  /           \
+                                 /             \
+                         sidebar playback   Telegram voice/audio
 ```
 
-No STT text should be injected into the conversation until the STT engine has released the GPU resources it used.
+Two hard separation rules:
 
-No TTS-normalized text should replace the original assistant message in conversation history.
+1. No transcript enters the conversation until the STT process has completely exited and temporary STT GPU resources are gone.
+2. No TTS-normalized text replaces the original assistant response in UI/history.
 
 ---
 
-## 3. Existing Forge surfaces to reuse
+## 4. Existing Forge surfaces to reuse
 
-Current Forge already has the pieces that should remain authoritative for the final prompt and remote delivery paths:
+Keep existing Forge paths authoritative:
 
 - `src/remote/TelegramChannel.ts`
 - `src/remote/RemoteAttachmentStore.ts`
@@ -98,24 +207,26 @@ Current Forge already has the pieces that should remain authoritative for the fi
 - `src/remote/RemoteQueueDrain.ts`
 - `src/remote/RemoteController.ts`
 - `src/sidebar/AgentLoop.ts`
-- existing conversation / prompt admission logic
-- existing background-process and model lifecycle patterns
+- existing conversation persistence
+- existing model/runtime lifecycle patterns
+- existing process execution and cancellation patterns
 
-Do not create a second voice-specific agent loop.
+Do not create a voice-specific agent loop.
 
-Voice transcription must end by calling the same normal prompt admission/send path used for typed text.
+Voice input must eventually become the same kind of normal text prompt that typed input becomes.
 
 ---
 
-## 4. New modules proposed
+## 5. Proposed new modules
 
-Names are suggestions; preserve existing Forge naming conventions if the current codebase indicates a better placement.
+Names are suggestions and should follow current Forge naming conventions after implementation begins.
 
 ```text
 src/voice/
-  VoiceIngress.ts
   VoiceTypes.ts
+  VoiceIngress.ts
   AudioNormalizer.ts
+  MicrophoneCapture.ts
   WhisperRunner.ts
   WhisperLifecycle.ts
   SpeechRenderer.ts
@@ -125,7 +236,7 @@ src/voice/
   VoiceOutputRouter.ts
 ```
 
-Optional resources:
+Optional built-in resources:
 
 ```text
 resources/voice/
@@ -133,159 +244,121 @@ resources/voice/
   pronunciations.el.json
 ```
 
-Workspace/user override, if desired:
+Optional workspace/user override:
 
 ```text
 .forge/tts-pronunciations.json
 ```
 
-Built-in pronunciation resources should remain versioned with Forge. User/workspace overrides should extend or override them rather than require modifying the shipped files.
+Workspace/user entries override built-ins.
 
 ---
 
-## 5. STT: whisper.cpp, not Python Whisper
+## 6. STT backend: `whisper.cpp`
 
-### Decision
+### 6.1 Phase 1 decision
 
-Use `whisper.cpp` as the preferred Forge STT runtime.
+Use a short-lived `whisper.cpp` CLI process for each completed recording/Telegram voice message.
 
-Reasons:
+Why this is preferred even though tighter APIs exist:
 
-- native executable/library model fits Forge better than a Python/PyTorch dependency;
-- easier lifecycle management;
-- local-only operation;
-- explicit GPU/CPU selection;
-- multilingual Whisper checkpoints support Greek and English;
-- no need to alter the main coding-model protocol.
+- simplest lifecycle to reason about;
+- process exit is a strong CUDA-context teardown boundary;
+- no native Node addon ABI problem;
+- no long-lived STT server;
+- cancellation can terminate the process;
+- stdout/file output is easy to parse;
+- easy CPU/GPU A/B testing;
+- compatible with future migration to an addon/library after behavior is measured.
 
-Do not use English-only `.en` Whisper checkpoints for this feature.
+### 6.2 Model candidates
 
-Initial benchmark candidates:
+Benchmark these in Greek and English:
 
-1. `large-v3` as the quality baseline;
-2. `large-v3-turbo` as the likely quality/performance choice;
-3. an appropriate quantized `large-v3-turbo` whisper.cpp checkpoint if Greek quality remains acceptable.
+1. `large-v3` — quality reference;
+2. `large-v3-turbo` — likely practical quality/speed choice;
+3. quantized `large-v3-turbo` variants — only if Greek quality remains acceptable.
 
-The user previously observed that the largest Whisper models produced the best English recognition. Greek must be benchmarked separately before choosing the shipping default.
+Never use `.en` checkpoints when Greek input is enabled.
+
+Default language policy:
+
+```text
+auto
+```
+
+Expose explicit `el` and `en` for testing and troubleshooting.
+
+### 6.3 Use current stable whisper.cpp, not an old copied binary
+
+At implementation time pin a tested whisper.cpp release. The project is actively changing; VAD, device selection, ffmpeg decoding and bindings have continued evolving in 2026.
+
+Record the tested version in Forge docs/config diagnostics.
 
 ---
 
-## 6. STT lifecycle and VRAM policy
-
-This is one of the most important requirements.
+## 7. STT lifecycle and VRAM policy
 
 ### Hard invariant
 
 ```text
-transcribe -> release Whisper completely -> only then submit the Forge prompt
+capture complete
+  -> launch Whisper
+  -> transcribe
+  -> collect transcript
+  -> terminate normally
+  -> await child-process exit
+  -> delete temp audio
+  -> only then submit transcript
 ```
 
-The implementation must not assume that returning a transcript automatically means CUDA memory has been released.
+For Phase 1 the strongest release barrier is **child process exit**.
 
-Preferred sequence:
+Pseudo-code:
 
 ```ts
-const transcript = await whisper.transcribe(audio);
-await whisper.dispose();
-await whisper.waitUntilReleased();
-await submitExistingForgePrompt(transcript);
+const result = await whisperRunner.transcribe(tempWav, options);
+await result.processExited;
+await cleanupTempAudio(tempWav);
+await submitExistingForgePrompt(result.text);
 ```
 
-The exact API will depend on process/library integration, but the barrier is mandatory.
+Do not call prompt admission merely because a line of transcript has appeared on stdout. Wait for successful terminal process completion.
 
-### Preferred execution policy
+### VRAM policy
 
-1. If Whisper can run without disturbing the active coding model, use the GPU.
-2. If available VRAM is insufficient, prefer CPU STT over unloading the coding model.
-3. Only consider unloading/reloading Qwen as an explicit last-resort policy, not the default.
+Priority:
 
-Why: evicting the coding model may cost model reload latency and destroy useful warm/KV state for the sake of a short voice command.
+1. GPU Whisper if it fits without disturbing the coding model;
+2. CPU Whisper if GPU allocation would require evicting the coding model;
+3. configurable secondary GPU when available;
+4. unloading/reloading Qwen only as explicit last-resort behavior.
 
-### Future multi-GPU option
+Why: unloading Qwen costs model reload time and can destroy warm prefix/KV advantages for a very short voice command.
 
-Support a configurable Whisper device/GPU assignment so a secondary GPU can handle STT independently of the main coding model.
+### Measurement before scheduling logic
 
-Suggested config shape, subject to existing Forge config conventions:
+Measure on the real machine:
 
-```yaml
-voice:
-  enabled: true
-  stt:
-    backend: whisper.cpp
-    binary: C:/path/to/whisper-cli.exe
-    model: C:/path/to/ggml-large-v3-turbo.bin
-    language: auto
-    device: auto
-    prefer_gpu: true
-    fallback_cpu: true
-```
+- Qwen VRAM residency before STT;
+- Whisper model-load VRAM;
+- peak Whisper VRAM;
+- VRAM immediately after process exit;
+- GPU transcription latency;
+- CPU transcription latency;
+- Greek recognition quality;
+- English recognition quality;
+- model load/unload latency.
 
-Do not implement speculative VRAM scheduling until measured on the actual runtime. First measure:
-
-- free VRAM before Whisper load;
-- VRAM after load;
-- peak during transcription;
-- memory after Whisper teardown;
-- transcription time on GPU;
-- transcription time on CPU;
-- Greek word error behavior;
-- English word error behavior.
+Do not build an elaborate scheduler until these numbers are known.
 
 ---
 
-## 7. Telegram voice input
+## 8. Sidebar microphone: corrected implementation
 
-Telegram voice notes are normally delivered as a Telegram `voice` object whose underlying audio is typically OGG/Opus.
+### 8.1 UI behavior
 
-Proposed path:
-
-```text
-Telegram update
-  -> detect message.voice
-  -> authorize through existing remote auth/session gates
-  -> obtain/download file
-  -> store through existing attachment/storage conventions
-  -> VoiceIngress
-  -> whisper.cpp
-  -> transcript
-  -> delete/release temporary audio according to retention policy
-  -> existing RemotePromptAdmission
-```
-
-Do not bypass:
-
-- owner matching;
-- private-chat policy;
-- TOTP/session lock behavior;
-- queue/deduplication guarantees;
-- existing remote prompt admission.
-
-A voice message is simply another representation of an owner-authored prompt.
-
-### Telegram UX
-
-While transcribing, send/stream a concise status if the current remote progress architecture supports it cleanly, e.g. `Transcribing voice…`.
-
-After transcription either:
-
-- submit immediately, or
-- optionally echo a short transcript before the turn begins if a future confirmation mode is added.
-
-Default recommendation: submit immediately once transcription succeeds, matching typed-message behavior.
-
-On STT failure, do not submit an empty or partial prompt. Return a clear remote error.
-
----
-
-## 8. Forge sidebar microphone
-
-Add a microphone control beside the existing composer/send controls.
-
-### Webview side
-
-Use the VS Code webview browser media APIs, normally `navigator.mediaDevices.getUserMedia({ audio: true })` and `MediaRecorder`, subject to what the current VS Code/Chromium runtime exposes.
-
-Expected capture format may be WebM/Opus depending on runtime support. Do not hard-code MP3 as an intermediate requirement.
+Add a microphone button beside the composer.
 
 Suggested states:
 
@@ -293,102 +366,228 @@ Suggested states:
 idle -> recording -> stopping -> transcribing -> submitted
 ```
 
-UI behavior:
+Interaction:
 
-- mic button starts recording;
-- visible recording state / timer;
-- second press stops recording;
-- optional cancel action discards recording;
-- while STT runs, disable duplicate submission of that recording;
-- typed composer remains separate;
-- transcript becomes a normal user message once STT teardown completes.
+- first press starts local capture;
+- button/pill visibly shows recording state and elapsed time;
+- second press stops capture;
+- cancel discards the recording;
+- after stop, Forge transcribes;
+- transcript is submitted as a normal user message only after the STT release barrier.
 
-### Extension-host boundary
+### 8.2 Do not capture audio in the webview
 
-Do not run Whisper in the webview.
-
-The webview should send recorded bytes/attachment metadata to the extension host. The extension host owns:
-
-- temporary file handling;
-- codec normalization if required;
-- whisper.cpp execution;
-- lifecycle / VRAM barrier;
-- prompt submission.
-
-This keeps the privileged process/lifecycle logic out of the UI layer.
-
----
-
-## 9. Audio normalization
-
-Do not design around MP3.
-
-Likely inputs:
-
-- Telegram: OGG/Opus;
-- sidebar: WebM/Opus or another MediaRecorder-supported codec.
-
-Whisper should receive a format it reliably accepts. If conversion is required, normalize through a bounded local decoder path, preferably ffmpeg if Forge already treats ffmpeg as an optional dependency or a direct decoder supported by the chosen Whisper invocation.
-
-Target normalization when necessary:
+The webview sends only commands such as:
 
 ```text
-mono PCM / WAV
-16 kHz
+voice:startRecording
+voice:stopRecording
+voice:cancelRecording
 ```
 
-Do not perform lossy transcode chains such as OGG -> MP3 -> WAV.
+The extension host owns the recorder/helper process.
 
-Temporary files must have:
+### 8.3 Phase 1 capture choices
 
-- bounded size;
-- unique names;
-- cleanup on success;
-- cleanup on cancellation/error;
-- no execution semantics;
-- no workspace write unless explicitly configured.
+Evaluate in this order:
+
+#### Option A — tiny native capture helper based on whisper.cpp SDL2/common-sdl
+
+Best architectural fit if packaging is acceptable.
+
+Advantages:
+
+- whisper.cpp already has tested SDL2 microphone code;
+- default-device handling is already implemented in upstream examples;
+- avoids VS Code webview microphone permissions;
+- capture helper can output WAV/PCM and exit;
+- Whisper itself does not need to load until recording stops.
+
+Preferred refinement: separate **capture** from **transcription** so the Whisper model is not resident while the user is merely speaking.
+
+```text
+mic button
+ -> capture helper only
+ -> stop
+ -> WAV ready
+ -> whisper-cli starts
+ -> transcribe
+ -> whisper-cli exits
+```
+
+This minimizes STT VRAM residency.
+
+#### Option B — ffmpeg local microphone capture
+
+Forge already treats ffmpeg as an optional local dependency for video features, so reuse may be attractive. On Windows, device selection is less elegant and must be tested carefully. Do not hard-code a microphone device name.
+
+Use only if device discovery/default-device UX is acceptable.
+
+#### Option C — `whisper-stream` / `whisper-command`
+
+These already prove local microphone capture works. They are useful as prototypes or fallback helpers.
+
+However, they load Whisper while listening. For push-to-talk Forge UX, capture-first/transcribe-second is more VRAM-efficient.
+
+### 8.4 Future optimization
+
+If upstream VS Code eventually permits microphone access in webviews reliably, `MediaRecorder` can become an alternate capture backend. It should not block Phase 1.
 
 ---
 
-## 10. TTS: Piper
+## 9. Telegram voice input
 
-### Decision
+### 9.1 Extend Telegram schema
 
-Use Piper as the initial local TTS backend.
+Add `message.voice`, including at minimum:
+
+- `file_id`;
+- `duration`;
+- `mime_type` when provided;
+- `file_size` when provided.
+
+Telegram voice notes should enter Forge as a dedicated audio/voice attachment classification, not as text.
+
+### 9.2 Fix binary attachment handling
+
+Current Forge code converts non-image/non-PDF attachments to UTF-8 strings. That path is invalid for audio.
+
+Introduce one of:
+
+```ts
+dataBytes?: Buffer
+```
+
+or a temporary-file-oriented binary attachment contract.
+
+Do not base64 audio unless an existing store boundary specifically requires it. Prefer bytes/temp-file references internally to avoid needless copies.
+
+### 9.3 Telegram path
+
+```text
+Telegram voice
+ -> existing owner/private/TOTP/session checks
+ -> validate size/duration
+ -> getFile
+ -> download binary bytes
+ -> VoiceIngress
+ -> decode/normalize
+ -> whisper.cpp child process
+ -> wait for exit
+ -> transcript
+ -> existing RemotePromptAdmission
+```
+
+Do not bypass:
+
+- owner matching;
+- private-chat restriction;
+- TOTP/session lock;
+- deduplication;
+- queue semantics;
+- `/steer`/current-turn behavior;
+- remote audit conventions.
+
+### 9.4 UX
+
+Use existing remote progress infrastructure for a small status such as:
+
+```text
+Transcribing voice…
+```
+
+On success, submit immediately by default.
+
+On failure, do not submit empty/partial text.
+
+Optional later mode: echo transcript for approval before submission.
+
+---
+
+## 10. Audio normalization
+
+Do not use MP3 as an intermediate format.
+
+Expected inputs:
+
+- Telegram: OGG/Opus;
+- local capture helper: ideally already 16-bit mono WAV/PCM.
+
+Target Whisper input for the simple Phase 1 path:
+
+```text
+16 kHz
+mono
+PCM s16 WAV
+```
+
+`whisper-cli` historically expects 16-bit WAV in its simple CLI path, while newer whisper.cpp common decoding/server code can optionally decode additional formats with ffmpeg/miniaudio. Do not depend on a compile-time decoder feature until the pinned build is tested.
+
+Safest Telegram flow:
+
+```text
+OGG/Opus -> ffmpeg -> 16 kHz mono WAV -> whisper-cli
+```
+
+No lossy OGG -> MP3 -> WAV chain.
+
+Temporary files:
+
+- unique random names;
+- outside workspace by default;
+- bounded size/duration;
+- cleanup after success;
+- cleanup after error/cancel;
+- never executable;
+- no transcript/audio logging unless explicitly enabled.
+
+---
+
+## 11. Piper TTS backend
+
+### 11.1 Phase 1 decision
+
+Use Piper as a separate local process/runtime.
 
 Greek voice:
 
-- JOY Piper voice (`el_GR-joy-medium` / project model already available to the user).
+```text
+JOY / el_GR-joy-medium
+```
 
 English:
 
-- configurable Piper English voice.
-
-Piper should normally run on CPU. This avoids wasting VRAM needed by Qwen/Whisper and makes TTS independent of coding-model residency.
-
-Suggested config shape:
-
-```yaml
-voice:
-  tts:
-    enabled: false
-    backend: piper
-    binary: C:/path/to/piper.exe
-    language: auto
-    greek_voice: C:/path/to/el_GR-joy-medium.onnx
-    english_voice: C:/path/to/en_voice.onnx
-    speak_code_blocks: false
+```text
+configurable Piper voice
 ```
 
-Exact schema should follow Forge's existing config patterns.
+Run TTS on CPU by default. Its job should not compete with Qwen/Whisper for GPU memory.
+
+### 11.2 Do not make the Phase 1 implementation depend on Python
+
+The maintained Piper project supports Python APIs and HTTP server operation, but also provides `libpiper`/C++ tooling in current versions.
+
+For Forge Phase 1, the abstraction should simply expect an external local Piper command/runtime. The exact installed distribution can be swapped without affecting the speech renderer.
+
+### 11.3 Do not keep spawning Piper once per sentence if latency is poor
+
+Piper documentation notes that CLI startup repeatedly reloads the model and can be slower than a resident server.
+
+Unlike Whisper, Piper is small and CPU-side, so a resident Piper process is acceptable if measurements show startup overhead matters.
+
+Therefore:
+
+- Phase 1 may begin with one-shot CLI simplicity;
+- if latency is noticeable, move Piper to a small resident local process/server;
+- this does **not** violate the STT release rule because Piper is not occupying the precious Whisper/Qwen GPU budget when configured CPU-only.
 
 ---
 
-## 11. The coding-vocabulary TTS problem
+## 12. Code-aware TTS problem
 
-JOY and ordinary English Piper voices do not inherently understand programming semantics.
+JOY and normal English Piper voices do not understand programming semantics by themselves.
 
-Raw strings such as:
+Problematic examples:
 
 ```text
 exec_command
@@ -402,94 +601,98 @@ npm
 x8/x8
 ```
 
-may be spelled one character at a time, pronounced incorrectly, or produce unnatural punctuation speech.
-
-Do not solve this by changing the visible assistant response.
-
-Forge must maintain two representations:
+Forge must keep two representations:
 
 ```text
-assistantOriginalText  -> UI/history/Telegram text
-assistantSpeechText    -> Piper only
+assistantOriginalText -> UI/history/Telegram text
+assistantSpeechText   -> Piper only
 ```
 
-The speech representation is derived deterministically.
+Never modify conversation history merely to improve pronunciation.
 
 ---
 
-## 12. SpeechRenderer
+## 13. SpeechRenderer
 
-`SpeechRenderer` should convert assistant Markdown into a speakable form without another LLM call for the normal case.
+Normal operation must be deterministic code, not a second LLM call.
 
-Suggested stages:
+Pipeline:
 
 ```text
 assistant Markdown
-  -> Markdown-aware segmentation
-  -> code block policy
-  -> inline-code/token normalization
-  -> path/CLI/version/unit normalization
-  -> technical pronunciation lexicon
-  -> optional raw Piper phoneme injection
-  -> final TTS string
+ -> Markdown-aware segmentation
+ -> code-block policy
+ -> inline-code normalization
+ -> identifier/path/version/unit normalization
+ -> technical pronunciation lexicon
+ -> raw Piper phoneme injection when available
+ -> final TTS string
 ```
 
-### Deterministic transformations
+### Generic deterministic rules
 
-Examples:
+Implement rules before growing a huge dictionary:
 
-```text
-exec_command       -> exec command
-load_tool_group    -> load tool group
-getEditorContext   -> get editor context
-32GB               -> thirty two gigabytes / Greek equivalent
-64k context        -> sixty four thousand context tokens, if context implies token count
---ctx-size          -> context size
-src/tools/file.ts  -> file dot t s under source tools, or a shorter semantic rendering
-```
-
-The exact spoken policy should favor comprehension over literal source-code reading.
+- `snake_case` -> split words;
+- `camelCase` -> split words;
+- `PascalCase` -> split words;
+- common all-caps acronyms -> spelled/pronounced using language rules;
+- numbers + units -> speak naturally;
+- semantic model versions -> e.g. `Qwen3.8`;
+- file extensions -> language-specific readable names;
+- CLI flags -> strip punctuation and verbalize semantic name where known;
+- paths -> shorten/read by useful components;
+- URLs -> do not read literally by default;
+- hashes -> announce/shorten rather than spell every character;
+- Markdown punctuation -> never read formatting marks.
 
 ### Code blocks
 
-Default recommendation:
+Default:
 
-- do not read full code blocks literally;
-- announce or summarize structurally without an additional LLM call where possible, e.g. `I included a TypeScript code block.`;
-- retain an optional `speak_code_blocks` mode for users who explicitly want literal reading.
+```text
+speak_code_blocks: false
+```
 
-Do not ask Qwen to make a second TTS rewrite for every answer. That adds latency, context cost, variability and another failure mode.
+Do not read long source code character-by-character.
 
-A future optional LLM summarization mode can be added only for very large/complex code blocks.
+Deterministic fallback examples:
+
+```text
+"I included a TypeScript code block."
+"I included a shell command."
+```
+
+Optional future mode may ask an LLM for a spoken summary of very large code sections, but not in Phase 1.
 
 ---
 
-## 13. Pronunciation dictionary
+## 14. Pronunciation lexicon
 
-Do not begin with a manually curated 1,000-entry file.
+Do not start with 1,000 hand-written entries.
 
 Start with:
 
-- roughly 100-200 very common technical names;
-- deterministic rules for broad token classes;
-- user/workspace overrides;
-- add entries based on real failed pronunciations.
+- roughly 100-200 common coding/AI terms;
+- generic token-class rules;
+- add entries from real failed pronunciations;
+- allow workspace/user override.
 
-Possible conceptual schema:
+Conceptual schema:
 
 ```json
 {
   "CUDA": {
     "el_text": "κούντα",
     "en_text": "cuda",
-    "el_phonemes": null,
-    "en_phonemes": null
+    "el_phonemes": "",
+    "en_phonemes": ""
   },
   "Qwen": {
     "el_text": "κουέν",
     "en_text": "quen",
-    "el_phonemes": null,
-    "en_phonemes": null
+    "el_phonemes": "",
+    "en_phonemes": ""
   },
   "VRAM": {
     "el_text": "βι ραμ",
@@ -502,463 +705,421 @@ Possible conceptual schema:
 }
 ```
 
-The dictionary should be case-aware where needed but matching should normally be tolerant enough to catch common variants.
-
-Generic rules should handle:
-
-- snake_case;
-- camelCase;
-- PascalCase;
-- all-caps acronyms;
-- digits + units;
-- model versions;
-- file extensions;
-- common CLI prefixes/flags;
-- slash/backslash paths;
-- URLs;
-- Git commit abbreviations.
+Store text fallback and optional raw phonemes in the same entry.
 
 ---
 
-## 14. Piper pronunciation injection
+## 15. Piper raw-phoneme injection
 
-Modern Piper variants support more pronunciation control than simple text replacement. Where the pinned runtime supports raw phoneme spans (for example `[[...]]` syntax), Forge can inject known phoneme sequences for technical terms while letting ordinary text use Piper/eSpeak normally.
-
-Conceptual flow:
+Current maintained Piper supports raw espeak-ng phonemes in normal text using:
 
 ```text
-"Restart CUDA and check the backend"
-        |
-        +-- ordinary words -> eSpeak phonemization
-        |
-        +-- CUDA -> Forge lexicon -> forced phoneme span
-        |
-        v
-      Piper
+[[ <phonemes> ]]
 ```
 
-This is preferable to transliteration when it works because Forge explicitly controls pronunciation rather than hoping eSpeak derives the desired pronunciation from a replacement spelling.
-
-### Important implementation requirement
-
-Do not assume every Piper binary/version supports the same raw-phoneme input syntax.
-
-Before implementing this path:
-
-1. pin/identify the Piper runtime Forge intends to support;
-2. create a tiny standalone acceptance test;
-3. verify JOY accepts a raw phoneme span;
-4. compare synthesized output against the ordinary text path;
-5. only then make raw-phoneme injection the preferred renderer.
-
-Fallback must always exist:
+Example from Piper docs:
 
 ```text
-raw phoneme injection unavailable
-  -> use el_text/en_text replacement
-  -> normal eSpeak/Piper path
+I am the [[ bˈætmæn ]]
 ```
 
-Do not edit or retrain the JOY `.onnx` merely for technical vocabulary.
+This gives Forge a clean pronunciation override without retraining JOY.
+
+Conceptual speech-only string:
+
+```text
+Restart [[ <CUDA phonemes> ]] and check the backend.
+```
+
+### Implementation strategy
+
+1. Pin the Piper runtime/version being tested.
+2. Build a tiny standalone JOY acceptance test.
+3. Test 10-20 terms first:
+   - CUDA
+   - Qwen
+   - GitHub
+   - Python
+   - TypeScript
+   - JavaScript
+   - llama.cpp
+   - npm
+   - VRAM
+   - NVIDIA
+   - JSON
+   - YAML
+   - API
+   - HTTP
+   - backend
+   - context
+4. Generate/test correct Greek and English phoneme strings.
+5. Compare raw-phoneme output with text-transliteration fallback.
+6. Only then expand the lexicon.
+
+### Important limitation
+
+Raw phonemes do not magically expand the voice model's learned acoustic capabilities. A voice can still render some unusual phoneme sequences poorly. Keep text fallback available.
+
+A recent Piper issue demonstrates that even explicit phoneme spans may occasionally omit or render phonemes unexpectedly in some voices/versions. Therefore every shipped pronunciation entry should be testable against the selected voice/runtime.
 
 ---
 
-## 15. Greek + English handling
+## 16. Greek + English behavior
 
-Whisper input:
+### STT
 
-- default `language: auto` is appropriate for mixed usage;
-- expose explicit `el` and `en` overrides for testing/debugging;
-- never select an English-only Whisper model if Greek is enabled.
+Use a multilingual Whisper model.
 
-TTS output:
+Default:
 
-First implementation should avoid word-by-word switching between Greek and English Piper voices. Voice switching in a mixed technical sentence can sound more unnatural than a good pronunciation dictionary.
+```text
+language: auto
+```
 
-Preferred initial behavior:
+Debug overrides:
 
-- detect dominant response language;
-- choose JOY for Greek-dominant response;
-- choose configured English voice for English-dominant response;
-- pronounce technical terms via lexicon/injection in that voice.
+```text
+language: el
+language: en
+```
 
-Later optional enhancement:
+### TTS
 
-- language-segmented synthesis + PCM concatenation for genuinely multilingual passages.
+Phase 1:
 
-Do not make this a Phase 1 requirement.
+- detect dominant assistant-response language;
+- Greek-dominant -> JOY;
+- English-dominant -> configured English Piper voice;
+- technical terms -> lexicon + raw phonemes/text fallback;
+- avoid switching voices every few words.
+
+Later:
+
+- language-segmented synthesis and PCM concatenation if real usage proves it worthwhile.
 
 ---
 
-## 16. Voice output routing
+## 17. Voice output routing
 
-The assistant response should always remain available as text.
+Text should always remain available.
 
-Suggested modes:
+Suggested settings:
 
 ```yaml
 voice:
   output:
-    sidebar: off | auto | on
+    sidebar: off | on
     telegram: text | voice | text_and_voice
 ```
 
-Recommended defaults:
-
-- sidebar: off initially, user enables spoken output;
-- Telegram: text by default; optional `text_and_voice`.
-
-The TTS layer should consume the final assistant response after the agent turn, not intermediate tool chatter/reasoning.
-
-Do not speak hidden thinking channels.
-
-Do not speak raw tool-call JSON.
-
-Do not speak every progress event.
-
----
-
-## 17. Security and trust boundaries
-
-Voice does not weaken Forge's command model.
-
-A transcript becomes ordinary user text. It does not become a privileged command channel.
-
-Therefore:
+Recommended default:
 
 ```text
-voice -> transcript -> normal Forge user prompt -> normal agent permissions
+sidebar: off
+telegram: text
 ```
 
-All existing restrictions remain:
+Users explicitly opt into spoken responses.
 
-- tool permissions;
-- normal/Clanker approval behavior;
-- exec structural restrictions;
-- denylist;
-- recursive delete confirmation;
-- remote owner/session/TOTP policy.
-
-For Telegram, `/clanker` remains an owner command, not something STT should interpret specially unless the existing command parser receives the exact transcribed slash command and the product explicitly chooses to allow that behavior. Safer Phase 1 recommendation: voice transcriptions should be treated as prompts, not remote slash commands.
+For Telegram, if sending a native voice note requires Opus/Ogg, convert the locally synthesized WAV to the Bot API's preferred voice-note format only at the transport boundary. Do not change Piper's internal output format just for Telegram.
 
 ---
 
-## 18. Failure handling
+## 18. Proposed config
 
-### STT failure
-
-- do not submit partial garbage automatically;
-- clean temporary audio;
-- release Whisper;
-- return a concise failure message;
-- keep typed input available.
-
-### Whisper OOM
-
-Policy:
-
-1. terminate/release failed Whisper attempt;
-2. if configured, retry on CPU;
-3. do not automatically evict the coding model unless an explicit policy enables it.
-
-### TTS failure
-
-- never fail the underlying assistant turn;
-- preserve/show the text response;
-- report that speech generation failed;
-- clean partial audio.
-
-### Cancellation
-
-Voice recording, STT and TTS must all be cancellable. Cancellation must release native processes/resources and delete transient audio.
-
----
-
-## 19. Configuration proposal
-
-Conceptual only; align with current Forge schema implementation before coding:
+Illustrative only; follow current Forge schema conventions.
 
 ```yaml
 voice:
   enabled: true
 
+  input:
+    sidebar: true
+    telegram: true
+    max_seconds: 180
+    max_bytes: 25000000
+
+  capture:
+    backend: helper       # helper | ffmpeg | future-webview
+    helper: C:/path/to/forge-audio-capture.exe
+
   stt:
     backend: whisper.cpp
-    binary: C:/forge/bin/whisper-cli.exe
-    model: C:/forge/models/ggml-large-v3-turbo.bin
+    binary: C:/path/to/whisper-cli.exe
+    model: C:/path/to/ggml-large-v3-turbo.bin
     language: auto
     prefer_gpu: true
     fallback_cpu: true
-    device: auto
+    gpu_device: auto
+    flash_attn: true
 
   tts:
-    enabled: true
+    enabled: false
     backend: piper
-    binary: C:/forge/bin/piper.exe
-    greek_voice: C:/forge/voices/el_GR-joy-medium.onnx
-    english_voice: C:/forge/voices/en_US-example.onnx
-    pronunciation_mode: auto
-    pronunciation_overrides: .forge/tts-pronunciations.json
+    binary: C:/path/to/piper.exe
+    greek_voice: C:/path/to/el_GR-joy-medium.onnx
+    english_voice: C:/path/to/en_US-voice.onnx
+    language: auto
     speak_code_blocks: false
+    pronunciation_file: .forge/tts-pronunciations.json
 
   output:
-    sidebar: on
-    telegram: text_and_voice
+    sidebar: off
+    telegram: text
 ```
 
-Do not add every knob on day one. Start with the minimum fields required for a working vertical slice.
+Do not require every field. Establish sensible local defaults where Forge can discover them safely.
 
 ---
 
-## 20. Implementation phases
+## 19. Cancellation and concurrency
 
-### Phase 0 - empirical runtime checks
-
-Before integration:
-
-1. identify the Whisper build currently used in previous tests;
-2. benchmark `large-v3`, `large-v3-turbo`, and one quantized candidate;
-3. test English and Greek voice commands;
-4. measure GPU/CPU memory and latency;
-5. verify teardown actually releases VRAM;
-6. identify the exact Piper runtime/version;
-7. verify JOY command-line synthesis;
-8. verify raw phoneme injection on that exact Piper runtime;
-9. produce 10-20 technical pronunciation samples.
-
-Test terms:
+Voice has several asynchronous stages. Treat them as one cancellable operation until the text prompt is admitted.
 
 ```text
-CUDA
-Qwen
-GitHub
-Git
-Python
-TypeScript
-JavaScript
-llama.cpp
-whisper.cpp
-Piper
-VRAM
-npm
-npx
-exec_command
-load_tool_group
-context
-backend
-RTX 5060 Ti
-32GB
---ctx-size
+recording
+ -> decoding
+ -> STT
+ -> release
+ -> prompt admission
 ```
 
-### Phase 1 - Telegram STT vertical slice
+If cancelled before prompt admission:
 
-- receive Telegram voice;
-- download/store safely;
-- transcribe locally;
-- release Whisper;
-- submit transcript through existing remote prompt path;
-- no TTS yet.
+- terminate capture helper;
+- terminate Whisper process;
+- wait for process exit;
+- remove temp files;
+- do not create a user message.
 
-This proves the most useful mobile workflow with the least UI work.
+Do not permit two STT GPU jobs simultaneously by default.
 
-### Phase 2 - sidebar microphone
+Use a small `VoiceTranscriptionQueue` or mutex if both Telegram and sidebar can trigger transcription concurrently.
 
-- mic control;
-- recording/cancel UI;
-- transfer bytes to extension host;
-- same VoiceIngress + WhisperRunner;
-- normal Forge prompt submission.
-
-No separate STT implementation for sidebar vs Telegram.
-
-### Phase 3 - basic Piper TTS
-
-- PiperRunner;
-- JOY Greek;
-- English voice;
-- speak plain prose;
-- route to sidebar playback and/or Telegram;
-- preserve original response text.
-
-### Phase 4 - code-aware SpeechRenderer
-
-- Markdown segmentation;
-- skip/summarize code blocks deterministically;
-- snake_case/camelCase/path/number/unit rules;
-- initial technical lexicon;
-- user override file.
-
-### Phase 5 - Piper phoneme injection
-
-Only after standalone validation:
-
-- lexicon phoneme entries;
-- raw-phoneme spans where supported;
-- text-rewrite fallback;
-- regression tests per language/voice.
-
-### Phase 6 - polish
-
-- output mode settings;
-- language overrides;
-- device/GPU selection;
-- optional CPU fallback telemetry/logging;
-- UX indicators;
-- more pronunciation entries derived from actual usage.
+After transcript admission, normal Forge queue/steer behavior takes over.
 
 ---
 
-## 21. Tests required
+## 20. Security and privacy
 
-### Unit
+Voice input is executable intent after transcription, so preserve every existing Forge control boundary.
 
-- technical dictionary exact match;
-- case variants;
-- snake_case splitting;
-- camelCase splitting;
-- units/numbers;
-- paths;
-- Markdown/code-fence policy;
-- TTS output never mutates original message;
-- temporary-file cleanup;
-- STT failure does not submit prompt.
+Requirements:
 
-### Lifecycle
+- Telegram voice must pass existing remote authentication/session gates;
+- voice must not bypass Clanker/approval semantics;
+- transcript is treated exactly like typed user input after admission;
+- audio size and duration are bounded;
+- decoder paths receive fixed argv, never shell-interpolated filenames;
+- temp files are not written to workspace by default;
+- no automatic retention of recordings;
+- no hidden cloud transcription/TTS calls;
+- config must make local executable/model paths explicit;
+- remote voice duplicates must inherit existing Telegram deduplication semantics.
 
-- Whisper process exits after every completed transcription;
-- Whisper process exits on failure;
-- Whisper process exits on cancellation;
-- prompt is not admitted before release barrier;
-- CPU fallback occurs after GPU OOM when configured;
-- coding model is not evicted by default.
+---
+
+## 21. Licensing/package boundary
+
+### Whisper
+
+Use the upstream `whisper.cpp` license and attribution requirements appropriate to the pinned distribution.
+
+### Piper
+
+The maintained OHF Piper repository is GPL-3.0.
+
+For Phase 1:
+
+- treat Piper as an optional external local executable/runtime;
+- do not statically/dynamically link `libpiper` into the Apache-2.0 Forge extension without an explicit licensing decision;
+- do not bundle the maintained Piper runtime into Forge Marketplace packaging by accident;
+- the JOY voice/model license must also be documented independently from the runtime license.
+
+This keeps implementation work moving without creating a distribution-policy surprise later.
+
+---
+
+## 22. What not to build initially
+
+Do not start with:
+
+- direct audio input to Qwen;
+- a second voice-specific agent loop;
+- a resident Whisper server;
+- a native Node Whisper addon;
+- webview `getUserMedia` as the only microphone path;
+- automatic Qwen unload/reload scheduling;
+- 1,000 pronunciation entries;
+- word-by-word Greek/English Piper switching;
+- an LLM TTS rewrite call for every response;
+- retraining JOY merely for code vocabulary;
+- embedding `libpiper` into Forge before licensing is settled.
+
+---
+
+## 23. Fastest implementation path
+
+### Phase 0 — standalone validation before touching agent logic
+
+1. Pin current whisper.cpp build.
+2. Test `large-v3`, `large-v3-turbo`, one quantized turbo candidate.
+3. Record 15-20 short Greek coding commands and 15-20 English coding commands.
+4. Measure WER/subjective command accuracy and latency.
+5. Measure VRAM before load, peak and after child-process exit.
+6. Confirm CPU fallback speed.
+7. Pin/test Piper runtime with JOY.
+8. Test Piper `[[ raw phoneme ]]` syntax with JOY.
+9. Build a 15-term technical pronunciation sample set.
+10. Confirm one-shot Piper startup latency.
+
+### Phase 1 — Telegram STT first
+
+Telegram is the easiest end-to-end input because Telegram already records the microphone.
+
+1. Extend `TelegramUpdateSchema` with `voice`.
+2. Add binary attachment handling.
+3. Download OGG/Opus bytes.
+4. Normalize to WAV locally.
+5. Spawn whisper.cpp.
+6. Wait for exit.
+7. Submit transcript through existing `RemotePromptAdmission`.
+8. Add `Transcribing voice…` progress.
+9. Add failure/cancellation tests.
+
+**Do this before sidebar microphone capture.** It validates almost the entire STT/prompt pipeline without solving local audio capture at the same time.
+
+### Phase 2 — sidebar microphone
+
+1. Add mic UI state machine.
+2. Implement extension-host capture helper.
+3. Prefer capture-only helper producing 16 kHz mono WAV.
+4. Reuse the exact same `VoiceIngress -> WhisperRunner` path from Telegram.
+5. Add cancellation.
+6. Verify no webview microphone permission is required.
+
+### Phase 3 — TTS basic
+
+1. Add `PiperRunner` external-process abstraction.
+2. JOY Greek output.
+3. English voice output.
+4. Sidebar playback.
+5. Telegram text+voice transport.
+6. Keep original response untouched.
+
+### Phase 4 — code-aware pronunciation
+
+1. Implement Markdown-aware `SpeechRenderer`.
+2. Implement generic identifier/number/path rules.
+3. Seed 100-200 common technical terms only after the 15-term prototype works.
+4. Add `[[ raw phoneme ]]` injection for tested entries.
+5. Keep text fallback.
+6. Add workspace override JSON.
+
+### Phase 5 — optimize only from measurements
+
+Candidates:
+
+- resident CPU Piper process if startup latency matters;
+- Whisper Node addon only if process startup proves material and reliable VRAM disposal can be demonstrated;
+- secondary-GPU STT scheduling;
+- VAD for long voice notes;
+- language-segmented TTS;
+- transcript confirmation mode;
+- optional streaming partial transcript UI.
+
+---
+
+## 24. Minimum test matrix
+
+### STT correctness
+
+- English normal speech;
+- Greek normal speech;
+- Greek sentence containing English coding terms;
+- English sentence containing symbols/model versions;
+- silence-only input;
+- very short utterance;
+- long utterance;
+- cancellation while Whisper is running;
+- invalid/corrupt audio;
+- CPU fallback;
+- GPU path;
+- second-GPU path when available.
+
+### Resource lifecycle
+
+- Whisper process always exits;
+- temp audio always deleted;
+- VRAM returns after STT process exit;
+- Qwen remains resident when CPU STT fallback is selected;
+- no duplicate submission on Telegram retry;
+- no double transcription from repeated stop events.
+
+### Sidebar capture
+
+- microphone helper starts/stops;
+- cancel removes file;
+- default input device works;
+- device missing/error produces actionable message;
+- no dependency on webview microphone permission.
+
+### Piper
+
+- JOY normal Greek;
+- English voice normal English;
+- mixed technical sentence;
+- raw phoneme span accepted;
+- fallback replacement works;
+- code block omitted/summarized;
+- original assistant text unchanged;
+- Piper failure does not lose textual response.
 
 ### Telegram
 
-- voice from authorized owner works;
-- locked session rejects voice like text;
-- non-owner voice fails closed;
-- duplicate Telegram update does not run the voice prompt twice;
-- TTS response follows configured output mode.
-
-### Sidebar
-
-- mic permission denied;
-- recording cancel;
-- repeated record/stop cycles;
-- empty/silent recording;
-- large recording limit;
-- conversation switching while transcribing.
-
-### Greek quality
-
-Create a fixed Greek coding-command test set, not only casual speech. Example topics:
-
-- restart backend;
-- inspect CUDA error;
-- run npm install;
-- open TypeScript file;
-- check GitHub issue;
-- change context size;
-- VRAM usage;
-- llama.cpp flags.
-
-Compare models using real transcription errors, not subjective memory alone.
+- voice while session locked is rejected exactly like text;
+- authorized voice submits once;
+- voice download remains binary-safe;
+- over-size/over-duration voice rejected before expensive processing;
+- response voice conversion failure still leaves text response available.
 
 ---
 
-## 22. Logging / observability
+## 25. Acceptance criteria
 
-Keep logs metadata-focused.
+The first useful release is complete when:
 
-Useful measurements:
-
-- input duration;
-- input codec;
-- STT backend/device;
-- Whisper model;
-- load time;
-- transcription time;
-- teardown time;
-- fallback used yes/no;
-- transcript character count;
-- TTS synthesis time;
-- pronunciation replacements count;
-- phoneme injections count;
-- generated audio duration.
-
-Do not log raw voice audio or full transcripts by default.
+1. a Telegram Greek or English voice note becomes an ordinary Forge prompt locally;
+2. a sidebar microphone button can record without relying on webview microphone permission;
+3. Whisper is fully gone before the coding-model turn begins;
+4. the same transcript follows existing Forge queue/auth/approval semantics;
+5. JOY can speak a Greek Forge response locally;
+6. an English Piper voice can speak an English Forge response locally;
+7. the visible response remains exact while speech uses a separate renderer;
+8. at least a starter set of technical terms is pronounced intentionally rather than letter-by-letter;
+9. raw-phoneme injection is proven with JOY or cleanly falls back to deterministic text replacement;
+10. no cloud speech service is required.
 
 ---
 
-## 23. Non-goals for first implementation
+## 26. Recommended starting work tomorrow
 
-Do not:
-
-- make Qwen consume audio directly;
-- add a new voice-specific agent loop;
-- convert everything to MP3;
-- keep a large Whisper model permanently resident without measurement;
-- unload Qwen by default to make room for Whisper;
-- retrain JOY merely to pronounce code vocabulary;
-- use another LLM call to rewrite every response for TTS;
-- read long source-code blocks character-by-character;
-- make TTS failure fail the coding turn;
-- let voice bypass Forge permissions or remote authentication.
-
----
-
-## 24. Recommended first-day work order
-
-1. Confirm current Whisper executable/model paths used in previous testing.
-2. Confirm exact Piper runtime/version used with JOY.
-3. Write two tiny standalone scripts/tests:
-   - audio -> whisper.cpp -> transcript -> process exit;
-   - text -> Piper/JOY -> WAV.
-4. Test Greek Whisper with 10 coding-oriented commands.
-5. Measure Whisper peak VRAM and post-exit release.
-6. Validate Piper raw phoneme injection on JOY. If unsupported, lock in text-rewrite fallback.
-7. Implement `VoiceIngress` + `WhisperRunner` independent of UI.
-8. Wire Telegram voice into that service first.
-9. Reuse the same service from the sidebar mic.
-10. Add Piper only after STT input is stable.
-11. Add `SpeechRenderer` and the initial technical lexicon.
-12. Expand pronunciation entries from observed failures, not from speculative bulk lists.
-
----
-
-## 25. Definition of done for v1
-
-A successful v1 should demonstrate this exact loop:
+Start with the smallest vertical slice that proves the architecture:
 
 ```text
-User records Greek or English voice in Telegram or Forge sidebar
-  -> Forge transcribes locally with whisper.cpp
-  -> Whisper resources are fully released
-  -> transcript enters existing Forge agent loop as ordinary user text
-  -> agent performs normal tool work under existing Forge security policy
-  -> normal response remains visible as exact text
-  -> optional SpeechRenderer creates a separate TTS representation
-  -> JOY or English Piper voice speaks the response
-  -> technical terms use deterministic pronunciation handling
-  -> no second LLM call is required for normal TTS
+Telegram voice
+ -> binary download
+ -> ffmpeg WAV normalization
+ -> short-lived whisper.cpp
+ -> process exit
+ -> transcript
+ -> existing RemotePromptAdmission
 ```
 
-The implementation is successful only if adding voice does not compromise Forge's existing context behavior, tool security model, remote-auth model, or coding-model VRAM stability.
+Then test with one English and one Greek voice note.
 
----
+Do **not** start with sidebar recording or TTS. Once Telegram STT works, the difficult shared transcription path is proven. Add the sidebar mic as a second input producer, then add Piper as an output consumer.
 
-## 26. Key design decisions to preserve
+For TTS, prototype JOY pronunciation control outside Forge with 15 technical words before writing a large lexicon. If `[[ raw phoneme ]]` works well, build the lexicon around it. If not, fall back to transliterated speech text without changing the visible response.
 
-1. `whisper.cpp` is the preferred STT runtime.
-2. Greek + English require multilingual Whisper checkpoints.
-3. STT is transient; teardown precedes prompt submission.
-4. CPU Whisper fallback is preferred to automatically evicting Qwen.
-5. Piper TTS should normally stay CPU-side.
-6. JOY is the first Greek TTS voice.
-7. Original assistant text and spoken representation are separate.
-8. Code-aware TTS normalization is deterministic code first, not an LLM prompt.
-9. Piper raw-phoneme injection is preferred where verified on the pinned runtime; text normalization is the fallback.
-10. Start with a modest technical lexicon plus generic rules, not a speculative 1,000-word hand-written dictionary.
-11. Telegram and sidebar must share the same STT service.
-12. Voice input is a normal user prompt after transcription; it receives no special execution privilege.
+This ordering gives the highest chance of having a working local voice-controlled Forge quickly while preserving Forge's existing security, queueing and model-lifecycle architecture.
