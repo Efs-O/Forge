@@ -1,5 +1,39 @@
 # Forge — Recent Changes
 
+## 0.15.9
+
+> Ships 0.15.7 and 0.15.8 as well: both were committed but never tagged, so the
+> publish workflow — which fires on the tag, not the commit — never ran for
+> them. Coming from 0.15.6, everything under all three headings is new to you.
+
+- **The sidebar gets its column back.** The panel was spending roughly two
+  thirds of a 382 px column on chrome, leaving the transcript the smallest
+  region on screen. Eight changes, none of them a restyle: the header is one row
+  instead of two and carries the Forge mark; the sessions flyout floats over the
+  transcript instead of pushing 200 px of it off-screen, and its list is twice as
+  tall now that length costs the chat nothing; the composer's stacked button
+  column becomes one row under a full-width field, taking the model selector with
+  it; and a short conversation anchors to the bottom of the panel, next to the
+  composer, rather than floating above 400 px of void.
+
+- **The "Queue" button is gone.** While a turn was running it called the same
+  submit that Enter calls, and the queued prompt already announces itself in the
+  transcript with Steer and Cancel on it. Enter still queues; a line under the
+  composer says so.
+
+- **Clanker arms the field instead of shouting.** An amber all-caps pill sat a
+  pointer-width from Stop — persistent state filed among actions. Clanker is
+  durable across reloads, so it now colours the box you type into, with one dim
+  line naming it and how to stop it. Off, none of it renders.
+
+- **The thinking fold says how long it thought.** `Thinking · 4.2s`. Reasoning
+  and the answer draw on one output budget, so that number is worth seeing
+  without opening the fold.
+
+- **"Starting backend, please wait…" stops lying.** It is rewritten in place to
+  "Backend ready." rather than answered by a second row, which used to leave the
+  first one in the transcript permanently describing a wait that had ended.
+
 ## 0.15.8
 
 - **`/workspace` lists on its own now.** The namespace had exactly one verb, so
