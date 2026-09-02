@@ -429,10 +429,17 @@
 #btn-send:hover:not(:disabled) {
   background: color-mix(in srgb, var(--forge-accent) 22%, transparent);
 }
+/*
+ * Send is disabled whenever the prompt is empty, which is most of the time -
+ * so this, not the accent, is the composer's resting appearance. It was first
+ * given the unpaired chip's input-border grey and vanished against the panel:
+ * correct as a semantic ("not the accent"), wrong as a colour. Mixed off the
+ * foreground instead, so it tracks the theme and stays legible in both.
+ */
 #btn-send:disabled {
-  border-color: var(--vscode-input-border, #555);
+  border-color: color-mix(in srgb, var(--vscode-foreground) 42%, transparent);
   background: none;
-  color: var(--vscode-descriptionForeground);
+  color: color-mix(in srgb, var(--vscode-foreground) 72%, transparent);
   cursor: default;
 }
 
