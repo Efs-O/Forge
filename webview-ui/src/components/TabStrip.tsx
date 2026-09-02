@@ -7,7 +7,6 @@ interface Props {
   streamingIds: ReadonlySet<string>;
   /** Tabs holding a prompt that has not been submitted yet. */
   queuedIds: ReadonlySet<string>;
-  historyCount: number;
   historyExpanded: boolean;
   onSwitch: (id: string) => void;
   onNew: () => void;
@@ -68,7 +67,6 @@ export function TabStrip({
   activeId,
   streamingIds,
   queuedIds,
-  historyCount,
   historyExpanded,
   onSwitch,
   onNew,
@@ -143,7 +141,6 @@ export function TabStrip({
             onClick={onToggleHistory}
           >
             <ClockIcon />
-            {historyCount > 0 && <span id="history-toolbar-count">{historyCount}</span>}
           </button>
           <button
             id="tab-new-btn"

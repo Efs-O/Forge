@@ -419,7 +419,6 @@ export function App(): React.ReactElement {
               activeId={state.activeConversationId}
               streamingIds={state.streamingIds}
               queuedIds={queuedIds}
-              historyCount={state.history.length}
               historyExpanded={historyExpanded}
               onSwitch={handleSwitchTab}
               onNew={handleNewConversation}
