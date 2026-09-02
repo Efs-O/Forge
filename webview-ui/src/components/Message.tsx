@@ -6,6 +6,10 @@ import type { AppMessage } from '../App';
 import { vscode } from '../vscode';
 import { normalizeMarkdownForRender } from '../markdown';
 import { FILE_LINK_SCHEME, linkifyForRender, parseFileLink } from '../linkify';
+// Same formatter the standalone reasoning rows use. Two renderers reached the
+// screen saying "Thinking" - this one, for a turn that reasoned *and* answered,
+// was the unmeasured one, so the rows that cost the most said the least.
+import { thinkingLabel } from './ThinkingGroup';
 
 const ChevronDown = (): React.ReactElement => (
   <svg width="10" height="6" viewBox="0 0 10 6" fill="currentColor" aria-hidden="true">
@@ -188,7 +192,13 @@ function splitStreamingContent(content: string): { settled: string; live: string
   return { settled: content.slice(0, lastSafeSplit), live: content.slice(lastSafeSplit) };
 }
 
-export function Message({ role, content, reasoning, streaming }: MessageProps): React.ReactElement {
+export function Message({
+  role,
+  content,
+  reasoning,
+  reasoningMs,
+  streaming,
+}: MessageProps): React.ReactElement {
   const [thinkingOpen, setThinkingOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -214,12 +224,8 @@ export function Message({ role, content, reasoning, streaming }: MessageProps): 
     );
   }
 
-  const roleLabel = role === 'user' ? 'You' : 'Forge';
-
   return (
     <div className="msg-wrapper">
-      <span className={`msg-role role-${role}`}>{roleLabel}</span>
-
       <div className={`msg ${role}`}>
         {role === 'assistant' && reasoning && (
           <div className={`thinking-bubble${thinkingOpen ? ' thinking-bubble-open' : ''}`}>
@@ -229,7 +235,7 @@ export function Message({ role, content, reasoning, streaming }: MessageProps): 
               onClick={() => setThinkingOpen((open) => !open)}
               aria-expanded={thinkingOpen}
             >
-              <span>Thinking</span>
+              <span>{thinkingLabel('Thinking', reasoningMs)}</span>
               <span className="thinking-chevron">
                 {thinkingOpen ? <ChevronDown /> : <ChevronRight />}
               </span>

@@ -155,11 +155,16 @@ function HistoryRow({
         type="button"
         className="history-item"
         onClick={() => onRestore(item.id)}
-        title={absoluteTime(item.updatedAt)}
+        title={[absoluteTime(item.updatedAt), item.active_model].filter(Boolean).join('\n')}
       >
         <span className="history-item-title">{item.title}</span>
+        {/* Model earns its place on this line specifically: the one thing you
+            need to know before resuming a session is which model it was held
+            by, and a title derived from an opening prompt rarely says. Full
+            name is in the row tooltip; the line ellipsises. */}
         <span className="history-item-meta">
           {item.messageCount ?? 0} msg · {relativeTime(item.updatedAt)}
+          {item.active_model ? ` · ${item.active_model}` : ''}
         </span>
       </button>
       <div className="history-item-menu-wrap" ref={menuRef}>

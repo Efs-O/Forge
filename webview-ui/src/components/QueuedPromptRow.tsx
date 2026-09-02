@@ -22,7 +22,6 @@ export function QueuedPromptRow({
     : '';
   return (
     <div className="msg-wrapper queued-prompt">
-      <span className="msg-role role-user">You</span>
       <div className="msg user msg-queued">{text || 'Attachment queued'}</div>
       <div className="queued-prompt-actions">
         <span className="queued-prompt-status">

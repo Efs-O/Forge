@@ -31,7 +31,7 @@ function resolveConvId(state: State, convId?: string): string {
   return convId ?? state.activeConversationId;
 }
 
-function withoutKey(map: Map<string, string>, id: string): Map<string, string> {
+function withoutKey<V>(map: Map<string, V>, id: string): Map<string, V> {
   if (!map.has(id)) return map;
   const next = new Map(map);
   next.delete(id);
@@ -75,6 +75,20 @@ function sealReasoningSpan(state: State, cid: string): State {
     ...m,
     reasoningMs: Date.now() - (m.reasoningStartedAt ?? Date.now()),
   }));
+}
+
+/**
+ * ` · 2.1 s` for a wait worth reporting, and nothing at all for one that is not.
+ *
+ * The row only exists when the acquire ran past BACKEND_START_NOTICE_MS, so
+ * every one of these is at least half a second; the floor here guards the case
+ * where the READY frame follows almost immediately after, where a duration says
+ * less than no duration would.
+ */
+function elapsedSuffix(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 500) return '.';
+  const s = ms / 1000;
+  return ` · ${s < 10 ? s.toFixed(1) : Math.round(s)} s`;
 }
 
 export function reducer(state: State, action: Action): State {
@@ -202,17 +216,18 @@ export function reducer(state: State, action: Action): State {
         backendReady: true,
         backendStartRowIds: withoutKey(state.backendStartRowIds, cid),
       };
-      const startRowId = state.backendStartRowIds.get(cid);
-      if (startRowId === undefined) return next;
+      const start = state.backendStartRowIds.get(cid);
+      if (start === undefined) return next;
       // Rewrite the announcement rather than answering it. The pair used to
       // accumulate, leaving "Starting backend, please wait…" in the transcript
       // forever above a "Backend ready." that had made it untrue.
+      const content = `Backend ready${elapsedSuffix(Date.now() - start.startedAt)}`;
       return {
         ...next,
         messagesById: {
           ...next.messagesById,
           [cid]: (next.messagesById[cid] ?? []).map((row) =>
-            row.id === startRowId ? { ...row, content: 'Backend ready.' } : row,
+            row.id === start.id ? { ...row, content } : row,
           ),
         },
       };
@@ -225,7 +240,10 @@ export function reducer(state: State, action: Action): State {
         {
           ...state,
           backendReady: false,
-          backendStartRowIds: new Map(state.backendStartRowIds).set(cid, rowId),
+          backendStartRowIds: new Map(state.backendStartRowIds).set(cid, {
+            id: rowId,
+            startedAt: Date.now(),
+          }),
         },
         cid,
         { id: rowId, role: 'system', content: action.message },

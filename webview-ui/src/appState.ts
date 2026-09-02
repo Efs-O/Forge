@@ -20,16 +20,19 @@ export interface State {
    */
   checkpointPendingIds: Set<string>;
   /**
-   * Conversation id -> the id of its "Starting backend…" row.
+   * Conversation id -> its "Starting backend…" row, and when that row landed.
    *
    * Only conversations that announced a start are in here: a warm pool resolves
    * the acquire in milliseconds and announces nothing, and an unconditional
    * reply would leave a permanent row answering a question nobody asked. The
    * row id is kept so `READY` can rewrite that row in place rather than append
    * a second one - a wait that ended does not need two permanent rows, one of
-   * which describes a state that is over.
+   * which describes a state that is over. `startedAt` rides along so the
+   * rewrite can say how long the wait actually was - a cold llama-server spawn
+   * plus a model load is the slowest thing in a session, and "Backend ready."
+   * on its own throws that measurement away.
    */
-  backendStartRowIds: Map<string, string>;
+  backendStartRowIds: Map<string, { id: string; startedAt: number }>;
   sessionHydrated: boolean;
   tabs: SessionTabMeta[];
   history: SessionHistoryMeta[];

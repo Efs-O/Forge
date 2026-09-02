@@ -6,30 +6,25 @@
   gap: 3px;
 }
 
-.msg-role {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  padding: 0 4px;
-  color: var(--vscode-descriptionForeground);
-  user-select: none;
-}
-
-.msg-role.role-assistant {
-  color: var(--forge-accent);
-}
-
+/*
+ * No role labels and no box on either speaker.
+ *
+ * YOU and FORGE in caps above bordered cards meant the reading surface - the
+ * assistant prose, the thing you are actually here to read - was boxed in like
+ * a form field, and the eye crossed two borders per exchange for information
+ * that indentation already carries. The user turn keeps a 2px accent rail,
+ * which is enough to tell the two apart at a glance; the assistant turn runs
+ * as plain text on the panel ground.
+ */
 .msg {
-  padding: 8px 12px;
-  border-radius: var(--forge-radius-md);
   line-height: 1.55;
   word-break: break-word;
 }
 
 .msg.user {
-  background: var(--vscode-inputValidation-infoBackground, #1e3a5f);
-  border-left: 3px solid var(--forge-accent);
+  background: transparent;
+  border-left: 2px solid var(--forge-accent);
+  padding: 2px 0 2px 9px;
   white-space: pre-wrap;
 }
 
@@ -52,7 +47,6 @@
 
 .msg.assistant {
   background: transparent;
-  border: 1px solid var(--forge-border);
 }
 
 .msg.assistant h1,

@@ -194,5 +194,11 @@
 .history-item-meta {
   font-size: 10px;
   color: var(--vscode-descriptionForeground);
+  /* The model name joined this line and model names are long. It truncates
+     here rather than wrapping the row to two lines or widening the panel. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
