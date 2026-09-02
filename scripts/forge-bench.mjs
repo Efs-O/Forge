@@ -1,12 +1,30 @@
 #!/usr/bin/env node
 import { build } from 'esbuild';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { resolve } from 'node:path';
+import { delimiter, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const ALL_ARMS = ['qwen-minimal', 'qwen-forge', 'claude-code', 'codex'];
+
+function exposeWindowsDockerCli() {
+  if (process.platform !== 'win32') return;
+  const candidates = [
+    process.env.LOCALAPPDATA
+      ? resolve(process.env.LOCALAPPDATA, 'Programs', 'DockerDesktop', 'resources', 'bin')
+      : undefined,
+    process.env.ProgramFiles
+      ? resolve(process.env.ProgramFiles, 'Docker', 'Docker', 'resources', 'bin')
+      : undefined,
+    process.env.ProgramW6432
+      ? resolve(process.env.ProgramW6432, 'Docker', 'Docker', 'resources', 'bin')
+      : undefined,
+  ].filter((candidate) => candidate && existsSync(resolve(candidate, 'docker.exe')));
+  if (!candidates.length) return;
+  const currentPath = process.env.PATH ?? process.env.Path ?? '';
+  process.env.PATH = [candidates[0], currentPath].filter(Boolean).join(delimiter);
+}
 
 function value(args, flag) {
   const index = args.indexOf(flag);
@@ -75,6 +93,7 @@ async function loadBenchmarkModule() {
 }
 
 async function main() {
+  exposeWindowsDockerCli();
   const args = process.argv.slice(2);
   if (args.includes('--help') || args.includes('-h')) {
     console.log(
@@ -99,3 +118,4 @@ main().catch((error) => {
   console.error(`forge-bench: ${error instanceof Error ? error.message : String(error)}`);
   process.exitCode = 1;
 });
+
