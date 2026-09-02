@@ -120,7 +120,7 @@ check that cannot succeed yet.
 
 **Terminal awareness, in both directions.** `run_terminal` pastes into your
 real terminal and reports how it turned out via shell integration. The agent
-also *sees the commands you run yourself* — including the ones that failed — so
+also _sees the commands you run yourself_ — including the ones that failed — so
 it corrects them in chat instead of asking you to paste output it already has.
 `query_powershell` and `run_build` / `run_tests` / `run_workspace_task` /
 `list_workspace_tasks` cover the structured cases.
@@ -352,6 +352,24 @@ For larger examples, including control-server and cloud-provider patterns, use
 Click the Forge icon in the activity bar and send a prompt.
 
 If the config is missing or invalid, Forge will guide you through setup instead of silently failing.
+
+## Coding benchmark smoke test
+
+Forge includes a one-task SWE-bench Verified smoke runner. Install the official
+`swebench` package and Docker, copy `benchmarks/smoke-task.example.json` to
+`benchmarks/smoke-task.json`, and pin one `instance_id` (and dataset revision).
+Start the Qwen llama-server normally, then validate without model calls:
+
+```powershell
+npm run bench:smoke -- --dry-run
+npm run bench:smoke
+```
+
+Use `--arms qwen-forge,qwen-minimal` for a local-only rehearsal. Each arm gets
+an exact-base disposable checkout and writes logs, patch, evaluator output,
+runtime facts, and usage under `results/<run-id>/<arm>/`. The report ranks this
+single task only; one task is not a SWE-bench score, and published SWE figures
+are not mixed into the local ranking.
 
 ## Cloud and Token Setup
 

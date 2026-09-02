@@ -2,5 +2,6 @@
   "instance_id": "replace-with-swe-bench-verified-instance",
   "dataset": "princeton-nlp/SWE-bench_Verified",
   "split": "test",
+  "revision": "main",
   "timeout_minutes": 30
 }
