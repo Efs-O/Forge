@@ -39,13 +39,6 @@ smoke3d/**
 prodtest-md2html/**
 prodtest-*/**
 .mcp.json
-fireworks.html
-aurora_glass.html
-3d_glass_particles.html
-meadow.html
-meadow_v2.html
-particle_network.html
 assets/.coordination/**
 assets/_preview/**
 assets/publisher-logo.svg
-publisher-logo.png
