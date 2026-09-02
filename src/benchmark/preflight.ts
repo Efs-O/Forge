@@ -205,9 +205,7 @@ export async function preparePreflight(options: BenchmarkOptions): Promise<Prefl
       `Official SWE-bench evaluator was not found at ${options.evaluatorExecutable}; install the official swebench package or pass --evaluator.`,
     );
   }
-  // The current official SWE-bench CLI exposes commands/help but not a
-  // --version option. Use its stable top-level help probe for availability.
-  const evaluator = await runCliCommand(evaluatorExecutable, ['--help']);
+  const evaluator = await runCliCommand(evaluatorExecutable, ['--version']);
   checks.evaluator = {
     executable: evaluatorExecutable,
     ok: commandSucceeded(evaluator),

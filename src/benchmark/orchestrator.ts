@@ -195,10 +195,7 @@ async function runArm(
           sampling: server?.requestModel?.sampling,
           thinking: {
             enabled: server?.requestModel?.think !== false,
-            reasoning_effort:
-              arm === 'qwen-forge'
-                ? (server?.requestModel?.reasoning_effort ?? 'low')
-                : 'qwen-template-default-xhigh',
+            reasoning_effort: server?.requestModel?.reasoning_effort ?? 'low',
           },
           system_prompt:
             arm === 'qwen-forge'
@@ -323,3 +320,4 @@ export function writeReports(
     'utf8',
   );
 }
+

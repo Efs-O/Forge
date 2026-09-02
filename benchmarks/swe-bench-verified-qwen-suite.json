@@ -1,0 +1,15 @@
+{
+  "name": "SWE-bench Verified Qwen calibration",
+  "dataset": "princeton-nlp/SWE-bench_Verified",
+  "split": "test",
+  "revision": "c104f840cc67f8b6eec6f759eebc8b2693d5854a",
+  "timeout_minutes": 30,
+  "tasks": [
+    { "instance_id": "astropy__astropy-12907" },
+    { "instance_id": "django__django-10097" },
+    { "instance_id": "matplotlib__matplotlib-13989" },
+    { "instance_id": "scikit-learn__scikit-learn-10297" },
+    { "instance_id": "sympy__sympy-11618" }
+  ]
+}
+

@@ -92,18 +92,19 @@ async function minimalCompletion(
     requestModel,
     { allowPreserveThinking: true },
   );
+  const reasoningEffort = requestModel?.reasoning_effort ?? 'low';
   const response = await fetch(`${endpoint}/v1/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       ...request,
       stream: false,
-      // Keep the neutral arm on Qwen's own reasoning default. In the current
-      // Qwen3.8 template, enabled thinking without reasoning_effort means
-      // xhigh; the Forge arm explicitly sends the configured low level.
+      // Keep the neutral arm's loop and prompt minimal, but match the Forge
+      // arm's configured Qwen reasoning level for this controlled comparison.
       chat_template_kwargs: {
         ...request.chat_template_kwargs,
         enable_thinking: requestModel?.think !== false,
+        reasoning_effort: reasoningEffort,
       },
     }),
     signal,
@@ -302,3 +303,4 @@ export async function runCliArm(
     cliStatus: result.status,
   };
 }
+
