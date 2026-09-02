@@ -133,6 +133,21 @@ Therefore Telegram voice support requires:
 
 This is an implementation requirement, not an optional cleanup.
 
+### 2.9 Phase 1 emoji policy
+
+Do not spend early implementation time on Unicode emoji normalization, speech names, skin-tone modifiers, ZWJ sequences, or Telegram-specific emoji edge cases.
+
+**Phase 1 policy:**
+
+- Telegram inbound **text prompts containing emoji are rejected before prompt admission** with a concise message such as `Forge: emojis are not supported in remote prompts yet.`;
+- voice transcripts contain no generated emoji and therefore require no special STT handling;
+- assistant text remains untouched and may still contain emoji;
+- the TTS `SpeechRenderer` strips emoji from the speech-only copy before Piper;
+- sidebar typed-chat behavior outside the new voice path is not changed merely for this feature;
+- revisit full Unicode/emoji support only after the STT/TTS path is stable.
+
+Implementation should use Unicode-aware emoji detection rather than an ASCII range hack. Keep this as a transport/input policy, not a tokenizer/model modification.
+
 ---
 
 ## 3. Revised architecture
@@ -175,6 +190,8 @@ extension-host capture helper              binary OGG/Opus download
                     /                \
           original text           SpeechRenderer
           UI + history                 |
+                                      |
+                              strip emoji (Phase 1)
                                       |
                               code-aware normalization
                                       |
@@ -488,7 +505,13 @@ Do not bypass:
 - `/steer`/current-turn behavior;
 - remote audit conventions.
 
-### 9.4 UX
+### 9.4 Telegram text emoji guard (Phase 1)
+
+Before ordinary Telegram text reaches prompt admission, detect Unicode emoji. If any are present, reject the remote prompt and return a clear message. This guard is intentionally temporary and should be isolated so it can be removed later without touching prompt/tokenization logic.
+
+Do not reinterpret, transliterate or silently drop emoji from a user-authored Telegram prompt in Phase 1; reject it instead so the user knows the exact text was not submitted.
+
+### 9.5 UX
 
 Use existing remote progress infrastructure for a small status such as:
 
@@ -621,6 +644,7 @@ Pipeline:
 ```text
 assistant Markdown
  -> Markdown-aware segmentation
+ -> Phase 1 emoji removal from speech copy
  -> code-block policy
  -> inline-code normalization
  -> identifier/path/version/unit normalization
@@ -633,6 +657,7 @@ assistant Markdown
 
 Implement rules before growing a huge dictionary:
 
+- strip emoji from the speech-only copy in Phase 1;
 - `snake_case` -> split words;
 - `camelCase` -> split words;
 - `PascalCase` -> split words;
@@ -760,7 +785,7 @@ Restart [[ <CUDA phonemes> ]] and check the backend.
 
 Raw phonemes do not magically expand the voice model's learned acoustic capabilities. A voice can still render some unusual phoneme sequences poorly. Keep text fallback available.
 
-A recent Piper issue demonstrates that even explicit phoneme spans may occasionally omit or render phonemes unexpectedly in some voices/versions. Therefore every shipped pronunciation entry should be testable against the selected voice/runtime.
+Every shipped pronunciation entry should be testable against the selected voice/runtime.
 
 ---
 
@@ -791,6 +816,7 @@ Phase 1:
 - Greek-dominant -> JOY;
 - English-dominant -> configured English Piper voice;
 - technical terms -> lexicon + raw phonemes/text fallback;
+- emoji -> remove from speech-only copy;
 - avoid switching voices every few words.
 
 Later:
@@ -838,6 +864,7 @@ voice:
     telegram: true
     max_seconds: 180
     max_bytes: 25000000
+    reject_telegram_emoji: true
 
   capture:
     backend: helper       # helper | ffmpeg | future-webview
@@ -861,6 +888,7 @@ voice:
     english_voice: C:/path/to/en_US-voice.onnx
     language: auto
     speak_code_blocks: false
+    strip_emoji: true
     pronunciation_file: .forge/tts-pronunciations.json
 
   output:
@@ -909,6 +937,7 @@ Requirements:
 - Telegram voice must pass existing remote authentication/session gates;
 - voice must not bypass Clanker/approval semantics;
 - transcript is treated exactly like typed user input after admission;
+- Telegram emoji rejection happens before prompt admission in Phase 1;
 - audio size and duration are bounded;
 - decoder paths receive fixed argv, never shell-interpolated filenames;
 - temp files are not written to workspace by default;
@@ -953,6 +982,7 @@ Do not start with:
 - 1,000 pronunciation entries;
 - word-by-word Greek/English Piper switching;
 - an LLM TTS rewrite call for every response;
+- emoji-to-speech semantics;
 - retraining JOY merely for code vocabulary;
 - embedding `libpiper` into Forge before licensing is settled.
 
@@ -979,13 +1009,14 @@ Telegram is the easiest end-to-end input because Telegram already records the mi
 
 1. Extend `TelegramUpdateSchema` with `voice`.
 2. Add binary attachment handling.
-3. Download OGG/Opus bytes.
-4. Normalize to WAV locally.
-5. Spawn whisper.cpp.
-6. Wait for exit.
-7. Submit transcript through existing `RemotePromptAdmission`.
-8. Add `Transcribing voice…` progress.
-9. Add failure/cancellation tests.
+3. Add the temporary Telegram text emoji-rejection guard.
+4. Download OGG/Opus bytes.
+5. Normalize to WAV locally.
+6. Spawn whisper.cpp.
+7. Wait for exit.
+8. Submit transcript through existing `RemotePromptAdmission`.
+9. Add `Transcribing voice…` progress.
+10. Add failure/cancellation tests.
 
 **Do this before sidebar microphone capture.** It validates almost the entire STT/prompt pipeline without solving local audio capture at the same time.
 
@@ -1006,6 +1037,7 @@ Telegram is the easiest end-to-end input because Telegram already records the mi
 4. Sidebar playback.
 5. Telegram text+voice transport.
 6. Keep original response untouched.
+7. Strip emoji from the speech-only copy before Piper.
 
 ### Phase 4 — code-aware pronunciation
 
@@ -1026,7 +1058,8 @@ Candidates:
 - VAD for long voice notes;
 - language-segmented TTS;
 - transcript confirmation mode;
-- optional streaming partial transcript UI.
+- optional streaming partial transcript UI;
+- full emoji normalization/speech support after the basic path is stable.
 
 ---
 
@@ -1072,6 +1105,7 @@ Candidates:
 - raw phoneme span accepted;
 - fallback replacement works;
 - code block omitted/summarized;
+- emoji removed from speech copy without changing original text;
 - original assistant text unchanged;
 - Piper failure does not lose textual response.
 
@@ -1081,6 +1115,8 @@ Candidates:
 - authorized voice submits once;
 - voice download remains binary-safe;
 - over-size/over-duration voice rejected before expensive processing;
+- Telegram text containing emoji is rejected before prompt admission in Phase 1;
+- ordinary Unicode Greek/English text without emoji remains accepted;
 - response voice conversion failure still leaves text response available.
 
 ---
@@ -1098,7 +1134,8 @@ The first useful release is complete when:
 7. the visible response remains exact while speech uses a separate renderer;
 8. at least a starter set of technical terms is pronounced intentionally rather than letter-by-letter;
 9. raw-phoneme injection is proven with JOY or cleanly falls back to deterministic text replacement;
-10. no cloud speech service is required.
+10. Telegram text emoji is deliberately rejected during Phase 1 and assistant emoji does not reach Piper;
+11. no cloud speech service is required.
 
 ---
 
@@ -1115,6 +1152,8 @@ Telegram voice
  -> transcript
  -> existing RemotePromptAdmission
 ```
+
+In parallel with the Telegram schema change, add the temporary inbound emoji guard for ordinary Telegram text so unsupported emoji never reaches the early remote/voice implementation path.
 
 Then test with one English and one Greek voice note.
 
