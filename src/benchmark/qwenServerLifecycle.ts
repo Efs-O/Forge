@@ -3,6 +3,7 @@ import { parse as parseYaml } from 'yaml';
 import { ForgeConfigSchema } from '../config/schema';
 import type { ForgeConfig, ModelConfig } from '../config/types';
 import { DirectBackend } from '../backend/DirectBackend';
+import { resolveRequestModel, resolveSpawnModel } from '../config/ConfigResolver';
 import { inspectQwenEndpoint, normalizeLlamaBaseUrl, type QwenEndpointFacts } from './preflight';
 
 export interface QwenLifecycleOptions {
@@ -17,6 +18,8 @@ export interface QwenServerHandle {
   endpoint: string;
   logicalModel: string;
   facts: QwenEndpointFacts;
+  /** Resolved request-time settings from Forge's live config. */
+  requestModel: ModelConfig;
   backend?: DirectBackend;
 }
 
@@ -71,11 +74,12 @@ export async function ensureForgeQwen(options: QwenLifecycleOptions): Promise<Qw
   const config = readConfig(options.forgeConfigPath);
   const selected = selectModel(config, options.model);
   const logicalModel = selected.name;
+  const requestModel = resolveRequestModel(config, logicalModel);
   const response = await controlRequest(controlUrl(config), 'ensure', logicalModel);
   if (typeof response.baseUrl !== 'string') throw new Error('Forge /ensure returned no baseUrl.');
   const endpoint = normalizeLlamaBaseUrl(response.baseUrl);
   const facts = await inspectQwenEndpoint(endpoint);
-  return { phase: 'forge', endpoint, logicalModel, facts };
+  return { phase: 'forge', endpoint, logicalModel, facts, requestModel };
 }
 
 export async function unloadForgeQwen(handle: QwenServerHandle, configPath: string): Promise<void> {
@@ -104,12 +108,24 @@ export async function startMinimalQwen(
 ): Promise<QwenServerHandle> {
   const config = readConfig(options.forgeConfigPath);
   const selected = selectModel(config, options.model);
+  const requestModel = resolveRequestModel(config, selected.name);
   const root = normalizeLlamaBaseUrl(endpoint);
   const parsedEndpoint = new URL(root);
   const port = Number(parsedEndpoint.port);
   if (!port) throw new Error(`Minimal Qwen endpoint has no explicit port: ${root}`);
   if (!selected.gguf_path) throw new Error(`Qwen model ${selected.name} has no gguf_path.`);
-  const minimalModel: ModelConfig = { name: selected.name, gguf_path: selected.gguf_path };
+  const resolved = resolveSpawnModel(config, selected.name);
+  // The neutral arm must still fit the task plus the shared tool schema. The
+  // raw DirectBackend defaults are 4096 total tokens over four slots (1024 per
+  // slot), which rejects this benchmark before the model can act. Preserve the
+  // configured context capacity, use one slot for an apples-to-apples run, and
+  // omit Forge-specific MTP/checkpoint/other extra argv settings.
+  const minimalModel: ModelConfig = {
+    name: selected.name,
+    gguf_path: selected.gguf_path,
+    num_ctx: Math.max(resolved.num_ctx ?? config.llama_server.default_num_ctx ?? 0, 32_768),
+    n_parallel: 1,
+  };
   const minimalConfig: ForgeConfig = {
     ...config,
     models: config.models.map((model) =>
@@ -127,6 +143,7 @@ export async function startMinimalQwen(
       endpoint: actualEndpoint,
       logicalModel: selected.name,
       facts,
+      requestModel,
       backend,
     };
   } catch (error) {
@@ -138,3 +155,4 @@ export async function startMinimalQwen(
 export async function stopMinimalQwen(handle: QwenServerHandle): Promise<void> {
   if (handle.backend) await handle.backend.stop();
 }
+

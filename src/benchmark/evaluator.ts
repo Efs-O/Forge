@@ -55,14 +55,34 @@ function evaluatorProcess(
   args: readonly string[],
   cwd: string,
 ): Promise<Awaited<ReturnType<typeof runProcess>>> {
+  const evaluatorEnv =
+    process.platform === 'win32'
+      ? {
+          ...process.env,
+          PYTHONPATH: [
+            path.resolve(process.cwd(), 'scripts', 'swebench-windows'),
+            process.env.PYTHONPATH,
+          ]
+            .filter(Boolean)
+            .join(path.delimiter),
+        }
+      : undefined;
   if (process.platform !== 'win32' || !/\.(cmd|bat)$/iu.test(executable)) {
-    return runProcess(executable, args, { cwd, timeoutMs: 60 * 60 * 1000 });
+    return runProcess(executable, args, {
+      cwd,
+      ...(evaluatorEnv ? { env: evaluatorEnv } : {}),
+      timeoutMs: 60 * 60 * 1000,
+    });
   }
   const quote = (value: string): string => `"${value.replace(/"/gu, '\\"')}"`;
   return runProcess(
     'cmd.exe',
     ['/d', '/s', '/c', [quote(executable), ...args.map(quote)].join(' ')],
-    { cwd, timeoutMs: 60 * 60 * 1000 },
+    {
+      cwd,
+      ...(evaluatorEnv ? { env: evaluatorEnv } : {}),
+      timeoutMs: 60 * 60 * 1000,
+    },
   );
 }
 
@@ -110,3 +130,4 @@ export function evaluatorSucceeded(result: EvaluatorResult): boolean {
   // resolved field, not the agent prose or process wording, is authoritative.
   return result.resolved !== undefined;
 }
+
