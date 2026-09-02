@@ -38,6 +38,8 @@ export interface State {
   history: SessionHistoryMeta[];
   activeConversationId: string;
   clankerMode: boolean;
+  /** Whether anything outside this window can drive it. Host-owned. */
+  remote: { transports: string[]; paired: boolean };
 }
 
 export const initialState: State = {
@@ -54,6 +56,7 @@ export const initialState: State = {
   history: [],
   activeConversationId: '',
   clankerMode: false,
+  remote: { transports: [], paired: false },
 };
 
 /** Derived view helpers — used by App.tsx */
@@ -112,6 +115,7 @@ export type Action =
       convId?: string;
     }
   | { type: 'CLANKER_CHANGED'; enabled: boolean }
+  | { type: 'REMOTE_STATUS'; transports: string[]; paired: boolean }
   | {
       type: 'SESSION_SYNC';
       activeId: string;

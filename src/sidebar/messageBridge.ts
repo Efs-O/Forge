@@ -197,6 +197,19 @@ export interface ClankerChangedMsg {
   enabled: boolean;
 }
 
+/**
+ * Whether anything can reach this window from outside it. Sent on the
+ * `webviewReady` handshake and again on every transport or pairing change, so a
+ * reloaded webview never has to ask.
+ */
+export interface RemoteStatusMsg {
+  type: 'remoteStatus';
+  /** Running transports, sorted; empty when remote control is off. */
+  transports: string[];
+  /** True when at least one running transport has a paired owner. */
+  paired: boolean;
+}
+
 export interface FileDiffMsg {
   type: 'fileDiff';
   filePath: string;
@@ -304,6 +317,7 @@ export type HostToWebview =
   | SessionSyncMsg
   | FileDiffMsg
   | ClankerChangedMsg
+  | RemoteStatusMsg
   | WorkspaceInfoMsg;
 
 // ── Webview → Host ────────────────────────────────────────────────────────────

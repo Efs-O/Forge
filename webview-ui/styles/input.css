@@ -247,23 +247,98 @@
   opacity: 0.5;
 }
 
+/*
+ * `1fr auto 1fr`, not flex with a spacer. The model sits in the middle cell and
+ * therefore at the row's true centre whatever the side cells hold - a spacer
+ * would push it off-axis the moment the remote chip appeared, so the selector
+ * would shift sideways when a phone paired. Both side cells collapse to zero
+ * when empty, so a window with no remote transport looks the same as before
+ * except that the model is centred.
+ */
 #input-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 6px;
   min-width: 0;
 }
 
+.input-actions-left,
+.input-actions-right {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.input-actions-right {
+  justify-content: flex-end;
+}
+
 /*
- * The model trigger used to be `flex: 1` and swallow the whole row. In a 380px
- * sidebar that looked like a chip; docked wide it stretched to ~1000px and read
- * as a bar of its own, which is not what it is. It shrink-wraps now (see
- * `.ms-root`), and the slack goes here instead, so send stays pinned right at
- * every width and the model chip stays chip-sized.
+ * A readout, not a button: bordered rather than filled, so it never reads as
+ * something to press. Same height, radius and font as send/stop so it belongs
+ * to the row.
  */
-#input-actions > #btn-send,
-#input-actions > #btn-stop {
-  margin-left: auto;
+#remote-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border-radius: var(--forge-radius-sm);
+  border: 1px solid var(--forge-accent);
+  background: color-mix(in srgb, var(--forge-accent) 10%, transparent);
+  color: var(--forge-accent);
+  font-size: inherit;
+  white-space: nowrap;
+  min-width: 0;
+  cursor: default;
+  user-select: none;
+}
+
+/* Running but unpaired. Grey and still: the bot answers /pair and nothing else,
+   so it must not borrow the colour that means "reachable". */
+#remote-chip.is-unpaired {
+  border-color: var(--vscode-input-border, #555);
+  background: none;
+  color: var(--vscode-descriptionForeground);
+}
+
+.remote-chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+#remote-chip.is-paired .remote-chip-dot {
+  animation: forge-remote-breathe 2.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  #remote-chip.is-paired .remote-chip-dot {
+    animation: none;
+  }
+}
+
+.remote-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/*
+ * Below this the three cells cannot all keep their words: the model name is the
+ * one that ellipsises to nothing first, and it is the one the row exists for.
+ * The chip keeps its dot and hands the words to the tooltip; send keeps its
+ * glyph. Measured against the 380px the sidebar opens at and the ~320px it can
+ * be dragged to.
+ */
+@media (max-width: 360px) {
+  .remote-chip-label,
+  #btn-send span,
+  #btn-stop span {
+    display: none;
+  }
+  #remote-chip {
+    padding: 4px 7px;
+  }
 }
 
 /* One line under the actions, carrying what Enter does - or, when Clanker is

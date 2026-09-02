@@ -233,6 +233,7 @@ overlaps with an existing owner, extend the owner instead.
 | Context measured + output budget estimate  | `src/util/contextBudget.ts`                  |
 | Token-count display formatting             | `src/util/formatTokens.ts`                   |
 | Elapsed-duration display formatting        | `src/util/formatDuration.ts`                 |
+| Remote compaction notice policy            | `src/remote/remoteCompactionNotice.ts`       |
 | Streaming Ollama native client             | `src/llm/OllamaNativeClient.ts`              |
 | Request normalization (per-provider)       | `src/llm/RequestNormalizer.ts`               |
 | Sampling parameter merge                   | `src/llm/SamplingMerge.ts`                   |

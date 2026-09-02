@@ -26,9 +26,15 @@ export class RemoteAuth {
   private pairing: PairingSession | undefined;
   private readonly sessionAuth: RemoteSessionAuth;
 
+  /**
+   * `onOwnerChanged` fires whenever pairing is gained or lost. A plain callback
+   * rather than a `vscode.EventEmitter`: this class imports vscode for types
+   * only, and the remote suite's tests construct it without the module present.
+   */
   constructor(
     private readonly secrets: vscode.SecretStorage,
     policy: RemoteSessionPolicy = { inactivityTimeoutMinutes: 30 },
+    private readonly onOwnerChanged: () => void = () => undefined,
   ) {
     this.sessionAuth = new RemoteSessionAuth(secrets, policy);
   }
@@ -70,6 +76,7 @@ export class RemoteAuth {
     await this.secrets.store(ownerSecretKey(event.channel), event.senderId);
     this.sessionAuth.lock(event.channel, event.senderId);
     this.pairing = undefined;
+    this.onOwnerChanged();
     return 'paired';
   }
 
@@ -79,6 +86,7 @@ export class RemoteAuth {
     await this.secrets.delete(totpSecretKey(channel));
     if (owner) this.sessionAuth.lock(channel, owner);
     this.sessionAuth.clearChannel(channel);
+    this.onOwnerChanged();
   }
 
   async hasOwner(channel: RemoteInboundEvent['channel']): Promise<boolean> {

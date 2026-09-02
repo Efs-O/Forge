@@ -330,11 +330,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     openWorkspace: async (directory) => {
       await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(directory), false);
     },
+    onStatusChanged: () => void publishRemoteStatus(),
   });
   activeRemoteRuntime = remoteRuntime;
+  // Reads the runtime rather than taking a value: `status()` awaits SecretStorage
+  // for the paired-owner check, so the runtime's own notification stays
+  // synchronous and cannot interleave with the lifecycle step that raised it.
+  const publishRemoteStatus = async (): Promise<void> => {
+    sidebarProvider.setRemoteStatus(await remoteRuntime.status());
+  };
   await remoteRuntime.applyConfig(config).catch((err) => {
     void vscode.window.showErrorMessage(`Forge remote failed to start: ${(err as Error).message}`);
   });
+  await publishRemoteStatus();
   context.subscriptions.push({
     dispose: () => {
       void sidebarProvider.dispose();

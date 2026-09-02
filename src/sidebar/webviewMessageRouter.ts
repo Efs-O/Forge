@@ -23,6 +23,7 @@ export interface WebviewActions {
   postWorkspaceInfo: () => void;
   isBackendReady: () => boolean;
   getClankerMode: () => boolean;
+  getRemoteStatus: () => { transports: string[]; paired: boolean };
   send: (text: string, attachments?: AttachmentData[], conversationId?: string) => void;
   steer: (
     text: string,
@@ -60,6 +61,10 @@ export function routeWebviewMessage(actions: WebviewActions, msg: WebviewToHost)
       actions.postWorkspaceInfo();
       if (actions.isBackendReady()) actions.post({ type: 'ready' });
       actions.post({ type: 'clankerChanged', enabled: actions.getClankerMode() });
+      // The chip is host state the webview cannot derive. Without this a reload
+      // shows no chip until the next transport or pairing change, which on a
+      // stable setup is never.
+      actions.post({ type: 'remoteStatus', ...actions.getRemoteStatus() });
       break;
 
     case 'send':

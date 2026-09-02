@@ -179,3 +179,17 @@ export interface RemoteChannel {
   unlink?(): Promise<void>;
   healthCheck?(): Promise<RemoteTransportHealth>;
 }
+
+/**
+ * What the sidebar chip reports. Deliberately Forge's own view and not a health
+ * check: `transports` means `channel.start()` resolved and the transport has not
+ * been stopped, and `paired` means an owner id is in SecretStorage. A revoked
+ * token or a dropped long-poll still reads as running until a send fails, and
+ * claiming otherwise would need a heartbeat that does not exist.
+ */
+export interface RemoteStatus {
+  /** Running transports, sorted, so the value is comparable between polls. */
+  transports: Array<RemoteInboundEvent['channel']>;
+  /** True when at least one running transport has a paired owner. */
+  paired: boolean;
+}

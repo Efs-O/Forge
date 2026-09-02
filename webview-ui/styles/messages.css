@@ -21,12 +21,14 @@
   word-break: break-word;
 }
 
-/* The bar is the same warm hue as the streaming line and the armed-Clanker
-   hint: one accent for "this is Forge's own state", and blue reserved for the
-   things you can act on. */
+/* Transparent, not removed. The bar is the queued row's affordance (below) and
+   nothing else's, but the indent has to be identical on both or a queued prompt
+   jumps sideways the moment its turn starts and it becomes an ordinary message.
+   Transparent rather than a dark colour: black is only invisible against a dark
+   theme, and this panel follows whatever theme the user has. */
 .msg.user {
   background: transparent;
-  border-left: 2px solid var(--forge-clanker);
+  border-left: 2px solid transparent;
   padding: 2px 0 2px 9px;
   white-space: pre-wrap;
 }

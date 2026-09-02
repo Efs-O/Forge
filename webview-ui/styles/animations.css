@@ -77,3 +77,15 @@
     animation: none;
   }
 }
+
+/* The remote chip's dot. Slower than the streaming blink: this one says a link
+   is open, not that work is happening, and a fast pulse would read as activity. */
+@keyframes forge-remote-breathe {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}

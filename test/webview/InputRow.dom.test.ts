@@ -42,7 +42,11 @@ const COMMANDS = [
   },
 ];
 
-function renderInput(streaming: boolean, onRunSlashCommand = vi.fn()): typeof onRunSlashCommand {
+function renderInput(
+  streaming: boolean,
+  onRunSlashCommand = vi.fn(),
+  remote: { transports: string[]; paired: boolean } = { transports: [], paired: false },
+): typeof onRunSlashCommand {
   act(() => {
     root.render(
       React.createElement(InputRow, {
@@ -59,6 +63,7 @@ function renderInput(streaming: boolean, onRunSlashCommand = vi.fn()): typeof on
         activeModel: null,
         onModelChange: vi.fn(),
         modelPickerDisabled: false,
+        remote,
         activeConversationId: 'test-conversation',
       }),
     );
@@ -108,5 +113,35 @@ describe('InputRow slash commands', () => {
     renderInput(false);
     expect(items().every((item) => !item.disabled)).toBe(true);
     expect(items()[0]!.className).toContain('selected');
+  });
+});
+
+describe('remote-control chip', () => {
+  const chip = (): HTMLElement | null => container.querySelector('#remote-chip');
+
+  it('says nothing when no transport is running', () => {
+    renderInput(false, vi.fn(), { transports: [], paired: false });
+    expect(chip()).toBeNull();
+  });
+
+  it('reads active only once an owner is paired', () => {
+    renderInput(false, vi.fn(), { transports: ['telegram'], paired: true });
+    expect(chip()?.textContent).toBe('Remote active');
+    expect(chip()?.className).toContain('is-paired');
+  });
+
+  // The distinction the chip exists to make: a running transport with nobody
+  // paired answers /pair and nothing else, so it must not claim to be reachable.
+  it('reads waiting while a running transport has no owner', () => {
+    renderInput(false, vi.fn(), { transports: ['whatsapp'], paired: false });
+    expect(chip()?.textContent).toBe('Remote waiting');
+    expect(chip()?.className).toContain('is-unpaired');
+    expect(chip()?.getAttribute('title')).toContain('no owner is paired');
+  });
+
+  it('names every running transport in one chip, not one chip each', () => {
+    renderInput(false, vi.fn(), { transports: ['telegram', 'whatsapp'], paired: true });
+    expect(container.querySelectorAll('#remote-chip')).toHaveLength(1);
+    expect(chip()?.getAttribute('title')).toContain('telegram · whatsapp');
   });
 });

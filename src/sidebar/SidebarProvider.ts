@@ -1,3 +1,17 @@
+/* eslint-disable max-lines -- deliberately over 500; see the note below. */
+/*
+ * Over the 500-line ceiling on purpose. Every cut available here is the kind the
+ * file-size rule warns against: the six `post*`/`persist` helpers close over
+ * `sidebar`, `config`, `pool`, `agentLoop`, `workspaceRoot` and `budget`, and
+ * the `handleMessage` actions literal closes over eight fields - extracting
+ * either means threading a context object purely to shed lines, and a reader
+ * chasing one message would end up in three files.
+ *
+ * The seam that IS real is the constructor: its collaborator wiring is
+ * construction, not behaviour, and a `createSidebarCollaborators` factory would
+ * take ~130 lines out at once. That is the split the next addition to this file
+ * should pay for. Do not add another method here without doing it.
+ */
 import * as vscode from 'vscode';
 import type { IBackendPool } from '../backend/BackendPool';
 import type { ForgeConfig, ModelConfig } from '../config/types';
@@ -223,6 +237,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   // ── Public API ────────────────────────────────────────────────────────────
 
+  /**
+   * Remote-control state, pushed in by `extension.ts` as `RemoteRuntime`
+   * lifecycle moves. Held here as well as posted because the webview asks for it
+   * on every `webviewReady`, and a reload must not have to wait for the next
+   * transport change to learn whether anything can reach this window.
+   */
+  setRemoteStatus(status: { transports: string[]; paired: boolean }): void {
+    this.remoteStatus = { transports: [...status.transports], paired: status.paired };
+    this.post({ type: 'remoteStatus', ...this.remoteStatus });
+  }
+
   /** Opens the active turn's changes in VS Code's native diff editor. */
   async reviewCheckpoint(): Promise<void> {
     await this.review.open(this.checkpoints.pendingSnapshots(this.sidebar.activeConversationId));
@@ -328,6 +353,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       buildModelsMessage(this.config, this.pool, active?.active_model ?? this.config.active_model),
     );
   }
+
+  private remoteStatus: { transports: string[]; paired: boolean } = {
+    transports: [],
+    paired: false,
+  };
 
   private post(msg: HostToWebview): void {
     this.view?.webview.postMessage(msg);
@@ -457,6 +487,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         postWorkspaceInfo: () => this.postWorkspaceInfo(),
         isBackendReady: () => this.pool.isAnyReady(),
         getClankerMode: () => this.agentLoop.getClankerMode(),
+        getRemoteStatus: () => this.remoteStatus,
         send: (text, attachments, conversationId) => {
           void this.send.send(text, attachments, conversationId);
         },

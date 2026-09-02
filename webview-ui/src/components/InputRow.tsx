@@ -21,6 +21,8 @@ interface Props {
   activeModel: string | null;
   onModelChange: (name: string | null) => void;
   modelPickerDisabled: boolean;
+  /** Whether anything outside this window can drive it. */
+  remote: { transports: string[]; paired: boolean };
   activeConversationId: string;
 }
 
@@ -68,6 +70,41 @@ const PaperclipIcon = (): React.ReactElement => (
   </svg>
 );
 
+/**
+ * Whether anything outside this window can reach it.
+ *
+ * Three states, not two. A transport that is running with nobody paired is up
+ * and answering `/pair`, but cannot be driven - saying "active" there would
+ * claim someone can reach this window when the pairing gate says otherwise. It
+ * reports Forge's own view and is not a health check: a revoked token or a
+ * dropped session still reads as running until a send fails.
+ */
+function RemoteChip({
+  transports,
+  paired,
+}: {
+  transports: string[];
+  paired: boolean;
+}): React.ReactElement | null {
+  if (transports.length === 0) return null;
+  const via = transports.join(' · ');
+  const label = paired ? 'Remote active' : 'Remote waiting';
+  const title = paired
+    ? `Remote control is paired on ${via}. Messages from there drive this window.`
+    : `${via} is running but no owner is paired. Run “Forge: Pair Remote Device” to bind one.`;
+  return (
+    <span
+      id="remote-chip"
+      className={paired ? 'is-paired' : 'is-unpaired'}
+      title={title}
+      role="status"
+    >
+      <span className="remote-chip-dot" aria-hidden="true" />
+      <span className="remote-chip-label">{label}</span>
+    </span>
+  );
+}
+
 export function InputRow({
   onSend,
   onCancel,
@@ -82,6 +119,7 @@ export function InputRow({
   activeModel,
   onModelChange,
   modelPickerDisabled,
+  remote,
   activeConversationId,
 }: Props): React.ReactElement {
   const [text, setText] = useState('');
@@ -333,7 +371,15 @@ export function InputRow({
           onChange={handleFileChange}
         />
 
+        {/* Three columns rather than a flex spacer: `1fr auto 1fr` keeps the
+            model at the row's true centre no matter how wide the left chip
+            gets, where a spacer would shove it off-axis the moment the chip
+            appeared. The side cells collapse to nothing when empty. */}
         <div id="input-actions">
+          <span className="input-actions-left">
+            <RemoteChip transports={remote.transports} paired={remote.paired} />
+          </span>
+
           <ModelSelector
             models={models}
             activeModel={activeModel}
@@ -341,17 +387,21 @@ export function InputRow({
             disabled={modelPickerDisabled}
           />
 
-          {streaming ? (
-            <button id="btn-stop" type="button" onClick={onCancel}>
-              <StopIcon />
-              Stop
-            </button>
-          ) : (
-            <button id="btn-send" type="button" onClick={submit} disabled={!canSend}>
-              <SendIcon />
-              Send
-            </button>
-          )}
+          <span className="input-actions-right">
+            {streaming ? (
+              // The labels are wrapped so the narrow-panel rule can drop the
+              // word and keep the glyph. A bare text node cannot be targeted.
+              <button id="btn-stop" type="button" onClick={onCancel} title="Stop">
+                <StopIcon />
+                <span>Stop</span>
+              </button>
+            ) : (
+              <button id="btn-send" type="button" onClick={submit} disabled={!canSend} title="Send">
+                <SendIcon />
+                <span>Send</span>
+              </button>
+            )}
+          </span>
         </div>
 
         {/* One line carries both facts, and only one can apply at a time: armed

@@ -43,6 +43,7 @@ beforeEach(() => {
         activeModel: null,
         onModelChange: vi.fn(),
         modelPickerDisabled: false,
+        remote: { transports: [], paired: false },
         activeConversationId: 'test-conversation',
       }),
     );

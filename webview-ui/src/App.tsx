@@ -187,6 +187,9 @@ export function App(): React.ReactElement {
         case 'clankerChanged':
           dispatch({ type: 'CLANKER_CHANGED', enabled: msg.enabled });
           break;
+        case 'remoteStatus':
+          dispatch({ type: 'REMOTE_STATUS', transports: msg.transports, paired: msg.paired });
+          break;
         case 'thread-stream-state-changed':
         case 'thread-read-state-changed':
         case 'historyRestore':
@@ -472,6 +475,7 @@ export function App(): React.ReactElement {
         activeModel={state.activeModel}
         onModelChange={handleModelChange}
         modelPickerDisabled={uiBusy}
+        remote={state.remote}
         activeConversationId={state.activeConversationId}
       />
       {confirmRequest && (

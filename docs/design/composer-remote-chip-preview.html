@@ -1,0 +1,344 @@
+<meta charset="utf-8" />
+<title>Composer action row — remote chip</title>
+<style>
+  :root {
+    --sbg: #1c1f24;
+    --sbg2: #16191d;
+    --sline: #2b3037;
+    --sfg: #cdd3da;
+    --sdim: #868f9b;
+    --sacc: #e5824a;
+    --sblue: #4c9be0;
+    --sgreen: #6fc099;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 28px 22px 60px;
+    background: #101317;
+    color: var(--sfg);
+    font: 13px/1.5 -apple-system, "Segoe UI", system-ui, sans-serif;
+  }
+  h1 { font-size: 17px; font-weight: 600; margin: 0 0 4px; }
+  h2 {
+    font-size: 11px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--sdim); margin: 34px 0 12px; padding-bottom: 6px;
+    border-bottom: 1px solid var(--sline);
+  }
+  .lede { color: var(--sdim); max-width: 66ch; margin: 0 0 8px; }
+  .lede code, p code { color: var(--sfg); background: #22272d; padding: 1px 4px; border-radius: 3px; font-size: 11px; }
+
+  .strip { display: flex; flex-wrap: wrap; gap: 22px; align-items: flex-start; }
+  .spec { display: flex; flex-direction: column; gap: 7px; }
+  .spec > .cap {
+    font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--sdim);
+  }
+  .spec > .note { font-size: 11px; color: var(--sdim); max-width: 38ch; }
+
+  /* ── the panel shell ─────────────────────────────────────────────────── */
+  .panel {
+    width: 382px;
+    background: var(--sbg);
+    border: 1px solid var(--sline);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .panel.wide { width: 620px; }
+  .panel.narrow { width: 320px; }
+
+  .fakebody {
+    padding: 12px 10px 6px;
+    color: var(--sdim);
+    font-size: 11.5px;
+    min-height: 46px;
+  }
+  .fakebody .amsg { color: var(--sfg); }
+
+  .composer { border-top: 1px solid var(--sline); padding: 8px; }
+
+  .field {
+    position: relative;
+    background: #14171b;
+    border: 1px solid #333a42;
+    border-radius: 6px;
+    padding: 8px 10px 30px;
+    min-height: 56px;
+    color: var(--sdim);
+    font-size: 12px;
+  }
+  .clip {
+    position: absolute; left: 5px; bottom: 5px;
+    width: 24px; height: 24px; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--sdim);
+  }
+
+  /* ── action row: today vs proposed ───────────────────────────────────── */
+  .actions { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+  .actions .grow { flex: 1; }
+
+  .actions.grid {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 6px;
+  }
+  .actions.grid > .left { justify-self: start; }
+  .actions.grid > .mid { justify-self: center; }
+  .actions.grid > .right { justify-self: end; }
+
+  /* ── controls ────────────────────────────────────────────────────────── */
+  .ms {
+    display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+    position: relative;
+    background: #23282e; color: var(--sfg);
+    border: 1px solid #363d45; border-radius: 4px;
+    padding: 4px 22px; font-size: 12px; max-width: 260px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .ms::after {
+    content: "▾"; position: absolute; right: 8px; top: 50%;
+    transform: translateY(-50%); font-size: 10px; opacity: .6;
+  }
+  .ms .dot {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--sgreen); flex: none;
+  }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 11px; border-radius: 4px; font-size: 12px;
+    border: 1px solid transparent; white-space: nowrap;
+  }
+  .btn.send { background: #0e639c; color: #fff; }
+  .btn.stop { background: #6b2b2b; color: #f3d9d9; border-color: #8a3a3a; }
+
+  /* the new chip: same geometry as stop/send, blue, not a button */
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 11px; border-radius: 4px; font-size: 12px;
+    border: 1px solid var(--sblue);
+    color: var(--sblue);
+    background: rgba(76, 155, 224, .1);
+    white-space: nowrap;
+  }
+  .chip .live {
+    width: 6px; height: 6px; border-radius: 50%; background: var(--sblue); flex: none;
+    animation: breathe 2.4s ease-in-out infinite;
+  }
+  @keyframes breathe { 0%,100% { opacity: .4 } 50% { opacity: 1 } }
+  .chip.pairing {
+    border-color: #5c6470; color: var(--sdim); background: none;
+  }
+  .chip.pairing .live { background: var(--sdim); animation: none; }
+  .chip.icononly { padding: 4px 8px; }
+
+  .hint { margin: 6px 0 0; font-size: 10px; color: var(--sdim); }
+  .hint.armed { color: var(--sacc); }
+
+  /* ── annotation ──────────────────────────────────────────────────────── */
+  .callouts { max-width: 74ch; }
+  .callout {
+    border-left: 2px solid var(--sline);
+    padding: 2px 0 2px 12px;
+    margin: 14px 0;
+  }
+  .callout b { color: var(--sfg); font-weight: 600; display: block; margin-bottom: 2px; }
+  .callout p { margin: 0; color: var(--sdim); }
+  .callout.warn { border-left-color: var(--sacc); }
+  .callout.ask { border-left-color: var(--sblue); }
+
+  table { border-collapse: collapse; font-size: 12px; margin-top: 6px; }
+  th, td { text-align: left; padding: 5px 16px 5px 0; vertical-align: top; }
+  th { color: var(--sdim); font-weight: 500; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
+  td code { font-size: 11px; }
+</style>
+
+<h1>Composer action row — centred model, remote chip</h1>
+<p class="lede">
+  Proposed change to the row under the prompt field. The model selector moves to the true
+  centre; the left slot gains a status chip that appears only while a remote transport is
+  live. Nothing else in the composer moves.
+</p>
+
+<h2>A · the row today</h2>
+<div class="strip">
+  <div class="spec">
+    <span class="cap">now</span>
+    <div class="panel">
+      <div class="fakebody"><span class="amsg">Done — three files changed.</span></div>
+      <div class="composer">
+        <div class="field">Ask, or / for commands…<span class="clip">🖇</span></div>
+        <div class="actions">
+          <span class="ms"><span class="dot"></span>qwen38-27b-coding</span>
+          <span class="grow"></span>
+          <span class="btn send">➤ Send</span>
+        </div>
+        <p class="hint">Enter to send · Shift+Enter for a newline</p>
+      </div>
+    </div>
+    <span class="note">Model left, send right, empty middle.</span>
+  </div>
+</div>
+
+<h2>B · proposed — the four states</h2>
+<div class="strip">
+
+  <div class="spec">
+    <span class="cap">1 · no remote configured</span>
+    <div class="panel">
+      <div class="composer">
+        <div class="field">Ask, or / for commands…<span class="clip">🖇</span></div>
+        <div class="actions grid">
+          <span class="left"></span>
+          <span class="ms mid"><span class="dot"></span>qwen38-27b-coding</span>
+          <span class="btn send right">➤ Send</span>
+        </div>
+        <p class="hint">Enter to send · Shift+Enter for a newline</p>
+      </div>
+    </div>
+    <span class="note">Left slot is empty and holds no width. The model still sits dead centre — that is what the grid buys over a flex spacer.</span>
+  </div>
+
+  <div class="spec">
+    <span class="cap">2 · telegram paired</span>
+    <div class="panel">
+      <div class="composer">
+        <div class="field">Ask, or / for commands…<span class="clip">🖇</span></div>
+        <div class="actions grid">
+          <span class="chip left"><span class="live"></span>Remote active</span>
+          <span class="ms mid"><span class="dot"></span>qwen38-27b-coding</span>
+          <span class="btn send right">➤ Send</span>
+        </div>
+        <p class="hint">Enter to send · Shift+Enter for a newline</p>
+      </div>
+    </div>
+    <span class="note">Blue, and the same height and radius as Send/Stop — but bordered, not filled, because it is a readout, not a button.</span>
+  </div>
+
+  <div class="spec">
+    <span class="cap">3 · streaming, remote paired</span>
+    <div class="panel">
+      <div class="composer">
+        <div class="field">Ask, or / for commands…<span class="clip">🖇</span></div>
+        <div class="actions grid">
+          <span class="chip left"><span class="live"></span>Remote active</span>
+          <span class="ms mid"><span class="dot"></span>qwen38-27b-coding</span>
+          <span class="btn stop right">■ Stop</span>
+        </div>
+        <p class="hint">Enter queues this for the next turn</p>
+      </div>
+    </div>
+    <span class="note">Stop replaces Send in the right slot; the chip does not move.</span>
+  </div>
+
+  <div class="spec">
+    <span class="cap">4 · running, nobody paired</span>
+    <div class="panel">
+      <div class="composer">
+        <div class="field">Ask, or / for commands…<span class="clip">🖇</span></div>
+        <div class="actions grid">
+          <span class="chip pairing left"><span class="live"></span>Remote waiting</span>
+          <span class="ms mid"><span class="dot"></span>qwen38-27b-coding</span>
+          <span class="btn send right">➤ Send</span>
+        </div>
+        <p class="hint">Enter to send · Shift+Enter for a newline</p>
+      </div>
+    </div>
+    <span class="note">The state I would add unasked — see the callout below. Grey, no pulse: the bot is up but nothing can drive it yet.</span>
+  </div>
+
+</div>
+
+<h2>C · width</h2>
+<div class="strip">
+  <div class="spec">
+    <span class="cap">620px — docked wide</span>
+    <div class="panel wide">
+      <div class="composer">
+        <div class="field">Ask, or / for commands…<span class="clip">🖇</span></div>
+        <div class="actions grid">
+          <span class="chip left"><span class="live"></span>Remote active</span>
+          <span class="ms mid"><span class="dot"></span>qwen38-27b-coding</span>
+          <span class="btn send right">➤ Send</span>
+        </div>
+        <p class="hint">Enter to send · Shift+Enter for a newline</p>
+      </div>
+    </div>
+    <span class="note">Centre stays centred as the panel grows — the two side slots share the slack equally.</span>
+  </div>
+
+  <div class="spec">
+    <span class="cap">320px — narrowest usable sidebar</span>
+    <div class="panel narrow">
+      <div class="composer">
+        <div class="field">Ask, or / for…<span class="clip">🖇</span></div>
+        <div class="actions grid">
+          <span class="chip icononly left" title="Remote active — telegram"><span class="live"></span>⌁</span>
+          <span class="ms mid"><span class="dot"></span>qwen38-27b…</span>
+          <span class="btn send right">➤</span>
+        </div>
+        <p class="hint">Enter to send · Shift+Enter</p>
+      </div>
+    </div>
+    <span class="note">Below ~360px the words drop and the chip keeps the dot alone, title on hover. Without this the model name ellipsises to nothing at the width the panel actually opens at.</span>
+  </div>
+</div>
+
+<h2>D · what drives it</h2>
+<p class="lede">
+  The state already exists host-side. Nothing new needs to be measured or stored — it needs
+  an event and a bridge message.
+</p>
+<table>
+  <tr><th>Fact</th><th>Owner today</th><th>Means</th></tr>
+  <tr>
+    <td>transport running</td>
+    <td><code>RemoteRuntime.active</code> — a <code>Map</code> keyed <code>telegram</code>/<code>whatsapp</code>, written only by <code>startTransport</code>/<code>stopTransport</code>/<code>dispose</code></td>
+    <td>Forge started the bot and <code>channel.start()</code> resolved</td>
+  </tr>
+  <tr>
+    <td>owner paired</td>
+    <td><code>RemoteAuth.hasOwner(channel)</code> — reads <code>forge.remote.&lt;ch&gt;.ownerId</code> from SecretStorage</td>
+    <td>a person is bound to this transport and can actually send</td>
+  </tr>
+</table>
+
+<div class="callouts">
+  <div class="callout ask">
+    <b>Why two states and not one</b>
+    <p>
+      "Remote active" on a transport with no paired owner would be false. The bot is up and
+      answering <code>/pair</code>, but nobody can drive Forge through it — that is the whole
+      point of the pairing gate. Showing the same blue chip for both would mean the indicator
+      says "someone can reach this window" when nobody can. Hence state 4, grey and unpulsed.
+      If you would rather have one state, say so and I ship only the blue one.
+    </p>
+  </div>
+  <div class="callout warn">
+    <b>What the chip cannot honestly claim</b>
+    <p>
+      It reports Forge's own view: the transport started and an owner is paired. It is not a
+      health check. A revoked Telegram token, a dropped long-poll, or a WhatsApp session that
+      Baileys has quietly lost will all still read as active until a send fails. Making the
+      chip mean "the link is up right now" needs a heartbeat that does not exist yet, and I
+      would rather it under-claim than invent one.
+    </p>
+  </div>
+  <div class="callout">
+    <b>Both transports at once</b>
+    <p>
+      Telegram and WhatsApp can both be live. One chip, not two: it reads
+      <code>Remote active</code> either way and names the transports in its tooltip
+      (<code>telegram · whatsapp</code>). Two chips would push the centred model off-axis on a
+      narrow panel to say something the tooltip already says.
+    </p>
+  </div>
+  <div class="callout">
+    <b>Cost</b>
+    <p>
+      An emitter on <code>RemoteRuntime</code> fired from the three sites that mutate
+      <code>active</code>, plus a <code>remoteStatus</code> bridge message, plus the chip and a
+      three-column grid in <code>#input-actions</code>. No new state, no polling, no network.
+    </p>
+  </div>
+</div>

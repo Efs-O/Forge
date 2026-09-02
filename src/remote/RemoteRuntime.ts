@@ -15,8 +15,9 @@ import {
   workspaceIdFor,
 } from './RemoteWorkspaceHandoff';
 import { RemoteTransportLease } from './RemoteTransportLease';
-import type { RemoteChannel } from './types';
+import type { RemoteChannel, RemoteStatus } from './types';
 import { RemoteAuditLog } from './RemoteAuditLog';
+import { remoteCompactionNotice } from './remoteCompactionNotice';
 import { RemoteAttachmentStore } from './RemoteAttachmentStore';
 
 export interface RemoteChannelFactoryContext {
@@ -35,6 +36,13 @@ export interface RemoteRuntimeOptions {
   secrets: vscode.SecretStorage;
   channelFactories?: Partial<Record<'telegram' | 'whatsapp', RemoteChannelFactory>>;
   notifyLocal: (message: string) => void;
+  /**
+   * Fired whenever the set of running transports or the paired-owner state
+   * changes. The listener reads `status()` - which has to await SecretStorage -
+   * rather than being handed a value, so the notification stays synchronous and
+   * cannot interleave with the lifecycle operation that raised it.
+   */
+  onStatusChanged?: (() => void) | undefined;
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
   reloadWindow?: (() => Promise<void>) | undefined;
   openWorkspace?: ((directory: string) => Promise<void>) | undefined;
@@ -76,7 +84,7 @@ export class RemoteRuntime {
   private appliedConfig: ForgeConfig | undefined;
 
   constructor(private readonly options: RemoteRuntimeOptions) {
-    this.auth = new RemoteAuth(options.secrets);
+    this.auth = new RemoteAuth(options.secrets, undefined, () => this.notifyStatus());
     this.store = new RemoteRequestStore(
       path.join(options.storageDirectory, 'remote-state-v2.json'),
       path.join(options.storageDirectory, 'remote-state-v1.json'),
@@ -338,6 +346,7 @@ export class RemoteRuntime {
           compactionSubscription,
           notificationSubscription,
         });
+        this.notifyStatus();
       } catch (err) {
         compactionSubscription?.dispose();
         notificationSubscription?.dispose();
@@ -439,28 +448,15 @@ export class RemoteRuntime {
     const transport = this.active.get(name);
     if (!transport) return;
     this.active.delete(name);
+    this.notifyStatus();
     transport.compactionSubscription?.dispose();
     transport.notificationSubscription?.dispose();
     await transport.controller.stop();
     await transport.lease.release();
   }
 
-  /**
-   * Delivery policy for host-originated compaction events:
-   * - trigger 'auto'  → notify on started + finished (primary new capability)
-   * - trigger 'remote' → suppress (the /compact handler already sent progress)
-   * - trigger 'sidebar' → suppress (local actions are not mirrored by default)
-   */
   private onCompactionEvent(event: CompactionEvent, controller: RemoteController): void {
-    if (event.trigger !== 'auto') return;
-    const text =
-      event.phase === 'started'
-        ? 'Forge: compacting…'
-        : event.outcome === 'compacted'
-          ? 'Forge: compaction complete.'
-          : event.outcome === 'skipped'
-            ? undefined
-            : 'Forge: compaction failed.';
+    const text = remoteCompactionNotice(event);
     if (text === undefined) return;
     void controller.enqueueHostNotification(event.conversationId, text).catch((err) => {
       this.options.notifyLocal(
@@ -471,6 +467,21 @@ export class RemoteRuntime {
 
   private async stopActive(): Promise<void> {
     await Promise.all([...this.active.keys()].map((name) => this.stopTransport(name)));
+  }
+
+  /**
+   * What the sidebar chip shows. Sorted so two reads of an unchanged runtime
+   * produce an identical value, which is what lets the webview treat a repeated
+   * message as a no-op.
+   */
+  async status(): Promise<RemoteStatus> {
+    const transports = (this.activeTransports() as RemoteStatus['transports']).sort();
+    const owned = await Promise.all(transports.map((name) => this.auth.hasOwner(name)));
+    return { transports, paired: owned.some(Boolean) };
+  }
+
+  private notifyStatus(): void {
+    this.options.onStatusChanged?.();
   }
 }
 

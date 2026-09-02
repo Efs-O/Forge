@@ -356,6 +356,9 @@ export function reducer(state: State, action: Action): State {
     case 'CLANKER_CHANGED':
       return { ...state, clankerMode: action.enabled };
 
+    case 'REMOTE_STATUS':
+      return { ...state, remote: { transports: action.transports, paired: action.paired } };
+
     case 'SESSION_SYNC': {
       const hostStreaming = action.tabs.filter((tab) => tab.streaming).map((tab) => tab.id);
       const liveConversationIds = new Set([...state.streamingIds, ...hostStreaming]);
