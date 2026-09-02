@@ -31,6 +31,13 @@ function resolveConvId(state: State, convId?: string): string {
   return convId ?? state.activeConversationId;
 }
 
+function withoutKey(map: Map<string, string>, id: string): Map<string, string> {
+  if (!map.has(id)) return map;
+  const next = new Map(map);
+  next.delete(id);
+  return next;
+}
+
 function withoutId(set: Set<string>, id: string): Set<string> {
   if (!set.has(id)) return set;
   const next = new Set(set);
@@ -50,6 +57,24 @@ function clearRecoveredBackendStartErrors(state: State, convId: string): State {
   );
   if (remaining.length === existing.length) return state;
   return { ...state, messagesById: { ...state.messagesById, [convId]: remaining } };
+}
+
+/**
+ * Close an open reasoning span on the conversation's last row.
+ *
+ * A reasoning-only round ends at a tool call, not at prose, so `TOKEN` alone
+ * would leave every thinking-then-tool round unmeasured - which on this agent
+ * loop is most of them.
+ */
+function sealReasoningSpan(state: State, cid: string): State {
+  const rows = state.messagesById[cid] ?? [];
+  const last = rows[rows.length - 1];
+  if (last?.role !== 'assistant') return state;
+  if (last.reasoningStartedAt === undefined || last.reasoningMs !== undefined) return state;
+  return updateLastInConv(state, cid, (m) => ({
+    ...m,
+    reasoningMs: Date.now() - (m.reasoningStartedAt ?? Date.now()),
+  }));
 }
 
 export function reducer(state: State, action: Action): State {
@@ -102,7 +127,15 @@ export function reducer(state: State, action: Action): State {
         return appendToConv(state, cid, { id: mkId(), role: 'assistant', content: action.text });
       }
       if (last?.role === 'assistant') {
-        return updateLastInConv(state, cid, (m) => ({ ...m, content: m.content + action.text }));
+        return updateLastInConv(state, cid, (m) => ({
+          ...m,
+          content: m.content + action.text,
+          // Prose starting is the end of the reasoning phase. Stamped once:
+          // every later token would otherwise re-measure to "now".
+          ...(m.reasoningStartedAt !== undefined && m.reasoningMs === undefined
+            ? { reasoningMs: Date.now() - m.reasoningStartedAt }
+            : {}),
+        }));
       }
       return appendToConv(state, cid, { id: mkId(), role: 'assistant', content: action.text });
     }
@@ -120,6 +153,7 @@ export function reducer(state: State, action: Action): State {
         return updateLastInConv(state, cid, (m) => ({
           ...m,
           reasoning: (m.reasoning ?? '') + action.text,
+          reasoningStartedAt: m.reasoningStartedAt ?? Date.now(),
         }));
       }
       return appendToConv(state, cid, {
@@ -127,6 +161,7 @@ export function reducer(state: State, action: Action): State {
         role: 'assistant',
         content: '',
         reasoning: action.text,
+        reasoningStartedAt: Date.now(),
       });
     }
 
@@ -136,7 +171,13 @@ export function reducer(state: State, action: Action): State {
       const newGenerating = new Set(state.generatingIds);
       newStreaming.delete(cid);
       newGenerating.delete(cid);
-      return { ...state, streamingIds: newStreaming, generatingIds: newGenerating };
+      // A turn that ends on reasoning alone - cancelled, or cut off by the
+      // output budget - still gets its span closed here rather than left open.
+      return {
+        ...sealReasoningSpan(state, cid),
+        streamingIds: newStreaming,
+        generatingIds: newGenerating,
+      };
     }
 
     case 'ERROR': {
@@ -159,26 +200,35 @@ export function reducer(state: State, action: Action): State {
       const next: State = {
         ...clearRecoveredBackendStartErrors(state, cid),
         backendReady: true,
-        backendStartAnnouncedIds: withoutId(state.backendStartAnnouncedIds, cid),
+        backendStartRowIds: withoutKey(state.backendStartRowIds, cid),
       };
-      if (!state.backendStartAnnouncedIds.has(cid)) return next;
-      return appendToConv(next, cid, {
-        id: mkId(),
-        role: 'system',
-        content: 'Backend ready.',
-      });
+      const startRowId = state.backendStartRowIds.get(cid);
+      if (startRowId === undefined) return next;
+      // Rewrite the announcement rather than answering it. The pair used to
+      // accumulate, leaving "Starting backend, please wait…" in the transcript
+      // forever above a "Backend ready." that had made it untrue.
+      return {
+        ...next,
+        messagesById: {
+          ...next.messagesById,
+          [cid]: (next.messagesById[cid] ?? []).map((row) =>
+            row.id === startRowId ? { ...row, content: 'Backend ready.' } : row,
+          ),
+        },
+      };
     }
 
     case 'BACKEND_STARTING': {
       const cid = resolveConvId(state, action.convId);
+      const rowId = mkId();
       return appendToConv(
         {
           ...state,
           backendReady: false,
-          backendStartAnnouncedIds: new Set([...state.backendStartAnnouncedIds, cid]),
+          backendStartRowIds: new Map(state.backendStartRowIds).set(cid, rowId),
         },
         cid,
-        { id: mkId(), role: 'system', content: action.message },
+        { id: rowId, role: 'system', content: action.message },
       );
     }
 
@@ -196,7 +246,7 @@ export function reducer(state: State, action: Action): State {
           backendReady: false,
           // The failure row is the answer to the announcement; a later READY
           // must not also reply to it.
-          backendStartAnnouncedIds: withoutId(state.backendStartAnnouncedIds, cid),
+          backendStartRowIds: withoutKey(state.backendStartRowIds, cid),
         },
         cid,
         { id: mkId(), role: 'error', content: action.message },
@@ -211,7 +261,7 @@ export function reducer(state: State, action: Action): State {
 
     case 'TOOL_ACTIVITY': {
       const cid = resolveConvId(state, action.convId);
-      return appendToConv(state, cid, {
+      return appendToConv(sealReasoningSpan(state, cid), cid, {
         id: mkId(),
         role: 'tool' as const,
         content: action.detail ? `${action.toolName} → ${action.detail}` : action.toolName,

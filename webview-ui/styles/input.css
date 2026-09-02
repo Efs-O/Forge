@@ -201,22 +201,20 @@
   color: var(--forge-accent);
 }
 
-#model-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 6px;
-  min-width: 0;
-}
-
+/*
+ * A column, not a row. The buttons used to stack to the right of the field,
+ * spending ~150px of a 382px panel on chrome and squeezing the textarea to
+ * roughly half its width. Everything that is not the field is now one
+ * horizontal row beneath it, at the width it actually needs.
+ */
 #prompt-area {
   display: flex;
-  align-items: flex-end;
+  flex-direction: column;
   gap: 6px;
 }
 
 #prompt {
-  flex: 1;
+  width: 100%;
   resize: none;
   background: var(--vscode-input-background);
   color: var(--vscode-input-foreground);
@@ -238,17 +236,39 @@
   opacity: 0.5;
 }
 
-#input-btn-col {
+#input-actions {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  align-items: stretch;
-  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/*
+ * No spacer element: `.ms-root` is already `flex: 1`, so the model trigger
+ * takes the slack and the action button sits at the right edge. A second
+ * flexing child would split that space with it and shrink the name for nothing.
+ */
+
+/* One line under the actions, carrying what Enter does - or, when Clanker is
+   armed, that it is. Never both: armed is the louder fact and takes the row. */
+#composer-hint {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.3;
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: none;
+}
+
+#composer-hint.clanker-armed {
+  color: var(--vscode-editorWarning-foreground, #cca700);
 }
 
 #attach-btn {
-  width: 34px;
-  height: 34px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   display: inline-flex;
   align-items: center;
@@ -297,6 +317,11 @@
   cursor: default;
 }
 
+#btn-send,
+#btn-stop {
+  flex-shrink: 0;
+}
+
 #btn-stop {
   display: inline-flex;
   align-items: center;
@@ -324,24 +349,29 @@
   color: #fff;
 }
 
-/* ── Clanker mode pill ───────────────────────────────────────────────────── */
+/* ── Clanker mode ────────────────────────────────────────────────────────── */
 
-#clanker-pill {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  padding: 3px 8px;
-  border-radius: var(--forge-radius-pill);
-  background: #9a6700;
-  color: #fff;
-  opacity: 0.93;
-  user-select: none;
-  white-space: nowrap;
-  cursor: default;
+/*
+ * Clanker is a standing condition, not an action: ToolApprovalService reads it
+ * on every approval and returns true without asking, and it is durable across
+ * reloads (workspaceState 'forge.clankerMode'). It used to render as an amber
+ * all-caps pill in the button column - persistent state filed among actions, a
+ * pointer-width from Stop, and the highest-contrast element in the panel.
+ *
+ * So it arms the field instead. The thing you are about to type into is the
+ * thing whose behaviour changed, and off, none of this renders at all.
+ */
+#prompt.clanker-armed {
+  border-color: var(--vscode-editorWarning-foreground, #cca700);
+  background: color-mix(
+    in srgb,
+    var(--vscode-inputValidation-warningBackground, #352a00) 35%,
+    var(--vscode-input-background)
+  );
+}
+
+#prompt.clanker-armed:focus {
+  border-color: var(--vscode-editorWarning-foreground, #cca700);
 }
 
 /* ── Slash command menu ──────────────────────────────────────────────────── */

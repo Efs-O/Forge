@@ -18,34 +18,24 @@ body {
 
 /* ── Header ─────────────────────────────────────────────────────────────── */
 
+/*
+ * One row: mark, workspace root, budget. They were stacked, which spent two
+ * rows of a 382px column on ambient facts. The mark is inline SVG in
+ * Header.tsx rather than an <img>, so it needs no webview resource URI and
+ * cannot 404 on a packaging mistake.
+ */
 #forge-header {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
   border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #333);
   flex-shrink: 0;
 }
 
-#forge-logo-row {
-  display: flex;
-  align-items: center;
-  padding: 7px 10px 3px;
-}
-
-#forge-logo-text {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: var(--vscode-foreground);
-  opacity: 0.88;
-  user-select: none;
-}
-
-#forge-logo-icon {
-  color: var(--forge-accent);
-  display: inline-flex;
+#forge-mark {
+  flex-shrink: 0;
+  display: block;
 }
 
 
@@ -57,11 +47,18 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 10px 5px;
+  flex-shrink: 0;
 }
 
+/*
+ * Fixed width, not `flex: 1`. The bar qualifies the number; it is not the
+ * headline. Full-width, it was the widest element in the panel for a value
+ * nobody looks at until it is close to the ceiling - which is what
+ * budgetColor() is for.
+ */
 #token-budget-bar-track {
-  flex: 1;
+  width: 40px;
+  flex-shrink: 0;
   height: 3px;
   background: var(--vscode-editor-inactiveSelectionBackground, #3a3a3a);
   border-radius: 2px;
@@ -90,6 +87,17 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+/*
+ * Anchor a short conversation to the bottom, next to the composer and the
+ * streaming line, instead of leaving it stranded at the top above 400px of
+ * void. `margin-top: auto` on the first child rather than
+ * `justify-content: flex-end` on the container: the latter makes overflowing
+ * content unreachable above the scroll origin in Chromium.
+ */
+#messages > *:first-child {
+  margin-top: auto;
 }
 
 /* ── Checkpoint bar ─────────────────────────────────────────────────────── */
@@ -160,7 +168,8 @@ body {
   display: flex;
   align-items: baseline;
   gap: 5px;
-  padding: 4px 10px 0;
+  flex: 1;
+  min-width: 0;
   font-size: 10px;
   color: var(--vscode-descriptionForeground);
   white-space: nowrap;

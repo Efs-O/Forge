@@ -76,14 +76,29 @@ afterEach(() => {
 });
 
 describe('sessions panel dismissal', () => {
-  it('collapses after switching to an open session, and posts the switch', () => {
+  it('switches sessions from the strip, not from the panel', () => {
+    // The panel lists closed sessions only now. Open tabs were listed in both
+    // places, so the active session rendered twice - once as its chip above,
+    // once as a row below it.
     openPanel();
-    const rows = panel().querySelectorAll<HTMLButtonElement>('.session-list .history-item');
-    expect(rows.length).toBe(2);
-    click(rows[1]!);
+    expect(panel().querySelectorAll('.session-list')).toHaveLength(0);
 
+    const chips = container.querySelectorAll<HTMLButtonElement>('.tab-chip-label');
+    expect(chips.length).toBe(2);
+    click(chips[1]!);
     expect(posted).toContainEqual({ type: 'switchConversation', id: 'tab-2' });
+  });
+
+  it('dismisses on Escape without touching the session', () => {
+    openPanel();
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+
     expect(panel().hidden).toBe(true);
+    expect(posted).not.toContainEqual(
+      expect.objectContaining({ type: 'switchConversation' } as Record<string, unknown>),
+    );
   });
 
   it('collapses after restoring a closed session', () => {
@@ -98,8 +113,9 @@ describe('sessions panel dismissal', () => {
 
   it('returns focus to the toggle, so keyboard users do not land on <body>', () => {
     openPanel();
-    const rows = panel().querySelectorAll<HTMLButtonElement>('.session-list .history-item');
-    click(rows[1]!);
+    const restore = panel().querySelector<HTMLButtonElement>('#history-list .history-item');
+    if (!restore) throw new Error('closed row not rendered');
+    click(restore);
 
     expect(document.activeElement).toBe(toggle());
   });

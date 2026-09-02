@@ -250,7 +250,7 @@ describe('webview App reducer', () => {
     );
   });
 
-  it('answers a start announcement with "Backend ready." exactly once', () => {
+  it('rewrites the start announcement rather than answering it', () => {
     const starting = appModule.reducer(appModule.initialState, {
       type: 'BACKEND_STARTING',
       convId: 'tab-1',
@@ -259,10 +259,10 @@ describe('webview App reducer', () => {
     const ready = appModule.reducer(starting, { type: 'READY', convId: 'tab-1' });
 
     expect(ready.backendReady).toBe(true);
-    expect(ready.messagesById['tab-1']?.map((m) => m.content)).toEqual([
-      'Starting backend, please wait…',
-      'Backend ready.',
-    ]);
+    // One row, updated in place. Appending left "Starting backend, please
+    // wait…" in the transcript forever, above the row that made it untrue.
+    expect(ready.messagesById['tab-1']?.map((m) => m.content)).toEqual(['Backend ready.']);
+    expect(ready.messagesById['tab-1']?.[0]?.id).toBe(starting.messagesById['tab-1']?.[0]?.id);
   });
 
   it('stays silent on a warm acquire that never announced a start', () => {
@@ -283,7 +283,8 @@ describe('webview App reducer', () => {
     const ready = appModule.reducer(starting, { type: 'READY', convId: 'tab-1' });
     const readyAgain = appModule.reducer(ready, { type: 'READY', convId: 'tab-1' });
 
-    expect(readyAgain.messagesById['tab-1']).toHaveLength(2);
+    expect(readyAgain.messagesById['tab-1']).toHaveLength(1);
+    expect(readyAgain.messagesById['tab-1']?.[0]?.content).toBe('Backend ready.');
   });
 
   it('lets a failed start close its own announcement', () => {

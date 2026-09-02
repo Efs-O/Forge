@@ -5,6 +5,14 @@ export interface AppMessage {
   role: 'user' | 'assistant' | 'error' | 'system' | 'tool' | 'diff';
   content: string;
   reasoning?: string | undefined;
+  /**
+   * Wall time the reasoning phase took, stamped live by the reducer. Absent on
+   * rehydrated rows - `PersistedRow` does not carry it - so every reader must
+   * render without it.
+   */
+  reasoningMs?: number;
+  /** Set while reasoning is still streaming into this row. */
+  reasoningStartedAt?: number;
   diffHunks?: DiffHunk[] | null;
   diffIsNew?: boolean;
   diffIsDeleted?: boolean;

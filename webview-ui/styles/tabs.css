@@ -1,6 +1,9 @@
 /* ── Chats panel ─────────────────────────────────────────────────────────── */
 
 #chats-panel {
+  /* The containing block for the sessions overlay below it. */
+  position: relative;
+  z-index: 20;
   flex-shrink: 0;
   border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #333);
   padding: 0 8px 4px;

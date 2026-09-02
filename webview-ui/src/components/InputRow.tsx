@@ -237,8 +237,11 @@ export function InputRow({
   );
 
   const canSend = text.trim().length > 0 || attachments.length > 0;
+  // The key hints moved to #composer-hint below the field, so the placeholder
+  // stops repeating them - it is the widest text in the panel and was spending
+  // that width on a shortcut the hint row now states permanently.
   const placeholder = backendReady
-    ? 'Ask anything… (Shift+Enter for newline)'
+    ? 'Ask, or / for commands…'
     : 'Ask anything… first send starts the backend';
 
   return (
@@ -292,29 +295,11 @@ export function InputRow({
         onDismissErrors={files.dismissErrors}
       />
 
-      <div id="model-row">
-        <ModelSelector
-          models={models}
-          activeModel={activeModel}
-          onModelChange={onModelChange}
-          disabled={modelPickerDisabled}
-        />
-      </div>
-
       <div id="prompt-area">
-        <button
-          id="attach-btn"
-          type="button"
-          title="Attach files — or drop them here, or paste a screenshot. Images up to 10 MiB, text and code up to 2 MiB, 10 files / 25 MiB per message."
-          aria-label="Attach files"
-          onClick={() => fileInputRef.current?.click()}
-        >
-          <PaperclipIcon />
-        </button>
-
         <textarea
           ref={textareaRef}
           id="prompt"
+          className={clankerMode ? 'clanker-armed' : undefined}
           value={text}
           placeholder={placeholder}
           onChange={handleTextChange}
@@ -332,26 +317,29 @@ export function InputRow({
           onChange={handleFileChange}
         />
 
-        <div id="input-btn-col">
-          {clankerMode && (
-            <span
-              id="clanker-pill"
-              title="Clanker Mode active — no confirmation prompts. Recursive deletes still confirm."
-            >
-              💥 CLANKER MODE
-            </span>
-          )}
+        <div id="input-actions">
+          <button
+            id="attach-btn"
+            type="button"
+            title="Attach files — or drop them here, or paste a screenshot. Images up to 10 MiB, text and code up to 2 MiB, 10 files / 25 MiB per message."
+            aria-label="Attach files"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <PaperclipIcon />
+          </button>
+
+          <ModelSelector
+            models={models}
+            activeModel={activeModel}
+            onModelChange={onModelChange}
+            disabled={modelPickerDisabled}
+          />
+
           {streaming ? (
-            <>
-              <button id="btn-send" type="button" onClick={submit} disabled={!canSend}>
-                <SendIcon />
-                Queue
-              </button>
-              <button id="btn-stop" type="button" onClick={onCancel}>
-                <StopIcon />
-                Stop
-              </button>
-            </>
+            <button id="btn-stop" type="button" onClick={onCancel}>
+              <StopIcon />
+              Stop
+            </button>
           ) : (
             <button id="btn-send" type="button" onClick={submit} disabled={!canSend}>
               <SendIcon />
@@ -359,6 +347,18 @@ export function InputRow({
             </button>
           )}
         </div>
+
+        {/* One line carries both facts, and only one can apply at a time: armed
+            is the louder of the two and wins the row. Enter's behaviour is
+            stated rather than built into a second button - the queue confirms
+            itself in the transcript, as a QueuedPromptRow. */}
+        <p id="composer-hint" className={clankerMode ? 'clanker-armed' : undefined}>
+          {clankerMode
+            ? '⏵⏵ Clanker — no confirmations · /clanker to stop'
+            : streaming
+              ? 'Enter queues this for the next turn'
+              : 'Enter to send · Shift+Enter for a newline'}
+        </p>
       </div>
     </div>
   );

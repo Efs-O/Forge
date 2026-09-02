@@ -4,10 +4,24 @@
    and tabs.css was already at 408 LOC.
    Layout and rows below are unchanged from tabs.css — moved, not rewritten. */
 
+/*
+ * An overlay, not a block in the column. As a sibling of the transcript it
+ * pushed ~200px of chat off-screen for as long as it was open, in a panel where
+ * the transcript was already the smallest region. Floating it costs the
+ * transcript nothing, which is also what lets the list below be twice as tall.
+ */
 #history-panel {
-  margin-top: 4px;
-  border-top: 1px solid var(--vscode-sideBarSectionHeader-border, #333);
-  padding-top: 4px;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  margin-top: 1px;
+  padding: 4px 8px 6px;
+  background: var(--vscode-editorWidget-background, #252526);
+  border: 1px solid var(--vscode-editorWidget-border, #454545);
+  border-radius: 0 0 var(--forge-radius-md) var(--forge-radius-md);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
 }
 
 #history-empty {
@@ -25,8 +39,9 @@
   flex-direction: column;
   gap: 1px;
   /* A whole number of 38px rows (+1px gaps) so the list never renders a row
-     sliced through the middle at the scroll boundary. */
-  max-height: 160px;
+     sliced through the middle at the scroll boundary. Taller than it was
+     because the panel floats now: length here costs the transcript nothing. */
+  max-height: 316px;
   overflow-y: auto;
 }
 
@@ -181,28 +196,3 @@
   color: var(--vscode-descriptionForeground);
 }
 
-/* ── Open section ────────────────────────────────────────────────────────── */
-
-.session-section-label {
-  font-size: 9.5px;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--vscode-descriptionForeground, #8b8b8b);
-  margin: 6px 0 2px 2px;
-}
-
-.session-list {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  /* Shorter than the closed list: open tabs are few, and the closed list is
-     the one that needs the scroll budget. */
-  max-height: 120px;
-  overflow-y: auto;
-}
-
-/* The tab you are looking at: marked, but still listed and still clickable. */
-.history-item-row-current .history-item {
-  border-left-color: var(--forge-accent);
-  background: var(--vscode-list-inactiveSelectionBackground, #37373d);
-}

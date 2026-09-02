@@ -28,28 +28,19 @@ const ITEMS = [
 ];
 
 interface Handlers {
-  onSwitch?: (id: string) => void;
+  onDismiss?: () => void;
   onRestore?: () => void;
   onDelete?: () => void;
   onRename?: (id: string, title: string) => void;
 }
-
-const OPEN_TABS = [
-  { id: 'open-1', title: 'refactor ConfigLoader', createdAt: 1, updatedAt: 9, messageCount: 12 },
-  { id: 'open-2', title: 'write tests', createdAt: 1, updatedAt: 8, messageCount: 3 },
-];
 
 function render(handlers: Handlers = {}, over: Record<string, unknown> = {}): void {
   act(() => {
     root.render(
       React.createElement(HistoryList, {
         items: ITEMS,
-        tabs: [],
-        activeId: 'open-1',
-        streamingIds: new Set<string>(),
-        queuedIds: new Set<string>(),
         expanded: true,
-        onSwitch: handlers.onSwitch ?? vi.fn(),
+        onDismiss: handlers.onDismiss ?? vi.fn(),
         onRestore: handlers.onRestore ?? vi.fn(),
         onDelete: handlers.onDelete ?? vi.fn(),
         onRename: handlers.onRename ?? vi.fn(),
@@ -157,61 +148,62 @@ describe('HistoryList row actions', () => {
   });
 });
 
-describe('sessions panel — open section', () => {
-  it('lists open tabs above the closed ones and switches on click', () => {
-    const onSwitch = vi.fn();
-    render({ onSwitch }, { tabs: OPEN_TABS, activeId: 'open-1' });
-
-    const labels = Array.from(
-      container.querySelectorAll('.session-section-label'),
-      (el) => el.textContent,
-    );
-    expect(labels).toEqual(['Open', 'Closed']);
-
-    const openRows = container.querySelectorAll('.session-list .history-item');
-    expect(Array.from(openRows, (el) => el.textContent)).toEqual([
-      expect.stringContaining('refactor ConfigLoader'),
-      expect.stringContaining('write tests'),
-    ]);
-
-    act(() => (openRows[1] as HTMLButtonElement).click());
-    expect(onSwitch).toHaveBeenCalledWith('open-2');
+describe('sessions panel — overlay contract', () => {
+  it('lists closed sessions only — open tabs belong to the strip above', () => {
+    render();
+    // The panel used to repeat every open tab under an "Open" heading, so the
+    // active session rendered twice: once as its own chip, once directly below.
+    expect(container.querySelectorAll('.session-section-label')).toHaveLength(0);
+    expect(container.querySelectorAll('.history-item')).toHaveLength(ITEMS.length);
   });
 
-  it('marks the active tab without hiding it from the list', () => {
-    render({}, { tabs: OPEN_TABS, activeId: 'open-2' });
-    const current = container.querySelectorAll('.history-item-row-current');
-    expect(current).toHaveLength(1);
-    expect(current[0]!.textContent).toContain('write tests');
+  it('dismisses on Escape', () => {
+    const onDismiss = vi.fn();
+    render({ onDismiss });
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
-  it('shows the spinner for a streaming tab and the dot for a queued one', () => {
-    render(
-      {},
-      {
-        tabs: OPEN_TABS,
-        activeId: 'open-1',
-        streamingIds: new Set(['open-1']),
-        queuedIds: new Set(['open-2']),
-      },
-    );
-    const rows = container.querySelectorAll('.session-list .history-item-row');
-    expect(rows[0]!.querySelector('.tab-streaming-spinner')).not.toBeNull();
-    expect(rows[0]!.querySelector('.tab-waiting-dot')).toBeNull();
-    expect(rows[1]!.querySelector('.tab-waiting-dot')).not.toBeNull();
+  it('dismisses on a click outside, but not on one inside', () => {
+    const onDismiss = vi.fn();
+    render({ onDismiss });
+
+    act(() => {
+      container
+        .querySelector('.history-item')!
+        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+    expect(onDismiss).not.toHaveBeenCalled();
+
+    act(() => {
+      document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+    expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
-  it('gives open rows no kebab — an open tab is closed from the strip', () => {
-    render({}, { tabs: OPEN_TABS, activeId: 'open-1' });
-    expect(container.querySelectorAll('.session-list .history-item-kebab')).toHaveLength(0);
+  it('ignores the toolbar toggle, which owns the other half of the toggle', () => {
+    const onDismiss = vi.fn();
+    render({ onDismiss });
+    const toggle = document.createElement('button');
+    toggle.id = 'history-toolbar-btn';
+    document.body.appendChild(toggle);
+
+    // Without this the press would both dismiss here and toggle there, so the
+    // panel would close and reopen on one click.
+    act(() => toggle.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
+    expect(onDismiss).not.toHaveBeenCalled();
+    toggle.remove();
   });
 
-  it('keeps element ids unique across both sections', () => {
-    // Both sections share a wrapper, so it is a class: two elements carrying
-    // one id is invalid and makes getElementById order-dependent.
-    render({}, { tabs: OPEN_TABS, activeId: 'open-1' });
-    const ids = Array.from(container.querySelectorAll('[id]'), (el) => el.id);
-    expect(ids).toHaveLength(new Set(ids).size);
-    expect(container.querySelectorAll('.history-list-wrap')).toHaveLength(2);
+  it('binds nothing while collapsed', () => {
+    const onDismiss = vi.fn();
+    render({ onDismiss }, { expanded: false });
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+    expect(onDismiss).not.toHaveBeenCalled();
   });
 });

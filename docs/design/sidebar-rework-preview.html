@@ -1,0 +1,850 @@
+<title>Forge Sidebar Rework</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&display=swap">
+<style>
+  :root {
+    --paper: #eceef1;
+    --panel: #ffffff;
+    --ink: #11151a;
+    --dim: #58616d;
+    --faint: #7e8894;
+    --rule: #d2d8df;
+    --accent: #b8410d;
+    --steel: #2f5d8a;
+    --crit: #9c2a2f;
+    --warn: #855400;
+    --ok: #2c6a4c;
+    --chipbg: #e2e6ea;
+
+    --display: "Archivo", "Segoe UI", sans-serif;
+    --body: "Source Sans 3", "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", "Cascadia Code", ui-monospace, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #0f1216;
+      --panel: #171b21;
+      --ink: #dee3ea;
+      --dim: #949dab;
+      --faint: #79828f;
+      --rule: #262c34;
+      --accent: #e5824a;
+      --steel: #83b4e2;
+      --crit: #e0787c;
+      --warn: #d9a441;
+      --ok: #6fc099;
+      --chipbg: #1f242b;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #0f1216;
+    --panel: #171b21;
+    --ink: #dee3ea;
+    --dim: #949dab;
+    --faint: #79828f;
+    --rule: #262c34;
+    --accent: #e5824a;
+    --steel: #83b4e2;
+    --crit: #e0787c;
+    --warn: #d9a441;
+    --ok: #6fc099;
+    --chipbg: #1f242b;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 16px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 40px 28px 80px; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  h1 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: clamp(30px, 4.2vw, 46px);
+    line-height: 1.04;
+    letter-spacing: -0.02em;
+    margin: 10px 0 0;
+    text-wrap: balance;
+  }
+  .lede {
+    max-width: 63ch;
+    margin: 16px 0 0;
+    font-size: 17px;
+    color: var(--dim);
+  }
+  .lede strong { color: var(--ink); font-weight: 600; }
+
+  h2 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 13px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin: 0 0 14px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  section { margin-top: 52px; }
+
+  /* ── mock stage ─────────────────────────────────────── */
+  .stage {
+    display: flex;
+    gap: 28px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .specimen { flex: 0 0 auto; }
+  .specimen-cap {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .specimen-cap b {
+    font-family: var(--display);
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .specimen-cap span {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--faint);
+  }
+
+  /* the depicted VS Code sidebar keeps its own fixed dark chrome */
+  .sb {
+    --sbg: #1c1f24;
+    --sbg2: #16191d;
+    --sline: #2b3037;
+    --sfg: #cdd3da;
+    --sdim: #868f9b;
+    --sacc: #e5824a;
+    --sblue: #4c9be0;
+    position: relative;
+    width: 382px;
+    height: 640px;
+    background: var(--sbg);
+    border: 1px solid var(--sline);
+    border-radius: 6px;
+    color: var(--sfg);
+    font-family: var(--mono);
+    font-size: 11.5px;
+    line-height: 1.45;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 18px 40px -24px rgba(0,0,0,.55);
+  }
+  .sb .grow { flex: 1; min-height: 0; }
+  .sb .dim { color: var(--sdim); }
+
+  .vsctabs {
+    display: flex;
+    gap: 2px;
+    padding: 5px 6px 0;
+    background: var(--sbg2);
+    border-bottom: 1px solid var(--sline);
+    flex-shrink: 0;
+  }
+  .vsctabs i {
+    font-style: normal;
+    padding: 4px 9px;
+    font-size: 11px;
+    color: var(--sdim);
+    border-radius: 4px 4px 0 0;
+  }
+  .vsctabs i.on { background: var(--sbg); color: var(--sfg); }
+
+  .hdr { padding: 8px 10px; border-bottom: 1px solid var(--sline); flex-shrink: 0; }
+  .row { display: flex; align-items: center; gap: 8px; }
+  .logo {
+    font-family: var(--display);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .logo em { color: var(--sacc); font-style: normal; }
+  .logo svg { display: block; flex: none; }
+  .logo { display: inline-flex; align-items: center; gap: 6px; }
+
+  .queued {
+    border: 1px dashed #3a6a95;
+    border-radius: 5px;
+    padding: 7px 9px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .queued .qtext { color: var(--sdim); }
+  .queued .qact { display: flex; align-items: center; gap: 8px; font-size: 10px; }
+  .queued .qact .st { color: var(--sblue); flex: 1; }
+  .spacer { flex: 1; }
+  .iconbtn {
+    width: 22px; height: 22px;
+    display: grid; place-items: center;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: var(--sdim);
+    font-size: 12px;
+  }
+  .iconbtn.act { border-color: var(--sline); color: var(--sfg); }
+
+  .budget-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10.5px;
+    color: var(--sdim);
+    font-variant-numeric: tabular-nums;
+  }
+  .budget-chip .track {
+    width: 46px; height: 3px;
+    background: #2b3037;
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .budget-chip .fill { display: block; height: 100%; background: var(--sblue); }
+
+  .barfull {
+    height: 4px;
+    background: #2b3037;
+    border-radius: 2px;
+    margin: 6px 0 2px;
+  }
+
+  /* transcript */
+  .tx { padding: 10px; overflow: hidden; display: flex; flex-direction: column; gap: 9px; }
+  .tx.bottom { justify-content: flex-end; }
+
+  .sysline { color: var(--sdim); font-size: 10.5px; display: flex; align-items: center; gap: 6px; }
+  .sysline .dot { width: 5px; height: 5px; border-radius: 50%; background: #4f9f76; flex: none; }
+  .sysline.center { justify-content: center; font-style: italic; }
+
+  .umsg {
+    border-left: 2px solid var(--sacc);
+    padding: 2px 0 2px 9px;
+    color: var(--sfg);
+  }
+  .umsg.boxed {
+    border: 1px solid #3a6a95;
+    background: #1b2833;
+    border-radius: 5px;
+    padding: 8px 10px;
+  }
+  .label {
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    color: var(--sdim);
+    margin-bottom: 3px;
+  }
+  .amsg { color: var(--sfg); }
+  .amsg.boxed { border: 1px solid var(--sline); border-radius: 5px; padding: 8px 10px; }
+
+  .foldline {
+    display: flex; align-items: center; gap: 6px;
+    color: var(--sdim); font-size: 10.5px;
+  }
+  .toolrow {
+    display: flex; align-items: center; gap: 7px;
+    padding: 4px 8px;
+    border: 1px solid var(--sline);
+    border-radius: 4px;
+    font-size: 10.5px;
+    color: var(--sdim);
+  }
+  .toolrow b { color: var(--sfg); font-weight: 500; }
+  .toolrow .ok { color: #6fc099; }
+
+  .streaming {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 10.5px; color: var(--sacc);
+    font-variant-numeric: tabular-nums;
+  }
+  .pulse {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--sacc);
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: .35; } 50% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .pulse { animation: none; opacity: .8; } }
+  .linkbtn {
+    color: var(--sdim);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  /* sessions flyout */
+  .flyout {
+    border-bottom: 1px solid var(--sline);
+    background: #191d22;
+    padding: 8px 10px 10px;
+    flex-shrink: 0;
+  }
+  .flyout .cap { display: flex; align-items: center; font-size: 10px; letter-spacing: .14em; color: var(--sdim); }
+  .sesstrip { display: flex; align-items: center; gap: 5px; margin: 7px 0; }
+  .sesstrip .tab {
+    display: flex; align-items: center; gap: 6px;
+    border: 1px solid #3a6a95;
+    background: #1b2833;
+    border-radius: 4px;
+    padding: 4px 7px;
+    max-width: 230px;
+    overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  }
+  .grouphdr { font-size: 9px; letter-spacing: .18em; color: var(--sdim); margin: 6px 0 3px; }
+  .srow {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 7px;
+    border-left: 2px solid transparent;
+    border-radius: 4px;
+  }
+  .srow.on { background: #22272d; border-left-color: var(--sacc); }
+  .srow .t { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .srow .m { color: var(--sdim); font-size: 10px; }
+  .void { flex: 1; }
+
+  .composer { border-top: 1px solid var(--sline); padding: 8px; flex-shrink: 0; }
+  .ta {
+    border: 1px solid #343a42;
+    border-radius: 5px;
+    background: #14171b;
+    padding: 8px 9px;
+    color: var(--sdim);
+    min-height: 54px;
+  }
+  .actions { display: flex; align-items: center; gap: 6px; margin-top: 7px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 10px;
+    border: 1px solid var(--sline);
+    border-radius: 4px;
+    font-size: 11px;
+    color: var(--sfg);
+  }
+  .btn.primary { background: #2f5d8a; border-color: #3d74a9; color: #fff; }
+  .btn.stop { background: #4a1d1f; border-color: #8c3034; color: #f0a9ab; }
+  .btn.ghost { color: var(--sdim); }
+  .btn.on { border-color: var(--sacc); color: var(--sacc); }
+  .kbd { color: var(--sdim); font-size: 10px; }
+
+  .clanker-loud {
+    background: #9a6700; color: #fff;
+    font-weight: 700; font-size: 10px; letter-spacing: .06em;
+    padding: 4px 10px; border-radius: 999px;
+  }
+  .modelbar {
+    border: 1px solid var(--sline);
+    border-radius: 5px;
+    padding: 6px 9px;
+    display: flex; align-items: center; gap: 7px;
+    color: var(--sdim);
+    margin: 8px;
+  }
+  .modelchip {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 10.5px; color: var(--sdim);
+  }
+  .greendot { width: 6px; height: 6px; border-radius: 50%; background: #4f9f76; }
+  .btncol { display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
+
+  /* clanker option specimens */
+  .sb.mini { height: auto; }
+  .opts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+    gap: 24px;
+    align-items: start;
+  }
+  .opt { display: flex; flex-direction: column; gap: 10px; }
+  .opt-hd { display: flex; align-items: baseline; gap: 8px; }
+  .opt-hd b {
+    font-family: var(--display);
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .verdict-tag {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 3px;
+    background: var(--chipbg);
+    color: var(--dim);
+  }
+  .verdict-tag.pick { background: var(--ok); color: var(--panel); }
+  .opt p { margin: 0; font-size: 14px; color: var(--dim); }
+
+  .ta.armed {
+    border-color: #b8752a;
+    background: #1b1712;
+    box-shadow: inset 0 0 0 1px rgba(229,130,74,.16);
+  }
+  .armed-hint {
+    display: flex; align-items: center; gap: 6px;
+    margin-top: 5px;
+    font-size: 10px;
+    color: #e5824a;
+  }
+  .armed-hint .chev { letter-spacing: -1px; }
+  .armed-hint .why { color: var(--sdim); }
+
+  /* numbered hotspots */
+  .pin {
+    position: absolute;
+    width: 19px; height: 19px;
+    border-radius: 50%;
+    background: var(--sacc);
+    color: #1c1f24;
+    font-family: var(--display);
+    font-size: 11px;
+    font-weight: 700;
+    display: grid; place-items: center;
+    box-shadow: 0 0 0 3px #1c1f24;
+    z-index: 3;
+  }
+
+  /* ── findings ───────────────────────────────────────── */
+  .findings {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+  }
+  .find {
+    background: var(--panel);
+    padding: 18px 20px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .find-top { display: flex; align-items: center; gap: 9px; }
+  .num {
+    width: 20px; height: 20px; flex: none;
+    border-radius: 50%;
+    background: var(--accent); color: var(--panel);
+    font-family: var(--display); font-size: 11px; font-weight: 700;
+    display: grid; place-items: center;
+  }
+  .find h3 {
+    font-family: var(--display);
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 0;
+    flex: 1;
+  }
+  .sev {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 3px;
+    background: var(--chipbg);
+    color: var(--dim);
+  }
+  .sev.high { color: var(--crit); }
+  .sev.med { color: var(--warn); }
+  .find p { margin: 0; font-size: 14.5px; color: var(--dim); }
+  .find p.fix { color: var(--ink); }
+  .find p.fix b {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--ok);
+    display: block;
+    margin-bottom: 2px;
+    font-weight: 500;
+  }
+  code {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    background: var(--chipbg);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  .verdict {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    margin-top: 26px;
+  }
+  .verdict div { background: var(--panel); padding: 14px 16px; }
+  .verdict dt {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+  .verdict dd {
+    margin: 4px 0 0;
+    font-family: var(--display);
+    font-size: 21px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  .verdict dd small { font-size: 13px; font-weight: 500; color: var(--dim); }
+
+  footer {
+    margin-top: 56px;
+    padding-top: 16px;
+    border-top: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--faint);
+  }
+</style>
+
+<div class="wrap">
+
+  <p class="eyebrow">Forge&nbsp;·&nbsp;sidebar webview&nbsp;·&nbsp;design pass</p>
+  <h1>The chat has room for four messages. Chrome is holding the rest.</h1>
+  <p class="lede">The visual language is right — VS Code-native tokens, restrained colour, no invented widgets. What's off is <strong>allocation</strong>. In the captured state, a 382&nbsp;px column spends roughly 300&nbsp;px on session management, model selection and a three-button action stack, leaving one sentence of assistant text floating above 400&nbsp;px of void. Below: the same panel, same components, re-budgeted.</p>
+
+  <dl class="verdict">
+    <div><dt>Transcript share, current</dt><dd>~34%<small> of column height</small></dd></div>
+    <div><dt>After rework</dt><dd>~72%<small> at the same width</small></dd></div>
+    <div><dt>Components removed</dt><dd>0<small> — all re-placed</small></dd></div>
+    <div><dt>Changes that are CSS only</dt><dd>5<small> of 8</small></dd></div>
+  </dl>
+
+  <section>
+    <h2>Side by side · 382 px, the real sidebar width</h2>
+    <div class="stage">
+
+      <!-- ══ CURRENT ══ -->
+      <div class="specimen">
+        <div class="specimen-cap"><b>Current</b><span>as captured</span></div>
+        <div class="sb">
+          <div class="vsctabs"><i>Chat</i><i>Codex</i><i>Claude Code</i><i class="on">Forge</i></div>
+
+          <div class="hdr">
+            <div class="barfull"></div>
+            <div class="row"><span class="spacer"></span><span class="dim" style="font-size:10px">0 / 58k</span></div>
+          </div>
+
+          <div class="flyout">
+            <div class="row cap"><span>SESSIONS</span><span class="spacer"></span><span class="iconbtn act">◷</span><span class="iconbtn act">+</span></div>
+            <div class="sesstrip">
+              <span class="dim">‹</span>
+              <span class="tab">◌ hey man — check the …<span class="dim">✕</span></span>
+              <span class="spacer"></span><span class="dim">›</span>
+            </div>
+            <div class="grouphdr">OPEN</div>
+            <div class="srow on"><span class="t">◌ hey man — check the latest 10 halluscribe sessi…</span></div>
+            <div class="grouphdr">CLOSED</div>
+            <div class="srow"><span class="t">DO YOU AHVE A LOOP COMMAND ? FOR US…</span><span class="dim">⋮</span></div>
+            <div class="srow"><span class="t">Prompt: Create a very high quality realistic vid…</span><span class="dim">⋮</span></div>
+            <div class="srow"><span class="t">44672</span><span class="dim">⋮</span></div>
+            <div class="srow"><span class="t">ping me 3 times at 15 second intervals.”</span><span class="dim">⋮</span></div>
+          </div>
+
+          <div class="tx grow">
+            <div class="label">YOU</div>
+            <div class="umsg boxed">hey man - check the latest 10 halluscribe sessions and tell me if you find anything interesting</div>
+            <div class="sysline center">Starting backend, please wait…</div>
+            <div class="sysline center">Backend ready.</div>
+            <div class="foldline">▸ Thinking</div>
+            <div class="label">FORGE</div>
+            <div class="amsg boxed">I'll load the halluscribe tools to search previous sessions.</div>
+            <div class="void"></div>
+            <div class="streaming"><span class="pulse"></span> Feeding the GPU…</div>
+          </div>
+
+          <div class="modelbar"><span class="greendot"></span> qwen38-27b-mtp-ud-q3kxl-no-vision <span class="spacer"></span><span class="dim">▾</span></div>
+
+          <div class="composer" style="border-top:none;padding-top:0">
+            <div class="row" style="align-items:stretch;gap:8px">
+              <span class="iconbtn act" style="align-self:flex-end">📎</span>
+              <div class="ta" style="flex:1;min-height:96px"></div>
+              <div class="btncol">
+                <span class="clanker-loud">☠ CLANKER MODE</span>
+                <span class="btn primary" style="justify-content:center">➤ Queue</span>
+                <span class="btn stop" style="justify-content:center">■ Stop</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ PROPOSED ══ -->
+      <div class="specimen">
+        <div class="specimen-cap"><b>Proposed</b><span>same components, re-budgeted</span></div>
+        <div class="sb">
+          <span class="pin" style="top:12px;right:12px">1</span>
+          <span class="pin" style="top:48px;left:10px">2</span>
+          <span class="pin" style="top:196px;left:10px">4</span>
+          <span class="pin" style="top:330px;left:10px">5</span>
+          <span class="pin" style="bottom:118px;left:10px">6</span>
+          <span class="pin" style="bottom:44px;left:10px">7</span>
+          <span class="pin" style="bottom:44px;right:12px">8</span>
+
+          <div class="hdr">
+            <div class="row">
+              <span class="logo">
+                <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+                  <defs>
+                    <linearGradient id="fg" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0" stop-color="#ffd24a"/>
+                      <stop offset="0.45" stop-color="#ff9a1f"/>
+                      <stop offset="1" stop-color="#e8530e"/>
+                    </linearGradient>
+                  </defs>
+                  <rect x="7" y="7" width="10" height="10" rx="1.5" fill="url(#fg)"/>
+                  <rect x="9" y="4" width="1.5" height="3" rx="0.5" fill="url(#fg)"/>
+                  <rect x="13.5" y="4" width="1.5" height="3" rx="0.5" fill="url(#fg)"/>
+                  <rect x="9" y="17" width="1.5" height="3" rx="0.5" fill="url(#fg)"/>
+                  <rect x="13.5" y="17" width="1.5" height="3" rx="0.5" fill="url(#fg)"/>
+                  <rect x="4" y="9" width="3" height="1.5" rx="0.5" fill="url(#fg)"/>
+                  <rect x="4" y="13.5" width="3" height="1.5" rx="0.5" fill="url(#fg)"/>
+                  <rect x="17" y="9" width="3" height="1.5" rx="0.5" fill="url(#fg)"/>
+                  <rect x="17" y="13.5" width="3" height="1.5" rx="0.5" fill="url(#fg)"/>
+                </svg>
+                Forge
+              </span>
+              <span class="spacer"></span>
+              <span class="budget-chip"><span class="track"><span class="fill" style="width:21%"></span></span> 12.4k / 58k</span>
+              <span class="iconbtn act">◷</span>
+              <span class="iconbtn act">+</span>
+            </div>
+            <div class="row" style="margin-top:6px">
+              <span class="dim" style="font-size:10.5px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">halluscribe session sweep</span>
+              <span class="spacer"></span>
+              <span class="dim" style="font-size:10px">3 open ▾</span>
+            </div>
+          </div>
+
+          <div class="tx grow bottom">
+            <div class="sysline"><span class="dot"></span> Backend ready · 2.1 s</div>
+
+            <div class="umsg">hey man — check the latest 10 halluscribe sessions and tell me if you find anything interesting</div>
+
+            <div class="foldline">▸ Thought for 4.2 s <span class="dim">· 380 tok</span></div>
+
+            <div class="amsg">I'll load the halluscribe tools and search the last ten archived sessions.</div>
+
+            <div class="toolrow"><span class="ok">✓</span> <b>load_tool_group</b> halluscribe <span class="spacer"></span><span>0.3 s</span></div>
+            <div class="toolrow"><span class="ok">✓</span> <b>search_sessions</b> limit&nbsp;10 <span class="spacer"></span><span>10 hits · 0.9 s</span></div>
+
+            <div class="amsg">Three things stand out across the ten. First, every session that</div>
+
+            <div class="streaming">
+              <span class="pulse"></span> Feeding the GPU… 8.3 s · 41 tok/s
+              <span class="spacer"></span>
+              <span class="linkbtn">Stop</span>
+            </div>
+
+            <div class="queued">
+              <div class="qtext">also check whether any of them mention ask_user</div>
+              <div class="qact">
+                <span class="st">Queued — waiting on qwen38-27b</span>
+                <span class="linkbtn">Steer</span>
+                <span class="linkbtn">Cancel</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="composer">
+            <div class="ta">Ask, or / for commands…</div>
+            <div class="actions">
+              <span class="iconbtn act">📎</span>
+              <span class="modelchip"><span class="greendot"></span> qwen38-27b · q3kxl ▾</span>
+              <span class="spacer"></span>
+              <span class="btn stop">■ Stop</span>
+            </div>
+            <div class="row" style="margin-top:5px">
+              <span class="kbd">Enter queues this for the next turn</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <h2>Clanker · a mode wearing a button's clothes</h2>
+    <p class="lede" style="margin-bottom:26px">Clanker isn't an action, it's a standing condition — <code>ToolApprovalService:84</code> reads it on every approval and returns <code>true</code> without asking. Sitting it beside Stop puts persistent state in the row the eye scans for “what happens now”, one pointer-width from the button you hit under pressure. Claude Code's answer to the same problem is worth copying: permission mode is never a control in the action row. It lives as a dim status line directly under the input, cycles on <code>Shift+Tab</code>, colours itself when it's the dangerous one, and costs a one-time acceptance before it can ever be armed. The mode is a property of the box you type into.</p>
+
+    <div class="opts">
+
+      <div class="opt">
+        <div class="opt-hd"><b>A · Arm the composer itself</b><span class="verdict-tag pick">recommended</span></div>
+        <div class="sb mini">
+          <div class="tx" style="padding-bottom:0">
+            <div class="sysline"><span class="dot" style="background:#e5824a"></span> Clanker on — confirmations off from here</div>
+            <div class="toolrow"><span class="ok">✓</span> <b>edit_file</b> AgentLoop.ts <span class="spacer"></span><span style="color:#e5824a">auto</span></div>
+          </div>
+          <div class="composer">
+            <div class="ta armed">Ask, or / for commands…</div>
+            <div class="armed-hint"><span class="chev">⏵⏵</span> Clanker — no confirmations <span class="why">· /clanker to stop</span></div>
+            <div class="actions">
+              <span class="iconbtn act">📎</span>
+              <span class="modelchip"><span class="greendot"></span> qwen38-27b · q3kxl ▾</span>
+              <span class="spacer"></span>
+              <span class="btn stop">■ Stop</span>
+            </div>
+          </div>
+        </div>
+        <p>Off, it renders nothing at all — no pill, no reserved space. On, the field you're about to type into is visibly armed and one dim line says what that means and how to undo it. The action row goes back to holding exactly one button.</p>
+      </div>
+
+      <div class="opt">
+        <div class="opt-hd"><b>B · A mode chip in the header</b><span class="verdict-tag">viable</span></div>
+        <div class="sb mini">
+          <div class="hdr">
+            <div class="row">
+              <span class="logo" style="gap:6px"><span style="color:#e5824a">◆</span> Forge</span>
+              <span class="spacer"></span>
+              <span class="btn on" style="font-size:10px;padding:2px 8px">⏵⏵ Clanker</span>
+              <span class="iconbtn act">◷</span>
+            </div>
+          </div>
+          <div class="composer" style="border-top:none">
+            <div class="ta">Ask, or / for commands…</div>
+            <div class="actions">
+              <span class="iconbtn act">📎</span>
+              <span class="modelchip"><span class="greendot"></span> qwen38-27b · q3kxl ▾</span>
+              <span class="spacer"></span>
+              <span class="btn stop">■ Stop</span>
+            </div>
+          </div>
+        </div>
+        <p>Groups it with the other session-scoped facts — model, budget, session name. Clean, but it puts the warning at the far end of the panel from the confirmations it's suppressing, and header space is already spoken for.</p>
+      </div>
+
+      <div class="opt">
+        <div class="opt-hd"><b>C · Toggle beside Stop</b><span class="verdict-tag">what we drew</span></div>
+        <div class="sb mini">
+          <div class="composer" style="border-top:none">
+            <div class="ta">Ask, or / for commands…</div>
+            <div class="actions">
+              <span class="iconbtn act">📎</span>
+              <span class="modelchip"><span class="greendot"></span> qwen38-27b ▾</span>
+              <span class="spacer"></span>
+              <span class="btn on">☠ Clanker</span>
+              <span class="btn stop">■ Stop</span>
+            </div>
+          </div>
+        </div>
+        <p>Quieter than the amber caps pill, but it keeps the category error: a mode filed among actions, adjacent to the one control you click in a hurry. It also competes for the narrowest row in the panel.</p>
+      </div>
+
+    </div>
+
+    <div class="findings" style="margin-top:30px">
+      <div class="find">
+        <div class="find-top"><span class="num">↺</span><h3>It survives reloads — quietly</h3><span class="sev high">high</span></div>
+        <p><em>Correction to the first pass:</em> it does <strong>not</strong> reset. <code>sidebarWiring.ts:118</code> restores it from <code>workspaceState['forge.clankerMode']</code> at startup, and <code>rememberClankerMode</code> writes it on every toggle. It is workspace-scoped and durable — which makes the display more important, not less: the mode can be on from three days ago, and one amber pill in a button column is what's telling you.</p>
+        <p class="fix"><b>Change</b>Option A carries that weight properly — the field you type into is the thing that's armed, so the signal is where the risk is. What is genuinely missing is narrower: the flag is global to the workspace while the notice lands only in the tab where you typed <code>/clanker</code>.</p>
+      </div>
+      <div class="find">
+        <div class="find-top"><span class="num">⎘</span><h3>Within an armed stretch, every call looks approved</h3><span class="sev high">high</span></div>
+        <p>The flip itself <em>is</em> already logged — <code>SlashCommandHandler.ts:172</code> posts a notice both ways. What isn't: a write you confirmed and a write Clanker waved through at <code>ToolApprovalService.ts:84</code> render identically, so within an armed stretch there's no per-call record.</p>
+        <p class="fix"><b>Change</b>Tag auto-approved tool rows <code>auto</code>, as in specimen A. Deferred out of the layout pass — it means threading a flag from the approval service through <code>ToolDispatch</code> and the <code>toolResult</code> bridge message, four files for a signal the ON/OFF notice already gives at turn granularity.</p>
+      </div>
+      <div class="find">
+        <div class="find-top"><span class="num">⚠</span><h3>Nothing gates the first arming</h3><span class="sev med">med</span></div>
+        <p><code>/clanker</code> is <code>availableWhileStreaming</code> — correct, since mid-turn is when you want it — but that also means one slash command mid-stream removes every confirmation with no acknowledgement step.</p>
+        <p class="fix"><b>Change</b>One-time modal on first use per install, the way bypass permissions is gated: state what stops being asked, note that recursive deletes still confirm, and that the per-turn checkpoint is the rollback. Never ask again.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Ten changes, keyed to the mock</h2>
+    <div class="findings">
+
+      <div class="find">
+        <div class="find-top"><span class="num">1</span><h3>The budget bar reads as empty</h3><span class="sev med">med</span></div>
+        <p>A full-width track sitting at <code>0 / 58k</code> looks like a stalled progress bar, and it's the widest element on screen for a number nobody watches until it matters.</p>
+        <p class="fix"><b>Change</b>Collapse it to a 46&nbsp;px chip beside the header icons. Let it grow a colour only past 70% and 90% — until then, it is a number, not a warning.</p>
+      </div>
+
+      <div class="find">
+        <div class="find-top"><span class="num">2</span><h3>The session flyout pushes instead of floating</h3><span class="sev high">high</span></div>
+        <p>Opening it costs ~200&nbsp;px of transcript permanently, and the current session appears three times: in the tab strip, again under <code>OPEN</code>, again as the header title. Four rows of history scroll inside a 160&nbsp;px box while 400&nbsp;px of empty transcript sits below it.</p>
+        <p class="fix"><b>Change</b>Make it an overlay anchored to the ◷ button — <code>position:absolute</code> over the transcript, dismiss on Escape or outside click. Drop the tab strip; the header line already names the current session and carries the <code>3 open ▾</code> switcher.</p>
+      </div>
+
+      <div class="find">
+        <div class="find-top"><span class="num">3</span><h3>Session titles are the first line of the prompt</h3><span class="sev med">med</span></div>
+        <p>“44672” and “ping me 3 times at 15 second intervals.”” are not names anyone can navigate by, and <code>conversationTitle.ts</code> already exists to do better.</p>
+        <p class="fix"><b>Change</b>Title from the first assistant turn rather than the user's opening keystrokes, and show <code>12 msg · 2h · qwen38</code> as the sub-line — model matters when you're picking a session to resume.</p>
+      </div>
+
+      <div class="find">
+        <div class="find-top"><span class="num">4</span><h3>Both speakers get a box and a shouty label</h3><span class="sev med">med</span></div>
+        <p><code>YOU</code> and <code>FORGE</code> in caps above bordered cards means the reading surface — assistant prose, the thing you actually read — is boxed in like a form field, and the eye has to cross two borders per exchange.</p>
+        <p class="fix"><b>Change</b>User turns keep a 2&nbsp;px accent rail and no box. Assistant turns run as plain text on the panel ground. Speaker is legible from indentation alone, so both labels go.</p>
+      </div>
+
+      <div class="find">
+        <div class="find-top"><span class="num">5</span><h3>“Thinking” never says how much</h3><span class="sev med">med</span></div>
+        <p>A bare disclosure triangle gives no reason to open it and no signal that reasoning was expensive — which, on a shared output budget where thinking and the answer compete for the same tokens, is exactly what a user needs to see.</p>
+        <p class="fix"><b>Change</b><code>▸ Thought for 4.2 s · 380 tok</code>. Same row, same fold, now a measurement.</p>
+      </div>
+
+      <div class="find">
+        <div class="find-top"><span class="num">6</span><h3>Status is stranded below the void</h3><span class="sev high">high</span></div>
+        <p>The transcript is top-aligned, so “Feeding the GPU…” floats hundreds of pixels away from the text being generated. Two backend notices stay as separate centred italic lines forever, and the streaming indicator carries no elapsed time and no way to stop from where you're looking.</p>
+        <p class="fix"><b>Change</b>Bottom-anchor the transcript (<code>justify-content:flex-end</code>) and put the live line at its tail with elapsed seconds, tok/s and an inline Stop. Collapse the boot notices into one <code>Backend ready · 2.1 s</code>.</p>
+      </div>
+
+      <div class="find">
+        <div class="find-top"><span class="num">7</span><h3>The model bar is a full-width row for a value that rarely changes</h3><span class="sev med">med</span></div>
+        <p>It sits between the status line and the composer, splitting the two things that belong together, and spends a full row on a name that only needs to be recognisable, not complete.</p>
+        <p class="fix"><b>Change</b>Fold it into the composer action row as <code>qwen38-27b · q3kxl ▾</code> with the residency dot. Full name and slot count go in the tooltip and the picker.</p>
+      </div>
+
+      <div class="find">
+        <div class="find-top"><span class="num">8</span><h3>Three stacked buttons, two of them primary</h3><span class="sev high">high</span></div>
+        <p>The vertical stack takes ~150&nbsp;px of width from a 382&nbsp;px column, so the textarea is squeezed to roughly half the panel. Worse, Queue and Stop are both live and both loud — nothing says which one Enter does. And <code>☠ CLANKER MODE</code> in amber caps is the highest-contrast element on the screen for a mode you set once.</p>
+        <p class="fix"><b>Change</b>One horizontal row under a full-width textarea: attach, model, spacer, and a single primary that <em>is</em> Stop while streaming and Send otherwise — Clanker leaves the row entirely (see above). <code>Enter queues this for the next turn</code> in 10&nbsp;px below — say what the key does instead of building a button for it.</p>
+      </div>
+
+      <div class="find">
+        <div class="find-top"><span class="num">9</span><h3>The Queue button is already redundant</h3><span class="sev high">high</span></div>
+        <p>In <code>InputRow.tsx:346</code> the streaming branch renders <code>#btn-send</code> with the label “Queue” beside <code>#btn-stop</code> — but it fires the same <code>submit</code> that <code>Enter</code> fires at line 231, and the result already announces itself: <code>QueuedPromptRow</code> drops a dashed <em>Queued — waiting on qwen38-27b</em> row into the transcript with Steer and Cancel on it. So the button duplicates a key that works, to produce feedback that appears somewhere else.</p>
+        <p class="fix"><b>Change</b>Delete the streaming branch's send button. While a turn runs, the action slot holds Stop alone, and the queue is confirmed where it lives — in the transcript, next to the turn it's waiting on. The one thing lost is discoverability for a mouse-only user, which the <code>Enter queues this for the next turn</code> hint under the composer covers for a fifth of the pixels.</p>
+      </div>
+
+      <div class="find">
+        <div class="find-top"><span class="num">10</span><h3>The header mark is the real one now</h3><span class="sev">note</span></div>
+        <p>The placeholder diamond is replaced with <code>assets/icon.svg</code> — the pinned-chip silhouette from the activity bar — filled with the <code>forgeGlow</code> gradient out of <code>assets/publisher-logo.svg</code> (#ffd24a → #ff9a1f → #e8530e).</p>
+        <p class="fix"><b>Note</b>The full publisher logo doesn't survive the trip down: its black chip body vanishes on a dark sidebar, and the pixel-art “?” inside it is a 5×7 grid at 7&nbsp;px pitch — below roughly 24&nbsp;px it turns to mush. Ship the pins-and-chip silhouette in the gradient at 15&nbsp;px and keep the full mark for the Marketplace tile.</p>
+      </div>
+
+    </div>
+  </section>
+
+  <footer>
+    Mock built from <code>webview-ui/styles/{layout,input,sessions-panel,messages}.css</code> and <code>components/InputRow.tsx</code>. Findings 1, 4, 5, 6, 7, 10 are CSS, copy and one asset; 2, 3, 8, 9 touch the React tree — 9 is a deletion.
+  </footer>
+
+</div>

@@ -1,15 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import type { SessionHistoryMeta, SessionTabMeta } from '../../../src/sidebar/messageBridge';
+import type { SessionHistoryMeta } from '../../../src/sidebar/messageBridge';
 
 interface Props {
   items: SessionHistoryMeta[];
-  /** Open tabs, listed above the closed ones so running work is visible here. */
-  tabs: SessionTabMeta[];
-  activeId: string;
-  streamingIds: ReadonlySet<string>;
-  queuedIds: ReadonlySet<string>;
   expanded: boolean;
-  onSwitch: (id: string) => void;
+  /** Escape or a click outside the panel. */
+  onDismiss: () => void;
   onRestore: (id: string) => void;
   onDelete: (id: string) => void;
   onRename: (id: string, title: string) => void;
@@ -212,53 +208,10 @@ function HistoryRow({
   );
 }
 
-/**
- * An open tab. Leaner than `HistoryRow` on purpose: no kebab, because an open
- * tab is renamed and closed from the strip, not from here.
- */
-function OpenRow({
-  tab,
-  isActive,
-  streaming,
-  queued,
-  onSwitch,
-}: {
-  tab: SessionTabMeta;
-  isActive: boolean;
-  streaming: boolean;
-  queued: boolean;
-  onSwitch: (id: string) => void;
-}): React.ReactElement {
-  return (
-    <div className={`history-item-row${isActive ? ' history-item-row-current' : ''}`}>
-      <button
-        type="button"
-        className="history-item"
-        aria-current={isActive ? 'true' : undefined}
-        onClick={() => onSwitch(tab.id)}
-        title={absoluteTime(tab.updatedAt)}
-      >
-        <span className="history-item-title">
-          {streaming && <span className="tab-streaming-spinner" aria-label="generating" />}
-          {queued && <span className="tab-waiting-dot" aria-label="queued" />}
-          {tab.title}
-        </span>
-        <span className="history-item-meta">
-          {tab.messageCount ?? 0} msg · {relativeTime(tab.updatedAt)}
-        </span>
-      </button>
-    </div>
-  );
-}
-
 export function HistoryList({
   items,
-  tabs,
-  activeId,
-  streamingIds,
-  queuedIds,
   expanded,
-  onSwitch,
+  onDismiss,
   onRestore,
   onDelete,
   onRename,
@@ -267,25 +220,37 @@ export function HistoryList({
   // rather than as per-row state that would survive the row being re-keyed.
   const [menuId, setMenuId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const panelRef = useRef<HTMLElement>(null);
 
+  // The panel floats over the transcript now, so it needs the dismissal
+  // contract every overlay needs. Same shape as the row kebab's above; the
+  // kebab keeps its own because it must close without closing the panel.
+  useEffect(() => {
+    if (!expanded) return;
+    const onDown = (e: MouseEvent): void => {
+      const target = e.target as Node;
+      if (panelRef.current?.contains(target)) return;
+      // The toolbar button toggles; letting the outside-click close fire too
+      // would reopen-and-close on the same press.
+      if ((target as HTMLElement).closest?.('#history-toolbar-btn')) return;
+      onDismiss();
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onDismiss();
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [expanded, onDismiss]);
+
+  // Open tabs are deliberately absent: the tab strip directly above lists every
+  // one of them, with the same spinner and queued dot, so an "Open" group here
+  // rendered the active session a second time under its own chip.
   return (
-    <section id="history-panel" aria-label="Sessions" hidden={!expanded}>
-      <p className="session-section-label">Open</p>
-      <div className="history-list-wrap">
-        <div className="session-list">
-          {tabs.map((tab) => (
-            <OpenRow
-              key={tab.id}
-              tab={tab}
-              isActive={tab.id === activeId}
-              streaming={streamingIds.has(tab.id)}
-              queued={!streamingIds.has(tab.id) && queuedIds.has(tab.id)}
-              onSwitch={onSwitch}
-            />
-          ))}
-        </div>
-      </div>
-      <p className="session-section-label">Closed</p>
+    <section id="history-panel" ref={panelRef} aria-label="Closed sessions" hidden={!expanded}>
       {items.length === 0 ? (
         <p id="history-empty">Closed chats appear here.</p>
       ) : (

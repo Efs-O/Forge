@@ -9,6 +9,13 @@ import { nextPhrase, phrasePool } from '../statusPhrases';
  */
 const ROTATE_MS = 12_000;
 
+/**
+ * How often the elapsed counter repaints. Tenths, because at whole seconds a
+ * slow first token makes the line look stuck for a second at a time - the exact
+ * reading the counter exists to rule out.
+ */
+const TICK_MS = 100;
+
 interface Props {
   streaming: boolean;
   /** True when the active model runs on the user's own hardware. */
@@ -29,6 +36,20 @@ interface Props {
  */
 export function StreamingStatus({ streaming, local, clanker }: Props): React.ReactElement {
   const [phrase, setPhrase] = useState<string | null>(null);
+  const [elapsedMs, setElapsedMs] = useState(0);
+
+  // The phrase says something is happening; the clock says for how long. A cold
+  // model load and a wedged turn look identical without it.
+  useEffect(() => {
+    if (!streaming) {
+      setElapsedMs(0);
+      return;
+    }
+    const startedAt = Date.now();
+    setElapsedMs(0);
+    const timer = setInterval(() => setElapsedMs(Date.now() - startedAt), TICK_MS);
+    return () => clearInterval(timer);
+  }, [streaming]);
 
   useEffect(() => {
     if (!streaming) {
@@ -55,6 +76,11 @@ export function StreamingStatus({ streaming, local, clanker }: Props): React.Rea
       <span className="streaming-status-text" aria-hidden="true">
         {phrase ?? ''}
       </span>
+      {streaming && (
+        <span className="streaming-status-elapsed" aria-hidden="true">
+          {(elapsedMs / 1000).toFixed(1)}s
+        </span>
+      )}
       <span className="visually-hidden" role="status" aria-live="polite">
         {streaming ? 'Generating' : ''}
       </span>

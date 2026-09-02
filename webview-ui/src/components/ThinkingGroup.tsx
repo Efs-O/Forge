@@ -23,6 +23,27 @@ export function isReasoningOnly(msg: AppMessage): boolean {
   return msg.role === 'assistant' && !msg.content && Boolean(msg.reasoning);
 }
 
+/**
+ * `Thinking · 4.2s`, or plain `Thinking` when there is no measurement.
+ *
+ * A bare chevron gives no reason to open the row and no signal that reasoning
+ * was expensive - and on a shared output budget, where thinking and the answer
+ * draw on the same pool, that is the number worth seeing. Rehydrated rows carry
+ * no timing (`PersistedRow` does not persist it), hence the fallback.
+ */
+export function thinkingLabel(base: string, ms: number | undefined): string {
+  if (ms === undefined || ms < 100) return base;
+  const seconds = ms / 1000;
+  return `${base} · ${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s`;
+}
+
+/** Total measured reasoning across a run of steps; undefined when none is. */
+function totalReasoningMs(steps: AppMessage[]): number | undefined {
+  const measured = steps.filter((step) => step.reasoningMs !== undefined);
+  if (measured.length === 0) return undefined;
+  return measured.reduce((sum, step) => sum + (step.reasoningMs ?? 0), 0);
+}
+
 function ThinkingRow({
   label,
   reasoning,
@@ -63,7 +84,12 @@ export function ThinkingGroup({ steps }: Props): React.ReactElement | null {
   if (steps.length === 0) return null;
 
   if (steps.length === 1) {
-    return <ThinkingRow label="Thinking" reasoning={steps[0]!.reasoning ?? ''} />;
+    return (
+      <ThinkingRow
+        label={thinkingLabel('Thinking', steps[0]!.reasoningMs)}
+        reasoning={steps[0]!.reasoning ?? ''}
+      />
+    );
   }
 
   return (
@@ -77,12 +103,18 @@ export function ThinkingGroup({ steps }: Props): React.ReactElement | null {
         <span className="thinking-row-chevron">
           {expanded ? <ChevronDown /> : <ChevronRight />}
         </span>
-        <span className="thinking-row-label">Thinking ({steps.length} steps)</span>
+        <span className="thinking-row-label">
+          {thinkingLabel(`Thinking (${steps.length} steps)`, totalReasoningMs(steps))}
+        </span>
       </button>
       {expanded && (
         <div className="thinking-group-body">
           {steps.map((step, i) => (
-            <ThinkingRow key={step.id} label={`Step ${i + 1}`} reasoning={step.reasoning ?? ''} />
+            <ThinkingRow
+              key={step.id}
+              label={thinkingLabel(`Step ${i + 1}`, step.reasoningMs)}
+              reasoning={step.reasoning ?? ''}
+            />
           ))}
         </div>
       )}

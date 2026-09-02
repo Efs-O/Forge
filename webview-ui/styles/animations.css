@@ -36,6 +36,15 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  flex: 1;
+}
+
+/* Tabular figures so a tenths counter does not jitter the row's width as the
+   digits change. Pinned right of the phrase, which yields the space. */
+.streaming-status-elapsed {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
 }
 
 /* Hidden with `visibility`, and the animation applied ONLY while streaming.

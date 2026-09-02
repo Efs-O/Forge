@@ -37,6 +37,9 @@ docs/*
 !docs/plans/**
 !docs/reports/
 !docs/reports/**
+# Design references a plan points at - mockups meant to be opened in a browser.
+!docs/design/
+!docs/design/**
 !docs/TOOL_COVERAGE.md
 !docs/live-reports/
 !docs/live-reports/*.json

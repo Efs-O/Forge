@@ -306,13 +306,6 @@ export function App(): React.ReactElement {
     refocusToggle.current = true;
     setHistoryExpanded(false);
   }, []);
-  const handleSwitchFromPanel = useCallback(
-    (id: string) => {
-      handleSwitchTab(id);
-      collapseHistory();
-    },
-    [handleSwitchTab, collapseHistory],
-  );
   const handleRestoreFromPanel = useCallback(
     (id: string) => {
       handleRestoreConversation(id);
@@ -321,12 +314,13 @@ export function App(): React.ReactElement {
     [handleRestoreConversation, collapseHistory],
   );
 
-  // The panel now also lists open tabs, so an empty history no longer means an
-  // empty panel. Collapse only when there is genuinely nothing but the one tab
-  // already visible in the strip.
+  // The panel lists closed sessions only - open tabs are the strip's job - so an
+  // empty history is once again an empty panel. Restoring or deleting the last
+  // closed chat while it is open would otherwise leave an empty overlay
+  // covering the transcript.
   useEffect(() => {
-    if (state.history.length === 0 && state.tabs.length <= 1) setHistoryExpanded(false);
-  }, [state.history.length, state.tabs.length]);
+    if (state.history.length === 0) setHistoryExpanded(false);
+  }, [state.history.length]);
 
   const handleConfirmApprove = useCallback(() => {
     if (!confirmRequest) return;
@@ -431,12 +425,8 @@ export function App(): React.ReactElement {
             />
             <HistoryList
               items={state.history}
-              tabs={state.tabs}
-              activeId={state.activeConversationId}
-              streamingIds={state.streamingIds}
-              queuedIds={queuedIds}
               expanded={historyExpanded}
-              onSwitch={handleSwitchFromPanel}
+              onDismiss={collapseHistory}
               onRestore={handleRestoreFromPanel}
               onDelete={handleDeleteConversation}
               onRename={handleRenameConversation}

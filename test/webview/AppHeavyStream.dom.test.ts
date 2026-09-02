@@ -118,7 +118,14 @@ describe('App heavy streaming load', () => {
   it('keeps a steered prompt visible through the interrupted turn shutdown', () => {
     const textarea = container.querySelector<HTMLTextAreaElement>('#prompt')!;
     act(() => setNativeTextareaValue(textarea, 'redirect the active turn'));
-    act(() => container.querySelector<HTMLButtonElement>('#btn-send')!.click());
+    // Enter is the only way to queue during a turn: the composer's action slot
+    // holds Stop alone while streaming, because a second "Queue" button fired
+    // this same submit and the QueuedPromptRow below is what confirms it.
+    act(() => {
+      textarea.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+      );
+    });
 
     const steer = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find(
       (button) => button.textContent === 'Steer',
