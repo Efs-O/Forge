@@ -23,7 +23,12 @@
   min-height: 24px;
   padding: 0 12px;
   font-size: calc(var(--vscode-font-size, 13px) + 1px);
-  color: var(--forge-accent, #0090ff);
+  /* The same hue as the armed-Clanker hint directly below it. Blue is the
+     panel's "you can act on this" colour - it sits on links, on the queued
+     row, on the budget fill - and spending it on an ambient line that is not
+     actionable made the loudest element on screen the one with nothing to do.
+     Warm reads as status. */
+  color: var(--forge-clanker);
   user-select: none;
   letter-spacing: 0.02em;
   flex-shrink: 0;
@@ -55,7 +60,7 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--forge-accent, #0090ff);
+  background: var(--forge-clanker);
   flex-shrink: 0;
   visibility: hidden;
 }

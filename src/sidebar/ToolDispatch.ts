@@ -233,18 +233,19 @@ export class ToolDispatch {
     setPlan?: (items: PlanItem[]) => void,
   ): Promise<void> {
     for (const tc of toolCalls) {
+      // Every exit from this iteration pushes exactly one tool message, so the
+      // span is stamped once here and read by `toolMessage` on whichever branch
+      // wins. The early refusals (declined, unknown tool, budget) are timed too:
+      // they are near-instant and fall under the display floor, so they simply
+      // render without a duration rather than needing a special case.
+      const startedAt = Date.now();
       let result: ToolHandlerResult;
       let args: Record<string, unknown> | undefined;
       try {
         if (signal?.aborted) {
           result = 'Error: tool execution cancelled';
           this.postResult(tc, toolResultText(result), undefined, convId);
-          messages.push({
-            role: 'tool',
-            content: toolResultContent(result),
-            tool_call_id: tc.id,
-            name: tc.function.name,
-          });
+          messages.push(this.toolMessage(tc, toolResultContent(result), startedAt));
           continue;
         }
         try {
@@ -253,12 +254,7 @@ export class ToolDispatch {
           this.failureTracker.record();
           result = `Error: malformed tool arguments (invalid JSON)`;
           this.postResult(tc, toolResultText(result), undefined, convId);
-          messages.push({
-            role: 'tool',
-            content: toolResultContent(result),
-            tool_call_id: tc.id,
-            name: tc.function.name,
-          });
+          messages.push(this.toolMessage(tc, toolResultContent(result), startedAt));
           continue;
         }
 
@@ -268,12 +264,7 @@ export class ToolDispatch {
         const unavailable = unavailableTools?.get(tc.function.name);
         if (unavailable) {
           this.postResult(tc, unavailable, undefined, convId);
-          messages.push({
-            role: 'tool',
-            content: unavailable,
-            tool_call_id: tc.id,
-            name: tc.function.name,
-          });
+          messages.push(this.toolMessage(tc, unavailable, startedAt));
           continue;
         }
 
@@ -281,23 +272,13 @@ export class ToolDispatch {
         if (!reg) {
           result = `Error: unknown tool "${tc.function.name}"`;
           this.postResult(tc, toolResultText(result), undefined, convId);
-          messages.push({
-            role: 'tool',
-            content: toolResultContent(result),
-            tool_call_id: tc.id,
-            name: tc.function.name,
-          });
+          messages.push(this.toolMessage(tc, toolResultContent(result), startedAt));
           continue;
         }
         const budgetBlock = budget?.check(tc.function.name);
         if (budgetBlock) {
           this.postResult(tc, budgetBlock, undefined, convId);
-          messages.push({
-            role: 'tool',
-            content: budgetBlock,
-            tool_call_id: tc.id,
-            name: tc.function.name,
-          });
+          messages.push(this.toolMessage(tc, budgetBlock, startedAt));
           continue;
         }
 
@@ -328,12 +309,7 @@ export class ToolDispatch {
           if (!approved) {
             result = `User declined: ${tc.function.name}`;
             this.postResult(tc, toolResultText(result), undefined, convId);
-            messages.push({
-              role: 'tool',
-              content: toolResultContent(result),
-              tool_call_id: tc.id,
-              name: tc.function.name,
-            });
+            messages.push(this.toolMessage(tc, toolResultContent(result), startedAt));
             continue;
           }
         }
@@ -377,13 +353,32 @@ export class ToolDispatch {
       }
 
       this.postResult(tc, toolResultText(result), args, convId);
-      messages.push({
-        role: 'tool',
-        content: toolResultContent(result),
-        tool_call_id: tc.id,
-        name: tc.function.name,
-      });
+      messages.push(this.toolMessage(tc, toolResultContent(result), startedAt));
     }
+  }
+
+  /**
+   * The one shape of a tool result message, carrying its own measured duration.
+   *
+   * The literal was written out at each of the dispatch loop's eight exits, and
+   * a duration added to seven of them is a row that silently loses its timing on
+   * whichever branch was missed.
+   */
+  private toolMessage(
+    tc: ToolCall,
+    content: ChatMessage['content'],
+    startedAt: number,
+  ): ChatMessage {
+    // Same rule as the reasoning span: a zero is a clock that did not tick, not
+    // a call that took no time, and it does not go on the message.
+    const elapsed = Date.now() - startedAt;
+    return {
+      role: 'tool',
+      content,
+      tool_call_id: tc.id,
+      name: tc.function.name,
+      ...(elapsed > 0 ? { toolMs: elapsed } : {}),
+    };
   }
 
   async openFile(filePath: string, options?: OpenFileOptions): Promise<void> {

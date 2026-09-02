@@ -52,17 +52,32 @@
   opacity: 0.8;
 }
 
-.tool-row-indicator {
-  color: var(--vscode-textLink-foreground, #4daafc);
-  font-size: 8px;
+/* Fixed width so the names below it stay in one column whichever glyph lands. */
+.tool-row-status {
+  width: 9px;
   flex-shrink: 0;
+  font-size: 10px;
   line-height: 1;
+  text-align: center;
+}
+.tool-row-status.is-ok {
+  color: var(--forge-tool-ok);
+}
+.tool-row-status.is-error {
+  color: var(--forge-tool-bad);
+}
+.tool-row-status.is-pending {
+  color: var(--vscode-descriptionForeground);
 }
 
+/* Foreground, not link blue. Nothing here navigates - the name is the label of
+   an action that already ran, and link colour on a whole column of them made
+   the tool rows the loudest thing in a transcript they are meant to sit under.
+   The outcome glyph carries the colour now. */
 .tool-row-name {
   font-family: var(--vscode-editor-font-family, 'Cascadia Code', monospace);
   font-size: 11px;
-  color: var(--vscode-textLink-foreground, #4daafc);
+  color: var(--vscode-foreground);
   white-space: nowrap;
 }
 
@@ -133,7 +148,7 @@
 }
 
 .msg-tool-row-error .tool-row-name {
-  color: var(--vscode-errorForeground, #f48771);
+  color: var(--forge-tool-bad);
 }
 
 .tool-row-body {

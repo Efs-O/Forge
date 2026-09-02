@@ -231,7 +231,12 @@ export interface SessionSyncMsg {
   messagesById: Record<
     string,
     Array<
-      | { role: 'user' | 'assistant'; content: string; reasoning?: string | undefined }
+      | {
+          role: 'user' | 'assistant';
+          content: string;
+          reasoning?: string | undefined;
+          reasoningMs?: number | undefined;
+        }
       | {
           role: 'tool';
           content: string;
@@ -239,6 +244,7 @@ export interface SessionSyncMsg {
           toolResult: string;
           toolResultTotal: number;
           toolIsError?: boolean | undefined;
+          toolMs?: number | undefined;
         }
       | {
           role: 'diff';

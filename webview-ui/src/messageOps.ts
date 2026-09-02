@@ -30,7 +30,12 @@ export interface AppMessage {
 }
 
 export type PersistedRow =
-  | { role: 'user' | 'assistant'; content: string; reasoning?: string | undefined }
+  | {
+      role: 'user' | 'assistant';
+      content: string;
+      reasoning?: string | undefined;
+      reasoningMs?: number | undefined;
+    }
   | {
       role: 'tool';
       content: string;
@@ -39,6 +44,7 @@ export type PersistedRow =
       toolResult: string;
       toolResultTotal: number;
       toolIsError?: boolean | undefined;
+      toolMs?: number | undefined;
     }
   | {
       role: 'diff';
@@ -73,6 +79,9 @@ export function mergeSyncedMessages(local: AppMessage[], rows: PersistedRow[]): 
     ...((m.role === 'user' || m.role === 'assistant') && m.reasoning !== undefined
       ? { reasoning: m.reasoning }
       : {}),
+    ...((m.role === 'user' || m.role === 'assistant') && m.reasoningMs !== undefined
+      ? { reasoningMs: m.reasoningMs }
+      : {}),
     ...(m.role === 'tool'
       ? {
           toolName: m.toolName,
@@ -80,6 +89,7 @@ export function mergeSyncedMessages(local: AppMessage[], rows: PersistedRow[]): 
           toolResult: m.toolResult,
           toolResultTotal: m.toolResultTotal,
           ...(m.toolIsError ? { toolIsError: true } : {}),
+          ...(m.toolMs !== undefined ? { toolMs: m.toolMs } : {}),
         }
       : {}),
     ...(m.role === 'diff'
@@ -111,15 +121,19 @@ export function mergeSyncedMessages(local: AppMessage[], rows: PersistedRow[]): 
     if (message.role === 'tool' && message.toolDetail !== undefined) {
       reconstructed[hostIndex]!.toolDetail = message.toolDetail;
     }
-    // Durations are measured live and never make it into `PersistedRow`, so a
-    // host row carries none. Without this carry-over a mid-session sync silently
-    // replaced every measured row with an unmeasured copy of itself, and the
-    // timings the reducer had just stamped disappeared from a running turn -
-    // which looked exactly like timing that had never been implemented.
-    if (message.reasoningMs !== undefined) {
+    // The host's span wins where it has one - it is the side that saw both ends
+    // and the only side that survives a reload. The webview's live stamp fills
+    // the gap before the first sync, and permanently for the CLI-agent turns the
+    // host does not time. Without this carry-over a mid-session sync replaced
+    // every measured row with an unmeasured copy of itself, and the timings the
+    // reducer had just stamped disappeared from a running turn - which looked
+    // exactly like timing that had never been implemented.
+    if (reconstructed[hostIndex]!.reasoningMs === undefined && message.reasoningMs !== undefined) {
       reconstructed[hostIndex]!.reasoningMs = message.reasoningMs;
     }
-    if (message.toolMs !== undefined) reconstructed[hostIndex]!.toolMs = message.toolMs;
+    if (reconstructed[hostIndex]!.toolMs === undefined && message.toolMs !== undefined) {
+      reconstructed[hostIndex]!.toolMs = message.toolMs;
+    }
     hostCursor = hostIndex + 1;
   }
 

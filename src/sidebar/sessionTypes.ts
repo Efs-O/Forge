@@ -67,6 +67,9 @@ const slimMsgSchema = z.object({
   role: z.enum(['user', 'assistant', 'tool']),
   content: z.string().nullable(),
   reasoning: z.string().optional(),
+  /** Measured spans. Optional, so records written before 0.15.12 still parse. */
+  reasoningMs: z.number().optional(),
+  toolMs: z.number().optional(),
   tool_calls: z.array(toolCallSchema).optional(),
   tool_call_id: z.string().optional(),
   name: z.string().optional(),
@@ -76,7 +79,7 @@ export type SlimPersistMessage = z.infer<typeof slimMsgSchema>;
 
 /** Subset of the transcript which can be safely restored into the webview. */
 export type DisplayPersistMessage =
-  | { role: 'user' | 'assistant'; content: string; reasoning?: string }
+  | { role: 'user' | 'assistant'; content: string; reasoning?: string; reasoningMs?: number }
   | {
       role: 'tool';
       content: string;
@@ -84,6 +87,7 @@ export type DisplayPersistMessage =
       toolResult: string;
       toolResultTotal: number;
       toolIsError?: boolean;
+      toolMs?: number;
     }
   | {
       role: 'diff';
@@ -325,6 +329,8 @@ export function slimPersistMessages(messages: ChatMessage[]): SlimPersistMessage
       ...(typeof m.reasoning === 'string' && m.reasoning.length > 0
         ? { reasoning: m.reasoning }
         : {}),
+      ...(typeof m.reasoningMs === 'number' ? { reasoningMs: m.reasoningMs } : {}),
+      ...(typeof m.toolMs === 'number' ? { toolMs: m.toolMs } : {}),
       ...(hasToolCalls ? { tool_calls: m.tool_calls } : {}),
       ...(typeof m.tool_call_id === 'string' ? { tool_call_id: m.tool_call_id } : {}),
       ...(typeof m.name === 'string' ? { name: m.name } : {}),
@@ -368,6 +374,7 @@ export function displayPersistMessages(
         toolResult,
         toolResultTotal,
         ...(isFailureResult(toolText) ? { toolIsError: true } : {}),
+        ...(typeof m.toolMs === 'number' ? { toolMs: m.toolMs } : {}),
       });
       for (const diff of diffsByToolCall.get(m.tool_call_id ?? '') ?? []) {
         out.push({
@@ -393,8 +400,11 @@ export function displayPersistMessages(
     // The ordinary message renderer intentionally shows answer text only, so
     // preserve the thought as its own Thinking row rather than losing it when
     // session sync replaces the live stream.
+    // The span belongs to the thought, so on a split turn it rides the reasoning
+    // half - the answer half never reasoned.
+    const reasoningMs = typeof m.reasoningMs === 'number' ? { reasoningMs: m.reasoningMs } : {};
     if (m.role === 'assistant' && content && reasoning) {
-      out.push({ role: 'assistant', content: '', reasoning });
+      out.push({ role: 'assistant', content: '', reasoning, ...reasoningMs });
       out.push({ role: 'assistant', content });
       continue;
     }
@@ -402,7 +412,7 @@ export function displayPersistMessages(
       role: m.role,
       // A reasoning-only turn has content: null; the webview contract is string.
       content,
-      ...(reasoning ? { reasoning } : {}),
+      ...(reasoning ? { reasoning, ...reasoningMs } : {}),
     });
   }
   return out;
@@ -415,6 +425,8 @@ export function chatMessagesFromSlim(slim: SlimPersistMessage[]): ChatMessage[] 
     ...(typeof m.reasoning === 'string' && m.reasoning.length > 0
       ? { reasoning: m.reasoning }
       : {}),
+    ...(typeof m.reasoningMs === 'number' ? { reasoningMs: m.reasoningMs } : {}),
+    ...(typeof m.toolMs === 'number' ? { toolMs: m.toolMs } : {}),
     ...(m.tool_calls ? { tool_calls: m.tool_calls } : {}),
     ...(typeof m.tool_call_id === 'string' ? { tool_call_id: m.tool_call_id } : {}),
     ...(typeof m.name === 'string' ? { name: m.name } : {}),

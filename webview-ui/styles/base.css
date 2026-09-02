@@ -19,6 +19,11 @@
      desaturated end of the same hue - still unmistakably a warning, quiet
      enough to sit in the corner of the eye for an hour. */
   --forge-clanker:   var(--vscode-charts-orange, #cd9178);
+  /* Tool outcome. Green and red carry no meaning on their own here - each glyph
+     differs in shape as well as hue (✓ / ✕ / ○) and carries a title, so the row
+     still reads without colour. */
+  --forge-tool-ok:   var(--vscode-charts-green, #6fc099);
+  --forge-tool-bad:  var(--vscode-errorForeground, #f48771);
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }

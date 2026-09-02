@@ -21,16 +21,23 @@
   word-break: break-word;
 }
 
+/* The bar is the same warm hue as the streaming line and the armed-Clanker
+   hint: one accent for "this is Forge's own state", and blue reserved for the
+   things you can act on. */
 .msg.user {
   background: transparent;
-  border-left: 2px solid var(--forge-accent);
+  border-left: 2px solid var(--forge-clanker);
   padding: 2px 0 2px 9px;
   white-space: pre-wrap;
 }
 
+/* Queued is the exception, and deliberately so: it is not yet part of the
+   transcript. Dashed says provisional and blue says there is still something
+   to do about it - Steer or Cancel sit right underneath. */
 .msg.user.msg-queued {
   opacity: 0.7;
   border-left-style: dashed;
+  border-left-color: var(--forge-accent);
 }
 
 .queued-prompt-actions {
@@ -41,7 +48,7 @@
 }
 
 .queued-prompt-status {
-  color: var(--vscode-descriptionForeground);
+  color: var(--forge-accent);
   font-size: 11px;
 }
 

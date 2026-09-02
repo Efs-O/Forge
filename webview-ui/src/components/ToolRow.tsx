@@ -44,11 +44,22 @@ export function ToolRow({ message }: { message: AppMessage }): React.ReactElemen
   // Only rows whose call Forge saw both announced and returned carry one, so an
   // absent duration means unmeasured - never "instant".
   const elapsed = formatDuration(message.toolMs);
+  // A row exists from the moment the call is announced, so it has three states,
+  // not two. `toolResultTotal` is the field TOOL_RESULT always sets - an empty
+  // `toolResult` is a tool that returned nothing, not one still running.
+  const status = message.toolIsError
+    ? { className: 'is-error', glyph: '✕', label: 'failed' }
+    : message.toolResultTotal !== undefined
+      ? { className: 'is-ok', glyph: '✓', label: 'completed' }
+      : { className: 'is-pending', glyph: '○', label: 'running' };
   const body = useMemo(() => normalizeMarkdownForRender(result), [result]);
 
   return (
     <div className={`msg-tool-row-wrap${message.toolIsError ? ' msg-tool-row-error' : ''}`}>
       <div className="msg-tool-row">
+        <span className={`tool-row-status ${status.className}`} title={status.label}>
+          {status.glyph}
+        </span>
         {expandable ? (
           <button
             className="tool-row-toggle"
@@ -61,10 +72,7 @@ export function ToolRow({ message }: { message: AppMessage }): React.ReactElemen
             <span className="tool-row-name">{name}</span>
           </button>
         ) : (
-          <>
-            <span className="tool-row-indicator">●</span>
-            <span className="tool-row-name">{name}</span>
-          </>
+          <span className="tool-row-name">{name}</span>
         )}
         {detail && <span className="tool-row-detail">{detail}</span>}
         {elapsed && <span className="tool-row-time">{elapsed}</span>}

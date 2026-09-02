@@ -16,6 +16,14 @@ export interface ChatMessage {
   content: string | ContentPart[] | null;
   /** Optional reasoning/thinking text shown in the sidebar but never sent back to the model. */
   reasoning?: string;
+  /**
+   * How long the reasoning stream ran, and how long a tool call took. Measured
+   * by the host, which is the only side that sees both ends: the webview's own
+   * stamps are live-only and are erased the moment a session sync rebuilds the
+   * transcript from disk.
+   */
+  reasoningMs?: number;
+  toolMs?: number;
   tool_call_id?: string;
   name?: string;
   tool_calls?: ToolCall[];
