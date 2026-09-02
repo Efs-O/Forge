@@ -378,7 +378,9 @@ the served llama-server:
 npm run bench:ping
 ```
 
-The ping command never launches Claude or Codex and stores its reply and server
+The ping command never launches Claude or Codex. It loads the Forge-configured
+Qwen server for `qwen-forge`, unloads it, starts the same GGUF through Forge's
+baseline direct lifecycle for `qwen-minimal`, and stores both replies and server
 facts under `results/ping-<run-id>/`.
 
 ## Cloud and Token Setup

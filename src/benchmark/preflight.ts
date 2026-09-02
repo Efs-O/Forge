@@ -96,6 +96,7 @@ function modelId(models: unknown, requested: string | undefined, manifestModel?:
 }
 
 export interface QwenEndpointFacts {
+  baseUrl: string;
   model: string;
   models: unknown;
   props: unknown;
@@ -103,19 +104,44 @@ export interface QwenEndpointFacts {
   propsCheck: { ok: boolean; status: number; body: unknown; error?: string };
 }
 
+export function normalizeLlamaBaseUrl(baseUrl: string): string {
+  const trimmed = baseUrl.trim().replace(/\/+$/gu, '');
+  return trimmed.replace(/\/v1$/iu, '');
+}
+
 export async function inspectQwenEndpoint(
   baseUrl: string,
   requestedModel?: string,
 ): Promise<QwenEndpointFacts> {
-  const models = await probeJson(`${baseUrl}/v1/models`);
-  const props = await probeJson(`${baseUrl}/props`);
+  const root = normalizeLlamaBaseUrl(baseUrl);
+  const models = await probeJson(`${root}/v1/models`);
+  const props = await probeJson(`${root}/props`);
   if (!models.ok || !props.ok) throw new Error(`llama-server preflight failed at ${baseUrl}.`);
   return {
+    baseUrl: root,
     model: modelId(models.body, requestedModel),
     models: models.body,
     props: props.body,
     modelsCheck: models,
     propsCheck: props,
+  };
+}
+
+async function inspectQwenControlServer(configPath: string): Promise<{
+  health: Awaited<ReturnType<typeof probeJson>>;
+  models: Awaited<ReturnType<typeof probeJson>>;
+}> {
+  if (!fs.existsSync(configPath))
+    throw new Error(`Forge config not found for Qwen lifecycle control: ${configPath}`);
+  const config = parseYaml(fs.readFileSync(configPath, 'utf8')) as {
+    control_server?: { port?: number };
+  };
+  const port = config.control_server?.port;
+  if (!port) throw new Error('Forge control_server.port is required for Qwen lifecycle control.');
+  const baseUrl = `http://127.0.0.1:${port}`;
+  return {
+    health: await probeJson(`${baseUrl}/healthz`),
+    models: await probeJson(`${baseUrl}/models`),
   };
 }
 
@@ -193,13 +219,25 @@ export async function preparePreflight(options: BenchmarkOptions): Promise<Prefl
   let llamaModels: unknown = undefined;
   let llamaProps: unknown = undefined;
   let model = options.model ?? task.model ?? '';
+  let effectiveBaseUrl = options.baseUrl;
   if (options.arms.some((arm) => arm.startsWith('qwen'))) {
-    const facts = await inspectQwenEndpoint(options.baseUrl, model || undefined);
-    checks.llama_models = facts.modelsCheck;
-    checks.llama_props = facts.propsCheck;
-    llamaModels = facts.models;
-    llamaProps = facts.props;
-    model = facts.model;
+    try {
+      const facts = await inspectQwenEndpoint(options.baseUrl, model || undefined);
+      checks.llama_models = facts.modelsCheck;
+      checks.llama_props = facts.propsCheck;
+      llamaModels = facts.models;
+      llamaProps = facts.props;
+      model = facts.model;
+      effectiveBaseUrl = facts.baseUrl;
+    } catch (error) {
+      const control = await inspectQwenControlServer(options.forgeConfigPath);
+      checks.llama_control = control;
+      if (!control.health.ok || !control.models.ok)
+        throw new Error(
+          `llama-server is unavailable at ${options.baseUrl}, and Forge control server preflight failed: ${String(error)}`,
+        );
+      checks.llama_server_deferred = { reason: 'runner will load Forge and minimal phases' };
+    }
   }
 
   const cliExecutables: Partial<Record<'claude' | 'codex', string>> = {};
@@ -257,7 +295,8 @@ export async function preparePreflight(options: BenchmarkOptions): Promise<Prefl
   };
   fs.writeFileSync(path.join(runDir, 'preflight.json'), JSON.stringify(preflight, null, 2), 'utf8');
   return {
-    options,
+    options:
+      effectiveBaseUrl === options.baseUrl ? options : { ...options, baseUrl: effectiveBaseUrl },
     task,
     record,
     runId,

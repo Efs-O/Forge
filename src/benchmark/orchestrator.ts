@@ -14,6 +14,13 @@ import { BENCHMARK_TOOL_NAMES, createBenchmarkToolHost } from './toolHost';
 import { captureCliUsage, qwenUsage } from './usageCapture';
 import { commandSucceeded, runProcess } from './process';
 import type { PreflightContext } from './preflight';
+import {
+  ensureForgeQwen,
+  startMinimalQwen,
+  stopMinimalQwen,
+  unloadForgeQwen,
+  type QwenServerHandle,
+} from './qwenServerLifecycle';
 
 function append(file: string, text: string): void {
   fs.appendFileSync(file, text, 'utf8');
@@ -38,12 +45,15 @@ async function runAgent(
   arm: BenchmarkArm,
   callbacks: ArmCallbacks,
   signal: AbortSignal,
+  server?: QwenServerHandle,
 ): Promise<AgentExecution> {
   const problem = context.record.problem_statement;
+  const endpoint = server?.endpoint ?? context.options.baseUrl;
+  const model = server?.facts.model ?? context.model;
   if (arm === 'qwen-minimal')
     return runQwenMinimal(
-      context.options.baseUrl,
-      context.model,
+      endpoint,
+      model,
       problem,
       createBenchmarkToolHost(context.workspaces[arm]),
       signal,
@@ -51,8 +61,8 @@ async function runAgent(
     );
   if (arm === 'qwen-forge')
     return runQwenForge(
-      context.options.baseUrl,
-      context.model,
+      endpoint,
+      model,
       problem,
       createBenchmarkToolHost(context.workspaces[arm]),
       signal,
@@ -72,7 +82,11 @@ async function runAgent(
   );
 }
 
-async function runArm(context: PreflightContext, arm: BenchmarkArm): Promise<BenchmarkRunResult> {
+async function runArm(
+  context: PreflightContext,
+  arm: BenchmarkArm,
+  server?: QwenServerHandle,
+): Promise<BenchmarkRunResult> {
   const armDir = path.join(context.runDir, arm);
   const events = path.join(armDir, 'agent-events.jsonl');
   const stdout = path.join(armDir, 'stdout.log');
@@ -94,7 +108,7 @@ async function runArm(context: PreflightContext, arm: BenchmarkArm): Promise<Ben
   const timer = setTimeout(() => controller.abort(), context.task.timeout_minutes * 60_000);
   try {
     event('status', `Starting ${arm} at ${context.record.base_commit}`);
-    execution = await runAgent(context, arm, callbacks, controller.signal);
+    execution = await runAgent(context, arm, callbacks, controller.signal, server);
     if (execution.finalText) append(stdout, `\n\nFINAL:\n${execution.finalText}\n`);
   } catch (error) {
     execution = {
@@ -170,12 +184,13 @@ async function runArm(context: PreflightContext, arm: BenchmarkArm): Promise<Ben
     },
     model: arm.startsWith('qwen')
       ? {
-          endpoint: context.options.baseUrl,
-          id: context.model,
+          endpoint: server?.endpoint ?? context.options.baseUrl,
+          id: server?.facts.model ?? context.model,
           sampling: { temperature: 0, max_tokens: 4096, enable_thinking: false },
           tool_allowlist: BENCHMARK_TOOL_NAMES,
-          models: context.llamaModels,
-          props: context.llamaProps,
+          models: server?.facts.models ?? context.llamaModels,
+          props: server?.facts.props ?? context.llamaProps,
+          server_phase: server?.phase,
         }
       : undefined,
     cli:
@@ -221,7 +236,49 @@ async function runArm(context: PreflightContext, arm: BenchmarkArm): Promise<Ben
 export async function executeBenchmark(context: PreflightContext): Promise<BenchmarkRunResult[]> {
   if (context.options.dryRun) return [];
   const results: BenchmarkRunResult[] = [];
-  for (const arm of context.options.arms) {
+  let forge: QwenServerHandle | undefined;
+  let minimal: QwenServerHandle | undefined;
+  let forgeEndpoint: string | undefined;
+  const qwenModel = context.options.model;
+  try {
+    if (context.options.arms.includes('qwen-forge')) {
+      process.stdout.write('forge-bench: loading Forge Qwen parameters\n');
+      forge = await ensureForgeQwen({
+        forgeConfigPath: context.options.forgeConfigPath,
+        model: qwenModel,
+      });
+      forgeEndpoint = forge.endpoint;
+      process.stdout.write(`forge-bench: running qwen-forge\n`);
+      results.push(await runArm(context, 'qwen-forge', forge));
+      process.stdout.write(`forge-bench: qwen-forge ${results.at(-1)!.status}\n`);
+      await unloadForgeQwen(forge, context.options.forgeConfigPath);
+      forge = undefined;
+    }
+    if (context.options.arms.includes('qwen-minimal')) {
+      process.stdout.write('forge-bench: unloading Forge Qwen parameters\n');
+      const armDir = path.join(context.runDir, 'qwen-minimal');
+      fs.mkdirSync(armDir, { recursive: true });
+      minimal = await startMinimalQwen(
+        {
+          forgeConfigPath: context.options.forgeConfigPath,
+          model: qwenModel,
+          onStdout: (text) => append(path.join(armDir, 'server.stdout.log'), text),
+          onStderr: (text) => append(path.join(armDir, 'server.stderr.log'), text),
+        },
+        forgeEndpoint ?? context.options.baseUrl,
+      );
+      process.stdout.write('forge-bench: running qwen-minimal\n');
+      results.push(await runArm(context, 'qwen-minimal', minimal));
+      process.stdout.write(`forge-bench: qwen-minimal ${results.at(-1)!.status}\n`);
+    }
+  } finally {
+    if (minimal) await stopMinimalQwen(minimal);
+    if (forge) await unloadForgeQwen(forge, context.options.forgeConfigPath);
+  }
+  const nonQwenArms = context.options.arms.filter(
+    (arm) => arm !== 'qwen-forge' && arm !== 'qwen-minimal',
+  );
+  for (const arm of nonQwenArms) {
     process.stdout.write(`forge-bench: running ${arm}\n`);
     results.push(await runArm(context, arm));
     process.stdout.write(`forge-bench: ${arm} ${results.at(-1)!.status}\n`);

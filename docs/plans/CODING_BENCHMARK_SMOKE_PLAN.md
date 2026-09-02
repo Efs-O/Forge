@@ -1,6 +1,6 @@
 # Coding benchmark smoke test plan
 
-Status: implementation-ready plan.  This document intentionally records the
+Status: implementation-ready plan. This document intentionally records the
 smallest useful first experiment before any multi-task leaderboard work.
 
 ## Goal
@@ -8,17 +8,17 @@ smallest useful first experiment before any multi-task leaderboard work.
 Run one **SWE-bench Verified** instance once with four coding-agent arms, then
 produce one auditable report:
 
-1. `qwen-minimal` — Qwen3.8-27B through the already-running llama-server and a
-   neutral, minimal tool loop.
-2. `qwen-forge` — the same llama-server/model settings through Forge's real
-   local-model loop.
+1. `qwen-minimal` — Qwen3.8-27B through a direct llama-server started with
+   only the baseline server arguments and a neutral, minimal tool loop.
+2. `qwen-forge` — the same model loaded through Forge's configured spawn
+   parameters and real local-model loop.
 3. `claude-code` — the authenticated Claude Code CLI launched by Forge's
    existing CLI integration.
 4. `codex` — the authenticated Codex CLI launched by Forge's existing CLI
    integration.
 
 This is a pipeline smoke test, not a claim of a statistically meaningful
-ranking or a SWE-bench score.  The result is one task outcome per arm.
+ranking or a SWE-bench score. The result is one task outcome per arm.
 
 ## Non-negotiable comparison rules
 
@@ -32,16 +32,16 @@ All four arms receive:
 
 The benchmark records the supplied task text verbatim, checks the starting Git
 HEAD before each agent starts, and grades every result with the official test
-patch/evaluator.  An agent may inspect and change only its own checkout.
+patch/evaluator. An agent may inspect and change only its own checkout.
 
 The report must call out the real harness distinction:
 
-| Arm | Agent/tool ownership |
-|---|---|
-| `qwen-minimal` | benchmark's intentionally small shared tool host |
-| `qwen-forge` | Forge's native `ToolCallingLoop`, prompt/context policy, and benchmark tool host |
-| `claude-code` | Claude Code's native tool loop; Forge owns launch, workspace and transcript capture only |
-| `codex` | Codex's native tool loop; Forge owns launch, workspace and transcript capture only |
+| Arm            | Agent/tool ownership                                                                     |
+| -------------- | ---------------------------------------------------------------------------------------- |
+| `qwen-minimal` | benchmark's intentionally small shared tool host                                         |
+| `qwen-forge`   | Forge's native `ToolCallingLoop`, prompt/context policy, and benchmark tool host         |
+| `claude-code`  | Claude Code's native tool loop; Forge owns launch, workspace and transcript capture only |
+| `codex`        | Codex's native tool loop; Forge owns launch, workspace and transcript capture only       |
 
 Therefore Claude/Codex are not described as using Forge's native tool registry.
 They are reference agents on the same task and workspace contract.
@@ -50,22 +50,22 @@ They are reference agents on the same task and workspace contract.
 
 No new generic agent framework is to be built.
 
-| Need | Existing Forge / CacheWarden component | Benchmark action |
-|---|---|---|
-| Qwen production loop | `src/agent/ToolCallingLoop.ts` | Call it for `qwen-forge`; do not copy its recovery, request, or tool-call parsing code. |
-| Qwen minimal baseline | `test/live/liveModelHarness.ts` | Promote only the minimal request/round mechanics needed for a neutral loop; keep prompt and context policy deliberately small. |
-| Claude/Codex invocation | `src/agents/CliAgentDriver.ts` and adapters | Reuse the existing executable resolution, argument construction, streaming events, timeout, and cancellation behavior. |
-| Local tool semantics | current Forge file/search/edit/test helpers where decoupled from VS Code | Expose only the small benchmark allowlist: read, list/search, edit, and terminal/test. Both Qwen arms use this exact host. |
-| Qwen usage | llama-server OpenAI `usage` and `/props` | Persist raw usage and server metadata per run. |
-| Codex usage | CacheWarden `CodexJsonlParser.ts` | Reuse/adapt its parser for the session's `token_count.last_token_usage` record. |
-| Claude usage | CacheWarden `CacheKeepManager.getClaudeTokenUsage` logic | Reuse/adapt its bounded-tail parse of `message.usage`: normal input + cache creation + cache read. |
-| Isolated workspaces | Forge's temporary-workspace test patterns plus Git worktrees/clone | One disposable task checkout per arm; never run an agent in the Forge checkout. |
-| Existing testing style | Vitest, fake CLI fixtures, `scripts/*-ab.mjs` | Unit test parsers/orchestration with fakes; gate real model/provider work behind an explicit command. |
+| Need                    | Existing Forge / CacheWarden component                                   | Benchmark action                                                                                                               |
+| ----------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| Qwen production loop    | `src/agent/ToolCallingLoop.ts`                                           | Call it for `qwen-forge`; do not copy its recovery, request, or tool-call parsing code.                                        |
+| Qwen minimal baseline   | `test/live/liveModelHarness.ts`                                          | Promote only the minimal request/round mechanics needed for a neutral loop; keep prompt and context policy deliberately small. |
+| Claude/Codex invocation | `src/agents/CliAgentDriver.ts` and adapters                              | Reuse the existing executable resolution, argument construction, streaming events, timeout, and cancellation behavior.         |
+| Local tool semantics    | current Forge file/search/edit/test helpers where decoupled from VS Code | Expose only the small benchmark allowlist: read, list/search, edit, and terminal/test. Both Qwen arms use this exact host.     |
+| Qwen usage              | llama-server OpenAI `usage` and `/props`                                 | Persist raw usage and server metadata per run.                                                                                 |
+| Codex usage             | CacheWarden `CodexJsonlParser.ts`                                        | Reuse/adapt its parser for the session's `token_count.last_token_usage` record.                                                |
+| Claude usage            | CacheWarden `CacheKeepManager.getClaudeTokenUsage` logic                 | Reuse/adapt its bounded-tail parse of `message.usage`: normal input + cache creation + cache read.                             |
+| Isolated workspaces     | Forge's temporary-workspace test patterns plus Git worktrees/clone       | One disposable task checkout per arm; never run an agent in the Forge checkout.                                                |
+| Existing testing style  | Vitest, fake CLI fixtures, `scripts/*-ab.mjs`                            | Unit test parsers/orchestration with fakes; gate real model/provider work behind an explicit command.                          |
 
 ## Required new surface
 
 Add a focused `scripts/forge-bench.mjs` command and small benchmark modules
-under `src/benchmark/`.  The command owns orchestration only:
+under `src/benchmark/`. The command owns orchestration only:
 
 1. load a versioned task manifest;
 2. create four task workspaces from the pinned base commit;
@@ -89,37 +89,37 @@ It must refuse before spending provider usage when any prerequisite is missing:
 - Claude or Codex is absent/not authenticated; or
 - the selected task workspace is not a clean Git checkout at `base_commit`.
 
-`--dry-run` validates everything except agent calls and evaluation.  `--arms`
+`--dry-run` validates everything except agent calls and evaluation. `--arms`
 allows a local-Qwen-only rehearsal; default is all four arms.
 
 ## Full-Forge Qwen boundary
 
 Forge currently has no headless endpoint that submits a full sidebar local-model
-turn.  Its localhost control server only loads local models and proxies cloud
-completions.  Do not automate the VS Code webview and do not create a broad
+turn. Its localhost control server only loads local models and proxies cloud
+completions. Do not automate the VS Code webview and do not create a broad
 remote agent endpoint just for this benchmark.
 
 Instead, factor a narrow, non-UI benchmark entry point around the already
-production-owned local loop.  It must compose the same request construction,
+production-owned local loop. It must compose the same request construction,
 system/template injection, context handling, tool definitions, tool budget and
 `ToolCallingLoop` as `ModelTurn`; the only substitute is a deliberately
-sandboxed benchmark tool host instead of VS Code UI tools.  The task manifest
+sandboxed benchmark tool host instead of VS Code UI tools. The task manifest
 will declare the allowed tools so `qwen-minimal` and `qwen-forge` receive the
 same effective capabilities.
 
 This is the smallest change that permits one command while preserving the
-meaningful Forge-vs-minimal comparison.  It is not a public control-server API.
+meaningful Forge-vs-minimal comparison. It is not a public control-server API.
 
 ## Task and evaluation contract
 
-The initial manifest pins one official `SWE-bench_Verified` instance.  It stores
+The initial manifest pins one official `SWE-bench_Verified` instance. It stores
 the dataset revision/name and `instance_id`, not a copied issue description or
-gold patch.  On first run, the bootstrapper obtains the official task record,
+gold patch. On first run, the bootstrapper obtains the official task record,
 which contains `repo`, `base_commit`, `problem_statement`, `test_patch`, and
 the evaluator metadata.
 
 The agent sees only the repository at `base_commit` and `problem_statement`.
-The official test patch is applied only by the evaluator after the run.  The
+The official test patch is applied only by the evaluator after the run. The
 gold patch is never downloaded into an agent workspace or results directory.
 
 The report uses these result states:
@@ -129,9 +129,9 @@ The report uses these result states:
 - `ERROR` — setup, agent, patch collection, or evaluator infrastructure failed;
 - `TIMEOUT` — agent reached its deadline; evaluator still runs if a patch exists.
 
-The report ranks only the four outcomes for this task, with ties.  It may show
+The report ranks only the four outcomes for this task, with ties. It may show
 published SWE figures in a **separate external-reference table**, including
-dataset, harness, date, and source.  It must say that `1/1` is not a SWE score
+dataset, harness, date, and source. It must say that `1/1` is not a SWE score
 and must never extrapolate it to a percentage ranking.
 
 ## Metrics and artifacts
@@ -158,7 +158,7 @@ base commit, timeout, CLI versions when available, and for Qwen:
 - context/KV/GPU/sampling facts passed to the server where available; and
 - prompt/completion/cache usage returned by llama-server.
 
-`usage.json` includes provenance and raw evidence.  CacheWarden's parsers show
+`usage.json` includes provenance and raw evidence. CacheWarden's parsers show
 that the authoritative data comes from local agent transcripts, so the benchmark
 will read only the fresh session identified by the run, after the CLI exits:
 
@@ -182,10 +182,11 @@ or provider CLI session state:
 6. evaluate every resulting patch;
 7. generate the human-readable report and machine JSON.
 
-The Qwen server is never restarted between the two Qwen arms.  The runner
-captures its facts before and after both arms and reports any drift.  A later
-128K/two-5060 run therefore needs no code change: it simply produces a distinct
-run manifest with those observed settings.
+The runner executes `qwen-forge` first, releases and unloads its Forge-managed
+server, then starts the same GGUF through the single Forge-owned
+`DirectBackend` lifecycle with only baseline arguments for `qwen-minimal`. It
+captures `/props`, `/v1/models`, and endpoint facts for both phases so the
+startup-parameter distinction is auditable.
 
 ## Safety and cost controls
 
@@ -217,25 +218,26 @@ run manifest with those observed settings.
 
 - [ ] `npm run bench:smoke -- --dry-run` validates a pinned official task, all
       arm prerequisites, clean isolated workspaces, and report generation
-      without invoking any model or CLI.  (Automated fixture test.)
+      without invoking any model or CLI. (Automated fixture test.)
 - [ ] Every real arm starts from the identical task repo/base commit and cannot
-      alter another arm's workspace.  (Integration test plus recorded SHAs.)
-- [ ] `qwen-minimal` and `qwen-forge` use the same llama-server endpoint/model
-      facts and the same benchmark tool allowlist.  (Manifest assertion.)
+      alter another arm's workspace. (Integration test plus recorded SHAs.)
+- [ ] `qwen-minimal` and `qwen-forge` use the same GGUF and benchmark tool
+      allowlist, while their server startup phases are separately unloaded,
+      reloaded, and recorded. (Lifecycle assertion.)
 - [ ] `qwen-forge` calls production-owned Forge loop components rather than a
-      copied implementation.  (Unit test/spies at the extracted entry point.)
+      copied implementation. (Unit test/spies at the extracted entry point.)
 - [ ] Claude and Codex launch through `CliAgentDriver`/their existing adapters
-      and retain native tool ownership.  (Fake-CLI integration test.)
+      and retain native tool ownership. (Fake-CLI integration test.)
 - [ ] A timeout or agent crash still preserves logs, patch if present, and an
-      `ERROR`/`TIMEOUT` result without aborting later selected arms.  (Fixture
+      `ERROR`/`TIMEOUT` result without aborting later selected arms. (Fixture
       test.)
 - [ ] PASS/FAIL comes only from the official evaluator result, never from an
-      agent's final prose or a diff heuristic.  (Evaluator adapter test.)
+      agent's final prose or a diff heuristic. (Evaluator adapter test.)
 - [ ] Claude and Codex usage parsing correctly handles CacheWarden's current
       documented transcript shapes and reports unavailable cleanly for unknown
-      shapes.  (Parser fixtures.)
+      shapes. (Parser fixtures.)
 - [ ] The final Markdown report has separate local-task ranking and external
       SWE reference sections and explicitly says a one-task smoke result is
-      not a SWE score.  (Snapshot test.)
+      not a SWE score. (Snapshot test.)
 - [ ] `npm run type-check`, `npm run lint`, `npm test`, and `npm run build`
-      remain green before the branch is proposed for merge.  (CI validation.)
+      remain green before the branch is proposed for merge. (CI validation.)

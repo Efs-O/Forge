@@ -62,7 +62,7 @@ async function loadBenchmarkModule() {
             namespace: 'benchmark',
           }));
           buildApi.onLoad({ filter: /.*/, namespace: 'benchmark' }, () => ({
-            contents: `export const window = { createOutputChannel: () => ({ appendLine() {}, show() {}, dispose() {} }) }; export const workspace = { getConfiguration: () => ({ get: () => undefined }) };`,
+            contents: `export const window = { createOutputChannel: () => ({ append() {}, appendLine() {}, show() {}, dispose() {} }) }; export const workspace = { getConfiguration: () => ({ get: () => undefined }) };`,
             loader: 'js',
           }));
         },
