@@ -24,6 +24,9 @@ export interface CliAgentRunOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
   onEvent?: (event: CliAgentEvent) => void;
+  /** Raw protocol capture for headless integrations; the adapter still owns parsing. */
+  onStdoutLine?: (line: string) => void;
+  onStderr?: (text: string) => void;
 }
 
 /**
@@ -70,13 +73,16 @@ export class CliAgentDriver {
     });
 
     child.stderr?.on('data', (chunk: Buffer) => {
-      stderrChunks.push(chunk.toString());
+      const text = chunk.toString();
+      stderrChunks.push(text);
+      options.onStderr?.(text);
     });
 
     const rl = child.stdout
       ? readline.createInterface({ input: child.stdout, crlfDelay: Infinity })
       : undefined;
     rl?.on('line', (line) => {
+      options.onStdoutLine?.(line);
       try {
         adapter.handleLine(line, ctx);
       } catch {

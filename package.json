@@ -438,6 +438,7 @@
     "lint:fix": "eslint src webview-ui --ext .ts,.tsx --fix",
     "test": "vitest run",
     "test:local-tools": "node scripts/test-local-tools.mjs",
+    "bench:smoke": "node scripts/forge-bench.mjs",
     "probe:claude-cold-resume": "node scripts/test-claude-cold-resume.mjs",
     "probe:codex-persistent": "node scripts/spike-codex-persistent-protocol.mjs",
     "test:watch": "vitest",
