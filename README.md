@@ -371,6 +371,16 @@ runtime facts, and usage under `results/<run-id>/<arm>/`. The report ranks this
 single task only; one task is not a SWE-bench score, and published SWE figures
 are not mixed into the local ranking.
 
+Before spending evaluator or agent-session usage, ping both Qwen arms against
+the served llama-server:
+
+```powershell
+npm run bench:ping
+```
+
+The ping command never launches Claude or Codex and stores its reply and server
+facts under `results/ping-<run-id>/`.
+
 ## Cloud and Token Setup
 
 Cloud or hosted OpenAI-compatible providers are explicit and credentialed through SecretStorage, not YAML.

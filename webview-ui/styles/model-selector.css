@@ -1,31 +1,39 @@
 /* ── Model selector custom dropdown ─────────────────────────────────────── */
 
+/* Shrink-to-fit, not `flex: 1`. The trigger is a control in the action row
+   beside attach and send, and a name is typically ~24 characters; letting it
+   flex meant a wide-docked panel stretched one dropdown across the entire
+   composer. `max-width` caps it in the other direction so an unusually long
+   model id ellipsises instead of pushing send off the row. */
 .ms-root {
-  flex: 1;
-  position: relative;
+  flex: 0 1 auto;
   min-width: 0;
+  max-width: 260px;
+  position: relative;
 }
 
-/* Padding is symmetric and the chevron is taken out of flow deliberately: with
-   the chevron in flow, the name centres inside the space *left over* beside it
-   and lands visibly off-centre. The right padding reserves the chevron's lane
-   so a long name ellipsises before it reaches it. */
+/* The chevron is taken out of flow deliberately: in flow, the name lays out
+   inside the space *left over* beside it and lands visibly off its lane. The
+   right padding reserves the chevron's lane so a long name ellipsises before
+   it reaches it. Left-aligned now that the trigger is only as wide as its
+   contents - centring text inside a shrink-wrapped box is a no-op that only
+   costs an off-centre look while the name is ellipsised. */
 .ms-trigger {
   width: 100%;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 4px;
   position: relative;
   background: var(--vscode-dropdown-background);
   color: var(--vscode-dropdown-foreground);
   border: 1px solid var(--vscode-dropdown-border);
-  padding: 4px 22px;
+  padding: 4px 22px 4px 8px;
   font-size: inherit;
   font-family: inherit;
   border-radius: var(--forge-radius-sm);
   cursor: pointer;
-  text-align: center;
+  text-align: left;
   min-width: 0;
 }
 
@@ -39,7 +47,7 @@
 }
 
 .ms-trigger-name {
-  flex: 1;
+  flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -121,11 +129,19 @@
    sits in the composer at the foot of the sidebar, so a downward panel would
    open straight off the bottom edge. `max-height` is viewport-relative so a
    long grouped model list scrolls instead of overflowing the panel. */
+/* Sized to its own contents, not to the trigger. Now that the trigger
+   shrink-wraps the *active* model's name, `right: 0` would have made the whole
+   list as narrow as whatever happened to be selected - pick a short name and
+   every longer one in the list ellipsises. `min-width: 100%` keeps it at least
+   flush with the trigger; the cap keeps it inside a narrow sidebar. */
 .ms-panel {
   position: absolute;
   bottom: calc(100% + 3px);
   left: 0;
-  right: 0;
+  right: auto;
+  width: max-content;
+  min-width: 100%;
+  max-width: min(340px, 90vw);
   z-index: 1000;
   background: var(--vscode-dropdown-background);
   border: 1px solid var(--vscode-focusBorder, #0090ff);

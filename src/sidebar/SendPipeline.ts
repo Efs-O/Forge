@@ -13,7 +13,7 @@ import type { AttachmentData, HostToWebview } from './messageBridge';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
 import type { ToolFailureTracker } from '../tools/StripTools';
 import type { AgentLoop, SidebarProviderEvents } from './AgentLoop';
-import { SessionLogger } from './SessionLogger';
+import { SessionLogger, type CompactionLogEntry } from './SessionLogger';
 import { resolveRequestModel } from '../config/ConfigResolver';
 import { deriveStaticCapabilities } from '../config/ConfigResolver';
 import { getLogger } from '../util/logger';
@@ -270,21 +270,39 @@ export class SendPipeline {
     await this.send(text, attachments);
   }
 
+  /**
+   * Records a completed compaction on the same transcript as the turns.
+   *
+   * Public because `CompactionService` is reached through the slash handler and
+   * has no logger of its own; this class owns the per-conversation loggers, so
+   * routing the row through it keeps that ownership single rather than handing
+   * a second writer the same file.
+   */
+  logCompaction(convId: string, entry: CompactionLogEntry): void {
+    const conv = this.deps.getSidebar().conversations.find((c) => c.id === convId);
+    if (!conv) return;
+    const logger = this.loggerFor(conv);
+    logger.updateTitle(conv.title);
+    logger.logCompaction(entry, conv.active_model ?? '');
+  }
+
+  private loggerFor(conv: ConversationRuntime): SessionLogger {
+    const existing = this.sessionLoggers.get(conv.id);
+    if (existing) return existing;
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    const logger = new SessionLogger(conv.id, conv.title, conv.active_model ?? '', {
+      ...(folder ? { workspaceName: folder.name, workspacePath: folder.uri.fsPath } : {}),
+      ...(forgeVersion() ? { forgeVersion: forgeVersion()! } : {}),
+    });
+    this.sessionLoggers.set(conv.id, logger);
+    return logger;
+  }
+
   /** Appends the finished turn to the on-disk transcript under ~/.forge. */
   private flushSessionLog(convId: string): void {
     const conv = this.deps.getSidebar().conversations.find((c) => c.id === convId);
     if (!conv || conv.messages.length === 0) return;
-    if (!this.sessionLoggers.has(convId)) {
-      const folder = vscode.workspace.workspaceFolders?.[0];
-      this.sessionLoggers.set(
-        convId,
-        new SessionLogger(convId, conv.title, conv.active_model ?? '', {
-          ...(folder ? { workspaceName: folder.name, workspacePath: folder.uri.fsPath } : {}),
-          ...(forgeVersion() ? { forgeVersion: forgeVersion()! } : {}),
-        }),
-      );
-    }
-    const logger = this.sessionLoggers.get(convId)!;
+    const logger = this.loggerFor(conv);
     logger.updateTitle(conv.title);
     logger.flush(conv.messages, conv.active_model ?? '', {
       inputTokens: conv.input_tokens ?? 0,

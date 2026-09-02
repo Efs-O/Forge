@@ -14,14 +14,22 @@ function value(args, flag) {
 }
 
 function optionsFromArgs(args) {
-  const selected = (value(args, '--arms') ?? ALL_ARMS.join(','))
+  const ping = args.includes('--ping');
+  const selected = (
+    value(args, '--arms') ?? (ping ? 'qwen-minimal,qwen-forge' : ALL_ARMS.join(','))
+  )
     .split(',')
     .map((arm) => arm.trim())
     .filter(Boolean);
   const invalid = selected.filter((arm) => !ALL_ARMS.includes(arm));
   if (invalid.length) throw new Error(`Unknown arm(s): ${invalid.join(', ')}`);
   if (!selected.length) throw new Error('At least one benchmark arm is required.');
+  if (ping && args.includes('--dry-run'))
+    throw new Error('--ping cannot be combined with --dry-run.');
+  if (ping && selected.some((arm) => !arm.startsWith('qwen-')))
+    throw new Error('--ping only supports qwen-minimal and qwen-forge.');
   return {
+    ping,
     dryRun: args.includes('--dry-run'),
     taskPath: resolve(ROOT, value(args, '--task') ?? 'benchmarks/smoke-task.json'),
     outputRoot: resolve(ROOT, value(args, '--out') ?? 'results'),
@@ -70,14 +78,18 @@ async function main() {
   const args = process.argv.slice(2);
   if (args.includes('--help') || args.includes('-h')) {
     console.log(
-      'Usage: npm run bench:smoke -- [--dry-run] [--arms arm,...] [--task path] [--model id] [--base-url url] [--evaluator swebench]',
+      'Usage: npm run bench:smoke -- [--dry-run] [--arms arm,...] [--task path] [--model id] [--base-url url] [--evaluator swebench]\n       npm run bench:ping -- [--arms qwen-minimal,qwen-forge] [--model id] [--base-url url]',
     );
     return;
   }
   const options = optionsFromArgs(args);
   const { module, temp } = await loadBenchmarkModule();
   try {
-    await module.runBenchmark(options);
+    if (options.ping) {
+      await module.runPing(options);
+    } else {
+      await module.runBenchmark(options);
+    }
   } finally {
     rmSync(temp, { recursive: true, force: true });
   }

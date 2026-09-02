@@ -140,6 +140,24 @@ export class ContextBudgetPublisher {
     }
   }
 
+  /**
+   * The same two numbers `publish` renders, for a caller that needs to record
+   * them rather than display them.
+   *
+   * Kept here rather than recomputed at the call site so the per-slot division
+   * and the group-inheritance resolution keep one owner — reading `num_ctx`
+   * directly is what used to over-report every multi-slot model.
+   */
+  snapshot(conv: ConversationRuntime): { used: number; max: number } {
+    const config = this.deps.getConfig();
+    const selection = conv.active_model ?? config.active_model;
+    const model = this.resolveModel(config, this.deps.baseOf(selection));
+    return {
+      used: reportedContextTokens(conv),
+      max: model ? perSlotContext(model, config.llama_server) : 0,
+    };
+  }
+
   /** Evaluate the completed conversation even when another tab is active. */
   async evaluateAfterTurn(
     conv: ConversationRuntime,

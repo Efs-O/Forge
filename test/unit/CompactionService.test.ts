@@ -20,6 +20,7 @@ import { applyCompactionWindow } from '../../src/sidebar/compactionWindow';
 import type { ChatMessage } from '../../src/llm/types';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
 import type { HostToWebview } from '../../src/sidebar/messageBridge';
+import type { CompactionLogEntry } from '../../src/sidebar/SessionLogger';
 
 function conv(messages: ChatMessage[]): ConversationRuntime {
   return { id: 'c1', title: 't', messages, createdAt: 0, updatedAt: 0 } as ConversationRuntime;
@@ -581,6 +582,92 @@ describe('runCompaction', () => {
       { conversationId: c.id, phase: 'started', trigger: 'auto' },
       { conversationId: c.id, phase: 'finished', outcome: 'compacted', trigger: 'auto' },
     ]);
+  });
+
+  it('logs the compaction with the context measured BEFORE the counters are cleared', async () => {
+    const c = conv([...base]);
+    c.last_input_tokens = 44_000;
+    c.last_output_tokens = 1_200;
+    const h = harness(c, async () => long('summary'));
+    const rows: CompactionLogEntry[] = [];
+    const deps: CompactionDeps = {
+      ...h.deps,
+      // The real wiring deletes both counters here. Doing the same in the test
+      // is the point: reading them after this call would log 0, and the row
+      // exists to carry the exact figure the server reported.
+      invalidateExactTokenBudget: (target) => {
+        delete target.last_input_tokens;
+        delete target.last_output_tokens;
+      },
+      compactionMetrics: () => ({ max: 58_000, threshold: 0.8 }),
+      logCompaction: (_target, entry) => rows.push(entry),
+    };
+
+    expect(await runCompaction(deps, c.id, { auto: true, trigger: 'auto' })).toBe('compacted');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      generation: 1,
+      usedTokens: 45_200,
+      maxTokens: 58_000,
+      threshold: 0.8,
+      trigger: 'auto',
+      fromIndex: c.compaction?.fromIndex,
+    });
+    expect(rows[0]?.summaryChars).toBe(c.compaction?.summary.length);
+  });
+
+  it('names the size at the cut in the notice, using the pre-invalidation figure', async () => {
+    const c = conv([...base]);
+    c.last_input_tokens = 44_000;
+    c.last_output_tokens = 1_200;
+    const h = harness(c, async () => long('summary'));
+    const deps: CompactionDeps = {
+      ...h.deps,
+      invalidateExactTokenBudget: (target) => {
+        delete target.last_input_tokens;
+        delete target.last_output_tokens;
+      },
+      compactionMetrics: () => ({ max: 58_000 }),
+    };
+
+    expect(await runCompaction(deps, c.id, { auto: true })).toBe('compacted');
+    const notice = h.posted.find(
+      (m) => m.type === 'notice' && m.message.startsWith('Conversation compacted'),
+    );
+    expect(notice).toMatchObject({
+      message: `Conversation compacted at ${(45_200).toLocaleString()} / ${(58_000).toLocaleString()}. Chat history is unchanged.`,
+    });
+  });
+
+  it('omits the size when the model has no configured window', async () => {
+    const c = conv([...base]);
+    c.last_input_tokens = 44_000;
+    const h = harness(c, async () => long('summary'));
+    const deps: CompactionDeps = { ...h.deps, compactionMetrics: () => ({ max: 0 }) };
+
+    expect(await runCompaction(deps, c.id, { auto: true })).toBe('compacted');
+    expect(
+      h.posted.some(
+        (m) => m.type === 'notice' && m.message === 'Conversation compacted. Chat history is unchanged.',
+      ),
+    ).toBe(true);
+  });
+
+  it('does not log when the summary is rejected', async () => {
+    const c = conv([...base]);
+    const h = harness(c, async () => '');
+    const rows: CompactionLogEntry[] = [];
+    const deps: CompactionDeps = { ...h.deps, logCompaction: (_t, entry) => rows.push(entry) };
+
+    expect(await runCompaction(deps, c.id, { auto: true })).toBe('failed');
+    expect(rows).toEqual([]);
+  });
+
+  it('compacts normally when nothing is listening for the log row', async () => {
+    const c = conv([...base]);
+    const h = harness(c, async () => long('summary'));
+
+    expect(await runCompaction(h.deps, c.id, { auto: true })).toBe('compacted');
   });
 
   it('emits finished(failed) when the summarization throws', async () => {

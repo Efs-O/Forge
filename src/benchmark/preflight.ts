@@ -75,7 +75,7 @@ async function probeJson(
   }
 }
 
-function modelId(models: unknown, requested: string | undefined, manifest: BenchmarkTask): string {
+function modelId(models: unknown, requested: string | undefined, manifestModel?: string): string {
   const entries =
     models && typeof models === 'object' && Array.isArray((models as { data?: unknown }).data)
       ? (models as { data: Array<{ id?: unknown }> }).data
@@ -83,7 +83,7 @@ function modelId(models: unknown, requested: string | undefined, manifest: Bench
   const available = entries
     .map((entry) => entry.id)
     .filter((id): id is string => typeof id === 'string');
-  const chosen = requested ?? manifest.model ?? (available.length === 1 ? available[0] : undefined);
+  const chosen = requested ?? manifestModel ?? (available.length === 1 ? available[0] : undefined);
   if (!chosen)
     throw new Error(
       `Multiple or no llama-server models are available; pass --model (available: ${available.join(', ') || 'none'}).`,
@@ -93,6 +93,30 @@ function modelId(models: unknown, requested: string | undefined, manifest: Bench
       `Model ${chosen} is not served by llama-server (available: ${available.join(', ')}).`,
     );
   return chosen;
+}
+
+export interface QwenEndpointFacts {
+  model: string;
+  models: unknown;
+  props: unknown;
+  modelsCheck: { ok: boolean; status: number; body: unknown; error?: string };
+  propsCheck: { ok: boolean; status: number; body: unknown; error?: string };
+}
+
+export async function inspectQwenEndpoint(
+  baseUrl: string,
+  requestedModel?: string,
+): Promise<QwenEndpointFacts> {
+  const models = await probeJson(`${baseUrl}/v1/models`);
+  const props = await probeJson(`${baseUrl}/props`);
+  if (!models.ok || !props.ok) throw new Error(`llama-server preflight failed at ${baseUrl}.`);
+  return {
+    model: modelId(models.body, requestedModel),
+    models: models.body,
+    props: props.body,
+    modelsCheck: models,
+    propsCheck: props,
+  };
 }
 
 async function executableCheck(
@@ -170,15 +194,12 @@ export async function preparePreflight(options: BenchmarkOptions): Promise<Prefl
   let llamaProps: unknown = undefined;
   let model = options.model ?? task.model ?? '';
   if (options.arms.some((arm) => arm.startsWith('qwen'))) {
-    const models = await probeJson(`${options.baseUrl}/v1/models`);
-    const props = await probeJson(`${options.baseUrl}/props`);
-    checks.llama_models = models;
-    checks.llama_props = props;
-    if (!models.ok || !props.ok)
-      throw new Error(`llama-server preflight failed at ${options.baseUrl}.`);
-    llamaModels = models.body;
-    llamaProps = props.body;
-    model = modelId(models.body, model || undefined, task);
+    const facts = await inspectQwenEndpoint(options.baseUrl, model || undefined);
+    checks.llama_models = facts.modelsCheck;
+    checks.llama_props = facts.propsCheck;
+    llamaModels = facts.models;
+    llamaProps = facts.props;
+    model = facts.model;
   }
 
   const cliExecutables: Partial<Record<'claude' | 'codex', string>> = {};

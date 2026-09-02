@@ -244,10 +244,16 @@
 }
 
 /*
- * No spacer element: `.ms-root` is already `flex: 1`, so the model trigger
- * takes the slack and the action button sits at the right edge. A second
- * flexing child would split that space with it and shrink the name for nothing.
+ * The model trigger used to be `flex: 1` and swallow the whole row. In a 380px
+ * sidebar that looked like a chip; docked wide it stretched to ~1000px and read
+ * as a bar of its own, which is not what it is - it is a control that sits
+ * between attach and send. It shrink-wraps now (see `.ms-root`), and the slack
+ * goes here instead, so send stays pinned right at every width.
  */
+#input-actions > #btn-send,
+#input-actions > #btn-stop {
+  margin-left: auto;
+}
 
 /* One line under the actions, carrying what Enter does - or, when Clanker is
    armed, that it is. Never both: armed is the louder fact and takes the row. */
@@ -263,7 +269,7 @@
 }
 
 #composer-hint.clanker-armed {
-  color: var(--vscode-editorWarning-foreground, #cca700);
+  color: var(--forge-clanker);
 }
 
 #attach-btn {
@@ -362,16 +368,14 @@
  * thing whose behaviour changed, and off, none of this renders at all.
  */
 #prompt.clanker-armed {
-  border-color: var(--vscode-editorWarning-foreground, #cca700);
-  background: color-mix(
-    in srgb,
-    var(--vscode-inputValidation-warningBackground, #352a00) 35%,
-    var(--vscode-input-background)
-  );
+  border-color: color-mix(in srgb, var(--forge-clanker) 55%, transparent);
+  background: color-mix(in srgb, var(--forge-clanker) 7%, var(--vscode-input-background));
 }
 
+/* Focus is the one moment the field should assert itself, so the border comes
+   up to full strength there and nowhere else. */
 #prompt.clanker-armed:focus {
-  border-color: var(--vscode-editorWarning-foreground, #cca700);
+  border-color: var(--forge-clanker);
 }
 
 /* ── Slash command menu ──────────────────────────────────────────────────── */

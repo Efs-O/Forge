@@ -12,6 +12,13 @@
   --forge-surface-1: var(--vscode-editorWidget-background, #252526);
   --forge-surface-2: var(--vscode-editor-inactiveSelectionBackground, #3a3a3a);
   --forge-border:    var(--vscode-widget-border, #444);
+  /* Clanker's warning hue. Deliberately NOT editorWarning-foreground: that
+     token is a squint-bright mustard tuned to be seen once, on a squiggle a
+     few characters wide. Clanker arms the whole composer border and stays
+     armed for the session, so the same value reads as a defect. This is the
+     desaturated end of the same hue - still unmistakably a warning, quiet
+     enough to sit in the corner of the eye for an hour. */
+  --forge-clanker:   var(--vscode-charts-orange, #cd9178);
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }

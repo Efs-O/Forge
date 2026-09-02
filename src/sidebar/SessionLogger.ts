@@ -30,6 +30,24 @@ export interface SessionUsage {
  * indistinguishable from every other. `forgeVersion` is for the reader that
  * meets a format change years from now.
  */
+/** One completed compaction, as recorded in the session transcript. */
+export interface CompactionLogEntry {
+  /** How many times this conversation has been compacted, including this one. */
+  generation: number;
+  /** Index into `conv.messages` from which the model still sees real turns. */
+  fromIndex: number;
+  /** Exact server-reported context at the moment of the cut, prompt + completion. */
+  usedTokens: number;
+  /** Per-slot window, 0 when the model has no configured context. */
+  maxTokens: number;
+  /** Size of the summary that replaced the cut turns. */
+  summaryChars: number;
+  /** Which path started this compaction. */
+  trigger: string;
+  /** Configured `auto_compact.at` when the event fired; absent when unset. */
+  threshold?: number;
+}
+
 export interface SessionContext {
   workspaceName?: string;
   workspacePath?: string;
@@ -118,22 +136,68 @@ export class SessionLogger {
     this.title = title;
   }
 
+  /**
+   * Writes `session_start` once per run. Extracted from `flush` because a
+   * compaction row can be the first thing this run appends, and a file whose
+   * first row for a run carries no `forge_version` cannot be attributed to a
+   * build afterwards.
+   */
+  private ensureHeader(model: string): void {
+    if (this.headerWritten) return;
+    const { workspaceName, workspacePath, forgeVersion } = this.context;
+    this.append({
+      type: 'session_start',
+      session_id: this.sessionId,
+      title: this.title,
+      model,
+      timestamp_ms: Date.now(),
+      ...(workspaceName ? { workspace_name: workspaceName } : {}),
+      ...(workspacePath ? { workspace_path: workspacePath } : {}),
+      ...(forgeVersion ? { forge_version: forgeVersion } : {}),
+    });
+    this.headerWritten = true;
+  }
+
+  /**
+   * Records one completed compaction.
+   *
+   * Nothing else on disk marks a compaction. `applyCompactionWindow` builds the
+   * replacement context at request time and never mutates `conv.messages`, so
+   * the summary preamble is not persisted, and the only surviving trace was the
+   * `RESUME_PROMPT` user row — absent entirely for a manual `/compact` or when
+   * `auto_compact.resume` is off.
+   *
+   * `used_tokens` is the exact pre-compaction figure the inference server
+   * reported. The post-compaction size is deliberately NOT recorded: it does
+   * not exist yet at this point (see `opResetReportedContext`) and the only way
+   * to produce one would be the chars-per-token estimate that
+   * `util/contextBudget` forbids from reaching a consumer. The next `usage`
+   * row is the exact "after", so pair on that instead.
+   *
+   * `threshold` is the configured `auto_compact.at` at the moment of the
+   * event, which is what makes a fraction-triggered compaction distinguishable
+   * from one the context-exhaustion path forced below the threshold — without
+   * threading a reason through five files to get here.
+   */
+  logCompaction(entry: CompactionLogEntry, model: string): void {
+    this.ensureHeader(model);
+    this.append({
+      type: 'compaction',
+      generation: entry.generation,
+      from_index: entry.fromIndex,
+      used_tokens: entry.usedTokens,
+      max_tokens: entry.maxTokens,
+      summary_chars: entry.summaryChars,
+      trigger: entry.trigger,
+      ...(entry.threshold !== undefined ? { threshold: entry.threshold } : {}),
+      timestamp_ms: Date.now(),
+      model,
+    });
+  }
+
   flush(messages: ChatMessage[], model: string, usage?: SessionUsage): void {
     const startedAt = this.writtenCount;
-    if (!this.headerWritten) {
-      const { workspaceName, workspacePath, forgeVersion } = this.context;
-      this.append({
-        type: 'session_start',
-        session_id: this.sessionId,
-        title: this.title,
-        model,
-        timestamp_ms: Date.now(),
-        ...(workspaceName ? { workspace_name: workspaceName } : {}),
-        ...(workspacePath ? { workspace_path: workspacePath } : {}),
-        ...(forgeVersion ? { forge_version: forgeVersion } : {}),
-      });
-      this.headerWritten = true;
-    }
+    this.ensureHeader(model);
 
     const newMessages = messages.slice(this.writtenCount);
     for (const msg of newMessages) {

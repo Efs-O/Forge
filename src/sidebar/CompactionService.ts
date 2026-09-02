@@ -27,6 +27,8 @@ import {
 import type { PromptRunOptions } from './PromptRun';
 import { getLogger } from '../util/logger';
 import { selectCompactionSplit } from './compactionSplit';
+import type { CompactionLogEntry } from './SessionLogger';
+import { reportedContextTokens } from '../util/contextBudget';
 
 const log = getLogger();
 
@@ -37,6 +39,17 @@ export interface CompactionDeps {
   postSessionSync: () => void;
   invalidateExactTokenBudget: (conv: ConversationRuntime) => void;
   postTokenBudget: (conv: ConversationRuntime) => void;
+  /**
+   * Records the completed compaction on the session transcript.
+   *
+   * Optional: sidebar-only callers and tests omit it, and a compaction must
+   * never fail because nothing is listening. `usedTokens` has to be read before
+   * `invalidateExactTokenBudget` clears the counters, so the reading happens at
+   * the call site rather than inside the sink.
+   */
+  logCompaction?: (conv: ConversationRuntime, entry: CompactionLogEntry) => void;
+  /** Per-slot window and the configured auto-compaction threshold, for the log row. */
+  compactionMetrics?: (conv: ConversationRuntime) => { max: number; threshold?: number };
   runPromptToMarkdown: (
     text: string,
     conversationId?: string,
@@ -238,22 +251,49 @@ export async function runCompaction(
     // overwriting the transcript. conv.messages stays whole, so the sidebar
     // scrollback and the persisted record survive; only what the model is sent
     // shrinks (see applyCompactionWindow).
+    // Read before the assignment below overwrites conv.compaction, and shared
+    // with the log row so the two can never disagree about which generation
+    // this was.
+    const generation = (conv.compaction?.generation ?? 0) + 1;
     conv.compaction = {
       summary: trimmed,
       fromIndex,
-      generation: (conv.compaction?.generation ?? 0) + 1,
+      generation,
       ...(userMessages.length > 0 ? { userMessages } : {}),
       ...(recordedActions.length > 0 ? { recordedActions } : {}),
       ...(repoState ? { repoState } : {}),
     };
     conv.updatedAt = Date.now();
+    // Before invalidateExactTokenBudget below: that deletes the very counters
+    // this row exists to preserve.
+    const metrics = deps.compactionMetrics?.(conv);
+    const usedBefore = reportedContextTokens(conv);
+    deps.logCompaction?.(conv, {
+      generation,
+      fromIndex,
+      usedTokens: usedBefore,
+      maxTokens: metrics?.max ?? 0,
+      summaryChars: trimmed.length,
+      trigger,
+      ...(metrics?.threshold !== undefined ? { threshold: metrics.threshold } : {}),
+    });
     deps.persistSession();
     deps.postSessionSync();
     deps.invalidateExactTokenBudget(conv);
     deps.postTokenBudget(conv);
+    // The size at the cut, because nothing else can show it: the token bar has
+    // just been reset to `0 / max` by invalidateExactTokenBudget above, so the
+    // moment a compaction lands is the moment the number that triggered it
+    // stops being visible anywhere. Both figures are exact — `usedBefore` is
+    // the server's own count, read before the counters were cleared. Omitted
+    // rather than guessed when the model has no configured window.
+    const atSize =
+      metrics && metrics.max > 0
+        ? ` at ${usedBefore.toLocaleString()} / ${metrics.max.toLocaleString()}`
+        : '';
     deps.post({
       type: 'notice',
-      message: 'Conversation compacted. Chat history is unchanged.',
+      message: `Conversation compacted${atSize}. Chat history is unchanged.`,
       conversationId: conv.id,
     });
     if (!options.auto) {

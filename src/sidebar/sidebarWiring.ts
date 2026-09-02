@@ -146,6 +146,14 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     postSessionSync: host.postSessionSync,
     invalidateExactTokenBudget: (conv) => opResetReportedContext(conv),
     postTokenBudget: (conv) => budget.publish(conv),
+    // `send` is constructed below; this closure only runs after a compaction,
+    // which cannot happen before the pipeline exists.
+    logCompaction: (conv, entry) => send.logCompaction(conv.id, entry),
+    compactionMetrics: (conv) => {
+      const { max } = budget.snapshot(conv);
+      const at = host.getConfig().auto_compact?.at;
+      return { max, ...(at !== undefined ? { threshold: at } : {}) };
+    },
     runPromptToMarkdown: (text, conversationId, options) =>
       agentLoop.runPromptToMarkdown(text, conversationId, options),
     isStreaming: (conversationId) => agentLoop.isStreamingConv(conversationId),
