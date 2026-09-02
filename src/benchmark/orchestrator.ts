@@ -30,10 +30,14 @@ async function collectPatch(workspace: string, file: string): Promise<string> {
   const staged = await runProcess('git', ['add', '--all'], { cwd: workspace, timeoutMs: 120_000 });
   if (!commandSucceeded(staged))
     throw new Error(`Could not stage the agent patch: ${staged.stderr || staged.stdout}`.trim());
-  const diff = await runProcess('git', ['diff', '--binary', 'HEAD'], {
-    cwd: workspace,
-    timeoutMs: 120_000,
-  });
+  const diff = await runProcess(
+    'git',
+    ['diff', '--binary', 'HEAD', '--', '.', ':(exclude).coordination/**'],
+    {
+      cwd: workspace,
+      timeoutMs: 120_000,
+    },
+  );
   if (!commandSucceeded(diff))
     throw new Error(`Could not collect the agent patch: ${diff.stderr || diff.stdout}`.trim());
   fs.writeFileSync(file, diff.stdout, 'utf8');
@@ -58,6 +62,7 @@ async function runAgent(
       createBenchmarkToolHost(context.workspaces[arm]),
       signal,
       callbacks,
+      server?.requestModel,
     );
   if (arm === 'qwen-forge')
     return runQwenForge(
@@ -67,6 +72,7 @@ async function runAgent(
       createBenchmarkToolHost(context.workspaces[arm]),
       signal,
       callbacks,
+      server?.requestModel,
     );
   const cliName = arm === 'claude-code' ? 'claude' : 'codex';
   const executable = context.cliExecutables[cliName];
@@ -186,7 +192,22 @@ async function runArm(
       ? {
           endpoint: server?.endpoint ?? context.options.baseUrl,
           id: server?.facts.model ?? context.model,
-          sampling: { temperature: 0, max_tokens: 4096, enable_thinking: false },
+          sampling: server?.requestModel?.sampling,
+          thinking: {
+            enabled: server?.requestModel?.think !== false,
+            reasoning_effort:
+              arm === 'qwen-forge'
+                ? (server?.requestModel?.reasoning_effort ?? 'low')
+                : 'qwen-template-default-xhigh',
+          },
+          system_prompt:
+            arm === 'qwen-forge'
+              ? {
+                  source: 'Forge template plus resolved config system_prompt',
+                  configured: server?.requestModel?.system_prompt,
+                  mode: server?.requestModel?.system_prompt_mode ?? 'append',
+                }
+              : { source: 'Qwen chat-template default; no explicit system message' },
           tool_allowlist: BENCHMARK_TOOL_NAMES,
           models: server?.facts.models ?? context.llamaModels,
           props: server?.facts.props ?? context.llamaProps,

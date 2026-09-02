@@ -42,6 +42,7 @@ async function runArm(
   model: string,
   phase: 'forge' | 'minimal',
   armDir: string,
+  requestModel?: QwenServerHandle['requestModel'],
 ): Promise<PingResult> {
   const started = Date.now();
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-bench-ping-'));
@@ -62,8 +63,24 @@ async function runArm(
     const prompt = 'Reply with exactly PONG and do not call tools. Do not modify files.';
     execution =
       arm === 'qwen-minimal'
-        ? await runQwenMinimal(endpoint, model, prompt, host, controller.signal, callbacks)
-        : await runQwenForge(endpoint, model, prompt, host, controller.signal, callbacks);
+        ? await runQwenMinimal(
+            endpoint,
+            model,
+            prompt,
+            host,
+            controller.signal,
+            callbacks,
+            requestModel,
+          )
+        : await runQwenForge(
+            endpoint,
+            model,
+            prompt,
+            host,
+            controller.signal,
+            callbacks,
+            requestModel,
+          );
   } catch (error) {
     execution = {
       status: controller.signal.aborted ? 'timed_out' : 'failed',
@@ -132,7 +149,14 @@ export async function runBenchmarkPing(options: PingOptions): Promise<void> {
       forgeEndpoint = forge.endpoint;
       phases.forge = { endpoint: forge.endpoint, model: forge.facts.model, facts: forge.facts };
       results.push(
-        await runArm('qwen-forge', forge.endpoint, forge.facts.model, 'forge', forgeDir),
+        await runArm(
+          'qwen-forge',
+          forge.endpoint,
+          forge.facts.model,
+          'forge',
+          forgeDir,
+          forge.requestModel,
+        ),
       );
       process.stdout.write(`forge-bench: qwen-forge ${results.at(-1)!.status}\n`);
       await unloadForgeQwen(forge, options.forgeConfigPath);
@@ -156,7 +180,14 @@ export async function runBenchmarkPing(options: PingOptions): Promise<void> {
         facts: minimal.facts,
       };
       results.push(
-        await runArm('qwen-minimal', minimal.endpoint, minimal.facts.model, 'minimal', minimalDir),
+        await runArm(
+          'qwen-minimal',
+          minimal.endpoint,
+          minimal.facts.model,
+          'minimal',
+          minimalDir,
+          minimal.requestModel,
+        ),
       );
       process.stdout.write(`forge-bench: qwen-minimal ${results.at(-1)!.status}\n`);
     }

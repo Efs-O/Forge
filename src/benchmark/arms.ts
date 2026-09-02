@@ -1,6 +1,7 @@
 import type { ModelConfig } from '../config/types';
 import { runToolCallingLoop } from '../agent/ToolCallingLoop';
 import { injectSystemPrompt } from '../llm/SystemPromptInjector';
+import { mergeSampling } from '../llm/SamplingMerge';
 import type { ChatMessage, ToolCall, ToolDefinition } from '../llm/types';
 import { CliAgentDriver } from '../agents/CliAgentDriver';
 import type { CliAgentName, CliAgentRunStatus } from '../agents/types';
@@ -29,9 +30,6 @@ export interface AgentExecution {
   cliStatus?: CliAgentRunStatus;
   sessionId?: string;
 }
-
-const MINIMAL_SYSTEM =
-  'You are a coding agent. Use the supplied tools to solve the issue. Continue until the task is complete, then answer briefly.';
 
 function addUsage(
   target: QwenUsage,
@@ -83,19 +81,30 @@ async function minimalCompletion(
   model: string,
   messages: ChatMessage[],
   tools: ToolDefinition[],
+  requestModel: ModelConfig | undefined,
   signal: AbortSignal,
 ): Promise<CompletionResponse> {
+  // Use Forge's canonical sampler merge so preserve_thinking is placed in
+  // chat_template_kwargs rather than accidentally sent as a top-level API
+  // field. The only minimal-arm override is its reasoning level below.
+  const request = mergeSampling(
+    { model, messages, stream: true, tools },
+    requestModel,
+    { allowPreserveThinking: true },
+  );
   const response = await fetch(`${endpoint}/v1/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      model,
+      ...request,
       stream: false,
-      temperature: 0,
-      max_tokens: 4096,
-      chat_template_kwargs: { enable_thinking: false },
-      messages,
-      tools,
+      // Keep the neutral arm on Qwen's own reasoning default. In the current
+      // Qwen3.8 template, enabled thinking without reasoning_effort means
+      // xhigh; the Forge arm explicitly sends the configured low level.
+      chat_template_kwargs: {
+        ...request.chat_template_kwargs,
+        enable_thinking: requestModel?.think !== false,
+      },
     }),
     signal,
   });
@@ -111,11 +120,11 @@ export async function runQwenMinimal(
   host: BenchmarkToolHost,
   signal: AbortSignal,
   callbacks: ArmCallbacks,
+  requestModel?: ModelConfig,
 ): Promise<AgentExecution> {
-  const messages: ChatMessage[] = [
-    { role: 'system', content: MINIMAL_SYSTEM },
-    { role: 'user', content: problem },
-  ];
+  // No Forge system prompt: the direct arm is intentionally just the Qwen
+  // chat template's default system behavior plus the issue text and tools.
+  const messages: ChatMessage[] = [{ role: 'user', content: problem }];
   const usage: QwenUsage = { rounds: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
   try {
     for (let round = 0; round < 100; round += 1) {
@@ -125,6 +134,7 @@ export async function runQwenMinimal(
         model,
         messages,
         host.definitions(),
+        requestModel,
         signal,
       );
       callbacks.stdout(`${JSON.stringify(response)}\n`);
@@ -184,16 +194,20 @@ export async function runQwenForge(
   host: BenchmarkToolHost,
   signal: AbortSignal,
   callbacks: ArmCallbacks,
+  configuredModel?: ModelConfig,
 ): Promise<AgentExecution> {
   const messages: ChatMessage[] = [{ role: 'user', content: problem }];
   const usage: QwenUsage = { rounds: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
   const model: ModelConfig = {
+    ...configuredModel,
     name: modelName,
     provider: 'llama.cpp',
-    think: false,
-    strip_thinking_channels: true,
+    // These are resolved from the live Qwen config by the lifecycle owner.
+    think: configuredModel?.think ?? true,
+    reasoning_effort: configuredModel?.reasoning_effort ?? 'low',
+    strip_thinking_channels: configuredModel?.strip_thinking_channels ?? true,
     capabilities: ['tool-call'],
-    sampling: { temperature: 0, max_tokens: 4096 },
+    sampling: { ...(configuredModel?.sampling ?? {}) },
   };
   try {
     const result = await runToolCallingLoop({
@@ -202,13 +216,22 @@ export async function runQwenForge(
       messages,
       getToolDefinitions: host.definitions,
       signal,
-      maxRounds: 500,
-      maxOutputTokens: 4096,
+      maxRounds: model.max_tool_rounds ?? 500,
+      ...(model.sampling?.max_tokens !== undefined
+        ? { maxOutputTokens: model.sampling.max_tokens }
+        : {}),
       nativeTools: true,
       canUseThinkingKwargs: true,
-      stripThinkingChannels: true,
+      stripThinkingChannels: model.strip_thinking_channels ?? true,
       includeUsage: true,
-      prepareMessages: (current) => injectSystemPrompt(current),
+      prepareMessages: (current) =>
+        injectSystemPrompt(
+          current,
+          undefined,
+          undefined,
+          model.system_prompt,
+          model.system_prompt_mode,
+        ),
       onToken: (text) => {
         callbacks.stdout(text);
         callbacks.event('text', text);

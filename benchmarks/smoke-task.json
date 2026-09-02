@@ -1,0 +1,7 @@
+{
+  "instance_id": "astropy__astropy-12907",
+  "dataset": "princeton-nlp/SWE-bench_Verified",
+  "split": "test",
+  "revision": "c104f840cc67f8b6eec6f759eebc8b2693d5854a",
+  "timeout_minutes": 30
+}
