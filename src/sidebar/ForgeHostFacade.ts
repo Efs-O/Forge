@@ -2,6 +2,7 @@ import type { AttachmentData } from './messageBridge';
 import type { ConversationRuntime } from './sessionTypes';
 import type { ForgeRequestOutcome } from './turnOutcome';
 import type { CompactionEvent, CompactionOutcome, CompactionTrigger } from './CompactionService';
+import type { HostActivityListener } from './HostActivity';
 import type { RequestChainStatus } from './RequestChainLifecycle';
 import type { ToolApprovalRequestEvent, ToolApprovalSink } from './ToolApprovalService';
 import type { AgentProgressEvent } from './AgentProgress';
@@ -73,6 +74,12 @@ export interface ForgeHostFacade {
    */
   onCompactionEvent?(listener: (event: CompactionEvent) => void): { dispose(): void };
   /**
+   * Subscribe to host state changes a paired chat cannot otherwise learn
+   * about: a model unloaded, the backend restarted, a turn finished that the
+   * chat did not ask for. Optional on the same terms as the hook above.
+   */
+  onHostActivity?(listener: HostActivityListener): { dispose(): void };
+  /**
    * Subscribe to agent-authored notify_user messages.
    *
    * The listener resolves to the number of chats it reached, which the tool
@@ -122,6 +129,7 @@ export interface SidebarHostFacadeDeps {
   unloadModels: () => Promise<void>;
   restartModel: (modelName: string) => Promise<void>;
   onCompactionEvent?: (listener: (event: CompactionEvent) => void) => { dispose(): void };
+  onHostActivity?: (listener: HostActivityListener) => { dispose(): void };
   onUserNotification?: (sink: UserNotificationSink) => { dispose(): void };
   onAgentProgress: (listener: (event: AgentProgressEvent) => void) => { dispose(): void };
 }
@@ -234,6 +242,10 @@ export class SidebarHostFacade implements ForgeHostFacade {
 
   onCompactionEvent(listener: (event: CompactionEvent) => void): { dispose(): void } {
     return this.deps.onCompactionEvent!(listener);
+  }
+
+  onHostActivity(listener: HostActivityListener): { dispose(): void } {
+    return this.deps.onHostActivity!(listener);
   }
 
   onUserNotification(sink: UserNotificationSink): { dispose(): void } {

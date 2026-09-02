@@ -18,6 +18,7 @@ import {
   type RemoteStoreState,
   type WorkspaceHandoff,
 } from './RemoteStoreSchemas';
+import { bindingsForConversation, bindingsForWorkspace } from './remoteBindingQueries';
 import {
   findSelection,
   newSelectionToken,
@@ -117,23 +118,17 @@ export class RemoteRequestStore {
     return this.state.bindings.find((item) => item.channel === channel && item.chatId === chatId);
   }
 
-  /**
-   * Reverse of `binding()`: every chat bound to a conversation, optionally
-   * restricted to one transport. Returns clones — callers must not mutate the
-   * store's state. A conversation may be bound to several chats/transports, so
-   * this returns an array, not one record.
-   */
+  /** Reverse of `binding()`. See remoteBindingQueries for both selectors. */
   bindingsForConversation(
     conversationId: string,
     channel?: RemoteBinding['channel'],
   ): RemoteBinding[] {
-    return this.state.bindings
-      .filter(
-        (item) =>
-          item.conversationId === conversationId &&
-          (channel === undefined || item.channel === channel),
-      )
-      .map((item) => ({ ...item }));
+    return bindingsForConversation(this.state.bindings, conversationId, channel);
+  }
+
+  /** Every chat bound to this workspace, whatever conversation each is on. */
+  bindingsForWorkspace(workspaceId: string, channel?: RemoteBinding['channel']): RemoteBinding[] {
+    return bindingsForWorkspace(this.state.bindings, workspaceId, channel);
   }
 
   /**

@@ -52,6 +52,17 @@ export class RemoteAgentProgress {
     });
   }
 
+  /**
+   * Whether a live progress message is already reporting this conversation's
+   * turn. Only begin() populates the map, and only RemoteQueueDrain calls it,
+   * so a true answer means the prompt came from a chat and that chat is
+   * already being told — which is exactly what turn mirroring must not repeat.
+   */
+  owns(conversationId: string): boolean {
+    const state = this.active.get(conversationId);
+    return state !== undefined && !state.closed;
+  }
+
   handle(event: AgentProgressEvent): void {
     const state = this.active.get(event.conversationId);
     if (!state || state.closed || !this.channel.editMessage) return;

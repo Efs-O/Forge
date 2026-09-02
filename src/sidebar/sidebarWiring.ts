@@ -22,6 +22,7 @@ import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
 import type { CliSessionRegistry } from '../agents/CliSessionRegistry';
 import { AgentLoop, type SidebarProviderEvents } from './AgentLoop';
 import { SlashCommandHandler } from './SlashCommandHandler';
+import { wireTurnMirror } from './turnMirrorWiring';
 import type { CompactionEvent } from './CompactionService';
 import { ContextBudgetPublisher } from './ContextBudgetPublisher';
 import { ConversationTabs } from './ConversationTabs';
@@ -216,6 +217,15 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
       host.postSessionSync();
       host.postTokenBudget();
     },
+  });
+
+  // Last, because it needs both halves: the events object AgentLoop decorates
+  // and the slashHandler that owns the activity listeners a transport hangs
+  // off. Decorating rather than emitting from the turn path keeps every
+  // outbound hook subscribed in one place.
+  wireTurnMirror(events, {
+    lookup: (id) => host.getSidebar().conversations.find((conv) => conv.id === id),
+    emit: (event) => slashHandler.emitActivity(event),
   });
 
   return { agentLoop, slashHandler, budget, tabs, send, requestChains };

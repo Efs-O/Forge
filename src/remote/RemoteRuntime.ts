@@ -18,6 +18,7 @@ import { RemoteTransportLease } from './RemoteTransportLease';
 import type { RemoteChannel, RemoteStatus } from './types';
 import { RemoteAuditLog } from './RemoteAuditLog';
 import { remoteCompactionNotice } from './remoteCompactionNotice';
+import { subscribeHostToRemote, type HostSubscriptions } from './remoteHostSubscriptions';
 import { RemoteAttachmentStore } from './RemoteAttachmentStore';
 
 export interface RemoteChannelFactoryContext {
@@ -52,8 +53,7 @@ interface ActiveTransport {
   channel: RemoteChannel;
   controller: RemoteController;
   lease: RemoteTransportLease;
-  compactionSubscription?: { dispose(): void } | undefined;
-  notificationSubscription?: { dispose(): void } | undefined;
+  subscriptions: HostSubscriptions;
 }
 
 export interface RemoteValidationStatus {
@@ -324,16 +324,11 @@ export class RemoteRuntime {
         this.controllerOptions(config),
         this.audit,
       );
-      const compactionSubscription = this.options.host.onCompactionEvent?.((event) =>
-        this.onCompactionEvent(event, controller),
-      );
-      // No trigger filter, unlike compaction: every notify_user call is
-      // explicitly agent-authored and addressed to the user.
-      const notificationSubscription = this.options.host.onUserNotification?.(async (event) =>
-        event.conversationId === undefined
-          ? 0
-          : controller.enqueueHostNotification(event.conversationId, event.text),
-      );
+      const subscriptions = subscribeHostToRemote(this.options.host, controller, {
+        onCompaction: (event) => this.onCompactionEvent(event, controller),
+        onActivityError: (message) =>
+          this.options.notifyLocal(`Forge remote activity notification failed: ${message}`),
+      });
       try {
         // Subscribe before channel startup: an automatic compaction can
         // complete while a transport is activating. Controller.start() starts
@@ -343,13 +338,11 @@ export class RemoteRuntime {
           channel,
           controller,
           lease,
-          compactionSubscription,
-          notificationSubscription,
+          subscriptions,
         });
         this.notifyStatus();
       } catch (err) {
-        compactionSubscription?.dispose();
-        notificationSubscription?.dispose();
+        subscriptions.dispose();
         throw err;
       }
     } catch (err) {
@@ -449,8 +442,7 @@ export class RemoteRuntime {
     if (!transport) return;
     this.active.delete(name);
     this.notifyStatus();
-    transport.compactionSubscription?.dispose();
-    transport.notificationSubscription?.dispose();
+    transport.subscriptions.dispose();
     await transport.controller.stop();
     await transport.lease.release();
   }

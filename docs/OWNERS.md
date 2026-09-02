@@ -234,6 +234,8 @@ overlaps with an existing owner, extend the owner instead.
 | Token-count display formatting             | `src/util/formatTokens.ts`                   |
 | Elapsed-duration display formatting        | `src/util/formatDuration.ts`                 |
 | Remote compaction notice policy            | `src/remote/remoteCompactionNotice.ts`       |
+| Host activity event shape                  | `src/sidebar/HostActivity.ts`                |
+| Finished-turn mirroring to remote chats    | `src/sidebar/turnMirrorWiring.ts`            |
 | Streaming Ollama native client             | `src/llm/OllamaNativeClient.ts`              |
 | Request normalization (per-provider)       | `src/llm/RequestNormalizer.ts`               |
 | Sampling parameter merge                   | `src/llm/SamplingMerge.ts`                   |

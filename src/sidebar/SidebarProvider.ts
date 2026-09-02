@@ -195,6 +195,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       setClankerMode: (on) => this.agentLoop.setClankerMode(on),
       contextBudget: (conversationId) => this.contextBudgetOf(conversationId),
       onCompactionEvent: (listener) => this.slashHandler.onCompactionEvent(listener),
+      onHostActivity: (listener) => this.slashHandler.onHostActivity(listener),
       onUserNotification: (sink) => this.notifications.addSink(sink),
       onAgentProgress: (listener) => this.agentLoop.onAgentProgress(listener),
       compact: (conversationId, options) =>

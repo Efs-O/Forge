@@ -24,6 +24,9 @@ export interface RemoteCommandContext {
   currentWorkspaceName?: string | undefined;
   /** Per-chat notify_user mute, backed by RemoteController's in-memory set. */
   notifyMute?: { get: (chatId: string) => boolean; set: (chatId: string, on: boolean) => void };
+  /** Per-chat turn-echo toggle, backed the same way. Separate from notifyMute
+   *  because the two carry very different volumes — see RemoteController. */
+  mirrorToggle?: { get: (chatId: string) => boolean; set: (chatId: string, on: boolean) => void };
   switchWorkspace?: ((alias: string, channel: string, chatId: string) => Promise<void>) | undefined;
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
   reloadWindow?: (() => Promise<void>) | undefined;

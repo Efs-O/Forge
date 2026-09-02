@@ -16,6 +16,7 @@ import { RemoteApprovalBridge } from './RemoteApprovalBridge';
 import { RemoteQuestionBridge } from './RemoteQuestionBridge';
 import type { RemoteAttachmentStore } from './RemoteAttachmentStore';
 import { RemoteAgentProgress } from './RemoteAgentProgress';
+import { RemoteNotificationFanout } from './RemoteNotificationFanout';
 import { admitRemotePrompt, isRemoteCommand, parseSteerCommand } from './RemotePromptAdmission';
 import { drainRemoteQueue } from './RemoteQueueDrain';
 import { RemotePendingPrompt } from './RemotePendingPrompt';
@@ -50,8 +51,7 @@ export class RemoteController {
   private subscription: { dispose(): void } | undefined;
   private accepting = false;
   private readonly activeConversations = new Set<string>();
-  /** Chats that have run /notify off. Cleared by a window reload, like clanker mode. */
-  private readonly mutedChats = new Set<string>();
+  private readonly fanout: RemoteNotificationFanout;
   private rateLimiter: RemoteRateLimiter;
   private readonly outbox: RemoteOutboxDelivery;
   private readonly approvals: RemoteApprovalBridge;
@@ -104,6 +104,13 @@ export class RemoteController {
       1_500,
       options.onError,
     );
+    this.fanout = new RemoteNotificationFanout({
+      store,
+      channelName: channel.name,
+      workspaceId: options.workspaceId,
+      kick: () => this.outbox.kick(),
+      ownsProgress: (conversationId) => this.progress.owns(conversationId),
+    });
   }
 
   async start(): Promise<void> {
@@ -156,43 +163,36 @@ export class RemoteController {
   }
 
   /**
-   * Enqueue a host-originated notification (e.g. a compaction progress line)
-   * for every chat on THIS transport bound to the conversation, then wake the
-   * delivery loop. `notifyOutbox` is a durable write only; without the kick an
-   * idle outbox would sit on the item until an unrelated retry. Filtering by
-   * this channel's name is what keeps a Telegram+WhatsApp setup from
-   * double-delivering: each transport's controller only reaches its own chats.
-   *
-   * Returns how many chats it reached. notify_user reports that number straight
-   * to the model, so a silent zero here is what stops the agent claiming it
-   * notified a user whose phone never buzzed.
+   * Host-originated delivery. RemoteNotificationFanout owns who hears what and
+   * what silences it; the controller keeps the numbers it returns, because
+   * notify_user reports them straight to the model.
    */
   async enqueueHostNotification(conversationId: string, text: string): Promise<number> {
-    const bindings = this.store
-      .bindingsForConversation(conversationId, this.channel.name)
-      .filter((binding) => !this.mutedChats.has(binding.chatId));
-    if (bindings.length === 0) return 0;
-    for (const binding of bindings) {
-      await this.store.notifyOutbox(binding.channel, binding.chatId, text);
-    }
-    this.outbox.kick();
-    return bindings.length;
+    return this.fanout.toConversation(conversationId, text);
   }
 
-  /**
-   * Per-chat notification mute, driven by /notify on|off.
-   *
-   * In memory, so it lasts until the window reloads -- the same lifetime as
-   * /clanker. Persisting it would mean a BindingSchema field and a legacy
-   * migration for what is a toggle.
-   */
+  async broadcastHostNotification(text: string): Promise<number> {
+    return this.fanout.toWorkspace(text);
+  }
+
+  async mirrorTurn(conversationId: string, text: string): Promise<number> {
+    return this.fanout.mirrorTurn(conversationId, text);
+  }
+
+  setMirror(chatId: string, on: boolean): void {
+    this.fanout.setMirror(chatId, on);
+  }
+
+  isMirrorOn(chatId: string): boolean {
+    return this.fanout.isMirrorOn(chatId);
+  }
+
   setNotify(chatId: string, on: boolean): void {
-    if (on) this.mutedChats.delete(chatId);
-    else this.mutedChats.add(chatId);
+    this.fanout.setNotify(chatId, on);
   }
 
   isNotifyOn(chatId: string): boolean {
-    return !this.mutedChats.has(chatId);
+    return this.fanout.isNotifyOn(chatId);
   }
 
   async handle(raw: RemoteInboundEvent): Promise<RemoteInboundDisposition> {
@@ -363,6 +363,10 @@ export class RemoteController {
           notifyMute: {
             get: (chatId: string) => this.isNotifyOn(chatId),
             set: (chatId: string, on: boolean) => this.setNotify(chatId, on),
+          },
+          mirrorToggle: {
+            get: (chatId: string) => this.isMirrorOn(chatId),
+            set: (chatId: string, on: boolean) => this.setMirror(chatId, on),
           },
           ...(this.options.switchWorkspace
             ? { switchWorkspace: this.options.switchWorkspace }

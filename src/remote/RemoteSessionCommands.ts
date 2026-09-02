@@ -27,7 +27,7 @@ export async function handleRemoteSessionCommand(
       event.chatId,
       `Forge commands:
 
-Session: /status · /context · /stop · /new · /list [page] · /resume [n-or-id] · /notify on|off
+Session: /status · /context · /stop · /new · /list [page] · /resume [n-or-id] · /notify on|off · /mirror on|off
 Workspace: /workspace [page] · /new <n-or-alias>
 Queue: /queue · /drop <n|all> · /steer <prompt>
 Models: /models [page] · /model [n-or-name] · /unload · /restart
@@ -40,6 +40,7 @@ Notes:
 • /reload fully reloads the VS Code window: it picks up a newly installed build, and drops a held prompt, the queue, and this session
 • /unload releases every loaded model and frees its memory, exactly like Unload Model in the sidebar; unlike /reload it refuses while a turn is running
 • /notify off silences agent notify_user messages for this chat until the window reloads
+• /mirror off stops answers typed in the Forge window being echoed here (on by default)
 • /new <n-or-alias> switches this chat to another workspace; /workspace lists them, numbers them, and says which one you are in`,
       { signal: context.signal },
     );
@@ -103,6 +104,24 @@ Notes:
       on
         ? 'Forge: agent notifications ON for this chat.'
         : 'Forge: agent notifications OFF for this chat — the agent is told its message did not reach you. It does not survive a window reload.',
+      { signal: context.signal },
+    );
+    return { kind: 'handled' };
+  }
+  if (command === '/mirror') {
+    if (!context.mirrorToggle) return { kind: 'rejected', reason: 'turn mirroring is unavailable' };
+    const desired = argument?.toLowerCase();
+    if (desired !== 'on' && desired !== 'off' && desired !== undefined && desired !== 'status') {
+      return { kind: 'rejected', reason: 'usage: /mirror on|off|status' };
+    }
+    if (desired === 'on' || desired === 'off')
+      context.mirrorToggle.set(event.chatId, desired === 'on');
+    const on = context.mirrorToggle.get(event.chatId);
+    await context.channel.send(
+      event.chatId,
+      on
+        ? 'Forge: mirroring ON — answers typed in the Forge window are echoed here.'
+        : 'Forge: mirroring OFF — you will only see turns you asked for from this chat. It does not survive a window reload.',
       { signal: context.signal },
     );
     return { kind: 'handled' };

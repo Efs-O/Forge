@@ -5,6 +5,7 @@ import type { IBackendPool } from '../backend/BackendPool';
 import type { ForgeConfig } from '../config/types';
 import type { ForgeSlashCommandId } from './messageBridge';
 import type { SidebarProviderEvents } from './AgentLoop';
+import type { HostActivityEvent, HostActivityListener } from './HostActivity';
 import {
   runCompaction,
   type CompactionDeps,
@@ -45,12 +46,25 @@ export interface SlashCommandDeps extends CompactionDeps {
 export class SlashCommandHandler {
   /** Remote transports subscribe here to observe compaction progress. */
   readonly compactionListeners = new Set<(event: CompactionEvent) => void>();
+  /** Same idea, for state changes a paired chat cannot otherwise learn about. */
+  readonly activityListeners = new Set<HostActivityListener>();
 
   constructor(private readonly deps: SlashCommandDeps) {}
 
   onCompactionEvent(listener: (event: CompactionEvent) => void): { dispose(): void } {
     this.compactionListeners.add(listener);
     return { dispose: () => this.compactionListeners.delete(listener) };
+  }
+
+  onHostActivity(listener: HostActivityListener): { dispose(): void } {
+    this.activityListeners.add(listener);
+    return { dispose: () => this.activityListeners.delete(listener) };
+  }
+
+  /** Fan out to every subscribed transport. No listeners is the normal case:
+   *  remote is opt-in, and these commands must not care whether it is up. */
+  emitActivity(event: HostActivityEvent): void {
+    for (const listener of this.activityListeners) listener(event);
   }
 
   async handle(commandId: ForgeSlashCommandId): Promise<void> {
@@ -63,6 +77,10 @@ export class SlashCommandHandler {
         // only this surface swallows it into the webview.
         try {
           await deps.unloadModels();
+          // Window-scoped: a paired chat that ran /unload gets its own reply
+          // from the command handler, but a chat that did not run it is just as
+          // affected and used to hear nothing at all.
+          this.emitActivity({ text: 'Forge: models unloaded.' });
         } catch (err) {
           deps.post({
             type: 'error',
@@ -80,13 +98,17 @@ export class SlashCommandHandler {
             await deps.pool.acquire(modelName);
             deps.events.onBackendReady?.(modelName);
           }
-          void vscode.window.showInformationMessage(
-            modelName
-              ? 'Forge: backend restarted.'
-              : 'Forge: all backends stopped. Pick a model to start again.',
-          );
+          const outcome = modelName
+            ? 'Forge: backend restarted.'
+            : 'Forge: all backends stopped. Pick a model to start again.';
+          void vscode.window.showInformationMessage(outcome);
+          this.emitActivity({ text: outcome });
         } catch (err) {
-          void vscode.window.showErrorMessage(`Forge: ${(err as Error).message}`);
+          const message = `Forge: ${(err as Error).message}`;
+          void vscode.window.showErrorMessage(message);
+          // A failed restart is the case a remote user most needs to hear:
+          // silence would read as a backend that came back.
+          this.emitActivity({ text: `Forge: backend restart failed. ${message}` });
         }
         return;
 
@@ -96,6 +118,10 @@ export class SlashCommandHandler {
 
       case 'newChat':
         await deps.newConversation();
+        // Window-scoped on purpose: a chat bound to the old conversation stays
+        // bound to it, so this is news about the window, not about that chat's
+        // binding. /resume is how a remote user follows the new one.
+        this.emitActivity({ text: 'Forge: started a new chat in this window.' });
         return;
 
       case 'rename':
@@ -115,7 +141,13 @@ export class SlashCommandHandler {
         return;
 
       case 'clearChat':
-        deps.clearMessages();
+        {
+          // Conversation-scoped: only the chats bound to this conversation just
+          // lost their history, and only they need to know why it is empty.
+          const conversationId = deps.getActiveConv().id;
+          deps.clearMessages();
+          this.emitActivity({ text: 'Forge: chat cleared.', conversationId });
+        }
         return;
 
       case 'review':
