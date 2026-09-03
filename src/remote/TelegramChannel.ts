@@ -257,8 +257,8 @@ export class TelegramChannel implements RemoteChannel {
             };
           }
         }
-        if (event?.kind === 'text') {
-          await this.acknowledgeTextDisposition(event, disposition, signal);
+        if (event && (event.kind === 'text' || event.kind === 'voice')) {
+          await this.acknowledgeDisposition(event, disposition, signal);
         }
         if (update.callback_query) {
           await this.call(
@@ -326,17 +326,28 @@ export class TelegramChannel implements RemoteChannel {
     return { bytes: bytes.length, mediaType: mediaTypeForPath(file.file_path) };
   }
 
-  private async acknowledgeTextDisposition(
-    event: Extract<RemoteInboundEvent, { kind: 'text' }>,
+  /**
+   * Says out loud why an inbound message went nowhere.
+   *
+   * Voice belongs here as much as text: a voice note rejected before
+   * transcription -- voice disabled, over the duration limit, oversize -- had
+   * its reason computed and then dropped, because this only ran for `text`. The
+   * sender saw nothing at all, which is indistinguishable from Forge being
+   * offline and is exactly the silent-failure shape the voice path is most
+   * likely to be blamed for.
+   */
+  private async acknowledgeDisposition(
+    event: Extract<RemoteInboundEvent, { kind: 'text' | 'voice' }>,
     disposition: RemoteInboundDisposition,
     signal: AbortSignal,
   ): Promise<void> {
     if (event.chatType !== 'private') return;
     let text: string | undefined;
     if (disposition.kind === 'queued') {
-      text = event.text.trim().toLowerCase().startsWith('/steer')
-        ? `Forge: steering prompt queued next (position ${disposition.position}).`
-        : `Forge: queued at position ${disposition.position}. Use /steer <prompt> to interrupt the current turn and run a new instruction next, or /queue to review pending work.`;
+      text =
+        event.kind === 'text' && event.text.trim().toLowerCase().startsWith('/steer')
+          ? `Forge: steering prompt queued next (position ${disposition.position}).`
+          : `Forge: queued at position ${disposition.position}. Use /steer <prompt> to interrupt the current turn and run a new instruction next, or /queue to review pending work.`;
     } else if (disposition.kind === 'rejected') {
       text = `Forge: ${disposition.reason}`;
     }

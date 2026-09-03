@@ -425,6 +425,67 @@ describe('TelegramChannel', () => {
   });
 
   /**
+   * The reason a rejected voice note went nowhere has to reach the sender.
+   *
+   * `acknowledgeDisposition` used to run only for `text`, so every pre-transcription
+   * rejection -- voice disabled in config, over the duration limit, oversize --
+   * computed a perfectly good reason string and then dropped it. What the sender
+   * experienced was a voice note vanishing into nothing, which is exactly what
+   * Forge being offline looks like. A user who never wanted voice must be told
+   * that, not left guessing.
+   */
+  it('tells the sender why a voice note was rejected', async () => {
+    const abort = new AbortController();
+    let delivered = false;
+    const sent: Array<Record<string, unknown>> = [];
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor: async () => undefined,
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        const method = String(url).split('/').at(-1);
+        if (method === 'setMyCommands') return response(true);
+        if (method === 'sendMessage') {
+          sent.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+          abort.abort();
+          return response({ message_id: 7 });
+        }
+        if (method === 'getUpdates' && !delivered) {
+          delivered = true;
+          return response([
+            {
+              update_id: 92,
+              message: {
+                message_id: 6,
+                date: 1_700_000_000,
+                chat: { id: 99, type: 'private' },
+                from: { id: 123 },
+                voice: { file_id: 'voice-xyz', duration: 2, mime_type: 'audio/ogg' },
+              },
+            },
+          ]);
+        }
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+            once: true,
+          });
+        });
+      }) as typeof fetch,
+    });
+    channel.onEvent(async () => ({
+      kind: 'rejected',
+      reason: 'voice input is disabled (set voice.enabled in config)',
+    }));
+
+    await channel.start(abort.signal);
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]).toMatchObject({
+      chat_id: '99',
+      text: 'Forge: voice input is disabled (set voice.enabled in config)',
+    });
+  });
+
+  /**
    * `downloadAttachment` used to end `bytes.toString('utf8')` for anything that
    * was not an image or a PDF. Decoding arbitrary bytes as utf8 substitutes
    * U+FFFD for every invalid sequence, so the file arrived intact and left
