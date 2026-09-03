@@ -368,6 +368,7 @@ overlaps with an existing owner, extend the owner instead.
 | Unconfirmed transcript state machine              | `src/voice/PendingVoiceDraft.ts`       |
 | Spoken command grammar + gate correlation         | `src/voice/VoiceGrammar.ts`            |
 | Voice session-log events                          | `src/voice/VoiceAudit.ts`              |
+| Voice audit JSONL writer                          | `src/voice/VoiceAuditFileSink.ts`      |
 | Tier A STT test double                            | `src/voice/FakeWhisperRunner.ts`       |
 | whisper.cpp process + argv                        | `src/voice/WhisperCppRunner.ts`        |
 | Telegram voice note -> draft -> prompt            | `src/remote/RemoteVoiceBridge.ts`      |

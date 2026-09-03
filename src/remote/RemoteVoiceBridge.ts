@@ -4,6 +4,7 @@ import { admittedFrom, VoiceAuditLog, type VoiceAuditSink } from '../voice/Voice
 import type { VoiceTranscript, WhisperRunner } from '../voice/VoiceTypes';
 import { matchVoiceCommand } from '../voice/VoiceGrammar';
 import { PendingVoiceDraft, type DraftResolution } from '../voice/PendingVoiceDraft';
+import { VoiceAuditFileSink } from '../voice/VoiceAuditFileSink';
 import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
 import { WhisperCppRunner } from '../voice/WhisperCppRunner';
 import type { ForgeConfig } from '../config/types';
@@ -123,6 +124,11 @@ export class RemoteVoiceBridge {
       return { kind: 'rejected', reason: 'voice note is too large' };
     }
     const source = await operation.adopt(target, mediaType);
+    // Cold start is ~4.2 s (§6.1b) and the sender has no other signal that
+    // anything is happening. Silence for four seconds after sending a voice note
+    // reads as "it was ignored", which is the failure this whole path is prone
+    // to being mistaken for.
+    await this.say(event.chatId, 'Forge: transcribing voice…');
 
     const result = await this.ingress.run(operation, source, {
       surface: 'telegram',
@@ -217,7 +223,7 @@ function draftKey(channel: string, chatId: string): string {
 export function buildVoiceBridge(
   channel: RemoteChannel,
   config: ForgeConfig,
-  sink: VoiceAuditSink = { write: () => undefined },
+  sink: VoiceAuditSink = new VoiceAuditFileSink(),
 ): { bridge: RemoteVoiceBridge; drafts: PendingVoiceDraft } | undefined {
   const voice = config.voice;
   if (voice?.enabled !== true) return undefined;

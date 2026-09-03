@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs/promises';
+import * as os from 'os';
+import * as path from 'path';
 import { RemoteVoiceBridge, type VoiceBridgeSettings } from '../../src/remote/RemoteVoiceBridge';
 import { PendingVoiceDraft } from '../../src/voice/PendingVoiceDraft';
 import { VoiceAuditLog, type VoiceAuditEvent } from '../../src/voice/VoiceAudit';
+import { VoiceAuditFileSink } from '../../src/voice/VoiceAuditFileSink';
 import { FakeWhisperRunner } from '../../src/voice/FakeWhisperRunner';
 import type { RemoteChannel, RemoteInboundEvent } from '../../src/remote/types';
 
@@ -150,7 +153,10 @@ describe('RemoteVoiceBridge gates', () => {
   it('always tells the sender something', async () => {
     const { bridge, sent } = harness();
     await bridge.handle(voiceEvent());
-    expect(sent).toHaveLength(1);
+    // The progress line, then the outcome. Either way the sender is never left
+    // wondering whether Forge heard them.
+    expect(sent[0]).toContain('transcribing');
+    expect(sent).toHaveLength(2);
   });
 });
 
@@ -205,5 +211,43 @@ describe('RemoteVoiceBridge draft resolution', () => {
   it('treats an approval word as a correction, never as a confirmation', () => {
     const { bridge, drafts } = heldDraft();
     expect(bridge.finishDraft(drafts.resolve('telegram', 'c1', 'approve'))).toBe('approve');
+  });
+});
+
+describe('VoiceAuditFileSink', () => {
+  it('appends one JSON line per row, joinable by operation_id', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-voice-audit-'));
+    const sink = new VoiceAuditFileSink(dir);
+    const log = new VoiceAuditLog(sink);
+    log.started({
+      operation_id: 'v_1',
+      surface: 'telegram',
+      bytes: 10,
+      media_type: 'audio/ogg',
+    });
+    log.rejected({ operation_id: 'v_1', reason: 'empty', detail: 'silence' });
+    const lines = (await fs.readFile(path.join(dir, 'voice.jsonl'), 'utf8')).trim().split('\n');
+    expect(lines).toHaveLength(2);
+    expect(lines.map((line) => JSON.parse(line).operation_id)).toEqual(['v_1', 'v_1']);
+    expect(JSON.parse(lines[1]!).type).toBe('voice_ingress_rejected');
+  });
+
+  /**
+   * Audio is deliberately not retained, so a voice turn whose row failed to
+   * write is undiagnosable -- but that must never be allowed to take down the
+   * turn itself.
+   */
+  it('never throws when the log cannot be written', () => {
+    const sink = new VoiceAuditFileSink(path.join(os.tmpdir(), 'forge-voice-\0-invalid'));
+    expect(() =>
+      sink.write({
+        type: 'voice_ingress_started',
+        operation_id: 'v_2',
+        ts_ms: 0,
+        surface: 'telegram',
+        bytes: 1,
+        media_type: 'audio/ogg',
+      }),
+    ).not.toThrow();
   });
 });
