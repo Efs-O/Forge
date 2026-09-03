@@ -744,6 +744,49 @@ Priority:
 
 Why: unloading Qwen costs model reload time and can destroy warm prefix/KV advantages for a very short voice command.
 
+### 7.1 Second GPU (hardware arriving 2026-09-04) — priority 3 becomes the default
+
+The "configurable secondary GPU" above stops being a hypothetical. A second card
+arrives 2026-09-04 and is intended for Whisper, which changes the shape of this
+section rather than just its numbers:
+
+- **The contention this policy exists to manage goes away.** Priorities 2 and 4
+  (CPU fallback, evicting Qwen) were both there to protect the coding model's
+  residency on a single 16 GB card. With Whisper on its own device there is
+  nothing to evict and nothing to fall back from, so the scheduler this section
+  warns against building is not merely premature — it is unnecessary.
+- **`keep_model_loaded` stops being a tradeoff.** It is the 4195 ms → ~250 ms
+  lever (§6.1b: per-clip time is flat across 1.5 s–8.0 s audio, so it is model
+  load, not inference). On one card it would park ~3 GB permanently against
+  Qwen; on a dedicated card that objection disappears and a resident whisper
+  process becomes the obvious next step. It is in the config schema today and
+  honored by nothing.
+- **The current failure mode is thrash, not OOM.** Under WDDM the driver spills
+  to system RAM rather than failing the allocation, so a collision degrades both
+  Whisper *and* the resident model for the duration instead of surfacing an
+  error. That is the worse of the two outcomes, because nothing is reported.
+  The window is only the ~4 s of a one-shot spawn, and it collides only if a
+  voice note arrives mid-generation — but it is unreported when it does.
+
+**Device pinning is not free config today.** whisper.cpp selects its device via
+`CUDA_VISIBLE_DEVICES` in the environment. `WhisperCppRunner` spawns with
+inherited env and no explicit device, so it will land on whichever card CUDA
+enumerates first — which is not necessarily the new one. Pinning needs a device
+setting in the `voice:` block (§18) threaded into the spawn env; it is small,
+but it is a change, not a setting that already exists. **Confirm what enumerates
+as device 0 before writing it** — if the new card enumerates first, the correct
+change may be none at all.
+
+**Piper cannot use the second GPU, and does not need to.** Verified against the
+installed binary rather than assumed: `piper.exe --help` exposes no `--cuda` /
+`--use-cuda` flag, and the install ships `onnxruntime.dll` +
+`onnxruntime_providers_shared.dll` with no `onnxruntime_providers_cuda.dll`.
+Both the flag and the execution provider would have to be present, and neither
+is — GPU builds of Piper exist upstream, but this is not one. It measures
+611–1995 ms on CPU (§11.3's threshold), touches no VRAM, and competes with
+nothing. Leave it on the CPU; a GPU Piper build would buy latency that is
+already inside budget, in exchange for a second CUDA dependency to deploy.
+
 ### Measurement before scheduling logic
 
 Measure on the real machine:
