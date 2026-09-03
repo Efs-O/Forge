@@ -575,10 +575,24 @@ than an observation: transcripts are checked in at
   `έλεξε`. None touch a control word. §6.4 decoder bias is the mitigation and is
   now justified by measurement rather than by anticipation.
 
-**What this does NOT settle:** model size (large-v3 only; turbo/medium still
-unmeasured and still need an authorized download), microphone and noise variation
-(the corpus is one speaker, one device, quiet room), and the R7 silence-filter
-sweep. n=1 per line throughout.
+**Model size is SETTLED at large-v3 — by the Ssuno repo, not by this plan.**
+`N:/vs code apps/Ssuno/docs/AUDIO_AND_DOWNLOADS.md` records turbo already tested
+and **deleted**: it "dropped a whole final-refrain couplet and hallucinated the
+outro ~40x". That is the §27.1 trailing-hallucination failure, worse, on the
+model §6.2 was going to reconsider. The same document independently reports
+faster-whisper's CUDA path broken on this machine — the identical finding, made
+before this measurement. No download is needed and none should be requested.
+
+That document also states whisper.cpp "holds VRAM, so it obeys the same
+one-model-at-a-time rule as ComfyUI", which is direct external support for
+§2.4's contention concern — and makes the resident-process question above a real
+architectural tradeoff rather than an obvious win.
+
+**What this does NOT settle:** the R7 silence-filter sweep, and microphone/noise
+variation (one speaker, one device, quiet room; n=1 per line). Neither blocks
+implementation. Both are regression questions to revisit if a real user reports a
+miss — collecting more corpus now would be measuring a system that has not been
+built yet.
 
 ### 6.2 Model candidates
 
