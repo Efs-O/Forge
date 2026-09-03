@@ -1,5 +1,15 @@
 # Forge — Recent Changes
 
+## 0.15.14
+
+- **A spoken reply no longer reads your own question back first.** The one-time
+  `Chat: … · ID: …` label at the top of the first answer in a chat was being
+  synthesized along with the answer — and a conversation title is derived from
+  the prompt you sent, so every voice message opened by repeating your question
+  and then spelling out a shortened id, before any of the reply arrived. The
+  label is a written navigation aid; it is now stripped before synthesis and
+  left untouched in the text message.
+
 ## 0.15.13
 
 - **Talk to Forge, and hear it answer.** Send a voice note to the Telegram bot

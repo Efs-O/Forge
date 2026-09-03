@@ -2,6 +2,7 @@ import { encodeToOpus } from '../voice/AudioNormalizer';
 import { PiperRunner, type PiperOptions } from '../voice/PiperRunner';
 import { isWorthSpeaking, renderForSpeech } from '../voice/SpeechRenderer';
 import { VoiceOperation } from '../voice/VoiceOperation';
+import { stripConversationIdentity } from './RemoteReplyIdentity';
 import type { ForgeConfig } from '../config/types';
 import type { RemoteChannel } from './types';
 
@@ -48,8 +49,12 @@ export class RemoteSpeechDelivery {
   async speak(chatId: string, markdown: string): Promise<boolean> {
     const settings = this.settings();
     if (!settings.enabled || !this.channel.sendVoice) return false;
-    const language = detectLanguage(markdown);
-    const spoken = renderForSpeech(markdown, { language, maxChars: settings.maxChars });
+    // The chat label is a written navigation aid and nothing else. Its title is
+    // the sender's own first prompt, so leaving it in made every spoken reply
+    // open by reading the question back before answering it.
+    const body = stripConversationIdentity(markdown);
+    const language = detectLanguage(body);
+    const spoken = renderForSpeech(body, { language, maxChars: settings.maxChars });
     if (!isWorthSpeaking(spoken)) return false;
 
     const operation = await VoiceOperation.create();
