@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import { build } from 'esbuild';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { parse as parseYaml } from 'yaml';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const ALL_ARMS = ['qwen-minimal', 'qwen-forge', 'claude-code', 'codex'];
@@ -31,6 +32,21 @@ function value(args, flag) {
   return index < 0 ? undefined : args[index + 1];
 }
 
+// The benchmark endpoint, resolved from the Forge config's `benchmark.base_url`.
+// This is the last-resort default: it only matters when neither --base-url nor
+// FORGE_BENCH_BASE_URL is set, and it must point at a dedicated llama-server
+// port — never the live Forge chat node (llama_server.port).
+function readBenchmarkBaseUrl(forgeConfigPath) {
+  try {
+    if (!existsSync(forgeConfigPath)) return undefined;
+    const config = parseYaml(readFileSync(forgeConfigPath, 'utf8'));
+    const base = config?.benchmark?.base_url;
+    return typeof base === 'string' && base.trim() ? base.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function optionsFromArgs(args) {
   const ping = args.includes('--ping');
   const selected = (
@@ -46,18 +62,30 @@ function optionsFromArgs(args) {
     throw new Error('--ping cannot be combined with --dry-run.');
   if (ping && selected.some((arm) => !arm.startsWith('qwen-')))
     throw new Error('--ping only supports qwen-minimal and qwen-forge.');
+  const forgeConfigPath = resolve(ROOT, value(args, '--forge-config') ?? '.forge/config.yaml');
+  const baseUrl =
+    value(args, '--base-url') ??
+    process.env.FORGE_BENCH_BASE_URL ??
+    readBenchmarkBaseUrl(forgeConfigPath);
+  if (!baseUrl)
+    throw new Error(
+      'No benchmark endpoint configured. Pass --base-url, set FORGE_BENCH_BASE_URL, ' +
+        `or add benchmark.base_url to ${forgeConfigPath}. ` +
+        'Refusing to default to the Forge chat port (llama_server.port) — a benchmark ' +
+        'must never target the live chat node.',
+    );
   return {
     ping,
     dryRun: args.includes('--dry-run'),
     taskPath: resolve(ROOT, value(args, '--task') ?? 'benchmarks/smoke-task.json'),
     outputRoot: resolve(ROOT, value(args, '--out') ?? 'results'),
     arms: selected,
-    baseUrl:
-      value(args, '--base-url') ?? process.env.FORGE_BENCH_BASE_URL ?? 'http://127.0.0.1:8080',
+    baseUrl,
     model: value(args, '--model') ?? process.env.FORGE_BENCH_MODEL,
     evaluatorExecutable:
       value(args, '--evaluator') ?? process.env.FORGE_BENCH_EVALUATOR ?? 'swebench',
-    forgeConfigPath: resolve(ROOT, value(args, '--forge-config') ?? '.forge/config.yaml'),
+    forgeConfigPath,
+    unloadChatNode: args.includes('--unload-chat-node'),
   };
 }
 
@@ -118,4 +146,3 @@ main().catch((error) => {
   console.error(`forge-bench: ${error instanceof Error ? error.message : String(error)}`);
   process.exitCode = 1;
 });
-

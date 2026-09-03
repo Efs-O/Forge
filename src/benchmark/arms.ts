@@ -87,11 +87,9 @@ async function minimalCompletion(
   // Use Forge's canonical sampler merge so preserve_thinking is placed in
   // chat_template_kwargs rather than accidentally sent as a top-level API
   // field. The only minimal-arm override is its reasoning level below.
-  const request = mergeSampling(
-    { model, messages, stream: true, tools },
-    requestModel,
-    { allowPreserveThinking: true },
-  );
+  const request = mergeSampling({ model, messages, stream: true, tools }, requestModel, {
+    allowPreserveThinking: true,
+  });
   const reasoningEffort = requestModel?.reasoning_effort ?? 'low';
   const response = await fetch(`${endpoint}/v1/chat/completions`, {
     method: 'POST',
@@ -303,4 +301,3 @@ export async function runCliArm(
     cliStatus: result.status,
   };
 }
-

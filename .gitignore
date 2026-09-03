@@ -5,6 +5,8 @@ dist/
 /CHANGELOG.md
 coverage/
 tool-result-context-ab-results/
+# SWE-bench run output: full clones of astropy/django/sympy/etc per task (~26k .py files)
+results/
 .forge/
 # Remote-control image inbox (phone attachments land here) — machine-local, never track
 .forge/remote-inbox/

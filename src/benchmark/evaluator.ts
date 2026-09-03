@@ -59,6 +59,7 @@ function evaluatorProcess(
     process.platform === 'win32'
       ? {
           ...process.env,
+          PYTHONUTF8: '1',
           PYTHONPATH: [
             path.resolve(process.cwd(), 'scripts', 'swebench-windows'),
             process.env.PYTHONPATH,
@@ -130,4 +131,3 @@ export function evaluatorSucceeded(result: EvaluatorResult): boolean {
   // resolved field, not the agent prose or process wording, is authoritative.
   return result.resolved !== undefined;
 }
-

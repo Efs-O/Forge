@@ -15,6 +15,7 @@ import { captureCliUsage, qwenUsage } from './usageCapture';
 import { commandSucceeded, runProcess } from './process';
 import type { PreflightContext } from './preflight';
 import {
+  checkOrUnloadChatNode,
   ensureForgeQwen,
   startMinimalQwen,
   stopMinimalQwen,
@@ -273,9 +274,14 @@ export async function executeBenchmark(context: PreflightContext): Promise<Bench
       forge = undefined;
     }
     if (context.options.arms.includes('qwen-minimal')) {
-      process.stdout.write('forge-bench: unloading Forge Qwen parameters\n');
+      process.stdout.write('forge-bench: checking Forge chat node VRAM state\n');
       const armDir = path.join(context.runDir, 'qwen-minimal');
       fs.mkdirSync(armDir, { recursive: true });
+      await checkOrUnloadChatNode(
+        context.options.forgeConfigPath,
+        qwenModel ?? '',
+        context.options.unloadChatNode ?? false,
+      );
       minimal = await startMinimalQwen(
         {
           forgeConfigPath: context.options.forgeConfigPath,
@@ -320,4 +326,3 @@ export function writeReports(
     'utf8',
   );
 }
-

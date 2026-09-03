@@ -23,6 +23,14 @@ export interface BenchmarkOptions {
   model?: string;
   evaluatorExecutable: string;
   forgeConfigPath: string;
+  /**
+   * When the qwen-minimal arm would otherwise collide with the live Forge chat
+   * node (same Qwen model still resident in VRAM), pass this to have the
+   * benchmark call the control server's /unload first. Without it the benchmark
+   * fails loudly with the exact unload command instead of silently contending
+   * for the GPU. Only meaningful when the chat node is idle (holds === 0).
+   */
+  unloadChatNode?: boolean;
 }
 
 export interface PreflightContext {
@@ -312,4 +320,3 @@ export async function preparePreflight(options: BenchmarkOptions): Promise<Prefl
     checks,
   };
 }
-

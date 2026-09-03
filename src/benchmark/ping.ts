@@ -204,4 +204,3 @@ export async function runBenchmarkPing(options: PingOptions): Promise<void> {
     throw new Error(`bench:ping failed. Details: ${path.join(runDir, 'ping.json')}`);
   process.stdout.write(`forge-bench: ping passed; details=${path.join(runDir, 'ping.json')}\n`);
 }
-
