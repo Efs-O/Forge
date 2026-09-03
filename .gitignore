@@ -99,3 +99,8 @@ SYSTEM_PROMPT_MODE_PLAN.md
 # Synthetic audio is reproducible from the manifest; recorded takes are not and
 # are committed deliberately under test/fixtures/voice/recorded/.
 test/fixtures/voice/synthetic/
+
+# Recorded voice corpus: real recordings of a person's voice. The Tier A tests
+# run off the checked-in transcripts, not the audio, so the audio never needs to
+# ship. Regenerate locally with `node scripts/voice-fixtures.mjs --import`.
+test/fixtures/voice/recorded/

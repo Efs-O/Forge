@@ -24,129 +24,236 @@
       "id": "en-cmd-approve",
       "language": "en",
       "text": "approve",
-      "source": "synthetic",
+      "source": "recorded",
       "voice": "en_US-amy-medium",
-      "expect": { "grammar": "approve", "critical": ["approve"] }
+      "expect": {
+        "grammar": "approve",
+        "critical": [
+          "approve"
+        ]
+      }
     },
     {
       "id": "en-cmd-approve-negated",
       "language": "en",
       "text": "do not approve that",
-      "source": "synthetic",
+      "source": "recorded",
       "voice": "en_US-amy-medium",
-      "expect": { "grammar": null, "critical": ["not", "approve"], "negation": true }
+      "expect": {
+        "grammar": null,
+        "critical": [
+          "not",
+          "approve"
+        ],
+        "negation": true
+      }
     },
     {
       "id": "en-cmd-deny",
       "language": "en",
       "text": "deny",
-      "source": "synthetic",
+      "source": "recorded",
       "voice": "en_US-amy-medium",
-      "expect": { "grammar": "deny", "critical": ["deny"] }
+      "expect": {
+        "grammar": "deny",
+        "critical": [
+          "deny"
+        ]
+      }
     },
     {
       "id": "en-cmd-cancel-negated",
       "language": "en",
       "text": "do not cancel",
-      "source": "synthetic",
+      "source": "recorded",
       "voice": "en_US-amy-medium",
-      "expect": { "grammar": null, "critical": ["not", "cancel"], "negation": true }
+      "expect": {
+        "grammar": null,
+        "critical": [
+          "not",
+          "cancel"
+        ],
+        "negation": true
+      }
     },
     {
       "id": "en-cmd-stop-qualified",
       "language": "en",
       "text": "stop after this finishes",
-      "source": "synthetic",
+      "source": "recorded",
       "voice": "en_US-amy-medium",
-      "expect": { "grammar": null, "critical": ["stop", "after"], "negation": true }
+      "expect": {
+        "grammar": null,
+        "critical": [
+          "stop",
+          "after"
+        ],
+        "negation": true
+      }
     },
     {
       "id": "en-cmd-yes-negated",
       "language": "en",
       "text": "I said no, not yes",
-      "source": "synthetic",
+      "source": "recorded",
       "voice": "en_US-amy-medium",
-      "expect": { "grammar": null, "critical": ["no", "not", "yes"], "negation": true }
+      "expect": {
+        "grammar": null,
+        "critical": [
+          "no",
+          "not",
+          "yes"
+        ],
+        "negation": true
+      }
     },
     {
       "id": "en-verb-keep",
       "language": "en",
       "text": "keep the changes",
-      "source": "synthetic",
+      "source": "recorded",
       "voice": "en_US-amy-medium",
-      "expect": { "grammar": null, "critical": ["keep"], "mustNotContain": ["undo"] }
+      "expect": {
+        "grammar": null,
+        "critical": [
+          "keep"
+        ],
+        "mustNotContain": [
+          "undo"
+        ]
+      }
     },
     {
       "id": "en-verb-read",
       "language": "en",
       "text": "read the config file",
-      "source": "synthetic",
+      "source": "recorded",
       "voice": "en_US-amy-medium",
-      "expect": { "grammar": null, "critical": ["read"], "mustNotContain": ["write"] }
+      "expect": {
+        "grammar": null,
+        "critical": [
+          "read"
+        ],
+        "mustNotContain": [
+          "write"
+        ]
+      }
     },
     {
       "id": "en-prompt-identifiers",
       "language": "en",
       "text": "open src slash voice slash VoiceIngress dot ts and check the admission rule",
-      "source": "synthetic",
+      "source": "recorded",
       "voice": "en_US-amy-medium",
-      "expect": { "grammar": null, "critical": ["voice", "admission"] }
+      "expect": {
+        "grammar": null,
+        "critical": [
+          "voice",
+          "admission"
+        ]
+      }
     },
     {
       "id": "en-prompt-technical",
       "language": "en",
       "text": "restart the backend with CUDA and check VRAM",
-      "source": "synthetic",
+      "source": "recorded",
       "voice": "en_US-amy-medium",
-      "expect": { "grammar": null, "critical": ["restart", "backend", "CUDA", "VRAM"] }
+      "expect": {
+        "grammar": null,
+        "critical": [
+          "restart",
+          "backend",
+          "CUDA",
+          "VRAM"
+        ]
+      }
     },
     {
       "id": "el-cmd-approve",
       "language": "el",
       "text": "εντάξει",
-      "source": "synthetic",
+      "source": "recorded",
       "voice": "el_GR-joy-medium",
-      "expect": { "grammar": "approve", "critical": ["εντάξει"] }
+      "expect": {
+        "grammar": "approve",
+        "critical": [
+          "εντάξει"
+        ]
+      }
     },
     {
       "id": "el-cmd-approve-negated",
       "language": "el",
       "text": "μην εγκρίνεις",
-      "source": "synthetic",
+      "source": "recorded",
       "voice": "el_GR-joy-medium",
-      "expect": { "grammar": null, "critical": ["μην", "εγκρίνεις"], "negation": true }
+      "expect": {
+        "grammar": null,
+        "critical": [
+          "μην",
+          "εγκρίνεις"
+        ],
+        "negation": true
+      }
     },
     {
       "id": "el-cmd-deny",
       "language": "el",
       "text": "όχι",
-      "source": "synthetic",
+      "source": "recorded",
       "voice": "el_GR-joy-medium",
-      "expect": { "grammar": "deny", "critical": ["όχι"] }
+      "expect": {
+        "grammar": "deny",
+        "critical": [
+          "όχι"
+        ]
+      }
     },
     {
       "id": "el-cmd-cancel-negated",
       "language": "el",
       "text": "μην ακυρώσεις",
-      "source": "synthetic",
+      "source": "recorded",
       "voice": "el_GR-joy-medium",
-      "expect": { "grammar": null, "critical": ["μην", "ακυρώσεις"], "negation": true }
+      "expect": {
+        "grammar": null,
+        "critical": [
+          "μην",
+          "ακυρώσεις"
+        ],
+        "negation": true
+      }
     },
     {
       "id": "el-prompt-mixed",
       "language": "el",
       "text": "ξεκίνα τον backend και έλεγξε το VRAM",
-      "source": "synthetic",
+      "source": "recorded",
       "voice": "el_GR-joy-medium",
-      "expect": { "grammar": null, "critical": ["backend", "VRAM"], "mixedScript": true }
+      "expect": {
+        "grammar": null,
+        "critical": [
+          "backend",
+          "VRAM"
+        ],
+        "mixedScript": true
+      }
     },
     {
       "id": "el-prompt-commit",
       "language": "el",
       "text": "κάνε commit τις αλλαγές στο git",
-      "source": "synthetic",
+      "source": "recorded",
       "voice": "el_GR-joy-medium",
-      "expect": { "grammar": null, "critical": ["commit", "git"], "mixedScript": true }
+      "expect": {
+        "grammar": null,
+        "critical": [
+          "commit",
+          "git"
+        ],
+        "mixedScript": true
+      }
     },
     {
       "id": "silence-only",
@@ -154,18 +261,24 @@
       "text": "",
       "source": "generated-silence",
       "durationSeconds": 2,
-      "expect": { "grammar": null, "rejectAs": "empty" }
+      "expect": {
+        "grammar": null,
+        "rejectAs": "empty"
+      }
     },
     {
       "id": "trailing-silence",
       "language": "en",
       "text": "restart the backend",
-      "source": "synthetic",
+      "source": "recorded",
       "voice": "en_US-amy-medium",
       "trailingSilenceSeconds": 6,
       "expect": {
         "grammar": null,
-        "critical": ["restart", "backend"],
+        "critical": [
+          "restart",
+          "backend"
+        ],
         "$comment": "The §27.1 hallucination trigger: assert the transcript ends where speech does.",
         "mustNotRepeatFinalLine": true
       }

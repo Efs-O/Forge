@@ -512,6 +512,74 @@ nothing — recorded here because two of them are informative):
   no appended line on either engine. The §27.1 hallucination did not reproduce on
   clean synthetic audio — which is exactly why the R3 corpus must be **recorded**.
 
+### 6.1b SECOND MEASUREMENTS (2026-09-03) — GPU + the recorded corpus settle it
+
+The §6.1a numbers were taken with the GPU fully occupied, so they measured CPU
+only. With the GPU free (946 / 16311 MiB) and the **recorded** 17-utterance
+corpus in place, the picture inverts.
+
+**whisper.cpp large-v3, CUDA, greedy, 17 recorded clips:**
+
+| Shape | Per utterance |
+|---|---|
+| One process per clip (current §2.4 design) | 4,195 – 4,673 ms |
+| 10 clips in one process (6,318 ms total) | **~250 ms**, after a ~3.8 s load |
+
+Two conclusions, and the second is the important one:
+
+1. **GPU is 4–13x faster than CPU** on short utterances (4.2 s vs 16.8–54.1 s).
+   §6.1a's CPU-only verdict does not survive contact with a free GPU.
+2. **The one-shot spawn IS the latency.** The per-clip time is flat at ~4.2 s
+   across audio from 1.5 s to 8.0 s, which is the signature of fixed overhead,
+   not inference. Amortized, a clip costs ~250 ms — **12x inside R2's 3 s gate**.
+   The gate is not a model-size problem or an engine problem. It is §2.4's
+   process model, and §2.4's justification for it (VRAM contention) is a real
+   constraint that now has a measured price attached: ~4 s per utterance.
+
+**faster-whisper on GPU could not be measured, and that is itself the finding.**
+CTranslate2 aborts with `Library cublas64_12.dll is not found or cannot be
+loaded`. The wheel ships `cudnn64_9.dll` but not cuBLAS, and no CUDA 12 runtime
+is installed. Fixing it means a ~500 MB out-of-band NVIDIA dependency that the
+**end user** would have to install correctly on their own machine. The user has
+hit this exact wall before and resolved it the same way — it is why ComfyUI work
+here moved to llama.cpp.
+
+That reframes the choice. §6.1 treated engine selection as a latency question;
+for something shipped in a VS Code extension to strangers it is primarily a
+**deployment** question, and there whisper.cpp wins outright: a self-contained
+`.exe` plus a `.bin`, no Python, no runtime DLLs, no CUDA toolkit. A faster
+engine that a fraction of users cannot start is slower than a slower one that
+always starts.
+
+**Recorded-corpus accuracy — the R3 gate PASSES.** Now enforced as a test rather
+than an observation: transcripts are checked in at
+`test/fixtures/voice/transcripts-whispercpp-large-v3-cuda.json` and asserted by
+`test/unit/VoiceGrammarCorpus.test.ts` (Tier A — no binary, model or GPU needed).
+25 assertions, all passing.
+
+- **Zero false authorizations across all six negated utterances.** The one worth
+  naming: `μην εγκρίνεις` was heard as **`"Μείνα εγκρίνης."`** — badly mangled,
+  the negation destroyed — and the grammar still refused, because whole-utterance
+  matching cannot match a two-word phrase. No developer would have invented that
+  string as a test case. It is the argument for a recorded corpus in one line.
+- Plain commands all resolve: `Εντάξει.` → approve, `Όχι.` → deny, `Approve.`,
+  `Deny.`. Note `εντάξει` was **correct on real speech** but wrong (`"Έτσι."`) on
+  the Piper fixture — the synthetic entry was the unreliable one, exactly as the
+  manifest warns.
+- Free-form prompts stay prompts. `"Open src/voice/voiceingress.ts and check the
+  admission rule."` — path structure survived dictation.
+- **No trailing-silence hallucination** on 6 s of real recorded silence. The
+  §27.1 failure did not reproduce; the conservative `SILENCE_TRIM_FILTER` bias
+  toward keeping audio is not costing anything measurable yet.
+- Known misses, all benign: `VRAM` → `vrun`, `this` → `these`, `έλεγξε` →
+  `έλεξε`. None touch a control word. §6.4 decoder bias is the mitigation and is
+  now justified by measurement rather than by anticipation.
+
+**What this does NOT settle:** model size (large-v3 only; turbo/medium still
+unmeasured and still need an authorized download), microphone and noise variation
+(the corpus is one speaker, one device, quiet room), and the R7 silence-filter
+sweep. n=1 per line throughout.
+
 ### 6.2 Model candidates
 
 Benchmark in Greek and English:

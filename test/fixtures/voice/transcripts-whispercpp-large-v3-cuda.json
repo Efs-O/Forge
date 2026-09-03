@@ -1,0 +1,86 @@
+{
+  "$comment": [
+    "Verbatim transcripts of the RECORDED corpus, produced by whisper.cpp large-v3",
+    "on CUDA (RTX 5060 Ti 16GB), greedy, one process per clip, 2026-09-03.",
+    "",
+    "These exist so the R3 zero-false-authorization gate is a TEST, not a",
+    "one-off script someone ran once. They are real recogniser output on real",
+    "human speech, including its mistakes -- do not hand-correct them. A",
+    "transcript that is wrong here is exactly the input the grammar must survive.",
+    "",
+    "Regenerate after a backend or model change and re-run the suite; a new",
+    "engine that starts matching a negated utterance is a release blocker."
+  ],
+  "engine": "whisper.cpp large-v3 CUDA greedy",
+  "measuredAt": "2026-09-03",
+  "transcripts": {
+    "el-cmd-approve-negated": {
+      "text": "Μείνα εγκρίνης.",
+      "elapsedMs": 11474
+    },
+    "el-cmd-approve": {
+      "text": "Εντάξει.",
+      "elapsedMs": 4264
+    },
+    "el-cmd-cancel-negated": {
+      "text": "Μην ακυρώσεις",
+      "elapsedMs": 4302
+    },
+    "el-cmd-deny": {
+      "text": "Όχι.",
+      "elapsedMs": 4215
+    },
+    "el-prompt-commit": {
+      "text": "Κάνε commit τις αλλαγές στο git",
+      "elapsedMs": 4499
+    },
+    "el-prompt-mixed": {
+      "text": "Ξεκίνα το backend και έλεξε το vram.",
+      "elapsedMs": 4673
+    },
+    "en-cmd-approve-negated": {
+      "text": "Do not approve that.",
+      "elapsedMs": 4416
+    },
+    "en-cmd-approve": {
+      "text": "Approve.",
+      "elapsedMs": 4195
+    },
+    "en-cmd-cancel-negated": {
+      "text": "Do not cancel.",
+      "elapsedMs": 4430
+    },
+    "en-cmd-deny": {
+      "text": "Deny.",
+      "elapsedMs": 4192
+    },
+    "en-cmd-stop-qualified": {
+      "text": "Stop after these finishes.",
+      "elapsedMs": 4245
+    },
+    "en-cmd-yes-negated": {
+      "text": "I said no, not yes.",
+      "elapsedMs": 4292
+    },
+    "en-prompt-identifiers": {
+      "text": "Open src/voice/voiceingress.ts and check the admission rule.",
+      "elapsedMs": 4595
+    },
+    "en-prompt-technical": {
+      "text": "Restart the backend with CUDA and check vrun.",
+      "elapsedMs": 4341
+    },
+    "en-verb-keep": {
+      "text": "Keep the changes.",
+      "elapsedMs": 4195
+    },
+    "en-verb-read": {
+      "text": "Read the config file",
+      "elapsedMs": 4383
+    },
+    "trailing-silence": {
+      "text": "Restart the backend",
+      "elapsedMs": 4277
+    }
+  }
+}
