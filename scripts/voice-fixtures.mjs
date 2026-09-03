@@ -47,17 +47,86 @@ function readManifest() {
  */
 function list() {
   const { entries } = readManifest();
-  console.log('Record each line below as a separate voice note, then save it as');
-  console.log(`  ${path.relative(ROOT, FIXTURE_DIR)}/recorded/<id>.wav`);
-  console.log('and set that entry\'s "source" to "recorded" in the manifest.\n');
-  console.log('Vary the conditions across takes: quiet speech, background noise,');
-  console.log('and at least one delayed/replayed note (R3).\n');
-  for (const entry of entries) {
-    if (!entry.text) continue;
-    console.log(`[${entry.id}]  (${entry.language})`);
+  const spoken = entries.filter((entry) => entry.text);
+  console.log('HOW TO RECORD\n');
+  console.log('  1. Record each line below as a separate clip, any recorder,');
+  console.log('     any format (.m4a .ogg .oga .mp3 .wav .opus all work).');
+  console.log('     A phone voice recorder or a Telegram voice note to yourself');
+  console.log('     is ideal -- that is the microphone the feature will use.');
+  console.log('  2. Name each file after the id in [brackets], e.g. "en-cmd-approve.m4a".');
+  console.log('  3. Put them all in one folder and run:\n');
+  console.log('       node scripts/voice-fixtures.mjs --import <that folder>\n');
+  console.log('     That converts to 16 kHz mono WAV, files them under');
+  console.log(`     ${path.relative(ROOT, FIXTURE_DIR)}/recorded/, and flips each`);
+  console.log('     entry to source:"recorded" in the manifest. No ffmpeg needed by hand.\n');
+  console.log('  Partial batches are fine -- import as many as you record.\n');
+  console.log('WHAT TO VARY (R3): most at a normal speaking volume, but do a few');
+  console.log('  quietly, a few with background noise, and re-send one clip a second');
+  console.log('  time as a delayed/replayed note. The negation lines matter most:');
+  console.log('  they are what prove a misheard word cannot authorize an action.\n');
+  console.log('LINES TO RECORD\n');
+  for (const entry of spoken) {
+    const done = entry.source === 'recorded' ? '  [done]' : '';
+    console.log(`[${entry.id}]  (${entry.language})${done}`);
     console.log(`    "${entry.text}"`);
   }
-  console.log(`\n${entries.filter((e) => e.text).length} utterances.`);
+  const remaining = spoken.filter((entry) => entry.source !== 'recorded').length;
+  console.log(`\n${spoken.length} utterances, ${remaining} still to record.`);
+}
+
+/**
+ * Converts whatever the user recorded into the corpus.
+ *
+ * Deliberately format-agnostic: the point of the recorded corpus is that a
+ * human speaks into a real microphone, and making them fight ffmpeg first is a
+ * good way to end up with no corpus at all. Anything ffmpeg can decode is fine.
+ */
+function importRecordings(sourceDir, { ffmpeg }) {
+  const manifest = readManifest();
+  const byId = new Map(manifest.entries.map((entry) => [entry.id, entry]));
+  const outDir = path.join(FIXTURE_DIR, 'recorded');
+  fs.mkdirSync(outDir, { recursive: true });
+
+  let imported = 0;
+  const unmatched = [];
+  for (const file of fs.readdirSync(sourceDir)) {
+    const id = path.basename(file, path.extname(file));
+    const entry = byId.get(id);
+    if (!entry) {
+      unmatched.push(file);
+      continue;
+    }
+    const target = path.join(outDir, `${id}.wav`);
+    execFileSync(ffmpeg, [
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-y',
+      '-i',
+      path.join(sourceDir, file),
+      '-ac',
+      '1',
+      '-ar',
+      String(TARGET_RATE),
+      '-c:a',
+      'pcm_s16le',
+      target,
+    ]);
+    // Only the manifest says which entries count for Phase 0, so flipping this
+    // flag is the whole point of the import -- not the file copy.
+    entry.source = 'recorded';
+    imported += 1;
+  }
+
+  fs.writeFileSync(MANIFEST, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+  console.log(`Imported ${imported} recordings to ${path.relative(ROOT, outDir)}`);
+  if (unmatched.length) {
+    console.log(`\nSkipped ${unmatched.length} file(s) whose name matched no manifest id:`);
+    for (const file of unmatched) console.log(`  ${file}`);
+    console.log('Rename them to the id in [brackets] from --list.');
+  }
+  const left = manifest.entries.filter((e) => e.text && e.source !== 'recorded');
+  console.log(`\n${left.length} utterance(s) still synthetic. Run --list to see which.`);
 }
 
 function synthesize({ piper, voices, ffmpeg }) {
@@ -132,13 +201,17 @@ function synthesize({ piper, voices, ffmpeg }) {
   console.log('clear the R3 gate. Record the human corpus with --list.');
 }
 
-const mode = process.argv.includes('--generate') ? 'generate' : 'list';
-if (mode === 'list') {
-  list();
-} else {
+const ffmpeg = arg('ffmpeg', 'C:/ffmpeg/ffmpeg.exe');
+const importDir = arg('import', undefined);
+
+if (importDir) {
+  importRecordings(importDir, { ffmpeg });
+} else if (process.argv.includes('--generate')) {
   synthesize({
     piper: arg('piper', 'N:/vs code apps/Gemma4kids/piper/win/piper.exe'),
     voices: arg('voices', 'N:/vs code apps/Gemma4kids/voices'),
-    ffmpeg: arg('ffmpeg', 'C:/ffmpeg/ffmpeg.exe'),
+    ffmpeg,
   });
+} else {
+  list();
 }
