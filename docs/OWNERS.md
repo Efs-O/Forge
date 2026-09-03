@@ -356,6 +356,23 @@ overlaps with an existing owner, extend the owner instead.
 | Atomic writes, hashing, abort checks             | `src/checkpoint/CheckpointFileIO.ts`        |
 | Leftover-checkpoint reporting on startup         | `src/checkpoint/CheckpointRecovery.ts`      |
 
+## Voice (STT/TTS transport — plan: `docs/VOICE_STT_TTS_IMPLEMENTATION_PLAN.md`)
+
+| Concern                                          | Owner                                  |
+| ------------------------------------------------ | -------------------------------------- |
+| Voice transport types + `WhisperRunner` contract  | `src/voice/VoiceTypes.ts`              |
+| Temp-audio ownership + disposal                   | `src/voice/VoiceOperation.ts`          |
+| Audio -> 16 kHz mono WAV + silence trim           | `src/voice/AudioNormalizer.ts`         |
+| Normalize -> transcribe -> admission rule         | `src/voice/VoiceIngress.ts`            |
+| Transcript acceptance, refusal + echo filters     | `src/voice/TranscriptAcceptance.ts`    |
+| Unconfirmed transcript state machine              | `src/voice/PendingVoiceDraft.ts`       |
+| Spoken command grammar + gate correlation         | `src/voice/VoiceGrammar.ts`            |
+| Voice session-log events                          | `src/voice/VoiceAudit.ts`              |
+| Tier A STT test double                            | `src/voice/FakeWhisperRunner.ts`       |
+
+ffmpeg discovery is NOT owned here — it stays `src/tools/ffmpegLocate.ts`, and
+the configured override stays the existing `video.ffmpeg_path` key.
+
 ## Misc
 
 | Concern                              | Owner                               |
