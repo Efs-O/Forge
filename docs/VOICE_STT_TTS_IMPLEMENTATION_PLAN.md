@@ -1554,6 +1554,38 @@ Conceptual speech-only string:
 Restart [[ <CUDA phonemes> ]] and check the backend.
 ```
 
+### MEASURED 2026-09-03 — `[[ ]]` is NOT available on the shipped runtime
+
+Step 1 of the strategy below ("pin the runtime being tested") is what settled
+this, and it settled it against the section. On piper **1.2.0** — the last
+standalone Windows binary rhasspy ever released, Nov 2023, and the one this
+machine runs — the escape is not parsed at all:
+
+```
+input : I am the [[ bˈætmæn ]]
+piper : aɪɐm ðə bˈiː stɹˈɛs ɐ ˈiː tˈiː ˈɛm ɐ ˈiː ˈɛn
+```
+
+It phonemized the *characters of the phoneme string*: `b`, then the `ˈ` stress
+mark read as the **word "stress"**, then `a`, `e`, `t`, `m`, `a`, `e`, `n`. So
+the failure is not a silent no-op that falls back to text — it is actively
+worse than writing nothing, which makes shipping an entry with a phoneme field
+a hazard rather than an optimization.
+
+The feature is real, but it belongs to **piper1-gpl v1.7.0**, whose Windows
+release is a **Python wheel only** (`piper_tts-1.7.0-cp39-abi3-win_amd64.whl`).
+There is no standalone `piper.exe` in it. Adopting it therefore collides with
+§11.2 ("do not make the Piper integration depend on Python"), which is a
+deployment constraint, not a preference — the same one that ruled out
+faster-whisper in §6.1b. That trade is the user's to make and has not been
+made; Python 3.10 and 3.11 are both present on this machine, so it is
+available whenever it is wanted.
+
+**Consequence for §14:** the lexicon ships text-transliteration only. The
+`el_phonemes` / `en_phonemes` fields stay in the entry schema and stay empty,
+and nothing reads them. That is the plan's own advice ("keep text fallback
+available") arrived at from the other direction.
+
 ### Implementation strategy
 
 1. Pin the Piper runtime/version being tested.

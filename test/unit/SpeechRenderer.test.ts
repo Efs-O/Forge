@@ -36,17 +36,27 @@ describe('renderForSpeech', () => {
    * needs to hear. Only the backticks go.
    */
   it('keeps inline code content and drops the backticks', () => {
-    expect(renderForSpeech('Run `npm run ci` first.')).toBe('Run npm run ci first.');
+    // The backticks go; the content stays and is then spoken properly -- `npm`
+    // as three letters rather than an attempt at the word "nppm" (§14).
+    expect(renderForSpeech('Run `npm run ci` first.')).toBe('Run N P M run C I first.');
   });
 
   it('speaks the last path segment, not the whole path', () => {
+    // The identifier is also split at its capitals: espeak runs an unsplit
+    // `RemoteVoiceBridge` together into one unsayable word.
     const out = renderForSpeech('See src/remote/RemoteVoiceBridge.ts for details.');
-    expect(out).toBe('See RemoteVoiceBridge.ts for details.');
+    expect(out).toBe('See Remote Voice Bridge T S for details.');
   });
 
-  it('handles Windows paths too', () => {
-    expect(renderForSpeech('Open C:\\Users\\me\\notes.txt now.')).toContain('notes.txt');
-    expect(renderForSpeech('Open C:\\Users\\me\\notes.txt now.')).not.toContain('Users');
+  /**
+   * The drive letter has to go with the rest of the path. It did not: written
+   * as an optional prefix, the drive matched empty, the match began at the
+   * first directory, and the drive root survived to be read aloud as
+   * "C colon backslash". Both old assertions passed anyway -- the residue was
+   * in neither of them.
+   */
+  it('handles Windows paths too, drive letter included', () => {
+    expect(renderForSpeech('Open C:\\Users\\me\\notes.txt now.')).toBe('Open notes text now.');
   });
 
   it('says a link exists rather than spelling a URL', () => {
@@ -66,7 +76,9 @@ describe('renderForSpeech', () => {
    * markup. `max_tool_rounds` must survive intact.
    */
   it('does not treat snake_case as emphasis', () => {
-    expect(renderForSpeech('Set max_tool_rounds higher.')).toBe('Set max_tool_rounds higher.');
+    // Not emphasis, and not one word either: the underscores separate spoken
+    // words. What must never happen is the middle being eaten as italics.
+    expect(renderForSpeech('Set max_tool_rounds higher.')).toBe('Set max tool rounds higher.');
   });
 
   it('replaces a table rather than reading its pipes', () => {
@@ -75,8 +87,13 @@ describe('renderForSpeech', () => {
     expect(out).toContain('A table');
   });
 
-  it('flattens list markers', () => {
-    expect(renderForSpeech('- one\n- two')).toBe('one two');
+  /**
+   * The bullet goes, but the item boundary must not: run together as "one two",
+   * a list becomes one breathless clause with no pause where the eye saw a new
+   * line.
+   */
+  it('flattens list markers into sentences', () => {
+    expect(renderForSpeech('- one\n- two')).toBe('one. two.');
   });
 
   /**

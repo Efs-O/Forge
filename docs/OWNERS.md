@@ -370,6 +370,8 @@ overlaps with an existing owner, extend the owner instead.
 | Voice session-log events                          | `src/voice/VoiceAudit.ts`              |
 | Voice audit JSONL writer                          | `src/voice/VoiceAuditFileSink.ts`      |
 | Tier A STT test double                            | `src/voice/FakeWhisperRunner.ts`       |
+| Spoken pronunciation of technical tokens          | `src/voice/SpeechLexicon.ts`           |
+| Pronunciation lexicon data                        | `src/voice/lexicon.json`               |
 | whisper.cpp process + argv                        | `src/voice/WhisperCppRunner.ts`        |
 | Piper process + argv                              | `src/voice/PiperRunner.ts`             |
 | Markdown -> speakable text                        | `src/voice/SpeechRenderer.ts`          |

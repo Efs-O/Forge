@@ -18,6 +18,8 @@
  * Plan: docs/VOICE_STT_TTS_IMPLEMENTATION_PLAN.md §12, §13.
  */
 
+import { applyLexicon } from './SpeechLexicon';
+
 /** Beyond this a spoken reply stops being a summary and becomes a podcast. */
 const DEFAULT_MAX_CHARS = 600;
 
@@ -31,6 +33,39 @@ function codeBlockPhrase(lines: number, language: 'en' | 'el'): string {
   }
   return lines === 1 ? ' One line of code. ' : ` Code block, ${lines} lines. `;
 }
+
+/**
+ * A path, in three shapes, assembled from a string so each branch can be read.
+ *
+ * The branches differ in what counts as EVIDENCE that a slash is a path
+ * separator rather than punctuation, because `and/or` must survive:
+ *
+ * 1. A drive letter settles it outright, so one segment is enough -- and only
+ *    here are spaces allowed inside a segment. This user's home directory is
+ *    `C:/Users/efso office/`, and without that the match stopped at the space
+ *    and left the orphan word `efso` to be read aloud. It is confined to this
+ *    branch because a space-tolerant segment elsewhere would happily swallow
+ *    the prose in front of a path ("Open the src/a.ts file" -> "Open a.ts").
+ * 2. Two or more separators.
+ * 3. One separator, where the final name carries a dot -- `.forge/config.yaml`.
+ *
+ * The drive branch must not be folded into the others as an optional prefix: it
+ * then matches empty, the match begins at the first directory, and the drive
+ * root survives to be spoken as "C colon backslash".
+ */
+const SEGMENT = String.raw`[\w.-]+`;
+const SEGMENT_WITH_SPACES = String.raw`[\w.-]+(?:\x20[\w.-]+)*`;
+/** Either separator. Windows paths arrive with backslashes and must not be lost. */
+const SEP = String.raw`[\\/]`;
+const PATH = new RegExp(
+  '(?:' +
+    String.raw`[A-Za-z]:${SEP}(?:${SEGMENT_WITH_SPACES}${SEP})*` +
+    String.raw`|${SEP}?(?:${SEGMENT}${SEP}){2,}` +
+    String.raw`|(?:${SEGMENT}${SEP})+(?=[\w-]*\.[\w-])` +
+    ')' +
+    String.raw`([\w.-]+)`,
+  'g',
+);
 
 export interface SpeechRenderOptions {
   readonly language?: 'en' | 'el' | undefined;
@@ -86,7 +121,13 @@ export function renderForSpeech(markdown: string, options: SpeechRenderOptions =
     // Bare URLs have no label to fall back on.
     .replace(/https?:\/\/\S+/g, ' a link ')
     .replace(/^#{1,6}\s+/gm, '')
-    .replace(/^\s*[-*+]\s+/gm, '')
+    // A list item is a sentence when spoken. Stripping the bullet alone runs
+    // the items together into one breathless clause, because the newline
+    // between them collapses to a space further down; the full stop is what
+    // makes Piper pause where the eye would have seen a new line.
+    .replace(/^\s*[-*+]\s+(.*?)\s*$/gm, (_m, item: string) =>
+      /[.!?;:]$/.test(item) ? item : `${item}.`,
+    )
     .replace(/^\s*>\s?/gm, '')
     // Emphasis markers only; a lone asterisk or underscore inside a word (a
     // snake_case identifier) is not markup and must survive.
@@ -94,11 +135,20 @@ export function renderForSpeech(markdown: string, options: SpeechRenderOptions =
     .replace(/(?<!\w)[*_](\S(?:.*?\S)?)[*_](?!\w)/g, '$1')
     // A table read aloud is pipes and dashes. Say that one exists instead.
     .replace(/^\|.*\|\s*$/gm, language === 'el' ? 'Ένας πίνακας.' : 'A table.')
-    .replace(/^[-=]{3,}\s*$/gm, '');
+    .replace(/^[-=]{3,}\s*$/gm, '')
+    // An arrow is punctuation espeak has no word for. It reads as "then" in
+    // every place Forge emits one: a config key resolving to a value, a
+    // before/after.
+    .replace(/\s*(?:->|=>|→|⇒)\s*/g, language === 'el' ? ' στο ' : ' to ');
 
   // A path is the worst thing to hear character by character. Keep the final
-  // segment, which is the part a person would actually say.
-  text = text.replace(/(?:[A-Za-z]:)?(?:[\w.-]+[/\\]){2,}([\w.-]+)/g, '$1');
+  // segment, which is the part a person would actually say. See PATH above for
+  // why it has three branches.
+  text = text.replace(PATH, '$1');
+
+  // Vocabulary last of the content passes, and after the path collapse above:
+  // it should see `Bridge.ts`, not the six directory segments in front of it.
+  text = applyLexicon(text, language);
 
   // Collapse whatever the substitutions left behind. Paragraph breaks become
   // sentence breaks so Piper still pauses in roughly the right places.
