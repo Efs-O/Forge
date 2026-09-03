@@ -14,6 +14,9 @@
  * Usage:
  *   node scripts/voice-fixtures.mjs --list          print the recording script
  *   node scripts/voice-fixtures.mjs --generate      synthesize the smoke set
+ *   node scripts/voice-fixtures.mjs --import <dir>  import recordings by filename
+ *   node scripts/voice-fixtures.mjs --import <dir> --ordered
+ *                                                   ... or by send order
  *   node scripts/voice-fixtures.mjs --generate \
  *        --piper <exe> --voices <dir> --ffmpeg <exe>
  *
@@ -74,29 +77,72 @@ function list() {
   console.log(`\n${spoken.length} utterances, ${remaining} still to record.`);
 }
 
+const AUDIO_EXTENSIONS = new Set(['.oga', '.ogg', '.opus', '.m4a', '.mp3', '.wav', '.webm']);
+
+/**
+ * Files in the order they were recorded, oldest first.
+ *
+ * Telegram Desktop saves voice notes as `audio_<date>_<time>.ogg`, so send
+ * order is recoverable from mtime without the user renaming anything. Ties are
+ * broken by name, which for that pattern is also chronological.
+ */
+function audioFilesByTime(sourceDir) {
+  return fs
+    .readdirSync(sourceDir)
+    .filter((file) => AUDIO_EXTENSIONS.has(path.extname(file).toLowerCase()))
+    .map((file) => ({ file, mtime: fs.statSync(path.join(sourceDir, file)).mtimeMs }))
+    .sort((a, b) => a.mtime - b.mtime || a.file.localeCompare(b.file))
+    .map((item) => item.file);
+}
+
 /**
  * Converts whatever the user recorded into the corpus.
  *
  * Deliberately format-agnostic: the point of the recorded corpus is that a
  * human speaks into a real microphone, and making them fight ffmpeg first is a
  * good way to end up with no corpus at all. Anything ffmpeg can decode is fine.
+ *
+ * @param ordered Map files to the still-unrecorded entries by send order rather
+ *   than by filename. This is the Telegram path: the user sends one voice note
+ *   per line in list order and saves them, and the auto-generated names carry no
+ *   id. Order is the only correlation available, so it is used deliberately --
+ *   and every pairing is printed so a slip is visible rather than silent.
  */
-function importRecordings(sourceDir, { ffmpeg }) {
+function importRecordings(sourceDir, { ffmpeg, ordered }) {
   const manifest = readManifest();
   const byId = new Map(manifest.entries.map((entry) => [entry.id, entry]));
   const outDir = path.join(FIXTURE_DIR, 'recorded');
   fs.mkdirSync(outDir, { recursive: true });
 
+  let plan;
+  if (ordered) {
+    const pending = manifest.entries.filter((e) => e.text && e.source !== 'recorded');
+    const files = audioFilesByTime(sourceDir);
+    if (files.length > pending.length) {
+      console.error(
+        `${files.length} audio files but only ${pending.length} unrecorded entries. ` +
+          'Remove the extras or re-run without --ordered.',
+      );
+      process.exit(1);
+    }
+    plan = files.map((file, index) => ({ file, entry: pending[index] }));
+    console.log('Pairing by send order (oldest first):\n');
+    for (const { file, entry } of plan) console.log(`  ${file}  ->  ${entry.id}  "${entry.text}"`);
+    console.log('');
+  } else {
+    plan = fs
+      .readdirSync(sourceDir)
+      .map((file) => ({ file, entry: byId.get(path.basename(file, path.extname(file))) }));
+  }
+
   let imported = 0;
   const unmatched = [];
-  for (const file of fs.readdirSync(sourceDir)) {
-    const id = path.basename(file, path.extname(file));
-    const entry = byId.get(id);
+  for (const { file, entry } of plan) {
     if (!entry) {
       unmatched.push(file);
       continue;
     }
-    const target = path.join(outDir, `${id}.wav`);
+    const target = path.join(outDir, `${entry.id}.wav`);
     execFileSync(ffmpeg, [
       '-hide_banner',
       '-loglevel',
@@ -205,7 +251,7 @@ const ffmpeg = arg('ffmpeg', 'C:/ffmpeg/ffmpeg.exe');
 const importDir = arg('import', undefined);
 
 if (importDir) {
-  importRecordings(importDir, { ffmpeg });
+  importRecordings(importDir, { ffmpeg, ordered: process.argv.includes('--ordered') });
 } else if (process.argv.includes('--generate')) {
   synthesize({
     piper: arg('piper', 'N:/vs code apps/Gemma4kids/piper/win/piper.exe'),
