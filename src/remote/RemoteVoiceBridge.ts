@@ -2,7 +2,13 @@ import { VoiceIngress } from '../voice/VoiceIngress';
 import { VoiceOperation } from '../voice/VoiceOperation';
 import { admittedFrom, VoiceAuditLog, type VoiceAuditSink } from '../voice/VoiceAudit';
 import type { VoiceTranscript, WhisperRunner } from '../voice/VoiceTypes';
-import { matchVoiceCommand } from '../voice/VoiceGrammar';
+import {
+  correlateGate,
+  matchVoiceCommand,
+  recordingWindow,
+  type PendingGate,
+  type VoiceCommand,
+} from '../voice/VoiceGrammar';
 import { PendingVoiceDraft, type DraftResolution } from '../voice/PendingVoiceDraft';
 import { VoiceAuditFileSink } from '../voice/VoiceAuditFileSink';
 import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
@@ -34,6 +40,23 @@ export interface VoiceBridgeSettings {
   readonly biasPrompt: string;
   readonly trimSilence: boolean;
   readonly ffmpegPath?: string | undefined;
+}
+
+/**
+ * What a spoken approve/deny/stop needs, injected per call rather than held.
+ *
+ * Per call because the approval bridge is created inside `RemoteController`
+ * while this bridge is built alongside the channel: passing it at handle time
+ * avoids a settable field whose unset state would silently mean "spoken
+ * approvals do nothing".
+ */
+export interface SpokenGateContext {
+  readonly gates: readonly PendingGate[];
+  /** Auth nonce for this chat; the same one the button path checks. */
+  readonly nonce: string | undefined;
+  resolve(gateId: string, approve: boolean, nonce: string | undefined): boolean;
+  /** Cancels the running turn for `stop`. Absent where nothing is running. */
+  cancel?(): boolean;
 }
 
 export interface RemoteVoiceBridgeOptions {
@@ -72,6 +95,7 @@ export class RemoteVoiceBridge {
    */
   async handle(
     event: Extract<RemoteInboundEvent, { kind: 'voice' }>,
+    spoken?: SpokenGateContext,
   ): Promise<RemoteInboundDisposition> {
     const settings = this.options.settings();
     if (!settings.enabled) {
@@ -87,7 +111,7 @@ export class RemoteVoiceBridge {
 
     const operation = await VoiceOperation.create();
     try {
-      return await this.transcribeAndEcho(operation, event, settings);
+      return await this.transcribeAndEcho(operation, event, settings, spoken);
     } catch (error) {
       // The operation disposes itself inside `ingress.run`; a failure before
       // that point (download, size gate) has to clean up here, or the audio
@@ -101,6 +125,7 @@ export class RemoteVoiceBridge {
     operation: VoiceOperation,
     event: Extract<RemoteInboundEvent, { kind: 'voice' }>,
     settings: VoiceBridgeSettings,
+    spoken?: SpokenGateContext,
   ): Promise<RemoteInboundDisposition> {
     const download = this.options.channel.downloadAttachmentToFile;
     if (!download) {
@@ -144,6 +169,23 @@ export class RemoteVoiceBridge {
       // sender must never be left wondering whether Forge heard them.
       await this.say(event.chatId, `Forge: could not use that voice note (${result.reason}).`);
       return { kind: 'handled' };
+    }
+
+    const command = matchVoiceCommand(result.text);
+    if (command && spoken) {
+      const handled = await this.runSpokenCommand(operation.id, event, command, spoken);
+      if (handled) {
+        this.options.audit.admitted(
+          admittedFrom(operation.id, result.transcript, {
+            audioMs: event.durationMs,
+            // A spoken command IS the submission -- there is no draft to confirm.
+            autoSubmitted: true,
+            editedBeforeSubmit: false,
+            grammarMatch: command,
+          }),
+        );
+        return { kind: 'handled' };
+      }
     }
 
     const { draft, replaced } = this.options.drafts.hold({
@@ -198,6 +240,63 @@ export class RemoteVoiceBridge {
     return resolution.text;
   }
 
+  /**
+   * Applies a matched command to a pending gate, or refuses and says why.
+   *
+   * Returns false when the utterance should fall through to the draft path --
+   * `status` has no gate to resolve, and a command with nothing pending is
+   * usually the user dictating an ordinary prompt that happens to be one word.
+   *
+   * The correlation rule is `correlateGate`: exactly one gate open for the whole
+   * recording window, still unresolved, same chat. Anything ambiguous refuses.
+   * That is where strictness belongs -- the unambiguous case is the one that
+   * keeps this hands-free, which is the only reason spoken approval beats the
+   * inline button that is already one tap away.
+   */
+  private async runSpokenCommand(
+    operationId: string,
+    event: Extract<RemoteInboundEvent, { kind: 'voice' }>,
+    command: VoiceCommand,
+    spoken: SpokenGateContext,
+  ): Promise<boolean> {
+    if (command === 'status') return false;
+    if (command === 'stop') {
+      if (!spoken.cancel?.()) {
+        await this.say(event.chatId, 'Forge: nothing is running to stop.');
+        return true;
+      }
+      await this.say(event.chatId, 'Forge: stopped.');
+      return true;
+    }
+    const window = recordingWindow(event.receivedAt, event.durationMs);
+    const correlation = correlateGate(spoken.gates, event.chatId, window, event.replyToMessageId);
+    if (correlation.kind === 'not-a-command') return false;
+    if (correlation.kind === 'refuse') {
+      if (correlation.reason === 'none-open') return false;
+      // Ambiguous, never a guess: two gates were open, or one opened or closed
+      // while the user was still speaking. Naming the fallback matters -- a bare
+      // refusal teaches the user the capability does not work.
+      await this.say(
+        event.chatId,
+        'Forge: more than one approval was in play while you spoke, so I did not ' +
+          'act on it. Tap the button on the request, or reply to it directly.',
+      );
+      this.options.audit.rejected({
+        operation_id: operationId,
+        reason: 'refusal',
+        detail: `ambiguous spoken ${command}: ${spoken.gates.length} gate(s) in window`,
+      });
+      return true;
+    }
+    const approve = command === 'approve';
+    if (!spoken.resolve(correlation.gate.id, approve, spoken.nonce)) {
+      await this.say(event.chatId, 'Forge: that approval is stale — tap the button instead.');
+      return true;
+    }
+    await this.say(event.chatId, `Forge: ${approve ? 'approved' : 'denied'} by voice.`);
+    return true;
+  }
+
   private async say(chatId: string, text: string): Promise<void> {
     await this.options.channel
       .send(chatId, text, { ...(this.options.signal ? { signal: this.options.signal } : {}) })
@@ -250,5 +349,40 @@ function voiceSettings(config: ForgeConfig): VoiceBridgeSettings {
     biasPrompt: voice.bias_prompt ?? '',
     trimSilence: voice.trim_silence !== false,
     ...(config.video?.ffmpeg_path ? { ffmpegPath: config.video.ffmpeg_path } : {}),
+  };
+}
+
+/**
+ * Assembles the gate context for one inbound voice note.
+ *
+ * Lives here rather than in `RemoteController` because `SpokenGateContext` is
+ * declared here: the shape and the only thing that builds it stay together, and
+ * the controller keeps one call instead of a dozen lines of wiring.
+ *
+ * Typed structurally so this module never imports the approval bridge or the
+ * host facade -- the dependency runs the other way, and a cycle here would drag
+ * the whole remote layer into every voice test.
+ */
+export function buildSpokenGateContext(
+  event: Extract<RemoteInboundEvent, { kind: 'voice' }>,
+  nonce: string | undefined,
+  deps: {
+    pendingGates(chatId: string): PendingGate[];
+    resolveSpoken(gateId: string, approve: boolean, chatId: string, nonce?: string): boolean;
+    conversationFor(channel: string, chatId: string): string | undefined;
+    interrupt(conversationId: string): void;
+  },
+): SpokenGateContext {
+  return {
+    gates: deps.pendingGates(event.chatId),
+    nonce,
+    resolve: (gateId, approve, resolveNonce) =>
+      deps.resolveSpoken(gateId, approve, event.chatId, resolveNonce),
+    cancel: () => {
+      const conversationId = deps.conversationFor(event.channel, event.chatId);
+      if (!conversationId) return false;
+      deps.interrupt(conversationId);
+      return true;
+    },
   };
 }

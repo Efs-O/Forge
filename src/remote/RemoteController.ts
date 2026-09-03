@@ -20,7 +20,7 @@ import { RemoteNotificationFanout } from './RemoteNotificationFanout';
 import { admitRemotePrompt, isRemoteCommand, parseSteerCommand } from './RemotePromptAdmission';
 import { drainRemoteQueue } from './RemoteQueueDrain';
 import { RemotePendingPrompt } from './RemotePendingPrompt';
-import type { RemoteVoiceBridge } from './RemoteVoiceBridge';
+import { buildSpokenGateContext, type RemoteVoiceBridge } from './RemoteVoiceBridge';
 import type { PendingVoiceDraft } from '../voice/PendingVoiceDraft';
 import { handleRemoteSelectionAction } from './RemoteSelectionPager';
 
@@ -363,7 +363,16 @@ export class RemoteController {
           reason: 'voice input is disabled (set voice.enabled in config)',
         };
       }
-      const result = await this.voice.bridge.handle(event);
+      const result = await this.voice.bridge.handle(
+        event,
+        buildSpokenGateContext(event, gate.nonce, {
+          pendingGates: (chatId) => this.approvals.pendingGates(chatId),
+          resolveSpoken: (gateId, approve, chatId, nonce) =>
+            this.approvals.resolveSpoken(gateId, approve, chatId, nonce),
+          conversationFor: (channel, chatId) => this.store.binding(channel, chatId)?.conversationId,
+          interrupt: (conversationId) => void this.host.interrupt(conversationId),
+        }),
+      );
       if (result.kind !== 'rejected' && result.kind !== 'retry') this.auth.touch(event);
       return result;
     }

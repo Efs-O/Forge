@@ -7,6 +7,7 @@ import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import type { RemoteAuth } from './RemoteAuth';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteChannel, RemoteInboundEvent } from './types';
+import type { PendingGate } from '../voice/VoiceGrammar';
 
 interface RemoteApprovalEntry {
   requestId: string;
@@ -15,7 +16,20 @@ interface RemoteApprovalEntry {
   nonce?: string;
   actionId?: string;
   resolving?: boolean;
+  /** When the gate opened. Half of the §22A R1 recording-window rule. */
+  openedAt: number;
 }
+
+/**
+ * How long a resolved gate is remembered after it leaves `approvals`.
+ *
+ * `correlateGate` refuses when a gate opened OR CLOSED inside the recording
+ * window, and a gate that closed is deleted immediately -- so without this the
+ * ambiguous case would be indistinguishable from no gate at all, and a late
+ * "approve" would silently land on whatever opened next. Longer than any
+ * plausible voice note; the list is pruned on every read.
+ */
+const RESOLVED_MEMORY_MS = 5 * 60_000;
 
 /**
  * Provider-facing approval handles must stay short. Telegram limits callback
@@ -31,6 +45,13 @@ function newActionId(): string {
 /** Auth-nonce-bound remote presentation for Forge's one approval queue. */
 export class RemoteApprovalBridge {
   private readonly approvals = new Map<string, RemoteApprovalEntry>();
+  /** Gates that closed recently, so a spoken command can detect the race. */
+  private resolvedGates: Array<{
+    id: string;
+    chatId: string;
+    openedAt: number;
+    resolvedAt: number;
+  }> = [];
   private subscription: { dispose(): void } | undefined;
 
   constructor(
@@ -80,6 +101,51 @@ export class RemoteApprovalBridge {
     return true;
   }
 
+  /**
+   * Every gate a spoken command could plausibly refer to, open or recently
+   * closed, for `correlateGate` to judge (§22A R1-revised).
+   *
+   * Recently-closed gates are included deliberately: they are what turns "one
+   * gate was open the whole time" into a checkable claim rather than an
+   * assumption about a Map that may have changed underneath it.
+   */
+  pendingGates(chatId: string, now = Date.now()): PendingGate[] {
+    this.resolvedGates = this.resolvedGates.filter(
+      (gate) => now - gate.resolvedAt < RESOLVED_MEMORY_MS,
+    );
+    const open = [...this.approvals.entries()]
+      .filter(([, approval]) => approval.chatId === chatId && !approval.resolving)
+      .map(([id, approval]) => ({ id, chatId: approval.chatId, openedAt: approval.openedAt }));
+    const closed = this.resolvedGates
+      .filter((gate) => gate.chatId === chatId)
+      .map((gate) => ({ ...gate }));
+    return [...open, ...closed];
+  }
+
+  /**
+   * Resolves a gate a spoken word selected, having already been correlated.
+   *
+   * Separate from `resolveAction` because the two carry different evidence: the
+   * button path has an `actionId` the transport echoed back, while this path has
+   * only a recording window. Both still check `chatId` and the auth nonce, so
+   * the spoken route is strictly narrower than the button it substitutes for --
+   * it can never resolve a gate the button could not.
+   */
+  resolveSpoken(
+    gateId: string,
+    approve: boolean,
+    chatId: string,
+    nonce: string | undefined,
+  ): boolean {
+    const pending = this.approvals.get(gateId);
+    if (!pending || pending.chatId !== chatId || pending.resolving || pending.nonce !== nonce) {
+      return false;
+    }
+    pending.resolving = true;
+    this.host.resolveApproval(pending.event.id, approve);
+    return true;
+  }
+
   republish(chatId: string): void {
     for (const [id, approval] of this.approvals) {
       if (!approval.resolving && approval.chatId === chatId) void this.publish(id);
@@ -94,7 +160,12 @@ export class RemoteApprovalBridge {
     if (!chain?.remoteRequestId) return;
     const request = this.store.getRequest(chain.remoteRequestId);
     if (!request || request.channel !== this.channel.name) return;
-    this.approvals.set(event.id, { requestId: request.id, chatId: request.chatId, event });
+    this.approvals.set(event.id, {
+      requestId: request.id,
+      chatId: request.chatId,
+      event,
+      openedAt: Date.now(),
+    });
     void this.publish(event.id);
   }
 
@@ -102,6 +173,12 @@ export class RemoteApprovalBridge {
     const pending = this.approvals.get(event.id);
     if (!pending) return;
     this.approvals.delete(event.id);
+    this.resolvedGates.push({
+      id: event.id,
+      chatId: pending.chatId,
+      openedAt: pending.openedAt,
+      resolvedAt: Date.now(),
+    });
     void this.publishResolution(pending, event);
   }
 
