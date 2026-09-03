@@ -1,64 +1,13 @@
+import * as fsp from 'fs/promises';
 import { z } from 'zod';
-import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
 import {
-  createTelegramSelectionPages,
-  parseTelegramSelectionCallback,
-} from './TelegramSelectionPagination';
-
-const TelegramUpdateSchema = z.object({
-  update_id: z.number().int(),
-  message: z
-    .object({
-      message_id: z.number().int(),
-      date: z.number().int(),
-      text: z.string().optional(),
-      caption: z.string().optional(),
-      document: z
-        .object({
-          file_id: z.string(),
-          file_name: z.string().optional(),
-          mime_type: z.string().optional(),
-          file_size: z.number().int().nonnegative().optional(),
-        })
-        .optional(),
-      photo: z
-        .array(
-          z.object({ file_id: z.string(), file_size: z.number().int().nonnegative().optional() }),
-        )
-        .optional(),
-      /**
-       * `duration` is load-bearing, not informational: with `date` it defines
-       * the recording window that correlates a spoken command to one pending
-       * approval (docs/VOICE_STT_TTS_IMPLEMENTATION_PLAN.md §22A R1-revised).
-       */
-      voice: z
-        .object({
-          file_id: z.string(),
-          duration: z.number().int().nonnegative(),
-          mime_type: z.string().optional(),
-          file_size: z.number().int().nonnegative().optional(),
-        })
-        .optional(),
-      /** An explicit reply always wins over the recording-window heuristic. */
-      reply_to_message: z.object({ message_id: z.number().int() }).optional(),
-      chat: z.object({ id: z.union([z.number(), z.string()]), type: z.string() }),
-      from: z.object({ id: z.union([z.number(), z.string()]) }).optional(),
-    })
-    .optional(),
-  callback_query: z
-    .object({
-      id: z.string(),
-      data: z.string().optional(),
-      from: z.object({ id: z.union([z.number(), z.string()]) }),
-      message: z
-        .object({
-          message_id: z.number().int(),
-          chat: z.object({ id: z.union([z.number(), z.string()]), type: z.string() }),
-        })
-        .optional(),
-    })
-    .optional(),
-});
+  isTextMediaType,
+  mediaTypeForPath,
+  TelegramUpdateSchema,
+  telegramUpdateToEvent,
+} from './TelegramInboundMapping';
+import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
+import { createTelegramSelectionPages } from './TelegramSelectionPagination';
 
 const TelegramResponseSchema = z.object({
   ok: z.boolean(),
@@ -294,7 +243,7 @@ export class TelegramChannel implements RemoteChannel {
       }
       for (const update of updates.sort((a, b) => a.update_id - b.update_id)) {
         if (signal.aborted) return;
-        const event = this.toEvent(update);
+        const event = telegramUpdateToEvent(update);
         let disposition: RemoteInboundDisposition = event
           ? { kind: 'retry', reason: 'remote event handler is unavailable' }
           : { kind: 'handled' };
@@ -342,11 +291,39 @@ export class TelegramChannel implements RemoteChannel {
     const bytes = Buffer.from(await response.arrayBuffer());
     return {
       ...attachment,
-      data:
-        attachment.mediaType.startsWith('image/') || attachment.mediaType === 'application/pdf'
-          ? bytes.toString('base64')
-          : bytes.toString('utf8'),
+      // utf8 only for types that ARE text. Decoding arbitrary bytes as utf8
+      // replaces every invalid sequence with U+FFFD, which silently corrupts the
+      // file rather than failing -- audio, archives and office documents all
+      // arrived intact and left unusable.
+      data: isTextMediaType(attachment.mediaType)
+        ? bytes.toString('utf8')
+        : bytes.toString('base64'),
     };
+  }
+
+  /**
+   * Streams a Telegram file to disk without it ever becoming a string (§9.2).
+   *
+   * Telegram's Bot API caps downloads at 20 MB, well under any voice note the
+   * `voice.input.max_seconds` gate would allow through, so the whole body is
+   * buffered once rather than piped -- a stream here would add a partial-file
+   * failure mode for no benefit at this size.
+   */
+  async downloadAttachmentToFile(
+    providerFileId: string,
+    targetPath: string,
+    signal?: AbortSignal,
+  ): Promise<{ bytes: number; mediaType: string }> {
+    const file = z
+      .object({ file_path: z.string().min(1) })
+      .parse(await this.call('getFile', { file_id: providerFileId }, signal));
+    const response = await this.fetchImpl(
+      `https://api.telegram.org/file/bot${this.options.token}/${file.file_path}`,
+    );
+    if (!response.ok) throw new Error(`Telegram file download HTTP ${response.status}.`);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    await fsp.writeFile(targetPath, bytes);
+    return { bytes: bytes.length, mediaType: mediaTypeForPath(file.file_path) };
   }
 
   private async acknowledgeTextDisposition(
@@ -375,70 +352,6 @@ export class TelegramChannel implements RemoteChannel {
     });
   }
 
-  private toEvent(update: z.infer<typeof TelegramUpdateSchema>): RemoteInboundEvent | undefined {
-    const message = update.message;
-    if (
-      message &&
-      message.from &&
-      (message.text !== undefined || message.document || message.photo)
-    ) {
-      const document = message.document;
-      const photo = message.photo?.at(-1);
-      const attachment = document
-        ? {
-            name: document.file_name ?? 'telegram-document',
-            mediaType: document.mime_type ?? 'application/octet-stream',
-            providerFileId: document.file_id,
-          }
-        : photo
-          ? { name: 'telegram-photo.jpg', mediaType: 'image/jpeg', providerFileId: photo.file_id }
-          : undefined;
-      return {
-        channel: 'telegram',
-        kind: 'text',
-        providerMessageId: String(message.message_id),
-        senderId: String(message.from.id),
-        chatId: String(message.chat.id),
-        chatType: telegramChatType(message.chat.type),
-        receivedAt: message.date * 1000,
-        text: message.text ?? message.caption ?? '',
-        ...(attachment ? { attachments: [attachment] } : {}),
-      };
-    }
-    const callback = update.callback_query;
-    if (!callback || !callback.message || !callback.data) return undefined;
-    const selection = parseTelegramSelectionCallback(callback.data);
-    if (selection) {
-      return {
-        channel: 'telegram',
-        kind: 'selection',
-        providerMessageId: callback.id,
-        senderId: String(callback.from.id),
-        chatId: String(callback.message.chat.id),
-        chatType: telegramChatType(callback.message.chat.type),
-        receivedAt: Date.now(),
-        selectionKind: selection.kind,
-        selectionToken: selection.token,
-        action: selection.action,
-        ...(selection.page === undefined ? {} : { page: selection.page }),
-        messageId: String(callback.message.message_id),
-      };
-    }
-    const match = /^([ad]):(.+)$/.exec(callback.data);
-    if (!match) return undefined;
-    return {
-      channel: 'telegram',
-      kind: 'action',
-      providerMessageId: callback.id,
-      senderId: String(callback.from.id),
-      chatId: String(callback.message.chat.id),
-      chatType: telegramChatType(callback.message.chat.type),
-      receivedAt: Date.now(),
-      action: match[1] === 'a' ? 'approve' : 'deny',
-      correlationId: match[2]!,
-    };
-  }
-
   private async call(
     method: string,
     body: Record<string, unknown>,
@@ -458,11 +371,6 @@ export class TelegramChannel implements RemoteChannel {
     if (!parsed.ok) throw new Error(`Telegram Bot API rejected ${method}.`);
     return parsed.result;
   }
-}
-
-function telegramChatType(value: string): RemoteInboundEvent['chatType'] {
-  if (value === 'private') return 'private';
-  return value === 'channel' ? 'channel' : 'group';
 }
 
 export function splitTelegramText(text: string): string[] {

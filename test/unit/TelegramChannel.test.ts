@@ -360,4 +360,98 @@ describe('TelegramChannel', () => {
     await channel.start(abort.signal);
     await vi.waitFor(() => expect(setCursor).toHaveBeenCalledWith('telegram:update-offset', '78'));
   });
+
+  /**
+   * Before this mapping existed, a voice-only message matched none of the
+   * text/document/photo conditions in `toEvent`, so it produced no event AND
+   * still advanced the polling cursor -- the update was consumed and lost with
+   * nothing logged. Silent drops are the worst failure shape available here.
+   */
+  it('maps a voice note to a voice event, with duration and reply id', async () => {
+    const abort = new AbortController();
+    let delivered = false;
+    const seen: unknown[] = [];
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor: async () => undefined,
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        const method = String(url).split('/').at(-1);
+        if (method === 'setMyCommands') return response(true);
+        if (method === 'getUpdates' && !delivered) {
+          delivered = true;
+          return response([
+            {
+              update_id: 91,
+              message: {
+                message_id: 5,
+                date: 1_700_000_000,
+                chat: { id: 99, type: 'private' },
+                from: { id: 123 },
+                voice: { file_id: 'voice-abc', duration: 3, mime_type: 'audio/ogg' },
+                reply_to_message: { message_id: 4 },
+              },
+            },
+          ]);
+        }
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+            once: true,
+          });
+        });
+      }) as typeof fetch,
+    });
+    channel.onEvent(async (event) => {
+      seen.push(event);
+      abort.abort();
+      return { kind: 'handled' };
+    });
+
+    await channel.start(abort.signal);
+    await vi.waitFor(() => expect(seen).toHaveLength(1));
+    expect(seen[0]).toMatchObject({
+      channel: 'telegram',
+      kind: 'voice',
+      providerMessageId: '5',
+      senderId: '123',
+      chatId: '99',
+      providerFileId: 'voice-abc',
+      mediaType: 'audio/ogg',
+      // Seconds on the wire, milliseconds on the event: the recording window
+      // that correlates a spoken command is computed in ms (§22A R1-revised).
+      durationMs: 3000,
+      replyToMessageId: '4',
+    });
+  });
+
+  /**
+   * `downloadAttachment` used to end `bytes.toString('utf8')` for anything that
+   * was not an image or a PDF. Decoding arbitrary bytes as utf8 substitutes
+   * U+FFFD for every invalid sequence, so the file arrived intact and left
+   * corrupted -- with no error anywhere.
+   */
+  it('base64-encodes binary attachments instead of mangling them as utf8', async () => {
+    const binary = Buffer.from([0x00, 0xff, 0xfe, 0x80, 0x7f]);
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor: async () => undefined,
+      fetch: (async (url: string | URL | Request) => {
+        if (String(url).endsWith('/getFile')) return response({ file_path: 'voice/a.oga' });
+        return {
+          ok: true,
+          status: 200,
+          // Buffer.from(array) is pool-allocated, so `.buffer` carries an
+          // offset; copy it out or the test reads someone else's bytes.
+          arrayBuffer: async () => new Uint8Array(binary).buffer,
+        } as Response;
+      }) as typeof fetch,
+    });
+    const result = await channel.downloadAttachment({
+      name: 'a.oga',
+      mediaType: 'audio/ogg',
+      providerFileId: 'f1',
+    });
+    expect(Buffer.from(result.data!, 'base64')).toEqual(binary);
+  });
 });

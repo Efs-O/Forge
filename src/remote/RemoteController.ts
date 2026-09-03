@@ -20,6 +20,8 @@ import { RemoteNotificationFanout } from './RemoteNotificationFanout';
 import { admitRemotePrompt, isRemoteCommand, parseSteerCommand } from './RemotePromptAdmission';
 import { drainRemoteQueue } from './RemoteQueueDrain';
 import { RemotePendingPrompt } from './RemotePendingPrompt';
+import type { RemoteVoiceBridge } from './RemoteVoiceBridge';
+import type { PendingVoiceDraft } from '../voice/PendingVoiceDraft';
 import { handleRemoteSelectionAction } from './RemoteSelectionPager';
 
 export interface RemoteControllerOptions {
@@ -67,6 +69,12 @@ export class RemoteController {
     private readonly host: ForgeHostFacade,
     private options: RemoteControllerOptions,
     private readonly audit?: RemoteAuditLog,
+    /**
+     * Absent when `voice.enabled` is false. Held on the controller rather than
+     * in `options` because the bridge carries per-chat draft state that a
+     * config reload must not silently drop.
+     */
+    private readonly voice?: { bridge: RemoteVoiceBridge; drafts: PendingVoiceDraft } | undefined,
   ) {
     this.rateLimiter = new RemoteRateLimiter(options.rateLimitPerMinute);
     this.outbox = new RemoteOutboxDelivery(
@@ -125,6 +133,32 @@ export class RemoteController {
       this.kickDrain(request.conversationId);
     }
     this.outbox.start();
+  }
+
+  /**
+   * Interprets one inbound text against a pending voice draft.
+   *
+   * A confirmed draft re-enters `handle()` as an ordinary text event rather than
+   * being run directly, so /commands, /steer, the length limit and dedup all
+   * apply to a spoken prompt exactly as they do to a typed one. This mirrors the
+   * held-prompt replay above and, like it, cannot recurse: the replayed event is
+   * text, and the draft has already been cleared by `resolve()`.
+   */
+  private async resolveVoiceDraft(
+    event: Extract<RemoteInboundEvent, { kind: 'text' }>,
+  ): Promise<RemoteInboundDisposition | undefined> {
+    if (!this.voice) return undefined;
+    const resolution = this.voice.drafts.resolve(event.channel, event.chatId, event.text);
+    if (resolution.kind === 'none') return undefined;
+    const text = this.voice.bridge.finishDraft(resolution);
+    this.auth.touch(event);
+    if (text === undefined) {
+      await this.channel.send(event.chatId, 'Forge: draft discarded.', {
+        signal: this.abort.signal,
+      });
+      return { kind: 'handled' };
+    }
+    return await this.handle({ ...event, text });
   }
 
   updateOptions(options: RemoteControllerOptions): void {
@@ -322,6 +356,17 @@ export class RemoteController {
       this.auth.touch(event);
       return { kind: 'handled' };
     }
+    if (event.kind === 'voice') {
+      if (!this.voice) {
+        return {
+          kind: 'rejected',
+          reason: 'voice input is disabled (set voice.enabled in config)',
+        };
+      }
+      const result = await this.voice.bridge.handle(event);
+      if (result.kind !== 'rejected' && result.kind !== 'retry') this.auth.touch(event);
+      return result;
+    }
     if (event.text.length > this.options.maxMessageChars) {
       return { kind: 'rejected', reason: 'message exceeds configured limit' };
     }
@@ -333,6 +378,11 @@ export class RemoteController {
       this.auth.touch(event);
       return { kind: 'handled' };
     }
+    // After the question bridge, deliberately: a pending question is blocking a
+    // running turn, while a draft is blocking nothing. Ordering them the other
+    // way would let an unconfirmed transcript strand a live agent.
+    const draftResult = await this.resolveVoiceDraft(event);
+    if (draftResult) return draftResult;
     const key = remoteDedupKey(event.channel, event.chatId, event.providerMessageId);
     const steer = parseSteerCommand(event.text);
     if (steer.matched && !steer.text) {

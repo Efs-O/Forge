@@ -369,6 +369,9 @@ overlaps with an existing owner, extend the owner instead.
 | Spoken command grammar + gate correlation         | `src/voice/VoiceGrammar.ts`            |
 | Voice session-log events                          | `src/voice/VoiceAudit.ts`              |
 | Tier A STT test double                            | `src/voice/FakeWhisperRunner.ts`       |
+| whisper.cpp process + argv                        | `src/voice/WhisperCppRunner.ts`        |
+| Telegram voice note -> draft -> prompt            | `src/remote/RemoteVoiceBridge.ts`      |
+| Bot API update -> `RemoteInboundEvent`            | `src/remote/TelegramInboundMapping.ts` |
 
 ffmpeg discovery is NOT owned here — it stays `src/tools/ffmpegLocate.ts`, and
 the configured override stays the existing `video.ffmpeg_path` key.

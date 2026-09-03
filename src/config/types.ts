@@ -267,6 +267,26 @@ export interface VideoConfig {
   ffmpeg_path?: string;
 }
 
+/**
+ * Raw `voice:` block. Engine and model size are decided (§6.1b), so only their
+ * locations are configurable -- see VoiceConfigSchema for why.
+ */
+export interface VoiceConfig {
+  enabled?: boolean;
+  /** whisper-cli.exe from a CUDA build of whisper.cpp. */
+  whisper_binary?: string;
+  /** ggml-large-v3.bin. */
+  whisper_model?: string;
+  /** `auto`, or an ISO code to force one language. */
+  language?: string;
+  /** Worth ~4 s per utterance, costs a VRAM slot. Default off. */
+  keep_model_loaded?: boolean;
+  input?: { max_bytes?: number; max_seconds?: number };
+  /** §6.4 decoder bias. Empty disables. */
+  bias_prompt?: string;
+  trim_silence?: boolean;
+}
+
 export interface ForgeConfig {
   models: ModelConfig[];
   active_model: string | null;
@@ -285,6 +305,8 @@ export interface ForgeConfig {
   /** `view_video` frame extraction. Top-level only: tools are registered once
    *  at activation and never see the per-turn resolved model. */
   video?: VideoConfig;
+  /** Speech-to-text ingress. Off unless `enabled`. */
+  voice?: VoiceConfig;
   log_level?: 'trace' | 'debug' | 'info' | 'warn' | 'error';
   /** Extra directories to scan for GGUF files (used by first-run wizard). */
   model_dirs?: string[];

@@ -29,6 +29,27 @@ export const RemoteInboundEventSchema = z.discriminatedUnion('kind', [
     text: z.string(),
     attachments: z.array(RemoteInboundAttachmentSchema).max(10).optional(),
   }),
+  /**
+   * A voice note. Deliberately NOT a `text` event with an audio attachment:
+   * `RemoteInboundAttachment.data` is a string, and putting audio through it
+   * would base64-inflate it against a 14 MB cap and then be written back out to
+   * a temp file two steps later anyway (§9.2). Only the file id crosses here;
+   * the bytes go straight to disk via `downloadAttachmentToFile`.
+   */
+  InboundBaseSchema.extend({
+    kind: z.literal('voice'),
+    providerFileId: z.string().min(1).max(256),
+    mediaType: z.string().min(1).max(128),
+    /**
+     * Client-reported clip length. Load-bearing twice over: it rejects an
+     * over-long note before a byte is downloaded, and with `receivedAt` it
+     * defines the recording window that correlates a spoken command to one
+     * pending approval (§22A R1-revised).
+     */
+    durationMs: z.number().int().nonnegative(),
+    /** Set when the note was sent as a reply; wins over the timing heuristic. */
+    replyToMessageId: z.string().min(1).max(256).optional(),
+  }),
   InboundBaseSchema.extend({
     kind: z.literal('action'),
     action: z.enum(['approve', 'deny']),
@@ -165,6 +186,19 @@ export interface RemoteChannel {
   selectionPages?: RemoteSelectionPages;
   /** Fetches attachment bytes only after the controller has authenticated the sender. */
   downloadAttachment?(attachment: RemoteInboundAttachment): Promise<RemoteInboundAttachment>;
+  /**
+   * Stream a provider file straight to `targetPath` and report what landed.
+   *
+   * Separate from `downloadAttachment` because that one returns the payload as
+   * a string on the event, which audio must never become (§9.2). The caller
+   * owns `targetPath` -- in the voice path that is a `VoiceOperation` temp file,
+   * so cleanup stays keyed to the operation rather than to a stray `finally`.
+   */
+  downloadAttachmentToFile?(
+    providerFileId: string,
+    targetPath: string,
+    signal?: AbortSignal,
+  ): Promise<{ bytes: number; mediaType: string }>;
   /**
    * Drop the approve/deny buttons from a prompt that has been resolved.
    *

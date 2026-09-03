@@ -6,6 +6,7 @@ import type { CompactionEvent } from '../sidebar/CompactionService';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import { RemoteAuth } from './RemoteAuth';
 import { RemoteController, type RemoteControllerOptions } from './RemoteController';
+import { buildVoiceBridge } from './RemoteVoiceBridge';
 import { RemoteRequestStore } from './RemoteRequestStore';
 import { resolveWorkspaceAliases, type WorkspaceAliasTarget } from './RemoteWorkspaceDiscovery';
 import {
@@ -323,6 +324,7 @@ export class RemoteRuntime {
         this.options.host,
         this.controllerOptions(config),
         this.audit,
+        buildVoiceBridge(channel, config),
       );
       const subscriptions = subscribeHostToRemote(this.options.host, controller, {
         onCompaction: (event) => this.onCompactionEvent(event, controller),
