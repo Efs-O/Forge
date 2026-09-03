@@ -192,7 +192,7 @@ function splitStreamingContent(content: string): { settled: string; live: string
   return { settled: content.slice(0, lastSafeSplit), live: content.slice(lastSafeSplit) };
 }
 
-export function Message({
+function MessageView({
   role,
   content,
   reasoning,
@@ -267,3 +267,18 @@ export function Message({
     </div>
   );
 }
+
+/**
+ * Memoized because the list is not virtualized: every row is a live component,
+ * and a streaming turn hands `MessageList` a brand-new messages array on every
+ * token. Unmemoized, each token re-ran `react-markdown` + `rehype-highlight`
+ * over the whole transcript -- ~1000 rows in an audited session. Hidden in the
+ * background the browser throttles that work rather than dropping it, so
+ * switching away from the sidebar during a turn and back flushed the backlog in
+ * one paint, which read as the view spontaneously rebuilding itself.
+ *
+ * Every prop here is a primitive (MessageProps' non-primitive fields belong to
+ * the diff and tool rows, which MessageList routes to their own components), so
+ * the default shallow compare is exact -- no custom comparator to drift.
+ */
+export const Message = React.memo(MessageView);

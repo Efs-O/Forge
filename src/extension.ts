@@ -353,9 +353,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const sessionTimeBar = new SessionTimeStatusBar(() => sidebarProvider.getActiveSessionMetrics());
   refreshSessionTime = () => sessionTimeBar.refresh();
   context.subscriptions.push(sessionTimeBar);
+  // Contributed in package.json since the setting was added, but read by
+  // nothing until now -- unticking the box changed no behaviour. Same shape as
+  // the `forge.logLevel` gap fixed in 0.13.0. Note the section prefix: the key
+  // asked for here is the remainder after 'forge.'.
+  const retainSidebarContext = vscode.workspace
+    .getConfiguration('forge')
+    .get<boolean>('sidebar.retainContextWhenHidden', true);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(SidebarProvider.viewId, sidebarProvider, {
-      webviewOptions: { retainContextWhenHidden: true },
+      webviewOptions: { retainContextWhenHidden: retainSidebarContext },
     }),
     watchWorkspaceFolders(workspaceRoot, () => sidebarProvider.postWorkspaceInfo()),
     vscode.workspace.onDidSaveTextDocument((document) => {
