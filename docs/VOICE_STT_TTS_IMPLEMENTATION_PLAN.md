@@ -1162,3 +1162,215 @@ Do **not** start with sidebar recording or TTS. Once Telegram STT works, the dif
 For TTS, prototype JOY pronunciation control outside Forge with 15 technical words before writing a large lexicon. If `[[ raw phoneme ]]` works well, build the lexicon around it. If not, fall back to transliterated speech text without changing the visible response.
 
 This ordering gives the highest chance of having a working local voice-controlled Forge quickly while preserving Forge's existing security, queueing and model-lifecycle architecture.
+
+---
+
+## 27. Prior art already in the sibling workspaces (2026-09-03 sweep)
+
+Before starting Phase 0, note that most of this pipeline has already been built,
+shipped, or measured in other repos on this machine. Reuse the evidence; do not
+re-derive it. Nothing below is a Forge dependency — it is a TS port / lessons
+source, consistent with the "no coupling to sibling projects" rule.
+
+### 27.1 Whisper STT is already installed and measured (Ssuno)
+
+- **Reference doc:** `N:\vs code apps\Ssuno\docs\AUDIO_AND_DOWNLOADS.md`
+  (measured on this exact machine).
+- **whisper.cpp CUDA build already present:**
+  `N:\AI\Tools\whisper.cpp\build\bin\Release\whisper-cli.exe` (+ `whisper-bench.exe`,
+  `ggml-cuda.dll`). Model `N:\AI\Tools\whisper.cpp\models\ggml-large-v3.bin`
+  (3,095,033,483 bytes — verify size before use). No `large-v3-turbo` present:
+  it was **deleted on purpose** — it dropped a final-refrain couplet and
+  hallucinated the outro ~40× on a real track. Re-benchmark turbo for short
+  command utterances before trusting it; the plan's §6.2 assumption that turbo is
+  "likely the practical choice" is contradicted by local measurement on long
+  audio.
+- **Invocation that works:**
+  `whisper-cli.exe -m <model> -f <wav> -l en -otxt -of <out> --no-prints -pp`
+  (`-oj` for word-level JSON). Input must be **16 kHz mono WAV** — matches plan §10.
+- **Known whisper.cpp failure mode (measured):** hallucinated trailing lines at
+  the end of audio (a line repeated ×4, a spurious "Thank you."). For Forge's
+  push-to-talk commands this argues for VAD trailing-silence trim and/or a
+  max-duration cap, and for not trusting the last sentence of a long note.
+- **faster-whisper is the accuracy reference, and it is CPU-only here:**
+  `Systran/faster-whisper-large-v3` with `--no-vad` captured a full song
+  intro→outro near-perfectly; `small.en` / `tiny.en` dropped quiet passages —
+  **never use `.en` models** (plan §6.2 already says this; now it is measured).
+  faster-whisper's CUDA path is **broken on this box** (ctranslate2 wants
+  `cublas64_12.dll`, not on PATH) so it silently runs CPU int8 — ~1 s for a
+  4.5-minute track, never touches VRAM, runs fine alongside Forge/ComfyUI.
+  Reference script: `N:\vs code apps\Ssuno\The Space You Left\transcribe_lyrics.py`
+  (forces `HF_HUB_OFFLINE=1`, maps the 🎵 token to `[music]`, reconfigures stdout
+  to UTF-8 because the console is cp1253 — **keep both behaviours** in any port).
+  Cached models: `N:\.cache\huggingface\hub\models--Systran--faster-whisper-*`.
+- **This is a real fork in the road for Phase 0:** CPU faster-whisper large-v3
+  gives the strongest VRAM-release guarantee of all (it never allocates VRAM), at
+  ~1 s/short-utterance latency. It may beat the "short-lived whisper.cpp GPU
+  process" design on every axis that matters for a 3-second command. Benchmark
+  both in §Phase 0; do not assume GPU.
+- **whisper.cpp models live in the `ggerganov/whisper.cpp` HF repo**, not
+  `ggml-org/...`. HF fast-download env (`HF_HUB_ENABLE_HF_TRANSFER=1`,
+  `HF_XET_*`) is already installed — see the doc.
+- **ComfyUI has no STT** — it only ships audio *diffusion* encoders
+  (`N:\AI\ComfyUI\comfy\audio_encoders`, `ldm/audio`, `mmaudio`, stable-audio-3).
+  The only transferable "conclusion to ComfyUI" is the **one-GPU-model-at-a-time**
+  rule: GPU whisper.cpp obeys the same single-slot VRAM discipline as ComfyUI, so
+  the coding model and GPU STT genuinely contend. CPU STT sidesteps it entirely.
+
+### 27.2 A dual-llama-server STT design is already implemented (Gemma4kids)
+
+Gemma4kids shipped almost exactly the "second managed server for STT only"
+architecture on **2026-05-08**. It targets a Gemma-3n E4B **audio-multimodal**
+model rather than whisper, but the process/VRAM/lifecycle scaffolding is directly
+portable.
+
+- **Plan doc:** `N:\vs code apps\Gemma4kids\plan-dual-stt-server.md` (marked
+  ✅ IMPLEMENTED).
+- **Implementation:** `N:\vs code apps\Gemma4kids\src\main\llamaSttRuntime.ts`
+  (316 LOC) + `llamaSttUtils.ts` + shared `src\shared\transcription.ts`.
+- **Directly reusable decisions:**
+  - separate `LlamaCppSttConfig` type (no ctx/predict/cache fields) rather than
+    extending the chat config — "keeps chat config lean";
+  - **lazy start on first transcribe call** — zero VRAM until the mic is pressed;
+  - dedicated STT port (they use 8081 vs chat 8080), with a port-resolution step
+    that *excludes the active chat port* and can *reuse an already-running*
+    compatible server;
+  - in-flight startup dedup guard keyed by a JSON config key;
+  - spawn args:
+    `-m <model> [--mmproj <auto-detected>] --host 127.0.0.1 --port <p> --jinja
+    --ctx-size 8192 --batch-size 512 --parallel 1 --flash-attn on
+    --n-gpu-layers <n>`;
+  - 120 s startup timeout; poll `/v1/models` for readiness; on early exit surface
+    `stderr`/`stdout` tails to the user (matches Forge's "no buried errors" rule);
+  - **`void stopManagedSttServer()` immediately after every transcription** to
+    release STT VRAM while the coding server stays loaded — this *is* the plan's
+    §7 hard release barrier, already written, including `killProcessTree`.
+- **Transcribe call shape** (if a future phase ever uses an audio LLM instead of
+  whisper): `POST /v1/chat/completions` with
+  `content: [{type:'input_audio', input_audio:{data:<b64>, format:'wav'}}, {type:'text', text:<prompt>}]`,
+  `stream:false`, `max_tokens:512`; **fallback to `llama-mtmd-cli`** when the
+  server returns an "audio unsupported" error (`shouldFallbackToMtmdCli`).
+- **`src/shared/transcription.ts` is a gift** — dependency-free (no Electron/DOM/
+  Node), already bundles:
+  - `buildTranscribePrompt(languageHint)` with hardened per-language prompts
+    (`el`, `el+strict`, `de`, `en`, auto). The Greek prompt explicitly forbids
+    translation/transliteration and **Arabic/Cyrillic script output** — a real
+    observed drift mode of multilingual models. "Output only the transcription
+    text, with no newlines. Write numbers as digits." Port these verbatim.
+  - `stripPromptEcho()` — fine-tuned/instruct models echo the prompt back;
+  - `looksLikeTranscriptionRefusal()` — detects "no audible speech" / "cannot
+    transcribe" style refusals so they are not admitted as a user prompt. Forge's
+    §7 "do not submit empty/partial text" needs exactly this.
+- **Caveat:** this path proves script-drift and prompt-echo are real even for a
+  purpose-tuned model. whisper.cpp avoids both (it is not instruction-following),
+  which is a point in favour of keeping whisper as the Phase 1 backend.
+
+### 27.3 Piper TTS is already integrated, cross-platform, with a findings log (Gemma4kids)
+
+- **Plan:** `N:\vs code apps\Gemma4kids\tts_plan.md` (2026-04-27).
+- **Implementation:** `N:\vs code apps\Gemma4kids\src\main\ttsMain.ts` (313 LOC) —
+  a working reference for the `PiperRunner` + `VoiceOutputRouter` modules in §5.
+  Reusable pieces:
+  - `scanVoices()` — reads every `*.onnx` + sidecar `.onnx.json`, pulls
+    `audio.sample_rate` and `espeak.voice` (language) from the config, tolerates
+    one malformed voice config without killing the list;
+  - `selectVoice(voices, langHint)` — dominant-language pick with English then
+    first-voice fallback (plan §16);
+  - `buildWavHeader(pcmLength, sampleRate)` — the 44-byte header for the
+    **rhasspy** `--output-raw` (stdout PCM) path;
+  - **two Piper CLI dialects handled:** rhasspy `--output-raw` (stdin→stdout PCM,
+    caller builds the WAV header) vs the arm64 build's
+    `--model … --output_file <path>` (writes a complete WAV). §11.2's "expect an
+    external local Piper command" abstraction must cover both.
+  - text is written to Piper **stdin**, `proc.stdin.end()`, collect `stdout`; on
+    non-zero exit reject with the `stderr` tail.
+- **macOS findings (hard-won):**
+  `N:\vs code apps\Gemma4kids\docs\piper-mac-arm64-findings.md` +
+  `mac-piper-packaging-plan.md`:
+  - rhasspy's `piper_macos_aarch64.tar.gz` (2023.11.14-2) contains an **x86_64**
+    binary (`bad CPU type` on M-series) and the macOS archives **omit
+    `libespeak-ng`, `libpiper_phonemize`, `libonnxruntime.1.14.1`** — Homebrew
+    can't supply 1.14.1. Known upstream: rhasspy/piper #404, #523.
+  - Working macOS arm64 binary: **`itsabhishekolkha/piper-arm-build` v1.2.0**
+    (`piper-arm64-some.deps.deps`, 45 MB) — self-contained (`otool -L` shows
+    system libs only), but it is a **PyInstaller bundle** with a ~1–2 s
+    first-invocation unpack to `/tmp/_MEI…`. Fine for a demo, needs a real C++
+    static build for production.
+  - `OHF-voice/piper1-gpl` wheel is a **Python extension module** (`espeakbridge.so`
+    only) — cannot be spawned from Node. Confirms plan §2.6/§11.2: treat Piper as
+    an external process, not a lib.
+  - macOS `say` (`-v Melina` for `el`) is the last-ditch fallback — works, poor
+    quality. Windows/Linux rhasspy archives are fine (include all dylibs).
+- **Piper training env gotchas** (only relevant if a voice is ever retrained —
+  plan §22 says don't): `N:\vs code apps\Gemma4GR\PIPER_DOCKER_FIXES.md` —
+  RTX 5060 Ti (Blackwell sm_120) needs `nvcr.io/nvidia/pytorch:25.01-py3`+;
+  `piper-train` is off PyPI (install from `rhasspy/piper` source); Docker can't
+  mount `N:` network drives; cp1253 console needs forced UTF-8.
+
+### 27.4 The JOY Greek voice — files, license, provenance (Gemma4GR / Gemma4kids)
+
+- **Voice card:** `N:\vs code apps\Gemma4GR\VOICE_CARD.md` /
+  `N:\vs code apps\Gemma4kids\voices\el_GR-joy-medium.VOICE_CARD.md`.
+- `el_GR-joy-medium` — Piper VITS, **22050 Hz**, speaker Chara Kaltsou, trained
+  on **3,216 human utterances** (LJSpeech format), 20 epochs, medium tier. No
+  synthetic audio in training.
+- **License: CC BY-NC 4.0** — *NonCommercial*. This is a **distinct and stricter
+  constraint than the Piper-runtime GPL issue in plan §2.7 / §21**, and the plan
+  currently does not mention it. If Forge ever ships to the VS Code Marketplace
+  with JOY bundled, the voice's NC clause is the blocker, not just the runtime
+  license. Attribution string required: *"JOY Greek voice (el_GR-joy-medium),
+  Gemma4GR project — https://github.com/Efs-O/Gemma4GR, CC BY-NC 4.0"*.
+  Commercial licensing contact is the project author.
+- **Local copies of the model** (`el_GR-joy-medium.onnx` + `.onnx.json`):
+  `N:\vs code apps\Gemma4kids\voices\`, `...\JOY\`, `...\joy-greek-tts-upload\`,
+  `N:\vs code apps\Gemma4GR\output\piper_voice\`.
+- Baseline Greek voice for A/B was `el_GR-rapunzelina-medium` — checkpoints under
+  `N:\.cache\huggingface\hub\datasets--rhasspy--piper-checkpoints\...\el\el_GR\rapunzelina\medium`.
+  Conclusion from Gemma4GR's `VOICE_CARD` rationale: every pre-existing community
+  Greek voice was trained on synthetic/low-quality data and is "robotic,
+  mispronounced" — JOY exists because nothing else was usable. So for Greek TTS
+  in Forge there is effectively one option.
+
+### 27.5 Greek STT A/B evidence and the task-interference finding (Gemma4GR)
+
+Not directly reusable (it is about fine-tuning Gemma E4B, not whisper), but one
+conclusion matters for Forge's design:
+
+- `N:\vs code apps\Gemma4GR\FINAL_STT_RUN_PLAN.md` +
+  `output\ab_final_stt_vs_base_*.json` (2026-05-14): mixing an STT objective with
+  a spoken-QA objective in one model **degraded transcription** — fine-tuned
+  failures were "meta-responses or prompt echoes". Reinforces the plan's central
+  rule: **do not give one model both the "transcribe" job and the "answer" job.**
+  Voice stays a transport; whisper transcribes; the coding model only ever sees
+  text. A/B harness for reference: `N:\vs code apps\Gemma4GR\tests\stt_benchmark.py`,
+  `training\compare_piper_voices.py`.
+- Greek STT prompt that was trained against:
+  `N:\vs code apps\Gemma4GR\greek_stt_prompt.txt` (pair it with the hardened
+  prompts in §27.2 if an audio-LLM path is ever revisited).
+
+### 27.6 Net recommendation delta for this plan
+
+1. **Phase 0 must benchmark CPU faster-whisper-large-v3 as a first-class STT
+   backend**, not just as a fallback. On this machine it is already installed,
+   already measured accurate, and gives a perfect VRAM-release story. The plan's
+   "short-lived whisper.cpp GPU process" may be solving a problem (VRAM release)
+   that the CPU path doesn't have.
+2. **Drop the `large-v3-turbo` default assumption** (§6.2) pending a short-utterance
+   re-benchmark — it was deleted here for hallucinating.
+3. **Port `src/shared/transcription.ts` from Gemma4kids** as the starting point
+   for prompt-building / refusal-detection / prompt-echo-stripping (§7, §9.4).
+4. **Port the `llamaSttRuntime.ts` lifecycle** (lazy start, port exclusion,
+   startup-error surfacing, stop-after-transcribe) as the skeleton for
+   `WhisperLifecycle.ts` — swap the audio-LLM HTTP call for a whisper-cli spawn.
+5. **Port `ttsMain.ts`** (`scanVoices`, `selectVoice`, `buildWavHeader`,
+   dual-CLI-dialect spawn) as the skeleton for `PiperRunner.ts` / `PiperLifecycle.ts`.
+6. **Add a §21 sub-point for the JOY CC BY-NC 4.0 voice license** — it is a
+   separate redistribution blocker from the Piper GPL runtime and is currently
+   unaddressed.
+7. **whisper.cpp trailing-hallucination is a measured risk** — add VAD /
+   max-duration trim and end-of-audio distrust to the §24 STT test matrix.
+8. Reference-doc pointers to keep in Forge diagnostics:
+   `Ssuno/docs/AUDIO_AND_DOWNLOADS.md`, `Gemma4kids/plan-dual-stt-server.md`,
+   `Gemma4kids/tts_plan.md`, `Gemma4kids/docs/piper-mac-arm64-findings.md`,
+   `Gemma4GR/VOICE_CARD.md`, `Gemma4GR/FINAL_STT_RUN_PLAN.md`,
+   `Gemma4GR/PIPER_DOCKER_FIXES.md`.
