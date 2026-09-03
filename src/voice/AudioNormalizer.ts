@@ -111,3 +111,47 @@ function runFfmpeg(ffmpeg: string, args: string[], signal?: AbortSignal): Promis
     });
   });
 }
+
+/**
+ * WAV -> OGG/Opus, the format Telegram plays inline as a voice message.
+ *
+ * `sendAudio` would accept the WAV, but it renders as a file attachment with a
+ * download step; `sendVoice` requires OGG/Opus and renders as a waveform that
+ * plays on tap. For a reply you are meant to just hear, that difference is the
+ * whole feature.
+ *
+ * 24 kHz mono at 32 kbps: Piper emits 22.05 kHz mono, and Opus resamples to its
+ * own internal rates regardless, so bitrate is the only real lever. 32k is
+ * transparent for a single speaking voice.
+ */
+export async function encodeToOpus(
+  operation: VoiceOperation,
+  wavPath: string,
+  options: { ffmpegPath?: string | undefined; signal?: AbortSignal | undefined } = {},
+): Promise<string> {
+  const { ffmpeg } = resolveFfmpeg(options.ffmpegPath);
+  const target = operation.reserve('speech.ogg');
+  await runFfmpeg(
+    ffmpeg,
+    [
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-nostdin',
+      '-y',
+      '-i',
+      wavPath,
+      '-c:a',
+      'libopus',
+      '-b:a',
+      '32k',
+      '-ar',
+      '24000',
+      '-ac',
+      '1',
+      target,
+    ],
+    options.signal,
+  );
+  return target;
+}

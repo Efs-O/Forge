@@ -352,6 +352,29 @@ export class TelegramChannel implements RemoteChannel {
     });
   }
 
+  /**
+   * Uploads a synthesized reply as a playable voice message.
+   *
+   * `sendVoice` rather than `sendAudio` because Telegram renders the former as
+   * an inline waveform that plays on tap and the latter as a file with a
+   * download step -- for a reply meant to just be heard, that is the feature.
+   * It requires OGG/Opus specifically; see `encodeToOpus`.
+   *
+   * Multipart rather than `this.call`, which posts JSON: a file upload is the
+   * one Bot API shape that cannot go through it.
+   */
+  async sendVoice(chatId: string, oggPath: string, signal?: AbortSignal): Promise<void> {
+    const bytes = await fsp.readFile(oggPath);
+    const form = new FormData();
+    form.append('chat_id', chatId);
+    form.append('voice', new Blob([new Uint8Array(bytes)], { type: 'audio/ogg' }), 'reply.ogg');
+    const response = await this.fetchImpl(
+      `https://api.telegram.org/bot${this.options.token}/sendVoice`,
+      { method: 'POST', body: form, ...(signal ? { signal } : {}) },
+    );
+    if (!response.ok) throw new Error(`Telegram sendVoice HTTP ${response.status}.`);
+  }
+
   private async call(
     method: string,
     body: Record<string, unknown>,

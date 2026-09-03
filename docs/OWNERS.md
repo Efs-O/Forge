@@ -371,6 +371,9 @@ overlaps with an existing owner, extend the owner instead.
 | Voice audit JSONL writer                          | `src/voice/VoiceAuditFileSink.ts`      |
 | Tier A STT test double                            | `src/voice/FakeWhisperRunner.ts`       |
 | whisper.cpp process + argv                        | `src/voice/WhisperCppRunner.ts`        |
+| Piper process + argv                              | `src/voice/PiperRunner.ts`             |
+| Markdown -> speakable text                        | `src/voice/SpeechRenderer.ts`          |
+| Spoken reply delivery                             | `src/remote/RemoteSpeechDelivery.ts`   |
 | Telegram voice note -> draft -> prompt            | `src/remote/RemoteVoiceBridge.ts`      |
 | Bot API update -> `RemoteInboundEvent`            | `src/remote/TelegramInboundMapping.ts` |
 

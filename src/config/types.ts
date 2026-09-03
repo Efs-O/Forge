@@ -285,6 +285,15 @@ export interface VoiceConfig {
   /** §6.4 decoder bias. Empty disables. */
   bias_prompt?: string;
   trim_silence?: boolean;
+  /** Spoken replies via Piper. Flagged independently of STT (R6). */
+  output?: {
+    enabled?: boolean;
+    piper_binary?: string;
+    voices_dir?: string;
+    voice_en?: string;
+    voice_el?: string;
+    max_chars?: number;
+  };
 }
 
 export interface ForgeConfig {

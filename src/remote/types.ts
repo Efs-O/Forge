@@ -194,6 +194,11 @@ export interface RemoteChannel {
    * owns `targetPath` -- in the voice path that is a `VoiceOperation` temp file,
    * so cleanup stays keyed to the operation rather than to a stray `finally`.
    */
+  /**
+   * Deliver a spoken reply as a playable voice message. Optional: channels with
+   * no such affordance simply do not implement it, and speech is skipped.
+   */
+  sendVoice?(chatId: string, oggPath: string, signal?: AbortSignal): Promise<void>;
   downloadAttachmentToFile?(
     providerFileId: string,
     targetPath: string,

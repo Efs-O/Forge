@@ -18,6 +18,12 @@ export class RemoteOutboxDelivery {
     private readonly retryDelayMs = 1_000,
     private readonly onError?: (message: string) => void,
     private readonly canDeliver: CanDeliver = () => true,
+    /**
+     * Optional spoken rendering, attempted AFTER the text is marked delivered.
+     * Ordering is the contract: speech must never be able to affect whether a
+     * message counts as sent, or a Piper failure would drive the retry loop.
+     */
+    private readonly speak?: (chatId: string, text: string) => Promise<boolean>,
   ) {}
 
   start(): void {
@@ -60,6 +66,10 @@ export class RemoteOutboxDelivery {
           signal: this.signal,
         });
         await this.store.markOutbox(item.id, 'delivered');
+        // Never inside the try that owns delivery state: `speak` swallows its
+        // own errors, but the ordering has to make that impossible to get wrong
+        // if it ever stops doing so.
+        await this.speak?.(item.chatId, item.text).catch(() => false);
       } catch {
         await this.store.markOutbox(
           item.id,

@@ -386,3 +386,35 @@ export function buildSpokenGateContext(
     },
   };
 }
+
+/**
+ * Interprets one inbound text against a pending voice draft.
+ *
+ * Lives beside the bridge rather than in `RemoteController` because the draft
+ * verbs and their precedence are this module's semantics, not the controller's
+ * -- the controller only knows when to ask.
+ *
+ * A confirmed draft is re-run through `rerun` as ordinary text rather than
+ * executed here, so /commands, /steer, the length limit and dedup all apply to a
+ * spoken prompt exactly as to a typed one. It cannot recurse: the replayed event
+ * is text and `resolve()` has already cleared the draft.
+ */
+export async function resolveVoiceDraft(
+  event: Extract<RemoteInboundEvent, { kind: 'text' }>,
+  voice: { bridge: RemoteVoiceBridge; drafts: PendingVoiceDraft },
+  deps: {
+    touch(): void;
+    say(text: string): Promise<void>;
+    rerun(text: string): Promise<RemoteInboundDisposition>;
+  },
+): Promise<RemoteInboundDisposition | undefined> {
+  const resolution = voice.drafts.resolve(event.channel, event.chatId, event.text);
+  if (resolution.kind === 'none') return undefined;
+  const text = voice.bridge.finishDraft(resolution);
+  deps.touch();
+  if (text === undefined) {
+    await deps.say('Forge: draft discarded.');
+    return { kind: 'handled' };
+  }
+  return await deps.rerun(text);
+}

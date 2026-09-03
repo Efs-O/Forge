@@ -230,6 +230,25 @@ const VoiceConfigSchema = z
     bias_prompt: z.string().default(''),
     /** Trailing-silence trim. Off is the safe direction (see SILENCE_TRIM_FILTER). */
     trim_silence: z.boolean().default(true),
+    /**
+     * Spoken replies via Piper. Flagged independently of STT (R6): they are
+     * separate capabilities with separate failure modes, and input is useful
+     * without output.
+     *
+     * The JOY Greek voice is CC BY-NC 4.0, which is why nothing is bundled and
+     * both paths point at the user's own install (§21).
+     */
+    output: z
+      .object({
+        enabled: z.boolean().default(false),
+        piper_binary: z.string().min(1).optional(),
+        voices_dir: z.string().min(1).optional(),
+        voice_en: z.string().min(1).optional(),
+        voice_el: z.string().min(1).optional(),
+        /** Past this a spoken reply stops being a summary. */
+        max_chars: z.number().int().positive().optional(),
+      })
+      .optional(),
   })
   .optional();
 

@@ -7,6 +7,7 @@ import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import { RemoteAuth } from './RemoteAuth';
 import { RemoteController, type RemoteControllerOptions } from './RemoteController';
 import { buildVoiceBridge } from './RemoteVoiceBridge';
+import { buildSpeechDelivery } from './RemoteSpeechDelivery';
 import { RemoteRequestStore } from './RemoteRequestStore';
 import { resolveWorkspaceAliases, type WorkspaceAliasTarget } from './RemoteWorkspaceDiscovery';
 import {
@@ -325,6 +326,7 @@ export class RemoteRuntime {
         this.controllerOptions(config),
         this.audit,
         buildVoiceBridge(channel, config),
+        buildSpeechDelivery(channel, config, undefined, this.options.notifyLocal),
       );
       const subscriptions = subscribeHostToRemote(this.options.host, controller, {
         onCompaction: (event) => this.onCompactionEvent(event, controller),
