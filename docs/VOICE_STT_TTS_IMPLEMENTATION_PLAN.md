@@ -1586,6 +1586,52 @@ available whenever it is wanted.
 and nothing reads them. That is the plan's own advice ("keep text fallback
 available") arrived at from the other direction.
 
+### Can we build our own `piper.exe`? — traced 2026-09-03
+
+Asked because a homemade native binary would sidestep the Python wheel. The
+answer is yes, and it would not help, which is only obvious once you know where
+the feature lives:
+
+```
+src/piper/voice.py:255      if text_part.startswith("[["):
+libpiper/src/piper.cpp      (no match)
+```
+
+**`[[ ]]` is parsed in piper1-gpl's PYTHON layer**, not in `libpiper`. It is
+text splitting performed *before* anything reaches the C++ synthesizer.
+`libpiper/src/main/main.cpp` is a real native CLI target and does build with
+CMake — but compiling it produces a binary with exactly the pronunciation
+control 1.2.0 already has, which is none. **Do not spend a day on a native
+build expecting to get phonemes out of it.**
+
+Nor is there a side door in 1.2.0. Its `--json-input` mode ignores a `phonemes`
+field entirely; the debug trace shows it phonemizing the raw text regardless.
+That binary has no phoneme entry point at all.
+
+Two routes do work, neither yet justified:
+
+1. **Freeze the wheel.** PyInstaller `--onefile` on piper1-gpl yields a genuinely
+   self-contained `piper.exe` with the interpreter inside and nothing for a user
+   to install. That satisfies §11.2 at the level the rule cares about --
+   deployment -- even though Python is technically bundled. Cost is size: 150-250
+   MB against the current 500 KB, because onnxruntime and espeak-ng data ride
+   along.
+2. **Skip Piper entirely and go to espeak-ng.** The 1.2.0 install already ships
+   `espeak-ng-data/` with **113 compiled dictionaries**, `en_dict` and `el_dict`
+   among them. espeak is what does the phonemizing, so a dictionary entry fixes a
+   word for the *existing* binary -- no new build, no Python, no version change.
+   It is the same mechanism `[[ ]]` exists to reach, entered through the front
+   door. The catch is that compiling a dictionary needs the `espeak-ng` CLI (only
+   the DLL ships with Piper; the CLI is not on this machine) and means shipping
+   modified data files.
+
+**Trigger for revisiting: evidence, not appetite.** Phonemes only buy something
+for words where no *spelling* produces the right sound, and that list does not
+exist yet -- §14's transliteration covers every term measured so far. Collect
+the terms that still come out wrong after transliteration during real use. A
+short list means more lexicon entries. A long list, especially of Greek-script
+words, is what makes route 2 worth its complexity.
+
 ### Implementation strategy
 
 1. Pin the Piper runtime/version being tested.
