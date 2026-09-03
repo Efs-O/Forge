@@ -1,5 +1,39 @@
 # Forge — Recent Changes
 
+## 0.15.13
+
+- **Talk to Forge, and hear it answer.** Send a voice note to the Telegram bot
+  and it comes back as `Heard: "..."` for you to confirm with `/ok` before
+  anything runs — the transcript is a draft, never a submission. Replies are
+  spoken back as a playable voice message. Transcription is whisper.cpp with
+  `large-v3`, chosen on deployment grounds rather than speed: faster-whisper's
+  CUDA path cannot start without a ~500 MB CUDA 12 runtime an end user would
+  have to install, and Ssuno had already tested and deleted `turbo` for
+  dropping a whole couplet and hallucinating an outro.
+
+- **Spoken approvals, and the refusals that make them safe.** Say "approve",
+  "εντάξει", "deny" or "σταμάτα" and the matching gate resolves — but only when
+  exactly one approval was open across your entire recording window. Anything
+  ambiguous refuses and tells you to tap the button. Matching is
+  whole-utterance, which is what makes the negated cases safe: a recorded
+  `μην εγκρίνεις` came back from whisper as `Μείνα εγκρίνης.` — mangled past
+  recognition, the negation destroyed — and was still refused, because a
+  two-word phrase cannot match a whole utterance. All six recorded negations
+  are now a test, against verbatim fixture transcripts, so it needs no GPU.
+
+- **Replies are summarized for speech, not narrated.** A code fence becomes
+  "Code block, 12 lines", a path becomes its last segment, a table becomes "A
+  table.", a URL becomes "a link" — and inline code keeps its content, because
+  `npm run ci` is exactly what you want to hear. A reply that renders down to
+  nothing but placeholders is not spoken at all.
+
+- **An invisible byte no longer costs an hour.** A stray `0x08` inside a regex
+  literal made a function return the wrong answer while the identical code
+  worked in plain node. It renders as `` in `od` and as *nothing* in every
+  editor, terminal and grep. That is the second time this repo has been bitten
+  by a control character generated through a shell heredoc, so there is now a
+  test that scans every tracked source file and fails by name.
+
 ## 0.15.12
 
 - **A resumed agent stops treating old requests as new ones.** After an
