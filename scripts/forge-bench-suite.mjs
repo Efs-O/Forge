@@ -66,7 +66,7 @@ function latestReport(taskOutput) {
   return existsSync(reportPath) ? JSON.parse(readFileSync(reportPath, 'utf8')) : undefined;
 }
 
-function renderReport(suite, runId, taskReports) {
+function renderReport(suite, runId, taskReports, arms) {
   const rows = taskReports.flatMap((entry) =>
     (entry.report?.results ?? []).map((result) => ({
       task: entry.task.instance_id,
@@ -75,7 +75,7 @@ function renderReport(suite, runId, taskReports) {
       runtime: result.runtime_ms ? `${(result.runtime_ms / 1000).toFixed(1)}s` : '—',
     })),
   );
-  const counts = ['qwen-forge', 'qwen-minimal'].map((arm) => {
+  const counts = arms.map((arm) => {
     const armRows = rows.filter((row) => row.arm === arm);
     return {
       arm,
@@ -88,7 +88,7 @@ function renderReport(suite, runId, taskReports) {
     '',
     `Run: \`${runId}\``,
     '',
-    '> This is a local calibration suite using five official SWE-bench Verified test instances. It is not a published SWE-bench score.',
+    `> Local comparison across ${suite.tasks.length} official SWE-bench Verified test instances, arms: ${arms.join(', ')}. Not a published SWE-bench score.`,
     '',
     '| Task | Arm | Result | Runtime |',
     '| --- | --- | --- | ---: |',
@@ -100,7 +100,7 @@ function renderReport(suite, runId, taskReports) {
       (count) => `- ${count.arm}: ${count.pass}/${count.total} official evaluator PASS`,
     ),
     '',
-    'The two Qwen arms use the same model, server facts, tool allowlist, and `reasoning_effort: low`; they differ in prompt and loop ownership.',
+    'Qwen arms use the same model, server facts, tool allowlist, and `reasoning_effort: low`; `qwen-forge` differs from `qwen-minimal` in prompt and loop ownership. `claude-code` and `codex` run the CLI agents unattended in their own workspaces.',
     '',
   ];
   return lines.join('\n');
@@ -110,7 +110,7 @@ function main() {
   const args = process.argv.slice(2);
   if (args.includes('--help') || args.includes('-h')) {
     console.log(
-      'Usage: npm run bench:qwen-suite -- [--suite path] [--out path] [--model id] [--base-url url] [--evaluator swebench] [--forge-config path]',
+      'Usage: npm run bench:qwen-suite -- [--suite path] [--out path] [--arms a1,a2,...] [--limit N] [--model id] [--base-url url] [--evaluator swebench] [--forge-config path] [--unload-chat-node]',
     );
     return;
   }
@@ -119,8 +119,16 @@ function main() {
     value(args, '--suite') ?? 'benchmarks/swe-bench-verified-qwen-suite.json',
   );
   const outputRoot = resolve(ROOT, value(args, '--out') ?? 'results');
+  const arms = (value(args, '--arms') ?? 'qwen-minimal,qwen-forge')
+    .split(',')
+    .map((arm) => arm.trim())
+    .filter(Boolean);
+  const limit = value(args, '--limit') ? Number(value(args, '--limit')) : undefined;
   const suite = readSuite(suitePath);
-  const runId = `qwen-suite-${new Date().toISOString().replace(/[:.]/gu, '-')}`;
+  if (Number.isInteger(limit) && limit > 0 && limit < suite.tasks.length) {
+    suite.tasks = suite.tasks.slice(0, limit);
+  }
+  const runId = `suite-${new Date().toISOString().replace(/[:.]/gu, '-')}`;
   const runDir = resolve(outputRoot, runId);
   mkdirSync(runDir, { recursive: true });
   writeFileSync(
@@ -143,13 +151,14 @@ function main() {
       '--task',
       taskManifest,
       '--arms',
-      'qwen-minimal,qwen-forge',
+      arms.join(','),
       '--out',
       taskDir,
       ...(value(args, '--model') ? ['--model', value(args, '--model')] : []),
       ...(value(args, '--base-url') ? ['--base-url', value(args, '--base-url')] : []),
       ...(value(args, '--evaluator') ? ['--evaluator', value(args, '--evaluator')] : []),
       ...(value(args, '--forge-config') ? ['--forge-config', value(args, '--forge-config')] : []),
+      ...(args.includes('--unload-chat-node') ? ['--unload-chat-node'] : []),
     ];
     const result = spawnSync(process.execPath, childArgs, {
       cwd: ROOT,
@@ -161,9 +170,9 @@ function main() {
     if (result.error)
       console.error(`forge-bench-suite: ${task.instance_id}: ${result.error.message}`);
   }
-  const aggregate = { version: 1, run_id: runId, suite, tasks: taskReports };
+  const aggregate = { version: 1, run_id: runId, arms, suite, tasks: taskReports };
   writeFileSync(resolve(runDir, 'report.json'), JSON.stringify(aggregate, null, 2));
-  writeFileSync(resolve(runDir, 'report.md'), renderReport(suite, runId, taskReports));
+  writeFileSync(resolve(runDir, 'report.md'), renderReport(suite, runId, taskReports, arms));
   console.log(`forge-bench-suite: complete; report ${runDir}`);
 }
 
