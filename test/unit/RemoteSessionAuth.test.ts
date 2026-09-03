@@ -57,6 +57,50 @@ describe('RemoteSessionAuth', () => {
     });
   });
 
+  /**
+   * An authenticated owner's voice note must pass the gate.
+   *
+   * It did not: the authorized-kinds check was an inline chain of `action ||
+   * selection || text`, written before `voice` existed, so every voice note
+   * from a fully authenticated owner was denied -- and denied with "remote
+   * authentication is required", which sent the user looking for a code that
+   * would never have helped. Observed live on Telegram, twice, minutes after a
+   * text prompt in the same chat had worked.
+   *
+   * Voice is strictly weaker than the text it becomes: it is held as a draft
+   * the sender still has to confirm with /ok.
+   */
+  it('authorizes a voice note from an authenticated owner', async () => {
+    const secrets = new MemorySecrets();
+    const auth = new RemoteSessionAuth(secrets as unknown as vscode.SecretStorage, {
+      inactivityTimeoutMinutes: 30,
+    });
+    const secret = auth.createEnrollmentSecret();
+    const now = 1_234_567_890_000;
+    const code = generateTotp(secret, now).code;
+    await auth.confirmEnrollment('fake', 'owner', secret, code, now);
+
+    const note: Extract<RemoteInboundEvent, { kind: 'voice' }> = {
+      channel: 'fake',
+      kind: 'voice',
+      providerMessageId: 'message',
+      senderId: 'owner',
+      chatId: 'chat',
+      chatType: 'private',
+      receivedAt: 1,
+      providerFileId: 'file',
+      mediaType: 'audio/ogg',
+      durationMs: 2_000,
+    };
+
+    // Before authenticating, a voice note is still blocked -- it cannot carry a
+    // six-digit code, so there is nothing for the gate to verify.
+    expect(await auth.gate(note, 'owner', now)).toEqual({ kind: 'blocked' });
+
+    expect(await auth.gate(event(code), 'owner', now)).toMatchObject({ kind: 'authorized' });
+    expect(await auth.gate(note, 'owner', now + 1)).toMatchObject({ kind: 'authorized' });
+  });
+
   it('expires inactivity, rejects replay, and permits local-only enrollment removal', async () => {
     const secrets = new MemorySecrets();
     const auth = new RemoteSessionAuth(secrets as unknown as vscode.SecretStorage, {

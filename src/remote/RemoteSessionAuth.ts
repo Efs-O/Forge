@@ -48,6 +48,21 @@ export function totpSecretKey(channel: RemoteInboundEvent['channel']): string {
  * Pairing remains in RemoteAuth; callers must establish the exact owner before
  * presenting an event to this boundary.
  */
+/**
+ * Event kinds an authenticated owner may act with.
+ *
+ * A named set rather than an inline chain because adding an inbound kind must
+ * force a decision here. When it was a chain, `voice` was added to the system
+ * and simply never considered -- the gate denied it, and the denial named
+ * authentication, which is the one thing that was not wrong.
+ */
+const ACTIONABLE_WHEN_AUTHENTICATED = new Set<RemoteInboundEvent['kind']>([
+  'action',
+  'selection',
+  'text',
+  'voice',
+]);
+
 export class RemoteSessionAuth {
   private readonly sessions = new Map<string, AuthSession>();
 
@@ -114,13 +129,22 @@ export class RemoteSessionAuth {
     if (session.lockedOutUntil && now < session.lockedOutUntil) return { kind: 'locked_out' };
 
     if (session.state === 'authenticated') {
-      return event.kind === 'action' || event.kind === 'selection' || event.kind === 'text'
+      // Every event kind an authenticated owner may act with. `voice` belongs
+      // here for the same reason `text` does -- it becomes a draft the sender
+      // must still confirm, so it is strictly weaker than the text it turns
+      // into. It was missing purely because this list predates the kind, and
+      // the result was that voice failed for an owner who was fully
+      // authenticated, reported as "remote authentication is required" with no
+      // code that could ever fix it.
+      return ACTIONABLE_WHEN_AUTHENTICATED.has(event.kind)
         ? {
             kind: 'authorized',
             ...(session.nonce ? { nonce: session.nonce } : {}),
           }
         : { kind: 'blocked' };
     }
+    // A challenge can only be answered in text: no other kind can carry a
+    // six-digit code, so this stays narrower than the set above on purpose.
     if (event.kind !== 'text') return { kind: 'blocked' };
 
     const candidate = extractCode(event.text);
