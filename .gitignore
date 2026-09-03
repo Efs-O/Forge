@@ -94,3 +94,8 @@ SYSTEM_PROMPT_MODE_PLAN.md
 !docs/COMPACTION_PLAN.md
 !docs/CLOUD_DELEGATION_PLAN.md
 !docs/TOOL_RESULT_CONTEXT_EFFICIENCY_PLAN.md
+
+# Generated voice smoke fixtures (scripts/voice-fixtures.mjs --generate).
+# Synthetic audio is reproducible from the manifest; recorded takes are not and
+# are committed deliberately under test/fixtures/voice/recorded/.
+test/fixtures/voice/synthetic/

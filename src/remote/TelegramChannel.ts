@@ -26,6 +26,21 @@ const TelegramUpdateSchema = z.object({
           z.object({ file_id: z.string(), file_size: z.number().int().nonnegative().optional() }),
         )
         .optional(),
+      /**
+       * `duration` is load-bearing, not informational: with `date` it defines
+       * the recording window that correlates a spoken command to one pending
+       * approval (docs/VOICE_STT_TTS_IMPLEMENTATION_PLAN.md §22A R1-revised).
+       */
+      voice: z
+        .object({
+          file_id: z.string(),
+          duration: z.number().int().nonnegative(),
+          mime_type: z.string().optional(),
+          file_size: z.number().int().nonnegative().optional(),
+        })
+        .optional(),
+      /** An explicit reply always wins over the recording-window heuristic. */
+      reply_to_message: z.object({ message_id: z.number().int() }).optional(),
       chat: z.object({ id: z.union([z.number(), z.string()]), type: z.string() }),
       from: z.object({ id: z.union([z.number(), z.string()]) }).optional(),
     })
