@@ -1,5 +1,24 @@
 # Forge — Recent Changes
 
+## 0.15.18
+
+- **Every Telegram list and report is readable on a phone now.** The model list
+  already grouped and bolded itself; everything else arrived as one unbroken
+  block. `/help` ran eleven notes together with nothing between them, `/list`
+  packed a title, an id, a model and a timestamp onto a single wrapping line per
+  conversation, and `/status` read as six lines of undifferentiated prose. Rich
+  text now covers all of them: `/help` gets a paragraph per command group and
+  per note with the section label and each note's subject command in bold;
+  `/list` and `/select` give each conversation a bold numbered title on its own
+  line, its ids and timestamp indented under it, and a blank line before the
+  next; `/models` and `/workspace` bold the entry number, which is the part you
+  type back; `/status`, `/context` and `/queue` bold their line labels. The rule
+  that makes it safe is the one the model list already used — escape the whole
+  message first, then re-insert markup only for the structure Forge itself
+  decided on — so a conversation title full of angle brackets is content, never
+  markup, and a transport that does not parse HTML still gets the same
+  paragraphs with nothing leaking through.
+
 ## 0.15.14
 
 - **Remote resume and conversation selection now have distinct commands.** Bare
