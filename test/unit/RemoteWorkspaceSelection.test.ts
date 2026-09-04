@@ -64,7 +64,7 @@ function context(
     store,
     host: emptyHost,
     signal: new AbortController().signal,
-    modelNames: [],
+    modelEntries: [],
     workspaceAliases: aliases,
     ...(current ? { currentWorkspaceAlias: current } : {}),
   };
@@ -162,7 +162,7 @@ function commandContext(
     workspaceId: 'ws',
     signal: new AbortController().signal,
     inactivityTimeoutMinutes: 30,
-    modelNames: [],
+    modelEntries: [],
     workspaceAliases: aliases,
     switchWorkspace: async () => undefined,
     ...extra,

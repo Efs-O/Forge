@@ -1,4 +1,5 @@
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
+import { sortModelPickerEntries, type ModelPickerDescriptor } from '../sidebar/ModelPickerGroups';
 import { formatRemoteDateTime } from './RemoteDateTime';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type {
@@ -16,7 +17,7 @@ export interface RemoteSelectionContext {
   store: RemoteRequestStore;
   host: ForgeHostFacade;
   signal: AbortSignal;
-  modelNames: readonly string[];
+  modelEntries: readonly ModelPickerDescriptor[];
   /** alias -> display name, from `remote.workspace_aliases`. */
   workspaceAliases: Readonly<Record<string, string>>;
   /** The alias whose configured path is this window's root, when one matches. */
@@ -68,17 +69,17 @@ export async function sendModelSelection(
   context: RemoteSelectionContext,
   pageArgument?: string,
 ): Promise<RemoteInboundDisposition> {
-  if (context.modelNames.length === 0) {
+  if (context.modelEntries.length === 0) {
     return { kind: 'rejected', reason: 'no configured models are available' };
   }
-  const page = parseRequestedPage(pageArgument, context.modelNames.length);
+  const page = parseRequestedPage(pageArgument, context.modelEntries.length);
   if (page === undefined) {
     return {
       kind: 'rejected',
-      reason: `usage: /models <page 1-${pageCount(context.modelNames.length)}>`,
+      reason: `usage: /models <page 1-${pageCount(context.modelEntries.length)}>`,
     };
   }
-  const values = [...context.modelNames];
+  const values = sortModelPickerEntries(context.modelEntries).map((model) => model.name);
   const token = await context.store.issueSelection(
     event.channel,
     event.chatId,
@@ -225,7 +226,7 @@ function renderPage(
   const end = Math.min(start + PAGE_SIZE, values.length);
   const entries =
     kind === 'models'
-      ? values.slice(start, end).map((name, index) => `${start + index + 1}. ${clip(name, 220)}`)
+      ? formatModels(context, values, start, end)
       : kind === 'workspaces'
         ? formatWorkspaces(context, values, start, end)
         : formatConversations(context, values, start, end);
@@ -247,6 +248,26 @@ function renderPage(
     text: `${heading}\n\n${entries.join('\n')}${here}\n\nUse ${command}.${fallback} Selection expires in 10 minutes.`,
     controls: (token) => ({ kind, token, page, pageCount: pages }),
   };
+}
+
+function formatModels(
+  context: RemoteSelectionContext,
+  values: string[],
+  start: number,
+  end: number,
+): string[] {
+  const byName = new Map(context.modelEntries.map((model) => [model.name, model]));
+  const lines: string[] = [];
+  let previousGroup: string | undefined;
+  for (const [offset, name] of values.slice(start, end).entries()) {
+    const group = byName.get(name)?.group ?? 'Other models';
+    if (group !== previousGroup) {
+      lines.push(group);
+      previousGroup = group;
+    }
+    lines.push(`${start + offset + 1}. ${clip(name, 220)}`);
+  }
+  return lines;
 }
 
 /** The current workspace is marked so the list also answers "where am I?",

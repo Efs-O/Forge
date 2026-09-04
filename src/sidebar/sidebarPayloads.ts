@@ -13,7 +13,7 @@ import type { HostToWebview, ModelResidency } from './messageBridge';
 import { classifyModelRoute } from '../llm/ModelRouteClassifier';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
 import { historyMetasFromSession, slimMessagesById, tabMetasFromSession } from './sessionTypes';
-import { modelPickerGroup } from './ModelPickerGroups';
+import { describeModelPickerModel } from './ModelPickerGroups';
 import { reportedContextTokens } from '../util/contextBudget';
 import type { SessionTimeSnapshot } from '../vscode/SessionTimeStatusBar';
 
@@ -28,7 +28,7 @@ import type { SessionTimeSnapshot } from '../vscode/SessionTimeStatusBar';
 /** Residency the pool can speak to. Remote routes get `undefined` — see
  *  `ModelEntry.residency`. */
 function residencyOf(
-  model: Parameters<typeof modelPickerGroup>[0],
+  model: Parameters<typeof describeModelPickerModel>[0],
   pool: ModelResidencySource | undefined,
 ): ModelResidency | undefined {
   if (!pool) return undefined;
@@ -55,13 +55,13 @@ export function buildModelsMessage(
     models: config.models.map((configured) => {
       const model = mergeGroupsIntoModel(config, configured);
       const residency = residencyOf(model, pool);
+      const picker = describeModelPickerModel(model);
       // Spread rather than assign undefined: exactOptionalPropertyTypes draws a
       // distinction between an absent key and an explicit undefined, and
       // "no dot" is the absent case.
       return {
-        name: model.name,
+        ...picker,
         provider: model.provider ?? 'llama.cpp',
-        group: modelPickerGroup(model),
         ...(residency ? { residency } : {}),
       };
     }),

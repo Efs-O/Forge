@@ -16,6 +16,12 @@ export const MODEL_PICKER_GROUP_ORDER = [
 
 export type ModelPickerGroup = (typeof MODEL_PICKER_GROUP_ORDER)[number];
 
+/** The small model descriptor shared by the sidebar and remote pickers. */
+export interface ModelPickerDescriptor {
+  name: string;
+  group: ModelPickerGroup;
+}
+
 function titleCase(label: string): string {
   return label.replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
@@ -42,10 +48,30 @@ export function modelPickerGroup(model: ModelConfig): ModelPickerGroup {
   }
 }
 
+/** Builds the presentation metadata used by every model picker. */
+export function describeModelPickerModel(model: ModelConfig): ModelPickerDescriptor {
+  return { name: model.name, group: modelPickerGroup(model) };
+}
+
 /** Stable, case-insensitive ordering for entries in one picker group. */
 export function compareModelPickerEntries(
   a: Pick<ModelConfig, 'name'>,
   b: Pick<ModelConfig, 'name'>,
 ): number {
   return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+}
+
+/** Stable flat ordering matching the sidebar's group order and name sort. */
+export function sortModelPickerEntries<T extends ModelPickerDescriptor>(
+  entries: readonly T[],
+): T[] {
+  const groupOrder = new Map<string, number>(
+    MODEL_PICKER_GROUP_ORDER.map((group, index) => [group, index]),
+  );
+  return [...entries].sort((a, b) => {
+    const groupComparison =
+      (groupOrder.get(a.group) ?? MODEL_PICKER_GROUP_ORDER.length) -
+      (groupOrder.get(b.group) ?? MODEL_PICKER_GROUP_ORDER.length);
+    return groupComparison || a.group.localeCompare(b.group) || compareModelPickerEntries(a, b);
+  });
 }

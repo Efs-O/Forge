@@ -1,5 +1,7 @@
 import * as path from 'path';
 import type { ForgeConfig } from '../config/types';
+import { mergeGroupsIntoModel } from '../config/ConfigResolver';
+import { describeModelPickerModel } from '../sidebar/ModelPickerGroups';
 import { RemoteAttachmentStore } from './RemoteAttachmentStore';
 import { resolveWorkspaceAliases, type WorkspaceAliasTarget } from './RemoteWorkspaceDiscovery';
 import { workspaceIdFor } from './RemoteWorkspaceHandoff';
@@ -90,7 +92,9 @@ export function buildRemoteControllerOptions(
     queueLimit: remote.queue_limit,
     maxMessageChars: remote.max_message_chars,
     rateLimitPerMinute: remote.rate_limit_per_minute,
-    modelNames: config.models.map((model) => model.name),
+    modelEntries: config.models.map((model) =>
+      describeModelPickerModel(mergeGroupsIntoModel(config, model)),
+    ),
     ...(deps.workspaceRoot
       ? { attachmentStore: new RemoteAttachmentStore(deps.workspaceRoot) }
       : {}),

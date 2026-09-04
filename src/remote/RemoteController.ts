@@ -16,6 +16,7 @@ import { RemoteApprovalBridge } from './RemoteApprovalBridge';
 import { RemoteQuestionBridge } from './RemoteQuestionBridge';
 import type { RemoteAttachmentStore } from './RemoteAttachmentStore';
 import { RemoteAgentProgress } from './RemoteAgentProgress';
+import type { ModelPickerDescriptor } from '../sidebar/ModelPickerGroups';
 import { RemoteNotificationFanout } from './RemoteNotificationFanout';
 import {
   admitRemotePrompt,
@@ -33,14 +34,13 @@ import {
 } from './RemoteVoiceBridge';
 import type { RemoteSpeechDelivery } from './RemoteSpeechDelivery';
 import { handleRemoteSelectionAction } from './RemoteSelectionPager';
-
 export interface RemoteControllerOptions {
   workspaceId: string;
   queueLimit: number;
   maxMessageChars: number;
   rateLimitPerMinute: number;
-  /** Snapshot of model names from the active, validated Forge config. */
-  modelNames: readonly string[];
+  /** Snapshot of grouped model descriptors from the active Forge config. */
+  modelEntries: readonly ModelPickerDescriptor[];
   attachmentStore?: RemoteAttachmentStore | undefined;
   attachmentsEnabled: boolean;
   acceptPdfAttachments: boolean;
@@ -339,7 +339,7 @@ export class RemoteController {
           store: this.store,
           host: this.host,
           signal: this.abort.signal,
-          modelNames: this.options.modelNames,
+          modelEntries: this.options.modelEntries,
           workspaceAliases: this.options.workspaceAliases,
           ...(this.options.currentWorkspaceAlias
             ? { currentWorkspaceAlias: this.options.currentWorkspaceAlias }
@@ -420,7 +420,7 @@ export class RemoteController {
           workspaceId: this.options.workspaceId,
           signal: this.abort.signal,
           inactivityTimeoutMinutes: this.options.inactivityTimeoutMinutes ?? 30,
-          modelNames: this.options.modelNames,
+          modelEntries: this.options.modelEntries,
           workspaceAliases: this.options.workspaceAliases,
           // Without this, `/workspace list` never marks the current entry and
           // the "already in this workspace" guard on `/new <alias>` can never

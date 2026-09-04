@@ -10,6 +10,7 @@ import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
 import { collectSystemReport } from '../system/SystemReport';
 import { formatSystemReport } from '../system/formatSystemReport';
+import type { ModelPickerDescriptor } from '../sidebar/ModelPickerGroups';
 
 export interface RemoteCommandContext {
   channel: RemoteChannel;
@@ -18,7 +19,7 @@ export interface RemoteCommandContext {
   workspaceId: string;
   signal: AbortSignal;
   inactivityTimeoutMinutes: number;
-  modelNames: readonly string[];
+  modelEntries: readonly ModelPickerDescriptor[];
   workspaceAliases: Readonly<Record<string, string>>;
   /** The alias whose configured path is this window's root, when one matches. */
   currentWorkspaceAlias?: string | undefined;
@@ -270,7 +271,7 @@ async function executeRemoteCommand(
       return { kind: 'rejected', reason: 'the bound conversation is busy or has queued work' };
     }
     const modelName = resolveSelection(context, event, 'models', argument) ?? argument;
-    if (!context.modelNames.includes(modelName)) {
+    if (!context.modelEntries.some((model) => model.name === modelName)) {
       return { kind: 'rejected', reason: 'model is unavailable; use /models' };
     }
     await context.host.setConversationModel(binding.conversationId, modelName);

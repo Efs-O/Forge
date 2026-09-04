@@ -283,7 +283,7 @@ describe('RemoteController with fake channel', () => {
       queueLimit: 5,
       maxMessageChars: 12_000,
       rateLimitPerMinute: 30,
-      modelNames: [],
+      modelEntries: [],
       attachmentsEnabled: false,
       acceptPdfAttachments: false,
       workspaceAliases: {},
@@ -369,7 +369,7 @@ describe('RemoteController with fake channel', () => {
       queueLimit: 5,
       maxMessageChars: 12_000,
       rateLimitPerMinute: 30,
-      modelNames: [],
+      modelEntries: [],
       attachmentsEnabled: false,
       acceptPdfAttachments: false,
       workspaceAliases: {},
@@ -764,7 +764,7 @@ describe('remote compaction progress notifications', () => {
         queueLimit: 5,
         maxMessageChars: 4000,
         rateLimitPerMinute: 30,
-        modelNames: [],
+        modelEntries: [],
       },
     );
   }
@@ -902,7 +902,7 @@ describe('remote compaction progress notifications', () => {
       workspaceId: 'workspace',
       signal: new AbortController().signal,
       inactivityTimeoutMinutes: 30,
-      modelNames: [],
+      modelEntries: [],
       workspaceAliases: {},
     };
     await handleRemoteCommand(
@@ -955,7 +955,7 @@ describe('remote compaction progress notifications', () => {
       workspaceId: 'workspace',
       signal: new AbortController().signal,
       inactivityTimeoutMinutes: 30,
-      modelNames: [],
+      modelEntries: [],
       workspaceAliases: {},
       reloadWindow,
     };
@@ -1034,7 +1034,7 @@ describe('remote compaction progress notifications', () => {
       workspaceId: 'workspace',
       signal: new AbortController().signal,
       inactivityTimeoutMinutes: 30,
-      modelNames: [],
+      modelEntries: [],
       workspaceAliases: {},
     };
     // The result send throws, so the handler rejects — but the progress edit
@@ -1081,7 +1081,7 @@ describe('remote compaction progress notifications', () => {
       workspaceId: 'workspace',
       signal: new AbortController().signal,
       inactivityTimeoutMinutes: 30,
-      modelNames: [],
+      modelEntries: [],
       workspaceAliases: {},
     };
     await handleRemoteCommand(
@@ -1131,7 +1131,7 @@ describe('remote compaction progress notifications', () => {
       workspaceId: 'workspace',
       signal: new AbortController().signal,
       inactivityTimeoutMinutes: 30,
-      modelNames: [],
+      modelEntries: [],
       workspaceAliases: {},
     };
     await expect(
@@ -1177,7 +1177,7 @@ describe('remote compaction progress notifications', () => {
       workspaceId: 'workspace',
       signal: new AbortController().signal,
       inactivityTimeoutMinutes: 30,
-      modelNames: [],
+      modelEntries: [],
       workspaceAliases: {},
     };
     const command = (text: string, dedupKey: string) =>

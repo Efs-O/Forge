@@ -99,7 +99,10 @@ function context(
     store,
     host: hostWithConversations(conversationCount),
     signal: new AbortController().signal,
-    modelNames: Array.from({ length: modelCount }, (_, index) => `model-${index + 1}`),
+    modelEntries: Array.from({ length: modelCount }, (_, index) => ({
+      name: `model-${index + 1}`,
+      group: 'Local — llama.cpp' as const,
+    })),
     workspaceAliases: {},
   };
 }
@@ -226,9 +229,9 @@ describe('remote selection pagination', () => {
     });
     const page = channel.selectionPageSends[0]!;
     expect(page.text).toContain('Forge models 11-20 of 25 · page 2/3');
-    expect(page.text).toContain('11. model-11');
-    expect(page.text).not.toContain('21. model-21');
-    expect(store.selection('fake', 'chat', 'models')?.values[16]).toBe('model-17');
+    expect(page.text).toContain('11. model-19');
+    expect(page.text).not.toContain('21. model-3');
+    expect(store.selection('fake', 'chat', 'models')?.values[16]).toBe('model-24');
 
     await store.setBinding({
       channel: 'fake',
@@ -249,13 +252,46 @@ describe('remote selection pagination', () => {
       },
       'model-seventeen',
     );
-    expect(setConversationModel).toHaveBeenCalledWith('conversation-1', 'model-17');
+    expect(setConversationModel).toHaveBeenCalledWith('conversation-1', 'model-24');
 
     await expect(sendModelSelection(textEvent('/models 4'), ctx, '4')).resolves.toEqual({
       kind: 'rejected',
       reason: 'usage: /models <page 1-3>',
     });
     expect(channel.selectionPageSends).toHaveLength(1);
+  });
+
+  it('matches the sidebar group order and sorts names within each group', async () => {
+    const store = await requestStore();
+    const channel = new FakeRemoteChannel();
+    const ctx: RemoteSelectionContext = {
+      ...context(channel, store, 0),
+      modelEntries: [
+        { name: 'zeta-openai', group: 'OpenAI' },
+        { name: 'zeta-local', group: 'Local — llama.cpp' },
+        { name: 'alpha-openai', group: 'OpenAI' },
+        { name: 'alpha-local', group: 'Local — llama.cpp' },
+        { name: 'qwen-cloud', group: 'Ollama Cloud' },
+      ],
+    };
+
+    await expect(sendModelSelection(textEvent('/models'), ctx)).resolves.toEqual({
+      kind: 'handled',
+    });
+
+    const page = channel.selectionPageSends[0]!;
+    expect(page.text.indexOf('Local — llama.cpp')).toBeLessThan(page.text.indexOf('Ollama Cloud'));
+    expect(page.text.indexOf('Ollama Cloud')).toBeLessThan(page.text.indexOf('OpenAI'));
+    expect(page.text).toContain(
+      'Local — llama.cpp\n1. alpha-local\n2. zeta-local\nOllama Cloud\n3. qwen-cloud\nOpenAI\n4. alpha-openai\n5. zeta-openai',
+    );
+    expect(store.selection('fake', 'chat', 'models')?.values).toEqual([
+      'alpha-local',
+      'zeta-local',
+      'qwen-cloud',
+      'alpha-openai',
+      'zeta-openai',
+    ]);
   });
 
   it('rejects stale tokens and out-of-range callback pages', async () => {
@@ -289,7 +325,10 @@ describe('remote selection pagination', () => {
       queueLimit: 5,
       maxMessageChars: 4_000,
       rateLimitPerMinute: 30,
-      modelNames: Array.from({ length: 12 }, (_, index) => `model-${index + 1}`),
+      modelEntries: Array.from({ length: 12 }, (_, index) => ({
+        name: `model-${index + 1}`,
+        group: 'Local — llama.cpp' as const,
+      })),
       attachmentsEnabled: false,
       acceptPdfAttachments: true,
       workspaceAliases: {},
@@ -345,7 +384,7 @@ describe('remote selection pagination', () => {
       queueLimit: 5,
       maxMessageChars: 4_000,
       rateLimitPerMinute: 30,
-      modelNames: [],
+      modelEntries: [],
       attachmentsEnabled: false,
       acceptPdfAttachments: true,
       workspaceAliases: { forge: 'Forge', qwen: 'Qwen Testing' },
