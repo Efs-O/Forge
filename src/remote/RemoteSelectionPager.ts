@@ -1,5 +1,10 @@
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
-import { sortModelPickerEntries, type ModelPickerDescriptor } from '../sidebar/ModelPickerGroups';
+import {
+  MODEL_PICKER_GROUP_ORDER,
+  sortModelPickerEntries,
+  type ModelPickerDescriptor,
+} from '../sidebar/ModelPickerGroups';
+import { escapeTelegramHtml } from './telegramHtml';
 import { formatRemoteDateTime } from './RemoteDateTime';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type {
@@ -8,6 +13,9 @@ import type {
   RemoteInboundEvent,
   RemoteSelectionControls,
 } from './types';
+
+/** Heading for a model whose group the picker could not classify. */
+const OTHER_MODELS_GROUP = 'Other models';
 
 const PAGE_SIZE = 10;
 const SELECTION_TTL_MS = 10 * 60_000;
@@ -196,7 +204,7 @@ async function executeSelectionAction(
     event.messageId,
     rendered.text,
     rendered.controls(event.selectionToken),
-    { signal: context.signal },
+    { signal: context.signal, ...(rendered.parseMode ? { parseMode: rendered.parseMode } : {}) },
   );
   return { kind: 'handled' };
 }
@@ -213,10 +221,30 @@ async function sendPage(
   if (context.channel.selectionPages) {
     await context.channel.selectionPages.send(chatId, rendered.text, rendered.controls(token), {
       signal: context.signal,
+      ...(rendered.parseMode ? { parseMode: rendered.parseMode } : {}),
     });
     return;
   }
   await context.channel.send(chatId, rendered.text, { signal: context.signal });
+}
+
+/** Every heading `formatModels` can emit, as it appears once uppercased. */
+const MODEL_GROUP_HEADINGS = new Set(
+  [...MODEL_PICKER_GROUP_ORDER, OTHER_MODELS_GROUP].map((group) => group.toUpperCase()),
+);
+
+/**
+ * Re-inserts the only markup this page owns: its group headings.
+ *
+ * The text is escaped whole first, so a model name is content and nothing else.
+ * Headings are matched as complete lines against a fixed set, which is why a
+ * name can never be mistaken for one -- every entry line starts with "N. ".
+ */
+function withGroupHeadingMarkup(text: string): string {
+  return escapeTelegramHtml(text)
+    .split('\n')
+    .map((line) => (MODEL_GROUP_HEADINGS.has(line) ? `<b><u>${line}</u></b>` : line))
+    .join('\n');
 }
 
 function renderPage(
@@ -224,7 +252,11 @@ function renderPage(
   kind: SelectionKind,
   values: string[],
   page: number,
-): { text: string; controls: (token: string) => RemoteSelectionControls } {
+): {
+  text: string;
+  parseMode?: 'HTML';
+  controls: (token: string) => RemoteSelectionControls;
+} {
   const pages = pageCount(values.length);
   const start = page * PAGE_SIZE;
   const end = Math.min(start + PAGE_SIZE, values.length);
@@ -248,8 +280,18 @@ function renderPage(
     kind === 'workspaces' && context.currentWorkspaceName
       ? `\n\nYou are in: ${clip(context.currentWorkspaceName, 180)}`
       : '';
+  const text = `${heading}\n\n${entries.join('\n')}${here}\n\nUse ${command}.${fallback} Selection expires in 10 minutes.`;
+  // Rich text needs both capabilities: `sendHtml` says the transport parses it,
+  // `selectionPages` says the page is delivered through the call that carries
+  // the parse mode. Without the second, the plain-text fallback would print the
+  // escaping as literal `&amp;`.
+  const rich =
+    kind === 'models' &&
+    context.channel.sendHtml !== undefined &&
+    context.channel.selectionPages !== undefined;
   return {
-    text: `${heading}\n\n${entries.join('\n')}${here}\n\nUse ${command}.${fallback} Selection expires in 10 minutes.`,
+    text: rich ? withGroupHeadingMarkup(text) : text,
+    ...(rich ? { parseMode: 'HTML' as const } : {}),
     controls: (token) => ({ kind, token, page, pageCount: pages }),
   };
 }
@@ -264,9 +306,12 @@ function formatModels(
   const lines: string[] = [];
   let previousGroup: string | undefined;
   for (const [offset, name] of values.slice(start, end).entries()) {
-    const group = byName.get(name)?.group ?? 'Other models';
+    const group = byName.get(name)?.group ?? OTHER_MODELS_GROUP;
     if (group !== previousGroup) {
-      lines.push(group);
+      // Blank line before every group but the first: caps and underline make a
+      // heading legible, whitespace is what makes the list scannable.
+      if (previousGroup !== undefined) lines.push('');
+      lines.push(group.toUpperCase());
       previousGroup = group;
     }
     lines.push(`${start + offset + 1}. ${clip(name, 220)}`);

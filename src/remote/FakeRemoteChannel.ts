@@ -15,29 +15,44 @@ export class FakeRemoteChannel implements RemoteChannel {
     chatId: string;
     text: string;
     controls: RemoteSelectionControls;
+    parseMode?: 'HTML';
   }> = [];
   readonly selectionEdits: Array<{
     chatId: string;
     messageId: string;
     text: string;
     controls: RemoteSelectionControls;
+    parseMode?: 'HTML';
   }> = [];
+  /**
+   * Opt-in, because its presence is what the pager reads as "this transport
+   * parses HTML". Declaring it unconditionally would make every existing test's
+   * selection page rich, which is the opposite of what a fake is for.
+   */
+  sendHtml?: (chatId: string, html: string) => Promise<void>;
+  declareHtmlSupport(): void {
+    this.sendHtml = async (chatId: string, html: string): Promise<void> => {
+      this.sent.push({ chatId, text: html });
+    };
+  }
   readonly selectionCloses: Array<{ chatId: string; messageId: string }> = [];
   readonly selectionPages = {
     send: async (
       chatId: string,
       text: string,
       controls: RemoteSelectionControls,
+      options?: { parseMode?: 'HTML' },
     ): Promise<void> => {
-      this.selectionPageSends.push({ chatId, text, controls });
+      this.selectionPageSends.push({ chatId, text, controls, ...pageMode(options) });
     },
     edit: async (
       chatId: string,
       messageId: string,
       text: string,
       controls: RemoteSelectionControls,
+      options?: { parseMode?: 'HTML' },
     ): Promise<void> => {
-      this.selectionEdits.push({ chatId, messageId, text, controls });
+      this.selectionEdits.push({ chatId, messageId, text, controls, ...pageMode(options) });
     },
     close: async (chatId: string, messageId: string): Promise<void> => {
       this.selectionCloses.push({ chatId, messageId });
@@ -81,4 +96,8 @@ export class FakeRemoteChannel implements RemoteChannel {
   async editMessage(chatId: string, messageId: string, text: string): Promise<void> {
     this.edits.push({ chatId, messageId, text });
   }
+}
+
+function pageMode(options?: { parseMode?: 'HTML' }): { parseMode?: 'HTML' } {
+  return options?.parseMode ? { parseMode: options.parseMode } : {};
 }

@@ -150,14 +150,14 @@ export interface RemoteSelectionPages {
     chatId: string,
     text: string,
     controls: RemoteSelectionControls,
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal; parseMode?: 'HTML' },
   ): Promise<void>;
   edit(
     chatId: string,
     messageId: string,
     text: string,
     controls: RemoteSelectionControls,
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal; parseMode?: 'HTML' },
   ): Promise<void>;
   close(chatId: string, messageId: string, options?: { signal?: AbortSignal }): Promise<void>;
 }

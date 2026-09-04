@@ -25,9 +25,17 @@ export type TelegramBotCall = (
 export function createTelegramSelectionPages(call: TelegramBotCall): RemoteSelectionPages {
   return {
     send: (chatId, text, controls, options) =>
-      sendTelegramSelectionPage(call, chatId, text, controls, options?.signal),
+      sendTelegramSelectionPage(call, chatId, text, controls, options?.signal, options?.parseMode),
     edit: (chatId, messageId, text, controls, options) =>
-      editTelegramSelectionPage(call, chatId, messageId, text, controls, options?.signal),
+      editTelegramSelectionPage(
+        call,
+        chatId,
+        messageId,
+        text,
+        controls,
+        options?.signal,
+        options?.parseMode,
+      ),
     close: (chatId, messageId, options) =>
       closeTelegramSelectionPage(call, chatId, messageId, options?.signal),
   };
@@ -75,10 +83,16 @@ export async function sendTelegramSelectionPage(
   text: string,
   controls: RemoteSelectionControls,
   signal?: AbortSignal,
+  parseMode?: 'HTML',
 ): Promise<void> {
   await call(
     'sendMessage',
-    { chat_id: chatId, text, reply_markup: telegramSelectionKeyboard(controls) },
+    {
+      chat_id: chatId,
+      text,
+      ...(parseMode ? { parse_mode: parseMode } : {}),
+      reply_markup: telegramSelectionKeyboard(controls),
+    },
     signal,
   );
 }
@@ -90,6 +104,7 @@ export async function editTelegramSelectionPage(
   text: string,
   controls: RemoteSelectionControls,
   signal?: AbortSignal,
+  parseMode?: 'HTML',
 ): Promise<void> {
   await call(
     'editMessageText',
@@ -97,6 +112,7 @@ export async function editTelegramSelectionPage(
       chat_id: chatId,
       message_id: parseMessageId(messageId),
       text,
+      ...(parseMode ? { parse_mode: parseMode } : {}),
       reply_markup: telegramSelectionKeyboard(controls),
     },
     signal,

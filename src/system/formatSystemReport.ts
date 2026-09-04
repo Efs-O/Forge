@@ -5,6 +5,7 @@
  */
 
 import type { SystemReport, VramProcess } from './SystemReport';
+import { escapeTelegramHtml } from '../remote/telegramHtml';
 
 export interface FormatOptions {
   /** Telegram and tool results: drop column padding that a phone would wrap. */
@@ -178,25 +179,6 @@ export function formatSystemReport(report: SystemReport, options: FormatOptions 
 
   const text = lines.join('\n');
   return options.telegramHtml ? withTelegramForgeBackendEmphasis(text, report.vramProcesses) : text;
-}
-
-function escapeTelegramHtml(text: string): string {
-  return text.replace(/[&<>"']/gu, (character) => {
-    switch (character) {
-      case '&':
-        return '&amp;';
-      case '<':
-        return '&lt;';
-      case '>':
-        return '&gt;';
-      case '"':
-        return '&quot;';
-      case "'":
-        return '&#39;';
-      default:
-        return character;
-    }
-  });
 }
 
 /** Escape the complete report, then re-insert only Forge-owned backend labels as Telegram HTML. */

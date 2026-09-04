@@ -316,11 +316,16 @@ describe('remote selection pagination', () => {
     });
 
     const page = channel.selectionPageSends[0]!;
-    expect(page.text.indexOf('Local — llama.cpp')).toBeLessThan(page.text.indexOf('Ollama Cloud'));
-    expect(page.text.indexOf('Ollama Cloud')).toBeLessThan(page.text.indexOf('OpenAI'));
-    expect(page.text).toContain(
-      'Local — llama.cpp\n1. alpha-local\n2. zeta-local\nOllama Cloud\n3. qwen-cloud\nOpenAI\n4. alpha-openai\n5. zeta-openai',
+    expect(page.text.indexOf('LOCAL — LLAMA.CPP')).toBeLessThan(
+      page.text.indexOf('OLLAMA CLOUD'),
     );
+    expect(page.text.indexOf('OLLAMA CLOUD')).toBeLessThan(page.text.indexOf('OPENAI'));
+    // A blank line before every group but the first, and no markup: this
+    // channel declares no `sendHtml`, so the page stays literal text.
+    expect(page.text).toContain(
+      'LOCAL — LLAMA.CPP\n1. alpha-local\n2. zeta-local\n\nOLLAMA CLOUD\n3. qwen-cloud\n\nOPENAI\n4. alpha-openai\n5. zeta-openai',
+    );
+    expect(page.parseMode).toBeUndefined();
     expect(store.selection('fake', 'chat', 'models')?.values).toEqual([
       'alpha-local',
       'zeta-local',
@@ -328,6 +333,34 @@ describe('remote selection pagination', () => {
       'alpha-openai',
       'zeta-openai',
     ]);
+  });
+
+  it('underlines group headings on an HTML transport without trusting a model name', async () => {
+    const store = await requestStore();
+    const channel = new FakeRemoteChannel();
+    channel.declareHtmlSupport();
+    const ctx: RemoteSelectionContext = {
+      ...context(channel, store, 0),
+      modelEntries: [
+        { name: 'alpha-local', group: 'Local — llama.cpp' },
+        // A name is content, never markup. Left unescaped, the angle brackets
+        // would swallow the rest of the page and Telegram would reject the send.
+        { name: 'a<b>&c', group: 'OpenAI' },
+      ],
+    };
+
+    await expect(sendModelSelection(textEvent('/models'), ctx)).resolves.toEqual({
+      kind: 'handled',
+    });
+
+    const page = channel.selectionPageSends[0]!;
+    expect(page.parseMode).toBe('HTML');
+    expect(page.text).toContain('<b><u>LOCAL — LLAMA.CPP</u></b>');
+    expect(page.text).toContain('<b><u>OPENAI</u></b>');
+    expect(page.text).toContain('2. a&lt;b&gt;&amp;c');
+    // The usage footer names a placeholder in angle brackets, so it has to
+    // survive escaping too or Telegram eats it as an unknown tag.
+    expect(page.text).toContain('Use /model &lt;number&gt;.');
   });
 
   it('rejects stale tokens and out-of-range callback pages', async () => {
