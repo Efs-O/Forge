@@ -799,6 +799,44 @@ describe('remote runtime lifecycle', () => {
     await expect(channels[0]!.emit(event())).resolves.toMatchObject({ kind: 'retry' });
   });
 
+  it('rebuilds the voice runtime when resident model placement changes', async () => {
+    const { directory } = await newStore();
+    const channels: FakeRemoteChannel[] = [];
+    const runtime = new RemoteRuntime({
+      storageDirectory: directory,
+      workspaceId: 'workspace',
+      host: host(),
+      secrets: new MemorySecrets() as unknown as vscode.SecretStorage,
+      channelFactories: {
+        telegram: () => {
+          const channel = new FakeRemoteChannel();
+          channels.push(channel);
+          return channel;
+        },
+      },
+      notifyLocal: vi.fn(),
+    });
+    const configured = (device: number) =>
+      ForgeConfigSchema.parse({
+        models: [{ name: 'm', provider: 'ollama', endpoint: 'http://127.0.0.1:11434' }],
+        remote: { enabled: true, telegram: { enabled: true } },
+        voice: {
+          enabled: true,
+          whisper_model: 'C:/models/large-v3.bin',
+          compute: { device },
+          server: { enabled: true, binary: 'C:/tools/whisper-server.exe' },
+        },
+      });
+
+    await runtime.applyConfig(configured(0));
+    await runtime.applyConfig(configured(1));
+
+    expect(channels).toHaveLength(2);
+    await expect(channels[0]!.emit(event())).resolves.toMatchObject({ kind: 'retry' });
+    await expect(channels[1]!.emit(event())).resolves.toMatchObject({ kind: 'rejected' });
+    await runtime.dispose();
+  });
+
   it('recreates only the requested transport after its credential changes', async () => {
     const { directory } = await newStore();
     const telegramChannels: FakeRemoteChannel[] = [];

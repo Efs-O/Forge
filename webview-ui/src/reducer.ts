@@ -156,7 +156,12 @@ export function reducer(state: State, action: Action): State {
 
     case 'NOTICE': {
       const cid = resolveConvId(state, action.convId);
-      return appendToConv(state, cid, { id: mkId(), role: 'system', content: action.message });
+      return appendToConv(state, cid, {
+        id: mkId(),
+        role: 'system',
+        content: action.message,
+        ...(action.preformatted ? { preformatted: true } : {}),
+      });
     }
 
     case 'REASONING_TOKEN': {

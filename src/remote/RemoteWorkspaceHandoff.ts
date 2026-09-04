@@ -8,6 +8,7 @@
  */
 
 import { createHash } from 'crypto';
+import { realpathSync } from 'fs';
 import * as path from 'path';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import type { RemoteRequestStore } from './RemoteRequestStore';
@@ -18,11 +19,29 @@ import type { RemoteChannel } from './types';
 /** Exactly how extension.ts derives a workspace id, so the target window
  *  recognises the record as its own. */
 export function workspaceIdFor(target: string): string {
-  return createHash('sha256').update(path.resolve(target)).digest('hex');
+  const resolved = path.resolve(target);
+  if (process.platform !== 'win32') {
+    return createHash('sha256').update(resolved).digest('hex');
+  }
+
+  // Windows paths are case-insensitive. Ask the filesystem for its canonical
+  // spelling so aliases with different casing converge, then retain VS Code's
+  // lowercase-drive convention to preserve existing workspace ids.
+  let canonical = resolved;
+  try {
+    canonical = realpathSync.native(resolved);
+  } catch {
+    // A configured target may disappear between discovery and hashing. Keep
+    // the deterministic resolved spelling so its setup error is surfaced by
+    // the caller rather than hidden here.
+  }
+  canonical = canonical.replace(/^([A-Z]):/, (_, drive: string) => `${drive.toLowerCase()}:`);
+  return createHash('sha256').update(canonical).digest('hex');
 }
 
-/** Records the departure. The caller stops its transports and opens the target
- *  folder; this only makes the move durable first. */
+/** Records the departure and returns its id. The caller stops its transports
+ *  and opens the target folder; this only makes the move durable first, and
+ *  the id is what lets the caller undo it if no window ever claims. */
 export async function recordWorkspaceHandoff(
   store: RemoteRequestStore,
   sourceWorkspaceId: string,
@@ -30,8 +49,8 @@ export async function recordWorkspaceHandoff(
   alias: string,
   channel: string,
   chatId: string,
-): Promise<void> {
-  await store.beginWorkspaceHandoff({
+): Promise<string> {
+  return store.beginWorkspaceHandoff({
     channel: channel as WorkspaceHandoff['channel'],
     chatId,
     sourceWorkspaceId,
@@ -64,8 +83,9 @@ export async function resumeWorkspaceHandoffs(
 export interface ArrivalAnnouncement {
   channelFor: (name: WorkspaceHandoff['channel']) => RemoteChannel | undefined;
   displayNameFor: (alias: string) => string;
-  /** Enrolled TOTP means the reload this switch performed left the chat locked:
-   *  sessions are memory-only and do not survive a window restart. */
+  /** Enrolled TOTP means the arriving chat is locked: sessions are memory-only
+   *  and live in the window that authenticated them, so they never cross into
+   *  the window taking over — whether or not a reload was involved. */
   totpEnrolled: (channel: WorkspaceHandoff['channel']) => Promise<boolean>;
   notifyLocal: (message: string) => void;
 }
@@ -91,7 +111,7 @@ export async function announceWorkspaceArrivals(
       await channel.send(
         handoff.chatId,
         locked
-          ? `Forge: now in ${name} — a new chat is bound here. The window reloaded, so this session locked: send your 6-digit code to unlock it.`
+          ? `Forge: now in ${name} — a new chat is bound here. Your session did not carry over, so this chat is locked: send your 6-digit code to unlock it.`
           : `Forge: now in ${name} — a new chat is bound here.`,
       );
     } catch (err) {

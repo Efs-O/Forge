@@ -44,7 +44,7 @@ export function waitForCliProcessExit(proc: ChildProcess): Promise<CliProcessExi
  * followed by taskkill; POSIX sends SIGTERM then SIGKILL after a grace period.
  * Cleanup never waits longer than six seconds.
  */
-export function terminateCliProcessTree(proc: ChildProcess): Promise<void> {
+export function terminateProcessTree(proc: ChildProcess): Promise<void> {
   return new Promise<void>((resolve) => {
     let settled = false;
     const finish = (): void => {
@@ -86,3 +86,6 @@ export function terminateCliProcessTree(proc: ChildProcess): Promise<void> {
     setTimeout(finish, 6000);
   });
 }
+
+/** Backward-compatible name for CLI adapters. */
+export const terminateCliProcessTree = terminateProcessTree;

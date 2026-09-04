@@ -198,6 +198,7 @@ function MessageView({
   reasoning,
   reasoningMs,
   streaming,
+  preformatted,
 }: MessageProps): React.ReactElement {
   const [thinkingOpen, setThinkingOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -213,6 +214,9 @@ function MessageView({
   }, [content]);
 
   if (role === 'system') {
+    // A report's columns are its structure. The default system row is centred,
+    // italic and 11px — legible for "chat cleared", unreadable for a table.
+    if (preformatted) return <pre className="msg system system-block">{content}</pre>;
     return <div className="msg system">{content}</div>;
   }
 

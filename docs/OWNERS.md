@@ -135,6 +135,9 @@ overlaps with an existing owner, extend the owner instead.
 | Selection list identity, token, expiry       | `src/remote/RemoteSelectionState.ts`   |
 | Sibling-workspace discovery + alias merge    | `src/remote/RemoteWorkspaceDiscovery.ts` |
 | Chat handoff between workspace windows       | `src/remote/RemoteWorkspaceHandoff.ts` |
+| Handoff record state transitions             | `src/remote/RemoteHandoffState.ts`     |
+| Live handoff claim + switch rollback         | `src/remote/RemoteHandoffCoordinator.ts` |
+| Atomic write of the shared remote state file | `src/remote/remoteStateFile.ts`        |
 | Telegram selection keyboard + callback codec | `src/remote/TelegramSelectionPagination.ts` |
 | Forge approval presentation + correlation    | `src/remote/RemoteApprovalBridge.ts`   |
 | Telegram Bot API transport                   | `src/remote/TelegramChannel.ts`        |
@@ -279,6 +282,7 @@ overlaps with an existing owner, extend the owner instead.
 | Tool call JSON-fence fallback converter    | `src/tools/ToolCallFallback.ts`       |
 | Fallback tool-format prompt instructions   | `src/tools/FallbackToolPrompt.ts`     |
 | Allowlisted PowerShell query tool          | `src/tools/safePowerShellTool.ts`     |
+| `get_system_status` tool                   | `src/tools/systemStatusTool.ts`       |
 | Semantic codebase search tool              | `src/tools/semanticSearchTool.ts`     |
 | MCP client bridge (external MCP servers)   | `src/tools/mcpBridge.ts`              |
 | Demand-loaded MCP tool groups (lazy)       | `src/tools/lazyToolGroups.ts`         |
@@ -381,6 +385,14 @@ overlaps with an existing owner, extend the owner instead.
 
 ffmpeg discovery is NOT owned here — it stays `src/tools/ffmpegLocate.ts`, and
 the configured override stays the existing `video.ffmpeg_path` key.
+
+## Machine report (`/system`)
+
+| Concern                                     | Owner                              |
+| ------------------------------------------- | ---------------------------------- |
+| Machine report struct + collection          | `src/system/SystemReport.ts`       |
+| nvidia-smi / WDDM counter probes + parsers  | `src/system/systemProbes.ts`       |
+| Report rendering (sidebar/Telegram/tool)    | `src/system/formatSystemReport.ts` |
 
 ## Misc
 

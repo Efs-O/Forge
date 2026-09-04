@@ -45,8 +45,10 @@ export const TELEGRAM_BOT_COMMANDS = [
   { command: 'status', description: 'Session, model, queue' },
   { command: 'steer', description: 'Interrupt and prioritize' },
   { command: 'stop', description: 'Stop the current request' },
+  { command: 'system', description: 'GPU, VRAM by process, RAM, drives' },
   { command: 'timeout', description: 'Show/set session timeout' },
   { command: 'unload', description: 'Free memory: release the model' },
+  { command: 'voice', description: 'Spoken replies on/off' },
   { command: 'workspace', description: 'List workspaces and show where you are' },
 ] as const;
 

@@ -1,5 +1,4 @@
 import * as fs from 'fs/promises';
-import * as path from 'path';
 import { randomUUID } from 'crypto';
 import type {
   RemoteBinding,
@@ -12,6 +11,7 @@ import {
   LegacyRemoteStateSchema,
   MAX_OUTBOX_RECORDS,
   MAX_RECORDS,
+  migrateLegacyState,
   RemoteStateSchema,
   RETENTION_MS,
   type RemoteSelection,
@@ -19,6 +19,15 @@ import {
   type WorkspaceHandoff,
 } from './RemoteStoreSchemas';
 import { bindingsForConversation, bindingsForWorkspace } from './remoteBindingQueries';
+import { writeRemoteStateFile } from './remoteStateFile';
+import {
+  claimHandoffs,
+  completeHandoff,
+  failUnclaimedHandoff,
+  hasPendingHandoff,
+  replaceHandoffForChat,
+  type HandoffInput,
+} from './RemoteHandoffState';
 import {
   findSelection,
   newSelectionToken,
@@ -49,8 +58,7 @@ export class RemoteRequestStore {
   async load(): Promise<void> {
     if (this.loaded) return;
     try {
-      const parsed = RemoteStateSchema.parse(JSON.parse(await fs.readFile(this.filePath, 'utf8')));
-      this.state = parsed;
+      this.state = RemoteStateSchema.parse(JSON.parse(await fs.readFile(this.filePath, 'utf8')));
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
       await this.importLegacyOrCreate();
@@ -212,51 +220,42 @@ export class RemoteRequestStore {
     return removed;
   }
 
-  async beginWorkspaceHandoff(
-    handoff: Omit<WorkspaceHandoff, 'id' | 'state' | 'createdAt' | 'updatedAt' | 'expiresAt'>,
-  ): Promise<void> {
-    const now = Date.now();
+  /** Returns the id so the source window can later ask who claimed it. */
+  async beginWorkspaceHandoff(handoff: HandoffInput): Promise<string> {
+    const id = randomUUID();
     await this.mutate((draft) => {
-      draft.workspaceHandoffs = draft.workspaceHandoffs.filter(
-        (item) => item.channel !== handoff.channel || item.chatId !== handoff.chatId,
-      );
-      draft.workspaceHandoffs.push({
-        ...handoff,
-        id: randomUUID(),
-        state: 'pending',
-        createdAt: now,
-        updatedAt: now,
-        expiresAt: now + 5 * 60_000,
-      });
+      const list = draft.workspaceHandoffs;
+      draft.workspaceHandoffs = replaceHandoffForChat(list, handoff, Date.now(), id);
     });
+    return id;
   }
 
+  /** Written by another window, so callers `refresh()` first. */
+  hasPendingWorkspaceHandoff(workspaceId: string): boolean {
+    return hasPendingHandoff(this.state.workspaceHandoffs, workspaceId, Date.now());
+  }
+
+  /** Rereads first: two windows on one folder must not both claim. */
   async claimWorkspaceHandoffs(workspaceId: string): Promise<WorkspaceHandoff[]> {
-    const claimed: WorkspaceHandoff[] = [];
+    let claimed: WorkspaceHandoff[] = [];
     await this.mutate((draft) => {
-      const now = Date.now();
-      for (const handoff of draft.workspaceHandoffs) {
-        if (
-          handoff.state === 'pending' &&
-          handoff.targetWorkspaceId === workspaceId &&
-          handoff.expiresAt > now
-        ) {
-          handoff.state = 'claimed';
-          handoff.updatedAt = now;
-          claimed.push(structuredClone(handoff));
-        }
-      }
-    });
+      claimed = claimHandoffs(draft.workspaceHandoffs, workspaceId, Date.now());
+    }, true);
     return claimed;
   }
 
   async completeWorkspaceHandoff(id: string): Promise<void> {
+    await this.mutate((draft) => completeHandoff(draft.workspaceHandoffs, id, Date.now()));
+  }
+
+  /** The source window undoing a switch whose target never came up. Rereads
+   *  inside the mutation, so a claim already on disk wins. */
+  async failUnclaimedWorkspaceHandoff(id: string): Promise<'failed' | 'claimed' | 'gone'> {
+    let outcome: 'failed' | 'claimed' | 'gone' = 'gone';
     await this.mutate((draft) => {
-      const handoff = draft.workspaceHandoffs.find((item) => item.id === id);
-      if (!handoff) return;
-      handoff.state = 'completed';
-      handoff.updatedAt = Date.now();
-    });
+      outcome = failUnclaimedHandoff(draft.workspaceHandoffs, id, Date.now());
+    }, true);
+    return outcome;
   }
 
   async enqueue(record: RemoteRequestRecord): Promise<boolean> {
@@ -424,8 +423,32 @@ export class RemoteRequestStore {
     });
   }
 
-  private mutate(mutator: (draft: RemoteStoreState) => void): Promise<void> {
+  /**
+   * Rereads the file. Every window shares one state file and `persist()` writes
+   * the whole document, so a window that sat idle while another wrote must
+   * reread before mutating or its stale copy reverts the other window's work.
+   */
+  async refresh(): Promise<void> {
+    const operation = this.mutationTail.then(() => this.reload());
+    this.mutationTail = operation.catch(() => undefined);
+    return operation;
+  }
+
+  private async reload(): Promise<void> {
+    try {
+      this.state = RemoteStateSchema.parse(JSON.parse(await fs.readFile(this.filePath, 'utf8')));
+    } catch (err) {
+      // A file that is missing or unreadable leaves the in-memory copy in
+      // place: this is a refresh, not a load, and has no state to recover to.
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    }
+  }
+
+  /** `reloadFirst` rereads and mutates inside one queue entry, so a decision
+   *  taken on another window's writes cannot be overtaken between the two. */
+  private mutate(mutator: (draft: RemoteStoreState) => void, reloadFirst = false): Promise<void> {
     const operation = this.mutationTail.then(async () => {
+      if (reloadFirst) await this.reload();
       const draft = structuredClone(this.state);
       mutator(draft);
       const cutoff = Date.now() - RETENTION_MS;
@@ -459,29 +482,16 @@ export class RemoteRequestStore {
       return;
     }
     try {
-      const legacy = LegacyRemoteStateSchema.parse(
-        JSON.parse(await fs.readFile(this.legacyFilePath, 'utf8')),
+      this.state = migrateLegacyState(
+        LegacyRemoteStateSchema.parse(JSON.parse(await fs.readFile(this.legacyFilePath, 'utf8'))),
       );
-      this.state = {
-        version: 2,
-        requests: legacy.requests,
-        outbox: legacy.outbox,
-        bindings: legacy.bindings,
-        cursors: legacy.cursors,
-        controlReceipts: legacy.controlReceipts,
-        selections: [],
-        workspaceHandoffs: [],
-      };
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
     }
     await this.persist(this.state);
   }
 
-  private async persist(state: RemoteStoreState): Promise<void> {
-    await fs.mkdir(path.dirname(this.filePath), { recursive: true });
-    const temporary = `${this.filePath}.${randomUUID()}.tmp`;
-    await fs.writeFile(temporary, JSON.stringify(state), { encoding: 'utf8', mode: 0o600 });
-    await fs.rename(temporary, this.filePath);
+  private persist(state: RemoteStoreState): Promise<void> {
+    return writeRemoteStateFile(this.filePath, JSON.stringify(state));
   }
 }

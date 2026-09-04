@@ -124,3 +124,22 @@ export const EMPTY_REMOTE_STATE: RemoteStoreState = {
 export const MAX_RECORDS = 1_000;
 export const MAX_OUTBOX_RECORDS = 1_000;
 export const RETENTION_MS = 30 * 24 * 60 * 60_000;
+
+/**
+ * v1 → v2. Selections and workspace handoffs are window-lifetime concerns with
+ * short expiries, so an upgrade starts them empty rather than inventing history.
+ */
+export function migrateLegacyState(
+  legacy: z.infer<typeof LegacyRemoteStateSchema>,
+): RemoteStoreState {
+  return {
+    version: 2,
+    requests: legacy.requests,
+    outbox: legacy.outbox,
+    bindings: legacy.bindings,
+    cursors: legacy.cursors,
+    controlReceipts: legacy.controlReceipts,
+    selections: [],
+    workspaceHandoffs: [],
+  };
+}

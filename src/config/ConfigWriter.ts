@@ -12,6 +12,7 @@ export {
   ensureModelsSeq,
   removeModel,
   setModelField,
+  setNestedField,
   setTopLevel,
 } from './ConfigWriterHelpers';
 

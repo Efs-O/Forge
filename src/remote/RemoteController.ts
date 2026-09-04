@@ -23,10 +23,9 @@ import { RemotePendingPrompt } from './RemotePendingPrompt';
 import {
   buildSpokenGateContext,
   resolveVoiceDraft,
-  type RemoteVoiceBridge,
+  type VoiceBridgeBundle,
 } from './RemoteVoiceBridge';
 import type { RemoteSpeechDelivery } from './RemoteSpeechDelivery';
-import type { PendingVoiceDraft } from '../voice/PendingVoiceDraft';
 import { handleRemoteSelectionAction } from './RemoteSelectionPager';
 
 export interface RemoteControllerOptions {
@@ -49,6 +48,8 @@ export interface RemoteControllerOptions {
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
   reloadWindow?: (() => Promise<void>) | undefined;
   onError?: (message: string) => void;
+  /** Global spoken-reply toggle, persisted to config.yaml. */
+  voiceToggle?: { get: () => boolean; set: (on: boolean) => Promise<void> };
 }
 
 /** Durable transport-independent admission, FIFO execution, and notification. */
@@ -79,7 +80,7 @@ export class RemoteController {
      * in `options` because the bridge carries per-chat draft state that a
      * config reload must not silently drop.
      */
-    private readonly voice?: { bridge: RemoteVoiceBridge; drafts: PendingVoiceDraft } | undefined,
+    private readonly voice?: VoiceBridgeBundle | undefined,
     /** Absent when `voice.output.enabled` is false; replies stay text-only. */
     speech?: RemoteSpeechDelivery | undefined,
   ) {
@@ -425,6 +426,7 @@ export class RemoteController {
             ? { setInactivityTimeout: this.options.setInactivityTimeout }
             : {}),
           ...(this.options.reloadWindow ? { reloadWindow: this.options.reloadWindow } : {}),
+          ...(this.options.voiceToggle ? { voiceToggle: this.options.voiceToggle } : {}),
         },
         key,
       );

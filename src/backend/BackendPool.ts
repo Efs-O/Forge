@@ -23,6 +23,7 @@ import {
 import type { StructuralSettings } from './poolStructuralConfig';
 import type { PortClaim, PoolSlot, SlotTable } from './poolSlots';
 import type { IBackendPool } from './poolTypes';
+import type { BackendProcess } from '../system/SystemReport';
 import { reconcileDeadSlot, restartSlot, startSlot, type SlotStartContext } from './poolStart';
 
 export type { DelegationCheck, DelegationHold } from './DelegationGate';
@@ -286,6 +287,20 @@ export class BackendPool implements IBackendPool {
    */
   isModelReady(modelName: string): boolean {
     return this.backendFor(this.poolKey(modelName))?.isReady() ?? false;
+  }
+
+  /**
+   * Only owned slots are reported. A borrowed shared runtime is another
+   * window's process — we know its port, not its pid — and Ollama models live
+   * in the daemon, so neither can be named here without inventing a number.
+   */
+  backendProcesses(): readonly BackendProcess[] {
+    const processes: BackendProcess[] = [];
+    for (const [model, slot] of this.slots) {
+      const pid = slot.backend.serverPid();
+      if (pid !== null) processes.push({ model, pid });
+    }
+    return processes;
   }
 
   /**

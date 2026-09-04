@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { basename, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -110,7 +110,7 @@ function main() {
   const args = process.argv.slice(2);
   if (args.includes('--help') || args.includes('-h')) {
     console.log(
-      'Usage: npm run bench:qwen-suite -- [--suite path] [--out path] [--arms a1,a2,...] [--limit N] [--model id] [--base-url url] [--evaluator swebench] [--forge-config path] [--unload-chat-node]',
+      'Usage: npm run bench:qwen-suite -- [--suite path] [--out path] [--arms a1,a2,...] [--limit N] [--model id] [--base-url url] [--evaluator swebench] [--forge-config path] [--unload-chat-node] [--resume run-dir] [--start-at N]',
     );
     return;
   }
@@ -128,18 +128,47 @@ function main() {
   if (Number.isInteger(limit) && limit > 0 && limit < suite.tasks.length) {
     suite.tasks = suite.tasks.slice(0, limit);
   }
-  const runId = `suite-${new Date().toISOString().replace(/[:.]/gu, '-')}`;
-  const runDir = resolve(outputRoot, runId);
-  mkdirSync(runDir, { recursive: true });
-  writeFileSync(
-    resolve(runDir, 'suite.json'),
-    JSON.stringify({ ...suite, source: suitePath }, null, 2),
-  );
+  const resumeDir = value(args, '--resume');
+  const startAtRaw = value(args, '--start-at');
+  const startAt = startAtRaw === undefined ? undefined : Number(startAtRaw);
+  if (startAt !== undefined && (!Number.isInteger(startAt) || startAt < 1)) {
+    throw new Error('--start-at must be a positive 1-based task index.');
+  }
+  let runId;
+  let runDir;
+  if (resumeDir) {
+    runDir = resolve(ROOT, resumeDir);
+    if (!existsSync(runDir) || !statSync(runDir).isDirectory()) {
+      throw new Error(`--resume dir not found: ${runDir}`);
+    }
+    runId = basename(runDir);
+  } else {
+    runId = `suite-${new Date().toISOString().replace(/[:.]/gu, '-')}`;
+    runDir = resolve(outputRoot, runId);
+    mkdirSync(runDir, { recursive: true });
+    writeFileSync(
+      resolve(runDir, 'suite.json'),
+      JSON.stringify({ ...suite, source: suitePath }, null, 2),
+    );
+  }
   const taskReports = [];
   const forgeBench = resolve(ROOT, 'scripts', 'forge-bench.mjs');
+  let skipped = 0;
   for (const [index, task] of suite.tasks.entries()) {
     const taskName = `${String(index + 1).padStart(2, '0')}-${slug(task.instance_id)}`;
     const taskDir = resolve(runDir, taskName);
+    const existing = latestReport(taskDir);
+    if (startAt !== undefined && index + 1 < startAt) {
+      taskReports.push({ task, exit_code: undefined, report: existing, skipped: true });
+      skipped++;
+      continue;
+    }
+    if (resumeDir && existing) {
+      taskReports.push({ task, exit_code: 0, report: existing, resumed: true });
+      skipped++;
+      console.log(`forge-bench-suite: skipping ${taskName} (report.json present)`);
+      continue;
+    }
     const taskManifest = resolve(runDir, `${taskName}.task.json`);
     mkdirSync(taskDir, { recursive: true });
     writeFileSync(taskManifest, JSON.stringify(task, null, 2));
@@ -173,7 +202,9 @@ function main() {
   const aggregate = { version: 1, run_id: runId, arms, suite, tasks: taskReports };
   writeFileSync(resolve(runDir, 'report.json'), JSON.stringify(aggregate, null, 2));
   writeFileSync(resolve(runDir, 'report.md'), renderReport(suite, runId, taskReports, arms));
-  console.log(`forge-bench-suite: complete; report ${runDir}`);
+  console.log(
+    `forge-bench-suite: complete; ${skipped} skipped, ${taskReports.length - skipped} run; report ${runDir}`,
+  );
 }
 
 try {

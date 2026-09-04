@@ -23,6 +23,8 @@ import {
   formatContextBlocks,
 } from '../vscode/editorContext';
 import { deriveTitle, isUntitled, type ConversationRuntime } from './sessionTypes';
+import { collectSystemReport } from '../system/SystemReport';
+import { formatSystemReport } from '../system/formatSystemReport';
 
 export interface SlashCommandDeps extends CompactionDeps {
   /** UI-only commands still target the selected tab. */
@@ -191,6 +193,22 @@ export class SlashCommandHandler {
       case 'reloadWindow':
         await vscode.commands.executeCommand('workbench.action.reloadWindow');
         return;
+
+      case 'system': {
+        const report = await collectSystemReport({
+          backendProcesses: () => deps.pool.backendProcesses(),
+        });
+        // A notice row, not a model turn: this costs no tokens and needs no
+        // backend, which is the point — it is most useful when the backend is
+        // the thing eating the machine.
+        deps.post({
+          type: 'notice',
+          message: formatSystemReport(report),
+          conversationId: deps.getActiveConv().id,
+          preformatted: true,
+        });
+        return;
+      }
 
       case 'initForge':
         await this.initForge();

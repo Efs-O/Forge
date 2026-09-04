@@ -1,4 +1,7 @@
 import { z } from 'zod';
+import type * as vscode from 'vscode';
+import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
+import type { RemoteRequestStore } from './RemoteRequestStore';
 
 const InboundBaseSchema = z.object({
   channel: z.enum(['fake', 'telegram', 'whatsapp']),
@@ -231,4 +234,59 @@ export interface RemoteStatus {
   transports: Array<RemoteInboundEvent['channel']>;
   /** True when at least one running transport has a paired owner. */
   paired: boolean;
+}
+
+/**
+ * Construction options for the extension-scoped remote runtime. Lives here
+ * (not in RemoteRuntime.ts) so RemoteTransportManager can import it without
+ * importing the runtime class back — the dependency must point one way.
+ */
+export interface RemoteChannelFactoryContext {
+  getCursor: (key: string) => string | undefined;
+  setCursor: (key: string, value: string) => Promise<void>;
+}
+export type RemoteChannelFactory = (
+  context: RemoteChannelFactoryContext,
+) => Promise<RemoteChannel> | RemoteChannel;
+
+export interface RemoteRuntimeOptions {
+  storageDirectory: string;
+  workspaceRoot?: string | undefined;
+  workspaceId: string;
+  host: ForgeHostFacade;
+  secrets: vscode.SecretStorage;
+  channelFactories?: Partial<Record<'telegram' | 'whatsapp', RemoteChannelFactory>>;
+  notifyLocal: (message: string) => void;
+  /**
+   * Fired whenever the set of running transports or the paired-owner state
+   * changes. The listener reads `status()` - which has to await SecretStorage -
+   * rather than being handed a value, so the notification stays synchronous and
+   * cannot interleave with the lifecycle operation that raised it.
+   */
+  onStatusChanged?: (() => void) | undefined;
+  setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
+  reloadWindow?: (() => Promise<void>) | undefined;
+  openWorkspace?: ((directory: string) => Promise<void>) | undefined;
+  confirmWhisperServerStart?: ((detail: string) => Promise<boolean>) | undefined;
+  /** Absolute path to `.forge/config.yaml`; enables the persisted /voice toggle. */
+  configPath?: string | undefined;
+  /** Handoff watch/rollback timings. Present so a test need not wait out the
+   *  real ones; production uses the coordinator's defaults. */
+  handoffWatch?: { pollIntervalMs?: number; rollbackDelayMs?: number } | undefined;
+}
+
+export interface RemoteValidationStatus {
+  enabled: boolean;
+  transports: Array<{
+    name: 'telegram' | 'whatsapp';
+    configured: boolean;
+    active: boolean;
+    ownerPaired: boolean;
+    totpEnrolled: boolean;
+    leaseOwned: boolean;
+    providerOk: boolean;
+    detail: string;
+  }>;
+  requests: ReturnType<RemoteRequestStore['requestHealth']>;
+  outbox: ReturnType<RemoteRequestStore['outboxHealth']>;
 }

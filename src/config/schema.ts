@@ -9,6 +9,7 @@ import {
   SpawnSchema,
   ToolCallLimitsSchema,
 } from './schemaShared';
+import { VoiceConfigSchema } from './voiceSchema';
 
 const ToolPermissionSchema = z.enum(
   [
@@ -179,76 +180,6 @@ const VideoConfigSchema = z
     // ffmpeg -q:v: 2 is best quality, higher is smaller.
     frame_quality: z.number().int().min(2).max(31).optional(),
     ffmpeg_path: z.string().optional(),
-  })
-  .optional();
-
-/**
- * `voice:` — speech-to-text ingress. Off unless `enabled` is set.
- *
- * Backend and model are FIXED CHOICES, not tuning knobs, and §6.1b records why:
- * whisper.cpp because it is a self-contained .exe plus a .bin, where
- * faster-whisper needs a CUDA runtime the end user has to install; large-v3
- * because Ssuno already tested `turbo` and deleted it for hallucinating an outro
- * ~40x. So the only paths configured here are WHERE those two files are, not
- * which engine or size to use.
- *
- * Nothing has a default path: a wrong guess about where a 3 GB model lives is a
- * silent failure at record time. Absent config means the feature is off and says
- * so, per the no-hidden-fallbacks rule.
- */
-const VoiceConfigSchema = z
-  .object({
-    enabled: z.boolean().default(false),
-    /** whisper-cli.exe from a CUDA build of whisper.cpp. */
-    whisper_binary: z.string().min(1).optional(),
-    /** ggml-large-v3.bin. Verify the size: a truncated download still loads. */
-    whisper_model: z.string().min(1).optional(),
-    /** `auto` detects per utterance; an ISO code forces one (§16). */
-    language: z.string().min(1).default('auto'),
-    /**
-     * Held resident between utterances. §6.1b measured ~250 ms warm against
-     * ~4.2 s cold, so this is worth ~4 s per utterance -- and costs a VRAM slot
-     * the LLM often needs, which is why it defaults off (§2.4).
-     */
-    keep_model_loaded: z.boolean().default(false),
-    input: z
-      .object({
-        /** Rejected as `oversize` before anything is decoded. */
-        max_bytes: z
-          .number()
-          .int()
-          .positive()
-          .default(25 * 1024 * 1024),
-        /** Rejected as `too_long` from the client-reported duration. */
-        max_seconds: z.number().int().positive().default(300),
-      })
-      .optional(),
-    /**
-     * §6.4 decoder bias. Measured misses it targets: VRAM -> "vrun",
-     * this -> "these". Empty disables it.
-     */
-    bias_prompt: z.string().default(''),
-    /** Trailing-silence trim. Off is the safe direction (see SILENCE_TRIM_FILTER). */
-    trim_silence: z.boolean().default(true),
-    /**
-     * Spoken replies via Piper. Flagged independently of STT (R6): they are
-     * separate capabilities with separate failure modes, and input is useful
-     * without output.
-     *
-     * The JOY Greek voice is CC BY-NC 4.0, which is why nothing is bundled and
-     * both paths point at the user's own install (§21).
-     */
-    output: z
-      .object({
-        enabled: z.boolean().default(false),
-        piper_binary: z.string().min(1).optional(),
-        voices_dir: z.string().min(1).optional(),
-        voice_en: z.string().min(1).optional(),
-        voice_el: z.string().min(1).optional(),
-        /** Past this a spoken reply stops being a summary. */
-        max_chars: z.number().int().positive().optional(),
-      })
-      .optional(),
   })
   .optional();
 
@@ -463,6 +394,35 @@ export const ForgeConfigSchema = z
         code: z.ZodIssueCode.custom,
         path: ['llama_server', 'binary'],
         message: 'llama_server.binary is required when embeddings.enabled: true',
+      });
+    }
+    if (cfg.voice?.keep_model_loaded !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['voice', 'keep_model_loaded'],
+        message:
+          'voice.keep_model_loaded never worked and has been replaced by voice.server.enabled',
+      });
+    }
+    if (cfg.voice?.enabled && !cfg.voice.whisper_model) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['voice', 'whisper_model'],
+        message: 'voice.whisper_model is required when voice.enabled: true',
+      });
+    }
+    if (cfg.voice?.enabled && cfg.voice.server?.enabled && !cfg.voice.server.binary) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['voice', 'server', 'binary'],
+        message: 'voice.server.binary is required when voice.server.enabled: true',
+      });
+    }
+    if (cfg.voice?.enabled && cfg.voice.server?.enabled !== true && !cfg.voice.whisper_binary) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['voice', 'whisper_binary'],
+        message: 'voice.whisper_binary is required when voice.enabled: true',
       });
     }
   });

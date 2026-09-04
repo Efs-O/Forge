@@ -40,7 +40,8 @@ export type ForgeSlashCommandId =
   | 'keep'
   | 'reloadWindow'
   | 'initForge'
-  | 'clanker';
+  | 'clanker'
+  | 'system';
 
 // ── Host → Webview ────────────────────────────────────────────────────────────
 
@@ -54,6 +55,9 @@ export interface NoticeMsg {
   type: 'notice';
   message: string;
   conversationId?: string;
+  /** Render the message verbatim in a monospace block instead of as a one-line
+   *  status row. For reports whose columns carry meaning (`/system`). */
+  preformatted?: boolean;
 }
 export interface ReasoningTokenMsg {
   type: 'reasoningToken';

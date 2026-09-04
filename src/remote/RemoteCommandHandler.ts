@@ -8,6 +8,8 @@ import {
 } from './RemoteSelectionPager';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
+import { collectSystemReport } from '../system/SystemReport';
+import { formatSystemReport } from '../system/formatSystemReport';
 
 export interface RemoteCommandContext {
   channel: RemoteChannel;
@@ -27,6 +29,13 @@ export interface RemoteCommandContext {
   /** Per-chat turn-echo toggle, backed the same way. Separate from notifyMute
    *  because the two carry very different volumes — see RemoteController. */
   mirrorToggle?: { get: (chatId: string) => boolean; set: (chatId: string, on: boolean) => void };
+  /**
+   * Global spoken-reply toggle. Unlike notifyMute/mirrorToggle it is not
+   * per-chat (buildSpeechDelivery is built once per transport, not per chat)
+   * and it persists: set() writes voice.output.enabled to config.yaml and
+   * rebuilds the transports, so it survives a window reload.
+   */
+  voiceToggle?: { get: () => boolean; set: (on: boolean) => Promise<void> };
   switchWorkspace?: ((alias: string, channel: string, chatId: string) => Promise<void>) | undefined;
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
   reloadWindow?: (() => Promise<void>) | undefined;
@@ -263,6 +272,18 @@ async function executeRemoteCommand(
   // from /models, so hand over that list instead of denying the command exists.
   if (command === '/model') {
     return sendModelSelection(event, context, undefined);
+  }
+  if (command === '/system') {
+    // Deliberately not gated on a busy window: "what is holding the VRAM" is
+    // the question a user asks precisely while a turn is running, and the
+    // probes read counters without touching anything the turn owns.
+    const report = await collectSystemReport({
+      backendProcesses: () => context.host.backendProcesses?.() ?? [],
+    });
+    await context.channel.send(event.chatId, formatSystemReport(report, { compact: true }), {
+      signal: context.signal,
+    });
+    return { kind: 'handled' };
   }
   if (command === '/unload') {
     const idleReason = globalBusyReason(context);

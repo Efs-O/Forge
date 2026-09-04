@@ -75,7 +75,7 @@ export function selectCheckpointPending(state: State): boolean {
 
 export type Action =
   | { type: 'TOKEN'; text: string; convId?: string }
-  | { type: 'NOTICE'; message: string; convId?: string }
+  | { type: 'NOTICE'; message: string; convId?: string; preformatted?: boolean }
   | { type: 'REASONING_TOKEN'; text: string; convId?: string }
   | { type: 'GENERATION_STARTED'; convId?: string }
   | { type: 'DONE'; convId?: string }

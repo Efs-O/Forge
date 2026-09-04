@@ -1,11 +1,13 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as YAML from 'yaml';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   addModel,
   removeModel,
   setModelField,
+  setNestedField,
   setTopLevel,
   updateConfigFile,
   writeConfigSafely,
@@ -146,5 +148,86 @@ describe('writeConfigSafely reconciliation (legacy whole-object call shape)', ()
     expect(raw).toContain('# gemma-a: primary coding driver');
     expect(raw).toContain('# gemma-b: headless worker twin');
     expect(loadConfig(directory).active_model).toBe('gemma-b');
+  });
+});
+
+describe('setNestedField', () => {
+  // The helper mutates a live `yaml` Document node graph; the schema
+  // validation that guards `updateConfigFile` is covered by the tests above,
+  // so these exercise the node-graph behaviour in isolation.
+  const VOICE_YAML = [
+    'active_model: gemma',
+    'voice:',
+    '  enabled: true',
+    '  # the whisper paths must point at a real install',
+    '  whisper_binary: N:/AI/whisper-cli.exe',
+    '  output:',
+    '    enabled: true',
+    '    piper_binary: N:/AI/piper.exe',
+    '    max_chars: 1200',
+    '',
+  ].join('\n');
+
+  const parse = (s: string): YAML.Document => YAML.parseDocument(s);
+
+  it('sets a field on an existing nested block and preserves siblings', () => {
+    const doc = parse(VOICE_YAML);
+    setNestedField(doc, ['voice', 'output', 'enabled'], false);
+
+    const js = doc.toJS() as Record<string, any>;
+    expect(js.voice.output.enabled).toBe(false);
+    // Sibling keys on the same block survive.
+    expect(js.voice.output.piper_binary).toBe('N:/AI/piper.exe');
+    expect(js.voice.output.max_chars).toBe(1200);
+    // The rest of the voice block is untouched.
+    expect(js.voice.enabled).toBe(true);
+    expect(js.voice.whisper_binary).toBe('N:/AI/whisper-cli.exe');
+  });
+
+  it('preserves a hand-written comment on an untouched key', () => {
+    const doc = parse(VOICE_YAML);
+    setNestedField(doc, ['voice', 'output', 'enabled'], false);
+
+    const raw = doc.toString({ lineWidth: 0 });
+    expect(raw).toContain('# the whisper paths must point at a real install');
+  });
+
+  it('lazily creates intermediate maps when the block does not exist', () => {
+    // `voice` exists but `voice.input` does not — the helper must create it.
+    const doc = parse(VOICE_YAML);
+    setNestedField(doc, ['voice', 'input', 'max_seconds'], 90);
+
+    const js = doc.toJS() as Record<string, any>;
+    expect(js.voice.input.max_seconds).toBe(90);
+    // The pre-existing output block is untouched by creating a sibling block.
+    expect(js.voice.output.enabled).toBe(true);
+    expect(js.voice.output.piper_binary).toBe('N:/AI/piper.exe');
+  });
+
+  it('creates the whole chain from a top-level key that is absent', () => {
+    const doc = parse(VOICE_YAML);
+    setNestedField(doc, ['search', 'provider'], 'tavily');
+
+    const js = doc.toJS() as Record<string, any>;
+    expect(js.search.provider).toBe('tavily');
+    // The voice block, untouched, is still there.
+    expect(js.voice.output.enabled).toBe(true);
+  });
+
+  it('deletes the field when value is undefined', () => {
+    const doc = parse(VOICE_YAML);
+    setNestedField(doc, ['voice', 'output', 'max_chars'], undefined);
+
+    const js = doc.toJS() as Record<string, any>;
+    expect(js.voice.output.max_chars).toBeUndefined();
+    expect(js.voice.output.enabled).toBe(true);
+  });
+
+  it('works on a document whose root is empty', () => {
+    const doc = parse('');
+    setNestedField(doc, ['voice', 'output', 'enabled'], true);
+
+    const js = doc.toJS() as Record<string, any>;
+    expect(js.voice.output.enabled).toBe(true);
   });
 });

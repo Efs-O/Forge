@@ -173,6 +173,69 @@ remote:
   whatsapp:
     enabled: false # experimental linked-device adapter; see docs/REMOTE_CONTROL.md
 
+# Voice: spoken input and spoken replies over the remote channel (Telegram).
+# Off by default, and there are no default paths on purpose -- a wrong guess at
+# where a 3 GB model lives fails at record time with a bare non-zero exit.
+#
+# The engine and model size are decided, not tunable: whisper.cpp because it is
+# one .exe plus one .bin where faster-whisper needs a CUDA runtime the user has
+# to install, and large-v3 because `turbo` was measured hallucinating an outro.
+voice:
+  enabled: false
+  # whisper-cli.exe from a CUDA build of whisper.cpp.
+  # whisper_binary: C:/tools/whisper.cpp/build/bin/Release/whisper-cli.exe
+  # ggml-large-v3.bin. Check the file size -- a truncated download still loads.
+  # whisper_model: C:/tools/whisper.cpp/models/ggml-large-v3.bin
+  # `auto` detects per utterance; an ISO code ("en", "el") forces one.
+  language: auto
+  # Which device decodes. Omit the block entirely and whisper-cli keeps its own
+  # defaults: GPU on, device 0, 4 threads, 5 beams, flash-attn on. A CUDA build
+  # already uses the GPU, so this is about WHICH card, not whether.
+  compute:
+    gpu: true
+    # `-dev N`, a CUDA ordinal. This is llama.cpp's device order, which need NOT
+    # match nvidia-smi's -- read it off whisper-cli's own startup banner, which
+    # prints every device it found by name. Point it at the card the chat model
+    # is not using.
+    # device: 1
+    # threads: 8      # only matters with `gpu: false`
+    # beam_size: 5    # lower is faster and more literal; 1 is greedy
+    # flash_attn: true
+  server:
+    # Keep the model behind a local whisper-server between notes. This cuts the
+    # measured ~5.5 s model load to a ~0.3 s warm request, at ~3.6 GB VRAM.
+    enabled: false
+    # Build with: cmake --build build --config Release --target whisper-server
+    # binary: C:/tools/whisper.cpp/build/bin/Release/whisper-server.exe
+    port: 8092
+    # Zero keeps it resident until this VS Code window closes.
+    idle_timeout_ms: 600000
+    confirm_on_start: true
+  # Decoder bias: a vocabulary list, not an instruction. whisper.cpp truncates
+  # it at 224 tokens. Add the terms it mishears -- domain nouns and proper names
+  # are what it gets wrong.
+  bias_prompt: ""
+  # Trailing-silence trim. The same filter that drops a spurious final line also
+  # clips soft consonants and short negations, so off is the safe direction.
+  trim_silence: true
+  input:
+    max_bytes: 26214400 # 25 MiB, rejected before anything is decoded
+    max_seconds: 300 # rejected from the client-reported duration
+  # Spoken replies via Piper. Flagged separately from input because they are
+  # different capabilities with different failure modes, and input is useful on
+  # its own. Nothing is bundled: the Greek JOY voice is CC BY-NC 4.0, so both
+  # paths point at your own Piper install. Piper is ONNX and CPU-only unless
+  # your build ships the onnxruntime CUDA provider.
+  output:
+    enabled: false
+    # piper_binary: C:/tools/piper/piper.exe
+    # voices_dir: C:/tools/piper/voices
+    voice_en: en_US-amy-medium
+    voice_el: el_GR-joy-medium
+    # Past this a spoken reply is truncated at a sentence boundary and told to
+    # read the rest in the written message. Long voice notes cannot be skimmed.
+    max_chars: 1200
+
 # How many models may be loaded at once across all VS Code windows.
 # Local GGUFs are VRAM-bound; raise this only if you have the memory.
 max_simultaneous_models: 4

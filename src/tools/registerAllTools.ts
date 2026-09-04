@@ -52,6 +52,8 @@ import {
   makeRunBuildTool,
 } from './execTools';
 import { makeSafePowerShellTool } from './safePowerShellTool';
+import { makeSystemStatusTool } from './systemStatusTool';
+import type { BackendProcess } from '../system/SystemReport';
 import { makeLoadToolGroupTool } from './toolGroupTools';
 import { makeReadToolResultTool } from './toolResultTools';
 import { makeUpdatePlanTool } from './planTools';
@@ -93,6 +95,7 @@ export function registerAllTools(
   notifications: UserNotificationService,
   delegationService?: LocalDelegationService,
   getConfig?: () => ForgeConfig,
+  backendProcesses?: () => readonly BackendProcess[],
 ): void {
   // v0.1 builtins
   registry.register(makeReadFileTool());
@@ -157,6 +160,7 @@ export function registerAllTools(
   registry.register(makeStopExecutionTool());
   registry.register(makeListExecutionsTool());
   registry.register(makeSafePowerShellTool());
+  registry.register(makeSystemStatusTool(backendProcesses ? { backendProcesses } : {}));
   registry.register(makeRunTestsTool());
   registry.register(makeRunBuildTool());
   registry.register(makeRunWorkspaceTaskTool());

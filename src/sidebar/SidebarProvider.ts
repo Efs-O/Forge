@@ -208,6 +208,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.tabs.setModelById(conversationId, modelName),
       unloadModels: () => this.unloadModels(),
       restartModel: (modelName) => this.restartModel(modelName),
+      backendProcesses: () => this.pool.backendProcesses(),
     });
     // Register the conversation lookup so the session timer can resolve ids,
     // then fold any unfinished intervals from a previous session into the

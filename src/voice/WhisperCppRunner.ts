@@ -24,10 +24,64 @@ export interface WhisperCppOptions {
   readonly binary: string;
   /** Absolute path to a `ggml-*.bin`. */
   readonly model: string;
-  /** Reported on the transcript for the audit rows; does not change argv. */
-  readonly device?: 'cpu' | 'gpu' | undefined;
+  /**
+   * false passes `-ng`. Undefined leaves whisper-cli's own default, which is
+   * GPU on for a CUDA build -- so this is about pinning placement, not enabling
+   * acceleration that was otherwise off.
+   */
+  readonly useGpu?: boolean | undefined;
+  /** `-dev N`. A CUDA ordinal, which is not necessarily nvidia-smi's ordering. */
+  readonly gpuDevice?: number | undefined;
+  /** `-t N`. */
+  readonly threads?: number | undefined;
+  /** `-bs N`. */
+  readonly beamSize?: number | undefined;
+  /** `-fa` / `-nfa`. Passed either way rather than relying on the CLI default,
+   *  which has flipped between builds. */
+  readonly flashAttn?: boolean | undefined;
   /** Hard ceiling on one transcription. A hung child must not hang a turn. */
   readonly timeoutMs?: number | undefined;
+}
+
+/**
+ * Builds whisper-cli's argv.
+ *
+ * Split out and exported so the flag mapping is testable without spawning a
+ * 3 GB model: a wrong `-dev` is invisible in a transcript -- the text comes back
+ * correct off whichever card ran it -- so the argv is the only thing that can be
+ * asserted on.
+ *
+ * Every knob is omitted when unset. Passing whisper-cli's documented default
+ * back to it would look harmless but silently pins a value the next build may
+ * have moved.
+ */
+export function buildWhisperArgs(
+  options: WhisperCppOptions,
+  wavPath: string,
+  transcribe: TranscribeOptions,
+): string[] {
+  const args = [
+    '-m',
+    options.model,
+    '-f',
+    wavPath,
+    '-l',
+    transcribe.language || 'auto',
+    '-np',
+    '-nt',
+  ];
+  if (options.useGpu === false) args.push('-ng');
+  // Only meaningful with the GPU in play; `-dev` alongside `-ng` is contradictory
+  // enough to be worth not emitting rather than letting the CLI pick a winner.
+  else if (options.gpuDevice !== undefined) args.push('-dev', String(options.gpuDevice));
+  if (options.threads !== undefined) args.push('-t', String(options.threads));
+  if (options.beamSize !== undefined) args.push('-bs', String(options.beamSize));
+  if (options.flashAttn !== undefined) args.push(options.flashAttn ? '-fa' : '-nfa');
+  // §6.4 decoder bias. whisper.cpp caps the initial prompt at the first
+  // 224 tokens of context; a longer string is silently truncated, so keep it
+  // to a vocabulary list rather than an instruction.
+  if (transcribe.initialPrompt) args.push('--prompt', transcribe.initialPrompt);
+  return args;
 }
 
 /**
@@ -51,20 +105,7 @@ export class WhisperCppRunner implements WhisperRunner {
     await this.assertReadable(this.options.binary, 'whisper binary (voice.whisper_binary)');
     await this.assertReadable(this.options.model, 'whisper model (voice.whisper_model)');
 
-    const args = [
-      '-m',
-      this.options.model,
-      '-f',
-      wavPath,
-      '-l',
-      options.language || 'auto',
-      '-np',
-      '-nt',
-    ];
-    // §6.4 decoder bias. whisper.cpp caps the initial prompt at the first
-    // 224 tokens of context; a longer string is silently truncated, so keep it
-    // to a vocabulary list rather than an instruction.
-    if (options.initialPrompt) args.push('--prompt', options.initialPrompt);
+    const args = buildWhisperArgs(this.options, wavPath, options);
 
     const started = Date.now();
     const stdout = await this.run(args, options.signal);
@@ -73,7 +114,10 @@ export class WhisperCppRunner implements WhisperRunner {
       transcribeMs: Date.now() - started,
       backend: 'whisper.cpp',
       model: this.options.model,
-      device: this.options.device ?? 'gpu',
+      // Derived from the flag actually sent, not configured separately: the
+      // audit row's job is to say what ran, and two sources for that guarantee
+      // they disagree eventually.
+      device: this.options.useGpu === false ? 'cpu' : 'gpu',
       biasPromptUsed: Boolean(options.initialPrompt),
     };
   }

@@ -6,6 +6,7 @@ import type { HostActivityListener } from './HostActivity';
 import type { RequestChainStatus } from './RequestChainLifecycle';
 import type { ToolApprovalRequestEvent, ToolApprovalSink } from './ToolApprovalService';
 import type { AgentProgressEvent } from './AgentProgress';
+import type { BackendProcess } from '../system/SystemReport';
 
 export interface ForgeConversationSummary {
   id: string;
@@ -68,6 +69,13 @@ export interface ForgeHostFacade {
   unloadModels(): Promise<void>;
   restartModel(modelName: string): Promise<void>;
   /**
+   * Model → pid for the llama-servers this window spawned, so a remote
+   * `/system` can name Forge's own VRAM consumers. Optional on the same terms
+   * as the subscriptions below: fakes that omit it keep compiling, and the
+   * caller falls back to an untagged process list rather than failing.
+   */
+  backendProcesses?(): readonly BackendProcess[];
+  /**
    * Subscribe to compaction progress events emitted by the sidebar.
    * Optional: fakes that omit it keep compiling; the runtime uses optional
    * chaining so a missing method is a no-op, not an error.
@@ -128,6 +136,7 @@ export interface SidebarHostFacadeDeps {
   setConversationModel: (conversationId: string, modelName: string | null) => boolean;
   unloadModels: () => Promise<void>;
   restartModel: (modelName: string) => Promise<void>;
+  backendProcesses?: () => readonly BackendProcess[];
   onCompactionEvent?: (listener: (event: CompactionEvent) => void) => { dispose(): void };
   onHostActivity?: (listener: HostActivityListener) => { dispose(): void };
   onUserNotification?: (sink: UserNotificationSink) => { dispose(): void };
@@ -238,6 +247,10 @@ export class SidebarHostFacade implements ForgeHostFacade {
 
   restartModel(modelName: string): Promise<void> {
     return this.deps.restartModel(modelName);
+  }
+
+  backendProcesses(): readonly BackendProcess[] {
+    return this.deps.backendProcesses?.() ?? [];
   }
 
   onCompactionEvent(listener: (event: CompactionEvent) => void): { dispose(): void } {

@@ -49,6 +49,7 @@ import { flushPendingModelUsage } from './sidebar/modelManager/usageTracker';
 import { backgroundExecutionManager } from './tools/BackgroundExecutionManager';
 import { terminalCommandTracker } from './tools/TerminalCommandTracker';
 import { RemoteRuntime } from './remote/RemoteRuntime';
+import { workspaceIdFor } from './remote/RemoteWorkspaceHandoff';
 import { TelegramChannel, TELEGRAM_BOT_TOKEN_SECRET } from './remote/TelegramChannel';
 import { registerRemoteCommands } from './vscode/remoteCommands';
 
@@ -157,6 +158,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     userNotifications,
     delegationService,
     () => config,
+    () => pool.backendProcesses(),
   );
 
   // External MCP stdio servers (e.g. halluscribe-mcp). Bridged as a
@@ -274,13 +276,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     () => activeConfigPath,
     cliSessions,
   );
-  const workspaceId = createHash('sha256')
-    .update(workspaceRoot || `no-workspace:${activeConfigPath}`)
-    .digest('hex');
+  const workspaceId = workspaceRoot
+    ? workspaceIdFor(workspaceRoot)
+    : createHash('sha256').update(`no-workspace:${activeConfigPath}`).digest('hex');
   const remoteRuntime = new RemoteRuntime({
     storageDirectory: context.globalStorageUri.fsPath,
     ...(workspaceRoot ? { workspaceRoot } : {}),
     workspaceId,
+    configPath: activeConfigPath,
     host: sidebarProvider.getHostFacade(),
     secrets: context.secrets,
     channelFactories: {
@@ -330,6 +333,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     openWorkspace: async (directory) => {
       await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(directory), false);
     },
+    confirmWhisperServerStart: async (detail) =>
+      (await vscode.window.showWarningMessage(detail, { modal: true }, 'Start Whisper server')) ===
+      'Start Whisper server',
     onStatusChanged: () => void publishRemoteStatus(),
   });
   activeRemoteRuntime = remoteRuntime;

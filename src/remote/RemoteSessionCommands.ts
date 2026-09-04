@@ -27,20 +27,23 @@ export async function handleRemoteSessionCommand(
       event.chatId,
       `Forge commands:
 
-Session: /status · /context · /stop · /new · /list [page] · /resume [n-or-id] · /notify on|off · /mirror on|off
+Session: /status · /context · /stop · /new · /list [page] · /resume [n-or-id] · /notify on|off · /mirror on|off · /voice on|off
 Workspace: /workspace [page] · /new <n-or-alias>
 Queue: /queue · /drop <n|all> · /steer <prompt>
 Models: /models [page] · /model [n-or-name] · /unload · /restart
 Window: /compact · /lock · /reload · /timeout [1-1440|off] · /clanker on|off
+Machine: /system
 
 Notes:
 • /stop cancels the current request; queued prompts stay queued
 • /steer interrupts the current turn and runs its prompt before queued ones
 • /clanker on auto-approves non-dangerous tools until the window reloads — writes then land with no confirmation anywhere
 • /reload fully reloads the VS Code window: it picks up a newly installed build, and drops a held prompt, the queue, and this session
+• /system reports GPU load, which processes hold VRAM (Forge's own backends are tagged), RAM and drive space; it answers while a turn is running
 • /unload releases every loaded model and frees its memory, exactly like Unload Model in the sidebar; unlike /reload it refuses while a turn is running
 • /notify off silences agent notify_user messages for this chat until the window reloads
 • /mirror off stops answers typed in the Forge window being echoed here (on by default)
+• /voice off stops replies being sent as a spoken voice message (text stays); /voice on turns it back on — saved to config.yaml, so it survives a window reload
 • /new <n-or-alias> switches this chat to another workspace; /workspace lists them, numbers them, and says which one you are in`,
       { signal: context.signal },
     );
@@ -122,6 +125,36 @@ Notes:
       on
         ? 'Forge: mirroring ON — answers typed in the Forge window are echoed here.'
         : 'Forge: mirroring OFF — you will only see turns you asked for from this chat. It does not survive a window reload.',
+      { signal: context.signal },
+    );
+    return { kind: 'handled' };
+  }
+  if (command === '/voice') {
+    if (!context.voiceToggle) {
+      return { kind: 'rejected', reason: 'spoken replies are not available in this window' };
+    }
+    const desired = argument?.toLowerCase();
+    if (desired !== 'on' && desired !== 'off' && desired !== undefined && desired !== 'status') {
+      return { kind: 'rejected', reason: 'usage: /voice on|off|status' };
+    }
+    if (desired === 'on' || desired === 'off') {
+      try {
+        await context.voiceToggle.set(desired === 'on');
+      } catch (err) {
+        return {
+          kind: 'rejected',
+          reason: `could not update voice setting: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        };
+      }
+    }
+    const on = context.voiceToggle.get();
+    await context.channel.send(
+      event.chatId,
+      on
+        ? 'Forge: spoken replies ON — replies are also sent as a voice message. Saved to config.yaml.'
+        : 'Forge: spoken replies OFF — replies are text only. Saved to config.yaml.',
       { signal: context.signal },
     );
     return { kind: 'handled' };

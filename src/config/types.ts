@@ -279,7 +279,25 @@ export interface VoiceConfig {
   whisper_model?: string;
   /** `auto`, or an ISO code to force one language. */
   language?: string;
-  /** Worth ~4 s per utterance, costs a VRAM slot. Default off. */
+  /** Which device decodes. Absent means whisper.cpp's defaults (GPU 0). */
+  compute?: {
+    /** false forces CPU via `-ng`. */
+    gpu?: boolean;
+    /** CUDA ordinal for `-dev N`, in llama.cpp's ordering, not nvidia-smi's. */
+    device?: number;
+    threads?: number;
+    beam_size?: number;
+    flash_attn?: boolean;
+  };
+  /** Optional resident whisper-server. The CLI path remains the default. */
+  server?: {
+    enabled?: boolean;
+    binary?: string;
+    port?: number;
+    idle_timeout_ms?: number;
+    confirm_on_start?: boolean;
+  };
+  /** Removed configuration key retained only so validation can reject it clearly. */
   keep_model_loaded?: boolean;
   input?: { max_bytes?: number; max_seconds?: number };
   /** §6.4 decoder bias. Empty disables. */

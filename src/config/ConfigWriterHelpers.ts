@@ -88,6 +88,42 @@ export function setModelField(
 }
 
 /**
+ * Set (or delete, when `value === undefined`) a single field on a nested
+ * object block, e.g. `voice.output.enabled`. Lazily creates the intermediate
+ * maps so a config that never had an `output:` block still gains one.
+ * Preserves comments/formatting on sibling keys.
+ */
+export function setNestedField(
+  doc: YAML.Document,
+  pathKeys: readonly string[],
+  value: unknown,
+): void {
+  if (pathKeys.length === 0) throw new Error('setNestedField: empty path');
+  const root = doc.contents;
+  let parent: YAML.YAMLMap;
+  if (root && YAML.isMap(root)) {
+    parent = root;
+  } else {
+    parent = doc.createNode({}) as YAML.YAMLMap;
+    doc.contents = parent;
+  }
+  for (let i = 0; i < pathKeys.length - 1; i++) {
+    const key = pathKeys[i];
+    const next = parent.get(key, true);
+    if (next && YAML.isMap(next)) {
+      parent = next;
+    } else {
+      const created = doc.createNode({}) as YAML.YAMLMap;
+      parent.set(key, created);
+      parent = created;
+    }
+  }
+  const last = pathKeys[pathKeys.length - 1];
+  if (value === undefined) parent.delete(last);
+  else parent.set(last, doc.createNode(value));
+}
+
+/**
  * Delete a single nested key from a model's `spawn`/`sampling`/
  * `tool_call_limits` sub-map, removing the parent field entirely once it has
  * no keys left (never leaves a dangling empty block). No-op if the model,

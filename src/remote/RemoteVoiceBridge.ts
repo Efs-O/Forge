@@ -12,8 +12,10 @@ import {
 import { PendingVoiceDraft, type DraftResolution } from '../voice/PendingVoiceDraft';
 import { VoiceAuditFileSink } from '../voice/VoiceAuditFileSink';
 import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
-import { WhisperCppRunner } from '../voice/WhisperCppRunner';
-import type { ForgeConfig } from '../config/types';
+import { WhisperCppRunner, type WhisperCppOptions } from '../voice/WhisperCppRunner';
+import type { ForgeConfig, VoiceConfig } from '../config/types';
+import { WhisperServerProcess } from '../voice/WhisperServerProcess';
+import { WhisperServerRunner } from '../voice/WhisperServerRunner';
 
 /**
  * Turns an inbound voice note into a draft the sender confirms, and nothing more.
@@ -65,7 +67,14 @@ export interface RemoteVoiceBridgeOptions {
   readonly audit: VoiceAuditLog;
   readonly drafts: PendingVoiceDraft;
   readonly settings: () => VoiceBridgeSettings;
+  readonly withActivity?: (<T>(operation: () => Promise<T>) => Promise<T>) | undefined;
   readonly signal?: AbortSignal | undefined;
+}
+
+export interface VoiceBridgeBundle {
+  readonly bridge: RemoteVoiceBridge;
+  readonly drafts: PendingVoiceDraft;
+  dispose(): Promise<void>;
 }
 
 export class RemoteVoiceBridge {
@@ -155,14 +164,20 @@ export class RemoteVoiceBridge {
     // to being mistaken for.
     await this.say(event.chatId, 'Forge: transcribing voice…');
 
-    const result = await this.ingress.run(operation, source, {
-      surface: 'telegram',
-      language: settings.language,
-      initialPrompt: settings.biasPrompt,
-      audioMs: event.durationMs,
-      normalize: { trimSilence: settings.trimSilence, ffmpegPath: settings.ffmpegPath },
-      signal: this.options.signal,
-    });
+    const runIngress = (): ReturnType<VoiceIngress['run']> =>
+      this.ingress.run(operation, source, {
+        surface: 'telegram',
+        language: settings.language,
+        initialPrompt: settings.biasPrompt,
+        audioMs: event.durationMs,
+        normalize: { trimSilence: settings.trimSilence, ffmpegPath: settings.ffmpegPath },
+        signal: this.options.signal,
+      });
+    // Residency activity covers normalization as well as the HTTP request, so
+    // the idle timer cannot unload the model between those two phases.
+    const result = this.options.withActivity
+      ? await this.options.withActivity(runIngress)
+      : await runIngress();
     if (!result.ok) {
       // `ingress.run` already wrote the terminal audit row; this is the half the
       // user sees. A silent rejection is the `ask_user` failure again -- the
@@ -323,19 +338,64 @@ export function buildVoiceBridge(
   channel: RemoteChannel,
   config: ForgeConfig,
   sink: VoiceAuditSink = new VoiceAuditFileSink(),
-): { bridge: RemoteVoiceBridge; drafts: PendingVoiceDraft } | undefined {
+  lifecycle: {
+    confirmServerStart?: ((detail: string) => Promise<boolean>) | undefined;
+  } = {},
+): VoiceBridgeBundle | undefined {
   const voice = config.voice;
   if (voice?.enabled !== true) return undefined;
-  if (!voice.whisper_binary || !voice.whisper_model) return undefined;
+  if (!voice.whisper_model) return undefined;
+  const serverEnabled = voice.server?.enabled === true;
+  if (serverEnabled ? !voice.server?.binary : !voice.whisper_binary) return undefined;
   const drafts = new PendingVoiceDraft();
+  const compute = whisperCompute(voice.compute);
+  const server = serverEnabled
+    ? new WhisperServerProcess({
+        binary: voice.server!.binary!,
+        model: voice.whisper_model,
+        port: voice.server!.port,
+        idleTimeoutMs: voice.server!.idle_timeout_ms,
+        confirmOnStart: voice.server!.confirm_on_start,
+        confirmStart: lifecycle.confirmServerStart,
+        ...compute,
+      })
+    : undefined;
+  const runner: WhisperRunner = server
+    ? new WhisperServerRunner({
+        baseUrl: server.baseUrl(),
+        model: voice.whisper_model,
+        useGpu: compute.useGpu,
+      })
+    : new WhisperCppRunner({
+        binary: voice.whisper_binary!,
+        model: voice.whisper_model,
+        ...compute,
+      });
   const bridge = new RemoteVoiceBridge({
     channel,
-    runner: new WhisperCppRunner({ binary: voice.whisper_binary, model: voice.whisper_model }),
+    runner,
     audit: new VoiceAuditLog(sink),
     drafts,
     settings: () => voiceSettings(config),
+    ...(server ? { withActivity: (operation) => server.withActivity(operation) } : {}),
   });
-  return { bridge, drafts };
+  return { bridge, drafts, dispose: async () => await server?.dispose() };
+}
+
+/**
+ * Maps `voice.compute:` onto the runner's options, dropping every key the user
+ * left unset so whisper-cli keeps its own defaults for those (see
+ * `buildWhisperArgs`).
+ */
+function whisperCompute(compute: VoiceConfig['compute']): Partial<WhisperCppOptions> {
+  if (!compute) return {};
+  return {
+    ...(compute.gpu !== undefined ? { useGpu: compute.gpu } : {}),
+    ...(compute.device !== undefined ? { gpuDevice: compute.device } : {}),
+    ...(compute.threads !== undefined ? { threads: compute.threads } : {}),
+    ...(compute.beam_size !== undefined ? { beamSize: compute.beam_size } : {}),
+    ...(compute.flash_attn !== undefined ? { flashAttn: compute.flash_attn } : {}),
+  };
 }
 
 /** Reads the `voice:` block every call, so a config reload takes effect. */

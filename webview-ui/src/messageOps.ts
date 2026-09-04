@@ -13,6 +13,9 @@ export interface AppMessage {
   reasoningMs?: number;
   /** Set while reasoning is still streaming into this row. */
   reasoningStartedAt?: number;
+  /** System rows only: render verbatim in a monospace block rather than as a
+   *  centred one-line status row. Set by reports whose columns carry meaning. */
+  preformatted?: boolean;
   diffHunks?: DiffHunk[] | null;
   diffIsNew?: boolean;
   diffIsDeleted?: boolean;

@@ -7,6 +7,7 @@
 import type { BackendController } from './BackendController';
 import type { ForgeConfig } from '../config/types';
 import type { DelegationCheck, DelegationHold } from './DelegationGate';
+import type { BackendProcess } from '../system/SystemReport';
 
 export interface IBackendPool {
   acquire(modelName: string): Promise<BackendController>;
@@ -38,6 +39,11 @@ export interface IBackendPool {
    *  than `isAnyReady`, which answers the question for the pool as a whole. A
    *  resident model returns false while it is still spawning. */
   isModelReady(modelName: string): boolean;
+  /** Model → OS pid for every llama-server THIS window spawned. Ollama models
+   *  and runtimes borrowed from another Forge window contribute nothing: those
+   *  processes are not ours to name. Consumed by the machine report, which
+   *  cannot otherwise tell a Forge backend apart from any other VRAM holder. */
+  backendProcesses(): readonly BackendProcess[];
   /** Cheap change-detection key over every slot's residency AND readiness.
    *  Pure reads. Equal signatures mean nothing observable moved, so the sidebar
    *  can skip a repost; see docs/plans/MODEL_READINESS_DOT_PLAN.md for why this is polled

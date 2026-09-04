@@ -116,6 +116,15 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     description: 'Scan this workspace and generate an AGENTS.md instructions file.',
   },
   {
+    id: 'system',
+    trigger: 'system',
+    title: 'System Status',
+    description: 'Report GPU, VRAM by process, RAM and drive space for this machine.',
+    // Reads counters and prints a notice row. It touches nothing the turn owns,
+    // and mid-turn — when the agent is holding the VRAM — is when it is wanted.
+    availableWhileStreaming: true,
+  },
+  {
     id: 'clanker',
     trigger: 'clanker',
     title: 'Full Clanker',

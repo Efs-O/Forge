@@ -2,6 +2,34 @@
 
 ## 0.15.14
 
+- **`/system` says what the machine is doing, and which PID is holding the
+  VRAM.** New on both surfaces — the sidebar `/` menu and Telegram — plus a
+  `get_system_status` tool so the agent can read the same numbers in one round
+  instead of shelling out for them. Per-GPU load, utilisation and temperature
+  come from `nvidia-smi`; the per-process VRAM does not, because on WDDM
+  `--query-compute-apps` reports `[N/A]` for every process *and* lists graphics
+  clients like `explorer.exe`. The report reads the same performance counters
+  Task Manager does, filters to processes actually holding VRAM, reconciles each
+  adapter LUID against a card, and tags Forge's own llama-server backends with
+  their model name — the one line no external tool can produce. RAM and free
+  space per drive ride along. A probe that fails says why: a missing nvidia-smi
+  or a localised counter name is reported, never rendered as an empty section.
+
+- **A workspace switch no longer strands the chat between two windows.**
+  `/new <n>` recorded the move, stopped this window's transports and asked VS
+  Code to open the target folder — but when that folder is *already open in
+  another window*, VS Code focuses that window instead of reloading this one.
+  Nothing reloaded, so nothing ran the arrival claim, and the transport lease
+  had already been released: no window was polling Telegram at all. The chat's
+  last message stayed “switching…”, and `/status` went unanswered until a window
+  was reloaded by hand. Now a window that is already running watches for a chat
+  handed to it and claims it without a restart — taking the transport over first,
+  so two windows on one folder cannot both take the chat — and the window that
+  started the switch takes it back if nobody claims within twenty seconds,
+  saying so in the chat rather than leaving it quiet. The arrival receipt no
+  longer blames a reload for the locked session: sessions live in the window
+  that authenticated them and never cross to another one, reload or not.
+
 - **A spoken reply no longer reads your own question back first.** The one-time
   `Chat: … · ID: …` label at the top of the first answer in a chat was being
   synthesized along with the answer — and a conversation title is derived from

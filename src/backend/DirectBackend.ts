@@ -74,6 +74,16 @@ export class DirectBackend implements BackendController {
     return this.ready;
   }
 
+  /**
+   * OS pid of the llama-server this backend spawned, or null when there is no
+   * process of ours behind it — an Ollama model, a server adopted from another
+   * window, or one that has not started. Read by the machine report, which is
+   * otherwise unable to tell the user which VRAM consumer is Forge's own.
+   */
+  serverPid(): number | null {
+    return this.proc?.pid ?? null;
+  }
+
   showConsole(): void {
     serverChannel().show(true);
   }
