@@ -45,6 +45,13 @@ export interface RemoteCommandContext {
   switchWorkspace?: ((alias: string, channel: string, chatId: string) => Promise<void>) | undefined;
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
   reloadWindow?: (() => Promise<void>) | undefined;
+  /**
+   * Whether this channel has a TOTP enrollment, so `/reload` can say that the
+   * session dies with the window. Asked rather than assumed: an installation
+   * with no enrollment is never challenged, and telling that owner to have a
+   * code ready would send them looking for an authenticator they never set up.
+   */
+  totpEnrolled?: (() => Promise<boolean>) | undefined;
 }
 
 export async function handleRemoteCommand(

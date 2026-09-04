@@ -164,9 +164,19 @@ Notes:
     if (!context.reloadWindow) {
       return { kind: 'rejected', reason: 'remote reload is unavailable' };
     }
-    await context.channel.send(event.chatId, 'Forge: reloading the window…', {
-      signal: context.signal,
-    });
+    // The one command that ends the session it was typed into. /help says so,
+    // but help is read before the fact and this is read at the moment it
+    // matters: without it the chat simply goes quiet, and a quiet chat reads
+    // as a hung reload rather than as a locked session waiting for a code.
+    const reauth = (await context.totpEnrolled?.()) === true;
+    await context.channel.send(
+      event.chatId,
+      reauth
+        ? 'Forge: reloading the window… this session ends with it — send your 6-digit ' +
+            'code when it is back. A held prompt and the queue are dropped too.'
+        : 'Forge: reloading the window… a held prompt and the queue are dropped with it.',
+      { signal: context.signal },
+    );
     // Detached, not awaited. The reload tears down the extension host, so
     // anything after it never runs: awaiting it here killed the process before
     // handleRemoteCommand could mark the control receipt completed and before

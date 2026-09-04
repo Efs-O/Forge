@@ -116,7 +116,10 @@ export class RemoteController {
       (chatId) => this.auth.canDeliver(this.channel.name, chatId),
       speech ? (chatId, text) => speech.speak(chatId, text) : undefined,
     );
-    this.approvals = new RemoteApprovalBridge(
+    // The two bridges take the same seven dependencies by design -- both turn
+    // one host-side prompt into a chat round-trip. Naming that shape once means
+    // a change to it cannot reach only one of them.
+    const bridgeDeps = [
       channel,
       store,
       auth,
@@ -124,16 +127,9 @@ export class RemoteController {
       this.abort.signal,
       options.maxMessageChars,
       options.onError,
-    );
-    this.questions = new RemoteQuestionBridge(
-      channel,
-      store,
-      auth,
-      host,
-      this.abort.signal,
-      options.maxMessageChars,
-      options.onError,
-    );
+    ] as const;
+    this.approvals = new RemoteApprovalBridge(...bridgeDeps);
+    this.questions = new RemoteQuestionBridge(...bridgeDeps);
     this.progress = new RemoteAgentProgress(
       channel,
       this.abort.signal,
@@ -422,6 +418,7 @@ export class RemoteController {
           inactivityTimeoutMinutes: this.options.inactivityTimeoutMinutes ?? 30,
           modelEntries: this.options.modelEntries,
           workspaceAliases: this.options.workspaceAliases,
+          totpEnrolled: () => this.auth.totpEnrolled(this.channel.name),
           // Without this, `/workspace list` never marks the current entry and
           // the "already in this workspace" guard on `/new <alias>` can never
           // fire — RemoteRuntime computes the alias and the handler reads it,

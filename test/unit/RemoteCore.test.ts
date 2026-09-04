@@ -1007,6 +1007,58 @@ describe('remote compaction progress notifications', () => {
     expect(reloadWindow).toHaveBeenCalledTimes(1);
   }
 
+  it('warns that /reload ends the session only when a code can end it', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      // Enrolled: the session dies with the window, so the acknowledgement has
+      // to say so. Nothing else does -- the chat just goes silent, which is
+      // indistinguishable from a reload that hung.
+      const enrolled = await runReloadNotice(true, 'enrolled');
+      expect(enrolled).toContain('6-digit');
+      expect(enrolled).toContain('this session ends with it');
+      // Not enrolled: no challenge is ever issued, so naming a code would send
+      // the owner looking for an authenticator they never set up.
+      const open = await runReloadNotice(false, 'open');
+      expect(open).not.toContain('6-digit');
+      expect(open).toContain('reloading the window');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  async function runReloadNotice(totp: boolean, tag: string): Promise<string> {
+    const state = await store();
+    const channel = new FakeRemoteChannel();
+    const context = {
+      channel,
+      store: state,
+      host: {},
+      workspaceId: 'workspace',
+      signal: new AbortController().signal,
+      inactivityTimeoutMinutes: 30,
+      modelEntries: [],
+      workspaceAliases: {},
+      reloadWindow: vi.fn(async () => undefined),
+      totpEnrolled: async () => totp,
+    };
+    await handleRemoteCommand(
+      {
+        channel: 'fake',
+        kind: 'text',
+        providerMessageId: `notice-${tag}`,
+        senderId: 'owner',
+        chatId: 'chat-a',
+        chatType: 'private',
+        receivedAt: 1,
+        text: '/reload',
+      } as RemoteInboundEvent,
+      context as never,
+      `notice-${tag}`,
+    );
+    await vi.advanceTimersByTimeAsync(1_000);
+    return channel.sent.map((message) => message.text).join(' | ');
+  }
+
   it('keeps progress as complete when the result send throws after a successful compaction', async () => {
     const state = await store();
     await state.setBinding({
