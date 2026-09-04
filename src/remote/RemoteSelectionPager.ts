@@ -4,7 +4,7 @@ import {
   sortModelPickerEntries,
   type ModelPickerDescriptor,
 } from '../sidebar/ModelPickerGroups';
-import { escapeTelegramHtml } from './telegramHtml';
+import { boldLeadingNumber, boldNumberedLine, markupTelegramLines } from './telegramHtml';
 import { formatRemoteDateTime } from './RemoteDateTime';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type {
@@ -234,17 +234,30 @@ const MODEL_GROUP_HEADINGS = new Set(
 );
 
 /**
- * Re-inserts the only markup this page owns: its group headings.
+ * Re-inserts the markup a selection page owns: its heading, its group headings
+ * and its entry numbers.
  *
  * The text is escaped whole first, so a model name is content and nothing else.
- * Headings are matched as complete lines against a fixed set, which is why a
- * name can never be mistaken for one -- every entry line starts with "N. ".
+ * Group headings are matched as complete lines against a fixed set, and entries
+ * always start with "N. " -- which is why a name can never be mistaken for
+ * either.
  */
-function withGroupHeadingMarkup(text: string): string {
-  return escapeTelegramHtml(text)
-    .split('\n')
-    .map((line) => (MODEL_GROUP_HEADINGS.has(line) ? `<b><u>${line}</u></b>` : line))
-    .join('\n');
+function withSelectionMarkup(text: string, kind: SelectionKind): string {
+  // A conversation entry is a number and a title on one line, with its ids and
+  // timestamps on the next; bolding the whole line there bolds exactly the
+  // title. A model or workspace entry carries its path or provider on the same
+  // line, so only the number -- the part typed back -- is bolded.
+  const entry = kind === 'conversations' ? boldNumberedLine : boldLeadingNumber;
+  return markupTelegramLines(text, (line, index) => {
+    if (index === 0) return `<b>${line}</b>`;
+    if (MODEL_GROUP_HEADINGS.has(line)) return `<b><u>${line}</u></b>`;
+    if (line.startsWith('You are in: '))
+      return `<b>You are in:</b>${line.slice('You are in:'.length)}`;
+    // The footer is instructions, not content: italic keeps it present without
+    // letting it compete with the entries above it.
+    if (line.startsWith('Use /')) return `<i>${line}</i>`;
+    return entry(line);
+  });
 }
 
 function renderPage(
@@ -286,11 +299,9 @@ function renderPage(
   // the parse mode. Without the second, the plain-text fallback would print the
   // escaping as literal `&amp;`.
   const rich =
-    kind === 'models' &&
-    context.channel.sendHtml !== undefined &&
-    context.channel.selectionPages !== undefined;
+    context.channel.sendHtml !== undefined && context.channel.selectionPages !== undefined;
   return {
-    text: rich ? withGroupHeadingMarkup(text) : text,
+    text: rich ? withSelectionMarkup(text, kind) : text,
     ...(rich ? { parseMode: 'HTML' as const } : {}),
     controls: (token) => ({ kind, token, page, pageCount: pages }),
   };
@@ -342,14 +353,27 @@ function formatConversations(
   const byId = new Map(
     context.host.status().conversations.map((conversation) => [conversation.id, conversation]),
   );
-  return values.slice(start, end).map((id, index) => {
-    const number = start + index + 1;
+  const lines: string[] = [];
+  for (const [offset, id] of values.slice(start, end).entries()) {
+    // Two lines and a blank between entries: a conversation carries a title,
+    // an id, a model and a timestamp, and on a phone all four on one line wrap
+    // into an unreadable block where no entry has a visible beginning.
+    if (offset > 0) lines.push('');
+    const number = start + offset + 1;
     const conversation = byId.get(id);
-    if (!conversation) return `${number}. Unavailable conversation · ${shortId(id)}`;
-    return `${number}. ${clip(conversation.title, 180)} · ${shortId(id)} · ${
-      conversation.activeModel ?? 'default model'
-    } · ${formatRemoteDateTime(conversation.updatedAt)}${conversation.archived ? ' · archived' : ''}`;
-  });
+    if (!conversation) {
+      lines.push(`${number}. Unavailable conversation`);
+      lines.push(`    ${shortId(id)}`);
+      continue;
+    }
+    lines.push(`${number}. ${clip(conversation.title, 180)}`);
+    lines.push(
+      `    ${shortId(id)} · ${conversation.activeModel ?? 'default model'} · ${formatRemoteDateTime(
+        conversation.updatedAt,
+      )}${conversation.archived ? ' · archived' : ''}`,
+    );
+  }
+  return lines;
 }
 
 function parseRequestedPage(argument: string | undefined, itemCount: number): number | undefined {

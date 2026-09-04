@@ -357,10 +357,28 @@ describe('remote selection pagination', () => {
     expect(page.parseMode).toBe('HTML');
     expect(page.text).toContain('<b><u>LOCAL — LLAMA.CPP</u></b>');
     expect(page.text).toContain('<b><u>OPENAI</u></b>');
-    expect(page.text).toContain('2. a&lt;b&gt;&amp;c');
+    expect(page.text).toContain('<b>2.</b> a&lt;b&gt;&amp;c');
     // The usage footer names a placeholder in angle brackets, so it has to
     // survive escaping too or Telegram eats it as an unknown tag.
     expect(page.text).toContain('Use /model &lt;number&gt;.');
+  });
+
+  it('gives each conversation its own block, and bolds the title on an HTML transport', async () => {
+    const store = await requestStore();
+    const channel = new FakeRemoteChannel();
+    channel.declareHtmlSupport();
+    const ctx = context(channel, store, 3);
+
+    await expect(sendConversationSelection(textEvent('/list'), ctx)).resolves.toEqual({
+      kind: 'handled',
+    });
+
+    const page = channel.selectionPageSends[0]!;
+    expect(page.parseMode).toBe('HTML');
+    // The title owns its line; the ids, model and timestamp sit under it, and
+    // a blank line separates one conversation from the next.
+    expect(page.text).toContain('<b>1. Conversation 1</b>\n    con');
+    expect(page.text).toMatch(/\n\n<b>2\. Conversation 2<\/b>\n {4}con/u);
   });
 
   it('rejects stale tokens and out-of-range callback pages', async () => {

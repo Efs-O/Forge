@@ -1,4 +1,6 @@
 import type { RemoteCommandContext } from './RemoteCommandHandler';
+import { HELP_TEXT, decorateHelpLine } from './remoteHelpText';
+import { boldLeadingNumber, boldLineLabel, sendRichText } from './telegramHtml';
 import type { RemoteInboundDisposition, RemoteInboundEvent } from './types';
 
 type TextEvent = Extract<RemoteInboundEvent, { kind: 'text' }>;
@@ -13,6 +15,12 @@ type TextEvent = Extract<RemoteInboundEvent, { kind: 'text' }>;
  */
 const RELOAD_SETTLE_MS = 1_000;
 
+/** Line labels `/status` owns; bolding them makes the report scannable. */
+const STATUS_LABELS = new Set(['Workspace', 'Chat', 'Model', 'Forge', 'Context', 'Approvals']);
+
+/** Line labels `/context` owns. */
+const CONTEXT_LABELS = new Set(['Forge context', 'Remaining']);
+
 /** Queue/session commands split from model, workspace, and lifecycle controls. */
 export async function handleRemoteSessionCommand(
   command: string,
@@ -22,32 +30,12 @@ export async function handleRemoteSessionCommand(
 ): Promise<RemoteInboundDisposition | undefined> {
   if (command === '/help' || command === '/commands') {
     // Per-command descriptions already ship as Telegram's native command menu,
-    // so repeating them here only doubled the length of the message.
-    await context.channel.send(
-      event.chatId,
-      `Forge commands:
-
-Session: /status · /context · /stop · /new · /list [page] · /resume · /select <n-or-id> · /notify on|off · /mirror on|off · /voice on|off
-Workspace: /workspace [page] · /new <n-or-alias>
-Queue: /queue · /drop <n|all> · /steer <prompt>
-Models: /models [page] · /model [n-or-name] · /unload · /restart
-Window: /compact · /lock · /reload · /timeout [1-1440|off] · /clanker on|off
-Machine: /system
-
-Notes:
-• /stop cancels the current request; queued prompts stay queued
-• /resume continues the conversation bound to this chat; /select <n-or-id> switches to another one
-• /steer interrupts the current turn and runs its prompt before queued ones
-• /clanker on auto-approves non-dangerous tools until the window reloads — writes then land with no confirmation anywhere
-• /reload fully reloads the VS Code window: it picks up a newly installed build, and drops a held prompt, the queue, and this session
-• /system reports GPU load, which processes hold VRAM (Forge's own backends are tagged), RAM and drive space; it answers while a turn is running
-• /unload releases every loaded model and frees its memory, exactly like Unload Model in the sidebar; unlike /reload it refuses while a turn is running
-• /notify off silences agent notify_user messages for this chat until the window reloads
-• /mirror off stops answers typed in the Forge window being echoed here (on by default)
-• /voice off stops replies being sent as a spoken voice message (text stays); /voice on turns it back on — saved to config.yaml, so it survives a window reload
-• /new <n-or-alias> switches this chat to another workspace; /workspace lists them, numbers them, and says which one you are in`,
-      { signal: context.signal },
-    );
+    // so repeating them here only doubled the length of the message. What is
+    // left is a map, and a map is only useful if it is scannable: one group per
+    // paragraph, one note per paragraph, nothing wrapping into its neighbour.
+    await sendRichText(context.channel, event.chatId, HELP_TEXT, decorateHelpLine, {
+      signal: context.signal,
+    });
     return { kind: 'handled' };
   }
   if (command === '/status') {
@@ -57,7 +45,8 @@ Notes:
     const requests = context.store.requestHealth();
     const outbox = context.store.outboxHealth();
     const conversation = status.conversations.find((item) => item.id === binding?.conversationId);
-    await context.channel.send(
+    await sendRichText(
+      context.channel,
       event.chatId,
       // The workspace leads: a chat reached through /new could be sitting in
       // any project on disk, and nothing else in the session says which.
@@ -69,6 +58,7 @@ Notes:
         `Forge: ${status.requestChains.length} active request(s), ${queued} queued here, ${status.streamingConversationIds.length} streaming, ${requests.unknown} crash-unknown, ${outbox.pending} notifications pending, ${outbox.abandoned} abandoned.\n` +
         `Context: ${describeBudget(binding && context.host.contextBudget(binding.conversationId))}\n` +
         `Approvals: ${context.host.clankerMode() ? 'CLANKER — non-dangerous tools auto-approved' : 'gated'}`,
+      (line) => boldLineLabel(line, STATUS_LABELS),
       { signal: context.signal },
     );
     return { kind: 'handled' };
@@ -76,9 +66,11 @@ Notes:
   if (command === '/context') {
     const binding = context.store.binding(event.channel, event.chatId);
     if (!binding) return { kind: 'rejected', reason: 'no conversation is bound' };
-    await context.channel.send(
+    await sendRichText(
+      context.channel,
       event.chatId,
       describeDetailedBudget(context.host.contextBudget(binding.conversationId)),
+      (line) => boldLineLabel(line, CONTEXT_LABELS),
       { signal: context.signal },
     );
     return { kind: 'handled' };
@@ -193,7 +185,8 @@ Notes:
     const binding = context.store.binding(event.channel, event.chatId);
     if (!binding) return { kind: 'rejected', reason: 'no conversation is bound' };
     const queued = ownQueue(event, context, binding.conversationId);
-    await context.channel.send(
+    await sendRichText(
+      context.channel,
       event.chatId,
       queued.length === 0
         ? 'Forge: no queued prompts for this chat.'
@@ -202,7 +195,8 @@ Notes:
               (item, index) =>
                 `${index + 1}. ${item.priority === 'steer' ? '[steer] ' : ''}${truncate(item.text, 160)}`,
             )
-            .join('\n') + '\n\nUse /drop <number|all> to cancel queued work.',
+            .join('\n\n') + '\n\nUse /drop <number|all> to cancel queued work.',
+      (line) => (line.startsWith('Use /') ? `<i>${line}</i>` : boldLeadingNumber(line)),
       { signal: context.signal },
     );
     return { kind: 'handled' };
