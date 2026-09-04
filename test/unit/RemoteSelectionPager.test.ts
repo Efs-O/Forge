@@ -186,6 +186,42 @@ describe('remote selection pagination', () => {
     expect(store.selection('fake', 'chat', 'conversations', first.controls.token)).toBeUndefined();
   });
 
+  it('closes a list whose selection is gone, so no keyboard is ever stranded', async () => {
+    const store = await requestStore();
+    const channel = new FakeRemoteChannel();
+    const ctx = context(channel, store, 3, 12);
+
+    await sendModelSelection(textEvent('/models'), ctx);
+    const first = channel.selectionPageSends[0]!;
+
+    // A second /models supersedes the first list, which is exactly the state a
+    // stale keyboard is in. Its Close button must still dismiss the message.
+    await sendModelSelection(textEvent('/models'), ctx);
+    expect(store.selection('fake', 'chat', 'models', first.controls.token)).toBeUndefined();
+
+    await expect(
+      handleRemoteSelectionAction(
+        selectionEvent(first.controls.token, {
+          providerMessageId: 'close-stale',
+          action: 'close',
+          page: undefined,
+        }),
+        ctx,
+        'close-stale-list',
+      ),
+    ).resolves.toEqual({ kind: 'handled' });
+    expect(channel.selectionCloses).toEqual([{ chatId: 'chat', messageId: '42' }]);
+
+    // Paging a superseded list is still refused: it has no values to render.
+    await expect(
+      handleRemoteSelectionAction(
+        selectionEvent(first.controls.token, { providerMessageId: 'page-stale' }),
+        ctx,
+        'page-stale-list',
+      ),
+    ).resolves.toMatchObject({ kind: 'rejected' });
+  });
+
   it('continues the bound conversation on bare /resume and lists bare /model', async () => {
     const store = await requestStore();
     const channel = new FakeRemoteChannel();

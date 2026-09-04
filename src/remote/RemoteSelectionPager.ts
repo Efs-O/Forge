@@ -153,18 +153,10 @@ async function executeSelectionAction(
   event: SelectionEvent,
   context: RemoteSelectionContext,
 ): Promise<RemoteInboundDisposition> {
-  const selection = context.store.selection(
-    event.channel,
-    event.chatId,
-    event.selectionKind,
-    event.selectionToken,
-  );
-  if (!selection) {
-    return {
-      kind: 'rejected',
-      reason: `${kindLabel(event.selectionKind)} list expired; run ${commandFor(event.selectionKind)} again`,
-    };
-  }
+  // Close is dismissal of a message, not an operation on a list, so it must
+  // never be gated on the list still being live. Gating it left every expired
+  // or superseded list -- a second /models supersedes the first -- with a
+  // permanently dead x Close button and no way out but Telegram's own delete.
   if (event.action === 'close') {
     await context.store.clearSelection(
       event.channel,
@@ -179,6 +171,18 @@ async function executeSelectionAction(
       signal: context.signal,
     });
     return { kind: 'handled' };
+  }
+  const selection = context.store.selection(
+    event.channel,
+    event.chatId,
+    event.selectionKind,
+    event.selectionToken,
+  );
+  if (!selection) {
+    return {
+      kind: 'rejected',
+      reason: `${kindLabel(event.selectionKind)} list expired; run ${commandFor(event.selectionKind)} again`,
+    };
   }
   if (event.page === undefined || event.page >= pageCount(selection.values.length)) {
     return { kind: 'rejected', reason: 'selection page is out of range' };
