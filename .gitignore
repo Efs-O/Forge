@@ -104,3 +104,11 @@ test/fixtures/voice/synthetic/
 # run off the checked-in transcripts, not the audio, so the audio never needs to
 # ship. Regenerate locally with `node scripts/voice-fixtures.mjs --import`.
 test/fixtures/voice/recorded/
+
+# Scratch captures from the voice/whisper work, written to the repo root by a
+# manual run. Same reasoning as the recorded corpus above: audio of a real
+# person, reproducible locally, and no test reads it.
+/*.wav
+
+# Python bytecode from the SWE-bench harness.
+__pycache__/

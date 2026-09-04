@@ -5,6 +5,10 @@ ScreenShot*.jpg
 # so a screenshot dropped in the repo root must not ship to users.
 *.jpg
 *.png
+# Same rule for audio, and it bites harder: a scratch capture from the voice
+# work is a recording of someone speaking. whisper-resident-live.wav shipped
+# inside 0.15.14's VSIX because only images were excluded here.
+*.wav
 legacy/**
 .claude/**
 .cursor/**
