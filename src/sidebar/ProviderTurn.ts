@@ -70,6 +70,7 @@ function finishTurn(
   checkpoint: CheckpointSession,
   postC: (msg: HostToWebview) => void,
   releaseBackend: boolean,
+  finalText: string,
 ): void {
   const convId = conv.id;
   ctx.lifecycle.clearStreaming(convId);
@@ -78,7 +79,7 @@ function finishTurn(
   const depthBefore = ctx.checkpoints.depth(convId);
   ctx.checkpoints.commitTurn(checkpoint);
   if (ctx.checkpoints.depth(convId) > depthBefore) postC({ type: 'checkpointReady' });
-  ctx.events.onGenerationFinished?.(model.name, convId);
+  ctx.events.onGenerationFinished?.(model.name, convId, finalText);
   ctx.lifecycle.settle(convId);
 }
 
@@ -107,6 +108,7 @@ export async function runCloudProviderTurn(
   const checkpoint = ctx.checkpoints.beginTurn(`turn-${Date.now()}`, convId);
   ctx.lifecycle.markStreaming(convId);
   ctx.events.onGenerationStarted?.(model.name, convId);
+  let finalText = '';
   let outcome: ForgeTurnOutcome;
   try {
     const result = await ctx.runModelTurn(
@@ -126,6 +128,7 @@ export async function runCloudProviderTurn(
       finishReason: result.finishReason,
       ...(incompleteReason ? { incompleteReason } : {}),
     };
+    finalText = result.finalText;
   } catch (err) {
     if (ctrl.signal.aborted) {
       postC({ type: 'done', finishReason: 'cancelled' });
@@ -137,7 +140,7 @@ export async function runCloudProviderTurn(
       outcome = { kind: 'failed', error: message, finalText: '' };
     }
   } finally {
-    finishTurn(ctx, conv, model, checkpoint, postC, false);
+    finishTurn(ctx, conv, model, checkpoint, postC, false, finalText);
   }
   return outcome;
 }
@@ -214,6 +217,7 @@ export async function runLocalProviderTurn(
   const checkpoint = ctx.checkpoints.beginTurn(`turn-${Date.now()}`, convId);
   ctx.lifecycle.markStreaming(convId);
   ctx.events.onGenerationStarted?.(model.name, convId);
+  let finalText = '';
   let outcome: ForgeTurnOutcome;
   try {
     const result = await ctx.runModelTurn(
@@ -233,6 +237,7 @@ export async function runLocalProviderTurn(
       finishReason: result.finishReason,
       ...(incompleteReason ? { incompleteReason } : {}),
     };
+    finalText = result.finalText;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (ctrl.signal.aborted) {
@@ -245,7 +250,7 @@ export async function runLocalProviderTurn(
       outcome = { kind: 'failed', error: message, finalText: '' };
     }
   } finally {
-    finishTurn(ctx, conv, model, checkpoint, postC, true);
+    finishTurn(ctx, conv, model, checkpoint, postC, true, finalText);
   }
   return outcome;
 }

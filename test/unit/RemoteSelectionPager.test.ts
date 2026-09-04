@@ -147,7 +147,7 @@ describe('remote selection pagination', () => {
       ctx.host as unknown as { restoreConversation: typeof restoreConversation }
     ).restoreConversation = restoreConversation;
     await handleRemoteCommand(
-      textEvent('/resume 17'),
+      textEvent('/select 17'),
       {
         ...ctx,
         workspaceId: 'workspace',
@@ -156,6 +156,17 @@ describe('remote selection pagination', () => {
       'resume-seventeen',
     );
     expect(restoreConversation).toHaveBeenCalledWith('conversation-17', { activate: false });
+
+    await handleRemoteCommand(
+      textEvent('/resume 17'),
+      {
+        ...ctx,
+        workspaceId: 'workspace',
+        inactivityTimeoutMinutes: 30,
+      },
+      'resume-seventeen-legacy-alias',
+    );
+    expect(restoreConversation).toHaveBeenCalledTimes(2);
 
     await expect(
       handleRemoteSelectionAction(
@@ -172,27 +183,37 @@ describe('remote selection pagination', () => {
     expect(store.selection('fake', 'chat', 'conversations', first.controls.token)).toBeUndefined();
   });
 
-  // Both verbs take a number that only a list can supply, so the bare form used
-  // to fall past every branch in handleRemoteCommand to its catch-all and
-  // answer "unknown command" - the one thing that was never true about them.
-  it('answers a bare /resume and /model with the list the number comes from', async () => {
+  it('continues the bound conversation on bare /resume and lists bare /model', async () => {
     const store = await requestStore();
     const channel = new FakeRemoteChannel();
+    const resumeCurrent = vi.fn(async () => ({ kind: 'handled' as const }));
     const ctx = {
       ...context(channel, store, 3, 2),
       workspaceId: 'workspace',
       inactivityTimeoutMinutes: 30,
+      resumeCurrent,
     };
 
     await expect(handleRemoteCommand(textEvent('/resume'), ctx, 'bare-resume')).resolves.toEqual({
       kind: 'handled',
     });
-    expect(channel.selectionPageSends[0]!.controls).toMatchObject({ kind: 'conversations' });
+    expect(resumeCurrent).toHaveBeenCalledWith(
+      expect.objectContaining({ text: '/resume' }),
+      'bare-resume',
+    );
+    expect(channel.selectionPageSends).toHaveLength(0);
 
     await expect(handleRemoteCommand(textEvent('/model'), ctx, 'bare-model')).resolves.toEqual({
       kind: 'handled',
     });
-    expect(channel.selectionPageSends[1]!.controls).toMatchObject({ kind: 'models' });
+    expect(channel.selectionPageSends[0]!.controls).toMatchObject({ kind: 'models' });
+
+    await expect(
+      handleRemoteCommand(textEvent('/select'), ctx, 'bare-select'),
+    ).resolves.toEqual({
+      kind: 'rejected',
+      reason: 'usage: /select <number-or-id>',
+    });
   });
 
   it('applies the same paging to models and supports explicit page commands', async () => {

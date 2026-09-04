@@ -64,6 +64,12 @@ export class RemotePendingPrompt {
   }
 }
 
+/** Short, single-line echo so a replayed prompt is never silent. */
+export function previewPrompt(text: string): string {
+  const flat = text.replace(/\s+/gu, ' ').trim();
+  return flat.length > 120 ? `"${flat.slice(0, 120)}…"` : `"${flat}"`;
+}
+
 function key(channel: RemoteInboundEvent['channel'], chatId: string): string {
   return `${channel}:${chatId}`;
 }

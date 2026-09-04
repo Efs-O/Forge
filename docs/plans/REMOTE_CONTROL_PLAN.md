@@ -228,7 +228,7 @@ For V1, one running VS Code workspace owns the channel configuration. Do not att
 Default behavior after startup:
 
 - If a persisted remote binding points to an existing OPEN conversation, use it.
-- If it points to history, report that it is archived and require `/resume <id>`.
+- If it points to history, report that it is archived and require `/select <id>`.
 - If it points nowhere, do not guess. Ask the user to select a session or bind to the active open conversation through an explicit host command.
 
 Suggested host commands:
@@ -236,7 +236,9 @@ Suggested host commands:
 - `/status`
 - `/sessions`
 - `/use <short-id>` — bind to an existing open conversation
-- `/resume <short-id>` — restore archived conversation and bind it
+- `/resume` — continue the conversation currently bound to this chat
+- `/select <short-id>` — restore/select an existing conversation and bind it
+- `/resume <short-id>` — compatibility alias for `/select <short-id>`
 - `/new` — create a conversation and bind it
 - `/stop`
 - `/approve <approval-id>`

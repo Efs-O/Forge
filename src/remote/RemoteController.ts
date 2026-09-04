@@ -17,9 +17,15 @@ import { RemoteQuestionBridge } from './RemoteQuestionBridge';
 import type { RemoteAttachmentStore } from './RemoteAttachmentStore';
 import { RemoteAgentProgress } from './RemoteAgentProgress';
 import { RemoteNotificationFanout } from './RemoteNotificationFanout';
-import { admitRemotePrompt, isRemoteCommand, parseSteerCommand } from './RemotePromptAdmission';
+import {
+  admitRemotePrompt,
+  isRemoteCommand,
+  parseSteerCommand,
+  resumeRemoteConversation,
+  type RemotePromptAdmissionDeps,
+} from './RemotePromptAdmission';
 import { drainRemoteQueue } from './RemoteQueueDrain';
-import { RemotePendingPrompt } from './RemotePendingPrompt';
+import { previewPrompt, RemotePendingPrompt } from './RemotePendingPrompt';
 import {
   buildSpokenGateContext,
   resolveVoiceDraft,
@@ -67,7 +73,22 @@ export class RemoteController {
   private readonly progress: RemoteAgentProgress;
   private readonly pending = new RemotePendingPrompt();
   private progressSubscription: { dispose(): void } | undefined;
-
+  private get promptDeps(): RemotePromptAdmissionDeps & {
+    restoreConversation: (conversationId: string) => Promise<unknown>;
+  } {
+    return {
+      channel: this.channel,
+      store: this.store,
+      host: this.host,
+      options: this.options,
+      isBusy: (conversationId) => this.isBusy(conversationId),
+      kickDrain: (conversationId) => this.kickDrain(conversationId),
+      audit: this.audit,
+      onError: this.options.onError,
+      restoreConversation: (conversationId) =>
+        this.host.restoreConversation(conversationId, { activate: false }),
+    };
+  }
   constructor(
     private readonly channel: RemoteChannel,
     private readonly store: RemoteRequestStore,
@@ -427,6 +448,8 @@ export class RemoteController {
             : {}),
           ...(this.options.reloadWindow ? { reloadWindow: this.options.reloadWindow } : {}),
           ...(this.options.voiceToggle ? { voiceToggle: this.options.voiceToggle } : {}),
+          resumeCurrent: (resumeEvent, resumeDedupKey) =>
+            resumeRemoteConversation(resumeEvent, resumeDedupKey, this.promptDeps),
         },
         key,
       );
@@ -438,16 +461,7 @@ export class RemoteController {
       steer.text ?? event.text,
       key,
       steer.matched ? 'steer' : undefined,
-      {
-        channel: this.channel,
-        store: this.store,
-        host: this.host,
-        options: this.options,
-        isBusy: (conversationId) => this.isBusy(conversationId),
-        kickDrain: (conversationId) => this.kickDrain(conversationId),
-        audit: this.audit,
-        onError: this.options.onError,
-      },
+      this.promptDeps,
     );
     if (result.kind !== 'rejected' && result.kind !== 'retry') this.auth.touch(event);
     return result;
@@ -483,10 +497,4 @@ export class RemoteController {
       .finally(() => this.drains.delete(conversationId));
     this.drains.set(conversationId, drain);
   }
-}
-
-/** Short, single-line echo so a replayed prompt is never silent. */
-function previewPrompt(text: string): string {
-  const flat = text.replace(/\s+/gu, ' ').trim();
-  return flat.length > 120 ? `"${flat.slice(0, 120)}…"` : `"${flat}"`;
 }

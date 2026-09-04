@@ -22,7 +22,7 @@ buttons rather than keyboard-event emulation.
 - Show `Previous`, `Next`, and `Close` buttons as applicable.
 - Edit the original Telegram message when moving between pages.
 - Delete the Telegram message when `Close` is pressed.
-- Preserve absolute numbering across every page so `/resume 17` and `/model 17`
+- Preserve absolute numbering across every page so `/select 17` and `/model 17`
   retain their existing meaning.
 - Keep the existing ten-minute selection lifetime.
 - Support `/list <page>` and `/models <page>` as text fallbacks for transports
@@ -102,7 +102,7 @@ strict; arbitrary callback data remains ignored or rejected.
 4. A token cannot operate another chat or selection kind.
 5. Expired selections cannot be navigated or closed authoritatively.
 6. Callback page indices are bounded against the stored selection length.
-7. Numeric `/resume` and `/model` resolution continues to use the full stored
+7. Numeric `/select` and `/model` resolution continues to use the full stored
    values array, not only the visible page.
 8. Callback data contains no conversation IDs, model names, paths, identities,
    or secrets.
@@ -131,7 +131,7 @@ strict; arbitrary callback data remains ignored or rejected.
 - Page four displays 31–40 and has no `Next` button.
 - `Close` removes the Telegram list message and invalidates its token.
 - The same behavior applies to more than ten configured models.
-- `/resume 17` and `/model 17` resolve the seventeenth stored item after page
+- `/select 17` and `/model 17` resolve the seventeenth stored item after page
   navigation.
 - `/list 2` and `/models 2` work as text fallbacks.
 - Invalid pages receive a visible usage/range rejection.

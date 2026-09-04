@@ -287,8 +287,8 @@ Binding is presentation/routing state, separate from conversation transcript sta
 Startup behavior:
 
 - valid binding to open conversation -> use it;
-- binding to archived conversation -> report archived, require `/resume`;
-- stale/missing binding -> require `/use`, `/resume`, or `/new`;
+- binding to archived conversation -> report archived, require `/select`;
+- stale/missing binding -> require `/use`, `/select`, or `/new`;
 - never guess the active tab.
 
 Host commands:
@@ -296,7 +296,7 @@ Host commands:
 - `/status`
 - `/sessions`
 - `/use <short-id>`
-- `/resume <short-id>`
+- `/select <short-id>`
 - `/new`
 - `/stop`
 - `/approve <approval-id>`

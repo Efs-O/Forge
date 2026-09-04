@@ -92,7 +92,7 @@ export async function sendModelSelection(
 
 /**
  * Alias lists are short, so this exists for the numbering rather than the
- * paging: `/new 2` should work the way `/model 2` and `/resume 2` already do.
+ * paging: `/new 2` should work the way `/model 2` and `/select 2` already do.
  * Sharing the pager also means the list gets expiry and the page keyboard for
  * free once discovery starts returning more than ten workspaces.
  */
@@ -235,7 +235,7 @@ function renderPage(
       ? '/model <number>'
       : kind === 'workspaces'
         ? '/new <number>'
-        : '/resume <number>';
+        : '/select <number>';
   const fallback = pages > 1 ? ` Page fallback: ${commandFor(kind)} <page>.` : '';
   // A workspace list that does not say where you are answers half the question:
   // the "· current" marker only appears when the open folder is in the list.

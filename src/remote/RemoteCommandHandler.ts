@@ -36,6 +36,11 @@ export interface RemoteCommandContext {
    * rebuilds the transports, so it survives a window reload.
    */
   voiceToggle?: { get: () => boolean; set: (on: boolean) => Promise<void> };
+  /** Continue the conversation currently bound to this remote chat. */
+  resumeCurrent?: (
+    event: Extract<RemoteInboundEvent, { kind: 'text' }>,
+    dedupKey: string,
+  ) => Promise<RemoteInboundDisposition>;
   switchWorkspace?: ((alias: string, channel: string, chatId: string) => Promise<void>) | undefined;
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
   reloadWindow?: (() => Promise<void>) | undefined;
@@ -52,7 +57,7 @@ export async function handleRemoteCommand(
     return { kind: 'rejected', reason: 'previous command outcome is unknown; resend it' };
   }
   try {
-    const result = await executeRemoteCommand(event, context);
+    const result = await executeRemoteCommand(event, context, dedupKey);
     await context.store.finishControlEvent(dedupKey);
     return result;
   } catch (err) {
@@ -64,6 +69,7 @@ export async function handleRemoteCommand(
 async function executeRemoteCommand(
   event: Extract<RemoteInboundEvent, { kind: 'text' }>,
   context: RemoteCommandContext,
+  dedupKey: string,
 ): Promise<RemoteInboundDisposition> {
   // Split whole: `/workspace list 2` needs two operands, and a limit of 2 threw
   // the page number away, so the documented page fallback never paged.
@@ -170,8 +176,8 @@ async function executeRemoteCommand(
   }
   if (command === '/new' && argument) {
     // A number means the last `/workspace list`, matching /model <n> and
-    // /resume <n>; the alias keeps working so a remembered name does not
-    // depend on having listed first.
+    // /select <n>; the legacy /resume <n> alias keeps working so a remembered
+    // name does not depend on having listed first.
     const alias = resolveSelection(context, event, 'workspaces', argument) ?? argument;
     if (!context.workspaceAliases[alias]) {
       // A number that resolves to nothing means the list expired or never ran,
@@ -219,7 +225,7 @@ async function executeRemoteCommand(
   if (command === '/list') {
     return sendConversationSelection(event, context, argument);
   }
-  if (command === '/resume' && argument) {
+  if ((command === '/select' || command === '/resume') && argument) {
     const conversationId = resolveSelection(context, event, 'conversations', argument) ?? argument;
     const conv = await context.host.restoreConversation(conversationId, { activate: false });
     await context.store.setBinding({
@@ -230,19 +236,24 @@ async function executeRemoteCommand(
     });
     await context.channel.send(
       event.chatId,
-      `Forge: resumed ${conv.title} (${shortId(conv.id)}).`,
+      `Forge: selected ${conv.title} (${shortId(conv.id)}).`,
       {
         signal: context.signal,
       },
     );
     return { kind: 'handled' };
   }
-  // Bare /resume used to fall past every branch to “unknown command” — the one
-  // answer that is never true here, since the command plainly exists and the
-  // help line advertises it. It needs a number, and the numbers come from this
-  // list, so printing the list is the whole reply rather than a correction.
+  if (command === '/select') {
+    return { kind: 'rejected', reason: 'usage: /select <number-or-id>' };
+  }
+  // A numbered /resume is retained as a compatibility alias for /select.
+  // Bare /resume continues the conversation already bound to this chat, so a
+  // remote user can restart a cold model without inventing “Ready?”.
   if (command === '/resume') {
-    return sendConversationSelection(event, context, undefined);
+    if (!context.resumeCurrent) {
+      return { kind: 'rejected', reason: 'resume is unavailable in this window' };
+    }
+    return context.resumeCurrent(event, dedupKey);
   }
   if (command === '/models') {
     return sendModelSelection(event, context, argument);

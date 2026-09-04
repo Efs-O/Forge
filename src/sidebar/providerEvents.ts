@@ -7,7 +7,11 @@
  */
 export interface SidebarProviderEvents {
   onGenerationStarted?: (modelName: string | null, conversationId?: string) => void;
-  onGenerationFinished?: (modelName: string | null, conversationId?: string) => void;
+  onGenerationFinished?: (
+    modelName: string | null,
+    conversationId?: string,
+    finalText?: string,
+  ) => void;
   onBackendError?: (message: string) => void;
   onBackendReady?: (modelName: string | null) => void;
   onBackendStopped?: (modelName: string | null) => void;

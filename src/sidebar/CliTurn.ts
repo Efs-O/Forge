@@ -79,6 +79,7 @@ export async function runCliTurn(
   const checkpoint = ctx.checkpoints.beginTurn(`cli-chat-${Date.now()}`, convId);
   ctx.lifecycle.markStreaming(convId);
   let generationStarted = false;
+  let finalText = '';
   let outcome: ForgeTurnOutcome;
 
   try {
@@ -142,6 +143,7 @@ export async function runCliTurn(
           registry: ctx.cliSessions,
           key: { conversationId: conv.id, modelName: model.name },
         });
+    finalText = result.finalText;
     if (result.sessionId) {
       conv.cli_sessions = { ...conv.cli_sessions, [model.name]: result.sessionId };
       ctx.onTranscriptChanged(conv);
@@ -188,7 +190,9 @@ export async function runCliTurn(
     const depthBefore = ctx.checkpoints.depth(convId);
     ctx.checkpoints.commitTurn(checkpoint);
     if (ctx.checkpoints.depth(convId) > depthBefore) postC({ type: 'checkpointReady' });
-    if (generationStarted) ctx.events.onGenerationFinished?.(model.name, convId);
+    if (generationStarted) {
+      ctx.events.onGenerationFinished?.(model.name, convId, finalText);
+    }
     ctx.lifecycle.settle(convId);
   }
   return outcome;

@@ -27,7 +27,7 @@ export async function handleRemoteSessionCommand(
       event.chatId,
       `Forge commands:
 
-Session: /status · /context · /stop · /new · /list [page] · /resume [n-or-id] · /notify on|off · /mirror on|off · /voice on|off
+Session: /status · /context · /stop · /new · /list [page] · /resume · /select <n-or-id> · /notify on|off · /mirror on|off · /voice on|off
 Workspace: /workspace [page] · /new <n-or-alias>
 Queue: /queue · /drop <n|all> · /steer <prompt>
 Models: /models [page] · /model [n-or-name] · /unload · /restart
@@ -36,6 +36,7 @@ Machine: /system
 
 Notes:
 • /stop cancels the current request; queued prompts stay queued
+• /resume continues the conversation bound to this chat; /select <n-or-id> switches to another one
 • /steer interrupts the current turn and runs its prompt before queued ones
 • /clanker on auto-approves non-dangerous tools until the window reloads — writes then land with no confirmation anywhere
 • /reload fully reloads the VS Code window: it picks up a newly installed build, and drops a held prompt, the queue, and this session

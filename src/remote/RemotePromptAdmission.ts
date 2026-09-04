@@ -29,6 +29,10 @@ export interface RemotePromptAdmissionDeps {
   onError?: ((message: string) => void) | undefined;
 }
 
+interface RemoteResumeDeps extends RemotePromptAdmissionDeps {
+  restoreConversation: (conversationId: string) => Promise<unknown>;
+}
+
 export interface SteerCommand {
   matched: boolean;
   text?: string | undefined;
@@ -140,6 +144,33 @@ export async function admitRemotePrompt(
   return busy || alreadyQueued.length > 0
     ? { kind: 'queued', requestId: request.id, position: Math.max(1, position) }
     : { kind: 'accepted', requestId: request.id };
+}
+
+/** Resume the conversation already bound to a chat, loading it through the normal queue. */
+export async function resumeRemoteConversation(
+  event: Extract<RemoteInboundEvent, { kind: 'text' }>,
+  dedupKey: string,
+  deps: RemoteResumeDeps,
+): Promise<RemoteInboundDisposition> {
+  const binding = deps.store.binding(event.channel, event.chatId);
+  if (!binding) return { kind: 'rejected', reason: 'no conversation is bound' };
+  if (binding.workspaceId !== deps.options.workspaceId) {
+    return { kind: 'rejected', reason: 'chat is bound to a different workspace' };
+  }
+  if (deps.isBusy(binding.conversationId)) {
+    return { kind: 'rejected', reason: 'the bound conversation is already running' };
+  }
+
+  // Restore is idempotent for an open conversation and brings a history-only
+  // binding back into the sidebar before the normal queue loads its model.
+  await deps.restoreConversation(binding.conversationId);
+  return admitRemotePrompt(
+    event,
+    'Continue the current conversation from where you left off. If the task is already complete, report the result.',
+    dedupKey,
+    undefined,
+    deps,
+  );
 }
 
 async function saveAttachments(

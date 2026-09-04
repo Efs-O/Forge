@@ -103,7 +103,15 @@ describe('turn mirroring', () => {
     events.onGenerationFinished?.('m', 'conv-1');
     expect(emitted).toEqual([{ text: 'the answer', conversationId: 'conv-1', kind: 'turn' }]);
     // Decorating must not swallow the status-bar update it wraps.
-    expect(inner).toHaveBeenCalledWith('m', 'conv-1');
+    expect(inner).toHaveBeenCalledWith('m', 'conv-1', undefined);
+  });
+
+  it('uses the provider final text when a cold restart changes the transcript tail', () => {
+    const { events, emitted } = wire(conversation([{ role: 'user', content: 'hi' }]));
+    events.onGenerationFinished?.('m', 'conv-1', 'the freshly completed answer');
+    expect(emitted).toEqual([
+      { text: 'the freshly completed answer', conversationId: 'conv-1', kind: 'turn' },
+    ]);
   });
 
   // A turn ends with tool rows after the answer often enough that indexing the

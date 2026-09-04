@@ -29,7 +29,7 @@ V1 must support:
 - durable FIFO follow-up queuing while the conversation is busy;
 - final completion/failure notification;
 - Forge-owned tool approval from VS Code or the authorized remote owner;
-- deterministic `/status`, `/stop`, `/new`, `/list`, `/resume`, `/models`, `/model`,
+- deterministic `/status`, `/stop`, `/new`, `/list`, `/resume`, `/select`, `/models`, `/model`,
   `/queue`, `/unload`, `/restart`, `/compact`, `/lock`, `/timeout`, `/clanker`,
   `/workspace list`, and `/help` host commands;
 - correlated approval/denial through Telegram buttons and exact `APPROVE <id>` /
@@ -412,7 +412,7 @@ bookkeeping and persistence without changing:
 - unrelated backend residency decisions.
 
 Do not activate and switch back. Remote sends target only open conversations; archived conversations
-require explicit `/resume`.
+require explicit `/select`.
 
 ## 12. Remote transport contract
 
@@ -817,5 +817,5 @@ identifier.
 The Telegram follow-up acceptance matrix and Google Authenticator-compatible TOTP flow were
 reported passed on 2026-08-30 and are recorded in `docs/REMOTE_CONTROL_VALIDATION.md`. The final
 implemented command vocabulary is the one listed in section 1; the earlier `/sessions`, `/use`,
-`/approve`, and `/deny` proposal was superseded by `/list`, `/resume`, `/models`, `/model`, and
+`/approve`, and `/deny` proposal was superseded by `/list`, `/resume`, `/select`, `/models`, `/model`, and
 transport-native correlated approval actions.

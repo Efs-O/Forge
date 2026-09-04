@@ -126,7 +126,8 @@ commands include:
 | `/status`                 | Shows bounded runtime, queue, notification, context, and approval state.                                        |
 | `/new`                    | Binds the chat to a new non-active Forge conversation.                                                          |
 | `/list [page]`            | Lists conversations ten at a time with Previous/Next/Close buttons and short-lived absolute numeric selections. |
-| `/resume <number-or-id>`  | Binds the chat to an existing conversation.                                                                     |
+| `/resume`                 | Continues the conversation currently bound to this chat, loading its model if needed.                          |
+| `/select <number-or-id>`  | Selects and binds an existing conversation without starting a turn. `/resume <number-or-id>` remains an alias. |
 | `/models [page]`          | Lists configured models ten at a time with Previous/Next/Close buttons and absolute numeric selections.         |
 | `/model <number-or-name>` | Pins a model while the bound conversation is idle.                                                              |
 | `/queue`                  | Lists durable prompts waiting for the bound conversation.                                                       |

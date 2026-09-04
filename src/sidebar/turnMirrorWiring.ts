@@ -26,10 +26,14 @@ export interface TurnMirrorWiring {
  */
 export function wireTurnMirror(events: SidebarProviderEvents, deps: TurnMirrorWiring): void {
   const original = events.onGenerationFinished;
-  events.onGenerationFinished = (modelName, conversationId) => {
-    original?.(modelName, conversationId);
+  events.onGenerationFinished = (modelName, conversationId, finalText) => {
+    original?.(modelName, conversationId, finalText);
     if (conversationId === undefined) return;
-    const text = finalAnswer(deps.lookup(conversationId));
+    // The provider already has the exact final answer at this point. Reading
+    // the transcript here was racy around cold backend startup/restart: a
+    // session sync or a continuation could make the callback see a different
+    // tail even though the turn had just completed successfully.
+    const text = finalText?.trim() || finalAnswer(deps.lookup(conversationId));
     if (text) deps.emit({ text, conversationId, kind: 'turn' });
   };
 }

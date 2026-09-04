@@ -2,6 +2,11 @@
 
 ## 0.15.14
 
+- **Remote resume and conversation selection now have distinct commands.** Bare
+  `/resume` continues the conversation already bound to Telegram and loads its
+  model when needed. `/select <number-or-id>` switches the binding without
+  starting a turn; numbered `/resume` remains as a compatibility alias.
+
 - **`/system` says what the machine is doing, and which PID is holding the
   VRAM.** New on both surfaces — the sidebar `/` menu and Telegram — plus a
   `get_system_status` tool so the agent can read the same numbers in one round
@@ -205,7 +210,7 @@
   `/workspace list` now send ten entries at a time with native inline-keyboard
   `Previous` / `Next` / `Close` buttons: navigation edits the original message
   rather than posting another one, and `Close` deletes it. Numbering stays
-  absolute across pages, so `/resume 17` and `/model 17` mean the seventeenth
+  absolute across pages, so `/select 17` and `/model 17` mean the seventeenth
   item whichever page is on screen. `/list 2` and `/models 2` are the text
   fallback for transports without buttons.
 

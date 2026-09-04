@@ -245,6 +245,84 @@ describe('RemoteController with fake channel', () => {
     await controller.stop();
   });
 
+  it('uses bare /resume to continue the currently bound conversation', async () => {
+    const state = await store();
+    await state.setBinding({
+      channel: 'fake',
+      chatId: 'private-chat',
+      workspaceId: 'workspace',
+      conversationId: 'c1',
+    });
+    const secrets = new MemorySecrets();
+    const auth = new RemoteAuth(secrets as unknown as vscode.SecretStorage);
+    const channel = new FakeRemoteChannel();
+    const restoreConversation = vi.fn(async () => ({
+      id: 'c1',
+      title: 'Existing conversation',
+      activeModel: 'local',
+      archived: false,
+      updatedAt: Date.now(),
+    }));
+    const send = vi.fn(async () => ({ kind: 'completed' as const, finalText: 'continued answer' }));
+    const host = {
+      restoreConversation,
+      send,
+      cancel: vi.fn(),
+      addApprovalSink: () => ({ dispose: () => undefined }),
+      addQuestionSink: () => ({ dispose: () => undefined }),
+      answerQuestion: () => false,
+      status: () => ({
+        activeConversationId: 'c1',
+        conversations: [],
+        requestChains: [],
+        streamingConversationIds: [],
+      }),
+    } as unknown as ForgeHostFacade;
+    const controller = new RemoteController(channel, state, auth, host, {
+      workspaceId: 'workspace',
+      queueLimit: 5,
+      maxMessageChars: 12_000,
+      rateLimitPerMinute: 30,
+      modelNames: [],
+      attachmentsEnabled: false,
+      acceptPdfAttachments: false,
+      workspaceAliases: {},
+    });
+    await controller.start();
+
+    const code = auth.beginPairing('fake');
+    const base = {
+      channel: 'fake' as const,
+      senderId: 'owner-stable-id',
+      chatId: 'private-chat',
+      chatType: 'private' as const,
+      receivedAt: Date.now(),
+    };
+    await expect(
+      channel.emit({ ...base, kind: 'text', providerMessageId: 'pair-resume', text: `/pair ${code}` }),
+    ).resolves.toEqual({ kind: 'handled' });
+
+    await expect(
+      channel.emit({ ...base, kind: 'text', providerMessageId: 'resume-current', text: '/resume' }),
+    ).resolves.toMatchObject({ kind: 'accepted' });
+    await vi.waitFor(() =>
+      expect(restoreConversation).toHaveBeenCalledWith('c1', { activate: false }),
+    );
+    await vi.waitFor(() =>
+      expect(send).toHaveBeenCalledWith(
+        'c1',
+        expect.stringContaining('Continue the current conversation'),
+        undefined,
+        expect.objectContaining({ remoteRequestId: expect.any(String) }),
+      ),
+    );
+    await vi.waitFor(() =>
+      expect(channel.sent.some((item) => item.text === 'continued answer')).toBe(true),
+    );
+
+    await controller.stop();
+  });
+
   it('durably prioritizes /steer before interrupting the active turn', async () => {
     const state = await store();
     await state.setBinding({
