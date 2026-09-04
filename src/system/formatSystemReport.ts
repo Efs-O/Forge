@@ -9,6 +9,10 @@ import type { SystemReport, VramProcess } from './SystemReport';
 export interface FormatOptions {
   /** Telegram and tool results: drop column padding that a phone would wrap. */
   compact?: boolean;
+  /** Sidebar: label fields on separate lines instead of requiring a wide table. */
+  sidebar?: boolean;
+  /** Telegram HTML: emphasize Forge's registered backend/model without trusting its name as markup. */
+  telegramHtml?: boolean;
 }
 
 const GIB = 1024 * 1024 * 1024;
@@ -95,7 +99,71 @@ function gpuSection(report: SystemReport, compact: boolean): string[] {
   return lines;
 }
 
+/**
+ * A sidebar is normally narrower than the report's desktop table. Keep the
+ * hierarchy, but put each card's metrics on their own labelled line so no
+ * horizontal scrolling is needed to read a GPU or its owner.
+ */
+function sidebarGpuSection(report: SystemReport): string[] {
+  const lines: string[] = [];
+  if (report.gpuError) lines.push(`GPUs   unavailable — ${report.gpuError}`);
+
+  const attributed = new Set<number>();
+  for (const gpu of report.gpus) {
+    const memory =
+      gpu.memoryUsedMb === null || gpu.memoryTotalMb === null
+        ? 'memory n/a'
+        : `${(gpu.memoryUsedMb / 1024).toFixed(1)} / ${(gpu.memoryTotalMb / 1024).toFixed(1)} GB`;
+    const util = gpu.utilizationPercent === null ? 'n/a' : `${gpu.utilizationPercent}%`;
+    const temp = gpu.temperatureC === null ? 'n/a' : `${gpu.temperatureC}°C`;
+    lines.push(`GPU ${gpu.index}  ${shortGpuName(gpu.name)}`);
+    lines.push(`  VRAM ${memory} · ${util} · ${temp}`);
+
+    const owned = report.vramProcesses.filter((entry) => entry.gpuIndex === gpu.index);
+    owned.forEach((entry, position) => {
+      attributed.add(entry.pid);
+      const branch = position === owned.length - 1 ? '└' : '├';
+      const name = entry.name ?? '(exited)';
+      lines.push(`  ${branch} ${entry.pid}  ${name} · ${gib(entry.bytes).toFixed(2)} GB`);
+      if (entry.forgeModel) lines.push(`      Forge backend: ${entry.forgeModel}`);
+    });
+  }
+
+  const unattributed = report.vramProcesses.filter((entry) => !attributed.has(entry.pid));
+  if (unattributed.length > 0) {
+    lines.push(report.gpus.length > 0 ? 'VRAM (card not resolved)' : 'VRAM by process');
+    unattributed.forEach((entry, position) => {
+      const branch = position === unattributed.length - 1 ? '└' : '├';
+      const name = entry.name ?? '(exited)';
+      lines.push(`  ${branch} ${entry.pid}  ${name} · ${gib(entry.bytes).toFixed(2)} GB`);
+      if (entry.forgeModel) lines.push(`      Forge backend: ${entry.forgeModel}`);
+    });
+  }
+  if (report.vramProcessError) {
+    lines.push(`Per-process VRAM unavailable — ${report.vramProcessError}`);
+  } else if (report.vramProcesses.length === 0 && !report.gpuError) {
+    lines.push(
+      `No process is holding more than ${(report.minVramBytes / GIB).toFixed(2)} GB of VRAM.`,
+    );
+  }
+  return lines;
+}
+
+function formatSidebarSystemReport(report: SystemReport): string {
+  const lines = sidebarGpuSection(report);
+  const usedRam = report.ram.totalBytes - report.ram.freeBytes;
+  lines.push('');
+  lines.push(`RAM  ${gib(usedRam).toFixed(1)} / ${gib(report.ram.totalBytes).toFixed(1)} GB used`);
+  for (const drive of report.drives) {
+    lines.push(
+      `${drive.drive}  ${gib(drive.freeBytes).toFixed(0)} GB free / ${gib(drive.totalBytes).toFixed(0)} GB`,
+    );
+  }
+  return lines.join('\n');
+}
+
 export function formatSystemReport(report: SystemReport, options: FormatOptions = {}): string {
+  if (options.sidebar) return formatSidebarSystemReport(report);
   const compact = options.compact === true;
   const lines = gpuSection(report, compact);
 
@@ -108,5 +176,45 @@ export function formatSystemReport(report: SystemReport, options: FormatOptions 
   );
   for (const drive of report.drives) lines.push(formatDriveLine(drive, compact));
 
-  return lines.join('\n');
+  const text = lines.join('\n');
+  return options.telegramHtml ? withTelegramForgeBackendEmphasis(text, report.vramProcesses) : text;
+}
+
+function escapeTelegramHtml(text: string): string {
+  return text.replace(/[&<>"']/gu, (character) => {
+    switch (character) {
+      case '&':
+        return '&amp;';
+      case '<':
+        return '&lt;';
+      case '>':
+        return '&gt;';
+      case '"':
+        return '&quot;';
+      case "'":
+        return '&#39;';
+      default:
+        return character;
+    }
+  });
+}
+
+/** Escape the complete report, then re-insert only Forge-owned backend labels as Telegram HTML. */
+function withTelegramForgeBackendEmphasis(text: string, processes: readonly VramProcess[]): string {
+  const models = [
+    ...new Set(processes.flatMap((process) => (process.forgeModel ? [process.forgeModel] : []))),
+  ];
+  const markers = models.map((model, index) => ({ model, marker: `@@FORGE_BACKEND_${index}@@` }));
+  let marked = text;
+  for (const { model, marker } of markers) {
+    marked = marked.replaceAll(`Forge backend: ${model}`, marker);
+  }
+  let escaped = escapeTelegramHtml(marked);
+  for (const { model, marker } of markers) {
+    escaped = escaped.replaceAll(
+      marker,
+      `<b><u>◆ FORGE BACKEND: ${escapeTelegramHtml(model.toUpperCase())}</u></b>`,
+    );
+  }
+  return escaped;
 }

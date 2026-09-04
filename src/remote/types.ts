@@ -172,6 +172,8 @@ export interface RemoteChannel {
     text: string,
     options?: { correlationId?: string; signal?: AbortSignal },
   ): Promise<void>;
+  /** Telegram-only rich-text delivery. Other transports keep plain text. */
+  sendHtml?(chatId: string, html: string, options?: { signal?: AbortSignal }): Promise<void>;
   /** Best-effort presentation only; never an authoritative remote reply. */
   sendProgress?(
     chatId: string,

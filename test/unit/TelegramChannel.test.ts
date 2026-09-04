@@ -206,6 +206,25 @@ describe('TelegramChannel', () => {
     expect(chunks.join('')).toBe(`${'x'.repeat(4095)}😀tail`);
   });
 
+  it('sends explicitly requested rich text as Telegram HTML', async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor: async () => undefined,
+      fetch: (async (_url: string | URL | Request, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return response({ message_id: 1 });
+      }) as typeof fetch,
+    });
+
+    await channel.sendHtml('chat', '<b><u>Forge backend: model</u></b>');
+    expect(bodies[0]).toMatchObject({
+      text: '<b><u>Forge backend: model</u></b>',
+      parse_mode: 'HTML',
+    });
+  });
+
   it("rejects approval callback data beyond Telegram's 64-byte limit before sending", async () => {
     const fetchMock = vi.fn(async () => response({ message_id: 1 }));
     const channel = new TelegramChannel({

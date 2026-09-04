@@ -203,7 +203,7 @@ export class SlashCommandHandler {
         // the thing eating the machine.
         deps.post({
           type: 'notice',
-          message: formatSystemReport(report),
+          message: formatSystemReport(report, { sidebar: true }),
           conversationId: deps.getActiveConv().id,
           preformatted: true,
         });

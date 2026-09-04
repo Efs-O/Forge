@@ -257,6 +257,25 @@ describe('formatSystemReport', () => {
     expect(text).toContain('N:');
   });
 
+  it('uses labelled short lines for the narrow sidebar', () => {
+    const text = formatSystemReport(base, { sidebar: true });
+
+    expect(text).toContain('GPU 1  RTX 5060 Ti\n  VRAM 15.5 / 15.9 GB · 100% · 67°C');
+    expect(text).toContain('└ 20336  llama-server.exe · 14.70 GB');
+    expect(text).toContain('\n      Forge backend: qwen38-27b');
+    expect(text).toContain('N:  412 GB free / 1863 GB');
+  });
+
+  it('emphasizes an escaped Forge backend label for Telegram only', () => {
+    const text = formatSystemReport(
+      { ...base, vramProcesses: [{ ...base.vramProcesses[0], forgeModel: 'qwen <fast>' }] },
+      { compact: true, telegramHtml: true },
+    );
+
+    expect(text).toContain('<b><u>◆ FORGE BACKEND: QWEN &lt;FAST&gt;</u></b>');
+    expect(text).not.toContain('<fast>');
+  });
+
   it('lists a process whose card could not be resolved rather than hiding it', () => {
     const text = formatSystemReport({
       ...base,

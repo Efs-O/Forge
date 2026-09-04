@@ -112,6 +112,20 @@ export class TelegramChannel implements RemoteChannel {
     text: string,
     options?: { correlationId?: string; signal?: AbortSignal },
   ): Promise<void> {
+    await this.sendText(chatId, text, options);
+  }
+
+  /** Rich text is deliberately opt-in; normal agent replies stay literal. */
+  async sendHtml(chatId: string, html: string, options?: { signal?: AbortSignal }): Promise<void> {
+    await this.sendText(chatId, html, options, 'HTML');
+  }
+
+  private async sendText(
+    chatId: string,
+    text: string,
+    options?: { correlationId?: string; signal?: AbortSignal },
+    parseMode?: 'HTML',
+  ): Promise<void> {
     const chunks = splitTelegramText(text);
     for (let index = 0; index < chunks.length; index++) {
       const correlationId = index === 0 ? options?.correlationId : undefined;
@@ -129,6 +143,7 @@ export class TelegramChannel implements RemoteChannel {
         {
           chat_id: chatId,
           text: chunks[index],
+          ...(parseMode ? { parse_mode: parseMode } : {}),
           ...(correlationId
             ? {
                 reply_markup: {

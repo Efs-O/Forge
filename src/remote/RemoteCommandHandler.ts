@@ -292,9 +292,15 @@ async function executeRemoteCommand(
     const report = await collectSystemReport({
       backendProcesses: () => context.host.backendProcesses?.() ?? [],
     });
-    await context.channel.send(event.chatId, formatSystemReport(report, { compact: true }), {
-      signal: context.signal,
+    const text = formatSystemReport(report, {
+      compact: true,
+      telegramHtml: context.channel.sendHtml !== undefined,
     });
+    if (context.channel.sendHtml) {
+      await context.channel.sendHtml(event.chatId, text, { signal: context.signal });
+    } else {
+      await context.channel.send(event.chatId, text, { signal: context.signal });
+    }
     return { kind: 'handled' };
   }
   if (command === '/unload') {

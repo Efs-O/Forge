@@ -97,16 +97,19 @@
   background: transparent;
 }
 
-/* Reports whose columns carry meaning (/system). Same muted role as a status
-   row, but monospace, left-aligned and scrolled rather than wrapped: a wrapped
-   table row is not a shorter table, it is a broken one. */
+/* Reports whose columns carry meaning (/system). The host supplies a narrow,
+   labelled layout for this surface; preserve its lines while allowing a long
+   process or model name to wrap instead of making the sidebar horizontally
+   scroll through a one-line viewport. */
 .msg.system.system-block {
   font-family: var(--vscode-editor-font-family, monospace);
   font-style: normal;
   font-size: 12px;
   text-align: left;
-  white-space: pre;
-  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  box-sizing: border-box;
+  max-width: 100%;
   margin: 4px 0;
   padding: 6px 8px;
 }
