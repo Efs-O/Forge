@@ -1,4 +1,4 @@
-import type { ChatCompletionRequest, StreamChunk, ToolCall } from './types';
+import type { ChatCompletionRequest, ChatMessage, StreamChunk, ToolCall } from './types';
 import {
   ToolCallTruncatedError,
   argumentsAreIncomplete,
@@ -39,6 +39,27 @@ function messageStats(request: ChatCompletionRequest): {
     toolCalls += message.tool_calls?.length ?? 0;
   }
   return { chars, imageParts, toolCalls };
+}
+
+/**
+ * Reduce a ChatMessage to the fields the OpenAI chat-completions wire format
+ * defines. `ChatMessage` also carries sidebar-only bookkeeping — `reasoning`,
+ * `reasoningMs`, `toolMs`, `internal` — that Forge persists for its own UI and
+ * agent loop but must never send upstream. llama-server and Ollama silently
+ * drop unknown fields; strict validators (Cerebras) reject the whole request
+ * with `wrong_api_format`, e.g. `messages.2.assistant.reasoningMs: property ...
+ * is unsupported`. Whitelisting the wire fields keeps every provider happy.
+ */
+function toWireMessage(message: ChatMessage): ChatMessage {
+  const wire: ChatMessage = { role: message.role, content: message.content };
+  if (message.tool_call_id !== undefined) wire.tool_call_id = message.tool_call_id;
+  if (message.name !== undefined) wire.name = message.name;
+  if (message.tool_calls !== undefined) wire.tool_calls = message.tool_calls;
+  return wire;
+}
+
+function toWireRequest(request: ChatCompletionRequest): ChatCompletionRequest {
+  return { ...request, messages: request.messages.map(toWireMessage) };
 }
 
 export type TokenHandler = (token: string) => void;
@@ -108,7 +129,7 @@ export async function streamChatCompletion(
     response = await fetch(`${baseUrl}/v1/chat/completions`, {
       method: 'POST',
       headers,
-      body: JSON.stringify(request),
+      body: JSON.stringify(toWireRequest(request)),
       signal: signal ?? null,
     });
   } catch (err) {
