@@ -74,6 +74,56 @@ The loop has several local-model-specific behaviors that are unusually valuable:
 
 This is exactly the engineering that can make the same 27B local model behave better in Forge than in a generic OpenAI-compatible harness.
 
+### Truncation-aware recovery temporarily suppresses thinking
+
+This behavior is implemented today and is worth documenting explicitly because it is easy to mistake for a model reload or a global reasoning-mode change.
+
+When a model begins a large tool call and llama.cpp reports that the call was cut off by output/context exhaustion, Forge classifies that separately from malformed tool JSON. It preserves the protocol state, adds recovery guidance and starts another model round inside the same user turn.
+
+For models whose runtime/chat template supports thinking kwargs, only that recovery request is sent with `chat_template_kwargs.enable_thinking: false`. Forge does **not** restart or reload `llama-server`; the toggle is part of the individual `/v1/chat/completions` request. The implementation deliberately avoids making the model reason through the same problem again when the previous reasoning was already sufficient and the immediate problem is simply that the tool payload did not fit.
+
+Once a round completes successfully, the truncation-recovery counter is cleared. The following normal round therefore goes back to the model's configured `think` value automatically.
+
+Conceptually:
+
+```text
+normal round:   thinking ON
+      ↓
+large tool call is truncated
+      ↓
+recovery round: thinking OFF, spend room on completing/chunking the tool call
+      ↓
+recovery succeeds
+      ↓
+next normal round: configured thinking mode is restored
+```
+
+The code comment records a real motivating observation: a retry that re-thought the operation consumed roughly 4k tokens before the tool call even began, leaving less room than the already-truncated attempt. This recovery path is therefore not cosmetic; it is a context-efficiency mechanism targeted at reasoning local models.
+
+The request path is explicit:
+
+```text
+model.think / preserve_thinking
+        ↓
+turnModelBehavior.canUseThinkingKwargs()
+        ↓
+ModelTurn
+        ↓
+ToolCallingLoop
+        ↓
+chat_template_kwargs.enable_thinking
+        ↓
+OpenAIClient
+        ↓
+POST /v1/chat/completions
+        ↓
+llama-server
+```
+
+The runtime capability gate matters: Forge omits thinking kwargs when the served model does not appear to support them. The harness-side behavior is therefore implemented and wired; whether a particular GGUF/chat template obeys the flag still depends on that template and llama.cpp build.
+
+**Documentation gap:** this is currently much better documented in source comments than in user-facing documentation. Add a short README mention under local-model/context-efficiency features, and consider a later `docs/LOCAL_MODEL_OPTIMIZATIONS.md` or equivalent for the deeper runtime details. The README explanation should stay short and user-oriented rather than exposing the whole recovery state machine.
+
 ### ToolRegistry has become a real capability system
 
 Registered tools can carry:
@@ -158,7 +208,7 @@ The following are already present or substantially implemented and should not be
 
 - demand-loaded tool groups with per-round schema refresh;
 - native + fallback tool-call recovery through one loop;
-- truncated-tool-call recovery with thinking suppression;
+- truncated-tool-call recovery with temporary thinking suppression and automatic restoration;
 - tool-result context bounding/supersession infrastructure;
 - background command execution and monitoring;
 - terminal awareness;
@@ -331,6 +381,12 @@ Replace regex-oriented conversion with a bounded proper HTML-to-text parser that
 
 Some local models still return tool-style JSON where raw markdown is expected. Add a conservative extraction/retry path rather than broad prompt growth.
 
+### 13. Document local-model runtime optimizations
+
+**Priority: LOW-MEDIUM documentation**
+
+Add a short README mention for truncation-aware tool recovery and temporary thinking suppression. If more detail is useful later, collect the deeper implementation notes in a focused local-model/runtime document together with lazy tool exposure, tool-result context bounding, prompt-prefix stability and context-budget behavior.
+
 ---
 
 ## Recommended next engineering sequence
@@ -369,6 +425,7 @@ The objective is not bigger context. It is better continuity when context has to
 11. Git CLI fallback.
 12. Package-manager and multi-language `/initForge` improvements.
 13. HTML fetch cleanup and smaller UX items.
+14. Add concise user-facing documentation for truncation-aware recovery/thinking suppression.
 
 ---
 
