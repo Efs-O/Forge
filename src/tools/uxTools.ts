@@ -3,6 +3,7 @@ import type { RegisteredTool } from './ToolRegistry';
 import { resolveWorkspaceUri } from '../util/WorkspacePaths';
 import type { UserQuestionService } from '../sidebar/UserQuestionService';
 import {
+  NOTIFY_IDLE_RESET_MS,
   NOTIFY_TURN_LIMIT,
   type UserNotificationService,
 } from '../sidebar/UserNotificationService';
@@ -48,9 +49,12 @@ export function makeAskUserTool(questions: UserQuestionService): RegisteredTool 
       function: {
         name: 'ask_user',
         description:
-          'Ask the user a question and wait for their answer. The question reaches ' +
-          'whichever surface started the turn -- the VS Code window, or the chat it ' +
-          'was driven from remotely.',
+          'Ask the user a question and BLOCK until they answer. The question ' +
+          'reaches whichever surface started the turn -- the VS Code window, or ' +
+          'the chat it was driven from remotely. There is no timeout: if the user ' +
+          'has stepped away the turn stalls until they return, so do not use it ' +
+          'to check in during long unattended work. When work can continue under ' +
+          'a stated assumption, state the assumption, notify_user, and keep going.',
         parameters: {
           type: 'object',
           properties: {
@@ -124,9 +128,18 @@ export function makeNotifyUserTool(notifications: UserNotificationService): Regi
     handler: async (args, context) => {
       const message = args['message'] as string;
       if (notifications.remaining(context?.conversationId) <= 0) {
+        // Say that the budget refills, and when. The old string ended at "put
+        // it in your final reply", which on a long unattended run means hours
+        // from now -- correct for a runaway loop, useless for a paced report,
+        // and the model cannot tell which case it is in from the cap alone.
+        const waitMs = notifications.idleResetIn(context?.conversationId);
+        const waitMin = Math.max(1, Math.ceil(waitMs / 60_000));
         return (
-          `Notification limit reached for this turn (${NOTIFY_TURN_LIMIT}). ` +
-          'The message was not sent -- put it in your final reply instead.'
+          `Notification limit reached: ${NOTIFY_TURN_LIMIT} sent in the last ` +
+          `${NOTIFY_IDLE_RESET_MS / 60_000} minutes. The message was NOT sent. ` +
+          `The budget refills after ${waitMin} more minute(s) without a ` +
+          'notification, so a paced update will go through later in this turn. ' +
+          'Do not retry now -- put this message in your final reply instead.'
         );
       }
       // The desktop toast is unconditional: it has to work with remote disabled,

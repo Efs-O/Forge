@@ -204,6 +204,9 @@ export class RemoteController {
   async enqueueHostNotification(conversationId: string, text: string): Promise<number> {
     return this.fanout.toConversation(conversationId, text);
   }
+  reachForConversation(conversationId: string): number {
+    return this.fanout.countOn(conversationId);
+  }
 
   async broadcastHostNotification(text: string): Promise<number> {
     return this.fanout.toWorkspace(text);

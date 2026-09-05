@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  NOTIFY_IDLE_RESET_MS,
   NOTIFY_TURN_LIMIT,
   UserNotificationService,
 } from '../../src/sidebar/UserNotificationService';
@@ -107,7 +108,7 @@ describe('notify_user tool', () => {
     expect(result).toContain('Do not claim you notified them remotely');
   });
 
-  it('refuses past the per-turn cap and names the alternative', async () => {
+  it('refuses past the burst cap and names the alternative', async () => {
     const service = new UserNotificationService();
     service.addSink(async () => 1);
     const tool = makeNotifyUserTool(service);
@@ -115,8 +116,61 @@ describe('notify_user tool', () => {
       await tool.handler({ message: `m${i}` }, ctx('c1'));
     }
     const capped = await tool.handler({ message: 'one too many' }, ctx('c1'));
-    expect(capped).toContain(`Notification limit reached for this turn (${NOTIFY_TURN_LIMIT})`);
-    expect(capped).toContain('put it in your final reply instead');
+    expect(capped).toContain(`Notification limit reached: ${NOTIFY_TURN_LIMIT} sent`);
+    expect(capped).toContain('put this message in your final reply instead');
+    // The refusal has to say the budget comes back, or a paced run reads the
+    // cap as final and goes silent for the rest of the turn.
+    expect(capped).toContain('refills');
+  });
+
+  // The overnight-report failure: an 8-hour run is one turn, so a per-turn cap
+  // with no refill silences a 2-hour cadence after its fourth report.
+  it('returns the whole budget after a quiet stretch', async () => {
+    let clock = 0;
+    const service = new UserNotificationService(undefined, () => clock);
+    service.addSink(async () => 1);
+    const tool = makeNotifyUserTool(service);
+    for (let i = 0; i < NOTIFY_TURN_LIMIT; i += 1) {
+      await tool.handler({ message: `m${i}` }, ctx('c1'));
+    }
+    expect(service.remaining('c1')).toBe(0);
+
+    // One second short of the window: still capped, and the refusal says how
+    // much longer to wait rather than implying the turn must end first.
+    clock += NOTIFY_IDLE_RESET_MS - 1000;
+    const early = await tool.handler({ message: 'too soon' }, ctx('c1'));
+    expect(early).toContain('Notification limit reached');
+    expect(service.idleResetIn('c1')).toBe(1000);
+
+    // A refused call must not push the window out, or a retrying agent could
+    // never reach the reset it is waiting for.
+    clock += 1000;
+    expect(service.remaining('c1')).toBe(NOTIFY_TURN_LIMIT);
+    expect(await tool.handler({ message: 'report 2' }, ctx('c1'))).toContain('delivered');
+    // ...and the send that follows the reset starts a fresh burst, rather than
+    // landing on the stale total and capping again immediately.
+    expect(service.remaining('c1')).toBe(NOTIFY_TURN_LIMIT - 1);
+  });
+
+  it('reports remote reach without sending, and 0 when no probe is registered', () => {
+    const service = new UserNotificationService();
+    expect(service.reach('c1')).toBe(0);
+    const registration = service.setReachProbe((id) => (id === 'c1' ? 2 : 0));
+    expect(service.reach('c1')).toBe(2);
+    expect(service.reach('c2')).toBe(0);
+    expect(service.reach(undefined)).toBe(0);
+    // Disposed with the transport: a count that outlived it would tell a turn
+    // the user was reachable when nothing could deliver.
+    registration.dispose();
+    expect(service.reach('c1')).toBe(0);
+  });
+
+  it('reports reach 0 when the probe throws rather than failing the turn', () => {
+    const service = new UserNotificationService();
+    service.setReachProbe(() => {
+      throw new Error('transport down');
+    });
+    expect(service.reach('c1')).toBe(0);
   });
 
   it('does not consume budget for a call it refused', async () => {

@@ -49,7 +49,7 @@ overlaps with an existing owner, extend the owner instead.
 | Agent's last reply carried past a compaction| `src/sidebar/compactionLastReply.ts` |
 | Working-tree snapshot for a compaction     | `src/sidebar/repoSnapshot.ts`        |
 | Agent task plan tool + plan rendering      | `src/tools/planTools.ts`             |
-| Volatile turn context (active file, plan)  | `src/sidebar/turnContext.ts`         |
+| Volatile turn context (file, plan, remote) | `src/sidebar/turnContext.ts`         |
 | Prompt KV-cache reuse stats from `usage`   | `src/llm/promptCacheStats.ts`        |
 | Webview HTML builder                       | `src/sidebar/WebviewBuilder.ts`      |
 | Multi-conversation session types + persist | `src/sidebar/sessionTypes.ts`        |

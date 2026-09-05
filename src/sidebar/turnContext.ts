@@ -47,6 +47,8 @@ export interface TurnContextState {
   activeTerminalCwd?: string | undefined;
   /** Commands the user ran in their own terminal, newest first. */
   userTerminalCommands?: UserTerminalCommand[] | undefined;
+  /** Remote chats bound to this conversation; 0 when nothing is listening. */
+  remoteChats?: number | undefined;
 }
 
 /**
@@ -83,6 +85,8 @@ function renderTurnContext(state: TurnContextState): string | undefined {
         `Intended working directory: ${intendedCwd}`,
     );
   }
+  const remote = renderRemoteReach(state.remoteChats);
+  if (remote) parts.push(remote);
   const userTerminal = renderUserTerminalCommands(state.userTerminalCommands);
   if (userTerminal) parts.push(userTerminal);
   if (state.activeTerminalCwd) {
@@ -98,6 +102,34 @@ function renderTurnContext(state: TurnContextState): string | undefined {
   }
   if (parts.length === 0) return undefined;
   return `${OPEN}\n${parts.join('\n\n')}\n${CLOSE}`;
+}
+
+/**
+ * What the user can and cannot see from a phone.
+ *
+ * The delivery rule is not guessable from the tool list, and getting it wrong
+ * is silent: only a turn's FINAL reply is mirrored to a bound chat (see
+ * docs/plans/REMOTE_OUTBOUND_EVENTS_PLAN.md -- "turn finished" is one of three
+ * outbound hooks). Anything written mid-turn sits in the webview until the
+ * turn ends. For a normal turn that is seconds and does not matter. For a long
+ * unattended run it is the whole night: an agent asked for a report every two
+ * hours wrote them as chat text, and the user woke to a silent phone.
+ *
+ * Stated as a runtime fact rather than a FORGE.md rule because it is only true
+ * some of the time, and a rule would tax every desktop turn to fix a remote-
+ * only failure. It lives in Layer C for the KV-cache reason at the top of this
+ * file: it changes between turns, and the system prompt must not.
+ */
+function renderRemoteReach(chats: number | undefined): string | undefined {
+  if (!chats || chats <= 0) return undefined;
+  return (
+    `Remote: ${chats} chat(s) bound to this conversation. The user may be away ` +
+    'from the machine. Only your FINAL reply for this turn is mirrored there -- ' +
+    'text you write mid-turn is invisible until the turn ends, and so is a ' +
+    'VS Code notification. If something must reach them before then, or if this ' +
+    'turn is long-running and they asked to be kept posted, call notify_user. ' +
+    'Do not block a long unattended run on ask_user: it waits with no timeout.'
+  );
 }
 
 /** Newest command always; earlier ones only when they failed. */

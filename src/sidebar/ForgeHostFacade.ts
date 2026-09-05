@@ -95,6 +95,16 @@ export interface ForgeHostFacade {
    * return 0 rather than pretending.
    */
   onUserNotification?(sink: UserNotificationSink): { dispose(): void };
+  /**
+   * Register the inverse of `onUserNotification`: how many chats a
+   * notification WOULD reach, asked before sending rather than learned after.
+   *
+   * A turn needs the answer up front, because what it should do differs --
+   * write the update in chat, or push it -- and by the time the count comes
+   * back from a send it is too late to have made that choice. Optional on the
+   * same terms as the hooks above; unregistered means reach 0.
+   */
+  setReachProbe?(probe: (conversationId: string) => number): { dispose(): void };
   onAgentProgress?(listener: (event: AgentProgressEvent) => void): { dispose(): void };
 }
 
@@ -140,6 +150,7 @@ export interface SidebarHostFacadeDeps {
   onCompactionEvent?: (listener: (event: CompactionEvent) => void) => { dispose(): void };
   onHostActivity?: (listener: HostActivityListener) => { dispose(): void };
   onUserNotification?: (sink: UserNotificationSink) => { dispose(): void };
+  setReachProbe?: (probe: (conversationId: string) => number) => { dispose(): void };
   onAgentProgress: (listener: (event: AgentProgressEvent) => void) => { dispose(): void };
 }
 
@@ -263,6 +274,10 @@ export class SidebarHostFacade implements ForgeHostFacade {
 
   onUserNotification(sink: UserNotificationSink): { dispose(): void } {
     return this.deps.onUserNotification!(sink);
+  }
+
+  setReachProbe(probe: (conversationId: string) => number): { dispose(): void } {
+    return this.deps.setReachProbe!(probe);
   }
 
   onAgentProgress(listener: (event: AgentProgressEvent) => void): { dispose(): void } {

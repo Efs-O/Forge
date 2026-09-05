@@ -40,6 +40,9 @@ export function subscribeHostToRemote(
         ? 0
         : controller.enqueueHostNotification(event.conversationId, event.text),
     ),
+    // Registered and disposed with the sink, so the count a turn is told can
+    // never outlive the transport that would deliver on it.
+    host.setReachProbe?.((conversationId) => controller.reachForConversation(conversationId)),
     // Window-scoped when the event names no conversation (a model unloaded
     // affects every bound chat here), conversation-scoped when it does. The
     // turn echo arrives on this hook too and routes through mirrorTurn, so a

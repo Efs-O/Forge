@@ -197,6 +197,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       onCompactionEvent: (listener) => this.slashHandler.onCompactionEvent(listener),
       onHostActivity: (listener) => this.slashHandler.onHostActivity(listener),
       onUserNotification: (sink) => this.notifications.addSink(sink),
+      setReachProbe: (probe) => this.notifications.setReachProbe(probe),
       onAgentProgress: (listener) => this.agentLoop.onAgentProgress(listener),
       compact: (conversationId, options) =>
         this.slashHandler.compactConversation(conversationId, {
@@ -214,6 +215,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     // then fold any unfinished intervals from a previous session into the
     // persisted totals.
     this.agentLoop.setConversationLookup((id) => this.getConversation(id));
+    // Lets a turn state, in its own context block, whether anyone is listening
+    // from a phone. Routed through the notification service rather than the
+    // remote controller: that class already owns "can I reach the user".
+    this.agentLoop.setRemoteReach((id) => this.notifications.reach(id));
     this.agentLoop.restoreSessionTimers(this.sidebar);
     this.persistSession();
   }

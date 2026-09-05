@@ -94,6 +94,17 @@ export class RemoteNotificationFanout {
     return this.send(chatIds, text);
   }
 
+  /**
+   * How many chats a notification for this conversation would reach.
+   *
+   * Deliberately the same `chatsOn` the sends use, muting included: a count
+   * that ignored mutes would tell a turn someone was listening when the only
+   * bound chat had silenced it.
+   */
+  countOn(conversationId: string): number {
+    return this.chatsOn(conversationId).length;
+  }
+
   private chatsOn(conversationId: string): string[] {
     return this.deps.store
       .bindingsForConversation(conversationId, this.deps.channelName)

@@ -100,6 +100,8 @@ export interface ModelTurnContext {
   onUsage?: (conv: ConversationRuntime, inputTokens: number, outputTokens: number) => void;
   onTranscriptChanged?: (conv: ConversationRuntime) => void;
   emitAgentProgress: (event: AgentProgressEvent) => void;
+  /** Remote chats bound to a conversation. Absent when no transport is live. */
+  remoteReach?: (conversationId: string) => number;
 }
 
 export interface ModelTurnRequest {
@@ -241,6 +243,7 @@ export async function runModelTurn(
   // reaches the prompt on the next USER turn, where the prefix is being
   // extended anyway. `items` is copied so a later in-place mutation of
   // conv.plan cannot reach back into this turn's prompt.
+  const remoteChats = ctx.remoteReach?.(conv.id) ?? 0;
   const pastedTerminalCommand = latestPastedTerminalCommand(conv.messages);
   const terminalCommandResult = terminalCommandTracker.latestForConversation(conv.id);
   const userTerminalCommands = terminalCommandTracker.recentUserCommands();
@@ -258,6 +261,10 @@ export async function runModelTurn(
     ...(userTerminalCommands.length > 0 ? { userTerminalCommands } : {}),
     ...(terminalCwd ? { activeTerminalCwd: terminalCwd } : {}),
     ...(conv.plan ? { plan: { items: [...conv.plan.items], updatedAt: conv.plan.updatedAt } } : {}),
+    // Snapshotted with the rest of Layer C: a chat binding that changes
+    // mid-turn must not rewrite the prompt near the head and cost this turn's
+    // own tool rounds.
+    ...(remoteChats > 0 ? { remoteChats } : {}),
   };
 
   const result = await trackTurnCompletion(ctx.lifecycle, conv.id, () =>

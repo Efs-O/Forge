@@ -55,6 +55,7 @@ export interface TurnServices {
   onTranscriptChanged: (conv: ConversationRuntime) => void;
   /** Emits visible progress only; reasoning has no route into this seam. */
   emitAgentProgress: (event: AgentProgressEvent) => void;
+  remoteReach?: (conversationId: string) => number;
   commitUserPrompt: (
     conv: ConversationRuntime,
     text: string,

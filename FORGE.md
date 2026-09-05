@@ -105,6 +105,18 @@ plan itself, by `update_plan` — it is not repeated here.)
   "pasted" — if you need to find or re-read an attached file, search
   `.forge/remote-inbox/` — it's on disk there.
 
+- **A long unattended run is ONE turn, and only its final reply reaches the
+  phone.** Mid-turn chat text is invisible to a remote user until the turn ends
+  — an overnight benchmark asked to report every two hours produced its reports
+  as chat text and the user woke to a silent phone. During work that will run
+  unattended: push each checkpoint with `notify_user` (the budget is 5, and it
+  refills after 5 minutes of quiet, so a paced cadence never meets the cap), and
+  do NOT stop on `ask_user` — it blocks with no timeout, so a question asked
+  while the user is asleep stalls the run until morning. If a decision comes up,
+  state the assumption you are proceeding under, `notify_user` it, and keep
+  going. `[Forge turn context]` tells you when a chat is actually bound; with no
+  remote chat, none of this applies.
+
 - **Auto-compact fires only post-turn, on a completed turn or a recoverable
   context-exhaustion failure.** The fraction trigger needs the *server-reported*
   context ≥ `auto_compact.at` (0.85); the exhaustion trigger needs the last

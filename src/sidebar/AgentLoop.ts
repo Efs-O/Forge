@@ -60,6 +60,7 @@ export class AgentLoop {
    * after construction; without it the session timer is a no-op.
    */
   private conversationLookup: ((id: string) => ConversationRuntime | undefined) | null = null;
+  private remoteReach?: (conversationId: string) => number;
   private onContextChanged?: (convId: string) => void;
   private onTranscriptChanged?: (convId: string) => void;
   private readonly progressListeners = new Set<AgentProgressListener>();
@@ -81,6 +82,14 @@ export class AgentLoop {
    */
   setConversationLookup(lookup: (id: string) => ConversationRuntime | undefined): void {
     this.conversationLookup = lookup;
+  }
+
+  /**
+   * Registers the remote-reach probe used to tell a turn whether anyone is
+   * listening from a phone. A setter for the same reason as the two above.
+   */
+  setRemoteReach(probe: (conversationId: string) => number): void {
+    this.remoteReach = probe;
   }
 
   /** Total active agent time in ms for a conversation (including in-progress). */
@@ -201,6 +210,9 @@ export class AgentLoop {
       },
       onTranscriptChanged: (conv) => this.recordTranscriptMutation(conv),
       emitAgentProgress: (event) => this.emitAgentProgress(event),
+      // Wrapped, not snapshotted, for the reason above: the probe is
+      // registered after construction and only while a transport is running.
+      remoteReach: (conversationId) => this.remoteReach?.(conversationId) ?? 0,
       // `options` is load-bearing and was missing here: a narrower function is
       // assignable, so dropping the 4th parameter type-checked while silently
       // discarding `internal: true`. Every Forge-authored prompt — the
