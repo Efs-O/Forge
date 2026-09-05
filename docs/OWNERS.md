@@ -239,6 +239,7 @@ overlaps with an existing owner, extend the owner instead.
 | Context measured + output budget estimate  | `src/util/contextBudget.ts`                  |
 | Token-count display formatting             | `src/util/formatTokens.ts`                   |
 | Elapsed-duration display formatting        | `src/util/formatDuration.ts`                 |
+| Local date + wall clock for the model      | `src/util/localClock.ts`                     |
 | Remote compaction notice policy            | `src/remote/remoteCompactionNotice.ts`       |
 | Host activity event shape                  | `src/sidebar/HostActivity.ts`                |
 | Finished-turn mirroring to remote chats    | `src/sidebar/turnMirrorWiring.ts`            |

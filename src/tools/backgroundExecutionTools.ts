@@ -1,4 +1,5 @@
 import type { RegisteredTool } from './ToolRegistry';
+import { localTimeOfDay } from '../util/localClock';
 import { MAX_OUTPUT_CHARS, parseExecOutputOptions, stripAnsi } from './execHelpers';
 import {
   backgroundExecutionManager,
@@ -206,6 +207,10 @@ export function formatBackgroundObservation(
     exit_code: observation.exitCode,
     waited_ms: waitedMs,
     ran_for_ms: ranForMs,
+    // The wall clock alongside the durations. An agent parked on a long job
+    // interleaves this tool with `wait`, and durations alone give it no
+    // position in time to date a progress report from -- see localClock.ts.
+    local_time: localTimeOfDay(),
     next_stdout_cursor: stdout.nextCursor,
     next_stderr_cursor: stderr.nextCursor,
   };

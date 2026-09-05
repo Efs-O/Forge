@@ -13,7 +13,7 @@ describe('wait tool', () => {
     const result = await tool.handler({ seconds: 1 }, ctx());
     const elapsed = Date.now() - startedAt;
     expect(elapsed).toBeGreaterThanOrEqual(900);
-    expect(result).toBe('Waited 1s.');
+    expect(result).toMatch(/^Waited 1s\. Local time is now \d{2}:\d{2}\.$/u);
   });
 
   // /stop must not leave a turn parked on a timer.
@@ -26,6 +26,7 @@ describe('wait tool', () => {
     expect(Date.now() - startedAt).toBeLessThan(2000);
     expect(result).toContain('Wait cancelled after');
     expect(result).toContain(`of the ${MAX_WAIT_SECONDS}s requested`);
+    expect(result).toMatch(/Local time is now \d{2}:\d{2}\./u);
   });
 
   it('returns immediately when the turn is already aborted', async () => {
@@ -55,5 +56,13 @@ describe('wait tool', () => {
 
   it('points at monitor_execution for waiting on a command', () => {
     expect(tool.definition.function.description).toContain('monitor_execution');
+  });
+
+  // The 2026-09-05 miscount: two wait(360) calls reported as a 60-minute check.
+  // A duration alone gives no position in time, so the model can only count its
+  // own sleeps, and it cannot see a miscount from the inside.
+  it('reports the wall clock so an interval can be timed against it', () => {
+    expect(tool.definition.function.description).toContain('local wall-clock time');
+    expect(tool.definition.function.description).toContain(`an hour is four calls of ${MAX_WAIT_SECONDS}s`);
   });
 });

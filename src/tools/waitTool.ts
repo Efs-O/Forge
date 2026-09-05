@@ -1,4 +1,5 @@
 import type { RegisteredTool } from './ToolRegistry';
+import { localTimeOfDay } from '../util/localClock';
 
 /**
  * Longest single pause, in seconds.
@@ -49,7 +50,11 @@ export function makeWaitTool(): RegisteredTool {
           'spend your tool-call budget on sleeping. To wait for a specific ' +
           'background command rather than a fixed delay, use monitor_execution ' +
           'instead -- it returns as soon as that command finishes, which is quicker ' +
-          'and more precise than guessing a duration here.',
+          'and more precise than guessing a duration here. Each return reports the ' +
+          'local wall-clock time it finished at: for a task on an interval, work out ' +
+          'the next deadline from that clock rather than from how many waits you have ' +
+          'called, and chain waits until the clock reaches it -- an hour is four calls ' +
+          `of ${MAX_WAIT_SECONDS}s, not one.`,
         parameters: {
           type: 'object',
           properties: {
@@ -92,10 +97,16 @@ export function makeWaitTool(): RegisteredTool {
       // cancelled wait that reported the full duration would have the model
       // believe time passed that never did.
       const elapsedSeconds = Math.round((Date.now() - startedAt) / 1000);
+      // The clock, not just the duration. A run of `Waited 900s.` gives no
+      // position in time, so the only way to know how long a chain of waits has
+      // covered is to count them -- and a miscount is invisible from inside.
+      // Safe here in a way it is not in the system prompt: a tool result is
+      // appended past everything cached, so a value that ticks costs nothing.
+      const clock = `Local time is now ${localTimeOfDay()}.`;
       if (signal?.aborted) {
-        return `Wait cancelled after ${elapsedSeconds}s of the ${seconds}s requested. The turn is stopping -- do not start further work.`;
+        return `Wait cancelled after ${elapsedSeconds}s of the ${seconds}s requested. ${clock} The turn is stopping -- do not start further work.`;
       }
-      return `Waited ${elapsedSeconds}s.`;
+      return `Waited ${elapsedSeconds}s. ${clock}`;
     },
   };
 }

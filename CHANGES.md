@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **The agent can tell the time again, so an hourly report is actually
+  hourly.** Asked to check a benchmark every 60 minutes, it posted a "60-min
+  check" seven minutes in. The transcript shows why: two `wait(360)` calls,
+  each answered `Waited 360s.` and nothing else. A duration is not a position
+  in time, so the only way to keep an interval was to count its own sleeps, a
+  miscount is invisible from the inside, and the system prompt's new date line
+  closed the last exit by telling it not to ask the shell for the clock — a ban
+  with no sanctioned alternative named. `wait` and `monitor_execution` now
+  report the local wall clock on every return, which is safe where a clock in
+  the system prompt is not: a tool result is appended past everything already
+  in the KV cache, so a value that ticks costs no re-evaluation. The prompt
+  points at that clock instead of just forbidding the other one, and `wait`'s
+  description says outright that an hour is four calls of 900s, not one.
+
 - **`read_file numbered: true` no longer breaks the edit that follows it.** The
   prefix was `"675| "` — number, pipe, *space* — and a model cannot tell that
   space from the line's own first column. So every `old_str` composed from a
