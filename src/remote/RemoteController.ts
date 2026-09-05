@@ -19,9 +19,8 @@ import { RemoteAgentProgress } from './RemoteAgentProgress';
 import type { ModelPickerDescriptor } from '../sidebar/ModelPickerGroups';
 import { RemoteNotificationFanout } from './RemoteNotificationFanout';
 import {
-  admitRemotePrompt,
+  admitRemoteText,
   isRemoteCommand,
-  parseSteerCommand,
   resumeRemoteConversation,
   type RemotePromptAdmissionDeps,
 } from './RemotePromptAdmission';
@@ -216,6 +215,10 @@ export class RemoteController {
     return this.fanout.mirrorTurn(conversationId, text);
   }
 
+  async reportTurnFailure(conversationId: string, text: string): Promise<number> {
+    return this.fanout.failureNotice(conversationId, text);
+  }
+
   setMirror(chatId: string, on: boolean): void {
     this.fanout.setMirror(chatId, on);
   }
@@ -405,10 +408,6 @@ export class RemoteController {
       : undefined;
     if (draftResult) return draftResult;
     const key = remoteDedupKey(event.channel, event.chatId, event.providerMessageId);
-    const steer = parseSteerCommand(event.text);
-    if (steer.matched && !steer.text) {
-      return { kind: 'rejected', reason: 'usage: /steer <prompt>' };
-    }
     if (isRemoteCommand(event.text)) {
       const result = await handleRemoteCommand(
         event,
@@ -456,13 +455,7 @@ export class RemoteController {
       if (result.kind !== 'rejected' && result.kind !== 'retry') this.auth.touch(event);
       return result;
     }
-    const result = await admitRemotePrompt(
-      event,
-      steer.text ?? event.text,
-      key,
-      steer.matched ? 'steer' : undefined,
-      this.promptDeps,
-    );
+    const result = await admitRemoteText(event, key, this.promptDeps);
     if (result.kind !== 'rejected' && result.kind !== 'retry') this.auth.touch(event);
     return result;
   }

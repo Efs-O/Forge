@@ -4,6 +4,7 @@ import * as path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RemoteAgentProgress } from '../../src/remote/RemoteAgentProgress';
 import { RemoteRequestStore } from '../../src/remote/RemoteRequestStore';
+import { RemoteNotificationFanout } from '../../src/remote/RemoteNotificationFanout';
 import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
 import { wireTurnMirror } from '../../src/sidebar/turnMirrorWiring';
 import type { HostActivityEvent } from '../../src/sidebar/HostActivity';
@@ -153,6 +154,92 @@ describe('turn mirroring', () => {
     events.onGenerationFinished?.('m', 'conv-1');
     expect(emitted[0]!.text.length).toBeLessThan(5_000);
     expect(emitted[0]!.text).toContain('truncated');
+  });
+});
+
+/**
+ * A turn that dies has to reach whoever was waiting on it.
+ *
+ * On 2026-09-05 a stale-port fetch failure ended a monitoring turn at 16:33.
+ * The sidebar rendered an error into a window nobody was in front of, the
+ * phone that had asked for the monitoring heard nothing, and the next model
+ * request was 2h12m later — the user's own "Are you monitoring?". Silence and
+ * "still working" looked identical.
+ */
+describe('failed-turn fan-out', () => {
+  function wireFailure(): { events: SidebarProviderEvents; emitted: HostActivityEvent[] } {
+    const emitted: HostActivityEvent[] = [];
+    const events: SidebarProviderEvents = {};
+    wireTurnMirror(events, { lookup: () => undefined, emit: (event) => emitted.push(event) });
+    return { events, emitted };
+  }
+
+  it('emits a failure notice naming the error, not silence', () => {
+    const { events, emitted } = wireFailure();
+    events.onTurnFailed?.('conv-1', 'fetch failed');
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0]!.kind).toBe('failure');
+    expect(emitted[0]!.conversationId).toBe('conv-1');
+    expect(emitted[0]!.text).toContain('fetch failed');
+    // The turn is over; say so, or the reader keeps waiting.
+    expect(emitted[0]!.text).toContain('Nothing further is running');
+  });
+
+  it('keeps a caller-supplied listener', () => {
+    const emitted: HostActivityEvent[] = [];
+    const inner = vi.fn();
+    const events: SidebarProviderEvents = { onTurnFailed: inner };
+    wireTurnMirror(events, { lookup: () => undefined, emit: (event) => emitted.push(event) });
+    events.onTurnFailed?.('conv-1', 'boom');
+    expect(inner).toHaveBeenCalledWith('conv-1', 'boom');
+    expect(emitted).toHaveLength(1);
+  });
+
+  it('declines when a remote progress message already reports the turn', async () => {
+    const state = await store();
+    await state.setBinding({
+      channel: 'telegram',
+      chatId: 'chat-a',
+      workspaceId: 'ws',
+      conversationId: 'conv-1',
+    });
+    const make = (ownsProgress: boolean): RemoteNotificationFanout =>
+      new RemoteNotificationFanout({
+        store: state,
+        channelName: 'telegram',
+        workspaceId: 'ws',
+        kick: () => undefined,
+        ownsProgress: () => ownsProgress,
+      });
+
+    // Chat-originated: RemoteQueueDrain already sends "Forge request failed".
+    await expect(make(true).failureNotice('conv-1', 'boom')).resolves.toBe(0);
+    // Sidebar-originated: nothing else would ever tell the phone.
+    await expect(make(false).failureNotice('conv-1', 'boom')).resolves.toBe(1);
+  });
+
+  it('is not silenced by /mirror off, which is about repeating answers', async () => {
+    const state = await store();
+    await state.setBinding({
+      channel: 'telegram',
+      chatId: 'chat-a',
+      workspaceId: 'ws',
+      conversationId: 'conv-1',
+    });
+    const fanout = new RemoteNotificationFanout({
+      store: state,
+      channelName: 'telegram',
+      workspaceId: 'ws',
+      kick: () => undefined,
+      ownsProgress: () => false,
+    });
+    fanout.setMirror('chat-a', false);
+    await expect(fanout.mirrorTurn('conv-1', 'an answer')).resolves.toBe(0);
+    await expect(fanout.failureNotice('conv-1', 'boom')).resolves.toBe(1);
+
+    // /notify off is the switch that does cover it.
+    fanout.setNotify('chat-a', false);
+    await expect(fanout.failureNotice('conv-1', 'boom')).resolves.toBe(0);
   });
 });
 

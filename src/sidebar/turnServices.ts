@@ -63,7 +63,7 @@ export interface TurnServices {
     options?: UserPromptOptions,
   ) => void;
   runModelTurn: (
-    baseUrl: string,
+    resolveBaseUrl: () => Promise<string>,
     conv: ConversationRuntime,
     model: ModelConfig,
     activeFile: string | undefined,
@@ -88,9 +88,9 @@ export function makeRunModelTurn(
   getServices: () => TurnServices,
   run: (services: TurnServices, options: ModelTurnRequest) => Promise<ToolCallingLoopResult>,
 ): TurnServices['runModelTurn'] {
-  return (baseUrl, conv, model, activeFile, ctrl, postC, apiKey, checkpoint) =>
+  return (resolveBaseUrl, conv, model, activeFile, ctrl, postC, apiKey, checkpoint) =>
     run(getServices(), {
-      baseUrl,
+      resolveBaseUrl,
       conv,
       model,
       activeFile,

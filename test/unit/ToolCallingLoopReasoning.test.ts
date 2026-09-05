@@ -47,7 +47,7 @@ function scriptTwoRounds(): void {
 
 function runOptions(messages: ChatMessage[]) {
   return {
-    baseUrl: 'http://localhost:0',
+    resolveBaseUrl: async () => 'http://localhost:0',
     model: { name: 'test-model' } as never,
     messages,
     getToolDefinitions: () => [{ type: 'function', function: { name: 'read_file' } }] as never,

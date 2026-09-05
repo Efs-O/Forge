@@ -109,6 +109,23 @@ describe('RemoteRequestStore', () => {
     expect(state.queued('c1').map((item) => item.id)).toEqual(['steer']);
     expect(state.getRequest('normal')?.state).toBe('cancelled');
   });
+
+  it('promotes a queued prompt ahead of an existing steer', async () => {
+    const state = await store();
+    await state.enqueue(request({ id: 'first', dedupKey: 'first', admittedAt: 1 }));
+    await state.enqueue(request({ id: 'second', dedupKey: 'second', admittedAt: 2 }));
+    await state.enqueue(
+      request({ id: 'steered', dedupKey: 'steered', admittedAt: 3, priority: 'steer' }),
+    );
+    expect(state.queued('c1').map((item) => item.id)).toEqual(['steered', 'first', 'second']);
+
+    // Flagging it a steer is not enough on its own: ordering is priority THEN
+    // admittedAt, so without the re-dating it would land behind `steered`.
+    await expect(state.promoteQueued('c1', 'second')).resolves.toBe(true);
+    expect(state.queued('c1').map((item) => item.id)).toEqual(['second', 'steered', 'first']);
+
+    await expect(state.promoteQueued('c1', 'missing')).resolves.toBe(false);
+  });
 });
 
 describe('remote configuration and lease', () => {
@@ -391,6 +408,86 @@ describe('RemoteController with fake channel', () => {
     expect(interrupt).toHaveBeenCalledWith('c1');
     await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
     expect(send.mock.calls.map((call) => call[1])).toEqual(['change direction now', 'hello']);
+    await controller.stop();
+  });
+
+  it('reads a bare number after /steer as a queue position, not as prompt text', async () => {
+    const state = await store();
+    await state.setBinding({
+      channel: 'fake',
+      chatId: 'chat',
+      workspaceId: 'workspace',
+      conversationId: 'c1',
+    });
+    await state.enqueue(
+      request({ id: 'first', dedupKey: 'first', admittedAt: 1, text: 'first task' }),
+    );
+    await state.enqueue(
+      request({ id: 'second', dedupKey: 'second', admittedAt: 2, text: 'second task' }),
+    );
+    const secrets = new MemorySecrets();
+    secrets.values.set('forge.remote.fake.ownerId', 'owner');
+    const auth = new RemoteAuth(secrets as unknown as vscode.SecretStorage);
+    const channel = new FakeRemoteChannel();
+    let busy = true;
+    const send = vi.fn(async () => ({ kind: 'completed' as const, finalText: 'done' }));
+    const interrupt = vi.fn(async () => {
+      busy = false;
+    });
+    const host = {
+      createConversation: vi.fn(),
+      restoreConversation: vi.fn(),
+      send,
+      cancel: vi.fn(),
+      interrupt,
+      queueIntent: vi.fn(),
+      addApprovalSink: () => ({ dispose: () => undefined }),
+      addQuestionSink: () => ({ dispose: () => undefined }),
+      answerQuestion: () => false,
+      resolveApproval: vi.fn(),
+      status: () => ({
+        activeConversationId: 'c1',
+        conversations: [],
+        requestChains: busy
+          ? [{ conversationId: 'c1', userIntentEpoch: 1, stage: 'running', managed: true }]
+          : [],
+        streamingConversationIds: busy ? ['c1'] : [],
+      }),
+      contextBudget: () => ({ used: 10, max: 100 }),
+      clankerMode: () => false,
+      setClankerMode: vi.fn(),
+    } as unknown as ForgeHostFacade;
+    const controller = new RemoteController(channel, state, auth, host, {
+      workspaceId: 'workspace',
+      queueLimit: 5,
+      maxMessageChars: 12_000,
+      rateLimitPerMinute: 30,
+      modelEntries: [],
+      attachmentsEnabled: false,
+      acceptPdfAttachments: false,
+      workspaceAliases: {},
+    });
+    await controller.start();
+
+    const disposition = await channel.emit({
+      channel: 'fake',
+      kind: 'text',
+      providerMessageId: 'steer-message',
+      senderId: 'owner',
+      chatId: 'chat',
+      chatType: 'private',
+      receivedAt: 3,
+      text: '/steer 2',
+    });
+
+    // The old parser enqueued the literal prompt "2" and cancelled the turn to
+    // run it. Nothing new is admitted now, and the reply names what it ran.
+    expect(disposition).toMatchObject({ kind: 'handled' });
+    expect(state.queued('c1').map((item) => item.id)).toEqual(['second', 'first']);
+    expect(interrupt).toHaveBeenCalledWith('c1');
+    expect(channel.sent.some((item) => item.text.includes('queued #2 next'))).toBe(true);
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    expect(send.mock.calls.map((call) => call[1])).toEqual(['second task', 'first task']);
     await controller.stop();
   });
 

@@ -105,7 +105,8 @@ export interface ModelTurnContext {
 }
 
 export interface ModelTurnRequest {
-  baseUrl: string;
+  /** Resolved per round, never captured: see ToolCallingLoopOptions. */
+  resolveBaseUrl: () => Promise<string>;
   conv: ConversationRuntime;
   model: ModelConfig;
   activeFile: string | undefined;
@@ -172,7 +173,7 @@ async function trackTurnCompletion<T>(
 
 export async function runModelTurn(
   ctx: ModelTurnContext,
-  { baseUrl, conv, model, activeFile, ctrl, postC, apiKey, checkpoint }: ModelTurnRequest,
+  { resolveBaseUrl, conv, model, activeFile, ctrl, postC, apiKey, checkpoint }: ModelTurnRequest,
 ): Promise<ToolCallingLoopResult> {
   const config = ctx.getConfig();
   const allowed = resolveToolPermissions(config);
@@ -180,7 +181,9 @@ export async function runModelTurn(
   // (group tools/tool_call_limits merged) by the caller.
   const budget = new ToolBudget(model);
   const useStrip = ctx.failureTracker.shouldStrip();
-  const runtimeCaps = await ctx.capabilities(model, baseUrl);
+  // One probe per turn is right — capabilities describe the model, not the
+  // port it happens to be on — but it must still start from a live endpoint.
+  const runtimeCaps = await ctx.capabilities(model, await resolveBaseUrl());
   const thinkingKwargs = canUseThinkingKwargs(model, runtimeCaps);
   const stripThinkingChannels = shouldStripThinking(model, config);
   if (useStrip) {
@@ -269,7 +272,7 @@ export async function runModelTurn(
 
   const result = await trackTurnCompletion(ctx.lifecycle, conv.id, () =>
     runToolCallingLoop({
-      baseUrl,
+      resolveBaseUrl,
       model,
       messages: conv.messages,
       getToolDefinitions: buildToolDefinitions,

@@ -40,7 +40,7 @@ export interface ProviderTurnContext {
     options?: UserPromptOptions,
   ) => void;
   runModelTurn: (
-    baseUrl: string,
+    resolveBaseUrl: () => Promise<string>,
     conv: ConversationRuntime,
     model: ModelConfig,
     activeFile: string | undefined,
@@ -112,7 +112,7 @@ export async function runCloudProviderTurn(
   let outcome: ForgeTurnOutcome;
   try {
     const result = await ctx.runModelTurn(
-      baseUrl,
+      async () => baseUrl,
       conv,
       model,
       activeFile,
@@ -207,6 +207,7 @@ export async function runLocalProviderTurn(
       ? 'Backend start cancelled.'
       : `Backend failed to start: ${(err as Error).message}`;
     ctx.events.onBackendError?.(msg);
+    ctx.events.onTurnFailed?.(convId, msg);
     postC({ type: 'backendDown', message: msg });
     ctx.lifecycle.settle(convId);
     return ctrl.signal.aborted
@@ -221,7 +222,12 @@ export async function runLocalProviderTurn(
   let outcome: ForgeTurnOutcome;
   try {
     const result = await ctx.runModelTurn(
-      backend.baseUrl(),
+      // The POOL, not `backend`. A model unloaded mid-turn comes back through
+      // `startSlot`, which builds a new controller on a newly claimed port —
+      // the one we hold is then orphaned and its baseUrl() is stale forever.
+      // Re-acquiring is a cheap map lookup while the slot is live, and blocks
+      // for the reload when it is not.
+      async () => (await ctx.pool.acquire(model.name)).baseUrl(),
       conv,
       model,
       activeFile,
@@ -244,8 +250,13 @@ export async function runLocalProviderTurn(
       postC({ type: 'done', finishReason: 'cancelled' });
       outcome = abortedTurnOutcome(ctx.lifecycle.terminationKind(convId));
     } else {
-      log.error(`[AgentLoop] ${model.provider} chat failed model=${model.name}: ${message}`);
+      // `provider` is optional and unset for local llama entries, which is how
+      // this line read "[AgentLoop] undefined chat failed" in the 09-05 logs.
+      log.error(
+        `[AgentLoop] ${model.provider ?? 'local'} chat failed model=${model.name}: ${message}`,
+      );
       ctx.events.onBackendError?.(message);
+      ctx.events.onTurnFailed?.(convId, message);
       postC({ type: 'error', message });
       outcome = { kind: 'failed', error: message, finalText: '' };
     }

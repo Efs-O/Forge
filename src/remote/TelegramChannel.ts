@@ -34,6 +34,7 @@ export const TELEGRAM_BOT_COMMANDS = [
   { command: 'help', description: 'Show all Forge commands' },
   { command: 'list', description: 'List recent conversations' },
   { command: 'lock', description: 'Lock this remote session' },
+  { command: 'mirror', description: 'Echo sidebar answers here on/off' },
   { command: 'model', description: 'Pin a model to this chat' },
   { command: 'models', description: 'List configured models' },
   { command: 'new', description: 'Start a new chat' },
@@ -44,7 +45,7 @@ export const TELEGRAM_BOT_COMMANDS = [
   { command: 'restart', description: 'Restart the pinned model' },
   { command: 'select', description: 'Select an existing conversation' },
   { command: 'status', description: 'Session, model, queue' },
-  { command: 'steer', description: 'Interrupt and prioritize' },
+  { command: 'steer', description: 'Run queued <n> or new text now' },
   { command: 'stop', description: 'Stop the current request' },
   { command: 'system', description: 'GPU, VRAM by process, RAM, drives' },
   { command: 'timeout', description: 'Show/set session timeout' },
@@ -364,8 +365,8 @@ export class TelegramChannel implements RemoteChannel {
     if (disposition.kind === 'queued') {
       text =
         event.kind === 'text' && event.text.trim().toLowerCase().startsWith('/steer')
-          ? `Forge: steering prompt queued next (position ${disposition.position}).`
-          : `Forge: queued at position ${disposition.position}. Use /steer <prompt> to interrupt the current turn and run a new instruction next, or /queue to review pending work.`;
+          ? `Forge: interrupting the turn; your steering prompt runs next (position ${disposition.position}).`
+          : `Forge: queued at position ${disposition.position} — it runs when the current turn ends. Send /steer ${disposition.position} to cut the turn short and run it now, /queue to review, /drop ${disposition.position} to cancel.`;
     } else if (disposition.kind === 'rejected') {
       text = `Forge: ${disposition.reason}`;
     }

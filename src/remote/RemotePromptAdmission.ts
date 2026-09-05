@@ -35,15 +35,29 @@ interface RemoteResumeDeps extends RemotePromptAdmissionDeps {
 
 export interface SteerCommand {
   matched: boolean;
+  /** New prompt text to run ahead of the queue. */
   text?: string | undefined;
+  /** 1-based queue position to promote instead of enqueuing new text. */
+  promote?: number | undefined;
 }
 
-/** Recognise `/steer <prompt>` without treating an ordinary slash command as a prompt. */
+/**
+ * Recognise `/steer` in both of its forms without treating an ordinary slash
+ * command as a prompt.
+ *
+ * A bare number is a queue position, never prompt text. `/drop 1` takes an
+ * index, so `/steer 1` reading as the literal one-character prompt "1" was a
+ * trap that cost real turns: it cancelled the running turn and then asked the
+ * agent to act on "1". The two commands now agree on what a number means, and
+ * every caller reports which reading it took.
+ */
 export function parseSteerCommand(text: string): SteerCommand {
   const match = /^\/steer(?:\s+([\s\S]*))?$/i.exec(text.trim());
   if (!match) return { matched: false };
-  const prompt = match[1]?.trim();
-  return prompt ? { matched: true, text: prompt } : { matched: true };
+  const argument = match[1]?.trim();
+  if (!argument) return { matched: true, promote: 1 };
+  if (/^\d+$/.test(argument)) return { matched: true, promote: Number(argument) };
+  return { matched: true, text: argument };
 }
 
 /**
@@ -144,6 +158,85 @@ export async function admitRemotePrompt(
   return busy || alreadyQueued.length > 0
     ? { kind: 'queued', requestId: request.id, position: Math.max(1, position) }
     : { kind: 'accepted', requestId: request.id };
+}
+
+/**
+ * Route one inbound text message to the queue.
+ *
+ * Sole owner of what `/steer` means, so the controller routes commands and
+ * knows nothing about steering: `/steer <n>` promotes an existing queued
+ * prompt, `/steer <prompt>` jumps new text to the front, anything else queues
+ * normally. `isRemoteCommand` already excludes every `/steer` form, so this
+ * runs after the command handler has declined the message.
+ */
+export async function admitRemoteText(
+  event: Extract<RemoteInboundEvent, { kind: 'text' }>,
+  dedupKey: string,
+  deps: RemotePromptAdmissionDeps,
+): Promise<RemoteInboundDisposition> {
+  const steer = parseSteerCommand(event.text);
+  if (steer.promote !== undefined) return promoteQueuedPrompt(event, steer.promote, deps);
+  return admitRemotePrompt(
+    event,
+    steer.text ?? event.text,
+    dedupKey,
+    steer.text ? 'steer' : undefined,
+    deps,
+  );
+}
+
+/**
+ * `/steer <n>` — run an already-queued prompt next instead of retyping it.
+ *
+ * The interrupt is what makes this different from reordering: with nothing
+ * running there is no turn to cut short and the drain kick alone is enough.
+ */
+export async function promoteQueuedPrompt(
+  event: Extract<RemoteInboundEvent, { kind: 'text' }>,
+  position: number,
+  deps: RemotePromptAdmissionDeps,
+): Promise<RemoteInboundDisposition> {
+  const binding = deps.store.binding(event.channel, event.chatId);
+  if (!binding) return { kind: 'rejected', reason: 'no conversation is bound' };
+  if (binding.workspaceId !== deps.options.workspaceId) {
+    return { kind: 'rejected', reason: 'chat is bound to a different workspace' };
+  }
+  const queued = deps.store
+    .queued(binding.conversationId)
+    .filter((item) => item.channel === event.channel && item.chatId === event.chatId);
+  if (queued.length === 0) {
+    return {
+      kind: 'rejected',
+      reason: 'nothing is queued to steer to — send /steer <prompt> to run new text next',
+    };
+  }
+  const target = queued[position - 1];
+  if (!target) {
+    return { kind: 'rejected', reason: `queue has ${queued.length} prompt(s); /queue lists them` };
+  }
+  if (!(await deps.store.promoteQueued(binding.conversationId, target.id))) {
+    return { kind: 'retry', reason: 'queued prompt changed state during promotion' };
+  }
+  await deps.audit?.record(event, 'steer_queued', target.id).catch(() => undefined);
+  const busy = deps.isBusy(binding.conversationId);
+  if (busy) {
+    deps.host.queueIntent(binding.conversationId);
+    await deps.host.interrupt(binding.conversationId).catch((err) => {
+      deps.onError?.(
+        `Forge remote steering interrupt failed; prompt remains queued: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    });
+  }
+  deps.kickDrain(binding.conversationId);
+  await deps.channel.send(
+    event.chatId,
+    `Forge: ${busy ? 'interrupting the turn; running' : 'running'} queued #${position} next — ${
+      target.text.length > 120 ? `${target.text.slice(0, 119)}…` : target.text
+    }`,
+  );
+  return { kind: 'handled' };
 }
 
 /** Resume the conversation already bound to a chat, loading it through the normal queue. */

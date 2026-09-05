@@ -210,7 +210,7 @@ export async function runQwenForge(
   };
   try {
     const result = await runToolCallingLoop({
-      baseUrl: endpoint,
+      resolveBaseUrl: async () => endpoint,
       model,
       messages,
       getToolDefinitions: host.definitions,

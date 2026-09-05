@@ -179,7 +179,10 @@ describe('TelegramChannel', () => {
     channel.onEvent(async () => ({ kind: 'queued', requestId: 'r1', position: 2 }));
 
     await channel.start(abort.signal);
-    await vi.waitFor(() => expect(acknowledgements[0]).toContain('/steer <prompt>'));
+    // The acknowledgement names the position it just assigned, so steering or
+    // dropping it needs no second lookup — and no retyping of the prompt.
+    await vi.waitFor(() => expect(acknowledgements[0]).toContain('/steer 2'));
+    expect(acknowledgements[0]).toContain('/drop 2');
   });
 
   it('splits long messages and attaches approval callbacks only to the first chunk', async () => {

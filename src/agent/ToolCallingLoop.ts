@@ -40,7 +40,19 @@ export {
 } from './truncationRecovery';
 
 export interface ToolCallingLoopOptions {
-  baseUrl: string;
+  /**
+   * The endpoint to call, resolved on EVERY round rather than captured once,
+   * for the same reason `getToolDefinitions` is: the answer changes mid-turn.
+   *
+   * Forge's pool hands out a rotating port, and anything that unloads a model
+   * — a `/unload`, the benchmark freeing VRAM, an eviction — brings it back on
+   * the next free one behind a NEW controller. A turn holding the old string
+   * then dials a dead port and fails in ~11ms with "fetch failed", which is
+   * what silently killed a two-hour monitoring loop on 2026-09-05. Resolving
+   * through the pool also means a round that arrives mid-restart WAITS for the
+   * reload instead of failing instantly.
+   */
+  resolveBaseUrl: () => Promise<string>;
   model: ModelConfig;
   messages: ChatMessage[];
   /**
@@ -108,10 +120,11 @@ async function streamOnce(
   onToken: (token: string) => void,
   onReasoning: (token: string) => void,
 ): Promise<{ finishReason: string | null; toolCalls: ToolCall[] | null }> {
+  const baseUrl = await options.resolveBaseUrl();
   return new Promise((resolve, reject) => {
     let capturedToolCalls: ToolCall[] | null = null;
     void streamModelChatCompletion(
-      options.baseUrl,
+      baseUrl,
       request,
       options.model,
       {

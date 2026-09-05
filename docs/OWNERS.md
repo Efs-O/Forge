@@ -131,6 +131,8 @@ overlaps with an existing owner, extend the owner instead.
 | RFC 6238 generation/verification             | `src/remote/RemoteTotp.ts`             |
 | Durable requests, bindings, cursors, outbox  | `src/remote/RemoteRequestStore.ts`     |
 | Remote owner command behavior                | `src/remote/RemoteCommandHandler.ts`   |
+| Queue order, promote/cancel/claim rules      | `src/remote/remoteQueueOrdering.ts`    |
+| Turn outcome echoed to bound chats           | `src/sidebar/turnMirrorWiring.ts`      |
 | Paged /list, /models, /workspace selections  | `src/remote/RemoteSelectionPager.ts`   |
 | Selection list identity, token, expiry       | `src/remote/RemoteSelectionState.ts`   |
 | Sibling-workspace discovery + alias merge    | `src/remote/RemoteWorkspaceDiscovery.ts` |

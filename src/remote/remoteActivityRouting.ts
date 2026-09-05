@@ -11,9 +11,12 @@ import type { RemoteController } from './RemoteController';
  *
  * - No conversation → window scope. A model unloaded affects every chat bound
  *   to this workspace, including ones on a different conversation.
- * - `kind: 'turn'` → the echo of a finished answer, the only kind that can
- *   duplicate what a chat already saw. mirrorTurn declines when a progress
- *   message already owns that turn, and it is what /mirror off silences.
+ * - `kind: 'turn'` → the echo of a finished answer. mirrorTurn declines when a
+ *   progress message already owns that turn, and it is what /mirror off
+ *   silences.
+ * - `kind: 'failure'` → a turn that died. Declines on the same ownership test,
+ *   because a chat-originated turn already gets "Forge request failed" from
+ *   the queue drain, but is NOT silenced by /mirror off.
  * - Anything else → the conversation's chats, riding /notify with compaction
  *   and notify_user.
  *
@@ -26,7 +29,9 @@ export function routeHostActivity(
   if (event.conversationId === undefined) {
     return controller.broadcastHostNotification(event.text);
   }
-  return event.kind === 'turn'
-    ? controller.mirrorTurn(event.conversationId, event.text)
-    : controller.enqueueHostNotification(event.conversationId, event.text);
+  if (event.kind === 'turn') return controller.mirrorTurn(event.conversationId, event.text);
+  if (event.kind === 'failure') {
+    return controller.reportTurnFailure(event.conversationId, event.text);
+  }
+  return controller.enqueueHostNotification(event.conversationId, event.text);
 }

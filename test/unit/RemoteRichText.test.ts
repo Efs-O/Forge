@@ -1,4 +1,7 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { describe, expect, it } from 'vitest';
+import { TELEGRAM_BOT_COMMANDS } from '../../src/remote/TelegramChannel';
 import { HELP_TEXT, decorateHelpLine } from '../../src/remote/remoteHelpText';
 import { boldLineLabel, markupTelegramLines, sendRichText } from '../../src/remote/telegramHtml';
 
@@ -21,7 +24,7 @@ describe('remote rich text', () => {
   it('gives help one paragraph per group and per note, with the subject bolded', () => {
     const rendered = markupTelegramLines(HELP_TEXT, decorateHelpLine);
     expect(rendered.startsWith('<b>Forge commands:</b>')).toBe(true);
-    expect(rendered).toContain('<b>Session:</b> /status');
+    expect(rendered).toContain('<b>Session:</b> /help');
     expect(rendered).toContain('• <b>/stop</b> cancels');
     // Placeholders keep their angle brackets as text, or Telegram reads them
     // as an unknown tag and rejects the whole send.
@@ -42,5 +45,52 @@ describe('remote rich text', () => {
       (line) => `<b>${line}</b>`,
     );
     expect(plain).toEqual(['Model: a<b>']);
+  });
+});
+
+/**
+ * The command map lives in three places that cannot see each other: the
+ * handlers, `/help`, and Telegram's native menu. Two of them had already
+ * drifted — `/mirror` was implemented and documented but absent from the menu,
+ * so it never appeared to anyone browsing the bot. Reading the handlers back
+ * is what makes the next omission fail here instead of on a phone.
+ */
+describe('remote command map', () => {
+  const SOURCES = [
+    'src/remote/RemoteCommandHandler.ts',
+    'src/remote/RemoteSessionCommands.ts',
+    'src/remote/RemoteController.ts',
+  ];
+  // Aliases and the parser-dispatched command have no `command === ...` line.
+  const UNDOCUMENTED_ALIASES = new Set(['/commands']);
+  const EXTRA_IMPLEMENTED = ['/steer'];
+
+  const implemented = new Set(
+    SOURCES.flatMap((file) =>
+      [...readFileSync(join(process.cwd(), file), 'utf8').matchAll(/=== '(\/[a-z]+)'/gu)].map(
+        (match) => match[1]!,
+      ),
+    )
+      .concat(EXTRA_IMPLEMENTED)
+      .filter((command) => !UNDOCUMENTED_ALIASES.has(command)),
+  );
+
+  it('finds the handlers it is meant to be checking', () => {
+    // A regex that silently matched nothing would make both tests below pass.
+    expect(implemented.size).toBeGreaterThan(20);
+    expect(implemented.has('/steer')).toBe(true);
+    expect(implemented.has('/mirror')).toBe(true);
+  });
+
+  it('documents every implemented command in /help', () => {
+    const documented = new Set([...HELP_TEXT.matchAll(/(?<![\w/])(\/[a-z]+)/gu)].map((m) => m[1]!));
+    expect([...implemented].filter((command) => !documented.has(command))).toEqual([]);
+  });
+
+  it("offers every implemented command in Telegram's native menu", () => {
+    const menu = new Set(TELEGRAM_BOT_COMMANDS.map((entry) => `/${entry.command}`));
+    expect([...implemented].filter((command) => !menu.has(command))).toEqual([]);
+    // And nothing in the menu that no handler answers.
+    expect([...menu].filter((command) => !implemented.has(command))).toEqual([]);
   });
 });

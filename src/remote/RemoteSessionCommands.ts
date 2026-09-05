@@ -195,8 +195,9 @@ export async function handleRemoteSessionCommand(
               (item, index) =>
                 `${index + 1}. ${item.priority === 'steer' ? '[steer] ' : ''}${truncate(item.text, 160)}`,
             )
-            .join('\n\n') + '\n\nUse /drop <number|all> to cancel queued work.',
-      (line) => (line.startsWith('Use /') ? `<i>${line}</i>` : boldLeadingNumber(line)),
+            .join('\n\n') +
+            '\n\nThese run in order once the current turn ends. Use /steer <number> to run one now, or /drop <number|all> to cancel.',
+      (line) => (line.startsWith('These run') ? `<i>${line}</i>` : boldLeadingNumber(line)),
       { signal: context.signal },
     );
     return { kind: 'handled' };

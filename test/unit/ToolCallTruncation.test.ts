@@ -35,7 +35,7 @@ const SERVER_CONTEXT_400 =
 
 function runOptions(messages: ChatMessage[], extra: Record<string, unknown> = {}) {
   return {
-    baseUrl: 'http://localhost:0',
+    resolveBaseUrl: async () => 'http://localhost:0',
     model: { name: 'test-model' } as never,
     messages,
     getToolDefinitions: () => [{ type: 'function', function: { name: 'write_file' } }] as never,

@@ -74,7 +74,7 @@ describe('tool-loop context preflight', () => {
     let called = false;
     await expect(
       runToolCallingLoop({
-        baseUrl: 'http://localhost:0',
+        resolveBaseUrl: async () => 'http://localhost:0',
         model: { name: 'local' } as never,
         messages: [{ role: 'user', content: 'x' }],
         getToolDefinitions: () => [],

@@ -95,6 +95,23 @@ export class RemoteNotificationFanout {
   }
 
   /**
+   * A turn that ended in failure rather than an answer.
+   *
+   * Declines on the same test `mirrorTurn` uses — a live progress message
+   * means the prompt came from a chat and RemoteQueueDrain already reports
+   * "Forge request failed: …" there. What is left is the case that had no
+   * reporter at all: a turn started in the sidebar, failing while the person
+   * who started it is watching from a phone.
+   *
+   * Unlike `mirrorTurn` this ignores `/mirror off`. That switch means "stop
+   * repeating answers to me", never "stop telling me the work died".
+   */
+  async failureNotice(conversationId: string, text: string): Promise<number> {
+    if (this.deps.ownsProgress(conversationId)) return 0;
+    return this.send(this.chatsOn(conversationId), text);
+  }
+
+  /**
    * How many chats a notification for this conversation would reach.
    *
    * Deliberately the same `chatsOn` the sends use, muting included: a count

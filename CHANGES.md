@@ -2,6 +2,61 @@
 
 ## Unreleased
 
+- **A turn no longer dials the port the model used to be on.** Forge's pool
+  hands out a rotating port, and anything that unloads a model mid-turn — a
+  `/unload`, an eviction, the benchmark freeing VRAM — brings it back through
+  `startSlot` on the NEXT free port behind a *new* controller. The turn held
+  the old one. On 2026-09-05 the log reads `slot ready … on port 8080` at
+  16:33:05 and, twenty-two seconds later, `request start id=28
+  target=127.0.0.1:8083` failing in **11 ms** with `fetch failed`. The next
+  model request was 2 h 12 m later, and it was the user asking "Are you
+  monitoring?". The endpoint is now resolved on every round through the pool,
+  the way `getToolDefinitions` already was and for the same reason — so a
+  round arriving mid-restart waits for the reload instead of failing against a
+  corpse.
+
+- **A turn that dies says so, to whoever was waiting.** The failure reached the
+  status bar and the webview and stopped there. If you started the work from
+  the sidebar and walked away to watch it from your phone — exactly what a
+  long monitoring run is for — nothing ever told you it had stopped; silence
+  and "still working" looked identical for two hours. Failures now fan out to
+  the chats bound to the conversation, saying what broke and that nothing is
+  still running. They decline when a chat-originated turn already gets "Forge
+  request failed" from the queue drain, and `/mirror off` does not silence
+  them: that switch means "stop repeating answers to me", never "stop telling
+  me the work died". `/notify off` still covers them.
+
+- **`[AgentLoop] undefined chat failed`** — `model.provider` is optional and
+  unset for local llama entries, so the log line named no provider at all.
+
+- **`/steer 1` no longer runs a prompt that says "1".** `/drop <n>` takes a
+  queue position, so `/steer <n>` looked like one too — and was not: the whole
+  argument was prompt text, so `/steer 1` cancelled the running turn and asked
+  the agent to act on the single character `1`. A real session went further and
+  sent `/steer stop`, which is why the agent announced "Stopping the run now"
+  and called `stop_execution`; it was doing exactly as told. A bare number
+  after `/steer` is now always a queue position: `/steer 2` interrupts the turn
+  and runs queued prompt 2, `/steer` with no argument runs prompt 1, and
+  `/steer <text>` still jumps new text to the front. Every reply names which
+  reading it took and quotes what it is about to run, so the two can never be
+  confused silently again.
+
+- **The queue now says what it is for.** Nothing told you that an ordinary
+  message sent mid-turn waits rather than interrupts, or that the prompt you
+  just typed could be promoted without retyping it — the acknowledgement
+  offered `/steer <prompt>`, i.e. type it all again. A queued message now
+  reports its position and the exact `/steer <n>` and `/drop <n>` that act on
+  it, and `/queue` says these run in order once the current turn ends.
+
+- **`/mirror` was implemented, documented, and invisible.** It was missing from
+  Telegram's native command menu, so it existed only for someone who had read
+  the help text closely. The command map lives in three places that cannot see
+  each other — the handlers, `/help`, and the bot menu — so a test now reads the
+  handlers back and fails when any of the three drifts. It caught a second
+  omission on its first run: `/help` was not listed in its own output. `/help`
+  itself was also rewritten, with a "How work is queued" section, because
+  several notes described behavior that no longer matched the code.
+
 - **The agent can tell the time again, so an hourly report is actually
   hourly.** Asked to check a benchmark every 60 minutes, it posted a "60-min
   check" seven minutes in. The transcript shows why: two `wait(360)` calls,

@@ -29,16 +29,17 @@ import {
   type HandoffInput,
 } from './RemoteHandoffState';
 import {
+  cancelQueuedInDraft,
+  claimNextInDraft,
+  compareQueuedRequests,
+  promoteQueuedInDraft,
+} from './remoteQueueOrdering';
+import {
   findSelection,
   newSelectionToken,
   removeSelection,
   replaceSelection,
 } from './RemoteSelectionState';
-
-function compareQueuedRequests(left: RemoteRequestRecord, right: RemoteRequestRecord): number {
-  const priority = Number(right.priority === 'steer') - Number(left.priority === 'steer');
-  return priority || (left.admittedAt ?? left.receivedAt) - (right.admittedAt ?? right.receivedAt);
-}
 
 export function remoteDedupKey(channel: string, chatId: string, messageId: string): string {
   return `${channel}\u0000${chatId}\u0000${messageId}`;
@@ -286,20 +287,7 @@ export class RemoteRequestStore {
   ): Promise<RemoteRequestRecord | undefined> {
     let claimedId: string | undefined;
     await this.mutate((draft) => {
-      if (
-        draft.requests.some(
-          (item) => item.conversationId === conversationId && item.state === 'running',
-        )
-      ) {
-        return;
-      }
-      const next = draft.requests
-        .filter((item) => item.conversationId === conversationId && item.state === 'queued')
-        .sort(compareQueuedRequests)[0];
-      if (!next || next.channel !== channel) return;
-      next.state = 'running';
-      next.updatedAt = Date.now();
-      claimedId = next.id;
+      claimedId = claimNextInDraft(draft.requests, conversationId, channel);
     });
     return claimedId ? this.getRequest(claimedId) : undefined;
   }
@@ -308,22 +296,20 @@ export class RemoteRequestStore {
     await this.setRequestState(id, 'queued');
   }
 
-  /** Mark selected queued prompts cancelled without deleting their audit record. */
+  /** `/steer <n>`: run an already-queued prompt next. */
+  async promoteQueued(conversationId: string, requestId: string): Promise<boolean> {
+    let promoted = false;
+    await this.mutate((draft) => {
+      promoted = promoteQueuedInDraft(draft.requests, conversationId, requestId);
+    });
+    return promoted;
+  }
+
+  /** `/drop`: cancel queued prompts without deleting their audit record. */
   async cancelQueued(conversationId: string, requestIds?: ReadonlySet<string>): Promise<number> {
     let cancelled = 0;
     await this.mutate((draft) => {
-      for (const request of draft.requests) {
-        if (
-          request.conversationId !== conversationId ||
-          request.state !== 'queued' ||
-          (requestIds && !requestIds.has(request.id))
-        ) {
-          continue;
-        }
-        request.state = 'cancelled';
-        request.updatedAt = Date.now();
-        cancelled += 1;
-      }
+      cancelled = cancelQueuedInDraft(draft.requests, conversationId, requestIds);
     });
     return cancelled;
   }

@@ -20,13 +20,19 @@ export interface HostActivityEvent {
    */
   conversationId?: string;
   /**
-   * `turn` marks the echo of a finished answer — the one kind a chat may
-   * already have seen, and the one `/mirror off` silences. Everything else is
-   * a state change the user asked nothing about, so it rides `/notify` with
-   * compaction and notify_user. Without the distinction, muting the answers
-   * would also mute "chat cleared", which is not what either switch means.
+   * Everything unkinded is a state change the user asked nothing about, so it
+   * rides `/notify` with compaction and notify_user. Without the distinction,
+   * muting the answers would also mute "chat cleared", which is not what
+   * either switch means.
+   *
+   * `turn` marks the echo of a finished answer; `failure` marks a turn that
+   * ended without one. Both concern a single turn, and both can duplicate
+   * something a chat already saw, so each declines when a remote progress
+   * message already owns that turn. They differ in what silences them:
+   * `/mirror off` is about not wanting answers repeated, and must never
+   * suppress the news that the work stopped.
    */
-  kind?: 'turn';
+  kind?: 'turn' | 'failure';
 }
 
 export type HostActivityListener = (event: HostActivityEvent) => void;

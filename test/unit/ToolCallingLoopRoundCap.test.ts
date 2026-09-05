@@ -37,7 +37,7 @@ function scriptEndlessToolCalls(): void {
 
 function runOptions(messages: ChatMessage[], maxRounds: number) {
   return {
-    baseUrl: 'http://localhost:0',
+    resolveBaseUrl: async () => 'http://localhost:0',
     model: { name: 'test-model' } as never,
     messages,
     getToolDefinitions: () => [{ type: 'function', function: { name: 'edit_file' } }] as never,

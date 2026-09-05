@@ -11,7 +11,7 @@ export interface TurnMirrorWiring {
 }
 
 /**
- * Echo a finished turn's answer to the chats bound to its conversation.
+ * Echo a turn's outcome — answer or failure — to the chats bound to it.
  *
  * Decorates `onGenerationFinished` the way wireSessionTimer does, for the same
  * reason: the event already fires at exactly the right moment and carries the
@@ -35,6 +35,24 @@ export function wireTurnMirror(events: SidebarProviderEvents, deps: TurnMirrorWi
     // tail even though the turn had just completed successfully.
     const text = finalText?.trim() || finalAnswer(deps.lookup(conversationId));
     if (text) deps.emit({ text, conversationId, kind: 'turn' });
+  };
+
+  // A failed turn fires onGenerationFinished too, but with no final text — so
+  // the branch above sends nothing and the chat is left watching a turn that
+  // will never speak again. Decorated here rather than emitted from the turn
+  // path for the same reason as the answer: one place subscribes the outbound
+  // hooks.
+  const originalFailed = events.onTurnFailed;
+  events.onTurnFailed = (conversationId, message) => {
+    originalFailed?.(conversationId, message);
+    if (conversationId === undefined) return;
+    deps.emit({
+      text: `Forge: the turn stopped — ${message}
+
+Nothing further is running. Send a new instruction to pick it back up.`,
+      conversationId,
+      kind: 'failure',
+    });
   };
 }
 
