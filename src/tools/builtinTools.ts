@@ -70,9 +70,12 @@ export function makeReadFileTool(): RegisteredTool {
             numbered: {
               type: 'boolean',
               description:
-                'Prefix each line with its 1-based number as "  12| text". Use when you need ' +
-                'line numbers, e.g. to build apply_line_edits operations. The prefix is display ' +
-                'only — never copy it into old_str or expected_lines.',
+                'Prefix each line with its 1-based number as "  12|text". Use when you need ' +
+                'line numbers, e.g. to build apply_line_edits operations. The prefix ends at ' +
+                'the "|" and the very next character is column 1 of the real line, so the ' +
+                "line's own indentation is preserved exactly. Strip everything up to and " +
+                'including the first "|" — never copy the prefix into old_str or ' +
+                'expected_lines, and never add or drop a space after it.',
             },
           },
           required: ['path'],
@@ -112,9 +115,17 @@ export function makeReadFileTool(): RegisteredTool {
       // a file gave none — so the model counted them itself and got it wrong:
       // 14 of its 19 calls failed on stale or miscounted `expected_lines`.
       const width = String(end).length;
+      // No space after the "|". A separator of "| " is NOT reversible: the
+      // model cannot tell the separator's space from the line's first column,
+      // so every old_str composed from a numbered read carries one extra
+      // leading space and edit_file refuses text that was quoted perfectly.
+      // That is what stalled the 2026-09-05 config.yaml session — six edit
+      // attempts, all off by exactly one space, against a YAML file where
+      // indentation is load-bearing. The number is right-padded instead, so
+      // the "|" column still lines up and the character after it is column 1.
       return capRead(
         selected
-          .map((line, index) => `${String(start + index).padStart(width, ' ')}| ${line}`)
+          .map((line, index) => `${String(start + index).padStart(width, ' ')}|${line}`)
           .join('\n'),
       );
     },

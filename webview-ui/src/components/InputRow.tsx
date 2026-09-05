@@ -52,6 +52,14 @@ function step(
   return from;
 }
 
+/** `record` without `key`, leaving `record` untouched. */
+function omit(record: Record<string, string>, key: string): Record<string, string> {
+  if (!(key in record)) return record;
+  const rest = { ...record };
+  delete rest[key];
+  return rest;
+}
+
 const SendIcon = (): React.ReactElement => (
   // 11px, not 13: the icon must stay inside the 16px line box the composer row
   // pins, or send grows taller than the remote chip beside it.
@@ -124,7 +132,22 @@ export function InputRow({
   remote,
   activeConversationId,
 }: Props): React.ReactElement {
-  const [text, setText] = useState('');
+  // Drafts are per conversation, the same way staged attachments are. One
+  // shared `text` meant an unsent message typed in tab 1 appeared in tabs 2 and
+  // 3 — and would have been sent to whichever tab happened to be open. The
+  // composer is a property of the conversation, not of the panel.
+  const [draftByConversation, setDraftByConversation] = useState<Record<string, string>>({});
+  const text = draftByConversation[activeConversationId] ?? '';
+  const setText = useCallback(
+    (next: string) => {
+      setDraftByConversation((previous) =>
+        // Drop the key rather than storing '' so a cleared draft leaves nothing
+        // behind for a conversation id that may never come back.
+        next ? { ...previous, [activeConversationId]: next } : omit(previous, activeConversationId),
+      );
+    },
+    [activeConversationId],
+  );
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const [dragging, setDragging] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -161,7 +184,7 @@ export function InputRow({
     setText(prefillText);
     onPrefillConsumed();
     setTimeout(() => textareaRef.current?.focus(), 0);
-  }, [onPrefillConsumed, prefillText]);
+  }, [onPrefillConsumed, prefillText, setText]);
 
   const handleTextChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -169,7 +192,12 @@ export function InputRow({
       setText(e.target.value);
       if (selectedCommandIndex !== 0) setSelectedCommandIndex(0);
     },
-    [selectedCommandIndex],
+    // `setText` is rebuilt whenever the active conversation changes, and it
+    // MUST be listed: without it this callback keeps the first one it saw and
+    // writes every keystroke into the draft of whichever conversation was
+    // active at mount — which, on a fresh panel, is the empty id it holds
+    // before the host's first sessionSync arrives.
+    [selectedCommandIndex, setText],
   );
 
   const submit = useCallback(() => {
@@ -179,7 +207,7 @@ export function InputRow({
     setText('');
     clearAttachments();
     textareaRef.current?.focus();
-  }, [text, attachments, clearAttachments, streaming, onSend]);
+  }, [text, attachments, clearAttachments, streaming, onSend, setText]);
 
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -240,7 +268,7 @@ export function InputRow({
       setSelectedCommandIndex(0);
       textareaRef.current?.focus();
     },
-    [onRunSlashCommand, streaming],
+    [onRunSlashCommand, streaming, setText],
   );
 
   const handleKeyDown = useCallback(
@@ -273,7 +301,7 @@ export function InputRow({
         submit();
       }
     },
-    [activeIndex, runSlashCommand, runnable, slashMatches, showSlashMenu, submit],
+    [activeIndex, runSlashCommand, runnable, slashMatches, showSlashMenu, submit, setText],
   );
 
   const canSend = text.trim().length > 0 || attachments.length > 0;

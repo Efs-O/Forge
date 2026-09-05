@@ -264,6 +264,7 @@ overlaps with an existing owner, extend the owner instead.
 | `old_str` matching + line-ending handling  | `src/tools/editMatch.ts`              |
 | Structured line-edit validation + tool     | `src/tools/structuredEditTool.ts`     |
 | Code + file search tools (ripgrep)         | `src/tools/dirTools.ts`               |
+| Search scope: excludes + named-path rule   | `src/tools/searchScope.ts`            |
 | search_code snippet/result size bounds     | `src/tools/searchSnippet.ts`          |
 | list_directory + size/age formatting       | `src/tools/listDirectoryTool.ts`      |
 | Terminal + headless exec tools             | `src/tools/execTools.ts`              |

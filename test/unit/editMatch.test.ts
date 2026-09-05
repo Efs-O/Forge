@@ -95,3 +95,38 @@ describe('describeEditMiss', () => {
     expect(describeEditMiss('abc\n', 'zz')).toContain('read_file');
   });
 });
+
+describe('describeEditMiss — the uniform indent shift', () => {
+  // The 2026-09-05 config.yaml session: six consecutive edit_file calls failed
+  // because `read_file numbered: true` separated the number from the line with
+  // "| ", and the model could not tell that space from the line's own first
+  // column. Every old_str it built carried one extra leading space. The generic
+  // diagnosis called it "a later line differs" — true by trim(), and it sent
+  // the model hunting a later line that was fine.
+  const yaml = ['spawn:', '  num_ctx: 100000', '  n_batch: 2048', ''].join('\n');
+
+  it('names leading whitespace rather than blaming a later line', () => {
+    const shifted = '   num_ctx: 100000\n   n_batch: 2048';
+    const message = describeEditMiss(yaml, shifted);
+    expect(message).toContain('leading whitespace');
+    expect(message).toContain('2 spaces');
+    expect(message).toContain('3 spaces');
+    expect(message).not.toContain('a later line');
+  });
+
+  it('gives the line the block really starts on', () => {
+    expect(describeEditMiss(yaml, '   num_ctx: 100000\n   n_batch: 2048')).toContain('line 2');
+  });
+
+  it('still blames a later line when the content genuinely differs', () => {
+    expect(describeEditMiss(yaml, '  num_ctx: 100000\n  n_batch: 4096')).toContain(
+      'a later line',
+    );
+  });
+
+  it('says nothing about indentation for a block that matches outright', () => {
+    // findEditMatch handles this; describeEditMiss is only ever called on a miss,
+    // but a single short token must not be accused of an indent problem.
+    expect(describeEditMiss(yaml, '   x')).not.toContain('leading whitespace');
+  });
+});

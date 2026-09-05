@@ -4,6 +4,7 @@ import type { RegisteredTool } from './ToolRegistry';
 import { resolveRipgrep, type RipgrepResolution } from './RipgrepResolver';
 import { capResultText } from './resultCap';
 import { capSnippetLine, MAX_SEARCH_RESULT_CHARS } from './searchSnippet';
+import { SEARCH_EXCLUDES, namedExistingPath } from './searchScope';
 
 const OUTPUT_LINE_LIMIT = 50;
 const CONTEXT_LINES = 2;
@@ -18,24 +19,6 @@ const CONTEXT_LINES = 2;
  * the actual sources. The tool looked broken while working.
  */
 export const SNIPPETS_PER_FILE_LIMIT = 8;
-/**
- * Globs must be recursive to match below the search root. Bare `.git/**` is
- * anchored to that root, so it excluded only a top-level `.git` and happily
- * searched `subproject/.git/`, `subproject/node_modules/`, and so on —
- * `find_files` already got this right, which is why the two tools disagreed
- * about what is in the workspace. Both now share this one list.
- *
- * `.forge/` is excluded outright: it holds the semantic index, which is a
- * verbatim copy of the sources and would otherwise double every match.
- */
-export const SEARCH_EXCLUDES = [
-  '!**/.git/**',
-  '!**/node_modules/**',
-  '!**/dist/**',
-  '!**/out/**',
-  '!**/.forge/**',
-];
-
 interface SearchCodeMatch {
   path: string;
   snippets: string[];
@@ -100,7 +83,13 @@ async function listWorkspaceFiles(
   const folder = vscode.workspace.workspaceFolders?.[0];
   if (!folder) throw new Error('No workspace folder open.');
 
-  const args = ['--files', '--glob', pattern, ...SEARCH_EXCLUDES.flatMap((g) => ['--glob', g])];
+  // `--hidden` so dot-directories (.forge, .vscode, .github) are crawled at
+  // all; ignore files still filter them, which is the behaviour that keeps
+  // node_modules out.
+  const named = namedExistingPath(pattern, folder.uri.fsPath);
+  const args = named
+    ? ['--files', '--hidden', '--no-ignore-vcs', named]
+    : ['--files', '--hidden', '--glob', pattern, ...SEARCH_EXCLUDES.flatMap((g) => ['--glob', g])];
 
   return new Promise<string[]>((resolve, reject) => {
     const found: string[] = [];
@@ -307,6 +296,7 @@ async function searchWorkspaceText(
   const folder = vscode.workspace.workspaceFolders?.[0];
   if (!folder) throw new Error('No workspace folder open.');
 
+  const named = namedExistingPath(include, folder.uri.fsPath);
   const args = [
     '--json',
     '--fixed-strings',
@@ -314,11 +304,12 @@ async function searchWorkspaceText(
     '--with-filename',
     '--context',
     String(CONTEXT_LINES),
-    '--glob',
-    include,
-    ...SEARCH_EXCLUDES.flatMap((glob) => ['--glob', glob]),
+    '--hidden',
+    ...(named
+      ? ['--no-ignore-vcs']
+      : ['--glob', include, ...SEARCH_EXCLUDES.flatMap((glob) => ['--glob', glob])]),
     query,
-    '.',
+    named ?? '.',
   ];
 
   return new Promise<SearchCodeMatch[]>((resolve, reject) => {

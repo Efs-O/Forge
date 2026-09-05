@@ -73,6 +73,10 @@ export const workspace = {
   },
   openTextDocument: async (uri: { fsPath: string }) => ({
     uri,
+    // Real documents report a line count, and open_file clamps a requested
+    // line against it. Without one here the stub would hand back NaN and the
+    // clamp would go untested.
+    lineCount: 1,
     save: async () => true,
   }),
   applyEdit: async () => true,
@@ -86,6 +90,8 @@ export const workspace = {
 
 export const window = {
   activeTextEditor: undefined as unknown,
+  /** What showTextDocument was last called with, for tools that only open. */
+  lastShown: undefined as { document: unknown; options?: unknown } | undefined,
   visibleTextEditors: [] as Array<{ document: { uri: { fsPath: string } } }>,
   tabGroups: { all: [] as Array<{ tabs: Array<{ input?: unknown }> }> },
   createOutputChannel: () => ({
@@ -99,7 +105,10 @@ export const window = {
   showErrorMessage: async () => undefined,
   showQuickPick: async (): Promise<string | undefined> => undefined,
   showInputBox: async (): Promise<string | undefined> => undefined,
-  showTextDocument: async (document: unknown) => document,
+  showTextDocument: async (document: unknown, options?: unknown) => {
+    window.lastShown = { document, options };
+    return document;
+  },
   createTerminal: () => ({ show: () => undefined, sendText: () => undefined }),
   createInputBox: () => makeQuickInput(),
   createQuickPick: () => makeQuickInput(),
@@ -216,6 +225,9 @@ export const Uri = {
   }),
   parse: (value: string) => ({ fsPath: value, toString: () => value }),
 };
+
+/** Mirrors the real enum's values; `Beside` is the one Forge passes. */
+export const ViewColumn = { Active: -1, Beside: -2, One: 1, Two: 2, Three: 3 } as const;
 
 export class Position {
   constructor(

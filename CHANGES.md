@@ -1,5 +1,59 @@
 # Forge — Recent Changes
 
+## Unreleased
+
+- **`read_file numbered: true` no longer breaks the edit that follows it.** The
+  prefix was `"675| "` — number, pipe, *space* — and a model cannot tell that
+  space from the line's own first column. So every `old_str` composed from a
+  numbered read carried one extra leading space on every line, and `edit_file`
+  refused text that had been quoted perfectly. On 2026-09-05 that cost a whole
+  session: against `.forge/config.yaml`, where indentation is load-bearing, six
+  consecutive edits failed, all off by exactly one space, while a second tab
+  editing the same file the same day with no numbered reads went two for two.
+  The separator is now `"675|"` and the character after the pipe is column 1.
+  The miss message was making it worse — it compared lines with `trim()`, so a
+  uniformly over-indented block came back as "your first line matched, a later
+  line differs", sending the model to hunt a line that was fine. A constant
+  indent shift is now detected and named, with both indents reported. It is
+  reported, never applied: silently re-indenting a YAML or Python block would
+  change what the edit means.
+
+- **`search_code` and `find_files` can see `.forge/config.yaml`.** Two things
+  hid it. `.forge/**` was excluded wholesale to keep the semantic index out of
+  results, and the index is one file, not a tree — the exclusion is now the
+  index, the session logs and the remote inbox by name. And ripgrep applies
+  `.gitignore` to what it *crawls*, which listed `.forge/`, so even the
+  narrowed exclusion would not have been enough. A path the caller typed out in
+  full is now handed to ripgrep as a search root rather than as a glob filter,
+  and ignore rules do not filter a search root: naming a file is an explicit
+  request for that file. Wildcard patterns keep the ignore rules, which is what
+  stops a search drowning in build output. Before this, `search_code "num_ctx"
+  include=".forge/config.yaml"` reported "No matches found" about a file holding
+  37 of them, and the agent fell back to reading blind 100-line windows.
+
+- **New tool: `open_file`.** Asked to open a file in the editor, the agent had
+  no way to do it and read the file into the chat instead — a different thing
+  entirely. The plumbing already existed (`ToolDispatch.openFile` backs the
+  webview's file links and auto-open-after-write); nothing exposed it to the
+  model. Opens at a given line, optionally beside the active editor, and never
+  as a preview tab, so the file the user asked for is not replaced by the
+  agent's next read.
+
+- **The agent knows what day it is.** Nothing in the system prompt carried a
+  date, so a model asked to write one reached for
+  `powershell -Command "Get-Date"` — banned, because a model-authored script
+  cannot be checked by the denylist — and spent a round recovering through
+  `node -e`. The refusal was not at fault: it names alternatives, and none of
+  them tells the time. `TemplateEngine.render` now supplies `currentDate` to
+  every template. Date only, never a time: the system prompt is the KV cache's
+  prefix, so anything in it that ticks re-processes the whole prompt every turn.
+
+- **An unsent prompt stays in the tab you typed it in.** The composer held one
+  `text` state for the whole panel, so a draft typed in one tab appeared in
+  every other tab's prompt box — and would have been sent to whichever tab was
+  open when you hit Enter. Drafts are now per conversation, the way staged
+  attachments already were.
+
 ## 0.15.18
 
 - **Every Telegram list and report is readable on a phone now.** The model list

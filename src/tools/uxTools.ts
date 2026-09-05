@@ -40,6 +40,90 @@ export function makeShowDiffTool(): RegisteredTool {
   };
 }
 
+// ── open_file ─────────────────────────────────────────────────────────────────
+
+/**
+ * Show a file in the editor.
+ *
+ * Forge could already open a file — `ToolDispatch.openFile` backs the webview's
+ * file links and the auto-open-after-write setting — but no tool exposed it, so
+ * "open config.yaml in the editor" was a request the agent had no way to
+ * satisfy. It would read the file out into the chat instead, which is not what
+ * was asked for. A capability the model cannot reach is one the transcript
+ * cannot show is missing (CLAUDE.md, "Agent-Ergonomics Traps").
+ */
+export function makeOpenFileTool(): RegisteredTool {
+  return {
+    definition: {
+      type: 'function',
+      function: {
+        name: 'open_file',
+        description:
+          'Open a file in the main VS Code editor so the user can see it. Use this ' +
+          'whenever the user asks to open, show, or bring up a file — it puts the real ' +
+          'editor tab in front of them, which reading the file into the chat does not. ' +
+          'Does not return the contents: use read_file for that.',
+        parameters: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description:
+                'File to open, relative to the workspace root or absolute. The workspace ' +
+                "root is not necessarily the project root — prefix a nested repository's " +
+                'directory when the file lives inside one.',
+            },
+            line: {
+              type: 'number',
+              minimum: 1,
+              description: 'Optional 1-based line to reveal and place the cursor on.',
+            },
+            beside: {
+              type: 'boolean',
+              description:
+                'Open in a column beside the active editor instead of reusing it. ' +
+                'Defaults to false.',
+            },
+          },
+          required: ['path'],
+          additionalProperties: false,
+        },
+      },
+    },
+    permission: 'read',
+    handler: async (args) => {
+      const suppliedPath = args['path'] as string;
+      const uri = resolveWorkspaceUri(suppliedPath);
+      let doc: vscode.TextDocument;
+      try {
+        doc = await vscode.workspace.openTextDocument(uri);
+      } catch (err) {
+        throw new Error(`open_file: cannot open ${suppliedPath} — ${(err as Error).message}`);
+      }
+      // `line` arrives 1-based from the model; VS Code positions are 0-based.
+      // A line past the end is clamped rather than refused: the file is open
+      // either way, and a stale line number is not worth failing the call over.
+      const rawLine = args['line'] as number | undefined;
+      const lastLine = doc.lineCount > 0 ? doc.lineCount - 1 : 0;
+      const zeroBased =
+        rawLine === undefined ? undefined : Math.min(Math.max(0, rawLine - 1), lastLine);
+      const target =
+        zeroBased === undefined ? undefined : new vscode.Range(zeroBased, 0, zeroBased, 0);
+      await vscode.window.showTextDocument(doc, {
+        // Not a preview tab: a preview is replaced by the next thing opened, so
+        // the file the user asked for would vanish behind the agent's own reads.
+        preview: false,
+        preserveFocus: false,
+        ...(args['beside'] === true ? { viewColumn: vscode.ViewColumn.Beside } : {}),
+        ...(target ? { selection: target } : {}),
+      });
+      return zeroBased === undefined
+        ? `Opened ${suppliedPath} in the editor.`
+        : `Opened ${suppliedPath} in the editor at line ${zeroBased + 1}.`;
+    },
+  };
+}
+
 // ── ask_user ──────────────────────────────────────────────────────────────────
 
 export function makeAskUserTool(questions: UserQuestionService): RegisteredTool {

@@ -25,6 +25,7 @@ import {
   makeCopyToClipboardTool,
   makeOpenUrlTool,
   makeReadClipboardTool,
+  makeOpenFileTool,
   makeShowDiffTool,
   makeShowNotificationTool,
 } from '../../src/tools/uxTools';
@@ -171,6 +172,48 @@ describe('isolated editor, language, search, and memory tool execution', () => {
     expect(open).toHaveBeenCalledOnce();
     await expect(makeOpenUrlTool().handler({ url: 'file:///secret' })).rejects.toThrow(
       'must start with',
+    );
+  });
+
+  // open_file exists because the plumbing did and the tool did not: the webview
+  // could open a file link and auto-open-after-write could open a written file,
+  // but "open config.yaml in the editor" was a request the agent had no way to
+  // satisfy — it read the file into the chat instead, which is a different
+  // thing. A capability the model cannot reach leaves no trace in the logs.
+  it('opens a file in the editor rather than returning its contents', async () => {
+    const show = vi.spyOn(vscode.window, 'showTextDocument');
+
+    await expect(makeOpenFileTool().handler({ path: 'sample.ts' })).resolves.toBe(
+      'Opened sample.ts in the editor.',
+    );
+    // Never a preview tab: a preview is replaced by the next thing opened, so
+    // the file the user asked for would vanish behind the agent's own reads.
+    expect(show.mock.calls[0]?.[1]).toMatchObject({ preview: false, preserveFocus: false });
+    expect(show.mock.calls[0]?.[1]).not.toHaveProperty('viewColumn');
+
+    await expect(makeOpenFileTool().handler({ path: 'sample.ts', beside: true })).resolves.toBe(
+      'Opened sample.ts in the editor.',
+    );
+    expect(show.mock.calls[1]?.[1]).toMatchObject({ viewColumn: vscode.ViewColumn.Beside });
+  });
+
+  it('reveals a 1-based line, clamped to the file rather than refused', async () => {
+    const show = vi.spyOn(vscode.window, 'showTextDocument');
+
+    await expect(makeOpenFileTool().handler({ path: 'sample.ts', line: 1 })).resolves.toBe(
+      'Opened sample.ts in the editor at line 1.',
+    );
+    // The stub document reports one line, so a stale line number lands on it.
+    await expect(makeOpenFileTool().handler({ path: 'sample.ts', line: 900 })).resolves.toBe(
+      'Opened sample.ts in the editor at line 1.',
+    );
+    expect(show).toHaveBeenCalledTimes(2);
+  });
+
+  it('names the file it could not open instead of failing bare', async () => {
+    vi.spyOn(vscode.workspace, 'openTextDocument').mockRejectedValue(new Error('ENOENT'));
+    await expect(makeOpenFileTool().handler({ path: 'missing.ts' })).rejects.toThrow(
+      'open_file: cannot open missing.ts',
     );
   });
 

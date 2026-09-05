@@ -63,6 +63,7 @@ const EXPECTED_NATIVE_NAMES = [
   'monitor_execution',
   'move_file',
   'notify_user',
+  'open_file',
   'open_url_in_browser',
   'query_powershell',
   'read_clipboard',
@@ -130,7 +131,7 @@ function makeRegistry(options: { search?: boolean; delegation?: boolean } = {}):
 }
 
 describe('registerAllTools canonical coordinator catalog', () => {
-  it('exposes the exact 68-tool native catalog when all optional wiring is present', () => {
+  it('exposes the exact 69-tool native catalog when all optional wiring is present', () => {
     const registry = makeRegistry({ search: true, delegation: true });
     expect(registry.names().sort()).toEqual(EXPECTED_NATIVE_NAMES);
     // load_tool_group is registered but suppresses its own advertisement while
@@ -149,6 +150,6 @@ describe('registerAllTools canonical coordinator catalog', () => {
     expect(names).not.toContain('web_search');
     expect(names).not.toContain('ask_local_agent');
     expect(names).not.toContain('list_delegation_targets');
-    expect(names).toHaveLength(65);
+    expect(names).toHaveLength(66);
   });
 });

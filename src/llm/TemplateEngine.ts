@@ -9,6 +9,21 @@ export interface TemplateContext {
   selection?: string;
   customInstructions?: string;
   forgeInstructions?: string;
+  /** Filled in by `render`; callers do not pass it. */
+  currentDate?: string;
+}
+
+/**
+ * Today, as the local calendar sees it.
+ *
+ * DATE only, never a time. The system prompt is the KV cache's prefix, so
+ * anything in it that ticks re-processes the whole prompt on every turn; a
+ * date moves once a day, at an hour nobody is mid-turn.
+ */
+function today(): string {
+  const now = new Date();
+  const pad = (value: number): string => String(value).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
 export class TemplateEngine {
@@ -31,15 +46,19 @@ export class TemplateEngine {
    */
   render(name: string, context: TemplateContext): string {
     const templateName = `${name}.njk`;
+    // Injected here rather than at each call site: a model with no clock has
+    // no way to date anything it writes, and asking for one cost a round to a
+    // banned `powershell -Command "Get-Date"` and a fallback to `node -e`.
+    const withDate = { currentDate: today(), ...context };
     try {
-      return this.env.render(templateName, context);
+      return this.env.render(templateName, withDate);
     } catch (err) {
       // Fall back to builtin if user template errors
       const builtinDir = this.templateDirs[this.templateDirs.length - 1];
       const builtinPath = path.join(builtinDir, templateName);
       if (fs.existsSync(builtinPath)) {
         const raw = fs.readFileSync(builtinPath, 'utf8');
-        return nunjucks.renderString(raw, context);
+        return nunjucks.renderString(raw, withDate);
       }
       throw err;
     }

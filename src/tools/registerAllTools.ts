@@ -27,6 +27,7 @@ import { makeEditNotebookCellTool, makeReadNotebookTool } from './notebookTools'
 import { makeListWorkspaceTasksTool, makeRunWorkspaceTaskTool } from './taskTools';
 import {
   makeShowDiffTool,
+  makeOpenFileTool,
   makeAskUserTool,
   makeNotifyUserTool,
   makeShowNotificationTool,
@@ -127,6 +128,7 @@ export function registerAllTools(
   registry.register(makeReadNotebookTool());
   registry.register(makeListWorkspaceTasksTool());
   registry.register(makeShowDiffTool());
+  registry.register(makeOpenFileTool());
   registry.register(makeAskUserTool(questions));
   registry.register(makeNotifyUserTool(notifications));
   registry.register(makeWaitTool());

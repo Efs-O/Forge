@@ -97,7 +97,7 @@ describe('read_file numbered output', () => {
 
   it('numbers whole-file reads from 1', async () => {
     const out = await makeReadFileTool().handler({ path: 'f.txt', numbered: true });
-    expect(String(out).split('\n').slice(0, 3)).toEqual(['1| alpha', '2| beta', '3| gamma']);
+    expect(String(out).split('\n').slice(0, 3)).toEqual(['1|alpha', '2|beta', '3|gamma']);
   });
 
   it('numbers a range with the file’s real line numbers', async () => {
@@ -109,7 +109,19 @@ describe('read_file numbered output', () => {
       end_line: 3,
       numbered: true,
     });
-    expect(String(out)).toBe('2| beta\n3| gamma');
+    expect(String(out)).toBe('2|beta\n3|gamma');
+  });
+
+  // No space after the "|". With one, a model cannot tell the separator from
+  // the line's own first column, so every old_str it builds from a numbered
+  // read carries an extra leading space — which is what made six consecutive
+  // edit_file calls fail against .forge/config.yaml on 2026-09-05.
+  it('preserves leading indentation exactly, so old_str can be copied off it', async () => {
+    fs.writeFileSync(path.join(root, 'i.yaml'), 'spawn:\n  num_ctx: 100000\n', 'utf8');
+    const out = await makeReadFileTool().handler({ path: 'i.yaml', numbered: true });
+    const line = String(out).split('\n')[1]!;
+    expect(line).toBe('2|  num_ctx: 100000');
+    expect(line.slice(line.indexOf('|') + 1)).toBe('  num_ctx: 100000');
   });
 
   it('is off by default so ordinary reads are unchanged', async () => {

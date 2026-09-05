@@ -82,6 +82,9 @@ export function applyEol(text: string, eol: '\r\n' | '\n'): string {
  * anchor rather than a re-read, which is what it actually needs.
  */
 export function describeEditMiss(content: string, oldStr: string): string {
+  const indent = describeIndentShift(content, oldStr);
+  if (indent) return indent;
+
   const firstLine = oldStr.replace(/\r\n?/gu, '\n').split('\n')[0]?.trim() ?? '';
   if (firstLine.length >= 3) {
     const lines = content.replace(/\r\n?/gu, '\n').split('\n');
@@ -101,4 +104,61 @@ export function describeEditMiss(content: string, oldStr: string): string {
     }
   }
   return ' Re-read the file with read_file and copy the target text verbatim.';
+}
+
+/**
+ * The one miss worth naming before any other: `old_str` that matches the file
+ * exactly once its leading whitespace is shifted by a constant.
+ *
+ * A model composing `old_str` from a `numbered: true` read used to inherit the
+ * separator's trailing space on EVERY line, so the block differed from the file
+ * by one uniform space and nothing else. The generic diagnosis below reads that
+ * as "your first line matched, a later line differs" — true by `trim()`, and
+ * exactly wrong: it sends the model hunting a later line that is fine. Six
+ * consecutive edits failed that way on 2026-09-05 against `.forge/config.yaml`.
+ *
+ * `read_file` no longer emits that space, but a model can still hand-indent a
+ * block, and an off-by-one indent must not cost a turn to a message that points
+ * somewhere else. Reported, never auto-applied: silently re-indenting a YAML or
+ * Python block would change what the edit means.
+ */
+function describeIndentShift(content: string, oldStr: string): string | undefined {
+  const needle = oldStr.replace(/\r\n?/gu, '\n').split('\n');
+  if (needle.length === 0) return undefined;
+
+  const stripped = needle.map((line) => line.replace(/^[ \t]+/u, ''));
+  // An all-blank or single-token block has no indentation to be wrong about,
+  // and would match far too loosely to accuse anyone of anything.
+  if (!stripped.some((line) => line.length >= 3)) return undefined;
+
+  const lines = content.replace(/\r\n?/gu, '\n').split('\n');
+  for (let start = 0; start + needle.length <= lines.length; start++) {
+    const window = lines.slice(start, start + needle.length);
+    if (!window.every((line, i) => line.replace(/^[ \t]+/u, '') === stripped[i])) continue;
+
+    const wanted = leadingWhitespace(window, stripped);
+    const given = leadingWhitespace(needle, stripped);
+    return (
+      ` The text WAS found at line ${start + 1}, differing only in leading whitespace: the ` +
+      `file indents that block with ${describeWidth(wanted)} where old_str has ` +
+      `${describeWidth(given)}. Re-send old_str with the file's own indentation — if you ` +
+      'built it from a numbered read, the prefix ends at the "|" and the next character is ' +
+      'already column 1, so do not add a space after it.'
+    );
+  }
+  return undefined;
+}
+
+/** The indent of the first line in `lines` that actually carries content. */
+function leadingWhitespace(lines: string[], stripped: string[]): string {
+  const index = stripped.findIndex((line) => line.length > 0);
+  if (index === -1) return '';
+  return lines[index]!.slice(0, lines[index]!.length - stripped[index]!.length);
+}
+
+function describeWidth(indent: string): string {
+  if (indent.length === 0) return 'no leading whitespace';
+  const tabs = (indent.match(/\t/gu) ?? []).length;
+  if (tabs > 0) return `${tabs} tab(s) + ${indent.length - tabs} space(s)`;
+  return `${indent.length} space${indent.length === 1 ? '' : 's'}`;
 }
