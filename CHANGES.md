@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **A remote `/clanker` now shows up in the sidebar.** Telegram replied "clanker
+  mode ON" and the gate really did open — `setClankerMode` set the flag — but it
+  was the only writer of that flag that never posted `clankerChanged`, so the
+  composer went on advertising gated approvals while non-dangerous writes landed
+  unconfirmed. `setClankerMode` is the sole writer now and always announces a
+  change; `toggleClankerMode` routes through it.
+
+- **`/clanker off` from a phone stays off across a reload.** The sidebar toggle
+  remembers itself in `workspaceState`; a remote toggle deliberately did not, so
+  disarming from Telegram left the persisted ON to re-arm the gate on the next
+  window reload. Remote OFF now clears that memory. Remote ON still does not
+  write it — arming from away must not outlive the window.
+
+- **Clanker's scope is stated where it is toggled.** It covers every tab in the
+  window and that workspace only, which is correct for an approval-gate bypass
+  and was nowhere written down. The sidebar reply, the Telegram reply, and
+  `/help` now all say so, including that the sidebar toggle survives a reload —
+  the remote help had claimed the opposite.
+
 - **A turn no longer dials the port the model used to be on.** Forge's pool
   hands out a rotating port, and anything that unloads a model mid-turn — a
   `/unload`, an eviction, the benchmark freeing VRAM — brings it back through

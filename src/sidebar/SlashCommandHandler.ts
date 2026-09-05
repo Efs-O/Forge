@@ -219,8 +219,8 @@ export class SlashCommandHandler {
         deps.post({
           type: 'token',
           text: on
-            ? '\n> 💥 **Clanker Mode ON** — no confirmation prompts until you run `/clanker` again. Recursive deletes still confirm.\n'
-            : '\n> 💥 **Clanker Mode OFF** — confirmation restored.\n',
+            ? '\n> 💥 **Clanker Mode ON** — every tab in this window, and this workspace only. No confirmation prompts until you run `/clanker` again; it survives a reload. Recursive deletes still confirm.\n'
+            : '\n> 💥 **Clanker Mode OFF** — confirmation restored in this workspace.\n',
         });
         return;
       }

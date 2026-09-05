@@ -60,8 +60,16 @@ export class ToolApprovalService {
     this.onApprovalEnd = onEnd;
   }
 
+  /**
+   * Sole writer of the flag. It always announces the new value to the webview:
+   * a remote `/clanker` changes the same gate the sidebar composer advertises,
+   * and a banner that still reads "gated" while writes land unconfirmed is the
+   * worse half of the bug.
+   */
   setClankerMode(enabled: boolean): void {
+    if (this.clankerMode === enabled) return;
     this.clankerMode = enabled;
+    this.post({ type: 'clankerChanged', enabled });
   }
 
   getClankerMode(): boolean {
@@ -69,8 +77,7 @@ export class ToolApprovalService {
   }
 
   toggleClankerMode(): boolean {
-    this.clankerMode = !this.clankerMode;
-    this.post({ type: 'clankerChanged', enabled: this.clankerMode });
+    this.setClankerMode(!this.clankerMode);
     return this.clankerMode;
   }
 

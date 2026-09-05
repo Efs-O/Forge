@@ -26,6 +26,22 @@ describe('ToolApprovalService', () => {
     await expect(pending).resolves.toBe(false);
   });
 
+  it('announces a remotely set clanker mode to the webview', () => {
+    const posted: HostToWebview[] = [];
+    const service = new ToolApprovalService(
+      (message) => posted.push(message),
+      () => ({}) as never,
+    );
+    // The remote /clanker path calls setClankerMode, not toggleClankerMode.
+    service.setClankerMode(true);
+    service.setClankerMode(true);
+    service.setClankerMode(false);
+    expect(posted.filter((message) => message.type === 'clankerChanged')).toEqual([
+      { type: 'clankerChanged', enabled: true },
+      { type: 'clankerChanged', enabled: false },
+    ]);
+  });
+
   it('tells the webview to drop a dialog a sink resolved', async () => {
     const posted: HostToWebview[] = [];
     const service = new ToolApprovalService(

@@ -96,8 +96,8 @@ async function executeRemoteCommand(
     await context.channel.send(
       event.chatId,
       desired === 'on'
-        ? 'Forge: clanker mode ON — non-dangerous tools now run with no approval, here or in the sidebar. It does not survive a window reload.'
-        : 'Forge: clanker mode OFF — tool approvals are gated again.',
+        ? 'Forge: clanker mode ON — non-dangerous tools now run with no approval, here or in the sidebar, for every tab in this window. It covers only this workspace, and does not survive a window reload.'
+        : 'Forge: clanker mode OFF — tool approvals are gated again in this workspace, and stay gated across a reload.',
       { signal: context.signal },
     );
     return { kind: 'handled' };

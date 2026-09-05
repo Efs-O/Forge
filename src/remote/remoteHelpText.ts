@@ -38,7 +38,7 @@ Notes:
 
 • /resume continues the conversation bound to this chat; /select <n-or-id> switches to another one; /list numbers the recent ones
 
-• /clanker on auto-approves non-dangerous tools until the window reloads — writes then land with no confirmation anywhere
+• /clanker on auto-approves non-dangerous tools in this workspace until the window reloads — writes then land with no confirmation anywhere, in any tab of that window. /clanker off also clears the sidebar toggle's memory, so it stays off across a reload
 
 • /compact summarises the conversation in place to win back context; the chat and its queue survive it
 

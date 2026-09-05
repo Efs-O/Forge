@@ -190,9 +190,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       getRequestChains: () => this.requestChains.status(),
       getStreamingConversationIds: () => this.agentLoop.getStreamingIds(),
       clankerMode: () => this.agentLoop.getClankerMode(),
-      // Not persisted here: a remote toggle must not silently outlive the window
-      // it was set from. The sidebar toggle keeps its own workspaceState memory.
-      setClankerMode: (on) => this.agentLoop.setClankerMode(on),
+      // Arming remotely is not persisted: a remote ON must not silently outlive
+      // the window it was set from. Disarming remotely *is* persisted, because
+      // the sidebar toggle's workspaceState memory would otherwise re-arm
+      // clanker on the next reload after the owner had explicitly turned it off.
+      setClankerMode: (on) => {
+        this.agentLoop.setClankerMode(on);
+        if (!on) void this.workspaceState.update('forge.clankerMode', false);
+      },
       contextBudget: (conversationId) => this.contextBudgetOf(conversationId),
       onCompactionEvent: (listener) => this.slashHandler.onCompactionEvent(listener),
       onHostActivity: (listener) => this.slashHandler.onHostActivity(listener),
