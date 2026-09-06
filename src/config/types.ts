@@ -105,6 +105,14 @@ export interface ModelConfig {
   /** Optional path to the vision projector .gguf (mmproj). Enables multimodal image input. */
   mmproj_path?: string;
   /**
+   * Per-model override of the llama-server executable. When set, this model
+   * spawns with THIS binary instead of the global `llama_server.binary`. For
+   * models that need a patched llama.cpp fork (e.g. Qwen3.8-Flash-Next MTP via
+   * the Unsloth fork) without changing the shared default for everyone else.
+   * Absent = use the global binary (current behavior, unchanged).
+   */
+  llama_server_binary?: string;
+  /**
    * Drop images from the model-facing copy once this many later USER messages
    * exist. `0` removes an image on the next user prompt; omitted = never age out
    * (the default). Counts user turns, not protocol messages, so a tool-heavy

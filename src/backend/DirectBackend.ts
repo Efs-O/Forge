@@ -201,7 +201,10 @@ export class DirectBackend implements BackendController {
   }
 
   private async startLlamaServer(model: ModelConfig): Promise<void> {
-    const binary = this.config.llama_server.binary;
+    // A model may override the global binary (e.g. a patched llama.cpp fork for
+    // one model). Absent = the shared llama_server.binary, so every other model
+    // and the default are unchanged.
+    const binary = model.llama_server_binary ?? this.config.llama_server.binary;
     if (!binary) {
       throw new Error(
         'llama_server.binary is not configured. Set llama_server.binary in config.yaml to point to your llama-server executable.',
