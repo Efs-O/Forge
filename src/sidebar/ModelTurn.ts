@@ -23,6 +23,7 @@ import type { TurnLifecycle } from './TurnLifecycle';
 import { computeContextBudget, estimateToolTokens, perSlotContext } from '../util/contextBudget';
 import { prepareToolResultContext } from '../agent/toolResultContext';
 import { supersedeStaleReads } from '../agent/staleReadSupersede';
+import { nudgeTruncatedResults } from '../agent/truncatedResultNudge';
 import { applyCompactionWindow } from './compactionWindow';
 import { ageOutImageParts, stripImageParts } from './imageParts';
 import { announceMissingImages } from './imageNotices';
@@ -324,7 +325,7 @@ export async function runModelTurn(
         // rounds WITHIN this turn too.
         const withTurnContext = injectTurnContext(injected, turnContext);
         return prepareToolResultContext({
-          messages: supersedeStaleReads(withTurnContext),
+          messages: nudgeTruncatedResults(supersedeStaleReads(withTurnContext)),
           toolTokens: estimateToolTokens(buildToolDefinitions()),
           model,
           server: config.llama_server,
