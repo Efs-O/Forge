@@ -28,6 +28,7 @@ const ORDER: Record<BenchmarkRunResult['status'], number> = {
   FAIL: 2,
   TIMEOUT: 3,
   ERROR: 4,
+  SKIPPED: 5,
 };
 
 export function rankSmokeResults(

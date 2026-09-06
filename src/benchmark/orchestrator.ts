@@ -19,12 +19,76 @@ import {
   ensureForgeQwen,
   startMinimalQwen,
   stopMinimalQwen,
+  releaseForgeQwen,
   unloadForgeQwen,
+  QwenArmUnavailableError,
   type QwenServerHandle,
 } from './qwenServerLifecycle';
 
 function append(file: string, text: string): void {
   fs.appendFileSync(file, text, 'utf8');
+}
+
+/**
+ * Per-slot context window as llama-server itself reports it, read from /props.
+ * `default_generation_settings.n_ctx` is already divided by `--parallel`, so it
+ * is the number the agent actually competes against — unlike the configured
+ * `num_ctx`, which is the total across slots.
+ */
+function slotContextFromProps(props: unknown): number | undefined {
+  if (!props || typeof props !== 'object') return undefined;
+  const record = props as Record<string, unknown>;
+  const settings = record.default_generation_settings;
+  const nested =
+    settings && typeof settings === 'object'
+      ? (settings as Record<string, unknown>).n_ctx
+      : undefined;
+  const value = typeof nested === 'number' ? nested : record.n_ctx;
+  return typeof value === 'number' && value > 0 ? value : undefined;
+}
+
+/**
+ * Record an arm that never ran. Without this the run directory is silent about
+ * why an arm is absent — the reason only ever reached the driver's console — so
+ * a reader scoring the results afterwards cannot tell an environment abort from
+ * a model failure.
+ */
+function recordSkippedArm(
+  context: PreflightContext,
+  arm: BenchmarkArm,
+  reason: string,
+): BenchmarkRunResult {
+  const at = new Date().toISOString();
+  const armDir = path.join(context.runDir, arm);
+  fs.mkdirSync(armDir, { recursive: true });
+  const runtimeFile = path.join(armDir, 'runtime.json');
+  fs.writeFileSync(
+    runtimeFile,
+    JSON.stringify(
+      {
+        version: 1,
+        arm,
+        status: 'SKIPPED',
+        skipped: { reason: 'harness_unavailable', detail: reason },
+        started_at: at,
+        completed_at: at,
+        task: { instance_id: context.task.instance_id },
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  );
+  process.stdout.write(`forge-bench: ${arm} SKIPPED — ${reason}\n`);
+  return {
+    arm,
+    status: 'SKIPPED',
+    started_at: at,
+    completed_at: at,
+    workspace: context.workspaces[arm],
+    runtime_file: runtimeFile,
+    error: reason,
+  };
 }
 
 async function collectPatch(workspace: string, file: string): Promise<string> {
@@ -106,10 +170,28 @@ async function runArm(
   const runtimeFile = path.join(armDir, 'runtime.json');
   const event = (kind: string, text: string): void =>
     append(events, `${JSON.stringify({ at: new Date().toISOString(), kind, text })}\n`);
+  // Context pressure, recorded per round. The benchmark's Qwen arms call
+  // `runToolCallingLoop` directly and therefore never auto-compact — there is
+  // no compaction event to log. What they do instead is run out of room, and
+  // that was invisible in the artifacts: a task killed by its context ceiling
+  // looked identical to one the model simply failed. `prompt_tokens` against
+  // the slot window is what distinguishes them after the fact.
+  const slotContext = slotContextFromProps(server?.facts.props);
+  let peakPromptTokens = 0;
   const callbacks: ArmCallbacks = {
     event: (kind, text) => event(kind, text),
     stdout: (text) => append(stdout, text),
     stderr: (text) => append(stderr, text),
+    usage: (value) => {
+      if (value.prompt_tokens > peakPromptTokens) peakPromptTokens = value.prompt_tokens;
+      event(
+        'status',
+        slotContext
+          ? `context: ${value.prompt_tokens}/${slotContext} tokens ` +
+              `(${Math.round((value.prompt_tokens / slotContext) * 100)}% of slot)`
+          : `context: ${value.prompt_tokens} prompt tokens (slot window unknown)`,
+      );
+    },
   };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), context.task.timeout_minutes * 60_000);
@@ -221,6 +303,15 @@ async function runArm(
           }
         : undefined,
     agent: { status: execution.status, error: execution.error },
+    context: arm.startsWith('qwen')
+      ? {
+          slot_window: slotContext,
+          peak_prompt_tokens: peakPromptTokens,
+          peak_fraction:
+            slotContext && peakPromptTokens ? peakPromptTokens / slotContext : undefined,
+          compaction: 'none — the benchmark arms run the raw tool loop, which does not compact',
+        }
+      : undefined,
   };
   fs.writeFileSync(runtimeFile, JSON.stringify(runtime, null, 2), 'utf8');
   fs.writeFileSync(
@@ -258,7 +349,11 @@ export async function executeBenchmark(context: PreflightContext): Promise<Bench
   let forge: QwenServerHandle | undefined;
   let minimal: QwenServerHandle | undefined;
   let forgeEndpoint: string | undefined;
+  let teardownFailure: string | undefined;
   const qwenModel = context.options.model;
+  // The only arm that needs the GPU to itself. Everything else runs against
+  // Forge's own pooled server and can share it with the sidebar.
+  const needsExclusiveGpu = context.options.arms.includes('qwen-minimal');
   try {
     if (context.options.arms.includes('qwen-forge')) {
       process.stdout.write('forge-bench: loading Forge Qwen parameters\n');
@@ -270,34 +365,65 @@ export async function executeBenchmark(context: PreflightContext): Promise<Bench
       process.stdout.write(`forge-bench: running qwen-forge\n`);
       results.push(await runArm(context, 'qwen-forge', forge));
       process.stdout.write(`forge-bench: qwen-forge ${results.at(-1)!.status}\n`);
-      await unloadForgeQwen(forge, context.options.forgeConfigPath);
+      // Unload ONLY when a standalone minimal server is about to need the GPU.
+      // Otherwise the eviction buys nothing and costs the chat node its port:
+      // Forge brings the model back on the next free one behind a new
+      // controller, which is what silently killed a monitoring agent on
+      // 2026-09-05. With no minimal arm, drop our hold and leave it resident.
+      if (needsExclusiveGpu) {
+        // The forge arm is already scored at this point. A failed teardown
+        // means the *next* arm has no GPU, not that this result is invalid —
+        // so it is reported against qwen-minimal below, never by discarding
+        // this one.
+        try {
+          await unloadForgeQwen(forge, context.options.forgeConfigPath);
+        } catch (error) {
+          if (!(error instanceof QwenArmUnavailableError)) throw error;
+          teardownFailure = error.message;
+        }
+      } else {
+        await releaseForgeQwen(forge, context.options.forgeConfigPath).catch(() => undefined);
+      }
       forge = undefined;
     }
     if (context.options.arms.includes('qwen-minimal')) {
       process.stdout.write('forge-bench: checking Forge chat node VRAM state\n');
       const armDir = path.join(context.runDir, 'qwen-minimal');
       fs.mkdirSync(armDir, { recursive: true });
-      await checkOrUnloadChatNode(
-        context.options.forgeConfigPath,
-        qwenModel ?? '',
-        context.options.unloadChatNode ?? false,
-      );
-      minimal = await startMinimalQwen(
-        {
-          forgeConfigPath: context.options.forgeConfigPath,
-          model: qwenModel,
-          onStdout: (text) => append(path.join(armDir, 'server.stdout.log'), text),
-          onStderr: (text) => append(path.join(armDir, 'server.stderr.log'), text),
-        },
-        forgeEndpoint ?? context.options.baseUrl,
-      );
-      process.stdout.write('forge-bench: running qwen-minimal\n');
-      results.push(await runArm(context, 'qwen-minimal', minimal));
-      process.stdout.write(`forge-bench: qwen-minimal ${results.at(-1)!.status}\n`);
+      // A minimal arm that cannot get its server is skipped, not fatal: the
+      // qwen-forge result for this task is already scored and must survive.
+      try {
+        if (teardownFailure) throw new QwenArmUnavailableError(teardownFailure);
+        await checkOrUnloadChatNode(
+          context.options.forgeConfigPath,
+          qwenModel ?? '',
+          context.options.unloadChatNode ?? false,
+        );
+        minimal = await startMinimalQwen(
+          {
+            forgeConfigPath: context.options.forgeConfigPath,
+            model: qwenModel,
+            onStdout: (text) => append(path.join(armDir, 'server.stdout.log'), text),
+            onStderr: (text) => append(path.join(armDir, 'server.stderr.log'), text),
+          },
+          forgeEndpoint ?? context.options.baseUrl,
+        );
+      } catch (error) {
+        if (!(error instanceof QwenArmUnavailableError)) throw error;
+        results.push(recordSkippedArm(context, 'qwen-minimal', error.message));
+      }
+      if (minimal) {
+        process.stdout.write('forge-bench: running qwen-minimal\n');
+        results.push(await runArm(context, 'qwen-minimal', minimal));
+        process.stdout.write(`forge-bench: qwen-minimal ${results.at(-1)!.status}\n`);
+      }
     }
   } finally {
     if (minimal) await stopMinimalQwen(minimal);
-    if (forge) await unloadForgeQwen(forge, context.options.forgeConfigPath);
+    if (forge) {
+      const teardown = needsExclusiveGpu ? unloadForgeQwen : releaseForgeQwen;
+      await teardown(forge, context.options.forgeConfigPath).catch(() => undefined);
+    }
   }
   const nonQwenArms = context.options.arms.filter(
     (arm) => arm !== 'qwen-forge' && arm !== 'qwen-minimal',

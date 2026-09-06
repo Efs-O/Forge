@@ -125,13 +125,13 @@ export async function checkOrUnloadChatNode(
   const entry = await fetchChatNodeEntry(base, modelName);
   if (!entry?.loaded) return;
   if (entry.holds > 0) {
-    throw new Error(
+    throw new QwenArmUnavailableError(
       `Cannot start the minimal Qwen server: "${entry.name}" has ${entry.holds} active hold(s) — ` +
         `a chat session owns it. Stop the active session and try again.`,
     );
   }
   if (!forceUnload) {
-    throw new Error(
+    throw new QwenArmUnavailableError(
       `Cannot start the minimal Qwen server: the Forge chat node has "${entry.name}" loaded in ` +
         `VRAM (holds=0). Unload it first:\n` +
         `  node -e "fetch('${base}/unload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({model:'${entry.name}'})}).then(r=>r.json()).then(console.log)"\n` +
@@ -144,7 +144,7 @@ export async function checkOrUnloadChatNode(
     const check = await fetchChatNodeEntry(base, entry.name);
     if (!check?.loaded) return;
     if (Date.now() >= deadline) {
-      throw new Error(
+      throw new QwenArmUnavailableError(
         `Unloaded "${entry.name}" but the control server still reports it loaded after 30s.`,
       );
     }
@@ -164,24 +164,69 @@ export async function ensureForgeQwen(options: QwenLifecycleOptions): Promise<Qw
   return { phase: 'forge', endpoint, logicalModel, facts, requestModel };
 }
 
+/**
+ * Thrown when a Qwen arm's server cannot be brought up or torn down because
+ * something outside the benchmark owns the model. The caller records the arm as
+ * SKIPPED rather than ERROR: the agent never ran, so nothing about the model
+ * was measured.
+ */
+export class QwenArmUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'QwenArmUnavailableError';
+  }
+}
+
+/**
+ * Release the benchmark's own hold and unload the model.
+ *
+ * The question that matters is "is the model still resident in VRAM?", not "is
+ * the port still answering" — Forge's pool hands out a rotating port and keeps
+ * the server process addressable independently of what is loaded, so endpoint
+ * reachability answered a different question than the one asked and failed even
+ * when the unload had worked. Residency is read from the control server, the
+ * same signal `checkOrUnloadChatNode` already uses.
+ */
+/**
+ * Drop the benchmark's hold and leave the model resident.
+ *
+ * The counterpart to `unloadForgeQwen`, and the right ending for a run whose
+ * arms all share Forge's own server. Unloading exists to free VRAM for the
+ * standalone minimal server; with no minimal arm it does nothing but evict the
+ * chat node. That is not free: the model comes back on the NEXT pool port
+ * behind a new controller, so an agent watching the run from the sidebar loses
+ * its endpoint every task. On 2026-09-05 that unload ran seven times in an
+ * afternoon and killed the monitoring turn outright.
+ */
+export async function releaseForgeQwen(
+  handle: QwenServerHandle,
+  configPath: string,
+): Promise<void> {
+  await controlRequest(controlUrl(readConfig(configPath)), 'release', handle.logicalModel);
+}
+
 export async function unloadForgeQwen(handle: QwenServerHandle, configPath: string): Promise<void> {
   const config = readConfig(configPath);
   const baseUrl = controlUrl(config);
   await controlRequest(baseUrl, 'release', handle.logicalModel);
+  const held = await fetchChatNodeEntry(baseUrl, handle.logicalModel);
+  if (held?.loaded && held.holds > 0)
+    throw new QwenArmUnavailableError(
+      `Cannot unload "${handle.logicalModel}": ${held.holds} hold(s) remain after the benchmark ` +
+        `released its own — a chat session owns the model. Close it to free the GPU.`,
+    );
   await controlRequest(baseUrl, 'unload', handle.logicalModel);
   const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(`${handle.endpoint}/v1/models`, {
-        signal: AbortSignal.timeout(2_000),
-      });
-      if (!response.ok) return;
-    } catch {
-      return;
-    }
+  for (;;) {
+    const entry = await fetchChatNodeEntry(baseUrl, handle.logicalModel);
+    if (!entry?.loaded) return;
+    if (Date.now() >= deadline)
+      throw new QwenArmUnavailableError(
+        `Unloaded "${handle.logicalModel}" but the control server still reports it resident ` +
+          `after 30s (holds=${entry.holds}).`,
+      );
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  throw new Error(`Forge unloaded ${handle.logicalModel} but ${handle.endpoint} stayed reachable.`);
 }
 
 export async function startMinimalQwen(

@@ -14,7 +14,13 @@ export interface BenchmarkTask {
 
 export interface BenchmarkRunResult {
   arm: BenchmarkArm;
-  status: 'PASS' | 'FAIL' | 'ERROR' | 'TIMEOUT';
+  /**
+   * `SKIPPED` means the arm never ran because its harness could not be brought
+   * up (e.g. the Qwen model stayed resident because a chat session held it).
+   * It is deliberately distinct from `ERROR`: an environment abort must never
+   * be counted as a model failure when the run is scored.
+   */
+  status: 'PASS' | 'FAIL' | 'ERROR' | 'TIMEOUT' | 'SKIPPED';
   started_at: string;
   completed_at: string;
   workspace: string;

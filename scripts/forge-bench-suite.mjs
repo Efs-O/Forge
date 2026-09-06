@@ -110,7 +110,15 @@ function main() {
   const args = process.argv.slice(2);
   if (args.includes('--help') || args.includes('-h')) {
     console.log(
-      'Usage: npm run bench:qwen-suite -- [--suite path] [--out path] [--arms a1,a2,...] [--limit N] [--model id] [--base-url url] [--evaluator swebench] [--forge-config path] [--unload-chat-node] [--resume run-dir] [--start-at N]',
+      [
+        'Usage: npm run bench:qwen-suite -- [--suite path] [--out path] [--arms a1,a2,...] [--limit N] [--model id] [--base-url url] [--evaluator swebench] [--forge-config path] [--unload-chat-node] [--resume run-dir] [--start-at N]',
+        '',
+        "Arms default to qwen-forge alone, which shares Forge's own llama-server",
+        'with the sidebar -- a chat agent can watch the run without losing its',
+        'endpoint. Adding qwen-minimal spawns a second server and needs the GPU',
+        'to itself; --unload-chat-node then evicts the chat model to make room,',
+        'and has no effect without it.',
+      ].join('\n'),
     );
     return;
   }
@@ -119,7 +127,11 @@ function main() {
     value(args, '--suite') ?? 'benchmarks/swe-bench-verified-qwen-suite.json',
   );
   const outputRoot = resolve(ROOT, value(args, '--out') ?? 'results');
-  const arms = (value(args, '--arms') ?? 'qwen-minimal,qwen-forge')
+  // qwen-forge only by default. qwen-minimal spawns a SECOND llama-server, so
+  // it can only run once the shared one is evicted -- which OOMs a single-GPU
+  // box and takes the sidebar's chat model with it. Ask for it by name when
+  // you want the comparison and have the VRAM: --arms qwen-minimal,qwen-forge.
+  const arms = (value(args, '--arms') ?? 'qwen-forge')
     .split(',')
     .map((arm) => arm.trim())
     .filter(Boolean);
