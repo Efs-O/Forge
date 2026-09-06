@@ -6,8 +6,13 @@ import {
 } from '../util/contextBudget';
 import type { LlamaServerConfig, ModelConfig } from '../config/types';
 
-/** Normal upper bound for a tool result retained verbatim in a tight prompt. */
-export const PREFERRED_TOOL_RESULT_CHARS = 8_000;
+/**
+ * Normal upper bound for a tool result retained verbatim in a tight prompt.
+ * Sized for a 128k single-slot window: large enough that a whole `--help`
+ * dump or a big source read survives one round, small enough that a handful
+ * of them still fit before the excerptor has to cut the rest.
+ */
+export const PREFERRED_TOOL_RESULT_CHARS = 12_000;
 /** A result smaller than this stays whole unless no input budget exists at all. */
 export const MIN_TOOL_RESULT_EXCERPT_CHARS = 2_000;
 

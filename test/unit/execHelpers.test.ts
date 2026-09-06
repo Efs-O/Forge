@@ -3,6 +3,8 @@ import {
   ExecCommandError,
   formatExecCommandOutput,
   formatOutput,
+  MAX_EXEC_STORED_CHARS,
+  MAX_OUTPUT_CHARS,
   spawnAndWait,
   stripAnsi,
 } from '../../src/tools/execHelpers';
@@ -84,5 +86,39 @@ describe('structured exec_command outcomes', () => {
 
     expect(output).toMatchObject({ stdout: 'two\nthree', stdout_truncated: true });
     expect(output).not.toHaveProperty('stderr');
+  });
+
+  describe('recoverable output (no line window)', () => {
+    // A `--help` dump past the per-round head: the OLD code stored only the
+    // 10k/16k slice and the middle was gone forever. Now the full stream is
+    // stored, so read_tool_result can page the part the head cut off.
+    it('stores the full stream when it is under the retention bound', () => {
+      const help = `usage: llama-server\n` + Array.from({ length: 800 }, (_, i) => `  --flag${i}  does something\n`).join('');
+      expect(help.length).toBeGreaterThan(MAX_OUTPUT_CHARS);
+      const output = JSON.parse(formatExecCommandOutput('llama-server', { stdout: help, stderr: '', exitCode: 0 }));
+      // The whole dump is in the transcript, not just the head.
+      expect(output.stdout).toBe(help);
+      expect(output).not.toHaveProperty('stdout_truncated');
+      expect(output).not.toHaveProperty('stdout_note');
+    });
+
+    it('lets read_tool_result recover the middle the head would have dropped', () => {
+      const head = 'A'.repeat(MAX_OUTPUT_CHARS);
+      const middle = 'SPLIT_MODE_SECTION';
+      const tail = 'B'.repeat(MAX_OUTPUT_CHARS);
+      const stdout = `${head}\n${middle}\n${tail}\n`;
+      const output = JSON.parse(formatExecCommandOutput('tool', { stdout, stderr: '', exitCode: 0 }));
+      // The middle sits past the old 10k head; it must be in the stored text.
+      expect(output.stdout).toContain(middle);
+      expect(output.stdout).toBe(stdout);
+    });
+
+    it('caps stored output at the retention bound and says how much was dropped', () => {
+      const stdout = 'x'.repeat(MAX_EXEC_STORED_CHARS + 5_000);
+      const output = JSON.parse(formatExecCommandOutput('tool', { stdout, stderr: '', exitCode: 0 }));
+      expect(output.stdout).toHaveLength(MAX_EXEC_STORED_CHARS);
+      expect(output.stdout_truncated).toBe(true);
+      expect(output.stdout_note).toContain('5000 characters');
+    });
   });
 });
