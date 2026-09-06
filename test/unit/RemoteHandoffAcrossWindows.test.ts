@@ -177,7 +177,13 @@ describe('workspace handoff between two live windows', () => {
     await vi.waitFor(() => expect(target.activeTransports()).toEqual(['telegram']), {
       timeout: 5_000,
     });
-    expect(channel.sent.some((message) => message.text.startsWith('Forge: now in'))).toBe(true);
+    // The arrival receipt is sent on a later tick than the transport coming up
+    // (takeOverTransports -> claim -> announce), so poll for it rather than
+    // checking the array synchronously.
+    await vi.waitFor(
+      () => expect(channel.sent.some((message) => message.text.startsWith('Forge: now in'))).toBe(true),
+      { timeout: 2_000 },
+    );
     await target.dispose();
   });
 

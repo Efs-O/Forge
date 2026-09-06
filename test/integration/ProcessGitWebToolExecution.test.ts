@@ -80,65 +80,42 @@ describe('isolated process, Git, and web tool execution', () => {
     expect(sendText).toHaveBeenCalledWith('echo fixture', false);
   });
 
-  it('executes all Git handlers against a disposable repository or fake Git API', async () => {
-    execFileSync('git', ['init'], { cwd: root });
-    fs.writeFileSync(path.join(root, 'tracked.txt'), 'fixture\n', 'utf8');
-    execFileSync('git', ['add', 'tracked.txt'], { cwd: root });
-    execFileSync(
-      'git',
-      [
-        '-c',
-        'user.name=Forge Test',
-        '-c',
-        'user.email=forge@test.invalid',
-        'commit',
-        '-m',
-        'fixture',
-      ],
-      { cwd: root },
-    );
+  it('executes every Git handler through CLI discovery, with no Git extension present', async () => {
+    // The VS Code Git extension is deliberately absent here. Every tool below
+    // used to need it: `git_log`, `create_branch` and `switch_branch` went
+    // through its wrapper methods, and repository discovery went through its
+    // repository list, so all three failed outright in a window where the
+    // extension was unavailable while `git_status` beside them worked.
+    vi.spyOn(vscode.extensions, 'getExtension').mockReturnValue(undefined as never);
+
+    execFileSync('git', ['init', '-b', 'main'], { cwd: root });
     execFileSync('git', ['config', 'user.name', 'Forge Test'], { cwd: root });
     execFileSync('git', ['config', 'user.email', 'forge@test.invalid'], { cwd: root });
+    fs.writeFileSync(path.join(root, 'tracked.txt'), 'fixture\n', 'utf8');
+    execFileSync('git', ['add', 'tracked.txt'], { cwd: root });
+    execFileSync('git', ['commit', '-m', 'fixture commit\n\nbody line'], { cwd: root });
     fs.writeFileSync(path.join(root, 'tracked.txt'), 'changed\n', 'utf8');
 
-    const repo = {
-      rootUri: vscode.Uri.file(root),
-      state: {
-        workingTreeChanges: [{ uri: vscode.Uri.file(path.join(root, 'tracked.txt')), status: 1 }],
-        indexChanges: [],
-      },
-      log: vi.fn().mockResolvedValue([
-        {
-          hash: '1234567890',
-          message: 'fixture commit',
-          authorName: 'Forge Test',
-          commitDate: new Date('2026-01-01T00:00:00Z'),
-        },
-      ]),
-      diff: vi.fn().mockResolvedValue('fixture diff'),
-      show: vi.fn().mockResolvedValue('unused'),
-      createBranch: vi.fn().mockResolvedValue(undefined),
-      checkout: vi.fn().mockResolvedValue(undefined),
-      add: vi.fn().mockResolvedValue(undefined),
-      commit: vi.fn().mockResolvedValue(undefined),
-    };
-    vi.spyOn(vscode.extensions, 'getExtension').mockReturnValue({
-      exports: { getAPI: () => ({ repositories: [repo] }) },
-    } as never);
-
     await expect(makeGitStatusTool().handler({})).resolves.toBe('M tracked.txt');
-    await expect(makeGitLogTool().handler({ max_entries: 1 })).resolves.toContain('1234567');
+
+    const log = String(await makeGitLogTool().handler({ max_entries: 1 }));
+    // First line of the raw body, not git's normalised subject.
+    expect(log).toContain('fixture commit (Forge Test, ');
+    expect(log).not.toContain('body line');
+
     await expect(makeGitDiffTool().handler({ staged: false })).resolves.toContain('-fixture');
     await expect(makeGitBlameTool().handler({ path: 'tracked.txt' })).resolves.toContain(
       'author Not Committed Yet',
     );
     await expect(makeGitShowTool().handler({ ref: 'HEAD' })).resolves.toContain('fixture');
+
     await expect(makeCreateBranchTool().handler({ name: 'feature', from: 'HEAD' })).resolves.toBe(
       'Branch created: feature',
     );
-    await expect(makeSwitchBranchTool().handler({ name: 'main' })).resolves.toBe(
-      'Switched to main',
-    );
+    expect(currentBranch(root)).toBe('feature');
+    await expect(makeSwitchBranchTool().handler({ name: 'main' })).resolves.toBe('Switched to main');
+    expect(currentBranch(root)).toBe('main');
+
     // Acceptance #9: the refusal must name the tool that fixes it, not just
     // state the rule -- see docs/plans/TOOL_ERROR_PROMPT_PLAN.md.
     await expect(makeCommitTool().handler({ message: 'empty' })).rejects.toThrow(
@@ -149,9 +126,69 @@ describe('isolated process, Git, and web tool execution', () => {
     );
     await expect(makeGitStatusTool().handler({})).resolves.toBe('M tracked.txt [staged]');
     await expect(makeCommitTool().handler({ message: 'next' })).resolves.toBe('Committed: next');
-    expect(repo.createBranch).toHaveBeenCalledWith('feature', true, 'HEAD');
-    expect(repo.add).not.toHaveBeenCalled();
-    expect(repo.commit).not.toHaveBeenCalled();
+  }, 15_000);
+
+  it('never restores a file that shares the requested branch name', async () => {
+    vi.spyOn(vscode.extensions, 'getExtension').mockReturnValue(undefined as never);
+    execFileSync('git', ['init', '-b', 'main'], { cwd: root });
+    execFileSync('git', ['config', 'user.name', 'Forge Test'], { cwd: root });
+    execFileSync('git', ['config', 'user.email', 'forge@test.invalid'], { cwd: root });
+    // A tracked file whose name is also the branch name. `git checkout main`
+    // with no `--` restores this file from the index and stays on the current
+    // branch -- silently discarding edits instead of switching.
+    fs.writeFileSync(path.join(root, 'main'), 'committed\n', 'utf8');
+    execFileSync('git', ['add', 'main'], { cwd: root });
+    execFileSync('git', ['commit', '-m', 'fixture'], { cwd: root });
+    execFileSync('git', ['checkout', '-b', 'feature'], { cwd: root });
+    fs.writeFileSync(path.join(root, 'main'), 'edited\n', 'utf8');
+
+    await expect(makeSwitchBranchTool().handler({ name: 'main' })).resolves.toBe('Switched to main');
+    expect(currentBranch(root)).toBe('main');
+  });
+
+  it('rejects option-like and control-character branch arguments before spawning git', async () => {
+    vi.spyOn(vscode.extensions, 'getExtension').mockReturnValue(undefined as never);
+    execFileSync('git', ['init', '-b', 'main'], { cwd: root });
+
+    await expect(makeSwitchBranchTool().handler({ name: '--orphan' })).rejects.toThrow(
+      /looks like an option/u,
+    );
+    await expect(
+      makeCreateBranchTool().handler({ name: 'ok', from: '--force' }),
+    ).rejects.toThrow(/looks like an option/u);
+    await expect(makeCreateBranchTool().handler({ name: 'bad\nname' })).rejects.toThrow(
+      /control characters/u,
+    );
+    await expect(makeGitLogTool().handler({ max_entries: 0 })).rejects.toThrow(
+      /max_entries must be an integer/u,
+    );
+  });
+
+  it('reports an empty history rather than a failure, and a bad ref rather than an empty log', async () => {
+    vi.spyOn(vscode.extensions, 'getExtension').mockReturnValue(undefined as never);
+    execFileSync('git', ['init', '-b', 'main'], { cwd: root });
+
+    await expect(makeGitLogTool().handler({})).resolves.toBe('No commits.');
+    await expect(makeGitLogTool().handler({ branch: 'no-such-branch' })).rejects.toThrow(/git log/u);
+  });
+
+  it('frames log records so separator characters in a message cannot split them', async () => {
+    vi.spyOn(vscode.extensions, 'getExtension').mockReturnValue(undefined as never);
+    execFileSync('git', ['init', '-b', 'main'], { cwd: root });
+    execFileSync('git', ['config', 'user.name', 'Ünïcode Authör'], { cwd: root });
+    execFileSync('git', ['config', 'user.email', 'forge@test.invalid'], { cwd: root });
+    fs.writeFileSync(path.join(root, 'a.txt'), 'a\n', 'utf8');
+    execFileSync('git', ['add', 'a.txt'], { cwd: root });
+    // \x1f and \x1e are exactly the control separators a naive --format would
+    // have used as field delimiters. A commit message may contain them.
+    execFileSync('git', ['commit', '-m', 'sep \x1f and \x1e and — em dash\n\nsecond para'], {
+      cwd: root,
+    });
+
+    const log = String(await makeGitLogTool().handler({}));
+    expect(log.split('\n')).toHaveLength(1);
+    expect(log).toContain('sep \x1f and \x1e and — em dash');
+    expect(log).toContain('Ünïcode Authör');
   });
 
   it('executes fetch and search handlers with deterministic network adapters', async () => {
@@ -189,3 +226,7 @@ describe('isolated process, Git, and web tool execution', () => {
     ).resolves.toContain('**Fixture**');
   });
 });
+
+function currentBranch(cwd: string): string {
+  return execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd, encoding: 'utf8' }).trim();
+}
