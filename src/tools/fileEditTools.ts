@@ -146,6 +146,44 @@ export function makeDeleteFileTool(): RegisteredTool {
 
 // ── format_file ────────────────────────────────────────────────────────────────
 
+/**
+ * Formatting options for a document we deliberately do not open in an editor.
+ *
+ * A visible editor already carries VS Code's *resolved* options (including the
+ * result of `editor.detectIndentation`), so we reuse them when one happens to
+ * exist — without activating it. Otherwise we read the document- and
+ * language-scoped configuration. `detectIndentation` cannot be honoured without
+ * an editor, so the configured values are used as-is; that is stated here
+ * rather than hidden behind hardcoded defaults.
+ */
+export function resolveFormattingOptions(doc: vscode.TextDocument): vscode.FormattingOptions {
+  const visible = vscode.window.visibleTextEditors.find(
+    (e) => e.document.uri.fsPath === doc.uri.fsPath,
+  );
+  if (visible) {
+    const { tabSize, insertSpaces } = visible.options;
+    if (typeof tabSize === 'number' && typeof insertSpaces === 'boolean') {
+      return { tabSize, insertSpaces };
+    }
+  }
+
+  const cfg = vscode.workspace.getConfiguration('editor', {
+    uri: doc.uri,
+    languageId: doc.languageId,
+  });
+  const configuredTabSize = cfg.get('tabSize');
+  const configuredInsertSpaces = cfg.get('insertSpaces');
+  return {
+    // `editor.tabSize` is declared as a number but users can leave a string in
+    // settings.json; a bad value must not silently become NaN downstream.
+    tabSize:
+      typeof configuredTabSize === 'number' && Number.isInteger(configuredTabSize)
+        ? configuredTabSize
+        : 4,
+    insertSpaces: typeof configuredInsertSpaces === 'boolean' ? configuredInsertSpaces : true,
+  };
+}
+
 export function makeFormatFileTool(): RegisteredTool {
   return {
     definition: {
@@ -166,18 +204,50 @@ export function makeFormatFileTool(): RegisteredTool {
     },
     permission: 'write',
     mutation: { paths: (args) => [args['path'] as string], showDiff: true },
-    handler: async (args) => {
+    handler: async (args, context) => {
       const filePath = args['path'] as string;
       const uri = vscode.Uri.file(resolveWorkspacePath(filePath));
-      const alreadyOpen = vscode.window.visibleTextEditors.some(
-        (e) => e.document.uri.fsPath === uri.fsPath,
-      );
+      // Load the document only. Never show, activate or close an editor: a tool
+      // call must not move the user's focus, and the close command acted on
+      // whatever was active by the time it ran, not necessarily on this file.
       const doc = await vscode.workspace.openTextDocument(uri);
-      await vscode.window.showTextDocument(doc, { preview: false });
-      await vscode.commands.executeCommand('editor.action.formatDocument');
-      await doc.save();
-      if (!alreadyOpen) {
-        await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+
+      const versionBeforeFormat = doc.version;
+      const edits = await vscode.commands.executeCommand<vscode.TextEdit[] | undefined>(
+        'vscode.executeFormatDocumentProvider',
+        uri,
+        resolveFormattingOptions(doc),
+      );
+
+      if (!edits) {
+        // Undefined covers both "no formatter registered" and a provider that
+        // returned nothing. We cannot tell them apart, so we do not claim the
+        // file was already formatted.
+        return `No formatting edits returned; a formatter may not be available: ${filePath}`;
+      }
+      if (context?.abortSignal?.aborted) {
+        throw new Error('format_file: cancelled before edits were applied');
+      }
+      if (doc.version !== versionBeforeFormat) {
+        // The document changed while the provider ran, so the returned ranges
+        // may no longer address the text they were computed against.
+        throw new Error(`format_file: ${filePath} changed while formatting; no edits were applied`);
+      }
+      if (edits.length === 0) return `No changes: the formatter returned no edits: ${filePath}`;
+
+      const workspaceEdit = new vscode.WorkspaceEdit();
+      workspaceEdit.set(uri, edits);
+      const applied = await vscode.workspace.applyEdit(workspaceEdit);
+      if (!applied) throw new Error(`format_file: workspace edit was rejected for ${filePath}`);
+
+      const saved = await doc.save();
+      if (!saved) {
+        // The buffer holds the formatted text and the checkpoint already covers
+        // this path, so the change is recoverable — but it is not on disk.
+        throw new Error(
+          `format_file: formatted ${filePath} but the file could not be saved; ` +
+            'the change is present in the editor buffer only',
+        );
       }
       return `Formatted: ${filePath}`;
     },

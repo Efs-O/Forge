@@ -226,15 +226,29 @@ describe('isolated editor, language, search, and memory tool execution', () => {
     const workspaceEdit = {
       entries: () => [[vscode.Uri.file(path.join(root, 'sample.ts')), []]],
     };
-    vi.spyOn(vscode.commands, 'executeCommand').mockImplementation(async (command: string) =>
-      command === 'vscode.executeDocumentRenameProvider' ? workspaceEdit : undefined,
-    );
+    const formatEdits = [{ newText: 'formatted' }];
+    const executeCommand = vi
+      .spyOn(vscode.commands, 'executeCommand')
+      .mockImplementation(async (command: string) => {
+        if (command === 'vscode.executeDocumentRenameProvider') return workspaceEdit;
+        if (command === 'vscode.executeFormatDocumentProvider') return formatEdits;
+        return undefined;
+      });
     const apply = vi.spyOn(vscode.workspace, 'applyEdit').mockResolvedValue(true);
 
     await expect(makeFormatFileTool().handler({ path: 'sample.ts' })).resolves.toBe(
       'Formatted: sample.ts',
     );
     expect(save).toHaveBeenCalledOnce();
+    // format_file must go through the provider and never through the editor
+    // commands, which act on whatever document happens to be focused.
+    expect(executeCommand.mock.calls.map((call) => call[0])).not.toContain(
+      'editor.action.formatDocument',
+    );
+    expect(executeCommand.mock.calls.map((call) => call[0])).not.toContain(
+      'workbench.action.closeActiveEditor',
+    );
+    expect(vscode.window.visibleTextEditors).toHaveLength(0);
     const beforeMutate = vi.fn();
     await expect(
       makeRenameSymbolTool().handler(

@@ -249,3 +249,15 @@ export class Range {
 export const commands = {
   executeCommand: async (): Promise<unknown> => undefined,
 };
+
+export class WorkspaceEdit {
+  readonly edits: Array<[{ fsPath: string }, unknown]> = [];
+
+  set(uri: { fsPath: string }, textEdits: unknown): void {
+    this.edits.push([uri, textEdits]);
+  }
+
+  entries(): Array<[{ fsPath: string }, unknown]> {
+    return this.edits;
+  }
+}
