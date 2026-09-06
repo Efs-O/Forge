@@ -5,16 +5,8 @@
  * confirmation-gated, and keeping them together makes that boundary visible.
  */
 
-import * as path from 'path';
 import type { RegisteredTool } from './ToolRegistry';
-import {
-  getRepo,
-  getRepoForPaths,
-  readLiveGitStatus,
-  resolveFilePath,
-  runGit,
-  withGitError,
-} from './gitRepo';
+import { getRepo, getRepoForPaths, readLiveGitStatus, repoRelative, runGit } from './gitRepo';
 
 const cwdParameter = {
   type: 'string',
@@ -43,10 +35,13 @@ export function makeCreateBranchTool(): RegisteredTool {
     },
     permission: 'git-write',
     handler: async (args) => {
-      const repo = getRepo(args['cwd'] as string | undefined);
-      const name = args['name'] as string;
+      const repo = await getRepo(args['cwd'] as string | undefined);
+      const name = validateBranchName('create_branch', args['name'] as string);
       const from = args['from'] as string | undefined;
-      await withGitError('git_create_branch', repo, () => repo.createBranch(name, true, from));
+      if (from !== undefined) validateStartPoint(from);
+      // `-b` makes <name> a branch by definition, and the trailing `--` with no
+      // pathspec after it stops <from> being read as a file to restore.
+      await runGit(repo, ['checkout', '-b', name, ...(from ? [from] : []), '--']);
       return `Branch created: ${name}`;
     },
   };
@@ -74,9 +69,13 @@ export function makeSwitchBranchTool(): RegisteredTool {
     },
     permission: 'git-write',
     handler: async (args) => {
-      const repo = getRepo(args['cwd'] as string | undefined);
-      const name = args['name'] as string;
-      await withGitError('git_switch_branch', repo, () => repo.checkout(name));
+      const repo = await getRepo(args['cwd'] as string | undefined);
+      const name = validateBranchName('switch_branch', args['name'] as string);
+      // The trailing `--` with nothing after it forces <name> to be read as a
+      // revision. Without it, `git checkout <name>` restores a *file* of that
+      // name from the index if one exists — silently discarding the user's
+      // edits instead of switching branch.
+      await runGit(repo, ['checkout', name, '--']);
       return `Switched to ${name}`;
     },
   };
@@ -109,11 +108,8 @@ export function makeStageTool(): RegisteredTool {
     permission: 'git-write',
     handler: async (args) => {
       const requestedPaths = args['paths'] as string[];
-      const paths = requestedPaths.map(resolveFilePath);
-      const repo = getRepoForPaths(requestedPaths);
-      const root = repo.rootUri?.fsPath;
-      if (!root) throw new Error('git_stage: selected repository has no root path');
-      const relativePaths = paths.map((filePath) => path.relative(root, filePath));
+      const repo = await getRepoForPaths(requestedPaths);
+      const relativePaths = requestedPaths.map((filePath) => repoRelative(repo, filePath));
       await runGit(repo, ['add', '--', ...relativePaths]);
 
       const requested = new Set(relativePaths.map(normalizeGitPath));
@@ -152,15 +148,14 @@ export function makeCommitTool(): RegisteredTool {
     },
     permission: 'git-write',
     handler: async (args) => {
-      const repo = getRepo(args['cwd'] as string | undefined);
+      const repo = await getRepo(args['cwd'] as string | undefined);
       const message = args['message'] as string;
       const staged = (await readLiveGitStatus(repo)).some(
         (entry) => entry.index !== ' ' && entry.index !== '?',
       );
       if (!staged) {
-        const root = repo.rootUri?.fsPath ?? '(repository root unavailable)';
         throw new Error(
-          `git commit failed in repository "${root}": nothing is staged. ` +
+          `git commit failed in repository "${repo.root}": nothing is staged. ` +
             'Call stage with the paths to commit first, or git_status to see what changed.',
         );
       }
@@ -168,6 +163,49 @@ export function makeCommitTool(): RegisteredTool {
       return `Committed: ${message}`;
     },
   };
+}
+
+/**
+ * Reject branch names git would refuse or reinterpret.
+ *
+ * Two failures this guards against: a name beginning with `-` reaching argv as
+ * an option, and a name carrying a newline or NUL, which cannot be a ref and
+ * would corrupt any later parsing. Everything subtler is left to git's own
+ * `check-ref-format` rules, whose error message is clearer than a re-derived
+ * one would be.
+ */
+function validateBranchName(tool: string, name: string): string {
+  if (typeof name !== 'string' || name.trim() === '') {
+    throw new Error(`${tool}: branch name must be a non-empty string`);
+  }
+  if (name.startsWith('-')) {
+    throw new Error(`${tool}: branch name "${name}" is not valid (it looks like an option)`);
+  }
+  if (hasControlCharacter(name)) {
+    throw new Error(`${tool}: branch name must not contain control characters`);
+  }
+  return name;
+}
+
+/** Checked by code point rather than by regex: a control character in a regex
+ *  literal is itself an eslint error, and the intent is clearer this way. */
+function hasControlCharacter(value: string): boolean {
+  for (const character of value) {
+    const code = character.codePointAt(0) ?? 0;
+    if (code < 0x20 || code === 0x7f) return true;
+  }
+  return false;
+}
+
+function validateStartPoint(from: string): void {
+  if (from.startsWith('-')) {
+    throw new Error(`create_branch: start point "${from}" is not valid (it looks like an option)`);
+  }
+  if (from.trim() === '' || hasControlCharacter(from)) {
+    throw new Error(
+      'create_branch: start point must be a non-empty ref without control characters',
+    );
+  }
 }
 
 function normalizeGitPath(filePath: string): string {

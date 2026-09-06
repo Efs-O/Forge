@@ -7,14 +7,8 @@
 
 import * as child_process from 'child_process';
 import type { RegisteredTool } from './ToolRegistry';
-import {
-  getRepo,
-  gitCwd,
-  readLiveGitStatus,
-  resolveFilePath,
-  runGit,
-  withGitError,
-} from './gitRepo';
+import { getRepo, gitCwd, readLiveGitStatus, resolveFilePath, runGit } from './gitRepo';
+import { formatGitLog, gitLogArgs, isEmptyHistoryError } from './gitLog';
 
 const cwdParameter = {
   type: 'string',
@@ -39,7 +33,7 @@ export function makeGitStatusTool(): RegisteredTool {
     },
     permission: 'git-read',
     handler: async (args) => {
-      const repo = getRepo(args['cwd'] as string | undefined);
+      const repo = await getRepo(args['cwd'] as string | undefined);
       const lines: string[] = [];
 
       for (const change of await readLiveGitStatus(repo)) {
@@ -80,25 +74,19 @@ export function makeGitLogTool(): RegisteredTool {
     },
     permission: 'git-read',
     handler: async (args) => {
-      const repo = getRepo(args['cwd'] as string | undefined);
+      const repo = await getRepo(args['cwd'] as string | undefined);
       const maxEntries = (args['max_entries'] as number | undefined) ?? 20;
       const ref = args['branch'] as string | undefined;
 
-      const commits = await withGitError('git_log', repo, () =>
-        repo.log({ maxEntries, ...(ref ? { ref } : {}) }),
-      );
-      if (!commits.length) return 'No commits.';
-
-      return commits
-        .map((c) => {
-          const shortHash = c.hash.slice(0, 7);
-          const date =
-            c.commitDate instanceof Date
-              ? c.commitDate.toISOString().slice(0, 10)
-              : String(c.commitDate);
-          return `${shortHash} — ${c.message.split('\n')[0]} (${c.authorName}, ${date})`;
-        })
-        .join('\n');
+      try {
+        return formatGitLog(await runGit(repo, gitLogArgs(maxEntries, ref)));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        // A repository with no commits yet has an empty log; that is an answer,
+        // not a failure the model should try to recover from.
+        if (isEmptyHistoryError(message)) return 'No commits.';
+        throw err;
+      }
     },
   };
 }
@@ -129,14 +117,15 @@ export function makeGitDiffTool(): RegisteredTool {
       const cwd = args['cwd'] as string | undefined;
       const staged = args['staged'] === true;
 
-      // vscode.git diff does not support per-file filtering; fall back to spawn for that case
+      // A per-file diff takes a pathspec, which `runGit`'s bounded helper does
+      // not shape; spawn directly for that case.
       const filePath = args['path'] as string | undefined;
-      const repo = getRepo(filePath ?? cwd);
+      const repo = await getRepo(filePath ?? cwd);
       if (filePath) {
         const resolved = resolveFilePath(filePath);
         const spawnArgs = staged ? ['diff', '--staged', '--', resolved] : ['diff', '--', resolved];
         const result = child_process.spawnSync('git', spawnArgs, {
-          cwd: gitCwd(filePath ?? cwd),
+          cwd: repo.root,
           encoding: 'utf8',
         });
         return result.stdout || result.stderr || '(no diff)';
@@ -172,7 +161,7 @@ export function makeGitBlameTool(): RegisteredTool {
     handler: async (args) => {
       const filePath = resolveFilePath(args['path'] as string);
       const result = child_process.spawnSync('git', ['blame', '--line-porcelain', filePath], {
-        cwd: gitCwd((args['path'] as string) ?? (args['cwd'] as string | undefined)),
+        cwd: await gitCwd((args['path'] as string) ?? (args['cwd'] as string | undefined)),
         encoding: 'utf8',
       });
       if (result.error) throw new Error(`git_blame: ${result.error.message}`);
@@ -213,7 +202,7 @@ export function makeGitShowTool(): RegisteredTool {
     handler: async (args) => {
       const ref = args['ref'] as string;
       const result = child_process.spawnSync('git', ['show', ref], {
-        cwd: gitCwd(args['cwd'] as string | undefined),
+        cwd: await gitCwd(args['cwd'] as string | undefined),
         encoding: 'utf8',
       });
       if (result.error) throw new Error(`git_show: ${result.error.message}`);
