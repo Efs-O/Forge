@@ -1,5 +1,14 @@
 # Forge Architecture Review — 2026-09-05
 
+> **Status: VERIFIED 2026-09-05 against the worktree at `34f1215`.**
+>
+> The original review was written without reading the code. Every item in
+> "Genuinely unfinished" has since been checked against `src/`, and each now
+> carries a **Verdict** line naming the file that settles it. Four items were
+> already shipped and have been moved to the implemented list. The recommended
+> sequence was reordered as a result. Prose without a Verdict line is from the
+> original review and remains unverified.
+
 ## Executive summary
 
 Forge has crossed the line from "VS Code extension with a local coding agent" into a local-agent runtime/orchestration platform with VS Code, Telegram and CLI-backed agents as interaction surfaces.
@@ -230,17 +239,41 @@ The following are already present or substantially implemented and should not be
 - MCP per-tool permission classification;
 - repository-aware `FORGE.md` / `AGENTS.md` selection.
 
+Added 2026-09-05 by the verification pass, each having been proposed as new work
+in the section below before the code was checked:
+
+- composing a prompt while a turn streams, with Enter queueing the next turn
+  (`InputRow.tsx`);
+- `/initForge` markdown recovery from tool-style JSON output
+  (`extractMarkdownFromToolCall`);
+- a deterministic compaction ledger recording changed files and command
+  outcomes, independent of the summarizer (`compactionLedger.ts`);
+- disk-backed whole-workspace checkpoints for CLI agents
+  (`DiskCheckpointStore`);
+- multi-language project indicators in `/initForge` (Python, Rust, Go, Java).
+
+The lesson generalizes: this review proposed rebuilding four shipped features
+because the repository documents its capabilities mainly in source comments.
+That is the argument for item 13 and for the status convention at the end.
+
 ---
 
 ## Genuinely unfinished / still worthwhile
 
+Verified 2026-09-05. Original numbering is preserved so earlier references stay
+valid, but **items 10 and 12 are already shipped** and items 3, 5 and 8 are
+substantially further along than the original review assumed.
+
 ### 1. Parallel execution of independent tool calls
 
-**Priority: HIGH**
+**Priority: HIGH -> downgraded to MEDIUM on verification**
 
-`ToolDispatch.dispatch()` currently iterates model-emitted calls sequentially.
+**Verdict: OPEN, confirmed.** `ToolDispatch.dispatch()` is a plain
+`for (const tc of toolCalls)` at `src/sidebar/ToolDispatch.ts:235`, and no
+`parallelSafe` metadata exists anywhere in `src/`.
 
-The goal should not be a naive `Promise.all(toolCalls)`. Add a small execution classifier / conflict detector:
+The goal should not be a naive `Promise.all(toolCalls)`. Add a small execution
+classifier / conflict detector:
 
 **Good parallel candidates**
 
@@ -259,60 +292,74 @@ The goal should not be a naive `Promise.all(toolCalls)`. Add a small execution c
 - approval-gated actions;
 - tools with shared mutable runtime state.
 
-A first version can parallelize only tools explicitly marked `parallelSafe: true` and fall back to current serial behavior for everything else.
+A first version can parallelize only tools explicitly marked `parallelSafe: true`
+and fall back to current serial behavior for everything else.
 
-Expected benefit: lower wall-clock latency on multi-file inspection without increasing model context usage.
+**Why this was downgraded.** The payoff is wall-clock only, and it is claimed
+against the layer that owns checkpoints, approvals and mutation ordering. On a
+local 27B-class model, token generation dominates a turn by orders of magnitude
+over tool dispatch, so parallelizing four `read_file` calls saves milliseconds
+while putting `ToolDispatch`'s ordering guarantees at risk. The win is real only
+for genuinely slow tools - ripgrep over a large tree, LSP cold start, git on a
+mapped network drive. Schedule it after the cheap correctness fixes (6 and 7),
+and measure a real turn before assuming the latency is there to recover.
 
 ### 2. Hierarchical FORGE.md inheritance
 
-**Priority: HIGH**
+**Priority: HIGH - confirmed, and the strongest remaining item**
 
-Extend current repository-aware scoping to path hierarchy inside a repository.
+**Verdict: OPEN, confirmed.** `ForgeInstructionsLoader.instructionsFor()`
+resolves exactly one scope root via `resolveInstructionScopeRoot()` (nearest
+`.git`, bounded by the workspace root) and loads exactly one file. There is no
+ancestor walk, no concatenation and no per-scope delimiting.
 
 Recommended semantics:
 
 1. load repository-root `FORGE.md` / fallback `AGENTS.md`;
 2. walk from repository root toward the target directory;
 3. append the nearest matching instruction files in deterministic order;
-4. cap total bytes/tokens;
+4. cap total bytes/tokens - the existing `MAX_BYTES` guard is per file and must
+   become a budget across the whole assembled chain;
 5. clearly delimit each scope in the injected text;
 6. cache by target directory and invalidate via the existing watcher.
 
-This should combine very well with lazy tool groups: keep permanent instructions small and expose package-specific guidance only when work enters that part of the tree.
+The file is 220 lines with the watcher, cache and truncation guard already in
+place, so this is contained work against a real seam. It combines well with lazy
+tool groups: keep permanent instructions small and expose package-specific
+guidance only when work enters that part of the tree.
 
 ### 3. Re-audit the compaction state-ledger design
 
-**Priority: HIGH for review; implementation decision after audit**
+**Priority: HIGH for review -> resolved by the audit; mostly a docs problem**
 
-Forge now has a durable plan and significant compaction fixes, so older compaction plans may be partly obsolete.
+**Verdict: LARGELY IMPLEMENTED.** `COMPACTION_STATE_LEDGER_PLAN.md` states
+"IMPLEMENTED 2026-08-27 (0.13.15), all four phases", and the code agrees:
+`src/sidebar/compactionLedger.ts` (385 lines) derives the deterministic half of
+a compaction summary directly from tool calls, and `CompactionState` in
+`compactionTypes.ts` carries `recordedActions` (files and commands with
+`ok`/`failed`/`unknown` outcomes), `repoState`, `userMessages` and `lastReply`.
+`update_plan` supplies items with `pending`/`active`/`done` status.
 
-The next architecture question is whether the durable state should evolve from a simple plan into a small host-owned task ledger containing some subset of:
+Against the field list this review proposed, that already covers completed
+items, active item, modified files and build/test state. Genuinely absent:
+`objective`, `blockers`, and `confirmed facts/decisions`.
 
-- objective;
-- completed items;
-- active item;
-- blockers;
-- confirmed facts/decisions;
-- modified files;
-- build/test state;
-- next action.
-
-Do not inject a giant ledger every round. The point is structured, selectively injected continuity after compaction, not another permanent prompt tax.
+Do not add those three speculatively. The plan's own discipline applies - add
+only state fields proven useful by real failed or resumed sessions. The
+actionable remainder here is documentation, not engineering: the ledger is
+invisible in user-facing docs.
 
 ### 4. Re-open VRAM fleet scheduling
 
 **Priority: MEDIUM-HIGH strategic**
 
-The old fleet-scheduling idea is much more actionable now because Forge has:
+**Verdict: OPEN as a plan.** `FUTURE_VRAM_FLEET_SCHEDULING.md` still says "idea
+/ not scheduled". The prerequisites this review claims are real and present in
+`src/backend/`: `BackendPool`, `DelegationGate`, `ModelHeuristics`,
+`poolAcquisition`, `SharedRuntimeRegistry`, plus `/system` telemetry.
 
-- backend pool ownership;
-- delegation holds;
-- worker orchestration;
-- model-route classification;
-- process/GPU VRAM telemetry;
-- local/cloud/CLI target distinctions.
-
-Before implementation, re-read the old plan and rewrite it against current architecture instead of coding directly from the historical document.
+Before implementation, re-read the old plan and rewrite it against current
+architecture instead of coding directly from the historical document.
 
 Potential future responsibilities:
 
@@ -324,173 +371,290 @@ Potential future responsibilities:
 - worker admission based on current telemetry plus configured limits;
 - optional multi-GPU target preferences.
 
-Avoid pretending VRAM telemetry is a perfect predictor of whether a future model load will succeed.
+Avoid pretending VRAM telemetry is a perfect predictor of whether a future model
+load will succeed.
 
 ### 5. Disk-backed checkpoints
 
 **Priority: MEDIUM**
 
-Current source-code-sized checkpoints are fine, but full file contents in JS memory do not scale cleanly to large generated files or binary-ish workloads.
+**Verdict: HALF IMPLEMENTED.** `src/checkpoint/DiskCheckpointStore.ts` exists,
+is wired through `CheckpointStack`, and `mkdtemp`s under
+`os.tmpdir()/forge-checkpoints-<pid>`. But the comment at
+`CheckpointStack.ts:152` is explicit: *"Whole-workspace CLI snapshots are
+disk-backed."* Per-turn agent file edits still route through
+`captureMemoryState()` in `MemoryCheckpointState.ts`, holding full file contents
+in JS memory.
 
-Move snapshots to a turn-owned temporary directory while preserving the existing CheckpointSession/Keep/Undo API.
+So the original concern holds, but only for the tool-write path, and the
+infrastructure to fix it is already built and exercised. This is a rewiring job,
+not a new subsystem: move the per-turn snapshot path onto the existing disk
+store while preserving the CheckpointSession/Keep/Undo API.
 
 ### 6. Make `format_file` editor-independent
 
-**Priority: MEDIUM**
+**Priority: MEDIUM -> raised to HIGH; this is a live defect, not polish**
 
-Replace active-editor-command behavior with `vscode.languages.getDocumentFormattingEdits()` or equivalent direct document formatting APIs.
+**Verdict: OPEN, and worse than described.** The `format_file` handler in
+`src/tools/fileEditTools.ts:169-183` calls `openTextDocument`, then
+`showTextDocument`, then `editor.action.formatDocument`, then `doc.save()` - and
+then **closes the active editor** via `workbench.action.closeActiveEditor` if
+the file was not already open. A tool call therefore mutates the user's window
+state, and the close fires against whatever is active at that moment.
+
+Replace with `vscode.languages.getDocumentFormattingEdits()` or the
+`vscode.executeFormatDocumentProvider` command plus `workspace.applyEdit`. The
+pattern is already correct in the same file: `makeRenameSymbolTool()` at
+`fileEditTools.ts:221` uses `executeDocumentRenameProvider` and `applyEdit` with
+no editor involvement. Copy that shape.
 
 ### 7. Git CLI fallback
 
-**Priority: MEDIUM**
+**Priority: MEDIUM -> raised; the machinery is already in the file**
 
-Keep the VS Code Git API as the preferred path but add a clear fallback to the installed `git` executable when the extension API is unavailable.
+**Verdict: OPEN, small.** `repositories()` at `src/tools/gitRepo.ts:48-54`
+throws `git_*: no git repository found in workspace` when the `vscode.git`
+extension API is unavailable or empty - there is no fallback path.
+
+But `gitRepo.ts` already imports `execFile` and runs `git` directly at line 133,
+and `gitReadTools.ts:132` already spawns git for the per-file diff case the VS
+Code API cannot serve. The fallback is effectively assembled and simply not
+reached on the API-absent branch. Keep the VS Code Git API preferred and route
+that failure into the existing spawn path.
 
 ### 8. `/initForge` multi-language project detection
 
-**Priority: MEDIUM**
+**Priority: MEDIUM -> LOW after verification**
 
-Add project detection for at least:
+**Verdict: MOSTLY IMPLEMENTED.** The indicator list in
+`src/sidebar/SlashCommandHandler.ts:420-430` already probes `pyproject.toml`,
+`Cargo.toml`, `go.mod`, `pom.xml`, `build.gradle`, `tsconfig.json`,
+`.eslintrc`, `vite.config.ts` and `webpack.config.js`, and feeds the hits to the
+model as workspace-scan context.
 
-- Python: `pyproject.toml`, `requirements.txt`;
-- Rust: `Cargo.toml`;
-- Go: `go.mod`;
-- optionally .NET and Java after the architecture is generic.
+What is missing is not detection but *structured* per-language handling:
+`package.json` is the only manifest actually parsed (name, scripts, deps), so
+Python/Rust/Go projects yield a filename and nothing else. The useful increment
+is extracting build/test commands per ecosystem, not adding more filenames.
 
 ### 9. Package-manager detection for build/test tools
 
 **Priority: LOW-MEDIUM**
 
-Detect pnpm/yarn/bun/npm from lockfiles/config rather than assuming npm.
+**Verdict: OPEN, confirmed.** No reference to `pnpm-lock.yaml`, `yarn.lock`,
+`bun.lockb` or `packageManager` exists anywhere in `src/`. Detect the manager
+from lockfiles/config rather than assuming npm. Naturally pairs with item 8.
 
 ### 10. Type while streaming
 
-**Priority: LOW-MEDIUM UX**
+**Verdict: ALREADY IMPLEMENTED - remove from the backlog.**
 
-Allow prompt composition while a turn is running, while keeping submission disabled or treating Enter according to existing queue/steer semantics.
+`webview-ui/src/components/InputRow.tsx` never disables the composer textarea
+during a turn. `streaming` gates only the send button and streaming-unsafe slash
+commands, which stay listed and disabled rather than vanishing
+(`availableWhileStreaming`). The composer hint switches to *"Enter queues this
+for the next turn"*, and the queued prompt confirms itself in the transcript as
+a `QueuedPromptRow`.
+
+That is precisely the "keep submission disabled or treat Enter according to
+existing queue/steer semantics" behavior this review asked for.
 
 ### 11. Better HTML-to-text conversion for `web_fetch`
 
 **Priority: LOW**
 
-Replace regex-oriented conversion with a bounded proper HTML-to-text parser that preserves basic block spacing and decodes entities.
+**Verdict: OPEN, confirmed.** `htmlToText()` strips script/style blocks and then
+applies a bare tag-stripping regex. Replace with a bounded proper HTML-to-text
+parser that preserves basic block spacing and decodes entities.
 
 ### 12. `/initForge` output recovery
 
-**Priority: LOW**
+**Verdict: ALREADY IMPLEMENTED - remove from the backlog.**
 
-Some local models still return tool-style JSON where raw markdown is expected. Add a conservative extraction/retry path rather than broad prompt growth.
+`extractMarkdownFromToolCall()` at `src/sidebar/SlashCommandHandler.ts:352` is
+applied to the model's output at line 327. It strips outer code fences and
+recovers markdown from tool-style JSON, which is exactly the conservative
+extraction path this item requested.
 
 ### 13. Document local-model runtime optimizations
 
-**Priority: LOW-MEDIUM documentation**
+**Priority: LOW-MEDIUM -> raised to MEDIUM; it is now the largest real gap**
 
-Add a short README mention for truncation-aware tool recovery and temporary thinking suppression. If more detail is useful later, collect the deeper implementation notes in a focused local-model/runtime document together with lazy tool exposure, tool-result context bounding, prompt-prefix stability and context-budget behavior.
+**Verdict: PARTIALLY OPEN.** `README.md:25` mentions "truncated-call recovery"
+in passing and line 467 documents `max_result_chars`. Temporary thinking
+suppression on recovery is undocumented, and so is the compaction ledger from
+item 3.
+
+This item grew in relative importance precisely because the verification pass
+found so much already built. The dominant risk in this repo is no longer missing
+capability - it is capability that is invisible to its users and rediscoverable
+only by reading source comments. Add a short, user-oriented README mention, and
+collect the deeper runtime details in a focused
+`docs/LOCAL_MODEL_OPTIMIZATIONS.md` alongside lazy tool exposure, tool-result
+context bounding, prompt-prefix stability and context-budget behavior.
 
 ---
 
 ## Recommended next engineering sequence
 
-### Phase 1 — latency and context efficiency
+Reordered 2026-09-05 after verification. The original sequence led with parallel
+tool execution; that has been pushed back in favour of two small correctness
+fixes whose implementation pattern already exists in the same files.
 
-1. **Parallel safe tool execution.**
-   - implement explicit parallel-safety metadata or a small scheduler;
-   - begin with read-only independent tools only;
-   - preserve current serial behavior by default.
-2. **Hierarchical FORGE.md.**
-   - deterministic inheritance;
-   - strict size budget;
-   - reuse existing watcher/cache architecture.
+### Phase 1 - correctness fixes with a template in-tree
 
-These two changes should give immediate benefit to local 27B-class models without expanding the permanent system prompt.
+1. **`format_file` editor-independence (item 6).** It currently closes the
+   user's editor tab as a side effect of a tool call. `rename_symbol`, fifty
+   lines below it in `fileEditTools.ts`, already demonstrates the correct
+   provider-plus-`applyEdit` shape.
+2. **Git CLI fallback (item 7).** `git_*` throws outright when the extension API
+   is absent, while `execFile('git')` is already imported in that same file and
+   already used by `gitReadTools`. Route the failure into the existing path.
 
-### Phase 2 — long-session reliability
+Both are hours, not days, and both remove a failure the user can hit today.
 
-3. **Audit `COMPACTION_STATE_LEDGER_PLAN.md` against current code.**
-4. Decide whether to extend `update_plan` into a small durable execution ledger.
-5. Add only the state fields proven useful by real failed/resumed sessions.
+### Phase 2 - the one high-value structural item
 
-The objective is not bigger context. It is better continuity when context has to be compacted.
+3. **Hierarchical FORGE.md (item 2).** Deterministic inheritance, a byte budget
+   spanning the assembled chain rather than per file, reuse of the existing
+   watcher and cache. This is the strongest remaining item in the review and the
+   one that most directly serves local 27B-class models: it keeps the permanent
+   prompt small while making package-specific guidance available on demand.
 
-### Phase 3 — local-resource orchestration
+### Phase 3 - documentation, which the audit promoted
 
-6. **Re-audit `FUTURE_VRAM_FLEET_SCHEDULING.md`.**
-7. Rewrite the plan around current BackendPool, DelegationGate, worker orchestration and `/system` telemetry.
-8. Implement only after the new plan distinguishes hard admission constraints from heuristic memory estimates.
+4. **Document the local-model runtime optimizations (item 13).** Truncation-aware
+   recovery, temporary thinking suppression, the compaction ledger and lazy tool
+   groups are all shipped and all effectively invisible outside source comments.
+   This review is itself evidence of the cost: it proposed rebuilding four
+   things that already existed.
+5. **Sweep plan-file statuses** per the hygiene convention below. Same failure
+   mode, same fix.
 
-### Phase 4 — hardening
+### Phase 4 - measured performance work
 
-9. Disk-backed checkpoints.
-10. `format_file` robustness.
-11. Git CLI fallback.
-12. Package-manager and multi-language `/initForge` improvements.
-13. HTML fetch cleanup and smaller UX items.
-14. Add concise user-facing documentation for truncation-aware recovery/thinking suppression.
+6. **Parallel safe tool execution (item 1).** First measure where a real turn
+   actually spends wall-clock time. If tool dispatch is not a visible fraction
+   against local token generation, spend the risk budget elsewhere; the layer in
+   question owns checkpoints, approvals and mutation ordering.
+7. **Disk-backed per-turn checkpoints (item 5).** Rewiring onto
+   `DiskCheckpointStore`, which already exists and is exercised by the CLI
+   snapshot path.
 
----
+### Phase 5 - strategic and long-tail
+
+8. **Re-audit `FUTURE_VRAM_FLEET_SCHEDULING.md` (item 4)** and rewrite it around
+   current `BackendPool`, `DelegationGate`, worker orchestration and `/system`
+   telemetry. Implement only after the new plan distinguishes hard admission
+   constraints from heuristic memory estimates.
+9. Structured per-ecosystem build/test extraction for `/initForge` (item 8) and
+   package-manager detection (item 9), which are one piece of work.
+10. HTML fetch cleanup (item 11).
+
+Items 10 and 12 were removed from the backlog entirely; they already ship.
 
 ## Candidate relic / historical Markdown documents to review
 
-Do **not** delete these automatically. Several are useful historical design records, but their names/checklists can mislead an agent into reimplementing completed work. Review each and either remove it, move it under a clearly named archive directory, or add a strong historical/completed banner.
+Do **not** delete these automatically. Several are useful historical design
+records, but their names/checklists can mislead an agent into reimplementing
+completed work. Review each and either remove it, move it under a clearly named
+archive directory, or add a strong historical/completed banner.
 
-### Strong candidates for archive/removal review
+Verified 2026-09-05 by reading each file's own status line. The repository is
+already roughly 70% compliant with the status convention proposed below, which
+made this survey cheap - a good argument for finishing the convention.
 
-- `docs/plans/COMBINED_UNFINISHED_IMPLEMENTATION_PLAN.md`
-  - Despite the filename, its status says the automated implementation/verification work is complete.
-  - The stale title is particularly dangerous for future agents.
+### Self-declared complete, corroborated - safe to archive
 
-- `docs/AGENT_WORKER_ORCHESTRATION_REPORT.md` / worker orchestration planning document(s)
-  - Worker orchestration is implemented; historical unchecked acceptance boxes remain in the plan.
-  - Keep only if useful as architecture rationale; otherwise archive.
+These carry an explicit implemented/validated status line of their own:
 
-- `docs/plans/LOCAL_AGENT_DELEGATION_PLAN.md` if still present
-  - The combined plan explicitly says its bounded read-only consultation work was completed and must not be reopened/duplicated.
+- `COMPACTION_STATE_LEDGER_PLAN.md` - "IMPLEMENTED 2026-08-27 (0.13.15), all
+  four phases" (corroborated in code; see item 3)
+- `COMPACTION_SUMMARIZER_REQUEST_PLAN.md` - "IMPLEMENTED 2026-08-22"
+- `LAZY_TOOL_GROUPS_EXPERIMENT.md` - "implemented, measured, validated live"
+- `PROMPT_PREFIX_STABILITY_PLAN.md` - implemented (0.13.18)
+- `TOKEN_BAR_EXACT_USAGE_PLAN.md` - "IMPLEMENTED 2026-08-22"
+- `LIVE_CTX_AND_WARM_DELEGATION_PLAN.md` - implemented (2026-08-15)
+- `SESSION_TIME_STATUS_PLAN.md`, `SIDEBAR_UX_PLAN.md`,
+  `SIDEBAR_UX_CLEANUP_PLAN.md` - implemented
+- `SLOT_AFFINITY_AND_CHECKPOINTS_PLAN.md` - "measured and validated end-to-end"
+- `REMOTE_WORKSPACE_DISCOVERY_PLAN.md` - implemented 2026-09-01
+- `REMOTE_HANDOFF_TARGET_ALREADY_OPEN_PLAN.md` - implemented 2026-09-04
+- `REMOTE_TOTP_AUTH_PLAN.md` - implemented, real-device validation passed
+- `CLI_DAEMON_PLAN.md` - "implemented, validated, packaged, installed"
+- `COMBINED_UNFINISHED_IMPLEMENTATION_PLAN.md` - status says the automated
+  implementation/verification work is complete. The stale title is the single
+  most dangerous filename in `docs/plans/`.
 
-- `docs/plans/FORGE_HARDENING_AND_ONBOARDING_PLAN.md`
-  - Much of the hardening work was incorporated into the completed combined plan.
-  - Review for remaining unique acceptance items before removal/archive.
+### The `REMOTE_CONTROL_PLAN` chain - six files, one shipped feature
 
-- `docs/plans/DELEGATE_SAFETY_AND_TOOL_ACCESS_PLAN.md`
-  - Current ToolRegistry/ToolDispatch and worker/delegation permission architecture may supersede most of it.
-  - Audit before deletion because it may still contain rationale worth preserving.
+Missed by the first pass of this review and the largest single cleanup
+available. `REMOTE_CONTROL_PLAN_V4.md` says "implementation complete; Telegram
+and TOTP real-device validation complete". The five documents beneath it are
+superseded review iterations of the same feature:
 
-- `docs/plans/LAZY_TOOL_GROUPS_EXPERIMENT.md`
-  - Lazy/demand-loaded tool groups are already a shipped core feature.
-  - Likely a good archive candidate unless it contains benchmark evidence still referenced elsewhere.
+- `REMOTE_CONTROL_PLAN.md` - "changes requested before implementation"
+- `REMOTE_CONTROL_PLAN_V2.md` - "remaining corrections required"
+- `REMOTE_CONTROL_PLAN_V3.md` - "awaiting two Codex sequencing clarifications"
+- `REMOTE_CONTROL_PLAN_V3_FINAL_CLARIFICATIONS.md`
+- `REMOTE_CONTROL_PLAN_V3_REVIEW_FINDINGS.md`
 
-- `docs/plans/F3_CHAT_PROXY_PLAN.md`
-  - `ControlChatProxy` now exists; likely historical implementation plan.
+Archive V1-V3 as a set; keep V4 with a COMPLETE banner. Every one of the five
+reads as live work-in-progress to an agent that opens it directly.
 
-- `docs/plans/F6_PROFILES_PLAN.md`
-  - Profiles are in current runtime/config flows; check whether any acceptance item remains genuinely open.
+### Corrections to the first pass of this review
 
-- `docs/plans/CONFIG_OVERHAUL_PLAN.md`
-  - Candidate historical plan; verify against current config resolver/writer/wizard architecture.
+Three files this review nominated for archive should **stay**, on the evidence
+of their own headers:
+
+- `DELEGATE_SAFETY_AND_TOOL_ACCESS_PLAN.md` - its header says "report for
+  review - **nothing implemented**". This review speculated it was superseded by
+  current ToolRegistry/ToolDispatch architecture. That may yet be true, but it
+  is an audit question, not an archival one.
+- `CONFIG_OVERHAUL_PLAN.md` - "APPROVED - all questions (Q1-Q8) decided; ready
+  for implementation". Not complete.
+- `F6_PROFILES_PLAN.md` - "PLAN (implement in a fresh session). Breaking schema
+  change." Genuinely open.
+
+`AGENT_WORKER_ORCHESTRATION_REPORT.md`, `LOCAL_AGENT_DELEGATION_PLAN.md`,
+`FORGE_HARDENING_AND_ONBOARDING_PLAN.md` and `F3_CHAT_PROXY_PLAN.md` carry no
+status line at all and must be read before any decision.
 
 ### Compaction plans: review carefully, not blanket-delete
 
-- `docs/plans/COMPACTION_RESUME_MISREAD_PLAN.md`
-- `docs/plans/COMPACTION_SUMMARIZER_REQUEST_PLAN.md`
-- `docs/plans/COMPACTION_STATE_LEDGER_PLAN.md`
-
-The first two may be mostly completed incident/implementation records. `COMPACTION_STATE_LEDGER_PLAN.md` may still contain the next genuinely useful architecture step, so audit it before archiving anything.
+- `COMPACTION_RESUME_MISREAD_PLAN.md` - no status line; opens with an observed
+  failure and a session id, so it reads as an incident record.
+- `COMPACTION_SUMMARIZER_REQUEST_PLAN.md` - implemented; archive.
+- `COMPACTION_STATE_LEDGER_PLAN.md` - implemented; archive. This review had
+  flagged it as possibly containing the next architecture step. It does not; it
+  shipped in 0.13.15.
 
 ### CLI plans: review against current `src/agents/`
 
-- `docs/plans/CLI_CHECKPOINT_ARCHITECTURE_PLAN.md`
-- `docs/plans/CLI_DAEMON_PLAN.md`
+- `CLI_CHECKPOINT_ARCHITECTURE_PLAN.md` - "Core implementation complete (Phases
+  0-3 and hardening); isolated Git worktree prototype remains". Partially open:
+  keep, with the remaining scope stated at the top.
+- `CLI_DAEMON_PLAN.md` - complete; archive.
 
-Current code already contains persistent CLI session machinery, Codex app-server support and workspace checkpoint integration. Determine whether these plans are completed, partially superseded or still contain live work.
+### No status line at all - read before deciding
+
+15 files, including `VRAM_ADMISSION_PLAN.md`, `WORKER_REMOVAL_PLAN.md`,
+`TOKEN_EFFICIENCY_PLAN.md`, `RELIABILITY_HARDENING_PLAN.md`,
+`TESTING_BUGFIX_PLAN.md`, `VIDEO_ATTACHMENT_PLAN.md`,
+`VISION_HISTORY_STRIPPING_PLAN.md`, `MODEL_READINESS_DOT_PLAN.md`,
+`SIDEBAR_UI_REWORK_PLAN.md`, `REMOTE_OUTBOUND_EVENTS_PLAN.md`. Adding a status
+line to each is the cheapest possible pass and should precede any deletion.
 
 ### Keep active for now
 
-- `docs/plans/FUTURE_VRAM_FLEET_SCHEDULING.md`
-  - This is not a relic in concept. It should be rewritten against current architecture and may become a major future feature.
-
-- `ROADMAP.md`
-  - Still useful as the small canonical list of agreed unscheduled improvements, provided completed items are removed promptly.
-
----
+- `FUTURE_VRAM_FLEET_SCHEDULING.md` - "idea / not scheduled". Not a relic in
+  concept; rewrite against current architecture (item 4).
+- `NOTIFY_USER_PLAN.md`, `WHISPER_RESIDENT_SERVER_PLAN.md`,
+  `QUESTION_SELECTION_PLAN.md`, `REMOTE_ASK_USER_PLAN.md`,
+  `REMOTE_HELD_PROMPT_PLAN.md`, `SYSTEM_INFO_COMMAND_HANDOFF.md` - all
+  self-declared proposed/draft/not-implemented.
+- `ROADMAP.md` - still useful as the small canonical list of agreed unscheduled
+  improvements, provided completed items are removed promptly.
 
 ## Documentation hygiene recommendation
 

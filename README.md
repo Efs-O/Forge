@@ -23,7 +23,11 @@ available only when you explicitly configure them.
   another API URL.
 - **Tools engineered for local models.** Strict schemas, per-slot context
   budgeting, truncated-call recovery, bounded results, and chunked writes keep
-  smaller local models productive through long coding turns.
+  smaller local models productive through long coding turns. A cut-off tool call
+  is never dispatched as if it had run: it is retried smaller, with thinking
+  temporarily suppressed so the retry has more room than the attempt that
+  failed. What each of these actually does is in
+  [docs/LOCAL_MODEL_OPTIMIZATIONS.md](docs/LOCAL_MODEL_OPTIMIZATIONS.md).
 - **Reversible agent work.** Confirmation gates, inline diffs, and per-turn
   Keep/Undo checkpoints make file-changing actions visible and recoverable.
 - **Bring the runtime you prefer.** Use direct GGUF loading, local or

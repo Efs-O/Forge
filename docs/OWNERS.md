@@ -46,6 +46,7 @@ overlaps with an existing owner, extend the owner instead.
 | Summary prompt text + summary validation   | `src/sidebar/compactionPrompt.ts`    |
 | Applying the compaction window to a request| `src/sidebar/compactionWindow.ts`    |
 | Host-recorded summary facts (from messages)| `src/sidebar/compactionLedger.ts`    |
+| Ledger merge, retention cap, omission count| `src/sidebar/compactionRecordedState.ts` |
 | Agent's last reply carried past a compaction| `src/sidebar/compactionLastReply.ts` |
 | Working-tree snapshot for a compaction     | `src/sidebar/repoSnapshot.ts`        |
 | Agent task plan tool + plan rendering      | `src/tools/planTools.ts`             |
@@ -235,6 +236,7 @@ overlaps with an existing owner, extend the owner instead.
 | Buffered in-host chat for POST /chat       | `src/llm/ControlChatProxy.ts`                |
 | xAI token resolution (SecretStorage/OAuth) | `src/llm/XaiAuth.ts`                         |
 | FORGE.md workspace instructions loader     | `src/llm/ForgeInstructionsLoader.ts`         |
+| FORGE.md chain assembly + byte budget      | `src/llm/forgeInstructionsChain.ts`          |
 | Streaming OpenAI-compat client             | `src/llm/OpenAIClient.ts`                    |
 | Cut-off tool call: type + classification   | `src/llm/ToolCallTruncatedError.ts`          |
 | No-projector backend error classification  | `src/llm/imageUnsupportedError.ts`           |
@@ -275,7 +277,9 @@ overlaps with an existing owner, extend the owner instead.
 | exec_command program resolution            | `src/tools/execProgramResolver.ts`    |
 | Git tools (status, diff, commit)           | `src/tools/gitTools.ts`               |
 | Read-only git tools (status, log, diff)    | `src/tools/gitReadTools.ts`           |
-| VS Code Git API access + path/status maps  | `src/tools/gitRepo.ts`                |
+| Git handle, execution, status parsing      | `src/tools/gitRepo.ts`                |
+| Git repository discovery + selection       | `src/tools/gitDiscovery.ts`           |
+| git log argv, framing and parsing          | `src/tools/gitLog.ts`                 |
 | Search (Tavily / Brave)                    | `src/tools/searchTool.ts`             |
 | URL fetch tool (SSRF-guarded)              | `src/tools/fetchTool.ts`              |
 | LSP tools (go-to-def, refs, impls, diags)  | `src/tools/lspTools.ts`               |

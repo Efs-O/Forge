@@ -53,6 +53,7 @@ docs/*
 # on the Marketplace Overview page.
 !docs/COMMANDS.md
 !docs/TOOL_SCHEMA_AUDIT.md
+!docs/LOCAL_MODEL_OPTIMIZATIONS.md
 !docs/SHARED_RUNTIME.md
 !docs/DELEGATION.md
 !docs/SAFE_WORKER_TOOL_UPGRADE_PLAN.md

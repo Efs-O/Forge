@@ -76,6 +76,16 @@ plan itself, by `update_plan` — it is not repeated here.)
   VSIX (`npm run package`), the running session still executes the OLD code
   until the user installs + reloads. Re-ping only after a reload to test a fix.
 
+- **Building a VSIX: run in the background and ask about bumping the version.**
+  `npm run package` takes ~3 min (build:release + `vsce package`) and exceeds
+  the 120s foreground `exec_command` timeout — so when the user asks to build a
+  VSIX, start it with `exec_command background: true` and poll it with
+  `monitor_execution` (the `.vsix` lands at the workspace root; `vsce` is silent
+  while it writes the archive, so silence is not a hang). Before packaging, also
+  ASK the user whether they want to bump the version in `package.json` — the
+  current version is whatever is already there, and re-packaging at the same
+  version overwrites the prior `.vsix` with no way to tell them apart.
+
 - **Scripts (from `package.json`):** `npm test` (vitest), `npm run build`
   (dev), `npm run build:release`, `npm run type-check`, `npm run lint`,
   `npm run package` (build:release + `vsce package --no-dependencies`).

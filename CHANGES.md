@@ -45,6 +45,17 @@
   them: that switch means "stop repeating answers to me", never "stop telling
   me the work died". `/notify off` still covers them.
 
+- **The benchmark stops evicting the chat model it does not need to.**
+  `unloadForgeQwen` ran after every `qwen-forge` task, but the only thing that
+  needs the GPU to itself is `qwen-minimal`, which spawns a second
+  llama-server. With no minimal arm the unload freed nothing and cost the
+  sidebar its model — it fired seven times in one afternoon, and one of those
+  is what pulled the port out from under the monitoring agent. Teardown is now
+  a `/release` unless a minimal arm actually follows, and `bench:qwen-suite`
+  defaults to `--arms qwen-forge`: one shared server, one port, an agent that
+  can watch its own benchmark. Ask for `qwen-minimal` by name when you want the
+  comparison and have the VRAM.
+
 - **`[AgentLoop] undefined chat failed`** — `model.provider` is optional and
   unset for local llama entries, so the log line named no provider at all.
 
@@ -141,6 +152,80 @@
   every other tab's prompt box — and would have been sent to whichever tab was
   open when you hit Enter. Drafts are now per conversation, the way staged
   attachments already were.
+
+- **`format_file` no longer touches your editor.** It opened the file, ran the
+  editor's format command, saved, and then closed the active tab — which was
+  whatever happened to be focused by the time that command ran, not necessarily
+  the file it had formatted. It now asks the document formatting provider
+  directly and applies a workspace edit, the shape `rename_symbol` fifty lines
+  below it already used. It also stopped reporting success it had not earned:
+  a rejected edit, a failed save, or a document that changed while the formatter
+  ran are all errors now, and "no formatter available" is no longer reported as
+  "already formatted".
+
+- **The git tools work without the VS Code Git extension.** `git_log`,
+  `create_branch` and `switch_branch` went through that extension's wrapper
+  methods, and repository discovery went through its repository list, so in a
+  window where it was unavailable those tools failed outright while `git_status`
+  beside them worked. Everything runs `git` directly now, and discovery asks
+  git itself (`rev-parse --show-toplevel`) before consulting the extension —
+  which matters beyond the missing-extension case, because the extension's
+  repository list is only what VS Code happened to discover, so an outer
+  repository could silently capture work meant for a nested one. Linked
+  worktrees, whose `.git` is a file, are found for the same reason. Missing git,
+  a path in no repository, an invalid directory, a permissions error and a git
+  trust refusal are now five distinct messages instead of one, and `switch_branch`
+  can no longer restore a *file* that shares the branch's name.
+
+- **`FORGE.md` is inherited down the tree.** Only the nearest repository root's
+  file was loaded, so in a monorepo one file had to carry rules for every
+  package — the content a local model can least afford in its permanent prompt.
+  Forge now assembles the chain from the repository root down to the directory
+  being worked in, one file per level (`FORGE.md` preferred over `AGENTS.md`),
+  each labelled with the directory it applies to. The 15,000-byte guard is now a
+  budget across the whole assembled chain rather than per file, allocated
+  root-first so a large leaf truncates instead of pushing repository-wide rules
+  out; anything truncated or dropped is stated in the text and warned about
+  once. A nested repository starts its own chain, and instructions reached
+  through a link out of the workspace are refused rather than read. **If you
+  already have a nested `FORGE.md`, it was being ignored and now takes effect.**
+
+- **Compaction stops losing finished work.** Four defects, each of which could
+  make a resumed agent redo something it had already done:
+  - The 24-entry ledger cap filled itself with non-successes in oldest-first
+    order, so a run of old failures could evict every recent success. Slots are
+    now reserved by category and filled newest-first within each, so recent
+    completed work, the latest unresolved failures and quoted output evidence
+    all survive and no category can take every slot.
+  - Dropped entries were silent, which reads as "this never happened". The count
+    is now carried across compaction generations and stated in the block.
+  - A command's identity came from the first absolute path in its *output*, so
+    a build that produced a file and a later command that merely observed it
+    collapsed into one entry — and the observation superseded the build. It also
+    ignored the working directory, so `npm run ci` in two packages was one
+    entry. Identity is now the tool, the working directory and the structured
+    arguments; output naming a path is evidence, not an identifier.
+  - A long final message was cut to its opening, discarding the ending where
+    the next step usually is. The opening and the ending are both kept now, with
+    the elision marked, and the block no longer claims nothing happened after
+    the message when tool calls in fact followed it.
+
+  The summarizer is also now told to record what is already done and what
+  investigation concluded, to separate live blockers from failures already
+  fixed, and is given the agent's own plan labelled as intent rather than as
+  evidence. Its source is cut to whole messages from each end, with a count of
+  what was dropped, instead of a character slice through the middle of one. And
+  a compaction that would not actually shrink a large window is refused, keeping
+  the previous state and saying why, rather than committing it and auto-resuming
+  into a loop.
+
+- **Documented the local-model runtime behaviour** in
+  `docs/LOCAL_MODEL_OPTIMIZATIONS.md`: truncation-aware recovery, temporary
+  thinking suppression, lazy tool groups, bounded results, prompt-prefix
+  stability, per-slot budgets and the compaction ledger — with the owning file
+  for each. All of it already shipped and was findable only by reading source
+  comments, which is how an architecture review came to propose rebuilding four
+  of them.
 
 ## 0.15.18
 
