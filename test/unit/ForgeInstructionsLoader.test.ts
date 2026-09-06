@@ -115,7 +115,7 @@ describe('ForgeInstructionsLoader', () => {
     expect(loader.instructions).toBe('a'.repeat(15000));
     expect(fs.readFileSync(file, 'utf8')).toBe(content);
     expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
-      `Forge: ${file} exceeds 15000 bytes and was truncated before prompt injection.`,
+      'Forge: FORGE.md was truncated to fit the 15000-byte project-instruction budget.',
     );
     loader.dispose();
   });
