@@ -28,4 +28,21 @@ export interface CompactionState {
   repoState?: string;
   /** The agent's own last words before the cut. See `compactionLastReply.ts`. */
   lastReply?: string;
+  /**
+   * Whether tool calls ran after `lastReply` was sent.
+   *
+   * Without it the block asserted that nothing had happened since — false
+   * whenever the agent spoke and then worked, and outranking the recorded tool
+   * outcomes that are the real account of what executed.
+   */
+  lastReplyFollowedByTools?: boolean;
+  /**
+   * How many recorded actions the cap has dropped, per kind, across every
+   * generation so far.
+   *
+   * Persisted rather than recomputed: once a list has been capped, counting it
+   * again reports zero, and a resumed agent reading a short ledger cannot tell
+   * a dropped entry from an action that never happened.
+   */
+  omittedActions?: { file: number; command: number };
 }

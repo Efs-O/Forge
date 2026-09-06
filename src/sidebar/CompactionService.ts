@@ -26,10 +26,12 @@ import {
 } from './compactionUserContext';
 import type { PromptRunOptions } from './PromptRun';
 import { getLogger } from '../util/logger';
-import { collectLastReply } from './compactionLastReply';
+import { collectLastReply, toolActivityFollowedLastReply } from './compactionLastReply';
 import { selectCompactionSplit } from './compactionSplit';
 import type { CompactionLogEntry } from './SessionLogger';
 import { reportedContextTokens } from '../util/contextBudget';
+import { compactionWindowChars } from './compactionWindow';
+import type { CompactionState } from './compactionTypes';
 
 const log = getLogger();
 
@@ -119,6 +121,17 @@ export const RESUME_PROMPT = 'Continue the active task from the compacted contex
 export const MAX_CONSECUTIVE_AUTO_CONTINUES = 2;
 
 /**
+ * Below this the "did it shrink?" check does not apply.
+ *
+ * A short conversation can legitimately compact into something larger than it
+ * was — a 600-word structured summary of four messages — and refusing that
+ * would break an explicit `/compact` on a small chat. The check exists to stop
+ * a compact/resume loop, and a loop needs a window near the context limit, so a
+ * window smaller than one summarization source is out of its scope.
+ */
+export const MIN_WINDOW_CHARS_FOR_FIT_GUARD = 24000;
+
+/**
  * Runs one compaction against the active conversation.
  *
  * `auto` only changes the messaging: an automatic compaction the user did not
@@ -171,8 +184,14 @@ export async function runCompaction(
   // invisible to the model.
   const fromIndex = from + split.tailStart;
   const currentActions = collectRecordedActions(split.summarize);
-  const recordedActions = mergeRecordedActions(conv.compaction?.recordedActions, currentActions);
-  const recordedActionsText = renderRecordedActionsBlock(recordedActions);
+  const merged = mergeRecordedActions(
+    conv.compaction?.recordedActions,
+    currentActions,
+    conv.compaction?.omittedActions,
+  );
+  const recordedActions = merged.actions;
+  const omittedActions = merged.omitted;
+  const recordedActionsText = renderRecordedActionsBlock(recordedActions, omittedActions);
   const userMessages = collectCompactionUserMessages(
     conv.compaction?.userMessages,
     split.summarize,
@@ -185,6 +204,11 @@ export async function runCompaction(
   const lastReply = collectLastReply(pending.slice(split.tailStart))
     ? undefined
     : collectLastReply(split.summarize);
+  // Recorded with the reply, because the transcript it was derived from is not
+  // available when the block is rendered on a later turn.
+  const lastReplyFollowedByTools = lastReply
+    ? toolActivityFollowedLastReply(split.summarize)
+    : false;
 
   deps.post({ type: 'notice', message: 'Compacting conversation…', conversationId: conv.id });
   // The webview treats the conversation as streaming between these two, so a
@@ -228,6 +252,9 @@ export async function runCompaction(
           split.summarize,
           recordedActionsText + repoState,
           userContext,
+          // The agent's own plan, which the summarization request did not carry
+          // before. Supplied as intent, not evidence — see planSnapshotBlock.
+          conv.plan?.items,
         ),
         conv.id,
         {
@@ -264,15 +291,45 @@ export async function runCompaction(
     // with the log row so the two can never disagree about which generation
     // this was.
     const generation = (conv.compaction?.generation ?? 0) + 1;
-    conv.compaction = {
+    const candidate: CompactionState = {
       summary: trimmed,
       fromIndex,
       generation,
       ...(userMessages.length > 0 ? { userMessages } : {}),
       ...(recordedActions.length > 0 ? { recordedActions } : {}),
+      ...(omittedActions.file > 0 || omittedActions.command > 0 ? { omittedActions } : {}),
       ...(repoState ? { repoState } : {}),
       ...(lastReply ? { lastReply } : {}),
+      ...(lastReply && lastReplyFollowedByTools ? { lastReplyFollowedByTools } : {}),
     };
+
+    // Does the candidate actually shrink the window?
+    //
+    // A summary plus a preserved state block plus a retained tail can add up to
+    // more than it replaced — a long tail of large tool arguments is the usual
+    // shape. Committing that and then auto-resuming is how a compact/resume
+    // loop starts: each pass costs a model call, replaces good state with a
+    // paraphrase of it, and leaves the window no smaller. Estimated in
+    // characters, which is enough to tell a reduction from an increase.
+    const beforeChars = compactionWindowChars(conv.messages, conv.compaction);
+    const afterChars = compactionWindowChars(conv.messages, candidate);
+    if (beforeChars >= MIN_WINDOW_CHARS_FOR_FIT_GUARD && afterChars >= beforeChars) {
+      log.info(
+        `[compact] candidate window is not smaller (~${afterChars} vs ~${beforeChars} chars) — keeping the previous state`,
+      );
+      deps.post({
+        type: 'notice',
+        message:
+          'Forge: compaction would not have reduced the context ' +
+          `(estimated ~${afterChars.toLocaleString()} vs ~${beforeChars.toLocaleString()} characters), ` +
+          'so the previous state was kept. Start a new chat, or remove large attachments, if this repeats.',
+        conversationId: conv.id,
+      });
+      return 'failed';
+    }
+
+    // Non-destructive: recorded only once the candidate is known to be better.
+    conv.compaction = candidate;
     conv.updatedAt = Date.now();
     // Before invalidateExactTokenBudget below: that deletes the very counters
     // this row exists to preserve.

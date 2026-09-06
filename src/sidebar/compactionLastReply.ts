@@ -25,6 +25,18 @@ import type { ChatMessage } from '../llm/types';
 /** Enough for a closing report; short of a second summary. */
 export const LAST_REPLY_MAX_CHARS = 1200;
 
+/**
+ * Share of the budget given to the opening, when the message must be cut.
+ *
+ * The rest goes to the ending. Keeping only the head — which is what this did
+ * originally — throws away exactly the part that matters: a long reply states
+ * its next step, its open question or its handover at the *end*. The opening is
+ * kept so the resumed agent can still recognise which message this was.
+ */
+const HEAD_SHARE = 0.35;
+
+const ELISION = '\n…[middle omitted]…\n';
+
 /** The last thing the agent actually said, or nothing if it never spoke. */
 export function collectLastReply(messages: readonly ChatMessage[]): string | undefined {
   for (let index = messages.length - 1; index >= 0; index--) {
@@ -35,19 +47,56 @@ export function collectLastReply(messages: readonly ChatMessage[]): string | und
     if (typeof message.content !== 'string') continue;
     const text = message.content.trim();
     if (!text) continue;
-    return text.length <= LAST_REPLY_MAX_CHARS
-      ? text
-      : `${text.slice(0, LAST_REPLY_MAX_CHARS)}\n…[truncated]`;
+    return clampKeepingEnding(text, LAST_REPLY_MAX_CHARS);
   }
   return undefined;
 }
 
-export function renderLastReplyBlock(lastReply: string | undefined): string {
+/** Keep the opening and the ending, with the elision made explicit. */
+export function clampKeepingEnding(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  const room = Math.max(0, maxChars - ELISION.length);
+  const head = Math.floor(room * HEAD_SHARE);
+  const tail = room - head;
+  return `${text.slice(0, head)}${ELISION}${text.slice(text.length - tail)}`;
+}
+
+/**
+ * Did the agent do anything after saying this?
+ *
+ * The renderer used to assert flatly that nothing had happened since the last
+ * reply. That is false whenever the agent spoke and then ran tools — a common
+ * shape — and the assertion outranked the tool outcomes recorded elsewhere in
+ * the same block, which are the authoritative record of what executed.
+ */
+export function toolActivityFollowedLastReply(messages: readonly ChatMessage[]): boolean {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (
+      message?.role === 'assistant' &&
+      typeof message.content === 'string' &&
+      message.content.trim()
+    ) {
+      return false;
+    }
+    if (message?.role === 'tool' || (message?.tool_calls?.length ?? 0) > 0) return true;
+  }
+  return false;
+}
+
+export function renderLastReplyBlock(
+  lastReply: string | undefined,
+  toolsRanAfter: boolean = false,
+): string {
   if (!lastReply) return '';
+  const temporal = toolsRanAfter
+    ? 'That is the last text the user saw from you. Tool calls ran after it: the recorded ' +
+      'file changes and command outcomes above are authoritative about what actually executed.'
+    : 'That message is the most recent thing the user heard from you, and no tool ran after ' +
+      'it. Anything the recorded actions above describe is authoritative about what executed.';
   return (
     '\n\n**Your last message to the user, verbatim (recorded by Forge, not written by the model):**\n' +
     `${lastReply}\n\n` +
-    'That message is the most recent thing the user heard from you. Nothing has happened ' +
-    'since it was sent unless the messages after this context say so.'
+    temporal
   );
 }

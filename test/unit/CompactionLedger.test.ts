@@ -134,7 +134,7 @@ describe('collectCommandActions', () => {
     expect(actions).toEqual([
       {
         kind: 'command',
-        key: 'command:npm run ci',
+        key: 'command:exec_command|.|args=["run","ci"]\u001fcommand=npm',
         outcome: 'ok',
         line: '- ran `npm run ci` → exit 0',
       },
@@ -231,7 +231,36 @@ describe('recordedActionsBlock', () => {
 
     const block = recordedActionsBlock(messages);
     expect(block).toContain('FAILED write_file src/bad.ts');
-    expect(block).toContain('…and 7 more');
+    // The omission must read as history dropped for space, not as an absence
+    // of work: a resumed agent otherwise redoes what it cannot see.
+    expect(block).toContain('7 older recorded entries omitted for space');
+    expect(block).toContain('they happened; they are not listed here');
+  });
+
+  it('keeps recent successes when old failures could have filled every slot', () => {
+    // The original filling order took non-successes first, in oldest-first
+    // insertion order, so a run of old failures evicted every recent success
+    // and the agent redid work it had just finished.
+    const messages: ChatMessage[] = [];
+    for (let i = 0; i < 24; i++) {
+      messages.push(
+        call(`old${i}`, 'write_file', { path: `src/old${i}.ts` }),
+        result(`old${i}`, 'Error: stale failure'),
+      );
+    }
+    for (let i = 0; i < 10; i++) {
+      messages.push(
+        call(`new${i}`, 'write_file', { path: `src/new${i}.ts` }),
+        result(`new${i}`, 'done'),
+      );
+    }
+
+    const block = recordedActionsBlock(messages);
+    expect(block).toContain('write_file src/new9.ts');
+    expect(block).toContain('write_file src/new0.ts');
+    // The latest failures still survive; they simply cannot take every slot.
+    expect(block).toContain('src/old23.ts');
+    expect(block).not.toContain('src/old0.ts');
   });
 
   it('keeps successful artifact evidence when ordinary successes exceed the cap', () => {
@@ -247,33 +276,81 @@ describe('recordedActionsBlock', () => {
     expect(recordedActionsBlock(messages)).toContain('Downloaded krea2_turbo_fp8_scaled.safetensors');
   });
 
-  it('carries structured facts across generations with latest observation winning', () => {
+  it('keeps distinct commands distinct, even when they name the same artifact', () => {
+    // Keying on the first absolute path in the OUTPUT merged these two: the
+    // removal superseded the download, and the ledger then claimed only that
+    // the file had been removed. Output naming a path is evidence, not identity.
     const first = collectRecordedActions([
       call('old', 'exec_command', {
         command: 'download',
         args: ['N:\\AI\\models\\krea.safetensors'],
       }),
-      result(
-        'old',
-        'Saved to N:\\AI\\models\\krea.safetensors\n[exit code: 0]',
-      ),
+      result('old', 'Saved to N:\\AI\\models\\krea.safetensors\n[exit code: 0]'),
     ]);
     const later = collectRecordedActions([
       call('new', 'exec_command', {
         command: 'remove',
         args: ['N:\\AI\\models\\krea.safetensors'],
       }),
-      result(
-        'new',
-        'Removed N:\\AI\\models\\krea.safetensors\n[exit code: 0]',
-      ),
+      result('new', 'Removed N:\\AI\\models\\krea.safetensors\n[exit code: 0]'),
     ]);
 
     const merged = mergeRecordedActions(first, later);
-    const rendered = renderRecordedActionsBlock(merged);
-    expect(merged).toHaveLength(1);
+    const rendered = renderRecordedActionsBlock(merged.actions, merged.omitted);
+    expect(merged.actions).toHaveLength(2);
+    expect(rendered).toContain('Saved to N:\\AI\\models\\krea.safetensors');
     expect(rendered).toContain('Removed N:\\AI\\models\\krea.safetensors');
-    expect(rendered).not.toContain('Saved to');
+  });
+
+  it('supersedes an earlier observation of the same command in the same directory', () => {
+    const failed = collectRecordedActions([
+      call('a', 'run_build', { script: 'ci', cwd: 'packages/api' }),
+      result('a', '[exit code: 1]'),
+    ]);
+    const fixed = collectRecordedActions([
+      call('b', 'run_build', { script: 'ci', cwd: 'packages/api' }),
+      result('b', '[exit code: 0]'),
+    ]);
+
+    const merged = mergeRecordedActions(failed, fixed);
+    expect(merged.actions).toHaveLength(1);
+    expect(merged.actions[0]?.outcome).toBe('ok');
+  });
+
+  it('does not merge the same command run in different working directories', () => {
+    // `npm run ci` in two packages of a monorepo were one entry, so a failure
+    // in one silently replaced a success in the other.
+    const api = collectRecordedActions([
+      call('a', 'run_build', { script: 'ci', cwd: 'packages/api' }),
+      result('a', '[exit code: 0]'),
+    ]);
+    const web = collectRecordedActions([
+      call('b', 'run_build', { script: 'ci', cwd: 'packages/web' }),
+      result('b', '[exit code: 1]'),
+    ]);
+
+    const merged = mergeRecordedActions(api, web);
+    expect(merged.actions).toHaveLength(2);
+    expect(merged.actions.filter((action) => action.outcome === 'ok')).toHaveLength(1);
+  });
+
+  it('carries the omission count forward so a second compaction still discloses it', () => {
+    const many = collectRecordedActions(
+      Array.from({ length: 40 }, (_, i) => [
+        call(`f${i}`, 'write_file', { path: `src/f${i}.ts` }),
+        result(`f${i}`, 'done'),
+      ]).flat(),
+    );
+    const first = mergeRecordedActions(undefined, many);
+    expect(first.omitted.file).toBeGreaterThan(0);
+
+    // Second generation: recomputing from the already-capped list would report
+    // zero, and the earlier omission would silently vanish.
+    const second = mergeRecordedActions(first.actions, [], first.omitted);
+    expect(second.omitted.file).toBe(first.omitted.file);
+    expect(renderRecordedActionsBlock(second.actions, second.omitted)).toContain(
+      'omitted for space',
+    );
   });
 });
 

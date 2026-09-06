@@ -63,7 +63,12 @@ function statusLines(status: string): string {
  */
 export async function snapshotRepoState(): Promise<string> {
   try {
-    const cwd = gitCwd();
+    // Best-effort by design: this block is one optional paragraph of a
+    // compaction summary, so an ambiguous or missing repository means "omit
+    // the block", not "fail the compaction". That policy stays local to this
+    // caller — the user-invoked git tools must still refuse to guess which
+    // repository they are talking about.
+    const cwd = await gitCwd();
     // Concurrent, not sequential: three separate 3s timeouts would otherwise
     // add up to a 9s stall on the compaction path.
     const [unstaged, staged, status] = await Promise.all([

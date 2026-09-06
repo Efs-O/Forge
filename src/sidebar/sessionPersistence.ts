@@ -51,6 +51,8 @@ function copyCompaction(compaction: {
       }>
     | undefined;
   repoState?: string | undefined;
+  omittedActions?: { file: number; command: number } | undefined;
+  lastReplyFollowedByTools?: boolean | undefined;
 }): CompactionState {
   return {
     summary: compaction.summary,
@@ -71,6 +73,17 @@ function copyCompaction(compaction: {
         }
       : {}),
     ...(compaction.repoState !== undefined ? { repoState: compaction.repoState } : {}),
+    ...(compaction.omittedActions
+      ? {
+          omittedActions: {
+            file: compaction.omittedActions.file,
+            command: compaction.omittedActions.command,
+          },
+        }
+      : {}),
+    ...(compaction.lastReplyFollowedByTools !== undefined
+      ? { lastReplyFollowedByTools: compaction.lastReplyFollowedByTools }
+      : {}),
   };
 }
 

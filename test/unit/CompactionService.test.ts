@@ -16,7 +16,7 @@ import {
   recordedActionsBlock,
   renderRecordedActionsBlock,
 } from '../../src/sidebar/compactionLedger';
-import { applyCompactionWindow } from '../../src/sidebar/compactionWindow';
+import { applyCompactionWindow, messageCostChars } from '../../src/sidebar/compactionWindow';
 import type { ChatMessage } from '../../src/llm/types';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
 import type { HostToWebview } from '../../src/sidebar/messageBridge';
@@ -780,5 +780,148 @@ describe('runCompaction', () => {
     await expect(runCompaction(h.deps, c.id, { auto: true })).resolves.toBe('compacted');
     expect(c.compaction?.fromIndex).toBeLessThan(c.messages.length);
     expect(c.compaction?.lastReply).toBeUndefined();
+  });
+});
+
+describe('compaction fit guard', () => {
+  it('refuses a compaction that would not shrink a large window', async () => {
+    // A summary plus preserved state plus a retained tail can add up to more
+    // than it replaced. Committing that and auto-resuming is how a
+    // compact/resume loop starts: a model call per pass, and no reduction.
+    // The bulk is in tool-call ARGUMENTS, which the split's own tail cost
+    // scores as zero — so the tail passes RETAINED_TAIL_MAX_CHARS while
+    // actually costing 30,000 characters. That is what makes a non-reducing
+    // compaction reachable at all.
+    const c = conv([
+      { role: 'user', content: 'first task' },
+      { role: 'assistant', content: 'working' },
+      { role: 'user', content: 'second task' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'a',
+            type: 'function',
+            function: { name: 'write_file', arguments: 'x'.repeat(30000) },
+          },
+        ],
+      },
+      { role: 'tool', content: 'ok', tool_call_id: 'a' },
+    ]);
+    const h = harness(c, async () => long('summary'));
+
+    await expect(runCompaction(h.deps, c.id, { auto: true })).resolves.toBe('failed');
+    expect(c.compaction).toBeUndefined();
+    expect(
+      h.posted.some(
+        (msg) => msg.type === 'notice' && msg.message.includes('would not have reduced the context'),
+      ),
+    ).toBe(true);
+  });
+
+  it('still compacts a small conversation, where no loop is possible', async () => {
+    const c = conv([
+      { role: 'user', content: 'first task' },
+      { role: 'assistant', content: 'working' },
+      { role: 'user', content: 'second task' },
+      { role: 'assistant', content: 'done' },
+    ]);
+    const h = harness(c, async () => long('summary'));
+
+    await expect(runCompaction(h.deps, c.id, { auto: true })).resolves.toBe('compacted');
+  });
+
+  it('counts tool-call arguments and attachments, which the old tail cost skipped', () => {
+    const withArguments: ChatMessage = {
+      role: 'assistant',
+      content: null,
+      tool_calls: [
+        {
+          id: 'a',
+          type: 'function',
+          function: { name: 'write_file', arguments: JSON.stringify({ content: 'y'.repeat(500) }) },
+        },
+      ],
+    };
+    expect(messageCostChars(withArguments)).toBeGreaterThan(500);
+
+    const withAttachment: ChatMessage = {
+      role: 'user',
+      content: [{ type: 'image_url', image_url: { url: `data:image/png;base64,${'z'.repeat(400)}` } }],
+    } as ChatMessage;
+    expect(messageCostChars(withAttachment)).toBeGreaterThan(400);
+  });
+});
+
+describe('summary prompt continuation fidelity', () => {
+  const base: ChatMessage[] = [
+    { role: 'user', content: 'do the thing' },
+    { role: 'assistant', content: 'done' },
+  ];
+
+  it('asks for completed work and concluded investigation in State', () => {
+    const prompt = buildSummaryPrompt(undefined, base);
+    expect(prompt).toContain('record what is already DONE');
+    expect(prompt).toContain('naming the file, command or tool result');
+  });
+
+  it('asks Errors to separate unresolved blockers from failures already fixed', () => {
+    expect(buildSummaryPrompt(undefined, base)).toContain(
+      'separate blockers that are still unresolved',
+    );
+  });
+
+  it('asks Next for the pending action or the unanswered question', () => {
+    const prompt = buildSummaryPrompt(undefined, base);
+    expect(prompt).toContain('the question the user has not answered yet');
+    expect(prompt).toContain('Do not list work the recorded outcomes already show finished');
+  });
+
+  it('supplies the agent’s plan, labelled as intent rather than evidence', () => {
+    const prompt = buildSummaryPrompt(undefined, base, '', '', [
+      { text: 'ship the fix', status: 'pending' },
+      { text: 'write the test', status: 'done' },
+    ]);
+    expect(prompt).toContain('AGENT-MAINTAINED PLAN');
+    expect(prompt).toContain('not a host record of what ran');
+    expect(prompt).toContain('- [pending] ship the fix');
+  });
+
+  it('omits the plan block entirely when there is no plan', () => {
+    expect(buildSummaryPrompt(undefined, base)).not.toContain('AGENT-MAINTAINED PLAN');
+  });
+
+  it('cuts the source to whole messages and says how many were dropped', () => {
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'the original request' },
+      ...Array.from(
+        { length: 20 },
+        (_, i): ChatMessage => ({ role: 'assistant', content: `middle ${i} ${'m'.repeat(3000)}` }),
+      ),
+      { role: 'assistant', content: 'FINAL: the build is green and the fix is committed.' },
+    ];
+    const prompt = buildSummaryPrompt(undefined, messages);
+
+    // The most recent message survives intact — it is the completion report.
+    expect(prompt).toContain('FINAL: the build is green and the fix is committed.');
+    expect(prompt).toMatch(/\[\d+ messages from the middle of this window omitted for space/u);
+    expect(prompt).toContain('they happened');
+  });
+});
+
+describe('compacted window resume guidance', () => {
+  it('points at Next and discourages redoing recorded work, without a blanket trust', () => {
+    const [replacementUser] = applyCompactionWindow(
+      [{ role: 'user', content: 'tail' }],
+      { summary: 'Goal: x', fromIndex: 0 },
+    );
+    const text = String(replacementUser?.content ?? '');
+
+    expect(text).toContain('starting from what Next names');
+    expect(text).toContain('do not redo an operation recorded as completed');
+    expect(text).toContain('verify that one thing specifically');
+    // No blanket "trust everything", and no ban on re-reading code.
+    expect(text.toLowerCase()).not.toContain('trust everything');
   });
 });

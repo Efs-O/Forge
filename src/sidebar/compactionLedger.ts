@@ -160,6 +160,18 @@ function pathsFrom(args: Record<string, unknown>): string[] {
 }
 
 /**
+ * Identity form of a path.
+ *
+ * Case is folded only where the filesystem folds it. Lowercasing everywhere
+ * merged `Foo.ts` and `foo.ts` on Linux and macOS-with-a-case-sensitive-volume
+ * into one ledger entry, so an edit to one was recorded as superseding the edit
+ * to the other.
+ */
+function pathIdentity(value: string): string {
+  return process.platform === 'win32' ? value.toLowerCase() : value;
+}
+
+/**
  * Every file path named by a write-tool call.
  *
  * Kept exported and call-derived (not result-derived) because it is the tested
@@ -182,7 +194,7 @@ export function collectWrittenFiles(messages: readonly ChatMessage[]): string[] 
 function writeAction(tool: string, paths: string[], result: string | undefined): Action {
   const target = paths.length > 0 ? paths.join(' → ') : '(unnamed path)';
   const key = truncate(
-    `file:${paths.map((path) => path.toLowerCase()).join('>') || '(unnamed)'}`,
+    `file:${paths.map(pathIdentity).join('>') || '(unnamed)'}`,
     RECORDED_ACTION_KEY_MAX_CHARS - 1,
   );
   const outcome = classifyResult(result);
@@ -259,19 +271,45 @@ const DURABLE_OUTPUT_LINE =
 const COMMAND_EVIDENCE_MAX_LINES = 2;
 const COMMAND_EVIDENCE_LINE_MAX_CHARS = 220;
 
-const ABSOLUTE_PATH = /(?:[A-Za-z]:[\\/][^\s|;,'"]+|\/(?:[\w.-]+\/)+[\w.-]+)/;
+/**
+ * Stable identity for a command, derived from the call, never from its output.
+ *
+ * Two defects this replaces, both of which corrupted the ledger's merge:
+ *
+ *  - Keying on the first absolute path *mentioned in the output* made distinct
+ *    operations share an identity. A `cargo build` that wrote `target/app.exe`
+ *    and a later `ls target/app.exe` that merely observed it collapsed into one
+ *    entry, and the observation — which built nothing — superseded the build.
+ *    Output naming a path is evidence, not an identifier.
+ *  - Keying on the shortened display label ignored the working directory, so
+ *    `npm test` in two packages of a monorepo were one entry, and a failure in
+ *    one silently replaced a success in the other.
+ *
+ * Identity is the tool, the working directory and the full structured
+ * arguments. Two runs of the same command in the same place are the same
+ * operation, so the later observation supersedes the earlier — which is what
+ * makes a re-run after a fix clear the stale failure.
+ */
+function commandFactKey(tool: string, args: Record<string, unknown>): string {
+  const cwd = typeof args['cwd'] === 'string' && args['cwd'].trim() ? args['cwd'].trim() : '.';
+  const rest = Object.keys(args)
+    .filter((key) => key !== 'cwd')
+    .sort()
+    .map((key) => `${key}=${stableArgValue(args[key])}`)
+    .join('\u001f');
+  return truncate(
+    `command:${tool}|${pathIdentity(cwd.split('\\').join('/'))}|${rest}`,
+    RECORDED_ACTION_KEY_MAX_CHARS - 1,
+  );
+}
 
-function commandFactKey(label: string, evidence: readonly string[]): string {
-  for (const source of [...evidence, label]) {
-    const path = source.match(ABSOLUTE_PATH)?.[0];
-    if (path) {
-      return truncate(
-        `artifact:${path.replace(/\\/g, '/').toLowerCase()}`,
-        RECORDED_ACTION_KEY_MAX_CHARS - 1,
-      );
-    }
+function stableArgValue(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
   }
-  return truncate(`command:${label.trim().toLowerCase()}`, RECORDED_ACTION_KEY_MAX_CHARS - 1);
 }
 
 function commandEvidence(result: string): string[] {
@@ -286,13 +324,19 @@ function commandEvidence(result: string): string[] {
   return found;
 }
 
-function commandAction(tool: string, label: string, result: string | undefined): Action {
+function commandAction(
+  tool: string,
+  label: string,
+  args: Record<string, unknown>,
+  result: string | undefined,
+): Action {
+  const key = commandFactKey(tool, args);
   const outcome = classifyResult(result);
   if (outcome === 'failed') {
     const why = truncate((result ?? '').trim().split(/\r?\n/, 1)[0] ?? '', 100);
     return {
       kind: 'command',
-      key: commandFactKey(label, [why]),
+      key,
       outcome,
       line: `- ran \`${label}\` → FAILED — ${why}`,
     };
@@ -300,7 +344,7 @@ function commandAction(tool: string, label: string, result: string | undefined):
   if (outcome === 'unknown' || result === undefined) {
     return {
       kind: 'command',
-      key: commandFactKey(label, []),
+      key,
       outcome: 'unknown',
       line: `- ran \`${label}\` → outcome unknown (no result recorded)`,
     };
@@ -308,7 +352,7 @@ function commandAction(tool: string, label: string, result: string | undefined):
   if (NEVER_COMPLETES.has(tool)) {
     return {
       kind: 'command',
-      key: commandFactKey(label, []),
+      key,
       outcome: 'unknown',
       line: `- pasted \`${label}\` into the terminal → outcome unknown (never runs unattended)`,
     };
@@ -317,7 +361,7 @@ function commandAction(tool: string, label: string, result: string | undefined):
   if (exit === undefined) {
     return {
       kind: 'command',
-      key: commandFactKey(label, []),
+      key,
       outcome: 'unknown',
       line: `- ran \`${label}\` → outcome unknown (no exit code)`,
     };
@@ -325,7 +369,7 @@ function commandAction(tool: string, label: string, result: string | undefined):
   if (exit === 'null') {
     return {
       kind: 'command',
-      key: commandFactKey(label, []),
+      key,
       outcome: 'unknown',
       line: `- ran \`${label}\` → did not complete (exit null)`,
     };
@@ -334,7 +378,7 @@ function commandAction(tool: string, label: string, result: string | undefined):
     const evidence = commandEvidence(result);
     return {
       kind: 'command',
-      key: commandFactKey(label, evidence),
+      key,
       outcome: 'ok',
       line:
         `- ran \`${label}\` → exit 0` +
@@ -344,7 +388,7 @@ function commandAction(tool: string, label: string, result: string | undefined):
   }
   return {
     kind: 'command',
-    key: commandFactKey(label, []),
+    key,
     outcome: 'failed',
     line: `- ran \`${label}\` → exit ${exit} (FAILED)`,
   };
@@ -359,7 +403,7 @@ export function collectCommandActions(messages: readonly ChatMessage[]): Action[
       if (!COMMAND_TOOLS.has(call.function.name)) continue;
       const args = parseArgs(call.function.arguments) ?? {};
       const label = commandLabel(call.function.name, args);
-      actions.push(commandAction(call.function.name, label, results.get(call.id)));
+      actions.push(commandAction(call.function.name, label, args, results.get(call.id)));
     }
   }
   return actions;
