@@ -1,5 +1,8 @@
 import { spawn, type ChildProcess } from 'child_process';
 
+/** Teardown failed: the caller must retain the process and its reserved port. */
+export class LlamaTerminationError extends Error {}
+
 /**
  * Single launch point for a `llama-server` child process. Both `DirectBackend`
  * (chat) and `EmbeddingBackend` (semantic search) go through here so the spawn
@@ -15,54 +18,73 @@ export function spawnLlamaServer(binary: string, args: string[]): ChildProcess {
 
 /**
  * Gracefully terminate a spawned `llama-server` process.
- * - Windows: best-effort `proc.kill()`, then `taskkill /T /F` to take down the
- *   whole process tree.
+ * - Windows: taskkill /T /F while the parent still identifies its process tree.
  * - POSIX: `SIGTERM`, then `SIGKILL` after a 5 s grace period.
- * Resolves once the process exits or an overall 6 s deadline elapses, so callers
- * never hang on a wedged process.
+ * Rejects on failed termination or deadline expiry; callers retain ownership.
  */
 export function killLlamaProcess(proc: ChildProcess): Promise<void> {
-  return new Promise<void>((resolve) => {
+  if (proc.exitCode !== null || proc.signalCode !== null) return Promise.resolve();
+  return new Promise<void>((resolve, reject) => {
     let settled = false;
-    const finish = (): void => {
+    let escalation: ReturnType<typeof setTimeout> | undefined;
+    let killer: ChildProcess | undefined;
+    const finish = (err?: Error): void => {
       if (settled) return;
       settled = true;
-      resolve();
+      clearTimeout(deadline);
+      if (escalation) clearTimeout(escalation);
+      proc.removeListener('exit', onExit);
+      proc.removeListener('error', onError);
+      if (err) reject(new LlamaTerminationError(err.message));
+      else resolve();
     };
-
-    proc.once('exit', finish);
-    proc.once('error', finish);
+    const onExit = (): void => {
+      // On Windows the parent exiting alone does not confirm tree teardown.
+      if (!killer) finish();
+    };
+    const onError = (err: Error): void => finish(err);
+    const deadline = setTimeout(
+      () => finish(new Error(`llama-server ${proc.pid ?? '?'} did not stop within 6 seconds.`)),
+      6000,
+    );
+    proc.once('exit', onExit);
+    proc.once('error', onError);
 
     if (process.platform === 'win32' && proc.pid) {
       try {
-        proc.kill();
-      } catch {
-        // ignore and fall through to taskkill
+        killer = spawn('taskkill', ['/PID', String(proc.pid), '/T', '/F'], {
+          shell: false,
+          stdio: 'ignore',
+          windowsHide: true,
+        });
+      } catch (err) {
+        finish(err instanceof Error ? err : new Error(String(err)));
+        return;
       }
-
-      const killer = spawn('taskkill', ['/PID', String(proc.pid), '/T', '/F'], {
-        shell: false,
-        stdio: 'ignore',
+      killer.once('exit', (code) => {
+        finish(
+          code === 0
+            ? undefined
+            : new Error(`taskkill failed for llama-server ${proc.pid}: exit ${code}.`),
+        );
       });
-      killer.once('exit', () => setTimeout(finish, 250));
-      killer.once('error', () => setTimeout(finish, 250));
+      killer.once('error', onError);
     } else {
       try {
         proc.kill('SIGTERM');
-      } catch {
-        finish();
+      } catch (err) {
+        finish(err instanceof Error ? err : new Error(String(err)));
         return;
       }
 
-      setTimeout(() => {
+      if (settled) return;
+      escalation = setTimeout(() => {
         try {
           proc.kill('SIGKILL');
-        } catch {
-          // process likely already exited
+        } catch (err) {
+          finish(err instanceof Error ? err : new Error(String(err)));
         }
       }, 5000);
     }
-
-    setTimeout(finish, 6000);
   });
 }

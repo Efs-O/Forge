@@ -659,6 +659,42 @@ describe('remote durable boundaries', () => {
 });
 
 describe('remote runtime lifecycle', () => {
+  it('serializes configuration changes behind WhatsApp unlink', async () => {
+    const { directory } = await newStore();
+    let finishUnlink!: () => void;
+    const unlink = vi.fn(() => new Promise<void>((resolve) => { finishUnlink = resolve; }));
+    const stop = vi.fn(async () => {});
+    const channel: RemoteChannel = {
+      name: 'whatsapp',
+      onEvent: () => ({ dispose: stop }),
+      start: async () => {}, unlink,
+      send: async () => {},
+      retractPrompt: async () => {},
+    };
+    const runtime = new RemoteRuntime({
+      storageDirectory: directory, workspaceId: 'workspace', host: host(),
+      secrets: new MemorySecrets() as unknown as vscode.SecretStorage,
+      channelFactories: { whatsapp: () => channel }, notifyLocal: vi.fn(),
+    });
+    const config = ForgeConfigSchema.parse({
+      models: [{ name: 'm', provider: 'ollama', endpoint: 'http://127.0.0.1:11434' }],
+      remote: { enabled: true, whatsapp: { enabled: true } },
+    });
+    await runtime.applyConfig(config);
+    const unlinking = runtime.unlinkWhatsApp();
+    await vi.waitFor(() => expect(unlink).toHaveBeenCalledOnce());
+    const changing = runtime.applyConfig({ ...config, remote: { ...config.remote!, enabled: false } });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(stop).not.toHaveBeenCalled();
+    } finally {
+      finishUnlink();
+      await Promise.all([unlinking, changing]);
+      await runtime.dispose();
+    }
+    expect(stop).toHaveBeenCalledOnce();
+  });
+
   it('subscribes to compaction before channel startup', async () => {
     const { directory } = await newStore();
     const persisted = new RemoteRequestStore(path.join(directory, 'remote-state-v2.json'));

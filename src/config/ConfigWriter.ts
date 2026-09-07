@@ -84,9 +84,8 @@ function atomicWrite(configPath: string, contents: string): void {
   if (fs.existsSync(configPath)) fs.copyFileSync(configPath, backupPath);
   try {
     fs.writeFileSync(temporaryPath, contents, 'utf8');
-    // Windows rename does not replace an existing file. The backup remains the
-    // recovery point if the final replacement is interrupted.
-    if (fs.existsSync(configPath)) fs.rmSync(configPath, { force: true });
+    // Replace directly: deleting first leaves the live config missing if rename
+    // fails. An open-file sharing violation must fail with the original intact.
     fs.renameSync(temporaryPath, configPath);
   } catch (err) {
     if (fs.existsSync(temporaryPath)) fs.rmSync(temporaryPath, { force: true });

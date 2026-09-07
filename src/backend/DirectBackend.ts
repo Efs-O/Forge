@@ -352,8 +352,13 @@ export class DirectBackend implements BackendController {
       return;
     }
     const proc = this.proc;
-    this.proc = null;
-    await killLlamaProcess(proc);
+    this.proc = null; // Suppress unexpected-exit reconciliation during teardown.
+    try {
+      await killLlamaProcess(proc);
+    } catch (err) {
+      this.proc = proc; // Keep ownership so a failed stop can be retried.
+      throw err;
+    }
   }
 
   private resolveModel(name: string): ModelConfig {

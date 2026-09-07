@@ -17,8 +17,8 @@ const CONTENDED = new Set(['EPERM', 'EBUSY', 'EACCES']);
 export async function writeRemoteStateFile(filePath: string, contents: string): Promise<void> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   const temporary = `${filePath}.${randomUUID()}.tmp`;
-  await fs.writeFile(temporary, contents, { encoding: 'utf8', mode: 0o600 });
   try {
+    await fs.writeFile(temporary, contents, { encoding: 'utf8', mode: 0o600 });
     for (let attempt = 0; ; attempt += 1) {
       try {
         await fs.rename(temporary, filePath);

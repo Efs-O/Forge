@@ -1,9 +1,13 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { writeConfigSafely } from '../../src/config/ConfigWriter';
 import { loadConfig } from '../../src/config/ConfigLoader';
+
+vi.mock('fs', async (importOriginal) => ({
+  ...await importOriginal<typeof import('fs')>(),
+}));
 
 describe('writeConfigSafely', () => {
   let directory: string;
@@ -14,7 +18,23 @@ describe('writeConfigSafely', () => {
     configPath = path.join(directory, 'config.yaml');
   });
 
-  afterEach(() => fs.rmSync(directory, { recursive: true, force: true }));
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+
+  it('preserves the live config when replacement fails', () => {
+    fs.writeFileSync(configPath, 'original: true\n');
+    vi.spyOn(fs, 'renameSync').mockImplementation(() => {
+      throw new Error('replacement denied');
+    });
+    expect(() => writeConfigSafely(configPath, {
+      models: [{ name: 'm', provider: 'ollama', endpoint: 'http://127.0.0.1:11434' }],
+      active_model: 'm', llama_server: {},
+    })).toThrow('replacement denied');
+    expect(fs.readFileSync(configPath, 'utf8')).toBe('original: true\n');
+    expect(fs.existsSync(`${configPath}.tmp`)).toBe(false);
+  });
 
   it('validates and writes a loadable config', () => {
     writeConfigSafely(configPath, {

@@ -5,6 +5,12 @@ const denied = (command: string, args: string[] = []): string | null =>
   checkDenyList(command, args, getBuiltinDenyList())?.description ?? null;
 
 describe('recursive force delete', () => {
+  it('recognizes Windows wrapper suffixes in raw terminal commands', () => {
+    expect(denied('git.exe rm -rf src')).toContain('recursive force delete');
+    expect(denied('npm.cmd rm -rf .')).toContain('recursive force delete');
+    expect(denied('NPX.CMD rm -rf .')).toContain('recursive force delete');
+    expect(denied('git.exe rm -f README.md')).toBeNull();
+  });
   it('still blocks every destructive form', () => {
     // The whole point of the rule — these must never regress.
     expect(isRecursiveForceDelete('rm -rf /')).toBe(true);

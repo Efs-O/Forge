@@ -169,7 +169,13 @@ export class EmbeddingBackend implements vscode.Disposable {
 
     const proc = this.proc;
     this.proc = null;
-    await killLlamaProcess(proc);
+    try {
+      await killLlamaProcess(proc);
+    } catch (err) {
+      this.proc = proc;
+      this.ownsProcess = true;
+      throw err;
+    }
   }
 
   private idleTimeoutMs(): number {

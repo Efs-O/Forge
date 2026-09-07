@@ -158,7 +158,7 @@ export class BackendPool implements IBackendPool {
     if (this.isOllamaModel(key)) {
       const backend = this.ollamaSlots.get(key);
       if (backend) {
-        await backend.stop().catch(() => {});
+        await backend.stop();
         this.ollamaSlots.delete(key);
       }
     } else if (this.sharedSlots.has(key)) {
@@ -182,7 +182,7 @@ export class BackendPool implements IBackendPool {
           );
         }
         if (slot.starting) await slot.starting.catch(() => {});
-        await slot.backend.stop().catch(() => {});
+        await slot.backend.stop();
         this.freeSlot(key, slot);
         if (this.config.shared_runtime?.enabled) this.sharedRegistry.removeOwner(runtimeKey);
       }

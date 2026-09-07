@@ -35,6 +35,7 @@ export interface PortClaim {
    * await `evicted.backend.stop()` before spawning on `port`.
    */
   evicted: PoolSlot | null;
+  evictedModel?: string;
 }
 
 /**
@@ -69,7 +70,7 @@ export function claimPort(table: SlotTable, allowEvict: boolean): PortClaim {
   const [lruModel, slot] = lruEntry;
   log.info(`[BackendPool] evicting LRU slot: ${lruModel} on port ${slot.port}`);
   table.slots.delete(lruModel);
-  return { port: slot.port, evicted: slot };
+  return { port: slot.port, evicted: slot, evictedModel: lruModel };
 }
 
 /**

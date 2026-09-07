@@ -167,15 +167,14 @@ export class RemoteRuntime {
     return channel.requestPairingCode(phoneNumber);
   }
 
-  async unlinkWhatsApp(): Promise<void> {
-    const transport = this.manager.get('whatsapp');
-    if (!transport?.channel.unlink) throw new Error('Forge remote WhatsApp is not running.');
-    await transport.channel.unlink();
-    // NOTE: mutates the active map outside the lifecycleTail (pre-existing
-    // race, not introduced by the split). A concurrent applyConfig could
-    // interleave. Left for a separate change.
-    await this.manager.stopTransport('whatsapp');
-    await this.auth.unpair('whatsapp');
+  unlinkWhatsApp(): Promise<void> {
+    return this.enqueue(async () => {
+      const transport = this.manager.get('whatsapp');
+      if (!transport?.channel.unlink) throw new Error('Forge remote WhatsApp is not running.');
+      await transport.channel.unlink();
+      await this.manager.stopTransport('whatsapp');
+      await this.auth.unpair('whatsapp');
+    });
   }
 
   activeTransports(): string[] {

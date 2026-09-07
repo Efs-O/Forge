@@ -10,6 +10,7 @@
 
 import type { BackendController } from './BackendController';
 import { DirectBackend } from './DirectBackend';
+import { LlamaTerminationError } from './llamaProcess';
 import type { ForgeConfig } from '../config/types';
 import type { SharedRuntimeRegistry } from './SharedRuntimeRegistry';
 import type { PoolSlot, PortClaim } from './poolSlots';
@@ -52,10 +53,14 @@ export function startSlot(
   // raced the two loads and OOM'd the GPU. The slot above is already registered,
   // so a concurrent acquire joins this boot instead of starting a second one.
   // With nothing to evict, hotSwap must still start synchronously.
+  let evictionFailed = false;
   const swapped = evicted
     ? evicted.backend
         .stop()
-        .catch(() => {})
+        .catch((err: unknown) => {
+          evictionFailed = true;
+          throw err;
+        })
         .then(() => backend.hotSwap(modelName))
     : backend.hotSwap(modelName);
 
@@ -77,7 +82,16 @@ export function startSlot(
       log.info(`[BackendPool] slot ready: ${modelName} on port ${port}`);
     })
     .catch((err: unknown) => {
-      ctx.freeSlot(modelName, slot);
+      if (evictionFailed && evicted && claim.evictedModel) {
+        // The old process still owns this port. Restore its slot for retry,
+        // rather than returning the port to the allocator after a failed stop.
+        ctx.slots.delete(modelName);
+        ctx.slots.set(claim.evictedModel, evicted);
+      } else if (err instanceof LlamaTerminationError) {
+        slot.starting = null;
+      } else {
+        ctx.freeSlot(modelName, slot);
+      }
       rejectStart(err);
     });
 
@@ -106,7 +120,8 @@ export async function restartSlot(
     resolveStart();
     return slot.backend;
   } catch (err) {
-    ctx.freeSlot(modelName, slot);
+    if (err instanceof LlamaTerminationError) slot.starting = null;
+    else ctx.freeSlot(modelName, slot);
     rejectStart(err);
     throw err;
   }

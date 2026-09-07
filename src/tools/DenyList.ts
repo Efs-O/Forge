@@ -41,7 +41,7 @@ export function isRecursiveForceDelete(fullCommand: string): boolean {
     if (tokens[i] !== 'rm') continue;
     // `rm` must be the command itself, or the subcommand of a known wrapper —
     // not a substring of a path that happened to tokenize alone.
-    const previous = tokens[i - 1];
+    const previous = tokens[i - 1]?.replace(/\.(cmd|exe|bat)$/iu, '').toLowerCase();
     if (previous !== undefined && !COMMAND_PREFIXES.has(previous)) continue;
     let recursive = false;
     let force = false;

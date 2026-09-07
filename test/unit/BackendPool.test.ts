@@ -22,6 +22,7 @@ const harness = vi.hoisted(() => ({
   events: [] as string[],
   /** While true, stop() parks until the test releases it. */
   blockStops: false,
+  failStops: false,
   pendingStops: [] as Array<() => void>,
 }));
 
@@ -32,6 +33,7 @@ function resetHarness(): void {
   harness.events.length = 0;
   harness.pendingStops.length = 0;
   harness.blockStops = false;
+  harness.failStops = false;
 }
 
 /** Let every already-scheduled promise callback run. */
@@ -59,6 +61,7 @@ vi.mock('../../src/backend/DirectBackend', () => {
     async stop(): Promise<void> {
       this.ready = false;
       harness.events.push(`stop:${this.port}`);
+      if (harness.failStops) throw new Error('termination failed');
       if (harness.blockStops) {
         await new Promise<void>((resolve) => harness.pendingStops.push(resolve));
       }
@@ -162,6 +165,23 @@ describe('BackendPool port accounting', () => {
     expect(harness.pending).toHaveLength(1);
     expect(pool.isLoaded('A@main')).toBe(true);
     expect(pool.isLoaded('A-legacy')).toBe(true);
+  });
+
+  it('retains the old slot and port when eviction fails, then permits retry', async () => {
+    const pool = new BackendPool(makeConfig(1));
+    const first = pool.acquire('A');
+    harness.pending[0].resolve();
+    await first;
+    harness.failStops = true;
+    await expect(pool.acquire('B')).rejects.toThrow('termination failed');
+    expect(pool.loadedModelNames()).toEqual(['A']);
+    expect(freePortsOf(pool)).toEqual([]);
+    expect(harness.pending).toHaveLength(1);
+    await expect(pool.release('A')).rejects.toThrow('termination failed');
+    expect(pool.loadedModelNames()).toEqual(['A']);
+    harness.failStops = false;
+    await pool.release('A');
+    expect(freePortsOf(pool)).toEqual([8080]);
   });
 
   it('waits for the evicted backend to exit before spawning its replacement', async () => {
