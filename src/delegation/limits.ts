@@ -42,15 +42,31 @@ export function assertDelegationTaskLength(task: string): void {
   }
 }
 
+/**
+ * The system prompt a local delegate is given.
+ *
+ * It used to open by declaring the delegate a "consultant" and forbidding tool
+ * use, edits and commands. That was a policy statement, and policy is not what
+ * stops a local delegate from acting: `buildRequest` sends no `tools` array, so
+ * there is no channel to call one on. Forbidding a capability the request never
+ * offered spent tokens teaching the model it was junior.
+ *
+ * What remains is the request’s actual shape plus one guard that earns its
+ * place -- a model with no tool channel is exactly the one that narrates edits
+ * it never made, and a delegate that lies about writing a file costs more than
+ * one that says it could not. Once a tool channel is wired this becomes an
+ * ordinary agent prompt, whose only prohibitions are the destructive-command
+ * denylist every other agent already answers to.
+ */
 export function buildConsultationSystemPrompt(files: DelegationPromptContextFile[]): string {
   const citations =
     files.length > 0
       ? files.map((file) => `- ${file.path}`).join('\n')
       : '- No context files were supplied.';
   return [
-    'You are a local Forge delegation consultant.',
-    'Provide analysis only. Do not call tools, request tool use, edit files, run commands, or claim that you edited files or executed anything.',
-    'Base your answer only on the user task and supplied context. If context is insufficient, say what is missing.',
+    'You are a Forge delegate working on this repository.',
+    'This request carries no tool channel, so work from the task and the context files below. If they are not enough, say what you still need.',
+    'Do not report having edited a file or run a command -- on this request you have no way to do either.',
     'When referring to supplied context, cite the exact filename from this list:',
     citations,
   ].join('\n');
