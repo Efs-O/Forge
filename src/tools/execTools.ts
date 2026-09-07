@@ -297,6 +297,9 @@ export function makeRunTestsTool(): RegisteredTool {
 
 // ── run_build ──────────────────────────────────────────────────────────────────
 
+/** Foreground ceiling. Anything slower must be started with background: true. */
+const RUN_BUILD_TIMEOUT_MS = 120_000;
+
 export function makeRunBuildTool(): RegisteredTool {
   return {
     definition: {
@@ -304,7 +307,9 @@ export function makeRunBuildTool(): RegisteredTool {
       function: {
         name: 'run_build',
         description:
-          'Run an npm script (default: "build"). Reads package.json to verify the script exists.',
+          'Run an npm script (default: "build"). Reads package.json to verify the script exists. ' +
+          'Foreground runs are capped at 2 minutes — pass background=true for a script that takes ' +
+          'longer (release builds, packaging) and poll it with monitor_execution.',
         parameters: {
           type: 'object',
           properties: {
@@ -313,6 +318,11 @@ export function makeRunBuildTool(): RegisteredTool {
               type: 'string',
               description:
                 'Project directory to run in, relative to the workspace root (or absolute). Defaults to the workspace root — set it when the project is a subdirectory, e.g. "threejs-game-prompt".',
+            },
+            background: {
+              type: 'boolean',
+              description:
+                'Start the script without waiting for it. Returns an execution_id for monitor_execution. Required for anything over 2 minutes.',
             },
           },
           required: [],
@@ -350,14 +360,45 @@ export function makeRunBuildTool(): RegisteredTool {
       guardExec('npm', cmdArgs);
 
       const invocation = resolvePackageRunnerInvocation('npm');
-      const result = await spawnAndWait(
-        invocation.command,
-        [...invocation.argsPrefix, ...cmdArgs],
-        root,
-        120_000,
-        {},
-        context?.abortSignal,
-      );
+      const command = invocation.command;
+      const spawnArgs = [...invocation.argsPrefix, ...cmdArgs];
+
+      if (args['background'] === true) {
+        const started = backgroundExecutionManager.start({ command, args: spawnArgs, cwd: root });
+        // Same reason as exec_command: a failed launch is reported on the next
+        // tick, so observing immediately would call a dead process "running".
+        await new Promise((resolve) => setImmediate(resolve));
+        const observation = await backgroundExecutionManager.observe(started.id, 0, 0, 0);
+        return formatBackgroundObservation(observation, 0, {});
+      }
+
+      let result;
+      try {
+        result = await spawnAndWait(
+          command,
+          spawnArgs,
+          root,
+          RUN_BUILD_TIMEOUT_MS,
+          {},
+          context?.abortSignal,
+        );
+      } catch (error) {
+        // A bare "process timed out after 120000ms" taught the agent nothing:
+        // `npm run package` takes ~3 minutes here, so this call could NEVER
+        // succeed, and the retry that does work had to be guessed. An audited
+        // session burned a turn and two minutes on exactly that. Name the way
+        // out in the failure that blocks it.
+        if (error instanceof ExecCommandError && error.kind === 'timeout') {
+          throw new ExecCommandError(
+            'timeout',
+            command,
+            `npm run ${script} exceeded run_build's ${RUN_BUILD_TIMEOUT_MS / 1000}s foreground ` +
+              `limit. It is still a valid script — re-run it as run_build with background: true, ` +
+              `then poll monitor_execution for the execution_id it returns.`,
+          );
+        }
+        throw error;
+      }
       const out = result.stdout.slice(0, MAX_OUTPUT_CHARS);
       let formatted = out;
       if (result.stderr) formatted += `\n[stderr]\n${result.stderr.slice(0, MAX_OUTPUT_CHARS)}`;

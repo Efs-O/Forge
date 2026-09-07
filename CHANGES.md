@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- **`run_build` could never package, and said only "process timed out".** Its
+  foreground timeout is 120 s and `npm run package` takes ~180 s, so that call
+  was guaranteed to fail — and the error named no alternative, so the retry that
+  works had to be guessed. An audited session burned a turn and two minutes on
+  exactly this before falling back to `exec_command` with `background: true`.
+  `run_build` now takes `background` itself, and its timeout says which flag to
+  re-run with and which tool to poll. A refusal that cannot name its sanctioned
+  alternative teaches the agent the capability does not exist.
+
+- **`npm run package` refuses to overwrite a VSIX that is already there.**
+  `vsce package` replaces `forge-llm-<version>.vsix` in place with no warning, so
+  packaging without a version bump left two different builds behind one
+  filename. The script now fails with the version to bump and the file to
+  delete; `FORGE_ALLOW_VSIX_OVERWRITE=1` is the deliberate rebuild path. A
+  mechanical guarantee rather than a prompt rule that costs tokens on every turn
+  and is forgotten on the one that matters.
+
 - **One `/select 1` from Telegram became ~30 inbound events and answered
   "remote rate limit exceeded".** The rate limit (30 per chat per minute) was
   never the problem — it was the brake. `/select <n>` calls
