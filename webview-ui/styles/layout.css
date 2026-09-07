@@ -85,13 +85,40 @@ body {
 
 /* ── Message list ───────────────────────────────────────────────────────── */
 
-#messages {
+/*
+ * One pane per visited tab, all mounted, only the active one shown - see
+ * MessageList's `active` prop. Class rather than id: the id is unique and rides
+ * the visible pane, so anything selecting `#messages` still finds exactly one.
+ */
+.messages-pane {
   flex: 1;
   overflow-y: auto;
   padding: 10px 10px 4px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+/* `display: flex` above outranks the UA sheet's `[hidden] { display: none }`,
+   so without this every pane would be on screen at once. */
+.messages-pane[hidden] {
+  display: none;
+}
+
+/*
+ * Skip layout and paint for rows scrolled out of view. The transcript is not
+ * virtualized - every row is a live component - so on a long conversation this
+ * is what keeps the cost of a repaint proportional to the viewport rather than
+ * to the transcript. It matters most on the path that has no React work at all
+ * to blame: returning to the VS Code window and paying one full re-composite of
+ * a several-thousand-node list.
+ *
+ * `auto` on contain-intrinsic-size makes the browser remember each row's last
+ * rendered height, so the scrollbar stops jumping once a row has been seen.
+ */
+.messages-pane > * {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 60px;
 }
 
 /*
@@ -101,7 +128,7 @@ body {
  * `justify-content: flex-end` on the container: the latter makes overflowing
  * content unreachable above the scroll origin in Chromium.
  */
-#messages > *:first-child {
+.messages-pane > *:first-child {
   margin-top: auto;
 }
 

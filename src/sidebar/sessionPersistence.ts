@@ -11,6 +11,7 @@ import type { Memento } from 'vscode';
 import type { ChatMessage } from '../llm/types';
 import type { CompactionState } from './compactionTypes';
 import {
+  ACTIVE_ID_KEY,
   HISTORY_KEY_LEGACY,
   MAX_HISTORY_CONVERSATIONS,
   SESSION_KEY_V1,
@@ -281,9 +282,19 @@ export function loadSidebarSession(workspaceState: Memento): SidebarRuntime {
   const parsedV1 = sidebarSessionPersistedSchema.safeParse(rawV1);
   if (parsedV1.success && parsedV1.data.conversations.length > 0) {
     const d = parsedV1.data;
-    const activeOk = d.conversations.some((c) => c.id === d.activeConversationId);
-    let activeId = d.activeConversationId;
-    if (!activeOk) activeId = d.conversations[0].id;
+    // The pointer key wins when it still names an open conversation: a tab
+    // switch writes only that, so the blob's own `activeConversationId` can be
+    // several switches stale. Absent (records written before the split) or
+    // dangling, fall back to the blob and then to the first tab.
+    const pointer = workspaceState.get<string>(ACTIVE_ID_KEY);
+    const candidates = [pointer, d.activeConversationId];
+    let activeId = d.conversations[0].id;
+    for (const candidate of candidates) {
+      if (candidate && d.conversations.some((c) => c.id === candidate)) {
+        activeId = candidate;
+        break;
+      }
+    }
 
     void workspaceState.update(HISTORY_KEY_LEGACY, undefined as unknown as string);
     return {
@@ -307,6 +318,22 @@ export function loadSidebarSession(workspaceState: Memento): SidebarRuntime {
 
 export function saveSidebarSession(workspaceState: Memento, session: SidebarRuntime): void {
   void workspaceState.update(SESSION_KEY_V1, runtimeToPersisted(session));
+  // Keep the pointer in step so it is always the authoritative answer on load,
+  // rather than a value that may be older than the blob beside it.
+  void workspaceState.update(ACTIVE_ID_KEY, session.activeConversationId);
+}
+
+/**
+ * Persist WHICH conversation is active, without touching the transcripts.
+ *
+ * Switching tabs changes exactly this one string. Routing it through
+ * `saveSidebarSession` rebuilt and reserialized every open tab and all 40
+ * archived conversations - 16 MB in the workspace this was measured in -
+ * synchronously on the extension host, which is a large part of why a switch
+ * cost a visible second. See `docs/plans/SIDEBAR_SWITCH_LATENCY_PLAN.md`.
+ */
+export function saveActiveConversationId(workspaceState: Memento, id: string): void {
+  void workspaceState.update(ACTIVE_ID_KEY, id);
 }
 
 /** Tab list + transcripts for authoritative webview sync. */

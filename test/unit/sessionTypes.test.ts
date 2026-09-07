@@ -5,10 +5,10 @@ import {
   createDefaultSession,
   deriveTitle,
   displayTitle,
-  displayPersistMessages,
-  historyMetasFromSession,
   HISTORY_KEY_LEGACY,
   loadSidebarSession,
+  saveActiveConversationId,
+  saveSidebarSession,
   runtimeToPersisted,
   SESSION_KEY_V1,
   sidebarSessionPersistedSchema,
@@ -17,6 +17,11 @@ import {
   isUntitled,
   upsertHistoryConversation,
 } from '../../src/sidebar/sessionTypes';
+import {
+  countDisplayMessages,
+  displayPersistMessages,
+  historyMetasFromSession,
+} from '../../src/sidebar/sessionProjections';
 import type { ChatMessage } from '../../src/llm/types';
 
 function makeMemento(store: Record<string, unknown>): Memento {
@@ -515,5 +520,89 @@ describe('sessionTypes', () => {
     const rt = loadSidebarSession(makeMemento(store));
     expect(rt.conversations).toHaveLength(1);
     expect(rt.activeConversationId).toBe(rt.conversations[0].id);
+  });
+});
+
+describe('countDisplayMessages', () => {
+  const toolCall = {
+    id: 'call-1',
+    type: 'function' as const,
+    function: { name: 'edit_file', arguments: '{}' },
+  };
+
+  // Every branch displayPersistMessages has: an internal prompt, a plain user
+  // turn, a reasoning-only tool-call turn, a tool result with a file preview
+  // hanging off it, a split answer-after-thought turn, and a turn whose content
+  // is parts rather than a string.
+  const transcript: ChatMessage[] = [
+    { role: 'user', content: 'hidden', internal: true },
+    { role: 'user', content: 'go' },
+    { role: 'assistant', content: null, reasoning: 'planning', tool_calls: [toolCall] },
+    { role: 'tool', content: 'ok', tool_call_id: 'call-1', name: 'edit_file' },
+    { role: 'assistant', content: 'answer', reasoning: 'thought' },
+    { role: 'user', content: [{ type: 'text', text: 'with parts' }] },
+    { role: 'assistant', content: 'plain' },
+  ];
+
+  const diffs = [
+    { toolCallId: 'call-1', filePath: 'a.ts', hunks: null, isNew: false, isDeleted: false },
+  ];
+
+  /**
+   * The badge count is derived independently of the rows now, so this is the
+   * only thing keeping the two in step. If a branch is added to
+   * `displayPersistMessages` and not to `countDisplayMessages`, tab badges
+   * start disagreeing with the transcript and nothing else would say so.
+   */
+  it('agrees with the rows displayPersistMessages actually emits', () => {
+    const rows = displayPersistMessages(transcript, diffs).filter((m) => m.role !== 'tool');
+    expect(countDisplayMessages(transcript, diffs)).toBe(rows.length);
+  });
+
+  it('counts the diff rows a tool result drags along, and no tool rows', () => {
+    const withDiff = countDisplayMessages(transcript, diffs);
+    const withoutDiff = countDisplayMessages(transcript, []);
+    expect(withDiff - withoutDiff).toBe(1);
+  });
+});
+
+describe('active conversation pointer', () => {
+  it('survives a save that never touched the transcript blob', () => {
+    const store = new Map<string, unknown>();
+    const memento = {
+      get: (key: string) => store.get(key),
+      update: (key: string, value: unknown) => {
+        store.set(key, value);
+        return Promise.resolve();
+      },
+    } as unknown as Memento;
+
+    const session = createDefaultSession();
+    const second = { ...session.conversations[0]!, id: 'second', messages: [] };
+    session.conversations.push(second);
+    saveSidebarSession(memento, session);
+
+    // A tab switch writes only this - the 16 MB blob beside it still names the
+    // conversation that was active before the switch.
+    saveActiveConversationId(memento, 'second');
+
+    expect(loadSidebarSession(memento).activeConversationId).toBe('second');
+  });
+
+  it('falls back to the blob when the pointer names a conversation that is gone', () => {
+    const store = new Map<string, unknown>();
+    const memento = {
+      get: (key: string) => store.get(key),
+      update: (key: string, value: unknown) => {
+        store.set(key, value);
+        return Promise.resolve();
+      },
+    } as unknown as Memento;
+
+    const session = createDefaultSession();
+    saveSidebarSession(memento, session);
+    saveActiveConversationId(memento, 'closed-since');
+
+    expect(loadSidebarSession(memento).activeConversationId).toBe(session.conversations[0]!.id);
   });
 });

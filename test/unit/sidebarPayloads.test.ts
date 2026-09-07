@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { buildModelsMessage, buildSessionMetrics } from '../../src/sidebar/sidebarPayloads';
+import {
+  buildModelsMessage,
+  buildSessionMetrics,
+  buildSessionSyncMessage,
+} from '../../src/sidebar/sidebarPayloads';
 import type { ForgeConfig } from '../../src/config/types';
 import type { ModelEntry } from '../../src/sidebar/messageBridge';
-import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
+import type { ConversationRuntime, SidebarRuntime } from '../../src/sidebar/sessionTypes';
 
 const conv = (over: Partial<ConversationRuntime> = {}): ConversationRuntime =>
   ({ id: 'c1', messages: [], ...over }) as ConversationRuntime;
@@ -104,5 +108,55 @@ describe('buildSessionMetrics', () => {
       requestCount: 3,
     });
     expect(snapshot).not.toHaveProperty('currentOutputTokens');
+  });
+});
+
+describe('buildSessionSyncMessage transcript scope', () => {
+  const withText = (id: string, text: string): ConversationRuntime =>
+    ({
+      id,
+      title: id,
+      createdAt: 0,
+      updatedAt: 0,
+      messages: [{ role: 'user', content: text }],
+    }) as ConversationRuntime;
+
+  const session = (): SidebarRuntime => ({
+    activeConversationId: 'a',
+    conversations: [withText('a', 'active'), withText('b', 'background'), withText('c', 'busy')],
+    history: [withText('h', 'archived')],
+  });
+
+  it('ships only the active transcript, never the background tabs or history', () => {
+    const msg = buildSessionSyncMessage(session(), new Set(), () => 0) as {
+      messagesById: Record<string, unknown>;
+      tabs: unknown[];
+      history: unknown[];
+    };
+
+    expect(Object.keys(msg.messagesById)).toEqual(['a']);
+    // The metadata for everything else still rides along - it is the megabytes
+    // of transcript that were the problem, not the tab list.
+    expect(msg.tabs).toHaveLength(3);
+    expect(msg.history).toHaveLength(1);
+  });
+
+  it('also ships a streaming tab, which has tool rows to reconcile while hidden', () => {
+    const msg = buildSessionSyncMessage(session(), new Set(['c']), () => 0) as {
+      messagesById: Record<string, unknown>;
+    };
+
+    expect(Object.keys(msg.messagesById).sort()).toEqual(['a', 'c']);
+  });
+
+  it('always includes the active id, so the webview can never be shown a tab it has no rows for', () => {
+    const s = session();
+    s.activeConversationId = 'b';
+    const msg = buildSessionSyncMessage(s, new Set(), () => 0) as {
+      activeId: string;
+      messagesById: Record<string, unknown>;
+    };
+
+    expect(msg.messagesById[msg.activeId]).toBeDefined();
   });
 });

@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import type { AppMessage } from '../reducer';
+import { sameRowList } from '../messageOps';
 import { DiffBlock, diffStats } from './DiffBlock';
 
 const ChevronDown = (): React.ReactElement => (
@@ -24,7 +25,7 @@ interface Props {
  * standalone block — grouping one row behind a disclosure would cost a click for
  * no gain — while several collapse to a header the reader can skip past.
  */
-export function DiffGroup({ diffs }: Props): React.ReactElement | null {
+function DiffGroupView({ diffs }: Props): React.ReactElement | null {
   const [expanded, setExpanded] = useState(false);
 
   const totals = useMemo(
@@ -85,3 +86,11 @@ export function DiffGroup({ diffs }: Props): React.ReactElement | null {
     </div>
   );
 }
+
+/**
+ * Memoized for the same reason `Message` is: the list is not virtualized, so
+ * every group is a live component. `mergeSyncedMessages` rebuilds every row
+ * object on each sync, so the array prop is always a new reference and the
+ * default shallow compare would never hit - hence the explicit row compare.
+ */
+export const DiffGroup = React.memo(DiffGroupView, (a, b) => sameRowList(a.diffs, b.diffs));

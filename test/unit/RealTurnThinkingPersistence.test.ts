@@ -11,7 +11,8 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { chatMessagesFromSlim, displayPersistMessages } from '../../src/sidebar/sessionTypes';
+import { chatMessagesFromSlim } from '../../src/sidebar/sessionTypes';
+import { displayPersistMessages } from '../../src/sidebar/sessionProjections';
 import type { ConversationPersisted } from '../../src/sidebar/sessionTypes';
 import { mergeSyncedMessages, type AppMessage } from '../../webview-ui/src/messageOps';
 import { isReasoningOnly } from '../../webview-ui/src/components/ThinkingGroup';

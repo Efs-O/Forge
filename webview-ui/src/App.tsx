@@ -17,7 +17,7 @@ import {
 } from './reducer';
 export type { AppMessage } from './reducer';
 import { Header, type WorkspaceInfo } from './components/Header';
-import { MessageList } from './components/MessageList';
+import { TranscriptPanes } from './components/TranscriptPanes';
 import { CheckpointBar } from './components/CheckpointBar';
 import { diffStats } from './components/DiffBlock';
 import { InputRow } from './components/InputRow';
@@ -25,15 +25,15 @@ import { ConfirmationDialog } from './components/ConfirmationDialog';
 import { QuestionDialog } from './components/QuestionDialog';
 import { useAgentDialogs } from './useAgentDialogs';
 import { TabStrip } from './components/TabStrip';
-import { HistoryList, relativeTime } from './components/HistoryList';
+import { HistoryList } from './components/HistoryList';
 import { EmptyState } from './components/EmptyState';
-import { resumedNoteFor, resumedTabIds } from './resumedTabs';
+import { resumedTabIds } from './resumedTabs';
 import { StreamingStatus } from './components/StreamingStatus';
 import { SLASH_COMMANDS } from './slashCommands';
 import { webviewDiagnostics } from './WebviewDiagnostics';
 import { useHostCommands } from './hostCommands';
 
-interface QueuedPrompt {
+export interface QueuedPrompt {
   id: string;
   conversationId: string;
   text: string;
@@ -344,11 +344,6 @@ export function App(): React.ReactElement {
   const activeModelEntry = state.models.find((model) => model.name === state.activeModel);
   const activeModelIsLocal = activeModelEntry?.residency !== undefined;
 
-  const activeTab = state.tabs.find((tab) => tab.id === state.activeConversationId);
-  const resumedNote = resumedNoteFor(activeTab, resumedIds, relativeTime);
-  // A background tab may be on a different model than the picker shows, and
-  // `active_model` is only set once a conversation picks one explicitly.
-  const queuedModelName = activeTab?.active_model ?? state.activeModel;
   const queuedIds = useMemo(
     () => new Set(queuedPrompts.map((prompt) => prompt.conversationId)),
     [queuedPrompts],
@@ -425,18 +420,13 @@ export function App(): React.ReactElement {
           </>
         )}
       </aside>
-      <MessageList
-        messages={messages}
-        queuedPrompts={queuedPrompts.filter(
-          (prompt) => prompt.conversationId === state.activeConversationId,
-        )}
+      <TranscriptPanes
+        state={state}
+        queuedPrompts={queuedPrompts}
         onCancelQueuedPrompt={cancelQueuedPrompt}
         onSteerQueuedPrompt={steerQueuedPrompt}
-        streaming={streaming}
-        conversationId={state.activeConversationId}
+        resumedIds={resumedIds}
         emptyState={emptyState}
-        resumedNote={resumedNote}
-        queuedModelName={queuedModelName}
       />
       <StreamingStatus
         streaming={streaming}

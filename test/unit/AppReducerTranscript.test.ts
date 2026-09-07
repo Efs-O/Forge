@@ -294,4 +294,55 @@ describe('webview App reducer — transcript rows', () => {
       expect(pendingIn(synced, 'tab-2')).toBe(false);
     });
   });
+
+  describe('SESSION_SYNC transcripts are a partial update', () => {
+    const twoTabs = [
+      { id: 'tab-1', title: 'One', createdAt: 1, updatedAt: 2, messageCount: 1 },
+      { id: 'tab-2', title: 'Two', createdAt: 1, updatedAt: 2, messageCount: 1 },
+    ];
+
+    it('keeps a cached transcript for a tab the sync did not carry', () => {
+      // The host ships only what can be rendered now, so a background tab's
+      // rows arrive once and must survive every later sync. Replacing the map
+      // wholesale would blank that tab until the user switched back to it.
+      const first = appModule.reducer(appModule.initialState, {
+        type: 'SESSION_SYNC',
+        activeId: 'tab-2',
+        tabs: twoTabs,
+        history: [],
+        messagesById: { 'tab-2': [{ role: 'user', content: 'two' }] },
+      });
+
+      const second = appModule.reducer(first, {
+        type: 'SESSION_SYNC',
+        activeId: 'tab-1',
+        tabs: twoTabs,
+        history: [],
+        messagesById: { 'tab-1': [{ role: 'user', content: 'one' }] },
+      });
+
+      expect(second.messagesById['tab-2']?.map((m) => m.content)).toEqual(['two']);
+      expect(second.messagesById['tab-1']?.map((m) => m.content)).toEqual(['one']);
+    });
+
+    it('drops the cache for a tab that has been closed', () => {
+      const first = appModule.reducer(appModule.initialState, {
+        type: 'SESSION_SYNC',
+        activeId: 'tab-2',
+        tabs: twoTabs,
+        history: [],
+        messagesById: { 'tab-2': [{ role: 'user', content: 'two' }] },
+      });
+
+      const closed = appModule.reducer(first, {
+        type: 'SESSION_SYNC',
+        activeId: 'tab-1',
+        tabs: [twoTabs[0]!],
+        history: [],
+        messagesById: { 'tab-1': [{ role: 'user', content: 'one' }] },
+      });
+
+      expect(closed.messagesById['tab-2']).toBeUndefined();
+    });
+  });
 });

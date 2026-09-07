@@ -55,8 +55,14 @@ export interface ConversationTabsDeps {
   events: SidebarProviderEvents;
   post: (msg: HostToWebview) => void;
   baseOf: (id: string | null | undefined) => string | null;
-  /** Republishes models, session, and the context budget after a tab change. */
-  refreshUi: () => void;
+  /**
+   * Republishes models, session, and the context budget after a tab change.
+   *
+   * `pointerOnly` says the transcripts are untouched and only the active id
+   * moved, so the session can be persisted as a single string instead of a
+   * full 16 MB rebuild on the extension host.
+   */
+  refreshUi: (options?: { pointerOnly?: boolean }) => void;
 }
 
 export class ConversationTabs {
@@ -152,7 +158,9 @@ export class ConversationTabs {
     this.deps.setSidebar(result.sidebar);
     if (result.activeModelOverride) this.deps.setActiveModel(result.activeModelOverride);
     this.deps.failureTracker.reset();
-    this.deps.refreshUi();
+    // A switch moves the active id and nothing else: no transcript, title,
+    // counter or pin changes here, so there is nothing for a full save to write.
+    this.deps.refreshUi({ pointerOnly: true });
     this.deps.events.onConversationSwitched?.(this.deps.getConfig().active_model ?? null);
   }
 

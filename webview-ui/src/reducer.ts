@@ -367,7 +367,12 @@ export function reducer(state: State, action: Action): State {
     case 'SESSION_SYNC': {
       const hostStreaming = action.tabs.filter((tab) => tab.streaming).map((tab) => tab.id);
       const liveConversationIds = new Set([...state.streamingIds, ...hostStreaming]);
-      const messagesById: Record<string, AppMessage[]> = {};
+      // `messagesById` is a PARTIAL update — the host ships only the transcripts
+      // that can be rendered right now (active + streaming + anything asked
+      // for), because shipping all 52 was costing a second per tab switch. So
+      // start from what is already cached and overlay, rather than replacing:
+      // an id absent from the payload means "unchanged", never "empty".
+      const messagesById: Record<string, AppMessage[]> = { ...state.messagesById };
       for (const [id, rows] of Object.entries(action.messagesById)) {
         const local = state.messagesById[id] ?? [];
         // Stream tokens and tool events are the newest presentation state. A
@@ -389,6 +394,12 @@ export function reducer(state: State, action: Action): State {
       // an undo the user can still see files for.
       const openIds = new Set([...action.tabs.map((tab) => tab.id), action.activeId]);
       const pending = new Set([...state.checkpointPendingIds].filter((id) => openIds.has(id)));
+      // Bound the transcript cache to the open tabs. A closed or archived
+      // conversation is re-sent by the host if it is ever shown again, so
+      // holding its rows here only grows the webview's heap for the session.
+      for (const id of Object.keys(messagesById)) {
+        if (!openIds.has(id)) delete messagesById[id];
+      }
       // A restored webview may have missed generationStarted. Recover host-busy
       // tabs without clearing newer local starts; DONE remains the end signal.
       return {

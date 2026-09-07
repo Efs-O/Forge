@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Switching chat tabs no longer stalls for a second or two.** Every
+  `sessionSync` shipped the transcripts of every open tab *and* all 40 archived
+  history conversations to the webview — 16 MB in a measured workspace — to
+  render one of them, and every tab switch also rebuilt and rewrote that same
+  16 MB into `workspaceState` to record which conversation was now active. The
+  host now sends only the transcripts the webview can render (the active tab
+  plus anything streaming), a switch persists the active id as a single string
+  instead of the whole blob, tab badges are counted without materialising the
+  rows they count, and the webview's transcript reconciler walks its host rows
+  once instead of rescanning them per local row. Returning to a tab you have
+  already opened is a `hidden` toggle now, not a remount that re-runs
+  `react-markdown` over the whole conversation, and rows scrolled out of view
+  are neither laid out nor painted — which is what made coming back to the
+  window from another app slow. Diagnosis and measurements:
+  `docs/plans/SIDEBAR_SWITCH_LATENCY_PLAN.md`.
+
 - **`exec_command` no longer hands a whole build log to the model in one
   round.** The formatter computed a bounded "shown" window and then returned
   the unbounded stored stream instead, so `max_output_chars` did nothing unless

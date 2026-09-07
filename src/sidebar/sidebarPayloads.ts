@@ -12,7 +12,11 @@ import { mergeGroupsIntoModel } from '../config/ConfigResolver';
 import type { HostToWebview, ModelResidency } from './messageBridge';
 import { classifyModelRoute } from '../llm/ModelRouteClassifier';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
-import { historyMetasFromSession, slimMessagesById, tabMetasFromSession } from './sessionTypes';
+import {
+  historyMetasFromSession,
+  slimMessagesById,
+  tabMetasFromSession,
+} from './sessionProjections';
 import { describeModelPickerModel } from './ModelPickerGroups';
 import { reportedContextTokens } from '../util/contextBudget';
 import type { SessionTimeSnapshot } from '../vscode/SessionTimeStatusBar';
@@ -69,18 +73,29 @@ export function buildModelsMessage(
   };
 }
 
-/** Tabs, history and slimmed transcripts — everything the webview redraws from. */
+/**
+ * Tabs, history and slimmed transcripts — everything the webview redraws from.
+ *
+ * Transcripts are limited to what the webview can render this instant: the
+ * active tab, plus anything streaming (a background turn still has to reconcile
+ * its tool rows). Shipping all 52 conversations, as this did, is what made a tab
+ * switch cost 1–2 s — see `docs/plans/SIDEBAR_SWITCH_LATENCY_PLAN.md`. The
+ * active id is always in the set, so the webview can never be told to show a
+ * tab it has no rows for; it treats `messagesById` as a partial update and
+ * caches the rest, so an absent id means "unchanged", never "empty".
+ */
 export function buildSessionSyncMessage(
   sidebar: SidebarRuntime,
   streamingIds: ReadonlySet<string>,
   sessionActiveMs: (conversation: ConversationRuntime) => number,
 ): HostToWebview {
+  const wanted = new Set<string>([sidebar.activeConversationId, ...streamingIds]);
   return {
     type: 'sessionSync',
     activeId: sidebar.activeConversationId,
     tabs: tabMetasFromSession(sidebar, streamingIds, sessionActiveMs),
     history: historyMetasFromSession(sidebar),
-    messagesById: slimMessagesById(sidebar),
+    messagesById: slimMessagesById(sidebar, wanted),
   };
 }
 

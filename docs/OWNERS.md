@@ -58,6 +58,7 @@ overlaps with an existing owner, extend the owner instead.
 | Image content parts: count/strip/age out   | `src/sidebar/imageParts.ts`          |
 | Missing-image notices to the user          | `src/sidebar/imageNotices.ts`        |
 | Session load/save/migrate (workspaceState) | `src/sidebar/sessionPersistence.ts`  |
+| Session -> webview projections (rows, metas, counts) | `src/sidebar/sessionProjections.ts` |
 | First-run setup wizard                     | `src/sidebar/FirstRunWizard.ts`      |
 | Add-model setup wizard                     | `src/sidebar/AddModelWizard.ts`      |
 | Missing-config setup mode                  | `src/sidebar/SetupMode.ts`           |
@@ -80,6 +81,7 @@ overlaps with an existing owner, extend the owner instead.
 | Approval + agent-question modal state             | `webview-ui/src/useAgentDialogs.ts`            |
 | Agent question dialog (ask_user in the sidebar)   | `webview-ui/src/components/QuestionDialog.tsx` |
 | Transcript row folding (diff / thinking runs)    | `webview-ui/src/components/MessageList.tsx`    |
+| One mounted transcript pane per visited tab      | `webview-ui/src/components/TranscriptPanes.tsx` |
 | Single-file diff rendering + stats               | `webview-ui/src/components/DiffBlock.tsx`      |
 | Per-turn multi-file diff summary card            | `webview-ui/src/components/DiffGroup.tsx`      |
 | Compact per-round reasoning rows                 | `webview-ui/src/components/ThinkingGroup.tsx`  |

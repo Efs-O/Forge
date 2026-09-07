@@ -20,7 +20,7 @@ import { expandAlias, mergeGroupsIntoModel, splitModelProfile } from '../config/
 import type { HostToWebview, WebviewToHost, AttachmentData } from './messageBridge';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
 import type { CliSessionRegistry } from '../agents/CliSessionRegistry';
-import { loadSidebarSession, saveSidebarSession } from './sessionTypes';
+import { loadSidebarSession, saveActiveConversationId, saveSidebarSession } from './sessionTypes';
 import { CheckpointStack } from '../checkpoint/CheckpointStack';
 import { ToolRegistry } from '../tools/ToolRegistry';
 import type { KeepUndoCodeLensProvider } from './KeepUndoCodeLens';
@@ -129,6 +129,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         postSessionSync: () => this.postSessionSync(),
         postTokenBudget: () => this.postTokenBudget(),
         persistSession: () => this.persistSession(),
+        persistActiveId: () => this.persistActiveId(),
         baseOf: (id) => this.baseOf(id),
         autoCompact: (conv, chain) => this.autoCompact(conv, chain),
         resumeAfterManualCompact: (conversationId, reason) =>
@@ -459,6 +460,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private persistSession(): void {
     saveSidebarSession(this.workspaceState, this.sidebar);
+  }
+
+  /** Tab-switch persistence: one string, not the whole transcript blob. */
+  private persistActiveId(): void {
+    saveActiveConversationId(this.workspaceState, this.sidebar.activeConversationId);
   }
 
   /** Strip @profile + expand aliases to the base model name (F6). */

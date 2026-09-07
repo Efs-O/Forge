@@ -3,11 +3,11 @@ import type { ContentPart } from '../llm/types';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
 import {
   MAX_CONVERSATIONS,
-  displayPersistMessages,
   UNTITLED_TITLE,
   newConversationId,
   upsertHistoryConversation,
 } from './sessionTypes';
+import { displayPersistMessages } from './sessionProjections';
 
 export type NewConvResult =
   | { atCap: true }

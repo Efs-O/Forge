@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import type { AppMessage } from '../reducer';
+import { sameRowList } from '../messageOps';
 import { ToolRow } from './ToolRow';
 
 const ChevronDown = (): React.ReactElement => (
@@ -24,7 +25,7 @@ function summary(tools: readonly AppMessage[]): string {
 }
 
 /** A compact, ordered view of the parallel tool calls issued in one agent step. */
-export function ToolGroup({ tools }: { tools: AppMessage[] }): React.ReactElement | null {
+function ToolGroupView({ tools }: { tools: AppMessage[] }): React.ReactElement | null {
   const [open, setOpen] = useState(false);
   const label = useMemo(() => summary(tools), [tools]);
 
@@ -52,3 +53,11 @@ export function ToolGroup({ tools }: { tools: AppMessage[] }): React.ReactElemen
     </div>
   );
 }
+
+/**
+ * Memoized for the same reason `Message` is: the list is not virtualized, so
+ * every group is a live component. `mergeSyncedMessages` rebuilds every row
+ * object on each sync, so the array prop is always a new reference and the
+ * default shallow compare would never hit - hence the explicit row compare.
+ */
+export const ToolGroup = React.memo(ToolGroupView, (a, b) => sameRowList(a.tools, b.tools));

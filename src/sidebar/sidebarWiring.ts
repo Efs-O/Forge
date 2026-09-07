@@ -46,6 +46,8 @@ export interface SidebarHost {
   postSessionSync: () => void;
   postTokenBudget: () => void;
   persistSession: () => void;
+  /** Writes only the active-conversation pointer — see `saveActiveConversationId`. */
+  persistActiveId: () => void;
   baseOf: (id: string | null | undefined) => string | null;
   autoCompact: (
     conv: ConversationRuntime,
@@ -211,8 +213,9 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     events,
     post: host.post,
     baseOf: host.baseOf,
-    refreshUi: () => {
-      host.persistSession();
+    refreshUi: (options) => {
+      if (options?.pointerOnly) host.persistActiveId();
+      else host.persistSession();
       host.postModels();
       host.postSessionSync();
       host.postTokenBudget();

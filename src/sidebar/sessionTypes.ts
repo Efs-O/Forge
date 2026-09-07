@@ -9,15 +9,13 @@ export {
   createDefaultSession,
   loadSidebarSession,
   runtimeToPersisted,
+  saveActiveConversationId,
   saveSidebarSession,
   upsertHistoryConversation,
 } from './sessionPersistence';
 import type { ChatMessage } from '../llm/types';
 import { stripImageParts } from './imageParts';
 import type { DiffHunk, SessionHistoryMeta, SessionTabMeta } from './messageBridge';
-import { capDisplayText } from '../tools/resultCap';
-import { isFailureResult, resultLabel } from './toolResultView';
-import { displayTitle } from './conversationTitle';
 
 export type { SessionHistoryMeta, SessionTabMeta };
 
@@ -32,6 +30,12 @@ export const MAX_HISTORY_CONVERSATIONS = 40;
 export const HISTORY_KEY_LEGACY = 'forge.conversation.history';
 
 export const SESSION_KEY_V1 = 'forge.conversations.v1';
+
+/**
+ * Which conversation is active, stored apart from the transcript blob so a tab
+ * switch does not have to rewrite it. See `saveActiveConversationId`.
+ */
+export const ACTIVE_ID_KEY = 'forge.conversations.activeId';
 
 const toolCallSchema = z.object({
   id: z.string(),
@@ -303,84 +307,6 @@ export function slimPersistMessages(messages: ChatMessage[]): SlimPersistMessage
   return out;
 }
 
-/**
- * Webview view: renderable turns. Completed tool calls are included so reload
- * can reconstruct the work already done. Their body is capped by the same rule
- * as a live ToolResult message, rather than copying an unbounded tool payload
- * into a webview message.
- *
- * An assistant turn that only called a tool is kept when it carries reasoning.
- * Dropping those made every thinking bubble except the final round's vanish the
- * moment a turn ended and SESSION_SYNC rebuilt the transcript.
- */
-export function displayPersistMessages(
-  messages: ChatMessage[],
-  displayDiffs: ConversationDisplayDiff[] = [],
-): DisplayPersistMessage[] {
-  const out: DisplayPersistMessage[] = [];
-  const diffsByToolCall = new Map<string, ConversationDisplayDiff[]>();
-  for (const diff of displayDiffs) {
-    const current = diffsByToolCall.get(diff.toolCallId);
-    if (current) current.push(diff);
-    else diffsByToolCall.set(diff.toolCallId, [diff]);
-  }
-  for (const m of messages) {
-    if (m.internal) continue;
-    const toolText = m.role === 'tool' ? textContent(m.content) : null;
-    if (m.role === 'tool' && toolText !== null) {
-      const toolName = m.name ?? 'tool';
-      const { text: toolResult, totalChars: toolResultTotal } = capDisplayText(toolText);
-      out.push({
-        role: 'tool',
-        content: `${toolName} → ${resultLabel(toolName, toolText, null)}`,
-        toolName,
-        toolResult,
-        toolResultTotal,
-        ...(isFailureResult(toolText) ? { toolIsError: true } : {}),
-        ...(typeof m.toolMs === 'number' ? { toolMs: m.toolMs } : {}),
-      });
-      for (const diff of diffsByToolCall.get(m.tool_call_id ?? '') ?? []) {
-        out.push({
-          role: 'diff',
-          content: diff.filePath,
-          diffHunks: diff.hunks,
-          diffIsNew: diff.isNew,
-          diffIsDeleted: diff.isDeleted,
-        });
-      }
-      continue;
-    }
-    if (
-      (m.role !== 'user' && m.role !== 'assistant') ||
-      (typeof m.content !== 'string' &&
-        !(m.role === 'assistant' && typeof m.reasoning === 'string' && m.reasoning.length > 0))
-    ) {
-      continue;
-    }
-    const content = typeof m.content === 'string' ? m.content : '';
-    const reasoning = typeof m.reasoning === 'string' && m.reasoning.length > 0 ? m.reasoning : '';
-    // The final answer can follow streamed reasoning in the same model turn.
-    // The ordinary message renderer intentionally shows answer text only, so
-    // preserve the thought as its own Thinking row rather than losing it when
-    // session sync replaces the live stream.
-    // The span belongs to the thought, so on a split turn it rides the reasoning
-    // half - the answer half never reasoned.
-    const reasoningMs = typeof m.reasoningMs === 'number' ? { reasoningMs: m.reasoningMs } : {};
-    if (m.role === 'assistant' && content && reasoning) {
-      out.push({ role: 'assistant', content: '', reasoning, ...reasoningMs });
-      out.push({ role: 'assistant', content });
-      continue;
-    }
-    out.push({
-      role: m.role,
-      // A reasoning-only turn has content: null; the webview contract is string.
-      content,
-      ...(reasoning ? { reasoning, ...reasoningMs } : {}),
-    });
-  }
-  return out;
-}
-
 export function chatMessagesFromSlim(slim: SlimPersistMessage[]): ChatMessage[] {
   return slim.map((m) => ({
     role: m.role,
@@ -395,60 +321,4 @@ export function chatMessagesFromSlim(slim: SlimPersistMessage[]): ChatMessage[] 
     ...(typeof m.name === 'string' ? { name: m.name } : {}),
     ...(m.internal ? { internal: true } : {}),
   }));
-}
-
-export function tabMetasFromSession(
-  session: SidebarRuntime,
-  streamingIds?: ReadonlySet<string>,
-  getActiveTimeMs?: (conversation: ConversationRuntime) => number,
-): SessionTabMeta[] {
-  return session.conversations.map((c) => {
-    // Tool turns are restored but must not inflate the user-facing badge.
-    const shown = displayPersistMessages(c.messages, c.displayDiffs).filter(
-      (m) => m.role !== 'tool',
-    );
-    return {
-      id: c.id,
-      title: displayTitle(c.title),
-      createdAt: c.createdAt,
-      updatedAt: c.updatedAt,
-      messageCount: shown.length,
-      ...(c.active_model !== undefined ? { active_model: c.active_model } : {}),
-      active_time_ms: getActiveTimeMs?.(c) ?? c.active_time_ms ?? 0,
-      ...(streamingIds?.has(c.id) ? { streaming: true } : {}),
-    };
-  });
-}
-
-export function historyMetasFromSession(session: SidebarRuntime): SessionHistoryMeta[] {
-  const openIds = new Set(session.conversations.map((c) => c.id));
-  return session.history
-    .filter((c) => !openIds.has(c.id))
-    .sort((a, b) => b.updatedAt - a.updatedAt)
-    .map((c) => {
-      const shown = displayPersistMessages(c.messages, c.displayDiffs).filter(
-        (m) => m.role !== 'tool',
-      );
-      return {
-        id: c.id,
-        title: displayTitle(c.title),
-        createdAt: c.createdAt,
-        updatedAt: c.updatedAt,
-        messageCount: shown.length,
-        ...(c.active_model !== undefined ? { active_model: c.active_model } : {}),
-        active_time_ms: c.active_time_ms ?? 0,
-      };
-    });
-}
-
-/** Transcripts for webview sync — display view, not the persistence view. */
-export function slimMessagesById(session: SidebarRuntime): Record<string, DisplayPersistMessage[]> {
-  const out: Record<string, DisplayPersistMessage[]> = {};
-  for (const c of session.conversations) {
-    out[c.id] = displayPersistMessages(c.messages, c.displayDiffs);
-  }
-  for (const c of session.history) {
-    out[c.id] = displayPersistMessages(c.messages, c.displayDiffs);
-  }
-  return out;
 }

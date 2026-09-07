@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import type { AppMessage } from '../reducer';
+import { sameRowList } from '../messageOps';
 import { formatDuration } from '../../../src/util/formatDuration';
 
 const ChevronDown = (): React.ReactElement => (
@@ -86,7 +87,7 @@ interface Props {
   steps: AppMessage[];
 }
 
-export function ThinkingGroup({ steps }: Props): React.ReactElement | null {
+function ThinkingGroupView({ steps }: Props): React.ReactElement | null {
   const [expanded, setExpanded] = useState(false);
 
   if (steps.length === 0) return null;
@@ -129,3 +130,11 @@ export function ThinkingGroup({ steps }: Props): React.ReactElement | null {
     </div>
   );
 }
+
+/**
+ * Memoized for the same reason `Message` is: the list is not virtualized, so
+ * every group is a live component. `mergeSyncedMessages` rebuilds every row
+ * object on each sync, so the array prop is always a new reference and the
+ * default shallow compare would never hit - hence the explicit row compare.
+ */
+export const ThinkingGroup = React.memo(ThinkingGroupView, (a, b) => sameRowList(a.steps, b.steps));
