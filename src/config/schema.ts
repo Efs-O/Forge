@@ -373,16 +373,21 @@ export const ForgeConfigSchema = z
         });
       }
     });
-    const hasLocalModel = cfg.models.some(
+    // A model carrying its own `llama_server_binary` never reads the global
+    // one, so it must not be what forces the global to exist: a config whose
+    // only local model points at a patched fork is complete without it.
+    const localModelsNeedingGlobalBinary = cfg.models.filter(
       (m) =>
         (m.provider ?? effectiveGroupField(m, cfg.groups, 'provider') ?? 'llama.cpp') ===
-        'llama.cpp',
+          'llama.cpp' && !m.llama_server_binary,
     );
-    if (hasLocalModel && !cfg.llama_server.binary) {
+    if (localModelsNeedingGlobalBinary.length > 0 && !cfg.llama_server.binary) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['llama_server', 'binary'],
-        message: 'llama_server.binary is required when any model uses provider: llama.cpp',
+        message:
+          'llama_server.binary is required when any model uses provider: llama.cpp without its ' +
+          'own llama_server_binary',
       });
     }
     if (cfg.embeddings?.enabled && !cfg.embeddings.model_path) {

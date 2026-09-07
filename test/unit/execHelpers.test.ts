@@ -120,5 +120,35 @@ describe('structured exec_command outcomes', () => {
       expect(output.stdout_truncated).toBe(true);
       expect(output.stdout_note).toContain('5000 characters');
     });
+
+    // The bound is the real worst case one exec_command can add to a round:
+    // the excerptor downstream only cuts when the window is already tight.
+    it('bounds a both-streams result to twice the retention bound', () => {
+      const huge = 'x'.repeat(MAX_EXEC_STORED_CHARS * 3);
+      const output = JSON.parse(
+        formatExecCommandOutput('tool', { stdout: huge, stderr: huge, exitCode: 1 }),
+      );
+      expect(output.stdout.length + output.stderr.length).toBe(MAX_EXEC_STORED_CHARS * 2);
+    });
+
+    // max_output_chars used to be ignored unless head_lines/tail_lines came
+    // with it, so a caller asking for a small result got the whole stream.
+    it('honours max_output_chars with no line window', () => {
+      const stdout = 'y'.repeat(20_000);
+      const output = JSON.parse(
+        formatExecCommandOutput('tool', { stdout, stderr: '', exitCode: 0 }, { maxChars: 2_000 }),
+      );
+      expect(output.stdout).toHaveLength(2_000);
+      expect(output.stdout_truncated).toBe(true);
+      expect(output.stdout_note).toContain('max_output_chars');
+    });
+
+    it('leaves a stream shorter than max_output_chars whole and unmarked', () => {
+      const output = JSON.parse(
+        formatExecCommandOutput('tool', { stdout: 'short', stderr: '', exitCode: 0 }, { maxChars: 2_000 }),
+      );
+      expect(output.stdout).toBe('short');
+      expect(output).not.toHaveProperty('stdout_truncated');
+    });
   });
 });

@@ -47,7 +47,7 @@ export function makeMonitorExecutionTool(): RegisteredTool {
               type: 'integer',
               minimum: 1,
               maximum: MAX_OUTPUT_CHARS,
-              description: 'Maximum new characters per returned stream. Default 10000.',
+              description: `Maximum new characters per returned stream. Default ${String(MAX_OUTPUT_CHARS)}.`,
             },
             output_stream: {
               type: 'string',

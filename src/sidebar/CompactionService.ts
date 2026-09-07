@@ -131,6 +131,15 @@ export const MAX_CONSECUTIVE_AUTO_CONTINUES = 2;
  */
 export const MIN_WINDOW_CHARS_FOR_FIT_GUARD = 24000;
 
+/** The one wording for a refused compaction, whichever check refused it. */
+function refusalNotice(afterChars: number, beforeChars: number): string {
+  return (
+    'Forge: compaction would not have reduced the context ' +
+    `(estimated ~${afterChars.toLocaleString()} vs ~${beforeChars.toLocaleString()} characters), ` +
+    'so the previous state was kept. Start a new chat, or remove large attachments, if this repeats.'
+  );
+}
+
 /**
  * Runs one compaction against the active conversation.
  *
@@ -210,6 +219,23 @@ export async function runCompaction(
     ? toolActivityFollowedLastReply(split.summarize)
     : false;
 
+  // Everything the candidate state will carry except the summary itself. Built
+  // here so the floor check below can run BEFORE the summarization request.
+  const candidateWithSummary = (summaryText: string): CompactionState => ({
+    summary: summaryText,
+    fromIndex,
+    generation: (conv.compaction?.generation ?? 0) + 1,
+    ...(userMessages.length > 0 ? { userMessages } : {}),
+    ...(recordedActions.length > 0 ? { recordedActions } : {}),
+    ...(omittedActions.file > 0 || omittedActions.command > 0 ? { omittedActions } : {}),
+    ...(repoState ? { repoState } : {}),
+    ...(lastReply ? { lastReply } : {}),
+    ...(lastReply && lastReplyFollowedByTools ? { lastReplyFollowedByTools } : {}),
+  });
+
+  // Read before conv.compaction is replaced below.
+  const beforeChars = compactionWindowChars(conv.messages, conv.compaction);
+
   deps.post({ type: 'notice', message: 'Compacting conversation…', conversationId: conv.id });
   // The webview treats the conversation as streaming between these two, so a
   // prompt typed during the summarization is queued and flushed after it rather
@@ -243,6 +269,27 @@ export async function runCompaction(
           log.info(`[compact] repo snapshot unavailable — ${(err as Error).message}`);
         }
       }
+      // The fit check, run against the cheapest candidate that could exist: an
+      // EMPTY summary. A summary only adds characters, so if even a zero-length
+      // one does not shrink the window, no summary will, and the check after
+      // the request is certain to refuse. Deciding it here costs one snapshot
+      // that has already been taken; deciding it there pays for a summarization
+      // whose result is thrown away, on every threshold crossing, for as long
+      // as the window stays stuck. It sits after the repo snapshot because
+      // repoState is part of what the candidate carries.
+      const floorChars = compactionWindowChars(conv.messages, candidateWithSummary(''));
+      if (beforeChars >= MIN_WINDOW_CHARS_FOR_FIT_GUARD && floorChars >= beforeChars) {
+        log.info(
+          `[compact] no summary could shrink this window (~${floorChars} vs ~${beforeChars} chars before the summary) — not summarizing`,
+        );
+        deps.post({
+          type: 'notice',
+          message: refusalNotice(floorChars, beforeChars),
+          conversationId: conv.id,
+        });
+        return 'failed';
+      }
+
       // Supply the deterministic ledger to the summarizer as well as pinning it
       // below. A long tool dump used to hide an already-completed download from
       // the model that wrote the summary, leaving only an earlier "next" step.
@@ -291,17 +338,7 @@ export async function runCompaction(
     // with the log row so the two can never disagree about which generation
     // this was.
     const generation = (conv.compaction?.generation ?? 0) + 1;
-    const candidate: CompactionState = {
-      summary: trimmed,
-      fromIndex,
-      generation,
-      ...(userMessages.length > 0 ? { userMessages } : {}),
-      ...(recordedActions.length > 0 ? { recordedActions } : {}),
-      ...(omittedActions.file > 0 || omittedActions.command > 0 ? { omittedActions } : {}),
-      ...(repoState ? { repoState } : {}),
-      ...(lastReply ? { lastReply } : {}),
-      ...(lastReply && lastReplyFollowedByTools ? { lastReplyFollowedByTools } : {}),
-    };
+    const candidate = candidateWithSummary(trimmed);
 
     // Does the candidate actually shrink the window?
     //
@@ -311,7 +348,9 @@ export async function runCompaction(
     // loop starts: each pass costs a model call, replaces good state with a
     // paraphrase of it, and leaves the window no smaller. Estimated in
     // characters, which is enough to tell a reduction from an increase.
-    const beforeChars = compactionWindowChars(conv.messages, conv.compaction);
+    //
+    // The floor check before the request rules out the hopeless case; this one
+    // catches a summary that came back long enough to undo a real reduction.
     const afterChars = compactionWindowChars(conv.messages, candidate);
     if (beforeChars >= MIN_WINDOW_CHARS_FOR_FIT_GUARD && afterChars >= beforeChars) {
       log.info(
@@ -319,10 +358,7 @@ export async function runCompaction(
       );
       deps.post({
         type: 'notice',
-        message:
-          'Forge: compaction would not have reduced the context ' +
-          `(estimated ~${afterChars.toLocaleString()} vs ~${beforeChars.toLocaleString()} characters), ` +
-          'so the previous state was kept. Start a new chat, or remove large attachments, if this repeats.',
+        message: refusalNotice(afterChars, beforeChars),
         conversationId: conv.id,
       });
       return 'failed';

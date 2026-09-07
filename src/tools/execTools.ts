@@ -12,6 +12,7 @@ import {
   guardExec,
   MAX_OUTPUT_CHARS,
   MAX_EXEC_OUTPUT_LINES,
+  MAX_EXEC_STORED_CHARS,
   parseExecOutputOptions,
   resolveExecCwd,
   spawnAndWait,
@@ -117,7 +118,11 @@ export function makeExecCommandTool(): RegisteredTool {
               type: 'integer',
               minimum: 1,
               maximum: MAX_OUTPUT_CHARS,
-              description: 'Maximum returned characters per selected output stream. Default 10000.',
+              description:
+                'Maximum returned characters per selected output stream, for asking for LESS ' +
+                'than the default. Omitted: the whole stream is returned, capped at ' +
+                `${String(MAX_EXEC_STORED_CHARS)} characters. Output past the applied bound is ` +
+                'dropped and cannot be recovered.',
             },
             output_stream: {
               type: 'string',

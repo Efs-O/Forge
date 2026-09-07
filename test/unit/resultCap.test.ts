@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { capResultText, DEFAULT_MAX_RESULT_CHARS } from '../../src/tools/resultCap';
+import { capResultText, DEFAULT_MAX_RESULT_CHARS, isCapTruncated } from '../../src/tools/resultCap';
 
 describe('resultCap', () => {
   it('should return text unchanged when shorter than the cap', () => {
@@ -40,5 +40,35 @@ describe('resultCap', () => {
 
   it('should use default max chars constant', () => {
     expect(DEFAULT_MAX_RESULT_CHARS).toBe(24000);
+  });
+});
+
+describe('isCapTruncated', () => {
+  it('recognises text that capResultText actually cut', () => {
+    expect(isCapTruncated(capResultText('A'.repeat(100), 10))).toBe(true);
+  });
+
+  it('recognises a cut carrying advice', () => {
+    expect(isCapTruncated(capResultText('A'.repeat(100), 10, 'read_file', 'Page it.'))).toBe(true);
+  });
+
+  it('returns false for text capResultText left alone', () => {
+    expect(isCapTruncated(capResultText('short', 100))).toBe(false);
+  });
+
+  // The marker is ordinary prose: a file that merely quotes it — this source,
+  // a transcript, a doc about truncation — is not a truncated result, and
+  // treating it as one changes what the model is told about a complete read.
+  it('returns false when the phrase only appears inside the body', () => {
+    const body = ['const MARKER = \'[truncated by Forge MCP bridge\';', 'more code follows'].join(
+      '\n',
+    );
+    expect(isCapTruncated(body)).toBe(false);
+  });
+
+  it('returns false when the phrase appears mid-body of a complete read', () => {
+    const cut = capResultText('A'.repeat(100), 10);
+    const continued = [cut, '', 'and then the file continued to its real end'].join('\n');
+    expect(isCapTruncated(continued)).toBe(false);
   });
 });

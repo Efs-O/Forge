@@ -86,7 +86,18 @@ makes that possible.
 Tool results are capped (default 24,000 characters, `max_result_chars`) before
 entering the conversation, with a visible truncation marker. MCP servers have
 their own per-server cap: an uncapped result from a verbose server filled the
-slot's context and stalled the turn silently.
+slot's context and stalled the turn silently. `isCapTruncated` — beside the
+function that writes the marker — is how the rest of the codebase asks whether a
+result was cut; matching the marker text anywhere in the body instead treats any
+file quoting it as truncated.
+
+`exec_command` has its own bound in
+[`src/tools/execHelpers.ts`](../src/tools/execHelpers.ts): 60,000 characters per
+stream, or less when the call passes `max_output_chars`. What that function
+returns is what the round carries — the excerptor in `toolResultContext` shrinks
+it further only once the window is genuinely tight, so on a roomy 128k window
+this bound, not the excerptor, is what keeps one build log from costing tens of
+thousands of tokens.
 
 ## 5. Prompt-prefix stability
 

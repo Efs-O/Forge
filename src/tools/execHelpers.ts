@@ -7,13 +7,20 @@ export const MAX_OUTPUT_CHARS = 16_000;
 export const MAX_EXEC_OUTPUT_LINES = 2_000;
 
 /**
- * Upper bound on how much of a command's output is STORED in the transcript.
- * Mirrors `MAX_READ_FILE_CHARS`: a big `--help` dump or build log is legitimate
- * work, but an uncapped multi-MB stream would pollute the transcript and the
- * token estimate for every later round. Everything above this is dropped with
- * a note, exactly as the background buffer's retention cap already does.
+ * Upper bound on how much of a command's output is RETURNED, and therefore
+ * stored in the transcript and paged by `read_tool_result`.
+ *
+ * There is no separate "shown" copy: what this function returns is what the
+ * round carries. The excerptor in `toolResultContext` shrinks it further only
+ * when the window is actually tight, so this bound is the real worst case a
+ * single `exec_command` can add — both streams at once, which at ~4 chars per
+ * token is roughly 30k tokens. It was 120_000 per stream, i.e. twice that,
+ * which is more than a 128k window should ever spend on one command.
+ *
+ * A caller that wants less says so with `max_output_chars`; that argument is
+ * honoured here and never silently ignored.
  */
-export const MAX_EXEC_STORED_CHARS = 120_000;
+export const MAX_EXEC_STORED_CHARS = 60_000;
 
 export type ExecOutputStream = 'both' | 'stdout' | 'stderr';
 
@@ -229,22 +236,29 @@ function filterExecOutput(
 }
 
 /**
- * The stored copy of one stream: the full output, capped at the retention bound
- * so a runaway build log cannot bloat the transcript. This is what lands in the
- * transcript and what `read_tool_result` pages — so a `--help` dump past the
- * per-round `MAX_OUTPUT_CHARS` head is still fully recoverable, unlike the old
- * slice that dropped the middle forever.
+ * The returned copy of one stream: the full output, capped at `limit`.
+ *
+ * `limit` is the caller's `max_output_chars` when it gave one, otherwise the
+ * retention bound. Everything past it is dropped and unrecoverable — it is
+ * never stored anywhere — so the note says so rather than implying the rest
+ * can be paged back.
  */
-function storedStream(text: string): { text: string; totalChars: number; dropped: number } {
+function storedStream(text: string, limit: number): { text: string; dropped: number } {
   const normalized = stripAnsi(text);
-  if (normalized.length <= MAX_EXEC_STORED_CHARS) {
-    return { text: normalized, totalChars: normalized.length, dropped: 0 };
-  }
-  return {
-    text: normalized.slice(0, MAX_EXEC_STORED_CHARS),
-    totalChars: normalized.length,
-    dropped: normalized.length - MAX_EXEC_STORED_CHARS,
-  };
+  if (normalized.length <= limit) return { text: normalized, dropped: 0 };
+  return { text: normalized.slice(0, limit), dropped: normalized.length - limit };
+}
+
+/** The note attached to a stream cut by the returned-character bound. */
+function dropNote(dropped: number, limit: number, explicit: boolean): string {
+  const bound = explicit
+    ? `the max_output_chars value you passed (${String(limit)})`
+    : `the ${String(limit)}-char default bound`;
+  return (
+    `${String(dropped)} characters past ${bound} were dropped and cannot be recovered. ` +
+    `Re-run with head_lines or tail_lines to select the part you need, or redirect the ` +
+    `command's output to a file and read it.`
+  );
 }
 
 export function formatExecCommandOutput(
@@ -253,49 +267,33 @@ export function formatExecCommandOutput(
   options: ExecOutputOptions = {},
 ): string {
   const stream = options.stream ?? 'both';
-  // The per-round SHOWN window (head/tail) and the STORED full stream are
-  // different things. `shown` is what the model sees this round; `stored` is
-  // what the transcript keeps so `read_tool_result` can recover the rest. When
-  // the caller asked for a line window (head/tail) the shown text IS the whole
-  // answer they wanted, so it is also what gets stored — there is no "middle"
-  // to recover from a deliberate tail.
-  const stdoutShown = filterExecOutput(result.stdout, options);
-  const stderrShown = filterExecOutput(result.stderr, options);
-  const stdoutStored = storedStream(result.stdout);
-  const stderrStored = storedStream(result.stderr);
+  // A line window (head/tail) IS the answer the caller asked for, so it is what
+  // gets returned. Without one, the whole stream is returned, bounded by
+  // `max_output_chars` when given and by the retention bound otherwise.
+  const lineWindow = options.headLines !== undefined || options.tailLines !== undefined;
+  const explicitLimit = options.maxChars !== undefined;
+  const limit = options.maxChars ?? MAX_EXEC_STORED_CHARS;
   const out: Record<string, unknown> = {
     kind: result.exitCode === 0 ? 'success' : 'non_zero_exit',
     program,
     exitCode: result.exitCode,
   };
-  if (stream !== 'stderr') {
-    const lineWindow = options.headLines !== undefined || options.tailLines !== undefined;
-    out['stdout'] = lineWindow ? stdoutShown.text : stdoutStored.text;
+  const emit = (key: 'stdout' | 'stderr', raw: string): void => {
     if (lineWindow) {
-      out['stdout_truncated'] = stdoutShown.truncated;
-    } else if (stdoutStored.dropped > 0) {
-      out['stdout_truncated'] = true;
-      out['stdout_note'] =
-        `${String(stdoutStored.dropped)} characters past the ${String(MAX_EXEC_STORED_CHARS)}-char ` +
-        `retention bound were dropped and cannot be recovered; the first ` +
-        `${String(MAX_EXEC_STORED_CHARS)} are stored. Redirect the command's output to a file if ` +
-        `you need the rest.`;
+      const shown = filterExecOutput(raw, options);
+      out[key] = shown.text;
+      out[`${key}_truncated`] = shown.truncated;
+      return;
     }
-  }
-  if (stream !== 'stdout') {
-    const lineWindow = options.headLines !== undefined || options.tailLines !== undefined;
-    out['stderr'] = lineWindow ? stderrShown.text : stderrStored.text;
-    if (lineWindow) {
-      out['stderr_truncated'] = stderrShown.truncated;
-    } else if (stderrStored.dropped > 0) {
-      out['stderr_truncated'] = true;
-      out['stderr_note'] =
-        `${String(stderrStored.dropped)} characters past the ${String(MAX_EXEC_STORED_CHARS)}-char ` +
-        `retention bound were dropped and cannot be recovered; the first ` +
-        `${String(MAX_EXEC_STORED_CHARS)} are stored. Redirect the command's output to a file if ` +
-        `you need the rest.`;
+    const stored = storedStream(raw, limit);
+    out[key] = stored.text;
+    if (stored.dropped > 0) {
+      out[`${key}_truncated`] = true;
+      out[`${key}_note`] = dropNote(stored.dropped, limit, explicitLimit);
     }
-  }
+  };
+  if (stream !== 'stderr') emit('stdout', result.stdout);
+  if (stream !== 'stdout') emit('stderr', result.stderr);
   return JSON.stringify(out);
 }
 

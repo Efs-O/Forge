@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+- **`exec_command` no longer hands a whole build log to the model in one
+  round.** The formatter computed a bounded "shown" window and then returned
+  the unbounded stored stream instead, so `max_output_chars` did nothing unless
+  `head_lines`/`tail_lines` came with it, and the schema still advertised a
+  10,000-character default that no longer existed. Both streams at the old
+  120,000-char bound was ~60k tokens from a single call — on a 128k window the
+  excerptor never fires, because the window is not tight yet. The returned text
+  is now the only text: `max_output_chars` is honoured on every path, the
+  retention bound is 60,000 characters per stream (~30k tokens for both), and
+  the note names the bound that actually applied and says the rest is gone
+  rather than implying `read_tool_result` can page it back.
+
+- **A file that merely quotes the truncation marker is no longer treated as a
+  truncated result.** `[truncated by ` was matched anywhere in the body by both
+  `staleReadSupersede` and the new result nudge, so reading any source or
+  transcript containing the phrase suppressed a supersede and attached a
+  "narrow your search" instruction to a complete read. `isCapTruncated` in
+  `resultCap.ts` — beside the function that writes the marker — anchors the
+  match at the end, and both callers use it.
+
+- **A compaction that cannot possibly shrink the window no longer pays for a
+  summarization first.** The fit check ran after the model call, so a stuck
+  window re-summarized and discarded the result on every threshold crossing.
+  The same check now runs beforehand against an empty summary: a summary only
+  adds characters, so if a zero-length one does not shrink the window, none
+  will. The post-request check stays for a summary that came back long enough
+  to undo a real reduction, and both refusals share one wording.
+
+- **`llama_server_binary` on a model no longer requires the global binary too.**
+  Config validation demanded `llama_server.binary` for any `llama.cpp` model,
+  including one carrying its own override — which never reads the global value.
+  Only models without an override require it now.
+
+- **Seven helpers in `gitDiscovery.ts`/`gitLog.ts` stopped being exported.** No
+  caller outside their own module and no test imported them, which is the shape
+  `CLAUDE.md` calls the wired half of a bug pointing at itself.
+
 - **A remote `/clanker` now shows up in the sidebar.** Telegram replied "clanker
   mode ON" and the gate really did open — `setClankerMode` set the flag — but it
   was the only writer of that flag that never posted `clankerChanged`, so the

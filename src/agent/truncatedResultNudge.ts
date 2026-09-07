@@ -1,4 +1,5 @@
 import type { ChatMessage } from '../llm/types';
+import { isCapTruncated } from '../tools/resultCap';
 
 /**
  * Model-facing nudge appended to a tool result that came back truncated.
@@ -16,9 +17,6 @@ import type { ChatMessage } from '../llm/types';
  * alongside `supersedeStaleReads`. `conv.messages` is never touched, so the
  * nudge is rebuilt fresh each round and never accumulates.
  */
-
-/** The marker `capResultText` appends to every capped tool result when it is cut. */
-const TRUNCATION_MARKER = '[truncated by ';
 
 /** Tools whose cap is a search breadth the model can narrow with a query/glob. */
 const SEARCH_TOOLS = new Set(['search_code', 'find_files', 'search_codebase']);
@@ -52,7 +50,7 @@ export function nudgeTruncatedResults(messages: ChatMessage[]): ChatMessage[] {
   const result = messages.map((message) => {
     if (message.role !== 'tool') return message;
     if (typeof message.content !== 'string') return message;
-    if (!message.content.includes(TRUNCATION_MARKER)) return message;
+    if (!isCapTruncated(message.content)) return message;
     changed = true;
     return { ...message, content: message.content + nudgeFor(message.name) };
   });

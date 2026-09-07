@@ -15,7 +15,7 @@
 
 import * as path from 'path';
 
-export const AGENTS_MD = 'AGENTS.md';
+const AGENTS_MD = 'AGENTS.md';
 export const FORGE_MD = 'FORGE.md';
 export const INSTRUCTION_FILES = [FORGE_MD, AGENTS_MD] as const;
 

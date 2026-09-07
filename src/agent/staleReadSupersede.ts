@@ -1,4 +1,5 @@
 import type { ChatMessage } from '../llm/types';
+import { isCapTruncated } from '../tools/resultCap';
 
 /**
  * Model-facing elision of `read_file` results that a later read replaced.
@@ -43,7 +44,7 @@ function supersededNotice(path: string): string {
 function isCompleteRead(content: string): boolean {
   if (content.length === 0) return false;
   if (content.startsWith('Error') || content.startsWith('[Forge:')) return false;
-  return !content.includes('[truncated by ');
+  return !isCapTruncated(content);
 }
 
 function readFilePath(argumentsJson: string): string | undefined {

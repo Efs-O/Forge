@@ -99,7 +99,7 @@ export function containsPath(root: string, target: string): boolean {
 
 // ── location resolution ───────────────────────────────────────────────────────
 
-export function workspaceRoots(): string[] {
+function workspaceRoots(): string[] {
   return (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath);
 }
 
@@ -121,7 +121,7 @@ export function resolveFilePath(p: string): string {
  * agent is about to create is the ordinary case — so walking up is not a
  * fallback, it is the normal path.
  */
-export function nearestExistingDirectory(location: string): string {
+function nearestExistingDirectory(location: string): string {
   let current = resolveFilePath(location);
   for (;;) {
     try {
@@ -156,7 +156,7 @@ let cliUnavailableReported = false;
  * directory that simply is not a repository are different answers, and the
  * error the user eventually sees depends on which one it was.
  */
-export async function probeRepoRoot(dir: string): Promise<string | ProbeFailure> {
+async function probeRepoRoot(dir: string): Promise<string | ProbeFailure> {
   try {
     const { stdout } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], {
       cwd: dir,
@@ -208,7 +208,7 @@ function isProbeFailure(value: string | ProbeFailure): value is ProbeFailure {
 }
 
 /** Turn a probe failure into the error the tool caller should see. */
-export function probeFailureError(location: string, failure: ProbeFailure): GitDiscoveryError {
+function probeFailureError(location: string, failure: ProbeFailure): GitDiscoveryError {
   const where = `"${location}"`;
   switch (failure.kind) {
     case 'git-missing':
@@ -244,7 +244,7 @@ export function probeFailureError(location: string, failure: ProbeFailure): GitD
  * fall back to the CLI, not a reason to fail the tool call. The failure is
  * logged so it is visible in diagnostics rather than silently absorbed.
  */
-export async function apiRepoRoots(): Promise<string[]> {
+async function apiRepoRoots(): Promise<string[]> {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- vscode.git API is untyped
     const extension = vscode.extensions.getExtension<any>('vscode.git');

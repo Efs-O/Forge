@@ -23,7 +23,7 @@ const MAX_ENTRIES_LIMIT = 500;
  */
 const FORMAT = '--format=%H%n%an%n%aI%n%B';
 
-export interface GitLogEntry {
+interface GitLogEntry {
   hash: string;
   authorName: string;
   /** Author date, ISO-8601, exactly as git printed it. */
@@ -54,7 +54,7 @@ export function gitLogArgs(maxEntries: number, ref?: string): string[] {
   return args;
 }
 
-export function parseGitLog(stdout: string): GitLogEntry[] {
+function parseGitLog(stdout: string): GitLogEntry[] {
   return stdout
     .split('\0')
     .filter((record) => record.trim() !== '')

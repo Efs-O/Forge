@@ -14,6 +14,25 @@ export const DEFAULT_MAX_RESULT_CHARS = 24000;
  */
 export const MAX_READ_FILE_CHARS = 120000;
 
+/** The opening of the marker `capResultText` appends when it cuts a result. */
+const CAP_MARKER_PREFIX = '\n\n[truncated by ';
+
+/**
+ * True when `text` ends with the marker `capResultText` appends.
+ *
+ * Anchored at the END rather than matched anywhere in the body: the marker is
+ * ordinary text, so a result that merely CONTAINS the phrase — reading this
+ * file, or any transcript quoting it — is not a truncated result. Both callers
+ * change model-facing behaviour on the answer, so a substring match here is the
+ * same class of bug as a denylist matching a guard pattern as a substring.
+ */
+export function isCapTruncated(text: string): boolean {
+  const index = text.lastIndexOf(CAP_MARKER_PREFIX);
+  if (index === -1) return false;
+  const marker = text.slice(index);
+  return marker.includes(' — showing ') && marker.trimEnd().endsWith(']');
+}
+
 /**
  * Truncates oversized tool output, appending a visible marker so the model knows.
  * `source` names the component that did the cutting and `advice` (optional) tells
@@ -27,7 +46,7 @@ export function capResultText(
 ): string {
   if (text.length <= maxChars) return text;
   const tail = advice ? `. ${advice}` : '';
-  return `${text.slice(0, maxChars)}\n\n[truncated by ${source} — showing ${maxChars} of ${text.length} chars${tail}]`;
+  return `${text.slice(0, maxChars)}${CAP_MARKER_PREFIX}${source} — showing ${maxChars} of ${text.length} chars${tail}]`;
 }
 
 /**
