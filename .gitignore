@@ -83,6 +83,12 @@ PRODTEST_SEMVER_PLAN.md
 scripts/LLM_STRESS_TEST.md
 scripts/llm-stress-test.ps1
 
+# This machine's own agent instructions. FORGE.md.example is the template that
+# ships; the live file is personal — it accumulates hardware notes, absolute
+# paths and workflow preferences that are true here and nowhere else.
+FORGE.md
+!FORGE.md.example
+
 # Session planning/diagnostic scratch — kept local, not user-facing
 CHUNK_DOCSTRING_PLAN.md
 EMBEDDING_PROMPT_STYLE_PLAN.md
