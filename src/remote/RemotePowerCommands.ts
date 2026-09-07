@@ -117,7 +117,13 @@ async function handleSleep(
 
   // The wake time is parsed BEFORE the confirmation is offered: a typo in it
   // must not be discovered after the machine is already going down.
-  const timeOperand = flags.find((operand) => !['confirm', 'force', 'hibernate'].includes(operand));
+  //
+  // Joined, not `find`: the command line is split on whitespace, so reading only
+  // the first non-flag token would refuse "2026-09-08 07:00" and "45 minutes" --
+  // both forms parseWakeTime accepts -- for no reason the user could see.
+  const timeOperand = flags
+    .filter((operand) => !['confirm', 'force', 'hibernate'].includes(operand))
+    .join(' ');
   let wakeAt: Date | undefined;
   if (timeOperand) {
     wakeAt = parseWakeTime(timeOperand);
@@ -204,7 +210,8 @@ async function handleWake(
   event: Extract<RemoteInboundEvent, { kind: 'text' }>,
   context: RemotePowerContext,
 ): Promise<RemoteInboundDisposition> {
-  const argument = operands[0]?.toLowerCase();
+  // Joined for the same reason as /sleep: a two-token time must not be refused.
+  const argument = operands.join(' ').toLowerCase();
 
   if (argument === 'off' || argument === 'clear') {
     const removed = await context.power.clearWakeTimer();
