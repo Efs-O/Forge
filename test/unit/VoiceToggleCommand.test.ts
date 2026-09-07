@@ -67,6 +67,7 @@ function commandContext(
     workspaceId: 'ws',
     signal: new AbortController().signal,
     inactivityTimeoutMinutes: 30,
+    rateLimitPerMinute: 30,
     modelEntries: [],
     workspaceAliases: {},
     ...(voiceToggle ? { voiceToggle } : {}),

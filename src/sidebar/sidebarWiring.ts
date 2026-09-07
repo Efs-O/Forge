@@ -26,6 +26,7 @@ import { wireTurnMirror } from './turnMirrorWiring';
 import type { CompactionEvent } from './CompactionService';
 import { ContextBudgetPublisher } from './ContextBudgetPublisher';
 import { ConversationTabs } from './ConversationTabs';
+import type { ChatAttachmentStore } from './ChatAttachmentStore';
 import { SendPipeline } from './SendPipeline';
 import { opResetReportedContext } from './ConversationOps';
 import { snapshotRepoState } from './repoSnapshot';
@@ -84,6 +85,7 @@ export interface SidebarParts {
   workspaceRoot: string | undefined;
   getConfigPath: (() => string) | undefined;
   cliSessions: CliSessionRegistry | undefined;
+  attachmentStore: ChatAttachmentStore | undefined;
 }
 
 export interface SidebarRuntimeParts {
@@ -194,6 +196,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     postSessionSync: host.postSessionSync,
     evaluateAfterTurn: (conv, chain) => budget.evaluateAfterTurn(conv, chain),
     resetContextWarning: (conversationId) => budget.resetWarning(conversationId),
+    attachmentStore: parts.attachmentStore,
   });
 
   const tabs = new ConversationTabs({

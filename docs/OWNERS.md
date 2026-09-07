@@ -65,6 +65,9 @@ overlaps with an existing owner, extend the owner instead.
 | Keep/Undo CodeLens decorations             | `src/sidebar/KeepUndoCodeLens.ts`    |
 | Typed webview ↔ host message contract      | `src/sidebar/messageBridge.ts`       |
 | Webview diagnostic message shapes          | `src/sidebar/diagnosticMessages.ts`  |
+| Conversation-tab webview message shapes    | `src/sidebar/conversationMessages.ts` |
+| "Open this in the editor" message shapes    | `src/sidebar/openMessages.ts`        |
+| Chat attachment bytes on disk (thumbnails) | `src/sidebar/ChatAttachmentStore.ts` |
 | In-editor green/red diff decorations       | `src/sidebar/DiffDecorations.ts`     |
 | Diff computation + unified-diff parsing    | `src/sidebar/DiffUtils.ts`           |
 | Session transcript logging (~/.forge)      | `src/sidebar/SessionLogger.ts`       |

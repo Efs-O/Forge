@@ -155,6 +155,7 @@ describe('remote selection pagination', () => {
         ...ctx,
         workspaceId: 'workspace',
         inactivityTimeoutMinutes: 30,
+        rateLimitPerMinute: 30,
       },
       'resume-seventeen',
     );
@@ -166,6 +167,7 @@ describe('remote selection pagination', () => {
         ...ctx,
         workspaceId: 'workspace',
         inactivityTimeoutMinutes: 30,
+        rateLimitPerMinute: 30,
       },
       'resume-seventeen-legacy-alias',
     );
@@ -230,6 +232,7 @@ describe('remote selection pagination', () => {
       ...context(channel, store, 3, 2),
       workspaceId: 'workspace',
       inactivityTimeoutMinutes: 30,
+      rateLimitPerMinute: 30,
       resumeCurrent,
     };
 
@@ -251,8 +254,62 @@ describe('remote selection pagination', () => {
       handleRemoteCommand(textEvent('/select'), ctx, 'bare-select'),
     ).resolves.toEqual({
       kind: 'rejected',
-      reason: 'usage: /select <number-or-id>',
+      reason: 'usage: /chat <number-or-id>',
     });
+  });
+
+  it('rejects an unrestorable /chat instead of asking the transport to retry', async () => {
+    const store = await requestStore();
+    const channel = new FakeRemoteChannel();
+    const ctx = {
+      ...context(channel, store, 3, 2),
+      workspaceId: 'workspace',
+      inactivityTimeoutMinutes: 30,
+      rateLimitPerMinute: 30,
+    };
+    (ctx.host as unknown as { restoreConversation: () => Promise<never> }).restoreConversation =
+      async () => {
+        throw new Error('Forge: maximum open conversations reached.');
+      };
+
+    // A throw here used to escape as `retry`, which the Telegram poll loop
+    // answers by redelivering the same update without advancing its offset.
+    await expect(handleRemoteCommand(textEvent('/chat 1'), ctx, 'chat-cap')).resolves.toEqual({
+      kind: 'rejected',
+      reason: 'Forge: maximum open conversations reached.',
+    });
+  });
+
+  it('reports and sets the remote rate limit', async () => {
+    const store = await requestStore();
+    const channel = new FakeRemoteChannel();
+    const setRateLimit = vi.fn(async () => undefined);
+    const ctx = {
+      ...context(channel, store, 3, 2),
+      workspaceId: 'workspace',
+      inactivityTimeoutMinutes: 30,
+      rateLimitPerMinute: 30,
+      setRateLimit,
+    };
+
+    await expect(handleRemoteCommand(textEvent('/ratelimit'), ctx, 'rl-read')).resolves.toEqual({
+      kind: 'handled',
+    });
+    expect(channel.sent.at(-1)?.text).toContain('30 messages per minute');
+
+    await expect(handleRemoteCommand(textEvent('/ratelimit 90'), ctx, 'rl-set')).resolves.toEqual({
+      kind: 'handled',
+    });
+    expect(setRateLimit).toHaveBeenCalledWith(90);
+
+    await expect(handleRemoteCommand(textEvent('/ratelimit off'), ctx, 'rl-off')).resolves.toEqual({
+      kind: 'handled',
+    });
+    expect(setRateLimit).toHaveBeenCalledWith(600);
+
+    await expect(handleRemoteCommand(textEvent('/ratelimit 9000'), ctx, 'rl-bad')).resolves.toEqual(
+      { kind: 'rejected', reason: 'usage: /ratelimit <1-600|off>' },
+    );
   });
 
   it('applies the same paging to models and supports explicit page commands', async () => {
@@ -285,6 +342,7 @@ describe('remote selection pagination', () => {
         ...ctx,
         workspaceId: 'workspace',
         inactivityTimeoutMinutes: 30,
+        rateLimitPerMinute: 30,
       },
       'model-seventeen',
     );

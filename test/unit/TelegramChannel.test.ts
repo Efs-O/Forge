@@ -538,3 +538,61 @@ describe('TelegramChannel', () => {
     expect(Buffer.from(result.data!, 'base64')).toEqual(binary);
   });
 });
+
+describe('TelegramChannel retry bound', () => {
+  it('gives up on an update that always throws instead of redelivering it forever', async () => {
+    const abort = new AbortController();
+    let cursor: string | undefined;
+    let handled = 0;
+    const sent: string[] = [];
+    const update = {
+      update_id: 7,
+      message: {
+        message_id: 1,
+        chat: { id: 42, type: 'private' },
+        from: { id: 42, is_bot: false },
+        text: '/chat 1',
+        date: 0,
+      },
+    };
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => cursor,
+      setCursor: async (_key, value) => {
+        cursor = value;
+      },
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        const method = String(url).split('/').at(-1)!;
+        const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+        if (method === 'setMyCommands') return response(true);
+        if (method === 'sendMessage') {
+          sent.push(String(body.text));
+          return response({ message_id: 99 });
+        }
+        if (method === 'getUpdates') {
+          // Telegram redelivers until the offset moves past the update.
+          if (Number(body.offset ?? 0) > update.update_id) {
+            return new Promise<Response>((_resolve, reject) => {
+              init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+                once: true,
+              });
+            });
+          }
+          return response([update]);
+        }
+        return response(true);
+      }) as typeof fetch,
+    });
+
+    channel.onEvent(async () => {
+      handled += 1;
+      throw new Error('conversation could not be restored');
+    });
+    await channel.start(abort.signal);
+    await vi.waitFor(() => expect(cursor).toBe('8'));
+    abort.abort();
+
+    expect(handled).toBe(3);
+    expect(sent.at(-1)).toContain('conversation could not be restored');
+  });
+});

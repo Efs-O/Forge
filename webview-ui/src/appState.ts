@@ -4,7 +4,7 @@ import type {
   DiffHunk,
   ModelEntry,
 } from '../../src/sidebar/messageBridge';
-import type { AppMessage, PersistedRow } from './messageOps';
+import type { AppMessage, MessageAttachment, PersistedRow } from './messageOps';
 
 export interface State {
   messagesById: Record<string, AppMessage[]>;
@@ -84,7 +84,14 @@ export type Action =
   | { type: 'BACKEND_STARTING'; message: string; convId?: string }
   | { type: 'BACKEND_DOWN'; message: string; convId?: string }
   | { type: 'MODELS'; models: ModelEntry[]; active: string | null }
-  | { type: 'USER_SEND'; text: string; convId?: string }
+  | {
+      type: 'USER_SEND';
+      text: string;
+      convId?: string;
+      /** Shown immediately from the bytes still in hand; the next sync replaces
+       *  them with the host's stored references. */
+      attachments?: MessageAttachment[];
+    }
   | { type: 'SET_MODEL'; name: string | null }
   | { type: 'CHECKPOINT_READY'; convId?: string }
   | { type: 'CHECKPOINT_DISMISSED'; convId?: string }
@@ -122,4 +129,5 @@ export type Action =
       tabs: SessionTabMeta[];
       history: SessionHistoryMeta[];
       messagesById: Record<string, PersistedRow[]>;
+      attachmentsRoot?: string | undefined;
     };

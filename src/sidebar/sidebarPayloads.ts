@@ -9,7 +9,7 @@
 
 import type { ForgeConfig } from '../config/types';
 import { mergeGroupsIntoModel } from '../config/ConfigResolver';
-import type { HostToWebview, ModelResidency } from './messageBridge';
+import type { HostToWebview, ModelResidency, SessionSyncMsg } from './messageBridge';
 import { classifyModelRoute } from '../llm/ModelRouteClassifier';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
 import {
@@ -88,7 +88,8 @@ export function buildSessionSyncMessage(
   sidebar: SidebarRuntime,
   streamingIds: ReadonlySet<string>,
   sessionActiveMs: (conversation: ConversationRuntime) => number,
-): HostToWebview {
+  attachmentsRoot?: string,
+): SessionSyncMsg {
   const wanted = new Set<string>([sidebar.activeConversationId, ...streamingIds]);
   return {
     type: 'sessionSync',
@@ -96,6 +97,7 @@ export function buildSessionSyncMessage(
     tabs: tabMetasFromSession(sidebar, streamingIds, sessionActiveMs),
     history: historyMetasFromSession(sidebar),
     messagesById: slimMessagesById(sidebar, wanted),
+    ...(attachmentsRoot ? { attachmentsRoot } : {}),
   };
 }
 

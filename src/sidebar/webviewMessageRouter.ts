@@ -43,6 +43,7 @@ export interface WebviewActions {
   renameConversation: (id: string, title: string) => void;
   runSlashCommand: (id: ForgeSlashCommandId) => void;
   openFile: (path: string, line?: number, beside?: boolean) => Promise<void>;
+  openAttachment: (relativePath: string) => Promise<void>;
   resolveConfirmation: (id: string, approved: boolean) => void;
   /** `text: undefined` is a dismissal, which the tool reports as no answer. */
   answerQuestion: (id: string, text: string | undefined) => void;
@@ -139,6 +140,14 @@ export function routeWebviewMessage(actions: WebviewActions, msg: WebviewToHost)
         .openFile(msg.path, msg.line, msg.beside)
         .catch((err: Error) =>
           actions.post({ type: 'error', message: `Could not open ${msg.path}: ${err.message}` }),
+        );
+      break;
+
+    case 'openAttachment':
+      void actions
+        .openAttachment(msg.relativePath)
+        .catch((err: Error) =>
+          actions.post({ type: 'error', message: `Could not open attachment: ${err.message}` }),
         );
       break;
 

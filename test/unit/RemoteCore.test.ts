@@ -999,6 +999,7 @@ describe('remote compaction progress notifications', () => {
       workspaceId: 'workspace',
       signal: new AbortController().signal,
       inactivityTimeoutMinutes: 30,
+      rateLimitPerMinute: 30,
       modelEntries: [],
       workspaceAliases: {},
     };
@@ -1052,6 +1053,7 @@ describe('remote compaction progress notifications', () => {
       workspaceId: 'workspace',
       signal: new AbortController().signal,
       inactivityTimeoutMinutes: 30,
+      rateLimitPerMinute: 30,
       modelEntries: [],
       workspaceAliases: {},
       reloadWindow,
@@ -1133,6 +1135,7 @@ describe('remote compaction progress notifications', () => {
       workspaceId: 'workspace',
       signal: new AbortController().signal,
       inactivityTimeoutMinutes: 30,
+      rateLimitPerMinute: 30,
       modelEntries: [],
       workspaceAliases: {},
       reloadWindow: vi.fn(async () => undefined),
@@ -1183,6 +1186,7 @@ describe('remote compaction progress notifications', () => {
       workspaceId: 'workspace',
       signal: new AbortController().signal,
       inactivityTimeoutMinutes: 30,
+      rateLimitPerMinute: 30,
       modelEntries: [],
       workspaceAliases: {},
     };
@@ -1230,6 +1234,7 @@ describe('remote compaction progress notifications', () => {
       workspaceId: 'workspace',
       signal: new AbortController().signal,
       inactivityTimeoutMinutes: 30,
+      rateLimitPerMinute: 30,
       modelEntries: [],
       workspaceAliases: {},
     };
@@ -1280,6 +1285,7 @@ describe('remote compaction progress notifications', () => {
       workspaceId: 'workspace',
       signal: new AbortController().signal,
       inactivityTimeoutMinutes: 30,
+      rateLimitPerMinute: 30,
       modelEntries: [],
       workspaceAliases: {},
     };
@@ -1326,6 +1332,7 @@ describe('remote compaction progress notifications', () => {
       workspaceId: 'workspace',
       signal: new AbortController().signal,
       inactivityTimeoutMinutes: 30,
+      rateLimitPerMinute: 30,
       modelEntries: [],
       workspaceAliases: {},
     };

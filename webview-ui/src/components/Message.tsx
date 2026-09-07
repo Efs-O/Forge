@@ -10,6 +10,7 @@ import { FILE_LINK_SCHEME, linkifyForRender, parseFileLink } from '../linkify';
 // screen saying "Thinking" - this one, for a turn that reasoned *and* answered,
 // was the unmeasured one, so the rows that cost the most said the least.
 import { thinkingLabel } from './ThinkingGroup';
+import { MessageAttachments } from './MessageAttachments';
 
 const ChevronDown = (): React.ReactElement => (
   <svg width="10" height="6" viewBox="0 0 10 6" fill="currentColor" aria-hidden="true">
@@ -199,6 +200,7 @@ function MessageView({
   reasoningMs,
   streaming,
   preformatted,
+  attachments,
 }: MessageProps): React.ReactElement {
   const [thinkingOpen, setThinkingOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -251,7 +253,10 @@ function MessageView({
         {role === 'assistant' && content ? (
           <AssistantContent content={content} streaming={streaming} />
         ) : role === 'user' ? (
-          content
+          <>
+            {content}
+            {attachments?.length ? <MessageAttachments attachments={attachments} /> : null}
+          </>
         ) : null}
       </div>
 
@@ -281,8 +286,10 @@ function MessageView({
  * switching away from the sidebar during a turn and back flushed the backlog in
  * one paint, which read as the view spontaneously rebuilding itself.
  *
- * Every prop here is a primitive (MessageProps' non-primitive fields belong to
- * the diff and tool rows, which MessageList routes to their own components), so
- * the default shallow compare is exact -- no custom comparator to drift.
+ * Every prop here is a primitive except `attachments`, which is rebuilt only
+ * when the host re-sends the row (MessageProps' other non-primitive fields
+ * belong to the diff and tool rows, which MessageList routes to their own
+ * components), so the default shallow compare is exact -- no custom comparator
+ * to drift.
  */
 export const Message = React.memo(MessageView);

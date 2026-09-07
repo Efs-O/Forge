@@ -76,14 +76,21 @@ export function displayPersistMessages(
       }
       continue;
     }
+    // A user turn that carried an attachment has ARRAY content, and requiring a
+    // string here dropped it whole: after a reload the prompt text vanished
+    // from the transcript along with the image. Its text parts are renderable,
+    // so take them.
+    const arrayText = m.role === 'user' && Array.isArray(m.content) ? textContent(m.content) : null;
     if (
       (m.role !== 'user' && m.role !== 'assistant') ||
       (typeof m.content !== 'string' &&
+        arrayText === null &&
+        !(m.role === 'user' && m.attachments?.length) &&
         !(m.role === 'assistant' && typeof m.reasoning === 'string' && m.reasoning.length > 0))
     ) {
       continue;
     }
-    const content = typeof m.content === 'string' ? m.content : '';
+    const content = typeof m.content === 'string' ? m.content : (arrayText ?? '');
     const reasoning = typeof m.reasoning === 'string' && m.reasoning.length > 0 ? m.reasoning : '';
     // The final answer can follow streamed reasoning in the same model turn.
     // The ordinary message renderer intentionally shows answer text only, so
@@ -102,6 +109,7 @@ export function displayPersistMessages(
       // A reasoning-only turn has content: null; the webview contract is string.
       content,
       ...(reasoning ? { reasoning, ...reasoningMs } : {}),
+      ...(m.attachments?.length ? { attachments: m.attachments } : {}),
     });
   }
   return out;
@@ -135,7 +143,17 @@ export function countDisplayMessages(
     }
     if (m.role !== 'user' && m.role !== 'assistant') continue;
     const hasReasoning = typeof m.reasoning === 'string' && m.reasoning.length > 0;
-    if (typeof m.content !== 'string' && !(m.role === 'assistant' && hasReasoning)) continue;
+    // Mirrors the attachment-carrying user turn the projection now keeps: its
+    // content is an array, and it still counts for one row.
+    const arrayText = m.role === 'user' && Array.isArray(m.content) ? textContent(m.content) : null;
+    if (
+      typeof m.content !== 'string' &&
+      arrayText === null &&
+      !(m.role === 'user' && m.attachments?.length) &&
+      !(m.role === 'assistant' && hasReasoning)
+    ) {
+      continue;
+    }
     const content = typeof m.content === 'string' ? m.content : '';
     // A split turn (streamed thought followed by the answer) emits two rows.
     count += m.role === 'assistant' && content && hasReasoning ? 2 : 1;

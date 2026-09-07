@@ -125,7 +125,15 @@ export function reducer(state: State, action: Action): State {
         checkpointPendingIds: withoutId(state.checkpointPendingIds, cid),
         messagesById: {
           ...state.messagesById,
-          [cid]: [...base, { id: mkId(), role: 'user', content: action.text }],
+          [cid]: [
+            ...base,
+            {
+              id: mkId(),
+              role: 'user',
+              content: action.text,
+              ...(action.attachments?.length ? { attachments: action.attachments } : {}),
+            },
+          ],
         },
       };
     }
@@ -385,7 +393,7 @@ export function reducer(state: State, action: Action): State {
         messagesById[id] =
           liveConversationIds.has(id) && local.length > 0
             ? local
-            : mergeSyncedMessages(local, rows);
+            : mergeSyncedMessages(local, rows, action.attachmentsRoot);
       }
       // A closed tab can never show its bar again, so drop its pending id rather
       // than letting the set grow for the lifetime of the webview.

@@ -57,6 +57,7 @@ export interface RemoteControllerOptionsDeps {
   workspaceId: string;
   workspaceRoot?: string | undefined;
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
+  setRateLimit?: ((perMinute: number) => Promise<void>) | undefined;
   reloadWindow?: (() => Promise<void>) | undefined;
   onError: (message: string) => void;
   /** Live read of the applied config's voice output flag. */
@@ -120,6 +121,7 @@ export function buildRemoteControllerOptions(
       deps.switchWorkspace(config, alias, channel, chatId),
     inactivityTimeoutMinutes: remote.auth.inactivity_timeout_minutes,
     setInactivityTimeout: deps.setInactivityTimeout,
+    setRateLimit: deps.setRateLimit,
     reloadWindow: deps.reloadWindow,
     onError: deps.onError,
     ...(deps.hasConfigPath

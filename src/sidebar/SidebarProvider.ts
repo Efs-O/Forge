@@ -32,6 +32,7 @@ import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
 import type { AgentLoop } from './AgentLoop';
 import type { SidebarProviderEvents } from './AgentLoop';
 import type { SlashCommandHandler } from './SlashCommandHandler';
+import type { ChatAttachmentStore } from './ChatAttachmentStore';
 import { wireSidebar } from './sidebarWiring';
 import { reindexCodebase } from './reindexCommand';
 import type { ContextBudgetPublisher } from './ContextBudgetPublisher';
@@ -110,6 +111,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private readonly workspaceRoot?: string,
     getConfigPath?: () => string,
     cliSessions?: CliSessionRegistry,
+    // Absent in tests and in any host without globalStorage; prompts then send
+    // exactly as before, minus the transcript thumbnails.
+    private readonly attachmentStore?: ChatAttachmentStore,
   ) {
     this.sidebar = loadSidebarSession(workspaceState);
     const runtime = wireSidebar(
@@ -161,6 +165,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         workspaceRoot,
         getConfigPath,
         cliSessions,
+        attachmentStore,
       },
     );
     this.agentLoop = runtime.agentLoop;
@@ -260,7 +265,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.view = webviewView;
     webviewView.webview.options = {
       enableScripts: true,
-      localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview')],
+      localResourceRoots: [
+        vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview'),
+        // Without this the transcript's thumbnails are silently blocked: a
+        // webview URI outside every root does not load and reports nothing.
+        ...(this.attachmentStore ? [vscode.Uri.file(this.attachmentStore.rootPath)] : []),
+      ],
     };
     webviewView.webview.html = buildWebviewHtml(this.extensionUri, webviewView.webview);
     webviewView.webview.onDidReceiveMessage((raw: unknown) => {
@@ -451,11 +461,44 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private postSessionSync(): void {
+    // The attachments prefix is resolved here rather than in the projection:
+    // `asWebviewUri` needs the live webview, and the projections are pure reads
+    // with no VS Code in them. It ships once per sync; rows carry only their
+    // relative path.
     this.post(
-      buildSessionSyncMessage(this.sidebar, this.agentLoop.getStreamingIds(), (conversation) =>
-        this.agentLoop.getSessionActiveMs(conversation),
+      buildSessionSyncMessage(
+        this.sidebar,
+        this.agentLoop.getStreamingIds(),
+        (conversation) => this.agentLoop.getSessionActiveMs(conversation),
+        this.attachmentsRootUri(),
       ),
     );
+  }
+
+  private attachmentsRootUri(): string | undefined {
+    if (!this.attachmentStore || !this.view) return undefined;
+    return this.view.webview
+      .asWebviewUri(vscode.Uri.file(this.attachmentStore.rootPath))
+      .toString();
+  }
+
+  /**
+   * Opens a stored attachment in VS Code's own viewer — the image preview for
+   * images, the editor for text. `resolve` refuses a path that escapes the
+   * store, so a crafted transcript row cannot address arbitrary files.
+   */
+  private async openAttachment(relativePath: string): Promise<void> {
+    if (!this.attachmentStore) throw new Error('attachments are not stored in this window');
+    const target = this.attachmentStore.resolve(relativePath);
+    await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(target));
+  }
+
+  /** Every conversation id the session can still reach, open or archived. */
+  liveConversationIds(): string[] {
+    return [
+      ...this.sidebar.conversations.map((conversation) => conversation.id),
+      ...this.sidebar.history.map((conversation) => conversation.id),
+    ];
   }
 
   private persistSession(): void {
@@ -606,6 +649,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         renameConversation: (id, title) => this.tabs.rename(id, title),
         runSlashCommand: (id) => void this.slashHandler.handle(id),
         openFile: (path, line, beside) => this.agentLoop.openFile(path, { line, beside }),
+        openAttachment: (relativePath) => this.openAttachment(relativePath),
         resolveConfirmation: (id, approved) => this.agentLoop.resolveConfirmation(id, approved),
         recordWebviewDiagnostic: (message) => logWebviewDiagnostic(message),
       },

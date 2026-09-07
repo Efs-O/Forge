@@ -1,3 +1,7 @@
+import type { ChatAttachmentRef } from '../llm/types';
+
+export type { ChatAttachmentRef };
+
 /** Tab row mirrored for host + webview. */
 export interface SessionTabMeta {
   id: string;
@@ -289,6 +293,7 @@ export interface SessionSyncMsg {
           content: string;
           reasoning?: string | undefined;
           reasoningMs?: number | undefined;
+          attachments?: ChatAttachmentRef[] | undefined;
         }
       | {
           role: 'tool';
@@ -308,6 +313,12 @@ export interface SessionSyncMsg {
         }
     >
   >;
+  /**
+   * Webview-URI prefix for the chat attachment store, so a transcript row's
+   * `relativePath` resolves to something the webview may load. Absent when the
+   * host has no attachment store — rows then render as plain file chips.
+   */
+  attachmentsRoot?: string;
 }
 
 /**
@@ -417,35 +428,25 @@ export interface KeepMsg {
 export interface ReviewCheckpointMsg {
   type: 'reviewCheckpoint';
 }
-/** @deprecated Maps to newConversation on host. */
-export interface NewChatRequestMsg {
-  type: 'newChat';
-}
-export interface NewConversationMsg {
-  type: 'newConversation';
-}
-export interface SwitchConversationMsg {
-  type: 'switchConversation';
-  id: string;
-}
-export interface CloseConversationMsg {
-  type: 'closeConversation';
-  id: string;
-}
-export interface RestoreConversationMsg {
-  type: 'restoreConversation';
-  id: string;
-}
-export interface DeleteConversationMsg {
-  type: 'deleteConversation';
-  id: string;
-}
-/** Rename any conversation by id — an open tab or one archived in history. */
-export interface RenameConversationMsg {
-  type: 'renameConversation';
-  id: string;
-  title: string;
-}
+export type {
+  NewChatRequestMsg,
+  NewConversationMsg,
+  SwitchConversationMsg,
+  CloseConversationMsg,
+  RestoreConversationMsg,
+  DeleteConversationMsg,
+  RenameConversationMsg,
+} from './conversationMessages';
+
+import type {
+  NewChatRequestMsg,
+  NewConversationMsg,
+  SwitchConversationMsg,
+  CloseConversationMsg,
+  RestoreConversationMsg,
+  DeleteConversationMsg,
+  RenameConversationMsg,
+} from './conversationMessages';
 
 // v0.2+ additions
 export interface ConfirmResponseMsg {
@@ -463,14 +464,10 @@ export interface RunSlashCommandMsg {
   type: 'runSlashCommand';
   commandId: ForgeSlashCommandId;
 }
-export interface OpenFileMsg {
-  type: 'openFile';
-  path: string;
-  /** 1-based line to reveal, from a `path:42` reference in the transcript. */
-  line?: number;
-  /** Ctrl/Cmd-click: open in the editor group beside the active one. */
-  beside?: boolean;
-}
+
+export type { OpenFileMsg, OpenAttachmentMsg } from './openMessages';
+
+import type { OpenFileMsg, OpenAttachmentMsg } from './openMessages';
 
 export type WebviewToHost =
   | SendMsg
@@ -491,5 +488,6 @@ export type WebviewToHost =
   | ConfirmResponseMsg
   | QuestionResponseMsg
   | OpenFileMsg
+  | OpenAttachmentMsg
   | RunSlashCommandMsg
   | WebviewDiagnosticMsg;

@@ -267,6 +267,8 @@ export interface RemoteRuntimeOptions {
    */
   onStatusChanged?: (() => void) | undefined;
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
+  /** Persist `remote.rate_limit_per_minute` and re-apply it live (`/ratelimit`). */
+  setRateLimit?: ((perMinute: number) => Promise<void>) | undefined;
   reloadWindow?: (() => Promise<void>) | undefined;
   openWorkspace?: ((directory: string) => Promise<void>) | undefined;
   confirmWhisperServerStart?: ((detail: string) => Promise<boolean>) | undefined;

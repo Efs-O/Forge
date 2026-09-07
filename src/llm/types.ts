@@ -10,6 +10,15 @@ export interface ContentPartImage {
 }
 export type ContentPart = ContentPartText | ContentPartImage;
 
+/** A file a prompt carried, stored on disk by `ChatAttachmentStore`. */
+export interface ChatAttachmentRef {
+  name: string;
+  mediaType: string;
+  bytes: number;
+  /** POSIX-joined `<conversationId>/<file>`, relative to the store root. */
+  relativePath: string;
+}
+
 export interface ChatMessage {
   role: Role;
   /** May be null on assistant messages that carry tool_calls without text. */
@@ -24,6 +33,12 @@ export interface ChatMessage {
    */
   reasoningMs?: number;
   toolMs?: number;
+  /**
+   * Files this user turn carried, as on-disk references (see
+   * `ChatAttachmentStore`). Forge-only, like `reasoning`: no provider
+   * serializer reads it, and it holds no bytes, so it is safe to persist.
+   */
+  attachments?: ChatAttachmentRef[];
   tool_call_id?: string;
   name?: string;
   tool_calls?: ToolCall[];

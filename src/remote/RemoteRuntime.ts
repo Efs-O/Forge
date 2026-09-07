@@ -467,6 +467,7 @@ export class RemoteRuntime {
       workspaceId: this.options.workspaceId,
       workspaceRoot: this.options.workspaceRoot,
       setInactivityTimeout: this.options.setInactivityTimeout,
+      setRateLimit: this.options.setRateLimit,
       reloadWindow: this.options.reloadWindow,
       onError: this.options.notifyLocal,
       voiceOutputEnabled: () => this.appliedConfig?.voice?.output?.enabled === true,

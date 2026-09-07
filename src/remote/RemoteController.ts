@@ -51,6 +51,7 @@ export interface RemoteControllerOptions {
   switchWorkspace?: ((alias: string, channel: string, chatId: string) => Promise<void>) | undefined;
   inactivityTimeoutMinutes?: number;
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
+  setRateLimit?: ((perMinute: number) => Promise<void>) | undefined;
   reloadWindow?: (() => Promise<void>) | undefined;
   onError?: (message: string) => void;
   /** Global spoken-reply toggle, persisted to config.yaml. */
@@ -418,6 +419,7 @@ export class RemoteController {
           workspaceId: this.options.workspaceId,
           signal: this.abort.signal,
           inactivityTimeoutMinutes: this.options.inactivityTimeoutMinutes ?? 30,
+          rateLimitPerMinute: this.options.rateLimitPerMinute,
           modelEntries: this.options.modelEntries,
           workspaceAliases: this.options.workspaceAliases,
           totpEnrolled: () => this.auth.totpEnrolled(this.channel.name),
@@ -445,6 +447,7 @@ export class RemoteController {
           ...(this.options.setInactivityTimeout
             ? { setInactivityTimeout: this.options.setInactivityTimeout }
             : {}),
+          ...(this.options.setRateLimit ? { setRateLimit: this.options.setRateLimit } : {}),
           ...(this.options.reloadWindow ? { reloadWindow: this.options.reloadWindow } : {}),
           ...(this.options.voiceToggle ? { voiceToggle: this.options.voiceToggle } : {}),
           resumeCurrent: (resumeEvent, resumeDedupKey) =>

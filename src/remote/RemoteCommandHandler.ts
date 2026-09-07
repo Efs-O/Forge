@@ -21,6 +21,8 @@ export interface RemoteCommandContext {
   workspaceId: string;
   signal: AbortSignal;
   inactivityTimeoutMinutes: number;
+  /** Current `remote.rate_limit_per_minute`, so `/ratelimit` can report it. */
+  rateLimitPerMinute: number;
   modelEntries: readonly ModelPickerDescriptor[];
   workspaceAliases: Readonly<Record<string, string>>;
   /** The alias whose configured path is this window's root, when one matches. */
@@ -46,6 +48,7 @@ export interface RemoteCommandContext {
   ) => Promise<RemoteInboundDisposition>;
   switchWorkspace?: ((alias: string, channel: string, chatId: string) => Promise<void>) | undefined;
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
+  setRateLimit?: ((perMinute: number) => Promise<void>) | undefined;
   reloadWindow?: (() => Promise<void>) | undefined;
   /**
    * Whether this channel has a TOTP enrollment, so `/reload` can say that the
@@ -141,6 +144,34 @@ async function executeRemoteCommand(
     await context.channel.send(
       event.chatId,
       `Forge: remote inactivity timeout ${minutes === 0 ? 'disabled' : `set to ${minutes} minutes`}.`,
+      { signal: context.signal },
+    );
+    return { kind: 'handled' };
+  }
+  if (command === '/ratelimit') {
+    if (!argument) {
+      await context.channel.send(
+        event.chatId,
+        `Forge: remote rate limit is ${context.rateLimitPerMinute} messages per minute.`,
+        { signal: context.signal },
+      );
+      return { kind: 'handled' };
+    }
+    // `off` maps to the schema ceiling rather than removing the limiter. The
+    // limiter is the only backstop the Telegram poll loop has against a single
+    // poisoned update being redelivered forever; a true “off” would trade a
+    // visible error for a silent hot loop.
+    const perMinute = argument.toLowerCase() === 'off' ? 600 : Number(argument);
+    if (!Number.isInteger(perMinute) || perMinute < 1 || perMinute > 600) {
+      return { kind: 'rejected', reason: 'usage: /ratelimit <1-600|off>' };
+    }
+    if (!context.setRateLimit) {
+      return { kind: 'rejected', reason: 'remote rate limit configuration is unavailable' };
+    }
+    await context.setRateLimit(perMinute);
+    await context.channel.send(
+      event.chatId,
+      `Forge: remote rate limit set to ${perMinute} messages per minute.`,
       { signal: context.signal },
     );
     return { kind: 'handled' };
@@ -245,12 +276,28 @@ async function executeRemoteCommand(
     });
     return { kind: 'handled' };
   }
-  if (command === '/list') {
+  // `/chats` lists, `/chat <n>` picks — the same plural/singular pair as
+  // `/models` and `/model`. `/list` and `/select` stay as silent aliases: they
+  // are in muscle memory and in older help text screenshots.
+  if (command === '/chats' || command === '/list') {
     return sendConversationSelection(event, context, argument);
   }
-  if ((command === '/select' || command === '/resume') && argument) {
+  if ((command === '/chat' || command === '/select' || command === '/resume') && argument) {
     const conversationId = resolveSelection(context, event, 'conversations', argument) ?? argument;
-    const conv = await context.host.restoreConversation(conversationId, { activate: false });
+    // restoreConversation THROWS when the tab cannot be opened — the
+    // MAX_CONVERSATIONS cap, or an id that is not in history. An uncaught throw
+    // here became a `retry` disposition, which the Telegram poll loop answers by
+    // redelivering the same update without advancing its offset: one `/select 1`
+    // produced ~30 inbound events in four seconds and stopped only because the
+    // rate limiter began rejecting them. The user then saw "rate limit
+    // exceeded" and never saw the real reason. Rejecting names the cause and
+    // advances the offset.
+    let conv: Awaited<ReturnType<typeof context.host.restoreConversation>>;
+    try {
+      conv = await context.host.restoreConversation(conversationId, { activate: false });
+    } catch (err) {
+      return { kind: 'rejected', reason: err instanceof Error ? err.message : String(err) };
+    }
     await context.store.setBinding({
       channel: event.channel,
       chatId: event.chatId,
@@ -266,10 +313,10 @@ async function executeRemoteCommand(
     );
     return { kind: 'handled' };
   }
-  if (command === '/select') {
-    return { kind: 'rejected', reason: 'usage: /select <number-or-id>' };
+  if (command === '/chat' || command === '/select') {
+    return { kind: 'rejected', reason: 'usage: /chat <number-or-id>' };
   }
-  // A numbered /resume is retained as a compatibility alias for /select.
+  // A numbered /resume is retained as a compatibility alias for /chat.
   // Bare /resume continues the conversation already bound to this chat, so a
   // remote user can restart a cold model without inventing “Ready?”.
   if (command === '/resume') {

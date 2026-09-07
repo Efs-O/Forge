@@ -1,4 +1,20 @@
-import type { DiffHunk } from '../../src/sidebar/messageBridge';
+import type { ChatAttachmentRef, DiffHunk } from '../../src/sidebar/messageBridge';
+
+/**
+ * One file shown under a message bubble.
+ *
+ * `src` is a `data:` URL while the prompt is still local (the webview holds the
+ * bytes it just sent) and a webview URI once the host has persisted it. Only
+ * the persisted form has a `relativePath`, and only that form can be opened:
+ * there is nothing on disk to open until the host has written it.
+ */
+export interface MessageAttachment {
+  name: string;
+  mediaType: string;
+  bytes: number;
+  src: string;
+  relativePath?: string;
+}
 
 export interface AppMessage {
   id: string;
@@ -30,6 +46,8 @@ export interface AppMessage {
   /** Wall clock the call was announced at, and how long it ran. */
   toolStartedAt?: number;
   toolMs?: number;
+  /** Files the user's prompt carried, rendered under the bubble. */
+  attachments?: MessageAttachment[];
 }
 
 export type PersistedRow =
@@ -38,6 +56,7 @@ export type PersistedRow =
       content: string;
       reasoning?: string | undefined;
       reasoningMs?: number | undefined;
+      attachments?: ChatAttachmentRef[] | undefined;
     }
   | {
       role: 'tool';
@@ -57,6 +76,21 @@ export type PersistedRow =
       diffIsDeleted: boolean;
     };
 
+/**
+ * A stored reference becomes renderable only once the host has told us where
+ * its store is. Without that prefix the row still lists the file by name and
+ * size — a missing thumbnail is a smaller loss than a broken one.
+ */
+function restoredAttachment(ref: ChatAttachmentRef, root?: string): MessageAttachment {
+  return {
+    name: ref.name,
+    mediaType: ref.mediaType,
+    bytes: ref.bytes,
+    src: root ? `${root.replace(/\/$/u, '')}/${ref.relativePath}` : '',
+    relativePath: ref.relativePath,
+  };
+}
+
 export function mkId(): string {
   return Math.random().toString(36).slice(2);
 }
@@ -74,7 +108,11 @@ export function mkId(): string {
  * matching host turn. That keeps tool activity before the final report instead
  * of moving it to the bottom after session reconciliation.
  */
-export function mergeSyncedMessages(local: AppMessage[], rows: PersistedRow[]): AppMessage[] {
+export function mergeSyncedMessages(
+  local: AppMessage[],
+  rows: PersistedRow[],
+  attachmentsRoot?: string,
+): AppMessage[] {
   const reconstructed: AppMessage[] = rows.map((m) => ({
     id: mkId(),
     role: m.role,
@@ -84,6 +122,9 @@ export function mergeSyncedMessages(local: AppMessage[], rows: PersistedRow[]): 
       : {}),
     ...((m.role === 'user' || m.role === 'assistant') && m.reasoningMs !== undefined
       ? { reasoningMs: m.reasoningMs }
+      : {}),
+    ...((m.role === 'user' || m.role === 'assistant') && m.attachments?.length
+      ? { attachments: m.attachments.map((ref) => restoredAttachment(ref, attachmentsRoot)) }
       : {}),
     ...(m.role === 'tool'
       ? {

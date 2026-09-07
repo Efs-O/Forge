@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import { UserQuestionService } from './sidebar/UserQuestionService';
 import { UserNotificationService } from './sidebar/UserNotificationService';
 import { SidebarProvider } from './sidebar/SidebarProvider';
+import { ChatAttachmentStore } from './sidebar/ChatAttachmentStore';
 import { watchWorkspaceFolders } from './sidebar/workspaceInfo';
 import { BackendPool } from './backend/BackendPool';
 import { disposeServerChannel } from './backend/DirectBackend';
@@ -236,6 +237,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   if (forgeLoader) context.subscriptions.push(forgeLoader);
 
   let refreshSessionTime = (): void => {};
+  const chatAttachments = new ChatAttachmentStore(
+    path.join(context.globalStorageUri.fsPath, 'chat-attachments'),
+  );
   sidebarProvider = new SidebarProvider(
     context.extensionUri,
     pool,
@@ -275,7 +279,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     workspaceRoot,
     () => activeConfigPath,
     cliSessions,
+    chatAttachments,
   );
+  // Best-effort, after the session is loaded: an attachment whose conversation
+  // is gone is unreachable, and nothing else ever deletes it.
+  void chatAttachments.prune(sidebarProvider.liveConversationIds());
   const workspaceId = workspaceRoot
     ? workspaceIdFor(workspaceRoot)
     : createHash('sha256').update(`no-workspace:${activeConfigPath}`).digest('hex');
@@ -323,6 +331,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     setInactivityTimeout: async (minutes) => {
       updateConfigFile(activeConfigPath, (doc) => {
         doc.setIn(['remote', 'auth', 'inactivity_timeout_minutes'], minutes);
+      });
+      config = loadConfig(path.dirname(activeConfigPath));
+      await activeRemoteRuntime?.applyConfig(config);
+    },
+    setRateLimit: async (perMinute) => {
+      updateConfigFile(activeConfigPath, (doc) => {
+        doc.setIn(['remote', 'rate_limit_per_minute'], perMinute);
       });
       config = loadConfig(path.dirname(activeConfigPath));
       await activeRemoteRuntime?.applyConfig(config);

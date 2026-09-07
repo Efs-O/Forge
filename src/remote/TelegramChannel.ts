@@ -27,12 +27,13 @@ export const TELEGRAM_BOT_TOKEN_SECRET = 'forge.remote.telegram.botToken';
 
 /** Native Telegram command menu. Parsing remains transport-independent. */
 export const TELEGRAM_BOT_COMMANDS = [
+  { command: 'chat', description: 'Switch to an existing conversation' },
+  { command: 'chats', description: 'List recent conversations' },
   { command: 'clanker', description: 'Set approval-gate mode' },
   { command: 'compact', description: 'Compact the conversation' },
   { command: 'context', description: 'Context usage and tokens' },
   { command: 'drop', description: 'Drop queued prompt or all' },
   { command: 'help', description: 'Show all Forge commands' },
-  { command: 'list', description: 'List recent conversations' },
   { command: 'lock', description: 'Lock this remote session' },
   { command: 'mirror', description: 'Echo sidebar answers here on/off' },
   { command: 'model', description: 'Pin a model to this chat' },
@@ -40,10 +41,10 @@ export const TELEGRAM_BOT_COMMANDS = [
   { command: 'new', description: 'Start a new chat' },
   { command: 'notify', description: 'Agent notifications on/off' },
   { command: 'queue', description: 'List queued prompts' },
+  { command: 'ratelimit', description: 'Show/set messages allowed per minute' },
   { command: 'reload', description: 'Reload VS Code window' },
   { command: 'resume', description: 'Continue the current conversation' },
   { command: 'restart', description: 'Restart the pinned model' },
-  { command: 'select', description: 'Select an existing conversation' },
   { command: 'status', description: 'Session, model, queue' },
   { command: 'steer', description: 'Run queued <n> or new text now' },
   { command: 'stop', description: 'Stop the current request' },
@@ -230,9 +231,25 @@ export class TelegramChannel implements RemoteChannel {
     }
   }
 
+  /**
+   * Bounds how often one update may be redelivered before it is given up on.
+   *
+   * A `retry` disposition breaks the batch WITHOUT advancing the offset, so
+   * Telegram hands back the same update immediately. That is the right answer
+   * for a transient host error, and a trap for a permanent one: `/select <n>`
+   * on an unrestorable conversation threw on every attempt, and the resulting
+   * hot loop produced ~30 inbound events in four seconds until the rate limiter
+   * turned them into rejections. The sender saw "rate limit exceeded" and never
+   * saw the real cause. Three attempts, then reject with the last error and move
+   * on — a poisoned update must never be able to spin.
+   */
+  private static readonly MAX_UPDATE_RETRIES = 3;
+
   private async poll(signal: AbortSignal): Promise<void> {
     let offset = Number(this.options.getCursor(CURSOR_KEY) ?? '0');
     let consecutiveFailures = 0;
+    let retryingUpdateId: number | undefined;
+    let retryAttempts = 0;
     if (!Number.isSafeInteger(offset) || offset < 0) offset = 0;
     while (!signal.aborted) {
       let updates: z.infer<typeof TelegramUpdateSchema>[];
@@ -275,6 +292,21 @@ export class TelegramChannel implements RemoteChannel {
               reason: err instanceof Error ? err.message : String(err),
             };
           }
+        }
+        if (disposition.kind === 'retry') {
+          if (update.update_id === retryingUpdateId) retryAttempts += 1;
+          else {
+            retryingUpdateId = update.update_id;
+            retryAttempts = 1;
+          }
+          if (retryAttempts >= TelegramChannel.MAX_UPDATE_RETRIES) {
+            disposition = { kind: 'rejected', reason: disposition.reason };
+            retryingUpdateId = undefined;
+            retryAttempts = 0;
+          }
+        } else if (update.update_id === retryingUpdateId) {
+          retryingUpdateId = undefined;
+          retryAttempts = 0;
         }
         if (event && (event.kind === 'text' || event.kind === 'voice')) {
           await this.acknowledgeDisposition(event, disposition, signal);

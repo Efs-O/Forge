@@ -266,3 +266,49 @@
   height: 1px;
   background: var(--vscode-sideBarSectionHeader-border, #333);
 }
+
+/* Attachments under a user turn.
+ *
+ * A thumbnail rather than a filename chip: the transcript is where a
+ * conversation is read back, and "screenshot.png" recalls nothing. Capped at
+ * 160px so a tall screenshot cannot push the reply off the screen, and left as
+ * a plain button so the whole thumbnail is the hit target. */
+.msg-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.msg-attachment {
+  padding: 0;
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.3));
+  border-radius: var(--forge-radius-sm);
+  background: none;
+  cursor: pointer;
+  overflow: hidden;
+  line-height: 0;
+  transition: border-color 0.12s ease;
+}
+
+.msg-attachment:not(.is-image) {
+  padding: 3px 8px;
+  line-height: normal;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.msg-attachment:hover:not(:disabled) {
+  border-color: var(--forge-accent);
+}
+
+.msg-attachment:disabled {
+  cursor: default;
+}
+
+.msg-attachment img {
+  display: block;
+  max-width: 160px;
+  max-height: 160px;
+  object-fit: contain;
+}

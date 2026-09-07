@@ -28,7 +28,7 @@ describe('remote rich text', () => {
     expect(rendered).toContain('• <b>/stop</b> cancels');
     // Placeholders keep their angle brackets as text, or Telegram reads them
     // as an unknown tag and rejects the whole send.
-    expect(rendered).toContain('/select &lt;n-or-id&gt;');
+    expect(rendered).toContain('/chat &lt;n-or-id&gt;');
     // No two lines of prose ever touch: every note is its own paragraph.
     for (const [index, line] of HELP_TEXT.split('\n').entries()) {
       if (!line.startsWith('•')) continue;
@@ -62,7 +62,11 @@ describe('remote command map', () => {
     'src/remote/RemoteController.ts',
   ];
   // Aliases and the parser-dispatched command have no `command === ...` line.
-  const UNDOCUMENTED_ALIASES = new Set(['/commands']);
+  // `/list` and `/select` were renamed to `/chats` and `/chat`; they still
+  // answer, so muscle memory and old screenshots keep working, but they are
+  // deliberately absent from both the help text and the native menu — two names
+  // for one thing in the command map is what made the old one hard to read.
+  const UNDOCUMENTED_ALIASES = new Set(['/commands', '/list', '/select']);
   const EXTRA_IMPLEMENTED = ['/steer'];
 
   const implemented = new Set(

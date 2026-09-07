@@ -38,6 +38,7 @@ describe('RemoteSessionAuth', () => {
     const secrets = new MemorySecrets();
     const auth = new RemoteSessionAuth(secrets as unknown as vscode.SecretStorage, {
       inactivityTimeoutMinutes: 30,
+      rateLimitPerMinute: 30,
     });
     const secret = auth.createEnrollmentSecret();
     const now = 1_234_567_890_000;
@@ -74,6 +75,7 @@ describe('RemoteSessionAuth', () => {
     const secrets = new MemorySecrets();
     const auth = new RemoteSessionAuth(secrets as unknown as vscode.SecretStorage, {
       inactivityTimeoutMinutes: 30,
+      rateLimitPerMinute: 30,
     });
     const secret = auth.createEnrollmentSecret();
     const now = 1_234_567_890_000;
@@ -126,6 +128,7 @@ describe('RemoteSessionAuth', () => {
     const secrets = new MemorySecrets();
     const auth = new RemoteSessionAuth(secrets as unknown as vscode.SecretStorage, {
       inactivityTimeoutMinutes: 30,
+      rateLimitPerMinute: 30,
     });
     const secret = auth.createEnrollmentSecret();
     const now = 1_234_567_890_000;

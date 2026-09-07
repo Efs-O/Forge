@@ -12,7 +12,7 @@ const HELP_SECTIONS = new Set(['Session', 'Workspace', 'Queue', 'Models', 'Windo
 
 export const HELP_TEXT = `Forge commands:
 
-Session: /help · /status · /context · /stop · /new · /list [page] · /resume · /select <n-or-id> · /notify on|off · /mirror on|off · /voice on|off
+Session: /help · /status · /context · /stop · /new · /chats [page] · /chat <n-or-id> · /resume · /notify on|off · /mirror on|off · /voice on|off
 
 Workspace: /workspace [page] · /new <n-or-alias>
 
@@ -20,7 +20,7 @@ Queue: /queue · /steer <n-or-prompt> · /drop <n|all>
 
 Models: /models [page] · /model [n-or-name] · /unload · /restart
 
-Window: /compact · /lock · /reload · /timeout [1-1440|off] · /clanker on|off
+Window: /compact · /lock · /reload · /timeout [1-1440|off] · /ratelimit [1-600|off] · /clanker on|off
 
 Machine: /system · /sleep [8h|07:00] · /wake [8h|07:00|off]
 
@@ -36,23 +36,7 @@ Notes:
 
 • /status shows the model, the context used, and how many prompts are waiting; /context breaks the context window down on its own
 
-• /resume continues the conversation bound to this chat; /select <n-or-id> switches to another one; /list numbers the recent ones
-
-• /clanker on auto-approves non-dangerous tools in this workspace until the window reloads — writes then land with no confirmation anywhere, in any tab of that window. /clanker off also clears the sidebar toggle's memory, so it stays off across a reload
-
-• /compact summarises the conversation in place to win back context; the chat and its queue survive it
-
-• /reload fully reloads the VS Code window: it picks up a newly installed build, and drops a held prompt, the queue, and this session
-
-• /lock ends this authenticated session and discards any held prompt; the next message asks for the code again
-
-• /system reports GPU load, which processes hold VRAM (Forge's own backends are tagged), RAM and drive space; it answers while a turn is running
-
-• /unload releases every loaded model and frees its memory, exactly like Unload Model in the sidebar; unlike /reload it refuses while a turn is running
-
-• /model with no argument reports the pinned model, /models lists them, /restart restarts the running backend
-
-• /timeout sets how long this chat stays authenticated when idle; off never expires
+• /chats numbers the recent conversations; /chat <n-or-id> switches to one; /resume continues the one already bound to this chat
 
 • /notify off silences agent notify_user messages for this chat until the window reloads
 
@@ -60,11 +44,29 @@ Notes:
 
 • /voice off stops replies being sent as a spoken voice message (text stays); /voice on turns it back on — saved to config.yaml, so it survives a window reload
 
+• /new <n-or-alias> switches this chat to another workspace; /workspace lists them, numbers them, and says which one you are in
+
+• /model with no argument reports the pinned model, /models lists them, /restart restarts the running backend
+
+• /unload releases every loaded model and frees its memory, exactly like Unload Model in the sidebar; unlike /reload it refuses while a turn is running
+
+• /compact summarises the conversation in place to win back context; the chat and its queue survive it
+
+• /lock ends this authenticated session and discards any held prompt; the next message asks for the code again
+
+• /reload fully reloads the VS Code window: it picks up a newly installed build, and drops a held prompt, the queue, and this session
+
+• /timeout sets how long this chat stays authenticated when idle; off never expires
+
+• /ratelimit sets how many messages this chat may send per minute (default 30); off raises it to the 600 ceiling rather than removing it, because the limit is also what stops a stuck message being retried forever
+
+• /clanker on auto-approves non-dangerous tools in this workspace until the window reloads — writes then land with no confirmation anywhere, in any tab of that window. /clanker off also clears the sidebar toggle's memory, so it stays off across a reload
+
+• /system reports GPU load, which processes hold VRAM (Forge's own backends are tagged), RAM and drive space; it answers while a turn is running
+
 • /sleep suspends this machine. It asks for "/sleep confirm" first, and refuses while a turn is running unless you send "/sleep force". "/sleep 8h" arms a wake timer before suspending, so it comes back on its own; add "hibernate" for S4 instead of S3
 
-• /wake with no argument reports how to wake this machine from outside — the MAC address for a Wake-on-LAN magic packet, the broadcast address, and whether the adapter is armed. Forge CANNOT wake the machine itself: once it sleeps nothing on it is running, so no message can reach it. "/wake 07:00" arms the clock instead, which does work; "/wake off" clears it
-
-• /new <n-or-alias> switches this chat to another workspace; /workspace lists them, numbers them, and says which one you are in`;
+• /wake with no argument reports how to wake this machine from outside — the MAC address for a Wake-on-LAN magic packet, the broadcast address, and whether the adapter is armed. Forge CANNOT wake the machine itself: once it sleeps nothing on it is running, so no message can reach it. "/wake 07:00" arms the clock instead, which does work; "/wake off" clears it`;
 
 /**
  * Bolds the two things a reader scans for: the section a command lives under,

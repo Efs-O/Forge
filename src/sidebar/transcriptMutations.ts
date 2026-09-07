@@ -6,6 +6,7 @@
  */
 
 import type { AttachmentData } from './messageBridge';
+import type { ChatAttachmentRef } from '../llm/types';
 import type { ConversationRuntime } from './sessionTypes';
 import { buildUserContent } from './ConversationOps';
 import { deriveTitle } from './sessionTypes';
@@ -13,6 +14,12 @@ import { deriveTitle } from './sessionTypes';
 /** Presentation metadata for a prompt injected by Forge rather than authored by the user. */
 export interface UserPromptOptions {
   internal?: boolean;
+  /**
+   * On-disk references to what this prompt carried, stamped on the transcript
+   * so the webview can show the images back. The pixels stay out of the
+   * transcript; `ChatAttachmentStore` holds them.
+   */
+  attachmentRefs?: ChatAttachmentRef[];
 }
 
 /** Append the user's message, titling the conversation from its first one. */
@@ -27,6 +34,7 @@ export function appendUserPrompt(
     role: 'user',
     content: buildUserContent(text, attachments),
     ...(options?.internal ? { internal: true } : {}),
+    ...(options?.attachmentRefs?.length ? { attachments: options.attachmentRefs } : {}),
   });
   if (priorUserCount === 0) conv.title = deriveTitle(text.split('\n')[0] ?? text);
 }

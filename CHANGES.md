@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+- **One `/select 1` from Telegram became ~30 inbound events and answered
+  "remote rate limit exceeded".** The rate limit (30 per chat per minute) was
+  never the problem — it was the brake. `/select <n>` calls
+  `restoreConversation`, which throws when the tab cannot be opened (the 12-tab
+  cap, or an id not in history), and the Telegram poll loop turned any thrown
+  handler error into a `retry` that breaks the batch WITHOUT advancing the
+  getUpdates offset. Telegram redelivered the same update immediately, forever,
+  and only the rate limiter converting it into a rejection ended the burst — so
+  the sender saw a limit they had not hit and never saw the real cause. The
+  restore failure is now reported as itself, one update can be retried at most
+  three times before it is given up on, and `/ratelimit [1-600|off]` sets the
+  limit from the phone (persisted to `config.yaml`, live on the next message).
+  Audit-log evidence: `docs/plans/REMOTE_SELECT_AND_INLINE_IMAGES_PLAN.md`.
+
+- **`/list` and `/select` are `/chats` and `/chat`.** The plural lists, the
+  singular picks — the pair `/models` and `/model` already used. The old names
+  still answer, so nothing in muscle memory breaks, but they are gone from the
+  help text and the command menu. The `/help` notes are also in an order now:
+  they follow the command map above them instead of the order they were written
+  in.
+
+- **Images you send are shown in the chat, and open when you click them.** An
+  attachment used to be invisible in the transcript, and after a reload it took
+  the prompt with it: a user turn carrying a file has array content, and the
+  display projection dropped every message whose content was not a string. The
+  bytes are now written to the extension's own storage
+  (`ChatAttachmentStore`) and the transcript keeps a reference, so nothing
+  base64 reaches `workspaceState`; the sidebar renders images as thumbnails
+  under the prompt that sent them, and clicking one opens it in VS Code's image
+  preview.
+
 - **Switching chat tabs no longer stalls for a second or two.** Every
   `sessionSync` shipped the transcripts of every open tab *and* all 40 archived
   history conversations to the webview — 16 MB in a measured workspace — to

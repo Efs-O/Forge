@@ -25,6 +25,8 @@ import type { RequestChainContext } from './RequestChainLifecycle';
 import { toRequestOutcome, type ForgeRequestOutcome, type ForgeTurnOutcome } from './turnOutcome';
 import type { ContextThresholdAction } from './ContextBudgetPublisher';
 import { isContextExhaustionReason } from '../agent/truncationRecovery';
+import type { ChatAttachmentStore } from './ChatAttachmentStore';
+import type { ChatAttachmentRef } from '../llm/types';
 
 const log = getLogger();
 export const CONVERSATION_BUSY_ERROR = 'Forge: this conversation is still generating.';
@@ -52,6 +54,9 @@ export interface SendPipelineDeps {
     turn: ForgeTurnOutcome,
   ) => Promise<ContextThresholdAction | undefined>;
   resetContextWarning: (conversationId: string) => void;
+  /** Absent in tests and in a host with no globalStorage; attachments then
+   *  behave exactly as before, minus the transcript thumbnails. */
+  attachmentStore?: ChatAttachmentStore | undefined;
 }
 
 export class SendPipeline {
@@ -199,10 +204,25 @@ export class SendPipeline {
       deps.post({ type: 'userPrompt', text, conversationId: conv.id });
     }
     deps.post({ type: 'generationStarted', conversationId: conv.id });
+    // Saved before the turn, so the reference is already on the user message the
+    // first time the transcript is persisted. A failure here must not cost the
+    // user their prompt: the turn runs without thumbnails instead.
+    let attachmentRefs: ChatAttachmentRef[] = [];
+    if (attachments?.length && deps.attachmentStore) {
+      try {
+        attachmentRefs = await deps.attachmentStore.save(conv.id, attachments);
+      } catch (err) {
+        log.warn(`[SendPipeline] chat attachments were not saved: ${(err as Error).message}`);
+      }
+    }
     return deps.requestChains.run(chain, async () => {
       let nextText = text;
       let nextAttachments = attachments;
-      let nextOptions = promptOptions;
+      // Only the FIRST request of a chain carries the files the user sent; a
+      // continuation re-sends neither the bytes nor their references.
+      let nextOptions = attachmentRefs.length
+        ? { ...(promptOptions ?? {}), attachmentRefs }
+        : promptOptions;
       for (;;) {
         let turn: ForgeTurnOutcome;
         try {

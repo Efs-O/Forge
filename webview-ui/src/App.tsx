@@ -21,6 +21,7 @@ import { TranscriptPanes } from './components/TranscriptPanes';
 import { CheckpointBar } from './components/CheckpointBar';
 import { diffStats } from './components/DiffBlock';
 import { InputRow } from './components/InputRow';
+import { attachmentBytes } from './components/useAttachments';
 import { ConfirmationDialog } from './components/ConfirmationDialog';
 import { QuestionDialog } from './components/QuestionDialog';
 import { useAgentDialogs } from './useAgentDialogs';
@@ -176,6 +177,7 @@ export function App(): React.ReactElement {
             tabs: msg.tabs,
             history: msg.history,
             messagesById: msg.messagesById,
+            attachmentsRoot: msg.attachmentsRoot,
           });
           break;
         case 'tokenBudget':
@@ -221,7 +223,19 @@ export function App(): React.ReactElement {
   }, []);
 
   const postPrompt = useCallback((prompt: QueuedPrompt) => {
-    dispatch({ type: 'USER_SEND', text: prompt.text, convId: prompt.conversationId });
+    dispatch({
+      type: 'USER_SEND',
+      text: prompt.text,
+      convId: prompt.conversationId,
+      // The bytes are in hand right now, so the thumbnail appears with the
+      // bubble rather than after the host has written the file and synced back.
+      attachments: prompt.attachments.map((attachment) => ({
+        name: attachment.name,
+        mediaType: attachment.mediaType,
+        bytes: attachmentBytes(attachment),
+        src: `data:${attachment.mediaType};base64,${attachment.data}`,
+      })),
+    });
     vscode.postMessage({
       type: 'send',
       text: prompt.text,

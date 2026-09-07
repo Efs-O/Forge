@@ -13,7 +13,7 @@ export {
   saveSidebarSession,
   upsertHistoryConversation,
 } from './sessionPersistence';
-import type { ChatMessage } from '../llm/types';
+import type { ChatAttachmentRef, ChatMessage } from '../llm/types';
 import { stripImageParts } from './imageParts';
 import type { DiffHunk, SessionHistoryMeta, SessionTabMeta } from './messageBridge';
 
@@ -61,6 +61,14 @@ function textContent(content: ChatMessage['content']): string | null {
  * Backward compatible: every field added here is optional and `content` only
  * widened, so records written by earlier versions still parse unchanged.
  */
+/** Metadata only — the bytes live under the ChatAttachmentStore root. */
+const attachmentRefSchema = z.object({
+  name: z.string(),
+  mediaType: z.string(),
+  bytes: z.number(),
+  relativePath: z.string(),
+});
+
 const slimMsgSchema = z.object({
   role: z.enum(['user', 'assistant', 'tool']),
   content: z.string().nullable(),
@@ -72,12 +80,19 @@ const slimMsgSchema = z.object({
   tool_call_id: z.string().optional(),
   name: z.string().optional(),
   internal: z.boolean().optional(),
+  attachments: z.array(attachmentRefSchema).optional(),
 });
 export type SlimPersistMessage = z.infer<typeof slimMsgSchema>;
 
 /** Subset of the transcript which can be safely restored into the webview. */
 export type DisplayPersistMessage =
-  | { role: 'user' | 'assistant'; content: string; reasoning?: string; reasoningMs?: number }
+  | {
+      role: 'user' | 'assistant';
+      content: string;
+      reasoning?: string;
+      reasoningMs?: number;
+      attachments?: ChatAttachmentRef[];
+    }
   | {
       role: 'tool';
       content: string;
@@ -302,6 +317,7 @@ export function slimPersistMessages(messages: ChatMessage[]): SlimPersistMessage
       ...(typeof m.tool_call_id === 'string' ? { tool_call_id: m.tool_call_id } : {}),
       ...(typeof m.name === 'string' ? { name: m.name } : {}),
       ...(m.internal ? { internal: true } : {}),
+      ...(m.attachments?.length ? { attachments: m.attachments } : {}),
     });
   }
   return out;
@@ -320,5 +336,6 @@ export function chatMessagesFromSlim(slim: SlimPersistMessage[]): ChatMessage[] 
     ...(typeof m.tool_call_id === 'string' ? { tool_call_id: m.tool_call_id } : {}),
     ...(typeof m.name === 'string' ? { name: m.name } : {}),
     ...(m.internal ? { internal: true } : {}),
+    ...(m.attachments?.length ? { attachments: m.attachments } : {}),
   }));
 }
