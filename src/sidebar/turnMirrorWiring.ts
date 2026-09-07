@@ -8,6 +8,15 @@ const MAX_MIRRORED_CHARS = 3_500;
 export interface TurnMirrorWiring {
   lookup: (conversationId: string) => ConversationRuntime | undefined;
   emit: (event: HostActivityEvent) => void;
+  /**
+   * Closes the progress channel for the turn.
+   *
+   * Separate from `emit` because it must fire on every ending, including the
+   * one `emit` has nothing to say about: a turn that produced no answer sends
+   * no activity event, and a live progress message with no closer stays on
+   * "working…" for good.
+   */
+  endProgress: (conversationId: string, ok: boolean) => void;
 }
 
 /**
@@ -29,6 +38,7 @@ export function wireTurnMirror(events: SidebarProviderEvents, deps: TurnMirrorWi
   events.onGenerationFinished = (modelName, conversationId, finalText) => {
     original?.(modelName, conversationId, finalText);
     if (conversationId === undefined) return;
+    deps.endProgress(conversationId, true);
     // The provider already has the exact final answer at this point. Reading
     // the transcript here was racy around cold backend startup/restart: a
     // session sync or a continuation could make the callback see a different
@@ -46,6 +56,7 @@ export function wireTurnMirror(events: SidebarProviderEvents, deps: TurnMirrorWi
   events.onTurnFailed = (conversationId, message) => {
     originalFailed?.(conversationId, message);
     if (conversationId === undefined) return;
+    deps.endProgress(conversationId, false);
     deps.emit({
       text: `Forge: the turn stopped — ${message}
 

@@ -10,7 +10,6 @@ import type { RemoteChannel, RemoteInboundEvent } from './types';
 import type { PendingGate } from '../voice/VoiceGrammar';
 
 interface RemoteApprovalEntry {
-  requestId: string;
   chatId: string;
   event: ToolApprovalRequestEvent;
   nonce?: string;
@@ -154,19 +153,31 @@ export class RemoteApprovalBridge {
 
   private onRequested(event: ToolApprovalRequestEvent): void {
     if (!event.conversationId) return;
+    const chatId = this.chatFor(event.conversationId);
+    if (!chatId) return;
+    this.approvals.set(event.id, { chatId, event, openedAt: Date.now() });
+    void this.publish(event.id);
+  }
+
+  /**
+   * Which chat is asked to open this gate.
+   *
+   * The queued request first, so a chat that asked for the turn is the one
+   * answering for it even if a second chat is bound to the conversation. The
+   * binding is the fallback, and it is what makes a gate reachable at all for
+   * a turn started in the sidebar: that turn has no remote request behind it,
+   * so this used to return nothing and the phone was never told the work had
+   * stopped on a confirmation the user had walked away from.
+   */
+  private chatFor(conversationId: string): string | undefined {
     const chain = this.host
       .status()
-      .requestChains.find((item) => item.conversationId === event.conversationId);
-    if (!chain?.remoteRequestId) return;
-    const request = this.store.getRequest(chain.remoteRequestId);
-    if (!request || request.channel !== this.channel.name) return;
-    this.approvals.set(event.id, {
-      requestId: request.id,
-      chatId: request.chatId,
-      event,
-      openedAt: Date.now(),
-    });
-    void this.publish(event.id);
+      .requestChains.find((item) => item.conversationId === conversationId);
+    const request = chain?.remoteRequestId
+      ? this.store.getRequest(chain.remoteRequestId)
+      : undefined;
+    if (request) return request.channel === this.channel.name ? request.chatId : undefined;
+    return this.store.bindingsForConversation(conversationId, this.channel.name)[0]?.chatId;
   }
 
   private onResolved(event: ToolApprovalResolvedEvent): void {

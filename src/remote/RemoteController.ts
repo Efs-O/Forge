@@ -14,9 +14,8 @@ import { RemoteOutboxDelivery } from './RemoteOutboxDelivery';
 import { handleRemoteCommand } from './RemoteCommandHandler';
 import { RemoteApprovalBridge } from './RemoteApprovalBridge';
 import { RemoteQuestionBridge } from './RemoteQuestionBridge';
-import type { RemoteAttachmentStore } from './RemoteAttachmentStore';
 import { RemoteAgentProgress } from './RemoteAgentProgress';
-import type { ModelPickerDescriptor } from '../sidebar/ModelPickerGroups';
+import { HostProgressOpener } from './remoteHostProgress';
 import { RemoteNotificationFanout } from './RemoteNotificationFanout';
 import {
   admitRemoteText,
@@ -33,30 +32,8 @@ import {
 } from './RemoteVoiceBridge';
 import type { RemoteSpeechDelivery } from './RemoteSpeechDelivery';
 import { handleRemoteSelectionAction } from './RemoteSelectionPager';
-export interface RemoteControllerOptions {
-  workspaceId: string;
-  queueLimit: number;
-  maxMessageChars: number;
-  rateLimitPerMinute: number;
-  /** Snapshot of grouped model descriptors from the active Forge config. */
-  modelEntries: readonly ModelPickerDescriptor[];
-  attachmentStore?: RemoteAttachmentStore | undefined;
-  attachmentsEnabled: boolean;
-  acceptPdfAttachments: boolean;
-  workspaceAliases: Readonly<Record<string, string>>;
-  /** Alias whose configured path resolves to this window's root, if any. */
-  currentWorkspaceAlias?: string | undefined;
-  /** Display name of the folder this window has open, alias or not. */
-  currentWorkspaceName?: string | undefined;
-  switchWorkspace?: ((alias: string, channel: string, chatId: string) => Promise<void>) | undefined;
-  inactivityTimeoutMinutes?: number;
-  setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
-  setRateLimit?: ((perMinute: number) => Promise<void>) | undefined;
-  reloadWindow?: (() => Promise<void>) | undefined;
-  onError?: (message: string) => void;
-  /** Global spoken-reply toggle, persisted to config.yaml. */
-  voiceToggle?: { get: () => boolean; set: (on: boolean) => Promise<void> };
-}
+import type { RemoteControllerOptions } from './remoteControllerOptions';
+export type { RemoteControllerOptions };
 
 /** Durable transport-independent admission, FIFO execution, and notification. */
 export class RemoteController {
@@ -71,6 +48,7 @@ export class RemoteController {
   private readonly approvals: RemoteApprovalBridge;
   private readonly questions: RemoteQuestionBridge;
   private readonly progress: RemoteAgentProgress;
+  private readonly hostProgress: HostProgressOpener;
   private readonly pending = new RemotePendingPrompt();
   private progressSubscription: { dispose(): void } | undefined;
   private get promptDeps(): RemotePromptAdmissionDeps & {
@@ -145,6 +123,13 @@ export class RemoteController {
       kick: () => this.outbox.kick(),
       ownsProgress: (conversationId) => this.progress.owns(conversationId),
     });
+    this.hostProgress = new HostProgressOpener({
+      channel,
+      signal: this.abort.signal,
+      progress: this.progress,
+      target: (conversationId) => this.fanout.mirrorTarget(conversationId),
+      ...(options.onError ? { onError: options.onError } : {}),
+    });
   }
 
   async start(): Promise<void> {
@@ -154,7 +139,9 @@ export class RemoteController {
     this.approvals.start();
     this.questions.start();
     await this.channel.start(this.abort.signal);
-    this.progressSubscription = this.host.onAgentProgress?.((event) => this.progress.handle(event));
+    this.progressSubscription = this.host.onAgentProgress?.((event) =>
+      this.hostProgress.handle(event),
+    );
     for (const request of this.store.queued(undefined, this.channel.name)) {
       this.kickDrain(request.conversationId);
     }
@@ -192,6 +179,7 @@ export class RemoteController {
       [...this.activeConversations].map((conversationId) => this.host.cancel(conversationId)),
     );
     await Promise.allSettled([...this.drains.values()]);
+    this.hostProgress.dispose();
     await this.progress.dispose();
     await this.outbox.stop();
   }

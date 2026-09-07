@@ -90,7 +90,11 @@ describe('turn mirroring', () => {
     const emitted: HostActivityEvent[] = [];
     const inner = vi.fn();
     const events: SidebarProviderEvents = { onGenerationFinished: inner };
-    wireTurnMirror(events, { lookup: () => conv, emit: (event) => emitted.push(event) });
+    wireTurnMirror(events, {
+      lookup: () => conv,
+      emit: (event) => emitted.push(event),
+      endProgress: () => undefined,
+    });
     return { events, emitted, inner };
   }
 
@@ -170,7 +174,11 @@ describe('failed-turn fan-out', () => {
   function wireFailure(): { events: SidebarProviderEvents; emitted: HostActivityEvent[] } {
     const emitted: HostActivityEvent[] = [];
     const events: SidebarProviderEvents = {};
-    wireTurnMirror(events, { lookup: () => undefined, emit: (event) => emitted.push(event) });
+    wireTurnMirror(events, {
+      lookup: () => undefined,
+      emit: (event) => emitted.push(event),
+      endProgress: () => undefined,
+    });
     return { events, emitted };
   }
 
@@ -189,7 +197,11 @@ describe('failed-turn fan-out', () => {
     const emitted: HostActivityEvent[] = [];
     const inner = vi.fn();
     const events: SidebarProviderEvents = { onTurnFailed: inner };
-    wireTurnMirror(events, { lookup: () => undefined, emit: (event) => emitted.push(event) });
+    wireTurnMirror(events, {
+      lookup: () => undefined,
+      emit: (event) => emitted.push(event),
+      endProgress: () => undefined,
+    });
     events.onTurnFailed?.('conv-1', 'boom');
     expect(inner).toHaveBeenCalledWith('conv-1', 'boom');
     expect(emitted).toHaveLength(1);

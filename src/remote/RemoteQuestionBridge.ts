@@ -70,17 +70,35 @@ export class RemoteQuestionBridge {
   }
 
   private onAsked(event: UserQuestionRequestEvent): void {
-    // No conversation, or no remote chain behind it, means the turn is local:
-    // stay silent and let the desktop prompt be the only surface.
+    // An unaddressed question cannot be attributed to a chat: the sidebar and
+    // the desktop prompt stay its only surfaces.
     if (!event.conversationId) return;
+    const chatId = this.chatFor(event.conversationId);
+    if (!chatId) return;
+    this.questions.set(event.id, { chatId, event });
+    void this.publish(event.id);
+  }
+
+  /**
+   * Which chat is asked the question.
+   *
+   * The queued request first, then the conversation's binding. The fallback is
+   * the case this used to refuse: a turn started in the sidebar blocks on
+   * ask_user with nothing said remotely, so a phone watching it sees the work
+   * stop and never learns it is waiting on an answer only the keyboard can
+   * give. The cost is that `answerText` can now claim a plain message sent
+   * while such a question is open -- bounded to the seconds a gate is up, and
+   * `/`-prefixed commands are never claimed.
+   */
+  private chatFor(conversationId: string): string | undefined {
     const chain = this.host
       .status()
-      .requestChains.find((item) => item.conversationId === event.conversationId);
-    if (!chain?.remoteRequestId) return;
-    const request = this.store.getRequest(chain.remoteRequestId);
-    if (!request || request.channel !== this.channel.name) return;
-    this.questions.set(event.id, { chatId: request.chatId, event });
-    void this.publish(event.id);
+      .requestChains.find((item) => item.conversationId === conversationId);
+    const request = chain?.remoteRequestId
+      ? this.store.getRequest(chain.remoteRequestId)
+      : undefined;
+    if (request) return request.channel === this.channel.name ? request.chatId : undefined;
+    return this.store.bindingsForConversation(conversationId, this.channel.name)[0]?.chatId;
   }
 
   private onAnswered(event: UserQuestionAnsweredEvent): void {

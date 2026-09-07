@@ -232,6 +232,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
   wireTurnMirror(events, {
     lookup: (id) => host.getSidebar().conversations.find((conv) => conv.id === id),
     emit: (event) => slashHandler.emitActivity(event),
+    endProgress: (id, ok) => agentLoop.reportProgress({ conversationId: id, kind: 'end', ok }),
   });
 
   return { agentLoop, slashHandler, budget, tabs, send, requestChains };

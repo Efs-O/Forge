@@ -112,6 +112,22 @@ export class RemoteNotificationFanout {
   }
 
   /**
+   * The chat that should watch a sidebar-started turn on this conversation.
+   *
+   * Exactly `mirrorTurn`'s predicate, deliberately: the live trace and the
+   * echoed answer are the same content arriving at different times, so a chat
+   * that silenced one and not the other would be reading half a turn.
+   *
+   * One chat, not the list: a progress message is edited in place and the
+   * component holding it keys one message per conversation. Two chats bound to
+   * one conversation is already an odd shape -- the second still gets the
+   * mirrored answer, which is the part that carries the result.
+   */
+  mirrorTarget(conversationId: string): string | undefined {
+    return this.chatsOn(conversationId).find((chatId) => !this.unmirrored.has(chatId));
+  }
+
+  /**
    * How many chats a notification for this conversation would reach.
    *
    * Deliberately the same `chatsOn` the sends use, muting included: a count

@@ -20,7 +20,17 @@ export type AgentProgressEvent =
    * the mirrored message rather than being overwritten by the next milestone
    * 1.5s later; an `info` does not.
    */
-  | { conversationId: string; kind: 'notice'; text: string; severity: 'info' | 'warning' };
+  | { conversationId: string; kind: 'notice'; text: string; severity: 'info' | 'warning' }
+  /**
+   * The turn is over. The only terminal signal this channel has, and the reason
+   * it needs one: a progress message opened for a turn nobody queued has no
+   * request to close it, so without this it would stay on "working…" and the
+   * next turn would inherit the stale message.
+   *
+   * `ok` distinguishes the two endings a reader cares about. It says nothing
+   * about the answer -- that arrives on its own through the mirror.
+   */
+  | { conversationId: string; kind: 'end'; ok: boolean };
 
 export type AgentProgressListener = (event: AgentProgressEvent) => void;
 

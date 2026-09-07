@@ -13,7 +13,23 @@ const MAX_HEADLINE_CHARS = 160;
 
 type CanDeliver = (chatId: string) => boolean | Promise<boolean>;
 
+/**
+ * Who asked for the turn this message reports.
+ *
+ * `remote` is a prompt RemoteQueueDrain admitted from a chat: that path opens
+ * the message before the turn starts and closes it with the request's outcome,
+ * and RemoteNotificationFanout must not also echo the answer.
+ *
+ * `host` is a turn started in the sidebar, whose message is opened lazily on
+ * the first progress event and closed by the turn's own `end`. The fanout is
+ * deliberately blind to it -- the live trace and the mirrored answer are two
+ * different things there, and suppressing the answer would leave the phone
+ * with a truncated tail and no final word.
+ */
+export type ProgressOrigin = 'remote' | 'host';
+
 interface ActiveProgress {
+  origin: ProgressOrigin;
   chatId: string;
   messageId: string;
   headline: string;
@@ -50,9 +66,15 @@ export class RemoteAgentProgress {
     this.maxMessageChars = maxMessageChars;
   }
 
-  begin(conversationId: string, chatId: string, messageId: string): void {
+  begin(
+    conversationId: string,
+    chatId: string,
+    messageId: string,
+    origin: ProgressOrigin = 'remote',
+  ): void {
     this.drop(conversationId);
     this.active.set(conversationId, {
+      origin,
       chatId,
       messageId,
       headline: DEFAULT_HEADLINE,
@@ -72,12 +94,33 @@ export class RemoteAgentProgress {
    */
   owns(conversationId: string): boolean {
     const state = this.active.get(conversationId);
+    return state !== undefined && !state.closed && state.origin === 'remote';
+  }
+
+  /**
+   * Whether ANY live message reports this turn, whoever started it.
+   *
+   * Distinct from `owns` on purpose: this is the guard that stops a second
+   * message being opened for a turn already being reported, and it must count
+   * the host-started ones that `owns` deliberately hides from the fanout.
+   */
+  has(conversationId: string): boolean {
+    const state = this.active.get(conversationId);
     return state !== undefined && !state.closed;
   }
 
   handle(event: AgentProgressEvent): void {
     const state = this.active.get(event.conversationId);
     if (!state || state.closed || !this.channel.editMessage) return;
+    if (event.kind === 'end') {
+      // Only the lazily-opened kind. A remote request's message is closed by
+      // RemoteQueueDrain with the request's own outcome, which knows the two
+      // endings this event cannot tell apart: a cancelled request also ends
+      // its turn "successfully", and closing it here would report it as done.
+      if (state.origin !== 'host') return;
+      void this.finish(event.conversationId, event.ok ? 'Forge: completed.' : 'Forge: failed.');
+      return;
+    }
     if (event.kind === 'commentary') {
       const delta = sanitize(event.text);
       if (!delta) return;

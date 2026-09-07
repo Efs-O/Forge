@@ -3,9 +3,42 @@ import type { ForgeConfig } from '../config/types';
 import { mergeGroupsIntoModel } from '../config/ConfigResolver';
 import { describeModelPickerModel } from '../sidebar/ModelPickerGroups';
 import { RemoteAttachmentStore } from './RemoteAttachmentStore';
+import type { ModelPickerDescriptor } from '../sidebar/ModelPickerGroups';
 import { resolveWorkspaceAliases, type WorkspaceAliasTarget } from './RemoteWorkspaceDiscovery';
 import { workspaceIdFor } from './RemoteWorkspaceHandoff';
-import type { RemoteControllerOptions } from './RemoteController';
+
+/**
+ * What a RemoteController is configured with.
+ *
+ * Lives with its builder rather than with the class: every field here is
+ * produced by `buildRemoteControllerOptions` below from one ForgeConfig read,
+ * so a new option added to one and not the other is a type error in this file
+ * instead of a silent gap two files apart.
+ */
+export interface RemoteControllerOptions {
+  workspaceId: string;
+  queueLimit: number;
+  maxMessageChars: number;
+  rateLimitPerMinute: number;
+  /** Snapshot of grouped model descriptors from the active Forge config. */
+  modelEntries: readonly ModelPickerDescriptor[];
+  attachmentStore?: RemoteAttachmentStore | undefined;
+  attachmentsEnabled: boolean;
+  acceptPdfAttachments: boolean;
+  workspaceAliases: Readonly<Record<string, string>>;
+  /** Alias whose configured path resolves to this window's root, if any. */
+  currentWorkspaceAlias?: string | undefined;
+  /** Display name of the folder this window has open, alias or not. */
+  currentWorkspaceName?: string | undefined;
+  switchWorkspace?: ((alias: string, channel: string, chatId: string) => Promise<void>) | undefined;
+  inactivityTimeoutMinutes?: number;
+  setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
+  setRateLimit?: ((perMinute: number) => Promise<void>) | undefined;
+  reloadWindow?: (() => Promise<void>) | undefined;
+  onError?: (message: string) => void;
+  /** Global spoken-reply toggle, persisted to config.yaml. */
+  voiceToggle?: { get: () => boolean; set: (on: boolean) => Promise<void> };
+}
 
 /**
  * Shared by the controller-options builder and the runtime's workspace handoff:

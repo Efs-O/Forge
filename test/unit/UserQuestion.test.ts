@@ -185,12 +185,23 @@ describe('UserQuestionService', () => {
   });
 });
 
-function bridgeRig(options: { canDeliver?: boolean; remoteRequestId?: string | undefined } = {}) {
+function bridgeRig(
+  options: {
+    canDeliver?: boolean;
+    remoteRequestId?: string | undefined;
+    /** Chat bound to c1, standing in for a paired phone. */
+    boundChatId?: string;
+  } = {},
+) {
   const channel = new FakeRemoteChannel();
   const service = new UserQuestionService();
   const store = {
     getRequest: (id: string) =>
       id === 'req-1' ? { id: 'req-1', channel: 'fake', chatId: 'chat-1' } : undefined,
+    bindingsForConversation: () =>
+      options.boundChatId
+        ? [{ channel: 'fake', chatId: options.boundChatId, workspaceId: 'w', conversationId: 'c1' }]
+        : [],
   } as unknown as RemoteRequestStore;
   const auth = {
     canDeliver: async () => options.canDeliver ?? true,
@@ -249,12 +260,24 @@ describe('RemoteQuestionBridge', () => {
     expect(channel.sent[0]?.text).toContain('2. ollama');
   });
 
-  it('stays silent for a local turn with no remote chain', async () => {
+  it('stays silent for a turn with neither a remote chain nor a bound chat', async () => {
     const { bridge, channel, service } = bridgeRig({ remoteRequestId: undefined });
     void service.ask({ prompt: 'Which file?', conversationId: 'c1' });
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(channel.sent).toHaveLength(0);
     expect(bridge.hasPending('chat-1')).toBe(false);
+  });
+
+  it('asks the bound chat when the turn was started in the sidebar', async () => {
+    const { bridge, channel, service } = bridgeRig({
+      remoteRequestId: undefined,
+      boundChatId: 'chat-9',
+    });
+    const pending = service.ask({ prompt: 'Which file?', conversationId: 'c1' });
+    await vi.waitFor(() => expect(channel.sent).toHaveLength(1));
+    expect(channel.sent[0]?.chatId).toBe('chat-9');
+    expect(bridge.answerText('chat-9', 'src/index.ts')).toBe(true);
+    await expect(pending).resolves.toBe('src/index.ts');
   });
 
   it('never hands the question to an expired session', async () => {

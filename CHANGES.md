@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+- **A turn started in the sidebar told a paired phone nothing until it was
+  over.** The whole mid-turn channel — streamed commentary, tool milestones,
+  phase headlines, and the notice and warning rows added last release — is
+  rendered into one live remote message, and that message was only ever opened
+  by `RemoteQueueDrain`, on the path that admits a prompt *from a chat*.
+  `RemoteAgentProgress.handle` drops every event for a conversation with no open
+  message, so for work started at the keyboard each one was discarded in
+  silence; only the finished answer was mirrored. That is precisely the case
+  remote control exists for — start something, walk away, watch it from the
+  phone. `HostProgressOpener` now opens the message lazily on the first progress
+  event, buffering what streams while the send is in flight so the trace does
+  not begin mid-sentence, and the turn's own new `end` event closes it. A
+  conversation nobody is paired to is decided once per turn rather than once per
+  token. `/mirror off` silences the live trace exactly as it silences the echoed
+  answer — they are the same content arriving at different times.
+
+- **Approvals and `ask_user` questions had the same hole, and it blocked
+  turns.** Both bridges resolved their chat by looking up the turn's remote
+  request, so a confirmation gate or a question raised by a sidebar turn was
+  never sent anywhere: the phone watched the work stop and was never told what
+  it had stopped on. Both now fall back to the conversation's binding. One
+  consequence worth knowing: while such a question is open, a plain message from
+  the chat answers it rather than starting a turn — bounded to the seconds a
+  gate is up, and `/`-prefixed commands are never claimed.
+
+- `RemoteControllerOptions` moved to `remoteControllerOptions.ts`, beside the
+  builder that produces it.
+
 - **Compaction refused every conversation over 24,000 characters, and no model
   call was ever made.** The pre-request floor check measures the cheapest
   candidate that could exist — one carrying an EMPTY summary — and routed it
