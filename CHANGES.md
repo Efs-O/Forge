@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- **Compaction refused every conversation over 24,000 characters, and no model
+  call was ever made.** The pre-request floor check measures the cheapest
+  candidate that could exist — one carrying an EMPTY summary — and routed it
+  through `applyCompactionWindow`, whose first line treats a summary-less state
+  as "not compacted yet" and hands back the whole transcript. The floor
+  therefore always equalled the uncompacted size, so the guard fired on every
+  compaction above `MIN_WINDOW_CHARS_FOR_FIT_GUARD`. It surfaced as two
+  identical figures on a first compaction (`~300,876 vs ~300,876`) and as raw
+  transcript versus compacted window on a second (`~679,032 vs ~295,933`) — one
+  bug with two faces, and neither number was a candidate that had grown.
+  Measurement now builds the window unconditionally; the request path keeps its
+  short-circuit. The genuine fit guard, which stops a compact/resume loop when a
+  large tool-argument tail really cannot shrink, is unchanged.
+
+- **Six phrases added to the streaming status line**, in the shared pool so they
+  rotate on local and cloud routes alike.
+
 - **`run_build` could never package, and said only "process timed out".** Its
   foreground timeout is 120 s and `npm run package` takes ~180 s, so that call
   was guaranteed to fail — and the error named no alternative, so the retry that

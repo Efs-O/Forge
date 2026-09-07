@@ -648,7 +648,8 @@ describe('runCompaction', () => {
     expect(await runCompaction(deps, c.id, { auto: true })).toBe('compacted');
     expect(
       h.posted.some(
-        (m) => m.type === 'notice' && m.message === 'Conversation compacted. Chat history is unchanged.',
+        (m) =>
+          m.type === 'notice' && m.message === 'Conversation compacted. Chat history is unchanged.',
       ),
     ).toBe(true);
   });
@@ -815,9 +816,31 @@ describe('compaction fit guard', () => {
     expect(c.compaction).toBeUndefined();
     expect(
       h.posted.some(
-        (msg) => msg.type === 'notice' && msg.message.includes('would not have reduced the context'),
+        (msg) =>
+          msg.type === 'notice' && msg.message.includes('would not have reduced the context'),
       ),
     ).toBe(true);
+  });
+
+  it('compacts a large conversation that the summary plainly shrinks', async () => {
+    // Regression: the pre-request floor check measures a candidate carrying an
+    // EMPTY summary, and `applyCompactionWindow` treats a summary-less state as
+    // "not compacted", handing back the whole transcript. The floor therefore
+    // equalled the uncompacted size for every conversation, and the guard
+    // refused every compaction over MIN_WINDOW_CHARS_FOR_FIT_GUARD with two
+    // identical figures (~300,876 vs ~300,876 in the report that found it).
+    const messages: ChatMessage[] = [];
+    for (let i = 0; i < 40; i++) {
+      messages.push({ role: 'user', content: `task ${i} ` + 'a'.repeat(2000) });
+      messages.push({ role: 'assistant', content: `done ${i} ` + 'b'.repeat(2000) });
+    }
+    messages.push({ role: 'user', content: 'last small task' });
+    messages.push({ role: 'assistant', content: 'ok' });
+    const c = conv(messages);
+    const h = harness(c, async () => long('summary'));
+
+    await expect(runCompaction(h.deps, c.id, { auto: true })).resolves.toBe('compacted');
+    expect(c.compaction?.fromIndex).toBeLessThan(c.messages.length);
   });
 
   it('still compacts a small conversation, where no loop is possible', async () => {
@@ -848,7 +871,9 @@ describe('compaction fit guard', () => {
 
     const withAttachment: ChatMessage = {
       role: 'user',
-      content: [{ type: 'image_url', image_url: { url: `data:image/png;base64,${'z'.repeat(400)}` } }],
+      content: [
+        { type: 'image_url', image_url: { url: `data:image/png;base64,${'z'.repeat(400)}` } },
+      ],
     } as ChatMessage;
     expect(messageCostChars(withAttachment)).toBeGreaterThan(400);
   });
@@ -912,10 +937,10 @@ describe('summary prompt continuation fidelity', () => {
 
 describe('compacted window resume guidance', () => {
   it('points at Next and discourages redoing recorded work, without a blanket trust', () => {
-    const [replacementUser] = applyCompactionWindow(
-      [{ role: 'user', content: 'tail' }],
-      { summary: 'Goal: x', fromIndex: 0 },
-    );
+    const [replacementUser] = applyCompactionWindow([{ role: 'user', content: 'tail' }], {
+      summary: 'Goal: x',
+      fromIndex: 0,
+    });
     const text = String(replacementUser?.content ?? '');
 
     expect(text).toContain('starting from what Next names');

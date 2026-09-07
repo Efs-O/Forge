@@ -63,7 +63,25 @@ export function applyCompactionWindow(
   compaction: CompactionState | undefined,
 ): ChatMessage[] {
   if (!compaction || !compaction.summary) return messages;
+  return buildCompactionWindow(messages, compaction);
+}
 
+/**
+ * The window a state would produce, built unconditionally.
+ *
+ * Separate from `applyCompactionWindow` because that function treats a state
+ * with no summary as "not compacted yet" and hands back the whole transcript —
+ * correct at request time, and wrong for measurement. `runCompaction`'s floor
+ * check measures a candidate carrying a deliberately EMPTY summary (the
+ * cheapest state that could exist), and routing that through the short-circuit
+ * made the floor equal the uncompacted size on every conversation. The guard
+ * then refused every compaction above `MIN_WINDOW_CHARS_FOR_FIT_GUARD` with
+ * two identical numbers — the ~300,876 vs ~300,876 shape.
+ */
+function buildCompactionWindow(
+  messages: ChatMessage[],
+  compaction: CompactionState,
+): ChatMessage[] {
   const from = Math.max(0, Math.min(compaction.fromIndex, messages.length));
   const tail = messages.slice(from);
 
@@ -110,10 +128,10 @@ export function compactionWindowChars(
   messages: ChatMessage[],
   compaction: CompactionState | undefined,
 ): number {
-  return applyCompactionWindow(messages, compaction).reduce(
-    (total, message) => total + messageCostChars(message),
-    0,
-  );
+  // Not applyCompactionWindow: a candidate with an empty summary must measure
+  // as the window it would really produce, not as the whole transcript.
+  const window = compaction ? buildCompactionWindow(messages, compaction) : messages;
+  return window.reduce((total, message) => total + messageCostChars(message), 0);
 }
 
 export { SUMMARY_PREAMBLE };
