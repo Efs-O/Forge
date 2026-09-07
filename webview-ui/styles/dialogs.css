@@ -106,3 +106,91 @@
   background: color-mix(in srgb, var(--vscode-inputValidation-errorBackground, #5a1d1d) 60%, transparent);
   color: var(--vscode-foreground);
 }
+
+/* ── Agent question dialog ──────────────────────────────────────────────── */
+
+/* Shares .confirm-dialog: the two modals are the same object with different
+   payloads, and divergent chrome would only make the sidebar look inconsistent
+   when an approval and a question follow each other in one turn. */
+.question-dialog {
+  max-width: 460px;
+}
+
+.question-icon {
+  color: var(--vscode-textLink-foreground, #3794ff);
+  flex-shrink: 0;
+  display: inline-flex;
+}
+
+.question-prompt {
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--vscode-foreground);
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.question-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.question-option {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: var(--vscode-textCodeBlock-background, #1e1e1e);
+  color: var(--vscode-foreground);
+  border: 1px solid var(--vscode-editorWidget-border, #454545);
+  border-radius: var(--forge-radius-sm);
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: inherit;
+  font-family: inherit;
+}
+.question-option:hover {
+  border-color: var(--vscode-focusBorder, #3794ff);
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+}
+
+/* The number is load-bearing, not decoration: the same options are numbered in
+   Telegram, and a reply of "2" resolves against this list either way. */
+.question-option-index {
+  flex-shrink: 0;
+  min-width: 1.2em;
+  text-align: right;
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+}
+
+.question-option-label {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.question-input {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, var(--vscode-editorWidget-border, #454545));
+  border-radius: var(--forge-radius-sm);
+  padding: 6px 8px;
+  font-family: inherit;
+  font-size: inherit;
+}
+.question-input:focus {
+  outline: none;
+  border-color: var(--vscode-focusBorder, #3794ff);
+}
+
+.confirm-btn-approve:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

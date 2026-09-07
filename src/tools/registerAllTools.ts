@@ -35,6 +35,8 @@ import {
   makeReadClipboardTool,
   makeOpenUrlTool,
 } from './uxTools';
+import { PowerControl } from '../system/PowerControl';
+import { makeGetPowerInfoTool, makeScheduleWakeTool, makeSleepComputerTool } from './powerTools';
 import { makeWebFetchTool } from './fetchTool';
 import { makeWebSearchTool } from './searchTool';
 import { makeRememberTool, makeRecallTool, makeListMemoriesTool } from './memoryTools';
@@ -131,6 +133,13 @@ export function registerAllTools(
   registry.register(makeOpenFileTool());
   registry.register(makeAskUserTool(questions));
   registry.register(makeNotifyUserTool(notifications));
+
+  // Power control. One PowerControl instance for all three: it is stateless,
+  // and a second one would be a second owner of the same spawn sites.
+  const power = new PowerControl();
+  registry.register(makeGetPowerInfoTool(power));
+  registry.register(makeScheduleWakeTool(power));
+  registry.register(makeSleepComputerTool(power));
   registry.register(makeWaitTool());
   registry.register(makeShowNotificationTool());
   registry.register(makeCopyToClipboardTool());

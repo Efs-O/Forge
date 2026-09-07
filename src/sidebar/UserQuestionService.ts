@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 export interface UserQuestionRequestEvent {
   id: string;
   prompt: string;
+  placeholder?: string;
   options?: readonly string[];
   conversationId?: string;
 }
@@ -15,6 +16,18 @@ export interface UserQuestionAnsweredEvent extends UserQuestionRequestEvent {
 export interface UserQuestionSink {
   asked(event: UserQuestionRequestEvent): void;
   answered(event: UserQuestionAnsweredEvent): void;
+  /**
+   * Whether this sink is rendering the question in front of the user AT THE
+   * MACHINE right now -- the sidebar webview, in practice.
+   *
+   * When one says yes, the VS Code input box is not raised at all. The box was
+   * the original and only local surface, which is why a multiple-choice
+   * question opened the command palette's quick pick over the editor instead of
+   * appearing in the sidebar where the rest of the turn is. It stays as the
+   * fallback for a window whose sidebar view has never been resolved, so a
+   * question is never asked into a void.
+   */
+  presentsLocally?(): boolean;
 }
 
 export interface UserQuestion {
@@ -77,18 +90,22 @@ export class UserQuestionService {
         id,
         prompt: request.prompt,
         settle,
+        ...(request.placeholder !== undefined ? { placeholder: request.placeholder } : {}),
         ...(request.options ? { options: request.options } : {}),
         ...(request.conversationId ? { conversationId: request.conversationId } : {}),
       };
       this.pending.set(id, entry);
       // Raised before the abort listener and the sinks, so both of those paths
       // find a box to dispose: either can settle the question the moment it is
-      // published, and a stale prompt must never outlive its answer.
-      const input = this.showLocal(
-        request,
-        (text) => settle(text, 'answered'),
-        () => settle(undefined, 'cancelled'),
-      );
+      // published, and a stale prompt must never outlive its answer. A sink
+      // that presents locally makes this a no-op disposable rather than a box.
+      const input = this.presentedLocally()
+        ? new vscode.Disposable(() => {})
+        : this.showLocal(
+            request,
+            (text) => settle(text, 'answered'),
+            () => settle(undefined, 'cancelled'),
+          );
       request.signal?.addEventListener('abort', () => settle(undefined, 'cancelled'), {
         once: true,
       });
@@ -102,6 +119,29 @@ export class UserQuestionService {
     if (!question) return false;
     question.settle(resolveSelection(text, question.options), 'answered');
     return true;
+  }
+
+  /**
+   * Dismisses a pending question without an answer.
+   *
+   * Separate from `answer` because the two settle differently: the tool reports
+   * a dismissal as "the user did not answer", and passing an empty string
+   * through `answer` would instead hand the model a blank reply it reads as
+   * one. False when the question is already gone.
+   */
+  dismiss(id: string): boolean {
+    const question = this.pending.get(id);
+    if (!question) return false;
+    question.settle(undefined, 'cancelled');
+    return true;
+  }
+
+  /** True while some sink is showing the question at the machine itself. */
+  private presentedLocally(): boolean {
+    for (const sink of this.sinks) {
+      if (sink.presentsLocally?.()) return true;
+    }
+    return false;
   }
 
   private showLocal(
@@ -141,6 +181,7 @@ function eventOf(question: PendingQuestion): UserQuestionRequestEvent {
   return {
     id: question.id,
     prompt: question.prompt,
+    ...(question.placeholder !== undefined ? { placeholder: question.placeholder } : {}),
     ...(question.options ? { options: question.options } : {}),
     ...(question.conversationId ? { conversationId: question.conversationId } : {}),
   };

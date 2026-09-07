@@ -8,7 +8,19 @@ export type AgentProgressEvent =
    * stuck on something that is not the model thinking — a cold `llama-server`
    * spawn, say. `text: undefined` restores the default headline.
    */
-  | { conversationId: string; kind: 'phase'; text: string | undefined };
+  | { conversationId: string; kind: 'phase'; text: string | undefined }
+  /**
+   * A status row the sidebar shows that is neither model output nor a tool: a
+   * compaction step, an image that could not be attached, a mid-turn error that
+   * does not end the turn.
+   *
+   * These were webview-only, so a phone watching a turn saw nothing when the
+   * agent hit "repeating the same tool call — stopping to avoid a loop" and was
+   * left waiting on a turn that had already given up. A `warning` latches in
+   * the mirrored message rather than being overwritten by the next milestone
+   * 1.5s later; an `info` does not.
+   */
+  | { conversationId: string; kind: 'notice'; text: string; severity: 'info' | 'warning' };
 
 export type AgentProgressListener = (event: AgentProgressEvent) => void;
 

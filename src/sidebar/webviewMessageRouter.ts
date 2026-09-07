@@ -44,6 +44,8 @@ export interface WebviewActions {
   runSlashCommand: (id: ForgeSlashCommandId) => void;
   openFile: (path: string, line?: number, beside?: boolean) => Promise<void>;
   resolveConfirmation: (id: string, approved: boolean) => void;
+  /** `text: undefined` is a dismissal, which the tool reports as no answer. */
+  answerQuestion: (id: string, text: string | undefined) => void;
   recordWebviewDiagnostic: (message: WebviewDiagnosticMsg) => void;
 }
 
@@ -142,6 +144,10 @@ export function routeWebviewMessage(actions: WebviewActions, msg: WebviewToHost)
 
     case 'confirmResponse':
       actions.resolveConfirmation(msg.id, msg.approved);
+      break;
+
+    case 'questionResponse':
+      actions.answerQuestion(msg.id, msg.text);
       break;
 
     case 'webviewDiagnostic':

@@ -22,7 +22,7 @@ Models: /models [page] · /model [n-or-name] · /unload · /restart
 
 Window: /compact · /lock · /reload · /timeout [1-1440|off] · /clanker on|off
 
-Machine: /system
+Machine: /system · /sleep [8h|07:00] · /wake [8h|07:00|off]
 
 How work is queued:
 
@@ -59,6 +59,10 @@ Notes:
 • /mirror off stops answers typed in the Forge window being echoed here (on by default)
 
 • /voice off stops replies being sent as a spoken voice message (text stays); /voice on turns it back on — saved to config.yaml, so it survives a window reload
+
+• /sleep suspends this machine. It asks for "/sleep confirm" first, and refuses while a turn is running unless you send "/sleep force". "/sleep 8h" arms a wake timer before suspending, so it comes back on its own; add "hibernate" for S4 instead of S3
+
+• /wake with no argument reports how to wake this machine from outside — the MAC address for a Wake-on-LAN magic packet, the broadcast address, and whether the adapter is armed. Forge CANNOT wake the machine itself: once it sleeps nothing on it is running, so no message can reach it. "/wake 07:00" arms the clock instead, which does work; "/wake off" clears it
 
 • /new <n-or-alias> switches this chat to another workspace; /workspace lists them, numbers them, and says which one you are in`;
 

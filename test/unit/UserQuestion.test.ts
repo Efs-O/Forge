@@ -25,6 +25,71 @@ function currentInput() {
 }
 
 describe('UserQuestionService', () => {
+
+  it('does not raise the VS Code box when a sink presents the question locally', async () => {
+    const service = new UserQuestionService();
+    const asked: string[] = [];
+    service.addSink({
+      asked: (event) => asked.push(event.id),
+      answered: () => undefined,
+      presentsLocally: () => true,
+    });
+
+    const pending = service.ask({ prompt: 'Which file?', options: ['a', 'b'] });
+    // The whole point: a multiple-choice question used to open the command
+    // palette's quick pick over the editor while the sidebar showed nothing.
+    expect(openQuickInputs).toHaveLength(0);
+    expect(asked).toHaveLength(1);
+
+    service.answer(asked[0]!, '2');
+    await expect(pending).resolves.toBe('b');
+  });
+
+  it('still raises the box when no sink presents locally', async () => {
+    const service = new UserQuestionService();
+    service.addSink({
+      asked: () => undefined,
+      answered: () => undefined,
+      presentsLocally: () => false,
+    });
+
+    const pending = service.ask({ prompt: 'Which file?' });
+    expect(openQuickInputs).toHaveLength(1);
+    currentInput().accept('src/index.ts');
+    await expect(pending).resolves.toBe('src/index.ts');
+  });
+
+  it('carries the placeholder to the sinks so the sidebar can render it', () => {
+    const service = new UserQuestionService();
+    let seen: string | undefined;
+    service.addSink({
+      asked: (event) => {
+        seen = event.placeholder;
+      },
+      answered: () => undefined,
+      presentsLocally: () => true,
+    });
+    void service.ask({ prompt: 'Which file?', placeholder: 'e.g. src/index.ts' });
+    expect(seen).toBe('e.g. src/index.ts');
+  });
+
+  it('reports a dismissal as no answer rather than an empty one', async () => {
+    const service = new UserQuestionService();
+    const ids: string[] = [];
+    service.addSink({
+      asked: (event) => ids.push(event.id),
+      answered: () => undefined,
+      presentsLocally: () => true,
+    });
+
+    const pending = service.ask({ prompt: 'Which file?' });
+    expect(service.dismiss(ids[0]!)).toBe(true);
+    // undefined, not '': the tool turns this into "the user did not answer",
+    // where a blank string would read to the model as an actual reply.
+    await expect(pending).resolves.toBeUndefined();
+    expect(service.dismiss(ids[0]!)).toBe(false);
+  });
+
   it('answers from the local box and keeps it open against focus loss', async () => {
     const service = new UserQuestionService();
     const pending = service.ask({ prompt: 'Which file?' });

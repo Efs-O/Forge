@@ -63,6 +63,7 @@ overlaps with an existing owner, extend the owner instead.
 | Missing-config setup mode                  | `src/sidebar/SetupMode.ts`           |
 | Keep/Undo CodeLens decorations             | `src/sidebar/KeepUndoCodeLens.ts`    |
 | Typed webview ↔ host message contract      | `src/sidebar/messageBridge.ts`       |
+| Webview diagnostic message shapes          | `src/sidebar/diagnosticMessages.ts`  |
 | In-editor green/red diff decorations       | `src/sidebar/DiffDecorations.ts`     |
 | Diff computation + unified-diff parsing    | `src/sidebar/DiffUtils.ts`           |
 | Session transcript logging (~/.forge)      | `src/sidebar/SessionLogger.ts`       |
@@ -76,6 +77,8 @@ overlaps with an existing owner, extend the owner instead.
 | Streamed assistant turn finalization             | `src/agent/StreamedAssistantTurn.ts`           |
 | Webview state reducer (per-conversation keying)  | `webview-ui/src/reducer.ts`                    |
 | Fire-and-forget webview→host commands            | `webview-ui/src/hostCommands.ts`               |
+| Approval + agent-question modal state             | `webview-ui/src/useAgentDialogs.ts`            |
+| Agent question dialog (ask_user in the sidebar)   | `webview-ui/src/components/QuestionDialog.tsx` |
 | Transcript row folding (diff / thinking runs)    | `webview-ui/src/components/MessageList.tsx`    |
 | Single-file diff rendering + stats               | `webview-ui/src/components/DiffBlock.tsx`      |
 | Per-turn multi-file diff summary card            | `webview-ui/src/components/DiffGroup.tsx`      |
@@ -132,6 +135,7 @@ overlaps with an existing owner, extend the owner instead.
 | RFC 6238 generation/verification             | `src/remote/RemoteTotp.ts`             |
 | Durable requests, bindings, cursors, outbox  | `src/remote/RemoteRequestStore.ts`     |
 | Remote owner command behavior                | `src/remote/RemoteCommandHandler.ts`   |
+| /sleep, /wake, sleep confirmation state      | `src/remote/RemotePowerCommands.ts`    |
 | Queue order, promote/cancel/claim rules      | `src/remote/remoteQueueOrdering.ts`    |
 | Turn outcome echoed to bound chats           | `src/sidebar/turnMirrorWiring.ts`      |
 | Paged /list, /models, /workspace selections  | `src/remote/RemoteSelectionPager.ts`   |
@@ -285,6 +289,7 @@ overlaps with an existing owner, extend the owner instead.
 | LSP tools (go-to-def, refs, impls, diags)  | `src/tools/lspTools.ts`               |
 | In-memory workspace memory tool            | `src/tools/memoryTools.ts`            |
 | UX tools (show_diff, open_file)            | `src/tools/uxTools.ts`                |
+| Power tools (sleep, wake timer, WoL info)  | `src/tools/powerTools.ts`             |
 | Denylist (dangerous command filter)        | `src/tools/DenyList.ts`               |
 | User confirmation request + response flow  | `src/sidebar/ToolApprovalService.ts`  |
 | Tool strip (remove tools from request)     | `src/tools/StripTools.ts`             |
@@ -403,6 +408,8 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Machine report struct + collection          | `src/system/SystemReport.ts`       |
 | nvidia-smi / WDDM counter probes + parsers  | `src/system/systemProbes.ts`       |
 | Report rendering (sidebar/Telegram/tool)    | `src/system/formatSystemReport.ts` |
+| Suspend + wake-timer commands (sole spawn)  | `src/system/PowerControl.ts`       |
+| Wake config parsing + report formatting     | `src/system/wakeInfo.ts`           |
 
 ## Misc
 

@@ -11,6 +11,8 @@ import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from
 import { collectSystemReport } from '../system/SystemReport';
 import { formatSystemReport } from '../system/formatSystemReport';
 import type { ModelPickerDescriptor } from '../sidebar/ModelPickerGroups';
+import { PowerControl } from '../system/PowerControl';
+import { handleRemotePowerCommand } from './RemotePowerCommands';
 
 export interface RemoteCommandContext {
   channel: RemoteChannel;
@@ -54,6 +56,12 @@ export interface RemoteCommandContext {
   totpEnrolled?: (() => Promise<boolean>) | undefined;
 }
 
+/**
+ * Stateless, so one instance serves every chat and every transport. A second
+ * would be a second owner of the same `powercfg`/`schtasks` spawn sites.
+ */
+const powerControl = new PowerControl();
+
 export async function handleRemoteCommand(
   event: Extract<RemoteInboundEvent, { kind: 'text' }>,
   context: RemoteCommandContext,
@@ -85,6 +93,13 @@ async function executeRemoteCommand(
   const argument = operands[0];
   const sessionCommand = await handleRemoteSessionCommand(command, argument, event, context);
   if (sessionCommand) return sessionCommand;
+  const powerCommand = await handleRemotePowerCommand(command, operands, event, {
+    channel: context.channel,
+    host: context.host,
+    signal: context.signal,
+    power: powerControl,
+  });
+  if (powerCommand) return powerCommand;
   if (command === '/clanker') {
     const desired = argument?.toLowerCase();
     if (desired !== 'on' && desired !== 'off') {

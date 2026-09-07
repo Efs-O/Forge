@@ -5,6 +5,9 @@ const DEFAULT_EDIT_INTERVAL_MS = 1_500;
 const MAX_COMMENTARY_CHARS = 2_400;
 const MAX_STATUS_CHARS = 500;
 const MAX_TOOL_NAME_CHARS = 80;
+const MAX_NOTICE_CHARS = 300;
+/** Warnings latch, so the tail is bounded rather than the whole turn's worth. */
+const MAX_LATCHED_WARNINGS = 4;
 const DEFAULT_HEADLINE = 'Forge: working…';
 const MAX_HEADLINE_CHARS = 160;
 
@@ -16,6 +19,14 @@ interface ActiveProgress {
   headline: string;
   commentary: string;
   milestone?: string;
+  /**
+   * Warnings that must survive the next milestone.
+   *
+   * `milestone` is overwritten by the following tool name ~1.5s later, which is
+   * fine for "Running read_file…" and wrong for "agent is repeating the same
+   * tool call". Those go here instead and stay for the rest of the turn.
+   */
+  warnings: string[];
   lastText: string;
   timer?: ReturnType<typeof setTimeout>;
   tail: Promise<void>;
@@ -46,6 +57,7 @@ export class RemoteAgentProgress {
       messageId,
       headline: DEFAULT_HEADLINE,
       commentary: '',
+      warnings: [],
       lastText: DEFAULT_HEADLINE,
       tail: Promise.resolve(),
       closed: false,
@@ -75,6 +87,18 @@ export class RemoteAgentProgress {
       const next = headline || DEFAULT_HEADLINE;
       if (next === state.headline) return;
       state.headline = next;
+    } else if (event.kind === 'notice') {
+      const notice = keepTail(sanitize(event.text).trim(), MAX_NOTICE_CHARS);
+      if (!notice) return;
+      if (event.severity === 'warning') {
+        // Deduplicated: a guard that fires on consecutive rounds would
+        // otherwise fill the message with copies of one sentence.
+        if (state.warnings[state.warnings.length - 1] === notice) return;
+        state.warnings.push(notice);
+        if (state.warnings.length > MAX_LATCHED_WARNINGS) state.warnings.shift();
+      } else {
+        state.milestone = notice;
+      }
     } else if (event.kind === 'tool') {
       const toolName = sanitizeToolName(event.toolName);
       if (!toolName) return;
@@ -167,6 +191,12 @@ function render(state: ActiveProgress, maximum: number): string {
   const sections = [state.headline];
   const commentary = state.commentary.trim();
   if (commentary) sections.push(commentary);
+  // Warnings sit below the commentary and above the live milestone: they are
+  // the part of the message the reader most needs and the part most likely to
+  // be trimmed, so they are never the first thing the tail cut reaches.
+  if (state.warnings.length) {
+    sections.push(state.warnings.map((warning) => `\u26a0 ${warning}`).join('\n'));
+  }
   if (state.milestone) sections.push(state.milestone);
   return keepTailWithPrefix(sections.join('\n\n'), maximum, `${state.headline}\n\n`);
 }

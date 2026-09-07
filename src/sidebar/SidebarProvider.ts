@@ -66,7 +66,7 @@ const RESIDENCY_POLL_MS = 1500;
 export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewId = 'forge.sidebar';
 
-  private view?: vscode.WebviewView;
+  private view: vscode.WebviewView | undefined;
   /** Residency poll: see docs/plans/MODEL_READINESS_DOT_PLAN.md — why a tick, not an event; runs only while the sidebar is visible. */
   private sidebar: SidebarRuntime;
   private readonly failureTracker = new ToolFailureTracker();
@@ -171,8 +171,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.hostFacade = new SidebarHostFacade({
       createConversation: (options) => this.tabs.create(options),
       restoreConversation: (conversationId, options) => this.tabs.restore(conversationId, options),
+      // Every send that arrives through the facade came from outside the
+      // webview -- a paired chat, or another extension -- so its prompt has no
+      // bubble unless the pipeline draws one.
       send: (conversationId, text, attachments, options) =>
-        this.send.send(text, attachments, conversationId, undefined, options),
+        this.send.send(text, attachments, conversationId, undefined, {
+          ...options,
+          echoPrompt: true,
+        }),
       cancel: async (conversationId) => {
         this.requestChains.markCancelling(conversationId);
         await this.agentLoop.cancel(conversationId);
@@ -224,6 +230,23 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     // from a phone. Routed through the notification service rather than the
     // remote controller: that class already owns "can I reach the user".
     this.agentLoop.setRemoteReach((id) => this.notifications.reach(id));
+    // The sidebar's own seat at the question table. Registered here rather
+    // than in resolveWebviewView because the sink must exist before the first
+    // turn; `presentsLocally` is what makes it conditional, so a window whose
+    // view has never been resolved still falls back to the VS Code input box.
+    this.questions.addSink({
+      asked: (event) =>
+        this.post({
+          type: 'question',
+          id: event.id,
+          prompt: event.prompt,
+          ...(event.placeholder !== undefined ? { placeholder: event.placeholder } : {}),
+          ...(event.options ? { options: event.options } : {}),
+          ...(event.conversationId ? { conversationId: event.conversationId } : {}),
+        }),
+      answered: (event) => this.post({ type: 'questionResolved', id: event.id }),
+      presentsLocally: () => this.view !== undefined,
+    });
     this.agentLoop.restoreSessionTimers(this.sidebar);
     this.persistSession();
   }
@@ -243,7 +266,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.handleMessage(raw as WebviewToHost);
     });
     webviewView.onDidChangeVisibility(() => this.residency.sync(this.view?.visible ?? false));
-    webviewView.onDidDispose(() => this.residency.stop());
+    webviewView.onDidDispose(() => {
+      // Cleared, not just stopped: `presentsLocally` reads this to decide
+      // whether the sidebar is showing agent questions. A stale reference would
+      // claim a dead webview is presenting them, and ask_user would fall
+      // through to nothing at all rather than to the VS Code input box.
+      if (this.view === webviewView) this.view = undefined;
+      this.residency.stop();
+    });
     this.residency.sync(this.view?.visible ?? false);
   }
 
@@ -373,6 +403,46 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private post(msg: HostToWebview): void {
     this.view?.webview.postMessage(msg);
+    this.mirrorStatusRow(msg);
+  }
+
+  /**
+   * Forward the two webview-only status categories to the progress channel, so
+   * a paired chat sees what the sidebar sees.
+   *
+   * Decorating `post` rather than the emit sites is deliberate, and the same
+   * technique `wireTurnMirror` uses on `onGenerationFinished`: notices are
+   * raised from 12 places and mid-turn errors from 27, and threading a mirror
+   * call through each would leave the next new one silent by default.
+   *
+   * Only *addressed* messages are mirrored. An unaddressed notice would have to
+   * be attributed to the active tab, which is right in the webview and wrong
+   * here -- a background conversation's chat would be told about a turn that is
+   * not its own.
+   */
+  private mirrorStatusRow(msg: HostToWebview): void {
+    if (msg.type === 'notice') {
+      if (!msg.conversationId) return;
+      this.agentLoop.reportProgress({
+        conversationId: msg.conversationId,
+        kind: 'notice',
+        text: msg.message,
+        severity: 'info',
+      });
+      return;
+    }
+    if (msg.type !== 'error' || !msg.conversationId) return;
+    // A turn that actually fails is already mirrored by wireTurnMirror. What is
+    // missing is the error posted *while the turn continues* -- the repeated
+    // tool call guard is the clearest case, and it ends the useful part of the
+    // turn while saying nothing remotely.
+    if (!this.agentLoop.isStreamingConv(msg.conversationId)) return;
+    this.agentLoop.reportProgress({
+      conversationId: msg.conversationId,
+      kind: 'notice',
+      text: msg.message,
+      severity: 'warning',
+    });
   }
 
   postWorkspaceInfo(): void {
@@ -513,6 +583,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         cancel: () => {
           this.requestChains.markCancelling(this.sidebar.activeConversationId);
           void this.agentLoop.cancel(this.sidebar.activeConversationId);
+        },
+        answerQuestion: (id, text) => {
+          if (text === undefined) this.questions.dismiss(id);
+          else this.questions.answer(id, text);
         },
         switchModel: (name) => this.tabs.pinModel(name),
         undo: () => this.undo(),

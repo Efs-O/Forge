@@ -384,6 +384,18 @@ export class AgentLoop {
     this.onTranscriptChanged?.(conv.id);
   }
 
+  /**
+   * Publish a progress event raised outside the turn path.
+   *
+   * The turn emits its own commentary and tool milestones. This is for the
+   * sidebar's webview-only status rows -- notices, and mid-turn errors -- which
+   * `SidebarProvider.post` folds in so all 12 notice sites and all 27 error
+   * sites are covered without editing any of them.
+   */
+  reportProgress(event: AgentProgressEvent): void {
+    this.emitAgentProgress(event);
+  }
+
   private emitAgentProgress(event: AgentProgressEvent): void {
     for (const listener of this.progressListeners) {
       try {

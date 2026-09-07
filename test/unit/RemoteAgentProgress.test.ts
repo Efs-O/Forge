@@ -124,4 +124,84 @@ describe('RemoteAgentProgress', () => {
       { chatId: 'chat-a', messageId: 'message-1', text: 'Forge: completed.' },
     ]);
   });
+
+  it('latches warnings so a milestone does not overwrite them 1.5s later', async () => {
+    vi.useFakeTimers();
+    const channel = new FakeRemoteChannel();
+    const progress = new RemoteAgentProgress(
+      channel,
+      new AbortController().signal,
+      () => true,
+      3_900,
+      1_000,
+    );
+    progress.begin('c1', 'chat-a', 'message-1');
+
+    // The case that motivated this: the repeated-tool-call guard ends the
+    // useful part of a turn, and used to say nothing at all remotely.
+    progress.handle({
+      conversationId: 'c1',
+      kind: 'notice',
+      severity: 'warning',
+      text: 'Forge: agent is repeating the same tool call — stopping to avoid a loop.',
+    });
+    progress.handle({ conversationId: 'c1', kind: 'tool', toolName: 'read_file' });
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    const text = channel.edits.at(-1)!.text;
+    expect(text).toContain('⚠ Forge: agent is repeating the same tool call');
+    expect(text).toContain('Running read_file…');
+  });
+
+  it('replaces the milestone with an info notice but does not latch it', async () => {
+    vi.useFakeTimers();
+    const channel = new FakeRemoteChannel();
+    const progress = new RemoteAgentProgress(
+      channel,
+      new AbortController().signal,
+      () => true,
+      3_900,
+      1_000,
+    );
+    progress.begin('c1', 'chat-a', 'message-1');
+
+    progress.handle({
+      conversationId: 'c1',
+      kind: 'notice',
+      severity: 'info',
+      text: 'Compacting conversation…',
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(channel.edits.at(-1)!.text).toContain('Compacting conversation…');
+
+    progress.handle({ conversationId: 'c1', kind: 'tool', toolName: 'read_file' });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(channel.edits.at(-1)!.text).not.toContain('Compacting conversation…');
+  });
+
+  it('does not repeat a warning that fires on consecutive rounds', async () => {
+    vi.useFakeTimers();
+    const channel = new FakeRemoteChannel();
+    const progress = new RemoteAgentProgress(
+      channel,
+      new AbortController().signal,
+      () => true,
+      3_900,
+      1_000,
+    );
+    progress.begin('c1', 'chat-a', 'message-1');
+
+    for (let round = 0; round < 3; round += 1) {
+      progress.handle({
+        conversationId: 'c1',
+        kind: 'notice',
+        severity: 'warning',
+        text: 'the same warning',
+      });
+    }
+    await vi.advanceTimersByTimeAsync(1_000);
+    const occurrences = channel.edits.at(-1)!.text.split('the same warning').length - 1;
+    expect(occurrences).toBe(1);
+  });
+
 });

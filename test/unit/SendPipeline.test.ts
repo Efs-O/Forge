@@ -98,6 +98,38 @@ function errors(posted: HostToWebview[]): string[] {
 describe('SendPipeline.send', () => {
   beforeEach(() => vi.clearAllMocks());
 
+  it('echoes a prompt the webview did not type, before the turn starts', async () => {
+    const h = harness();
+    await h.pipeline.send('from telegram', undefined, 'conv-1', undefined, {
+      echoPrompt: true,
+    });
+
+    // Without this the tab goes busy with no user bubble above it: the webview
+    // draws its own from USER_SEND, and sessionSync deliberately keeps the
+    // local transcript for a conversation that is already streaming.
+    const echo = h.posted.findIndex(
+      (msg) => msg.type === 'userPrompt' && msg.text === 'from telegram',
+    );
+    const started = h.posted.findIndex((msg) => msg.type === 'generationStarted');
+    expect(echo).toBeGreaterThanOrEqual(0);
+    expect(echo).toBeLessThan(started);
+  });
+
+  it('does not echo a prompt the webview typed itself', async () => {
+    const h = harness();
+    await h.pipeline.send('typed here');
+    expect(h.posted.some((msg) => msg.type === 'userPrompt')).toBe(false);
+  });
+
+  it('does not echo a prompt that failed admission', async () => {
+    const h = harness({ streaming: true });
+    await h.pipeline.send('from telegram', undefined, 'conv-1', undefined, {
+      echoPrompt: true,
+    });
+    // A refused prompt never ran, so a bubble for it would be a lie.
+    expect(h.posted.some((msg) => msg.type === 'userPrompt')).toBe(false);
+  });
+
   it('runs the turn on the active conversation', async () => {
     const h = harness();
     const outcome = await h.pipeline.send('hello');

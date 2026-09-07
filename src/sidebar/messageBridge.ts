@@ -68,6 +68,21 @@ export interface GenerationStartedMsg {
   type: 'generationStarted';
   conversationId?: string;
 }
+/**
+ * A prompt this webview did NOT type: one sent from a paired chat, or by a VS
+ * Code command.
+ *
+ * The user bubble is normally drawn by the webview from its own USER_SEND, so a
+ * remote prompt used to start a turn with nothing above it. `sessionSync` could
+ * not repair that either -- it deliberately keeps the local transcript for a
+ * conversation that is streaming, which is exactly the state a remote turn is
+ * in from the moment it is admitted.
+ */
+export interface UserPromptMsg {
+  type: 'userPrompt';
+  text: string;
+  conversationId?: string;
+}
 export interface DoneMsg {
   type: 'done';
   finishReason: string | null;
@@ -139,6 +154,27 @@ export interface ConfirmRequestMsg {
   detail: string;
   isDangerous?: boolean;
   conversationId?: string;
+}
+/**
+ * An agent question raised by `ask_user`.
+ *
+ * Deliberately shaped like ConfirmRequestMsg: both are modal, both can be
+ * settled by a surface other than this webview, and both therefore need a
+ * resolved counterpart. The difference is that a question can want free text
+ * back, which an approval's two buttons cannot carry.
+ */
+export interface QuestionRequestMsg {
+  type: 'question';
+  id: string;
+  prompt: string;
+  placeholder?: string;
+  options?: readonly string[];
+  conversationId?: string;
+}
+/** A question something else settled — a paired chat, or a cancelled turn. */
+export interface QuestionResolvedMsg {
+  type: 'questionResolved';
+  id: string;
 }
 /**
  * A pending approval that something OTHER than this webview settled — a remote
@@ -300,6 +336,7 @@ export type HostToWebview =
   | NoticeMsg
   | ReasoningTokenMsg
   | GenerationStartedMsg
+  | UserPromptMsg
   | DoneMsg
   | ErrorMsg
   | ReadyMsg
@@ -311,6 +348,8 @@ export type HostToWebview =
   | NewChatMsg
   | ConfirmRequestMsg
   | ConfirmResolvedMsg
+  | QuestionRequestMsg
+  | QuestionResolvedMsg
   | ToolActivityMsg
   | ToolResultMsg
   | TokenBudgetMsg
@@ -324,7 +363,18 @@ export type HostToWebview =
   | RemoteStatusMsg
   | WorkspaceInfoMsg;
 
-// ── Webview → Host ────────────────────────────────────────────────────────────
+// ── Webview → Host ──────────────────────────────────────────────────────────
+
+// Re-exported rather than moved out of reach: the bridge stays the single
+// import for every message shape, wherever the declaration happens to live.
+export type {
+  WebviewDiagnosticKind,
+  WebviewDiagnosticBreadcrumb,
+  WebviewDiagnosticSummary,
+  WebviewDiagnosticMsg,
+} from './diagnosticMessages';
+
+import type { WebviewDiagnosticMsg } from './diagnosticMessages';
 
 export interface AttachmentData {
   name: string;
@@ -403,6 +453,12 @@ export interface ConfirmResponseMsg {
   id: string;
   approved: boolean;
 }
+/** The sidebar's answer to a `question`. `text: undefined` means dismissed. */
+export interface QuestionResponseMsg {
+  type: 'questionResponse';
+  id: string;
+  text?: string;
+}
 export interface RunSlashCommandMsg {
   type: 'runSlashCommand';
   commandId: ForgeSlashCommandId;
@@ -414,47 +470,6 @@ export interface OpenFileMsg {
   line?: number;
   /** Ctrl/Cmd-click: open in the editor group beside the active one. */
   beside?: boolean;
-}
-
-export type WebviewDiagnosticKind =
-  | 'mount'
-  | 'unmount'
-  | 'heartbeat'
-  | 'error'
-  | 'unhandledrejection'
-  | 'react-error';
-
-export interface WebviewDiagnosticBreadcrumb {
-  timestamp: number;
-  event: string;
-  conversationId?: string;
-  detail?: string;
-}
-
-export interface WebviewDiagnosticSummary {
-  uptimeMs: number;
-  hostMessages: number;
-  messageTypes: Record<string, number>;
-  renders: number;
-  inputChanges: number;
-  activeConversationId: string;
-  displayedMessages: number;
-  queuedPrompts: number;
-  streaming: boolean;
-  prefillPending: boolean;
-}
-
-/** Bounded, content-free diagnostics from the isolated React webview. */
-export interface WebviewDiagnosticMsg {
-  type: 'webviewDiagnostic';
-  instanceId: string;
-  kind: WebviewDiagnosticKind;
-  timestamp: number;
-  summary: WebviewDiagnosticSummary;
-  message?: string;
-  stack?: string;
-  componentStack?: string;
-  recent?: WebviewDiagnosticBreadcrumb[];
 }
 
 export type WebviewToHost =
@@ -474,6 +489,7 @@ export type WebviewToHost =
   | DeleteConversationMsg
   | RenameConversationMsg
   | ConfirmResponseMsg
+  | QuestionResponseMsg
   | OpenFileMsg
   | RunSlashCommandMsg
   | WebviewDiagnosticMsg;

@@ -64,7 +64,7 @@ export class SendPipeline {
     attachments?: AttachmentData[],
     conversationId?: string,
     promptOptions?: UserPromptOptions,
-    metadata?: { remoteRequestId?: string },
+    metadata?: { remoteRequestId?: string; echoPrompt?: boolean },
   ): Promise<ForgeRequestOutcome> {
     const { deps } = this;
     let conv = conversationId
@@ -191,6 +191,13 @@ export class SendPipeline {
     // USER_SEND covers clicks in the current webview, but auto-compaction
     // resumes, commands, and restored webviews have no such action. Announce
     // every accepted turn here so Stop does not depend on its caller.
+    // A prompt the webview did not type has no user bubble yet: only the
+    // webview's own send dispatches one. Posted before generationStarted so the
+    // transcript reads in the order it happened, and only when the caller asks
+    // -- a webview send would otherwise render its prompt twice.
+    if (metadata?.echoPrompt) {
+      deps.post({ type: 'userPrompt', text, conversationId: conv.id });
+    }
     deps.post({ type: 'generationStarted', conversationId: conv.id });
     return deps.requestChains.run(chain, async () => {
       let nextText = text;
@@ -267,7 +274,9 @@ export class SendPipeline {
       );
     }
     await vscode.commands.executeCommand('workbench.view.extension.forge-sidebar');
-    await this.send(text, attachments);
+    // Same hole as a remote prompt: a command-issued prompt is not typed in the
+    // webview, so nothing else would draw its bubble.
+    await this.send(text, attachments, undefined, undefined, { echoPrompt: true });
   }
 
   /**

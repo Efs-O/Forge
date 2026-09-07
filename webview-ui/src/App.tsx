@@ -22,6 +22,8 @@ import { CheckpointBar } from './components/CheckpointBar';
 import { diffStats } from './components/DiffBlock';
 import { InputRow } from './components/InputRow';
 import { ConfirmationDialog } from './components/ConfirmationDialog';
+import { QuestionDialog } from './components/QuestionDialog';
+import { useAgentDialogs } from './useAgentDialogs';
 import { TabStrip } from './components/TabStrip';
 import { HistoryList, relativeTime } from './components/HistoryList';
 import { EmptyState } from './components/EmptyState';
@@ -42,12 +44,9 @@ export function App(): React.ReactElement {
   webviewDiagnostics.recordRender();
   const [state, dispatch] = useReducer(reducer, initialState);
 
-  const [confirmRequest, setConfirmRequest] = useState<{
-    id: string;
-    toolName: string;
-    detail: string;
-    isDangerous?: boolean;
-  } | null>(null);
+  // A tool approval and an ask_user question: two modals with one shared rule,
+  // which is why they live together. See useAgentDialogs.
+  const dialogs = useAgentDialogs();
   const [tokenUsed, setTokenUsed] = useState(0);
   const [tokenMax, setTokenMax] = useState(0);
   const [workspace, setWorkspace] = useState<WorkspaceInfo | undefined>(undefined);
@@ -68,10 +67,20 @@ export function App(): React.ReactElement {
     function handler(event: MessageEvent): void {
       const msg = event.data as HostToWebview;
       webviewDiagnostics.recordHostMessage(msg);
+      // Consumes the approval/question messages and reports that it did, so the
+      // switch below never has to know they exist.
+      if (dialogs.handleHostMessage(msg)) return;
       switch (msg.type) {
         case 'generationStarted':
           if (msg.conversationId) steeringConversationIds.current.delete(msg.conversationId);
           dispatch({ type: 'GENERATION_STARTED', convId: msg.conversationId });
+          break;
+        // A prompt sent from a paired chat or a VS Code command. Reuses
+        // USER_SEND rather than adding a reducer case, so a remote prompt
+        // performs the same stale-diff and stale-error stripping a typed one
+        // does -- the bubble is identical because the action is.
+        case 'userPrompt':
+          dispatch({ type: 'USER_SEND', text: msg.text, convId: msg.conversationId });
           break;
         case 'token':
           dispatch({ type: 'TOKEN', text: msg.text, convId: msg.conversationId });
@@ -168,19 +177,6 @@ export function App(): React.ReactElement {
             history: msg.history,
             messagesById: msg.messagesById,
           });
-          break;
-        case 'confirmRequest':
-          setConfirmRequest({
-            id: msg.id,
-            toolName: msg.toolName,
-            detail: msg.detail,
-            isDangerous: msg.isDangerous,
-          });
-          break;
-        case 'confirmResolved':
-          // Only clear the dialog we are actually showing: a late resolve for an
-          // older approval must not dismiss the one now on screen.
-          setConfirmRequest((current) => (current?.id === msg.id ? null : current));
           break;
         case 'tokenBudget':
           setTokenUsed(msg.used);
@@ -330,18 +326,6 @@ export function App(): React.ReactElement {
     if (state.history.length === 0) setHistoryExpanded(false);
   }, [state.history.length]);
 
-  const handleConfirmApprove = useCallback(() => {
-    if (!confirmRequest) return;
-    vscode.postMessage({ type: 'confirmResponse', id: confirmRequest.id, approved: true });
-    setConfirmRequest(null);
-  }, [confirmRequest]);
-
-  const handleConfirmDeny = useCallback(() => {
-    if (!confirmRequest) return;
-    vscode.postMessage({ type: 'confirmResponse', id: confirmRequest.id, approved: false });
-    setConfirmRequest(null);
-  }, [confirmRequest]);
-
   const handleRunSlashCommand = useCallback((commandId: ForgeSlashCommandId) => {
     vscode.postMessage({ type: 'runSlashCommand', commandId });
   }, []);
@@ -482,13 +466,22 @@ export function App(): React.ReactElement {
         remote={state.remote}
         activeConversationId={state.activeConversationId}
       />
-      {confirmRequest && (
+      {dialogs.question && (
+        <QuestionDialog
+          prompt={dialogs.question.prompt}
+          placeholder={dialogs.question.placeholder}
+          options={dialogs.question.options}
+          onAnswer={dialogs.answerQuestion}
+          onDismiss={dialogs.dismissQuestion}
+        />
+      )}
+      {dialogs.confirmRequest && (
         <ConfirmationDialog
-          toolName={confirmRequest.toolName}
-          detail={confirmRequest.detail}
-          isDangerous={confirmRequest.isDangerous}
-          onApprove={handleConfirmApprove}
-          onDeny={handleConfirmDeny}
+          toolName={dialogs.confirmRequest.toolName}
+          detail={dialogs.confirmRequest.detail}
+          isDangerous={dialogs.confirmRequest.isDangerous}
+          onApprove={dialogs.approveConfirm}
+          onDeny={dialogs.denyConfirm}
         />
       )}
     </div>
