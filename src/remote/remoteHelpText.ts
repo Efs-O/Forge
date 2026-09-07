@@ -12,7 +12,7 @@ const HELP_SECTIONS = new Set(['Session', 'Workspace', 'Queue', 'Models', 'Windo
 
 export const HELP_TEXT = `Forge commands:
 
-Session: /help · /status · /context · /stop · /new · /chats [page] · /chat <n-or-id> · /resume · /notify on|off · /mirror on|off · /voice on|off
+Session: /help · /status · /context · /view [n] · /stop · /new · /chats [page] · /chat <n-or-id> · /resume · /notify on|off · /mirror on|off · /voice on|off
 
 Workspace: /workspace [page] · /new <n-or-alias>
 
@@ -37,6 +37,8 @@ Notes:
 • /status shows the model, the context used, and how many prompts are waiting; /context breaks the context window down on its own
 
 • /chats numbers the recent conversations; /chat <n-or-id> switches to one; /resume continues the one already bound to this chat
+
+• /view replays the last answers in this chat's conversation, oldest first — 3 by default, 10 at most; use it after /chat to see what an older conversation came to
 
 • /notify off silences agent notify_user messages for this chat until the window reloads
 

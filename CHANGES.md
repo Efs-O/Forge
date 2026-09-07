@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **`/view [n]` replays a conversation to the phone.** There was no way to read
+  a transcript remotely at all — `/status` and `/context` report numbers,
+  `/chats` reports titles, and nothing showed words, so `/chat 3` switched you
+  into a conversation you could not then read. It matters more since the live
+  progress message: that message is edited in place and replaced with
+  `Forge: completed.` at the end of a turn, so a phone that was off is shown the
+  final state and never the edits it missed. Push is lossy for the trace by
+  construction; `/view` is the pull that complements it. Defaults to the last 3
+  exchanges, caps at 10 — a larger number is clamped and reported rather than
+  refused. One message per exchange, oldest first, each headed `[2/3] You: …`
+  with the prompt that asked for it. An agentic turn counts once: the text
+  before its tool rounds is superseded by the answer it was working towards, so
+  a `/view 3` is not spent on three fragments of one turn. Read through
+  `displayPersistMessages`, deliberately not the session log — files written
+  before 0.13.20 re-append the whole conversation on every reload, and a recap
+  built from one would show the same answer several times over. Plan:
+  `docs/plans/REMOTE_VIEW_TRANSCRIPT_PLAN.md`.
+
 - **A turn started in the sidebar told a paired phone nothing until it was
   over.** The whole mid-turn channel — streamed commentary, tool milestones,
   phase headlines, and the notice and warning rows added last release — is

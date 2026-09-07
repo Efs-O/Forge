@@ -316,7 +316,12 @@ describe('RemoteController with fake channel', () => {
       receivedAt: Date.now(),
     };
     await expect(
-      channel.emit({ ...base, kind: 'text', providerMessageId: 'pair-resume', text: `/pair ${code}` }),
+      channel.emit({
+        ...base,
+        kind: 'text',
+        providerMessageId: 'pair-resume',
+        text: `/pair ${code}`,
+      }),
     ).resolves.toEqual({ kind: 'handled' });
 
     await expect(
@@ -851,19 +856,13 @@ describe('remote compaction progress notifications', () => {
     store: RemoteRequestStore,
     host: Partial<ForgeHostFacade>,
   ): RemoteController {
-    return new RemoteController(
-      channel,
-      store,
-      authFixture(),
-      host as unknown as ForgeHostFacade,
-      {
-        workspaceId: 'workspace',
-        queueLimit: 5,
-        maxMessageChars: 4000,
-        rateLimitPerMinute: 30,
-        modelEntries: [],
-      },
-    );
+    return new RemoteController(channel, store, authFixture(), host as unknown as ForgeHostFacade, {
+      workspaceId: 'workspace',
+      queueLimit: 5,
+      maxMessageChars: 4000,
+      rateLimitPerMinute: 30,
+      modelEntries: [],
+    });
   }
 
   it('reverse-looks-up bindings per conversation and filters by transport', async () => {
@@ -1359,5 +1358,68 @@ describe('remote compaction progress notifications', () => {
     await command('/drop all', 'drop-command');
     expect(state.getRequest('mine')?.state).toBe('cancelled');
     expect(state.getRequest('other')?.state).toBe('queued');
+  });
+
+  it('replays the bound conversation for /view, and refuses when nothing is bound', async () => {
+    const state = await store();
+    const channel = new FakeRemoteChannel();
+    const asked: Array<{ conversationId: string; limit: number }> = [];
+    const context = {
+      channel,
+      store: state,
+      host: {
+        recentExchanges: (conversationId: string, limit: number) => {
+          asked.push({ conversationId, limit });
+          return [{ prompt: 'resume', answer: 'Ten issues, ranked.' }];
+        },
+      },
+      workspaceId: 'workspace',
+      signal: new AbortController().signal,
+      inactivityTimeoutMinutes: 30,
+      rateLimitPerMinute: 30,
+      modelEntries: [],
+      workspaceAliases: {},
+    };
+    const command = (text: string, dedupKey: string) =>
+      handleRemoteCommand(
+        {
+          channel: 'fake',
+          kind: 'text',
+          providerMessageId: dedupKey,
+          senderId: 'owner',
+          chatId: 'chat-a',
+          chatType: 'private',
+          receivedAt: 1,
+          text,
+        } as RemoteInboundEvent,
+        context as never,
+        dedupKey,
+      );
+
+    // A recap of a conversation this chat is not on would be someone else's.
+    expect(await command('/view', 'view-unbound')).toEqual({
+      kind: 'rejected',
+      reason: 'no conversation is bound',
+    });
+
+    await state.setBinding({
+      channel: 'fake',
+      chatId: 'chat-a',
+      workspaceId: 'workspace',
+      conversationId: 'c1',
+    });
+    await command('/view', 'view-default');
+    expect(asked.at(-1)).toEqual({ conversationId: 'c1', limit: 3 });
+    expect(channel.sent.at(-1)?.text).toContain('[1/1] You: resume');
+    expect(channel.sent.at(-1)?.text).toContain('Ten issues, ranked.');
+
+    await command('/view 50', 'view-clamped');
+    expect(asked.at(-1)?.limit).toBe(10);
+    expect(channel.sent.at(-1)?.text).toContain('showing the last 10');
+
+    expect(await command('/view abc', 'view-bad')).toEqual({
+      kind: 'rejected',
+      reason: 'usage: /view [1-10]',
+    });
   });
 });

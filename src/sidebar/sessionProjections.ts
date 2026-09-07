@@ -220,3 +220,46 @@ export function slimMessagesById(
   }
   return out;
 }
+
+/** One prompt and what the agent finally said back to it. */
+export interface ForgeExchange {
+  prompt: string;
+  answer: string;
+}
+
+/**
+ * The last `limit` prompt/answer pairs, oldest first.
+ *
+ * Built on the display projection rather than on `messages` directly, so what a
+ * remote `/view` reads back is the same text the sidebar renders — including
+ * the fact that a compacted conversation holds its summary and not the answers
+ * it replaced. Reporting what the agent can still see is the more useful of the
+ * two possible answers, and the only one that stays true as the turn continues.
+ *
+ * One exchange per PROMPT, not per assistant message: an agentic turn emits
+ * text between tool rounds, and pairing each fragment with the same prompt
+ * would spend a `/view 3` on three pieces of one turn. The last text of the
+ * turn is the outcome, which is what the command is for.
+ */
+export function recentExchanges(messages: ChatMessage[], limit: number): ForgeExchange[] {
+  const exchanges: ForgeExchange[] = [];
+  let prompt = '';
+  let started = false;
+  for (const message of displayPersistMessages(messages)) {
+    if (message.role === 'user') {
+      prompt = message.content.trim();
+      started = false;
+      continue;
+    }
+    if (message.role !== 'assistant') continue;
+    const answer = message.content.trim();
+    if (!answer) continue;
+    // Later text in the same turn REPLACES the earlier: a turn that narrated
+    // before its tool calls has already had that narration superseded by the
+    // answer it was working towards.
+    if (started) exchanges[exchanges.length - 1] = { prompt, answer };
+    else exchanges.push({ prompt, answer });
+    started = true;
+  }
+  return limit >= exchanges.length ? exchanges : exchanges.slice(-limit);
+}

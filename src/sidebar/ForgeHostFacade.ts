@@ -7,6 +7,7 @@ import type { RequestChainStatus } from './RequestChainLifecycle';
 import type { ToolApprovalRequestEvent, ToolApprovalSink } from './ToolApprovalService';
 import type { AgentProgressEvent } from './AgentProgress';
 import type { BackendProcess } from '../system/SystemReport';
+import { recentExchanges, type ForgeExchange } from './sessionProjections';
 
 export interface ForgeConversationSummary {
   id: string;
@@ -106,6 +107,15 @@ export interface ForgeHostFacade {
    */
   setReachProbe?(probe: (conversationId: string) => number): { dispose(): void };
   onAgentProgress?(listener: (event: AgentProgressEvent) => void): { dispose(): void };
+  /**
+   * The last `limit` prompt/answer pairs of a conversation, oldest first.
+   *
+   * On the facade rather than reached for through `getOpenConversations()`:
+   * this is the seam transports read the host through, and the one place that
+   * already knows an archived conversation is still readable. Empty for a
+   * conversation this window does not hold.
+   */
+  recentExchanges(conversationId: string, limit: number): ForgeExchange[];
 }
 
 export interface SidebarHostFacadeDeps {
@@ -282,6 +292,14 @@ export class SidebarHostFacade implements ForgeHostFacade {
 
   onAgentProgress(listener: (event: AgentProgressEvent) => void): { dispose(): void } {
     return this.deps.onAgentProgress(listener);
+  }
+
+  recentExchanges(conversationId: string, limit: number): ForgeExchange[] {
+    const conversation = [
+      ...this.deps.getOpenConversations(),
+      ...(this.deps.getArchivedConversations?.() ?? []),
+    ].find((candidate) => candidate.id === conversationId);
+    return conversation ? recentExchanges(conversation.messages, limit) : [];
   }
 
   status(): ForgeHostStatus {

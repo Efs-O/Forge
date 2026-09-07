@@ -2,6 +2,7 @@ import type { RemoteCommandContext } from './RemoteCommandHandler';
 import { HELP_TEXT, decorateHelpLine } from './remoteHelpText';
 import { boldLeadingNumber, boldLineLabel, sendRichText } from './telegramHtml';
 import type { RemoteInboundDisposition, RemoteInboundEvent } from './types';
+import { MAX_VIEW_COUNT, parseViewCount, sendTranscriptView } from './RemoteTranscriptView';
 
 type TextEvent = Extract<RemoteInboundEvent, { kind: 'text' }>;
 
@@ -72,6 +73,24 @@ export async function handleRemoteSessionCommand(
       describeDetailedBudget(context.host.contextBudget(binding.conversationId)),
       (line) => boldLineLabel(line, CONTEXT_LABELS),
       { signal: context.signal },
+    );
+    return { kind: 'handled' };
+  }
+  if (command === '/view') {
+    const binding = context.store.binding(event.channel, event.chatId);
+    if (!binding) return { kind: 'rejected', reason: 'no conversation is bound' };
+    const requested = parseViewCount(argument);
+    if (requested.kind === 'invalid') {
+      return { kind: 'rejected', reason: `usage: /view [1-${String(MAX_VIEW_COUNT)}]` };
+    }
+    // Read from the host, not from the session log: that file re-appends the
+    // whole conversation on every reload for sessions written before 0.13.20,
+    // so a recap built from it shows the same answer several times over.
+    await sendTranscriptView(
+      context.channel,
+      event.chatId,
+      context.host.recentExchanges(binding.conversationId, requested.count),
+      { clamped: requested.clamped, signal: context.signal },
     );
     return { kind: 'handled' };
   }

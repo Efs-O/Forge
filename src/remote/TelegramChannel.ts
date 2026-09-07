@@ -51,6 +51,7 @@ export const TELEGRAM_BOT_COMMANDS = [
   { command: 'system', description: 'GPU, VRAM by process, RAM, drives' },
   { command: 'timeout', description: 'Show/set session timeout' },
   { command: 'unload', description: 'Free memory: release the model' },
+  { command: 'view', description: 'Replay the last answers in this chat' },
   { command: 'voice', description: 'Spoken replies on/off' },
   { command: 'workspace', description: 'List workspaces and show where you are' },
 ] as const;
