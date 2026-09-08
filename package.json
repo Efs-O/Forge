@@ -2,7 +2,7 @@
   "name": "forge-llm",
   "displayName": "Forge LLM",
   "description": "Run your own models in VS Code: full llama.cpp/GGUF control, 60+ agent tools, undo any turn, no telemetry.",
-  "version": "0.15.27",
+  "version": "0.15.28",
   "publisher": "Efsoo",
   "icon": "assets/publisher-logo.png",
   "galleryBanner": {
@@ -234,14 +234,14 @@
         "command": "forge.remote.validate",
         "title": "Forge: Validate Remote Control"
       },
-        {
-          "command": "forge.remote.setTelegramToken",
-          "title": "Forge: Set Telegram Bot Token"
-        },
-        {
-          "command": "forge.remote.generateWakeRelaySecret",
-          "title": "Forge: Generate WakeSleep Relay Secret"
-        },
+      {
+        "command": "forge.remote.setTelegramToken",
+        "title": "Forge: Set Telegram Bot Token"
+      },
+      {
+        "command": "forge.remote.generateWakeRelaySecret",
+        "title": "Forge: Generate WakeSleep Relay Secret"
+      },
       {
         "command": "forge.remote.pairTelegram",
         "title": "Forge: Pair Telegram Remote"

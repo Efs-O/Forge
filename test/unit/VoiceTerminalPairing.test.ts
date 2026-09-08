@@ -13,6 +13,7 @@ import { admittedFrom, VoiceAuditLog, type VoiceAuditEvent } from '../../src/voi
 import { VoiceIngress } from '../../src/voice/VoiceIngress';
 import { VoiceOperation } from '../../src/voice/VoiceOperation';
 import type { VoiceTranscript } from '../../src/voice/VoiceTypes';
+import { passthroughNormalize } from '../support/voiceNormalize';
 
 /**
  * The one-terminal-row invariant spans ingress AND the draft: ingress cannot
@@ -58,7 +59,7 @@ async function ingestToDraft(
   const operation = await VoiceOperation.create(os.tmpdir());
   const source = await operation.adopt(await silentWav(operation), 'audio/wav');
   const runner = new FakeWhisperRunner().enqueue({ kind: 'text', text: spoken });
-  const result = await new VoiceIngress(runner, log).run(operation, source, {
+  const result = await new VoiceIngress(runner, log, passthroughNormalize).run(operation, source, {
     surface: 'telegram',
     language: 'auto',
   });

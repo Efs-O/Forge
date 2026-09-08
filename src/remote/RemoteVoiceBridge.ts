@@ -1,4 +1,4 @@
-import { VoiceIngress } from '../voice/VoiceIngress';
+import { VoiceIngress, type NormalizeStep } from '../voice/VoiceIngress';
 import { VoiceOperation } from '../voice/VoiceOperation';
 import { admittedFrom, VoiceAuditLog, type VoiceAuditSink } from '../voice/VoiceAudit';
 import type { VoiceTranscript, WhisperRunner } from '../voice/VoiceTypes';
@@ -69,6 +69,8 @@ export interface RemoteVoiceBridgeOptions {
   readonly settings: () => VoiceBridgeSettings;
   readonly withActivity?: (<T>(operation: () => Promise<T>) => Promise<T>) | undefined;
   readonly signal?: AbortSignal | undefined;
+  /** Test seam only; production leaves this unset and gets the real ffmpeg step. */
+  readonly normalize?: NormalizeStep | undefined;
 }
 
 export interface VoiceBridgeBundle {
@@ -92,7 +94,7 @@ export class RemoteVoiceBridge {
   >();
 
   constructor(private readonly options: RemoteVoiceBridgeOptions) {
-    this.ingress = new VoiceIngress(options.runner, options.audit);
+    this.ingress = new VoiceIngress(options.runner, options.audit, options.normalize);
   }
 
   /**

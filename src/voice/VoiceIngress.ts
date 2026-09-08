@@ -36,10 +36,21 @@ export type IngressResult =
   | { ok: true; text: string; transcript: VoiceTranscript }
   | { ok: false; reason: VoiceRejectionReason; detail: string };
 
+/**
+ * The normalize step, injectable so a test does not need a real ffmpeg.
+ *
+ * `AudioNormalizer` stays the sole owner of the conversion; this is a seam, not
+ * a second implementation. Without it every unit test that walks this path
+ * spawns ffmpeg, which is why CI was red on all three runners from 0.15.13
+ * onward while passing on a developer machine that happened to have one.
+ */
+export type NormalizeStep = typeof normalizeToWav;
+
 export class VoiceIngress {
   constructor(
     private readonly runner: WhisperRunner,
     private readonly audit: VoiceAuditLog,
+    private readonly normalize: NormalizeStep = normalizeToWav,
   ) {}
 
   /**
@@ -85,7 +96,7 @@ export class VoiceIngress {
   ): Promise<IngressResult> {
     let transcript: VoiceTranscript;
     try {
-      const wav = await normalizeToWav(operation, source, {
+      const wav = await this.normalize(operation, source, {
         ...options.normalize,
         signal: options.signal,
       });

@@ -6,6 +6,7 @@ import { FakeWhisperRunner } from '../../src/voice/FakeWhisperRunner';
 import { VoiceAuditLog, type VoiceAuditEvent } from '../../src/voice/VoiceAudit';
 import { VoiceIngress } from '../../src/voice/VoiceIngress';
 import { VoiceOperation } from '../../src/voice/VoiceOperation';
+import { passthroughNormalize } from '../support/voiceNormalize';
 
 /**
  * Tier A: no model, no GPU, no network. ffmpeg is the one real dependency the
@@ -85,7 +86,7 @@ describe('VoiceIngress', () => {
     const { log, events } = auditLog();
     const runner = new FakeWhisperRunner().enqueue({ kind: 'text', text: 'restart the backend' });
 
-    const result = await new VoiceIngress(runner, log).run(operation, source, {
+    const result = await new VoiceIngress(runner, log, passthroughNormalize).run(operation, source, {
       surface: 'telegram',
       language: 'auto',
     });
@@ -103,7 +104,7 @@ describe('VoiceIngress', () => {
     const source = await operation.adopt(wav, 'audio/wav');
     const { log } = auditLog();
 
-    await new VoiceIngress(new FakeWhisperRunner(), log).run(operation, source, {
+    await new VoiceIngress(new FakeWhisperRunner(), log, passthroughNormalize).run(operation, source, {
       surface: 'telegram',
       language: 'auto',
     });
@@ -122,7 +123,7 @@ describe('VoiceIngress', () => {
     const { log, events } = auditLog();
     const runner = new FakeWhisperRunner().enqueue({ kind: 'text', text });
 
-    const result = await new VoiceIngress(runner, log).run(operation, source, {
+    const result = await new VoiceIngress(runner, log, passthroughNormalize).run(operation, source, {
       surface: 'telegram',
       language: 'auto',
     });
@@ -139,7 +140,7 @@ describe('VoiceIngress', () => {
     const { log, events } = auditLog();
     const runner = new FakeWhisperRunner().enqueue({ kind: 'fail', message: 'exit 1' });
 
-    const result = await new VoiceIngress(runner, log).run(operation, source, {
+    const result = await new VoiceIngress(runner, log, passthroughNormalize).run(operation, source, {
       surface: 'telegram',
       language: 'auto',
     });
@@ -156,7 +157,7 @@ describe('VoiceIngress', () => {
     const controller = new AbortController();
     const runner = new FakeWhisperRunner().enqueue({ kind: 'hang' });
 
-    const pending = new VoiceIngress(runner, log).run(operation, source, {
+    const pending = new VoiceIngress(runner, log, passthroughNormalize).run(operation, source, {
       surface: 'telegram',
       language: 'auto',
       signal: controller.signal,
@@ -173,7 +174,7 @@ describe('VoiceIngress', () => {
     const { log, events } = auditLog();
     const runner = new FakeWhisperRunner();
 
-    await new VoiceIngress(runner, log).run(operation, source, {
+    await new VoiceIngress(runner, log, passthroughNormalize).run(operation, source, {
       surface: 'telegram',
       language: 'el',
       initialPrompt: 'CUDA, Qwen, llama.cpp',

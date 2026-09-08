@@ -1,6 +1,21 @@
 # Forge — Recent Changes
 
-## 0.15.27
+## 0.15.28
+
+- **Every CI run since 0.15.13 was red, for one missing binary.** The voice
+  tests drive `VoiceIngress`, which called `normalizeToWav` directly, and that
+  spawns a real `ffmpeg` — so a unit suite that needs no model, GPU or network
+  quietly needed a system binary. `ci.yml` installs none, so the failure was
+  universal rather than flaky: ubuntu, macOS and Windows runners all failed,
+  while a developer machine with ffmpeg on PATH stayed green. The symptom named
+  the wrong thing twice over — `stt_failed`, and a spoken approval that resolved
+  no gate — which reads as a recogniser or correlation bug, not an absent
+  dependency. `VoiceIngress` now takes the normalize step as an injectable
+  parameter defaulting to the real one, and the tests pass
+  `passthroughNormalize`; `AudioNormalizer` remains its sole implementation.
+  Verified by running the three files with ffmpeg removed from `PATH`. The
+  0.15.27 tag exists but published nothing: the quality gate stopped it before
+  the Marketplace step, which is exactly the order that step was put in.
 
 - **The WakeSleep relay's dish half now exists, so `/sleep` works from the same
   Telegram chat as `/wake`.** 0.15.26 shipped `RelaySleepServer` — the receiver —

@@ -13,6 +13,7 @@ import { VoiceAuditLog, type VoiceAuditEvent } from '../../src/voice/VoiceAudit'
 import { VoiceAuditFileSink } from '../../src/voice/VoiceAuditFileSink';
 import { FakeWhisperRunner } from '../../src/voice/FakeWhisperRunner';
 import type { RemoteChannel, RemoteInboundEvent } from '../../src/remote/types';
+import { passthroughNormalize } from '../support/voiceNormalize';
 
 /**
  * The Telegram voice path end to end, with no model, GPU, network or ffmpeg.
@@ -107,6 +108,7 @@ function harness(
   } as unknown as RemoteChannel;
   const drafts = new PendingVoiceDraft();
   const bridge = new RemoteVoiceBridge({
+      normalize: passthroughNormalize,
     channel,
     runner: new FakeWhisperRunner(),
     audit: new VoiceAuditLog({ write: (row) => rows.push(row) }),
@@ -157,6 +159,7 @@ describe('RemoteVoiceBridge gates', () => {
 
   it('refuses a channel that cannot download files', async () => {
     const bridge = new RemoteVoiceBridge({
+      normalize: passthroughNormalize,
       channel: { name: 'fake', send: async () => undefined } as unknown as RemoteChannel,
       runner: new FakeWhisperRunner(),
       audit: new VoiceAuditLog({ write: () => undefined }),
@@ -311,6 +314,7 @@ describe('spoken approvals', () => {
     } as unknown as RemoteChannel;
     const rows: VoiceAuditEvent[] = [];
     const bridge = new RemoteVoiceBridge({
+      normalize: passthroughNormalize,
       channel,
       runner: new FakeWhisperRunner({ kind: 'text', text }),
       audit: new VoiceAuditLog({ write: (row) => rows.push(row) }),
