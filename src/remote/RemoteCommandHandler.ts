@@ -283,7 +283,12 @@ async function executeRemoteCommand(
     return sendConversationSelection(event, context, argument);
   }
   if ((command === '/chat' || command === '/select' || command === '/resume') && argument) {
-    const conversationId = resolveSelection(context, event, 'conversations', argument) ?? argument;
+    // A numbered selection normally resolves through the last /chats pager,
+    // which preserves the exact list the person saw.  Do not make that pager a
+    // prerequisite, though: `/chat 2` is useful (and documented) by itself.
+    // Fall back to the same newest-first order the pager uses instead of trying
+    // to restore a conversation literally named "2".
+    const conversationId = resolveConversationSelection(context, event, argument) ?? argument;
     // restoreConversation THROWS when the tab cannot be opened — the
     // MAX_CONVERSATIONS cap, or an id that is not in history. An uncaught throw
     // here became a `retry` disposition, which the Telegram poll loop answers by
@@ -441,6 +446,21 @@ function resolveSelection(
   return selection && index >= 0 && index < selection.values.length
     ? selection.values[index]
     : undefined;
+}
+
+function resolveConversationSelection(
+  context: RemoteCommandContext,
+  event: Extract<RemoteInboundEvent, { kind: 'text' }>,
+  argument: string,
+): string | undefined {
+  const fromPager = resolveSelection(context, event, 'conversations', argument);
+  if (fromPager || !/^\d+$/.test(argument)) return fromPager;
+  const index = Number(argument) - 1;
+  const conversations = context.host
+    .status()
+    .conversations.slice()
+    .sort((left, right) => right.updatedAt - left.updatedAt);
+  return index >= 0 && index < conversations.length ? conversations[index]!.id : undefined;
 }
 
 /** Why `/new <number>` found nothing: an expired list, an out-of-range number,

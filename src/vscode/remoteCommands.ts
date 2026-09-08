@@ -4,6 +4,7 @@ import { updateConfigFile } from '../config/ConfigWriter';
 import type { ForgeConfig } from '../config/types';
 import type { RemoteRuntime } from '../remote/RemoteRuntime';
 import { TELEGRAM_BOT_TOKEN_SECRET } from '../remote/TelegramChannel';
+import { newRelaySecret, RELAY_SLEEP_SECRET } from '../remote/RelaySleepServer';
 
 export function registerRemoteCommands(
   context: vscode.ExtensionContext,
@@ -17,6 +18,10 @@ export function registerRemoteCommands(
       const pick = await vscode.window.showQuickPick(
         [
           { label: 'Set Telegram bot token', command: 'forge.remote.setTelegramToken' },
+          {
+            label: 'Generate WakeSleep relay secret',
+            command: 'forge.remote.generateWakeRelaySecret',
+          },
           { label: 'Validate remote control', command: 'forge.remote.validate' },
           { label: 'Pair Telegram owner', command: 'forge.remote.pairTelegram' },
           { label: 'Unpair Telegram owner', command: 'forge.remote.unpairTelegram' },
@@ -45,6 +50,14 @@ export function registerRemoteCommands(
       await context.secrets.store(TELEGRAM_BOT_TOKEN_SECRET, token.trim());
       await runtime.refreshTransport('telegram', getConfig());
       void vscode.window.showInformationMessage('Forge: Telegram bot token stored securely.');
+    }),
+    vscode.commands.registerCommand('forge.remote.generateWakeRelaySecret', async () => {
+      const secret = newRelaySecret();
+      await context.secrets.store(RELAY_SLEEP_SECRET, secret);
+      void vscode.window.showWarningMessage(
+        `Forge WakeSleep relay secret (copy once into the dish wake.conf): ${secret}`,
+        { modal: true },
+      );
     }),
     vscode.commands.registerCommand('forge.remote.validate', async () => {
       try {

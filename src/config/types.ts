@@ -408,6 +408,8 @@ export interface ForgeConfig {
       accept_pdf: boolean;
     };
     workspace_aliases: Record<string, { path: string; display_name: string }>;
+    /** Private-LAN receiver for a paired always-on WakeSleep relay. */
+    wake_relay?: { enabled: boolean; host: string; port: number; relay_ip: string };
     telegram: { enabled: boolean };
     whatsapp: { enabled: boolean };
   };

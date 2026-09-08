@@ -226,11 +226,16 @@ async function handleWake(
   if (argument) {
     const target = parseWakeTime(argument);
     if (!target) {
+      const looksLikeWakeTarget =
+        /^(?:\d{1,3}\.){3}\d{1,3}$/.test(argument) ||
+        /^[0-9a-f]{2}(?:[:-][0-9a-f]{2}){5}$/i.test(argument);
       return {
         kind: 'rejected',
-        reason:
-          `could not read "${argument}" as a time — use a duration (8h, 90m), a clock ` +
-          'time (07:00), or /wake off to clear',
+        reason: looksLikeWakeTarget
+          ? 'the broadcast address and MAC address are the destination for a magic packet, not /wake arguments. ' +
+            'Send that packet from another device that stays awake; this Forge instance cannot send one after it sleeps.'
+          : `could not read "${argument}" as a time — use a duration (8h, 90m), a clock ` +
+            'time (07:00), or /wake off to clear',
       };
     }
     try {

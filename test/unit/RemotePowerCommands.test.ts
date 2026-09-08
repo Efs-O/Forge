@@ -192,6 +192,19 @@ describe('/wake', () => {
     expect(h.armed).toHaveLength(1);
   });
 
+  it('explains that Wake-on-LAN destinations are not wake-time arguments', async () => {
+    const h = context();
+    await expect(run(h, '/wake 192.168.1.255')).resolves.toMatchObject({
+      kind: 'rejected',
+      reason: expect.stringContaining('destination for a magic packet'),
+    });
+    await expect(run(h, '/wake E0-D5-5E-73-F7-88')).resolves.toMatchObject({
+      kind: 'rejected',
+      reason: expect.stringContaining('another device that stays awake'),
+    });
+    expect(h.armed).toHaveLength(0);
+  });
+
   it('clears an armed wake', async () => {
     const h = context();
     await run(h, '/wake off');

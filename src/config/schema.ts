@@ -256,6 +256,14 @@ const RemoteConfigSchema = z
         z.object({ path: z.string().min(1), display_name: z.string().min(1).max(80) }),
       )
       .default({}),
+    wake_relay: z
+      .object({
+        enabled: z.boolean().default(false),
+        host: z.string().regex(/^(?:\d{1,3}\.){3}\d{1,3}$/, 'host must be an IPv4 address'),
+        port: z.number().int().min(1024).max(65535),
+        relay_ip: z.string().regex(/^(?:\d{1,3}\.){3}\d{1,3}$/, 'relay_ip must be an IPv4 address'),
+      })
+      .optional(),
     telegram: z.object({ enabled: z.boolean().default(false) }).default({ enabled: false }),
     whatsapp: z.object({ enabled: z.boolean().default(false) }).default({ enabled: false }),
   })

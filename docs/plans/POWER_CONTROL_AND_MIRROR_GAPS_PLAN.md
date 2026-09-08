@@ -289,7 +289,14 @@ than to the VS Code input box.
 
 ### Still open
 
-The Wake-on-LAN path itself is user-side and undecided: the phone needs a WoL app
-(a second app beside Chrome Remote Desktop), or a Tailscale subnet router on a
-small always-on device for off-network wake. The wake timer shipped here covers
-the scheduled case with no extra app at all. Revisit after living with it.
+The Wake-on-LAN path needs a public, optional Forge Wake Relay on an always-on
+LAN device. Forge must carry the user-facing setup guide, configuration contract
+(MAC address, broadcast address, owner pairing, dedicated bot token), and
+diagnostics. The relay remains separately deployable because an asleep PC cannot
+poll Telegram or emit its own magic packet.
+
+Forge owns PC-side `/sleep`, confirmation, scheduled wakes, and Wake-on-LAN
+diagnostics; the relay owns `/wake`. A relay must never hold Windows credentials
+or expose an unauthenticated Windows control port. Relay-originated sleep needs
+an authenticated Forge-side command channel designed first, retaining the same
+confirmation policy as Forge's existing `/sleep`.

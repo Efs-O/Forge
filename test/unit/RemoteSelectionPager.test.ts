@@ -280,6 +280,31 @@ describe('remote selection pagination', () => {
     });
   });
 
+  it('resolves a numbered /chat from the current list without requiring /chats first', async () => {
+    const store = await requestStore();
+    const channel = new FakeRemoteChannel();
+    const restoreConversation = vi.fn(async (id: string) => ({
+      id,
+      title: 'Restored',
+      activeModel: 'model-1',
+      archived: false,
+    }));
+    const ctx = {
+      ...context(channel, store, 3),
+      workspaceId: 'workspace',
+      inactivityTimeoutMinutes: 30,
+      rateLimitPerMinute: 30,
+    };
+    (
+      ctx.host as unknown as { restoreConversation: typeof restoreConversation }
+    ).restoreConversation = restoreConversation;
+
+    await expect(handleRemoteCommand(textEvent('/chat 2'), ctx, 'chat-without-list')).resolves.toEqual({
+      kind: 'handled',
+    });
+    expect(restoreConversation).toHaveBeenCalledWith('conversation-2', { activate: false });
+  });
+
   it('reports and sets the remote rate limit', async () => {
     const store = await requestStore();
     const channel = new FakeRemoteChannel();

@@ -234,10 +234,14 @@
         "command": "forge.remote.validate",
         "title": "Forge: Validate Remote Control"
       },
-      {
-        "command": "forge.remote.setTelegramToken",
-        "title": "Forge: Set Telegram Bot Token"
-      },
+        {
+          "command": "forge.remote.setTelegramToken",
+          "title": "Forge: Set Telegram Bot Token"
+        },
+        {
+          "command": "forge.remote.generateWakeRelaySecret",
+          "title": "Forge: Generate WakeSleep Relay Secret"
+        },
       {
         "command": "forge.remote.pairTelegram",
         "title": "Forge: Pair Telegram Remote"

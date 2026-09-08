@@ -53,6 +53,7 @@ import { RemoteRuntime } from './remote/RemoteRuntime';
 import { workspaceIdFor } from './remote/RemoteWorkspaceHandoff';
 import { TelegramChannel, TELEGRAM_BOT_TOKEN_SECRET } from './remote/TelegramChannel';
 import { registerRemoteCommands } from './vscode/remoteCommands';
+import { RelaySleepServer } from './remote/RelaySleepServer';
 
 let activeRemoteRuntime: RemoteRuntime | undefined;
 
@@ -354,9 +355,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     onStatusChanged: () => void publishRemoteStatus(),
   });
   activeRemoteRuntime = remoteRuntime;
-  // Reads the runtime rather than taking a value: `status()` awaits SecretStorage
-  // for the paired-owner check, so the runtime's own notification stays
-  // synchronous and cannot interleave with the lifecycle step that raised it.
+  const wakeRelay = config.remote?.wake_relay;
+  if (wakeRelay?.enabled) {
+    const relayServer = new RelaySleepServer();
+    try {
+      await relayServer.start({
+        host: wakeRelay.host,
+        port: wakeRelay.port,
+        relayIp: wakeRelay.relay_ip,
+        secrets: context.secrets,
+        forge: sidebarProvider.getHostFacade(),
+        notify: (message) => void vscode.window.showErrorMessage(message),
+      });
+      context.subscriptions.push(relayServer);
+    } catch (err) {
+      void vscode.window.showErrorMessage(
+        `Forge wake relay failed to start: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
   const publishRemoteStatus = async (): Promise<void> => {
     sidebarProvider.setRemoteStatus(await remoteRuntime.status());
   };
