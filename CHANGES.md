@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## Unreleased
+## 0.15.27
 
 - **The WakeSleep relay's dish half now exists, so `/sleep` works from the same
   Telegram chat as `/wake`.** 0.15.26 shipped `RelaySleepServer` — the receiver —
@@ -23,6 +23,53 @@
   The commented `wake_relay` block landed between `workspace_aliases: {}` and the
   `# Example:` that documents it, so the `ssuno:` sample read as an example of
   the wrong key. Moved below the example it belongs to.
+
+- **Twenty-one verified high-risk bugs closed in one pass.** A full audit is in
+  `docs/reports/2026-09-07-highest-risk-bugs.md`; the fixes share one theme —
+  a guard that was written but not actually load-bearing. `write_file`,
+  `edit_file` and the shared-runtime registry all did truncate-then-write, so a
+  crash mid-write left a user file or a lease record empty rather than old;
+  `writeFileAtomicSync` in `src/util/atomicWrite.ts` now owns that pattern and
+  the xAI `auth.json` credential write uses it too. A relative path with **no
+  workspace folder open** resolved against the extension host's own working
+  directory, quietly pointing file tools at wherever VS Code happened to be
+  launched from — that now refuses instead. The checkpoint capacity guard had
+  no default, so any programmatic caller ran it uncapped; `DEFAULT_CHECKPOINT_LIMITS`
+  supplies 512 MB / 20,000 files. Session persistence was fire-and-forget, so a
+  memento write rejected on quota lost the transcript in silence and could be
+  overtaken by a later update — writes are serialized and failures logged, and
+  the legacy record is no longer cleared before its replacement is known to have
+  landed.
+- **The exec denylist was bypassable by wrapping the command in a shell.**
+  Every guard ran against `command` and `args`, which is sound while the command
+  is a real executable — but `bash -c "<anything>"` moves the whole payload into
+  a single argument the denylist cannot parse, so the guard inspected the string
+  `-c` and approved it. `bash`, `sh`, `zsh`, `dash`, `cmd` and `busybox` with a
+  script flag are refused outright now, and the refusal names the alternative:
+  a real executable with an args array, or the filesystem tools. Note the shape
+  — the denylist was never wrong about what it saw; it was shown the wrong thing.
+- **A stalled stream now aborts instead of hanging the turn forever.** The
+  15-second idle heartbeat detected the stall and wrote a log line, and then did
+  nothing about it — the turn stayed open indefinitely with no way back except
+  reloading the window. Forty-five seconds of idle now cancels the reader and
+  surfaces a real error to the user, and the late-arriving handlers stay quiet
+  rather than reviving a stream already reported dead. Detection without a
+  remedy reads as a working safeguard in the logs, which is worse than none.
+- **A shared runtime could be borrowed while its owner was shutting down.**
+  The owning window checked for live leases and then stopped, but nothing stopped
+  a second window taking a lease *between* those two steps — it would then hold a
+  lease on a server that was already going away. The registry record now carries
+  `acceptingBorrowers`, an owner drains new borrowers before it inspects leases,
+  and a borrower re-reads the record after taking its lease and releases it if the
+  owner changed underneath. Discovery skips a draining runtime entirely.
+- **Stopped telling a local delegate it was analysis-only.** The delegate system
+  prompt opened by declaring the model a "local Forge delegation consultant" and
+  forbidding tool use, edits and commands — a policy statement standing in for a
+  mechanism. Policy is not what stops a local delegate from acting: `buildRequest`
+  sends no `tools` array at all, so there is no channel to call one on. Spending
+  tokens forbidding a capability the request never offered mostly taught the model
+  it was junior. What remains is the one guard that earns its place, since a model
+  with no tool channel is exactly the one that narrates edits it never made.
 
 - **`/view [n]` replays a conversation to the phone.** There was no way to read
   a transcript remotely at all — `/status` and `/context` report numbers,

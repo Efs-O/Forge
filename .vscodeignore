@@ -25,6 +25,10 @@ tool-result-context-ab-results/**
 # over an hour on this before it was ignored. Nothing under it belongs in a
 # published extension.
 results/**
+# The runner that reads these manifests is scripts/forge-bench.mjs, which is
+# excluded below, and nothing in src/ resolves this path -- so shipping them put
+# dead files in front of users with no way to run them.
+benchmarks/**
 .github/**
 esbuild.config.mjs
 tsconfig.json
@@ -32,6 +36,9 @@ tsconfig.json
 .prettierrc
 vitest.config.*
 *.md
+# vsce matches `*.md` against the root only, so a note in a subdirectory ships
+# unnoticed: benchmarks/COST_ESTIMATES.md rode along in every VSIX until 0.15.27.
+**/*.md
 !README.md
 # Generated from CHANGES.md by scripts/sync-changelog.mjs. Without this line the
 # `*.md` rule above strips it and both registries show "No changelog available".

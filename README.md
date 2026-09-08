@@ -88,9 +88,10 @@ telemetry, analytics, or auto-update pings.
 
 Forge ships a **Changelog** tab next to this one — that is the full account,
 every release. The short version of the last three lines: 0.15 cut the system
-prompt and made VRAM-loading delegation ask first, 0.14 made tool schemas
-demand-loaded and the prompt prefix stable, 0.13 added background execution and
-told you what the backend is doing.
+prompt, made VRAM-loading delegation ask first, and then grew the phone into a
+real second seat — voice in and out, a readable transcript, a machine report,
+and sleep/wake; 0.14 made tool schemas demand-loaded and the prompt prefix
+stable; 0.13 added background execution and told you what the backend is doing.
 
 ## What the agent can do
 
@@ -183,11 +184,32 @@ re-delivery is recognised rather than run twice. Final responses go out through
 an at-least-once outbox. One fenced lease stops two VS Code windows consuming
 the same bot.
 
-**Commands.** `/status`, `/context`, `/stop`, `/steer <prompt>` (jumps the
-queue and interrupts the active turn), `/new`, `/list`, `/resume`, `/models`,
-`/model`, `/queue`, `/drop`, `/unload`, `/restart`, `/reload`, `/compact`,
-`/lock`, `/timeout`, `/clanker on|off`, `/workspace`. Telegram shows the
-main ones in its native command menu.
+**Talk to it.** Send a voice note and it is transcribed and run as a prompt;
+`/voice` turns spoken replies on, synthesized locally with Piper. Both
+directions stay on your machine — the same rule as everything else here. A
+voice note from an unpaired sender is rejected with a reason rather than
+silence.
+
+**Read it back.** `/view [n]` replays the last few exchanges into the chat.
+Live progress is pushed as a single message edited in place, so a phone that
+was asleep sees the final state and never the edits it missed — `/view` is the
+pull that covers that gap. `/system` reports GPU, VRAM by process, RAM and
+drives, which is how you find out from a train why the model will not load.
+
+**Commands.** `/status`, `/context`, `/system`, `/view`, `/stop`,
+`/steer <prompt>` (jumps the queue and interrupts the active turn), `/new`,
+`/chats`, `/chat`, `/resume`, `/models`, `/model`, `/queue`, `/drop`,
+`/ratelimit`, `/unload`, `/restart`, `/reload`, `/compact`, `/lock`,
+`/timeout`, `/notify`, `/mirror`, `/voice`, `/clanker on|off`, `/workspace`,
+`/sleep`, `/wake`, `/help`. Telegram shows them in its native command menu.
+
+**`/sleep` and `/wake` need hardware Forge does not ship.** `/sleep` suspends
+the machine; waking one that is suspended cannot be done by software running on
+it, so `/wake` is answered by a separate always-on device on the same LAN that
+sends the magic packet. Forge's half is a private-LAN receiver, off unless you
+configure `remote.wake_relay`, and it authenticates every request with an
+HMAC-SHA-256 signature over a timestamp and nonce whose secret lives in
+SecretStorage.
 
 The audit log is metadata only — timestamps, channel, action, request id, and
 truncated identity hashes. No prompt text, no responses, no secrets, no paths.
