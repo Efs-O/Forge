@@ -1,5 +1,24 @@
 # Forge — Recent Changes
 
+## 0.15.29
+
+- **`/workspace 23` answered with a page range, and 23 was a real workspace.**
+  The pagers number their entries 1..N across pages, then take a *page* as
+  their argument — so on a 30-workspace list the numbers 1-3 mean a page and
+  4-30 mean nothing, while every one of them is also a visible entry number.
+  The two readings are indistinguishable to the person typing, and the bare
+  `usage: /workspace [list] <page 1-3>` that came back sent them looking for a
+  paging mistake they had not made. An out-of-range page that *is* a valid
+  entry number now names the command that means what was typed, and the entry
+  it would select: `/workspace takes a page number (1-3), not a workspace
+  number. For workspace 23 (Halluscribe), use /new 23.` A number past the end
+  of the list has nothing to point at and still gets the plain range.
+  Deliberately a hint and not a redirect — on a three-page list every number
+  from 1 to 3 is a valid page *and* a valid entry, so acting on the guess would
+  silently do the wrong thing for exactly the numbers typed most often. Applies
+  to `/models` and `/chats` on the same footing, since they share the pager and
+  the trap.
+
 ## 0.15.28
 
 - **Every CI run since 0.15.13 was red, for one missing binary.** The voice

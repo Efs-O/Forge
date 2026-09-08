@@ -127,6 +127,32 @@ describe('workspace selection', () => {
     expect(channel.selectionPageSends).toHaveLength(0);
   });
 
+  it('points a workspace number at /new instead of only the page range', async () => {
+    const store = await requestStore();
+    const channel = new FakeRemoteChannel();
+    const ctx = context(channel, store, manyAliases(23));
+
+    // The number is out of page range but IS a real entry -- the whole point of
+    // the screenshot that prompted this: `/workspace 23` answered with a page
+    // range for a person who had typed a workspace number.
+    const rejected = await sendWorkspaceSelection(textEvent('/workspace list'), ctx, '23');
+    expect(rejected).toMatchObject({ kind: 'rejected' });
+    const reason = (rejected as { reason: string }).reason;
+    expect(reason).toContain('/new 23');
+    expect(reason).toContain('Workspace 23');
+    expect(reason).toContain('(1-3)');
+    expect(channel.selectionPageSends).toHaveLength(0);
+  });
+
+  it('keeps the bare page range for a number that is no entry either', async () => {
+    const store = await requestStore();
+    const channel = new FakeRemoteChannel();
+    const ctx = context(channel, store, manyAliases(23));
+
+    const rejected = await sendWorkspaceSelection(textEvent('/workspace list'), ctx, '99');
+    expect((rejected as { reason: string }).reason).toBe('usage: /workspace [list] <page 1-3>');
+  });
+
   it('says where to configure aliases when none exist', async () => {
     const store = await requestStore();
     const channel = new FakeRemoteChannel();

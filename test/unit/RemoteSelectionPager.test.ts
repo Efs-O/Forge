@@ -373,7 +373,16 @@ describe('remote selection pagination', () => {
     );
     expect(setConversationModel).toHaveBeenCalledWith('conversation-1', 'model-24');
 
+    // Page 4 does not exist, but model 4 does -- and the number was read off
+    // the same list, so the answer names the command that means what was typed
+    // rather than a page range the person was not thinking in.
     await expect(sendModelSelection(textEvent('/models 4'), ctx, '4')).resolves.toEqual({
+      kind: 'rejected',
+      reason:
+        '/models takes a page number (1-3), not a model number. For model 4 (model-12), use /model 4.',
+    });
+    // Past the end of the list too: nothing to point at, so the range stands.
+    await expect(sendModelSelection(textEvent('/models 99'), ctx, '99')).resolves.toEqual({
       kind: 'rejected',
       reason: 'usage: /models <page 1-3>',
     });

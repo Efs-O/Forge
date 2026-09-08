@@ -53,14 +53,14 @@ export async function sendConversationSelection(
     });
     return { kind: 'handled' };
   }
-  const page = parseRequestedPage(pageArgument, conversations.length);
+  const values = conversations.map((conversation) => conversation.id);
+  const page = parseRequestedPage(pageArgument, values.length);
   if (page === undefined) {
     return {
       kind: 'rejected',
-      reason: `usage: /list <page 1-${pageCount(conversations.length)}>`,
+      reason: pageRejection(context, 'conversations', values, pageArgument),
     };
   }
-  const values = conversations.map((conversation) => conversation.id);
   const token = await context.store.issueSelection(
     event.channel,
     event.chatId,
@@ -80,14 +80,11 @@ export async function sendModelSelection(
   if (context.modelEntries.length === 0) {
     return { kind: 'rejected', reason: 'no configured models are available' };
   }
-  const page = parseRequestedPage(pageArgument, context.modelEntries.length);
-  if (page === undefined) {
-    return {
-      kind: 'rejected',
-      reason: `usage: /models <page 1-${pageCount(context.modelEntries.length)}>`,
-    };
-  }
   const values = sortModelPickerEntries(context.modelEntries).map((model) => model.name);
+  const page = parseRequestedPage(pageArgument, values.length);
+  if (page === undefined) {
+    return { kind: 'rejected', reason: pageRejection(context, 'models', values, pageArgument) };
+  }
   const token = await context.store.issueSelection(
     event.channel,
     event.chatId,
@@ -121,10 +118,7 @@ export async function sendWorkspaceSelection(
   }
   const page = parseRequestedPage(pageArgument, values.length);
   if (page === undefined) {
-    return {
-      kind: 'rejected',
-      reason: `usage: /workspace [list] <page 1-${pageCount(values.length)}>`,
-    };
+    return { kind: 'rejected', reason: pageRejection(context, 'workspaces', values, pageArgument) };
   }
   const token = await context.store.issueSelection(
     event.channel,
@@ -280,12 +274,7 @@ function renderPage(
         ? formatWorkspaces(context, values, start, end)
         : formatConversations(context, values, start, end);
   const heading = `Forge ${kind} ${start + 1}-${end} of ${values.length} · page ${page + 1}/${pages}`;
-  const command =
-    kind === 'models'
-      ? '/model <number>'
-      : kind === 'workspaces'
-        ? '/new <number>'
-        : '/chat <number>';
+  const command = `${pickCommandFor(kind)} <number>`;
   const fallback = pages > 1 ? ` Page fallback: ${commandFor(kind)} <page>.` : '';
   // A workspace list that does not say where you are answers half the question:
   // the "· current" marker only appears when the open folder is in the list.
@@ -376,6 +365,48 @@ function formatConversations(
   return lines;
 }
 
+/**
+ * `/workspace 23` reads as "workspace 23" and parses as "page 23". Both
+ * numbers are read off the same list, so the two meanings are
+ * indistinguishable to the person typing -- and the bare range usage that came
+ * back sent them looking for a paging mistake they had not made.
+ *
+ * Deliberately a hint and not a redirect: on a three-page list every number
+ * from 1 to 3 is a valid page AND a valid item, so acting on the guess would
+ * silently do the wrong thing for exactly the numbers typed most often.
+ */
+function pageRejection(
+  context: RemoteSelectionContext,
+  kind: SelectionKind,
+  values: readonly string[],
+  argument: string | undefined,
+): string {
+  const usage = `usage: ${usageFor(kind)} <page 1-${pageCount(values.length)}>`;
+  if (argument === undefined || !/^\d+$/.test(argument)) return usage;
+  const index = Number(argument);
+  if (index < 1 || index > values.length) return usage;
+  const target = describeValue(context, kind, values[index - 1]!);
+  const label = kindLabel(kind);
+  return (
+    `${commandFor(kind)} takes a page number (1-${pageCount(values.length)}), not a ${label} number. ` +
+    `For ${label} ${argument}${target ? ` (${target})` : ''}, use ${pickCommandFor(kind)} ${argument}.`
+  );
+}
+
+/** The name the person would recognise from the list, for the hint above. */
+function describeValue(
+  context: RemoteSelectionContext,
+  kind: SelectionKind,
+  value: string,
+): string | undefined {
+  if (kind === 'workspaces') return clip(context.workspaceAliases[value] ?? value, 80);
+  if (kind === 'models') return clip(value, 80);
+  const conversation = context.host
+    .status()
+    .conversations.find((candidate) => candidate.id === value);
+  return conversation ? clip(conversation.title, 80) : undefined;
+}
+
 function parseRequestedPage(argument: string | undefined, itemCount: number): number | undefined {
   if (argument === undefined) return 0;
   if (!/^\d+$/.test(argument)) return undefined;
@@ -390,6 +421,17 @@ function pageCount(itemCount: number): number {
 function commandFor(kind: SelectionKind): '/chats' | '/models' | '/workspace' {
   if (kind === 'conversations') return '/chats';
   return kind === 'models' ? '/models' : '/workspace';
+}
+
+/** The command that picks one entry -- the other half of every numbered list. */
+function pickCommandFor(kind: SelectionKind): '/chat' | '/model' | '/new' {
+  if (kind === 'conversations') return '/chat';
+  return kind === 'models' ? '/model' : '/new';
+}
+
+/** `/workspace` keeps its optional verb in usage text; the others have none. */
+function usageFor(kind: SelectionKind): string {
+  return kind === 'workspaces' ? '/workspace [list]' : commandFor(kind);
 }
 
 function kindLabel(kind: SelectionKind): 'conversation' | 'model' | 'workspace' {
