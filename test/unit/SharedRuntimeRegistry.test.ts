@@ -75,6 +75,24 @@ describe('SharedRuntimeRegistry', () => {
     expect(lease.pid).toBe(process.pid);
     expect(Date.parse(lease.createdAt)).not.toBeNaN();
   });
+
+  it('rejects a borrower lease after the owner begins draining', () => {
+    const current = registry();
+    const record = {
+      key: 'runtime-key',
+      model: 'gemma',
+      endpoint: 'http://127.0.0.1:8080',
+      ownerPid: process.pid,
+      createdAt: 'now',
+    };
+    current.publish(record);
+    const discovered = current.find(record.key);
+    expect(discovered).toBeDefined();
+    expect(current.beginDraining(record.key)).toBe(true);
+    expect(current.acquireLeaseIfActive(record.key, 'late-borrower', discovered!)).toBe(false);
+    expect(current.hasBorrowers(record.key)).toBe(false);
+    expect(current.find(record.key)).toBeUndefined();
+  });
 });
 
 /** A minimal llama.cpp model; overrides pick the field under test. */

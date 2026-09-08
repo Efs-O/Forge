@@ -145,9 +145,20 @@ const PS_DANGEROUS_FLAGS = ['-Command', '-EncodedCommand', '-enc'];
  * a new PowerShell binary is a new hole, not a variant of an old one.
  */
 const PS_LAUNCHERS = ['powershell.exe', 'powershell', 'pwsh.exe', 'pwsh'];
+const SCRIPT_LAUNCHERS = ['bash', 'sh', 'zsh', 'dash', 'cmd', 'cmd.exe', 'busybox'];
+const SCRIPT_FLAGS = ['-c', '/c'];
 
 export function checkPowerShellBan(command: string, args: string[]): void {
   const cmd = command.toLowerCase();
+  if (
+    SCRIPT_LAUNCHERS.includes(cmd) &&
+    args.some((arg) => SCRIPT_FLAGS.includes(arg.toLowerCase()))
+  ) {
+    throw new Error(
+      'Shell script flags are banned — a model-authored script cannot be checked by the denylist. ' +
+        'Use a real executable with an args array or the dedicated filesystem tools instead.',
+    );
+  }
   if (PS_LAUNCHERS.includes(cmd)) {
     for (const arg of args) {
       if (PS_DANGEROUS_FLAGS.includes(arg)) {

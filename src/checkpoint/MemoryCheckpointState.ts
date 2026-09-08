@@ -1,5 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { assertCheckpointWithinLimits, type CheckpointLimits } from './CheckpointPolicy';
+import { writeFileAtomicSync } from '../util/atomicWrite';
 
 export type MemoryLeafState =
   | { kind: 'file'; content: Buffer }
@@ -17,14 +19,22 @@ export type MemorySnapshotState =
   | { kind: 'directory'; entries: MemoryDirectoryEntry[] }
   | { kind: 'symlink'; target: string };
 
-export function captureMemoryState(target: string): MemorySnapshotState {
+export function captureMemoryState(target: string, limits?: CheckpointLimits): MemorySnapshotState {
   if (!fs.existsSync(target)) return { kind: 'missing' };
   const stat = fs.lstatSync(target);
   if (stat.isSymbolicLink()) return { kind: 'symlink', target: fs.readlinkSync(target) };
-  if (stat.isFile()) return { kind: 'file', content: fs.readFileSync(target) };
+  if (stat.isFile()) {
+    if (limits) assertCheckpointWithinLimits({ totalBytes: stat.size, fileCount: 1 }, limits);
+    return { kind: 'file', content: fs.readFileSync(target) };
+  }
   if (!stat.isDirectory()) throw new Error(`CheckpointStack: unsupported path type ${target}`);
 
   const entries: MemoryDirectoryEntry[] = [];
+  let totalBytes = 0;
+  let fileCount = 0;
+  const assertWithinLimits = (): void => {
+    if (limits) assertCheckpointWithinLimits({ totalBytes, fileCount }, limits);
+  };
   const walk = (directory: string, relativeDirectory: string): void => {
     for (const name of fs.readdirSync(directory)) {
       const absolute = path.join(directory, name);
@@ -39,6 +49,9 @@ export function captureMemoryState(target: string): MemorySnapshotState {
           state: { kind: 'symlink', target: fs.readlinkSync(absolute) },
         });
       } else if (entryStat.isFile()) {
+        totalBytes += entryStat.size;
+        fileCount += 1;
+        assertWithinLimits();
         entries.push({
           relativePath,
           state: { kind: 'file', content: fs.readFileSync(absolute) },
@@ -51,24 +64,61 @@ export function captureMemoryState(target: string): MemorySnapshotState {
 }
 
 export function restoreMemoryState(target: string, state: MemorySnapshotState): void {
-  if (fs.existsSync(target)) fs.rmSync(target, { recursive: true, force: true });
-  if (state.kind === 'missing') return;
+  if (state.kind === 'missing') {
+    if (fs.existsSync(target)) fs.rmSync(target, { recursive: true, force: true });
+    return;
+  }
   fs.mkdirSync(path.dirname(target), { recursive: true });
   if (state.kind === 'file') {
-    fs.writeFileSync(target, state.content);
+    writeFileAtomicSync(target, state.content);
     return;
   }
   if (state.kind === 'symlink') {
-    fs.symlinkSync(state.target, target);
+    const stagingLink = path.join(
+      path.dirname(target),
+      `.${path.basename(target)}.forge-link-${process.pid}-${Date.now()}`,
+    );
+    try {
+      fs.symlinkSync(state.target, stagingLink);
+      fs.renameSync(stagingLink, target);
+    } catch (error) {
+      if (fs.existsSync(stagingLink)) fs.rmSync(stagingLink, { force: true });
+      throw error;
+    }
     return;
   }
 
-  fs.mkdirSync(target, { recursive: true });
-  for (const entry of state.entries) {
-    const destination = path.join(target, entry.relativePath);
-    fs.mkdirSync(path.dirname(destination), { recursive: true });
-    if (entry.state.kind === 'directory') fs.mkdirSync(destination, { recursive: true });
-    else if (entry.state.kind === 'symlink') fs.symlinkSync(entry.state.target, destination);
-    else fs.writeFileSync(destination, entry.state.content);
+  const staging = path.join(
+    path.dirname(target),
+    `.${path.basename(target)}.forge-restore-${process.pid}-${Date.now()}`,
+  );
+  fs.mkdirSync(staging, { recursive: true });
+  try {
+    for (const entry of state.entries) {
+      const destination = path.join(staging, entry.relativePath);
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      if (entry.state.kind === 'directory') fs.mkdirSync(destination, { recursive: true });
+      else if (entry.state.kind === 'symlink') fs.symlinkSync(entry.state.target, destination);
+      else writeFileAtomicSync(destination, entry.state.content);
+    }
+  } catch (error) {
+    fs.rmSync(staging, { recursive: true, force: true });
+    throw error;
   }
+
+  const backup = `${staging}.previous`;
+  const hadTarget = fs.existsSync(target);
+  try {
+    if (hadTarget) fs.renameSync(target, backup);
+    fs.renameSync(staging, target);
+  } catch (error) {
+    try {
+      if (hadTarget && fs.existsSync(backup) && !fs.existsSync(target))
+        fs.renameSync(backup, target);
+    } finally {
+      if (fs.existsSync(staging)) fs.rmSync(staging, { recursive: true, force: true });
+    }
+    throw error;
+  }
+  if (hadTarget) fs.rmSync(backup, { recursive: true, force: true });
 }

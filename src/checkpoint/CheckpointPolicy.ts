@@ -5,6 +5,12 @@ export interface CheckpointLimits {
   maxFiles: number;
 }
 
+/** Safe defaults for programmatic consumers that do not receive VS Code settings. */
+export const DEFAULT_CHECKPOINT_LIMITS: CheckpointLimits = {
+  maxBytes: 512 * 1024 * 1024,
+  maxFiles: 20_000,
+};
+
 export interface CheckpointMeasurement {
   totalBytes: number;
   fileCount: number;

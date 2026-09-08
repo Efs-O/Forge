@@ -8,6 +8,7 @@
  */
 
 import type { Memento } from 'vscode';
+import { getLogger } from '../util/logger';
 import type { ChatMessage } from '../llm/types';
 import type { CompactionState } from './compactionTypes';
 import {
@@ -26,6 +27,20 @@ import {
   type SidebarRuntime,
   type SidebarSessionPersisted,
 } from './sessionTypes';
+
+const log = getLogger();
+const pendingMementoWrites = new WeakMap<Memento, Promise<void>>();
+
+/** Serialize writes so a rejected quota write is visible and cannot race a later update. */
+function persistMemento(workspaceState: Memento, key: string, value: unknown): void {
+  const previous = pendingMementoWrites.get(workspaceState) ?? Promise.resolve();
+  const pending = previous.catch(() => undefined).then(() => workspaceState.update(key, value));
+  pendingMementoWrites.set(workspaceState, pending);
+  void pending.catch((error: unknown) => {
+    const detail = error instanceof Error ? error.message : String(error);
+    log.error(`[sessionPersistence] failed to persist ${key}: ${detail}`);
+  });
+}
 
 function emptyConversation(id: string, now: number): ConversationRuntime {
   return {
@@ -296,7 +311,7 @@ export function loadSidebarSession(workspaceState: Memento): SidebarRuntime {
       }
     }
 
-    void workspaceState.update(HISTORY_KEY_LEGACY, undefined as unknown as string);
+    persistMemento(workspaceState, HISTORY_KEY_LEGACY, undefined);
     return {
       activeConversationId: activeId,
       conversations: d.conversations.map(persistedToRuntime),
@@ -308,8 +323,9 @@ export function loadSidebarSession(workspaceState: Memento): SidebarRuntime {
     workspaceState.get<Array<{ role: 'user' | 'assistant'; content: string }>>(HISTORY_KEY_LEGACY);
   if (legacy?.length) {
     const migrated = migrateLegacyHistory(legacy);
-    void workspaceState.update(HISTORY_KEY_LEGACY, undefined as unknown as string);
-    void workspaceState.update(SESSION_KEY_V1, runtimeToPersisted(migrated));
+    // Preserve the legacy record until a later successful cleanup. Clearing it
+    // here could erase the only durable copy when the replacement hits quota.
+    persistMemento(workspaceState, SESSION_KEY_V1, runtimeToPersisted(migrated));
     return migrated;
   }
 
@@ -317,10 +333,10 @@ export function loadSidebarSession(workspaceState: Memento): SidebarRuntime {
 }
 
 export function saveSidebarSession(workspaceState: Memento, session: SidebarRuntime): void {
-  void workspaceState.update(SESSION_KEY_V1, runtimeToPersisted(session));
+  persistMemento(workspaceState, SESSION_KEY_V1, runtimeToPersisted(session));
   // Keep the pointer in step so it is always the authoritative answer on load,
   // rather than a value that may be older than the blob beside it.
-  void workspaceState.update(ACTIVE_ID_KEY, session.activeConversationId);
+  persistMemento(workspaceState, ACTIVE_ID_KEY, session.activeConversationId);
 }
 
 /**
@@ -333,7 +349,7 @@ export function saveSidebarSession(workspaceState: Memento, session: SidebarRunt
  * cost a visible second. See `docs/plans/SIDEBAR_SWITCH_LATENCY_PLAN.md`.
  */
 export function saveActiveConversationId(workspaceState: Memento, id: string): void {
-  void workspaceState.update(ACTIVE_ID_KEY, id);
+  persistMemento(workspaceState, ACTIVE_ID_KEY, id);
 }
 
 /** Tab list + transcripts for authoritative webview sync. */

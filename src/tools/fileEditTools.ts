@@ -211,6 +211,11 @@ export function makeFormatFileTool(): RegisteredTool {
       // call must not move the user's focus, and the close command acted on
       // whatever was active by the time it ran, not necessarily on this file.
       const doc = await vscode.workspace.openTextDocument(uri);
+      if (doc.isDirty) {
+        throw new Error(
+          `format_file: ${filePath} has unsaved editor changes; refusing to save unrelated user edits`,
+        );
+      }
 
       const versionBeforeFormat = doc.version;
       const edits = await vscode.commands.executeCommand<vscode.TextEdit[] | undefined>(

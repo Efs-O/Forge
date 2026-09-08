@@ -136,12 +136,13 @@ describe('plan persistence', () => {
     } as SidebarRuntime;
   }
 
-  it('round-trips through save and load, for history as well as live tabs', () => {
+  it('round-trips through save and load, for history as well as live tabs', async () => {
     // runtimeToPersisted maps conversations and history separately; a field
     // added to only one is silently dropped from archived chats.
     const store: Record<string, unknown> = {};
     const memento = makeMemento(store);
     saveSidebarSession(memento, session({ items: ITEMS, updatedAt: 1234 }));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
     const loaded = loadSidebarSession(memento);
     expect(loaded.conversations[0]?.plan).toEqual({ items: ITEMS, updatedAt: 1234 });

@@ -7,6 +7,7 @@ import { CHUNKED_WRITE_ADVICE } from './writeChunking';
 import { mimeFromHeader } from './imageTool';
 import { MAX_READ_FILE_CHARS, capResultText } from './resultCap';
 import { describePathMiss } from './pathErrorHint';
+import { writeFileAtomicSync } from '../util/atomicWrite';
 
 /** How much of a file to sniff for NUL bytes before calling it binary. */
 const BINARY_SNIFF_BYTES = 8000;
@@ -165,7 +166,7 @@ export function makeWriteFileTool(): RegisteredTool {
       const filePath = resolveWorkspacePath(args['path'] as string);
       const content = args['content'] as string;
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
-      fs.writeFileSync(filePath, content, 'utf8');
+      writeFileAtomicSync(filePath, content);
       return `Written ${filePath}`;
     },
   };

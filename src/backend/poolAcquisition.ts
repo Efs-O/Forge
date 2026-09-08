@@ -37,12 +37,20 @@ export async function borrowSharedRuntime(
 ): Promise<BackendController | undefined> {
   const record = ctx.registry.find(ctx.key);
   if (!record || !(await probeHealthy(record.endpoint))) return undefined;
-  const port = Number(new URL(record.endpoint).port);
-  if (!Number.isInteger(port) || port < 1) return undefined;
-  const backend = new DirectBackend(ctx.config, port);
-  await backend.hotSwap(modelName);
   const leaseId = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  ctx.registry.acquireLease(ctx.key, leaseId);
+  if (!ctx.registry.acquireLeaseIfActive(ctx.key, leaseId, record)) return undefined;
+  const port = Number(new URL(record.endpoint).port);
+  if (!Number.isInteger(port) || port < 1) {
+    ctx.registry.releaseLease(ctx.key, leaseId);
+    return undefined;
+  }
+  const backend = new DirectBackend(ctx.config, port);
+  try {
+    await backend.hotSwap(modelName);
+  } catch (error) {
+    ctx.registry.releaseLease(ctx.key, leaseId);
+    throw error;
+  }
   onBorrowed({ backend, key: ctx.key, leaseId });
   log.info(`[BackendPool] borrowed shared runtime: ${modelName} at ${record.endpoint}`);
   return backend;

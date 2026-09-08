@@ -10,6 +10,7 @@ import { getLogger } from '../util/logger';
 
 const log = getLogger();
 let requestSequence = 0;
+const STREAM_STALL_TIMEOUT_MS = 45_000;
 
 function requestTarget(baseUrl: string): string {
   try {
@@ -206,6 +207,7 @@ export async function streamChatCompletion(
   let firstByteAt: number | null = null;
   let lastActivityAt = Date.now();
   let streamStallWarned = false;
+  let streamStalled = false;
   const heartbeat = setInterval(() => {
     const now = Date.now();
     const idleMs = now - lastActivityAt;
@@ -214,7 +216,13 @@ export async function streamChatCompletion(
       `idle_ms=${idleMs} reads=${readCount} sse_frames=${sseFrameCount} ` +
       `bytes=${bytesRead} text_chars=${textChars} reasoning_chars=${reasoningChars} ` +
       `tool_deltas=${toolDeltaCount}`;
-    if (idleMs >= 15_000 && !streamStallWarned) {
+    if (idleMs >= STREAM_STALL_TIMEOUT_MS) {
+      streamStalled = true;
+      clearInterval(heartbeat);
+      log.error(`${heartbeatLine} — aborting stalled stream`);
+      void reader.cancel().catch(() => undefined);
+      handlers.onError(new Error(`Stream stalled after ${STREAM_STALL_TIMEOUT_MS / 1000}s idle`));
+    } else if (idleMs >= 15_000 && !streamStallWarned) {
       streamStallWarned = true;
       log.warn(heartbeatLine);
     } else {
@@ -397,12 +405,14 @@ export async function streamChatCompletion(
         }
       }
     }
+    if (streamStalled) return;
     // Stream ended without [DONE] or a terminal finish_reason (server crash or
     // dropped connection) — settle anyway so the agent loop never hangs.
     flushAccumulatedToolCalls();
     log.warn(`[OpenAIClient] stream ended without terminal frame ${streamSummary()}`);
     handlers.onDone(terminalFinishReason);
   } catch (err) {
+    if (streamStalled) return;
     if ((err as Error)?.name === 'AbortError') {
       log.info(`[OpenAIClient] stream aborted ${streamSummary()}`);
       handlers.onDone('cancelled');

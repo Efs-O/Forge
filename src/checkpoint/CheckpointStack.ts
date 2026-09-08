@@ -1,6 +1,5 @@
 import * as os from 'os';
 import * as path from 'path';
-import { isDeepStrictEqual } from 'util';
 import { getLogger } from '../util/logger';
 import { coverageForPaths } from './CheckpointInventory';
 import {
@@ -9,7 +8,7 @@ import {
   type PreparedDiskCheckpoint,
 } from './DiskCheckpointStore';
 import type { DiskCheckpointReference } from './CheckpointManifest';
-import type { CheckpointLimits } from './CheckpointPolicy';
+import { DEFAULT_CHECKPOINT_LIMITS, type CheckpointLimits } from './CheckpointPolicy';
 import { evictBeyondDepth, snapshotContents } from './checkpointHistory';
 import {
   captureMemoryState,
@@ -155,12 +154,14 @@ export class CheckpointStack {
   private legacySession: CheckpointSession | null = null;
   private readonly diskStore: DiskCheckpointStore;
   private readonly externalCliRollbackEnabled: boolean;
+  private readonly limits: CheckpointLimits;
 
   constructor(options: CheckpointStackOptions = {}) {
     this.externalCliRollbackEnabled = options.externalCliRollbackEnabled ?? true;
+    this.limits = options.limits ?? DEFAULT_CHECKPOINT_LIMITS;
     this.diskStore = new DiskCheckpointStore(
       options.storageRoot ?? path.join(os.tmpdir(), `forge-checkpoints-${process.pid}`),
-      options.limits ?? { maxBytes: Number.MAX_SAFE_INTEGER, maxFiles: Number.MAX_SAFE_INTEGER },
+      this.limits,
     );
   }
 
@@ -168,7 +169,7 @@ export class CheckpointStack {
     const session = new CheckpointSession(
       turnId,
       conversationId,
-      (target) => captureMemoryState(target),
+      (target) => captureMemoryState(target, this.limits),
       (completed) => this.commitSession(completed),
       this.diskStore,
       this.externalCliRollbackEnabled,
@@ -188,15 +189,10 @@ export class CheckpointStack {
   }
 
   private commitSession(session: CheckpointSession): void {
-    const changed = session.snapshots().filter((snapshot) => {
-      try {
-        return !isDeepStrictEqual(snapshot.originalState, captureMemoryState(snapshot.filePath));
-      } catch {
-        // If the current path cannot be inspected, retain the original state so
-        // Undo remains the safe operation.
-        return true;
-      }
-    });
+    // Do not re-capture every path merely to elide no-op snapshots. That second
+    // recursive capture doubled peak memory and could OOM after a successful
+    // mutation. A harmless no-op Undo is safer than another unbounded read.
+    const changed = [...session.snapshots()];
     const diskSnapshots = [...session.diskSnapshots()];
     if (changed.length === 0 && diskSnapshots.length === 0) return;
     const stack = this.stackFor(session.conversationId);

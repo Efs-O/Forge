@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import { writeFileAtomicSync } from '../util/atomicWrite';
 import * as os from 'os';
 import * as path from 'path';
 import type * as vscode from 'vscode';
@@ -59,7 +60,7 @@ async function refreshAndPersist(entry: OpenCodeXaiEntry): Promise<string> {
       refresh: tokens.refresh_token,
       expires: Date.now() + tokens.expires_in * 1000,
     };
-    fs.writeFileSync(OPENCODE_AUTH_PATH, JSON.stringify(auth, null, 2), 'utf8');
+    writeFileAtomicSync(OPENCODE_AUTH_PATH, JSON.stringify(auth, null, 2));
     log.info('[xAI] auth.json updated with new tokens');
   } catch (err) {
     log.warn(`[xAI] Could not write auth.json: ${(err as Error).message}`);

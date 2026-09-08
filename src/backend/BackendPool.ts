@@ -176,15 +176,23 @@ export class BackendPool implements IBackendPool {
       const slot = this.slots.get(key);
       if (slot) {
         const runtimeKey = this.runtimeKey(key);
-        if (this.config.shared_runtime?.enabled && this.sharedRegistry.hasBorrowers(runtimeKey)) {
+        const shared = this.config.shared_runtime?.enabled === true;
+        const draining = shared && this.sharedRegistry.beginDraining(runtimeKey);
+        if (shared && this.sharedRegistry.hasBorrowers(runtimeKey)) {
+          if (draining) this.sharedRegistry.resumeBorrowing(runtimeKey);
           throw new Error(
             `Cannot unload "${key}": another Forge workspace is using this shared runtime.`,
           );
         }
-        if (slot.starting) await slot.starting.catch(() => {});
-        await slot.backend.stop();
-        this.freeSlot(key, slot);
-        if (this.config.shared_runtime?.enabled) this.sharedRegistry.removeOwner(runtimeKey);
+        try {
+          if (slot.starting) await slot.starting.catch(() => {});
+          await slot.backend.stop();
+          this.freeSlot(key, slot);
+          if (shared) this.sharedRegistry.removeOwner(runtimeKey);
+        } catch (error) {
+          if (draining) this.sharedRegistry.resumeBorrowing(runtimeKey);
+          throw error;
+        }
       }
     }
     log.info(`[BackendPool] released: ${key}`);

@@ -29,7 +29,9 @@ export function resolveWorkspacePath(
     ? path.normalize(filePath)
     : root
       ? path.resolve(root, filePath)
-      : path.normalize(filePath);
+      : (() => {
+          throw new Error('No workspace folder open; use an explicit absolute path.');
+        })();
   if (options.mustBeInsideWorkspace) {
     if (!root) throw new Error('No workspace folder open');
     if (!isPathInside(root, resolved))

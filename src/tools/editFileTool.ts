@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveWorkspacePath } from '../util/WorkspacePaths';
 import { applyEol, describeEditMiss, dominantEol, findEditMatch } from './editMatch';
+import { writeFileAtomicSync } from '../util/atomicWrite';
 
 // ── edit_file ──────────────────────────────────────────────────────────────────
 
@@ -136,7 +137,7 @@ export function makeEditFileTool(): RegisteredTool {
           applyEol(edit.newStr, eol) +
           updated.slice(match.index + match.length);
       }
-      fs.writeFileSync(filepath, updated, 'utf8');
+      writeFileAtomicSync(filepath, updated);
       const suppliedPath = args['filepath'] as string;
       return edits.length === 1
         ? `Replaced in ${suppliedPath}`

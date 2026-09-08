@@ -169,7 +169,6 @@ export function makeExecCommandTool(): RegisteredTool {
           );
         }
         checkPowerShellBan(command, cmdArgs);
-        guardExec(command, cmdArgs);
       } catch (error) {
         throw new ExecCommandError(
           'policy_refusal',

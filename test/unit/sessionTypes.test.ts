@@ -495,14 +495,16 @@ describe('sessionTypes', () => {
     expect(historyMetasFromSession(s)).toHaveLength(0);
   });
 
-  it('loadSidebarSession migrates legacy slim history into v1', () => {
+  it('loadSidebarSession migrates legacy slim history into v1 without deleting its recovery copy', async () => {
     const slim = [{ role: 'assistant' as const, content: 'hello from disk' }];
     const store: Record<string, unknown> = {
       [HISTORY_KEY_LEGACY]: slim,
     };
     loadSidebarSession(makeMemento(store));
 
-    expect(store[HISTORY_KEY_LEGACY]).toBeUndefined();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(store[HISTORY_KEY_LEGACY]).toEqual(slim);
     expect(store[SESSION_KEY_V1]).toBeDefined();
 
     const parsed = sidebarSessionPersistedSchema.parse(store[SESSION_KEY_V1]);
@@ -567,7 +569,7 @@ describe('countDisplayMessages', () => {
 });
 
 describe('active conversation pointer', () => {
-  it('survives a save that never touched the transcript blob', () => {
+  it('survives a save that never touched the transcript blob', async () => {
     const store = new Map<string, unknown>();
     const memento = {
       get: (key: string) => store.get(key),
@@ -586,10 +588,12 @@ describe('active conversation pointer', () => {
     // conversation that was active before the switch.
     saveActiveConversationId(memento, 'second');
 
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
     expect(loadSidebarSession(memento).activeConversationId).toBe('second');
   });
 
-  it('falls back to the blob when the pointer names a conversation that is gone', () => {
+  it('falls back to the blob when the pointer names a conversation that is gone', async () => {
     const store = new Map<string, unknown>();
     const memento = {
       get: (key: string) => store.get(key),
@@ -602,6 +606,8 @@ describe('active conversation pointer', () => {
     const session = createDefaultSession();
     saveSidebarSession(memento, session);
     saveActiveConversationId(memento, 'closed-since');
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
     expect(loadSidebarSession(memento).activeConversationId).toBe(session.conversations[0]!.id);
   });

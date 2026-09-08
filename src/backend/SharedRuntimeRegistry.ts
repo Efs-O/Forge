@@ -5,6 +5,7 @@ import { isProcessAlive } from '../util/processLiveness';
 import { composeLlamaServerArgs } from './LlamaServerArgs';
 import type { LlamaServerConfig, ModelConfig } from '../config/types';
 import { getLogger } from '../util/logger';
+import { writeFileAtomicSync } from '../util/atomicWrite';
 
 const log = getLogger();
 
@@ -19,6 +20,8 @@ export interface SharedRuntimeRecord {
   endpoint: string;
   ownerPid: number;
   createdAt: string;
+  /** False while the owning window is checking whether it can safely stop. */
+  acceptingBorrowers?: boolean;
 }
 
 /** Local, machine-wide discovery plus per-client lease files for llama.cpp. */
@@ -33,6 +36,36 @@ export class SharedRuntimeRegistry {
   }
 
   find(key: string): SharedRuntimeRecord | undefined {
+    const value = this.readOwner(key);
+    return value?.acceptingBorrowers === false ? undefined : value;
+  }
+
+  /** Atomically drain new borrowers before an owner checks existing leases. */
+  beginDraining(key: string): boolean {
+    const record = this.readOwner(key);
+    if (!record || record.ownerPid !== process.pid) return false;
+    this.writeOwner({ ...record, acceptingBorrowers: false });
+    return true;
+  }
+
+  resumeBorrowing(key: string): void {
+    const record = this.readOwner(key);
+    if (record?.ownerPid === process.pid) this.writeOwner({ ...record, acceptingBorrowers: true });
+  }
+
+  /** Records a lease only if the same owner is still accepting borrowers. */
+  acquireLeaseIfActive(key: string, id: string, expected: SharedRuntimeRecord): boolean {
+    this.acquireLease(key, id);
+    const current = this.find(key);
+    const valid =
+      current?.ownerPid === expected.ownerPid &&
+      current.endpoint === expected.endpoint &&
+      current.createdAt === expected.createdAt;
+    if (!valid) this.releaseLease(key, id);
+    return valid;
+  }
+
+  private readOwner(key: string): SharedRuntimeRecord | undefined {
     try {
       const value = JSON.parse(fs.readFileSync(this.ownerPath(key), 'utf8')) as SharedRuntimeRecord;
       return value.key === key && typeof value.endpoint === 'string' ? value : undefined;
@@ -43,11 +76,11 @@ export class SharedRuntimeRegistry {
 
   publish(record: SharedRuntimeRecord): void {
     fs.mkdirSync(this.root, { recursive: true });
-    fs.writeFileSync(this.ownerPath(record.key), `${JSON.stringify(record)}\n`, 'utf8');
+    this.writeOwner({ ...record, acceptingBorrowers: true });
   }
 
   removeOwner(key: string): void {
-    const record = this.find(key);
+    const record = this.readOwner(key);
     if (record?.ownerPid === process.pid) fs.rmSync(this.ownerPath(key), { force: true });
   }
 
@@ -55,7 +88,7 @@ export class SharedRuntimeRegistry {
     const dir = this.leaseDir(key);
     fs.mkdirSync(dir, { recursive: true });
     const lease: LeaseRecord = { pid: process.pid, createdAt: new Date().toISOString() };
-    fs.writeFileSync(path.join(dir, `${id}.json`), `${JSON.stringify(lease)}\n`, 'utf8');
+    writeFileAtomicSync(path.join(dir, `${id}.json`), `${JSON.stringify(lease)}\n`);
   }
 
   releaseLease(key: string, id: string): void {
@@ -113,6 +146,11 @@ export class SharedRuntimeRegistry {
 
   private ownerPath(key: string): string {
     return path.join(this.root, `${key}.json`);
+  }
+
+  private writeOwner(record: SharedRuntimeRecord): void {
+    fs.mkdirSync(this.root, { recursive: true });
+    writeFileAtomicSync(this.ownerPath(record.key), `${JSON.stringify(record)}\n`);
   }
   private leaseDir(key: string): string {
     return path.join(this.root, `${key}.leases`);
