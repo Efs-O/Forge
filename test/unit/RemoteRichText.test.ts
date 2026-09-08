@@ -60,6 +60,10 @@ describe('remote command map', () => {
     'src/remote/RemoteCommandHandler.ts',
     'src/remote/RemoteSessionCommands.ts',
     'src/remote/RemoteController.ts',
+    // Added late: /sleep and /wake shipped working but absent from the menu
+    // precisely because they live in their own file and this list did not name
+    // it. Any new file holding a `command === '/x'` line belongs here too.
+    'src/remote/RemotePowerCommands.ts',
   ];
   // Aliases and the parser-dispatched command have no `command === ...` line.
   // `/list` and `/select` were renamed to `/chats` and `/chat`; they still
@@ -84,6 +88,11 @@ describe('remote command map', () => {
     expect(implemented.size).toBeGreaterThan(20);
     expect(implemented.has('/steer')).toBe(true);
     expect(implemented.has('/mirror')).toBe(true);
+  });
+
+  it('keeps the menu sorted, so a new command lands somewhere findable', () => {
+    const names = TELEGRAM_BOT_COMMANDS.map((entry) => entry.command as string);
+    expect(names).toEqual([...names].sort());
   });
 
   it('documents every implemented command in /help', () => {

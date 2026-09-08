@@ -43,8 +43,9 @@ export const TELEGRAM_BOT_COMMANDS = [
   { command: 'queue', description: 'List queued prompts' },
   { command: 'ratelimit', description: 'Show/set messages allowed per minute' },
   { command: 'reload', description: 'Reload VS Code window' },
-  { command: 'resume', description: 'Continue the current conversation' },
   { command: 'restart', description: 'Restart the pinned model' },
+  { command: 'resume', description: 'Continue the current conversation' },
+  { command: 'sleep', description: 'Suspend this machine (needs /sleep confirm)' },
   { command: 'status', description: 'Session, model, queue' },
   { command: 'steer', description: 'Run queued <n> or new text now' },
   { command: 'stop', description: 'Stop the current request' },
@@ -53,6 +54,7 @@ export const TELEGRAM_BOT_COMMANDS = [
   { command: 'unload', description: 'Free memory: release the model' },
   { command: 'view', description: 'Replay the last answers in this chat' },
   { command: 'voice', description: 'Spoken replies on/off' },
+  { command: 'wake', description: 'Wake-on-LAN details, or arm a wake timer' },
   { command: 'workspace', description: 'List workspaces and show where you are' },
 ] as const;
 
