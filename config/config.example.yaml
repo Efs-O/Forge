@@ -164,6 +164,10 @@ remote:
   # Aliases are the only remote workspace-switch targets; paths are never
   # inferred from an incoming Telegram command.
   workspace_aliases: {}
+  # Example:
+  #   ssuno:
+  #     path: N:/vs code apps/Ssuno
+  #     display_name: Ssuno
   # Optional, private-LAN receiver for the separately deployed WakeSleep relay.
   # The pairing secret stays in VS Code SecretStorage, never in this file.
   # wake_relay:
@@ -171,10 +175,6 @@ remote:
   #   host: 192.168.1.70
   #   port: 8742
   #   relay_ip: 192.168.1.81
-  # Example:
-  #   ssuno:
-  #     path: N:/vs code apps/Ssuno
-  #     display_name: Ssuno
   telegram:
     enabled: false
   whatsapp:

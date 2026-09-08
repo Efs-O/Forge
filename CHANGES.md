@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- **The WakeSleep relay's dish half now exists, so `/sleep` works from the same
+  Telegram chat as `/wake`.** 0.15.26 shipped `RelaySleepServer` — the receiver —
+  but nothing could sign a request for it: the relay hardware is a MIPS airOS
+  dish with no `openssl` binary and a busybox that ships only `md5sum`, and a
+  first attempt at a Lua SHA-256 failed its test vectors, which led to a proposal
+  to replace the HMAC with mutual TLS. The cause was not a missing capability.
+  airOS *does* carry `/lib/lua/bit32.so`; that module **saturates out-of-range
+  arguments instead of reducing them modulo 2^32** as Lua 5.2 specifies, so
+  `band(2^32 + 5, 0xffffffff)` answers `0xffffffff` rather than `5`. Every
+  SHA-256 addition overflows 32 bits, so folding sums with `band` pins the whole
+  state to all-ones and every digest is `ffff…ff` for every input. Reducing with
+  `%` instead fixes it, and no protocol change was needed. Worth remembering as a
+  failure shape: a wrong digest is still a well-formed 64-hex string, so the only
+  symptom downstream is a `401` — hence a self-test asserted on every daemon
+  start, and a vector suite that runs on the dish rather than on the dev machine,
+  which would have proved nothing about that platform. The relay itself lives
+  outside this repo; nothing in Forge changed to support it.
+- **Fixed the example config implying `wake_relay` takes workspace aliases.**
+  The commented `wake_relay` block landed between `workspace_aliases: {}` and the
+  `# Example:` that documents it, so the `ssuno:` sample read as an example of
+  the wrong key. Moved below the example it belongs to.
+
 - **`/view [n]` replays a conversation to the phone.** There was no way to read
   a transcript remotely at all — `/status` and `/context` report numbers,
   `/chats` reports titles, and nothing showed words, so `/chat 3` switched you
