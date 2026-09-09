@@ -426,3 +426,4 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Spawn-and-collect child process (no vscode) | `src/util/processSpawn.ts`         |
 | Workspace path resolution + realpath | `src/util/WorkspacePaths.ts`        |
 | Structured logging                   | `src/util/logger.ts`                |
+| Error message + cause-chain description | `src/util/describeError.ts`      |

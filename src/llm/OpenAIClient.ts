@@ -7,6 +7,7 @@ import {
 } from './ToolCallTruncatedError';
 import { imageUnsupportedMessage, isImageUnsupportedError } from './imageUnsupportedError';
 import { getLogger } from '../util/logger';
+import { withDescribedCause } from '../util/describeError';
 
 const log = getLogger();
 let requestSequence = 0;
@@ -146,7 +147,7 @@ export async function streamChatCompletion(
           `elapsed_ms=${Date.now() - startedAt}`,
         err,
       );
-      handlers.onError(err instanceof Error ? err : new Error(String(err)));
+      handlers.onError(withDescribedCause(err));
     }
     return;
   }
@@ -418,7 +419,7 @@ export async function streamChatCompletion(
       handlers.onDone('cancelled');
     } else {
       log.error(`[OpenAIClient] stream failure ${streamSummary()}`, err);
-      handlers.onError(err instanceof Error ? err : new Error(String(err)));
+      handlers.onError(withDescribedCause(err));
     }
   } finally {
     clearInterval(heartbeat);

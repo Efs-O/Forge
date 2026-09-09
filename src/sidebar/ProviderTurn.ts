@@ -22,6 +22,7 @@ import type { UserPromptOptions } from './transcriptMutations';
 import type { ToolCallingLoopResult } from '../agent/ToolCallingLoop';
 import { abortedTurnOutcome, type ForgeTurnOutcome } from './turnOutcome';
 import type { AgentProgressEvent } from './AgentProgress';
+import { describeError } from '../util/describeError';
 
 const log = getLogger();
 
@@ -134,7 +135,11 @@ export async function runCloudProviderTurn(
       postC({ type: 'done', finishReason: 'cancelled' });
       outcome = abortedTurnOutcome(ctx.lifecycle.terminationKind(convId));
     } else {
-      const message = err instanceof Error ? err.message : String(err);
+      // describeError, not `.message`: undici reports a refused connection, a
+      // reset socket and a headers timeout all as "fetch failed" and keeps the
+      // reason in `cause`. This is the line that produced the bare "fetch
+      // failed" a remote user saw on 2026-09-09, with nothing left to diagnose.
+      const message = describeError(err);
       log.error(`[AgentLoop] ${model.provider} agent loop error: ${message}`);
       postC({ type: 'error', message });
       outcome = { kind: 'failed', error: message, finalText: '' };
@@ -205,7 +210,7 @@ export async function runLocalProviderTurn(
   } catch (err) {
     const msg = ctrl.signal.aborted
       ? 'Backend start cancelled.'
-      : `Backend failed to start: ${(err as Error).message}`;
+      : `Backend failed to start: ${describeError(err)}`;
     ctx.events.onBackendError?.(msg);
     ctx.events.onTurnFailed?.(convId, msg);
     postC({ type: 'backendDown', message: msg });

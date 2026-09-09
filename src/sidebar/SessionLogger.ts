@@ -207,6 +207,28 @@ export class SessionLogger {
     });
   }
 
+  /**
+   * Records a turn that ended in an error.
+   *
+   * Without this a failed turn is invisible here: `flush` writes the messages
+   * that exist, so the file ends on the last successful tool row and reads as a
+   * healthy turn that simply stops. A remote user hit `fetch failed` on
+   * 2026-09-09 and the 543-row log for that conversation carried no trace of
+   * it — the rendered chat had the only copy of the one fact that mattered.
+   *
+   * `message` is the described error, cause chain included, because that is
+   * what makes one transport fault distinguishable from another after the fact.
+   */
+  logTurnError(message: string, model: string): void {
+    this.ensureHeader(model);
+    this.append({
+      type: 'turn_error',
+      message,
+      timestamp_ms: Date.now(),
+      model,
+    });
+  }
+
   flush(messages: ChatMessage[], model: string, usage?: SessionUsage): void {
     const startedAt = this.writtenCount;
     this.ensureHeader(model);

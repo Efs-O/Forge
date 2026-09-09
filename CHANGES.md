@@ -2,6 +2,28 @@
 
 ## 0.15.30
 
+- **Every network fault reported itself as `fetch failed`, so none of them could
+  be told apart.** A remote turn died with those two words after llama-server
+  had been up for nineteen hours and never restarted — which ruled out the dead
+  port a previous fix had addressed, and left nothing to say what had actually
+  happened. Node's undici reports a refused connection, a reset socket, a
+  headers timeout and a closed stream under that one message, keeping the
+  reason in `error.cause`; `.cause` was read nowhere in the codebase. It is the
+  same shape as llama-server answering a cut-off tool call and a malformed one
+  with the same HTTP 500: one string for two faults means neither is
+  actionable. `describeError` now walks the cause chain at the points where an
+  error becomes something a person reads, so the message carries the reason —
+  `fetch failed: read ECONNRESET` — and undici's timeout codes, which live only
+  in `code`, are named too.
+
+- **A failed turn left no trace in the session log.** `flush` writes the
+  messages that exist, and a turn that dies produces none of its own, so the
+  file ended on the last successful tool row and read as a healthy turn that
+  simply stops. The 543-row log for the failure above carried no record of it;
+  the rendered chat had the only copy. Turns that end in an error now append a
+  `turn_error` row carrying the described message, beneath the rows they
+  produced before stopping.
+
 - **`exec_command grep` told the agent nothing, so it kept trying.** `grep` is
   not on the Windows PATH — the only copy lives inside Git Bash, which a
   `shell: false` spawn cannot reach — so the call failed with Node's bare

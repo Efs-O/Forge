@@ -2,10 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const flush = vi.fn();
 const updateTitle = vi.fn();
+const logTurnError = vi.fn();
 // The real logger writes a transcript under ~/.forge on every finished turn.
 vi.mock('../../src/sidebar/SessionLogger', () => ({
   SessionLogger: vi.fn().mockImplementation(function SessionLoggerMock() {
-    return { flush, updateTitle };
+    return { flush, updateTitle, logTurnError };
   }),
 }));
 
@@ -279,6 +280,23 @@ describe('SendPipeline.send', () => {
     expect(h.deps.evaluateAfterTurn).toHaveBeenCalledTimes(2);
     expect(h.runTurn.mock.calls[1]?.[2]).toBe('resume');
     expect(outcome).toEqual({ kind: 'completed', finalText: 'recovered' });
+    // The failed attempt is on record even though the retry succeeded: a turn
+    // that fails writes no messages of its own, so without this row the log
+    // ends on the last good tool call and reads as a healthy turn.
+    expect(logTurnError).toHaveBeenCalledWith(CONTEXT_EXHAUSTED_MESSAGE, expect.any(String));
+  });
+
+  it('writes no error row for a turn that succeeded', async () => {
+    const h = harness();
+    h.runTurn.mockResolvedValueOnce({
+      kind: 'completed',
+      finalText: 'done',
+      finishReason: 'stop',
+    });
+
+    await h.pipeline.send('start');
+
+    expect(logTurnError).not.toHaveBeenCalled();
   });
 
   it('pins the full selection including @profile on the conversation', async () => {

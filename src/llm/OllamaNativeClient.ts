@@ -2,6 +2,7 @@ import type { ModelConfig } from '../config/types';
 import { getLogger } from '../util/logger';
 import type { ChatCompletionRequest, ChatMessage, ContentPart, ToolCall } from './types';
 import type { StreamHandlers } from './OpenAIClient';
+import { withDescribedCause } from '../util/describeError';
 
 interface OllamaToolCallChunk {
   function?: {
@@ -353,7 +354,7 @@ export async function streamOllamaChatCompletion(
     if ((err as Error)?.name === 'AbortError') {
       handlers.onDone('cancelled');
     } else {
-      handlers.onError(err instanceof Error ? err : new Error(String(err)));
+      handlers.onError(withDescribedCause(err));
     }
   } finally {
     reader.releaseLock();

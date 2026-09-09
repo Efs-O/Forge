@@ -239,6 +239,10 @@ export class SendPipeline {
           deps.postSessionSync();
           this.flushSessionLog(conv.id);
         }
+        // After the flush, so the error lands beneath the rows it followed. A
+        // failed turn writes no messages of its own, so without this the file
+        // ends on the last successful tool row and reads as a healthy turn.
+        if (turn.kind === 'failed') this.logTurnError(conv.id, turn.error);
         // Context exhaustion is a failed provider turn, but it is also the one
         // failure auto-compaction can repair. Returning here used to bypass the
         // compaction policy entirely (most visible in background Telegram
@@ -313,6 +317,13 @@ export class SendPipeline {
     const logger = this.loggerFor(conv);
     logger.updateTitle(conv.title);
     logger.logCompaction(entry, conv.active_model ?? '');
+  }
+
+  /** Records why a turn stopped, next to the rows it produced before stopping. */
+  private logTurnError(convId: string, message: string): void {
+    const conv = this.deps.getSidebar().conversations.find((c) => c.id === convId);
+    if (!conv) return;
+    this.loggerFor(conv).logTurnError(message, conv.active_model ?? '');
   }
 
   private loggerFor(conv: ConversationRuntime): SessionLogger {
