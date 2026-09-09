@@ -12,6 +12,15 @@
   which is the part that is genuinely volatile. Repeated narrations are not
   sent twice.
 
+- **Warnings now reach the phone instead of only the bubble.** "agent is
+  repeating the same tool call - stopping to avoid a loop" was latched into the
+  edited progress message, where Telegram never announced it, so a turn that had
+  already given up looked like a turn still working. Warnings are now sent as
+  their own message as well as latched; an `info` notice stays an edit, because
+  it is a milestone rather than news. `docs/plans/REMOTE_FAILURE_VISIBILITY_PLAN.md`
+  records what a remote user is still not told - stall detection, per-tool
+  failures, and a pushed liveness heartbeat - and what is already covered.
+
 ## 0.15.32
 
 - **Questions with choices now include an `Other…` route.** Selecting it opens

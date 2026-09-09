@@ -83,6 +83,59 @@ describe('RemoteAgentProgress', () => {
     expect(channel.sent).toHaveLength(1);
   });
 
+  it('sends a warning as its own message as well as latching it in the bubble', async () => {
+    vi.useFakeTimers();
+    const channel = new FakeRemoteChannel();
+    const progress = new RemoteAgentProgress(
+      channel,
+      new AbortController().signal,
+      () => true,
+      3_900,
+      1_000,
+    );
+    progress.begin('c1', 'chat-a', 'message-1');
+
+    progress.handle({
+      conversationId: 'c1',
+      kind: 'notice',
+      severity: 'warning',
+      text: 'agent is repeating the same tool call — stopping to avoid a loop',
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    // The message is the only half of this that reaches a phone.
+    expect(channel.sent).toEqual([
+      {
+        chatId: 'chat-a',
+        text: '⚠ agent is repeating the same tool call — stopping to avoid a loop',
+      },
+    ]);
+    // The bubble keeps its standing copy: sending does not un-latch it.
+    expect(channel.edits.at(-1)?.text).toContain(
+      '⚠ agent is repeating the same tool call — stopping to avoid a loop',
+    );
+
+    // The existing consecutive-duplicate guard still covers the send.
+    progress.handle({
+      conversationId: 'c1',
+      kind: 'notice',
+      severity: 'warning',
+      text: 'agent is repeating the same tool call — stopping to avoid a loop',
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(channel.sent).toHaveLength(1);
+
+    // An info notice is a milestone, not news: it stays an edit.
+    progress.handle({
+      conversationId: 'c1',
+      kind: 'notice',
+      severity: 'info',
+      text: 'compacting the conversation',
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(channel.sent).toHaveLength(1);
+  });
+
   it('shows a startup headline while the backend loads, then restores the default', async () => {
     vi.useFakeTimers();
     const channel = new FakeRemoteChannel();

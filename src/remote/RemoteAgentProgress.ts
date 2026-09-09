@@ -148,6 +148,13 @@ export class RemoteAgentProgress {
         if (state.warnings[state.warnings.length - 1] === notice) return;
         state.warnings.push(notice);
         if (state.warnings.length > MAX_LATCHED_WARNINGS) state.warnings.shift();
+        // Sent as well as latched, and the two are not redundant. The latched
+        // line is the standing reminder a reader scrolling the bubble sees; the
+        // message is the only thing that actually reaches a phone, because
+        // Telegram raises no notification for an edit. "agent is repeating the
+        // same tool call -- stopping to avoid a loop" is precisely the sentence
+        // that must not wait for the turn to end to be read.
+        this.queueOutbound(event.conversationId, state, `⚠ ${notice}`);
       } else {
         state.milestone = notice;
       }
@@ -209,6 +216,23 @@ export class RemoteAgentProgress {
     const text = sanitize(raw).trim();
     if (!text || text === state.lastNarration) return;
     state.lastNarration = text;
+    this.queueOutbound(conversationId, state, text, true);
+  }
+
+  /**
+   * Send one line of its own into the chat, in order behind the pending edits.
+   *
+   * `clearCommentary` separates the two callers: a narration is the same text
+   * the bubble is currently showing, so leaving it there would say everything
+   * twice, while a warning was never in the commentary and the latched copy is
+   * wanted.
+   */
+  private queueOutbound(
+    conversationId: string,
+    state: ActiveProgress,
+    text: string,
+    clearCommentary = false,
+  ): void {
     state.tail = state.tail
       .then(async () => {
         if (state.closed || this.signal.aborted) return;
@@ -221,7 +245,7 @@ export class RemoteAgentProgress {
         // already enough to make the next render differ, and forcing an edit
         // that produces identical text earns a Bot API "message is not
         // modified" error.
-        state.commentary = '';
+        if (clearCommentary) state.commentary = '';
         this.schedule(conversationId, state);
       })
       .catch((err) => this.report(err));
