@@ -286,7 +286,10 @@ export class DirectBackend implements BackendController {
         `url=http://${this.host}:${this.port}`,
     );
     const result = await waitForHealthy(
-      { baseUrl: `http://${this.host}:${this.port}` },
+      {
+        baseUrl: `http://${this.host}:${this.port}`,
+        timeoutMs: model.startup_timeout_ms ?? 120_000,
+      },
       proc,
       abort?.signal,
     );

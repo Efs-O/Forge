@@ -1,5 +1,20 @@
 # Forge — Recent Changes
 
+## 0.15.32
+
+- **Questions with choices now include an `Other…` route.** Selecting it opens
+  and focuses a free-text answer field while preserving the immediate-submit
+  numbered choices. The question modal also has more space for long context
+  without changing the shared confirmation dialog.
+
+- **Models are guided to ask one related decision group at a time.** Option
+  labels are kept short and mutually exclusive; unrelated follow-ups belong in
+  a later question after the first response.
+
+- **Direct llama-server models may configure a startup health-check timeout.**
+  `startup_timeout_ms` is validated per model and overrides the default
+  two-minute startup window when a large model needs more time to load.
+
 ## 0.15.31
 
 - **A turn could be arithmetically guaranteed to fail before its first token,

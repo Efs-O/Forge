@@ -112,6 +112,8 @@ export interface ModelConfig {
    * Absent = use the global binary (current behavior, unchanged).
    */
   llama_server_binary?: string;
+  /** Maximum time to wait for this model's llama-server health endpoint at startup. */
+  startup_timeout_ms?: number;
   /**
    * Drop images from the model-facing copy once this many later USER messages
    * exist. `0` removes an image on the next user prompt; omitted = never age out

@@ -138,7 +138,10 @@ export function makeAskUserTool(questions: UserQuestionService): RegisteredTool 
           'the chat it was driven from remotely. There is no timeout: if the user ' +
           'has stepped away the turn stalls until they return, so do not use it ' +
           'to check in during long unattended work. When work can continue under ' +
-          'a stated assumption, state the assumption, notify_user, and keep going.',
+          'a stated assumption, state the assumption, notify_user, and keep going. ' +
+          'Ask one related decision group per call. When using options, keep them ' +
+          'short and mutually exclusive. Ask an unrelated follow-up decision in ' +
+          'the next ask_user call rather than appending it as an "also" question.',
         parameters: {
           type: 'object',
           properties: {

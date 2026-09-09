@@ -17,37 +17,41 @@ export interface SlashCommand {
   availableWhileStreaming?: boolean;
 }
 
+/**
+ * Every slash command the sidebar offers, in alphabetical order by `trigger` —
+ * the text the user actually types after the "/". Nothing downstream depends on
+ * the order (`InputRow` filters this list and renders it as-is), so it is free
+ * to be the order that makes a command findable in a menu of seventeen. Keep
+ * new entries in place rather than appending.
+ */
 export const SLASH_COMMANDS: SlashCommand[] = [
   {
-    id: 'unloadModel',
-    trigger: 'unload',
-    title: 'Unload Model',
-    description: 'Stop the backend and release the active model from memory.',
-  },
-  {
-    id: 'restartBackend',
-    trigger: 'restart',
-    title: 'Restart Backend',
-    description: 'Start or reconnect the llama-server connection.',
-  },
-  {
-    id: 'reindex',
-    trigger: 'reindex',
-    title: 'Reindex Codebase',
-    description: 'Rebuild the local semantic search index for search_codebase.',
-  },
-  {
-    id: 'newChat',
-    trigger: 'new',
-    title: 'New Chat',
-    description: 'Open a new conversation tab.',
+    id: 'clanker',
+    trigger: 'clanker',
+    title: 'Full Clanker',
+    description:
+      'Toggle full-auto mode — no confirmation prompts until you run /clanker again. Recursive deletes still confirm.',
+    // An in-memory approval-mode flag that touches no backend state. Mid-turn is
+    // exactly when it is wanted: the agent is asking for confirmations now.
     availableWhileStreaming: true,
   },
   {
-    id: 'rename',
-    trigger: 'rename',
-    title: 'Rename Conversation',
-    description: 'Set the active conversation title.',
+    id: 'clearChat',
+    trigger: 'clear',
+    title: 'Clear Active Chat',
+    description: 'Clear messages in the active tab only (tabs stay open).',
+  },
+  {
+    id: 'compact',
+    trigger: 'compact',
+    title: 'Compact Chat',
+    description: 'Summarize the active chat and replace it with a compact context summary.',
+  },
+  {
+    id: 'config',
+    trigger: 'config',
+    title: 'Open Config',
+    description: 'Open the active Forge config.yaml.',
     availableWhileStreaming: true,
   },
   {
@@ -58,11 +62,16 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     availableWhileStreaming: true,
   },
   {
-    id: 'config',
-    trigger: 'config',
-    title: 'Open Config',
-    description: 'Open the active Forge config.yaml.',
-    availableWhileStreaming: true,
+    id: 'initForge',
+    trigger: 'initForge',
+    title: 'Init Forge',
+    description: 'Scan this workspace and generate an AGENTS.md instructions file.',
+  },
+  {
+    id: 'keep',
+    trigger: 'keep',
+    title: 'Keep Changes',
+    description: 'Dismiss pending checkpoint and keep edits.',
   },
   {
     id: 'logs',
@@ -72,34 +81,17 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     availableWhileStreaming: true,
   },
   {
-    id: 'clearChat',
-    trigger: 'clear',
-    title: 'Clear Active Chat',
-    description: 'Clear messages in the active tab only (tabs stay open).',
+    id: 'newChat',
+    trigger: 'new',
+    title: 'New Chat',
+    description: 'Open a new conversation tab.',
+    availableWhileStreaming: true,
   },
   {
-    id: 'review',
-    trigger: 'review',
-    title: 'Review Code',
-    description: 'Review the selection, current file, or current changes and run immediately.',
-  },
-  {
-    id: 'compact',
-    trigger: 'compact',
-    title: 'Compact Chat',
-    description: 'Summarize the active chat and replace it with a compact context summary.',
-  },
-  {
-    id: 'undo',
-    trigger: 'undo',
-    title: 'Undo Last Turn',
-    description: 'Restore files from the last checkpoint (same as Keep/Undo flow).',
-  },
-  {
-    id: 'keep',
-    trigger: 'keep',
-    title: 'Keep Changes',
-    description: 'Dismiss pending checkpoint and keep edits.',
+    id: 'reindex',
+    trigger: 'reindex',
+    title: 'Reindex Codebase',
+    description: 'Rebuild the local semantic search index for search_codebase.',
   },
   {
     id: 'reloadWindow',
@@ -110,10 +102,23 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     availableWhileStreaming: true,
   },
   {
-    id: 'initForge',
-    trigger: 'initForge',
-    title: 'Init Forge',
-    description: 'Scan this workspace and generate an AGENTS.md instructions file.',
+    id: 'rename',
+    trigger: 'rename',
+    title: 'Rename Conversation',
+    description: 'Set the active conversation title.',
+    availableWhileStreaming: true,
+  },
+  {
+    id: 'restartBackend',
+    trigger: 'restart',
+    title: 'Restart Backend',
+    description: 'Start or reconnect the llama-server connection.',
+  },
+  {
+    id: 'review',
+    trigger: 'review',
+    title: 'Review Code',
+    description: 'Review the selection, current file, or current changes and run immediately.',
   },
   {
     id: 'system',
@@ -125,13 +130,15 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     availableWhileStreaming: true,
   },
   {
-    id: 'clanker',
-    trigger: 'clanker',
-    title: 'Full Clanker',
-    description:
-      'Toggle full-auto mode — no confirmation prompts until you run /clanker again. Recursive deletes still confirm.',
-    // An in-memory approval-mode flag that touches no backend state. Mid-turn is
-    // exactly when it is wanted: the agent is asking for confirmations now.
-    availableWhileStreaming: true,
+    id: 'undo',
+    trigger: 'undo',
+    title: 'Undo Last Turn',
+    description: 'Restore files from the last checkpoint (same as Keep/Undo flow).',
+  },
+  {
+    id: 'unloadModel',
+    trigger: 'unload',
+    title: 'Unload Model',
+    description: 'Stop the backend and release the active model from memory.',
   },
 ];

@@ -113,7 +113,10 @@
    payloads, and divergent chrome would only make the sidebar look inconsistent
    when an approval and a question follow each other in one turn. */
 .question-dialog {
-  max-width: 460px;
+  /* Questions often include context plus several choices. Give that content
+     room without altering the smaller shared confirmation dialog. */
+  max-width: 640px;
+  max-height: calc(100dvh - 48px);
 }
 
 .question-icon {
@@ -128,7 +131,7 @@
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--vscode-foreground);
-  max-height: 220px;
+  max-height: min(360px, 45dvh);
   overflow-y: auto;
 }
 
@@ -171,6 +174,20 @@
 .question-option-label {
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.question-other {
+  align-self: flex-start;
+  background: transparent;
+  color: var(--vscode-textLink-foreground, #3794ff);
+  border: 0;
+  padding: 4px 2px;
+  cursor: pointer;
+  font: inherit;
+}
+.question-other:hover {
+  color: var(--vscode-textLink-activeForeground, #4daafc);
+  text-decoration: underline;
 }
 
 .question-input {

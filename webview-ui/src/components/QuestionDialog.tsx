@@ -38,13 +38,16 @@ export function QuestionDialog({
   onDismiss,
 }: Props): React.ReactElement {
   const [text, setText] = useState('');
+  const [showOther, setShowOther] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const showFreeText = !options?.length || showOther;
 
   // The question is raised mid-turn while the transcript streams, so nothing
-  // else is going to hand it focus.
+  // else is going to hand it focus. `Other…` changes this component in place,
+  // so its textarea needs the same focus hand-off after it appears.
   useEffect(() => {
     inputRef.current?.focus();
-  }, []);
+  }, [showFreeText]);
 
   const submit = useCallback(() => {
     const answer = text.trim();
@@ -90,7 +93,7 @@ export function QuestionDialog({
         </div>
         <div className="question-prompt">{prompt}</div>
 
-        {options?.length ? (
+        {options?.length && !showOther && (
           <div className="question-options">
             {options.map((option, index) => (
               <button
@@ -103,8 +106,13 @@ export function QuestionDialog({
                 <span className="question-option-label">{option}</span>
               </button>
             ))}
+            <button className="question-other" type="button" onClick={() => setShowOther(true)}>
+              Other…
+            </button>
           </div>
-        ) : (
+        )}
+
+        {showFreeText && (
           <textarea
             ref={inputRef}
             className="question-input"
@@ -120,7 +128,7 @@ export function QuestionDialog({
           <button className="confirm-btn-deny" type="button" onClick={onDismiss}>
             Dismiss
           </button>
-          {!options?.length && (
+          {showFreeText && (
             <button
               className="confirm-btn-approve"
               type="button"
