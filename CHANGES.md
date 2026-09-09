@@ -1,5 +1,17 @@
 # Forge — Recent Changes
 
+## 0.15.33
+
+- **A long remote turn now speaks in messages, not edits.** Everything the
+  agent said during a turn was written into the single "working..." bubble
+  Telegram opens when the turn starts, and Telegram raises no notification for
+  an edited message. A three-hour agentic turn therefore left the phone silent
+  until it finished, with every thought stacked in the first bubble. Each round
+  that narrates before calling tools now delivers that paragraph as its own
+  message; the live bubble drops back to the headline and the running tool,
+  which is the part that is genuinely volatile. Repeated narrations are not
+  sent twice.
+
 ## 0.15.32
 
 - **Questions with choices now include an `Other…` route.** Selecting it opens

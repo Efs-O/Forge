@@ -383,6 +383,10 @@ export async function runModelTurn(
         ctx.emitAgentProgress({ conversationId: conv.id, kind: 'commentary', text });
       },
       onReasoning: (text) => postC({ type: 'reasoningToken', text }),
+      // The round's own words, once it has finished saying them. Only remote
+      // surfaces act on this: the sidebar already rendered every token of it.
+      onRoundNarration: (text) =>
+        ctx.emitAgentProgress({ conversationId: conv.id, kind: 'narration', text }),
       onDone: (finishReason) => {
         postC({ type: 'done', finishReason });
       },

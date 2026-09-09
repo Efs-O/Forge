@@ -44,6 +44,11 @@ interface ActiveProgress {
    */
   warnings: string[];
   lastText: string;
+  /**
+   * The last narration delivered as its own message. A round that repeats
+   * itself would otherwise send the same paragraph twice.
+   */
+  lastNarration?: string;
   timer?: ReturnType<typeof setTimeout>;
   tail: Promise<void>;
   closed: boolean;
@@ -121,6 +126,10 @@ export class RemoteAgentProgress {
       void this.finish(event.conversationId, event.ok ? 'Forge: completed.' : 'Forge: failed.');
       return;
     }
+    if (event.kind === 'narration') {
+      this.queueNarration(event.conversationId, state, event.text);
+      return;
+    }
     if (event.kind === 'commentary') {
       const delta = sanitize(event.text);
       if (!delta) return;
@@ -180,6 +189,42 @@ export class RemoteAgentProgress {
       this.active.delete(conversationId);
     }
     await Promise.allSettled(pending);
+  }
+
+  /**
+   * Deliver one finished mid-turn thought as a new message, and clear it out of
+   * the live bubble.
+   *
+   * A new message rather than an edit because that is the whole point: Telegram
+   * notifies on a send and stays silent on an edit, so a turn that only ever
+   * edited its bubble was invisible to a phone until it ended. Clearing
+   * `commentary` afterwards keeps the two from saying the same thing twice --
+   * the bubble drops back to its headline and whatever tool is running now,
+   * which is the part that is genuinely volatile.
+   *
+   * Rides `state.tail` with the edits so a narration cannot overtake the bubble
+   * update that preceded it.
+   */
+  private queueNarration(conversationId: string, state: ActiveProgress, raw: string): void {
+    const text = sanitize(raw).trim();
+    if (!text || text === state.lastNarration) return;
+    state.lastNarration = text;
+    state.tail = state.tail
+      .then(async () => {
+        if (state.closed || this.signal.aborted) return;
+        if (this.active.get(conversationId) !== state) return;
+        if (!(await this.safeCanDeliver(state.chatId))) return;
+        await this.channel.send(state.chatId, text.slice(0, this.maxMessageChars), {
+          signal: this.signal,
+        });
+        // `lastText` is deliberately left alone: clearing the commentary is
+        // already enough to make the next render differ, and forcing an edit
+        // that produces identical text earns a Bot API "message is not
+        // modified" error.
+        state.commentary = '';
+        this.schedule(conversationId, state);
+      })
+      .catch((err) => this.report(err));
   }
 
   private schedule(conversationId: string, state: ActiveProgress): void {

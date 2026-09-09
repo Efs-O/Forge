@@ -50,6 +50,39 @@ describe('RemoteAgentProgress', () => {
     expect(channel.edits).toHaveLength(1);
   });
 
+  it('sends a finished mid-turn narration as its own message and clears the bubble', async () => {
+    vi.useFakeTimers();
+    const channel = new FakeRemoteChannel();
+    const progress = new RemoteAgentProgress(
+      channel,
+      new AbortController().signal,
+      () => true,
+      3_900,
+      1_000,
+    );
+    progress.begin('c1', 'chat-a', 'message-1');
+
+    progress.handle({ conversationId: 'c1', kind: 'commentary', text: 'Let me read the file.' });
+    progress.handle({ conversationId: 'c1', kind: 'tool', toolName: 'read_file' });
+    await vi.advanceTimersByTimeAsync(1_000);
+    progress.handle({ conversationId: 'c1', kind: 'narration', text: 'Let me read the file.' });
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    // A real message, so the phone raises a notification -- and the bubble no
+    // longer repeats what that message already says.
+    expect(channel.sent).toEqual([{ chatId: 'chat-a', text: 'Let me read the file.' }]);
+    expect(channel.edits.at(-1)).toEqual({
+      chatId: 'chat-a',
+      messageId: 'message-1',
+      text: 'Forge: working…\n\nRunning read_file…',
+    });
+
+    // A round that says the same thing again does not send it twice.
+    progress.handle({ conversationId: 'c1', kind: 'narration', text: 'Let me read the file.' });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(channel.sent).toHaveLength(1);
+  });
+
   it('shows a startup headline while the backend loads, then restores the default', async () => {
     vi.useFakeTimers();
     const channel = new FakeRemoteChannel();

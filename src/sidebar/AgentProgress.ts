@@ -1,6 +1,18 @@
 /** Visible, conversation-addressed progress that may be mirrored to an authorized surface. */
 export type AgentProgressEvent =
   | { conversationId: string; kind: 'commentary'; text: string }
+  /**
+   * One finished mid-turn thought: the paragraph a round wrote before calling
+   * tools.
+   *
+   * `commentary` is a token stream and belongs in a message that is edited in
+   * place; this is a completed statement and belongs in a message of its own.
+   * The distinction is not cosmetic. A long agentic turn can run for hours, and
+   * everything it said arrived as edits to the single "working…" bubble Telegram
+   * opened when the turn started -- and Telegram raises no notification for an
+   * edit. A phone watching a three-hour turn stayed silent until it ended.
+   */
+  | { conversationId: string; kind: 'narration'; text: string }
   | { conversationId: string; kind: 'tool'; toolName: string }
   | { conversationId: string; kind: 'status'; text: string }
   /**

@@ -81,6 +81,17 @@ export interface ToolCallingLoopOptions {
   onNativeFallback?: () => void;
   /** Called as soon as a transcript entry is appended, before the turn ends. */
   onMessagesChanged?: () => void;
+  /**
+   * The text a round produced before calling tools — the model narrating what
+   * it is about to do, on a turn that is not over.
+   *
+   * Distinct from `onToken`, which fires per token and is only ever a live
+   * trace: this fires once per round with the finished paragraph, so a surface
+   * that delivers messages rather than editing one in place has a whole thought
+   * to deliver. Never fires for the round that ends the turn — that text is the
+   * answer, and the answer has its own path.
+   */
+  onRoundNarration?: (text: string) => void;
   /** Request the provider's exact execution-side usage in the final stream frame. */
   includeUsage?: boolean;
   onUsage?: UsageHandler;
@@ -360,6 +371,7 @@ export async function runToolCallingLoop(
       // live row with `content: null` and the visible text disappears.
       streamedAssistant.completeToolCall(calls, assistantContent, assistantReasoning);
       options.onMessagesChanged?.();
+      if (assistantContent.trim()) options.onRoundNarration?.(assistantContent);
       const beforeDispatch = options.messages.length;
       await options.dispatchToolCalls(calls, options.messages);
       options.onMessagesChanged?.();
