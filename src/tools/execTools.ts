@@ -20,6 +20,7 @@ import {
 import {
   canonicalizeExecCommand,
   describeShellBuiltin,
+  describeWrongPlatformProgram,
   resolveExecInvocation,
   resolvePackageRunnerInvocation,
 } from './execProgramResolver';
@@ -169,6 +170,10 @@ export function makeExecCommandTool(): RegisteredTool {
           );
         }
         checkPowerShellBan(command, cmdArgs);
+        // Before the spawn, not after: this command would start successfully
+        // and fail on its own terms, so there is no error path to improve.
+        const wrongProgram = describeWrongPlatformProgram(command, cmdArgs);
+        if (wrongProgram) throw new Error(wrongProgram);
       } catch (error) {
         throw new ExecCommandError(
           'policy_refusal',

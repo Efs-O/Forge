@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   canonicalizeExecCommand,
   describeShellBuiltin,
+  describeWrongPlatformProgram,
   matchPackageRunner,
   resolveExecInvocation,
   resolvePackageRunnerInvocation,
@@ -116,7 +117,9 @@ describe('resolvePackageRunnerInvocation on Windows', () => {
 
   it('still reports a shim that is not on PATH at all', () => {
     const probe = probeFor([], {});
-    expect(() => resolvePackageRunnerInvocation('npm', 'win32', probe)).toThrow(/shim was not found/u);
+    expect(() => resolvePackageRunnerInvocation('npm', 'win32', probe)).toThrow(
+      /shim was not found/u,
+    );
   });
 });
 
@@ -164,9 +167,51 @@ describe('describeShellBuiltin', () => {
 
   // find and findstr are real programs on Windows: they spawn fine, so this map
   // never sees them, and claiming them here would refuse work that succeeds.
+  // Unix-shaped `find` is handled by argv instead — see below.
   it('leaves the programs that actually exist alone', () => {
     expect(describeShellBuiltin('findstr')).toBeUndefined();
     expect(describeShellBuiltin('find')).toBeUndefined();
+  });
+});
+
+describe('describeWrongPlatformProgram', () => {
+  it('catches Unix find on Windows before it reaches find.exe', () => {
+    expect(describeWrongPlatformProgram('find', ['.', '-name', '*.ts'], 'win32')).toContain(
+      'find_files',
+    );
+    expect(
+      describeWrongPlatformProgram('find', ['src', '-type', 'f', '-maxdepth', '2'], 'win32'),
+    ).toContain('find_files');
+  });
+
+  // The whole point of matching on argv: this command works, and refusing it
+  // would teach the agent a capability it has does not exist.
+  it('lets a genuine Windows find through', () => {
+    expect(
+      describeWrongPlatformProgram('find', ['/c', 'needle', 'file.txt'], 'win32'),
+    ).toBeUndefined();
+    expect(
+      describeWrongPlatformProgram('find', ['/v', '/n', 'x', 'a.txt'], 'win32'),
+    ).toBeUndefined();
+  });
+
+  // On Linux and macOS `find` IS the Unix one, so intercepting would break a
+  // command that does exactly what was asked.
+  it('never fires off Windows', () => {
+    expect(describeWrongPlatformProgram('find', ['.', '-name', '*.ts'], 'linux')).toBeUndefined();
+    expect(describeWrongPlatformProgram('find', ['.', '-name', '*.ts'], 'darwin')).toBeUndefined();
+  });
+
+  it('matches predicates as whole tokens, never as substrings', () => {
+    // A filename that merely contains a predicate must not trip the check.
+    expect(
+      describeWrongPlatformProgram('find', ['/c', '-nameplate', 'a.txt'], 'win32'),
+    ).toBeUndefined();
+  });
+
+  it('says nothing about other programs', () => {
+    expect(describeWrongPlatformProgram('git', ['-name', 'x'], 'win32')).toBeUndefined();
+    expect(describeWrongPlatformProgram('findstr', ['-name', 'x'], 'win32')).toBeUndefined();
   });
 });
 

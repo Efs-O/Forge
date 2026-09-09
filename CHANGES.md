@@ -29,10 +29,25 @@
   incremented at the single dispatch site. It counts what was *dispatched*, so
   a refused or failed call still shows — it spent a round either way, and a
   count of successes alone would understate exactly the turns worth looking at.
-  Telegram's `/status` gains a `Work:` line; the VS Code status bar tooltip
-  gains `Tool calls:` beside `Model requests:`. The status bar's visible text
-  is unchanged — it is already three figures wide, and a fourth stops it being
-  readable at a glance.
+  Telegram's `/status` gains a `Work:` line, placed under `Context:` because it
+  answers the same question — what this chat has spent — rather than joining
+  the per-window health figures on the `Forge:` line. The VS Code status bar
+  tooltip gains `Tool calls:` beside `Model requests:`; its visible text is
+  unchanged, being already three figures wide.
+
+- **Unix `find` on Windows reached a different program of the same name.**
+  `find . -name "*.ts"` spawns System32's `find.exe`, a text search utility,
+  which rejects the arguments with `FIND: Parameter format not correct` — a
+  message about a program the model did not think it was running, and one no
+  error-path fix can reach, because the command *succeeded* in starting. The
+  redirect therefore has to run before the spawn, which means refusing a
+  command that would otherwise execute. That is only safe because the two
+  `find`s are unambiguous from argv: the Windows one takes `/V /C /N /I`
+  switches and accepts no `-` predicate at all, so `-name`, `-type`,
+  `-maxdepth` and friends can only mean the Unix one. `find /c "needle"
+  file.txt` still runs untouched, whole tokens are matched so a filename
+  containing a predicate cannot trip it, and the check is Windows-only —
+  elsewhere `find` *is* the Unix one and must keep working.
 
 - **Clanker mode armed from Telegram no longer dies at the next reload.**
   Arming from the sidebar persisted to `workspaceState`; arming remotely did

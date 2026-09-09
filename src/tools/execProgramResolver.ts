@@ -176,6 +176,69 @@ const UNAVAILABLE_PROGRAM_ALTERNATIVES: ReadonlyMap<string, string> = new Map([
 ]);
 
 /**
+ * `find` is two different programs wearing one name, and only on Windows.
+ *
+ * The map above cannot help: Windows ships a real `find.exe` in System32, so a
+ * model writing Unix `find . -name "*.ts"` spawns successfully and gets back
+ * `FIND: Parameter format not correct` — a message about a program it did not
+ * think it was running. Redirecting every `find` would be worse, because
+ * `find /c "needle" file.txt` is a working command and refusing it teaches the
+ * agent a capability does not exist.
+ *
+ * So distinguish by argv, which is unambiguous: Windows `find` takes `/V /C /N
+ * /I /OFF` switches and a quoted string, and accepts no `-` predicate at all.
+ * Any of the Unix predicates below therefore means Unix `find` and nothing
+ * else. Whole tokens only — a substring test is what made the `rm -rf`
+ * denylist refuse `git rm -f README.md`.
+ */
+const UNIX_FIND_PREDICATES: ReadonlySet<string> = new Set([
+  '-name',
+  '-iname',
+  '-path',
+  '-ipath',
+  '-regex',
+  '-type',
+  '-maxdepth',
+  '-mindepth',
+  '-mtime',
+  '-mmin',
+  '-newer',
+  '-size',
+  '-empty',
+  '-delete',
+  '-exec',
+  '-execdir',
+  '-print',
+  '-print0',
+  '-prune',
+]);
+
+/**
+ * Names the tool for a command that would spawn the wrong program, rather than
+ * the missing-program path `describeShellBuiltin` covers. Returns undefined
+ * whenever the command as written would do what the caller meant — including
+ * every `find` on a platform where `find` *is* the Unix one.
+ */
+export function describeWrongPlatformProgram(
+  command: string,
+  args: readonly string[],
+  platform: NodeJS.Platform = process.platform,
+): string | undefined {
+  if (platform !== 'win32') return undefined;
+  const base = path
+    .basename(command)
+    .toLowerCase()
+    .replace(/\.(exe|cmd|bat|com)$/u, '');
+  if (base !== 'find') return undefined;
+  if (!args.some((arg) => UNIX_FIND_PREDICATES.has(arg.toLowerCase()))) return undefined;
+  return (
+    '"find" on Windows is a text search utility, not the Unix file finder: it ' +
+    'would reject these arguments rather than match paths. Use the find_files ' +
+    'tool to match paths by glob, or search_code to search file contents.'
+  );
+}
+
+/**
  * Matched on the basename with any executable extension stripped, so
  * `C:\Program Files\Git\usr\bin\grep.exe` and a bare `grep` reach the same
  * entry. Whole names only — a substring match is what made the `rm -rf`

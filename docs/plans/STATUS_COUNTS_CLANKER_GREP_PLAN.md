@@ -139,8 +139,19 @@ omissions (`test/unit/execProgramResolver.test.ts`); `applyToolCalls`
 accumulation and the absent-vs-zero distinction
 (`test/unit/toolCallCount.test.ts`).
 
-Left undone, knowingly: a model that writes `find . -name '*.ts'` still reaches
-Windows' unrelated `find.exe` and gets `FIND: Parameter format not correct`.
-Fixing that needs an intercept *before* the spawn, not on the error path, which
-means refusing a command that would otherwise run — a bigger decision than this
-change, and one worth its own evidence.
+`find` was initially left out as needing its own decision, then done in the
+same cycle once the sizing turned out to be wrong. The blanket refusal it
+seemed to require is not necessary: Windows `find` takes `/V /C /N /I` switches
+and accepts no `-` predicate, so Unix-shaped argv identifies itself and
+`describeWrongPlatformProgram` fires only on that, only on Windows. `find /c
+"needle" file.txt` still runs. ~60 lines including tests.
+
+Two follow-ups deliberately not taken:
+
+- **Clanker in `globalState`.** Still per-workspace, so it must be armed once
+  per project. Raise it only with a reason; the wider scope means arming from a
+  phone would leave writes unconfirmed in every project on disk.
+- **A general wrong-program table.** `find` is the only real name collision
+  worth handling — `sort` and `more` behave closely enough on both platforms
+  that redirecting them would cost more than it saves. One entry is not a
+  pattern; do not generalise this until a second case actually appears.

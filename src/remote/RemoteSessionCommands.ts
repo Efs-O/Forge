@@ -64,15 +64,15 @@ export async function handleRemoteSessionCommand(
       }\n` +
         `Chat: ${conversation ? `${conversation.title} · ${conversation.id}` : 'none bound'}\n` +
         `Model: ${conversation?.activeModel ?? 'default'}\n` +
-        // What this chat has actually spent. Tool calls are counted as
-        // dispatched, so a refused or failed one still shows: it cost a round
-        // either way, and a count of successes alone would understate exactly
-        // the turns worth looking at.
-        `Work: ${String(conversation?.requestCount ?? 0)} model request(s), ${String(
-          conversation?.toolCallCount ?? 0,
-        )} tool call(s) in this chat.\n` +
         `Forge: ${status.requestChains.length} active request(s), ${queued} queued here, ${status.streamingConversationIds.length} streaming, ${requests.unknown} crash-unknown, ${outbox.pending} notifications pending, ${outbox.abandoned} abandoned.\n` +
         `Context: ${describeBudget(binding && context.host.contextBudget(binding.conversationId))}\n` +
+        // Sits under Context because it answers the same question: what this
+        // chat has spent. Tool calls are counted as dispatched, so a refused or
+        // failed one still shows — it cost a round either way, and a count of
+        // successes alone would understate exactly the turns worth looking at.
+        `Work: ${String(conversation?.requestCount ?? 0)} model request(s), ${String(
+          conversation?.toolCallCount ?? 0,
+        )} tool call(s) in this chat\n` +
         `Approvals: ${context.host.clankerMode() ? 'CLANKER — non-dangerous tools auto-approved' : 'gated'}`,
       (line) => boldLineLabel(line, STATUS_LABELS),
       { signal: context.signal },
