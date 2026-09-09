@@ -58,6 +58,24 @@ export function reportedContextTokens(conv: ReportedUsage): number {
 export const CHARS_PER_TOKEN = 3.1;
 
 /**
+ * Chars-per-token for a TOOL RESULT body, which is most of an agentic prompt.
+ *
+ * `CHARS_PER_TOKEN` was measured over a whole mixed transcript, but tool
+ * results are not the same text as the model's own prose: source excerpts,
+ * `git grep` output and JSON payloads carry long runs the BPE merges well.
+ * Measured 2026-09-09 against the live llama-server tokenizer
+ * (Qwen3.8-Flash-Next) over the 138,571 chars of tool results from session
+ * 3c073ca7: 38,155 tokens, i.e. 3.63 chars/token. Assistant `tool_calls` JSON
+ * from the same session measured 3.20, close enough to the general figure to
+ * leave alone.
+ *
+ * 3.4 rather than the measured 3.63 keeps this pessimistic (~6% high) for the
+ * same reason `CHARS_PER_TOKEN` is: over-estimating the prompt only costs some
+ * excerpting, while under-estimating it can overrun the slot.
+ */
+export const TOOL_RESULT_CHARS_PER_TOKEN = 3.4;
+
+/**
  * Prompt scaffolding the message estimate cannot see (chat template, BOS/EOS,
  * role tags) AND the system prompt.
  *
@@ -98,7 +116,8 @@ export function estimateTokens(messages: ChatMessage[]): number {
     // the bar by the whole turn's thinking — and ToolCallingLoop attaches
     // reasoning to EVERY tool-call round, so on an agentic turn under
     // `--reasoning-budget 6144` that was thousands of phantom tokens per round.
-    return sum + Math.ceil(chars / CHARS_PER_TOKEN);
+    const rate = m.role === 'tool' ? TOOL_RESULT_CHARS_PER_TOKEN : CHARS_PER_TOKEN;
+    return sum + Math.ceil(chars / rate);
   }, 0);
 }
 
@@ -126,6 +145,28 @@ export function reasoningReserve(model: ModelConfig): number {
   const raw = args[idx + 1];
   const parsed = raw === undefined ? Number.NaN : Number.parseInt(raw, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+/**
+ * The smallest output budget a round can succeed with.
+ *
+ * Thinking and the answer share ONE budget, so a round needs the whole
+ * reasoning reserve PLUS room to say something afterwards. Sizing the reserve
+ * at `MIN_ROUND_HEADROOM_TOKENS` alone is what killed session 3c073ca7 on
+ * 2026-09-09: the excerptor trimmed the prompt until exactly 4,000 output
+ * tokens remained, `applyOutputCap` took its 512-token margin, and the request
+ * went out with `max_tokens: 3488` against a `--reasoning-budget 4096`. The
+ * model could not reach the budget, so llama.cpp never injected
+ * `--reasoning-budget-message`, never closed the thinking block, and the turn
+ * died at `finish_reason: length` with no content and no tool call after 13.5
+ * minutes. Every later round in that conversation got the identical 3,488 —
+ * once a transcript is big enough to engage the excerptor, the failure is
+ * permanent, not intermittent.
+ *
+ * Returns `MIN_ROUND_HEADROOM_TOKENS` for a model with no reasoning budget.
+ */
+export function minimumOutputReserve(model: ModelConfig): number {
+  return reasoningReserve(model) + MIN_ROUND_HEADROOM_TOKENS;
 }
 
 /**

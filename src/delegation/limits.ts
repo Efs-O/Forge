@@ -71,3 +71,36 @@ export function buildConsultationSystemPrompt(files: DelegationPromptContextFile
     citations,
   ].join('\n');
 }
+
+/**
+ * How much of a CLI delegate's answer belongs inline, before the rest belongs
+ * in a file.
+ *
+ * `MAX_DELEGATION_RESULT_CHARS` is a ceiling, not a target, and reaching it is
+ * already a failure: the cut is head-only, so an oversized review loses its
+ * TAIL -- which is where "APPROVE / NOT APPROVE" and the summary of changes
+ * conventionally sit. The delegate returns a verdict and the caller reads the
+ * detail from disk on demand, with ranges, instead of paying for all of it
+ * blind. 24,000 chars is ~6,600 tokens of a local agent's window at the
+ * measured tool-result rate -- a tenth of a 64k slot spent in one tool result.
+ */
+export const PREFERRED_CLI_DELEGATION_REPLY_CHARS = 1500;
+
+/**
+ * The reply-shape contract given to a CLI delegate.
+ *
+ * CLI agents run unrestricted with their own file tools, so "write the detail
+ * to a file" costs nothing to grant -- it is a request about shape, not a
+ * permission change. The exception matters as much as the rule: when the task
+ * IS to edit something, the edit is the deliverable and a separate report file
+ * would only duplicate it into the caller's context.
+ */
+export function buildCliDelegationReplyContract(): string {
+  return [
+    'Reply shape — your answer is read by a local model with a small context window, so it pays for every character:',
+    `- Keep the reply itself under ~${PREFERRED_CLI_DELEGATION_REPLY_CHARS} characters: the verdict or direct answer first, then at most the three points that change what the caller should do.`,
+    '- If the full detail is longer than that, WRITE IT TO A FILE yourself and give the path on its own line as the last line, formatted exactly `REPORT: <path>`. Do not paste the file back into the reply.',
+    '- If the task was to edit or create files, those edits ARE the deliverable: summarise what changed and list the paths. Do not also write a report file.',
+    '- Never pad the reply to show your work. An answer that overflows is truncated from the end, so padding costs you the conclusion.',
+  ].join('\n');
+}

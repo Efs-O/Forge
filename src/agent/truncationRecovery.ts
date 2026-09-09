@@ -103,6 +103,19 @@ export function isContextExhaustionReason(reason: string | undefined): boolean {
 export const MAX_ROUNDS_MESSAGE_PREFIX = 'Forge: agent exceeded maximum tool rounds';
 
 /**
+ * Transcript marker for a round that spent its entire output budget inside the
+ * thinking block and returned no content and no tool call.
+ *
+ * It goes in the messages, not just a log line: without it the next request
+ * sees an assistant turn that simply ends, and the model has no way to tell its
+ * own unfinished thought from a completed answer.
+ */
+export const OUTPUT_BUDGET_EXHAUSTED_NOTICE =
+  'Forge: this round hit the output limit while still reasoning, so it produced no ' +
+  'answer and no tool call. The thinking above is unfinished. Take the next concrete ' +
+  'action directly instead of re-deriving it.';
+
+/**
  * Prefix of the incomplete-turn reason recorded when the loop runs out of tool
  * rounds. The post-turn resume matches on it, so both sides must agree — hence
  * one constant rather than a literal at each end.

@@ -21,6 +21,7 @@ import type { ToolDispatch } from './ToolDispatch';
 import type { ToolFailureTracker } from '../tools/StripTools';
 import type { TurnLifecycle } from './TurnLifecycle';
 import { computeContextBudget, estimateToolTokens, perSlotContext } from '../util/contextBudget';
+import { stampToolResultClocks } from '../agent/toolResultClock';
 import { prepareToolResultContext } from '../agent/toolResultContext';
 import { supersedeStaleReads } from '../agent/staleReadSupersede';
 import { nudgeTruncatedResults } from '../agent/truncatedResultNudge';
@@ -326,7 +327,9 @@ export async function runModelTurn(
         // rounds WITHIN this turn too.
         const withTurnContext = injectTurnContext(injected, turnContext);
         return prepareToolResultContext({
-          messages: nudgeTruncatedResults(supersedeStaleReads(withTurnContext)),
+          messages: stampToolResultClocks(
+            nudgeTruncatedResults(supersedeStaleReads(withTurnContext)),
+          ),
           toolTokens: estimateToolTokens(buildToolDefinitions()),
           model,
           server: config.llama_server,
@@ -439,6 +442,19 @@ export async function runModelTurn(
   // is unfinished even though the loop returned normally.
   if (result.finishReason === 'length') {
     ctx.lifecycle.markIncomplete(conv.id, 'the reply was cut off by the output limit');
+    // Name the cause and the knob, the way the round cap below does. A `length`
+    // stop that produced no text at all showed the user nothing whatsoever —
+    // the turn just ended — and the reason (thinking outgrew the remaining
+    // output budget) is not something they can infer from an empty bubble.
+    if (!result.finalText) {
+      postC({
+        type: 'notice',
+        message:
+          'Forge: the model used its whole output budget on reasoning and was cut off ' +
+          'before answering. The context is nearly full — run /compact, or lower ' +
+          `\`--reasoning-budget\` for "${model.name}".`,
+      });
+    }
   }
   // Same shape as the `length` case above: the loop returned normally, but the
   // request is unfinished. Marking it is what lets the post-turn resume pick it

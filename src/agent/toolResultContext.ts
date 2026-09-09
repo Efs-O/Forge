@@ -1,9 +1,5 @@
 import type { ChatMessage } from '../llm/types';
-import {
-  CHARS_PER_TOKEN,
-  MIN_ROUND_HEADROOM_TOKENS,
-  computeContextBudget,
-} from '../util/contextBudget';
+import { CHARS_PER_TOKEN, computeContextBudget, minimumOutputReserve } from '../util/contextBudget';
 import type { LlamaServerConfig, ModelConfig } from '../config/types';
 
 /**
@@ -68,7 +64,11 @@ export function prepareToolResultContext(input: {
   server?: LlamaServerConfig;
   responseReserve?: number;
 }): ToolResultContextResult {
-  const responseReserve = input.responseReserve ?? MIN_ROUND_HEADROOM_TOKENS;
+  // Reserve thinking AND an answer, not just an answer. `MIN_ROUND_HEADROOM_TOKENS`
+  // alone left less output room than the model's own `--reasoning-budget`, which
+  // makes a long-thinking round unable to finish by construction — see
+  // `minimumOutputReserve`.
+  const responseReserve = input.responseReserve ?? minimumOutputReserve(input.model);
   const initial = computeContextBudget({
     messages: input.messages,
     toolTokens: input.toolTokens,

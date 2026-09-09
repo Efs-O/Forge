@@ -1,5 +1,62 @@
 # Forge — Recent Changes
 
+## 0.15.31
+
+- **A turn could be arithmetically guaranteed to fail before its first token,
+  and Forge spent 13.5 minutes proving it.** The model-facing excerptor trims
+  the prompt until exactly `MIN_ROUND_HEADROOM_TOKENS` (4,000) of output room
+  remains, then `applyOutputCap` takes its 512-token margin — so a large
+  conversation converges on `max_tokens: 3488`. Against `--reasoning-budget
+  4096` that is unwinnable: thinking and the answer share one budget, so the
+  model burns the whole ceiling inside the thinking block, never reaches the
+  budget that would have injected `--reasoning-budget-message`, and returns
+  `finish_reason: length` with no content and no tool call. Every later round in
+  that conversation got the identical 3,488, so the failure was permanent rather
+  than intermittent. The reserve now covers the reasoning budget *plus* an
+  answer allowance (`minimumOutputReserve`), and a round whose output room
+  cannot outlast the reasoning budget is refused up front instead of being sent
+  and discovered.
+
+- **That cut-off round was then flushed as a completed answer.** With no tool
+  calls and no content, `ToolCallingLoop` took the "model is done" branch,
+  called `completeAnswer('')` and returned — the turn simply stopped, and
+  neither the transcript nor the sidebar recorded a reason. A `length` stop with
+  nothing to show is now recorded in the transcript as a truncated round, and
+  the user is told the context is nearly full rather than being shown an empty
+  bubble.
+
+- **The agent had no clock, so it planned against a stale one.** Between rounds
+  the model learned the time only from `wait` and the background-exec tools. On
+  a slow local model that gap is not academic: one round took 13.5 minutes, and
+  the agent reasoned "it's now ~20:50, so I should wait until 21:21" from a
+  reading it had taken at 20:46 — the real time was 21:10 and the rate limit it
+  was waiting on had all but reset. Tool results now carry the time they were
+  produced. The stamp is rendered from a `stampedAt` fixed at creation and
+  applied only to the model-facing copy, so it is byte-identical on every later
+  round and cannot invalidate the KV cache — which the system prompt, the
+  obvious place to put a clock, would do on every turn (363 seconds of prompt
+  eval on the turn above).
+
+- **Tool results were costed 17% over.** Measured against the live llama-server
+  tokenizer over 138,571 chars of real tool results: 3.63 chars/token, against
+  the flat 3.1 the estimator applied. The excerptor was cutting real content to
+  satisfy a prompt size that was never there.
+
+- **A CLI delegate that timed out threw its finished work away.** Claude Code
+  edited the plan file it had been asked to revise and then hit the 600s
+  ceiling; the caller received the words "timed out" and nothing else, and had
+  to infer from file mtimes that anything had happened. The partial output now
+  comes back with the error, along with the reminder that a CLI delegate edits
+  the workspace directly and `git status` is the place to look.
+
+- **A delegate's reply is a verdict, not a document.** `MAX_DELEGATION_RESULT_CHARS`
+  is 24,000 — roughly a tenth of a 64k local window spent in one tool result —
+  and the cut is head-only, so an oversized review loses its tail, which is
+  where the verdict sits. CLI targets are now asked to keep the reply short and
+  write long detail to a file, ending with a `REPORT: <path>` line the caller
+  reads on demand. When the task was to edit files, those edits are the
+  deliverable and no report file is written.
+
 ## 0.15.30
 
 - **Every network fault reported itself as `fetch failed`, so none of them could

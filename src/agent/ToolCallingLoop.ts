@@ -16,7 +16,7 @@ import {
   stripStructuredOutputFromFullText,
 } from '../tools/StructuredOutputParser';
 import { extractFallbackToolCalls } from '../tools/ToolCallFallback';
-import { MIN_ROUND_HEADROOM_TOKENS } from '../util/contextBudget';
+import { MIN_ROUND_HEADROOM_TOKENS, reasoningReserve } from '../util/contextBudget';
 import { ToolLoopDetectedError, ToolLoopGuard } from './ToolLoopGuard';
 import { StreamedAssistantTurn } from './StreamedAssistantTurn';
 import {
@@ -27,6 +27,7 @@ import {
   isLlamaContextExhaustion,
   isNativeToolJsonParseError,
   MAX_ROUNDS_MESSAGE_PREFIX,
+  OUTPUT_BUDGET_EXHAUSTED_NOTICE,
   MAX_TRUNCATION_RECOVERIES,
   truncationGuidance,
 } from './truncationRecovery';
@@ -156,11 +157,28 @@ export async function runToolCallingLoop(
       ? options.prepareMessages([...options.messages])
       : [...options.messages];
     const outputRoom = options.getOutputRoom?.(prepared);
+    // A recovery round runs with thinking off, so the reasoning reserve does
+    // not apply to it — see the guard below and `suppressThinking`.
+    const suppressesThinking = truncationRecoveries > 0 && (options.canUseThinkingKwargs ?? false);
     // Do not send an input that leaves no answer/tool-call room at all. The
     // model-only tool-result window normally prevents this; this guard covers
     // transcripts that cannot be reduced further (for example, huge user text).
     if (outputRoom !== undefined && outputRoom <= 0) {
       throw new Error(CONTEXT_INPUT_EXHAUSTED_MESSAGE);
+    }
+    // A round that cannot outlast the model's own reasoning budget cannot
+    // succeed: llama.cpp spends thinking and answer from the one budget, so it
+    // burns the whole of `max_tokens` inside the thinking block, never reaches
+    // the budget that would have injected `--reasoning-budget-message`, and
+    // returns `finish_reason: length` with no content and no tool call. Refuse
+    // it here rather than spending the generation to find out — the round that
+    // proved this cost 13.5 minutes and produced nothing.
+    if (
+      outputRoom !== undefined &&
+      outputRoom <= reasoningReserve(options.model) &&
+      !suppressesThinking
+    ) {
+      throw new Error(CONTEXT_EXHAUSTED_MESSAGE);
     }
     // Only fail early once truncation has already happened this turn: with a
     // healthy turn a thin margin is still enough for a short reply, and
@@ -177,7 +195,7 @@ export async function runToolCallingLoop(
     // ~4k tokens before the tool call even began — so the retry started with
     // LESS room than the attempt that just failed, and cut at the identical
     // byte. Spending the whole budget on the write is the point of the retry.
-    const suppressThinking = truncationRecoveries > 0 && (options.canUseThinkingKwargs ?? false);
+    const suppressThinking = suppressesThinking;
     const toolDefinitions = options.getToolDefinitions();
     const fallbackMessages =
       toolDefinitions.length > 0
@@ -354,6 +372,27 @@ export async function runToolCallingLoop(
       continue;
     }
 
+    // A `length` stop with nothing to show is a truncated round, not an answer.
+    // The model spent its whole budget inside the thinking block and was cut
+    // off mid-sentence, so there is no content and no tool call to act on.
+    // Flushing it as a normal completion is what made session 3c073ca7 appear
+    // to simply stop: `completeAnswer('')` returned an empty `finalText`, the
+    // loop exited, and neither the transcript nor the sidebar recorded a
+    // reason. Record it in the transcript so the next request knows the work
+    // stopped rather than finished.
+    if (streamed.finishReason === 'length' && !assistantContent) {
+      streamedAssistant.completeAnswer(assistantContent, assistantReasoning);
+      options.messages.push({ role: 'assistant', content: OUTPUT_BUDGET_EXHAUSTED_NOTICE });
+      options.onMessagesChanged?.();
+      options.onDone?.(streamed.finishReason);
+      return {
+        finishReason: streamed.finishReason,
+        finalText: '',
+        rounds: round + 1,
+        repeatedCall: false,
+        hitRoundCap: false,
+      };
+    }
     if (assistantContent || assistantReasoning) {
       streamedAssistant.completeAnswer(assistantContent, assistantReasoning);
       options.onMessagesChanged?.();

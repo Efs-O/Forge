@@ -76,6 +76,7 @@ const slimMsgSchema = z.object({
   /** Measured spans. Optional, so records written before 0.15.12 still parse. */
   reasoningMs: z.number().optional(),
   toolMs: z.number().optional(),
+  stampedAt: z.number().optional(),
   tool_calls: z.array(toolCallSchema).optional(),
   tool_call_id: z.string().optional(),
   name: z.string().optional(),
@@ -101,6 +102,7 @@ export type DisplayPersistMessage =
       toolResultTotal: number;
       toolIsError?: boolean;
       toolMs?: number;
+      stampedAt?: number;
     }
   | {
       role: 'diff';
@@ -321,6 +323,8 @@ export function slimPersistMessages(messages: ChatMessage[]): SlimPersistMessage
         : {}),
       ...(typeof m.reasoningMs === 'number' ? { reasoningMs: m.reasoningMs } : {}),
       ...(typeof m.toolMs === 'number' ? { toolMs: m.toolMs } : {}),
+      ...(typeof m.stampedAt === 'number' ? { stampedAt: m.stampedAt } : {}),
+      ...(typeof m.stampedAt === 'number' ? { stampedAt: m.stampedAt } : {}),
       ...(hasToolCalls ? { tool_calls: m.tool_calls } : {}),
       ...(typeof m.tool_call_id === 'string' ? { tool_call_id: m.tool_call_id } : {}),
       ...(typeof m.name === 'string' ? { name: m.name } : {}),

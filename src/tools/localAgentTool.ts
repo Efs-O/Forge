@@ -183,7 +183,7 @@ export function makeLocalAgentTool(
       function: {
         name: 'ask_local_agent',
         description:
-          'Delegate a task to a configured model or CLI agent. Local/cloud targets get only the task and optional context files; CLI targets (claude, codex) run unrestricted with their own tools and can edit files themselves. Use for independent correctness, security, test, or architecture review, or to hand an implementation to a CLI agent. Requires only the delegate permission.',
+          'Delegate a task to a configured model or CLI agent. Local/cloud targets get only the task and optional context files; CLI targets (claude, codex) run unrestricted with their own tools and can edit files themselves. Use for independent correctness, security, test, or architecture review, or to hand an implementation to a CLI agent. A CLI target is told to keep its reply short and to write any long detail to a file, ending with a `REPORT: <path>` line — read that file yourself rather than asking it to repeat the content. Because it edits the workspace directly, a run that errors or times out may still have done the work: check `git status` before retrying. Requires only the delegate permission.',
         parameters: {
           type: 'object',
           properties: {

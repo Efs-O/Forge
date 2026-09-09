@@ -34,6 +34,12 @@ export interface ChatMessage {
   reasoningMs?: number;
   toolMs?: number;
   /**
+   * Wall-clock time a tool result was produced, epoch ms. Set once at creation
+   * so the model-facing clock stamp derived from it never changes under the KV
+   * cache -- see `stampToolResultClocks`.
+   */
+  stampedAt?: number;
+  /**
    * Files this user turn carried, as on-disk references (see
    * `ChatAttachmentStore`). Forge-only, like `reasoning`: no provider
    * serializer reads it, and it holds no bytes, so it is safe to persist.

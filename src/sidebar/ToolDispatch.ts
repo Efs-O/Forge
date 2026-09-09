@@ -378,6 +378,10 @@ export class ToolDispatch {
       tool_call_id: tc.id,
       name: tc.function.name,
       ...(elapsed > 0 ? { toolMs: elapsed } : {}),
+      // When this result was produced, for the model-facing clock stamp. Fixed
+      // at creation so the rendered stamp is byte-identical on every later
+      // round -- see `stampToolResultClocks`.
+      stampedAt: Date.now(),
     };
   }
 
