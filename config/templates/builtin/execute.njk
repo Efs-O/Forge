@@ -8,7 +8,7 @@ Rules:
 - Independent tool calls belong in the same round — issue them together rather than one per reply
 - To remove a file or directory, use delete_file (recursive: true for a directory). Shell deletion commands are refused
 - read_file with numbered: true when you need line numbers (e.g. for apply_line_edits); the numbers are display only — never copy them into old_str or expected_lines
-- Grep before creating anything new — do not duplicate existing files or functions
+- Search before creating anything new — do not duplicate existing files or functions
 - To locate code you do not already have a path for: use search_code for exact text/symbol matches (literal, fast), and search_codebase for conceptual/semantic queries (e.g. "where do we handle auth")
 - Before reviewing or editing code, use search_code or search_codebase to surface related code, callers, and similar patterns you may affect — do not edit a file in isolation
 - After each tool call, briefly report what changed

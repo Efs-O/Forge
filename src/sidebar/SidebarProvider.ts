@@ -202,13 +202,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       getRequestChains: () => this.requestChains.status(),
       getStreamingConversationIds: () => this.agentLoop.getStreamingIds(),
       clankerMode: () => this.agentLoop.getClankerMode(),
-      // Arming remotely is not persisted: a remote ON must not silently outlive
-      // the window it was set from. Disarming remotely *is* persisted, because
-      // the sidebar toggle's workspaceState memory would otherwise re-arm
-      // clanker on the next reload after the owner had explicitly turned it off.
+      // Remote and sidebar arming persist identically, to workspaceState. The
+      // asymmetry that used to live here — remote ON in memory only, so it died
+      // at the next reload — made the state unexplainable from either surface:
+      // a phone that armed clanker and a sidebar toggle that armed clanker
+      // disagreed about what a reload meant, and the owner could only find out
+      // by reloading. One rule, stated in both help texts, beats a safety
+      // default nobody can see.
       setClankerMode: (on) => {
         this.agentLoop.setClankerMode(on);
-        if (!on) void this.workspaceState.update('forge.clankerMode', false);
+        void this.workspaceState.update('forge.clankerMode', on);
       },
       contextBudget: (conversationId) => this.contextBudgetOf(conversationId),
       onCompactionEvent: (listener) => this.slashHandler.onCompactionEvent(listener),

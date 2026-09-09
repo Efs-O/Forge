@@ -32,6 +32,7 @@ import { resolveToolPermissions } from '../tools/PermissionResolver';
 import { ToolBudget } from '../tools/ToolBudget';
 import { hiddenLazyToolNames } from '../tools/lazyToolGroups';
 import { deriveStaticCapabilities } from '../config/ConfigResolver';
+import { applyToolCalls } from './transcriptMutations';
 import { extractToolDetail } from './toolSummary';
 import { injectTurnContext, type TurnContextState } from './turnContext';
 import { latestPastedTerminalCommand } from './compactionLedger';
@@ -332,6 +333,7 @@ export async function runModelTurn(
         }).messages;
       },
       dispatchToolCalls: async (toolCalls, messages) => {
+        applyToolCalls(conv, toolCalls.length);
         for (const call of toolCalls) {
           ctx.emitAgentProgress({
             conversationId: conv.id,

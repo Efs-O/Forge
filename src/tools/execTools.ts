@@ -214,8 +214,9 @@ export function makeExecCommandTool(): RegisteredTool {
         );
         return formatExecCommandOutput(command, result, outputOptions);
       } catch (error) {
-        // A cmd.exe builtin has no executable image, so spawn reports it
-        // missing — true, but useless. Say which tool replaces it.
+        // spawn reports a cmd.exe builtin and a genuinely absent program the
+        // same way: missing. True, and useless — a bare ENOENT names nothing
+        // the model could use instead, so it concludes the capability is gone.
         const alternative = describeShellBuiltin(command);
         if (
           alternative &&
@@ -225,7 +226,9 @@ export function makeExecCommandTool(): RegisteredTool {
           throw new ExecCommandError(
             'missing_executable',
             command,
-            `"${command}" is a shell builtin, not a program, and exec_command runs without a shell. ${alternative}`,
+            `"${command}" is not available here: exec_command runs without a shell, ` +
+              `so shell builtins have no executable image and Unix utilities are not on ` +
+              `this PATH. ${alternative}`,
           );
         }
         throw error;

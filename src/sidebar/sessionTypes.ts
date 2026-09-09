@@ -197,6 +197,7 @@ export const conversationPersistedSchema = z.object({
   last_input_tokens: z.number().int().min(0).optional(),
   last_output_tokens: z.number().int().min(0).optional(),
   model_request_count: z.number().int().min(0).optional(),
+  tool_call_count: z.number().int().min(0).optional(),
 });
 
 export const sidebarSessionPersistedSchema = z.object({
@@ -265,6 +266,13 @@ export interface ConversationRuntime {
   last_output_tokens?: number;
   /** Number of model requests that have reported usage. */
   model_request_count?: number;
+  /**
+   * Tool calls dispatched in this conversation. Counts what was *dispatched*,
+   * so a refused or failed call still counts: it spent a round either way, and
+   * a figure that only counted successes would understate exactly the turns
+   * worth looking at.
+   */
+  tool_call_count?: number;
 }
 
 export interface SidebarRuntime {

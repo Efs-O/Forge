@@ -15,6 +15,10 @@ export interface ForgeConversationSummary {
   activeModel: string | null;
   archived: boolean;
   updatedAt: number;
+  /** Model requests that reported usage. */
+  requestCount: number;
+  /** Tool calls dispatched, successes and failures alike. */
+  toolCallCount: number;
 }
 
 export interface ForgeHostStatus {
@@ -171,6 +175,8 @@ function summarize(conv: ConversationRuntime, archived: boolean): ForgeConversat
     activeModel: conv.active_model ?? null,
     archived,
     updatedAt: conv.updatedAt,
+    requestCount: conv.model_request_count ?? 0,
+    toolCallCount: conv.tool_call_count ?? 0,
   };
 }
 

@@ -1,5 +1,48 @@
 # Forge — Recent Changes
 
+## 0.15.30
+
+- **`exec_command grep` told the agent nothing, so it kept trying.** `grep` is
+  not on the Windows PATH — the only copy lives inside Git Bash, which a
+  `shell: false` spawn cannot reach — so the call failed with Node's bare
+  `spawn grep ENOENT`. That names nothing usable, and it is the exact failure
+  shape that left `delete_file` uncalled across ~3,000 tool calls: the agent
+  reads a nameless refusal as "the capability does not exist" and goes looking
+  for a workaround. `search_code` had bundled ripgrep behind it the whole time.
+  The map that already redirected cmd.exe builtins (`dir` → `list_directory`)
+  now also covers the Unix utilities that are simply absent — every spelling of
+  grep and `rg`/`ack` → `search_code`/`search_codebase`, `cat`/`head`/`tail` →
+  `read_file`, `sed`/`awk` → `edit_file`, and it matches through an `.exe`
+  suffix so the second thing a model tries lands on the same advice. `find` and
+  `findstr` are deliberately left out: both are real Windows programs that
+  spawn successfully, and refusing a command that works teaches the same wrong
+  lesson in the other direction. Nothing was added to the prompt — a rule there
+  costs every turn, while an error string arrives only when it is relevant.
+  What *was* changed in the prompt is the line that caused it: "**Grep** before
+  creating anything new" put the verb in imperative position two lines above
+  the one naming `search_code`, and now reads "Search".
+
+- **`/status` and the status bar now report tool calls.** Nothing counted them:
+  `ToolBudget` tracks only tools carrying a `tool_call_limits` entry, so
+  reading it would have under-reported every unbudgeted tool. A
+  `tool_call_count` now sits beside `model_request_count` on the conversation,
+  incremented at the single dispatch site. It counts what was *dispatched*, so
+  a refused or failed call still shows — it spent a round either way, and a
+  count of successes alone would understate exactly the turns worth looking at.
+  Telegram's `/status` gains a `Work:` line; the VS Code status bar tooltip
+  gains `Tool calls:` beside `Model requests:`. The status bar's visible text
+  is unchanged — it is already three figures wide, and a fourth stops it being
+  readable at a glance.
+
+- **Clanker mode armed from Telegram no longer dies at the next reload.**
+  Arming from the sidebar persisted to `workspaceState`; arming remotely did
+  not, on the reasoning that a remote ON should not silently outlive its
+  window. In practice that made the state unexplainable from either surface:
+  two toggles that look identical disagreed about what a reload meant, and the
+  owner could only find out by reloading. Both now persist, both on and off,
+  and the Telegram help and confirmation text say so — previously the help
+  described the remote rule while the sidebar quietly followed the other one.
+
 ## 0.15.29
 
 - **`/workspace 23` answered with a page range, and 23 was a real workspace.**

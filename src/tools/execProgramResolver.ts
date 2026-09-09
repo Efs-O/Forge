@@ -116,12 +116,27 @@ export function canonicalizeExecCommand(command: string): string {
   return matchPackageRunner(command) ?? command;
 }
 
+/** Named twice over, so the wording cannot drift between spellings of grep. */
+const SEARCH_ALTERNATIVE =
+  'Use search_code for literal or regex matches (bundled ripgrep), ' +
+  'or search_codebase for a conceptual query.';
+
 /**
- * cmd.exe builtins have no executable image, so `spawn` reports them as a
- * missing program — a confusing message, since the model can see the command
- * work in its own terminal. Name the tool that does the job instead.
+ * Programs `exec_command` cannot run here, and the tool that does the job.
+ *
+ * Two populations, one cure. cmd.exe builtins have no executable image, so
+ * `spawn` reports them missing — confusing, since the model can see the
+ * command work in its own terminal. The Unix text utilities are simply absent
+ * from a Windows PATH: `grep` lives inside Git Bash and nowhere a shell-free
+ * spawn can reach it, so the model gets a bare `spawn grep ENOENT` naming
+ * nothing it could use instead. That is the shape that left `delete_file`
+ * uncalled for ~3,000 tool calls — a refusal the agent reads as "the
+ * capability does not exist", after which it goes looking for a workaround.
+ *
+ * Ripgrep ships with VS Code and already backs `search_code` and `find_files`,
+ * so there is nothing to install here; there is only something to say.
  */
-const CMD_BUILTIN_ALTERNATIVES: ReadonlyMap<string, string> = new Map([
+const UNAVAILABLE_PROGRAM_ALTERNATIVES: ReadonlyMap<string, string> = new Map([
   ['dir', 'Use the list_directory tool.'],
   ['ls', 'Use the list_directory tool.'],
   ['cd', 'Pass the cwd argument to exec_command instead.'],
@@ -137,11 +152,41 @@ const CMD_BUILTIN_ALTERNATIVES: ReadonlyMap<string, string> = new Map([
   ['echo', 'Use write_file to create file content.'],
   ['set', 'Environment variables cannot be set for exec_command.'],
   ['cls', 'There is no terminal to clear.'],
+  // Unix text utilities. Absent from the Windows PATH, and each one has a tool
+  // that returns structured results rather than text to re-parse.
+  ['grep', SEARCH_ALTERNATIVE],
+  ['egrep', SEARCH_ALTERNATIVE],
+  ['fgrep', SEARCH_ALTERNATIVE],
+  ['rg', SEARCH_ALTERNATIVE],
+  ['ripgrep', SEARCH_ALTERNATIVE],
+  ['ack', SEARCH_ALTERNATIVE],
+  // `find` and `findstr` are deliberately absent: both are real programs on
+  // Windows and would spawn successfully, so this map never sees them. Adding
+  // them would mean refusing a command that works, which teaches the agent a
+  // capability does not exist — the opposite of the problem being fixed here.
+  ['cat', 'Use the read_file tool.'],
+  ['head', 'Use read_file, which takes a line range.'],
+  ['tail', 'Use read_file, which takes a line range.'],
+  ['less', 'Use read_file, which takes a line range.'],
+  ['sed', 'Use edit_file (batched edits[]) or apply_line_edits.'],
+  ['awk', 'Use search_code to select lines, then read_file to read them.'],
+  ['wc', 'Use read_file and count what it returns.'],
+  ['touch', 'Use write_file with empty content.'],
+  ['which', 'Use find_files, or exec_command the program directly.'],
 ]);
 
+/**
+ * Matched on the basename with any executable extension stripped, so
+ * `C:\Program Files\Git\usr\bin\grep.exe` and a bare `grep` reach the same
+ * entry. Whole names only — a substring match is what made the `rm -rf`
+ * denylist refuse `git rm -f README.md`.
+ */
 export function describeShellBuiltin(command: string): string | undefined {
-  const base = path.basename(command).toLowerCase();
-  return CMD_BUILTIN_ALTERNATIVES.get(base);
+  const base = path
+    .basename(command)
+    .toLowerCase()
+    .replace(/\.(exe|cmd|bat|com)$/u, '');
+  return UNAVAILABLE_PROGRAM_ALTERNATIVES.get(base);
 }
 
 /**

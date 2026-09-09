@@ -137,6 +137,37 @@ describe('describeShellBuiltin', () => {
     expect(describeShellBuiltin('node')).toBeUndefined();
     expect(describeShellBuiltin('git')).toBeUndefined();
   });
+
+  // The reported failure: exec_command grep returned a bare `spawn grep ENOENT`
+  // naming nothing usable, and the agent went looking for a workaround instead
+  // of calling search_code, which had ripgrep behind it the whole time.
+  it('points every spelling of grep at search_code', () => {
+    for (const spelling of ['grep', 'egrep', 'fgrep', 'rg', 'ripgrep', 'ack']) {
+      expect(describeShellBuiltin(spelling)).toContain('search_code');
+    }
+  });
+
+  it('names read_file for the Unix pagers', () => {
+    for (const spelling of ['cat', 'head', 'tail', 'less']) {
+      expect(describeShellBuiltin(spelling)).toContain('read_file');
+    }
+  });
+
+  // A Windows model reaches for the .exe spelling as soon as the bare name
+  // fails, so both have to land on the same advice.
+  it('strips an executable extension before matching', () => {
+    expect(describeShellBuiltin('grep.exe')).toContain('search_code');
+    expect(describeShellBuiltin(String.raw`C:\Program Files\Git\usr\bin\grep.exe`)).toContain(
+      'search_code',
+    );
+  });
+
+  // find and findstr are real programs on Windows: they spawn fine, so this map
+  // never sees them, and claiming them here would refuse work that succeeds.
+  it('leaves the programs that actually exist alone', () => {
+    expect(describeShellBuiltin('findstr')).toBeUndefined();
+    expect(describeShellBuiltin('find')).toBeUndefined();
+  });
 });
 
 describe('canonicalizeExecCommand keeps the denylist effective', () => {

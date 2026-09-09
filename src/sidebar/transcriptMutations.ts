@@ -51,3 +51,13 @@ export function applyUsage(
   conv.last_output_tokens = outputTokens;
   conv.model_request_count = (conv.model_request_count ?? 0) + 1;
 }
+
+/**
+ * Fold one round's dispatched tool calls into the running total. Separate from
+ * `applyUsage` because the two do not move together: a round can dispatch four
+ * tools, and a turn can end with none.
+ */
+export function applyToolCalls(conv: ConversationRuntime, count: number): void {
+  if (count <= 0) return;
+  conv.tool_call_count = (conv.tool_call_count ?? 0) + count;
+}

@@ -136,6 +136,7 @@ function persistedToRuntime(p: ConversationPersisted): ConversationRuntime {
     ...(p.last_input_tokens !== undefined ? { last_input_tokens: p.last_input_tokens } : {}),
     ...(p.last_output_tokens !== undefined ? { last_output_tokens: p.last_output_tokens } : {}),
     ...(p.model_request_count !== undefined ? { model_request_count: p.model_request_count } : {}),
+    ...(p.tool_call_count !== undefined ? { tool_call_count: p.tool_call_count } : {}),
   };
 }
 
@@ -208,6 +209,7 @@ export function runtimeToPersisted(session: SidebarRuntime): SidebarSessionPersi
       ...(c.model_request_count !== undefined
         ? { model_request_count: c.model_request_count }
         : {}),
+      ...(c.tool_call_count !== undefined ? { tool_call_count: c.tool_call_count } : {}),
     })),
     history: session.history.map((c) => ({
       id: c.id,
@@ -233,6 +235,7 @@ export function runtimeToPersisted(session: SidebarRuntime): SidebarSessionPersi
       ...(c.model_request_count !== undefined
         ? { model_request_count: c.model_request_count }
         : {}),
+      ...(c.tool_call_count !== undefined ? { tool_call_count: c.tool_call_count } : {}),
     })),
   };
 }

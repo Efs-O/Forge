@@ -62,7 +62,7 @@ Notes:
 
 • /ratelimit sets how many messages this chat may send per minute (default 30); off raises it to the 600 ceiling rather than removing it, because the limit is also what stops a stuck message being retried forever
 
-• /clanker on auto-approves non-dangerous tools in this workspace until the window reloads — writes then land with no confirmation anywhere, in any tab of that window. /clanker off also clears the sidebar toggle's memory, so it stays off across a reload
+• /clanker on auto-approves non-dangerous tools for every tab of the VS Code window — writes then land with no confirmation anywhere, here or in the sidebar. It is remembered per workspace and survives a window reload, so it stays armed until someone turns it off; /clanker off, or the sidebar toggle, is the only thing that clears it
 
 • /system reports GPU load, which processes hold VRAM (Forge's own backends are tagged), RAM and drive space; it answers while a turn is running
 

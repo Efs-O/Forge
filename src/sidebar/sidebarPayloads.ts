@@ -121,5 +121,6 @@ export function buildSessionMetrics(
       ? { currentOutputTokens: conv.last_output_tokens }
       : {}),
     ...(conv.model_request_count !== undefined ? { requestCount: conv.model_request_count } : {}),
+    ...(conv.tool_call_count !== undefined ? { toolCallCount: conv.tool_call_count } : {}),
   };
 }
