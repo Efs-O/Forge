@@ -8,12 +8,7 @@ import {
 } from './TelegramInboundMapping';
 import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
 import { createTelegramSelectionPages } from './TelegramSelectionPagination';
-
-const TelegramResponseSchema = z.object({
-  ok: z.boolean(),
-  result: z.unknown().optional(),
-  description: z.string().optional(),
-});
+import { postTelegram, TelegramChatQueue } from './telegramSendQueue';
 
 type Fetch = typeof fetch;
 const TelegramSentMessageSchema = z.object({ message_id: z.number().int() });
@@ -81,6 +76,8 @@ export class TelegramChannel implements RemoteChannel {
    * an entry per prompt for the life of the window.
    */
   private readonly promptMessages = new Map<string, number>();
+  /** Serializes every chat-addressed call so sends cannot overtake each other. */
+  private readonly sendQueue = new TelegramChatQueue();
 
   constructor(private readonly options: TelegramChannelOptions) {
     this.fetchImpl = options.fetch ?? fetch;
@@ -435,34 +432,33 @@ export class TelegramChannel implements RemoteChannel {
    */
   async sendVoice(chatId: string, oggPath: string, signal?: AbortSignal): Promise<void> {
     const bytes = await fsp.readFile(oggPath);
+    // Read before entering the lane: a slow disk must not hold the chat's queue.
     const form = new FormData();
     form.append('chat_id', chatId);
     form.append('voice', new Blob([new Uint8Array(bytes)], { type: 'audio/ogg' }), 'reply.ogg');
-    const response = await this.fetchImpl(
-      `https://api.telegram.org/bot${this.options.token}/sendVoice`,
-      { method: 'POST', body: form, ...(signal ? { signal } : {}) },
-    );
-    if (!response.ok) throw new Error(`Telegram sendVoice HTTP ${response.status}.`);
+    await this.sendQueue.run(chatId, async () => {
+      const response = await this.fetchImpl(
+        `https://api.telegram.org/bot${this.options.token}/sendVoice`,
+        { method: 'POST', body: form, ...(signal ? { signal } : {}) },
+      );
+      if (!response.ok) throw new Error(`Telegram sendVoice HTTP ${response.status}.`);
+    });
   }
 
-  private async call(
+  /**
+   * Every Bot API call, in its chat's lane. Calls that name no chat -- the
+   * `getUpdates` long poll, `getMe`, `setMyCommands` -- run unqueued, so
+   * inbound polling is never held up behind an outbound send.
+   */
+  private call(
     method: string,
     body: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<unknown> {
-    const response = await this.fetchImpl(
-      `https://api.telegram.org/bot${this.options.token}/${method}`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-        ...(signal ? { signal } : {}),
-      },
+    const chatId = body.chat_id === undefined ? undefined : String(body.chat_id);
+    return this.sendQueue.run(chatId, () =>
+      postTelegram(this.fetchImpl, this.options.token, method, body, signal),
     );
-    if (!response.ok) throw new Error(`Telegram Bot API HTTP ${response.status}.`);
-    const parsed = TelegramResponseSchema.parse(await response.json());
-    if (!parsed.ok) throw new Error(`Telegram Bot API rejected ${method}.`);
-    return parsed.result;
   }
 }
 

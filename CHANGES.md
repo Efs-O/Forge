@@ -1,5 +1,25 @@
 # Forge — Recent Changes
 
+## 0.15.34
+
+- **Telegram messages could arrive out of order.** Several producers write to
+  the same chat - the durable outbox loop with its own 1s-to-60s retry backoff,
+  the live progress channel's narration and warning sends, command replies,
+  approval prompts, `/view`, selection pages - and each was ordered only within
+  itself. Two sends in flight at once are ordered by whichever reaches
+  Telegram's server first, so an older message could land after a newer one.
+  Shipping mid-turn narration in 0.15.33 raised the volume from roughly one
+  message per turn to one per round and made the race routine. Every
+  chat-addressed Bot API call now runs in a per-chat FIFO lane; calls that name
+  no chat, `getUpdates` above all, stay unqueued so inbound polling is never
+  held behind an outbound send.
+
+- **A rate-limited send is no longer lost or re-ordered.** Any non-2xx used to
+  throw, so a 429 left the outbox to retry on its own escalating schedule -
+  landing the message late and out of order - while a narration or warning was
+  logged and dropped. Forge now waits the `retry_after` interval Telegram names
+  and retries in place, bounded, keeping the message in its lane.
+
 ## 0.15.33
 
 - **A long remote turn now speaks in messages, not edits.** Everything the

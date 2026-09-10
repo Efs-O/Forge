@@ -157,6 +157,7 @@ overlaps with an existing owner, extend the owner instead.
 | Telegram selection keyboard + callback codec | `src/remote/TelegramSelectionPagination.ts` |
 | Forge approval presentation + correlation    | `src/remote/RemoteApprovalBridge.ts`   |
 | Telegram Bot API transport                   | `src/remote/TelegramChannel.ts`        |
+| Per-chat send ordering + Bot API 429 retry   | `src/remote/telegramSendQueue.ts`      |
 | Telegram HTML escaping + line markup helpers  | `src/remote/telegramHtml.ts`           |
 | /help command map text + its markup          | `src/remote/remoteHelpText.ts`         |
 | WhatsApp linked-device transport             | `src/remote/whatsapp/BaileysWhatsAppChannel.ts` |
