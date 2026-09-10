@@ -475,6 +475,7 @@ export function App(): React.ReactElement {
           prompt={dialogs.question.prompt}
           placeholder={dialogs.question.placeholder}
           options={dialogs.question.options}
+          questions={dialogs.question.questions}
           onAnswer={dialogs.answerQuestion}
           onDismiss={dialogs.dismissQuestion}
         />

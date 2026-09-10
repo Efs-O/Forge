@@ -176,6 +176,44 @@
   word-break: break-word;
 }
 
+/* Sub-questions. The block scrolls rather than the dialog growing past the
+   viewport: the Dismiss/Answer row must stay reachable however many are asked. */
+.question-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: min(420px, 50dvh);
+  overflow-y: auto;
+}
+
+.question-group {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.question-group-prompt {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 0 0 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--vscode-descriptionForeground, #9d9d9d);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Selected, not hovered: with sub-questions a click sets a choice and waits for
+   the rest, so the dialog has to show what is already picked. */
+.question-option-selected {
+  border-color: var(--vscode-focusBorder, #3794ff);
+  background: var(--vscode-list-activeSelectionBackground, #04395e);
+}
+
 .question-other {
   align-self: flex-start;
   background: transparent;

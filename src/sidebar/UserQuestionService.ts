@@ -1,10 +1,24 @@
 import * as vscode from 'vscode';
+import {
+  renderQuestionAsText,
+  resolveAnswerText,
+  type QuestionGroup,
+} from '../util/questionAnswers';
 
 export interface UserQuestionRequestEvent {
   id: string;
   prompt: string;
   placeholder?: string;
   options?: readonly string[];
+  /**
+   * Sub-questions, each with its own choice list, answered in one round.
+   *
+   * A single flat `options` list forced two decisions to be crossed into their
+   * combinations -- four buttons for two yes/no choices -- which grows
+   * multiplicatively and reads as one question the user has to decode. When
+   * present, `options` is ignored.
+   */
+  questions?: readonly QuestionGroup[];
   conversationId?: string;
 }
 
@@ -34,6 +48,7 @@ export interface UserQuestion {
   prompt: string;
   placeholder?: string | undefined;
   options?: readonly string[] | undefined;
+  questions?: readonly QuestionGroup[] | undefined;
   conversationId?: string | undefined;
   signal?: AbortSignal | undefined;
 }
@@ -92,6 +107,7 @@ export class UserQuestionService {
         settle,
         ...(request.placeholder !== undefined ? { placeholder: request.placeholder } : {}),
         ...(request.options ? { options: request.options } : {}),
+        ...(request.questions ? { questions: request.questions } : {}),
         ...(request.conversationId ? { conversationId: request.conversationId } : {}),
       };
       this.pending.set(id, entry);
@@ -117,7 +133,7 @@ export class UserQuestionService {
   answer(id: string, text: string): boolean {
     const question = this.pending.get(id);
     if (!question) return false;
-    question.settle(resolveSelection(text, question.options), 'answered');
+    question.settle(resolveAnswerText(text, question.options, question.questions), 'answered');
     return true;
   }
 
@@ -151,6 +167,20 @@ export class UserQuestionService {
   ): vscode.Disposable {
     // createInputBox/createQuickPick rather than the show* wrappers: only these
     // can be hidden programmatically when a remote answer wins the race.
+    //
+    // Sub-questions get the box, not the picker: a quick pick answers exactly
+    // one list, and chaining several would leave the earlier ones unanswerable
+    // once the user moved on. The box takes all of them at once as numbers,
+    // the same reply a chat would send.
+    if (request.questions?.length) {
+      const box = vscode.window.createInputBox();
+      box.prompt = renderQuestionAsText(request.prompt, undefined, request.questions);
+      box.ignoreFocusOut = true;
+      box.onDidAccept(() => accept(resolveAnswerText(box.value, undefined, request.questions)));
+      box.onDidHide(() => dismiss());
+      box.show();
+      return box;
+    }
     if (request.options?.length) {
       const picker = vscode.window.createQuickPick();
       picker.items = request.options.map((label) => ({ label }));
@@ -183,15 +213,7 @@ function eventOf(question: PendingQuestion): UserQuestionRequestEvent {
     prompt: question.prompt,
     ...(question.placeholder !== undefined ? { placeholder: question.placeholder } : {}),
     ...(question.options ? { options: question.options } : {}),
+    ...(question.questions ? { questions: question.questions } : {}),
     ...(question.conversationId ? { conversationId: question.conversationId } : {}),
   };
-}
-
-/** A bare index against an options list selects that option; anything else is verbatim. */
-function resolveSelection(text: string, options?: readonly string[]): string {
-  if (!options?.length) return text;
-  const index = /^\s*([0-9]+)\s*$/.exec(text);
-  if (!index) return text;
-  const picked = options[Number(index[1]) - 1];
-  return picked ?? text;
 }

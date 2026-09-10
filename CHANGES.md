@@ -1,5 +1,52 @@
 # Forge — Recent Changes
 
+## 0.15.35
+
+- **`ask_user` can ask two decisions in one round.** It carried one prompt and
+  one flat options list, so two related choices had to be crossed into their
+  combinations -- four buttons for two yes/no decisions, growing
+  multiplicatively and read as one question the user has to decode. It now
+  takes `questions: [{prompt, options}]`: each sub-question gets its own list,
+  the sidebar holds the answer until every one has a pick, and the answer comes
+  back labelled a line per sub-question. Remotely the reply is one number per
+  question in order -- "1 2" -- and the numbering shown in chat is the same
+  numbering the sidebar buttons carry, because both render through one owner.
+
+- **`Other…` in an agent question was a one-way door.** Picking it replaced the
+  numbered choices with the free-text box, so a mis-click left the user with
+  nothing to read and nothing to click back to — the only way out was to type an
+  answer or dismiss the question entirely. The options now stay on screen and
+  the text box opens beneath them, so either path stays available.
+
+- **The agent could delete a tracked file believing it was a duplicate, and
+  then had no way to put it back.** Given `CHANGES.md` and its gitignored,
+  generated twin `CHANGELOG.md`, an agent hashed both, found them
+  byte-identical, and deleted the tracked source of truth — content says
+  nothing about which file generates which. Neither the tool result nor the
+  approval dialog the user clicked mentioned that one of the two was committed
+  and the other ignored. `delete_file` now consults git before deleting and,
+  when the path was tracked at HEAD, says so in its result along with how to
+  undo it; the confirmation dialog gains a `Git:` line for the same reason.
+
+- **New `restore_file` tool.** `git checkout <ref> -- <path>` is denylisted
+  because it silently overwrites uncommitted work, but the refusal offered
+  `switch_branch` and `git_show` as alternatives — neither of which can put a
+  file back, so the agent had nowhere to go and handed the problem to the user.
+  `restore_file({"paths": [...], "ref": "HEAD~1"})` restores from any ref,
+  recreating files a commit deleted. It is confirmation-gated and checkpointed,
+  and the denylist refusal now names it. A refusal that names no working
+  alternative teaches the agent the capability does not exist.
+
+- **`commit` can amend.** Previously it could only add a commit, so fixing the
+  message on the one just made meant shelling out through `exec_command`.
+  `amend: true` rewrites the previous commit, allows an empty index (a
+  message-only amend is legitimate), and refuses once the commit has reached a
+  remote — rewriting published history is the user's call.
+
+- **`stage` names the kind of change it staged.** `Staged: CHANGES.md` read as
+  an edit when it was in fact a deletion, and the commit message written from
+  it said so. It now reports `CHANGES.md (deleted)`.
+
 ## 0.15.34
 
 - **Telegram messages could arrive out of order.** Several producers write to

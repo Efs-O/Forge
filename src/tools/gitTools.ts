@@ -6,7 +6,14 @@
  */
 
 import type { RegisteredTool } from './ToolRegistry';
-import { getRepo, getRepoForPaths, readLiveGitStatus, repoRelative, runGit } from './gitRepo';
+import {
+  getRepo,
+  getRepoForPaths,
+  readLiveGitStatus,
+  repoRelative,
+  runGit,
+  type GitRepoHandle,
+} from './gitRepo';
 
 const cwdParameter = {
   type: 'string',
@@ -121,7 +128,79 @@ export function makeStageTool(): RegisteredTool {
               requested.has(normalizeGitPath(entry.originalPath)))),
       );
       if (!staged.length) return `No changes staged: ${requestedPaths.join(', ')}`;
-      return `Staged: ${staged.map((entry) => entry.path).join(', ')}`;
+      // Naming the kind, not just the path: `Staged: CHANGES.md` read as an
+      // edit when it was in fact a deletion, and the commit message written
+      // from it said so.
+      return `Staged: ${staged
+        .map((entry) => `${entry.path} (${describeIndexState(entry.index)})`)
+        .join(', ')}`;
+    },
+  };
+}
+
+// ── restore_file ───────────────────────────────────────────────────────────────
+
+/**
+ * The sanctioned counterpart to the denylisted `git checkout <ref> -- <path>`.
+ *
+ * The raw command is refused for a good reason — it overwrites uncommitted work
+ * with no reflog entry — but the refusal used to offer `switch_branch` and
+ * `git_show` as alternatives, neither of which can put a file back. An agent
+ * that had just deleted and committed a tracked file hit that wall and had to
+ * hand the problem to the user. The capability is legitimate; what it needed
+ * was a gate, which being a confirmation-gated tool provides.
+ */
+export function makeRestoreFileTool(): RegisteredTool {
+  return {
+    definition: {
+      type: 'function',
+      function: {
+        name: 'restore_file',
+        description:
+          'Restore files to their committed content from a git ref (HEAD by default), ' +
+          'recreating them if they were deleted. Use this to undo an unwanted delete_file ' +
+          'or edit on a tracked path. Any uncommitted changes to these paths are overwritten.',
+        parameters: {
+          type: 'object',
+          properties: {
+            paths: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'File paths to restore (absolute or workspace-relative).',
+            },
+            ref: {
+              type: 'string',
+              description:
+                'Commit, branch, or tag to restore from. Defaults to HEAD. Use HEAD~1 to ' +
+                'recover a file the most recent commit deleted.',
+            },
+          },
+          required: ['paths'],
+          additionalProperties: false,
+        },
+      },
+    },
+    permission: 'write',
+    mutation: { paths: (args) => args['paths'] as string[], showDiff: true },
+    approval: (args) => {
+      const paths = Array.isArray(args['paths']) ? (args['paths'] as string[]) : [];
+      const ref = typeof args['ref'] === 'string' ? args['ref'] : 'HEAD';
+      return {
+        detail:
+          `About to overwrite from git ${ref}:\n${paths.join('\n')}\n` +
+          'Any uncommitted changes to these paths are discarded.',
+      };
+    },
+    handler: async (args) => {
+      const requestedPaths = args['paths'] as string[];
+      if (!Array.isArray(requestedPaths) || requestedPaths.length === 0) {
+        throw new Error('restore_file: at least one path is required');
+      }
+      const ref = validateRef('restore_file', (args['ref'] as string | undefined) ?? 'HEAD');
+      const repo = await getRepoForPaths(requestedPaths);
+      const relativePaths = requestedPaths.map((filePath) => repoRelative(repo, filePath));
+      await runGit(repo, ['checkout', ref, '--', ...relativePaths]);
+      return `Restored from ${ref}: ${relativePaths.join(', ')}`;
     },
   };
 }
@@ -134,11 +213,19 @@ export function makeCommitTool(): RegisteredTool {
       type: 'function',
       function: {
         name: 'commit',
-        description: 'Create a git commit with the given message.',
+        description:
+          'Create a git commit with the given message, or amend the previous one. ' +
+          'Amending is refused once the commit has reached a remote.',
         parameters: {
           type: 'object',
           properties: {
             message: { type: 'string', description: 'Commit message.' },
+            amend: {
+              type: 'boolean',
+              description:
+                'If true, replace the previous commit instead of adding one, rewriting it ' +
+                'with the staged changes and this message. Default false.',
+            },
             cwd: cwdParameter,
           },
           required: ['message'],
@@ -150,19 +237,49 @@ export function makeCommitTool(): RegisteredTool {
     handler: async (args) => {
       const repo = await getRepo(args['cwd'] as string | undefined);
       const message = args['message'] as string;
+      const amend = args['amend'] === true;
       const staged = (await readLiveGitStatus(repo)).some(
         (entry) => entry.index !== ' ' && entry.index !== '?',
       );
-      if (!staged) {
+      // An amend with an empty index is legitimate — it rewrites the message
+      // alone — so the "nothing is staged" guard applies to new commits only.
+      if (!staged && !amend) {
         throw new Error(
           `git commit failed in repository "${repo.root}": nothing is staged. ` +
             'Call stage with the paths to commit first, or git_status to see what changed.',
         );
       }
-      await runGit(repo, ['commit', '-m', message]);
-      return `Committed: ${message}`;
+      if (amend) await refuseAmendOfPublishedCommit(repo);
+      await runGit(repo, ['commit', ...(amend ? ['--amend'] : []), '-m', message]);
+      return `${amend ? 'Amended' : 'Committed'}: ${message}`;
     },
   };
+}
+
+/**
+ * Rewriting a commit someone else may already have fetched is the user's call,
+ * not the agent's — every collaborator who has it must then recover by hand.
+ * A commit still only in the local branch has no such cost.
+ */
+async function refuseAmendOfPublishedCommit(repo: GitRepoHandle): Promise<void> {
+  let remoteBranches: string;
+  try {
+    remoteBranches = await runGit(repo, ['branch', '-r', '--contains', 'HEAD']);
+  } catch {
+    // No commits yet, or no remotes configured: nothing has been published, so
+    // there is nothing to protect.
+    return;
+  }
+  const containing = remoteBranches
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!containing.length) return;
+  throw new Error(
+    `commit: refusing to amend — HEAD is already on ${containing.join(', ')}. ` +
+      'Amending a pushed commit rewrites published history; make a new commit instead, ' +
+      'or ask the user to rewrite and force-push themselves.',
+  );
 }
 
 /**
@@ -198,13 +315,45 @@ function hasControlCharacter(value: string): boolean {
 }
 
 function validateStartPoint(from: string): void {
-  if (from.startsWith('-')) {
-    throw new Error(`create_branch: start point "${from}" is not valid (it looks like an option)`);
+  validateRef('create_branch', from, 'start point');
+}
+
+/**
+ * Reject a ref git would reinterpret as an option or that cannot be one.
+ *
+ * Everything subtler is left to git, whose own error names the actual problem
+ * better than a re-derived check would.
+ */
+function validateRef(tool: string, ref: string, label = 'ref'): string {
+  if (typeof ref !== 'string' || ref.trim() === '') {
+    throw new Error(`${tool}: ${label} must be a non-empty ref`);
   }
-  if (from.trim() === '' || hasControlCharacter(from)) {
-    throw new Error(
-      'create_branch: start point must be a non-empty ref without control characters',
-    );
+  if (ref.startsWith('-')) {
+    throw new Error(`${tool}: ${label} "${ref}" is not valid (it looks like an option)`);
+  }
+  if (hasControlCharacter(ref)) {
+    throw new Error(`${tool}: ${label} must not contain control characters`);
+  }
+  return ref;
+}
+
+/** Porcelain v1's index column, in words. */
+function describeIndexState(index: string): string {
+  switch (index) {
+    case 'A':
+      return 'added';
+    case 'D':
+      return 'deleted';
+    case 'M':
+      return 'modified';
+    case 'R':
+      return 'renamed';
+    case 'C':
+      return 'copied';
+    case 'T':
+      return 'type changed';
+    default:
+      return `index state "${index}"`;
   }
 }
 

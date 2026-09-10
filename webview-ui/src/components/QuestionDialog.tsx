@@ -1,9 +1,12 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { formatGroupAnswer, type QuestionGroup } from '../../../src/util/questionAnswers';
+import { QuestionGroups } from './QuestionGroups';
 
 interface Props {
   prompt: string;
   placeholder?: string | undefined;
   options?: readonly string[] | undefined;
+  questions?: readonly QuestionGroup[] | undefined;
   onAnswer: (text: string) => void;
   onDismiss: () => void;
 }
@@ -34,13 +37,24 @@ export function QuestionDialog({
   prompt,
   placeholder,
   options,
+  questions,
   onAnswer,
   onDismiss,
 }: Props): React.ReactElement {
   const [text, setText] = useState('');
   const [showOther, setShowOther] = useState(false);
+  const [picks, setPicks] = useState<Record<number, string>>({});
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const showFreeText = !options?.length || showOther;
+  const groups = questions?.length ? questions : undefined;
+  const showFreeText = (!options?.length && !groups) || showOther;
+  // Sub-questions are answered together or not at all: a partial set would
+  // reach the model as a decision it never made on the group left blank.
+  const groupAnswer = useMemo(() => {
+    if (!groups) return undefined;
+    const chosen = groups.map((_, index) => picks[index]);
+    if (chosen.some((pick) => pick === undefined)) return undefined;
+    return formatGroupAnswer(groups, chosen as string[]);
+  }, [groups, picks]);
 
   // The question is raised mid-turn while the transcript streams, so nothing
   // else is going to hand it focus. `Other…` changes this component in place,
@@ -49,10 +63,16 @@ export function QuestionDialog({
     inputRef.current?.focus();
   }, [showFreeText]);
 
+  // Typed text wins when there is any: opening `Other…` and writing in it is an
+  // explicit override of whatever was clicked above.
   const submit = useCallback(() => {
-    const answer = text.trim();
+    const answer = text.trim() || groupAnswer;
     if (answer) onAnswer(answer);
-  }, [text, onAnswer]);
+  }, [text, groupAnswer, onAnswer]);
+
+  const pick = useCallback((groupIndex: number, option: string) => {
+    setPicks((current) => ({ ...current, [groupIndex]: option }));
+  }, []);
 
   // Escape lives on the document, not on the textarea: the options variant has
   // no text field to carry the handler, and a modal that only closes when the
@@ -93,7 +113,13 @@ export function QuestionDialog({
         </div>
         <div className="question-prompt">{prompt}</div>
 
-        {options?.length && !showOther && (
+        {groups && <QuestionGroups groups={groups} picks={picks} onPick={pick} />}
+
+        {/* The options stay mounted once `Other…` is open. Swapping them out for
+            the textarea stranded the user: the choices they were reading were
+            gone and nothing offered them back, so a mis-click became a forced
+            essay. */}
+        {!groups && options?.length ? (
           <div className="question-options">
             {options.map((option, index) => (
               <button
@@ -106,11 +132,14 @@ export function QuestionDialog({
                 <span className="question-option-label">{option}</span>
               </button>
             ))}
-            <button className="question-other" type="button" onClick={() => setShowOther(true)}>
-              Other…
-            </button>
           </div>
-        )}
+        ) : null}
+
+        {!showOther && (options?.length || groups) ? (
+          <button className="question-other" type="button" onClick={() => setShowOther(true)}>
+            Other…
+          </button>
+        ) : null}
 
         {showFreeText && (
           <textarea
@@ -128,12 +157,12 @@ export function QuestionDialog({
           <button className="confirm-btn-deny" type="button" onClick={onDismiss}>
             Dismiss
           </button>
-          {showFreeText && (
+          {(showFreeText || groups) && (
             <button
               className="confirm-btn-approve"
               type="button"
               onClick={submit}
-              disabled={!text.trim()}
+              disabled={!text.trim() && !groupAnswer}
             >
               Answer
             </button>

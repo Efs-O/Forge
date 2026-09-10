@@ -6,6 +6,7 @@ import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import type { RemoteAuth } from './RemoteAuth';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteChannel } from './types';
+import { renderQuestionAsText } from '../util/questionAnswers';
 
 interface RemoteQuestionEntry {
   chatId: string;
@@ -115,14 +116,17 @@ export class RemoteQuestionBridge {
     if (!pending) return;
     // An expired session must not be handed the question text.
     if (!(await this.auth.canDeliver(this.channel.name, pending.chatId))) return;
-    const options = pending.event.options?.length
-      ? `\n${pending.event.options.map((option, index) => `${index + 1}. ${option}`).join('\n')}` +
-        '\n\nReply with the number or the text.'
-      : '\n\nReply with your answer.';
+    // Rendered by the shared owner so a "1 2" typed here means exactly what
+    // it means clicked in the sidebar -- the numbering is the contract.
+    const body = renderQuestionAsText(
+      pending.event.prompt,
+      pending.event.options,
+      pending.event.questions,
+    );
     try {
       await this.channel.send(
         pending.chatId,
-        `Forge asks: ${pending.event.prompt}${options}`.slice(0, this.maxMessageChars),
+        `Forge asks: ${body}`.slice(0, this.maxMessageChars),
         { signal: this.signal },
       );
     } catch (err) {

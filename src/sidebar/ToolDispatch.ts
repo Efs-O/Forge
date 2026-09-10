@@ -17,6 +17,7 @@ import type { ToolBudget } from '../tools/ToolBudget';
 import type { DiffDecorations } from './DiffDecorations';
 import { resolveWorkspacePath, type ResolveWorkspacePathOptions } from '../util/WorkspacePaths';
 import { capDisplayText } from '../tools/resultCap';
+import { describeGitLineForDelete } from '../tools/gitTrackedStatus';
 import { isFailureResult, readPathArg, resultLabel } from './toolResultView';
 import type { PlanItem } from './sessionTypes';
 import { getLogger } from '../util/logger';
@@ -57,7 +58,7 @@ export interface RecordedFileDiff {
  * action. The scan is deliberately bounded: confirmation must stay responsive
  * even when a model targets a very large generated directory.
  */
-function describeDelete(args: Record<string, unknown>): string {
+async function describeDelete(args: Record<string, unknown>): Promise<string> {
   const requestedPath = typeof args['path'] === 'string' ? args['path'] : '(invalid path)';
   const recursive = args['recursive'] === true;
   const toTrash = args['to_trash'] !== false;
@@ -101,6 +102,11 @@ function describeDelete(args: Record<string, unknown>): string {
         : 'Scope requested: this item only.',
     );
   }
+
+  // The one fact the dialog used to withhold. A user approving the deletion of
+  // a committed file is making a different decision from one approving a
+  // generated artifact, and until now both looked identical here.
+  lines.push(`Git: ${await describeGitLineForDelete(requestedPath)}`);
 
   lines.push(
     toTrash
@@ -299,7 +305,7 @@ export class ToolDispatch {
           const fallbackDetail = raw.length > 300 ? raw.slice(0, 300) + '\n…' : raw;
           const detail =
             approvalMetadata?.detail ??
-            (tc.function.name === 'delete_file' ? describeDelete(args) : fallbackDetail);
+            (tc.function.name === 'delete_file' ? await describeDelete(args) : fallbackDetail);
           const isDangerous =
             approvalMetadata?.dangerous ??
             (tc.function.name === 'delete_file' && args['recursive'] === true);

@@ -1,3 +1,4 @@
+import { parseQuestionGroups } from '../util/questionAnswers';
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveWorkspaceUri } from '../util/WorkspacePaths';
@@ -141,7 +142,10 @@ export function makeAskUserTool(questions: UserQuestionService): RegisteredTool 
           'a stated assumption, state the assumption, notify_user, and keep going. ' +
           'Ask one related decision group per call. When using options, keep them ' +
           'short and mutually exclusive. Ask an unrelated follow-up decision in ' +
-          'the next ask_user call rather than appending it as an "also" question.',
+          'the next ask_user call rather than appending it as an "also" question. ' +
+          'To put two related decisions in one round, pass `questions` -- each ' +
+          'entry gets its own choice list and its own answer, which is what to ' +
+          'use instead of crossing two decisions into one combined options list.',
         parameters: {
           type: 'object',
           properties: {
@@ -153,7 +157,29 @@ export function makeAskUserTool(questions: UserQuestionService): RegisteredTool 
             options: {
               type: 'array',
               items: { type: 'string' },
-              description: 'If provided, offers a fixed choice instead of free text.',
+              description:
+                'If provided, offers a fixed choice instead of free text. Ignored ' +
+                'when `questions` is present.',
+            },
+            questions: {
+              type: 'array',
+              description:
+                'Two or more sub-questions answered in one round, each with its ' +
+                'own choice list. The answer comes back as one labelled line per ' +
+                'sub-question. Use `prompt` as the shared preamble.',
+              items: {
+                type: 'object',
+                properties: {
+                  prompt: { type: 'string', description: 'This sub-question.' },
+                  options: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Its mutually exclusive choices.',
+                  },
+                },
+                required: ['prompt', 'options'],
+                additionalProperties: false,
+              },
             },
           },
           required: ['prompt'],
@@ -163,10 +189,15 @@ export function makeAskUserTool(questions: UserQuestionService): RegisteredTool 
     },
     permission: 'read',
     handler: async (args, context) => {
+      // A malformed `questions` falls back to the flat shape rather than
+      // failing the call: the question still reaches the user, which is the
+      // point of the tool, and a half-built array must not cost a round.
+      const groups = parseQuestionGroups(args['questions']);
       const answer = await questions.ask({
         prompt: args['prompt'] as string,
         placeholder: args['placeholder'] as string | undefined,
-        options: args['options'] as string[] | undefined,
+        options: groups ? undefined : (args['options'] as string[] | undefined),
+        questions: groups,
         conversationId: context?.conversationId,
         // Without this a cancelled turn leaves the question open forever: the
         // box no longer self-dismisses on blur, and a remote asker has no Esc.

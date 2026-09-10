@@ -1,3 +1,4 @@
+import type { QuestionGroup } from '../../src/util/questionAnswers';
 import { useCallback, useState } from 'react';
 import type { HostToWebview } from '../../src/sidebar/messageBridge';
 import { vscode } from './vscode';
@@ -26,6 +27,7 @@ export interface QuestionState {
   prompt: string;
   placeholder?: string | undefined;
   options?: readonly string[] | undefined;
+  questions?: readonly QuestionGroup[] | undefined;
 }
 
 export interface AgentDialogs {
@@ -64,6 +66,7 @@ export function useAgentDialogs(): AgentDialogs {
           prompt: msg.prompt,
           placeholder: msg.placeholder,
           options: msg.options,
+          questions: msg.questions,
         });
         return true;
       case 'questionResolved':

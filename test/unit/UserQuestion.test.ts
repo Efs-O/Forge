@@ -165,6 +165,42 @@ describe('UserQuestionService', () => {
     await expect(pending).resolves.toBe('neither, use vllm');
   });
 
+  it('answers sub-questions positionally and labels each line', async () => {
+    const service = new UserQuestionService();
+    const asked = vi.fn();
+    service.addSink({ asked, answered: () => undefined });
+    const pending = service.ask({
+      prompt: 'Two decisions:',
+      questions: [
+        { prompt: 'Version', options: ['bump', 'keep'] },
+        { prompt: 'Install', options: ['open', 'skip'] },
+      ],
+      conversationId: 'c1',
+    });
+    const id = asked.mock.calls[0]?.[0].id as string;
+    service.answer(id, '2 1');
+    // Labelled, because "keep" and "open" alone say nothing about which
+    // sub-question each one answered.
+    await expect(pending).resolves.toBe('Version: keep\nInstall: open');
+  });
+
+  it('passes a reply through verbatim when it is not one index per sub-question', async () => {
+    const service = new UserQuestionService();
+    const asked = vi.fn();
+    service.addSink({ asked, answered: () => undefined });
+    const pending = service.ask({
+      prompt: 'Two decisions:',
+      questions: [
+        { prompt: 'Version', options: ['bump', 'keep'] },
+        { prompt: 'Install', options: ['open', 'skip'] },
+      ],
+      conversationId: 'c1',
+    });
+    const id = asked.mock.calls[0]?.[0].id as string;
+    service.answer(id, 'bump it but do not install');
+    await expect(pending).resolves.toBe('bump it but do not install');
+  });
+
   it('cancels a pending question when the turn aborts', async () => {
     const service = new UserQuestionService();
     const controller = new AbortController();
@@ -258,6 +294,24 @@ describe('RemoteQuestionBridge', () => {
     await vi.waitFor(() => expect(channel.sent).toHaveLength(1));
     expect(channel.sent[0]?.text).toContain('1. llama.cpp');
     expect(channel.sent[0]?.text).toContain('2. ollama');
+  });
+
+  it('numbers each sub-question separately and says how to reply', async () => {
+    const { channel, service } = bridgeRig();
+    void service.ask({
+      prompt: 'Two decisions:',
+      questions: [
+        { prompt: 'Version', options: ['bump', 'keep'] },
+        { prompt: 'Install', options: ['open', 'skip'] },
+      ],
+      conversationId: 'c1',
+    });
+    await vi.waitFor(() => expect(channel.sent).toHaveLength(1));
+    const text = channel.sent[0]?.text ?? '';
+    expect(text).toContain('1) Version');
+    expect(text).toContain('2) Install');
+    expect(text).toContain('   1. bump');
+    expect(text).toContain('one number per question');
   });
 
   it('stays silent for a turn with neither a remote chain nor a bound chat', async () => {

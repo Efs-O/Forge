@@ -1,3 +1,4 @@
+import type { QuestionGroup } from '../util/questionAnswers';
 import type { ChatAttachmentRef } from '../llm/types';
 
 export type { ChatAttachmentRef };
@@ -173,6 +174,8 @@ export interface QuestionRequestMsg {
   prompt: string;
   placeholder?: string;
   options?: readonly string[];
+  /** Sub-questions with their own choice lists; `options` is ignored with these. */
+  questions?: readonly QuestionGroup[];
   conversationId?: string;
 }
 /** A question something else settled — a paired chat, or a cancelled turn. */

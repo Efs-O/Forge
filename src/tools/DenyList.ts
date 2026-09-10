@@ -114,8 +114,10 @@ export function getBuiltinDenyList(): DenyListEntry[] {
       match: isDestructiveGitCheckout,
       description: 'git checkout/restore discarding working-tree changes',
       alternative:
-        'This deletes uncommitted work unrecoverably. To move between branches use ' +
-        'the switch_branch tool; to inspect a file at a ref use git_show.',
+        'This deletes uncommitted work unrecoverably. To put a file back to its ' +
+        'committed content — including one a commit deleted — use the restore_file ' +
+        'tool, which asks first: restore_file({"paths": ["<path>"], "ref": "HEAD~1"}). ' +
+        'To move between branches use switch_branch; to inspect a file at a ref use git_show.',
     },
     // Every push is outward-facing, not just a forced one.
     {

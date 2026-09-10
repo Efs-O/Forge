@@ -4,6 +4,31 @@ import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveWorkspacePath } from '../util/WorkspacePaths';
 
+/** Join a result line to its optional follow-up sentence. */
+function withWarning(result: string, warning: string): string {
+  return warning ? `${result}\n${warning}` : result;
+}
+
+/**
+ * Ask git about a path that is about to be deleted, without dragging the git
+ * discovery stack into this module's load.
+ *
+ * `gitDiscovery` instantiates the extension logger at import time, which needs
+ * a live `vscode.window`. Importing it statically here made every consumer of
+ * these pure-filesystem tools depend on that, breaking tests that stub only
+ * what they use. The import happens on the delete path or not at all.
+ */
+async function trackedWarningFor(filePath: string): Promise<string> {
+  try {
+    const { describeDeletedTrackedFile, describeTrackedState } = await import('./gitTrackedStatus');
+    return describeDeletedTrackedFile(await describeTrackedState(filePath), filePath);
+  } catch {
+    // Advisory only: a deletion the caller asked for must not fail because git
+    // could not be consulted.
+    return '';
+  }
+}
+
 // ── create_directory ───────────────────────────────────────────────────────────
 
 export function makeCreateDirectoryTool(): RegisteredTool {
@@ -122,9 +147,14 @@ export function makeDeleteFileTool(): RegisteredTool {
       const filePath = args['path'] as string;
       const resolved = resolveWorkspacePath(filePath);
       const recursive = args['recursive'] === true;
+      // Asked before the delete: afterwards the path is gone from the working
+      // tree and `ls-files` can no longer distinguish "was never tracked" from
+      // "tracked, and you just removed it".
+      const warning = await trackedWarningFor(filePath);
+
       if (args['to_trash'] === false) {
         fs.rmSync(resolved, { recursive });
-        return `Permanently deleted: ${filePath}`;
+        return withWarning(`Permanently deleted: ${filePath}`, warning);
       }
       try {
         await vscode.workspace.fs.delete(vscode.Uri.file(resolved), {
@@ -139,7 +169,7 @@ export function makeDeleteFileTool(): RegisteredTool {
             'call delete_file again with to_trash: false to delete it permanently.',
         );
       }
-      return `Moved to recycle bin: ${filePath}`;
+      return withWarning(`Moved to recycle bin: ${filePath}`, warning);
     },
   };
 }

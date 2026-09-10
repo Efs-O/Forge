@@ -251,6 +251,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           prompt: event.prompt,
           ...(event.placeholder !== undefined ? { placeholder: event.placeholder } : {}),
           ...(event.options ? { options: event.options } : {}),
+          ...(event.questions ? { questions: event.questions } : {}),
           ...(event.conversationId ? { conversationId: event.conversationId } : {}),
         }),
       answered: (event) => this.post({ type: 'questionResolved', id: event.id }),

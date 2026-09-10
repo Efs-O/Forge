@@ -72,6 +72,7 @@ import {
   makeSwitchBranchTool,
   makeStageTool,
   makeCommitTool,
+  makeRestoreFileTool,
 } from './gitTools';
 import { makeSearchCodebaseTool } from './semanticSearchTool';
 import type { IndexManager } from '../search/IndexManager';
@@ -184,6 +185,7 @@ export function registerAllTools(
   registry.register(makeSwitchBranchTool());
   registry.register(makeStageTool());
   registry.register(makeCommitTool());
+  registry.register(makeRestoreFileTool());
 
   // delegation — only registered when a LocalDelegationService is wired in
   if (delegationService && getConfig) {
