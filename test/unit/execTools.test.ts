@@ -242,12 +242,26 @@ describe('exec_command safety policy', () => {
     });
     const started = JSON.parse(start as string) as { execution_id: string };
 
-    // A real short wait so the child's first chunk reaches the buffer; the
-    // assertion below then re-reads it from cursor 0.
-    await makeMonitorExecutionTool().handler({
-      execution_id: started.execution_id,
-      wait_ms: 500,
-    });
+    // Wait until the child's first chunk actually reaches the buffer; the
+    // assertion below then re-reads it from cursor 0. A fixed wait (the old
+    // 500ms) was the flake: under parallel load the node spawn plus first pipe
+    // flush can exceed it, so "tick" was not yet buffered and the re-read saw
+    // an empty stream. Polling until the chunk arrives makes the wait adaptive
+    // to however long the spawn takes. The ceiling stays well under the 5s
+    // per-test timeout; the rest of the test returns immediately (aborted
+    // signal + stop).
+    const deadline = Date.now() + 3_000;
+    for (;;) {
+      const raw = (await makeMonitorExecutionTool().handler({
+        execution_id: started.execution_id,
+        wait_ms: 250,
+        stdout_cursor: 0,
+      })) as string;
+      if (JSON.parse(raw).stdout.includes('tick')) break;
+      if (Date.now() >= deadline) {
+        throw new Error('timed out waiting for the child to emit "tick"');
+      }
+    }
 
     const raw = (await makeMonitorExecutionTool().handler(
       {
