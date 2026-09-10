@@ -8,7 +8,6 @@ import { RemoteAuth } from './RemoteAuth';
 import type { RemoteController } from './RemoteController';
 import { RemoteRequestStore } from './RemoteRequestStore';
 import { RemoteLeaseError } from './RemoteTransportLease';
-import type { WorkspaceHandoff } from './RemoteStoreSchemas';
 import { RemoteAuditLog } from './RemoteAuditLog';
 import { RemoteAttachmentStore } from './RemoteAttachmentStore';
 import { RemoteTransportManager } from './RemoteTransportManager';
@@ -25,6 +24,7 @@ import {
   resumeWorkspaceHandoffs,
   announceWorkspaceArrivals,
 } from './RemoteWorkspaceHandoff';
+import type { WorkspaceArrival } from './RemoteWorkspaceHandoff';
 import { remoteCompactionNotice } from './remoteCompactionNotice';
 import { voiceRuntimeSignature } from './voiceRuntimeSignature';
 import {
@@ -298,7 +298,7 @@ export class RemoteRuntime {
     await this.announce(arrivals, config);
   }
 
-  private announce(arrivals: readonly WorkspaceHandoff[], config: ForgeConfig): Promise<void> {
+  private announce(arrivals: readonly WorkspaceArrival[], config: ForgeConfig): Promise<void> {
     return announceWorkspaceArrivals(arrivals, {
       channelFor: (name) => this.manager.get(name)?.channel,
       displayNameFor: (alias) =>

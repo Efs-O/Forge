@@ -94,63 +94,29 @@ describe('workspace selection', () => {
     expect(sent.text).toContain('1. forge — Forge · current');
     expect(sent.text).toContain('2. qwen — Qwen Testing');
     expect(sent.text).not.toContain('Qwen Testing · current');
-    // The numbering is the point of reusing the pager at all.
-    expect(sent.text).toContain('/new <number>');
+    // The numbering is the point of reusing the pager at all, and the command
+    // it names is the same one that listed: /workspace lists, /workspace 2 goes.
+    expect(sent.text).toContain('/workspace <number>');
+    // No page fallback here: the number after /workspace is a workspace.
+    expect(sent.text).not.toContain('Page fallback');
   });
 
-  it('pages in tens and keeps numbering absolute across pages', async () => {
+  it('sends page one and hands the whole list to the keyboard', async () => {
     const store = await requestStore();
     const channel = new FakeRemoteChannel();
     const ctx = context(channel, store, manyAliases(23));
 
+    // /workspace takes NO page argument any more: the number after it is a
+    // workspace, and reading it as a page is the collision this list caused.
     await sendWorkspaceSelection(textEvent('/workspace list'), ctx);
     const first = channel.selectionPageSends[0]!;
     expect(first.text).toContain('page 1/3');
     expect(first.text).toContain('10. ws-10');
     expect(first.text).not.toContain('11. ws-11');
-
-    await sendWorkspaceSelection(textEvent('/workspace list'), ctx, '2');
-    const second = channel.selectionPageSends[1]!;
-    // Absolute, not restarting at 1 — /new 11 must mean the eleventh alias.
-    expect(second.text).toContain('11. ws-11');
-    expect(second.text).toContain('page 2/3');
-  });
-
-  it('rejects a page beyond the end instead of sending an empty list', async () => {
-    const store = await requestStore();
-    const channel = new FakeRemoteChannel();
-    const ctx = context(channel, store, manyAliases(23));
-
-    await expect(
-      sendWorkspaceSelection(textEvent('/workspace list'), ctx, '4'),
-    ).resolves.toMatchObject({ kind: 'rejected' });
-    expect(channel.selectionPageSends).toHaveLength(0);
-  });
-
-  it('points a workspace number at /new instead of only the page range', async () => {
-    const store = await requestStore();
-    const channel = new FakeRemoteChannel();
-    const ctx = context(channel, store, manyAliases(23));
-
-    // The number is out of page range but IS a real entry -- the whole point of
-    // the screenshot that prompted this: `/workspace 23` answered with a page
-    // range for a person who had typed a workspace number.
-    const rejected = await sendWorkspaceSelection(textEvent('/workspace list'), ctx, '23');
-    expect(rejected).toMatchObject({ kind: 'rejected' });
-    const reason = (rejected as { reason: string }).reason;
-    expect(reason).toContain('/new 23');
-    expect(reason).toContain('Workspace 23');
-    expect(reason).toContain('(1-3)');
-    expect(channel.selectionPageSends).toHaveLength(0);
-  });
-
-  it('keeps the bare page range for a number that is no entry either', async () => {
-    const store = await requestStore();
-    const channel = new FakeRemoteChannel();
-    const ctx = context(channel, store, manyAliases(23));
-
-    const rejected = await sendWorkspaceSelection(textEvent('/workspace list'), ctx, '99');
-    expect((rejected as { reason: string }).reason).toBe('usage: /workspace [list] <page 1-3>');
+    expect(first.controls).toMatchObject({ kind: 'workspaces', page: 0, pageCount: 3 });
+    // Numbering stays absolute across pages because the stored selection holds
+    // every alias, not just the page that was rendered.
+    expect(store.selection('fake', 'chat', 'workspaces')?.values).toHaveLength(23);
   });
 
   it('says where to configure aliases when none exist', async () => {
@@ -208,18 +174,42 @@ describe('/workspace command shape', () => {
     expect(channel.selectionPageSends[0]?.text).toContain('1. forge — Forge');
   });
 
-  it('pages from the bare form and from the explicit verb', async () => {
+  it('goes to the workspace a number names instead of reading it as a page', async () => {
     const store = await requestStore();
     const channel = new FakeRemoteChannel();
-    const ctx = commandContext(channel, store, manyAliases(23));
+    const switched: string[] = [];
+    const ctx = commandContext(channel, store, manyAliases(23), {
+      switchWorkspace: async (alias) => {
+        switched.push(alias);
+      },
+    });
 
-    await handleRemoteCommand(textEvent('/workspace 2'), ctx, 'ws-page-bare');
-    expect(channel.selectionPageSends[0]?.text).toContain('11. ws-11');
+    // The screenshot that prompted this: `/workspace 27` was answered with
+    // "takes a page number (1-3)" for the workspace the user had just read off
+    // this very list. 23 is out of page range and IS a real entry.
+    await handleRemoteCommand(textEvent('/workspace'), ctx, 'ws-list');
+    await expect(
+      handleRemoteCommand(textEvent('/workspace 23'), ctx, 'ws-go'),
+    ).resolves.toMatchObject({ kind: 'handled' });
+    expect(switched).toEqual(['ws-23']);
+    expect(channel.sent.at(-1)?.text).toContain('switching to Workspace 23');
+  });
 
-    // The top-level split used to drop this page number on the floor, so the
-    // documented `/workspace list <page>` fallback silently returned page 1.
-    await handleRemoteCommand(textEvent('/workspace list 3'), ctx, 'ws-page-verb');
-    expect(channel.selectionPageSends[1]?.text).toContain('21. ws-21');
+  it('refuses a switch to the workspace the chat is already in', async () => {
+    const store = await requestStore();
+    const channel = new FakeRemoteChannel();
+    const ctx = commandContext(
+      channel,
+      store,
+      { forge: 'Forge', qwen: 'Qwen' },
+      { currentWorkspaceAlias: 'forge' },
+    );
+
+    // A reload costs the remote session, so spending one to arrive where the
+    // chat already is drops the session for nothing.
+    const rejected = await handleRemoteCommand(textEvent('/workspace forge'), ctx, 'ws-noop');
+    expect(rejected).toMatchObject({ kind: 'rejected' });
+    expect((rejected as { reason: string }).reason).toContain('/chats');
   });
 
   it('rejects an unknown subcommand rather than listing', async () => {
@@ -227,9 +217,10 @@ describe('/workspace command shape', () => {
     const channel = new FakeRemoteChannel();
     const ctx = commandContext(channel, store, { forge: 'Forge' });
 
-    await expect(
-      handleRemoteCommand(textEvent('/workspace create'), ctx, 'ws-unknown'),
-    ).resolves.toMatchObject({ kind: 'rejected' });
+    const rejected = await handleRemoteCommand(textEvent('/workspace create'), ctx, 'ws-unknown');
+    expect(rejected).toMatchObject({ kind: 'rejected' });
+    // The refusal names the lists rather than only saying no.
+    expect((rejected as { reason: string }).reason).toContain('/workspace');
     expect(channel.selectionPageSends).toHaveLength(0);
   });
 
@@ -253,12 +244,17 @@ describe('/workspace command shape', () => {
     expect(expired).toMatchObject({ kind: 'rejected' });
     expect((expired as { reason: string }).reason).toContain('expired');
 
-    await handleRemoteCommand(textEvent('/workspace 3'), ctx, 'new-list');
+    // Bare /workspace stores every alias, so a number off any page resolves.
+    await handleRemoteCommand(textEvent('/workspace'), ctx, 'new-list');
+    // /new <n> is retained as a silent alias for the documented /workspace <n>.
     await expect(handleRemoteCommand(textEvent('/new 26'), ctx, 'new-ok')).resolves.toMatchObject({
       kind: 'handled',
     });
+    await expect(
+      handleRemoteCommand(textEvent('/workspace 26'), ctx, 'ws-ok'),
+    ).resolves.toMatchObject({ kind: 'handled' });
 
-    const outOfRange = await handleRemoteCommand(textEvent('/new 99'), ctx, 'new-range');
+    const outOfRange = await handleRemoteCommand(textEvent('/workspace 99'), ctx, 'new-range');
     expect((outOfRange as { reason: string }).reason).toContain('1-30');
   });
 });

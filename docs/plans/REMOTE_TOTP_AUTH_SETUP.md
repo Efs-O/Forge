@@ -136,7 +136,7 @@ commands include:
 | `/unload`                 | Releases loaded backends while Forge is globally idle.                                                          |
 | `/restart`                | Restarts the bound conversation's explicitly pinned model while idle.                                           |
 | `/workspace list [page]`  | Lists workspace aliases ten at a time, numbered, marking the one this chat is in.                                |
-| `/new <number-or-alias>`  | Hands the chat off to a configured workspace, by list number or alias.                                           |
+| `/workspace <number-or-alias>` | Hands the chat off to a configured workspace, by list number or alias, and continues its most recent conversation. `/new <n>` is a silent alias. |
 | `/clanker on\|off`         | Changes the normal non-dangerous tool confirmation gate for this window.                                         |
 | `/lock`                   | Immediately locks the remote session.                                                                           |
 | `/timeout`                | Shows the inactivity timeout.                                                                                   |

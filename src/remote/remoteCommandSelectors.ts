@@ -5,7 +5,7 @@
  * read the last pager selection and the host's conversation list and return an
  * id (or the sentence explaining why they could not), and touch no channel and
  * no host state. Owner of the argument→id rules for `/chat`, `/model` and
- * `/new <workspace>`, and of the miss messages that name the sanctioned list.
+ * `/workspace <n>`, and of the miss messages that name the sanctioned list.
  */
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import type { RemoteRequestStore } from './RemoteRequestStore';
@@ -71,8 +71,8 @@ function recentConversations(context: SelectionLookup) {
     .sort((left, right) => right.updatedAt - left.updatedAt);
 }
 
-/** Why `/new <number>` found nothing: an expired list, an out-of-range number,
- *  or a genuinely unknown alias are three different fixes. */
+/** Why `/workspace <number>` found nothing: an expired list, an out-of-range
+ *  number, or a genuinely unknown alias are three different fixes. */
 export function numberedSelectionMiss(
   context: SelectionLookup,
   event: TextEvent,
@@ -88,7 +88,9 @@ export function numberedSelectionMiss(
     );
   }
   const selection = context.store.selection(event.channel, event.chatId, 'workspaces');
-  if (!selection) return 'the workspace list expired; run /workspace again, then /new <number>';
+  if (!selection) {
+    return 'the workspace list expired; run /workspace again, then /workspace <number>';
+  }
   return `pick 1-${selection.values.length} from the last /workspace list`;
 }
 

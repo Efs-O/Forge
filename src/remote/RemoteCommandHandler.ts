@@ -13,12 +13,8 @@ import { formatSystemReport } from '../system/formatSystemReport';
 import type { ModelPickerDescriptor } from '../sidebar/ModelPickerGroups';
 import { PowerControl } from '../system/PowerControl';
 import { handleRemotePowerCommand } from './RemotePowerCommands';
-import {
-  numberedSelectionMiss,
-  resolveConversationSelection,
-  resolveSelection,
-  shortId,
-} from './remoteCommandSelectors';
+import { switchWorkspaceCommand } from './remoteWorkspaceCommand';
+import { resolveConversationSelection, resolveSelection, shortId } from './remoteCommandSelectors';
 
 export interface RemoteCommandContext {
   channel: RemoteChannel;
@@ -223,51 +219,23 @@ async function executeRemoteCommand(
     return { kind: 'handled' };
   }
   if (command === '/workspace') {
-    // `list` is the only verb, so requiring it was pure ceremony: bare
-    // `/workspace` lists, and `/workspace 2` pages, exactly like /list and
-    // /models. The verb still parses so the namespace stays open for the
-    // create/confirm subcommands the remote plan has queued behind it.
+    // `/workspace` lists and numbers the workspaces; `/workspace 27` goes to
+    // number 27. It used to read that number as a PAGE, so the one command
+    // carried two number spaces and answered `/workspace 27` with "takes a
+    // page number (1-3)" — for the workspace the user had just read off this
+    // very list. Paging is the inline keyboard's job now. `list` still parses
+    // as a no-op verb so the namespace stays open for the create/confirm
+    // subcommands the remote plan has queued behind it.
     const [first, second] = operands;
-    const page = first === 'list' ? second : first;
-    if (page !== undefined && !/^\d+$/.test(page)) {
-      return { kind: 'rejected', reason: 'usage: /workspace [list] [page]' };
-    }
-    return sendWorkspaceSelection(event, context, page);
+    const selector = first === 'list' ? second : first;
+    if (selector === undefined) return sendWorkspaceSelection(event, context);
+    return switchWorkspaceCommand(selector, event, context);
   }
+  // `/new <n>` is retained as a silent alias: it is in muscle memory and in
+  // older help screenshots. `/workspace <n>` is the documented spelling,
+  // because `/new` reads as "make me a new one" and never joined anything.
   if (command === '/new' && argument) {
-    // A number means the last `/workspace list`, matching /model <n> and
-    // /select <n>; the legacy /resume <n> alias keeps working so a remembered
-    // name does not depend on having listed first.
-    const alias = resolveSelection(context, event, 'workspaces', argument) ?? argument;
-    if (!context.workspaceAliases[alias]) {
-      // A number that resolves to nothing means the list expired or never ran,
-      // not that the workspace is missing — saying “not found” for a number the
-      // user just read off a list sends them looking for the wrong problem.
-      return { kind: 'rejected', reason: numberedSelectionMiss(context, event, argument) };
-    }
-    if (!context.switchWorkspace) {
-      return { kind: 'rejected', reason: 'workspace switching is unavailable in this window' };
-    }
-    // Switching costs a window reload and a fresh conversation, so doing it to
-    // arrive where the chat already is would silently drop the session.
-    if (alias === context.currentWorkspaceAlias) {
-      return {
-        kind: 'rejected',
-        reason: `this chat is already in ${context.workspaceAliases[alias]}; /new alone starts a chat here`,
-      };
-    }
-    // Says what the silence that follows means: the VS Code window reloads, so
-    // this chat hears nothing until the new window's transport comes up and
-    // sends its own arrival receipt.
-    await context.channel.send(
-      event.chatId,
-      `Forge: switching to ${context.workspaceAliases[alias]}… the window reloads, so this chat goes quiet for a few seconds — I will message you when it is back.`,
-      {
-        signal: context.signal,
-      },
-    );
-    await context.switchWorkspace(alias, event.channel, event.chatId);
-    return { kind: 'handled' };
+    return switchWorkspaceCommand(argument, event, context);
   }
   if (command === '/new') {
     const conv = await context.host.createConversation({ activate: false });

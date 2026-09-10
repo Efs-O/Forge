@@ -626,13 +626,14 @@ describe('remote selection pagination', () => {
       });
       expect(channel.selectionPageSends[0]?.text).toContain('1. forge — Forge · current');
 
-      await expect(channel.emit(textEvent('/new 1'))).resolves.toEqual({
+      await expect(channel.emit(textEvent('/workspace 1'))).resolves.toEqual({
         kind: 'rejected',
-        reason: 'this chat is already in Forge; /new alone starts a chat here',
+        reason:
+          'this chat is already in Forge; /chats lists the conversations here and /new starts one',
       });
       expect(switchWorkspace).not.toHaveBeenCalled();
 
-      await expect(channel.emit(textEvent('/new 2'))).resolves.toEqual({ kind: 'handled' });
+      await expect(channel.emit(textEvent('/workspace 2'))).resolves.toEqual({ kind: 'handled' });
       expect(switchWorkspace).toHaveBeenCalledWith('qwen', 'fake', 'chat');
     } finally {
       await controller.stop();

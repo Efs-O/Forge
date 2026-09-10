@@ -59,16 +59,35 @@ export async function recordWorkspaceHandoff(
   });
 }
 
-/** Claims any handoff addressed to this window and binds the chat to a new
- *  conversation here. Returns what it claimed so the caller can announce it. */
+/** One claimed handoff and the conversation this window put the chat into. */
+export interface WorkspaceArrival {
+  handoff: WorkspaceHandoff;
+  /** Title of the bound conversation, so the receipt can name where you are. */
+  conversationTitle: string;
+  /** True when nothing was here to continue and a chat had to be created. */
+  created: boolean;
+}
+
+/**
+ * Claims any handoff addressed to this window and binds the chat here.
+ *
+ * Binds the workspace's most recently updated conversation, NOT a new one.
+ * `/workspace 27` is "go to 27 and carry on"; landing in an empty chat meant
+ * every switch cost a `/chats` and a `/chat 1` to undo, and the work you
+ * switched in order to continue was one command further away than before you
+ * left. A workspace with no history at all is the only case that still gets a
+ * fresh chat, because there is nothing else it could mean.
+ */
 export async function resumeWorkspaceHandoffs(
   store: RemoteRequestStore,
   workspaceId: string,
   host: ForgeHostFacade,
-): Promise<WorkspaceHandoff[]> {
+): Promise<WorkspaceArrival[]> {
   const handoffs = await store.claimWorkspaceHandoffs(workspaceId);
+  const arrivals: WorkspaceArrival[] = [];
   for (const handoff of handoffs) {
-    const conversation = await host.createConversation({ activate: false });
+    const resumed = await resumeNewestConversation(host);
+    const conversation = resumed ?? (await host.createConversation({ activate: false }));
     await store.setBinding({
       channel: handoff.channel,
       chatId: handoff.chatId,
@@ -76,8 +95,30 @@ export async function resumeWorkspaceHandoffs(
       conversationId: conversation.id,
     });
     await store.completeWorkspaceHandoff(handoff.id);
+    arrivals.push({
+      handoff,
+      conversationTitle: conversation.title,
+      created: resumed === undefined,
+    });
   }
-  return handoffs;
+  return arrivals;
+}
+
+/**
+ * The newest conversation this workspace has, reopened if it was archived.
+ *
+ * Returns undefined rather than throwing: `restoreConversation` throws on the
+ * MAX_CONVERSATIONS cap, and a full tab bar must not turn an arrival into a
+ * chat bound to nothing — a new conversation is a worse landing than the one
+ * you wanted, but it is a landing.
+ */
+async function resumeNewestConversation(host: ForgeHostFacade) {
+  const newest = host
+    .status()
+    .conversations.slice()
+    .sort((left, right) => right.updatedAt - left.updatedAt)[0];
+  if (!newest) return undefined;
+  return host.restoreConversation(newest.id, { activate: false }).catch(() => undefined);
 }
 
 export interface ArrivalAnnouncement {
@@ -99,20 +140,28 @@ export interface ArrivalAnnouncement {
  * reason to think is locked.
  */
 export async function announceWorkspaceArrivals(
-  arrivals: readonly WorkspaceHandoff[],
+  arrivals: readonly WorkspaceArrival[],
   deps: ArrivalAnnouncement,
 ): Promise<void> {
-  for (const handoff of arrivals) {
+  for (const arrival of arrivals) {
+    const { handoff } = arrival;
     const channel = deps.channelFor(handoff.channel);
     if (!channel) continue;
     const name = deps.displayNameFor(handoff.targetAlias);
     const locked = await deps.totpEnrolled(handoff.channel).catch(() => true);
+    // Naming the conversation is the difference between "it worked" and
+    // "did it put me somewhere useful?": the receipt used to say "a new chat
+    // is bound here" whatever it bound, so there was no way to tell a resumed
+    // conversation from a blank one without running /view.
+    const where = arrival.created
+      ? 'nothing was here to continue, so a new chat is bound'
+      : `continuing “${clipTitle(arrival.conversationTitle)}” — /chats to pick another`;
     try {
       await channel.send(
         handoff.chatId,
         locked
-          ? `Forge: now in ${name} — a new chat is bound here. Your session did not carry over, so this chat is locked: send your 6-digit code to unlock it.`
-          : `Forge: now in ${name} — a new chat is bound here.`,
+          ? `Forge: now in ${name} — ${where}. Your session did not carry over, so this chat is locked: send your 6-digit code to unlock it.`
+          : `Forge: now in ${name} — ${where}.`,
       );
     } catch (err) {
       // The switch itself succeeded; a failed receipt is worth surfacing
@@ -124,4 +173,10 @@ export async function announceWorkspaceArrivals(
       );
     }
   }
+}
+
+/** Conversation titles are user text; keep a receipt to one readable line. */
+function clipTitle(title: string): string {
+  const characters = [...title];
+  return characters.length <= 60 ? title : `${characters.slice(0, 59).join('')}…`;
 }

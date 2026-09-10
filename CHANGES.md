@@ -35,6 +35,22 @@
   existing chat. The command menu, `/help`, and the "workspace not found"
   rejection now all point at `/chat` for that.
 
+- **`/workspace 27` now goes to workspace 27.** It read that number as a
+  *page*, so the one command carried two number spaces and answered
+  `/workspace 27` with "takes a page number (1-3)" — for the workspace the user
+  had just read off that very list. The number after `/workspace` is a
+  workspace now; the inline next/prev keyboard is the only pager, which is the
+  only paging anyone was using. `/new <n>` stays as a silent alias, but `/new`
+  is documented as one thing again: start a chat here.
+
+- **Arriving in a workspace continues its most recent conversation.** The
+  handoff bound a brand-new chat whatever was already there, so `/workspace 27`
+  — "go to 27 and carry on" — landed in an empty chat, and the work you
+  switched in order to continue was a `/chats` and a `/chat 1` further away than
+  before you left. Only a workspace with no history at all gets a fresh chat.
+  The arrival receipt names the conversation it landed in, so a resumed chat is
+  no longer indistinguishable from a blank one without running `/view`.
+
 ## 0.15.32
 
 - **Questions with choices now include an `Other…` route.** Selecting it opens

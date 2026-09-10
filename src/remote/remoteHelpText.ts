@@ -14,7 +14,7 @@ export const HELP_TEXT = `Forge commands:
 
 Session: /help · /status · /context · /view [n] · /stop · /new · /chats [page] · /chat <n-or-name> · /resume · /notify on|off · /mirror on|off · /voice on|off
 
-Workspace: /workspace [page] · /new <n-or-alias>
+Workspace: /workspace · /workspace <n-or-alias>
 
 Queue: /queue · /steer <n-or-prompt> · /drop <n|all>
 
@@ -46,7 +46,7 @@ Notes:
 
 • /voice off stops replies being sent as a spoken voice message (text stays); /voice on turns it back on — saved to config.yaml, so it survives a window reload
 
-• /new alone starts a new chat here; /new <n-or-alias> starts one in another workspace, which reloads the window. It never joins an existing chat — that is /chat. /workspace lists the workspaces, numbers them, and says which one you are in
+• /workspace lists the workspaces, numbers them, and says which one you are in; /workspace <n-or-alias> goes to one and continues its most recent conversation. The VS Code window reloads, so the chat goes quiet for a few seconds and the remote session does not survive it — expect to send your code again. /new <n> still works as an alias
 
 • /model with no argument reports the pinned model, /models lists them, /restart restarts the running backend
 

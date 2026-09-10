@@ -38,7 +38,7 @@ export const TELEGRAM_BOT_COMMANDS = [
   { command: 'mirror', description: 'Echo sidebar answers here on/off' },
   { command: 'model', description: 'Pin a model to this chat' },
   { command: 'models', description: 'List configured models' },
-  { command: 'new', description: 'Start a new chat, optionally in another workspace' },
+  { command: 'new', description: 'Start a new chat here' },
   { command: 'notify', description: 'Agent notifications on/off' },
   { command: 'queue', description: 'List queued prompts' },
   { command: 'ratelimit', description: 'Show/set messages allowed per minute' },
@@ -55,7 +55,7 @@ export const TELEGRAM_BOT_COMMANDS = [
   { command: 'view', description: 'Replay the last answers in this chat' },
   { command: 'voice', description: 'Spoken replies on/off' },
   { command: 'wake', description: 'Wake-on-LAN details, or arm a wake timer' },
-  { command: 'workspace', description: 'List workspaces and show where you are' },
+  { command: 'workspace', description: 'List workspaces, or go to one by number' },
 ] as const;
 
 export interface TelegramChannelOptions {

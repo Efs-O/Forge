@@ -98,14 +98,19 @@ export async function sendModelSelection(
 
 /**
  * Alias lists are short, so this exists for the numbering rather than the
- * paging: `/new 2` should work the way `/model 2` and `/chat 2` already do.
- * Sharing the pager also means the list gets expiry and the page keyboard for
- * free once discovery starts returning more than ten workspaces.
+ * paging: `/workspace 2` should work the way `/model 2` and `/chat 2` already
+ * do. Sharing the pager also means the list gets expiry and the page keyboard
+ * for free once discovery starts returning more than ten workspaces.
+ *
+ * Deliberately takes NO page argument. `/workspace` numbers the workspaces
+ * 1-N, so reinterpreting a number as a page put two number spaces on one
+ * command: `/workspace 27` was answered with "takes a page number (1-3)" when
+ * 27 was exactly the workspace the user meant. The inline next/prev keyboard
+ * pages the list, which is the only paging anyone needed.
  */
 export async function sendWorkspaceSelection(
   event: TextEvent,
   context: RemoteSelectionContext,
-  pageArgument?: string,
 ): Promise<RemoteInboundDisposition> {
   const values = Object.keys(context.workspaceAliases);
   if (values.length === 0) {
@@ -116,10 +121,6 @@ export async function sendWorkspaceSelection(
     );
     return { kind: 'handled' };
   }
-  const page = parseRequestedPage(pageArgument, values.length);
-  if (page === undefined) {
-    return { kind: 'rejected', reason: pageRejection(context, 'workspaces', values, pageArgument) };
-  }
   const token = await context.store.issueSelection(
     event.channel,
     event.chatId,
@@ -127,7 +128,7 @@ export async function sendWorkspaceSelection(
     values,
     SELECTION_TTL_MS,
   );
-  await sendPage(event.chatId, context, 'workspaces', token, values, page);
+  await sendPage(event.chatId, context, 'workspaces', token, values, 0);
   return { kind: 'handled' };
 }
 
@@ -275,7 +276,11 @@ function renderPage(
         : formatConversations(context, values, start, end);
   const heading = `Forge ${kind} ${start + 1}-${end} of ${values.length} · page ${page + 1}/${pages}`;
   const command = `${pickCommandFor(kind)} <number>`;
-  const fallback = pages > 1 ? ` Page fallback: ${commandFor(kind)} <page>.` : '';
+  // No page fallback for workspaces: the number after /workspace is a
+  // workspace, not a page, so naming one here would re-create the collision
+  // this list exists to avoid. The inline keyboard is the only pager.
+  const fallback =
+    pages > 1 && kind !== 'workspaces' ? ` Page fallback: ${commandFor(kind)} <page>.` : '';
   // A workspace list that does not say where you are answers half the question:
   // the "· current" marker only appears when the open folder is in the list.
   const here =
@@ -381,7 +386,7 @@ function pageRejection(
   values: readonly string[],
   argument: string | undefined,
 ): string {
-  const usage = `usage: ${usageFor(kind)} <page 1-${pageCount(values.length)}>`;
+  const usage = `usage: ${commandFor(kind)} <page 1-${pageCount(values.length)}>`;
   if (argument === undefined || !/^\d+$/.test(argument)) return usage;
   const index = Number(argument);
   if (index < 1 || index > values.length) return usage;
@@ -423,15 +428,12 @@ function commandFor(kind: SelectionKind): '/chats' | '/models' | '/workspace' {
   return kind === 'models' ? '/models' : '/workspace';
 }
 
-/** The command that picks one entry -- the other half of every numbered list. */
-function pickCommandFor(kind: SelectionKind): '/chat' | '/model' | '/new' {
+/** The command that picks one entry -- the other half of every numbered list.
+ *  For workspaces it is the same command that lists them: `/workspace` alone
+ *  lists, `/workspace 27` goes there. */
+function pickCommandFor(kind: SelectionKind): '/chat' | '/model' | '/workspace' {
   if (kind === 'conversations') return '/chat';
-  return kind === 'models' ? '/model' : '/new';
-}
-
-/** `/workspace` keeps its optional verb in usage text; the others have none. */
-function usageFor(kind: SelectionKind): string {
-  return kind === 'workspaces' ? '/workspace [list]' : commandFor(kind);
+  return kind === 'models' ? '/model' : '/workspace';
 }
 
 function kindLabel(kind: SelectionKind): 'conversation' | 'model' | 'workspace' {
