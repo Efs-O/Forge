@@ -140,6 +140,7 @@ overlaps with an existing owner, extend the owner instead.
 | RFC 6238 generation/verification             | `src/remote/RemoteTotp.ts`             |
 | Durable requests, bindings, cursors, outbox  | `src/remote/RemoteRequestStore.ts`     |
 | Remote owner command behavior                | `src/remote/RemoteCommandHandler.ts`   |
+| Command argument → id, and miss messages     | `src/remote/remoteCommandSelectors.ts` |
 | /sleep, /wake, sleep confirmation state      | `src/remote/RemotePowerCommands.ts`    |
 | Queue order, promote/cancel/claim rules      | `src/remote/remoteQueueOrdering.ts`    |
 | Turn outcome echoed to bound chats           | `src/sidebar/turnMirrorWiring.ts`      |

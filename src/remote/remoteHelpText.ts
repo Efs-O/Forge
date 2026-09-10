@@ -4,7 +4,7 @@
  * Owner of the remote command map. It is written as plain text and decorated
  * afterwards (see `markupTelegramLines`), so a transport without rich text
  * shows the same paragraphs without a single stray tag — and the angle
- * brackets in `<n-or-id>` stay literal either way.
+ * brackets in `<n-or-name>` stay literal either way.
  */
 
 /** Section labels that head a command group, bolded when the transport allows. */
@@ -12,7 +12,7 @@ const HELP_SECTIONS = new Set(['Session', 'Workspace', 'Queue', 'Models', 'Windo
 
 export const HELP_TEXT = `Forge commands:
 
-Session: /help · /status · /context · /view [n] · /stop · /new · /chats [page] · /chat <n-or-id> · /resume · /notify on|off · /mirror on|off · /voice on|off
+Session: /help · /status · /context · /view [n] · /stop · /new · /chats [page] · /chat <n-or-name> · /resume · /notify on|off · /mirror on|off · /voice on|off
 
 Workspace: /workspace [page] · /new <n-or-alias>
 
@@ -36,7 +36,7 @@ Notes:
 
 • /status shows the model, the context used, and how many prompts are waiting; /context breaks the context window down on its own
 
-• /chats numbers the recent conversations; /chat <n-or-id> switches to one; /resume continues the one already bound to this chat
+• /chats numbers the recent conversations; /chat switches to one by that number, its title, or its id; /resume continues the one already bound to this chat
 
 • /view replays the last answers in this chat's conversation, oldest first — 3 by default, 10 at most; use it after /chat to see what an older conversation came to
 
@@ -46,7 +46,7 @@ Notes:
 
 • /voice off stops replies being sent as a spoken voice message (text stays); /voice on turns it back on — saved to config.yaml, so it survives a window reload
 
-• /new <n-or-alias> switches this chat to another workspace; /workspace lists them, numbers them, and says which one you are in
+• /new alone starts a new chat here; /new <n-or-alias> starts one in another workspace, which reloads the window. It never joins an existing chat — that is /chat. /workspace lists the workspaces, numbers them, and says which one you are in
 
 • /model with no argument reports the pinned model, /models lists them, /restart restarts the running backend
 

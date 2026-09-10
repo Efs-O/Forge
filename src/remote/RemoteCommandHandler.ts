@@ -13,6 +13,12 @@ import { formatSystemReport } from '../system/formatSystemReport';
 import type { ModelPickerDescriptor } from '../sidebar/ModelPickerGroups';
 import { PowerControl } from '../system/PowerControl';
 import { handleRemotePowerCommand } from './RemotePowerCommands';
+import {
+  numberedSelectionMiss,
+  resolveConversationSelection,
+  resolveSelection,
+  shortId,
+} from './remoteCommandSelectors';
 
 export interface RemoteCommandContext {
   channel: RemoteChannel;
@@ -288,7 +294,10 @@ async function executeRemoteCommand(
     // prerequisite, though: `/chat 2` is useful (and documented) by itself.
     // Fall back to the same newest-first order the pager uses instead of trying
     // to restore a conversation literally named "2".
-    const conversationId = resolveConversationSelection(context, event, argument) ?? argument;
+    // Titles carry spaces ("Untitled chat"), so the whole remainder is the
+    // selector here — a single number joins to itself and still resolves.
+    const selector = operands.join(' ');
+    const conversationId = resolveConversationSelection(context, event, selector) ?? selector;
     // restoreConversation THROWS when the tab cannot be opened — the
     // MAX_CONVERSATIONS cap, or an id that is not in history. An uncaught throw
     // here became a `retry` disposition, which the Telegram poll loop answers by
@@ -301,7 +310,18 @@ async function executeRemoteCommand(
     try {
       conv = await context.host.restoreConversation(conversationId, { activate: false });
     } catch (err) {
-      return { kind: 'rejected', reason: err instanceof Error ? err.message : String(err) };
+      // A bare "could not be restored" sends the user looking for a missing
+      // conversation when what they typed was a name or a stale number. Name
+      // the list that numbers them instead — a refusal that does not point at
+      // the sanctioned move teaches the capability does not exist.
+      const cause = err instanceof Error ? err.message : String(err);
+      return {
+        kind: 'rejected',
+        reason:
+          conversationId === selector && !/^\d+$/.test(selector)
+            ? `no conversation matches “${selector}”; run /chats, then /chat <number>`
+            : cause,
+      };
     }
     await context.store.setBinding({
       channel: event.channel,
@@ -319,7 +339,10 @@ async function executeRemoteCommand(
     return { kind: 'handled' };
   }
   if (command === '/chat' || command === '/select') {
-    return { kind: 'rejected', reason: 'usage: /chat <number-or-id>' };
+    return {
+      kind: 'rejected',
+      reason: 'usage: /chat <number-or-name>; /chats lists and numbers them',
+    };
   }
   // A numbered /resume is retained as a compatibility alias for /chat.
   // Bare /resume continues the conversation already bound to this chat, so a
@@ -432,52 +455,4 @@ function globalBusyReason(context: RemoteCommandContext): string | undefined {
     return 'Forge is busy; wait for requests, streams, and approvals to finish';
   }
   return context.store.queued().length > 0 ? 'Forge has queued remote requests' : undefined;
-}
-
-function resolveSelection(
-  context: RemoteCommandContext,
-  event: Extract<RemoteInboundEvent, { kind: 'text' }>,
-  kind: 'models' | 'conversations' | 'workspaces',
-  argument: string,
-): string | undefined {
-  if (!/^\d+$/.test(argument)) return undefined;
-  const selection = context.store.selection(event.channel, event.chatId, kind);
-  const index = Number(argument) - 1;
-  return selection && index >= 0 && index < selection.values.length
-    ? selection.values[index]
-    : undefined;
-}
-
-function resolveConversationSelection(
-  context: RemoteCommandContext,
-  event: Extract<RemoteInboundEvent, { kind: 'text' }>,
-  argument: string,
-): string | undefined {
-  const fromPager = resolveSelection(context, event, 'conversations', argument);
-  if (fromPager || !/^\d+$/.test(argument)) return fromPager;
-  const index = Number(argument) - 1;
-  const conversations = context.host
-    .status()
-    .conversations.slice()
-    .sort((left, right) => right.updatedAt - left.updatedAt);
-  return index >= 0 && index < conversations.length ? conversations[index]!.id : undefined;
-}
-
-/** Why `/new <number>` found nothing: an expired list, an out-of-range number,
- *  or a genuinely unknown alias are three different fixes. */
-function numberedSelectionMiss(
-  context: RemoteCommandContext,
-  event: Extract<RemoteInboundEvent, { kind: 'text' }>,
-  argument: string,
-): string {
-  if (!/^\d+$/.test(argument)) {
-    return `workspace “${argument}” was not found. Use /workspace.`;
-  }
-  const selection = context.store.selection(event.channel, event.chatId, 'workspaces');
-  if (!selection) return 'the workspace list expired; run /workspace again, then /new <number>';
-  return `pick 1-${selection.values.length} from the last /workspace list`;
-}
-
-function shortId(id: string): string {
-  return id.length > 7 ? `${id.slice(0, 3)}…${id.slice(-3)}` : id;
 }

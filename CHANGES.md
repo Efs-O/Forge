@@ -21,6 +21,20 @@
   records what a remote user is still not told - stall detection, per-tool
   failures, and a pushed liveness heartbeat - and what is already covered.
 
+- **`/chat` accepts a conversation's name, not only its number.** `/chats`
+  lists conversations by title, so typing `/chat D` is the obvious next move —
+  but only a number or a full id resolved, and a title was passed through as if
+  it were an id, so it failed with "conversation could not be restored." Titles
+  now match case-insensitively against the same newest-first list `/chats`
+  numbers, spaces included, and a genuine miss says to run `/chats` instead of
+  implying the conversation is gone. The doubled `Forge: Forge:` prefix on that
+  rejection is fixed too: host errors already carry the prefix.
+
+- **`/new` says what it does.** Bare `/new` starts a chat here and `/new <n>`
+  starts one in another workspace; nothing about the name said it never joins an
+  existing chat. The command menu, `/help`, and the "workspace not found"
+  rejection now all point at `/chat` for that.
+
 ## 0.15.32
 
 - **Questions with choices now include an `Other…` route.** Selecting it opens

@@ -254,7 +254,7 @@ describe('remote selection pagination', () => {
       handleRemoteCommand(textEvent('/select'), ctx, 'bare-select'),
     ).resolves.toEqual({
       kind: 'rejected',
-      reason: 'usage: /chat <number-or-id>',
+      reason: 'usage: /chat <number-or-name>; /chats lists and numbers them',
     });
   });
 
@@ -303,6 +303,53 @@ describe('remote selection pagination', () => {
       kind: 'handled',
     });
     expect(restoreConversation).toHaveBeenCalledWith('conversation-2', { activate: false });
+  });
+
+  it('resolves /chat by conversation title, which is what /chats shows', async () => {
+    const store = await requestStore();
+    const channel = new FakeRemoteChannel();
+    const restoreConversation = vi.fn(async (id: string) => ({
+      id,
+      title: 'Conversation 2',
+      activeModel: 'model-1',
+      archived: false,
+    }));
+    const ctx = {
+      ...context(channel, store, 3),
+      workspaceId: 'workspace',
+      inactivityTimeoutMinutes: 30,
+      rateLimitPerMinute: 30,
+    };
+    (
+      ctx.host as unknown as { restoreConversation: typeof restoreConversation }
+    ).restoreConversation = restoreConversation;
+
+    // The list numbers conversations but displays names, so a name is the
+    // obvious thing to type; it used to be passed through as a literal id.
+    await expect(
+      handleRemoteCommand(textEvent('/chat conversation 2'), ctx, 'chat-by-title'),
+    ).resolves.toEqual({ kind: 'handled' });
+    expect(restoreConversation).toHaveBeenCalledWith('conversation-2', { activate: false });
+  });
+
+  it('names /chats when a /chat title matches nothing', async () => {
+    const store = await requestStore();
+    const channel = new FakeRemoteChannel();
+    const ctx = {
+      ...context(channel, store, 3),
+      workspaceId: 'workspace',
+      inactivityTimeoutMinutes: 30,
+      rateLimitPerMinute: 30,
+    };
+    (ctx.host as unknown as { restoreConversation: () => Promise<never> }).restoreConversation =
+      async () => {
+        throw new Error('Forge: conversation could not be restored.');
+      };
+
+    await expect(handleRemoteCommand(textEvent('/chat d'), ctx, 'chat-miss')).resolves.toEqual({
+      kind: 'rejected',
+      reason: 'no conversation matches “d”; run /chats, then /chat <number>',
+    });
   });
 
   it('reports and sets the remote rate limit', async () => {

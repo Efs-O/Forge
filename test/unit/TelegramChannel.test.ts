@@ -508,6 +508,63 @@ describe('TelegramChannel', () => {
   });
 
   /**
+   * Host errors are thrown with the prefix already attached (ForgeHostFacade
+   * throws "Forge: conversation could not be restored."), and the rejection
+   * acknowledgement added a second one, so a failed `/chat` read back as
+   * "Forge: Forge: conversation could not be restored."
+   */
+  it('does not double the Forge prefix on a reason that already carries one', async () => {
+    const abort = new AbortController();
+    let delivered = false;
+    const sent: Array<Record<string, unknown>> = [];
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor: async () => undefined,
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        const method = String(url).split('/').at(-1);
+        if (method === 'setMyCommands') return response(true);
+        if (method === 'sendMessage') {
+          sent.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+          abort.abort();
+          return response({ message_id: 8 });
+        }
+        if (method === 'getUpdates' && !delivered) {
+          delivered = true;
+          return response([
+            {
+              update_id: 93,
+              message: {
+                message_id: 9,
+                date: 1_700_000_000,
+                chat: { id: 99, type: 'private' },
+                from: { id: 123 },
+                text: '/chat d',
+              },
+            },
+          ]);
+        }
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+            once: true,
+          });
+        });
+      }) as typeof fetch,
+    });
+    channel.onEvent(async () => ({
+      kind: 'rejected',
+      reason: 'Forge: conversation could not be restored.',
+    }));
+
+    await channel.start(abort.signal);
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]).toMatchObject({
+      chat_id: '99',
+      text: 'Forge: conversation could not be restored.',
+    });
+  });
+
+  /**
    * `downloadAttachment` used to end `bytes.toString('utf8')` for anything that
    * was not an image or a PDF. Decoding arbitrary bytes as utf8 substitutes
    * U+FFFD for every invalid sequence, so the file arrived intact and left

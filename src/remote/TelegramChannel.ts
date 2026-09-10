@@ -27,7 +27,7 @@ export const TELEGRAM_BOT_TOKEN_SECRET = 'forge.remote.telegram.botToken';
 
 /** Native Telegram command menu. Parsing remains transport-independent. */
 export const TELEGRAM_BOT_COMMANDS = [
-  { command: 'chat', description: 'Switch to an existing conversation' },
+  { command: 'chat', description: 'Switch to an existing conversation by number or name' },
   { command: 'chats', description: 'List recent conversations' },
   { command: 'clanker', description: 'Set approval-gate mode' },
   { command: 'compact', description: 'Compact the conversation' },
@@ -38,7 +38,7 @@ export const TELEGRAM_BOT_COMMANDS = [
   { command: 'mirror', description: 'Echo sidebar answers here on/off' },
   { command: 'model', description: 'Pin a model to this chat' },
   { command: 'models', description: 'List configured models' },
-  { command: 'new', description: 'Start a new chat' },
+  { command: 'new', description: 'Start a new chat, optionally in another workspace' },
   { command: 'notify', description: 'Agent notifications on/off' },
   { command: 'queue', description: 'List queued prompts' },
   { command: 'ratelimit', description: 'Show/set messages allowed per minute' },
@@ -403,7 +403,12 @@ export class TelegramChannel implements RemoteChannel {
           ? `Forge: interrupting the turn; your steering prompt runs next (position ${disposition.position}).`
           : `Forge: queued at position ${disposition.position} — it runs when the current turn ends. Send /steer ${disposition.position} to cut the turn short and run it now, /queue to review, /drop ${disposition.position} to cancel.`;
     } else if (disposition.kind === 'rejected') {
-      text = `Forge: ${disposition.reason}`;
+      // Reasons that came from a thrown host error already carry the prefix
+      // (ForgeHostFacade throws "Forge: conversation could not be restored."),
+      // so prefixing unconditionally produced "Forge: Forge: …" in the chat.
+      text = disposition.reason.startsWith('Forge:')
+        ? disposition.reason
+        : `Forge: ${disposition.reason}`;
     }
     if (!text) return;
     await this.send(event.chatId, text, { signal }).catch((err) => {

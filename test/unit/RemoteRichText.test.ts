@@ -28,7 +28,7 @@ describe('remote rich text', () => {
     expect(rendered).toContain('• <b>/stop</b> cancels');
     // Placeholders keep their angle brackets as text, or Telegram reads them
     // as an unknown tag and rejects the whole send.
-    expect(rendered).toContain('/chat &lt;n-or-id&gt;');
+    expect(rendered).toContain('/chat &lt;n-or-name&gt;');
     // No two lines of prose ever touch: every note is its own paragraph.
     for (const [index, line] of HELP_TEXT.split('\n').entries()) {
       if (!line.startsWith('•')) continue;
