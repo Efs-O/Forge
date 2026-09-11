@@ -1,5 +1,26 @@
 # Forge — Recent Changes
 
+## 0.15.37
+
+- **One `/model` command for remote.** `/models` and `/model` did overlapping
+  work: bare `/model` already listed models, so `/models` only added a hidden
+  page argument. `/model` is now the single visible command — bare lists, and
+  `/model <number-or-name>` pins one to the chat. `/models` stays as a silent
+  alias (the `/list` → `/chats` convention): it is hidden from `/help` and the
+  Telegram menu but still answers, and it is the only thing that pages the model
+  list on a plain-text transport like WhatsApp, which has no keyboard. On
+  Telegram the redundant `Page fallback: /models <page>.` footer line is dropped,
+  since the inline Previous/Next buttons already page. The `/help` note that
+  claimed bare `/model` reports the pinned model is also corrected — it lists.
+
+## 0.15.36
+
+- **`/chats` says which workspace it is in.** The conversation pager only ever
+  lists this window's conversations but never said where they lived, so after a
+  `/workspace` switch you had to run `/workspace` again to confirm. It now
+  prints the same `You are in: <name>` line `/workspace` already shows, reusing
+  the workspace name the selection context already carried.
+
 ## 0.15.35
 
 - **`ask_user` can ask two decisions in one round.** It carried one prompt and
