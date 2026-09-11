@@ -502,6 +502,35 @@ describe('remote selection pagination', () => {
     expect(page.text).toContain('Use /model &lt;number&gt;.');
   });
 
+  it('pages a long model list by keyboard only, and keeps the text fallback for plain text', async () => {
+    const store = await requestStore();
+
+    // A keyboard transport (Telegram) pages with the inline buttons, so the
+    // footer must not also name a page command — it is dead weight there.
+    const channel = new FakeRemoteChannel();
+    const ctx = context(channel, store, 0, 25);
+    await expect(sendModelSelection(textEvent('/models'), ctx)).resolves.toEqual({
+      kind: 'handled',
+    });
+    expect(channel.selectionPageSends[0]!.text).not.toContain('Page fallback');
+
+    // A plain-text transport (WhatsApp) has no keyboard, so the footer is the
+    // only way to page past the first ten — it must stay.
+    const sent: string[] = [];
+    const plain = {
+      name: 'fake' as const,
+      onEvent: () => ({ dispose: () => undefined }),
+      send: async (_chatId: string, text: string) => {
+        sent.push(text);
+      },
+    } as unknown as FakeRemoteChannel;
+    const plainCtx = context(plain, store, 0, 25);
+    await expect(sendModelSelection(textEvent('/models'), plainCtx)).resolves.toEqual({
+      kind: 'handled',
+    });
+    expect(sent[0]).toContain('Page fallback: /models <page>.');
+  });
+
   it('gives each conversation its own block, and bolds the title on an HTML transport', async () => {
     const store = await requestStore();
     const channel = new FakeRemoteChannel();

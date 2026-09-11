@@ -279,8 +279,13 @@ function renderPage(
   // No page fallback for workspaces: the number after /workspace is a
   // workspace, not a page, so naming one here would re-create the collision
   // this list exists to avoid. The inline keyboard is the only pager.
+  // And no fallback line on a transport that has a keyboard: there the
+  // Previous/Next buttons already page, so the text is dead weight (it is the
+  // only pager on a plain-text transport like WhatsApp, which keeps it).
   const fallback =
-    pages > 1 && kind !== 'workspaces' ? ` Page fallback: ${commandFor(kind)} <page>.` : '';
+    pages > 1 && kind !== 'workspaces' && !context.channel.selectionPages
+      ? ` Page fallback: ${commandFor(kind)} <page>.`
+      : '';
   // A workspace or conversation list that does not say where you are answers
   // half the question: /chats only ever shows this window's conversations, so
   // the line costs nothing and saves a /workspace round-trip after a switch.

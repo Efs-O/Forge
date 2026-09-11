@@ -18,7 +18,7 @@ Workspace: /workspace · /workspace <n-or-alias>
 
 Queue: /queue · /steer <n-or-prompt> · /drop <n|all>
 
-Models: /models [page] · /model [n-or-name] · /unload · /restart
+Models: /model [n-or-name] · /unload · /restart
 
 Window: /compact · /lock · /reload · /timeout [1-1440|off] · /ratelimit [1-600|off] · /clanker on|off
 
@@ -48,7 +48,7 @@ Notes:
 
 • /workspace lists the workspaces, numbers them, and says which one you are in; /workspace <n-or-alias> goes to one and continues its most recent conversation. The VS Code window reloads, so the chat goes quiet for a few seconds and the remote session does not survive it — expect to send your code again. /new <n> still works as an alias
 
-• /model with no argument reports the pinned model, /models lists them, /restart restarts the running backend
+• /model lists the configured models, and /model <number-or-name> pins one to this chat; /restart restarts the running backend
 
 • /unload releases every loaded model and frees its memory, exactly like Unload Model in the sidebar; unlike /reload it refuses while a turn is running
 

@@ -65,12 +65,12 @@ describe('remote command map', () => {
     // it. Any new file holding a `command === '/x'` line belongs here too.
     'src/remote/RemotePowerCommands.ts',
   ];
-  // Aliases and the parser-dispatched command have no `command === ...` line.
-  // `/list` and `/select` were renamed to `/chats` and `/chat`; they still
-  // answer, so muscle memory and old screenshots keep working, but they are
-  // deliberately absent from both the help text and the native menu — two names
-  // for one thing in the command map is what made the old one hard to read.
-  const UNDOCUMENTED_ALIASES = new Set(['/commands', '/list', '/select']);
+  // Aliases that still answer but are hidden from the help text and native
+  // menu — two names for one thing in the command map is what made the old one
+  // hard to read. `/list` and `/select` were renamed to `/chats` and `/chat`;
+  // `/models` was folded into `/model` (bare `/model` lists, `/model <n>` pins),
+  // but it still pages the model list on a plain-text transport, so it answers.
+  const UNDOCUMENTED_ALIASES = new Set(['/commands', '/list', '/select', '/models']);
   const EXTRA_IMPLEMENTED = ['/steer'];
 
   const implemented = new Set(
