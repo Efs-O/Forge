@@ -91,6 +91,13 @@ export interface BackgroundExecutionStartOptions {
    * definition, so there is deliberately no default deadline here.
    */
   timeoutMs?: number | undefined;
+  /**
+   * Optional validated env for the child, merged over the inherited env. The
+   * foreground path (`spawnAndWait`) already takes `extraEnv`; without this the
+   * background path would silently drop a validated `env` and the two paths of
+   * `exec_command` would disagree.
+   */
+  env?: NodeJS.ProcessEnv;
 }
 
 export class BackgroundExecutionManager {
@@ -113,7 +120,9 @@ export class BackgroundExecutionManager {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
-      env: { ...globalThis.process.env, NO_COLOR: '1', FORCE_COLOR: '0' },
+      // The user env is spread before NO_COLOR/FORCE_COLOR so those still win
+      // over a caller-supplied value, matching the foreground path.
+      env: { ...globalThis.process.env, ...options.env, NO_COLOR: '1', FORCE_COLOR: '0' },
     });
     const execution: BackgroundExecution = {
       id: `exec-${randomUUID()}`,

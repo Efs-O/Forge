@@ -304,4 +304,43 @@ describe('exec_command safety policy', () => {
     expect(observed.status).toBe('completed');
     expect(observed.suggested_next_wait_ms).toBeUndefined();
   });
+
+  it('passes a validated env variable through to the foreground child', async () => {
+    const result = (await makeExecCommandTool().handler({
+      command: process.execPath,
+      args: ['-e', 'process.stdout.write(process.env.FORGE_TEST_ENV ?? "missing")'],
+      cwd: process.cwd(),
+      env: { FORGE_TEST_ENV: 'hello-env' },
+    })) as string;
+    expect(result).toContain('hello-env');
+  });
+
+  it('refuses a blocked env name before spawning', async () => {
+    await expect(
+      makeExecCommandTool().handler({
+        command: process.execPath,
+        args: ['-e', 'process.stdout.write("never")'],
+        cwd: process.cwd(),
+        env: { NODE_OPTIONS: '--require=evil.js' },
+      }),
+    ).rejects.toThrow('NODE_OPTIONS');
+  });
+
+  it('passes a validated env variable through to a background child', async () => {
+    const start = await makeExecCommandTool().handler({
+      command: process.execPath,
+      args: ['-e', 'process.stdout.write(process.env.FORGE_BG_ENV ?? "missing")'],
+      cwd: process.cwd(),
+      background: true,
+      env: { FORGE_BG_ENV: 'bg-env' },
+    });
+    const started = JSON.parse(start as string) as { execution_id: string };
+    const result = await makeMonitorExecutionTool().handler({
+      execution_id: started.execution_id,
+      wait_ms: 1_000,
+    });
+    const observed = JSON.parse(result as string) as { status: string; stdout: string };
+    expect(observed.status).toBe('completed');
+    expect(observed.stdout).toContain('bg-env');
+  });
 });

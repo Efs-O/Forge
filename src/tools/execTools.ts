@@ -24,6 +24,7 @@ import {
   resolveExecInvocation,
   resolvePackageRunnerInvocation,
 } from './execProgramResolver';
+import { validateExecEnv } from './execEnvPolicy';
 import { checkDenyList, getBuiltinDenyList } from './DenyList';
 import { backgroundExecutionManager } from './BackgroundExecutionManager';
 import { formatBackgroundObservation } from './backgroundExecutionTools';
@@ -97,6 +98,14 @@ export function makeExecCommandTool(): RegisteredTool {
             },
             args: { type: 'array', items: { type: 'string' }, description: 'Arguments array.' },
             cwd: { type: 'string', description: 'Working directory. Optional.' },
+            env: {
+              type: 'object',
+              additionalProperties: { type: 'string' },
+              description:
+                'Optional environment variables for the process. A small, validated set — '
+                + 'dangerous names (NODE_OPTIONS, PATH, LD_PRELOAD, …) are refused. '
+                + 'Use for CLIs that need an env var (e.g. ELECTRON_RUN_AS_NODE).',
+            },
             timeout_ms: {
               type: 'integer',
               description:
@@ -161,6 +170,13 @@ export function makeExecCommandTool(): RegisteredTool {
           error instanceof Error ? error.message : String(error),
         );
       }
+      // Validate the env BEFORE any guard/spawn. A rejected var is a policy
+      // refusal, not a spawn failure — the model must not be told the program
+      // is missing when the real problem is a blocked variable name.
+      const envCheck = validateExecEnv(args['env'] as Record<string, unknown> | undefined);
+      if (!envCheck.ok) {
+        throw new ExecCommandError('policy_refusal', command, envCheck.error ?? 'invalid env');
+      }
       try {
         const denied = checkDenyList(command, cmdArgs, getBuiltinDenyList());
         if (denied) {
@@ -202,6 +218,7 @@ export function makeExecCommandTool(): RegisteredTool {
             args: spawned.args,
             cwd,
             timeoutMs: requestedTimeoutMs,
+            env: envCheck.env,
           });
           // spawn reports a failed launch on the next tick, so observing
           // immediately would report "running" for a process already dead.
@@ -214,7 +231,7 @@ export function makeExecCommandTool(): RegisteredTool {
           spawned.args,
           cwd,
           timeoutMs,
-          {},
+          envCheck.env,
           context?.abortSignal,
         );
         return formatExecCommandOutput(command, result, outputOptions);
