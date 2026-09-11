@@ -520,6 +520,28 @@ describe('remote selection pagination', () => {
     expect(page.text).toMatch(/\n\n<b>2\. Conversation 2<\/b>\n {4}con/u);
   });
 
+  it('names the workspace a /chats list is in, and omits the line when unknown', async () => {
+    const store = await requestStore();
+    const channel = new FakeRemoteChannel();
+
+    // With a workspace name, the page says where the conversations live — the
+    // same "You are in:" line /workspace already prints, so a switch is
+    // confirmable without a second command.
+    const withName = { ...context(channel, store, 3), currentWorkspaceName: 'Forge' };
+    await expect(sendConversationSelection(textEvent('/chats'), withName)).resolves.toEqual({
+      kind: 'handled',
+    });
+    expect(channel.selectionPageSends[0]!.text).toContain('You are in: Forge');
+
+    // Without one the line is absent, not blank: the context has no
+    // currentWorkspaceName, so the footer must not print a bare label.
+    const withoutName = context(channel, store, 3);
+    await expect(sendConversationSelection(textEvent('/chats'), withoutName)).resolves.toEqual({
+      kind: 'handled',
+    });
+    expect(channel.selectionPageSends[1]!.text).not.toContain('You are in:');
+  });
+
   it('rejects stale tokens and out-of-range callback pages', async () => {
     const store = await requestStore();
     const channel = new FakeRemoteChannel();

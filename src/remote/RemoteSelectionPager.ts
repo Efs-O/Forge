@@ -281,10 +281,11 @@ function renderPage(
   // this list exists to avoid. The inline keyboard is the only pager.
   const fallback =
     pages > 1 && kind !== 'workspaces' ? ` Page fallback: ${commandFor(kind)} <page>.` : '';
-  // A workspace list that does not say where you are answers half the question:
-  // the "· current" marker only appears when the open folder is in the list.
+  // A workspace or conversation list that does not say where you are answers
+  // half the question: /chats only ever shows this window's conversations, so
+  // the line costs nothing and saves a /workspace round-trip after a switch.
   const here =
-    kind === 'workspaces' && context.currentWorkspaceName
+    (kind === 'workspaces' || kind === 'conversations') && context.currentWorkspaceName
       ? `\n\nYou are in: ${clip(context.currentWorkspaceName, 180)}`
       : '';
   const text = `${heading}\n\n${entries.join('\n')}${here}\n\nUse ${command}.${fallback} Selection expires in 10 minutes.`;
