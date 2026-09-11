@@ -123,6 +123,32 @@ describe('ToolCallingLoop reasoning retention', () => {
     ]);
   });
 
+  it('does not narrate before an ask_user question to remote surfaces', async () => {
+    const askUser: ToolCall = {
+      id: 'question_1',
+      type: 'function',
+      function: { name: 'ask_user', arguments: '{"prompt":"Pick one","options":["1","2"]}' },
+    };
+    const narrate = vi.fn();
+    streamModelChatCompletion.mockImplementation(
+      async (_url: string, _req: unknown, _model: unknown, h: Handlers) => {
+        h.onToken('I need your choice.');
+        h.onToolCalls([askUser]);
+        h.onDone('tool_calls');
+      },
+    );
+    const messages: ChatMessage[] = [{ role: 'user', content: 'go' }];
+
+    await runToolCallingLoop({
+      ...runOptions(messages),
+      onRoundNarration: narrate,
+      maxRounds: 1,
+    } as never);
+
+    expect(narrate).not.toHaveBeenCalled();
+    expect(messages[1]).toMatchObject({ content: 'I need your choice.' });
+  });
+
   it('writes reasoning into the real transcript while it is still streaming', async () => {
     const messages: ChatMessage[] = [{ role: 'user', content: 'go' }];
     let streamedSnapshot: ChatMessage[] = [];

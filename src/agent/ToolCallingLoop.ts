@@ -371,7 +371,11 @@ export async function runToolCallingLoop(
       // live row with `content: null` and the visible text disappears.
       streamedAssistant.completeToolCall(calls, assistantContent, assistantReasoning);
       options.onMessagesChanged?.();
-      if (assistantContent.trim()) options.onRoundNarration?.(assistantContent);
+      // A question is the boundary of this round. Keep any pre-question
+      // commentary in the transcript, but do not send it as a separate remote
+      // notification while the user is waiting for the question itself.
+      const asksUser = calls.some((call) => call.function.name === 'ask_user');
+      if (assistantContent.trim() && !asksUser) options.onRoundNarration?.(assistantContent);
       const beforeDispatch = options.messages.length;
       await options.dispatchToolCalls(calls, options.messages);
       options.onMessagesChanged?.();
