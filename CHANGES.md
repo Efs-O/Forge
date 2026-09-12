@@ -1,5 +1,17 @@
 # Forge — Recent Changes
 
+## 0.15.40
+
+- **Remote narration no longer over-suppressed.** A tool round that is purely
+  an `ask_user` question still suppresses its pre-question commentary from
+  remote surfaces, but a mixed round (e.g. a file write alongside a question)
+  now narrates as before — the user hears about the real work.
+
+- **Telegram album cursor commit is failure-safe.** If the durable cursor write
+  fails while flushing a merged photo album, the error is now reported instead
+  of escaping the poll loop; the album is still delivered and Telegram
+  redelivers it on restart rather than the poll loop going down.
+
 ## 0.15.39
 
 - **Telegram albums arrive as one prompt.** Photo groups are merged into one
