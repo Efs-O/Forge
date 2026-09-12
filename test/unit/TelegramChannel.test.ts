@@ -1,3 +1,6 @@
+import * as fsp from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   splitTelegramText,
@@ -8,6 +11,9 @@ import {
   parseTelegramSelectionCallback,
   telegramSelectionKeyboard,
 } from '../../src/remote/TelegramSelectionPagination';
+import { RemoteAttachmentStore } from '../../src/remote/RemoteAttachmentStore';
+import { HELP_TEXT } from '../../src/remote/remoteHelpText';
+import type { RemoteInboundDisposition, RemoteInboundEvent } from '../../src/remote/types';
 
 function response(result: unknown): Response {
   return { ok: true, status: 200, json: async () => ({ ok: true, result }) } as Response;
@@ -41,6 +47,17 @@ describe('TelegramChannel', () => {
       }),
     );
     abort.abort();
+  });
+
+  /**
+   * `HELP_TEXT` is the only place a phone user learns the image rules, so the
+   * cap and the size limits must be spelled out there rather than discovered by
+   * trial and error.
+   */
+  it('documents the 3-image album cap and the size limits in /help', () => {
+    expect(HELP_TEXT).toContain('3 images');
+    expect(HELP_TEXT).toContain('10 MiB');
+    expect(HELP_TEXT).toContain('25 MiB');
   });
 
   it('validates Bot API authentication without exposing the token', async () => {
@@ -651,5 +668,246 @@ describe('TelegramChannel retry bound', () => {
 
     expect(handled).toBe(3);
     expect(sent.at(-1)).toContain('conversation could not be restored');
+  });
+});
+
+/**
+ * A Telegram photo album is delivered as separate `photo` updates sharing a
+ * `media_group_id`. Without buffering, an album of N becomes N queued prompts.
+ * These tests pin the merge: one batch of album photos is one multi-image event,
+ * the cap is enforced with a notice, the offset advances per photo, and a
+ * non-album message after an album is not dropped or reordered.
+ */
+describe('TelegramChannel photo albums', () => {
+  function photoUpdate(
+    updateId: number,
+    messageId: number,
+    fileId: string,
+    groupId: string,
+    text?: string,
+  ) {
+    return {
+      update_id: updateId,
+      message: {
+        message_id: messageId,
+        date: 1_700_000_000,
+        chat: { id: 99, type: 'private' },
+        from: { id: 123 },
+        photo: [{ file_id: fileId, file_size: 100 }],
+        ...(groupId ? { media_group_id: groupId } : {}),
+        ...(text ? { text } : {}),
+      },
+    };
+  }
+
+  function textUpdate(updateId: number, messageId: number, text: string) {
+    return {
+      update_id: updateId,
+      message: {
+        message_id: messageId,
+        date: 1_700_000_000,
+        chat: { id: 99, type: 'private' },
+        from: { id: 123 },
+        text,
+      },
+    };
+  }
+
+  /**
+   * Feeds `batches` one `getUpdates` result at a time (in order) and hangs the
+   * long poll once they are exhausted, so the loop does not spin. Captures the
+   * events the handler sees and every `sendMessage` body the channel sends.
+   */
+  async function runAlbums(
+    batches: unknown[][],
+    handler: (event: RemoteInboundEvent) => Promise<RemoteInboundDisposition>,
+  ) {
+    const abort = new AbortController();
+    let poll = 0;
+    const events: RemoteInboundEvent[] = [];
+    const sent: Array<Record<string, unknown>> = [];
+    const setCursor = vi.fn(async () => undefined);
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor,
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        const method = String(url).split('/').at(-1)!;
+        if (method === 'setMyCommands') return response(true);
+        if (method === 'sendMessage') {
+          sent.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+          return response({ message_id: 1 });
+        }
+        if (method === 'getUpdates') {
+          const batch = batches[poll++];
+          if (batch) return response(batch);
+          return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+              once: true,
+            });
+          });
+        }
+        return response(true);
+      }) as typeof fetch,
+    });
+    channel.onEvent(async (event) => {
+      events.push(event);
+      return handler(event);
+    });
+    await channel.start(abort.signal);
+    return { abort, events, sent, setCursor };
+  }
+
+  it('maps a single non-album photo to one event (existing behaviour)', async () => {
+    const h = await runAlbums(
+      [[photoUpdate(1, 1, 'f1', '')]],
+      async () => ({ kind: 'accepted', requestId: 'r' }),
+    );
+    await vi.waitFor(() => expect(h.events).toHaveLength(1));
+    h.abort.abort();
+    expect(h.events[0]).toMatchObject({
+      kind: 'text',
+      providerMessageId: '1',
+      attachments: [
+        { name: 'telegram-photo.jpg', mediaType: 'image/jpeg', providerFileId: 'f1' },
+      ],
+    });
+  });
+
+  it('merges a 2-photo album in one batch into a single event', async () => {
+    const h = await runAlbums(
+      [[photoUpdate(1, 1, 'f1', 'g1'), photoUpdate(2, 2, 'f2', 'g1')]],
+      async () => ({ kind: 'accepted', requestId: 'r' }),
+    );
+    await vi.waitFor(() => expect(h.events).toHaveLength(1));
+    h.abort.abort();
+    expect(h.events[0]).toMatchObject({
+      kind: 'text',
+      providerMessageId: '1',
+      attachments: [
+        { providerFileId: 'f1' },
+        { providerFileId: 'f2' },
+      ],
+    });
+  });
+
+  it('merges a 3-photo album into one event with no overflow notice', async () => {
+    const h = await runAlbums(
+      [[photoUpdate(1, 1, 'f1', 'g1'), photoUpdate(2, 2, 'f2', 'g1'), photoUpdate(3, 3, 'f3', 'g1')]],
+      async () => ({ kind: 'accepted', requestId: 'r' }),
+    );
+    await vi.waitFor(() => expect(h.events).toHaveLength(1));
+    h.abort.abort();
+    expect(h.events[0]).toMatchObject({
+      kind: 'text',
+      attachments: [{ providerFileId: 'f1' }, { providerFileId: 'f2' }, { providerFileId: 'f3' }],
+    });
+    expect(h.sent).toHaveLength(0);
+  });
+
+  it('caps a 4-photo album at 3 and tells the user the limit', async () => {
+    const h = await runAlbums(
+      [
+        [
+          photoUpdate(1, 1, 'f1', 'g1'),
+          photoUpdate(2, 2, 'f2', 'g1'),
+          photoUpdate(3, 3, 'f3', 'g1'),
+          photoUpdate(4, 4, 'f4', 'g1'),
+        ],
+      ],
+      async () => ({ kind: 'accepted', requestId: 'r' }),
+    );
+    await vi.waitFor(() => expect(h.events).toHaveLength(1));
+    await vi.waitFor(() => expect(h.sent).toHaveLength(1));
+    h.abort.abort();
+    expect(h.events[0]).toMatchObject({
+      kind: 'text',
+      attachments: [{ providerFileId: 'f1' }, { providerFileId: 'f2' }, { providerFileId: 'f3' }],
+    });
+    expect(String(h.sent[0]!.text)).toContain('limited to 3 images');
+    expect(String(h.sent[0]!.text)).toContain('10 MiB');
+  });
+
+  it('flushes an album before a following text message in the same batch', async () => {
+    const h = await runAlbums(
+      [[photoUpdate(1, 1, 'f1', 'g1'), photoUpdate(2, 2, 'f2', 'g1'), textUpdate(3, 3, 'after')]],
+      async () => ({ kind: 'accepted', requestId: 'r' }),
+    );
+    await vi.waitFor(() => expect(h.events).toHaveLength(2));
+    h.abort.abort();
+    expect(h.events[0]).toMatchObject({
+      kind: 'text',
+      text: '',
+      attachments: [{ providerFileId: 'f1' }, { providerFileId: 'f2' }],
+    });
+    expect(h.events[1]).toMatchObject({ kind: 'text', text: 'after' });
+  });
+
+  it('emits two events, in order, for two different albums in one batch', async () => {
+    const h = await runAlbums(
+      [
+        [
+          photoUpdate(1, 1, 'f1', 'gA'),
+          photoUpdate(2, 2, 'f2', 'gA'),
+          photoUpdate(3, 3, 'f3', 'gB'),
+        ],
+      ],
+      async () => ({ kind: 'accepted', requestId: 'r' }),
+    );
+    await vi.waitFor(() => expect(h.events).toHaveLength(2));
+    h.abort.abort();
+    expect(h.events[0]).toMatchObject({
+      kind: 'text',
+      providerMessageId: '1',
+      attachments: [{ providerFileId: 'f1' }, { providerFileId: 'f2' }],
+    });
+    expect(h.events[1]).toMatchObject({
+      kind: 'text',
+      providerMessageId: '3',
+      attachments: [{ providerFileId: 'f3' }],
+    });
+  });
+
+  it('advances the offset on every album photo, not just per emitted event', async () => {
+    const h = await runAlbums(
+      [[photoUpdate(1, 1, 'f1', 'g1'), photoUpdate(2, 2, 'f2', 'g1'), photoUpdate(3, 3, 'f3', 'g1')]],
+      async () => ({ kind: 'accepted', requestId: 'r' }),
+    );
+    await vi.waitFor(() => expect(h.events).toHaveLength(1));
+    h.abort.abort();
+    // Three photos -> three offset saves (2, 3, 4), even though one event fired.
+    expect(h.setCursor).toHaveBeenCalledTimes(3);
+    expect(h.setCursor).toHaveBeenLastCalledWith('telegram:update-offset', '4');
+  });
+
+  it('degrades a cross-batch album to two events without losing an update', async () => {
+    const h = await runAlbums(
+      [
+        [photoUpdate(1, 1, 'f1', 'g1'), photoUpdate(2, 2, 'f2', 'g1')],
+        [photoUpdate(3, 3, 'f3', 'g1')],
+      ],
+      async () => ({ kind: 'accepted', requestId: 'r' }),
+    );
+    await vi.waitFor(() => expect(h.events).toHaveLength(2));
+    h.abort.abort();
+    expect(h.events[0]).toMatchObject({ attachments: [{ providerFileId: 'f1' }, { providerFileId: 'f2' }] });
+    expect(h.events[1]).toMatchObject({ attachments: [{ providerFileId: 'f3' }] });
+  });
+});
+
+describe('RemoteAttachmentStore size limits', () => {
+  it('rejects an image over the 10 MiB per-image limit', async () => {
+    const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'forge-att-'));
+    try {
+      const store = new RemoteAttachmentStore(root);
+      const oversize = Buffer.alloc(10 * 1024 * 1024 + 1);
+      await expect(
+        store.save('conv', 'req', [
+          { name: 'big.jpg', mediaType: 'image/jpeg', data: oversize.toString('base64') },
+        ]),
+      ).rejects.toThrow('exceeds its 10 MiB limit');
+    } finally {
+      await fsp.rm(root, { recursive: true, force: true });
+    }
   });
 });

@@ -36,6 +36,13 @@ export const TelegramUpdateSchema = z.object({
         )
         .optional(),
       /**
+       * Set on every photo of a Telegram photo *album*. An album is delivered
+       * as separate `photo` updates that all share one `media_group_id`; the
+       * channel groups them into one multi-image prompt (see
+       * `albumPhotoFromUpdate`). A single photo has no group id.
+       */
+      media_group_id: z.string().optional(),
+      /**
        * `duration` is load-bearing, not informational: with `date` it defines
        * the recording window that correlates a spoken command to one pending
        * approval (docs/VOICE_STT_TTS_IMPLEMENTATION_PLAN.md §22A R1-revised).
@@ -102,9 +109,26 @@ export function mediaTypeForPath(filePath: string): string {
   return known[extension] ?? 'application/octet-stream';
 }
 
-function telegramChatType(value: string): RemoteInboundEvent['chatType'] {
+export function telegramChatType(value: string): RemoteInboundEvent['chatType'] {
   if (value === 'private') return 'private';
   return value === 'channel' ? 'channel' : 'group';
+}
+
+/**
+ * The photo of a Telegram album (photo group) update, or `undefined` if this
+ * update is not one. An album is a burst of separate `photo` updates sharing a
+ * `media_group_id`; the channel buffers them into one multi-image prompt rather
+ * than letting each become its own queued request. A single photo with no group
+ * id is NOT an album and keeps flowing through `telegramUpdateToEvent`
+ * untouched, so this helper never changes single-photo behaviour.
+ */
+export function albumPhotoFromUpdate(
+  update: z.infer<typeof TelegramUpdateSchema>,
+): { name: string; mediaType: string; providerFileId: string } | undefined {
+  const message = update.message;
+  const photo = message?.photo?.at(-1);
+  if (!message?.from || !photo || !message.media_group_id) return undefined;
+  return { name: 'telegram-photo.jpg', mediaType: 'image/jpeg', providerFileId: photo.file_id };
 }
 
 export function telegramUpdateToEvent(

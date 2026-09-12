@@ -1,8 +1,10 @@
 import * as fsp from 'fs/promises';
 import { z } from 'zod';
 import {
+  albumPhotoFromUpdate,
   isTextMediaType,
   mediaTypeForPath,
+  telegramChatType,
   TelegramUpdateSchema,
   telegramUpdateToEvent,
 } from './TelegramInboundMapping';
@@ -14,6 +16,13 @@ type Fetch = typeof fetch;
 const TelegramSentMessageSchema = z.object({ message_id: z.number().int() });
 
 const CURSOR_KEY = 'telegram:update-offset';
+/**
+ * How many photos of a Telegram album (photo group) become one prompt. Telegram
+ * delivers an album as separate updates sharing a `media_group_id`; without this
+ * cap an album of N would become N queued prompts. The sidebar's own
+ * `MAX_ATTACHMENTS_PER_PROMPT` (10) is the downstream backstop and is unchanged.
+ */
+export const MAX_TELEGRAM_IMAGES_PER_MESSAGE = 3;
 /** Unanswered prompts are rare; this only bounds a pathological case. */
 const PROMPT_MESSAGE_LIMIT = 256;
 const TELEGRAM_TEXT_LIMIT = 4096;
@@ -77,6 +86,24 @@ export class TelegramChannel implements RemoteChannel {
   private readonly promptMessages = new Map<string, number>();
   /** Serializes every chat-addressed call so sends cannot overtake each other. */
   private readonly sendQueue = new TelegramChatQueue();
+  /**
+   * A Telegram photo album in flight. Photos arrive as separate updates sharing
+   * a `media_group_id`; they are buffered here and emitted as ONE multi-image
+   * prompt on flush, instead of each becoming its own queued request. The offset
+   * is advanced per photo (not per flush) so a held album can never spin the
+   * poll loop -- the `MAX_UPDATE_RETRIES` guard always sees a moving offset.
+   */
+  private pendingAlbum: {
+    mediaGroupId: string;
+    photos: Array<{ name: string; mediaType: string; providerFileId: string }>;
+    firstText: string;
+    firstMessageId: number;
+    chatId: string;
+    senderId: string;
+    chatType: RemoteInboundEvent['chatType'];
+    receivedAt: number;
+    overflow: boolean;
+  } | undefined;
 
   constructor(private readonly options: TelegramChannelOptions) {
     this.fetchImpl = options.fetch ?? fetch;
@@ -278,6 +305,21 @@ export class TelegramChannel implements RemoteChannel {
       }
       for (const update of updates.sort((a, b) => a.update_id - b.update_id)) {
         if (signal.aborted) return;
+        const albumPhoto = albumPhotoFromUpdate(update);
+        if (albumPhoto) {
+          // A photo of a Telegram album: buffer it and do NOT emit an event yet.
+          // The offset advances per photo so a held album can never spin the loop.
+          const groupId = update.message!.media_group_id!;
+          if (this.pendingAlbum && this.pendingAlbum.mediaGroupId !== groupId) {
+            await this.flushAlbum(signal);
+          }
+          this.bufferAlbumPhoto(update, albumPhoto);
+          offset = update.update_id + 1;
+          await this.options.setCursor(CURSOR_KEY, String(offset));
+          continue;
+        }
+        // A non-album update ends any album in flight before it is handled.
+        if (this.pendingAlbum) await this.flushAlbum(signal);
         const event = telegramUpdateToEvent(update);
         let disposition: RemoteInboundDisposition = event
           ? { kind: 'retry', reason: 'remote event handler is unavailable' }
@@ -324,6 +366,94 @@ export class TelegramChannel implements RemoteChannel {
         offset = update.update_id + 1;
         await this.options.setCursor(CURSOR_KEY, String(offset));
       }
+      // An album's photos arrive as a burst in one batch; flush at the end so
+      // the merged prompt is emitted with no waiting.
+      if (this.pendingAlbum) await this.flushAlbum(signal);
+    }
+  }
+
+  /**
+   * Adds an album photo to the in-flight album, replacing it when the group id
+   * differs (the caller flushes the old album before this is reached). Caps the
+   * buffered photos at `MAX_TELEGRAM_IMAGES_PER_MESSAGE`; the 4th and later set
+   * `overflow` so the flush can tell the user what was dropped.
+   */
+  private bufferAlbumPhoto(
+    update: z.infer<typeof TelegramUpdateSchema>,
+    photo: { name: string; mediaType: string; providerFileId: string },
+  ): void {
+    const message = update.message!;
+    const pending = this.pendingAlbum;
+    if (!pending || pending.mediaGroupId !== message.media_group_id) {
+      this.pendingAlbum = {
+        mediaGroupId: message.media_group_id!,
+        photos: [photo],
+        firstText: message.text ?? message.caption ?? '',
+        firstMessageId: message.message_id,
+        chatId: String(message.chat.id),
+        senderId: String(message.from!.id),
+        chatType: telegramChatType(message.chat.type),
+        receivedAt: message.date * 1000,
+        overflow: false,
+      };
+      return;
+    }
+    if (pending.photos.length >= MAX_TELEGRAM_IMAGES_PER_MESSAGE) {
+      pending.overflow = true;
+      return;
+    }
+    pending.photos.push(photo);
+  }
+
+  /**
+   * Emits the buffered album as ONE multi-image `text` prompt, acknowledges its
+   * disposition like any other text event, and -- if the album overflowed the
+   * cap -- tells the user how many were kept and what the size limits are.
+   *
+   * The offset has already advanced past every photo by the time this runs, so
+   * a `retry` disposition here cannot redeliver the album (the updates are
+   * consumed). That is the accepted trade for merging: a transient host error
+   * drops at most one album, and the loop never spins on it.
+   */
+  private async flushAlbum(signal: AbortSignal): Promise<void> {
+    const album = this.pendingAlbum;
+    if (!album) return;
+    this.pendingAlbum = undefined;
+    const event: RemoteInboundEvent = {
+      channel: 'telegram',
+      kind: 'text',
+      providerMessageId: String(album.firstMessageId),
+      senderId: album.senderId,
+      chatId: album.chatId,
+      chatType: album.chatType,
+      receivedAt: album.receivedAt,
+      text: album.firstText,
+      attachments: album.photos,
+    };
+    let disposition: RemoteInboundDisposition = {
+      kind: 'retry',
+      reason: 'remote event handler is unavailable',
+    };
+    if (this.handler) {
+      try {
+        disposition = await this.handler(event);
+      } catch (err) {
+        disposition = { kind: 'retry', reason: err instanceof Error ? err.message : String(err) };
+      }
+    }
+    await this.acknowledgeDisposition(event, disposition, signal);
+    if (album.overflow && album.chatType === 'private') {
+      await this.send(
+        album.chatId,
+        `Forge: albums are limited to ${MAX_TELEGRAM_IMAGES_PER_MESSAGE} images per message — I kept the first ${MAX_TELEGRAM_IMAGES_PER_MESSAGE}. Each image is capped at 10 MiB, 25 MiB total.`,
+        { signal },
+      ).catch((err) => {
+        if (!signal.aborted) {
+          this.options.onError?.(
+            `Forge Telegram album notice failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      });
     }
   }
 

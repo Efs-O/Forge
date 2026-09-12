@@ -40,6 +40,8 @@ Notes:
 
 • /view replays the last answers in this chat's conversation, oldest first — 3 by default, 10 at most; use it after /chat to see what an older conversation came to
 
+• You can send up to 3 images in one message (send them as a photo album). Each image is capped at 10 MiB and 25 MiB total; send more than 3 and I keep the first 3 and tell you
+
 • /notify off silences agent notify_user messages for this chat until the window reloads
 
 • /mirror off stops answers typed in the Forge window being echoed here (on by default)
