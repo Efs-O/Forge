@@ -1,13 +1,12 @@
-import * as fsp from 'fs/promises';
 import { z } from 'zod';
-import {
-  albumPhotoFromUpdate,
-  isTextMediaType,
-  mediaTypeForPath,
-  telegramChatType,
-  TelegramUpdateSchema,
-  telegramUpdateToEvent,
-} from './TelegramInboundMapping';
+import { TelegramAlbumCoordinator, MAX_TELEGRAM_IMAGES_PER_MESSAGE } from './TelegramAlbumBuffer';
+import { acknowledgeTelegramDisposition } from './TelegramAcknowledgement';
+import { splitTelegramText } from './TelegramText';
+import { sendTelegramVoice } from './TelegramVoice';
+import { downloadTelegramAttachment, downloadTelegramAttachmentToFile } from './TelegramDownloads';
+import { pollTelegramUpdates, TELEGRAM_CURSOR_KEY } from './TelegramPolling';
+export { MAX_TELEGRAM_IMAGES_PER_MESSAGE } from './TelegramAlbumBuffer';
+export { splitTelegramText } from './TelegramText';
 import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
 import { createTelegramSelectionPages } from './TelegramSelectionPagination';
 import { postTelegram, TelegramChatQueue } from './telegramSendQueue';
@@ -15,17 +14,8 @@ import { postTelegram, TelegramChatQueue } from './telegramSendQueue';
 type Fetch = typeof fetch;
 const TelegramSentMessageSchema = z.object({ message_id: z.number().int() });
 
-const CURSOR_KEY = 'telegram:update-offset';
-/**
- * How many photos of a Telegram album (photo group) become one prompt. Telegram
- * delivers an album as separate updates sharing a `media_group_id`; without this
- * cap an album of N would become N queued prompts. The sidebar's own
- * `MAX_ATTACHMENTS_PER_PROMPT` (10) is the downstream backstop and is unchanged.
- */
-export const MAX_TELEGRAM_IMAGES_PER_MESSAGE = 3;
 /** Unanswered prompts are rare; this only bounds a pathological case. */
 const PROMPT_MESSAGE_LIMIT = 256;
-const TELEGRAM_TEXT_LIMIT = 4096;
 const TELEGRAM_CALLBACK_DATA_LIMIT_BYTES = 64;
 export const TELEGRAM_BOT_TOKEN_SECRET = 'forge.remote.telegram.botToken';
 
@@ -86,27 +76,37 @@ export class TelegramChannel implements RemoteChannel {
   private readonly promptMessages = new Map<string, number>();
   /** Serializes every chat-addressed call so sends cannot overtake each other. */
   private readonly sendQueue = new TelegramChatQueue();
-  /**
-   * A Telegram photo album in flight. Photos arrive as separate updates sharing
-   * a `media_group_id`; they are buffered here and emitted as ONE multi-image
-   * prompt on flush, instead of each becoming its own queued request. The offset
-   * is advanced per photo (not per flush) so a held album can never spin the
-   * poll loop -- the `MAX_UPDATE_RETRIES` guard always sees a moving offset.
-   */
-  private pendingAlbum: {
-    mediaGroupId: string;
-    photos: Array<{ name: string; mediaType: string; providerFileId: string }>;
-    firstText: string;
-    firstMessageId: number;
-    chatId: string;
-    senderId: string;
-    chatType: RemoteInboundEvent['chatType'];
-    receivedAt: number;
-    overflow: boolean;
-  } | undefined;
+  private readonly albumCoordinator: TelegramAlbumCoordinator;
 
   constructor(private readonly options: TelegramChannelOptions) {
     this.fetchImpl = options.fetch ?? fetch;
+    this.albumCoordinator = new TelegramAlbumCoordinator({
+      handle: async (event) => {
+        if (!this.handler) return { kind: 'retry', reason: 'remote event handler is unavailable' };
+        try {
+          return await this.handler(event);
+        } catch (err) {
+          return { kind: 'retry', reason: err instanceof Error ? err.message : String(err) };
+        }
+      },
+      acknowledge: (event, disposition, signal) =>
+        this.acknowledgeDisposition(event, disposition, signal),
+      commitCursor: (nextOffset) => this.options.setCursor(TELEGRAM_CURSOR_KEY, String(nextOffset)),
+      onOverflow: async (event, signal) => {
+        if (event.chatType !== 'private') return;
+        await this.send(
+          event.chatId,
+          `Forge: albums are limited to ${MAX_TELEGRAM_IMAGES_PER_MESSAGE} images per message — I kept the first ${MAX_TELEGRAM_IMAGES_PER_MESSAGE}. Each image is capped at 10 MiB, 25 MiB total.`,
+          { signal },
+        ).catch((err) => {
+          if (!signal.aborted) {
+            this.options.onError?.(
+              `Forge Telegram album notice failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        });
+      },
+    });
   }
 
   onEvent(handler: (event: RemoteInboundEvent) => Promise<RemoteInboundDisposition>): {
@@ -269,216 +269,27 @@ export class TelegramChannel implements RemoteChannel {
    * saw the real cause. Three attempts, then reject with the last error and move
    * on — a poisoned update must never be able to spin.
    */
-  private static readonly MAX_UPDATE_RETRIES = 3;
-
   private async poll(signal: AbortSignal): Promise<void> {
-    let offset = Number(this.options.getCursor(CURSOR_KEY) ?? '0');
-    let consecutiveFailures = 0;
-    let retryingUpdateId: number | undefined;
-    let retryAttempts = 0;
-    if (!Number.isSafeInteger(offset) || offset < 0) offset = 0;
-    while (!signal.aborted) {
-      let updates: z.infer<typeof TelegramUpdateSchema>[];
-      try {
-        const result = await this.call(
-          'getUpdates',
-          {
-            offset,
-            timeout: 25,
-            allowed_updates: ['message', 'callback_query'],
-          },
-          signal,
-        );
-        updates = z.array(TelegramUpdateSchema).parse(result);
-        consecutiveFailures = 0;
-      } catch (err) {
-        if (signal.aborted) return;
-        consecutiveFailures += 1;
-        if (consecutiveFailures === 3) {
-          this.options.onError?.(
-            `Forge Telegram polling is retrying: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-        const delay = Math.min(1_000 * 2 ** Math.min(consecutiveFailures - 1, 5), 30_000);
-        await abortableDelay(delay, signal);
-        continue;
-      }
-      for (const update of updates.sort((a, b) => a.update_id - b.update_id)) {
-        if (signal.aborted) return;
-        const albumPhoto = albumPhotoFromUpdate(update);
-        if (albumPhoto) {
-          // A photo of a Telegram album: buffer it and do NOT emit an event yet.
-          // The offset advances per photo so a held album can never spin the loop.
-          const groupId = update.message!.media_group_id!;
-          if (this.pendingAlbum && this.pendingAlbum.mediaGroupId !== groupId) {
-            await this.flushAlbum(signal);
-          }
-          this.bufferAlbumPhoto(update, albumPhoto);
-          offset = update.update_id + 1;
-          await this.options.setCursor(CURSOR_KEY, String(offset));
-          continue;
-        }
-        // A non-album update ends any album in flight before it is handled.
-        if (this.pendingAlbum) await this.flushAlbum(signal);
-        const event = telegramUpdateToEvent(update);
-        let disposition: RemoteInboundDisposition = event
-          ? { kind: 'retry', reason: 'remote event handler is unavailable' }
-          : { kind: 'handled' };
-        if (event && this.handler) {
-          try {
-            disposition = await this.handler(event);
-          } catch (err) {
-            disposition = {
-              kind: 'retry',
-              reason: err instanceof Error ? err.message : String(err),
-            };
-          }
-        }
-        if (disposition.kind === 'retry') {
-          if (update.update_id === retryingUpdateId) retryAttempts += 1;
-          else {
-            retryingUpdateId = update.update_id;
-            retryAttempts = 1;
-          }
-          if (retryAttempts >= TelegramChannel.MAX_UPDATE_RETRIES) {
-            disposition = { kind: 'rejected', reason: disposition.reason };
-            retryingUpdateId = undefined;
-            retryAttempts = 0;
-          }
-        } else if (update.update_id === retryingUpdateId) {
-          retryingUpdateId = undefined;
-          retryAttempts = 0;
-        }
-        if (event && (event.kind === 'text' || event.kind === 'voice')) {
-          await this.acknowledgeDisposition(event, disposition, signal);
-        }
-        if (update.callback_query) {
-          await this.call(
-            'answerCallbackQuery',
-            {
-              callback_query_id: update.callback_query.id,
-              text: disposition.kind === 'rejected' ? disposition.reason.slice(0, 200) : 'Received',
-            },
-            signal,
-          ).catch(() => undefined);
-        }
-        if (disposition.kind === 'retry') break;
-        offset = update.update_id + 1;
-        await this.options.setCursor(CURSOR_KEY, String(offset));
-      }
-      // An album's photos arrive as a burst in one batch; flush at the end so
-      // the merged prompt is emitted with no waiting.
-      if (this.pendingAlbum) await this.flushAlbum(signal);
-    }
-  }
-
-  /**
-   * Adds an album photo to the in-flight album, replacing it when the group id
-   * differs (the caller flushes the old album before this is reached). Caps the
-   * buffered photos at `MAX_TELEGRAM_IMAGES_PER_MESSAGE`; the 4th and later set
-   * `overflow` so the flush can tell the user what was dropped.
-   */
-  private bufferAlbumPhoto(
-    update: z.infer<typeof TelegramUpdateSchema>,
-    photo: { name: string; mediaType: string; providerFileId: string },
-  ): void {
-    const message = update.message!;
-    const pending = this.pendingAlbum;
-    if (!pending || pending.mediaGroupId !== message.media_group_id) {
-      this.pendingAlbum = {
-        mediaGroupId: message.media_group_id!,
-        photos: [photo],
-        firstText: message.text ?? message.caption ?? '',
-        firstMessageId: message.message_id,
-        chatId: String(message.chat.id),
-        senderId: String(message.from!.id),
-        chatType: telegramChatType(message.chat.type),
-        receivedAt: message.date * 1000,
-        overflow: false,
-      };
-      return;
-    }
-    if (pending.photos.length >= MAX_TELEGRAM_IMAGES_PER_MESSAGE) {
-      pending.overflow = true;
-      return;
-    }
-    pending.photos.push(photo);
-  }
-
-  /**
-   * Emits the buffered album as ONE multi-image `text` prompt, acknowledges its
-   * disposition like any other text event, and -- if the album overflowed the
-   * cap -- tells the user how many were kept and what the size limits are.
-   *
-   * The offset has already advanced past every photo by the time this runs, so
-   * a `retry` disposition here cannot redeliver the album (the updates are
-   * consumed). That is the accepted trade for merging: a transient host error
-   * drops at most one album, and the loop never spins on it.
-   */
-  private async flushAlbum(signal: AbortSignal): Promise<void> {
-    const album = this.pendingAlbum;
-    if (!album) return;
-    this.pendingAlbum = undefined;
-    const event: RemoteInboundEvent = {
-      channel: 'telegram',
-      kind: 'text',
-      providerMessageId: String(album.firstMessageId),
-      senderId: album.senderId,
-      chatId: album.chatId,
-      chatType: album.chatType,
-      receivedAt: album.receivedAt,
-      text: album.firstText,
-      attachments: album.photos,
-    };
-    let disposition: RemoteInboundDisposition = {
-      kind: 'retry',
-      reason: 'remote event handler is unavailable',
-    };
-    if (this.handler) {
-      try {
-        disposition = await this.handler(event);
-      } catch (err) {
-        disposition = { kind: 'retry', reason: err instanceof Error ? err.message : String(err) };
-      }
-    }
-    await this.acknowledgeDisposition(event, disposition, signal);
-    if (album.overflow && album.chatType === 'private') {
-      await this.send(
-        album.chatId,
-        `Forge: albums are limited to ${MAX_TELEGRAM_IMAGES_PER_MESSAGE} images per message — I kept the first ${MAX_TELEGRAM_IMAGES_PER_MESSAGE}. Each image is capped at 10 MiB, 25 MiB total.`,
-        { signal },
-      ).catch((err) => {
-        if (!signal.aborted) {
-          this.options.onError?.(
-            `Forge Telegram album notice failed: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-      });
-    }
+    return pollTelegramUpdates(signal, {
+      call: (method, body, callSignal) => this.call(method, body, callSignal),
+      getCursor: this.options.getCursor,
+      setCursor: this.options.setCursor,
+      getHandler: () => this.handler,
+      acknowledge: (event, disposition, eventSignal) =>
+        this.acknowledgeDisposition(event, disposition, eventSignal),
+      albumCoordinator: this.albumCoordinator,
+      onError: this.options.onError,
+    });
   }
 
   async downloadAttachment(
     attachment: import('./types').RemoteInboundAttachment,
   ): Promise<import('./types').RemoteInboundAttachment> {
-    if (!attachment.providerFileId) throw new Error('Telegram attachment has no file id.');
-    const file = z
-      .object({ file_path: z.string().min(1) })
-      .parse(await this.call('getFile', { file_id: attachment.providerFileId }));
-    const response = await this.fetchImpl(
-      `https://api.telegram.org/file/bot${this.options.token}/${file.file_path}`,
-    );
-    if (!response.ok) throw new Error(`Telegram file download HTTP ${response.status}.`);
-    const bytes = Buffer.from(await response.arrayBuffer());
-    return {
-      ...attachment,
-      // utf8 only for types that ARE text. Decoding arbitrary bytes as utf8
-      // replaces every invalid sequence with U+FFFD, which silently corrupts the
-      // file rather than failing -- audio, archives and office documents all
-      // arrived intact and left unusable.
-      data: isTextMediaType(attachment.mediaType)
-        ? bytes.toString('utf8')
-        : bytes.toString('base64'),
-    };
+    return downloadTelegramAttachment(attachment, {
+      call: (method, body, signal) => this.call(method, body, signal),
+      fetchImpl: this.fetchImpl,
+      token: this.options.token,
+    });
   }
 
   /**
@@ -494,16 +305,11 @@ export class TelegramChannel implements RemoteChannel {
     targetPath: string,
     signal?: AbortSignal,
   ): Promise<{ bytes: number; mediaType: string }> {
-    const file = z
-      .object({ file_path: z.string().min(1) })
-      .parse(await this.call('getFile', { file_id: providerFileId }, signal));
-    const response = await this.fetchImpl(
-      `https://api.telegram.org/file/bot${this.options.token}/${file.file_path}`,
-    );
-    if (!response.ok) throw new Error(`Telegram file download HTTP ${response.status}.`);
-    const bytes = Buffer.from(await response.arrayBuffer());
-    await fsp.writeFile(targetPath, bytes);
-    return { bytes: bytes.length, mediaType: mediaTypeForPath(file.file_path) };
+    return downloadTelegramAttachmentToFile(providerFileId, targetPath, signal, {
+      call: (method, body, callSignal) => this.call(method, body, callSignal),
+      fetchImpl: this.fetchImpl,
+      token: this.options.token,
+    });
   }
 
   /**
@@ -516,62 +322,29 @@ export class TelegramChannel implements RemoteChannel {
    * offline and is exactly the silent-failure shape the voice path is most
    * likely to be blamed for.
    */
-  private async acknowledgeDisposition(
+  private acknowledgeDisposition(
     event: Extract<RemoteInboundEvent, { kind: 'text' | 'voice' }>,
     disposition: RemoteInboundDisposition,
     signal: AbortSignal,
   ): Promise<void> {
-    if (event.chatType !== 'private') return;
-    let text: string | undefined;
-    if (disposition.kind === 'queued') {
-      text =
-        event.kind === 'text' && event.text.trim().toLowerCase().startsWith('/steer')
-          ? `Forge: interrupting the turn; your steering prompt runs next (position ${disposition.position}).`
-          : `Forge: queued at position ${disposition.position} — it runs when the current turn ends. Send /steer ${disposition.position} to cut the turn short and run it now, /queue to review, /drop ${disposition.position} to cancel.`;
-    } else if (disposition.kind === 'rejected') {
-      // Reasons that came from a thrown host error already carry the prefix
-      // (ForgeHostFacade throws "Forge: conversation could not be restored."),
-      // so prefixing unconditionally produced "Forge: Forge: …" in the chat.
-      text = disposition.reason.startsWith('Forge:')
-        ? disposition.reason
-        : `Forge: ${disposition.reason}`;
-    }
-    if (!text) return;
-    await this.send(event.chatId, text, { signal }).catch((err) => {
-      if (!signal.aborted) {
-        this.options.onError?.(
-          `Forge Telegram acknowledgement failed: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        );
-      }
-    });
+    return acknowledgeTelegramDisposition(
+      event,
+      disposition,
+      signal,
+      (chatId, text, options) => this.send(chatId, text, options),
+      this.options.onError,
+    );
   }
 
-  /**
-   * Uploads a synthesized reply as a playable voice message.
-   *
-   * `sendVoice` rather than `sendAudio` because Telegram renders the former as
-   * an inline waveform that plays on tap and the latter as a file with a
-   * download step -- for a reply meant to just be heard, that is the feature.
-   * It requires OGG/Opus specifically; see `encodeToOpus`.
-   *
-   * Multipart rather than `this.call`, which posts JSON: a file upload is the
-   * one Bot API shape that cannot go through it.
-   */
   async sendVoice(chatId: string, oggPath: string, signal?: AbortSignal): Promise<void> {
-    const bytes = await fsp.readFile(oggPath);
-    // Read before entering the lane: a slow disk must not hold the chat's queue.
-    const form = new FormData();
-    form.append('chat_id', chatId);
-    form.append('voice', new Blob([new Uint8Array(bytes)], { type: 'audio/ogg' }), 'reply.ogg');
-    await this.sendQueue.run(chatId, async () => {
-      const response = await this.fetchImpl(
-        `https://api.telegram.org/bot${this.options.token}/sendVoice`,
-        { method: 'POST', body: form, ...(signal ? { signal } : {}) },
-      );
-      if (!response.ok) throw new Error(`Telegram sendVoice HTTP ${response.status}.`);
-    });
+    await sendTelegramVoice(
+      this.fetchImpl,
+      this.options.token,
+      this.sendQueue,
+      chatId,
+      oggPath,
+      signal,
+    );
   }
 
   /**
@@ -589,36 +362,4 @@ export class TelegramChannel implements RemoteChannel {
       postTelegram(this.fetchImpl, this.options.token, method, body, signal),
     );
   }
-}
-
-export function splitTelegramText(text: string): string[] {
-  if (!text) return [''];
-  const chunks: string[] = [];
-  let chunk = '';
-  let characters = 0;
-  for (const character of text) {
-    if (characters === TELEGRAM_TEXT_LIMIT) {
-      chunks.push(chunk);
-      chunk = '';
-      characters = 0;
-    }
-    chunk += character;
-    characters += 1;
-  }
-  if (chunk) chunks.push(chunk);
-  return chunks;
-}
-
-function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    signal.addEventListener(
-      'abort',
-      () => {
-        clearTimeout(timer);
-        resolve();
-      },
-      { once: true },
-    );
-  });
 }

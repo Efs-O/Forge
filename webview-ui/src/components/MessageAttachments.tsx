@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import type { MessageAttachment } from '../messageOps';
 import { vscode } from '../vscode';
 import { shortenName } from './AttachmentTray';
@@ -32,6 +32,7 @@ export function MessageAttachments({
   attachments: MessageAttachment[];
 }): React.ReactElement | null {
   const [expanded, setExpanded] = useState<MessageAttachment | null>(null);
+  const closeExpanded = useCallback(() => setExpanded(null), []);
 
   if (!attachments.length) return null;
   return (
@@ -39,7 +40,7 @@ export function MessageAttachments({
       <div className="msg-attachments">
         {attachments.map((attachment, index) => {
           const isImage = attachment.mediaType.startsWith('image/') && attachment.src !== '';
-          const openable = isImage || attachment.relativePath !== undefined;
+          const openable = isImage || Boolean(attachment.relativePath);
           const label = `${attachment.name} — ${sizeLabel(attachment.bytes)}`;
           const onClick = (): void => {
             if (isImage) {
@@ -55,7 +56,13 @@ export function MessageAttachments({
               key={`${attachment.name}-${index}`}
               type="button"
               className={`msg-attachment${isImage ? ' is-image' : ''}`}
-              title={isImage ? `${label} — click to expand` : openable ? `${label} — click to open` : label}
+              title={
+                isImage
+                  ? `${label} — click to expand`
+                  : openable
+                    ? `${label} — click to open`
+                    : label
+              }
               onClick={onClick}
               disabled={!openable}
             >
@@ -68,7 +75,7 @@ export function MessageAttachments({
           );
         })}
       </div>
-      {expanded && <ImageLightbox attachment={expanded} onClose={() => setExpanded(null)} />}
+      {expanded && <ImageLightbox attachment={expanded} onClose={closeExpanded} />}
     </>
   );
 }

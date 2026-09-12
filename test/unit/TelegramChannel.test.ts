@@ -714,9 +714,10 @@ describe('TelegramChannel photo albums', () => {
   }
 
   /**
-   * Feeds `batches` one `getUpdates` result at a time (in order) and hangs the
-   * long poll once they are exhausted, so the loop does not spin. Captures the
-   * events the handler sees and every `sendMessage` body the channel sends.
+   * Feeds `batches` one `getUpdates` result at a time (in order), returns one
+   * empty result so a buffered album can settle, then hangs the long poll.
+   * Captures the events the handler sees and every `sendMessage` body the
+   * channel sends.
    */
   async function runAlbums(
     batches: unknown[][],
@@ -724,6 +725,7 @@ describe('TelegramChannel photo albums', () => {
   ) {
     const abort = new AbortController();
     let poll = 0;
+    let returnedEmpty = false;
     const events: RemoteInboundEvent[] = [];
     const sent: Array<Record<string, unknown>> = [];
     const setCursor = vi.fn(async () => undefined);
@@ -740,7 +742,11 @@ describe('TelegramChannel photo albums', () => {
         }
         if (method === 'getUpdates') {
           const batch = batches[poll++];
-          if (batch) return response(batch);
+          if (batch !== undefined) return response(batch);
+          if (!returnedEmpty) {
+            returnedEmpty = true;
+            return response([]);
+          }
           return new Promise<Response>((_resolve, reject) => {
             init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
               once: true,
@@ -759,18 +765,16 @@ describe('TelegramChannel photo albums', () => {
   }
 
   it('maps a single non-album photo to one event (existing behaviour)', async () => {
-    const h = await runAlbums(
-      [[photoUpdate(1, 1, 'f1', '')]],
-      async () => ({ kind: 'accepted', requestId: 'r' }),
-    );
+    const h = await runAlbums([[photoUpdate(1, 1, 'f1', '')]], async () => ({
+      kind: 'accepted',
+      requestId: 'r',
+    }));
     await vi.waitFor(() => expect(h.events).toHaveLength(1));
     h.abort.abort();
     expect(h.events[0]).toMatchObject({
       kind: 'text',
       providerMessageId: '1',
-      attachments: [
-        { name: 'telegram-photo.jpg', mediaType: 'image/jpeg', providerFileId: 'f1' },
-      ],
+      attachments: [{ name: 'telegram-photo.jpg', mediaType: 'image/jpeg', providerFileId: 'f1' }],
     });
   });
 
@@ -784,16 +788,19 @@ describe('TelegramChannel photo albums', () => {
     expect(h.events[0]).toMatchObject({
       kind: 'text',
       providerMessageId: '1',
-      attachments: [
-        { providerFileId: 'f1' },
-        { providerFileId: 'f2' },
-      ],
+      attachments: [{ providerFileId: 'f1' }, { providerFileId: 'f2' }],
     });
   });
 
   it('merges a 3-photo album into one event with no overflow notice', async () => {
     const h = await runAlbums(
-      [[photoUpdate(1, 1, 'f1', 'g1'), photoUpdate(2, 2, 'f2', 'g1'), photoUpdate(3, 3, 'f3', 'g1')]],
+      [
+        [
+          photoUpdate(1, 1, 'f1', 'g1'),
+          photoUpdate(2, 2, 'f2', 'g1'),
+          photoUpdate(3, 3, 'f3', 'g1'),
+        ],
+      ],
       async () => ({ kind: 'accepted', requestId: 'r' }),
     );
     await vi.waitFor(() => expect(h.events).toHaveLength(1));
@@ -868,19 +875,25 @@ describe('TelegramChannel photo albums', () => {
     });
   });
 
-  it('advances the offset on every album photo, not just per emitted event', async () => {
+  it('commits the album offset after the combined event is handled', async () => {
     const h = await runAlbums(
-      [[photoUpdate(1, 1, 'f1', 'g1'), photoUpdate(2, 2, 'f2', 'g1'), photoUpdate(3, 3, 'f3', 'g1')]],
+      [
+        [
+          photoUpdate(1, 1, 'f1', 'g1'),
+          photoUpdate(2, 2, 'f2', 'g1'),
+          photoUpdate(3, 3, 'f3', 'g1'),
+        ],
+      ],
       async () => ({ kind: 'accepted', requestId: 'r' }),
     );
     await vi.waitFor(() => expect(h.events).toHaveLength(1));
     h.abort.abort();
-    // Three photos -> three offset saves (2, 3, 4), even though one event fired.
-    expect(h.setCursor).toHaveBeenCalledTimes(3);
+    // The cursor commits only after the combined event is handled.
+    expect(h.setCursor).toHaveBeenCalledTimes(1);
     expect(h.setCursor).toHaveBeenLastCalledWith('telegram:update-offset', '4');
   });
 
-  it('degrades a cross-batch album to two events without losing an update', async () => {
+  it('merges an album split across poll batches', async () => {
     const h = await runAlbums(
       [
         [photoUpdate(1, 1, 'f1', 'g1'), photoUpdate(2, 2, 'f2', 'g1')],
@@ -888,10 +901,23 @@ describe('TelegramChannel photo albums', () => {
       ],
       async () => ({ kind: 'accepted', requestId: 'r' }),
     );
-    await vi.waitFor(() => expect(h.events).toHaveLength(2));
+    await vi.waitFor(() => expect(h.events).toHaveLength(1));
     h.abort.abort();
-    expect(h.events[0]).toMatchObject({ attachments: [{ providerFileId: 'f1' }, { providerFileId: 'f2' }] });
-    expect(h.events[1]).toMatchObject({ attachments: [{ providerFileId: 'f3' }] });
+    expect(h.events[0]).toMatchObject({
+      attachments: [{ providerFileId: 'f1' }, { providerFileId: 'f2' }, { providerFileId: 'f3' }],
+    });
+  });
+
+  it('rejects an album after repeated handler failures before committing its cursor', async () => {
+    const h = await runAlbums(
+      [[photoUpdate(1, 1, 'f1', 'g1')]],
+      async () => ({ kind: 'retry', reason: 'album handler failed' }),
+    );
+    await vi.waitFor(() => expect(h.sent).toHaveLength(1));
+    h.abort.abort();
+    expect(h.events).toHaveLength(3);
+    expect(h.sent[0]!.text).toContain('album handler failed');
+    expect(h.setCursor).toHaveBeenLastCalledWith('telegram:update-offset', '2');
   });
 });
 

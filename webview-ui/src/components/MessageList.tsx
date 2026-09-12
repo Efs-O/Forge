@@ -141,7 +141,7 @@ export function MessageList({
     let cancelled = false;
     let frame = 0;
     const step = () => {
-      if (cancelled) return;
+      if (cancelled || userScrolledUp.current) return;
       scrollToBottom('auto');
       frame++;
       const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
@@ -189,8 +189,7 @@ export function MessageList({
     if (shownConversation.current !== conversationId) {
       shownConversation.current = conversationId;
       userScrolledUp.current = false;
-      settleToBottom();
-      return;
+      return settleToBottom();
     }
     if (!active) return;
     if (!userScrolledUp.current) {

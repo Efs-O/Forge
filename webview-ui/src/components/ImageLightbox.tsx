@@ -41,7 +41,12 @@ export function ImageLightbox({ attachment, onClose }: Props): React.ReactElemen
         ref={closeRef}
         type="button"
         className="lightbox-close"
-        onClick={onClose}
+        onClick={(event) => {
+          // The button is inside the backdrop. Prevent the same click from
+          // invoking the close callback a second time on the overlay.
+          event.stopPropagation();
+          onClose();
+        }}
         aria-label="Close image"
         title="Close (Esc)"
       >

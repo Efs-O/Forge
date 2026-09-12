@@ -2,18 +2,18 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MessageAttachment } from '../../webview-ui/src/messageOps';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const postMessage = vi.fn();
-(globalThis as unknown as { acquireVsCodeApi: () => { postMessage: (message: unknown) => void } })
-  .acquireVsCodeApi = () => ({ postMessage });
+(
+  globalThis as unknown as { acquireVsCodeApi: () => { postMessage: (message: unknown) => void } }
+).acquireVsCodeApi = () => ({ postMessage });
 
 const React = (await import('react')).default;
-const { MessageAttachments } = await import(
-  '../../webview-ui/src/components/MessageAttachments'
-);
-const { MessageAttachment } = await import('../../webview-ui/src/messageOps');
+const { MessageAttachments } = await import('../../webview-ui/src/components/MessageAttachments');
+const { ImageLightbox } = await import('../../webview-ui/src/components/ImageLightbox');
 
 let container: HTMLDivElement;
 let root: Root;
@@ -81,6 +81,19 @@ describe('MessageAttachments', () => {
     expect(container.querySelector('.lightbox-overlay')).toBeNull();
   });
 
+  it('calls onClose once when the close button is clicked', () => {
+    const onClose = vi.fn();
+    act(() => {
+      root.render(React.createElement(ImageLightbox, { attachment: image, onClose }));
+    });
+
+    act(() => {
+      container.querySelector<HTMLButtonElement>('.lightbox-close')!.click();
+    });
+
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
   it('still posts openAttachment for a non-image file', () => {
     act(() => {
       root.render(React.createElement(MessageAttachments, { attachments: [textFile] }));
@@ -105,6 +118,20 @@ describe('MessageAttachments', () => {
       root.render(
         React.createElement(MessageAttachments, {
           attachments: [{ ...textFile, relativePath: undefined }],
+        }),
+      );
+    });
+
+    const chip = container.querySelector<HTMLButtonElement>('.msg-attachment');
+    expect(chip).not.toBeNull();
+    expect(chip!.disabled).toBe(true);
+  });
+
+  it('leaves a non-image chip with an empty relativePath disabled', () => {
+    act(() => {
+      root.render(
+        React.createElement(MessageAttachments, {
+          attachments: [{ ...textFile, relativePath: '' }],
         }),
       );
     });

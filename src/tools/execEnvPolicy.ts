@@ -86,9 +86,7 @@ const BLOCKED_ENV_NAMES = new Set<string>([
  */
 const BLOCKED_ENV_PREFIXES = ['npm_config_', 'npm_lifecycle_', 'git_config_', 'dyld_'];
 
-export function validateExecEnv(
-  raw: Record<string, unknown> | undefined,
-): ExecEnvResult {
+export function validateExecEnv(raw: Record<string, unknown> | undefined): ExecEnvResult {
   if (raw === undefined) return { ok: true, env: {} };
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     return { ok: false, env: {}, error: 'env must be an object of string values' };

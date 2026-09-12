@@ -1,5 +1,24 @@
 # Forge — Recent Changes
 
+## 0.15.39
+
+- **Telegram albums arrive as one prompt.** Photo groups are merged into one
+  multi-image event, capped at three images with an in-chat overflow notice;
+  albums split across polling responses are kept together, and their cursor is
+  committed only after the event is handled.
+
+- **Remote questions expose free text.** Multi-question prompts now tell remote
+  users they may answer in prose, matching the sidebar's `Other…` route.
+
+- **`exec_command` accepts validated environment variables.** Foreground and
+  background execution share the same bounded policy while preserving shell-free
+  process spawning.
+
+- **The webview improves image and transcript navigation.** Image attachments
+  open in an in-place lightbox, and switching conversations reliably settles at
+  the actual bottom of a long transcript. Streaming status phrases also received
+  additional shared variants.
+
 ## 0.15.37
 
 - **One `/model` command for remote.** `/models` and `/model` did overlapping

@@ -102,9 +102,9 @@ export function makeExecCommandTool(): RegisteredTool {
               type: 'object',
               additionalProperties: { type: 'string' },
               description:
-                'Optional environment variables for the process. A small, validated set — '
-                + 'dangerous names (NODE_OPTIONS, PATH, LD_PRELOAD, …) are refused. '
-                + 'Use for CLIs that need an env var (e.g. ELECTRON_RUN_AS_NODE).',
+                'Optional environment variables for the process. A small, validated set — ' +
+                'dangerous names (NODE_OPTIONS, PATH, LD_PRELOAD, …) are refused. ' +
+                'Use for CLIs that need an env var (e.g. ELECTRON_RUN_AS_NODE).',
             },
             timeout_ms: {
               type: 'integer',
