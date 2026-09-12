@@ -104,7 +104,7 @@ export function renderQuestionAsText(
       )
       .join('\n');
     const example = groups.map(() => '1').join(' ');
-    return `${prompt}\n\n${body}\n\nReply with one number per question, in order — e.g. "${example}".`;
+    return `${prompt}\n\n${body}\n\nReply with one number per question, in order — e.g. "${example}" — or send free text instead.`;
   }
   if (options?.length) {
     const body = options.map((option, index) => `${index + 1}. ${option}`).join('\n');

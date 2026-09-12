@@ -312,6 +312,27 @@ describe('RemoteQuestionBridge', () => {
     expect(text).toContain('2) Install');
     expect(text).toContain('   1. bump');
     expect(text).toContain('one number per question');
+    // The free-text route is advertised too — the sidebar's Other… has to exist
+    // on a phone as well, or the number-only footer reads as the only way to answer.
+    expect(text).toContain('or send free text instead');
+  });
+
+  it('passes free text through verbatim when a sub-question is answered in prose', async () => {
+    const { bridge, service } = bridgeRig();
+    const pending = service.ask({
+      prompt: 'Two decisions:',
+      questions: [
+        { prompt: 'Version', options: ['bump', 'keep'] },
+        { prompt: 'Install', options: ['open', 'skip'] },
+      ],
+      conversationId: 'c1',
+    });
+    await vi.waitFor(() => expect(bridge.hasPending('chat-1')).toBe(true));
+
+    // Not an index pair, so it is not coerced into a labelled group answer — the
+    // advertised "or send free text instead" route must actually work remotely.
+    expect(bridge.answerText('chat-1', 'bump it but do not install')).toBe(true);
+    await expect(pending).resolves.toBe('bump it but do not install');
   });
 
   it('stays silent for a turn with neither a remote chain nor a bound chat', async () => {
