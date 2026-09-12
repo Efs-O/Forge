@@ -96,6 +96,7 @@ export const SHARED_PHRASES = [
   'Daisy, Daisy…',
   'Take a stress pill…',
   "I'm afraid I can't do that…",
+  'Pull the plug…',
 ] as const;
 
 export interface PhrasePoolOptions {
