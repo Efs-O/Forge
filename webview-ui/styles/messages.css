@@ -312,3 +312,73 @@
   max-height: 160px;
   object-fit: contain;
 }
+
+/* ── Image lightbox ─────────────────────────────────────────────────────── */
+
+/*
+ * The expanded view of a transcript image. Same fixed-inset overlay the
+ * confirmation dialog uses, but the image is the content: it fills the viewport
+ * minus a margin, letterboxed, so a tall screenshot and a wide screenshot both
+ * fit without cropping. The dimmed backdrop is the hit target that closes it —
+ * the image and caption stop propagation so a tap on the picture does not
+ * dismiss it.
+ */
+.lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  cursor: zoom-out;
+}
+
+.lightbox-image {
+  max-width: 100%;
+  max-height: calc(100vh - 80px);
+  object-fit: contain;
+  border-radius: var(--forge-radius-sm);
+  cursor: default;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+
+.lightbox-caption {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #aaa);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.lightbox-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--vscode-editorWidget-background, #252526);
+  border: 1px solid var(--vscode-editorWidget-border, #454545);
+  border-radius: 50%;
+  color: var(--vscode-foreground);
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+  z-index: 1;
+}
+.lightbox-close:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.1));
+}
+.lightbox-close:focus-visible {
+  outline: 2px solid var(--forge-accent);
+  outline-offset: 2px;
+}
