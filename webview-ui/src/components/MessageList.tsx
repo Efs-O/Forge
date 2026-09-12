@@ -119,24 +119,40 @@ export function MessageList({
   }, []);
 
   /**
-   * Scroll to the bottom and hold it there for the next two frames.
+   * Scroll to the bottom and keep re-pinning until the viewport is actually
+   * there.
    *
    * Rows use `content-visibility: auto`, so a pane that has just been shown
-   * reports an estimated height for everything off screen and only corrects it
-   * as rows come into view. One scroll lands near the bottom on that estimate;
-   * re-pinning after the browser has laid the real rows out is what lands on it.
+   * reports an estimated height (60px per row) for everything off screen and
+   * only corrects it as rows come into view. Scrolling once to that estimate
+   * lands in the MIDDLE of a long conversation, not at its end: the true
+   * `scrollHeight` is only reached after the browser has laid out the rows
+   * below the estimated position, which takes more than two frames for a long
+   * transcript. So re-pin every frame until `scrollHeight` stops growing under
+   * us (i.e. the viewport is genuinely at the bottom); the frame cap stops us
+   * chasing a bottom that keeps moving while a turn is still appending.
    */
   const settleToBottom = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
     scrollToBottom('auto');
     if (typeof requestAnimationFrame !== 'function') return;
-    let second = 0;
-    const first = requestAnimationFrame(() => {
+    let raf = 0;
+    let cancelled = false;
+    let frame = 0;
+    const step = () => {
+      if (cancelled) return;
       scrollToBottom('auto');
-      second = requestAnimationFrame(() => scrollToBottom('auto'));
-    });
+      frame++;
+      const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      if (distFromBottom > 1 && frame < 30) {
+        raf = requestAnimationFrame(step);
+      }
+    };
+    raf = requestAnimationFrame(step);
     return () => {
-      cancelAnimationFrame(first);
-      if (second) cancelAnimationFrame(second);
+      cancelled = true;
+      if (raf) cancelAnimationFrame(raf);
     };
   }, [scrollToBottom]);
 
