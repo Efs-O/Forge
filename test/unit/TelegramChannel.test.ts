@@ -919,6 +919,55 @@ describe('TelegramChannel photo albums', () => {
     expect(h.sent[0]!.text).toContain('album handler failed');
     expect(h.setCursor).toHaveBeenLastCalledWith('telegram:update-offset', '2');
   });
+
+  it('survives a cursor-commit failure: the album is delivered and the error is surfaced', async () => {
+    const abort = new AbortController();
+    const onError = vi.fn();
+    const events: RemoteInboundEvent[] = [];
+    let poll = 0;
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      // The durable cursor write fails. The album must still be handled and
+      // acknowledged; the failure is reported, not thrown out of the poll loop.
+      setCursor: async () => {
+        throw new Error('cursor store unavailable');
+      },
+      onError,
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        const method = String(url).split('/').at(-1)!;
+        if (method === 'setMyCommands') return response(true);
+        if (method === 'getUpdates') {
+          // One batch with a single album photo, then an empty response so the
+          // buffered album flushes, then hang the long poll.
+          const batch = poll;
+          poll += 1;
+          if (batch === 0) return response([photoUpdate(1, 1, 'f1', 'g1')]);
+          if (batch === 1) return response([]);
+          return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener(
+              'abort',
+              () => reject(new Error('aborted')),
+              { once: true },
+            );
+          });
+        }
+        return response(true);
+      }) as typeof fetch,
+    });
+    channel.onEvent(async (event) => {
+      events.push(event);
+      return { kind: 'accepted', requestId: 'r' };
+    });
+    await channel.start(abort.signal);
+    await vi.waitFor(() => expect(events).toHaveLength(1));
+    abort.abort();
+    // The album was delivered despite the cursor failure...
+    expect(events[0]).toMatchObject({ attachments: [{ providerFileId: 'f1' }] });
+    // ...and the failure was reported to onError rather than escaping.
+    expect(onError).toHaveBeenCalled();
+    expect(String(onError.mock.calls[0]![0])).toContain('cursor commit failed');
+  });
 });
 
 describe('RemoteAttachmentStore size limits', () => {

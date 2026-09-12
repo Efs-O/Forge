@@ -92,7 +92,11 @@ export class TelegramChannel implements RemoteChannel {
       acknowledge: (event, disposition, signal) =>
         this.acknowledgeDisposition(event, disposition, signal),
       commitCursor: (nextOffset) => this.options.setCursor(TELEGRAM_CURSOR_KEY, String(nextOffset)),
+      onError: this.options.onError,
       onOverflow: async (event, signal) => {
+        // Private-chat only, matching acknowledgeDisposition: remote
+        // notifications are a private-chat convention, so a group/channel album
+        // that overflows the 3-image cap is delivered without the notice.
         if (event.chatType !== 'private') return;
         await this.send(
           event.chatId,

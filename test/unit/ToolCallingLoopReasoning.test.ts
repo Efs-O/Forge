@@ -149,6 +149,34 @@ describe('ToolCallingLoop reasoning retention', () => {
     expect(messages[1]).toMatchObject({ content: 'I need your choice.' });
   });
 
+  it('still narrates a mixed round that does real work alongside ask_user', async () => {
+    const askUser: ToolCall = {
+      id: 'question_1',
+      type: 'function',
+      function: { name: 'ask_user', arguments: '{"prompt":"Pick one","options":["1","2"]}' },
+    };
+    const narrate = vi.fn();
+    streamModelChatCompletion.mockImplementation(
+      async (_url: string, _req: unknown, _model: unknown, h: Handlers) => {
+        h.onToken('Wrote the file; now I need your choice.');
+        h.onToolCalls([CALL, askUser]);
+        h.onDone('tool_calls');
+      },
+    );
+    const messages: ChatMessage[] = [{ role: 'user', content: 'go' }];
+
+    await runToolCallingLoop({
+      ...runOptions(messages),
+      onRoundNarration: narrate,
+      maxRounds: 1,
+    } as never);
+
+    // The round did real work (read_file), so its commentary reaches remote
+    // surfaces even though it also ends in a question.
+    expect(narrate).toHaveBeenCalledTimes(1);
+    expect(narrate).toHaveBeenCalledWith('Wrote the file; now I need your choice.');
+  });
+
   it('writes reasoning into the real transcript while it is still streaming', async () => {
     const messages: ChatMessage[] = [{ role: 'user', content: 'go' }];
     let streamedSnapshot: ChatMessage[] = [];

@@ -95,6 +95,14 @@ export interface TelegramAlbumFlushDependencies {
   ) => Promise<void>;
   commitCursor: (offset: number) => Promise<void>;
   onOverflow: (event: TelegramTextEvent, signal: AbortSignal) => Promise<void>;
+  /**
+   * Reports a cursor-commit failure. A throw here must not escape the flush:
+   * the album has already been handled and acknowledged, so the only remaining
+   * effect of a persistence failure is that the durable cursor stays before the
+   * album and Telegram redelivers it on restart — the safe outcome. Letting the
+   * error propagate instead would take the whole poll loop down with it.
+   */
+  onError?: ((message: string) => void) | undefined;
 }
 
 /** Handles one buffered album with the same retry-before-cursor contract as a normal update. */
@@ -119,7 +127,13 @@ export async function flushTelegramAlbum(
   }
 
   await dependencies.acknowledge(album.event, disposition, dependencies.signal);
-  await dependencies.commitCursor(album.lastUpdateId + 1);
+  try {
+    await dependencies.commitCursor(album.lastUpdateId + 1);
+  } catch (err) {
+    dependencies.onError?.(
+      `Forge Telegram album cursor commit failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
   if (album.overflow) await dependencies.onOverflow(album.event, dependencies.signal);
 }
 
@@ -128,6 +142,7 @@ export interface TelegramAlbumCoordinatorDependencies {
   acknowledge: TelegramAlbumFlushDependencies['acknowledge'];
   commitCursor: TelegramAlbumFlushDependencies['commitCursor'];
   onOverflow: TelegramAlbumFlushDependencies['onOverflow'];
+  onError?: TelegramAlbumFlushDependencies['onError'];
 }
 
 /** Couples update mapping, buffering, and dispatch so the channel stays focused on polling. */

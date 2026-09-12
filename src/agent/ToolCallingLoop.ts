@@ -373,9 +373,13 @@ export async function runToolCallingLoop(
       options.onMessagesChanged?.();
       // A question is the boundary of this round. Keep any pre-question
       // commentary in the transcript, but do not send it as a separate remote
-      // notification while the user is waiting for the question itself.
-      const asksUser = calls.some((call) => call.function.name === 'ask_user');
-      if (assistantContent.trim() && !asksUser) options.onRoundNarration?.(assistantContent);
+      // notification while the user is waiting for the question itself. Only a
+      // round that is *purely* a question suppresses the narration: a mixed
+      // round (e.g. write_file + ask_user) did real work the user should hear
+      // about, so its commentary still reaches remote surfaces.
+      const isQuestionOnlyRound = calls.every((call) => call.function.name === 'ask_user');
+      if (assistantContent.trim() && !isQuestionOnlyRound)
+        options.onRoundNarration?.(assistantContent);
       const beforeDispatch = options.messages.length;
       await options.dispatchToolCalls(calls, options.messages);
       options.onMessagesChanged?.();
