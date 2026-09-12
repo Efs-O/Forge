@@ -1,6 +1,12 @@
 # Plan: controlled `env` parameter for `exec_command`
 
-Status: **proposed — for review, not yet implemented.**
+Status: **implemented 2026-09-12.** `exec_command` accepts a small, validated `env`
+object — `src/tools/execEnvPolicy.ts` (pure denylist of dangerous names + key-shape and
+size caps), threaded into both the foreground (`spawnAndWait extraEnv`) and background
+(`BackgroundExecutionManager.start env`) paths. `shell: false` is preserved at both
+spawn sites; no `cmd /c`, `powershell -Command`, or generic `.cmd`/`.bat` execution was
+introduced. 62 unit tests in `test/unit/execEnvPolicy.test.ts` plus 3 integration tests
+in `test/unit/execTools.test.ts`. Full non-live suite green.
 
 ## 1. Goal
 

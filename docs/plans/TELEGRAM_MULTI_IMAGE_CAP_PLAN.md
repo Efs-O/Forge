@@ -1,6 +1,11 @@
 # Telegram: up to 3 images per message, with cap + size surfaced to the user
 
-Status: **proposed** (2026-09-12). For review — nothing implemented yet.
+Status: **implemented 2026-09-12.** Albums merge into one prompt, capped at 3 images
+(`MAX_TELEGRAM_IMAGES_PER_MESSAGE`), with the cap and the 10 MiB / 25 MiB size limits
+surfaced in-chat on overflow and documented in `/help`. `albumPhotoFromUpdate()` in the
+inbound mapping, `pendingAlbum` buffering + `flushAlbum()` in the poll loop, and 10 unit
+tests covering merge, cap+notice, ordering, offset advance, cross-batch degradation,
+`/help` content, and the store's per-image size rejection. Full suite green.
 
 ---
 
