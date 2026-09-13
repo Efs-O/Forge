@@ -14,6 +14,7 @@ import { RemoteOutboxDelivery } from './RemoteOutboxDelivery';
 import { handleRemoteCommand } from './RemoteCommandHandler';
 import { RemoteApprovalBridge } from './RemoteApprovalBridge';
 import { RemoteQuestionBridge } from './RemoteQuestionBridge';
+import { CommandCleanupScheduler } from './CommandCleanupScheduler';
 import { RemoteAgentProgress } from './RemoteAgentProgress';
 import { HostProgressOpener } from './remoteHostProgress';
 import { RemoteNotificationFanout } from './RemoteNotificationFanout';
@@ -50,6 +51,8 @@ export class RemoteController {
   private readonly progress: RemoteAgentProgress;
   private readonly hostProgress: HostProgressOpener;
   private readonly pending = new RemotePendingPrompt();
+  /** Best-effort deletion of processed owner commands from Telegram. */
+  private readonly commandCleanup: CommandCleanupScheduler;
   private progressSubscription: { dispose(): void } | undefined;
   private get promptDeps(): RemotePromptAdmissionDeps & {
     restoreConversation: (conversationId: string) => Promise<unknown>;
@@ -108,6 +111,12 @@ export class RemoteController {
     ] as const;
     this.approvals = new RemoteApprovalBridge(...bridgeDeps);
     this.questions = new RemoteQuestionBridge(...bridgeDeps);
+    this.commandCleanup = new CommandCleanupScheduler({
+      channel,
+      signal: this.abort.signal,
+      delaySeconds: () => this.options.deleteCommandMessagesAfter ?? 0,
+      onError: this.options.onError,
+    });
     this.progress = new RemoteAgentProgress(
       channel,
       this.abort.signal,
@@ -168,6 +177,7 @@ export class RemoteController {
 
   async stop(): Promise<void> {
     this.accepting = false;
+    this.commandCleanup.dispose();
     this.abort.abort();
     this.subscription?.dispose();
     this.subscription = undefined;
@@ -317,6 +327,7 @@ export class RemoteController {
       await this.channel.send(event.chatId, 'Forge: remote session locked.', {
         signal: this.abort.signal,
       });
+      this.commandCleanup.schedule(event);
       return { kind: 'handled' };
     }
     if (!this.rateLimiter.allow(`${event.channel}:${event.senderId}:${event.chatId}`)) {
@@ -444,6 +455,9 @@ export class RemoteController {
         key,
       );
       if (result.kind !== 'rejected' && result.kind !== 'retry') this.auth.touch(event);
+      if (result.kind === 'handled' || result.kind === 'rejected') {
+        this.commandCleanup.schedule(event);
+      }
       return result;
     }
     const result = await admitRemoteText(event, key, this.promptDeps);

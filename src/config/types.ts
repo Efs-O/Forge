@@ -399,6 +399,8 @@ export interface ForgeConfig {
     queue_limit: number;
     max_message_chars: number;
     rate_limit_per_minute: number;
+    /** Seconds to keep a recognized /command before deleting it from Telegram; 0 disables. */
+    delete_command_messages_after: number;
     /** Remote TOTP session policy. Enrollment/secrets remain in SecretStorage. */
     auth: {
       /** 0 disables inactivity expiry; otherwise 1–1440 minutes. */

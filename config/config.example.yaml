@@ -152,6 +152,8 @@ remote:
   queue_limit: 5
   max_message_chars: 12000
   rate_limit_per_minute: 30
+  # Seconds to keep a recognized /command before deleting it from Telegram; 0 disables.
+  delete_command_messages_after: 5
   auth:
     # 0 disables only inactivity expiry; TOTP still locks after restart or /lock.
     inactivity_timeout_minutes: 30

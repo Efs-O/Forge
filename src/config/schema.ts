@@ -239,6 +239,8 @@ const RemoteConfigSchema = z
     queue_limit: z.number().int().min(1).max(100).default(5),
     max_message_chars: z.number().int().min(1).max(50_000).default(12_000),
     rate_limit_per_minute: z.number().int().min(1).max(600).default(30),
+    /** Seconds to keep a recognized /command before deleting it from Telegram; 0 disables. */
+    delete_command_messages_after: z.number().int().min(0).max(3600).default(5),
     auth: z
       .object({
         inactivity_timeout_minutes: z.number().int().min(0).max(1_440).default(30),

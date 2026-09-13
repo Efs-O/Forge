@@ -187,6 +187,17 @@ export interface RemoteChannel {
     text: string,
     options?: { signal?: AbortSignal },
   ): Promise<void>;
+  /**
+   * Delete a previously sent message. Optional: channels with no such
+   * affordance simply do not implement it, and command auto-cleanup is skipped.
+   * Best-effort presentation only; a failure must never affect command
+   * execution.
+   */
+  deleteMessage?(
+    chatId: string,
+    messageId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<void>;
   /** Optional native pagination surface (Telegram inline keyboard). */
   selectionPages?: RemoteSelectionPages;
   /** Fetches attachment bytes only after the controller has authenticated the sender. */

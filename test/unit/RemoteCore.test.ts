@@ -139,6 +139,7 @@ describe('remote configuration and lease', () => {
       queue_limit: 5,
       max_message_chars: 12_000,
       rate_limit_per_minute: 30,
+      delete_command_messages_after: 5,
       auth: { inactivity_timeout_minutes: 30 },
       attachments: { enabled: false, retain_days: 30, accept_pdf: true },
       workspace_aliases: {},
@@ -149,6 +150,19 @@ describe('remote configuration and lease', () => {
       ForgeConfigSchema.safeParse({
         models: [{ name: 'm', provider: 'ollama', endpoint: 'http://127.0.0.1:11434' }],
         remote: { enabled: true, queue_limit: 0 },
+      }).success,
+    ).toBe(false);
+    // delete_command_messages_after: 0 disables, but negative and >1h are out of range.
+    expect(
+      ForgeConfigSchema.safeParse({
+        models: [{ name: 'm', provider: 'ollama', endpoint: 'http://127.0.0.1:11434' }],
+        remote: { enabled: true, delete_command_messages_after: -1 },
+      }).success,
+    ).toBe(false);
+    expect(
+      ForgeConfigSchema.safeParse({
+        models: [{ name: 'm', provider: 'ollama', endpoint: 'http://127.0.0.1:11434' }],
+        remote: { enabled: true, delete_command_messages_after: 3601 },
       }).success,
     ).toBe(false);
   });

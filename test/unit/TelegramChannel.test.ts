@@ -307,6 +307,25 @@ describe('TelegramChannel', () => {
     expect(calls[2]!.body).toEqual({ chat_id: 'chat', message_id: 42 });
   });
 
+  it('deletes a message via the public deleteMessage affordance', async () => {
+    const calls: Array<{ method: string; body: Record<string, unknown> }> = [];
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor: async () => undefined,
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        const method = String(url).split('/').at(-1)!;
+        calls.push({ method, body: JSON.parse(String(init?.body)) as Record<string, unknown> });
+        return response({ ok: true });
+      }) as typeof fetch,
+    });
+
+    await channel.deleteMessage('chat', '42');
+    expect(calls).toEqual([
+      { method: 'deleteMessage', body: { chat_id: 'chat', message_id: 42 } },
+    ]);
+  });
+
   it('encodes and strictly parses selection callbacks within Telegram limits', () => {
     const keyboard = telegramSelectionKeyboard({
       kind: 'models',

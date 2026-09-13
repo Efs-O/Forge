@@ -219,6 +219,24 @@ export class TelegramChannel implements RemoteChannel {
   }
 
   /**
+   * Deletes a previously sent message. The command auto-cleanup path uses this
+   * to remove the owner's original /command after the configured delay. It
+   * runs through `call`, so it shares the chat's send lane with the command's
+   * own reply and aborts with the controller signal.
+   */
+  async deleteMessage(
+    chatId: string,
+    messageId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<void> {
+    await this.call(
+      'deleteMessage',
+      { chat_id: chatId, message_id: Number(messageId) },
+      options?.signal,
+    );
+  }
+
+  /**
    * Clears the inline keyboard, leaving the prompt text in place as the record
    * of what was asked. A prompt already edited, deleted, or unknown to this
    * process (a window reload drops the map) is not an error: there is nothing

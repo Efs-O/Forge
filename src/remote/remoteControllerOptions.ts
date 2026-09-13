@@ -32,6 +32,8 @@ export interface RemoteControllerOptions {
   currentWorkspaceName?: string | undefined;
   switchWorkspace?: ((alias: string, channel: string, chatId: string) => Promise<void>) | undefined;
   inactivityTimeoutMinutes?: number;
+  /** Seconds to keep a recognized /command before deleting it from Telegram; 0/absent disables. */
+  deleteCommandMessagesAfter?: number;
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
   setRateLimit?: ((perMinute: number) => Promise<void>) | undefined;
   reloadWindow?: (() => Promise<void>) | undefined;
@@ -153,6 +155,7 @@ export function buildRemoteControllerOptions(
     switchWorkspace: (alias, channel, chatId) =>
       deps.switchWorkspace(config, alias, channel, chatId),
     inactivityTimeoutMinutes: remote.auth.inactivity_timeout_minutes,
+    deleteCommandMessagesAfter: remote.delete_command_messages_after,
     setInactivityTimeout: deps.setInactivityTimeout,
     setRateLimit: deps.setRateLimit,
     reloadWindow: deps.reloadWindow,

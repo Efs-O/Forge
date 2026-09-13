@@ -1,5 +1,15 @@
 # Forge — Recent Changes
 
+## 0.15.41
+
+- **Telegram slash commands clean themselves up.** After a recognized
+  `/command` is processed, its original message is deleted from the Telegram
+  chat after a short delay, so the screen stops accumulating one-off commands.
+  The delay is `remote.delete_command_messages_after` in seconds (default 5;
+  `0` disables it). Only terminal command results are cleaned up — ordinary
+  prompts, `/steer`, voice, selections, and approval actions are untouched —
+  and a delete that fails never affects the command itself.
+
 ## 0.15.40
 
 - **Remote narration no longer over-suppressed.** A tool round that is purely
