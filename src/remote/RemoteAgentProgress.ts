@@ -68,7 +68,19 @@ interface ActiveProgress {
   closed: boolean;
 }
 
-/** Coalesces visible turn progress into one rate-limited remote message edit. */
+/**
+ * Coalesces visible turn progress into one rate-limited remote message edit.
+ *
+ * The progress "bubble" is a single message opened via `sendProgress` and then
+ * edited in place (`editMessageText`). Telegram does not let a message move to
+ * the bottom of a chat — it keeps the position it was created at — so the
+ * bubble stays at the top of the turn's activity while narrations and the
+ * final answer are sent as separate messages and appear below it. That is the
+ * intended layout, not a bug. Making the bubble "follow" the progress would
+ * mean delete-and-resend on every update, and Telegram notifies on sends but
+ * stays silent on edits — so the in-place edit is exactly what keeps a long
+ * turn from spamming the phone with a notification per progress tick.
+ */
 export class RemoteAgentProgress {
   private readonly active = new Map<string, ActiveProgress>();
 
