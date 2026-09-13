@@ -83,6 +83,35 @@ describe('RemoteAgentProgress', () => {
     expect(channel.sent).toHaveLength(1);
   });
 
+  it('does not send a narration twice when it repeats in non-adjacent rounds', async () => {
+    vi.useFakeTimers();
+    const channel = new FakeRemoteChannel();
+    const progress = new RemoteAgentProgress(
+      channel,
+      new AbortController().signal,
+      () => true,
+      3_900,
+      1_000,
+    );
+    progress.begin('c1', 'chat-a', 'message-1');
+
+    // X, then a different Y, then X again: the middle round changes the text,
+    // so a guard that only compares against the immediately preceding
+    // narration would send X twice. The seen-set must not.
+    progress.handle({ conversationId: 'c1', kind: 'narration', text: 'Let me read the file.' });
+    await vi.advanceTimersByTimeAsync(1_000);
+    progress.handle({ conversationId: 'c1', kind: 'narration', text: 'Now let me update it.' });
+    await vi.advanceTimersByTimeAsync(1_000);
+    progress.handle({ conversationId: 'c1', kind: 'narration', text: 'Let me read the file.' });
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    // X and Y, not X, Y, X.
+    expect(channel.sent).toEqual([
+      { chatId: 'chat-a', text: 'Let me read the file.' },
+      { chatId: 'chat-a', text: 'Now let me update it.' },
+    ]);
+  });
+
   it('sends a warning as its own message as well as latching it in the bubble', async () => {
     vi.useFakeTimers();
     const channel = new FakeRemoteChannel();

@@ -10,6 +10,14 @@ const MAX_NOTICE_CHARS = 300;
 const MAX_LATCHED_WARNINGS = 4;
 const DEFAULT_HEADLINE = 'Forge: working…';
 const MAX_HEADLINE_CHARS = 160;
+/**
+ * Bounds the per-turn narration seen-set. A turn that narrates more than this
+ * many distinct thoughts has already overflowed the message long ago, so the
+ * oldest entries are the ones least worth keeping; dropping them only means a
+ * very old repeat could resurface, which is the pre-fix behaviour, not a
+ * regression.
+ */
+const MAX_SEEN_NARRATIONS = 32;
 
 type CanDeliver = (chatId: string) => boolean | Promise<boolean>;
 
@@ -45,10 +53,16 @@ interface ActiveProgress {
   warnings: string[];
   lastText: string;
   /**
-   * The last narration delivered as its own message. A round that repeats
-   * itself would otherwise send the same paragraph twice.
+   * Every narration already delivered as its own message this turn.
+   *
+   * A model can repeat the same finished thought in two NON-adjacent rounds
+   * (X, Y, X): the middle round changes the text, so a guard that only compares
+   * against the immediately preceding narration lets the third one through and
+   * the phone gets the same paragraph twice. Remembering the whole turn's worth
+   * (bounded) closes that gap. Cleared by `begin`, so a later turn may say the
+   * same thing again.
    */
-  lastNarration?: string;
+  narrations: string[];
   timer?: ReturnType<typeof setTimeout>;
   tail: Promise<void>;
   closed: boolean;
@@ -86,6 +100,7 @@ export class RemoteAgentProgress {
       commentary: '',
       warnings: [],
       lastText: DEFAULT_HEADLINE,
+      narrations: [],
       tail: Promise.resolve(),
       closed: false,
     });
@@ -214,8 +229,9 @@ export class RemoteAgentProgress {
    */
   private queueNarration(conversationId: string, state: ActiveProgress, raw: string): void {
     const text = sanitize(raw).trim();
-    if (!text || text === state.lastNarration) return;
-    state.lastNarration = text;
+    if (!text || state.narrations.includes(text)) return;
+    state.narrations.push(text);
+    if (state.narrations.length > MAX_SEEN_NARRATIONS) state.narrations.shift();
     this.queueOutbound(conversationId, state, text, true);
   }
 
