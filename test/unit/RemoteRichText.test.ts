@@ -2,7 +2,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { describe, expect, it } from 'vitest';
 import { TELEGRAM_BOT_COMMANDS } from '../../src/remote/TelegramChannel';
-import { HELP_TEXT, decorateHelpLine } from '../../src/remote/remoteHelpText';
+import { HELP_SECTIONS, HELP_TEXT, decorateHelpLine } from '../../src/remote/remoteHelpText';
 import { boldLineLabel, markupTelegramLines, sendRichText } from '../../src/remote/telegramHtml';
 
 describe('remote rich text', () => {
@@ -24,7 +24,7 @@ describe('remote rich text', () => {
   it('gives help one paragraph per group and per note, with the subject bolded', () => {
     const rendered = markupTelegramLines(HELP_TEXT, decorateHelpLine);
     expect(rendered.startsWith('<b>Forge commands:</b>')).toBe(true);
-    expect(rendered).toContain('<b>Session:</b> /help');
+    expect(rendered).toContain('<b>Session:</b> /chat');
     expect(rendered).toContain('• <b>/stop</b> cancels');
     // Placeholders keep their angle brackets as text, or Telegram reads them
     // as an unknown tag and rejects the whole send.
@@ -33,6 +33,21 @@ describe('remote rich text', () => {
     for (const [index, line] of HELP_TEXT.split('\n').entries()) {
       if (!line.startsWith('•')) continue;
       expect(HELP_TEXT.split('\n')[index - 1]).toBe('');
+    }
+  });
+
+  it('keeps each help section sorted, so a new command lands somewhere findable', () => {
+    const sectionRe = /^([A-Za-z]+): (.+)$/u;
+    for (const line of HELP_TEXT.split('\n')) {
+      const match = sectionRe.exec(line);
+      if (!match) continue;
+      const [, label, body] = match;
+      if (!HELP_SECTIONS.has(label)) continue;
+      const commands = body
+        .split(' · ')
+        .map((entry) => entry.split(' ')[0])
+        .map((entry) => entry.toLowerCase());
+      expect(commands, `section "${label}" is not sorted`).toEqual([...commands].sort());
     }
   });
 

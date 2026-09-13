@@ -8,21 +8,28 @@
  */
 
 /** Section labels that head a command group, bolded when the transport allows. */
-const HELP_SECTIONS = new Set(['Session', 'Workspace', 'Queue', 'Models', 'Window', 'Machine']);
+export const HELP_SECTIONS = new Set([
+  'Session',
+  'Workspace',
+  'Queue',
+  'Models',
+  'Window',
+  'Machine',
+]);
 
 export const HELP_TEXT = `Forge commands:
 
-Session: /help · /status · /context · /view [n] · /stop · /new · /chats [page] · /chat <n-or-name> · /resume · /notify on|off · /mirror on|off · /voice on|off
+Session: /chat <n-or-name> · /chats [page] · /context · /help · /mirror on|off · /new · /notify on|off · /resume · /status · /stop · /view [n] · /voice on|off
 
 Workspace: /workspace · /workspace <n-or-alias>
 
-Queue: /queue · /steer <n-or-prompt> · /drop <n|all>
+Queue: /drop <n|all> · /queue · /steer <n-or-prompt>
 
-Models: /model [n-or-name] · /unload · /restart
+Models: /model [n-or-name] · /restart · /unload
 
-Window: /compact · /lock · /reload · /timeout [1-1440|off] · /ratelimit [1-600|off] · /clanker on|off
+Window: /clanker on|off · /compact · /lock · /ratelimit [1-600|off] · /reload · /timeout [1-1440|off]
 
-Machine: /system · /sleep [8h|07:00] · /wake [8h|07:00|off]
+Machine: /sleep [8h|07:00] · /system · /wake [8h|07:00|off]
 
 How work is queued:
 
