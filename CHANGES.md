@@ -1,5 +1,13 @@
 # Forge — Recent Changes
 
+## 0.15.42
+
+- **Remote narration no longer repeats out of order.** A mid-turn thought that
+  a model repeated in two non-adjacent rounds used to be sent to the phone
+  twice, because the dedup guard only compared against the immediately
+  preceding narration. Every narration already sent this turn is now remembered
+  (bounded) and skipped if it repeats, so the phone sees each thought once.
+
 ## 0.15.41
 
 - **Telegram slash commands clean themselves up.** After a recognized
