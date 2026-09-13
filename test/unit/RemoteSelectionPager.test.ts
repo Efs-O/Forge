@@ -436,6 +436,48 @@ describe('remote selection pagination', () => {
     expect(channel.selectionPageSends).toHaveLength(1);
   });
 
+  it('resolves /model <n> off the canonical list without a prior /models', async () => {
+    const store = await requestStore();
+    const channel = new FakeRemoteChannel();
+    const ctx: RemoteSelectionContext = {
+      ...context(channel, store, 0),
+      modelEntries: [
+        { name: 'small-local', group: 'Local — llama.cpp' },
+        { name: 'big-local', group: 'Local — llama.cpp' },
+        { name: 'cloud-model', group: 'Ollama Cloud' },
+      ],
+    };
+    await store.setBinding({
+      channel: 'fake',
+      chatId: 'chat',
+      workspaceId: 'workspace',
+      conversationId: 'conversation-1',
+    });
+    const setConversationModel = vi.fn(async () => undefined);
+    (
+      ctx.host as unknown as { setConversationModel: typeof setConversationModel }
+    ).setConversationModel = setConversationModel;
+    const handlerCtx = {
+      ...ctx,
+      workspaceId: 'workspace',
+      inactivityTimeoutMinutes: 30,
+      rateLimitPerMinute: 30,
+    };
+
+    // No /models was run in this chat, so there is no pager to resolve off. The
+    // number must fall back to the same order /models displays: the Local group
+    // first (big-local, then small-local), then Ollama Cloud.
+    //   1. big-local   2. small-local   3. cloud-model
+    await handleRemoteCommand(textEvent('/model 3'), handlerCtx, 'model-three');
+    expect(setConversationModel).toHaveBeenCalledWith('conversation-1', 'cloud-model');
+
+    // A number past the end of the list still cannot be a model, so it is
+    // rejected rather than silently pinned to the wrong entry.
+    await expect(handleRemoteCommand(textEvent('/model 4'), handlerCtx, 'model-four')).resolves.toEqual(
+      { kind: 'rejected', reason: 'model is unavailable; use /models' },
+    );
+  });
+
   it('matches the sidebar group order and sorts names within each group', async () => {
     const store = await requestStore();
     const channel = new FakeRemoteChannel();

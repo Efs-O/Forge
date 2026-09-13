@@ -8,6 +8,12 @@
   preceding narration. Every narration already sent this turn is now remembered
   (bounded) and skipped if it repeats, so the phone sees each thought once.
 
+- **`/model <n>` works without running `/models` first.** A number after
+  `/model` only resolved off the last `/models` page, so in a fresh chat
+  `/model 14` was rejected as "model is unavailable" until `/models` had been
+  run. The number now falls back to the same order `/models` displays, matching
+  `/chat <n>`, which already resolved off the recent-conversation list.
+
 ## 0.15.41
 
 - **Telegram slash commands clean themselves up.** After a recognized

@@ -14,7 +14,11 @@ import type { ModelPickerDescriptor } from '../sidebar/ModelPickerGroups';
 import { PowerControl } from '../system/PowerControl';
 import { handleRemotePowerCommand } from './RemotePowerCommands';
 import { switchWorkspaceCommand } from './remoteWorkspaceCommand';
-import { resolveConversationSelection, resolveSelection, shortId } from './remoteCommandSelectors';
+import {
+  resolveConversationSelection,
+  resolveModelSelection,
+  shortId,
+} from './remoteCommandSelectors';
 
 export interface RemoteCommandContext {
   channel: RemoteChannel;
@@ -335,8 +339,8 @@ async function executeRemoteCommand(
     ) {
       return { kind: 'rejected', reason: 'the bound conversation is busy or has queued work' };
     }
-    const modelName = resolveSelection(context, event, 'models', argument) ?? argument;
-    if (!context.modelEntries.some((model) => model.name === modelName)) {
+    const modelName = resolveModelSelection(context, event, argument);
+    if (!modelName || !context.modelEntries.some((model) => model.name === modelName)) {
       return { kind: 'rejected', reason: 'model is unavailable; use /models' };
     }
     await context.host.setConversationModel(binding.conversationId, modelName);
@@ -345,8 +349,9 @@ async function executeRemoteCommand(
     });
     return { kind: 'handled' };
   }
-  // Same defect as bare /resume, and the same answer: /model needs a number
-  // from /models, so hand over that list instead of denying the command exists.
+  // /model with no argument lists the models, the way /chats and /workspace do
+  // with no argument — a bare command is a request to see the list, not a
+  // failed pick.
   if (command === '/model') {
     return sendModelSelection(event, context, undefined);
   }

@@ -8,6 +8,7 @@
  * `/workspace <n>`, and of the miss messages that name the sanctioned list.
  */
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
+import { sortModelPickerEntries, type ModelPickerDescriptor } from '../sidebar/ModelPickerGroups';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteInboundEvent } from './types';
 
@@ -16,6 +17,13 @@ import type { RemoteInboundEvent } from './types';
 export interface SelectionLookup {
   store: RemoteRequestStore;
   host: ForgeHostFacade;
+  /**
+   * The configured models, in the order `/models` displays them. Present on the
+   * full command context; optional here because the conversation and workspace
+   * resolvers do not need it, and `WorkspaceSwitchContext` (a different, narrower
+   * slice) is also passed to `resolveSelection` without it.
+   */
+  modelEntries?: readonly ModelPickerDescriptor[];
 }
 
 type TextEvent = Extract<RemoteInboundEvent, { kind: 'text' }>;
@@ -92,6 +100,30 @@ export function numberedSelectionMiss(
     return 'the workspace list expired; run /workspace again, then /workspace <number>';
   }
   return `pick 1-${selection.values.length} from the last /workspace list`;
+}
+
+/**
+ * A `/model` argument: a pager number, a position in the canonical model list,
+ * or a model name.
+ *
+ * The pager comes first because it preserves the exact list the person saw. The
+ * number then falls back to the same order `/models` displays, so `/model 4`
+ * works without having run `/models` first — matching `/chat 2`, which resolves
+ * off the recent-conversation list rather than demanding a prior `/chats`. A
+ * non-numeric argument is a name the person read in the sidebar, so it is left
+ * for the handler to check against the configured models.
+ */
+export function resolveModelSelection(
+  context: SelectionLookup,
+  event: TextEvent,
+  argument: string,
+): string | undefined {
+  const fromPager = resolveSelection(context, event, 'models', argument);
+  if (fromPager) return fromPager;
+  if (!/^\d+$/.test(argument)) return undefined;
+  const entries = sortModelPickerEntries(context.modelEntries ?? []);
+  const index = Number(argument) - 1;
+  return index >= 0 && index < entries.length ? entries[index]!.name : undefined;
 }
 
 /** Conversation ids are UUIDs; a chat message wants the recognisable ends. */
