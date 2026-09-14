@@ -1,5 +1,8 @@
 # Safe Worker and Tool Upgrade Implementation Plan
 
+> **Status: SUPERSEDED.** Last verified 2026-09-14. `dispatch_workers` no longer exists (removed in 0.13.1). Current behavior: [DELEGATION.md](DELEGATION.md). Remaining work: none from this plan.
+
+
 Status: Phases 0–6 are implemented and covered by automated tests. Phase 6 was
 separately approved after the validated Phases 0–5 checkpoint commit. Installed-
 VSIX smoke validation from the verification matrix remains manual.

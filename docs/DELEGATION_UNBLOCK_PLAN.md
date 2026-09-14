@@ -1,5 +1,8 @@
 # Delegation Unblock Plan
 
+> **Status: IMPLEMENTED.** Last verified 2026-09-14. Current behavior: [DELEGATION.md](DELEGATION.md). Remaining work: CLI delegation takes no rollback checkpoint (see [ROADMAP.md](../ROADMAP.md)).
+
+
 **Branch:** `fix/delegation-unblock`
 **Date:** 2026-08-15
 **Origin:** A Qwen 3.8 session in the `Qwen testing` workspace tried to get a second

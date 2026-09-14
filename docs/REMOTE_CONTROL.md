@@ -60,10 +60,13 @@ provider reachability, durable request health, and notification delivery. The
 complete release checklist is in
 [real-device validation](REMOTE_CONTROL_VALIDATION.md).
 
-Remote commands are `/help`, `/commands`, `/status`, `/context`, `/stop`,
-`/steer <prompt>`, `/new`, `/list`, `/resume <number-or-id>`, `/models`,
-`/model <number-or-name>`, `/queue`, `/drop <number|all>`, `/unload`,
-`/restart`, `/compact`, `/lock`, `/timeout [1-1440|off]`, and `/clanker on|off`.
+Remote commands are `/help`, `/status`, `/context`, `/system`, `/view [n]`,
+`/stop`, `/steer <prompt>`, `/new`, `/chats`, `/chat <number-or-title>`,
+`/resume <number-or-id>`, `/model [number-or-name]` (bare `/model` lists),
+`/queue`, `/drop <number|all>`, `/ratelimit`, `/unload`, `/restart`, `/reload`,
+`/compact`, `/lock`, `/timeout [1-1440|off]`, `/notify`, `/mirror`, `/voice`,
+`/clanker on|off`, `/workspace`, `/sleep`, and `/wake`. `/commands`, `/list`,
+`/select`, and `/models` still parse as silent aliases.
 Telegram publishes the main commands in its native slash-command menu.
 Workspaces are listed with `/workspace` (`/workspace list` still parses) and
 opened with `/workspace <number-or-alias>`; the number after `/workspace` is a

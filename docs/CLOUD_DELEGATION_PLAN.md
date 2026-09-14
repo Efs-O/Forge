@@ -1,5 +1,8 @@
 # Cloud Delegation Plan — let `ask_local_agent` reach configured cloud models
 
+> **Status: IMPLEMENTED.** Last verified 2026-09-14. Current behavior: [DELEGATION.md](DELEGATION.md). Remaining work: Ollama `:cloud` delegates still get the 120 s local timeout (see [ROADMAP.md](../ROADMAP.md)).
+
+
 **Status:** IMPLEMENTED 2026-08-26 (`npm run ci` green: 1145 tests)
 **Date:** 2026-08-26
 

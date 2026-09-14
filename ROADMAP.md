@@ -1,38 +1,79 @@
-# Forge — Future Improvements
+# Forge — Roadmap
 
-Items agreed on but not yet scheduled. Add here during review sessions, pick from here when planning the next version.
-
----
-
-## UX
-
-- **Type-while-streaming**: allow typing in the prompt box while the agent is running, but keep the Submit button disabled. Users can compose their next message while waiting instead of staring at a locked input. UI-only change — disable textarea submit, not the textarea itself.
+**Last verified against code:** 2026-09-14 (0.16.0). Every item names the file
+that shows the gap and what "done" means. Shipped work belongs in
+[CHANGES.md](CHANGES.md), not here. An item stays only while the gap is still
+in the code.
 
 ---
 
-## Agent / FORGE.md
+## Now: verified gaps, ready to implement
 
-- **FORGE.md hierarchy**: support multi-level FORGE.md files (workspace root → subdirectory), same pattern as Claude Code's CLAUDE.md. Useful in monorepos where sub-packages have different stacks.
-- **`/initForge` model quality**: for models that still output tool-call JSON instead of raw markdown, consider a retry pass or a stricter extraction fallback.
+1. **CLI delegation has no rollback checkpoint.** Direct CLI chat snapshots the
+   workspace before the CLI starts (`snapshotWorkspaceBefore` in
+   `src/agents/CliChatRunner.ts`). `runCliDelegation` in
+   `src/delegation/CliDelegationRunner.ts` does not, even though the delegate
+   runs unrestricted and `ask_local_agent` encourages handing it
+   implementation work. As a result, Keep/Undo cannot reverse a delegate's
+   edits.
+   *Done when:* a CLI delegation takes the same disk-backed checkpoint as
+   direct chat, respecting `forge.checkpoint.externalCliEnabled`, and Undo
+   restores its edits.
+2. **Ollama `:cloud` delegates get the 120 s local timeout.**
+   `selectDelegationTimeout` (`src/delegation/LocalDelegationService.ts`)
+   gives the 300 s cloud timeout only to `provider === 'cloud'`, while the
+   comment in `limits.ts` says Ollama cloud-routed models get it too.
+   *Done when:* the timeout follows `localWeights`, or the comment is corrected.
+3. **Structured build/test tools are npm-only.** `run_tests` and `run_build`
+   always use `npm`/`npx`. `exec_command` can already run pnpm, yarn, or bun
+   by hand.
+   *Done when:* the lockfile (`pnpm-lock.yaml`, `yarn.lock`, `bun.lock`/`bun.lockb`)
+   selects the runner, and the result names the runner it used.
+4. **`web_fetch` text is garbled on real pages.** `htmlToText` in
+   `src/tools/fetchTool.ts` strips tags with regex, so entities stay encoded
+   and paragraph and line breaks are lost.
+   *Done when:* entities decode and block structure survives. SSRF guards and
+   output bounds stay unchanged.
+
+## Next: proposals that need a decision first
+
+- **Persistent agent jobs** (scheduled or condition-driven monitors).
+  Trigger → condition → action → validation → notification, with a
+  deterministic check first and a model call only when needed. Design notes
+  are in §1.11 of
+  [the 0.16 audit](docs/DOCUMENTATION_AND_ROADMAP_AUDIT_0.16.md). Two
+  decisions come before any plan: where the scheduler lives (extension host or
+  an always-on service), and what "Act" mode may do unattended.
+- **Windows Host Controller ownership.** Decide whether it ships from Forge,
+  from HalluScribe, or as a standalone application-neutral repository. Basic
+  Telegram remote control must stay independent of it either way.
+- **Local image generation backend** (ComfyUI).
+  [Plan](docs/plans/IMAGE_GENERATION_TOOL_PLAN.md) exists; cloud image
+  generation shipped in 0.16.
+
+## Gated: open, but not queued until the gate is met
+
+- **Parallel tool dispatch** (MEDIUM). `ToolDispatch.dispatch()` still runs
+  calls one at a time (`src/sidebar/ToolDispatch.ts`). The design is in
+  Section E of
+  [REVIEW_FOLLOWUP_2026-09-05_PLAN.md](docs/plans/REVIEW_FOLLOWUP_2026-09-05_PLAN.md).
+  *Gate:* measured Forge sessions where tool execution, not token generation,
+  takes a material share of turn wall-clock time (slow search, cold LSP, MCP
+  or network calls). Even then, only reads run concurrently; writes,
+  approvals, and stateful tools stay serial. Never use a blanket `Promise.all`.
 
 ---
 
-## Tooling
+## Removed on 2026-09-14: already implemented
 
-- **`/initForge` for non-JS projects**: currently scans `package.json` and `src/`. Add detection for Python (`pyproject.toml`, `requirements.txt`), Rust (`Cargo.toml`), and Go (`go.mod`) to produce better Stack and Key Files sections.
+Kept here for one release so nobody re-adds them from an old review.
 
----
-
-## Performance
-
-- **Parallel tool execution**: `ToolDispatch.dispatch()` runs tool calls sequentially. If the model requests 3 file reads, they execute one-by-one. Switch to `Promise.all` for independent tool calls — would be noticeably faster especially on multi-file operations. (Flagged by 27B model review)
-
----
-
-## Reliability / Edge Cases
-
-- **CheckpointStack: disk-based snapshots**: current implementation holds full file content in RAM as JS strings. Fine for source files, but risky for large generated files or binaries. Future version should write snapshots to a temp directory on disk instead. (Flagged by 27B model review)
-- **`format_file` brittleness**: currently calls `editor.action.formatDocument` on the active editor — unreliable if another tab is focused or formatting fails silently. Replace with `vscode.languages.getDocumentFormattingEdits()` for direct, tab-independent formatting. (Flagged by 27B model review)
-- **`git_*` tools: VS Code Git extension dependency**: if the user doesn't have the VS Code Git extension installed, all git tools throw unhelpfully. Add a fallback to `child_process.spawnSync('git', ...)` or at minimum surface a clear error message pointing to the dependency. (Flagged by 27B model review)
-- **`run_build` / `run_tests`: npm hardcoded**: detect `pnpm-lock.yaml`, `yarn.lock`, `bun.lockb` and use the correct package manager runner instead of always calling npm. (Flagged by 27B model review)
-- **`htmlToText` in `web_fetch`**: naive regex stripping misses HTML entities (`&nbsp;`, `&amp;`), `<br>` spacing, and `<p>` gaps. Results in garbled text on some pages. Replace with a proper HTML-to-text pass. (Flagged by 27B model review)
+| Former item | Where it lives now |
+| --- | --- |
+| Checkpoint snapshots on disk | `DiskCheckpointStore`, used by `CheckpointStack` for workspace-scale checkpoints |
+| `format_file` depends on the active editor | Target-URI `executeFormatDocumentProvider` plus a version-checked `WorkspaceEdit` |
+| Git tools need the VS Code Git extension | `runGit` in `src/tools/gitRepo.ts` runs the `git` CLI; the extension only helps discovery |
+| FORGE.md hierarchy | `src/llm/forgeInstructionsChain.ts` (FORGE.md / AGENTS.md chain with a shared budget) |
+| `/initForge` for non-JS projects | `SlashCommandHandler` scans `pyproject.toml`, `Cargo.toml`, `go.mod` |
+| `/initForge` tool-call JSON output | `extractMarkdownFromToolCall` fallback |
+| Type while streaming | The prompt textarea is never disabled during a turn (`webview-ui/src/components/InputRow.tsx`) |

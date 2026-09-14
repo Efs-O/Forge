@@ -6,6 +6,9 @@ command ids is reference a user looks up once and a store visitor scrolls past
 forever. It was 10.6% of that page.
 
 These commands are currently contributed by the extension.
+`test/unit/CommandsDocDrift.test.ts` fails CI when this table and
+`package.json` disagree. Telegram slash commands are a different surface; see
+[remote control](REMOTE_CONTROL.md).
 
 ### Core sidebar and backend
 
@@ -20,6 +23,9 @@ These commands are currently contributed by the extension.
 | `Forge: Validate Config`      | Validate the active config           |
 | `Forge: Pick Model`           | Pick the active model                |
 | `Forge: Pick GGUF Model File` | Pick a GGUF file during setup        |
+| `Forge: Model Manager`        | Open the Model Manager panel         |
+| `Forge: Add Models`           | Add model entries to the config      |
+| `Forge: Compact config into groups` | Migrate the config into shared groups (comment-preserving) |
 | `Forge: Setup Wizard`         | Run the first-run or repair flow     |
 | `Forge: Unload Model`         | Stop all backends and release models |
 | `Forge: New Chat`             | Open a new conversation tab          |
@@ -41,6 +47,24 @@ These commands are currently contributed by the extension.
 | --------------------------------- | ----------------------------------- |
 | `Forge: Set Search API Key`       | Store a Tavily or Brave API key     |
 | `Forge: Set Cloud Provider Token` | Store a cloud-provider bearer token |
+
+### Remote control
+
+| Command                                          | Description                                                     |
+| ------------------------------------------------ | --------------------------------------------------------------- |
+| `Forge: Configure Remote Control`                | Pick a remote-control setup action                              |
+| `Forge: Validate Remote Control`                 | Check the remote configuration and stored secrets               |
+| `Forge: Set Telegram Bot Token`                  | Store the Telegram bot token in SecretStorage                   |
+| `Forge: Pair Telegram Remote`                    | Pair the owner account with a one-time code                     |
+| `Forge: Unpair Telegram Remote`                  | Remove the paired Telegram owner                                |
+| `Forge: Set Up Telegram Authenticator`           | Enroll a TOTP authenticator (QR shown locally)                  |
+| `Forge: Reset Telegram Authenticator`            | Replace the enrolled TOTP secret                                |
+| `Forge: Disable Telegram Authenticator`          | Remove TOTP session locking                                     |
+| `Forge: Set Remote Inactivity Timeout`           | Set when an unlocked remote session re-locks                    |
+| `Forge: Generate WakeSleep Relay Secret`         | Create the HMAC secret shared with an always-on wake relay      |
+| `Forge: Link WhatsApp Device (Experimental)`     | Link the experimental WhatsApp adapter                          |
+| `Forge: Pair WhatsApp Remote Owner (Experimental)` | Pair the WhatsApp owner                                       |
+| `Forge: Unlink WhatsApp Device (Experimental)`   | Unlink the WhatsApp device                                      |
 
 ### Editor and review helpers
 

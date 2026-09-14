@@ -71,7 +71,7 @@ telemetry, analytics, or auto-update pings.
 - Direct `llama-server` lifecycle management
 - Ollama local and Ollama cloud routing through the local daemon
 - Optional cloud or self-hosted providers: `xai`, `openrouter`, `openai`, `openai-compatible`
-- External CLI agents (`provider: cli` — Claude Code, Codex) as full-rights direct-chat models and read-only delegation targets using each CLI's own authentication
+- External CLI agents (`provider: cli` — Claude Code, Codex) as full-rights agents — both in direct chat and as `ask_local_agent` delegation targets, where they can read and edit the workspace with their own tools — using each CLI's own authentication. See [delegation](docs/DELEGATION.md) for which runs Keep/Undo covers
 - Localhost control server for external orchestrators and shared model lifecycle
 - Reasoning token display and optional thinking-channel stripping
 - Optional Tavily or Brave web search with keys stored in VS Code SecretStorage
@@ -87,11 +87,14 @@ telemetry, analytics, or auto-update pings.
 ## What's New
 
 Forge ships a **Changelog** tab next to this one — that is the full account,
-every release. The short version of the last three lines: 0.15 cut the system
-prompt, made VRAM-loading delegation ask first, and then grew the phone into a
-real second seat — voice in and out, a readable transcript, a machine report,
-and sleep/wake; 0.14 made tool schemas demand-loaded and the prompt prefix
-stable; 0.13 added background execution and told you what the backend is doing.
+every release. The short version of the last three lines: 0.16 added
+`generate_image` for configured image APIs, `restore_file`, commit amend and
+multi-question `ask_user`, made semantic indexing survive any workspace, and
+tidied Telegram — photo albums as one prompt, one `/model` command, commands
+that clean up after themselves; 0.15 cut the system prompt, made VRAM-loading
+delegation ask first, and grew the phone into a real second seat — voice in and
+out, a readable transcript, a machine report, and sleep/wake; 0.14 made tool
+schemas demand-loaded and the prompt prefix stable.
 
 ## What the agent can do
 
@@ -131,8 +134,18 @@ it corrects them in chat instead of asking you to paste output it already has.
 `list_workspace_tasks` cover the structured cases.
 
 **Git.** `git_status`, `git_diff`, `git_log`, `git_blame`, `git_show` (which
-reads a file at any past commit), `stage`, `commit`, `create_branch`,
-`switch_branch`.
+reads a file at any past commit), `restore_file` (brings a path back from a
+commit, checkpointed), `stage`, `commit` (including `amend`), `create_branch`,
+`switch_branch`. They run the `git` CLI directly; the VS Code Git extension is
+not required.
+
+**Delegation.** `ask_local_agent` hands a task to another configured model or
+CLI agent; `list_delegation_targets` lists them on demand instead of spending
+schema on every turn. Local and cloud targets get the task and context files
+only. Claude Code and Codex run with their own tools and can edit files.
+
+**Images.** `generate_image` appears only when an `image_generation:` backend
+is configured; every call asks for approval because each image is billed.
 
 **Editor context.** `get_editor_context` lets the agent read the file and
 selection you are actually looking at; `replace_selection` and `show_diff`
@@ -150,7 +163,8 @@ conversation state, re-injected verbatim every round and never summarized — so
 a context compaction costs at most one stale item instead of the whole thread.
 
 **Reaching you.** `notify_user` and `show_notification` reach whichever surface
-started the turn — the sidebar, or your phone. `ask_user` asks a real question.
+started the turn — the sidebar, or your phone. `ask_user` asks a real question,
+or several related ones in a single round.
 
 **Web, when you configure it.** `web_search` (Tavily or Brave, your key) and
 `web_fetch`.
@@ -198,7 +212,7 @@ drives, which is how you find out from a train why the model will not load.
 
 **Commands.** `/status`, `/context`, `/system`, `/view`, `/stop`,
 `/steer <prompt>` (jumps the queue and interrupts the active turn), `/new`,
-`/chats`, `/chat`, `/resume`, `/models`, `/model`, `/queue`, `/drop`,
+`/chats`, `/chat`, `/resume`, `/model`, `/queue`, `/drop`,
 `/ratelimit`, `/unload`, `/restart`, `/reload`, `/compact`, `/lock`,
 `/timeout`, `/notify`, `/mirror`, `/voice`, `/clanker on|off`, `/workspace`,
 `/sleep`, `/wake`, `/help`. Telegram shows them in its native command menu.

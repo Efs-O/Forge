@@ -1,5 +1,8 @@
 # Worker Orchestration Implementation Plan
 
+> **Status: SUPERSEDED.** Last verified 2026-09-14. Worker dispatch (`dispatch_workers`) was removed in 0.13.1, and `ask_local_agent` is the only delegation path. CLI delegates are **not** read-only. Current behavior: [DELEGATION.md](DELEGATION.md). Remaining work: none from this plan. Kept for the safety rationale behind the cloud-launch approvals.
+
+
 ## Status
 
 **Implementation complete in the current worktree. `npm run ci` and

@@ -1,5 +1,8 @@
 # Forge Architecture Review — 2026-09-05
 
+> **Dated review.** It reflects the repository on 2026-09-05 and predates later 0.15.x and 0.16 work; its findings are not maintained. For current open work, see [ROADMAP.md](../ROADMAP.md). The parallel-tool item remains MEDIUM and measurement-gated.
+
+
 > **Status: VERIFIED 2026-09-05 against the worktree at `34f1215`.**
 >
 > The original review was written without reading the code. Every item in

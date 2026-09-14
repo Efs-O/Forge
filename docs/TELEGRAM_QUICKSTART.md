@@ -111,7 +111,7 @@ Useful first commands:
 /status
 /system
 /context
-/models
+/model
 /chats
 /workspace
 ```
