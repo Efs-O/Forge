@@ -292,7 +292,16 @@ Recommended structure:
 - maintain sidebar/remote semantic parity where appropriate;
 - preserve durable delivery/approval correctness;
 - improve remote UX without coupling core runtime to Telegram;
-- keep future dedicated mobile client support as an architecture concern, not Telegram-specific hacks.
+- keep future dedicated mobile client support as an architecture concern, not Telegram-specific hacks;
+- keep basic Forge Telegram remote control independent from any wake relay: it should work whenever the PC and VS Code/Forge are already running;
+- treat remote wake and machine lifecycle as an optional second layer for users who need control while the PC is asleep or Forge is offline;
+- do not make HalluScribe an installation prerequisite for Forge users merely because the current Windows Host Controller implementation happens to live in that workspace;
+- avoid making airOS hardware a requirement: the durable architecture should define an always-on LAN relay role that can be implemented by airOS, Raspberry Pi/Linux, OpenWrt, NAS, Home Assistant, another Windows host, or similar devices;
+- prefer one signed, allow-listed Windows Host Controller implementation rather than duplicating controller servers in Forge and HalluScribe; if the controller is truly application-neutral, consider extracting it to a standalone repository;
+- preserve the trust boundary: Telegram/relay inputs should select only fixed allow-listed program/action pairs, never arbitrary executable paths or shell fragments;
+- document the two-level onboarding clearly: **Basic remote** = Forge Telegram only, PC already awake; **Full remote** = always-on relay + Wake-on-LAN + signed Host Controller for wake/application lifecycle, after which Forge Telegram can take over.
+
+**Product decision still open:** exact repository ownership and packaging of the Windows Host Controller. Current discussion favors an application-neutral standalone component if it controls VS Code/HalluScribe/other approved programs, but this must be decided only after inspecting the unpushed controller implementation. Do not force this decision during the documentation cleanup.
 
 ### E. Multimodal and specialist capabilities
 
@@ -438,6 +447,8 @@ Verify current Telegram behavior from remote handlers/transport code, especially
 - compaction events;
 - FIFO/rate-limit behavior;
 - sidebar-started turn mirroring.
+
+Also preserve the distinction between ordinary Forge Telegram control and optional remote-wake infrastructure. The permanent docs should not imply that airOS, HalluScribe, or a wake relay is required for normal Telegram use. A future 4G/wake guide should explain generic relay-host requirements first and airOS as one implementation.
 
 Do not rely on `REMOTE_CONTROL_VALIDATION.md` as current behavior; validation history and user-facing behavior are different document roles.
 
