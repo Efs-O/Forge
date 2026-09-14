@@ -15,6 +15,16 @@ function createSession(confirmedSessionId?: string, timeoutMs?: number): CliAgen
 }
 
 describe('CliAgentSession', () => {
+  it('tags the spawned CLI so the Claude extension lists the session in its history', async () => {
+    const session = createSession();
+    try {
+      const result = await session.send('TRIGGER_ECHO_ENTRYPOINT');
+      expect(result.finalText).toBe('entrypoint=claude-vscode');
+    } finally {
+      await session.dispose();
+    }
+  });
+
   it('handles two warm turns in the same process', async () => {
     const session = createSession();
     try {

@@ -20,6 +20,10 @@ function emitTask(task, turn = 1) {
     line({ type: 'system', subtype: 'init', session_id: resumed });
     return;
   }
+  if (task.includes('TRIGGER_ECHO_ENTRYPOINT')) {
+    line({ type: 'result', is_error: false, result: `entrypoint=${process.env.CLAUDE_CODE_ENTRYPOINT ?? ''}` });
+    return;
+  }
   if (task.includes('TRIGGER_SLOW')) return;
   if (task.includes('TRIGGER_FAIL')) {
     process.stderr.write('claude: boom, something broke\n');

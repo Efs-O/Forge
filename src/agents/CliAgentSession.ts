@@ -1,6 +1,6 @@
 import * as readline from 'readline';
 import { randomUUID } from 'crypto';
-import { claudeAdapter } from './adapters/claudeAdapter';
+import { CLAUDE_SPAWN_ENV, claudeAdapter } from './adapters/claudeAdapter';
 import { spawnCliProcess, terminateCliProcessTree, waitForCliProcessExit } from './cliProcess';
 import type { CliAgentEvent, CliAgentRunResult, CliParseContext } from './types';
 
@@ -125,6 +125,7 @@ export class CliAgentSession {
       executable: this.options.executable,
       args,
       cwd: this.options.cwd,
+      env: CLAUDE_SPAWN_ENV,
       stdin: 'pipe',
     });
     this.child = child;

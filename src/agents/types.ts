@@ -43,6 +43,8 @@ export interface CliAdapter {
   buildArgs(task: string, options?: CliInvocationOptions): string[];
   /** Parse one line of the CLI's streamed stdout (stream-json / JSONL). */
   handleLine(line: string, ctx: CliParseContext): void;
+  /** Extra environment variables for the spawned CLI. */
+  readonly spawnEnv?: Readonly<Record<string, string>>;
 }
 
 /**

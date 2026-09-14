@@ -6,6 +6,8 @@ export interface SpawnCliProcessOptions {
   args: readonly string[];
   cwd: string;
   stdin?: 'ignore' | 'pipe';
+  /** Variables layered over the inherited environment. */
+  env?: Readonly<Record<string, string>>;
 }
 
 export interface CliProcessExit {
@@ -25,6 +27,7 @@ export function spawnCliProcess(options: SpawnCliProcessOptions): ChildProcess {
     : { file: options.executable, args: [...options.args] };
   return spawn(invocation.file, invocation.args, {
     cwd: options.cwd,
+    ...(options.env ? { env: { ...process.env, ...options.env } } : {}),
     stdio: [options.stdin ?? 'ignore', 'pipe', 'pipe'],
     windowsHide: true,
     ...(wrap ? { windowsVerbatimArguments: true } : {}),

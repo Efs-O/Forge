@@ -70,6 +70,7 @@ export class CliAgentDriver {
       executable: options.executable,
       args,
       cwd: options.cwd,
+      ...(adapter.spawnEnv ? { env: adapter.spawnEnv } : {}),
     });
 
     child.stderr?.on('data', (chunk: Buffer) => {

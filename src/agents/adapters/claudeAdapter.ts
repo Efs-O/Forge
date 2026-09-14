@@ -1,5 +1,17 @@
 import type { CliAdapter } from '../types';
 
+/**
+ * The Claude Code VS Code extension hides every transcript tagged with an SDK
+ * entrypoint (`sdk-cli`, which `claude -p` gets by default) from its session
+ * history. Tagging Forge's runs `claude-vscode` makes the Forge <-> Claude
+ * exchange openable there, as Codex's already is. `cli` is not honoured under
+ * `-p` (verified against CLI 2.1.270); `claude-vscode` is. Undocumented — if a
+ * CLI update ignores it, sessions merely go back to being hidden.
+ */
+export const CLAUDE_SPAWN_ENV: Readonly<Record<string, string>> = {
+  CLAUDE_CODE_ENTRYPOINT: 'claude-vscode',
+};
+
 function summarizeToolInput(name: string, input: unknown): string {
   if (input && typeof input === 'object') {
     const record = input as Record<string, unknown>;
@@ -19,6 +31,7 @@ function summarizeToolInput(name: string, input: unknown): string {
  */
 export const claudeAdapter: CliAdapter = {
   name: 'claude',
+  spawnEnv: CLAUDE_SPAWN_ENV,
   buildArgs(task, options) {
     const args = [
       '-p',
