@@ -167,30 +167,21 @@ Current `src/tools/gitRepo.ts` states and implements the opposite:
 
 Remove the Git-extension fallback item from `ROADMAP.md` entirely. Permanent Git docs should say the CLI is the execution source of truth and VS Code Git is optional discovery assistance, if that distinction is user-relevant.
 
-## 1.6 Parallel tool execution is still genuinely open
+## 1.6 Parallel tool execution is open but intentionally gated
 
-Unlike the three items above, this old roadmap item is real.
+`ToolCallingLoop` receives a batch of tool calls and hands it to `dispatchToolCalls`. Current `ToolDispatch.dispatch()` still iterates calls sequentially with `for (const tc of toolCalls)` and awaits each tool before moving to the next, so the feature is technically unimplemented.
 
-`ToolCallingLoop` receives a batch of tool calls and hands it to `dispatchToolCalls`. Current `ToolDispatch.dispatch()` iterates calls with a sequential `for (const tc of toolCalls)` and awaits each tool before moving to the next.
+However, this item must not be promoted back to active high-priority work merely because it remains open. The verified 2026-09-05 architecture review explicitly downgraded it from HIGH to MEDIUM after observing that, for the local 27B-class workload, model token generation dominates turn latency while ordinary batches of three or four read/tool calls execute extremely quickly in sequence. The follow-up plan therefore classified parallel dispatch as **gated, not queued** and required measurement before implementation.
 
-That sequential execution is currently intertwined with:
-
-- approval ordering;
-- shared transcript mutation;
-- checkpoint snapshots;
-- mutation/diff rendering;
-- tool budgets;
-- cancellation;
-- plan updates;
-- failure tracking.
+The detailed design already exists in Section E of `docs/plans/REVIEW_FOLLOWUP_2026-09-05_PLAN.md`. It covers the relevant concurrency hazards, including approval and budget ordering, cancellation, checkpoint/mutation barriers, transcript snapshot semantics, ordered failure accounting, bounded concurrency, reverse completion order, and pairing tool results by `tool_call_id` rather than positional completion order.
 
 ### Required change
 
-Keep this as future work, but rewrite the roadmap item. Do NOT write “replace with `Promise.all`”. That is too naive for the current architecture.
+Preserve the existing decision:
 
-The real future task should be something like:
+> **OPEN — MEDIUM priority — intentionally gated by measurement — design already exists.**
 
-> Add dependency-aware parallel dispatch for provably independent read-only tool calls while preserving deterministic tool-result ordering, cancellation, budgets, approvals, and mutation serialization.
+Do not rewrite this as a generic active optimization backlog item and do not implement blanket `Promise.all`. Re-open implementation only if measured Forge workloads show a material wall-clock opportunity, especially for genuinely slow operations such as large-tree search, cold LSP work, network/MCP calls, or slow Git/storage paths. The existing follow-up plan's measurement gate should remain authoritative unless new measurements justify changing it.
 
 Write tools, Git writes, approvals, plan changes, and stateful tools should remain serialized unless explicit dependency semantics are introduced.
 
@@ -237,6 +228,52 @@ This is an important current architectural pattern: capabilities that are expens
 
 Any architecture/optimization documentation should describe this pattern as an implemented design, not merely a possible future optimization.
 
+## 1.11 Proposed persistent agent jobs / monitor tools
+
+This is a product/architecture proposal, not current Forge behavior.
+
+A high-value future capability is to let the local Forge agent own **persistent scheduled or condition-driven jobs** rather than requiring every task to begin with a live user prompt. The useful abstraction is broader than a reminder or cron entry:
+
+> **Trigger → Condition → Action → Validation → Notification**
+
+Examples include checking llama.cpp every morning for a specific regression fix, watching an upstream issue/release until a required build becomes available, or reacting to repository/CI/system conditions. The job should persist its objective, schedule or watch condition, last-seen state, execution policy, validation criteria, and notification destination.
+
+A practical tool surface could include concepts such as `create_monitor`, `list_monitors`, `update_monitor`, `pause_monitor`, `delete_monitor`, and `run_monitor_now`, but final naming should follow the existing Forge tool taxonomy after code inspection.
+
+### Desired execution modes
+
+1. **Observe only** — check and report when relevant state changes.
+2. **Prepare** — detect the condition and stage/download/prepare the change, then require approval before mutation.
+3. **Act automatically** — perform a narrowly defined, explicitly authorized action when the stored condition is met.
+
+The third mode must not mean unrestricted unattended shell access. Jobs should use normal Forge permissions/confirmations and bounded allow-listed actions, with durable audit state and clear ownership.
+
+### Example: llama.cpp runtime maintenance
+
+A user could define a job equivalent to:
+
+> Every morning check whether a llama.cpp build containing the required Qwen 3.8 tensor-split/MTP fix is available. If it is, verify the evidence, obtain the appropriate Windows CUDA build, install it side-by-side, run the configured Forge smoke test, promote it only if validation passes, otherwise keep/restore the previous working build, and report the outcome.
+
+The safe lifecycle should be:
+
+> **detect → download/stage → verify → install side-by-side → test → promote → rollback on failure → notify**
+
+This is more valuable than a notification-only monitor because Forge already owns local model/runtime configuration and can potentially close the loop from upstream change to validated local deployment.
+
+### Efficiency requirement
+
+Do not wake a full local-model agent turn merely to discover that nothing changed. Where possible, the monitor subsystem should first perform cheap deterministic checks (for example comparing the last-seen Git SHA/release/issue state) and invoke the model only when new evidence needs interpretation or an action plan. This matters especially for local inference where unnecessary model turns cost latency, power, context and VRAM residency.
+
+### Persistence and delivery
+
+Jobs should survive VS Code/extension restart if the product intends them to be genuinely persistent. Results should be routable to the originating/bound Forge conversation and, when remote control is configured, optionally to Telegram. A future mobile client should consume the same job/result model rather than creating another scheduler.
+
+### Open architecture questions
+
+Before implementation, inspect existing background execution, remote durable outbox, conversation persistence, backend lifecycle, checkpoints and system-control owners so this does not become a second scheduler/runtime. Decide explicitly whether scheduling lives inside the extension host, a companion always-on host service, or both. If VS Code must be running for a job to execute, document that limitation; if jobs must run while Forge is closed, that requires an external durable runner and is a materially different architecture.
+
+This capability should be evaluated as a separate roadmap item and is potentially more strategically valuable than speculative micro-optimizations such as parallelizing already-fast local tool batches.
+
 ---
 
 # 2. `ROADMAP.md` — exact disposition
@@ -251,7 +288,7 @@ The current file should be replaced, not appended to.
 | FORGE.md hierarchy | Not resolved by this source audit | Verify `ForgeInstructionsLoader` behavior before keeping |
 | `/initForge` model quality | Needs re-verification | Verify command still exists/current flow before retaining |
 | `/initForge` non-JS projects | Needs re-verification | Verify command still exists/current flow before retaining |
-| Parallel tool execution | **OPEN** | Keep, but redefine as dependency-aware parallel read dispatch, not blanket `Promise.all` |
+| Parallel tool execution | **OPEN / GATED** | MEDIUM priority; preserve Section E measurement gate and existing design; do not queue implementation without evidence of material wall-clock benefit |
 | CheckpointStack disk snapshots | **IMPLEMENTED / OBSOLETE WORDING** | Remove from roadmap |
 | `format_file` active-editor brittleness | **IMPLEMENTED / OBSOLETE** | Remove from roadmap |
 | Git tools VS Code Git dependency/fallback | **IMPLEMENTED / OBSOLETE** | Remove from roadmap |
@@ -270,7 +307,8 @@ Recommended structure:
 - safe composition of local, cloud and CLI specialists;
 - worker/delegation observability;
 - concurrency only where ownership and rollback are explicit;
-- better recovery after interrupted delegated work where needed.
+- better recovery after interrupted delegated work where needed;
+- evaluate persistent agent jobs/monitor tools as a first-class orchestration capability: scheduled/conditional triggers, bounded action policies, validation/rollback and durable notification.
 
 ### B. Local-model efficiency and context economy
 
@@ -285,7 +323,8 @@ Recommended structure:
 - clearly distinguish what already survives reload from what does not;
 - unfinished-turn recovery if still incomplete;
 - durable state for long-running remote/agent workflows where justified;
-- memory pressure of native per-file checkpoints only if verified as a remaining issue.
+- memory pressure of native per-file checkpoints only if verified as a remaining issue;
+- if persistent agent jobs are adopted, define durable job state, last-seen condition state, audit history, restart recovery and rollback semantics explicitly.
 
 ### D. Remote operation
 
@@ -299,7 +338,8 @@ Recommended structure:
 - avoid making airOS hardware a requirement: the durable architecture should define an always-on LAN relay role that can be implemented by airOS, Raspberry Pi/Linux, OpenWrt, NAS, Home Assistant, another Windows host, or similar devices;
 - prefer one signed, allow-listed Windows Host Controller implementation rather than duplicating controller servers in Forge and HalluScribe; if the controller is truly application-neutral, consider extracting it to a standalone repository;
 - preserve the trust boundary: Telegram/relay inputs should select only fixed allow-listed program/action pairs, never arbitrary executable paths or shell fragments;
-- document the two-level onboarding clearly: **Basic remote** = Forge Telegram only, PC already awake; **Full remote** = always-on relay + Wake-on-LAN + signed Host Controller for wake/application lifecycle, after which Forge Telegram can take over.
+- document the two-level onboarding clearly: **Basic remote** = Forge Telegram only, PC already awake; **Full remote** = always-on relay + Wake-on-LAN + signed Host Controller for wake/application lifecycle, after which Forge Telegram can take over;
+- if persistent agent jobs can notify remotely, reuse the same conversation/remote delivery architecture rather than building a monitor-specific Telegram path.
 
 **Product decision still open:** exact repository ownership and packaging of the Windows Host Controller. Current discussion favors an application-neutral standalone component if it controls VS Code/HalluScribe/other approved programs, but this must be decided only after inspecting the unpushed controller implementation. Do not force this decision during the documentation cleanup.
 
@@ -313,7 +353,7 @@ Recommended structure:
 
 Keep verified concrete items such as:
 
-- dependency-aware parallel read dispatch;
+- parallel read dispatch only behind the existing measurement gate if evidence later justifies it;
 - package-manager detection;
 - proper HTML-to-text conversion;
 - any verified FORGE.md hierarchy or `/initForge` gaps;
@@ -395,6 +435,8 @@ Do not mix Telegram slash commands into this file unless it intentionally become
 Keep it as a dated review. Add a clear banner stating that it reflects the repository on 2026-09-05 and predates later 0.15.x/0.16 work. Do not mutate old findings until they look current.
 
 If Forge wants a living architecture document, create/update `docs/ARCHITECTURE.md` separately.
+
+The cleanup must preserve the review's verified parallel-tool decision: item 1 was downgraded from HIGH to MEDIUM after verification, and Section E of `docs/plans/REVIEW_FOLLOWUP_2026-09-05_PLAN.md` intentionally keeps implementation behind a measurement gate. Do not convert historical “gated” work into an active queue item merely because the current dispatcher remains sequential.
 
 ## `docs/REMOTE_COMPACT_PROGRESS_PLAN.md`
 
@@ -488,6 +530,7 @@ It should be implementation-derived and cover:
 14. Vision/video/image generation
 15. Persistence boundaries
 16. Security/trust boundaries
+17. If adopted, persistent agent jobs: scheduler/runner ownership, durable condition state, action authorization, validation/rollback and notification routing
 
 The architecture doc must distinguish CURRENT behavior from FUTURE roadmap work.
 
@@ -498,17 +541,20 @@ The architecture doc must distinguish CURRENT behavior from FUTURE roadmap work.
 Perform the cleanup in this order:
 
 1. **Fix P0 factual contradictions** in `README.md` and `docs/DELEGATION.md`.
-2. **Rewrite `ROADMAP.md`** using the verified disposition above; do not leave implemented bugs as future work.
+2. **Rewrite `ROADMAP.md`** using the verified disposition above; do not leave implemented bugs as future work and preserve intentionally gated items as gated.
 3. **Reconcile `docs/COMMANDS.md`** with `package.json` and add a drift check if practical.
 4. **Audit permanent subsystem docs** against their owning source modules.
 5. **Status historical plans/reports** rather than rewriting them as current docs.
 6. **Create/refresh `docs/ARCHITECTURE.md`** only after source-of-truth docs agree.
-7. Run tests/lint/docs link checks and any catalog/registry audit scripts already present.
-8. Finish with a report containing:
+7. Record new product proposals such as persistent agent jobs separately from implementation claims; do not silently implement them during a documentation cleanup.
+8. Run tests/lint/docs link checks and any catalog/registry audit scripts already present.
+9. Finish with a report containing:
    - files changed;
    - factual contradictions fixed;
    - roadmap items removed as already implemented;
    - roadmap items retained as verified open work;
+   - gated items preserved as gated and their activation criteria;
+   - new proposals requiring architecture/product decisions;
    - plans marked historical/superseded;
    - unresolved items that require product decisions rather than documentation edits.
 
@@ -520,9 +566,11 @@ Perform the cleanup in this order:
 - Do not remove safety caveats around destructive tools, external CLI agents, remote auth, checkpoints or billed image generation.
 - Do not mass-delete plans.
 - Do not promote an old plan into the roadmap without verifying the code gap still exists.
+- Do not convert deliberately gated work into queued implementation merely because it remains technically open.
 - Do not turn `ROADMAP.md` into a release changelog.
 - Do not duplicate the tool registry manually across many docs if one canonical reference can be linked.
 - Where practical, add invariant tests/generation checks for command/tool catalogs so this drift is harder to recreate.
+- New persistent-job/monitor work must reuse existing permissions, confirmations, checkpoints, backend lifecycle and remote-delivery primitives where possible; do not create an unattended privileged bypass around Forge's normal safety model.
 
 ---
 
@@ -535,9 +583,10 @@ The clearest verified examples are:
 - disk-backed external-CLI checkpoints: **already implemented**;
 - tab-independent direct formatter execution: **already implemented**;
 - Git CLI execution independent of VS Code Git: **already implemented**;
-- parallel tool execution: **still open**;
+- parallel tool execution: **still open but deliberately MEDIUM/gated behind measurement; design already exists**;
 - pnpm/yarn/bun detection in structured build/test tools: **still open**;
 - proper HTML-to-text conversion: **still open**;
-- CLI delegation documented as read-only: **documentation is wrong; current code allows CLI delegates to edit**.
+- CLI delegation documented as read-only: **documentation is wrong; current code allows CLI delegates to edit**;
+- persistent scheduled/conditional agent jobs: **new product proposal, not current behavior; potentially high strategic value**.
 
 The cleanup should therefore be a source-driven reconciliation pass, not a general prose refresh.
