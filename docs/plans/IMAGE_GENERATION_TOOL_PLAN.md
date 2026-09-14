@@ -1,6 +1,6 @@
 # `generate_image` — cloud (xAI) + local (ComfyUI) image generation (impl plan)
 
-Status (2026-09-14): **cloud half shipped in 0.15.50** — Phase 1 (cloud
+Status (2026-09-14): **cloud half shipped in 0.16.0** — Phase 1 (cloud
 backend + tool + config) and Phase 3 (Telegram photo) are built, for `xai`,
 `openai` and `openai-compatible` image endpoints. **ComfyUI (Phases 0, 2, 4)
 is not started** and remains the plan below.

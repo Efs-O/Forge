@@ -50,6 +50,10 @@ scripts/**
 .gitignore
 .vscodeignore
 **/*.map
+# Scratch bundles in dist/ (underscore-prefixed). A 7 MB dist/_hashcheck.js, left
+# from checking whether a fix was in the bundle, rode along in four local VSIXs.
+# The build only ever emits extension.js and webview/.
+dist/_*
 **/*.vsix
 .coordination/**
 smoke3d/**

@@ -189,7 +189,7 @@ describe('buildChunkSeeds token-budget fit pass', () => {
   });
 
   it('reserves the prompt prefix so a raw chunk at the budget edge still fits once formatted', async () => {
-    // Regression for the live 0.15.47 failure: a raw 4093-char single line has
+    // Regression for a live failure during development: a raw 4093-char single line has
     // raw est 2047 (<= 2048), so the raw-fit pass kept it whole — but the
     // request layer embeds the FORMATTED text (gemma prefix "title: none |
     // text: ", +20 chars), pushing it to est 2057 > 2048 -> HTTP 500. The fit

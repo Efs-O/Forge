@@ -1,127 +1,126 @@
 # Forge — Recent Changes
 
-## 0.15.42
+## 0.16.0
 
-- **Remote narration no longer repeats out of order.** A mid-turn thought that
-  a model repeated in two non-adjacent rounds used to be sent to the phone
-  twice, because the dedup guard only compared against the immediately
-  preceding narration. Every narration already sent this turn is now remembered
-  (bounded) and skipped if it repeats, so the phone sees each thought once.
+### Semantic search
 
-- **`/model <n>` works without running `/models` first.** A number after
-  `/model` only resolved off the last `/models` page, so in a fresh chat
-  `/model 14` was rejected as "model is unavailable" until `/models` had been
-  run. The number now falls back to the same order `/models` displays, matching
-  `/chat <n>`, which already resolved off the recent-conversation list.
+- **`search_codebase` can index any workspace without HTTP 500s.** Indexing
+  died with `input (N tokens) is too large to process` whenever the embedding
+  server's physical batch (`--ubatch-size`, pinned to `embeddings.n_ctx`,
+  default 2048) was exceeded — by too many chunks in one request, by one large
+  symbol, or by a single over-long line such as a minified-JSON fixture. No
+  chars-per-token estimate can prevent this: SentencePiece byte fallback makes
+  minified JS, base64 and CJK tokenize far denser than ordinary source. Chunks
+  are now **measured** with the server's own tokenizer (llama-server
+  `/tokenize`, same vocab as the embedding path), including the embedding
+  prompt prefix. Oversized symbols split into line sub-chunks that keep the
+  symbol name; single long lines split by characters. A byte upper bound skips
+  the tokenize call for small chunks, and a bounded cache shares counts between
+  chunking and request packing. Request batches are packed on exact counts, and
+  if the server still rejects a multi-chunk request it is split and retried
+  instead of aborting the build. **One-time index rebuild** on first use
+  (`INDEX_VERSION` 5).
 
-## 0.15.41
+### Tools
 
-- **Telegram slash commands clean themselves up.** After a recognized
-  `/command` is processed, its original message is deleted from the Telegram
-  chat after a short delay, so the screen stops accumulating one-off commands.
-  The delay is `remote.delete_command_messages_after` in seconds (default 5;
-  `0` disables it). Only terminal command results are cleaned up — ordinary
-  prompts, `/steer`, voice, selections, and approval actions are untouched —
-  and a delete that fails never affects the command itself.
-
-## 0.15.40
-
-- **Remote narration no longer over-suppressed.** A tool round that is purely
-  an `ask_user` question still suppresses its pre-question commentary from
-  remote surfaces, but a mixed round (e.g. a file write alongside a question)
-  now narrates as before — the user hears about the real work.
-
-- **Telegram album cursor commit is failure-safe.** If the durable cursor write
-  fails while flushing a merged photo album, the error is now reported instead
-  of escaping the poll loop; the album is still delivered and Telegram
-  redelivers it on restart rather than the poll loop going down.
-
-## 0.15.39
-
-- **Telegram albums arrive as one prompt.** Photo groups are merged into one
-  multi-image event, capped at three images with an in-chat overflow notice;
-  albums split across polling responses are kept together, and their cursor is
-  committed only after the event is handled.
-
-- **Remote questions expose free text.** Multi-question prompts now tell remote
-  users they may answer in prose, matching the sidebar's `Other…` route.
-
-- **`exec_command` accepts validated environment variables.** Foreground and
-  background execution share the same bounded policy while preserving shell-free
-  process spawning.
-
-- **The webview improves image and transcript navigation.** Image attachments
-  open in an in-place lightbox, and switching conversations reliably settles at
-  the actual bottom of a long transcript. Streaming status phrases also received
-  additional shared variants.
-
-## 0.15.37
-
-- **One `/model` command for remote.** `/models` and `/model` did overlapping
-  work: bare `/model` already listed models, so `/models` only added a hidden
-  page argument. `/model` is now the single visible command — bare lists, and
-  `/model <number-or-name>` pins one to the chat. `/models` stays as a silent
-  alias (the `/list` → `/chats` convention): it is hidden from `/help` and the
-  Telegram menu but still answers, and it is the only thing that pages the model
-  list on a plain-text transport like WhatsApp, which has no keyboard. On
-  Telegram the redundant `Page fallback: /models <page>.` footer line is dropped,
-  since the inline Previous/Next buttons already page. The `/help` note that
-  claimed bare `/model` reports the pinned model is also corrected — it lists.
-
-## 0.15.36
-
-- **`/chats` says which workspace it is in.** The conversation pager only ever
-  lists this window's conversations but never said where they lived, so after a
-  `/workspace` switch you had to run `/workspace` again to confirm. It now
-  prints the same `You are in: <name>` line `/workspace` already shows, reusing
-  the workspace name the selection context already carried.
-
-## 0.15.35
+- **New `generate_image` tool: any tool-using model can make images through a
+  cloud image API.** Configure backends under a new `image_generation:` block
+  (`xai`, `openai`, `openai-compatible`; OpenAI-style
+  `/v1/images/generations`). Keys resolve exactly as for a chat model on the
+  same provider, so `grok-imagine-image-2.0` works on the OpenCode OAuth login
+  with no new setup. The image is saved into the workspace under a checkpoint
+  (Undo removes it), opened beside the chat, shown as a clickable thumbnail
+  under its tool row (it survives a window reload), and sent as a photo to the
+  Telegram chat watching the turn, in order with the narration (falls back to
+  a document when Telegram rejects the photo). Every call asks for approval;
+  `confirm_each: true` (the default) keeps asking even under /clanker, since
+  each image is billed. The image is not pushed into the model's context — it
+  is told the workspace-relative path and can call `view_image`. No block, no
+  tool: the tool list and KV prefix are unchanged for configs without it. Local
+  ComfyUI backends are planned in `docs/plans/IMAGE_GENERATION_TOOL_PLAN.md`,
+  not built.
 
 - **`ask_user` can ask two decisions in one round.** It carried one prompt and
   one flat options list, so two related choices had to be crossed into their
-  combinations -- four buttons for two yes/no decisions, growing
-  multiplicatively and read as one question the user has to decode. It now
-  takes `questions: [{prompt, options}]`: each sub-question gets its own list,
-  the sidebar holds the answer until every one has a pick, and the answer comes
-  back labelled a line per sub-question. Remotely the reply is one number per
-  question in order -- "1 2" -- and the numbering shown in chat is the same
-  numbering the sidebar buttons carry, because both render through one owner.
+  combinations. It now takes `questions: [{prompt, options}]`: each
+  sub-question gets its own list, the sidebar holds the answer until every one
+  has a pick, and the answer comes back labelled a line per sub-question.
+  Remotely the reply is one number per question in order — "1 2" — using the
+  same numbering the sidebar buttons carry, and remote users are told they may
+  answer in prose instead.
 
-- **`Other…` in an agent question was a one-way door.** Picking it replaced the
-  numbered choices with the free-text box, so a mis-click left the user with
-  nothing to read and nothing to click back to — the only way out was to type an
-  answer or dismiss the question entirely. The options now stay on screen and
-  the text box opens beneath them, so either path stays available.
+- **`Other…` in an agent question is no longer a one-way door.** The numbered
+  options now stay on screen and the free-text box opens beneath them, so a
+  mis-click can be undone.
 
-- **The agent could delete a tracked file believing it was a duplicate, and
-  then had no way to put it back.** Given `CHANGES.md` and its gitignored,
-  generated twin `CHANGELOG.md`, an agent hashed both, found them
-  byte-identical, and deleted the tracked source of truth — content says
-  nothing about which file generates which. Neither the tool result nor the
-  approval dialog the user clicked mentioned that one of the two was committed
-  and the other ignored. `delete_file` now consults git before deleting and,
-  when the path was tracked at HEAD, says so in its result along with how to
-  undo it; the confirmation dialog gains a `Git:` line for the same reason.
+- **`delete_file` knows about git.** Given `CHANGES.md` and its gitignored,
+  generated twin `CHANGELOG.md`, an agent found them byte-identical and deleted
+  the tracked source of truth. `delete_file` now says in its result when the
+  path was tracked at HEAD, with how to undo it, and the confirmation dialog
+  gains a `Git:` line.
 
-- **New `restore_file` tool.** `git checkout <ref> -- <path>` is denylisted
-  because it silently overwrites uncommitted work, but the refusal offered
-  `switch_branch` and `git_show` as alternatives — neither of which can put a
-  file back, so the agent had nowhere to go and handed the problem to the user.
-  `restore_file({"paths": [...], "ref": "HEAD~1"})` restores from any ref,
-  recreating files a commit deleted. It is confirmation-gated and checkpointed,
-  and the denylist refusal now names it. A refusal that names no working
-  alternative teaches the agent the capability does not exist.
+- **New `restore_file` tool.** `git checkout <ref> -- <path>` stays denylisted
+  because it silently overwrites uncommitted work, but its refusal named no
+  alternative that could put a file back. `restore_file({"paths": [...],
+  "ref": "HEAD~1"})` restores from any ref, including files a commit deleted.
+  It is confirmation-gated and checkpointed, and the denylist refusal names it.
 
-- **`commit` can amend.** Previously it could only add a commit, so fixing the
-  message on the one just made meant shelling out through `exec_command`.
-  `amend: true` rewrites the previous commit, allows an empty index (a
-  message-only amend is legitimate), and refuses once the commit has reached a
-  remote — rewriting published history is the user's call.
+- **`commit` can amend.** `amend: true` rewrites the previous commit, allows an
+  empty index (a message-only amend), and refuses once the commit has reached a
+  remote.
 
-- **`stage` names the kind of change it staged.** `Staged: CHANGES.md` read as
-  an edit when it was in fact a deletion, and the commit message written from
-  it said so. It now reports `CHANGES.md (deleted)`.
+- **`stage` names the kind of change it staged** — `CHANGES.md (deleted)`
+  instead of a bare path that read as an edit.
+
+- **`exec_command` accepts validated environment variables.** Foreground and
+  background execution share one bounded policy; process spawning stays
+  shell-free.
+
+### Remote (Telegram)
+
+- **The live bubble no longer shows the model's streamed words.** Every
+  mid-turn thought and the final answer used to appear twice: streamed into the
+  "working…" bubble, then again as their own message, after which the bubble
+  copy vanished. The bubble now carries status only (headline, warnings, the
+  running tool) and each piece of text appears once, as a message — which is
+  also what pings the phone, since Telegram does not notify on edits.
+  **Trial change:** if the live text is missed, revert the commit "keep
+  streamed words out of the Telegram progress bubble".
+
+- **Slash commands clean themselves up.** After a `/command` is processed, its
+  original message is deleted after `remote.delete_command_messages_after`
+  seconds (default 5; `0` disables). Only terminal command results are cleaned
+  up — prompts, `/steer`, voice, selections and approvals are untouched — and a
+  failed delete never affects the command.
+
+- **Photo albums arrive as one prompt,** capped at three images with an in-chat
+  overflow notice. Albums split across polling responses are kept together, and
+  their cursor is committed only after the event is handled; a failed cursor
+  write is reported instead of taking the poll loop down.
+
+- **One `/model` command.** Bare `/model` lists models and
+  `/model <number-or-name>` pins one to the chat. A number now resolves in a
+  fresh chat without running a listing first. `/models` remains a hidden alias
+  (the only way to page the list on keyboard-less transports); on Telegram the
+  redundant page-fallback footer is gone. `/help` sections are sorted
+  alphabetically.
+
+- **`/chats` says which workspace it is in** (`You are in: <name>`).
+
+- **Narration is neither repeated nor over-suppressed.** A thought repeated in
+  two non-adjacent rounds is sent once, and a round that mixes real work with
+  an `ask_user` question narrates the work instead of being silenced.
+
+### Sidebar
+
+- **Image attachments open in an in-place lightbox.**
+- **Switching conversations settles at the actual bottom** of a long
+  transcript instead of mid-conversation.
+- More shared streaming status phrases.
+
+### CLI agents
+
+- **Forge-spawned Claude sessions show up in the Claude extension's history.**
 
 ## 0.15.34
 

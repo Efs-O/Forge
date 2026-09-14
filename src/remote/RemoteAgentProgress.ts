@@ -84,10 +84,10 @@ interface ActiveProgress {
  * tokens too, which meant every thought and the final answer appeared twice:
  * first inside the bubble, then again as their own message at the bottom,
  * after which the bubble copy vanished. Each piece of text now appears once,
- * as a message. TRIAL as of 0.15.49: the user may prefer the live text back;
+ * as a message. TRIAL as of 0.16.0: the user may prefer the live text back;
  * to revert, restore the `commentary` field, its append in `handle`, its
- * section in `render`, and the clear after a narration send (see the 0.15.49
- * commit for the exact diff).
+ * section in `render`, and the clear after a narration send (see the commit "keep
+ * streamed words out of the Telegram progress bubble" for the exact diff).
  */
 export class RemoteAgentProgress {
   private readonly active = new Map<string, ActiveProgress>();
