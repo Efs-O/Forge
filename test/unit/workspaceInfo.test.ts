@@ -47,4 +47,11 @@ describe('workspaceInfoMessage', () => {
       stale: false,
     });
   });
+
+  it('adds the root webview URI when the host can resolve one', () => {
+    setFolders([{ name: 'Forge', fsPath: 'N:/forge' }]);
+    expect(
+      workspaceInfoMessage('N:/forge', (uri) => `webview:${(uri as { fsPath: string }).fsPath}`),
+    ).toMatchObject({ rootUri: 'webview:N:/forge' });
+  });
 });

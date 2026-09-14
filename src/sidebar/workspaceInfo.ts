@@ -18,7 +18,10 @@ import type { HostToWebview } from './messageBridge';
  * was constructed with. A mismatch against the live list is what makes the
  * header say the window needs reloading rather than quietly aiming elsewhere.
  */
-export function workspaceInfoMessage(activationRoot: string): HostToWebview {
+export function workspaceInfoMessage(
+  activationRoot: string,
+  toWebviewUri?: (uri: vscode.Uri) => string,
+): HostToWebview {
   const folders = vscode.workspace.workspaceFolders ?? [];
   const root = folders[0]?.uri.fsPath ?? '';
   return {
@@ -27,6 +30,7 @@ export function workspaceInfoMessage(activationRoot: string): HostToWebview {
     path: root,
     extraRoots: Math.max(0, folders.length - 1),
     stale: root !== activationRoot,
+    ...(folders[0] && toWebviewUri ? { rootUri: toWebviewUri(folders[0].uri) } : {}),
   };
 }
 

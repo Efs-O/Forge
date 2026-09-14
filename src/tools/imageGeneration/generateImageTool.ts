@@ -5,6 +5,7 @@ import type { ForgeConfig, ImageBackendConfig, ImageGenerationConfig } from '../
 import type { ToolDefinition } from '../../llm/types';
 import type { UserNotificationService } from '../../sidebar/UserNotificationService';
 import { resolveWorkspacePath } from '../../util/WorkspacePaths';
+import { GENERATED_IMAGE_PREFIX } from '../../sidebar/toolResultView';
 import type { RegisteredTool, ToolHandlerContext } from '../ToolRegistry';
 import { generateCloudImage, type GeneratedImage } from './cloudImageBackend';
 
@@ -141,7 +142,7 @@ async function runGenerateImage(
   });
 
   const lines = [
-    `Generated image saved to ${target} (${image.mime}, ${image.bytes.length.toLocaleString()} bytes) with backend ${backend.name}.`,
+    `${GENERATED_IMAGE_PREFIX}${displayPath(absolute)} (${image.mime}, ${image.bytes.length.toLocaleString()} bytes) with backend ${backend.name}.`,
     reached > 0
       ? `Sent to ${reached} remote chat(s).`
       : 'No remote chat is watching this turn, so nothing was sent to a phone.',
@@ -149,6 +150,17 @@ async function runGenerateImage(
   if (image.revisedPrompt) lines.push(`The provider rewrote the prompt as: ${image.revisedPrompt}`);
   lines.push('To inspect it, call view_image on that path.');
   return lines.join('\n');
+}
+
+/**
+ * The saved path as the result states it: workspace-relative with `/`
+ * separators, so the sidebar can turn it into a thumbnail URL. A model may pass
+ * an absolute path inside the workspace; the result still reports it relative.
+ */
+function displayPath(absolute: string): string {
+  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const relative = root ? path.relative(root, absolute) : absolute;
+  return relative.split(path.sep).join('/');
 }
 
 export function pickBackend(

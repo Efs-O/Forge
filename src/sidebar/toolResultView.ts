@@ -54,3 +54,30 @@ export const PROSE_RESULT_TOOLS = new Set([
 export function rendersAsMarkdown(toolName: string): boolean {
   return PROSE_RESULT_TOOLS.has(toolName);
 }
+
+/**
+ * How a successful `generate_image` result begins. The tool writes it and the
+ * webview reads it back to show a thumbnail, so both halves import it from here
+ * rather than each spelling the sentence.
+ */
+export const GENERATED_IMAGE_PREFIX = 'Generated image saved to ';
+
+const GENERATED_IMAGE_LINE = /^Generated image saved to (.+?\.(?:png|jpe?g|gif|bmp|webp)) \(/i;
+
+/**
+ * Workspace-relative, `/`-separated path of the image a `generate_image` call
+ * saved, or undefined for any other tool, a failure, or an unrecognised result.
+ *
+ * Parsed from the result text rather than carried as a separate message field
+ * because the text is what the transcript persists: a restored session rebuilds
+ * its tool rows from it, and a thumbnail keyed on anything else would vanish on
+ * the first reload.
+ */
+export function generatedImagePath(toolName: string, result: string): string | undefined {
+  if (toolName !== 'generate_image' || isFailureResult(result)) return undefined;
+  const match = GENERATED_IMAGE_LINE.exec(result);
+  const relative = match?.[1];
+  if (!relative || relative.startsWith('/') || /^[a-z]:/i.test(relative)) return undefined;
+  if (relative.split('/').includes('..')) return undefined;
+  return relative;
+}

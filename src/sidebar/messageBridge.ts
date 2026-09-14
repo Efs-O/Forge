@@ -343,6 +343,8 @@ export interface WorkspaceInfoMsg {
   extraRoots: number;
   /** True once the roots changed since activation — the captured root is stale. */
   stale: boolean;
+  /** Webview URI of `path`, for thumbnails of workspace images (generate_image). */
+  rootUri?: string;
 }
 
 export type HostToWebview =

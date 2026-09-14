@@ -326,6 +326,7 @@ overlaps with an existing owner, extend the owner instead.
 | `generate_image` tool + save/deliver       | `src/tools/imageGeneration/generateImageTool.ts` |
 | Cloud `/v1/images/generations` backend     | `src/tools/imageGeneration/cloudImageBackend.ts` |
 | `image_generation:` config schema          | `src/config/imageGenerationSchema.ts` |
+| `generate_image` thumbnail URL (webview)   | `webview-ui/src/workspaceRootUri.ts` |
 | `view_video` tool definition + handler     | `src/tools/videoTool.ts`              |
 | ffmpeg probe + frame extraction            | `src/tools/videoExtract.ts`           |
 | ffmpeg/ffprobe executable discovery        | `src/tools/ffmpegLocate.ts`           |

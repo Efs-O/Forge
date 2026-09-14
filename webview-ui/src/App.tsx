@@ -7,6 +7,7 @@ import type {
   SessionTabMeta,
 } from '../../src/sidebar/messageBridge';
 import { vscode } from './vscode';
+import { WorkspaceRootUriContext } from './workspaceRootUri';
 import {
   reducer,
   initialState,
@@ -120,6 +121,7 @@ export function App(): React.ReactElement {
             path: msg.path,
             extraRoots: msg.extraRoots,
             stale: msg.stale,
+            ...(msg.rootUri ? { rootUri: msg.rootUri } : {}),
           });
           break;
         case 'backendStarting':
@@ -402,93 +404,95 @@ export function App(): React.ReactElement {
   }, [messages]);
 
   return (
-    <div id="forge-root">
-      <Header tokenUsed={tokenUsed} tokenMax={tokenMax} workspace={workspace} />
-      <aside id="chats-panel" aria-label="Forge sessions">
-        {!state.sessionHydrated && (
-          <span id="chats-loading" role="status">
-            Loading…
-          </span>
-        )}
-        {state.sessionHydrated && (
-          <>
-            <TabStrip
-              tabs={state.tabs}
-              activeId={state.activeConversationId}
-              streamingIds={state.streamingIds}
-              queuedIds={queuedIds}
-              historyExpanded={historyExpanded}
-              onSwitch={handleSwitchTab}
-              onNew={handleNewConversation}
-              onClose={handleCloseTab}
-              onToggleHistory={() => setHistoryExpanded((expanded) => !expanded)}
-            />
-            <HistoryList
-              items={state.history}
-              expanded={historyExpanded}
-              onDismiss={collapseHistory}
-              onRestore={handleRestoreFromPanel}
-              onDelete={handleDeleteConversation}
-              onRename={handleRenameConversation}
-            />
-          </>
-        )}
-      </aside>
-      <TranscriptPanes
-        state={state}
-        queuedPrompts={queuedPrompts}
-        onCancelQueuedPrompt={cancelQueuedPrompt}
-        onSteerQueuedPrompt={steerQueuedPrompt}
-        resumedIds={resumedIds}
-        emptyState={emptyState}
-      />
-      <StreamingStatus
-        streaming={streaming}
-        local={activeModelIsLocal}
-        clanker={state.clankerMode}
-      />
-      <CheckpointBar
-        visible={selectCheckpointPending(state)}
-        fileCount={checkpointStats.fileCount}
-        added={checkpointStats.added}
-        removed={checkpointStats.removed}
-      />
-      <InputRow
-        onSend={handleSend}
-        onCancel={handleCancel}
-        streaming={streaming}
-        backendReady={state.backendReady}
-        slashCommands={SLASH_COMMANDS}
-        onRunSlashCommand={handleRunSlashCommand}
-        prefillText={prefillText}
-        onPrefillConsumed={handlePrefillConsumed}
-        clankerMode={state.clankerMode}
-        models={state.models}
-        activeModel={state.activeModel}
-        onModelChange={handleModelChange}
-        modelPickerDisabled={uiBusy}
-        remote={state.remote}
-        activeConversationId={state.activeConversationId}
-      />
-      {dialogs.question && (
-        <QuestionDialog
-          prompt={dialogs.question.prompt}
-          placeholder={dialogs.question.placeholder}
-          options={dialogs.question.options}
-          questions={dialogs.question.questions}
-          onAnswer={dialogs.answerQuestion}
-          onDismiss={dialogs.dismissQuestion}
+    <WorkspaceRootUriContext.Provider value={workspace?.rootUri}>
+      <div id="forge-root">
+        <Header tokenUsed={tokenUsed} tokenMax={tokenMax} workspace={workspace} />
+        <aside id="chats-panel" aria-label="Forge sessions">
+          {!state.sessionHydrated && (
+            <span id="chats-loading" role="status">
+              Loading…
+            </span>
+          )}
+          {state.sessionHydrated && (
+            <>
+              <TabStrip
+                tabs={state.tabs}
+                activeId={state.activeConversationId}
+                streamingIds={state.streamingIds}
+                queuedIds={queuedIds}
+                historyExpanded={historyExpanded}
+                onSwitch={handleSwitchTab}
+                onNew={handleNewConversation}
+                onClose={handleCloseTab}
+                onToggleHistory={() => setHistoryExpanded((expanded) => !expanded)}
+              />
+              <HistoryList
+                items={state.history}
+                expanded={historyExpanded}
+                onDismiss={collapseHistory}
+                onRestore={handleRestoreFromPanel}
+                onDelete={handleDeleteConversation}
+                onRename={handleRenameConversation}
+              />
+            </>
+          )}
+        </aside>
+        <TranscriptPanes
+          state={state}
+          queuedPrompts={queuedPrompts}
+          onCancelQueuedPrompt={cancelQueuedPrompt}
+          onSteerQueuedPrompt={steerQueuedPrompt}
+          resumedIds={resumedIds}
+          emptyState={emptyState}
         />
-      )}
-      {dialogs.confirmRequest && (
-        <ConfirmationDialog
-          toolName={dialogs.confirmRequest.toolName}
-          detail={dialogs.confirmRequest.detail}
-          isDangerous={dialogs.confirmRequest.isDangerous}
-          onApprove={dialogs.approveConfirm}
-          onDeny={dialogs.denyConfirm}
+        <StreamingStatus
+          streaming={streaming}
+          local={activeModelIsLocal}
+          clanker={state.clankerMode}
         />
-      )}
-    </div>
+        <CheckpointBar
+          visible={selectCheckpointPending(state)}
+          fileCount={checkpointStats.fileCount}
+          added={checkpointStats.added}
+          removed={checkpointStats.removed}
+        />
+        <InputRow
+          onSend={handleSend}
+          onCancel={handleCancel}
+          streaming={streaming}
+          backendReady={state.backendReady}
+          slashCommands={SLASH_COMMANDS}
+          onRunSlashCommand={handleRunSlashCommand}
+          prefillText={prefillText}
+          onPrefillConsumed={handlePrefillConsumed}
+          clankerMode={state.clankerMode}
+          models={state.models}
+          activeModel={state.activeModel}
+          onModelChange={handleModelChange}
+          modelPickerDisabled={uiBusy}
+          remote={state.remote}
+          activeConversationId={state.activeConversationId}
+        />
+        {dialogs.question && (
+          <QuestionDialog
+            prompt={dialogs.question.prompt}
+            placeholder={dialogs.question.placeholder}
+            options={dialogs.question.options}
+            questions={dialogs.question.questions}
+            onAnswer={dialogs.answerQuestion}
+            onDismiss={dialogs.dismissQuestion}
+          />
+        )}
+        {dialogs.confirmRequest && (
+          <ConfirmationDialog
+            toolName={dialogs.confirmRequest.toolName}
+            detail={dialogs.confirmRequest.detail}
+            isDangerous={dialogs.confirmRequest.isDangerous}
+            onApprove={dialogs.approveConfirm}
+            onDeny={dialogs.denyConfirm}
+          />
+        )}
+      </div>
+    </WorkspaceRootUriContext.Provider>
   );
 }

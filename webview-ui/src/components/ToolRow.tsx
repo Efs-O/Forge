@@ -1,10 +1,12 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useContext, useMemo, useState } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AppMessage } from '../reducer';
 import { vscode } from '../vscode';
 import { normalizeMarkdownForRender } from '../markdown';
-import { rendersAsMarkdown } from '../../../src/sidebar/toolResultView';
+import { generatedImagePath, rendersAsMarkdown } from '../../../src/sidebar/toolResultView';
+import { WorkspaceRootUriContext, workspaceFileUri } from '../workspaceRootUri';
+import { ImageLightbox } from './ImageLightbox';
 import { formatDuration } from '../../../src/util/formatDuration';
 
 const ChevronDown = (): React.ReactElement => (
@@ -33,6 +35,9 @@ function formatSize(chars: number): string {
  */
 export function ToolRow({ message }: { message: AppMessage }): React.ReactElement {
   const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const closeExpanded = useCallback(() => setExpanded(false), []);
+  const rootUri = useContext(WorkspaceRootUriContext);
 
   const arrow = message.content.indexOf(' → ');
   const name = arrow !== -1 ? message.content.slice(0, arrow) : message.content;
@@ -53,6 +58,16 @@ export function ToolRow({ message }: { message: AppMessage }): React.ReactElemen
       ? { className: 'is-ok', glyph: '✓', label: 'completed' }
       : { className: 'is-pending', glyph: '○', label: 'running' };
   const body = useMemo(() => normalizeMarkdownForRender(result), [result]);
+  const imagePath = generatedImagePath(message.toolName ?? '', result);
+  const image =
+    imagePath && rootUri
+      ? {
+          name: imagePath,
+          mediaType: 'image/*',
+          bytes: 0,
+          src: workspaceFileUri(rootUri, imagePath),
+        }
+      : undefined;
 
   return (
     <div className={`msg-tool-row-wrap${message.toolIsError ? ' msg-tool-row-error' : ''}`}>
@@ -98,6 +113,17 @@ export function ToolRow({ message }: { message: AppMessage }): React.ReactElemen
           </button>
         )}
       </div>
+      {image && (
+        <button
+          type="button"
+          className="tool-row-thumb"
+          title={`${image.name} — click to expand`}
+          onClick={() => setExpanded(true)}
+        >
+          <img src={image.src} alt={image.name} />
+        </button>
+      )}
+      {image && expanded && <ImageLightbox attachment={image} onClose={closeExpanded} />}
       {open && (
         <div className="tool-row-body">
           {detail && (

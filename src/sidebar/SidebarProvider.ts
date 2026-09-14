@@ -274,6 +274,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         // Without this the transcript's thumbnails are silently blocked: a
         // webview URI outside every root does not load and reports nothing.
         ...(this.attachmentStore ? [vscode.Uri.file(this.attachmentStore.rootPath)] : []),
+        // generate_image thumbnails load straight from where the image was saved.
+        ...(vscode.workspace.workspaceFolders?.[0]
+          ? [vscode.workspace.workspaceFolders[0].uri]
+          : []),
       ],
     };
     webviewView.webview.html = buildWebviewHtml(this.extensionUri, webviewView.webview);
@@ -461,7 +465,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   postWorkspaceInfo(): void {
-    this.post(workspaceInfoMessage(this.workspaceRoot ?? ''));
+    const webview = this.view?.webview;
+    this.post(
+      workspaceInfoMessage(
+        this.workspaceRoot ?? '',
+        webview ? (uri) => webview.asWebviewUri(uri).toString() : undefined,
+      ),
+    );
   }
 
   private postSessionSync(): void {

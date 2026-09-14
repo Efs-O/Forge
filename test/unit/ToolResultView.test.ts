@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  generatedImagePath,
   isFailureResult,
   readPathArg,
   rendersAsMarkdown,
   resultLabel,
 } from '../../src/sidebar/toolResultView';
 import { capDisplayText, MAX_DISPLAY_RESULT_CHARS } from '../../src/tools/resultCap';
+import { workspaceFileUri } from '../../webview-ui/src/workspaceRootUri';
 
 describe('resultLabel', () => {
   it('labels a read-only call with its path argument', () => {
@@ -88,5 +90,31 @@ describe('rendersAsMarkdown', () => {
     expect(rendersAsMarkdown('exec_command')).toBe(false);
     expect(rendersAsMarkdown('git_diff')).toBe(false);
     expect(rendersAsMarkdown('unknown_tool')).toBe(false);
+  });
+});
+
+describe('generatedImagePath', () => {
+  const ok =
+    'Generated image saved to generated-images/20260914-a fox (1).jpg (image/jpeg, 130,038 bytes) with backend grok-imagine.\nSent to 1 remote chat(s).';
+
+  it('reads the saved path back from a successful generate_image result', () => {
+    expect(generatedImagePath('generate_image', ok)).toBe('generated-images/20260914-a fox (1).jpg');
+  });
+
+  it('ignores other tools, failures, and paths that leave the workspace', () => {
+    expect(generatedImagePath('write_file', ok)).toBeUndefined();
+    expect(generatedImagePath('generate_image', 'Error: grok-imagine: HTTP 401')).toBeUndefined();
+    expect(
+      generatedImagePath('generate_image', 'Generated image saved to ../outside.png (image/png'),
+    ).toBeUndefined();
+    expect(
+      generatedImagePath('generate_image', 'Generated image saved to C:/x/a.png (image/png'),
+    ).toBeUndefined();
+  });
+
+  it('builds an encoded thumbnail URL under the workspace root URI', () => {
+    expect(workspaceFileUri('https://file.vscode-resource/N:/ws/', 'art/a fox (1).jpg')).toBe(
+      'https://file.vscode-resource/N:/ws/art/a%20fox%20(1).jpg',
+    );
   });
 });

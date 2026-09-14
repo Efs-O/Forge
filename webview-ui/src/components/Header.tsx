@@ -6,6 +6,7 @@ export interface WorkspaceInfo {
   path: string;
   extraRoots: number;
   stale: boolean;
+  rootUri?: string;
 }
 
 interface Props {
