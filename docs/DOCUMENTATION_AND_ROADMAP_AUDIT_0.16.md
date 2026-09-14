@@ -236,9 +236,53 @@ A high-value future capability is to let the local Forge agent own **persistent 
 
 > **Trigger → Condition → Action → Validation → Notification**
 
-Examples include checking llama.cpp every morning for a specific regression fix, watching an upstream issue/release until a required build becomes available, or reacting to repository/CI/system conditions. The job should persist its objective, schedule or watch condition, last-seen state, execution policy, validation criteria, and notification destination.
+Examples include checking llama.cpp every morning for a specific regression fix, watching an upstream issue/release until a required build becomes available, monitoring disk space, checking repository/CI health, detecting broken local model/runtime configuration, or reacting to system conditions.
 
-A practical tool surface could include concepts such as `create_monitor`, `list_monitors`, `update_monitor`, `pause_monitor`, `delete_monitor`, and `run_monitor_now`, but final naming should follow the existing Forge tool taxonomy after code inspection.
+A practical tool surface could include concepts such as `create_monitor`, `list_monitors`, `get_monitor`, `update_monitor`, `pause_monitor`, `delete_monitor`, and `run_monitor_now`, but final naming should follow the existing Forge tool taxonomy after code inspection.
+
+### Runtime architecture: structured jobs, not Markdown injection
+
+Do **not** make an MD file the runtime source of truth and do not inject the monitor catalog into every ordinary model turn. That would waste context/KV space and couple scheduling to prompt text.
+
+The Markdown plan is design-time guidance for the implementing agent only. Runtime jobs should live in compact structured persistent state with fields conceptually equivalent to:
+
+- id/name/enabled;
+- trigger or schedule;
+- condition/watch predicate;
+- action policy;
+- validation/rollback policy;
+- notification target;
+- bound workspace/conversation if applicable;
+- last run / last success / last observation / last-seen upstream state;
+- next run and audit history.
+
+The normal Forge conversation should receive **none of this monitor state unless the user asks about it or a job result is intentionally surfaced there**.
+
+### Headless execution should be the default
+
+Scheduled jobs should run as **headless isolated executions**, not by hijacking the currently open sidebar conversation. The runner should reuse Forge's existing model/tool runtime, permissions, checkpoints and backend lifecycle where practical, but create a fresh bounded job session containing only the job objective, required context/tools, relevant previous observation/delta, and workspace instructions only when the job is workspace-scoped.
+
+The default model should therefore be:
+
+> scheduler → deterministic pre-check → optional isolated agent run → bounded action → validation → durable result → delivery
+
+A job may optionally be exposed as a **continuable job conversation** after completion so the user can open it and discuss the result without polluting the active coding chat.
+
+### Zero-LLM fast path
+
+A monitor must not wake the local model merely to rediscover that nothing changed. Deterministic checks should run without an LLM whenever possible.
+
+Examples:
+
+- disk-space threshold checks;
+- process/file existence checks;
+- configured path/runtime presence;
+- exact Git SHA/release/version comparison;
+- issue state comparison;
+- CI status transitions;
+- mounted drive / basic GPU visibility checks.
+
+Only when new evidence requires semantic interpretation, planning or a model-authored action should Forge invoke the local model. This reduces token usage, latency, power draw, context churn and unnecessary VRAM residency.
 
 ### Desired execution modes
 
@@ -247,6 +291,21 @@ A practical tool surface could include concepts such as `create_monitor`, `list_
 3. **Act automatically** — perform a narrowly defined, explicitly authorized action when the stored condition is met.
 
 The third mode must not mean unrestricted unattended shell access. Jobs should use normal Forge permissions/confirmations and bounded allow-listed actions, with durable audit state and clear ownership.
+
+### Safe initial job set
+
+Start with low-risk jobs that prove scheduling, persistence and delivery before allowing broad autonomous mutation:
+
+- llama.cpp version/fix watch;
+- disk-space monitor with warning thresholds and **no automatic deletion**;
+- Forge/repository CI-health watch;
+- Git workspace cleanliness / unexpectedly large untracked-file reporting;
+- configured GGUF/runtime/path health checks;
+- failed/stuck Forge-started background execution reporting;
+- basic GPU/model-drive/runtime sanity checks;
+- specific GitHub issue/release/commit-condition watches.
+
+Do not make automatic cleanup, arbitrary `git pull`, model deletion, Windows/driver updates, or destructive configuration mutation part of the first implementation.
 
 ### Example: llama.cpp runtime maintenance
 
@@ -258,19 +317,27 @@ The safe lifecycle should be:
 
 > **detect → download/stage → verify → install side-by-side → test → promote → rollback on failure → notify**
 
-This is more valuable than a notification-only monitor because Forge already owns local model/runtime configuration and can potentially close the loop from upstream change to validated local deployment.
-
-### Efficiency requirement
-
-Do not wake a full local-model agent turn merely to discover that nothing changed. Where possible, the monitor subsystem should first perform cheap deterministic checks (for example comparing the last-seen Git SHA/release/issue state) and invoke the model only when new evidence needs interpretation or an action plan. This matters especially for local inference where unnecessary model turns cost latency, power, context and VRAM residency.
+The first implementation can begin in Observe mode, then add Prepare, then permit Act only after the scheduler, audit trail, validation and rollback paths are proven.
 
 ### Persistence and delivery
 
-Jobs should survive VS Code/extension restart if the product intends them to be genuinely persistent. Results should be routable to the originating/bound Forge conversation and, when remote control is configured, optionally to Telegram. A future mobile client should consume the same job/result model rather than creating another scheduler.
+Jobs should survive VS Code/extension restart if the product intends them to be genuinely persistent. Results should be recorded durably and delivered independently of the active chat.
+
+Recommended delivery modes:
+
+- `sidebar` — show a compact job/result card rather than dumping the entire hidden execution transcript into the active conversation;
+- `telegram` — send the meaningful final result when Forge remote is configured;
+- `both`;
+- `silent-unless-triggered` — record successful no-change checks without notifying;
+- optional **continuable job** — expose the dedicated job session/conversation when the user wants to inspect tool history or continue discussing the result.
+
+The same durable result model should later serve a mobile client instead of creating a monitor-specific transport.
 
 ### Open architecture questions
 
-Before implementation, inspect existing background execution, remote durable outbox, conversation persistence, backend lifecycle, checkpoints and system-control owners so this does not become a second scheduler/runtime. Decide explicitly whether scheduling lives inside the extension host, a companion always-on host service, or both. If VS Code must be running for a job to execute, document that limitation; if jobs must run while Forge is closed, that requires an external durable runner and is a materially different architecture.
+Before implementation, inspect existing background execution, remote durable outbox, conversation persistence, backend lifecycle, checkpoints and system-control owners so this does not become a second scheduler/runtime.
+
+Decide explicitly whether scheduling lives inside the extension host, a companion always-on host service, or both. If VS Code must be running for a job to execute, document that limitation. If jobs must execute while Forge is completely closed, that requires an external durable runner and is a materially different architecture.
 
 This capability should be evaluated as a separate roadmap item and is potentially more strategically valuable than speculative micro-optimizations such as parallelizing already-fast local tool batches.
 
@@ -308,7 +375,7 @@ Recommended structure:
 - worker/delegation observability;
 - concurrency only where ownership and rollback are explicit;
 - better recovery after interrupted delegated work where needed;
-- evaluate persistent agent jobs/monitor tools as a first-class orchestration capability: scheduled/conditional triggers, bounded action policies, validation/rollback and durable notification.
+- evaluate persistent agent jobs/monitor tools as a first-class orchestration capability: structured persistent jobs, headless isolated execution, deterministic zero-LLM pre-checks, bounded action policies, validation/rollback and durable notification.
 
 ### B. Local-model efficiency and context economy
 
@@ -316,7 +383,8 @@ Recommended structure:
 - continue demand-loaded tool exposure;
 - improve semantic retrieval/compaction only where measurements justify it;
 - minimize duplicated tool output/context;
-- model-specific recovery kept behind generic interfaces where possible.
+- model-specific recovery kept behind generic interfaces where possible;
+- do not inject the persistent-job catalog or its design Markdown into normal turns; load only the one job's bounded context when a scheduled run actually requires a model.
 
 ### C. Durable state and recovery
 
@@ -339,7 +407,8 @@ Recommended structure:
 - prefer one signed, allow-listed Windows Host Controller implementation rather than duplicating controller servers in Forge and HalluScribe; if the controller is truly application-neutral, consider extracting it to a standalone repository;
 - preserve the trust boundary: Telegram/relay inputs should select only fixed allow-listed program/action pairs, never arbitrary executable paths or shell fragments;
 - document the two-level onboarding clearly: **Basic remote** = Forge Telegram only, PC already awake; **Full remote** = always-on relay + Wake-on-LAN + signed Host Controller for wake/application lifecycle, after which Forge Telegram can take over;
-- if persistent agent jobs can notify remotely, reuse the same conversation/remote delivery architecture rather than building a monitor-specific Telegram path.
+- if persistent agent jobs can notify remotely, reuse the same conversation/remote delivery architecture rather than building a monitor-specific Telegram path;
+- scheduled jobs should default to headless/detached execution with compact sidebar/Telegram result delivery, while an optional continuable job conversation can expose the dedicated execution history when needed.
 
 **Product decision still open:** exact repository ownership and packaging of the Windows Host Controller. Current discussion favors an application-neutral standalone component if it controls VS Code/HalluScribe/other approved programs, but this must be decided only after inspecting the unpushed controller implementation. Do not force this decision during the documentation cleanup.
 
@@ -530,7 +599,7 @@ It should be implementation-derived and cover:
 14. Vision/video/image generation
 15. Persistence boundaries
 16. Security/trust boundaries
-17. If adopted, persistent agent jobs: scheduler/runner ownership, durable condition state, action authorization, validation/rollback and notification routing
+17. If adopted, persistent agent jobs: scheduler/runner ownership, structured durable job state, zero-LLM deterministic pre-checks, isolated/headless agent execution, action authorization, validation/rollback and sidebar/remote notification routing
 
 The architecture doc must distinguish CURRENT behavior from FUTURE roadmap work.
 
@@ -571,6 +640,7 @@ Perform the cleanup in this order:
 - Do not duplicate the tool registry manually across many docs if one canonical reference can be linked.
 - Where practical, add invariant tests/generation checks for command/tool catalogs so this drift is harder to recreate.
 - New persistent-job/monitor work must reuse existing permissions, confirmations, checkpoints, backend lifecycle and remote-delivery primitives where possible; do not create an unattended privileged bypass around Forge's normal safety model.
+- Persistent monitor definitions must not become permanent prompt payload. Keep them in structured storage and inject only the bounded context required for a due job.
 
 ---
 
@@ -587,6 +657,6 @@ The clearest verified examples are:
 - pnpm/yarn/bun detection in structured build/test tools: **still open**;
 - proper HTML-to-text conversion: **still open**;
 - CLI delegation documented as read-only: **documentation is wrong; current code allows CLI delegates to edit**;
-- persistent scheduled/conditional agent jobs: **new product proposal, not current behavior; potentially high strategic value**.
+- persistent scheduled/conditional agent jobs: **new product proposal, not current behavior; structured/headless/zero-LLM-first architecture recommended**.
 
 The cleanup should therefore be a source-driven reconciliation pass, not a general prose refresh.
