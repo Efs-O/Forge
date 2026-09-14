@@ -45,6 +45,10 @@ describe('git awareness around delete and restore', () => {
   beforeEach(() => {
     root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'forge-del-')));
     git(root, ['init', '-b', 'main']);
+    // The env above only reaches this file's own git calls; the commit tool
+    // spawns git with the real environment, which has no identity on CI.
+    git(root, ['config', 'user.name', 'Forge Test']);
+    git(root, ['config', 'user.email', 'forge@test.invalid']);
     fs.writeFileSync(path.join(root, 'CHANGES.md'), '# 1.0\n', 'utf8');
     fs.writeFileSync(path.join(root, '.gitignore'), '/CHANGELOG.md\n', 'utf8');
     git(root, ['add', 'CHANGES.md', '.gitignore']);
