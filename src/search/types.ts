@@ -18,8 +18,16 @@ export interface SearchIndexFile {
    * older code stays structurally valid but no longer means the same thing, and
    * nothing else in isCompatibleIndex would catch it.
    * 2 — symbol chunks include their leading doc comment.
+   * 3 — char-split fallback re-chunks a single over-long line (e.g. a
+   *      minified JSON blob) that the line-split alone cannot break.
+   * 4 — fit pass measures the formatted text (prompt prefix included), so a
+   *      raw chunk at the budget edge no longer overflows once prefixed.
+   * 5 — fit pass measures the formatted text with the server's EXACT tokenizer
+   *      (via /tokenize), not a chars-per-token estimate. The estimate
+   *      undercounted dense content, so a chunk estimated to fit overflowed the
+   *      physical batch once the real tokenizer ran.
    */
-  version: 2;
+  version: 5;
   workspaceRoot: string;
   modelPath: string;
   includeGlobs: string[];

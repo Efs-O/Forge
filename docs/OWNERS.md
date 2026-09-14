@@ -337,6 +337,8 @@ overlaps with an existing owner, extend the owner instead.
 | ---------------------------------------- | -------------------------------- |
 | Index build/update + query orchestration | `src/search/IndexManager.ts`     |
 | Embedding HTTP client (/v1/embeddings)   | `src/search/EmbeddingClient.ts`  |
+| Exact token count (/tokenize)            | `src/search/TokenCounter.ts`     |
+| Embedding token budget + byte bound      | `src/search/embeddingBudget.ts`  |
 | Embedding task-prefix formatting         | `src/search/embeddingPrompts.ts` |
 | File chunking + chunk hashing            | `src/search/chunking.ts`         |
 | Vector math (cosine similarity)          | `src/search/semanticMath.ts`     |

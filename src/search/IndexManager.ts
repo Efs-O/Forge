@@ -4,12 +4,21 @@ import * as vscode from 'vscode';
 import type { ForgeConfig } from '../config/types';
 import { EmbeddingBackend } from '../backend/EmbeddingBackend';
 import { EmbeddingClient } from './EmbeddingClient';
+import { ServerTokenCounter } from './TokenCounter';
 import { buildChunkSeeds } from './chunking';
 import { cosineSimilarity } from './semanticMath';
 import { DEFAULT_PROMPT_STYLE, type EmbeddingPromptStyle } from './embeddingPrompts';
+import { DEFAULT_EMBEDDING_WINDOW } from './embeddingBudget';
 import type { SearchChunk, SearchHit, SearchIndexFile, SearchResultSummary } from './types';
 
-const INDEX_VERSION = 2;
+// Bump to 5: the fit pass now measures the FORMATTED text with the server's
+// EXACT tokenizer (via /tokenize), not a chars-per-token estimate. The estimate
+// undercounted dense content (minified JS, base64, CJK via byte fallback), so a
+// chunk estimated to fit overflowed the physical batch once the real tokenizer
+// ran — the recurring "input too large" 500. Chunk boundaries change and a
+// one-time rebuild is required. (v4 measured the formatted text with the
+// estimate; v3 added the char-split fallback for over-long single lines.)
+const INDEX_VERSION = 5;
 const DEFAULT_INCLUDE_GLOBS = ['**/*'];
 const DEFAULT_EXCLUDE_GLOBS = [
   '**/node_modules/**',
@@ -23,6 +32,7 @@ const EMBEDDING_BATCH_SIZE = 24;
 
 export class IndexManager {
   private readonly client: EmbeddingClient;
+  private readonly tokenCounter: ServerTokenCounter;
   private index: SearchIndexFile | null = null;
   private indexLoaded = false;
   private readonly dirtyPaths = new Set<string>();
@@ -32,9 +42,16 @@ export class IndexManager {
     private config: ForgeConfig,
     private readonly backend: EmbeddingBackend,
   ) {
+    // One counter, shared by the chunker (fit pass) and the request layer
+    // (packing): the same texts are measured by both, so the sha1 cache absorbs
+    // the repeat lookups. It measures via the server's own tokenizer, which is
+    // what makes the fit pass exact rather than another estimate.
+    this.tokenCounter = new ServerTokenCounter(() => this.backend.baseUrl());
     this.client = new EmbeddingClient(
       () => this.backend.baseUrl(),
       () => this.promptStyle(),
+      () => this.embeddingTokenBudget(),
+      () => this.tokenCounter,
     );
   }
 
@@ -168,7 +185,13 @@ export class IndexManager {
     for (const relPath of relativePaths) {
       const doc = await this.openEligibleDocument(relPath);
       if (!doc) continue;
-      const seeds = await buildChunkSeeds(doc, relPath);
+      const seeds = await buildChunkSeeds(
+        doc,
+        relPath,
+        this.embeddingTokenBudget(),
+        this.promptStyle(),
+        this.tokenCounter,
+      );
       for (let offset = 0; offset < seeds.length; offset += EMBEDDING_BATCH_SIZE) {
         const batch = seeds.slice(offset, offset + EMBEDDING_BATCH_SIZE);
         const embeddings = await this.client.embedDocuments(batch.map((seed) => seed.text));
@@ -256,6 +279,16 @@ export class IndexManager {
       // before prompt_style existed has `undefined` here and correctly rebuilds.
       index.promptStyle === this.promptStyle()
     );
+  }
+
+  /**
+   * The embedding server's physical batch, in tokens. composeEmbeddingServerArgs
+   * pins --ubatch-size to embeddings.n_ctx, and llama.cpp requires the whole
+   * combined request to fit it — so the client must never pack more than this
+   * many tokens into one /v1/embeddings call.
+   */
+  private embeddingTokenBudget(): number {
+    return this.config.embeddings?.n_ctx ?? DEFAULT_EMBEDDING_WINDOW;
   }
 
   private promptStyle(): EmbeddingPromptStyle {
