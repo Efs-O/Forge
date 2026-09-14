@@ -35,6 +35,10 @@ internal permission prompts cannot be intercepted by Forge.
 
 ## Telegram setup
 
+**New user? Start with the [5-minute Telegram quickstart](TELEGRAM_QUICKSTART.md).**
+It covers only the shortest path from BotFather to a working private Forge chat.
+The steps below are the compact reference version.
+
 1. Create a bot with Telegram BotFather and copy its token.
 2. Run `Forge: Set Telegram Bot Token`. The token is written to SecretStorage.
 3. Enable `remote.enabled` and `remote.telegram.enabled` in Forge config, then
