@@ -1,549 +1,532 @@
-# Forge 0.16 Documentation & Roadmap Modernization Audit
+# Forge 0.16 — Code-Grounded Documentation and Roadmap Audit
 
-**Status:** action plan for the local Forge agent  
-**Baseline:** current `main`, Forge 0.16.x  
-**Purpose:** bring project documentation, roadmap, plans, and architectural descriptions up to the level of the implementation that now exists.
-
----
-
-## Executive assessment
-
-Forge has evolved materially beyond the project described by the older roadmap and several older planning documents.
-
-The current project is no longer well described as only a VS Code chat extension with local-model tooling. The implementation now includes substantial pieces of a **local-first agent runtime / orchestration layer**:
-
-- local model lifecycle and llama.cpp integration;
-- structured tool execution and checkpointed workspace mutation;
-- Git-aware safety and recovery tools;
-- compaction and context-management infrastructure;
-- semantic codebase search;
-- remote control through Telegram;
-- durable remote notifications and progress handling;
-- sidebar/remote shared runtime behavior;
-- specialist/CLI delegation work;
-- image generation as a callable specialist capability;
-- multimodal result handling;
-- provider/model switching and cloud interoperability.
-
-The documentation must now describe the system that exists, not the system Forge was several months ago.
-
-### Current assessment
-
-- **Overall project:** 8.8/10
-- **Local-first coding-agent niche:** 9.2/10
-- **Documentation / roadmap alignment with current architecture:** materially below the implementation quality and now a maintenance risk.
-
-The remaining gap to a truly top-tier agent runtime is not primarily a lack of more tools. The important work is orchestration quality, delegation, state/recovery durability, composability, context efficiency, and architectural/documentation coherence.
+**Status:** implementation-derived maintenance report  
+**Audit date:** 2026-09-14  
+**Baseline:** current `main` / package version `0.16.0`  
+**Audience:** local Forge agent performing the documentation cleanup
 
 ---
 
-# Instructions to the implementing agent
+## Purpose
 
-Do **not** treat this document as permission to mechanically rewrite files.
+This report is derived from the current implementation, not from old plans. The task is to make the active documentation describe the code that exists now, remove already-implemented work from the roadmap, preserve genuinely open technical debt, and stop historical plans from being mistaken for current architecture.
 
-For every documentation change:
+The implementing agent MUST treat source code, tests, registries, schemas, and current config types as the source of truth. Old Markdown files are evidence of intent, not evidence of present behavior.
 
-1. Inspect current `main` implementation first.
-2. Verify public behavior against the actual command registry, tool registry, configuration schemas, runtime code, tests, and relevant `CHANGES.md` entries.
-3. Determine whether the existing document is:
-   - **CURRENT** — accurate enough; leave it alone except for minor corrections.
-   - **STALE** — useful but contains outdated behavior; update it.
-   - **SUPERSEDED** — historical implementation plan whose completed design is now documented elsewhere; mark/archive or replace with a short historical note if appropriate.
-   - **PARTIALLY IMPLEMENTED** — preserve unfinished work, but clearly distinguish implemented vs pending sections.
-   - **OBSOLETE** — assumptions are no longer valid; remove from active guidance or replace with a current document.
-4. Never mark a feature implemented based only on a plan or old report. Find the code/test evidence.
-5. Never delete useful historical design rationale unless the same information survives elsewhere.
-6. Prefer one authoritative current document over several overlapping documents that disagree.
-7. When a plan is fully implemented, convert its useful design rationale into the appropriate permanent documentation and then mark the plan as completed/historical rather than leaving it looking actionable.
-8. Preserve compatibility and safety warnings that still matter.
-9. Run documentation/link/command tests where available after changes.
-10. End the work with a concise report listing:
-    - files changed;
-    - files intentionally left unchanged;
-    - documents archived/superseded;
-    - unresolved documentation questions;
-    - roadmap items verified as still open.
+Do not mechanically rewrite every document. Fix factual drift first, then reorganize roadmap/history.
 
 ---
 
-# Priority 0 — verify the current product surface
+# Executive finding
 
-Before changing documentation, build a concise inventory from code.
+Forge's codebase has advanced faster than its documentation. The current repository is no longer accurately summarized by the old `ROADMAP.md` or by several older delegation / architecture documents.
 
-Verify at minimum:
+The implementation now has distinct subsystems for:
 
-- current extension version;
-- registered slash commands and aliases;
-- registered agent tools;
-- Git tools and their safety/confirmation semantics;
-- compaction entry points and triggers;
-- delegation / worker capabilities;
-- remote-control transports and current Telegram behavior;
-- image generation and `view_image` behavior;
-- semantic search/indexing behavior;
-- supported providers and credential paths;
-- shared sidebar/remote runtime behavior;
-- checkpoint behavior and recovery scope;
-- model lifecycle / llama.cpp configuration surfaces;
-- current FORGE.md behavior;
-- current CLI-agent integration behavior.
+- the model/tool-calling loop and truncation recovery;
+- dynamic tool registration and lazy tool exposure;
+- local semantic code search;
+- checkpointed workspace mutation, including disk-backed external-CLI rollback;
+- CLI-agent direct chat and delegation;
+- remote operation;
+- compaction and conversation runtime state;
+- Git-native recovery and mutation tools;
+- background process execution;
+- multimodal inspection and configured image generation;
+- machine/system control and status.
 
-This inventory becomes the source of truth for the documentation pass.
+This means the main documentation problem is no longer missing prose. It is **incorrect project state**: active documents still describe capabilities as future work after they have shipped, and some user-facing files describe CLI delegation with semantics that contradict the implementation.
+
+### Severity summary
+
+**P0 — factual contradictions / misleading current docs**
+
+- `README.md`
+- `docs/DELEGATION.md`
+- `ROADMAP.md`
+- `docs/COMMANDS.md`
+
+**P1 — likely stale permanent/reference docs that must be checked against current code**
+
+- `docs/SHARED_RUNTIME.md`
+- `docs/REMOTE_CONTROL.md`
+- `docs/LOCAL_MODEL_OPTIMIZATIONS.md`
+- `docs/OWNERS.md`
+- `docs/AGENT_TOOL_TRAPS.md`
+
+**P2 — historical plans/reports that need explicit lifecycle status, not blind rewriting**
+
+- `docs/FORGE_ARCHITECTURE_REVIEW_2026-09-05.md`
+- `docs/REMOTE_COMPACT_PROGRESS_PLAN.md`
+- delegation/worker plans and reports
+- completed files under `docs/plans/`
 
 ---
 
-# Priority 1 — replace the obsolete roadmap model
+# 1. Verified implementation facts that documentation must reflect
 
-## `ROADMAP.md`
+## 1.1 Tool surface is substantially broader than older docs imply
 
-**Expected status: STALE / structurally obsolete.**
+`src/tools/registerAllTools.ts` is the current registration source of truth. It registers file/edit tools, LSP tools, notebook tools, background execution, workspace tasks, web tools, durable memory, semantic search, Git reads/writes/recovery, system/power controls, delegation, vision/video, configured image generation, and lazy tool groups.
 
-The current roadmap is still organized around an earlier stage of Forge and currently lists a small set of UX/tooling edge cases as if they represent the primary future direction of the project.
+Important current tools include, among others:
 
-Do not simply append newer features below it.
+- `get_editor_context`
+- `find_implementations`
+- `get_code_actions` / `apply_code_action`
+- `read_tool_result`
+- `update_plan`
+- `search_codebase`
+- `monitor_execution` / `stop_execution` / `list_executions`
+- `restore_file`
+- `list_delegation_targets`
+- `ask_local_agent`
+- `generate_image` when configured
+- power/system tools
 
-### Required action
+Documentation that presents an older smaller tool list must be corrected from the registry, not from memory.
 
-Audit every existing item against current code, then rewrite `ROADMAP.md` around the architecture Forge actually has today.
+## 1.2 CLI delegation is NOT read-only
 
-Suggested top-level structure:
+This is the most important factual documentation bug found in the audit.
 
-### 1. Agent orchestration & delegation
+Current `ask_local_agent` behavior explicitly distinguishes targets:
 
-Examples of questions to resolve:
+- local/cloud model targets receive the delegated task plus optional context files and do not receive Forge's tool registry;
+- CLI targets such as Claude/Codex run with their own tools;
+- CLI targets are explicitly described by the implementation as unrestricted and able to edit files themselves;
+- the tool description tells the primary agent it may delegate implementation, not only review;
+- after CLI delegation errors/timeouts, the caller is warned to inspect Git state because the external agent may already have changed files.
 
-- Can the primary local agent delegate specialist work cleanly and cheaply?
-- Are worker lifecycles, scopes, permissions, and result synthesis mature?
-- Can Forge choose between local, CLI, cloud, search, and image specialists without bloating the base tool/prompt surface?
-- Are delegation results inspectable, checkpointed, resumable, and attributable?
-- Are concurrent independent workers safe?
+`README.md` currently says external CLI agents are “read-only delegation targets”. `docs/DELEGATION.md` opens by saying CLI delegates use a read-only tool set, then later in the same document calls them full-rights external agents. Those statements cannot coexist.
 
-### 2. Local-model efficiency & context engineering
+### Required change
 
-Focus on:
+Make the implementation semantics authoritative:
 
-- context economy;
-- selective/hierarchical tool exposure;
-- semantic retrieval quality;
-- compaction fidelity;
-- prompt-prefix stability / cache friendliness;
-- model-specific quirks and recovery;
-- avoiding unnecessary tool-result/context duplication;
-- parallel independent reads/searches where safe.
+- direct CLI chat: full-rights external agent using the CLI's own tools;
+- CLI delegation: also allowed to inspect AND edit using the CLI's own tools;
+- local/cloud delegation: bounded model call without Forge tools;
+- rollback/checkpoint coverage and the warning about partial work after error/timeout must remain clearly documented.
 
-### 3. State, recovery & long-running autonomy
+Update both `README.md` and `docs/DELEGATION.md` in the same cleanup so they cannot drift in opposite directions again.
 
-Focus on:
+## 1.3 External CLI rollback is already disk-backed
 
-- durable checkpoints;
-- process/VS Code restart recovery;
-- unfinished-turn recovery;
-- worker/session state;
-- crash-safe remote operation;
-- resumability after compaction;
-- auditability of mutations and delegated work.
+The old roadmap item “CheckpointStack: disk-based snapshots” is already materially implemented.
 
-### 4. Remote operation
+Current `CheckpointStack`:
 
-Treat Telegram as a real remote UI, not a notification add-on.
+- owns a `DiskCheckpointStore`;
+- stores `diskSnapshots` alongside in-memory file snapshots;
+- can prepare whole-workspace or targeted-path disk checkpoints;
+- uses a temp-backed default storage root unless configured otherwise;
+- restores disk snapshots during Undo;
+- keeps recovery data when an Undo is incomplete;
+- discards disk recovery data after successful restoration/eviction.
 
-Focus on:
+This does not mean every Forge-native per-file snapshot is disk-only. The current design is hybrid: native file mutations retain memory state, while whole-workspace/external-CLI rollback is disk-backed. Documentation should describe that accurately rather than saying Forge still needs to “move CheckpointStack to disk”.
 
-- parity with sidebar workflows where sensible;
-- stable long-running sessions;
-- approvals and structured questions;
-- model/session switching;
-- transcript/navigation quality;
-- attachments/multimodal interaction;
-- groundwork for a future dedicated iOS client without coupling core runtime logic to Telegram.
+### Required change
 
-### 5. Multimodal & specialist capabilities
+Remove the old roadmap item in its current wording. If there is still a desired follow-up, rewrite it narrowly around a real remaining problem, for example memory pressure from very large Forge-native per-file mutations, only if current limits/tests show that is still relevant.
 
-Focus on:
+## 1.4 `format_file` hardening is already implemented
 
-- image generation provider abstraction;
-- vision/image inspection;
-- possible local ComfyUI or other local backends;
-- artifact handling;
-- future specialist tools only when they compose cleanly with the agent loop.
+The roadmap says `format_file` is brittle because it operates on the active editor and suggests replacing that behavior with direct formatting-provider edits.
 
-### 6. Reliability, safety & observability
+Current `makeFormatFileTool()` already:
 
-Focus on:
+- opens the target document without showing/activating an editor;
+- refuses to overwrite unsaved unrelated user edits;
+- invokes `vscode.executeFormatDocumentProvider` for the explicit URI;
+- builds and applies a `WorkspaceEdit`;
+- checks document version before applying returned ranges;
+- saves the exact document;
+- reports the no-formatter/no-edit cases explicitly.
 
-- Git safety/recovery;
-- checkpoint guarantees;
-- structured errors;
-- tool failure recovery;
-- remote-delivery correctness;
-- model/runtime telemetry;
-- traceability of context/tool/delegation decisions.
+The exact API differs from the old suggestion, but the underlying bug has been solved: formatting is target-file based and no longer depends on whichever tab is focused.
 
-### 7. UX and lower-priority backlog
+### Required change
 
-Move still-valid smaller items here rather than allowing them to define the project direction.
+Delete the old roadmap item. If formatter reliability still has a failing test/case, document the specific remaining case rather than carrying the obsolete active-editor description forward.
 
-The existing roadmap items must be individually verified. Some may remain good backlog entries, including potentially:
+## 1.5 Git tools no longer depend on VS Code Git for execution
 
-- FORGE.md hierarchy;
-- parallel independent tool execution;
-- stronger checkpoint storage;
+The old roadmap says Git tools fail if the VS Code Git extension is unavailable and proposes a CLI fallback.
+
+Current `src/tools/gitRepo.ts` states and implements the opposite:
+
+- Git commands execute through a single `runGit` path;
+- `runGit` uses `execFile('git', args, ...)` without a shell;
+- the VS Code Git extension remains only a discovery aid;
+- missing `git` on PATH gets an explicit install/PATH error;
+- repository selection is handled separately and supports nested/multiple repository correctness.
+
+### Required change
+
+Remove the Git-extension fallback item from `ROADMAP.md` entirely. Permanent Git docs should say the CLI is the execution source of truth and VS Code Git is optional discovery assistance, if that distinction is user-relevant.
+
+## 1.6 Parallel tool execution is still genuinely open
+
+Unlike the three items above, this old roadmap item is real.
+
+`ToolCallingLoop` receives a batch of tool calls and hands it to `dispatchToolCalls`. Current `ToolDispatch.dispatch()` iterates calls with a sequential `for (const tc of toolCalls)` and awaits each tool before moving to the next.
+
+That sequential execution is currently intertwined with:
+
+- approval ordering;
+- shared transcript mutation;
+- checkpoint snapshots;
+- mutation/diff rendering;
+- tool budgets;
+- cancellation;
+- plan updates;
+- failure tracking.
+
+### Required change
+
+Keep this as future work, but rewrite the roadmap item. Do NOT write “replace with `Promise.all`”. That is too naive for the current architecture.
+
+The real future task should be something like:
+
+> Add dependency-aware parallel dispatch for provably independent read-only tool calls while preserving deterministic tool-result ordering, cancellation, budgets, approvals, and mutation serialization.
+
+Write tools, Git writes, approvals, plan changes, and stateful tools should remain serialized unless explicit dependency semantics are introduced.
+
+## 1.7 Package-manager detection is still open
+
+Current `run_tests` and `run_build` remain npm/npx-centric:
+
+- `detectTestRunner()` returns `npm`/`npx` runners;
+- `run_build` explicitly reads `package.json` and builds `npm run <script>`;
+- Vitest/Jest/Mocha auto-detection still maps to `npx`.
+
+### Required change
+
+Keep the roadmap item, but update its description to current code. Add lockfile/package-manager detection for pnpm/yarn/bun only if Forge intends these structured tools to support them. Do not imply the rest of `exec_command` cannot run those executables manually.
+
+## 1.8 `web_fetch` HTML conversion is still naive
+
+Current `htmlToText()`:
+
+- removes script/style blocks with regex;
+- strips remaining tags with regex;
+- collapses whitespace;
+- does not decode entities or preserve meaningful block/line structure.
+
+### Required change
+
+Keep this roadmap item. Reword it around preserving readable text structure and decoding entities, with SSRF and output bounding left unchanged.
+
+## 1.9 Tool-call truncation recovery is a real first-class subsystem
+
+`ToolCallingLoop` now contains explicit recovery for truncated tool calls and context exhaustion. It distinguishes truncation from malformed-tool failure, avoids charging truncation to the model failure tracker, injects a protocol-correct failed tool result when needed, and temporarily suppresses thinking on the recovery round to give the retried tool call more output room.
+
+### Required documentation consequence
+
+`docs/LOCAL_MODEL_OPTIMIZATIONS.md` and README claims about local-model hardening should be checked against this implementation and describe this as current behavior, not experimental advice.
+
+## 1.10 Delegation target exposure is context-aware
+
+Current delegation code intentionally avoids putting the full target catalog in the base schema every turn. `list_delegation_targets` exists as on-demand discovery; the always-visible `ask_local_agent` schema only highlights configured CLI targets where useful.
+
+This is an important current architectural pattern: capabilities that are expensive in prompt/KV surface are exposed on demand rather than blindly enumerated.
+
+### Required documentation consequence
+
+Any architecture/optimization documentation should describe this pattern as an implemented design, not merely a possible future optimization.
+
+---
+
+# 2. `ROADMAP.md` — exact disposition
+
+The current file should be replaced, not appended to.
+
+## Verified item-by-item status
+
+| Existing roadmap item | Code-grounded verdict | Action |
+| --- | --- | --- |
+| Type while streaming | Not resolved by this source audit | Re-check current webview input-state code; keep only if still disabled during turns |
+| FORGE.md hierarchy | Not resolved by this source audit | Verify `ForgeInstructionsLoader` behavior before keeping |
+| `/initForge` model quality | Needs re-verification | Verify command still exists/current flow before retaining |
+| `/initForge` non-JS projects | Needs re-verification | Verify command still exists/current flow before retaining |
+| Parallel tool execution | **OPEN** | Keep, but redefine as dependency-aware parallel read dispatch, not blanket `Promise.all` |
+| CheckpointStack disk snapshots | **IMPLEMENTED / OBSOLETE WORDING** | Remove from roadmap |
+| `format_file` active-editor brittleness | **IMPLEMENTED / OBSOLETE** | Remove from roadmap |
+| Git tools VS Code Git dependency/fallback | **IMPLEMENTED / OBSOLETE** | Remove from roadmap |
+| package-manager detection | **OPEN** | Keep/update |
+| `web_fetch` HTML-to-text quality | **OPEN** | Keep/update |
+
+## New roadmap structure
+
+The new roadmap should describe remaining product/architecture work, not old defects that have shipped.
+
+Recommended structure:
+
+### A. Orchestration and delegation
+
+- richer delegation lifecycle/result attribution;
+- safe composition of local, cloud and CLI specialists;
+- worker/delegation observability;
+- concurrency only where ownership and rollback are explicit;
+- better recovery after interrupted delegated work where needed.
+
+### B. Local-model efficiency and context economy
+
+- preserve prompt-prefix/KV stability;
+- continue demand-loaded tool exposure;
+- improve semantic retrieval/compaction only where measurements justify it;
+- minimize duplicated tool output/context;
+- model-specific recovery kept behind generic interfaces where possible.
+
+### C. Durable state and recovery
+
+- clearly distinguish what already survives reload from what does not;
+- unfinished-turn recovery if still incomplete;
+- durable state for long-running remote/agent workflows where justified;
+- memory pressure of native per-file checkpoints only if verified as a remaining issue.
+
+### D. Remote operation
+
+- maintain sidebar/remote semantic parity where appropriate;
+- preserve durable delivery/approval correctness;
+- improve remote UX without coupling core runtime to Telegram;
+- keep future dedicated mobile client support as an architecture concern, not Telegram-specific hacks.
+
+### E. Multimodal and specialist capabilities
+
+- current cloud/OpenAI-style image generation is shipped;
+- local ComfyUI or other local image backends can remain future work if still desired;
+- artifact/file lifecycle and specialist handoffs should remain composable with checkpoints and remote surfaces.
+
+### F. Reliability / developer experience backlog
+
+Keep verified concrete items such as:
+
+- dependency-aware parallel read dispatch;
 - package-manager detection;
-- formatter reliability;
-- improved non-JS `/initForge` behavior;
-- better HTML-to-text conversion;
-- typing while a turn is running.
-
-But **do not preserve any item merely because it is listed here or in the old roadmap**. Verify current code first.
+- proper HTML-to-text conversion;
+- any verified FORGE.md hierarchy or `/initForge` gaps;
+- UI typing-while-streaming if still open.
 
 ---
 
-# Priority 2 — reconcile plans with implementation
+# 3. `README.md` — required corrections
 
-The `docs/` and `docs/plans/` directories now contain a mixture of permanent documentation, architecture reviews, implementation plans, progress documents, and completed design work.
+`README.md` is generally much closer to current Forge than the old roadmap, but it contains important drift.
 
-That is useful during rapid development but becomes dangerous when old plans remain visually indistinguishable from current behavior.
+## P0 fixes
 
-Audit all planning documents.
+### Fix CLI delegation semantics
 
-## High-priority files to inspect
+Current README says:
 
-### `docs/REMOTE_COMPACT_PROGRESS_PLAN.md`
+> External CLI agents ... as full-rights direct-chat models and read-only delegation targets
 
-The document already describes itself as implemented except for a real-device progress smoke check.
+That is false against `ask_local_agent` today. Replace with wording that makes both direct-chat and delegated CLI execution full-rights external-agent paths, while explaining that Forge checkpoints eligible workspace changes for rollback.
 
-Verify the remaining smoke-test status. If the design is now fully implemented and validated:
+### Update “What's New”
 
-- preserve useful architecture in permanent compaction/remote documentation;
-- clearly mark this file **COMPLETED / HISTORICAL**, or move its remaining actionable item to the current roadmap/testing backlog;
-- do not leave it looking like an active implementation plan.
+The file currently summarizes 0.15/0.14/0.13 even though package version is 0.16.0 and 0.16 includes substantial new behavior. Refresh this section or make it deliberately version-agnostic and point to `CHANGES.md`.
 
-### `docs/COMPACTION_PLAN.md`
+### Update agent capability inventory
 
-Compare against the current compaction implementation and newer compaction-related plans.
+At minimum verify/add current behavior around:
 
-Resolve duplicated or conflicting descriptions of:
+- `restore_file`;
+- `generate_image` when configured;
+- Git commit amend semantics if intended for user docs;
+- multi-question `ask_user` behavior;
+- delegation target discovery;
+- current Telegram command/album/progress behavior where README exposes it.
 
-- trigger types;
-- summarizer requests;
-- state ledgers;
-- resume behavior;
-- remote progress events;
-- validation/apply behavior.
-
-There should be a clear current compaction architecture document and clearly labeled historical plans.
-
-### `docs/CLOUD_DELEGATION_PLAN.md`
-### `docs/DELEGATION_UNBLOCK_PLAN.md`
-### `docs/SAFE_WORKER_TOOL_UPGRADE_PLAN.md`
-### `docs/AGENT_WORKER_ORCHESTRATION_REPORT.md`
-### `docs/DELEGATION.md`
-
-These are especially important because delegation appears to have evolved through several iterations.
-
-Determine which file should be authoritative for **current behavior**.
-
-Recommended outcome:
-
-- `docs/DELEGATION.md` = current user/developer-facing delegation architecture and behavior;
-- historical plans/reports = clearly marked with status, implementation result, and remaining gaps;
-- unresolved work = moved into the current roadmap or a single active implementation plan.
-
-Do not let five documents describe five different generations of worker/delegation semantics without status labels.
-
-### `docs/FORGE_ARCHITECTURE_REVIEW_2026-09-05.md`
-
-Treat as a **dated snapshot**, not current architecture documentation.
-
-Do not rewrite history to make the old review look current. Add a prominent note if necessary explaining that it reflects the repository on 2026-09-05 and may predate later 0.15.x/0.16.x work.
-
-If a current architecture overview is missing, create one separately rather than mutating the historical review into one.
-
-### `docs/LOCAL_MODEL_OPTIMIZATIONS.md`
-
-Verify every recommendation against current runtime behavior and model configuration.
-
-Pay particular attention to anything involving:
-
-- context sizing;
-- batching;
-- KV cache types;
-- flash attention;
-- speculative/MTP behavior;
-- multi-GPU assumptions;
-- model-specific flags;
-- prompt/tool exposure strategies.
-
-Runtime recommendations age quickly. Mark version/model-specific advice explicitly.
-
-### `docs/REMOTE_CONTROL.md`
-### `docs/REMOTE_CONTROL_VALIDATION.md`
-
-Bring these in line with the current Telegram implementation, including where verified:
-
-- status-only progress bubble behavior;
-- permanent narration/final messages;
-- command cleanup;
-- `/model` and `/models` behavior;
-- `/view` behavior;
-- album/photo handling;
-- approvals and structured questions;
-- compaction events;
-- sidebar-started turn mirroring;
-- rate-limit/FIFO handling;
-- warning delivery semantics.
-
-Separate current user-facing behavior from validation history.
-
-### `docs/COMMANDS.md`
-
-Compare directly with the command registry and tests.
-
-Ensure aliases, remote availability, parameters, and behavior are current. Generate/validate from registry metadata if practical to reduce future drift.
-
-### `docs/SHARED_RUNTIME.md`
-
-Verify that it still accurately describes the relationship among sidebar, remote controllers, host runtime, conversation ownership, and outbound events.
-
-If orchestration has grown beyond this document, update or replace it with a broader current architecture document.
-
-### `docs/OWNERS.md`
-
-Verify ownership mappings against current module layout. Remove references to moved/deleted modules and include newer major subsystems where appropriate.
-
-### `docs/AGENT_TOOL_TRAPS.md`
-
-Keep this practical. Remove traps that the implementation has since eliminated and add only traps that still exist in current tool semantics.
+Do not blindly dump every tool into README. The registry should remain the reference source; README should describe capability classes and the highest-value tools.
 
 ---
 
-# Priority 3 — audit every file under `docs/plans/`
+# 4. `docs/DELEGATION.md` — required rewrite for consistency
 
-Do a full pass over `docs/plans/`.
+This file currently contradicts itself.
 
-For each file, add or normalize a compact header if one does not already exist:
+Its opening says CLI delegates use a read-only tool set and cannot edit. Later it says a `provider: cli` model is a full-rights external agent. Current source code supports the latter.
+
+## Required canonical behavior section
+
+Rewrite the first section around these exact distinctions:
+
+1. **Local llama.cpp / Ollama delegation** — task plus bounded selected context; no Forge tool loop.
+2. **Cloud model delegation** — same bounded delegated-call model unless provider-specific code says otherwise.
+3. **CLI agent delegation** — one-shot external CLI process with its own tools; may inspect AND modify the workspace; caller must inspect state after timeout/error because work may have occurred.
+4. **Direct CLI chat** — warm per-conversation/model session with full external-agent behavior.
+5. **Checkpoint model** — external CLI changes are covered by disk-backed workspace checkpointing when enabled; opt-out weakens Keep/Undo and must remain clearly warned.
+
+Remove every “read-only CLI” claim unless a separate sandbox/permission mode actually exists in current code.
+
+---
+
+# 5. `docs/COMMANDS.md` — regenerate or reconcile from `package.json`
+
+This file says it contains every command contributed to the palette, but the current `package.json` contributes many commands not present in the document excerpt, including model/config and remote-control operations.
+
+## Required action
+
+Compare the entire `contributes.commands` array in `package.json` against `docs/COMMANDS.md` and make the table complete.
+
+Prefer adding an invariant test or generation/check script so a future command addition cannot silently make the reference false again.
+
+Do not mix Telegram slash commands into this file unless it intentionally becomes a cross-surface command reference. If both are desired, use explicit VS Code and remote sections.
+
+---
+
+# 6. Historical architecture/plans — status them instead of rewriting history
+
+## `docs/FORGE_ARCHITECTURE_REVIEW_2026-09-05.md`
+
+Keep it as a dated review. Add a clear banner stating that it reflects the repository on 2026-09-05 and predates later 0.15.x/0.16 work. Do not mutate old findings until they look current.
+
+If Forge wants a living architecture document, create/update `docs/ARCHITECTURE.md` separately.
+
+## `docs/REMOTE_COMPACT_PROGRESS_PLAN.md`
+
+It already labels most work implemented. Verify the remaining real-device smoke item. If complete, mark the plan `COMPLETED / HISTORICAL` and link to the permanent remote/compaction docs.
+
+## Delegation plans/reports
+
+Audit:
+
+- `docs/CLOUD_DELEGATION_PLAN.md`
+- `docs/DELEGATION_UNBLOCK_PLAN.md`
+- `docs/SAFE_WORKER_TOOL_UPGRADE_PLAN.md`
+- `docs/AGENT_WORKER_ORCHESTRATION_REPORT.md`
+- related `docs/plans/*DELEGAT*` / worker files
+
+Current code has a concrete one-shot `LocalDelegationService`, CLI runner, target eligibility/limits, CLI direct-chat sessions, and `ask_local_agent`/`list_delegation_targets`. Historical worker terminology must not override this current model.
+
+For each old plan, add:
 
 ```md
 **Status:** proposed | active | partially implemented | implemented | superseded | abandoned
-**Last verified:** YYYY-MM-DD
-**Superseded by:** <path, if applicable>
+**Last verified:** 2026-09-14
+**Current behavior:** <canonical doc link>
+**Remaining work:** <only real unfinished items>
 ```
 
-Use statuses based on code evidence, not filenames.
-
-Likely candidates for verification include plans concerning:
-
-- compaction/resume/state ledger;
-- CLI checkpoint architecture;
-- CLI daemon behavior;
-- coding benchmark smoke tests;
-- configuration overhaul;
-- delegate safety/tool access;
-- delete/restore gaps;
-- exact embedding tokenization;
-- `exec_command` environment support;
-- image generation;
-- Telegram/remote behavior;
-- worker orchestration.
-
-Several of these areas appear to have received implementation work by 0.16.0. Completed plans should stop masquerading as future work.
-
-### Do not mass-delete completed plans
-
-Historical plans are useful when they explain why safety or architecture decisions exist.
-
-Prefer:
-
-- clear status;
-- completion/result note;
-- link to current implementation docs;
-- link to relevant commit/CHANGES entry where useful.
-
-Delete only documents that are pure duplication with no durable historical value.
+Do not delete architectural rationale that still explains safety decisions.
 
 ---
 
-# Priority 4 — create or refresh one authoritative architecture overview
+# 7. Permanent docs requiring a second code-backed pass
 
-If no current equivalent exists, create:
+These are not proven wrong by the specific mismatches above, but their subject areas have changed enough that they must be checked directly against code before the cleanup is considered complete.
 
-`docs/ARCHITECTURE.md`
+## `docs/SHARED_RUNTIME.md`
 
-It should describe the **current system**, not future aspirations.
+Verify against current conversation ownership, `AgentLoop`, host facade, remote reach/progress listeners, compaction events, and transport outbound event wiring.
 
-Suggested sections:
+## `docs/REMOTE_CONTROL.md`
 
-1. Extension/runtime overview
-2. Conversation and agent loop
-3. Model/provider layer
-4. Local llama.cpp model lifecycle
-5. Tool registry and dispatch
-6. Workspace mutation + checkpoint model
-7. Git safety model
-8. Context construction and compaction
-9. Semantic code search/indexing
-10. Delegation / workers / specialist agents
-11. Remote-control architecture
-12. Sidebar/remote shared runtime
-13. Multimodal and image-generation flow
-14. Persistence/state boundaries
-15. Security and approval boundaries
-16. Major extension points
+Verify current Telegram behavior from remote handlers/transport code, especially:
 
-Include diagrams using Mermaid if useful, but favor accuracy and maintainability over decorative complexity.
+- status-only edited progress bubble;
+- permanent narration/final messages;
+- command auto-delete policy;
+- `/model`/`/models` behavior;
+- `/view` replay;
+- photo album batching and image limits;
+- approvals/questions;
+- compaction events;
+- FIFO/rate-limit behavior;
+- sidebar-started turn mirroring.
 
-Architecture documentation should make clear which layer owns each behavior so future contributors do not reimplement the same feature in sidebar, Telegram, and worker paths independently.
+Do not rely on `REMOTE_CONTROL_VALIDATION.md` as current behavior; validation history and user-facing behavior are different document roles.
 
----
+## `docs/LOCAL_MODEL_OPTIMIZATIONS.md`
 
-# Priority 5 — improve README positioning
+Verify against current `ToolCallingLoop`, tool-result bounding, lazy groups, semantic search, context publisher and request normalization. In particular, make sure truncated-tool recovery and thinking suppression are described exactly as implemented today.
 
-Audit `README.md` after the architecture and command inventory are verified.
+## `docs/OWNERS.md`
 
-The README should communicate what Forge is **now**.
+Reconcile with the current module topology (`agent`, `agents`, `checkpoint`, `delegation`, `remote`, `search`, `system`, etc.).
 
-Do not overload it with every internal detail, but ensure the opening accurately represents Forge as a local-first coding agent runtime/harness rather than merely a model chat UI.
+## `docs/AGENT_TOOL_TRAPS.md`
 
-The feature overview should reflect major differentiators that are genuinely implemented, for example where verified:
-
-- local llama.cpp-first operation;
-- agentic VS Code tooling;
-- safe checkpointed edits and Git operations;
-- semantic code search;
-- compaction/long-context management;
-- Telegram remote control;
-- CLI/cloud delegation;
-- multimodal/image tooling;
-- configurable providers/models.
-
-Avoid version-sensitive implementation claims in the opening unless they are automatically maintained.
+Delete traps the code has already fixed. This file should describe traps that still exist today, not a bug cemetery.
 
 ---
 
-# Priority 6 — documentation invariants to add where practical
+# 8. Suggested living architecture document
 
-The long-term fix for documentation drift is not another manual cleanup pass.
+Create or refresh `docs/ARCHITECTURE.md` only after the factual corrections above.
 
-Where inexpensive, add checks that fail when documentation-critical registries drift.
+It should be implementation-derived and cover:
 
-Candidates:
+1. Extension activation and runtime composition
+2. Conversation/session ownership
+3. Model/provider routing
+4. Local llama.cpp lifecycle
+5. Agent/tool-calling loop
+6. Tool registry, permissions, approvals and lazy exposure
+7. Workspace mutation and checkpointing
+8. Git execution/safety/recovery
+9. Context construction, truncation recovery and compaction
+10. Semantic search/indexing
+11. Delegation and CLI-agent architecture
+12. Remote-control architecture
+13. Background execution/system controls
+14. Vision/video/image generation
+15. Persistence boundaries
+16. Security/trust boundaries
 
-- every visible slash command appears in generated/validated command documentation;
-- aliases are documented correctly;
-- public tool names in docs exist in the tool registry;
-- config keys shown in sample YAML exist in the config schema;
-- examples do not reference removed model/provider fields;
-- current version claims are not hardcoded in multiple places;
-- active-plan links resolve;
-- completed plans are not linked from sections labelled "future" without their status.
-
-Do not build a large documentation framework solely for this cleanup. Add only cheap invariants with a clear maintenance payoff.
-
----
-
-# Roadmap principles for Forge after 0.16
-
-Use these principles when deciding what remains on the roadmap.
-
-## 1. Do not optimize for raw tool count
-
-A local model pays a context/selection cost for every exposed capability. Prefer composable primitives and selective exposure over a huge flat registry.
-
-## 2. Treat delegation as a first-class primitive
-
-A strong local 27B-class model does not need to personally be the best model for every subtask. Forge should make specialist escalation cheap, bounded, inspectable, and resumable.
-
-## 3. Preserve local-first operation
-
-Cloud specialists should enhance Forge rather than turn the core product into a thin API frontend.
-
-## 4. Keep safety structural
-
-Continue preferring narrow, typed, checkpointed capabilities over granting generic shell/Git primitives simply because they are convenient.
-
-## 5. Optimize for long-running sessions
-
-Compaction, recovery, remote control, state persistence, and context efficiency matter more than isolated benchmark-demo features.
-
-## 6. Keep UI transports thin
-
-Sidebar, Telegram, and a future mobile client should sit on top of shared host/runtime capabilities wherever possible. Avoid implementing agent semantics separately in each transport.
-
-## 7. Verify before documenting
-
-The repository is moving quickly enough that implementation is the source of truth. Documentation should be generated or mechanically validated from registries/schemas when that is economical.
+The architecture doc must distinguish CURRENT behavior from FUTURE roadmap work.
 
 ---
 
-# Suggested final document topology
+# 9. Local-agent execution order
 
-This is a target, not a mandatory rename/delete list.
+Perform the cleanup in this order:
 
-```text
-README.md                         # product overview + quick start
-ROADMAP.md                        # current strategic future work only
-CHANGES.md                        # release/change history
-FORGE.md                          # agent/project instructions if applicable
-
-docs/
-  ARCHITECTURE.md                 # current architecture, authoritative
-  COMMANDS.md                     # current command reference
-  DELEGATION.md                   # current delegation/worker behavior
-  REMOTE_CONTROL.md               # current remote behavior
-  SHARED_RUNTIME.md               # retain only if distinct from ARCHITECTURE
-  LOCAL_MODEL_OPTIMIZATIONS.md    # current, version-qualified runtime guidance
-  AGENT_TOOL_TRAPS.md             # current known behavioral traps
-  OWNERS.md                       # current code ownership/module map
-  ...
-
-  plans/
-    <active plans>
-    <historical plans with explicit status>
-```
-
-Avoid having an unlabelled collection of `*_PLAN.md` files where nobody can tell which ones remain actionable.
+1. **Fix P0 factual contradictions** in `README.md` and `docs/DELEGATION.md`.
+2. **Rewrite `ROADMAP.md`** using the verified disposition above; do not leave implemented bugs as future work.
+3. **Reconcile `docs/COMMANDS.md`** with `package.json` and add a drift check if practical.
+4. **Audit permanent subsystem docs** against their owning source modules.
+5. **Status historical plans/reports** rather than rewriting them as current docs.
+6. **Create/refresh `docs/ARCHITECTURE.md`** only after source-of-truth docs agree.
+7. Run tests/lint/docs link checks and any catalog/registry audit scripts already present.
+8. Finish with a report containing:
+   - files changed;
+   - factual contradictions fixed;
+   - roadmap items removed as already implemented;
+   - roadmap items retained as verified open work;
+   - plans marked historical/superseded;
+   - unresolved items that require product decisions rather than documentation edits.
 
 ---
 
-# Concrete acceptance criteria
+# 10. Guardrails for the implementing agent
 
-The documentation modernization is complete when all of the following are true:
-
-- [ ] `ROADMAP.md` reflects Forge's current strategic direction rather than the May-era feature set.
-- [ ] Every old roadmap item has been checked against current implementation.
-- [ ] Every plan under `docs/` and `docs/plans/` has an understandable current status.
-- [ ] Completed plans no longer appear to be active future work.
-- [ ] Delegation documentation has one authoritative current description.
-- [ ] Compaction documentation has one authoritative current description.
-- [ ] Remote-control docs match current Telegram behavior.
-- [ ] `COMMANDS.md` matches the current command registry.
-- [ ] README accurately describes Forge 0.16-era capabilities.
-- [ ] A current architecture overview exists and matches the code.
-- [ ] Historical reviews remain identifiable as historical snapshots.
-- [ ] No documentation claims a feature exists merely because an implementation plan proposed it.
-- [ ] No significant implemented 0.16-era subsystem is absent from the product/architecture documentation without a deliberate reason.
-- [ ] Obsolete duplication is archived, merged, clearly superseded, or removed.
-- [ ] Useful unresolved work discovered during the audit is moved into the new roadmap rather than being stranded in old plans.
-- [ ] Tests/checks used by the documentation cleanup pass.
+- Do not change production behavior merely to make old documentation true. Change the docs to match correct current code unless an actual code bug is found.
+- Do not remove safety caveats around destructive tools, external CLI agents, remote auth, checkpoints or billed image generation.
+- Do not mass-delete plans.
+- Do not promote an old plan into the roadmap without verifying the code gap still exists.
+- Do not turn `ROADMAP.md` into a release changelog.
+- Do not duplicate the tool registry manually across many docs if one canonical reference can be linked.
+- Where practical, add invariant tests/generation checks for command/tool catalogs so this drift is harder to recreate.
 
 ---
 
-# Deliverable from the local agent
+# Bottom line
 
-After completing the audit, create a report at:
+The previous roadmap was not merely “old”; several entries are now factually obsolete against `main`.
 
-`docs/DOCUMENTATION_MODERNIZATION_RESULT.md`
+The clearest verified examples are:
 
-The report should contain:
+- disk-backed external-CLI checkpoints: **already implemented**;
+- tab-independent direct formatter execution: **already implemented**;
+- Git CLI execution independent of VS Code Git: **already implemented**;
+- parallel tool execution: **still open**;
+- pnpm/yarn/bun detection in structured build/test tools: **still open**;
+- proper HTML-to-text conversion: **still open**;
+- CLI delegation documented as read-only: **documentation is wrong; current code allows CLI delegates to edit**.
 
-1. **Summary** — what changed and why.
-2. **Current roadmap** — top strategic priorities after verification.
-3. **Files updated** — one sentence per file.
-4. **Files marked historical/superseded** — and what replaced them.
-5. **Files deleted** — only if any, with rationale.
-6. **Still-open documentation gaps**.
-7. **Code/documentation mismatches discovered**.
-8. **Tests/checks run**.
-9. **Recommended next engineering action** — one primary recommendation, not a large wishlist.
-
-Do not perform unrelated feature implementation during this documentation pass. If documentation inspection exposes a real code bug or missing capability, record it in the result and roadmap unless a tiny correction is required to make documentation truthful.
+The cleanup should therefore be a source-driven reconciliation pass, not a general prose refresh.
