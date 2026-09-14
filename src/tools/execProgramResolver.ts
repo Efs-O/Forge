@@ -225,10 +225,7 @@ export function describeWrongPlatformProgram(
   platform: NodeJS.Platform = process.platform,
 ): string | undefined {
   if (platform !== 'win32') return undefined;
-  const base = path
-    .basename(command)
-    .toLowerCase()
-    .replace(/\.(exe|cmd|bat|com)$/u, '');
+  const base = programBaseName(command);
   if (base !== 'find') return undefined;
   if (!args.some((arg) => UNIX_FIND_PREDICATES.has(arg.toLowerCase()))) return undefined;
   return (
@@ -239,16 +236,25 @@ export function describeWrongPlatformProgram(
 }
 
 /**
+ * Lower-cased basename with any executable extension stripped. `win32.basename`
+ * splits on both `\` and `/` on every host; the posix one keeps a Windows path
+ * whole, which made the `C:\...\grep.exe` spelling match only on Windows.
+ */
+function programBaseName(command: string): string {
+  return path.win32
+    .basename(command)
+    .toLowerCase()
+    .replace(/\.(exe|cmd|bat|com)$/u, '');
+}
+
+/**
  * Matched on the basename with any executable extension stripped, so
  * `C:\Program Files\Git\usr\bin\grep.exe` and a bare `grep` reach the same
  * entry. Whole names only — a substring match is what made the `rm -rf`
  * denylist refuse `git rm -f README.md`.
  */
 export function describeShellBuiltin(command: string): string | undefined {
-  const base = path
-    .basename(command)
-    .toLowerCase()
-    .replace(/\.(exe|cmd|bat|com)$/u, '');
+  const base = programBaseName(command);
   return UNAVAILABLE_PROGRAM_ALTERNATIVES.get(base);
 }
 
