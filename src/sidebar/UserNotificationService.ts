@@ -1,6 +1,9 @@
 export interface UserNotificationEvent {
   conversationId?: string;
+  /** The message, or the caption when `imagePath` is set. */
   text: string;
+  /** Absolute path of an image to deliver as a photo (`generate_image`). */
+  imagePath?: string;
 }
 
 /** Returns the number of remote chats the message was queued to. */
@@ -155,6 +158,21 @@ export class UserNotificationService {
     // stretch starts a fresh burst instead of landing on a stale total.
     this.sent.set(key, this.spent(key) + 1);
     this.lastSentAt.set(key, this.now());
+    return this.fanOut(event);
+  }
+
+  /**
+   * Delivers a generated image to the conversation's remote chats.
+   *
+   * Not charged against the notify_user budget: every image already passed a
+   * per-call approval, which is a stronger brake than the burst cap, and an
+   * agent asked for five images must not lose its ability to notify.
+   */
+  async deliverImage(event: UserNotificationEvent & { imagePath: string }): Promise<number> {
+    return this.fanOut(event);
+  }
+
+  private async fanOut(event: UserNotificationEvent): Promise<number> {
     const counts = await Promise.all(
       [...this.sinks].map(async (sink) => {
         try {

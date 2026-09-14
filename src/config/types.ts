@@ -265,6 +265,22 @@ export interface EmbeddingsConfig {
   exclude_globs?: string[];
 }
 
+/** One `image_generation.backends[]` entry (validated by imageGenerationSchema.ts). */
+export interface ImageBackendConfig {
+  name: string;
+  provider: 'xai' | 'openai' | 'openai-compatible';
+  model: string;
+  api_key_secret?: string;
+  endpoint?: string;
+  confirm_each: boolean;
+}
+
+export interface ImageGenerationConfig {
+  backends: ImageBackendConfig[];
+  default?: string;
+  output_dir: string;
+}
+
 /** Raw `video:` block. Defaults live in `videoTool.ts` (VIDEO_DEFAULTS). */
 export interface VideoConfig {
   max_duration_seconds?: number;
@@ -344,6 +360,8 @@ export interface ForgeConfig {
   video?: VideoConfig;
   /** Speech-to-text ingress. Off unless `enabled`. */
   voice?: VoiceConfig;
+  /** `generate_image` backends. Absent means the tool is not advertised. */
+  image_generation?: ImageGenerationConfig;
   log_level?: 'trace' | 'debug' | 'info' | 'warn' | 'error';
   /** Extra directories to scan for GGUF files (used by first-run wizard). */
   model_dirs?: string[];

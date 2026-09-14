@@ -3,6 +3,7 @@ import { TelegramAlbumCoordinator, MAX_TELEGRAM_IMAGES_PER_MESSAGE } from './Tel
 import { acknowledgeTelegramDisposition } from './TelegramAcknowledgement';
 import { splitTelegramText } from './TelegramText';
 import { sendTelegramVoice } from './TelegramVoice';
+import { sendTelegramPhoto } from './TelegramPhoto';
 import { downloadTelegramAttachment, downloadTelegramAttachmentToFile } from './TelegramDownloads';
 import { pollTelegramUpdates, TELEGRAM_CURSOR_KEY } from './TelegramPolling';
 export { MAX_TELEGRAM_IMAGES_PER_MESSAGE } from './TelegramAlbumBuffer';
@@ -355,6 +356,24 @@ export class TelegramChannel implements RemoteChannel {
       signal,
       (chatId, text, options) => this.send(chatId, text, options),
       this.options.onError,
+    );
+  }
+
+  async sendPhoto(
+    chatId: string,
+    filePath: string,
+    caption: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const { fetchImpl, sendQueue } = this;
+    await sendTelegramPhoto(
+      fetchImpl,
+      this.options.token,
+      sendQueue,
+      chatId,
+      filePath,
+      caption,
+      signal,
     );
   }
 

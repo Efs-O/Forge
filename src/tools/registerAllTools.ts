@@ -80,6 +80,7 @@ import { makeApplyLineEditsTool } from './structuredEditTool';
 import { makeViewImageTool } from './imageTool';
 import { makeWaitTool } from './waitTool';
 import { makeViewVideoTool } from './videoTool';
+import { makeGenerateImageTool } from './imageGeneration/generateImageTool';
 import {
   makeListExecutionsTool,
   makeMonitorExecutionTool,
@@ -191,6 +192,12 @@ export function registerAllTools(
   if (delegationService && getConfig) {
     registry.register(makeLocalAgentTool(delegationService, getConfig));
     registry.register(makeListDelegationTargetsTool(getConfig));
+  }
+
+  // Self-suppressing until config.yaml has an image_generation block, so a
+  // config without one keeps the tool list -- and the KV prefix -- unchanged.
+  if (getConfig) {
+    registry.register(makeGenerateImageTool({ getConfig, secrets, notifications }));
   }
 
   // Registered last, and self-suppressing until a lazy group is actually

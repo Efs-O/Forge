@@ -10,6 +10,7 @@ import {
   ToolCallLimitsSchema,
 } from './schemaShared';
 import { VoiceConfigSchema } from './voiceSchema';
+import { ImageGenerationConfigSchema } from './imageGenerationSchema';
 
 const ToolPermissionSchema = z.enum(
   [
@@ -288,6 +289,7 @@ export const ForgeConfigSchema = z
     embeddings: EmbeddingsConfigSchema,
     video: VideoConfigSchema,
     voice: VoiceConfigSchema,
+    image_generation: ImageGenerationConfigSchema,
     log_level: z.enum(['trace', 'debug', 'info', 'warn', 'error']).optional(),
     // v0.3 additions
     model_dirs: z.array(z.string()).optional(),

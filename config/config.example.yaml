@@ -245,6 +245,25 @@ voice:
     # read the rest in the written message. Long voice notes cannot be skimmed.
     max_chars: 1200
 
+# generate_image tool. Absent = the tool is never offered to a model. Backends
+# are OpenAI-style /v1/images/generations endpoints; keys resolve exactly like a
+# chat model on the same provider (SecretStorage, and for xai the OpenCode OAuth
+# login as a fallback). A local ComfyUI backend is planned, not implemented --
+# see docs/plans/IMAGE_GENERATION_TOOL_PLAN.md.
+# image_generation:
+#   default: grok-imagine
+#   output_dir: generated-images     # workspace-relative
+#   backends:
+#     - name: grok-imagine
+#       provider: xai                # xai | openai | openai-compatible
+#       model: grok-imagine-image-2.0
+#       api_key_secret: xai
+#       confirm_each: true           # default; asks even under /clanker (billed)
+#     - name: gpt-image
+#       provider: openai
+#       model: gpt-image-1
+#       api_key_secret: openai
+
 # How many models may be loaded at once across all VS Code windows.
 # Local GGUFs are VRAM-bound; raise this only if you have the memory.
 max_simultaneous_models: 4

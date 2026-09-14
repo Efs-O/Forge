@@ -34,12 +34,15 @@ export function subscribeHostToRemote(
   const subscriptions = [
     host.onCompactionEvent?.((event) => handlers.onCompaction(event)),
     // No trigger filter, unlike compaction: every notify_user call is
-    // explicitly agent-authored and addressed to the user.
-    host.onUserNotification?.(async (event) =>
-      event.conversationId === undefined
-        ? 0
-        : controller.enqueueHostNotification(event.conversationId, event.text),
-    ),
+    // explicitly agent-authored and addressed to the user. An image goes to
+    // the chat watching the turn, where it lands in order with the narration.
+    host.onUserNotification?.(async (event) => {
+      if (event.conversationId === undefined) return 0;
+      if (event.imagePath) {
+        return controller.deliverHostImage(event.conversationId, event.imagePath, event.text);
+      }
+      return controller.enqueueHostNotification(event.conversationId, event.text);
+    }),
     // Registered and disposed with the sink, so the count a turn is told can
     // never outlive the transport that would deliver on it.
     host.setReachProbe?.((conversationId) => controller.reachForConversation(conversationId)),

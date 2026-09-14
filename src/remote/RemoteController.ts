@@ -77,11 +77,8 @@ export class RemoteController {
     private readonly host: ForgeHostFacade,
     private options: RemoteControllerOptions,
     private readonly audit?: RemoteAuditLog,
-    /**
-     * Absent when `voice.enabled` is false. Held on the controller rather than
-     * in `options` because the bridge carries per-chat draft state that a
-     * config reload must not silently drop.
-     */
+    /** Absent when `voice.enabled` is false. Held here, not in `options`: its
+     *  per-chat draft state must survive a config reload. */
     private readonly voice?: VoiceBridgeBundle | undefined,
     /** Absent when `voice.output.enabled` is false; replies stay text-only. */
     speech?: RemoteSpeechDelivery | undefined,
@@ -201,6 +198,9 @@ export class RemoteController {
    */
   async enqueueHostNotification(conversationId: string, text: string): Promise<number> {
     return this.fanout.toConversation(conversationId, text);
+  }
+  deliverHostImage(conversationId: string, filePath: string, caption: string): number {
+    return this.progress.deliverImage(conversationId, filePath, caption);
   }
   reachForConversation(conversationId: string): number {
     return this.fanout.countOn(conversationId);

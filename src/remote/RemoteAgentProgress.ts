@@ -203,6 +203,29 @@ export class RemoteAgentProgress {
     this.schedule(event.conversationId, state);
   }
 
+  /**
+   * Send a generated image to the chat watching this turn, in order behind the
+   * pending edits and narrations.
+   *
+   * Returns how many chats it was queued to -- 0 or 1 -- because generate_image
+   * reports that to the model: a live message for the turn is the only proof a
+   * phone is watching, and claiming a send without one repeats ask_user's lie.
+   */
+  deliverImage(conversationId: string, filePath: string, caption: string): number {
+    const state = this.active.get(conversationId);
+    if (!state || state.closed || !this.channel.sendPhoto) return 0;
+    const sendPhoto = this.channel.sendPhoto.bind(this.channel);
+    state.tail = state.tail
+      .then(async () => {
+        if (state.closed || this.signal.aborted) return;
+        if (this.active.get(conversationId) !== state) return;
+        if (!(await this.safeCanDeliver(state.chatId))) return;
+        await sendPhoto(state.chatId, filePath, caption, this.signal);
+      })
+      .catch((err) => this.report(err));
+    return 1;
+  }
+
   async finish(conversationId: string, terminalText: string): Promise<void> {
     const state = this.active.get(conversationId);
     if (!state) return;

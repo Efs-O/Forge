@@ -215,6 +215,13 @@ export interface RemoteChannel {
    * no such affordance simply do not implement it, and speech is skipped.
    */
   sendVoice?(chatId: string, oggPath: string, signal?: AbortSignal): Promise<void>;
+  /** Deliver a local image file with a caption. Optional, like `sendVoice`. */
+  sendPhoto?(
+    chatId: string,
+    filePath: string,
+    caption: string,
+    signal?: AbortSignal,
+  ): Promise<void>;
   downloadAttachmentToFile?(
     providerFileId: string,
     targetPath: string,

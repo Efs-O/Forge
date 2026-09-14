@@ -40,6 +40,7 @@ const EXPECTED_NATIVE_NAMES = [
   'find_implementations',
   'find_references',
   'format_file',
+  'generate_image',
   'get_code_actions',
   'get_diagnostics',
   'get_document_symbols',
@@ -98,7 +99,9 @@ const EXPECTED_NATIVE_NAMES = [
   'write_file',
 ];
 
-function makeRegistry(options: { search?: boolean; delegation?: boolean } = {}): ToolRegistry {
+function makeRegistry(
+  options: { search?: boolean; delegation?: boolean; images?: boolean } = {},
+): ToolRegistry {
   const registry = new ToolRegistry();
   const workspaceState = {
     get: () => undefined,
@@ -113,6 +116,16 @@ function makeRegistry(options: { search?: boolean; delegation?: boolean } = {}):
       { name: 'primary', gguf_path: '/primary.gguf' },
       { name: 'worker', gguf_path: '/worker.gguf' },
     ],
+    ...(options.images
+      ? {
+          image_generation: {
+            output_dir: 'generated-images',
+            backends: [
+              { name: 'grok', provider: 'xai' as const, model: 'img', confirm_each: true },
+            ],
+          },
+        }
+      : {}),
   };
   const delegation = options.delegation
     ? ({
@@ -135,18 +148,29 @@ function makeRegistry(options: { search?: boolean; delegation?: boolean } = {}):
 }
 
 describe('registerAllTools canonical coordinator catalog', () => {
-  it('exposes the exact 73-tool native catalog when all optional wiring is present', () => {
+  it('exposes the exact 74-tool native catalog when all optional wiring is present', () => {
     const registry = makeRegistry({ search: true, delegation: true });
     expect(registry.names().sort()).toEqual(EXPECTED_NATIVE_NAMES);
     // load_tool_group is registered but suppresses its own advertisement while
-    // no lazy MCP group has been bridged in, so the 62 tools the model actually
-    // sees are unchanged from before the demand-loading experiment.
+    // no lazy MCP group has been bridged in, and generate_image while config.yaml
+    // has no image_generation block, so the tools the model actually sees are
+    // unchanged for a config that uses neither.
     expect(
       registry
         .definitions(ALL_PERMISSIONS)
         .map((tool) => tool.function.name)
         .sort(),
-    ).toEqual(EXPECTED_NATIVE_NAMES.filter((name) => name !== 'load_tool_group'));
+    ).toEqual(
+      EXPECTED_NATIVE_NAMES.filter(
+        (name) => name !== 'load_tool_group' && name !== 'generate_image',
+      ),
+    );
+  });
+
+  it('advertises generate_image once image_generation is configured', () => {
+    const registry = makeRegistry({ delegation: true, images: true });
+    const names = registry.definitions(ALL_PERMISSIONS).map((tool) => tool.function.name);
+    expect(names).toContain('generate_image');
   });
 
   it('lets search and delegation wiring control only their documented tools', () => {

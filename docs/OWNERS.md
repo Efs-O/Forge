@@ -158,6 +158,7 @@ overlaps with an existing owner, extend the owner instead.
 | Telegram selection keyboard + callback codec  | `src/remote/TelegramSelectionPagination.ts`     |
 | Forge approval presentation + correlation     | `src/remote/RemoteApprovalBridge.ts`            |
 | Telegram Bot API transport                    | `src/remote/TelegramChannel.ts`                 |
+| Telegram photo send + document fallback       | `src/remote/TelegramPhoto.ts`                   |
 | Per-chat send ordering + Bot API 429 retry    | `src/remote/telegramSendQueue.ts`               |
 | Telegram HTML escaping + line markup helpers  | `src/remote/telegramHtml.ts`                    |
 | /help command map text + its markup           | `src/remote/remoteHelpText.ts`                  |
@@ -322,6 +323,9 @@ overlaps with an existing owner, extend the owner instead.
 | Per-turn tool allowlist + call-budget      | `src/tools/ToolBudget.ts`             |
 | Plan rendering + `PLAN_GUIDANCE`           | `src/tools/planTools.ts`              |
 | `view_image` tool                          | `src/tools/imageTool.ts`              |
+| `generate_image` tool + save/deliver       | `src/tools/imageGeneration/generateImageTool.ts` |
+| Cloud `/v1/images/generations` backend     | `src/tools/imageGeneration/cloudImageBackend.ts` |
+| `image_generation:` config schema          | `src/config/imageGenerationSchema.ts` |
 | `view_video` tool definition + handler     | `src/tools/videoTool.ts`              |
 | ffmpeg probe + frame extraction            | `src/tools/videoExtract.ts`           |
 | ffmpeg/ffprobe executable discovery        | `src/tools/ffmpegLocate.ts`           |

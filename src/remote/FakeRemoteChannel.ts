@@ -11,6 +11,7 @@ export class FakeRemoteChannel implements RemoteChannel {
   readonly retracted: Array<{ chatId: string; correlationId: string }> = [];
   /** Records command auto-cleanup deletes so tests can assert they fired. */
   readonly deleted: Array<{ chatId: string; messageId: string }> = [];
+  readonly photos: Array<{ chatId: string; filePath: string; caption: string }> = [];
   readonly progress: Array<{ chatId: string; text: string }> = [];
   readonly edits: Array<{ chatId: string; messageId: string; text: string }> = [];
   readonly selectionPageSends: Array<{
@@ -92,6 +93,10 @@ export class FakeRemoteChannel implements RemoteChannel {
 
   async deleteMessage(chatId: string, messageId: string): Promise<void> {
     this.deleted.push({ chatId, messageId });
+  }
+
+  async sendPhoto(chatId: string, filePath: string, caption: string): Promise<void> {
+    this.photos.push({ chatId, filePath, caption });
   }
 
   async sendProgress(chatId: string, text: string): Promise<string> {
