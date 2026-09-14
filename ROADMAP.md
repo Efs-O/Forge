@@ -39,11 +39,10 @@ in the code.
 
 - **Persistent agent jobs** (scheduled or condition-driven monitors).
   Trigger → condition → action → validation → notification, with a
-  deterministic check first and a model call only when needed. Design notes
-  are in §1.11 of
-  [the 0.16 audit](docs/DOCUMENTATION_AND_ROADMAP_AUDIT_0.16.md). Two
-  decisions come before any plan: where the scheduler lives (extension host or
-  an always-on service), and what "Act" mode may do unattended.
+  deterministic check first and a model call only when needed.
+  [Plan](docs/plans/PERSISTENT_AGENT_JOBS_PLAN.md). Part A (a repeating wake
+  timer) is a prerequisite and can ship alone. Design decisions were signed
+  off 2026-09-14; next is the Phase A1 wake validation on the PC.
 - **Windows Host Controller ownership.** Decide whether it ships from Forge,
   from HalluScribe, or as a standalone application-neutral repository. Basic
   Telegram remote control must stay independent of it either way.
