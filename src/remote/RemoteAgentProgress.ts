@@ -2,7 +2,6 @@ import type { AgentProgressEvent } from '../sidebar/AgentProgress';
 import type { RemoteChannel } from './types';
 
 const DEFAULT_EDIT_INTERVAL_MS = 1_500;
-const MAX_COMMENTARY_CHARS = 2_400;
 const MAX_STATUS_CHARS = 500;
 const MAX_TOOL_NAME_CHARS = 80;
 const MAX_NOTICE_CHARS = 300;
@@ -41,7 +40,6 @@ interface ActiveProgress {
   chatId: string;
   messageId: string;
   headline: string;
-  commentary: string;
   milestone?: string;
   /**
    * Warnings that must survive the next milestone.
@@ -80,6 +78,16 @@ interface ActiveProgress {
  * mean delete-and-resend on every update, and Telegram notifies on sends but
  * stays silent on edits — so the in-place edit is exactly what keeps a long
  * turn from spamming the phone with a notification per progress tick.
+ *
+ * The bubble carries status only (headline, latched warnings, the running
+ * tool) — never the model's streamed words. It used to stream `commentary`
+ * tokens too, which meant every thought and the final answer appeared twice:
+ * first inside the bubble, then again as their own message at the bottom,
+ * after which the bubble copy vanished. Each piece of text now appears once,
+ * as a message. TRIAL as of 0.15.49: the user may prefer the live text back;
+ * to revert, restore the `commentary` field, its append in `handle`, its
+ * section in `render`, and the clear after a narration send (see the 0.15.49
+ * commit for the exact diff).
  */
 export class RemoteAgentProgress {
   private readonly active = new Map<string, ActiveProgress>();
@@ -109,7 +117,6 @@ export class RemoteAgentProgress {
       chatId,
       messageId,
       headline: DEFAULT_HEADLINE,
-      commentary: '',
       warnings: [],
       lastText: DEFAULT_HEADLINE,
       narrations: [],
@@ -157,11 +164,10 @@ export class RemoteAgentProgress {
       this.queueNarration(event.conversationId, state, event.text);
       return;
     }
-    if (event.kind === 'commentary') {
-      const delta = sanitize(event.text);
-      if (!delta) return;
-      state.commentary = keepTail(state.commentary + delta, MAX_COMMENTARY_CHARS);
-    } else if (event.kind === 'phase') {
+    // Streamed tokens stay out of the bubble; the finished text arrives as a
+    // narration or the final answer instead. See the class comment.
+    if (event.kind === 'commentary') return;
+    if (event.kind === 'phase') {
       const headline = keepTail(sanitize(event.text ?? '').trim(), MAX_HEADLINE_CHARS);
       const next = headline || DEFAULT_HEADLINE;
       if (next === state.headline) return;
@@ -226,15 +232,11 @@ export class RemoteAgentProgress {
   }
 
   /**
-   * Deliver one finished mid-turn thought as a new message, and clear it out of
-   * the live bubble.
+   * Deliver one finished mid-turn thought as a new message.
    *
    * A new message rather than an edit because that is the whole point: Telegram
    * notifies on a send and stays silent on an edit, so a turn that only ever
-   * edited its bubble was invisible to a phone until it ended. Clearing
-   * `commentary` afterwards keeps the two from saying the same thing twice --
-   * the bubble drops back to its headline and whatever tool is running now,
-   * which is the part that is genuinely volatile.
+   * edited its bubble was invisible to a phone until it ended.
    *
    * Rides `state.tail` with the edits so a narration cannot overtake the bubble
    * update that preceded it.
@@ -244,23 +246,11 @@ export class RemoteAgentProgress {
     if (!text || state.narrations.includes(text)) return;
     state.narrations.push(text);
     if (state.narrations.length > MAX_SEEN_NARRATIONS) state.narrations.shift();
-    this.queueOutbound(conversationId, state, text, true);
+    this.queueOutbound(conversationId, state, text);
   }
 
-  /**
-   * Send one line of its own into the chat, in order behind the pending edits.
-   *
-   * `clearCommentary` separates the two callers: a narration is the same text
-   * the bubble is currently showing, so leaving it there would say everything
-   * twice, while a warning was never in the commentary and the latched copy is
-   * wanted.
-   */
-  private queueOutbound(
-    conversationId: string,
-    state: ActiveProgress,
-    text: string,
-    clearCommentary = false,
-  ): void {
+  /** Send one line of its own into the chat, in order behind the pending edits. */
+  private queueOutbound(conversationId: string, state: ActiveProgress, text: string): void {
     state.tail = state.tail
       .then(async () => {
         if (state.closed || this.signal.aborted) return;
@@ -269,12 +259,6 @@ export class RemoteAgentProgress {
         await this.channel.send(state.chatId, text.slice(0, this.maxMessageChars), {
           signal: this.signal,
         });
-        // `lastText` is deliberately left alone: clearing the commentary is
-        // already enough to make the next render differ, and forcing an edit
-        // that produces identical text earns a Bot API "message is not
-        // modified" error.
-        if (clearCommentary) state.commentary = '';
-        this.schedule(conversationId, state);
       })
       .catch((err) => this.report(err));
   }
@@ -329,9 +313,7 @@ export class RemoteAgentProgress {
 
 function render(state: ActiveProgress, maximum: number): string {
   const sections = [state.headline];
-  const commentary = state.commentary.trim();
-  if (commentary) sections.push(commentary);
-  // Warnings sit below the commentary and above the live milestone: they are
+  // Warnings sit below the headline and above the live milestone: they are
   // the part of the message the reader most needs and the part most likely to
   // be trimmed, so they are never the first thing the tail cut reaches.
   if (state.warnings.length) {

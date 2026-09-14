@@ -17,6 +17,12 @@ function rig(options: { target?: string | undefined } = {}) {
   return { channel, progress, opener };
 }
 
+const status = (text: string): AgentProgressEvent => ({
+  conversationId: 'c1',
+  kind: 'status',
+  text,
+});
+
 const token = (text: string): AgentProgressEvent => ({
   conversationId: 'c1',
   kind: 'commentary',
@@ -29,25 +35,26 @@ async function settle(): Promise<void> {
 }
 
 describe('HostProgressOpener', () => {
-  it('opens a message for a turn no chat queued, and shows what it streams', async () => {
+  it('opens a message for a turn no chat queued, and shows its progress', async () => {
     const { channel, opener } = rig();
     opener.handle(token('I have strong evidence'));
     await settle();
     expect(channel.progress).toEqual([{ chatId: 'chat-1', text: 'Forge: working…' }]);
-    opener.handle(token(' on several issues.'));
+    opener.handle(status('Running tests…'));
     await settle();
-    expect(channel.edits.at(-1)?.text).toContain('I have strong evidence on several issues.');
+    expect(channel.edits.at(-1)?.text).toContain('Running tests…');
+    // Streamed words never enter the bubble; they arrive as their own message.
+    expect(channel.edits.at(-1)?.text).not.toContain('I have strong evidence');
   });
 
   it('holds the events streamed before the message exists, rather than losing them', async () => {
     const { channel, opener } = rig();
-    // All three land while the opening sendProgress is still in flight.
+    // Both land while the opening sendProgress is still in flight.
     opener.handle(token('first'));
-    opener.handle(token(' second'));
-    opener.handle(token(' third'));
+    opener.handle(status('Running read_file…'));
     await settle();
     expect(channel.progress).toHaveLength(1);
-    expect(channel.edits.at(-1)?.text).toContain('first second third');
+    expect(channel.edits.at(-1)?.text).toContain('Running read_file…');
   });
 
   it('closes the message when the turn ends', async () => {
@@ -104,7 +111,7 @@ describe('HostProgressOpener', () => {
   it('leaves a chat-queued turn to the queue drain that opened it', async () => {
     const { channel, progress, opener } = rig();
     progress.begin('c1', 'chat-1', 'msg-7');
-    opener.handle(token('streaming'));
+    opener.handle(status('streaming'));
     await settle();
     // No second message: the drain's own is edited instead.
     expect(channel.progress).toHaveLength(0);

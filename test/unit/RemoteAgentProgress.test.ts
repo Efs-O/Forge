@@ -17,7 +17,7 @@ describe('RemoteAgentProgress', () => {
     );
   });
 
-  it('coalesces visible commentary and a safe tool milestone into one edit', async () => {
+  it('keeps streamed commentary out of the bubble and coalesces the tool milestone', async () => {
     vi.useFakeTimers();
     const channel = new FakeRemoteChannel();
     const progress = new RemoteAgentProgress(
@@ -40,8 +40,7 @@ describe('RemoteAgentProgress', () => {
       {
         chatId: 'chat-a',
         messageId: 'message-1',
-        text:
-          'Forge: working…\n\nI read the file. Now I will update it.\n\nRunning read_file…',
+        text: 'Forge: working…\n\nRunning read_file…',
       },
     ]);
 
@@ -50,7 +49,7 @@ describe('RemoteAgentProgress', () => {
     expect(channel.edits).toHaveLength(1);
   });
 
-  it('sends a finished mid-turn narration as its own message and clears the bubble', async () => {
+  it('sends a finished mid-turn narration as its own message, never in the bubble', async () => {
     vi.useFakeTimers();
     const channel = new FakeRemoteChannel();
     const progress = new RemoteAgentProgress(
@@ -68,8 +67,8 @@ describe('RemoteAgentProgress', () => {
     progress.handle({ conversationId: 'c1', kind: 'narration', text: 'Let me read the file.' });
     await vi.advanceTimersByTimeAsync(1_000);
 
-    // A real message, so the phone raises a notification -- and the bubble no
-    // longer repeats what that message already says.
+    // A real message, so the phone raises a notification -- and the bubble
+    // never showed that text, so it appears exactly once.
     expect(channel.sent).toEqual([{ chatId: 'chat-a', text: 'Let me read the file.' }]);
     expect(channel.edits.at(-1)).toEqual({
       chatId: 'chat-a',
@@ -190,7 +189,7 @@ describe('RemoteAgentProgress', () => {
     expect(channel.edits.at(-1)).toEqual({
       chatId: 'chat-a',
       messageId: 'message-1',
-      text: 'Forge: working…\n\nOn it.',
+      text: 'Forge: working…',
     });
   });
 
@@ -208,7 +207,7 @@ describe('RemoteAgentProgress', () => {
 
     progress.handle({ conversationId: 'local', kind: 'commentary', text: 'local text' });
     progress.begin('remote', 'chat-a', 'message-1');
-    progress.handle({ conversationId: 'remote', kind: 'commentary', text: 'private update' });
+    progress.handle({ conversationId: 'remote', kind: 'phase', text: 'private update' });
     await vi.advanceTimersByTimeAsync(100);
     expect(channel.edits).toEqual([]);
 
@@ -230,7 +229,7 @@ describe('RemoteAgentProgress', () => {
       1_000,
     );
     progress.begin('c1', 'chat-a', 'message-1');
-    progress.handle({ conversationId: 'c1', kind: 'commentary', text: 'late update' });
+    progress.handle({ conversationId: 'c1', kind: 'status', text: 'late update' });
 
     await progress.finish('c1', 'Forge: completed.');
     await vi.advanceTimersByTimeAsync(2_000);
