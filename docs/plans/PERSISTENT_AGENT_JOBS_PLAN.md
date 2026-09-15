@@ -1,7 +1,11 @@
 # Scheduled Wake + Persistent Agent Jobs (impl plan)
 
 **Status:** plan; decisions D1–D7 and both open questions signed off
-2026-09-14. No code yet. Next step: Phase A1 validation.
+2026-09-14. No code yet. Phase A1 (see §A.7): **check 1 (G5) FAIL** — A2
+switches the wake principal to the interactive user; **check 2 (scheduled
+RTC wake) PASS** — the PC wakes itself at the armed time, unattended,
+confirmed twice. Checks 3 (daily recurrence) and 4 (lead time →
+`WAKE_LEAD_MS`) pending. Next step: A1 checks 3–4, then A2.
 **Date:** 2026-09-14
 **Origin:** §1.11 of [DOCUMENTATION_AND_ROADMAP_AUDIT_0.16.md](../DOCUMENTATION_AND_ROADMAP_AUDIT_0.16.md); roadmap tier "Next"
 
@@ -165,6 +169,58 @@ helper so both call sites share it.
 - `sleep_if_idle` decision table (pure function): input since resume, busy, or
   outside the window each means stay awake.
 - Manual: A1 steps 2–3 repeated against the real `setScheduledWakes`.
+
+## A.7 Phase A1 results (started 2026-09-15)
+
+**Check 1 (G5) — can a non-elevated VS Code register the SYSTEM wake task? FAIL.**
+
+- Session elevation: `whoami /groups` → `Mandatory Label\Medium Mandatory Level`,
+  no elevation (a standard interactive admin session, not UAC-elevated).
+- `schedule_wake 5m` (the real `PowerControl.armWakeTimer` → `schtasks /create`
+  path) returned **"Access is denied."**
+- Post-check `schtasks /query /tn ForgeWakeTimer` → task **absent**. The arm did
+  not register anything.
+- Precondition confirmed: `RTCWAKE` AC = 1 (wake timers allowed), so the refusal
+  is the **principal**, not the power scheme.
+- **Conclusion:** a SYSTEM-principal (`S-1-5-18`) task cannot be created from a
+  normal VS Code session. This confirms the A.3 step 1 branch: **A2 must switch
+  the principal to the interactive user (`InteractiveToken`)** — the no-op
+  `cmd /c exit` action does not care who runs it. The recurring
+  `ForgeScheduledWake` task (A.4) needs the same treatment: either an
+  interactive-user principal, or document that its first arm requires an
+  elevated VS Code.
+
+**Check 2 (G3 scheduled wake) — PASS, by direct observation (2026-09-15).**
+
+- Armed a throwaway `TimeTrigger` wake (interactive-user principal, no
+  elevation) via `a1-arm-test-wake.ps1`, slept the PC, touched nothing.
+- **The PC woke itself at the scheduled time, unattended — confirmed twice**
+  (the user watched the screen both times; the wake came back at the armed
+  interval, not earlier). This is the core of Part A and it works: an RTC
+  `WakeToRun` task brings the machine back from sleep with nobody at the box.
+- **Caveat — the Kernel-Power event log is NOT a reliable wake-timer here.**
+  `a1-read-sleep-events.ps1` reported the resume (107) only ~16–19 s after the
+  dirty-shutdown (42) event and *before* the armed time, which contradicted the
+  observed wake. The 42/107 pairing on this machine does not line up with the
+  actual RTC wake (likely the 42 is logged at suspend-complete and the 107 is
+  not the RTC resume we care about, or events are being coalesced). **Do not
+  use the event log to time the wake** — trust the armed boundary and direct
+  observation. This also means the G3 "does it re-sleep ~2 min after waking"
+  question is still **not** cleanly measured; the user found the PC at the
+  logon screen (awake) after the wake, which is consistent with *not*
+  re-sleeping, but a clean no-input re-sleep timing is still open.
+- **Remaining for check 2:** optionally repeat with `a1-hold-awake.ps1` running
+  to confirm `holdAwake` behaviour, and get one clean no-input re-sleep
+  timing. Not blocking — the scheduled-wake mechanism itself is validated.
+
+**Checks 3–4 — pending (require the user at the PC).**
+
+- **Check 3 (recurrence):** the throwaway *daily* task
+  (`a1-arm-test-wake.ps1 -Daily -At HH:MM`) must wake the PC two consecutive
+  mornings with nobody touching it.
+- **Check 4 (lead time):** measure resume → Telegram `/status` answers →
+  `llama-server` ready. This sets `WAKE_LEAD_MS`. (Use the armed boundary +
+  wall clock, not the event log.)
 
 ---
 

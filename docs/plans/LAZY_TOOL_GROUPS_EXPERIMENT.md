@@ -1,5 +1,7 @@
 # Demand-Loaded Tool Groups — Experiment Report
 
+> **Index (2026-09-15):** this doc is part of the tool-schema size investigation. Outcome, all related docs, and what to do when tools near ~100: [`TOOL_SCHEMA_GROWTH_PLAN.md`](TOOL_SCHEMA_GROWTH_PLAN.md).
+
 **Status:** implemented, measured, validated live. 2026-09-01.
 **Scope:** one rarely used MCP provider (HalluScribe). Not a tool-routing subsystem.
 

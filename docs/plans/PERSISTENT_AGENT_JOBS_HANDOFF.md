@@ -117,17 +117,25 @@ with streaming, steals focus). Separate job sessions avoid all three.
 
 ## Phase A1 checklist (after decisions, needs the user at the PC)
 
-1. From normal (non-elevated) VS Code: Telegram `/wake 5m`, then
+1. ~~From normal (non-elevated) VS Code: Telegram `/wake 5m`, then
    `schtasks /query /tn ForgeWakeTimer`. Is it registered? (SYSTEM principal
-   question.)
-2. A throwaway `CalendarTrigger` wake 3 min out → `/sleep confirm` → touch
-   nothing. Does it fall back asleep, and when? (System log Kernel-Power
-   42/107.) Repeat with a `SetThreadExecutionState` holder running.
-3. The same daily task wakes the PC two mornings in a row.
+   question.)~~ **DONE 2026-09-15: NOT registered — `schtasks` returns
+   "Access is denied" and the task is absent. Confirmed non-elevated session
+   (`Medium Mandatory Level`). A2 switches the principal to the interactive
+   user. See plan §A.7.**
+2. ~~A throwaway wake 3 min out → sleep → touch nothing. Does it wake itself?~~
+   **DONE 2026-09-15: YES — the PC woke itself at the armed time, unattended,
+   confirmed twice by watching the screen.** The scheduled RTC `WakeToRun`
+   mechanism works. (Note: the Kernel-Power 42/107 event log does NOT line up
+   with the actual wake on this box — do not use it to time the wake; trust the
+   armed boundary + direct observation. A clean no-input re-sleep timing is
+   still open but not blocking.)
+3. The same daily task wakes the PC two mornings in a row. — **pending**
+   (`a1-arm-test-wake.ps1 -Daily -At HH:MM`).
 4. Measure resume → Telegram `/status` answers → `llama-server` ready. This sets
-   `WAKE_LEAD_MS`.
+   `WAKE_LEAD_MS`. — **pending** (armed boundary + wall clock, not the event log).
 
-Record the results as §A.7 in the plan.
+Record the results as §A.7 in the plan. (Checks 1–2 recorded 2026-09-15.)
 
 ---
 
