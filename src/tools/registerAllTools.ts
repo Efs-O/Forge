@@ -81,6 +81,7 @@ import { makeViewImageTool } from './imageTool';
 import { makeWaitTool } from './waitTool';
 import { makeViewVideoTool } from './videoTool';
 import { makeGenerateImageTool } from './imageGeneration/generateImageTool';
+import { makeImageSearchTool } from './imageSearch/imageSearchTool';
 import {
   makeListExecutionsTool,
   makeMonitorExecutionTool,
@@ -101,6 +102,7 @@ export function registerAllTools(
   delegationService?: LocalDelegationService,
   getConfig?: () => ForgeConfig,
   backendProcesses?: () => readonly BackendProcess[],
+  resolveChatAttachment?: (relativePath: string) => string,
 ): void {
   // v0.1 builtins
   registry.register(makeReadFileTool());
@@ -198,6 +200,15 @@ export function registerAllTools(
   // config without one keeps the tool list -- and the KV prefix -- unchanged.
   if (getConfig) {
     registry.register(makeGenerateImageTool({ getConfig, secrets, notifications }));
+    // Same self-suppression, keyed on an image_search block.
+    registry.register(
+      makeImageSearchTool({
+        getConfig,
+        secrets,
+        notifications,
+        ...(resolveChatAttachment ? { resolveAttachment: resolveChatAttachment } : {}),
+      }),
+    );
   }
 
   // Registered last, and self-suppressing until a lazy group is actually

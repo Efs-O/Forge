@@ -10,6 +10,30 @@
   rendered chain (FORGE.md + AGENTS.md fallbacks, delimiters included), and
   every byte of it is sent on every native turn.
 
+### Tools
+
+- **`image_search`: reverse image search with Google Lens, free.** Attach an
+  image in the sidebar or on Telegram and ask where it comes from; the agent
+  picks the newest attached image (or `attachment_index`, or a public
+  `image_url`), uploads a local one to Litterbox for one hour, and queries
+  SerpApi's Google Lens engine (free plan: 250 searches/month). `type` is
+  `all` (what it shows + pages + similar images), `exact_matches` (find the
+  original), `visual_matches` or `products`. The ~400 KB response is trimmed
+  to at most 2,000 characters — title, site, link, date, size, price; never
+  thumbnails. Off until config.yaml has an `image_search` block (and
+  `net.search` is granted); key via "Forge: Set Cloud Provider Token".
+  `confirm_upload: true` asks before an attachment leaves the machine (default
+  off). Bytes are checked to be a real image before upload — Litterbox itself
+  accepts anything. Timeout defaults to 90 s: `type: all` measured 52 s.
+- **`image_search` shows the matches as pictures.** The top
+  `image_search.thumbnails` (default 4, `0` = off) match thumbnails are saved
+  under `.forge/image-search/<search>/`, shown as a clickable row of
+  thumbnails under the tool call in the sidebar (they survive a reload — the
+  paths live in the result text, like `generate_image`), and sent as photos
+  with title and link to the Telegram chat watching the turn. Thumbnails are
+  fetched only from SerpApi's and Google's thumbnail hosts, never from the
+  matched sites; search folders older than 7 days are pruned.
+
 ### Agent loop
 
 - **A turn that ends mid-thought is retried instead of silently stopping.**

@@ -136,3 +136,34 @@ describe('ToolRow', () => {
     expect(container.querySelector('.tool-row-body')).toBeNull();
   });
 });
+
+describe('ToolRow image_search thumbnails', () => {
+  it('renders every listed thumbnail and opens the clicked one', async () => {
+    const { WorkspaceRootUriContext } = await import('../../webview-ui/src/workspaceRootUri');
+    const { IMAGE_SEARCH_THUMBNAILS_PREFIX } = await import('../../src/sidebar/toolResultView');
+    const message = toolMessage({
+      content: 'image_search → Google Lens identifies it as: Eiffel Tower',
+      toolName: 'image_search',
+      toolResult: `Google Lens identifies it as: Eiffel Tower\n\n${IMAGE_SEARCH_THUMBNAILS_PREFIX}.forge/image-search/1/1.jpg, .forge/image-search/1/2.jpg`,
+      toolResultTotal: 120,
+    });
+    act(() => {
+      root.render(
+        React.createElement(
+          WorkspaceRootUriContext.Provider,
+          { value: 'https://file.vscode-resource/ws' },
+          React.createElement(ToolRow, { message }),
+        ),
+      );
+    });
+    const thumbs = container.querySelectorAll<HTMLButtonElement>(
+      '.tool-row-thumbs.is-grid .tool-row-thumb',
+    );
+    expect(thumbs).toHaveLength(2);
+    expect(thumbs[1]?.querySelector('img')?.getAttribute('src')).toBe(
+      'https://file.vscode-resource/ws/.forge/image-search/1/2.jpg',
+    );
+    act(() => thumbs[1]!.click());
+    expect(document.body.innerHTML).toContain('.forge/image-search/1/2.jpg');
+  });
+});

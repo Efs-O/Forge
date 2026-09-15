@@ -150,6 +150,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
   terminalCommandTracker.start();
   context.subscriptions.push(terminalCommandTracker);
+  const chatAttachments = new ChatAttachmentStore(
+    path.join(context.globalStorageUri.fsPath, 'chat-attachments'),
+  );
   registerAllTools(
     toolRegistry,
     context.workspaceState,
@@ -161,6 +164,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     delegationService,
     () => config,
     () => pool.backendProcesses(),
+    (relativePath) => chatAttachments.resolve(relativePath),
   );
 
   // External MCP stdio servers (e.g. halluscribe-mcp). Bridged as a
@@ -238,9 +242,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   if (forgeLoader) context.subscriptions.push(forgeLoader);
 
   let refreshSessionTime = (): void => {};
-  const chatAttachments = new ChatAttachmentStore(
-    path.join(context.globalStorageUri.fsPath, 'chat-attachments'),
-  );
   sidebarProvider = new SidebarProvider(
     context.extensionUri,
     pool,

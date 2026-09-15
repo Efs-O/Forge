@@ -327,20 +327,28 @@
   margin: 2px 0 4px 16px;
 }
 
-/* ── generate_image thumbnail ───────────────────────────────────────────── */
+/* ── generate_image thumbnail / image_search thumbnails ─────────────────── */
 
 /* Same envelope as a prompt attachment: big enough to recognise, small enough
    not to push the transcript around. A click opens the shared lightbox. */
+.tool-row-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0 2px 18px;
+  max-width: calc(100% - 18px);
+}
+
 .tool-row-thumb {
   display: block;
-  margin: 4px 0 2px 18px;
+  margin: 0;
   padding: 0;
   border: 1px solid var(--vscode-panel-border, transparent);
   border-radius: 4px;
   background: transparent;
   cursor: zoom-in;
   overflow: hidden;
-  max-width: calc(100% - 18px);
+  max-width: 100%;
 }
 
 .tool-row-thumb img {
@@ -348,6 +356,12 @@
   max-width: 160px;
   max-height: 160px;
   object-fit: contain;
+}
+
+/* Several search matches: smaller, so four fit on one sidebar line. */
+.tool-row-thumbs.is-grid .tool-row-thumb img {
+  max-width: 96px;
+  max-height: 96px;
 }
 
 .tool-row-thumb:focus-visible {

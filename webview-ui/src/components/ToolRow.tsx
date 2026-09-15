@@ -4,7 +4,11 @@ import remarkGfm from 'remark-gfm';
 import type { AppMessage } from '../reducer';
 import { vscode } from '../vscode';
 import { normalizeMarkdownForRender } from '../markdown';
-import { generatedImagePath, rendersAsMarkdown } from '../../../src/sidebar/toolResultView';
+import {
+  generatedImagePath,
+  imageSearchThumbnailPaths,
+  rendersAsMarkdown,
+} from '../../../src/sidebar/toolResultView';
 import { WorkspaceRootUriContext, workspaceFileUri } from '../workspaceRootUri';
 import { ImageLightbox } from './ImageLightbox';
 import { formatDuration } from '../../../src/util/formatDuration';
@@ -35,8 +39,9 @@ function formatSize(chars: number): string {
  */
 export function ToolRow({ message }: { message: AppMessage }): React.ReactElement {
   const [open, setOpen] = useState(false);
-  const [expanded, setExpanded] = useState(false);
-  const closeExpanded = useCallback(() => setExpanded(false), []);
+  // Index of the thumbnail open in the lightbox, or null.
+  const [expanded, setExpanded] = useState<number | null>(null);
+  const closeExpanded = useCallback(() => setExpanded(null), []);
   const rootUri = useContext(WorkspaceRootUriContext);
 
   const arrow = message.content.indexOf(' → ');
@@ -58,16 +63,18 @@ export function ToolRow({ message }: { message: AppMessage }): React.ReactElemen
       ? { className: 'is-ok', glyph: '✓', label: 'completed' }
       : { className: 'is-pending', glyph: '○', label: 'running' };
   const body = useMemo(() => normalizeMarkdownForRender(result), [result]);
-  const imagePath = generatedImagePath(message.toolName ?? '', result);
-  const image =
-    imagePath && rootUri
-      ? {
-          name: imagePath,
-          mediaType: 'image/*',
-          bytes: 0,
-          src: workspaceFileUri(rootUri, imagePath),
-        }
-      : undefined;
+  const toolName = message.toolName ?? '';
+  const generated = generatedImagePath(toolName, result);
+  const imagePaths = generated ? [generated] : imageSearchThumbnailPaths(toolName, result);
+  const images = rootUri
+    ? imagePaths.map((imagePath) => ({
+        name: imagePath,
+        mediaType: 'image/*',
+        bytes: 0,
+        src: workspaceFileUri(rootUri, imagePath),
+      }))
+    : [];
+  const openImage = expanded === null ? undefined : images[expanded];
 
   return (
     <div className={`msg-tool-row-wrap${message.toolIsError ? ' msg-tool-row-error' : ''}`}>
@@ -113,17 +120,22 @@ export function ToolRow({ message }: { message: AppMessage }): React.ReactElemen
           </button>
         )}
       </div>
-      {image && (
-        <button
-          type="button"
-          className="tool-row-thumb"
-          title={`${image.name} — click to expand`}
-          onClick={() => setExpanded(true)}
-        >
-          <img src={image.src} alt={image.name} />
-        </button>
+      {images.length > 0 && (
+        <div className={`tool-row-thumbs${images.length > 1 ? ' is-grid' : ''}`}>
+          {images.map((image, index) => (
+            <button
+              key={image.name}
+              type="button"
+              className="tool-row-thumb"
+              title={`${image.name} — click to expand`}
+              onClick={() => setExpanded(index)}
+            >
+              <img src={image.src} alt={image.name} />
+            </button>
+          ))}
+        </div>
       )}
-      {image && expanded && <ImageLightbox attachment={image} onClose={closeExpanded} />}
+      {openImage && <ImageLightbox attachment={openImage} onClose={closeExpanded} />}
       {open && (
         <div className="tool-row-body">
           {detail && (

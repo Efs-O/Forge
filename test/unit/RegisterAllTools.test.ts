@@ -55,6 +55,7 @@ const EXPECTED_NATIVE_NAMES = [
   'git_show',
   'git_status',
   'go_to_definition',
+  'image_search',
   'insert_code',
   'list_delegation_targets',
   'list_directory',
@@ -148,7 +149,7 @@ function makeRegistry(
 }
 
 describe('registerAllTools canonical coordinator catalog', () => {
-  it('exposes the exact 74-tool native catalog when all optional wiring is present', () => {
+  it('exposes the exact 75-tool native catalog when all optional wiring is present', () => {
     const registry = makeRegistry({ search: true, delegation: true });
     expect(registry.names().sort()).toEqual(EXPECTED_NATIVE_NAMES);
     // load_tool_group is registered but suppresses its own advertisement while
@@ -162,7 +163,8 @@ describe('registerAllTools canonical coordinator catalog', () => {
         .sort(),
     ).toEqual(
       EXPECTED_NATIVE_NAMES.filter(
-        (name) => name !== 'load_tool_group' && name !== 'generate_image',
+        (name) =>
+          name !== 'load_tool_group' && name !== 'generate_image' && name !== 'image_search',
       ),
     );
   });

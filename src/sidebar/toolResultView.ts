@@ -45,6 +45,7 @@ export const PROSE_RESULT_TOOLS = new Set([
   'ask_local_agent',
   'ask_user',
   'web_search',
+  'image_search',
   'web_fetch',
   'recall',
   'list_memories',
@@ -80,4 +81,29 @@ export function generatedImagePath(toolName: string, result: string): string | u
   if (!relative || relative.startsWith('/') || /^[a-z]:/i.test(relative)) return undefined;
   if (relative.split('/').includes('..')) return undefined;
   return relative;
+}
+
+/**
+ * How `image_search` lists the thumbnails it saved. Same contract as
+ * GENERATED_IMAGE_PREFIX: the tool writes the line, the webview parses it back,
+ * and a restored session rebuilds the thumbnails from the persisted text.
+ */
+export const IMAGE_SEARCH_THUMBNAILS_PREFIX =
+  'Thumbnails saved and shown to the user (view_image can open them): ';
+
+/** Relative, `/`-separated, image extension; no drive letters or backslashes. */
+const THUMBNAIL_PATH = /^[^/\\:]+(?:\/[^/\\:]+)*\.(?:png|jpe?g|gif|bmp|webp)$/iu;
+
+/** Workspace-relative thumbnail paths an `image_search` result lists, in order. */
+export function imageSearchThumbnailPaths(toolName: string, result: string): string[] {
+  if (toolName !== 'image_search' || isFailureResult(result)) return [];
+  const line = result
+    .split(/\r?\n/u)
+    .find((candidate) => candidate.startsWith(IMAGE_SEARCH_THUMBNAILS_PREFIX));
+  if (!line) return [];
+  return line
+    .slice(IMAGE_SEARCH_THUMBNAILS_PREFIX.length)
+    .split(', ')
+    .map((entry) => entry.trim())
+    .filter((entry) => THUMBNAIL_PATH.test(entry) && !entry.split('/').includes('..'));
 }

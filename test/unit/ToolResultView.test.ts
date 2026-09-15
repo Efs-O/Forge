@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   generatedImagePath,
+  IMAGE_SEARCH_THUMBNAILS_PREFIX,
+  imageSearchThumbnailPaths,
   isFailureResult,
   readPathArg,
   rendersAsMarkdown,
@@ -98,7 +100,9 @@ describe('generatedImagePath', () => {
     'Generated image saved to generated-images/20260914-a fox (1).jpg (image/jpeg, 130,038 bytes) with backend grok-imagine.\nSent to 1 remote chat(s).';
 
   it('reads the saved path back from a successful generate_image result', () => {
-    expect(generatedImagePath('generate_image', ok)).toBe('generated-images/20260914-a fox (1).jpg');
+    expect(generatedImagePath('generate_image', ok)).toBe(
+      'generated-images/20260914-a fox (1).jpg',
+    );
   });
 
   it('ignores other tools, failures, and paths that leave the workspace', () => {
@@ -116,5 +120,35 @@ describe('generatedImagePath', () => {
     expect(workspaceFileUri('https://file.vscode-resource/N:/ws/', 'art/a fox (1).jpg')).toBe(
       'https://file.vscode-resource/N:/ws/art/a%20fox%20(1).jpg',
     );
+  });
+});
+
+describe('imageSearchThumbnailPaths', () => {
+  const ok = [
+    'Visually similar: 2 found, top 2 shown.',
+    '1. A',
+    '',
+    `${IMAGE_SEARCH_THUMBNAILS_PREFIX}.forge/image-search/17/1.jpg, .forge/image-search/17/2.webp`,
+    'Sent 2 thumbnail(s) to 1 remote chat(s).',
+  ].join('\r\n');
+
+  it('reads every saved thumbnail path back, in order', () => {
+    expect(imageSearchThumbnailPaths('image_search', ok)).toEqual([
+      '.forge/image-search/17/1.jpg',
+      '.forge/image-search/17/2.webp',
+    ]);
+  });
+
+  it('ignores other tools, failures, and unsafe paths', () => {
+    expect(imageSearchThumbnailPaths('web_search', ok)).toEqual([]);
+    expect(imageSearchThumbnailPaths('image_search', 'Error: SerpApi: Invalid API key.')).toEqual(
+      [],
+    );
+    expect(
+      imageSearchThumbnailPaths(
+        'image_search',
+        `${IMAGE_SEARCH_THUMBNAILS_PREFIX}../x.jpg, C:/a.jpg, /abs.jpg, a\\b.jpg, ok/1.txt, ok/1.png`,
+      ),
+    ).toEqual(['ok/1.png']);
   });
 });

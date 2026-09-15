@@ -281,6 +281,17 @@ export interface ImageGenerationConfig {
   output_dir: string;
 }
 
+/** `image_search:` block (validated by imageSearchSchema.ts). */
+export interface ImageSearchConfig {
+  provider: 'serpapi_lens';
+  /** Secret key name in VS Code SecretStorage - never a raw key. */
+  secret_key_name: string;
+  max_results: number;
+  confirm_upload: boolean;
+  thumbnails: number;
+  timeout_ms: number;
+}
+
 /** Raw `video:` block. Defaults live in `videoTool.ts` (VIDEO_DEFAULTS). */
 export interface VideoConfig {
   max_duration_seconds?: number;
@@ -362,6 +373,8 @@ export interface ForgeConfig {
   voice?: VoiceConfig;
   /** `generate_image` backends. Absent means the tool is not advertised. */
   image_generation?: ImageGenerationConfig;
+  /** Reverse image search. Absent means `image_search` is not advertised. */
+  image_search?: ImageSearchConfig;
   log_level?: 'trace' | 'debug' | 'info' | 'warn' | 'error';
   /** Extra directories to scan for GGUF files (used by first-run wizard). */
   model_dirs?: string[];

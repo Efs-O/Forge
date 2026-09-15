@@ -248,6 +248,22 @@ voice:
     # read the rest in the written message. Long voice notes cannot be skimmed.
     max_chars: 1200
 
+# image_search tool: reverse image search (Google Lens via SerpApi). Absent =
+# the tool is never offered to a model. Needs net.search permission. Store the
+# SerpApi key with "Forge: Set Cloud Provider Token" under secret_key_name; the
+# free plan is 250 searches/month. SerpApi only accepts a public URL, so an
+# attached image is first uploaded to Litterbox (litterbox.catbox.moe), which
+# deletes it after 1 hour -- the image is publicly reachable until then.
+# See docs/plans/IMAGE_SEARCH_TOOL_PLAN.md.
+# image_search:
+#   provider: serpapi_lens
+#   secret_key_name: serpapi
+#   max_results: 8            # per section; the raw response is ~400 KB
+#   confirm_upload: false     # true = ask before an attachment is uploaded
+#   thumbnails: 4             # top matches saved to .forge/image-search, shown in
+#                             # the tool row and sent as photos to Telegram; 0 = off
+#   timeout_ms: 90000         # type "all" measured at ~52 s
+
 # generate_image tool. Absent = the tool is never offered to a model. Backends
 # are OpenAI-style /v1/images/generations endpoints; keys resolve exactly like a
 # chat model on the same provider (SecretStorage, and for xai the OpenCode OAuth
