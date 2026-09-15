@@ -144,13 +144,17 @@ export class TelegramChannel implements RemoteChannel {
     chatId: string,
     text: string,
     options?: { correlationId?: string; signal?: AbortSignal },
-  ): Promise<void> {
-    await this.sendText(chatId, text, options);
+  ): Promise<string[]> {
+    return this.sendText(chatId, text, options);
   }
 
   /** Rich text is deliberately opt-in; normal agent replies stay literal. */
-  async sendHtml(chatId: string, html: string, options?: { signal?: AbortSignal }): Promise<void> {
-    await this.sendText(chatId, html, options, 'HTML');
+  async sendHtml(
+    chatId: string,
+    html: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<string[]> {
+    return this.sendText(chatId, html, options, 'HTML');
   }
 
   private async sendText(
@@ -158,7 +162,8 @@ export class TelegramChannel implements RemoteChannel {
     text: string,
     options?: { correlationId?: string; signal?: AbortSignal },
     parseMode?: 'HTML',
-  ): Promise<void> {
+  ): Promise<string[]> {
+    const messageIds: string[] = [];
     const chunks = splitTelegramText(text);
     for (let index = 0; index < chunks.length; index++) {
       const correlationId = index === 0 ? options?.correlationId : undefined;
@@ -193,7 +198,10 @@ export class TelegramChannel implements RemoteChannel {
         options?.signal,
       );
       if (correlationId) this.rememberPrompt(correlationId, sent);
+      const parsed = TelegramSentMessageSchema.safeParse(sent);
+      if (parsed.success) messageIds.push(String(parsed.data.message_id));
     }
+    return messageIds;
   }
 
   async sendProgress(
@@ -354,7 +362,7 @@ export class TelegramChannel implements RemoteChannel {
       event,
       disposition,
       signal,
-      (chatId, text, options) => this.send(chatId, text, options),
+      (chatId, text, options) => this.send(chatId, text, options).then(() => undefined),
       this.options.onError,
     );
   }

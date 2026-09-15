@@ -6,6 +6,7 @@ import type * as vscode from 'vscode';
 import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
 import { RemoteAuth } from '../../src/remote/RemoteAuth';
 import { RemoteController } from '../../src/remote/RemoteController';
+import { CommandCleanupScheduler } from '../../src/remote/CommandCleanupScheduler';
 import { RemoteRequestStore } from '../../src/remote/RemoteRequestStore';
 import {
   buildRemoteControllerOptions,
@@ -51,13 +52,24 @@ async function store(): Promise<RemoteRequestStore> {
 function configWith(delay: number): ForgeConfig {
   return ForgeConfigSchema.parse({
     models: [{ name: 'm', provider: 'ollama', endpoint: 'http://127.0.0.1:11434' }],
-    remote: { enabled: true, telegram: { enabled: true }, delete_command_messages_after: delay },
+    // Replies pinned off: these tests are about the owner's command message.
+    remote: {
+      enabled: true,
+      telegram: { enabled: true },
+      delete_command_messages_after: delay,
+      delete_command_replies_after: 0,
+    },
   });
 }
 
 function host(overrides: Partial<ForgeHostFacade> = {}): ForgeHostFacade {
   return {
-    createConversation: async () => ({ id: 'c1', title: 'Remote', activeModel: 'local', archived: false }),
+    createConversation: async () => ({
+      id: 'c1',
+      title: 'Remote',
+      activeModel: 'local',
+      archived: false,
+    }),
     restoreConversation: async () => undefined,
     send: async () => ({ kind: 'completed' as const, finalText: 'ok' }),
     cancel: async () => undefined,
@@ -117,9 +129,7 @@ async function buildController(
     maxMessageChars: 12_000,
     rateLimitPerMinute: 60,
     onError,
-    ...(deleteCommandMessagesAfter === undefined
-      ? {}
-      : { deleteCommandMessagesAfter }),
+    ...(deleteCommandMessagesAfter === undefined ? {} : { deleteCommandMessagesAfter }),
     ...optionsOverrides,
   });
   await controller.start();
@@ -255,11 +265,15 @@ describe('RemoteController command auto-cleanup', () => {
     vi.useFakeTimers();
     // A broken reporter: the delete fails AND onError itself throws. Neither
     // may escape the timer as an unhandled rejection.
-    const { channel, controller } = await buildController(5, {}, {
-      onError: () => {
-        throw new Error('reporter is broken');
+    const { channel, controller } = await buildController(
+      5,
+      {},
+      {
+        onError: () => {
+          throw new Error('reporter is broken');
+        },
       },
-    });
+    );
     channel.deleteMessage = async () => {
       throw new Error('delete failed');
     };
@@ -435,5 +449,61 @@ describe('RemoteController command auto-cleanup', () => {
     } finally {
       await controller.stop();
     }
+  });
+
+  it('deletes the reply to a command after its own, longer delay', async () => {
+    vi.useFakeTimers();
+    const { channel, controller } = await buildController(5, {}, { deleteCommandRepliesAfter: 10 });
+    try {
+      await controller.handle(textEvent('/clanker off'));
+      const reply = channel.sent.findIndex((m) => m.text.startsWith('Forge: clanker mode OFF'));
+      expect(reply).toBeGreaterThanOrEqual(0);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(channel.deleted).toEqual([{ chatId: 'chat', messageId: 'msg-1' }]);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(channel.deleted).toContainEqual({ chatId: 'chat', messageId: `sent-${reply + 1}` });
+    } finally {
+      await controller.stop();
+    }
+  });
+
+  it('keeps replies when delete_command_replies_after is 0', async () => {
+    vi.useFakeTimers();
+    const { channel, controller } = await buildController(5, {}, { deleteCommandRepliesAfter: 0 });
+    try {
+      await controller.handle(textEvent('/clanker off'));
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(channel.deleted).toEqual([{ chatId: 'chat', messageId: 'msg-1' }]);
+    } finally {
+      await controller.stop();
+    }
+  });
+});
+
+describe('CommandCleanupScheduler.trackReplies', () => {
+  function scheduler(channel: FakeRemoteChannel): CommandCleanupScheduler {
+    return new CommandCleanupScheduler({
+      channel,
+      signal: new AbortController().signal,
+      delaySeconds: () => 5,
+      replyDelaySeconds: () => 10,
+    });
+  }
+
+  it('never deletes an approval prompt', async () => {
+    vi.useFakeTimers();
+    const channel = new FakeRemoteChannel();
+    const tracked = scheduler(channel).trackReplies(channel, '/status');
+    await tracked.send('chat', 'Approve?', { correlationId: 'c1' });
+    await tracked.send('chat', 'Forge: status');
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(channel.deleted).toEqual([{ chatId: 'chat', messageId: 'sent-2' }]);
+  });
+
+  it('leaves /view replies alone: they are earlier answers, not acknowledgements', async () => {
+    vi.useFakeTimers();
+    const channel = new FakeRemoteChannel();
+    const tracked = scheduler(channel).trackReplies(channel, '/view 3');
+    expect(tracked).toBe(channel);
   });
 });

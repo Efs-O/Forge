@@ -446,7 +446,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         conversationId: msg.conversationId,
         kind: 'notice',
         text: msg.message,
-        severity: 'info',
+        severity: msg.severity ?? 'info',
       });
       return;
     }

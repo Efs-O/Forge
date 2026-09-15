@@ -83,8 +83,10 @@ export class FakeRemoteChannel implements RemoteChannel {
     chatId: string,
     text: string,
     options?: { correlationId?: string; signal?: AbortSignal },
-  ): Promise<void> {
+  ): Promise<string[]> {
     this.sent.push({ chatId, text, ...(options?.correlationId ? options : {}) });
+    // Addressable like Telegram, so reply cleanup has an id to delete.
+    return [`sent-${this.sent.length}`];
   }
 
   async retractPrompt(chatId: string, correlationId: string): Promise<void> {

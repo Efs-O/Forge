@@ -90,7 +90,10 @@ export class RemoteRuntime {
       claimArrivals: () => this.claimArrivals(),
       restoreTransports: () => this.restoreTransports(),
       sendToChat: (channel, chatId, text) =>
-        this.manager.get(channel)?.channel.send(chatId, text) ?? Promise.resolve(),
+        this.manager
+          .get(channel)
+          ?.channel.send(chatId, text)
+          .then(() => undefined) ?? Promise.resolve(),
       notifyLocal: options.notifyLocal,
       ...(options.handoffWatch ?? {}),
     });

@@ -466,6 +466,8 @@ export async function runModelTurn(
     ctx.lifecycle.markIncomplete(conv.id, 'the model stopped while still reasoning');
     postC({
       type: 'notice',
+      // Warning, so a remote chat gets a push: the user must send "continue".
+      severity: 'warning',
       message:
         'Forge: the model ended its reply mid-thought twice (the automatic retry with ' +
         'thinking off also produced nothing). Say "continue" to resume.',

@@ -167,13 +167,22 @@ export interface RemoteChannel {
   onEvent(handler: (event: RemoteInboundEvent) => Promise<RemoteInboundDisposition>): {
     dispose(): void;
   };
+  /**
+   * Resolves to the provider ids of the messages created (one per chunk) when
+   * the transport knows them, so command-reply cleanup can delete them later.
+   * Transports that cannot address a sent message resolve to nothing.
+   */
   send(
     chatId: string,
     text: string,
     options?: { correlationId?: string; signal?: AbortSignal },
-  ): Promise<void>;
+  ): Promise<string[] | void>;
   /** Telegram-only rich-text delivery. Other transports keep plain text. */
-  sendHtml?(chatId: string, html: string, options?: { signal?: AbortSignal }): Promise<void>;
+  sendHtml?(
+    chatId: string,
+    html: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<string[] | void>;
   /** Best-effort presentation only; never an authoritative remote reply. */
   sendProgress?(
     chatId: string,

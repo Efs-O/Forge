@@ -73,8 +73,8 @@ export function boldLineLabel(line: string, labels: ReadonlySet<string>): string
  */
 export async function sendRichText(
   channel: {
-    send(chatId: string, text: string, options?: { signal?: AbortSignal }): Promise<void>;
-    sendHtml?(chatId: string, html: string, options?: { signal?: AbortSignal }): Promise<void>;
+    send(chatId: string, text: string, options?: { signal?: AbortSignal }): Promise<unknown>;
+    sendHtml?(chatId: string, html: string, options?: { signal?: AbortSignal }): Promise<unknown>;
   },
   chatId: string,
   text: string,

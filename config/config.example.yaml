@@ -154,6 +154,9 @@ remote:
   rate_limit_per_minute: 30
   # Seconds to keep a recognized /command before deleting it from Telegram; 0 disables.
   delete_command_messages_after: 5
+  # Seconds to keep Forge's reply to a /command before deleting it; 0 disables.
+  # Approval prompts and paginated lists are never auto-deleted.
+  delete_command_replies_after: 10
   auth:
     # 0 disables only inactivity expiry; TOTP still locks after restart or /lock.
     inactivity_timeout_minutes: 30

@@ -34,6 +34,8 @@ export interface RemoteControllerOptions {
   inactivityTimeoutMinutes?: number;
   /** Seconds to keep a recognized /command before deleting it from Telegram; 0/absent disables. */
   deleteCommandMessagesAfter?: number;
+  /** Seconds to keep Forge's reply to a /command before deleting it; 0/absent disables. */
+  deleteCommandRepliesAfter?: number;
   setInactivityTimeout?: ((minutes: number) => Promise<void>) | undefined;
   setRateLimit?: ((perMinute: number) => Promise<void>) | undefined;
   reloadWindow?: (() => Promise<void>) | undefined;
@@ -156,6 +158,7 @@ export function buildRemoteControllerOptions(
       deps.switchWorkspace(config, alias, channel, chatId),
     inactivityTimeoutMinutes: remote.auth.inactivity_timeout_minutes,
     deleteCommandMessagesAfter: remote.delete_command_messages_after,
+    deleteCommandRepliesAfter: remote.delete_command_replies_after,
     setInactivityTimeout: deps.setInactivityTimeout,
     setRateLimit: deps.setRateLimit,
     reloadWindow: deps.reloadWindow,

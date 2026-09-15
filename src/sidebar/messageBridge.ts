@@ -63,6 +63,8 @@ export interface NoticeMsg {
   /** Render the message verbatim in a monospace block instead of as a one-line
    *  status row. For reports whose columns carry meaning (`/system`). */
   preformatted?: boolean;
+  /** `warning` is sent to remote chats as a new message (a phone push), not an edit. */
+  severity?: 'info' | 'warning';
 }
 export interface ReasoningTokenMsg {
   type: 'reasoningToken';

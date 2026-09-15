@@ -140,6 +140,7 @@ describe('remote configuration and lease', () => {
       max_message_chars: 12_000,
       rate_limit_per_minute: 30,
       delete_command_messages_after: 5,
+      delete_command_replies_after: 10,
       auth: { inactivity_timeout_minutes: 30 },
       attachments: { enabled: false, retain_days: 30, accept_pdf: true },
       workspace_aliases: {},

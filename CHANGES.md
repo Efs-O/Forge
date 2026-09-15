@@ -14,7 +14,19 @@
   not on the finish reason. Such a round is retried **once, with thinking off**;
   the partial reasoning stays in context and an `internal` nudge (sent to the
   model, logged, never rendered) asks for the next action directly. If the retry
-  also produces nothing, the turn is marked incomplete and the chat says so.
+  also produces nothing, the turn is marked incomplete and the chat says so —
+  as a **warning**, so a Telegram chat gets a new message (a phone push) rather
+  than a silent edit of the progress bubble, and you know to send "continue".
+
+### Remote
+
+- **Forge's reply to a Telegram /command is auto-deleted too**, after
+  `remote.delete_command_replies_after` seconds (default **10**, `0` disables,
+  max 3600) — alongside the existing 5 s cleanup of the command itself.
+  Approval prompts, progress bubbles and paginated lists are never deleted (a
+  deleted button message strands its action), and `/view` replies are kept
+  because they are earlier answers, not acknowledgements. `RemoteChannel.send`
+  now resolves to the sent message ids so the reply can be addressed.
 
 ## 0.16.0
 

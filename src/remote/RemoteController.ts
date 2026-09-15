@@ -112,6 +112,7 @@ export class RemoteController {
       channel,
       signal: this.abort.signal,
       delaySeconds: () => this.options.deleteCommandMessagesAfter ?? 0,
+      replyDelaySeconds: () => this.options.deleteCommandRepliesAfter ?? 0,
       onError: this.options.onError,
     });
     this.progress = new RemoteAgentProgress(
@@ -412,7 +413,7 @@ export class RemoteController {
       const result = await handleRemoteCommand(
         event,
         {
-          channel: this.channel,
+          channel: this.commandCleanup.trackReplies(this.channel, event.text),
           store: this.store,
           host: this.host,
           workspaceId: this.options.workspaceId,
