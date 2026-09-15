@@ -119,3 +119,6 @@ test/fixtures/voice/recorded/
 
 # Python bytecode from the SWE-bench harness.
 __pycache__/
+
+# Output of the generate_image tool (xAI/Grok) - regenerable, never track.
+generated-images/
