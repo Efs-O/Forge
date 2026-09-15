@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import type { MessageAttachment } from '../messageOps';
 
 interface Props {
@@ -14,6 +15,11 @@ interface Props {
  * Closes on Escape, a click on the dimmed backdrop, or the explicit button —
  * the three ways a user expects a lightbox to dismiss. The image itself does
  * not close on click, so an accidental tap on the picture keeps it open.
+ *
+ * Portalled to `document.body`. Transcript rows carry `content-visibility:
+ * auto`, which implies paint containment — and a contained ancestor becomes the
+ * containing block for `position: fixed` and clips it. Rendered in place, the
+ * "full-size" view was cropped to the height of the tool row it came from.
  */
 export function ImageLightbox({ attachment, onClose }: Props): React.ReactElement {
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -29,7 +35,7 @@ export function ImageLightbox({ attachment, onClose }: Props): React.ReactElemen
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  return (
+  return createPortal(
     <div
       className="lightbox-overlay"
       role="dialog"
@@ -61,6 +67,7 @@ export function ImageLightbox({ attachment, onClose }: Props): React.ReactElemen
       <div className="lightbox-caption" onClick={(event) => event.stopPropagation()}>
         {attachment.name}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

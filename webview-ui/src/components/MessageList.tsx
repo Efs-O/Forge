@@ -80,6 +80,7 @@ interface Props {
 }
 
 const SCROLL_THRESHOLD = 80; // px from bottom — within this, auto-scroll is active
+const WARM_ROW_THRESHOLD = 10; // rows arriving at once that justify a full measure pass
 
 export function MessageList({
   messages,
@@ -107,6 +108,31 @@ export function MessageList({
   // current `active` without re-subscribing on every switch.
   const activeRef = useRef(active);
   activeRef.current = active;
+
+  /**
+   * Lay every row out once, so scrolling up does not jump.
+   *
+   * With `content-visibility: auto`, a row that has never been on screen counts
+   * as its 60px estimate. Wheeling up through a long transcript then grew each
+   * row to its real height (often several hundred px) as it entered the
+   * viewport: the content lurched and the scrollbar thumb resized under the
+   * wheel. `contain-intrinsic-size: auto` remembers a size only after a row has
+   * rendered, so force one full layout, hold it across a rendering update so the
+   * sizes are recorded, then hand skipping back. Paid once per loaded
+   * transcript, not per tab switch — a hidden pane keeps the remembered sizes.
+   */
+  const warmedRowCount = useRef(0);
+  const warmRowSizes = useCallback((el: HTMLDivElement) => {
+    if (typeof requestAnimationFrame !== 'function') return;
+    el.classList.add('cv-warm');
+    let raf = requestAnimationFrame(() => {
+      raf = requestAnimationFrame(() => el.classList.remove('cv-warm'));
+    });
+    return () => {
+      cancelAnimationFrame(raf);
+      el.classList.remove('cv-warm');
+    };
+  }, []);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     const el = containerRef.current;
@@ -159,14 +185,43 @@ export function MessageList({
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
+    let lastScrollTop = el.scrollTop;
     const onScroll = () => {
       const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-      userScrolledUp.current = distFromBottom > SCROLL_THRESHOLD;
+      // Only an upward move is the reader leaving the bottom. Distance alone is
+      // not: a smooth scroll that is still travelling, or a row that grew under
+      // the viewport (an image decoding, an off-screen row replacing its 60px
+      // estimate), also leaves us >80px short — and latching "scrolled up" there
+      // froze the view mid-row until the reader nudged it.
+      if (distFromBottom <= SCROLL_THRESHOLD) userScrolledUp.current = false;
+      else if (el.scrollTop < lastScrollTop - 1) userScrolledUp.current = true;
+      lastScrollTop = el.scrollTop;
       savedScrollTop.current = el.scrollTop;
     };
+    // An image finishing its load changes the height without a DOM mutation, so
+    // the MutationObserver below never sees it. `load` does not bubble; capture.
+    const onLoad = () => {
+      if (activeRef.current && !userScrolledUp.current) scrollToBottom();
+    };
     el.addEventListener('scroll', onScroll, { passive: true });
-    return () => el.removeEventListener('scroll', onScroll);
-  }, []);
+    el.addEventListener('load', onLoad, true);
+    // The pane is a flex child sharing the column with the streaming status line,
+    // the checkpoint bar and the auto-growing composer. When any of those appears
+    // the pane gets shorter with scrollTop unchanged, so its last line slides
+    // under them — and nothing inside the pane mutated, so nothing re-pinned.
+    const resize =
+      typeof ResizeObserver === 'undefined'
+        ? undefined
+        : new ResizeObserver(() => {
+            if (activeRef.current && !userScrolledUp.current) scrollToBottom();
+          });
+    resize?.observe(el);
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      el.removeEventListener('load', onLoad, true);
+      resize?.disconnect();
+    };
+  }, [scrollToBottom]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -200,6 +255,18 @@ export function MessageList({
       scrollToBottom(streaming ? 'auto' : 'smooth');
     }
   }, [active, messages, conversationId, scrollToBottom, streaming]);
+
+  // Only a bulk arrival needs warming — a loaded or resumed transcript. Rows
+  // appended during a turn mount at the bottom, on screen, and measure
+  // themselves.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || !active) return;
+    const grown = rows.length - warmedRowCount.current;
+    warmedRowCount.current = rows.length;
+    if (grown <= WARM_ROW_THRESHOLD) return;
+    return warmRowSizes(el);
+  }, [active, rows.length, warmRowSizes]);
 
   // Becoming visible again: put the reader back where they were, or at the
   // bottom if that is where they had been. Both because the pane was hidden and

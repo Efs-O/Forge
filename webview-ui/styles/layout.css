@@ -93,7 +93,8 @@ body {
 .messages-pane {
   flex: 1;
   overflow-y: auto;
-  padding: 10px 10px 4px;
+  /* 12px bottom: the last row should not butt against the status line. */
+  padding: 10px 10px 12px;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -119,6 +120,19 @@ body {
 .messages-pane > * {
   content-visibility: auto;
   contain-intrinsic-size: auto 60px;
+}
+
+/*
+ * ...except the tail. The newest rows are what auto-scroll aims at, and a row
+ * still on its 60px estimate makes `scrollHeight` wrong at the moment we read
+ * it, so the scroll lands short and the last row shows cut off above the
+ * composer. The tail is on screen anyway, so containment saves nothing there.
+ */
+/* -n + 4: the pane ends in an empty spacer div, so this is the last three rows. */
+.messages-pane > *:nth-last-child(-n + 4),
+/* One-frame measure pass on a freshly loaded transcript - see warmRowSizes(). */
+.messages-pane.cv-warm > * {
+  content-visibility: visible;
 }
 
 /*

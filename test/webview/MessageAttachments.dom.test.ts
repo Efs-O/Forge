@@ -59,9 +59,9 @@ describe('MessageAttachments', () => {
       thumbnail!.click();
     });
 
-    const lightbox = container.querySelector('.lightbox-overlay');
+    const lightbox = document.body.querySelector('.lightbox-overlay');
     expect(lightbox).not.toBeNull();
-    expect(container.querySelector('.lightbox-image')?.getAttribute('src')).toBe(image.src);
+    expect(document.body.querySelector('.lightbox-image')?.getAttribute('src')).toBe(image.src);
     // The image is viewed in place — it does not hand off to VS Code.
     expect(postMessage).not.toHaveBeenCalled();
   });
@@ -73,12 +73,12 @@ describe('MessageAttachments', () => {
     act(() => {
       container.querySelector<HTMLButtonElement>('.msg-attachment.is-image')!.click();
     });
-    expect(container.querySelector('.lightbox-overlay')).not.toBeNull();
+    expect(document.body.querySelector('.lightbox-overlay')).not.toBeNull();
 
     act(() => {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     });
-    expect(container.querySelector('.lightbox-overlay')).toBeNull();
+    expect(document.body.querySelector('.lightbox-overlay')).toBeNull();
   });
 
   it('calls onClose once when the close button is clicked', () => {
@@ -88,7 +88,7 @@ describe('MessageAttachments', () => {
     });
 
     act(() => {
-      container.querySelector<HTMLButtonElement>('.lightbox-close')!.click();
+      document.body.querySelector<HTMLButtonElement>('.lightbox-close')!.click();
     });
 
     expect(onClose).toHaveBeenCalledOnce();
@@ -110,7 +110,7 @@ describe('MessageAttachments', () => {
       type: 'openAttachment',
       relativePath: textFile.relativePath,
     });
-    expect(container.querySelector('.lightbox-overlay')).toBeNull();
+    expect(document.body.querySelector('.lightbox-overlay')).toBeNull();
   });
 
   it('leaves a non-image chip without a relativePath disabled', () => {
