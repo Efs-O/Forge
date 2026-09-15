@@ -1,5 +1,21 @@
 # Forge — Recent Changes
 
+## 0.16.1
+
+### Agent loop
+
+- **A turn that ends mid-thought is retried instead of silently stopping.**
+  Qwen3.8 would sometimes emit EOS right after llama-server injected
+  `--reasoning-budget-message`, still inside the thinking block:
+  `finish_reason=stop text_chars=0 tool_deltas=0`. The old guard only caught
+  `finish_reason: length`, so the loop took the empty round as a finished
+  answer and the turn just ended — 13 times across three days of session logs.
+  The guard now keys on the shape (reasoning, but no answer and no tool call),
+  not on the finish reason. Such a round is retried **once, with thinking off**;
+  the partial reasoning stays in context and an `internal` nudge (sent to the
+  model, logged, never rendered) asks for the next action directly. If the retry
+  also produces nothing, the turn is marked incomplete and the chat says so.
+
 ## 0.16.0
 
 ### Semantic search

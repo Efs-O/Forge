@@ -460,6 +460,17 @@ export async function runModelTurn(
       });
     }
   }
+  // The model ended its own generation mid-thought (see ToolCallingLoop). Not
+  // the output limit, so /compact is not the remedy; a plain retry usually is.
+  if (result.stoppedWhileReasoning) {
+    ctx.lifecycle.markIncomplete(conv.id, 'the model stopped while still reasoning');
+    postC({
+      type: 'notice',
+      message:
+        'Forge: the model ended its reply mid-thought twice (the automatic retry with ' +
+        'thinking off also produced nothing). Say "continue" to resume.',
+    });
+  }
   // Same shape as the `length` case above: the loop returned normally, but the
   // request is unfinished. Marking it is what lets the post-turn resume pick it
   // up — without this the turn simply stopped, and only a manual "continue"

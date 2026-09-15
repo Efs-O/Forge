@@ -28,6 +28,9 @@ import {
   isNativeToolJsonParseError,
   MAX_ROUNDS_MESSAGE_PREFIX,
   OUTPUT_BUDGET_EXHAUSTED_NOTICE,
+  MAX_REASONING_STOP_RETRIES,
+  REASONING_ONLY_STOP_NOTICE,
+  REASONING_STOP_RETRY_NUDGE,
   MAX_TRUNCATION_RECOVERIES,
   truncationGuidance,
 } from './truncationRecovery';
@@ -118,6 +121,11 @@ export interface ToolCallingLoopResult {
    * account of it, leaving the user an error where a partial answer belonged.
    */
   hitRoundCap: boolean;
+  /**
+   * The model ended generation (`stop`, not `length`) while still inside its
+   * thinking block: no answer, no tool call. The turn is unfinished.
+   */
+  stoppedWhileReasoning?: boolean;
 }
 
 function sanitizeText(text: string, stripThinking: boolean): string {
@@ -161,6 +169,7 @@ export async function runToolCallingLoop(
   let finalText = '';
   const loopGuard = new ToolLoopGuard();
   let truncationRecoveries = 0;
+  let reasoningStopRetries = 0;
 
   for (let round = 0; round < options.maxRounds; round++) {
     options.signal.throwIfAborted();
@@ -170,7 +179,9 @@ export async function runToolCallingLoop(
     const outputRoom = options.getOutputRoom?.(prepared);
     // A recovery round runs with thinking off, so the reasoning reserve does
     // not apply to it — see the guard below and `suppressThinking`.
-    const suppressesThinking = truncationRecoveries > 0 && (options.canUseThinkingKwargs ?? false);
+    const suppressesThinking =
+      (truncationRecoveries > 0 || reasoningStopRetries > 0) &&
+      (options.canUseThinkingKwargs ?? false);
     // Do not send an input that leaves no answer/tool-call room at all. The
     // model-only tool-result window normally prevents this; this guard covers
     // transcripts that cannot be reduced further (for example, huge user text).
@@ -361,6 +372,8 @@ export async function runToolCallingLoop(
         throw error;
       }
       options.failureTracker?.reset();
+      // The retry produced real work, so the next round may think again.
+      reasoningStopRetries = 0;
       // Carry this round's reasoning on the tool-call turn. rawReasoning resets
       // every round, so dropping it here discarded the model's thinking for every
       // round that ended in a tool call — only the final round's survived, and
@@ -400,9 +413,43 @@ export async function runToolCallingLoop(
     // loop exited, and neither the transcript nor the sidebar recorded a
     // reason. Record it in the transcript so the next request knows the work
     // stopped rather than finished.
-    if (streamed.finishReason === 'length' && !assistantContent) {
+    //
+    // A `stop` can end the same way. Session 79db75af: llama-server injected
+    // `--reasoning-budget-message`, then the model emitted EOS without ever
+    // leaving the thinking block — `finish_reason=stop text_chars=0
+    // reasoning_chars=14950 tool_deltas=0`. That silently ended 13 turns in
+    // three days, so the guard keys on the shape, not on the finish reason.
+    const stoppedWhileReasoning =
+      !assistantContent.trim() &&
+      rawReasoning.trim().length > 0 &&
+      streamed.finishReason !== 'cancelled';
+    // A normal stop always leaves an answer or a tool call; this one left only
+    // thinking, so retry it once with thinking off. The partial reasoning stays
+    // in the transcript (preserve_thinking), so the retry acts on what was
+    // already decided instead of re-deriving it — which is what hit the budget.
+    if (
+      !assistantContent &&
+      stoppedWhileReasoning &&
+      streamed.finishReason !== 'length' &&
+      reasoningStopRetries < MAX_REASONING_STOP_RETRIES
+    ) {
+      reasoningStopRetries++;
       streamedAssistant.completeAnswer(assistantContent, assistantReasoning);
-      options.messages.push({ role: 'assistant', content: OUTPUT_BUDGET_EXHAUSTED_NOTICE });
+      // Internal: the model and the session log need it; the sidebar must not
+      // render Forge's nudge as something the user typed.
+      options.messages.push({ role: 'user', content: REASONING_STOP_RETRY_NUDGE, internal: true });
+      options.onMessagesChanged?.();
+      continue;
+    }
+    if (!assistantContent && (streamed.finishReason === 'length' || stoppedWhileReasoning)) {
+      streamedAssistant.completeAnswer(assistantContent, assistantReasoning);
+      options.messages.push({
+        role: 'assistant',
+        content:
+          streamed.finishReason === 'length'
+            ? OUTPUT_BUDGET_EXHAUSTED_NOTICE
+            : REASONING_ONLY_STOP_NOTICE,
+      });
       options.onMessagesChanged?.();
       options.onDone?.(streamed.finishReason);
       return {
@@ -411,6 +458,7 @@ export async function runToolCallingLoop(
         rounds: round + 1,
         repeatedCall: false,
         hitRoundCap: false,
+        stoppedWhileReasoning: streamed.finishReason !== 'length',
       };
     }
     if (assistantContent || assistantReasoning) {

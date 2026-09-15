@@ -63,3 +63,6 @@ prodtest-*/**
 assets/.coordination/**
 assets/_preview/**
 assets/publisher-logo.svg
+
+# Local generate_image output
+generated-images/**

@@ -8,7 +8,11 @@ const { streamModelChatCompletion } = vi.hoisted(() => ({
 vi.mock('../../src/llm/ChatClient', () => ({ streamModelChatCompletion }));
 
 import { runToolCallingLoop } from '../../src/agent/ToolCallingLoop';
-import { OUTPUT_BUDGET_EXHAUSTED_NOTICE } from '../../src/agent/truncationRecovery';
+import {
+  OUTPUT_BUDGET_EXHAUSTED_NOTICE,
+  REASONING_ONLY_STOP_NOTICE,
+  REASONING_STOP_RETRY_NUDGE,
+} from '../../src/agent/truncationRecovery';
 
 interface Handlers {
   onToken: (t: string) => void;
@@ -67,6 +71,66 @@ describe('a round that spends its whole budget thinking', () => {
     expect(notice).toHaveLength(1);
     // One attempt only: it must not silently loop on an unwinnable round.
     expect(streamModelChatCompletion).toHaveBeenCalledTimes(1);
+  });
+
+  // Session 79db75af: the model emitted EOS right after the injected
+  // --reasoning-budget-message — finish_reason=stop, text_chars=0,
+  // reasoning_chars=14950. The old `length`-only guard let it end silently.
+  it('retries a stop inside the thinking block once, with thinking off', async () => {
+    const requests: Array<{ chat_template_kwargs?: { enable_thinking?: boolean } }> = [];
+    streamModelChatCompletion
+      .mockImplementationOnce(async (_u: string, r: never, _m: unknown, h: Handlers) => {
+        requests.push(r);
+        h.onReasoning('weighing the options. Stop reasoning now. Otherwise end reasoning.');
+        h.onDone('stop');
+      })
+      .mockImplementationOnce(async (_u: string, r: never, _m: unknown, h: Handlers) => {
+        requests.push(r);
+        h.onToken('Both wakes worked.');
+        h.onDone('stop');
+      });
+    const messages: ChatMessage[] = [{ role: 'user', content: 'resume' }];
+    const options = { ...baseOptions(messages), canUseThinkingKwargs: true };
+    const result = await runToolCallingLoop(options as never);
+
+    expect(result.finalText).toBe('Both wakes worked.');
+    expect(result.stoppedWhileReasoning).toBeUndefined();
+    expect(streamModelChatCompletion).toHaveBeenCalledTimes(2);
+    expect(requests[1]?.chat_template_kwargs?.enable_thinking).toBe(false);
+    expect(messages).toContainEqual({
+      role: 'user',
+      content: REASONING_STOP_RETRY_NUDGE,
+      internal: true,
+    });
+  });
+
+  it('surfaces the stop when the retry also ends inside the thinking block', async () => {
+    streamModelChatCompletion.mockImplementation(
+      async (_u: string, _r: unknown, _m: unknown, h: Handlers) => {
+        h.onReasoning('still thinking');
+        h.onDone('stop');
+      },
+    );
+    const messages: ChatMessage[] = [{ role: 'user', content: 'resume' }];
+    const result = await runToolCallingLoop(baseOptions(messages) as never);
+
+    expect(result.finishReason).toBe('stop');
+    expect(result.finalText).toBe('');
+    expect(result.stoppedWhileReasoning).toBe(true);
+    expect(messages.at(-1)).toEqual({ role: 'assistant', content: REASONING_ONLY_STOP_NOTICE });
+    // One retry, not a loop.
+    expect(streamModelChatCompletion).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not flag a length stop as stopped-while-reasoning', async () => {
+    streamModelChatCompletion.mockImplementation(
+      async (_u: string, _r: unknown, _m: unknown, h: Handlers) => {
+        h.onReasoning('cut off mid');
+        h.onDone('length');
+      },
+    );
+    const result = await runToolCallingLoop(baseOptions([{ role: 'user', content: 'go' }]) as never);
+    expect(result.stoppedWhileReasoning).toBe(false);
   });
 
   // The request that proved this cost 13.5 minutes to produce nothing: with

@@ -116,6 +116,30 @@ export const OUTPUT_BUDGET_EXHAUSTED_NOTICE =
   'action directly instead of re-deriving it.';
 
 /**
+ * Transcript marker for a round the model ended itself (`finish_reason: stop`)
+ * while still inside the thinking block — typically right after llama-server
+ * injected `--reasoning-budget-message`. Same purpose as the notice above; a
+ * separate string because the cause is not the output limit.
+ */
+export const REASONING_ONLY_STOP_NOTICE =
+  'Forge: this round ended while still reasoning, so it produced no answer and no ' +
+  'tool call. The thinking above is unfinished. Take the next concrete action ' +
+  'directly instead of re-deriving it.';
+
+/** Consecutive thinking-off retries before a reasoning-only stop is surfaced. */
+export const MAX_REASONING_STOP_RETRIES = 1;
+
+/**
+ * User-role nudge for the automatic retry. User role rather than assistant: a
+ * transcript ending on an assistant message makes llama-server continue that
+ * message as a prefill instead of starting a new turn.
+ */
+export const REASONING_STOP_RETRY_NUDGE =
+  'Forge: your previous response ended while still reasoning — no answer and no tool ' +
+  'call. Your reasoning above is preserved. Do not reason again: take the next concrete ' +
+  'action now, as a tool call or a direct answer.';
+
+/**
  * Prefix of the incomplete-turn reason recorded when the loop runs out of tool
  * rounds. The post-turn resume matches on it, so both sides must agree — hence
  * one constant rather than a literal at each end.
