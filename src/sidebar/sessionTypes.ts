@@ -283,6 +283,14 @@ export interface SidebarRuntime {
   history: ConversationRuntime[];
 }
 
+/** A conversation by id, open tabs first, then archived history. */
+export function findConversation(
+  sidebar: SidebarRuntime,
+  id: string,
+): ConversationRuntime | undefined {
+  return sidebar.conversations.find((c) => c.id === id) ?? sidebar.history.find((c) => c.id === id);
+}
+
 export function newConversationId(): string {
   try {
     return crypto.randomUUID();

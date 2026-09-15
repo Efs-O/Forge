@@ -149,13 +149,19 @@ export class ContextBudgetPublisher {
    * directly is what used to over-report every multi-slot model.
    */
   snapshot(conv: ConversationRuntime): { used: number; max: number } {
+    return this.resolvedSnapshot(conv) ?? { used: reportedContextTokens(conv), max: 0 };
+  }
+
+  /**
+   * `snapshot`, but undefined when the conversation's model cannot be resolved
+   * — the remote meter reports "unknown" for that rather than `used / 0`.
+   */
+  resolvedSnapshot(conv: ConversationRuntime): { used: number; max: number } | undefined {
     const config = this.deps.getConfig();
     const selection = conv.active_model ?? config.active_model;
     const model = this.resolveModel(config, this.deps.baseOf(selection));
-    return {
-      used: reportedContextTokens(conv),
-      max: model ? perSlotContext(model, config.llama_server) : 0,
-    };
+    if (!model) return undefined;
+    return { used: reportedContextTokens(conv), max: perSlotContext(model, config.llama_server) };
   }
 
   /** Evaluate the completed conversation even when another tab is active. */

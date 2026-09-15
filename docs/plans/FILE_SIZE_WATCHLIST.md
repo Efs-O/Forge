@@ -16,8 +16,6 @@ and a file on this list that does one thing may stay long with a stated reason.
   is already over.
 - **Tests are not linted** for size. They are listed below for awareness, not as
   violations.
-- `src/sidebar/SidebarProvider.ts` opts out with `eslint-disable max-lines` and a
-  note naming the split it owes.
 - `src/config/types.ts` and `src/config/schema.ts` are config schemas — CLAUDE.md
   exempts those as mechanical. They still trip the lint rule, so the day either
   crosses 500 it needs a deliberate disable with a reason, or a split by config
@@ -27,7 +25,6 @@ and a file on this list that does one thing may stay long with a stated reason.
 
 | Lines | File | Notes |
 |---:|---|---|
-| 681 | `src/sidebar/SidebarProvider.ts` | Lint disabled. Known seam, from its own header: move the constructor's collaborator wiring into a `createSidebarCollaborators` factory (~130 lines). "Do not add another method here without doing it." |
 | 555 | `webview-ui/styles/input.css` | Not linted. Unexamined; CSS usually splits by component. |
 | 518 | `src/remote/RemoteController.ts` | **Currently failing `npm run lint`** — uncommitted jobs/remote work from another session pushed it over. That work has to split it before it can land. |
 
@@ -46,6 +43,7 @@ and a file on this list that does one thing may stay long with a stated reason.
 
 | Lines | File | Notes |
 |---:|---|---|
+| 477 | `src/sidebar/SidebarProvider.ts` | **Split done** (was 681 with lint disabled): host facade → `sidebarFacadeWiring.ts`, compaction closures + construction-time registrations → `sidebarWiring.ts`, `contextBudgetOf` de-duplicated onto `ContextBudgetPublisher.resolvedSnapshot`, four dead public methods removed. The disable is gone — keep new wiring out of it. |
 | 494 | `src/agent/ToolCallingLoop.ts` | Pre-flight guards and truncation rows already moved to `truncationRecovery.ts` (0c07237). Remaining seam: request assembly (`base` → `mergeSampling` → `applyOutputCap` → `normalizeRequestForModel`, plus the fallback-tool message) as a `buildRoundRequest()`. |
 | 489 | `src/extension.ts` | Activation wiring; uncommitted jobs setup is landing here too. |
 | 483 | `src/remote/RemoteRequestStore.ts` | Unexamined. |
@@ -103,7 +101,7 @@ hard to navigate, but split it by `describe` block only when someone is working 
 1. `RemoteController.ts` — blocks CI; belongs to whoever lands the jobs/remote work.
 2. The Tier 2 files, as each is next touched. Any feature that adds lines to one of
    them pays for its split in the same change.
-3. `SidebarProvider.ts` collaborator factory — the owed split, with the seam already named.
+3. ~~`SidebarProvider.ts` collaborator factory~~ — done.
 4. Decide on CSS: either lint it or drop `.css` from the CLAUDE.md rule.
 
 ## Regenerate

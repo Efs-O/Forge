@@ -1,22 +1,19 @@
-/* eslint-disable max-lines -- deliberately over 500; see the note below. */
 /*
- * Over the 500-line ceiling on purpose. Every cut available here is the kind the
- * file-size rule warns against: the six `post*`/`persist` helpers close over
- * `sidebar`, `config`, `pool`, `agentLoop`, `workspaceRoot` and `budget`, and
- * the `handleMessage` actions literal closes over eight fields - extracting
- * either means threading a context object purely to shed lines, and a reader
- * chasing one message would end up in three files.
+ * The sidebar's VS Code surface: webview lifecycle, the public API extension.ts
+ * calls, and the `post*`/`persist` helpers every collaborator borrows.
  *
- * The seam that IS real is the constructor: its collaborator wiring is
- * construction, not behaviour, and a `createSidebarCollaborators` factory would
- * take ~130 lines out at once. That is the split the next addition to this file
- * should pay for. Do not add another method here without doing it.
+ * Collaborators are built elsewhere — `wireSidebar` (turn, compaction, tabs,
+ * send) and `createSidebarHostFacade` (the remote/extension seam). Keep it that
+ * way: construction wiring added here is what pushed this file past 500 before.
+ * What stays is deliberate: the helpers close over `sidebar`, `config`, `pool`,
+ * `agentLoop`, `workspaceRoot` and `budget`, and the `handleMessage` actions
+ * literal over eight fields — extracting either means threading a context
+ * object purely to shed lines.
  */
 import * as vscode from 'vscode';
 import type { IBackendPool } from '../backend/BackendPool';
-import type { ForgeConfig, ModelConfig } from '../config/types';
-import { perSlotContext, reportedContextTokens } from '../util/contextBudget';
-import { expandAlias, mergeGroupsIntoModel, splitModelProfile } from '../config/ConfigResolver';
+import type { ForgeConfig } from '../config/types';
+import { expandAlias, splitModelProfile } from '../config/ConfigResolver';
 import type { HostToWebview, WebviewToHost, AttachmentData } from './messageBridge';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
 import type { CliSessionRegistry } from '../agents/CliSessionRegistry';
@@ -45,17 +42,14 @@ import {
   buildSessionMetrics,
   buildSessionSyncMessage,
 } from './sidebarPayloads';
-import { runManualCompactResume } from './compactionPolicy';
-import type { CompactionPolicyDeps } from './compactionPolicy';
 import { workspaceInfoMessage } from './workspaceInfo';
-import { buildWebviewHtml } from './WebviewBuilder';
+import { buildWebviewHtml, webviewResourceRoots } from './WebviewBuilder';
 import type { IndexManager } from '../search/IndexManager';
 import type { SessionTimeSnapshot } from '../vscode/SessionTimeStatusBar';
 import type { RequestChainLifecycle } from './RequestChainLifecycle';
-import type { RequestChainContext } from './RequestChainLifecycle';
-import type { ContextThresholdAction } from './ContextBudgetPublisher';
-import { runAddressedAutoCompact } from './autoCompactionPolicy';
-import { SidebarHostFacade, type ForgeHostFacade } from './ForgeHostFacade';
+import type { ForgeHostFacade } from './ForgeHostFacade';
+import { createSidebarHostFacade } from './sidebarFacadeWiring';
+import { statusRowProgress } from './turnMirrorWiring';
 import { ResidencyPoller } from './ResidencyPoller';
 import type { UserQuestionService } from './UserQuestionService';
 import type { UserNotificationService } from './UserNotificationService';
@@ -98,7 +92,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private readonly questions: UserQuestionService,
     // Same reasoning as `questions`: one owner, so notify_user and the remote
     // bridge share a single fan-out.
-    private readonly notifications: UserNotificationService,
+    notifications: UserNotificationService,
     private readonly workspaceState: vscode.Memento,
     private readonly codeLens: KeepUndoCodeLensProvider,
     diffDecorations: DiffDecorations,
@@ -135,12 +129,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         persistSession: () => this.persistSession(),
         persistActiveId: () => this.persistActiveId(),
         baseOf: (id) => this.baseOf(id),
-        autoCompact: (conv, chain) => this.autoCompact(conv, chain),
-        resumeAfterManualCompact: (conversationId, reason) =>
-          this.resumeAfterManualCompact(conversationId, reason),
-        emitCompactionEvent: (event) => {
-          for (const listener of this.slashHandler.compactionListeners) listener(event);
-        },
         reindexCodebase: () => this.reindexCodebase(),
         newConversation: () => this.newConversation(),
         clearMessages: () => this.tabs.clearActive(),
@@ -166,6 +154,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         getConfigPath,
         cliSessions,
         attachmentStore,
+        questions,
+        notifications,
       },
     );
     this.agentLoop = runtime.agentLoop;
@@ -174,89 +164,19 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.tabs = runtime.tabs;
     this.send = runtime.send;
     this.requestChains = runtime.requestChains;
-    this.hostFacade = new SidebarHostFacade({
-      createConversation: (options) => this.tabs.create(options),
-      restoreConversation: (conversationId, options) => this.tabs.restore(conversationId, options),
-      // Every send that arrives through the facade came from outside the
-      // webview -- a paired chat, or another extension -- so its prompt has no
-      // bubble unless the pipeline draws one.
-      send: (conversationId, text, attachments, options) =>
-        this.send.send(text, attachments, conversationId, undefined, {
-          ...options,
-          echoPrompt: true,
-        }),
-      cancel: async (conversationId) => {
-        this.requestChains.markCancelling(conversationId);
-        await this.agentLoop.cancel(conversationId);
-      },
+    this.hostFacade = createSidebarHostFacade({
+      runtime,
+      getSidebar: () => this.sidebar,
+      pool,
+      questions,
+      notifications,
+      workspaceState,
       interrupt: (conversationId) => this.interruptForSteering(conversationId),
-      queueIntent: (conversationId) => this.requestChains.suppressContinuation(conversationId),
-      addApprovalSink: (sink) => this.agentLoop.addApprovalSink(sink),
-      resolveApproval: (id, approved) => this.agentLoop.resolveConfirmation(id, approved),
-      addQuestionSink: (sink) => this.questions.addSink(sink),
-      answerQuestion: (id, text) => this.questions.answer(id, text),
-      getPendingApproval: () => this.agentLoop.pendingApproval(),
-      getActiveConversationId: () => this.sidebar.activeConversationId,
-      getOpenConversations: () => this.sidebar.conversations,
-      getArchivedConversations: () => this.sidebar.history,
-      getRequestChains: () => this.requestChains.status(),
-      getStreamingConversationIds: () => this.agentLoop.getStreamingIds(),
-      clankerMode: () => this.agentLoop.getClankerMode(),
-      // Remote and sidebar arming persist identically, to workspaceState. The
-      // asymmetry that used to live here — remote ON in memory only, so it died
-      // at the next reload — made the state unexplainable from either surface:
-      // a phone that armed clanker and a sidebar toggle that armed clanker
-      // disagreed about what a reload meant, and the owner could only find out
-      // by reloading. One rule, stated in both help texts, beats a safety
-      // default nobody can see.
-      setClankerMode: (on) => {
-        this.agentLoop.setClankerMode(on);
-        void this.workspaceState.update('forge.clankerMode', on);
-      },
-      contextBudget: (conversationId) => this.contextBudgetOf(conversationId),
-      onCompactionEvent: (listener) => this.slashHandler.onCompactionEvent(listener),
-      onHostActivity: (listener) => this.slashHandler.onHostActivity(listener),
-      onUserNotification: (sink) => this.notifications.addSink(sink),
-      setReachProbe: (probe) => this.notifications.setReachProbe(probe),
-      onAgentProgress: (listener) => this.agentLoop.onAgentProgress(listener),
-      compact: (conversationId, options) =>
-        this.slashHandler.compactConversation(conversationId, {
-          auto: false,
-          ...(options?.trigger ? { trigger: options.trigger } : {}),
-          ...(options?.remoteOrigin ? { remoteOrigin: options.remoteOrigin } : {}),
-        }),
-      setConversationModel: (conversationId, modelName) =>
-        this.tabs.setModelById(conversationId, modelName),
       unloadModels: () => this.unloadModels(),
       restartModel: (modelName) => this.restartModel(modelName),
-      backendProcesses: () => this.pool.backendProcesses(),
     });
-    // Register the conversation lookup so the session timer can resolve ids,
-    // then fold any unfinished intervals from a previous session into the
-    // persisted totals.
-    this.agentLoop.setConversationLookup((id) => this.getConversation(id));
-    // Lets a turn state, in its own context block, whether anyone is listening
-    // from a phone. Routed through the notification service rather than the
-    // remote controller: that class already owns "can I reach the user".
-    this.agentLoop.setRemoteReach((id) => this.notifications.reach(id));
-    // The sidebar's own seat at the question table. Registered here rather
-    // than in resolveWebviewView because the sink must exist before the first
-    // turn; `presentsLocally` is what makes it conditional, so a window whose
-    // view has never been resolved still falls back to the VS Code input box.
-    this.questions.addSink({
-      asked: (event) =>
-        this.post({
-          type: 'question',
-          id: event.id,
-          prompt: event.prompt,
-          ...(event.placeholder !== undefined ? { placeholder: event.placeholder } : {}),
-          ...(event.options ? { options: event.options } : {}),
-          ...(event.questions ? { questions: event.questions } : {}),
-          ...(event.conversationId ? { conversationId: event.conversationId } : {}),
-        }),
-      answered: (event) => this.post({ type: 'questionResolved', id: event.id }),
-      presentsLocally: () => this.view !== undefined,
-    });
+    // wireSidebar registered the conversation lookup, so unfinished intervals
+    // from a previous session can now fold into the persisted totals.
     this.agentLoop.restoreSessionTimers(this.sidebar);
     this.persistSession();
   }
@@ -269,16 +189,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.view = webviewView;
     webviewView.webview.options = {
       enableScripts: true,
-      localResourceRoots: [
-        vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview'),
-        // Without this the transcript's thumbnails are silently blocked: a
-        // webview URI outside every root does not load and reports nothing.
-        ...(this.attachmentStore ? [vscode.Uri.file(this.attachmentStore.rootPath)] : []),
-        // generate_image thumbnails load straight from where the image was saved.
-        ...(vscode.workspace.workspaceFolders?.[0]
-          ? [vscode.workspace.workspaceFolders[0].uri]
-          : []),
-      ],
+      localResourceRoots: webviewResourceRoots(this.extensionUri, this.attachmentStore?.rootPath),
     };
     webviewView.webview.html = buildWebviewHtml(this.extensionUri, webviewView.webview);
     webviewView.webview.onDidReceiveMessage((raw: unknown) => {
@@ -375,11 +286,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await this.pool.acquire(modelName);
   }
 
-  notifyBackendError(message: string): void {
-    this.events.onBackendError?.(message);
-    this.post({ type: 'backendDown', message });
-  }
-
   prefillInput(text: string): void {
     void vscode.commands
       .executeCommand('workbench.view.extension.forge-sidebar')
@@ -420,48 +326,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     paired: false,
   };
 
+  /** Posts to the webview and mirrors status rows to paired chats (see `statusRowProgress`). */
   private post(msg: HostToWebview): void {
     this.view?.webview.postMessage(msg);
-    this.mirrorStatusRow(msg);
-  }
-
-  /**
-   * Forward the two webview-only status categories to the progress channel, so
-   * a paired chat sees what the sidebar sees.
-   *
-   * Decorating `post` rather than the emit sites is deliberate, and the same
-   * technique `wireTurnMirror` uses on `onGenerationFinished`: notices are
-   * raised from 12 places and mid-turn errors from 27, and threading a mirror
-   * call through each would leave the next new one silent by default.
-   *
-   * Only *addressed* messages are mirrored. An unaddressed notice would have to
-   * be attributed to the active tab, which is right in the webview and wrong
-   * here -- a background conversation's chat would be told about a turn that is
-   * not its own.
-   */
-  private mirrorStatusRow(msg: HostToWebview): void {
-    if (msg.type === 'notice') {
-      if (!msg.conversationId) return;
-      this.agentLoop.reportProgress({
-        conversationId: msg.conversationId,
-        kind: 'notice',
-        text: msg.message,
-        severity: msg.severity ?? 'info',
-      });
-      return;
-    }
-    if (msg.type !== 'error' || !msg.conversationId) return;
-    // A turn that actually fails is already mirrored by wireTurnMirror. What is
-    // missing is the error posted *while the turn continues* -- the repeated
-    // tool call guard is the clearest case, and it ends the useful part of the
-    // turn while saying nothing remotely.
-    if (!this.agentLoop.isStreamingConv(msg.conversationId)) return;
-    this.agentLoop.reportProgress({
-      conversationId: msg.conversationId,
-      kind: 'notice',
-      text: msg.message,
-      severity: 'warning',
-    });
+    const row = statusRowProgress(msg, (id) => this.agentLoop.isStreamingConv(id));
+    if (row) this.agentLoop.reportProgress(row);
   }
 
   postWorkspaceInfo(): void {
@@ -535,35 +404,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.budget.publish(this.getActive());
   }
 
-  private async autoCompact(
-    conv: ConversationRuntime,
-    chain: RequestChainContext,
-  ): Promise<ContextThresholdAction | undefined> {
-    return runAddressedAutoCompact(
-      {
-        post: (message) => this.post(message),
-        requestChains: this.requestChains,
-        compact: (conversationId) =>
-          this.slashHandler.compactConversation(conversationId, { auto: true, trigger: 'auto' }),
-        incompleteTurnReason: (conversationId) =>
-          this.agentLoop.incompleteTurnReason(conversationId),
-        resumeEnabled: () => this.config.auto_compact?.resume !== false,
-      },
-      conv,
-      chain,
-    );
-  }
-
-  private resumeAfterManualCompact(conversationId: string, reason: string): Promise<void> {
-    const deps: CompactionPolicyDeps = {
-      post: (msg) => this.post(msg),
-      send: async (text, convId, options) => {
-        await this.send.send(text, undefined, convId, options);
-      },
-    };
-    return runManualCompactResume(deps, conversationId, reason);
-  }
-
   private async interruptForSteering(conversationId: string): Promise<void> {
     this.requestChains.markCancelling(conversationId, 'interrupted');
     await this.agentLoop.interrupt(conversationId);
@@ -573,53 +413,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return this.tabs.active();
   }
 
-  /** Look up a conversation by id across open tabs and history. */
-  /**
-   * Per-slot context for any conversation, not just the active one — the
-   * publisher renders the active tab only, but a remote chat can be bound to a
-   * background conversation and still needs a truthful meter.
-   */
-  private contextBudgetOf(conversationId: string): { used: number; max: number } | undefined {
-    const conv = this.getConversation(conversationId);
-    if (!conv) return undefined;
-    const model = this.resolveModelFor(conv.active_model ?? this.config.active_model);
-    if (!model) return undefined;
-    return {
-      used: reportedContextTokens(conv),
-      max: perSlotContext(model, this.config.llama_server),
-    };
-  }
-
-  private resolveModelFor(selection: string | null | undefined): ModelConfig | undefined {
-    const base = this.baseOf(selection);
-    const raw = base ? this.config.models.find((entry) => entry.name === base) : undefined;
-    // Group inheritance first: a model taking its ctx from a group (e.g.
-    // `group: llamacpp-qwen3`) carries no num_ctx of its own, and the raw entry
-    // reads 0 — which surfaced remotely as "no num_ctx for this model".
-    return raw ? mergeGroupsIntoModel(this.config, raw) : undefined;
-  }
-
-  getConversation(id: string): ConversationRuntime | undefined {
-    return (
-      this.sidebar.conversations.find((c) => c.id === id) ??
-      this.sidebar.history.find((c) => c.id === id)
-    );
-  }
-
-  /** Total active agent time in ms for the currently active conversation. */
-  getActiveSessionTimeMs(): number {
-    const conv = this.getActive();
-    return this.agentLoop.getSessionActiveMs(conv);
-  }
-
   getActiveSessionMetrics(): SessionTimeSnapshot {
     const conv = this.getActive();
     return buildSessionMetrics(conv, this.agentLoop.getSessionActiveMs(conv));
-  }
-
-  /** Persist the current session to workspace state. */
-  saveSession(): void {
-    this.persistSession();
   }
 
   private handleMessage(msg: WebviewToHost): void {

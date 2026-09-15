@@ -1,6 +1,8 @@
 import type { ConversationRuntime } from './sessionTypes';
 import type { HostActivityEvent } from './HostActivity';
 import type { SidebarProviderEvents } from './AgentLoop';
+import type { HostToWebview } from './messageBridge';
+import type { AgentProgressEvent } from './AgentProgress';
 
 /** Telegram's own cap is 4096; leave room for the prefix and an ellipsis. */
 const MAX_MIRRORED_CHARS = 3_500;
@@ -73,6 +75,46 @@ ${next}`,
       conversationId,
       kind: 'failure',
     });
+  };
+}
+
+/**
+ * The progress row a posted webview message should also produce, if any, so a
+ * paired chat sees what the sidebar sees.
+ *
+ * Applied by decorating the provider's `post` rather than the emit sites, the
+ * same technique `wireTurnMirror` uses on `onGenerationFinished`: notices are
+ * raised from 12 places and mid-turn errors from 27, and threading a mirror
+ * call through each would leave the next new one silent by default.
+ *
+ * Only *addressed* messages are mirrored. An unaddressed notice would have to be
+ * attributed to the active tab, which is right in the webview and wrong here --
+ * a background conversation's chat would be told about a turn not its own.
+ */
+export function statusRowProgress(
+  msg: HostToWebview,
+  isStreaming: (conversationId: string) => boolean,
+): AgentProgressEvent | undefined {
+  if (msg.type === 'notice') {
+    if (!msg.conversationId) return undefined;
+    return {
+      conversationId: msg.conversationId,
+      kind: 'notice',
+      text: msg.message,
+      severity: msg.severity ?? 'info',
+    };
+  }
+  if (msg.type !== 'error' || !msg.conversationId) return undefined;
+  // A turn that actually fails is already mirrored by wireTurnMirror. What is
+  // missing is the error posted *while the turn continues* -- the repeated tool
+  // call guard is the clearest case, and it ends the useful part of the turn
+  // while saying nothing remotely.
+  if (!isStreaming(msg.conversationId)) return undefined;
+  return {
+    conversationId: msg.conversationId,
+    kind: 'notice',
+    text: msg.message,
+    severity: 'warning',
   };
 }
 

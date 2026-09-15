@@ -10,7 +10,10 @@
 import type * as vscode from 'vscode';
 import type { ForgeConfig } from '../config/types';
 import type { HostToWebview } from './messageBridge';
-import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
+import { findConversation, type ConversationRuntime, type SidebarRuntime } from './sessionTypes';
+import type { UserQuestionService } from './UserQuestionService';
+import type { UserNotificationService } from './UserNotificationService';
+import { buildQuestionMessage } from './sidebarPayloads';
 import type { IBackendPool } from '../backend/BackendPool';
 import type { CheckpointStack } from '../checkpoint/CheckpointStack';
 import type { ToolRegistry } from '../tools/ToolRegistry';
@@ -23,7 +26,9 @@ import type { CliSessionRegistry } from '../agents/CliSessionRegistry';
 import { AgentLoop, type SidebarProviderEvents } from './AgentLoop';
 import { SlashCommandHandler } from './SlashCommandHandler';
 import { wireTurnMirror } from './turnMirrorWiring';
-import { runCompaction, type CompactionDeps, type CompactionEvent } from './CompactionService';
+import { runCompaction, type CompactionDeps } from './CompactionService';
+import { runAddressedAutoCompact } from './autoCompactionPolicy';
+import { runManualCompactResume } from './compactionPolicy';
 import { compactMidTurn } from './midTurnCompaction';
 import { isContextExhaustionReason } from '../agent/truncationRecovery';
 import { ContextBudgetPublisher } from './ContextBudgetPublisher';
@@ -33,8 +38,6 @@ import { SendPipeline } from './SendPipeline';
 import { opResetReportedContext } from './ConversationOps';
 import { snapshotRepoState } from './repoSnapshot';
 import { RequestChainLifecycle } from './RequestChainLifecycle';
-import type { RequestChainContext } from './RequestChainLifecycle';
-import type { ContextThresholdAction } from './ContextBudgetPublisher';
 
 /** What the provider lends its collaborators. */
 export interface SidebarHost {
@@ -52,12 +55,6 @@ export interface SidebarHost {
   /** Writes only the active-conversation pointer — see `saveActiveConversationId`. */
   persistActiveId: () => void;
   baseOf: (id: string | null | undefined) => string | null;
-  autoCompact: (
-    conv: ConversationRuntime,
-    chain: RequestChainContext,
-  ) => Promise<ContextThresholdAction | undefined>;
-  resumeAfterManualCompact: (conversationId: string, reason: string) => Promise<void>;
-  emitCompactionEvent: (event: CompactionEvent) => void;
   reindexCodebase: () => Promise<void>;
   newConversation: () => Promise<void>;
   clearMessages: () => void;
@@ -88,6 +85,8 @@ export interface SidebarParts {
   getConfigPath: (() => string) | undefined;
   cliSessions: CliSessionRegistry | undefined;
   attachmentStore: ChatAttachmentStore | undefined;
+  questions: UserQuestionService;
+  notifications: UserNotificationService;
 }
 
 export interface SidebarRuntimeParts {
@@ -129,7 +128,19 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     getSidebar: host.getSidebar,
     post: host.post,
     baseOf: host.baseOf,
-    autoCompact: (conv, chain) => host.autoCompact(conv, chain),
+    autoCompact: (conv, chain) =>
+      runAddressedAutoCompact(
+        {
+          post: host.post,
+          requestChains,
+          compact: (conversationId) =>
+            slashHandler.compactConversation(conversationId, { auto: true, trigger: 'auto' }),
+          incompleteTurnReason: (conversationId) => agentLoop.incompleteTurnReason(conversationId),
+          resumeEnabled: () => host.getConfig().auto_compact?.resume !== false,
+        },
+        conv,
+        chain,
+      ),
     manualCompact: () => void slashHandler.handle('compact'),
     incompleteTurnReason: (convId) => agentLoop.incompleteTurnReason(convId),
   });
@@ -157,7 +168,9 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     isStreaming: (conversationId) => agentLoop.isStreamingConv(conversationId),
     beginCompaction: (convId) => agentLoop.beginBackgroundWork(convId),
     snapshotRepoState,
-    emitCompactionEvent: (event) => host.emitCompactionEvent(event),
+    emitCompactionEvent: (event) => {
+      for (const listener of slashHandler.compactionListeners) listener(event);
+    },
   };
 
   const slashHandler = new SlashCommandHandler({
@@ -175,7 +188,16 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     getActiveConv: host.getActive,
     incompleteTurnReason: (conversationId) => agentLoop.incompleteTurnReason(conversationId),
     resumeAfterManualCompact: (conversationId, reason) =>
-      host.resumeAfterManualCompact(conversationId, reason),
+      runManualCompactResume(
+        {
+          post: host.post,
+          send: async (text, convId, options) => {
+            await send.send(text, undefined, convId, options);
+          },
+        },
+        conversationId,
+        reason,
+      ),
     toggleClanker: () => {
       const on = agentLoop.toggleClanker();
       host.rememberClankerMode(on);
@@ -261,6 +283,22 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
       const auto = host.getConfig().auto_compact;
       return auto?.enabled === true && auto.resume !== false && isContextExhaustionReason(message);
     },
+  });
+
+  // The session timer resolves conversation ids through this lookup.
+  agentLoop.setConversationLookup((id) => findConversation(host.getSidebar(), id));
+  // Lets a turn state, in its own context block, whether anyone is listening
+  // from a phone. Routed through the notification service rather than the
+  // remote controller: that class already owns "can I reach the user".
+  agentLoop.setRemoteReach((id) => parts.notifications.reach(id));
+  // The sidebar's own seat at the question table. Registered at construction,
+  // not when the view resolves, because the sink must exist before the first
+  // turn; `presentsLocally` is what makes it conditional, so a window whose view
+  // has never been resolved still falls back to the VS Code input box.
+  parts.questions.addSink({
+    asked: (event) => host.post(buildQuestionMessage(event)),
+    answered: (event) => host.post({ type: 'questionResolved', id: event.id }),
+    presentsLocally: () => host.getView() !== undefined,
   });
 
   return { agentLoop, slashHandler, budget, tabs, send, requestChains };

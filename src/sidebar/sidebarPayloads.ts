@@ -20,6 +20,7 @@ import {
 import { describeModelPickerModel } from './ModelPickerGroups';
 import { reportedContextTokens } from '../util/contextBudget';
 import type { SessionTimeSnapshot } from '../vscode/SessionTimeStatusBar';
+import type { UserQuestionRequestEvent } from './UserQuestionService';
 
 /**
  * The model list and current selection for the picker.
@@ -107,6 +108,19 @@ export function buildSessionSyncMessage(
  * render: it used to be `last_input_tokens` alone, so the two displays
  * disagreed by the size of the last completion.
  */
+/** The sidebar's rendering of a question the agent asked (`ask_user`). */
+export function buildQuestionMessage(event: UserQuestionRequestEvent): HostToWebview {
+  return {
+    type: 'question',
+    id: event.id,
+    prompt: event.prompt,
+    ...(event.placeholder !== undefined ? { placeholder: event.placeholder } : {}),
+    ...(event.options ? { options: event.options } : {}),
+    ...(event.questions ? { questions: event.questions } : {}),
+    ...(event.conversationId ? { conversationId: event.conversationId } : {}),
+  };
+}
+
 export function buildSessionMetrics(
   conv: ConversationRuntime,
   activeMs: number,

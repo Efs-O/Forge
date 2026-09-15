@@ -21,6 +21,7 @@ overlaps with an existing owner, extend the owner instead.
 | Pure transcript/usage mutations                      | `src/sidebar/transcriptMutations.ts`     |
 | Sidebar host->webview event contract                 | `src/sidebar/providerEvents.ts`          |
 | Sidebar collaborator construction                    | `src/sidebar/sidebarWiring.ts`           |
+| Host facade construction (remote/extension seam)     | `src/sidebar/sidebarFacadeWiring.ts`     |
 | Ctx bar, HalluMeter bridge, thresholds               | `src/sidebar/ContextBudgetPublisher.ts`  |
 | Tab create/switch/close/restore + VRAM               | `src/sidebar/ConversationTabs.ts`        |
 | Send guards, model resolution, turn logs             | `src/sidebar/SendPipeline.ts`            |
