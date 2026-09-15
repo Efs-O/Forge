@@ -43,7 +43,7 @@ describe('ensureForgeInstructionsFile', () => {
     expect(result.status).toBe('created');
     const content = fs.readFileSync(path.join(root, 'FORGE.md'), 'utf8');
     expect(content).toContain('# Project Instructions');
-    expect(Buffer.byteLength(content, 'utf8')).toBeLessThan(15000);
+    expect(Buffer.byteLength(content, 'utf8')).toBeLessThan(25000);
   });
 
   it('creates FORGE.md without overwriting an existing AGENTS.md fallback', () => {
@@ -105,17 +105,17 @@ describe('ForgeInstructionsLoader', () => {
     loader.dispose();
   });
 
-  it('truncates oversized instructions at 15,000 bytes without changing the file', () => {
+  it('truncates oversized instructions at 25,000 bytes without changing the file', () => {
     const root = makeRoot();
     const file = path.join(root, 'FORGE.md');
-    const content = `${'a'.repeat(15000)}TAIL`;
+    const content = `${'a'.repeat(25000)}TAIL`;
     fs.writeFileSync(file, content, 'utf8');
     const loader = new ForgeInstructionsLoader(root);
 
-    expect(loader.instructions).toBe('a'.repeat(15000));
+    expect(loader.instructions).toBe('a'.repeat(25000));
     expect(fs.readFileSync(file, 'utf8')).toBe(content);
     expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
-      'Forge: FORGE.md was truncated to fit the 15000-byte project-instruction budget.',
+      'Forge: FORGE.md was truncated to fit the 25000-byte project-instruction budget.',
     );
     loader.dispose();
   });

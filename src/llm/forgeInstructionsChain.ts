@@ -27,7 +27,7 @@ export const INSTRUCTION_FILES = [FORGE_MD, AGENTS_MD] as const;
  * what makes the number mean something — at the cost of the delimiters
  * themselves consuming a little of it.
  */
-export const MAX_INSTRUCTION_BYTES = 15000;
+export const MAX_INSTRUCTION_BYTES = 25000;
 
 /** Below this, a block is not worth a header; the file is marked omitted. */
 const MIN_CONTENT_BYTES = 200;

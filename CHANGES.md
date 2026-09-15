@@ -2,6 +2,14 @@
 
 ## 0.16.1
 
+### Project instructions
+
+- **`FORGE.md` budget raised from 15,000 to 25,000 bytes**
+  (`MAX_INSTRUCTION_BYTES`). A 20 KB `FORGE.md` was being cut off, so its
+  last ~5 KB never reached the local agent. The budget still counts the whole
+  rendered chain (FORGE.md + AGENTS.md fallbacks, delimiters included), and
+  every byte of it is sent on every native turn.
+
 ### Agent loop
 
 - **A turn that ends mid-thought is retried instead of silently stopping.**

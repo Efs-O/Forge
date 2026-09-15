@@ -13,7 +13,7 @@ import {
 const RELOAD_DEBOUNCE_MS = 150;
 const STARTER_CONTENT = `# Project Instructions
 
-Keep this file concise (under 15,000 bytes). Forge includes it in every native local-agent prompt.
+Keep this file concise (under 25,000 bytes). Forge includes it in every native local-agent prompt.
 
 ## Project facts
 - Purpose and important architecture decisions:
