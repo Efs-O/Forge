@@ -33,6 +33,17 @@
   with title and link to the Telegram chat watching the turn. Thumbnails are
   fetched only from SerpApi's and Google's thumbnail hosts, never from the
   matched sites; search folders older than 7 days are pruned.
+- **`image_search` can use Yandex** (`engine: yandex`; `google_lens` stays the
+  default). Same SerpApi key, quota and Litterbox upload. Measured on the same
+  photo: 4.3 s against Lens's 18–52 s, and it lists the **largest copies** of
+  the image (2900×5367 here) — the best lead to an original — plus pages and
+  visually similar images; its page matches are noisier (mostly Pinterest).
+- **Clicking a search thumbnail enlarges it, with an "Open original ↗" link.**
+  No provider serves a thumbnail larger than ~170×320, and the first build
+  picked Lens's 92×92 web-page thumbnails, so the lightbox showed them at the
+  size they already had. Match thumbnails are now preferred, the preview is
+  scaled up to fill the view, and the link opens the full-size image in your
+  browser — Forge still never downloads from the matched site.
 
 ### Agent loop
 

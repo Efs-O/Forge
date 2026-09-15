@@ -1,6 +1,6 @@
 /**
- * SerpApi's Google Lens engine: one GET, a public image URL in, parsed matches
- * out. Every response field is treated as optional — SerpApi's shape varies by
+ * SerpApi's Google Lens engine: a public image URL in, parsed matches out.
+ * Every response field is treated as optional — SerpApi's shape varies by
  * `type`, and a missing field must drop a detail, not the whole result.
  *
  * Shapes measured live 2026-09-15: `exact_matches` returns only that array;
@@ -8,18 +8,32 @@
  * the image shows, e.g. "Eiffel Tower"), `short_videos` and `ai_overview`.
  */
 
-export const SERPAPI_ENDPOINT = 'https://serpapi.com/search.json';
+import type { ThumbnailCandidate } from './imageThumbnails';
+import {
+  httpsUrl,
+  isRecord,
+  serpApiGet,
+  str,
+  type SerpApiRequestOptions,
+  type SerpApiResponse,
+} from './serpApi';
 
 export const LENS_SEARCH_TYPES = ['all', 'exact_matches', 'visual_matches', 'products'] as const;
 export type LensSearchType = (typeof LENS_SEARCH_TYPES)[number];
 
 /** Result arrays rendered, in this order. Anything else (videos, AI overview) is dropped. */
-export const LENS_SECTIONS = [
+const LENS_SECTIONS = [
   ['exact_matches', 'Exact matches (same image)'],
   ['organic_results', 'Web pages about it'],
   ['visual_matches', 'Visually similar'],
   ['products', 'Products'],
 ] as const;
+
+/**
+ * Thumbnail order differs from text order: `organic_results` thumbnails are
+ * 92×92 favicon-sized squares, while match thumbnails are ~170×300 (measured).
+ */
+const THUMBNAIL_SECTIONS = ['exact_matches', 'visual_matches', 'products', 'organic_results'];
 
 const TITLE_CHARS = 100;
 /** Hard ceiling on what reaches the model: ~500 tokens. */
@@ -37,50 +51,27 @@ interface LensMatch {
   image_height?: unknown;
 }
 
-export type LensResponse = Record<string, unknown>;
-
-export interface LensSearchRequest {
+export interface LensSearchRequest extends SerpApiRequestOptions {
   imageUrl: string;
   type: LensSearchType;
   apiKey: string;
-  signal?: AbortSignal;
-  fetchImpl?: typeof fetch;
 }
 
-export async function searchLens(request: LensSearchRequest): Promise<LensResponse> {
-  const params = new URLSearchParams({
+export async function searchLens(request: LensSearchRequest): Promise<SerpApiResponse> {
+  const params: Record<string, string> = {
     engine: 'google_lens',
     url: request.imageUrl,
     api_key: request.apiKey,
-  });
+  };
   // `all` is SerpApi's default; sending it explicitly would change the cache key
   // for nothing.
-  if (request.type !== 'all') params.set('type', request.type);
-
-  const response = await (request.fetchImpl ?? fetch)(`${SERPAPI_ENDPOINT}?${params}`, {
-    headers: { Accept: 'application/json' },
-    ...(request.signal ? { signal: request.signal } : {}),
-  });
-  const text = await response.text();
-  let data: unknown;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    throw new Error(`SerpApi returned HTTP ${response.status} and no JSON: ${text.slice(0, 200)}`);
-  }
-  // SerpApi puts the reason in `error` for both 4xx (bad key: 401) and quota
-  // exhaustion; surface it verbatim — it names the fix.
-  const error = isRecord(data) && typeof data['error'] === 'string' ? data['error'] : undefined;
-  if (error) throw new Error(`SerpApi: ${error}`);
-  if (!response.ok || !isRecord(data)) {
-    throw new Error(`SerpApi search failed: HTTP ${response.status} — ${text.slice(0, 200)}`);
-  }
-  return data;
+  if (request.type !== 'all') params['type'] = request.type;
+  return serpApiGet(params, request);
 }
 
 /** Trimmed, model-facing text. Never includes thumbnails or metadata. */
 export function formatLensResults(
-  data: LensResponse,
+  data: SerpApiResponse,
   type: LensSearchType,
   maxResults: number,
 ): string {
@@ -97,13 +88,39 @@ export function formatLensResults(
   }
 
   if (!lines.length) return `Google Lens (${type}) found no matches for this image.`;
-  const text = lines.join('\n').trim();
+  return capResultText(lines.join('\n').trim());
+}
+
+/** Largest thumbnails first; `original` is the full image, else the page. */
+export function lensThumbnailCandidates(data: SerpApiResponse): ThumbnailCandidate[] {
+  const candidates: ThumbnailCandidate[] = [];
+  for (const key of THUMBNAIL_SECTIONS) {
+    const matches = data[key];
+    if (!Array.isArray(matches)) continue;
+    for (const match of matches) {
+      if (!isRecord(match)) continue;
+      const url = httpsUrl(match['thumbnail']);
+      if (!url) continue;
+      const original = httpsUrl(match['image']) ?? httpsUrl(match['link']);
+      candidates.push({
+        url,
+        title: str(match['title']).slice(0, TITLE_CHARS) || 'Untitled',
+        source: str(match['source']),
+        link: str(match['link']),
+        ...(original ? { original } : {}),
+      });
+    }
+  }
+  return candidates;
+}
+
+export function capResultText(text: string): string {
   return text.length > MAX_RESULT_CHARS
     ? `${text.slice(0, MAX_RESULT_CHARS)}\n… (trimmed to ${MAX_RESULT_CHARS} characters)`
     : text;
 }
 
-function identifiedAs(data: LensResponse): string[] {
+function identifiedAs(data: SerpApiResponse): string[] {
   const related = data['related_content'];
   if (!Array.isArray(related)) return [];
   return related
@@ -129,14 +146,6 @@ function formatMatch(match: LensMatch, position: number): string {
   const price = isRecord(match.price) ? str(match.price['value']) : str(match.price);
   if (price) parts.push(price);
   return parts.join(' — ');
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function str(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 function num(value: unknown): number | undefined {

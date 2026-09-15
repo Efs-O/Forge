@@ -329,7 +329,9 @@ overlaps with an existing owner, extend the owner instead.
 | `image_search` tool + attachment pick       | `src/tools/imageSearch/imageSearchTool.ts` |
 | SerpApi Google Lens call + result trimming | `src/tools/imageSearch/serpApiLens.ts` |
 | Litterbox temporary image upload           | `src/tools/imageSearch/litterboxUpload.ts` |
-| Lens thumbnail pick/download/prune         | `src/tools/imageSearch/lensThumbnails.ts` |
+| Search thumbnail pick/download/prune       | `src/tools/imageSearch/imageThumbnails.ts` |
+| SerpApi transport + error surfacing        | `src/tools/imageSearch/serpApi.ts`    |
+| SerpApi Yandex Images call + formatting    | `src/tools/imageSearch/yandexImages.ts` |
 | `image_search:` config schema              | `src/config/imageSearchSchema.ts` |
 | `generate_image` thumbnail URL (webview)   | `webview-ui/src/workspaceRootUri.ts` |
 | `view_video` tool definition + handler     | `src/tools/videoTool.ts`              |

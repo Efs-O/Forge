@@ -37,6 +37,20 @@ result states whether any chat took them. Folders > 7 days are pruned on the
 next search. Workspace rather than globalStorage: the webview's live tool rows
 only know the workspace root URI.
 
+**Yandex engine + enlarge (second follow-up).** `engine: yandex` routes to
+SerpApi `yandex_images` (`yandexImages.ts`; shared transport in `serpApi.ts`).
+Live on the Eiffel photo: HTTP 200, **4.3 s**, 162 KB; `image_results` 108,
+`similar_images` 40, `image_sizes.large` (largest copy 2900×5367),
+`image_tags` 5. `type` is Lens-only and refused with `engine: yandex`.
+Enlarge: the first live run saved **92×92** thumbnails (Lens
+`organic_results`). Measured maxima: Lens visual 165×306, Lens exact
+(serpapi.com) 174×290, Yandex with `w`/`h` dropped 173×320; the original
+was 2900×5367 / 5.2 MB on upload.wikimedia.org. Decision (user, 2026-09-15):
+provider images only, prefer match thumbnails over organic ones, scale the
+preview up in the lightbox, and add an "Open original" link that opens the
+full image in the browser — Forge never fetches from the matched site. The
+thumbnail line carries it as `path <url>` (originals > 300 chars dropped).
+
 Also required, missed by the draft: the permissions block must grant
 `net.search` (tool permission `search`), or the tool is never advertised.
 

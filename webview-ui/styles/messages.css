@@ -346,6 +346,20 @@
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
 }
 
+/* A search thumbnail is ~170×320 at most: scale it up to fill the view instead
+   of showing it at the size it already had in the tool row. It stays soft —
+   "Open original" below is the sharp version. */
+.lightbox-image.is-preview {
+  width: auto;
+  height: min(calc(100vh - 110px), 900px);
+}
+
+.lightbox-original {
+  font-size: 12px;
+  color: var(--vscode-textLink-foreground, #4daafc);
+  cursor: pointer;
+}
+
 .lightbox-caption {
   font-size: 11px;
   color: var(--vscode-descriptionForeground, #aaa);

@@ -1,16 +1,17 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { mimeFromHeader } from '../imageTool';
-import { LENS_SECTIONS, type LensResponse } from './serpApiLens';
 
 /**
- * Saves the top Lens match thumbnails into the workspace so the sidebar can
- * show them (workspace files are already a webview resource root, as for
- * `generate_image`) and a remote chat can receive them as photos.
+ * Saves the top match thumbnails of a reverse image search into the workspace
+ * so the sidebar can show them (workspace files are already a webview resource
+ * root, as for `generate_image`) and a remote chat can receive them as photos.
  *
  * Downloaded rather than hot-linked: the webview CSP stays closed to remote
- * images, and a restored session still has the files after SerpApi's links
- * expire. Measured 2026-09-15: 1.5-7 KB JPEGs, keyless, under 0.7 s each.
+ * images, and a restored session still has the files after the provider's
+ * links expire. Measured 2026-09-15: 1.5-9 KB JPEGs, keyless, under 0.7 s.
+ * No provider serves more than ~170×320; the full-size image is only ever
+ * opened in the user's browser (`original`), never fetched by Forge.
  */
 
 /** Workspace-relative; `.forge/` already holds Forge's remote inbox. */
@@ -18,7 +19,6 @@ export const THUMBNAIL_DIR = '.forge/image-search';
 /** Searches older than this lose their thumbnails on the next search. */
 const RETAIN_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_THUMBNAIL_BYTES = 512 * 1024;
-const TITLE_CHARS = 100;
 
 const EXTENSION_BY_MIME: Readonly<Record<string, string>> = {
   'image/png': '.png',
@@ -28,14 +28,17 @@ const EXTENSION_BY_MIME: Readonly<Record<string, string>> = {
   'image/webp': '.webp',
 };
 
-export interface LensThumbnail {
+/** One engine-neutral match with a thumbnail, as each engine module emits it. */
+export interface ThumbnailCandidate {
   url: string;
   title: string;
   source: string;
   link: string;
+  /** Full-size image, else the match page — opened in the browser on request. */
+  original?: string;
 }
 
-export interface SavedThumbnail extends LensThumbnail {
+export interface SavedThumbnail extends ThumbnailCandidate {
   /** Workspace-relative, `/`-separated. */
   relativePath: string;
   absolutePath: string;
@@ -48,28 +51,22 @@ export interface ThumbnailDownload {
 }
 
 /**
- * First `limit` matches with a thumbnail, in the order the result text lists
- * them. Only SerpApi's and Google's own thumbnail hosts are fetched: a match's
- * page or full-size image would announce the user's IP to an arbitrary site.
+ * First `limit` distinct candidates on a provider's own thumbnail host. A
+ * match's page or full-size image would announce the user's IP to an arbitrary
+ * site. Distinct by URL: Yandex gives every page reposting the same image the
+ * same thumbnail, and the live Eiffel run picked one picture four times.
  */
-export function pickThumbnails(data: LensResponse, limit: number): LensThumbnail[] {
-  const picked: LensThumbnail[] = [];
-  for (const [key] of LENS_SECTIONS) {
-    const matches = data[key];
-    if (!Array.isArray(matches)) continue;
-    for (const match of matches) {
-      if (picked.length >= limit) return picked;
-      if (typeof match !== 'object' || match === null) continue;
-      const record = match as Record<string, unknown>;
-      const url = typeof record['thumbnail'] === 'string' ? record['thumbnail'] : '';
-      if (!isThumbnailHost(url)) continue;
-      picked.push({
-        url,
-        title: text(record['title']).slice(0, TITLE_CHARS) || 'Untitled',
-        source: text(record['source']),
-        link: text(record['link']),
-      });
-    }
+export function pickThumbnails(
+  candidates: readonly ThumbnailCandidate[],
+  limit: number,
+): ThumbnailCandidate[] {
+  const seen = new Set<string>();
+  const picked: ThumbnailCandidate[] = [];
+  for (const candidate of candidates) {
+    if (picked.length >= limit) break;
+    if (!isThumbnailHost(candidate.url) || seen.has(candidate.url)) continue;
+    seen.add(candidate.url);
+    picked.push(candidate);
   }
   return picked;
 }
@@ -79,7 +76,9 @@ export function isThumbnailHost(url: string): boolean {
     const parsed = new URL(url);
     return (
       parsed.protocol === 'https:' &&
-      (parsed.hostname === 'serpapi.com' || parsed.hostname.endsWith('.gstatic.com'))
+      (parsed.hostname === 'serpapi.com' ||
+        parsed.hostname.endsWith('.gstatic.com') ||
+        parsed.hostname === 'avatars.mds.yandex.net')
     );
   } catch {
     return false;
@@ -87,7 +86,7 @@ export function isThumbnailHost(url: string): boolean {
 }
 
 export async function downloadThumbnails(
-  thumbnails: readonly LensThumbnail[],
+  thumbnails: readonly ThumbnailCandidate[],
   workspaceRoot: string,
   options: { stamp: number; signal?: AbortSignal; fetchImpl?: typeof fetch },
 ): Promise<ThumbnailDownload> {
@@ -144,8 +143,4 @@ async function pruneOld(base: string, now: number): Promise<void> {
         fs.rm(path.join(base, entry.name), { recursive: true, force: true }).catch(() => undefined),
       ),
   );
-}
-
-function text(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }

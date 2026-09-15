@@ -5,6 +5,13 @@ import type { MessageAttachment } from '../messageOps';
 interface Props {
   attachment: MessageAttachment;
   onClose: () => void;
+  /**
+   * Full-size source of a preview-sized image (an `image_search` thumbnail,
+   * ~170×320 at most). When set, the preview is scaled up to fill the view and
+   * an "Open original" link hands the real image to the user's browser —
+   * Forge itself never fetches from the matched site.
+   */
+  originalUrl?: string;
 }
 
 /**
@@ -21,7 +28,7 @@ interface Props {
  * containing block for `position: fixed` and clips it. Rendered in place, the
  * "full-size" view was cropped to the height of the tool row it came from.
  */
-export function ImageLightbox({ attachment, onClose }: Props): React.ReactElement {
+export function ImageLightbox({ attachment, onClose, originalUrl }: Props): React.ReactElement {
   const closeRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -59,7 +66,7 @@ export function ImageLightbox({ attachment, onClose }: Props): React.ReactElemen
         ×
       </button>
       <img
-        className="lightbox-image"
+        className={`lightbox-image${originalUrl ? ' is-preview' : ''}`}
         src={attachment.src}
         alt={attachment.name}
         onClick={(event) => event.stopPropagation()}
@@ -67,6 +74,18 @@ export function ImageLightbox({ attachment, onClose }: Props): React.ReactElemen
       <div className="lightbox-caption" onClick={(event) => event.stopPropagation()}>
         {attachment.name}
       </div>
+      {originalUrl && (
+        // A plain http(s) link: VS Code hands webview link clicks to the
+        // default browser, so no host message is needed.
+        <a
+          className="lightbox-original"
+          href={originalUrl}
+          title={originalUrl}
+          onClick={(event) => event.stopPropagation()}
+        >
+          Open original ↗
+        </a>
+      )}
     </div>,
     document.body,
   );

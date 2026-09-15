@@ -2,18 +2,23 @@ import * as fs from 'fs/promises';
 import * as vscode from 'vscode';
 import type { ForgeConfig, ImageSearchConfig } from '../../config/types';
 import type { ChatAttachmentRef, ChatMessage } from '../../llm/types';
-import { IMAGE_SEARCH_THUMBNAILS_PREFIX } from '../../sidebar/toolResultView';
+import { formatThumbnailLine } from '../../sidebar/toolResultView';
 import type { UserNotificationService } from '../../sidebar/UserNotificationService';
 import { MAX_VIEW_IMAGE_BYTES, mimeFromHeader } from '../imageTool';
 import type { RegisteredTool, ToolHandlerContext } from '../ToolRegistry';
-import { downloadThumbnails, pickThumbnails, type LensThumbnail } from './lensThumbnails';
+import { downloadThumbnails, pickThumbnails, type ThumbnailCandidate } from './imageThumbnails';
 import { uploadTemporaryImage } from './litterboxUpload';
 import {
   formatLensResults,
   LENS_SEARCH_TYPES,
+  lensThumbnailCandidates,
   searchLens,
   type LensSearchType,
 } from './serpApiLens';
+import { formatYandexResults, searchYandex, yandexThumbnailCandidates } from './yandexImages';
+
+export const IMAGE_SEARCH_ENGINES = ['google_lens', 'yandex'] as const;
+type ImageSearchEngine = (typeof IMAGE_SEARCH_ENGINES)[number];
 
 /** Litterbox keeps files 1 h; reuse an upload only well inside that. */
 const UPLOAD_REUSE_MS = 50 * 60 * 1000;
@@ -31,7 +36,8 @@ export interface ImageSearchDeps {
   notifications?: UserNotificationService;
   /** Injectable for tests. */
   upload?: typeof uploadTemporaryImage;
-  search?: typeof searchLens;
+  searchLens?: typeof searchLens;
+  searchYandex?: typeof searchYandex;
   downloadThumbnails?: typeof downloadThumbnails;
   readFile?: (filePath: string) => Promise<Uint8Array>;
   workspaceRoot?: () => string | undefined;
@@ -57,7 +63,7 @@ export function makeImageSearchTool(deps: ImageSearchDeps): RegisteredTool {
       function: {
         name: 'image_search',
         description:
-          'Reverse image search with Google Lens: finds where an image appears online and what it shows. Uses the most recent image the user attached unless image_url is given. Takes 20-60 s and uses one search from a small monthly quota, so do not repeat a search that already returned results.',
+          'Reverse image search: finds where an image appears online, what it shows, and similar images (thumbnails are shown to the user). Uses the most recent image the user attached unless image_url is given. Each call uses one search from a small monthly quota, so do not repeat a search that already returned results.',
         parameters: {
           type: 'object',
           properties: {
@@ -71,11 +77,17 @@ export function makeImageSearchTool(deps: ImageSearchDeps): RegisteredTool {
               type: 'string',
               description: 'Public http(s) image URL. Use instead of an attachment.',
             },
+            engine: {
+              type: 'string',
+              enum: [...IMAGE_SEARCH_ENGINES],
+              description:
+                'google_lens (default): cleanest matches, 20-60 s. yandex: ~5 s, lists the largest copies of the image (best lead to an original), strong on faces and non-Western sites, noisier pages.',
+            },
             type: {
               type: 'string',
               enum: [...LENS_SEARCH_TYPES],
               description:
-                'exact_matches = the same image elsewhere (find the original); visual_matches = similar images; products = shopping; all = identify it plus web pages and similar images. Default all.',
+                'google_lens only. exact_matches = the same image elsewhere (find the original); visual_matches = similar images; products = shopping; all = identify it plus web pages and similar images. Default all.',
             },
           },
           additionalProperties: false,
@@ -92,7 +104,7 @@ export function makeImageSearchTool(deps: ImageSearchDeps): RegisteredTool {
       const index = typeof args['attachment_index'] === 'number' ? args['attachment_index'] : 1;
       return {
         dangerous: false,
-        detail: `Upload attached image #${index} to Litterbox (public link, deleted after 1 h) and search it with Google Lens via SerpApi.`,
+        detail: `Upload attached image #${index} to Litterbox (public link, deleted after 1 h) and reverse-search it via SerpApi.`,
       };
     },
     handler: (args, context) => runImageSearch(deps, uploads, searchConfig(), args, context),
@@ -107,7 +119,11 @@ async function runImageSearch(
   context: ToolHandlerContext | undefined,
 ): Promise<string> {
   if (!config) throw new Error('image_search: no image_search block in config.yaml.');
-  const type = parseType(args['type']);
+  const engine = parseEnum(args['engine'], IMAGE_SEARCH_ENGINES, 'google_lens', 'engine');
+  const type = parseEnum(args['type'], LENS_SEARCH_TYPES, 'all', 'type');
+  if (engine === 'yandex' && args['type'] !== undefined) {
+    throw new Error('image_search: type applies to google_lens only. Drop type for engine yandex.');
+  }
   const source = pickSource(args, context?.conversationMessages);
 
   const apiKey = await deps.secrets?.get(config.secret_key_name);
@@ -132,9 +148,13 @@ async function runImageSearch(
         uploads.set(source.ref, { url: imageUrl, at: now() });
       }
     }
-    const data = await (deps.search ?? searchLens)({ imageUrl, type, apiKey, signal });
-    const text = formatLensResults(data, type, config.max_results);
-    const thumbnails = pickThumbnails(data, config.thumbnails);
+    const { text, candidates } = await runEngine(
+      deps,
+      engine,
+      { imageUrl, type, apiKey, signal },
+      config,
+    );
+    const thumbnails = pickThumbnails(candidates, config.thumbnails);
     if (!thumbnails.length) return text;
     const footer = await saveAndDeliverThumbnails(deps, thumbnails, context, signal, now());
     return `${text}\n\n${footer}`;
@@ -142,11 +162,31 @@ async function runImageSearch(
     if (timeout.aborted && !context?.abortSignal?.aborted) {
       throw new Error(
         `image_search timed out after ${Math.round(config.timeout_ms / 1000)} s ` +
-          `(image_search.timeout_ms). Lens searches of type "all" can take about a minute.`,
+          `(image_search.timeout_ms). Google Lens searches of type "all" can take about a minute; engine yandex is faster.`,
       );
     }
     throw err;
   }
+}
+
+async function runEngine(
+  deps: ImageSearchDeps,
+  engine: ImageSearchEngine,
+  request: { imageUrl: string; type: LensSearchType; apiKey: string; signal: AbortSignal },
+  config: ImageSearchConfig,
+): Promise<{ text: string; candidates: ThumbnailCandidate[] }> {
+  if (engine === 'yandex') {
+    const data = await (deps.searchYandex ?? searchYandex)(request);
+    return {
+      text: formatYandexResults(data, config.max_results),
+      candidates: yandexThumbnailCandidates(data),
+    };
+  }
+  const data = await (deps.searchLens ?? searchLens)(request);
+  return {
+    text: formatLensResults(data, request.type, config.max_results),
+    candidates: lensThumbnailCandidates(data),
+  };
 }
 
 /**
@@ -156,7 +196,7 @@ async function runImageSearch(
  */
 async function saveAndDeliverThumbnails(
   deps: ImageSearchDeps,
-  thumbnails: readonly LensThumbnail[],
+  thumbnails: readonly ThumbnailCandidate[],
   context: ToolHandlerContext | undefined,
   signal: AbortSignal,
   stamp: number,
@@ -170,7 +210,7 @@ async function saveAndDeliverThumbnails(
   );
   const lines: string[] = [];
   if (saved.length) {
-    lines.push(`${IMAGE_SEARCH_THUMBNAILS_PREFIX}${saved.map((t) => t.relativePath).join(', ')}`);
+    lines.push(formatThumbnailLine(saved));
   }
   if (failures.length) {
     lines.push(`${failures.length} thumbnail(s) could not be saved: ${failures.join('; ')}`);
@@ -206,12 +246,16 @@ function defaultWorkspaceRoot(): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 }
 
-function parseType(value: unknown): LensSearchType {
-  if (value === undefined) return 'all';
-  if (typeof value === 'string' && (LENS_SEARCH_TYPES as readonly string[]).includes(value)) {
-    return value as LensSearchType;
-  }
-  throw new Error(`image_search: type must be one of ${LENS_SEARCH_TYPES.join(', ')}.`);
+function parseEnum<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  fallback: T,
+  name: string,
+): T {
+  if (value === undefined) return fallback;
+  if (typeof value === 'string' && (allowed as readonly string[]).includes(value))
+    return value as T;
+  throw new Error(`image_search: ${name} must be one of ${allowed.join(', ')}.`);
 }
 
 /** Exported for tests: which image a call means. */

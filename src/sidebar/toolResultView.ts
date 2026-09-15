@@ -91,19 +91,46 @@ export function generatedImagePath(toolName: string, result: string): string | u
 export const IMAGE_SEARCH_THUMBNAILS_PREFIX =
   'Thumbnails saved and shown to the user (view_image can open them): ';
 
-/** Relative, `/`-separated, image extension; no drive letters or backslashes. */
-const THUMBNAIL_PATH = /^[^/\\:]+(?:\/[^/\\:]+)*\.(?:png|jpe?g|gif|bmp|webp)$/iu;
+/**
+ * One entry: a relative, `/`-separated image path, optionally followed by
+ * ` <https://…>` — the full-size original the lightbox offers to open in the
+ * browser. No drive letters, backslashes or spaces in the path.
+ */
+const THUMBNAIL_ENTRY =
+  /^([^/\\:\s]+(?:\/[^/\\:\s]+)*\.(?:png|jpe?g|gif|bmp|webp))(?: <(https?:\/\/[^\s<>]+)>)?$/iu;
+/** Longer originals are dropped from the line: they cost the model tokens. */
+const MAX_ORIGINAL_CHARS = 300;
 
-/** Workspace-relative thumbnail paths an `image_search` result lists, in order. */
-export function imageSearchThumbnailPaths(toolName: string, result: string): string[] {
+export interface ImageSearchThumbnail {
+  path: string;
+  original?: string;
+}
+
+/** The line `image_search` writes; `imageSearchThumbnails` reads it back. */
+export function formatThumbnailLine(
+  thumbnails: readonly { relativePath: string; original?: string }[],
+): string {
+  const entries = thumbnails.map((thumbnail) =>
+    thumbnail.original && thumbnail.original.length <= MAX_ORIGINAL_CHARS
+      ? `${thumbnail.relativePath} <${thumbnail.original}>`
+      : thumbnail.relativePath,
+  );
+  return `${IMAGE_SEARCH_THUMBNAILS_PREFIX}${entries.join(', ')}`;
+}
+
+/** Thumbnails an `image_search` result lists, in order. */
+export function imageSearchThumbnails(toolName: string, result: string): ImageSearchThumbnail[] {
   if (toolName !== 'image_search' || isFailureResult(result)) return [];
   const line = result
     .split(/\r?\n/u)
     .find((candidate) => candidate.startsWith(IMAGE_SEARCH_THUMBNAILS_PREFIX));
   if (!line) return [];
-  return line
-    .slice(IMAGE_SEARCH_THUMBNAILS_PREFIX.length)
-    .split(', ')
-    .map((entry) => entry.trim())
-    .filter((entry) => THUMBNAIL_PATH.test(entry) && !entry.split('/').includes('..'));
+  const thumbnails: ImageSearchThumbnail[] = [];
+  for (const entry of line.slice(IMAGE_SEARCH_THUMBNAILS_PREFIX.length).split(', ')) {
+    const match = THUMBNAIL_ENTRY.exec(entry.trim());
+    const path = match?.[1];
+    if (!path || path.split('/').includes('..')) continue;
+    thumbnails.push({ path, ...(match[2] ? { original: match[2] } : {}) });
+  }
+  return thumbnails;
 }

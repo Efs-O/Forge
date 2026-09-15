@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   generatedImagePath,
+  formatThumbnailLine,
   IMAGE_SEARCH_THUMBNAILS_PREFIX,
-  imageSearchThumbnailPaths,
+  imageSearchThumbnails,
   isFailureResult,
   readPathArg,
   rendersAsMarkdown,
@@ -123,32 +124,39 @@ describe('generatedImagePath', () => {
   });
 });
 
-describe('imageSearchThumbnailPaths', () => {
+describe('imageSearchThumbnails', () => {
+  const line = formatThumbnailLine([
+    { relativePath: '.forge/image-search/17/1.jpg', original: 'https://i.pinimg.com/474x/e6.jpg' },
+    { relativePath: '.forge/image-search/17/2.webp' },
+    {
+      relativePath: '.forge/image-search/17/3.png',
+      original: `https://x.example/${'a'.repeat(400)}`,
+    },
+  ]);
   const ok = [
     'Visually similar: 2 found, top 2 shown.',
     '1. A',
     '',
-    `${IMAGE_SEARCH_THUMBNAILS_PREFIX}.forge/image-search/17/1.jpg, .forge/image-search/17/2.webp`,
-    'Sent 2 thumbnail(s) to 1 remote chat(s).',
+    line,
+    'Sent 3 thumbnail(s) to 1 remote chat(s).',
   ].join('\r\n');
 
-  it('reads every saved thumbnail path back, in order', () => {
-    expect(imageSearchThumbnailPaths('image_search', ok)).toEqual([
-      '.forge/image-search/17/1.jpg',
-      '.forge/image-search/17/2.webp',
+  it('round-trips paths and originals, dropping an original too long for the model', () => {
+    expect(imageSearchThumbnails('image_search', ok)).toEqual([
+      { path: '.forge/image-search/17/1.jpg', original: 'https://i.pinimg.com/474x/e6.jpg' },
+      { path: '.forge/image-search/17/2.webp' },
+      { path: '.forge/image-search/17/3.png' },
     ]);
   });
 
-  it('ignores other tools, failures, and unsafe paths', () => {
-    expect(imageSearchThumbnailPaths('web_search', ok)).toEqual([]);
-    expect(imageSearchThumbnailPaths('image_search', 'Error: SerpApi: Invalid API key.')).toEqual(
-      [],
-    );
+  it('ignores other tools, failures, and unsafe paths or links', () => {
+    expect(imageSearchThumbnails('web_search', ok)).toEqual([]);
+    expect(imageSearchThumbnails('image_search', 'Error: SerpApi: Invalid API key.')).toEqual([]);
     expect(
-      imageSearchThumbnailPaths(
+      imageSearchThumbnails(
         'image_search',
-        `${IMAGE_SEARCH_THUMBNAILS_PREFIX}../x.jpg, C:/a.jpg, /abs.jpg, a\\b.jpg, ok/1.txt, ok/1.png`,
+        `${IMAGE_SEARCH_THUMBNAILS_PREFIX}../x.jpg, C:/a.jpg, /abs.jpg, a\\b.jpg, ok/1.txt, ok/2.png <javascript:alert(1)>, ok/1.png`,
       ),
-    ).toEqual(['ok/1.png']);
+    ).toEqual([{ path: 'ok/1.png' }]);
   });
 });

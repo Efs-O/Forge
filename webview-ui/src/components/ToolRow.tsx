@@ -6,7 +6,7 @@ import { vscode } from '../vscode';
 import { normalizeMarkdownForRender } from '../markdown';
 import {
   generatedImagePath,
-  imageSearchThumbnailPaths,
+  imageSearchThumbnails,
   rendersAsMarkdown,
 } from '../../../src/sidebar/toolResultView';
 import { WorkspaceRootUriContext, workspaceFileUri } from '../workspaceRootUri';
@@ -65,13 +65,16 @@ export function ToolRow({ message }: { message: AppMessage }): React.ReactElemen
   const body = useMemo(() => normalizeMarkdownForRender(result), [result]);
   const toolName = message.toolName ?? '';
   const generated = generatedImagePath(toolName, result);
-  const imagePaths = generated ? [generated] : imageSearchThumbnailPaths(toolName, result);
+  const listed = generated ? [{ path: generated }] : imageSearchThumbnails(toolName, result);
   const images = rootUri
-    ? imagePaths.map((imagePath) => ({
-        name: imagePath,
-        mediaType: 'image/*',
-        bytes: 0,
-        src: workspaceFileUri(rootUri, imagePath),
+    ? listed.map((entry) => ({
+        attachment: {
+          name: entry.path,
+          mediaType: 'image/*',
+          bytes: 0,
+          src: workspaceFileUri(rootUri, entry.path),
+        },
+        original: 'original' in entry ? entry.original : undefined,
       }))
     : [];
   const openImage = expanded === null ? undefined : images[expanded];
@@ -122,20 +125,26 @@ export function ToolRow({ message }: { message: AppMessage }): React.ReactElemen
       </div>
       {images.length > 0 && (
         <div className={`tool-row-thumbs${images.length > 1 ? ' is-grid' : ''}`}>
-          {images.map((image, index) => (
+          {images.map(({ attachment }, index) => (
             <button
-              key={image.name}
+              key={attachment.name}
               type="button"
               className="tool-row-thumb"
-              title={`${image.name} — click to expand`}
+              title={`${attachment.name} — click to expand`}
               onClick={() => setExpanded(index)}
             >
-              <img src={image.src} alt={image.name} />
+              <img src={attachment.src} alt={attachment.name} />
             </button>
           ))}
         </div>
       )}
-      {openImage && <ImageLightbox attachment={openImage} onClose={closeExpanded} />}
+      {openImage && (
+        <ImageLightbox
+          attachment={openImage.attachment}
+          onClose={closeExpanded}
+          {...(openImage.original ? { originalUrl: openImage.original } : {})}
+        />
+      )}
       {open && (
         <div className="tool-row-body">
           {detail && (

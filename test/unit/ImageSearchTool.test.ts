@@ -9,11 +9,15 @@ import {
   downloadThumbnails,
   isThumbnailHost,
   pickThumbnails,
-  type LensThumbnail,
-} from '../../src/tools/imageSearch/lensThumbnails';
+  type ThumbnailCandidate,
+} from '../../src/tools/imageSearch/imageThumbnails';
+import {
+  formatYandexResults,
+  yandexThumbnailCandidates,
+} from '../../src/tools/imageSearch/yandexImages';
 import {
   IMAGE_SEARCH_THUMBNAILS_PREFIX,
-  imageSearchThumbnailPaths,
+  imageSearchThumbnails,
 } from '../../src/sidebar/toolResultView';
 import type { UserNotificationService } from '../../src/sidebar/UserNotificationService';
 import * as fs from 'fs';
@@ -22,8 +26,32 @@ import * as path from 'path';
 import {
   formatLensResults,
   MAX_RESULT_CHARS,
+  lensThumbnailCandidates,
   searchLens,
 } from '../../src/tools/imageSearch/serpApiLens';
+
+/** Shapes copied from the live 2026-09-15 SerpApi yandex_images response. */
+const YANDEX = {
+  image_tags: [{ text: 'eiffel tower paris' }, { text: 'torre eiffel' }],
+  image_sizes: {
+    large: [{ size: '2900×5367', link: 'https://blogger.googleusercontent.com/big.jpg' }],
+  },
+  image_results: [
+    {
+      title: 'Pin em EU trip',
+      source: 'au.pinterest.com',
+      link: 'https://au.pinterest.com/pin/1/',
+      thumbnail: { link: 'https://avatars.mds.yandex.net/i?id=abc-images-thumbs&n=13&w=296&h=180' },
+      original_image: { link: 'https://i.pinimg.com/474x/e6.jpg' },
+    },
+  ],
+  similar_images: [
+    {
+      image: { link: 'https://avatars.mds.yandex.net/i?id=def-images-thumbs&n=13' },
+      link: 'https://yandex.com/images/search?url=x',
+    },
+  ],
+};
 
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
 const HTML = new TextEncoder().encode('<!doctype html><html>');
@@ -89,8 +117,9 @@ function makeTool(
   const cfg = 'cfg' in options ? options.cfg : config();
   const upload = vi.fn(async () => 'https://litter.catbox.moe/abc.jpg');
   const search = vi.fn(async () => EXACT);
+  const yandex = vi.fn(async () => YANDEX);
   const readFile = vi.fn(async () => options.bytes ?? JPEG);
-  const download = vi.fn(async (thumbnails: readonly LensThumbnail[]) => ({
+  const download = vi.fn(async (thumbnails: readonly ThumbnailCandidate[]) => ({
     saved: thumbnails.map((thumbnail, index) => ({
       ...thumbnail,
       relativePath: `.forge/image-search/0/${index + 1}.jpg`,
@@ -108,7 +137,8 @@ function makeTool(
     resolveAttachment: (relativePath) => `/store/${relativePath}`,
     notifications: { deliverImage } as unknown as UserNotificationService,
     upload,
-    search,
+    searchLens: search,
+    searchYandex: yandex,
     readFile,
     downloadThumbnails: download,
     workspaceRoot: () => ('workspace' in options ? options.workspace : '/ws'),
@@ -118,6 +148,7 @@ function makeTool(
     tool,
     upload,
     search,
+    yandex,
     readFile,
     download,
     deliverImage,
@@ -346,8 +377,11 @@ describe('thumbnails', () => {
       '/ws',
       expect.objectContaining({ stamp: 0 }),
     );
-    expect(imageSearchThumbnailPaths('image_search', result)).toEqual([
-      '.forge/image-search/0/1.jpg',
+    expect(imageSearchThumbnails('image_search', result)).toEqual([
+      {
+        path: '.forge/image-search/0/1.jpg',
+        original: 'https://en.wikipedia.org/wiki/Eiffel_Tower',
+      },
     ]);
     expect(deliverImage).toHaveBeenCalledWith({
       conversationId: 'c1',
@@ -386,7 +420,10 @@ describe('thumbnails', () => {
         { title: 'd', thumbnail: 'https://serpapi.com/searches/1/images/d.jpeg' },
       ],
     };
-    expect(pickThumbnails(data, 2).map((t) => t.title)).toEqual(['a', 'c']);
+    expect(pickThumbnails(lensThumbnailCandidates(data), 2).map((t) => t.title)).toEqual([
+      'a',
+      'c',
+    ]);
     expect(isThumbnailHost('https://serpapi.com.evil.example/x')).toBe(false);
   });
 
@@ -416,5 +453,86 @@ describe('thumbnails', () => {
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe('yandex engine', () => {
+  const context = { beforeMutate: () => undefined, conversationMessages: messages };
+
+  it('routes engine yandex to Yandex and leads with tags and the largest copies', async () => {
+    const { tool, search, yandex, download } = makeTool();
+    const result = String(await tool.handler({ engine: 'yandex' }, context));
+    expect(search).not.toHaveBeenCalled();
+    expect(yandex).toHaveBeenCalledWith(
+      expect.objectContaining({
+        imageUrl: 'https://litter.catbox.moe/abc.jpg',
+        apiKey: 'serp-key',
+      }),
+    );
+    expect(result.split('\n')[0]).toBe('Yandex identifies it as: eiffel tower paris; torre eiffel');
+    expect(result).toContain('1. 2900×5367 — <https://blogger.googleusercontent.com/big.jpg>');
+    expect(result).toContain('Pages with this image: 1 found');
+    const picked = download.mock.calls[0]?.[0] ?? [];
+    expect(picked.map((t) => t.url)).toEqual([
+      'https://avatars.mds.yandex.net/i?id=abc-images-thumbs&n=13',
+      'https://avatars.mds.yandex.net/i?id=def-images-thumbs&n=13',
+    ]);
+    expect(picked[0]?.original).toBe('https://i.pinimg.com/474x/e6.jpg');
+  });
+
+  it('refuses a Lens-only type with engine yandex, naming the fix', async () => {
+    const { tool, upload } = makeTool();
+    await expect(
+      tool.handler({ engine: 'yandex', type: 'exact_matches' }, context),
+    ).rejects.toThrow(/Drop type for engine yandex/);
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it('formats an empty Yandex response and allows only Yandex thumbnail hosts', () => {
+    expect(formatYandexResults({}, 8)).toBe('Yandex found no matches for this image.');
+    expect(isThumbnailHost('https://avatars.mds.yandex.net/i?id=1')).toBe(true);
+    expect(isThumbnailHost('https://i.pinimg.com/474x/e6.jpg')).toBe(false);
+    expect(yandexThumbnailCandidates({ image_results: [{ title: 'no thumb' }] })).toEqual([]);
+  });
+
+  it('prefers Lens match thumbnails over 92px organic ones, with the full image as original', () => {
+    const candidates = lensThumbnailCandidates({
+      organic_results: [{ title: 'org', thumbnail: 'https://encrypted-tbn0.gstatic.com/o' }],
+      visual_matches: [
+        {
+          title: 'vis',
+          thumbnail: 'https://encrypted-tbn2.gstatic.com/v',
+          image: 'https://thumb.wikimedia.org/full.jpg',
+          link: 'https://commons.wikimedia.org/page',
+        },
+      ],
+    });
+    expect(candidates.map((c) => c.title)).toEqual(['vis', 'org']);
+    expect(candidates[0]?.original).toBe('https://thumb.wikimedia.org/full.jpg');
+  });
+
+  it('skips repeated thumbnails and strips Yandex tracking from links (live-run findings)', () => {
+    const shared = 'https://avatars.mds.yandex.net/i?id=same-images-thumbs&n=13&w=296&h=180';
+    const data = {
+      image_results: [
+        {
+          title: 'p1',
+          link: 'https://pinterest.com/a/?utm_medium=organic&utm_source=yandexsmartcamera',
+          thumbnail: { link: shared },
+        },
+        { title: 'p2', link: 'https://pinterest.com/b/', thumbnail: { link: shared } },
+        {
+          title: 'p3',
+          link: 'https://historydraft.com/x?id=7&utm_source=yandexsmartcamera',
+          thumbnail: { link: 'https://avatars.mds.yandex.net/i?id=other&n=13' },
+        },
+      ],
+    };
+    const picked = pickThumbnails(yandexThumbnailCandidates(data), 4);
+    expect(picked.map((c) => c.title)).toEqual(['p1', 'p3']);
+    expect(picked[0]?.link).toBe('https://pinterest.com/a/');
+    const text = formatYandexResults(data, 8);
+    expect(text).toContain('<https://historydraft.com/x?id=7>');
+    expect(text).not.toContain('utm_');
   });
 });

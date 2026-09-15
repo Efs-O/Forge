@@ -144,7 +144,7 @@ describe('ToolRow image_search thumbnails', () => {
     const message = toolMessage({
       content: 'image_search → Google Lens identifies it as: Eiffel Tower',
       toolName: 'image_search',
-      toolResult: `Google Lens identifies it as: Eiffel Tower\n\n${IMAGE_SEARCH_THUMBNAILS_PREFIX}.forge/image-search/1/1.jpg, .forge/image-search/1/2.jpg`,
+      toolResult: `Google Lens identifies it as: Eiffel Tower\n\n${IMAGE_SEARCH_THUMBNAILS_PREFIX}.forge/image-search/1/1.jpg, .forge/image-search/1/2.jpg <https://upload.wikimedia.org/full.jpg>`,
       toolResultTotal: 120,
     });
     act(() => {
@@ -164,6 +164,17 @@ describe('ToolRow image_search thumbnails', () => {
       'https://file.vscode-resource/ws/.forge/image-search/1/2.jpg',
     );
     act(() => thumbs[1]!.click());
-    expect(document.body.innerHTML).toContain('.forge/image-search/1/2.jpg');
+    // Scaled up, with the full-size original handed to the browser.
+    expect(document.querySelector('.lightbox-image.is-preview')?.getAttribute('src')).toBe(
+      'https://file.vscode-resource/ws/.forge/image-search/1/2.jpg',
+    );
+    expect(document.querySelector('.lightbox-original')?.getAttribute('href')).toBe(
+      'https://upload.wikimedia.org/full.jpg',
+    );
+    act(() => (document.querySelector('.lightbox-close') as HTMLButtonElement).click());
+    // A thumbnail without an original opens plain: no link, no upscaling.
+    act(() => thumbs[0]!.click());
+    expect(document.querySelector('.lightbox-original')).toBeNull();
+    expect(document.querySelector('.lightbox-image.is-preview')).toBeNull();
   });
 });
