@@ -31,6 +31,11 @@ export interface WakeInfo {
    * `armWakeTimer` refuses instead of registering a task that will not fire.
    */
   wakeTimersAllowed: boolean | null;
+  /**
+   * The recurring wake schedule from `ForgeScheduledWake`, when the task
+   * exists. `null` means the task is not registered (no scheduled jobs).
+   */
+  scheduledWakes: import('./wakeTaskXml').RecurringWake[] | null;
 }
 
 /** The `Standby (S3)` / `Hibernate` lines above the "not available" heading. */
@@ -66,7 +71,11 @@ interface RawAdapter {
   magic?: unknown;
 }
 
-export function parseWakeInfo(json: string, wakeTimersAllowed: boolean | null): WakeInfo {
+export function parseWakeInfo(
+  json: string,
+  wakeTimersAllowed: boolean | null,
+  scheduledWakes: import('./wakeTaskXml').RecurringWake[] | null = null,
+): WakeInfo {
   let parsed: {
     armed?: unknown;
     states?: unknown;
@@ -112,6 +121,7 @@ export function parseWakeInfo(json: string, wakeTimersAllowed: boolean | null): 
     availableStates: availableStates(statesText),
     armedWake: nextRun && !/^N\/A/i.test(nextRun) ? nextRun : null,
     wakeTimersAllowed,
+    scheduledWakes,
   };
 }
 
@@ -199,6 +209,19 @@ export function formatWakeInfo(info: WakeInfo): string {
     }`,
   );
   lines.push(`Armed wake:   ${info.armedWake ?? 'none'}`);
+  if (info.scheduledWakes && info.scheduledWakes.length > 0) {
+    const desc = info.scheduledWakes
+      .map((w) => {
+        const pad = (n: number): string => String(n).padStart(2, '0');
+        const time = `${pad(w.hour)}:${pad(w.minute)}`;
+        const days = w.days === 'daily' ? 'daily' : w.days.join(', ');
+        return `${time} (${days})`;
+      })
+      .join('; ');
+    lines.push(`Scheduled:    ${desc}`);
+  } else {
+    lines.push(`Scheduled:    none`);
+  }
   lines.push('');
   // Said plainly every time, because it is the thing people expect to be false.
   lines.push(

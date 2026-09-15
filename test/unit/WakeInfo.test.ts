@@ -112,6 +112,24 @@ describe('parseWakeInfo', () => {
   it('fails loudly rather than returning an empty report', () => {
     expect(() => parseWakeInfo('not json', null)).toThrow(/could not read/i);
   });
+
+  it('carries the scheduled wakes through to the report', () => {
+    const wakes = [{ hour: 6, minute: 0, days: 'daily' as const }];
+    const info = parseWakeInfo(
+      JSON.stringify({ armed: '', states: '', adapters: [], task: '' }),
+      true,
+      wakes,
+    );
+    expect(info.scheduledWakes).toEqual(wakes);
+  });
+
+  it('defaults scheduled wakes to null when not supplied', () => {
+    const info = parseWakeInfo(
+      JSON.stringify({ armed: '', states: '', adapters: [], task: '' }),
+      true,
+    );
+    expect(info.scheduledWakes).toBeNull();
+  });
 });
 
 describe('parseWakeTime', () => {
@@ -163,6 +181,7 @@ describe('formatWakeInfo', () => {
     availableStates: ['Standby (S3)'],
     armedWake: null,
     wakeTimersAllowed: true,
+    scheduledWakes: null,
   };
 
   it('leads with the details a WoL app needs', () => {
@@ -194,5 +213,29 @@ describe('formatWakeInfo', () => {
     expect(formatWakeInfo({ ...base, wakeTimersAllowed: false })).toContain(
       'DISABLED on the active power scheme',
     );
+  });
+
+  it('shows the recurring schedule when present', () => {
+    const text = formatWakeInfo({
+      ...base,
+      scheduledWakes: [{ hour: 6, minute: 0, days: 'daily' }],
+    });
+    expect(text).toContain('Scheduled:    06:00 (daily)');
+  });
+
+  it('shows multiple recurring wakes', () => {
+    const text = formatWakeInfo({
+      ...base,
+      scheduledWakes: [
+        { hour: 6, minute: 0, days: 'daily' },
+        { hour: 9, minute: 30, days: ['Mon', 'Wed', 'Fri'] },
+      ],
+    });
+    expect(text).toContain('06:00 (daily)');
+    expect(text).toContain('09:30 (Mon, Wed, Fri)');
+  });
+
+  it('shows none when no scheduled task exists', () => {
+    expect(formatWakeInfo(base)).toContain('Scheduled:    none');
   });
 });

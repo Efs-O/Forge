@@ -4,8 +4,9 @@
 2026-09-14. No code yet. Phase A1 (see §A.7): **check 1 (G5) FAIL** — A2
 switches the wake principal to the interactive user; **check 2 (scheduled
 RTC wake) PASS** — the PC wakes itself at the armed time, unattended,
-confirmed twice. Checks 3 (daily recurrence) and 4 (lead time →
-`WAKE_LEAD_MS`) pending. Next step: A1 checks 3–4, then A2.
+confirmed twice; **check 4 (lead time) measured** — resident server healthy
+~112 s after RTC fire → `WAKE_LEAD_MS ≈ 120000`. Check 3 (daily recurrence)
+deferred (same RTC mechanism, low-risk). **A1 done; next step: A2.**
 **Date:** 2026-09-14
 **Origin:** §1.11 of [DOCUMENTATION_AND_ROADMAP_AUDIT_0.16.md](../DOCUMENTATION_AND_ROADMAP_AUDIT_0.16.md); roadmap tier "Next"
 
@@ -109,7 +110,10 @@ Results go in a new §A.7 of this file before A2 starts.
 
 ## A.4 Phase A2 — design
 
-**Two tasks, two owners.** `ForgeWakeTimer` stays exactly as it is. Add:
+**Two tasks, two owners.** `ForgeWakeTimer` and the new task both use the
+current interactive user's Task Scheduler `InteractiveToken` principal, not
+SYSTEM. **CHANGED: A1 proved the existing SYSTEM principal cannot be created
+from a normal VS Code session.** Add:
 
 | Task | Written by | Triggers |
 | --- | --- | --- |
@@ -130,15 +134,19 @@ holdAwake(reason: string): { dispose(): void }
 - `setScheduledWakes` uses the same XML → UTF-16 temp file → `schtasks /create /xml /f`
   path as `armWakeTimer`, with no `EndBoundary` and no `DeleteExpiredTaskAfter`.
   `wakeTaskXml` is split into a shared settings block plus a trigger renderer,
-  so the two task kinds cannot drift apart.
+  so the two task kinds cannot drift apart. Both render the interactive-token
+  principal; neither renders `S-1-5-18`.
 - `holdAwake` spawns one PowerShell child that P/Invokes
   `SetThreadExecutionState(ES_CONTINUOUS|ES_SYSTEM_REQUIRED)` and then blocks
   on stdin. `dispose()` closes stdin, and the child exits, which drops the
   request. If Forge dies, the child's stdin closes too, so the request can
   never outlive Forge. Reference-counted: two holders share one child.
+- The child lifecycle sits behind a small injectable spawn seam, so the
+  reference-count test does not launch PowerShell.
 - `readScheduledWakes` exists so `/wake` (no args) and `get_power_info` can
-  report the recurring schedule next to the one-shot. `formatWakeInfo` gains
-  one line.
+  report the recurring schedule next to the one-shot. `WakeInfo` gains a
+  `scheduledWakes` field, and `describeWake()` queries/parses
+  `ForgeScheduledWake` into it before `formatWakeInfo` renders the new line.
 
 **Sleep after the job (D6).** `sleep_if_idle` suspends only when all of these
 hold:
@@ -163,12 +171,16 @@ helper so both call sites share it.
 
 - XML: the one-shot task still has `EndBoundary` + `DeleteExpiredTaskAfter`;
   the recurring task has neither; daily and weekday triggers render correctly;
-  local-time boundaries (no `Z`); an empty wake list means delete.
+  local-time boundaries (no `Z`); both task kinds render `InteractiveToken`,
+  not SYSTEM; an empty wake list means delete.
 - `holdAwake` reference counting with a fake spawner: two holds make one
-  child, and the second dispose kills it.
+  child, and the second dispose closes its stdin so it exits.
 - `sleep_if_idle` decision table (pure function): input since resume, busy, or
   outside the window each means stay awake.
-- Manual: A1 steps 2–3 repeated against the real `setScheduledWakes`.
+- `WakeInfo.test.ts`: parsed wake data and `formatWakeInfo` show the recurring
+  schedule when present and `none` when the scheduled task is absent.
+- Manual: repeat A1 step 2 against the real `setScheduledWakes`; the two-day
+  recurrence soak from A1 step 3 remains deferred, as recorded in §A.7.
 
 ## A.7 Phase A1 results (started 2026-09-15)
 
@@ -213,14 +225,31 @@ helper so both call sites share it.
   to confirm `holdAwake` behaviour, and get one clean no-input re-sleep
   timing. Not blocking — the scheduled-wake mechanism itself is validated.
 
-**Checks 3–4 — pending (require the user at the PC).**
+**Check 4 (lead time → `WAKE_LEAD_MS`) — measured 2026-09-15.**
 
-- **Check 3 (recurrence):** the throwaway *daily* task
-  (`a1-arm-test-wake.ps1 -Daily -At HH:MM`) must wake the PC two consecutive
-  mornings with nobody touching it.
-- **Check 4 (lead time):** measure resume → Telegram `/status` answers →
-  `llama-server` ready. This sets `WAKE_LEAD_MS`. (Use the armed boundary +
-  wall clock, not the event log.)
+- Server was **resident** (`llama-server` running, Qwen3.8-27B in VRAM) before
+  sleep, so this is the fast case: the wake unfreezes an already-loaded server.
+- Armed boundary **13:14:55**; first healthy probe (`a1-probe-health.ps1` →
+  HTTP 200) at **13:16:47** → **~112 s** from RTC fire to a healthy endpoint.
+- **Caveat:** 112 s is an **upper bound**. The gap is dominated by the human
+  round-trip (the user had to return and report the wake before the probe ran);
+  nothing can probe during sleep. The resident-server thaw is *faster* than
+  112 s; the number just can't be pinned tighter without an in-extension probe
+  that starts at resume.
+- **Recommendation:** `WAKE_LEAD_MS ≈ 120000` (2 min) for the resident-server
+  case — covers the OS thaw + network + process thaw with margin. A **cold**
+  server (model not loaded, wake triggers a full 27B load) needs far more and is
+  out of scope for this measurement; if a job can run against a cold server,
+  `WAKE_LEAD_MS` must be raised (or the server kept warm) — flag for A2. A2
+  defines `WAKE_LEAD_MS = 120_000` in the scheduler's scheduling helper; it is
+  a named, injectable value in scheduler tests, not an untracked literal.
+
+**Check 3 (daily recurrence) — deferred, not blocking.**
+
+- The one-shot RTC wake was validated twice (check 2); the daily trigger is the
+  same RTC `WakeToRun` mechanism, so the two-morning soak is low-risk. Deferred
+  to avoid a two-day wait; can be run later with
+  `a1-arm-test-wake.ps1 -Daily -At HH:MM` if desired.
 
 ---
 
@@ -286,7 +315,14 @@ All writes use `writeFileAtomicSync` (`src/util/atomicWrite.ts`).
   them `late`, and hold `holdAwake` for the duration.
 - **Watch the job directory** (`fs.watch` + 1 s debounce). On change: reload,
   recompute `next_due_at`, and call `setScheduledWakes()` with the distinct
-  times (minus `WAKE_LEAD_MS`) of enabled `wake: true` jobs.
+  local trigger times of enabled `wake: true` jobs, shifted earlier by
+  `WAKE_LEAD_MS`. A shift across midnight also shifts a weekly wake to the
+  preceding weekday. Reconcile this same complete set when the scheduler
+  acquires its lease. At activation/config reload, `jobsSetup` invokes the
+  scheduler's wake-reconcile entry point even when it will not start a tick;
+  `jobs.enabled: false` or an absent block passes `[]` and deletes
+  `ForgeScheduledWake`, so a stale task cannot wake the machine after its jobs
+  are disabled.
 - **Backoff.** After 3 consecutive failures, report once and double the
   interval up to 24 h. The first success resets it and reports recovery.
 - **Disposal.** The tick stops, the lease is released, and holds are disposed.
@@ -480,7 +516,9 @@ including the one in the test *name*), plus `scripts/tool-audit-catalog.mjs`.
 - **Scheduler** (fake clock + fake store): due computation for daily, weekly,
   and interval schedules across DST; a late tick triggers exactly one catch-up
   run; no double run; backoff and recovery reporting; no lease means no runs;
-  wake times recomputed on change; summarize deferred while a turn streams.
+  wake times recomputed on lease acquisition and change; `WAKE_LEAD_MS =
+  120_000` shifts a weekly 00:01 job to the preceding weekday; disabling jobs
+  deletes scheduled wakes; summarize deferred while a turn streams.
 - **Outbox:** a second change for the same job replaces the text and bumps
   `earlier_count`; an item past 24 h renders as a count only; the Telegram
   holder deletes a file only after the remote outbox accepted it; a
@@ -498,14 +536,17 @@ including the one in the test *name*), plus `scripts/tool-audit-catalog.mjs`.
   comments); post-check failure restores the line; `apply` switches without
   approval but still stops on a digest or smoke-test failure.
 - **Gates:** `npm run ci`, `npm run package`.
-- **Live smoke, B1:** a `github_issue` job on a real llama.cpp issue at a
-  5-minute interval, plus one scheduled wake from sleep, delivered on Telegram.
+- **Live smoke, B1:** a `github_issue` job on a real llama.cpp issue at the
+  minimum valid 15-minute interval, plus one scheduled wake from sleep,
+  delivered on Telegram. **CHANGED: B.1 rejects intervals below 15 minutes.**
 
 ## B.11 Rollout order
 
 A1 validation → A2 wake → **B1** store + scheduler + checks + notify (usable
 alone: jobs defined by hand in JSON) → **B2** `manage_jobs` → **B3** Telegram
-→ **B4** discuss → **B5** `llamacpp_update` (prepare only, then apply). Each
+→ **B4** discuss → **B5** `llamacpp_update` (prepare and apply; apply is
+allowed from day one). **CHANGED: this now matches the signed-off no-gate
+decision.** Each
 phase ends green on CI and is committed separately with its `CHANGES.md` entry.
 
 ## Out of scope

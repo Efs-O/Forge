@@ -57,7 +57,7 @@ function keyOf(context: RemotePowerContext, chatId: string): string {
 }
 
 /** True while a turn, a queued request, or an approval is outstanding. */
-function busyReason(host: ForgeHostFacade): string | undefined {
+export function busyReason(host: ForgeHostFacade): string | undefined {
   const status = host.status();
   if (status.streamingConversationIds.length) return 'a turn is still running';
   if (status.requestChains.length) return 'a request is still in flight';
