@@ -184,6 +184,14 @@ helper so both call sites share it.
 
 ## A.7 Phase A1 results (started 2026-09-15)
 
+> **Re-run check 2 before relying on it. The hardware changed after these tests.**
+> The test machine's motherboard was replaced later on 2026-09-15, after the
+> checks below ran. That changed the NIC (so the Wake-on-LAN MAC changed), the
+> machine's LAN address, and reset the BIOS wake settings to defaults.
+> Check 1 (principal) does not depend on hardware. Check 2 (RTC wake) and
+> check 4 (lead time) need one repeat on the new board. The site-specific
+> addresses are recorded in the private network notes, not in this repo.
+
 **Check 1 (G5) — can a non-elevated VS Code register the SYSTEM wake task? FAIL.**
 
 - Session elevation: `whoami /groups` → `Mandatory Label\Medium Mandatory Level`,
