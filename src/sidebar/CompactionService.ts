@@ -153,11 +153,19 @@ export async function runCompaction(
     auto: boolean;
     trigger?: CompactionTrigger;
     remoteOrigin?: { channel: string; chatId: string };
+    /**
+     * Called by the tool loop between two rounds of a turn that is still
+     * running. The turn owns the streaming state, so this skips the streaming
+     * guard, `beginCompaction` (whose release would clear the TURN's streaming
+     * flag) and the generationStarted/done posts (which would end its bubble).
+     */
+    midTurn?: boolean;
   } = { auto: false },
 ): Promise<CompactionOutcome> {
   const trigger: CompactionTrigger = options.trigger ?? 'sidebar';
   const remoteOrigin = options.trigger === 'remote' ? options.remoteOrigin : undefined;
-  if (deps.isStreaming(conversationId)) {
+  const midTurn = options.midTurn === true;
+  if (!midTurn && deps.isStreaming(conversationId)) {
     void vscode.window.showInformationMessage(
       'Forge: wait for the current response to finish before compacting.',
     );
@@ -240,8 +248,8 @@ export async function runCompaction(
   // The webview treats the conversation as streaming between these two, so a
   // prompt typed during the summarization is queued and flushed after it rather
   // than racing the cut point.
-  deps.post({ type: 'generationStarted', conversationId: conv.id });
-  const release = deps.beginCompaction(conv.id);
+  if (!midTurn) deps.post({ type: 'generationStarted', conversationId: conv.id });
+  const release = midTurn ? () => undefined : deps.beginCompaction(conv.id);
   // 'started' only after the split is valid — pre-start skips/failures (no
   // conversation, not enough history, still streaming) emit nothing, so the
   // remote layer never reports progress for a compaction that never began.
@@ -316,7 +324,7 @@ export async function runCompaction(
       );
     } finally {
       release();
-      deps.post({ type: 'done', finishReason: 'stop', conversationId: conv.id });
+      if (!midTurn) deps.post({ type: 'done', finishReason: 'stop', conversationId: conv.id });
     }
 
     const trimmed = capSummary(summary);

@@ -23,7 +23,9 @@ import type { CliSessionRegistry } from '../agents/CliSessionRegistry';
 import { AgentLoop, type SidebarProviderEvents } from './AgentLoop';
 import { SlashCommandHandler } from './SlashCommandHandler';
 import { wireTurnMirror } from './turnMirrorWiring';
-import type { CompactionEvent } from './CompactionService';
+import { runCompaction, type CompactionDeps, type CompactionEvent } from './CompactionService';
+import { compactMidTurn } from './midTurnCompaction';
+import { isContextExhaustionReason } from '../agent/truncationRecovery';
 import { ContextBudgetPublisher } from './ContextBudgetPublisher';
 import { ConversationTabs } from './ConversationTabs';
 import type { ChatAttachmentStore } from './ChatAttachmentStore';
@@ -132,19 +134,10 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     incompleteTurnReason: (convId) => agentLoop.incompleteTurnReason(convId),
   });
 
-  const slashHandler = new SlashCommandHandler({
-    getConfig: host.getConfig,
-    unloadModels: host.unloadModels,
-    pool,
-    events,
-    reindexCodebase: host.reindexCodebase,
-    newConversation: host.newConversation,
-    clearMessages: host.clearMessages,
-    submitPrompt: host.submitPrompt,
-    undo: host.undo,
-    keep: host.keep,
+  // One deps object for every compaction path: the slash command, the
+  // post-turn trigger (through the slash handler) and mid-turn compaction.
+  const compactionDeps: CompactionDeps = {
     post: host.post,
-    getActiveConv: host.getActive,
     getConversation: (conversationId) =>
       host.getSidebar().conversations.find((conv) => conv.id === conversationId),
     persistSession: host.persistSession,
@@ -164,10 +157,25 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     isStreaming: (conversationId) => agentLoop.isStreamingConv(conversationId),
     beginCompaction: (convId) => agentLoop.beginBackgroundWork(convId),
     snapshotRepoState,
+    emitCompactionEvent: (event) => host.emitCompactionEvent(event),
+  };
+
+  const slashHandler = new SlashCommandHandler({
+    ...compactionDeps,
+    getConfig: host.getConfig,
+    unloadModels: host.unloadModels,
+    pool,
+    events,
+    reindexCodebase: host.reindexCodebase,
+    newConversation: host.newConversation,
+    clearMessages: host.clearMessages,
+    submitPrompt: host.submitPrompt,
+    undo: host.undo,
+    keep: host.keep,
+    getActiveConv: host.getActive,
     incompleteTurnReason: (conversationId) => agentLoop.incompleteTurnReason(conversationId),
     resumeAfterManualCompact: (conversationId, reason) =>
       host.resumeAfterManualCompact(conversationId, reason),
-    emitCompactionEvent: (event) => host.emitCompactionEvent(event),
     toggleClanker: () => {
       const on = agentLoop.toggleClanker();
       host.rememberClankerMode(on);
@@ -178,6 +186,22 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
   // Keeps the ctx bar and the HalluMeter bridge live during a turn instead of
   // frozen until it ends. Fired once per tool round, never per token.
   agentLoop.setContextChangedListener((convId) => budget.onTurnContextChanged(convId));
+  agentLoop.setMidTurnCompactor((conv, request) =>
+    compactMidTurn(
+      {
+        getConfig: host.getConfig,
+        snapshot: (c) => budget.snapshot(c),
+        compact: (conversationId) =>
+          runCompaction(compactionDeps, conversationId, {
+            auto: true,
+            trigger: 'auto',
+            midTurn: true,
+          }),
+      },
+      conv,
+      request,
+    ),
+  );
   agentLoop.setTranscriptChangedListener(() => {
     host.persistSession();
     host.postSessionSync();
@@ -233,6 +257,10 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     lookup: (id) => host.getSidebar().conversations.find((conv) => conv.id === id),
     emit: (event) => slashHandler.emitActivity(event),
     endProgress: (id, ok) => agentLoop.reportProgress({ conversationId: id, kind: 'end', ok }),
+    willAutoResume: (message) => {
+      const auto = host.getConfig().auto_compact;
+      return auto?.enabled === true && auto.resume !== false && isContextExhaustionReason(message);
+    },
   });
 
   return { agentLoop, slashHandler, budget, tabs, send, requestChains };

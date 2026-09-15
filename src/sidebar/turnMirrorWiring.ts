@@ -17,6 +17,12 @@ export interface TurnMirrorWiring {
    * "working…" for good.
    */
   endProgress: (conversationId: string, ok: boolean) => void;
+  /**
+   * True when the post-turn auto-compaction will pick this failure up and
+   * resume it. Telling the user "nothing further is running" and then resuming
+   * a minute later is what made the 2026-09-15 Telegram thread contradict itself.
+   */
+  willAutoResume?: (failureMessage: string) => boolean;
 }
 
 /**
@@ -57,10 +63,13 @@ export function wireTurnMirror(events: SidebarProviderEvents, deps: TurnMirrorWi
     originalFailed?.(conversationId, message);
     if (conversationId === undefined) return;
     deps.endProgress(conversationId, false);
+    const next = deps.willAutoResume?.(message)
+      ? 'Forge will compact the context and resume the task automatically.'
+      : 'Nothing further is running. Send a new instruction to pick it back up.';
     deps.emit({
       text: `Forge: the turn stopped — ${message}
 
-Nothing further is running. Send a new instruction to pick it back up.`,
+${next}`,
       conversationId,
       kind: 'failure',
     });

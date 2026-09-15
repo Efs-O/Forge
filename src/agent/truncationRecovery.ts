@@ -8,7 +8,7 @@
  * discrimination and the recovery text live together, away from the loop.
  */
 
-import type { ChatCompletionRequest } from '../llm/types';
+import type { ChatCompletionRequest, ChatMessage } from '../llm/types';
 import { CHUNKED_WRITE_ADVICE, MAX_SINGLE_WRITE_CHARS } from '../tools/writeChunking';
 import {
   ToolCallTruncatedError,
@@ -69,6 +69,39 @@ export function truncationGuidance(
   );
 }
 
+/** The transcript rows that deliver `guidance` for a cut-off call. */
+export function truncationRecoveryMessages(
+  truncation: ToolCallTruncatedError,
+  guidance: string,
+): ChatMessage[] {
+  if (!truncation.toolCallId || !truncation.toolName) {
+    // The server failed the whole request, so there is no call id to answer —
+    // a plain user-role nudge is the portable alternative.
+    return [{ role: 'user', content: guidance }];
+  }
+  // Close the protocol properly: an unanswered tool_call id breaks the next
+  // request on strict templates.
+  return [
+    {
+      role: 'assistant',
+      content: null,
+      tool_calls: [
+        {
+          id: truncation.toolCallId,
+          type: 'function',
+          function: { name: truncation.toolName, arguments: '{}' },
+        },
+      ],
+    },
+    {
+      role: 'tool',
+      content: guidance,
+      tool_call_id: truncation.toolCallId,
+      name: truncation.toolName,
+    },
+  ];
+}
+
 /** Consecutive truncation recoveries tolerated before the turn is failed. */
 export const MAX_TRUNCATION_RECOVERIES = 2;
 
@@ -80,7 +113,49 @@ const MIN_OUTPUT_CAP_TOKENS = 512;
 
 export const CONTEXT_EXHAUSTED_MESSAGE =
   `Forge: the model's tool call keeps being cut off — the remaining context cannot hold it. ` +
-  `Use /compact or start a new chat, then ask for the file in smaller pieces.`;
+  `Compact the conversation (automatic when auto_compact is enabled) or start a new chat.`;
+
+/**
+ * Compactions one turn may run between its own rounds. The shrink guards in
+ * `runCompaction` refuse a compaction that buys no room; this caps the case
+ * where each one buys a little and the turn eats it straight back.
+ */
+export const MAX_MID_TURN_COMPACTIONS = 2;
+
+/**
+ * Why the next round cannot be sent, or undefined when it can. The three
+ * pre-flight refusals of the tool loop, in one place because the loop asks
+ * twice: once to decide whether to compact, once more after compacting.
+ */
+export function contextExhaustionReason(state: {
+  outputRoom: number | undefined;
+  reasoningReserve: number;
+  suppressesThinking: boolean;
+  truncationRecoveries: number;
+  minRoundHeadroom: number;
+}): string | undefined {
+  const { outputRoom } = state;
+  if (outputRoom === undefined) return undefined;
+  // No answer/tool-call room at all. The model-only tool-result window normally
+  // prevents this; this covers transcripts that cannot be reduced further.
+  if (outputRoom <= 0) return CONTEXT_INPUT_EXHAUSTED_MESSAGE;
+  // A round that cannot outlast the model's own reasoning budget cannot
+  // succeed: llama.cpp spends thinking and answer from the one budget, so it
+  // burns the whole of `max_tokens` inside the thinking block and returns
+  // `finish_reason: length` with nothing. A recovery round runs with thinking
+  // off, so the reserve does not apply to it. The round that proved this cost
+  // 13.5 minutes and produced nothing.
+  if (outputRoom <= state.reasoningReserve && !state.suppressesThinking) {
+    return CONTEXT_EXHAUSTED_MESSAGE;
+  }
+  // Only fail early once truncation has already happened this turn: with a
+  // healthy turn a thin margin is still enough for a short reply. After a
+  // cut-off call, a margin this thin means even a chunked retry cannot fit.
+  if (state.truncationRecoveries > 0 && outputRoom < state.minRoundHeadroom) {
+    return CONTEXT_EXHAUSTED_MESSAGE;
+  }
+  return undefined;
+}
 
 /** The request itself cannot fit, before any tokens can be generated. */
 export const CONTEXT_INPUT_EXHAUSTED_MESSAGE =

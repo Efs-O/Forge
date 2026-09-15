@@ -193,6 +193,20 @@ describe('failed-turn fan-out', () => {
     expect(emitted[0]!.text).toContain('Nothing further is running');
   });
 
+  it('does not say nothing is running when auto-compaction will resume the turn', () => {
+    const emitted: HostActivityEvent[] = [];
+    const events: SidebarProviderEvents = {};
+    wireTurnMirror(events, {
+      lookup: () => undefined,
+      emit: (event) => emitted.push(event),
+      endProgress: () => undefined,
+      willAutoResume: (message) => message === 'out of room',
+    });
+    events.onTurnFailed?.('conv-1', 'out of room');
+    expect(emitted[0]!.text).not.toContain('Nothing further is running');
+    expect(emitted[0]!.text).toContain('resume the task automatically');
+  });
+
   it('keeps a caller-supplied listener', () => {
     const emitted: HostActivityEvent[] = [];
     const inner = vi.fn();

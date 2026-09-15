@@ -37,7 +37,7 @@ const CONTEXT_TICK_THROTTLE_MS = 500;
 const WARN_AT = 0.85;
 
 /** Default fraction that triggers auto-compaction when it is enabled. */
-const DEFAULT_AUTO_COMPACT_AT = 0.85;
+export const DEFAULT_AUTO_COMPACT_AT = 0.85;
 
 function writeForgeBridge(model: string, usedTokens: number, maxTokens: number): void {
   try {

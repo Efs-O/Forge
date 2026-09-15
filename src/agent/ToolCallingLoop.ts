@@ -24,8 +24,10 @@ import {
   asTruncation,
   CONTEXT_INPUT_EXHAUSTED_MESSAGE,
   CONTEXT_EXHAUSTED_MESSAGE,
+  contextExhaustionReason,
   isLlamaContextExhaustion,
   isNativeToolJsonParseError,
+  MAX_MID_TURN_COMPACTIONS,
   MAX_ROUNDS_MESSAGE_PREFIX,
   OUTPUT_BUDGET_EXHAUSTED_NOTICE,
   MAX_REASONING_STOP_RETRIES,
@@ -33,6 +35,7 @@ import {
   REASONING_STOP_RETRY_NUDGE,
   MAX_TRUNCATION_RECOVERIES,
   truncationGuidance,
+  truncationRecoveryMessages,
 } from './truncationRecovery';
 
 export {
@@ -107,6 +110,13 @@ export interface ToolCallingLoopOptions {
    */
   getOutputRoom?: (messages: ChatMessage[]) => number | undefined;
   isMutatingTool?: (name: string) => boolean;
+  /**
+   * Compacts the conversation between two rounds of this turn. Resolves true
+   * only when it compacted (and left the window ending on a user turn); the
+   * loop then re-prepares the request. `exhausted` means the next round cannot
+   * be sent as things stand, so the threshold does not apply.
+   */
+  compactMidTurn?: (request: { exhausted: boolean }) => Promise<boolean>;
 }
 
 export interface ToolCallingLoopResult {
@@ -170,49 +180,52 @@ export async function runToolCallingLoop(
   const loopGuard = new ToolLoopGuard();
   let truncationRecoveries = 0;
   let reasoningStopRetries = 0;
+  let midTurnCompactions = 0;
+  // Set when truncation retries ran out: the next round compacts or the turn fails.
+  let forceCompaction = false;
 
   for (let round = 0; round < options.maxRounds; round++) {
     options.signal.throwIfAborted();
-    const prepared = options.prepareMessages
-      ? options.prepareMessages([...options.messages])
-      : [...options.messages];
-    const outputRoom = options.getOutputRoom?.(prepared);
+    const measure = (): { prepared: ChatMessage[]; outputRoom: number | undefined } => {
+      const messages = options.prepareMessages
+        ? options.prepareMessages([...options.messages])
+        : [...options.messages];
+      return { prepared: messages, outputRoom: options.getOutputRoom?.(messages) };
+    };
+    let { prepared, outputRoom } = measure();
     // A recovery round runs with thinking off, so the reasoning reserve does
-    // not apply to it — see the guard below and `suppressThinking`.
+    // not apply to it — see `contextExhaustionReason` and `suppressThinking`.
     const suppressesThinking =
       (truncationRecoveries > 0 || reasoningStopRetries > 0) &&
       (options.canUseThinkingKwargs ?? false);
-    // Do not send an input that leaves no answer/tool-call room at all. The
-    // model-only tool-result window normally prevents this; this guard covers
-    // transcripts that cannot be reduced further (for example, huge user text).
-    if (outputRoom !== undefined && outputRoom <= 0) {
-      throw new Error(CONTEXT_INPUT_EXHAUSTED_MESSAGE);
-    }
-    // A round that cannot outlast the model's own reasoning budget cannot
-    // succeed: llama.cpp spends thinking and answer from the one budget, so it
-    // burns the whole of `max_tokens` inside the thinking block, never reaches
-    // the budget that would have injected `--reasoning-budget-message`, and
-    // returns `finish_reason: length` with no content and no tool call. Refuse
-    // it here rather than spending the generation to find out — the round that
-    // proved this cost 13.5 minutes and produced nothing.
-    if (
-      outputRoom !== undefined &&
-      outputRoom <= reasoningReserve(options.model) &&
-      !suppressesThinking
-    ) {
+    const exhaustion = (): string | undefined =>
+      contextExhaustionReason({
+        outputRoom,
+        reasoningReserve: reasoningReserve(options.model),
+        suppressesThinking,
+        truncationRecoveries,
+        minRoundHeadroom: MIN_ROUND_HEADROOM_TOKENS,
+      });
+    // Compact between rounds rather than failing the turn and resuming it
+    // afterwards: auto-compaction only ran post-turn, so a long turn could
+    // start at 60% and die at 100% without the threshold ever being checked.
+    if (options.compactMidTurn && midTurnCompactions < MAX_MID_TURN_COMPACTIONS) {
+      const exhausted = forceCompaction || exhaustion() !== undefined;
+      if (await options.compactMidTurn({ exhausted })) {
+        midTurnCompactions++;
+        // Room changed, so a pending retry starts a fresh (thinking-off) streak.
+        truncationRecoveries = Math.min(truncationRecoveries, 1);
+        options.onMessagesChanged?.();
+        ({ prepared, outputRoom } = measure());
+      } else if (forceCompaction) {
+        throw new Error(CONTEXT_EXHAUSTED_MESSAGE);
+      }
+    } else if (forceCompaction) {
       throw new Error(CONTEXT_EXHAUSTED_MESSAGE);
     }
-    // Only fail early once truncation has already happened this turn: with a
-    // healthy turn a thin margin is still enough for a short reply, and
-    // refusing outright would break those. After a cut-off call, a margin this
-    // thin means even a chunked retry cannot fit.
-    if (
-      truncationRecoveries > 0 &&
-      outputRoom !== undefined &&
-      outputRoom < MIN_ROUND_HEADROOM_TOKENS
-    ) {
-      throw new Error(CONTEXT_EXHAUSTED_MESSAGE);
-    }
+    forceCompaction = false;
+    const refusal = exhaustion();
+    if (refusal) throw new Error(refusal);
     // A recovery round must not re-think. Measured on a live turn, thinking ate
     // ~4k tokens before the tool call even began — so the retry started with
     // LESS room than the attempt that just failed, and cut at the identical
@@ -285,7 +298,13 @@ export async function runToolCallingLoop(
       // Estimates deliberately err on the safe side, but the server tokenizer
       // remains authoritative. Convert its 400 into Forge's recoverable path
       // instead of surfacing a raw provider failure.
-      if (isLlamaContextExhaustion(err)) throw new Error(CONTEXT_INPUT_EXHAUSTED_MESSAGE);
+      if (isLlamaContextExhaustion(err)) {
+        if (!options.compactMidTurn || midTurnCompactions >= MAX_MID_TURN_COMPACTIONS) {
+          throw new Error(CONTEXT_INPUT_EXHAUSTED_MESSAGE);
+        }
+        forceCompaction = true;
+        continue;
+      }
       // Truncation is checked first: it shares llama-server's parse-error
       // message with a genuinely malformed call, but stripping native tools
       // here would re-send the same oversized conversation and ask for the same
@@ -293,7 +312,12 @@ export async function runToolCallingLoop(
       const truncation = asTruncation(err);
       if (truncation) {
         if (++truncationRecoveries > MAX_TRUNCATION_RECOVERIES) {
-          throw new Error(CONTEXT_EXHAUSTED_MESSAGE);
+          // Retrying in the same space failed; only more space can help. Let
+          // the next round compact first, or fail there if it cannot.
+          if (!options.compactMidTurn || midTurnCompactions >= MAX_MID_TURN_COMPACTIONS) {
+            throw new Error(CONTEXT_EXHAUSTED_MESSAGE);
+          }
+          forceCompaction = true;
         }
         // Deliberately NOT failureTracker.record(): running out of context is
         // not the model failing at tool calls, and three of these used to
@@ -302,34 +326,10 @@ export async function runToolCallingLoop(
           toolName: truncation.toolName,
           approxBytes: truncation.approxBytes,
         });
-        const guidance = truncationGuidance(truncation, outputRoom);
-        if (truncation.toolCallId && truncation.toolName) {
-          // Close the protocol properly: an unanswered tool_call id breaks the
-          // next request on strict templates.
-          options.messages.push({
-            role: 'assistant',
-            content: null,
-            tool_calls: [
-              {
-                id: truncation.toolCallId,
-                type: 'function',
-                function: { name: truncation.toolName, arguments: '{}' },
-              },
-            ],
-          });
-          options.messages.push({
-            role: 'tool',
-            content: guidance,
-            tool_call_id: truncation.toolCallId,
-            name: truncation.toolName,
-          });
-          options.onMessagesChanged?.();
-        } else {
-          // The server failed the whole request, so there is no call id to
-          // answer — a plain user-role nudge is the portable alternative.
-          options.messages.push({ role: 'user', content: guidance });
-          options.onMessagesChanged?.();
-        }
+        options.messages.push(
+          ...truncationRecoveryMessages(truncation, truncationGuidance(truncation, outputRoom)),
+        );
+        options.onMessagesChanged?.();
         continue;
       }
       if (!isNativeToolJsonParseError(err) || nativeDefinitions.length === 0) throw err;

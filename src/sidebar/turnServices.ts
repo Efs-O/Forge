@@ -56,6 +56,8 @@ export interface TurnServices {
   /** Emits visible progress only; reasoning has no route into this seam. */
   emitAgentProgress: (event: AgentProgressEvent) => void;
   remoteReach?: (conversationId: string) => number;
+  /** Compacts between two rounds of a running turn; true when it did. */
+  compactMidTurn?: (conv: ConversationRuntime, request: { exhausted: boolean }) => Promise<boolean>;
   commitUserPrompt: (
     conv: ConversationRuntime,
     text: string,

@@ -62,6 +62,7 @@ export class AgentLoop {
   private conversationLookup: ((id: string) => ConversationRuntime | undefined) | null = null;
   private remoteReach?: (conversationId: string) => number;
   private onContextChanged?: (convId: string) => void;
+  private midTurnCompactor?: TurnServices['compactMidTurn'];
   private onTranscriptChanged?: (convId: string) => void;
   private readonly progressListeners = new Set<AgentProgressListener>();
 
@@ -73,6 +74,11 @@ export class AgentLoop {
    */
   setContextChangedListener(listener: (convId: string) => void): void {
     this.onContextChanged = listener;
+  }
+
+  /** Registers mid-turn compaction; it needs compaction deps built after this loop. */
+  setMidTurnCompactor(compactor: NonNullable<TurnServices['compactMidTurn']>): void {
+    this.midTurnCompactor = compactor;
   }
 
   /**
@@ -213,6 +219,8 @@ export class AgentLoop {
       // Wrapped, not snapshotted, for the reason above: the probe is
       // registered after construction and only while a transport is running.
       remoteReach: (conversationId) => this.remoteReach?.(conversationId) ?? 0,
+      compactMidTurn: (conv, request) =>
+        this.midTurnCompactor?.(conv, request) ?? Promise.resolve(false),
       // `options` is load-bearing and was missing here: a narrower function is
       // assignable, so dropping the 4th parameter type-checked while silently
       // discarding `internal: true`. Every Forge-authored prompt — the

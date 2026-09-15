@@ -44,6 +44,7 @@ overlaps with an existing owner, extend the owner instead.
 | Conversation CRUD pure ops                           | `src/sidebar/ConversationOps.ts`         |
 | Slash command dispatch                               | `src/sidebar/SlashCommandHandler.ts`     |
 | Compaction: cut point, run, resume                   | `src/sidebar/CompactionService.ts`       |
+| Compaction between rounds of a running turn (policy) | `src/sidebar/midTurnCompaction.ts`       |
 | Summary prompt text + summary validation             | `src/sidebar/compactionPrompt.ts`        |
 | Applying the compaction window to a request          | `src/sidebar/compactionWindow.ts`        |
 | Host-recorded summary facts (from messages)          | `src/sidebar/compactionLedger.ts`        |

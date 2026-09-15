@@ -105,6 +105,7 @@ export interface ModelTurnContext {
   emitAgentProgress: (event: AgentProgressEvent) => void;
   /** Remote chats bound to a conversation. Absent when no transport is live. */
   remoteReach?: (conversationId: string) => number;
+  compactMidTurn?: (conv: ConversationRuntime, request: { exhausted: boolean }) => Promise<boolean>;
 }
 
 export interface ModelTurnRequest {
@@ -273,6 +274,7 @@ export async function runModelTurn(
     ...(remoteChats > 0 ? { remoteChats } : {}),
   };
 
+  const compactor = ctx.compactMidTurn;
   const result = await trackTurnCompletion(ctx.lifecycle, conv.id, () =>
     runToolCallingLoop({
       resolveBaseUrl,
@@ -437,6 +439,7 @@ export async function runModelTurn(
           model,
           server: config.llama_server,
         }).outputRoom || undefined,
+      ...(compactor ? { compactMidTurn: (req) => compactor(conv, req) } : {}),
     }),
   );
   // Final publish for the turn. The per-round ticks above are throttled, so
