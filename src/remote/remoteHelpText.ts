@@ -28,7 +28,7 @@ Queue: /drop <n|all> · /queue · /steer <n-or-prompt>
 
 Models: /model [n-or-name] · /restart · /unload
 
-Jobs: /job <n|name> pause|resume|run|delete · /jobs
+Jobs: /job <n|name> pause|resume|run|delete|chat · /jobs
 
 Window: /clanker on|off · /compact · /lock · /ratelimit [1-600|off] · /reload · /timeout [1-1440|off]
 
@@ -76,7 +76,7 @@ Notes:
 
 • /clanker on auto-approves non-dangerous tools for every tab of the VS Code window — writes then land with no confirmation anywhere, here or in the sidebar. It is remembered per workspace and survives a window reload, so it stays armed until someone turns it off; /clanker off, or the sidebar toggle, is the only thing that clears it
 
-• /jobs lists the persistent agent jobs, numbered; /job <n|name> pause|resume|run|delete acts on one. /job <n> run runs it on the next scheduler tick, in whichever window holds the jobs lease; /job <n> delete asks for "/job <n> delete confirm" first, like /sleep
+• /jobs lists the persistent agent jobs, numbered; /job <n|name> pause|resume|run|delete|chat acts on one. /job <n> run runs it on the next scheduler tick, in whichever window holds the jobs lease; /job <n> delete asks for "/job <n> delete confirm" first, like /sleep; /job <n> chat opens (or reuses) the job's discuss chat, seeded with the job, its recent runs, and the last observation
 
 • /system reports GPU load, which processes hold VRAM (Forge's own backends are tagged), RAM and drive space; it answers while a turn is running
 

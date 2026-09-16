@@ -569,3 +569,61 @@ phase ends green on CI and is committed separately with its `CHANGES.md` entry.
   for v1.
 - Dish cron WoL as a second wake path. That is site-specific and belongs in
   the network repo.
+
+## Acceptance criteria
+
+Checklist of invariants and edge cases, each mapped to a test or a named
+validation step. A green suite is necessary, not sufficient — each item below
+is what the suite must prove.
+
+1. **Jobs live outside `~/.forge/sessions/`** (D1). `JobStore` writes to
+   `~/.forge/jobs/<id>.json`, `state/<id>.json`, `runs/<id>.jsonl`.
+   Validation: `test/unit/JobStore.test.ts` (save/load, separate state file,
+   run log) + the A1/A2 manual steps already recorded.
+2. **A malformed job file is reported, not skipped silently.** Validation:
+   `JobStore.test.ts` "a malformed job file is reported"; a corrupt state file
+   falls back to the default state.
+3. **`loadAll` is deterministic** (creation, then id) so `/jobs` numbering and
+   `/job <n>` resolution agree. Validation: `JobStore.test.ts`
+   "loadAll returns jobs in a deterministic order".
+4. **The scheduler runs a job at most once per due window**, honours
+   `maxConcurrent`, and does not double-run a job that is already running.
+   Validation: `test/unit/JobScheduler.test.ts` + `JobSchedule.test.ts`
+   (interval/daily/weekly due math, lead time, midnight rollover, dedup).
+5. **`run_now` is cross-window and idempotent.** A `run_requests/<id>` marker
+   runs the job on the next tick in whichever window holds the lease; the
+   marker is deleted as consumed, so a crash mid-run does not re-fire it; a job
+   id containing a dot round-trips. Validation: `JobTools.test.ts`
+   (run_now marker, dotted-id round-trip) + `JobScheduler.test.ts`
+   (marker consumption).
+6. **`manage_jobs` (B2)**: one tool, `action` enum, advertised only when
+   `jobs.enabled`; `read` for list/get, `write` for the mutating actions,
+   `delete` for delete; `update` takes a partial definition and rejects unknown
+   keys and the id; `delete` always asks for approval; resolution is exact
+   id/name or unique substring, ambiguous returns the candidates. Validation:
+   `test/unit/JobTools.test.ts` (32 tests).
+7. **The Telegram commands (B3)**: `/jobs` lists numbered; `/job <n|name>
+   pause|resume|run|delete` resolves by number/exact/substring, ambiguous
+   returns candidates; a multi-word name resolves (the action is the final
+   token); `delete` needs `confirm` within 90s and the confirmation re-checks
+   `updated_at` so a job deleted and recreated with the same id is not deleted
+   by a stale confirmation; `approve` answers "not available yet" (B5). Both
+   are in `TELEGRAM_BOT_COMMANDS`, `/help`, and the drift guard. Validation:
+   `test/unit/RemoteJobCommands.test.ts` + `test/unit/RemoteRichText.test.ts`
+   (drift guard).
+8. **The outbox coalesces to one pending message per job** (D2): newest wins,
+   carries a count of earlier undelivered changes, and items older than 24 h
+   are counted, never sent. Validation: `test/unit/JobOutbox.test.ts` +
+   `JobOutboxWatcher.test.ts`.
+9. **The discuss chat (B.6)** is opened on demand, reuses the job's
+   conversation when it still exists, seeds it with the definition, the last 10
+   run rows, and the last observation, and persists `state.conversation_id` so
+   the next entry point reuses it. All three entry points share one seeding
+   path: `manage_jobs {action:"discuss"}` (B2), `/job <n> chat` (B4), and the
+   (out-of-scope) sidebar command. Validation: `JobTools.test.ts` (discuss)
+   + `RemoteJobCommands.test.ts` (`/job <n> chat`).
+10. **`llamacpp_update` (B5)** runs its safety stages in `apply` mode (digest
+    verify, smoke test, defer while a turn streams, post-check rollback);
+    `prepare` + `/job <n> approve` stays available as a per-job choice. No
+    gate on `apply` from day one (signed-off). Validation: named manual step
+    (a real release) + unit tests for the action's stage ordering and rollback.

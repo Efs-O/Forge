@@ -148,6 +148,39 @@ export class JobStore {
     writeFileAtomicSync(path.join(this.stateDir, `${id}.json`), JSON.stringify(state, null, 2));
   }
 
+  /**
+   * Atomically patch a job's state: read the current state, apply `patch`, and
+   * write it back with no await between the read and the write. The read and
+   * write are both synchronous, so a concurrent state write (e.g. the
+   * scheduler recording a run) cannot land in the gap and be clobbered — the
+   * lost-update race that a `load`-then-`saveState` pair has. Used by the
+   * discuss chat to set `conversation_id` without clobbering a run that
+   * finished in the meantime.
+   */
+  patchState(id: string, patch: Partial<JobState>): void {
+    const full = path.join(this.stateDir, `${id}.json`);
+    let raw: string;
+    try {
+      raw = fs.readFileSync(full, 'utf8');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') raw = JSON.stringify(defaultState());
+      else throw err;
+    }
+    let current: JobState;
+    try {
+      const result = JobStateSchema.safeParse(JSON.parse(raw));
+      // State corruption is recoverable everywhere else in this store: a
+      // malformed state merely makes the next job run establish a new
+      // baseline.  Keep patchState consistent with readState.
+      current = result.success ? result.data : defaultState();
+    } catch (err) {
+      if (err instanceof SyntaxError) current = defaultState();
+      else throw err;
+    }
+    const next = JobStateSchema.parse({ ...current, ...patch });
+    writeFileAtomicSync(full, `${JSON.stringify(next, null, 2)}\n`);
+  }
+
   /** Read a job's state, or a default when the file is absent. */
   private async readState(id: string): Promise<JobState> {
     const full = path.join(this.stateDir, `${id}.json`);

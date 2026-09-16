@@ -400,6 +400,24 @@ describe('manage_jobs — discuss', () => {
     expect(restored).toEqual(['conv-existing']);
     expect((await store.load('disk'))?.state.conversation_id).toBe('conv-existing');
   });
+
+  it('persists a newly created conversation even when its seed turn fails', async () => {
+    await store.saveJob(job());
+    const hostFacade = {
+      restoreConversation: async () => {
+        throw new Error('no such conversation');
+      },
+      createConversation: async () => ({ id: 'conv-1' }),
+      send: async () => {
+        throw new Error('seed failed');
+      },
+    };
+
+    await expect(
+      call({ action: 'discuss', job: 'disk' }, { hostFacade: () => hostFacade }),
+    ).rejects.toThrow('seed failed');
+    expect((await store.load('disk'))?.state.conversation_id).toBe('conv-1');
+  });
 });
 
 describe('manage_jobs — argument validation', () => {

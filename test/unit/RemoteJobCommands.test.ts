@@ -163,7 +163,7 @@ describe('/job — pause and resume', () => {
     const result = await run('/job disk');
     expect(result).toEqual({
       kind: 'rejected',
-      reason: 'usage: /job <n|name> pause|resume|run|delete',
+      reason: 'usage: /job <n|name> pause|resume|run|delete|chat',
     });
   });
 });
@@ -237,6 +237,83 @@ describe('/job — delete', () => {
     });
     // The (replacement) job survives.
     expect(await store.load('disk')).toBeDefined();
+  });
+});
+
+describe('/job — chat', () => {
+  it('opens a new discuss chat and seeds it, persisting the conversation id', async () => {
+    await store.saveJob(job());
+    const sent: Array<{ conversationId: string; text: string }> = [];
+    const host = {
+      restoreConversation: async () => {
+        throw new Error('no such conversation');
+      },
+      createConversation: async () => ({ id: 'conv-1' }),
+      send: async (conversationId: string, text: string) => {
+        sent.push({ conversationId, text });
+      },
+    } as unknown as ForgeHostFacade;
+    const ctxWithHost = { ...ctx, host };
+    const result = await run('/job disk chat', ctxWithHost);
+    expect(result).toEqual({ kind: 'handled' });
+    expect(channel.sent.at(-1)!.text).toContain('opened the discuss chat for "Disk"');
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.conversationId).toBe('conv-1');
+    expect(sent[0]!.text).toContain('Job "Disk" [disk]');
+    expect(sent[0]!.text).toContain('The user wants to discuss this job.');
+    // The conversation id is persisted so the next entry point reuses it.
+    expect((await store.load('disk'))?.state.conversation_id).toBe('conv-1');
+  });
+
+  it('reuses an existing conversation when it still exists', async () => {
+    await store.saveJob(job());
+    await store.saveState('disk', {
+      last_run_at: null,
+      last_ok_at: null,
+      last_observation: null,
+      consecutive_failures: 0,
+      next_due_at: null,
+      conversation_id: 'conv-existing',
+      summary_pending: false,
+    });
+    const restored: string[] = [];
+    const created: string[] = [];
+    const host = {
+      restoreConversation: async (id: string) => {
+        restored.push(id);
+      },
+      createConversation: async () => {
+        created.push('should-not-be-created');
+        return { id: 'should-not-be-created' };
+      },
+      send: async () => undefined,
+    } as unknown as ForgeHostFacade;
+    const ctxWithHost = { ...ctx, host };
+    await run('/job disk chat', ctxWithHost);
+    expect(restored).toEqual(['conv-existing']);
+    expect(created).toEqual([]);
+    expect((await store.load('disk'))?.state.conversation_id).toBe('conv-existing');
+  });
+
+  it('returns a clear rejection when opening the chat fails', async () => {
+    await store.saveJob(job());
+    const host = {
+      restoreConversation: async () => {
+        throw new Error('no such conversation');
+      },
+      createConversation: async () => {
+        throw new Error('chat limit reached');
+      },
+      send: async () => undefined,
+    } as unknown as ForgeHostFacade;
+    const ctxWithHost = { ...ctx, host };
+    const result = await run('/job disk chat', ctxWithHost);
+    expect(result).toEqual({
+      kind: 'rejected',
+      reason: 'could not open discuss chat: chat limit reached',
+    });
+    expect(channel.sent.at(-1)!.text).toContain('could not open the discuss chat');
+    expect(channel.sent.at(-1)!.text).toContain('chat limit reached');
   });
 });
 

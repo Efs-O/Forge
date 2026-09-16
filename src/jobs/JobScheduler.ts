@@ -254,8 +254,7 @@ export class JobScheduler {
         delivered,
       };
       await this.store.appendRun(job.id, row);
-      await this.store.saveState(job.id, {
-        ...state,
+      this.store.patchState(job.id, {
         last_run_at: now.getTime(),
         last_ok_at: now.getTime(),
         last_observation: result.observation,
@@ -338,7 +337,7 @@ export class JobScheduler {
       try {
         const summary = await this.summarizeChange(job, state.last_observation ?? '');
         await this.deliver(job, summary);
-        await this.store.saveState(job.id, { ...state, summary_pending: false });
+        this.store.patchState(job.id, { summary_pending: false });
       } catch {
         // A failed summary is not fatal: the change is already in the run log.
         this.notifyLocal(`Forge: could not summarize job "${job.name}".`);
@@ -429,8 +428,7 @@ export class JobScheduler {
     const now = this.now();
     if (count < BACKOFF_THRESHOLD) {
       // Not yet backed off: just reschedule normally.
-      await this.store.saveState(job.id, {
-        ...state,
+      this.store.patchState(job.id, {
         last_run_at: now.getTime(),
         next_due_at: nextDue(job.schedule, now).getTime(),
         consecutive_failures: count,
@@ -447,8 +445,7 @@ export class JobScheduler {
       scheduledIntervalMs * 2 ** (count - BACKOFF_THRESHOLD + 1),
     );
     const nextDueAt = now.getTime() + backoffMs;
-    await this.store.saveState(job.id, {
-      ...state,
+    this.store.patchState(job.id, {
       last_run_at: now.getTime(),
       next_due_at: nextDueAt,
       consecutive_failures: count,

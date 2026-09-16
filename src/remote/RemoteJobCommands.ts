@@ -18,6 +18,7 @@
 import type { JobStore } from '../jobs/JobStore';
 import type { JobFile } from '../jobs/jobSchema';
 import { describeSchedule, formatWhen } from '../jobs/jobDescribe';
+import { openDiscussChat } from '../jobs/jobDiscuss';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
 
@@ -119,7 +120,7 @@ async function handleJobsList(
   await reply(
     context,
     event.chatId,
-    `Forge: ${all.length} job(s):\n\n${lines.join('\n')}\n\nUse /job <n|name> pause|resume|run|delete.`,
+    `Forge: ${all.length} job(s):\n\n${lines.join('\n')}\n\nUse /job <n|name> pause|resume|run|delete|chat.`,
   );
   return { kind: 'handled' };
 }
@@ -150,9 +151,9 @@ async function handleJob(
     await reply(
       context,
       event.chatId,
-      'Forge: usage — /job <n|name> pause|resume|run|delete. /jobs lists the jobs.',
+      'Forge: usage — /job <n|name> pause|resume|run|delete|chat. /jobs lists the jobs.',
     );
-    return { kind: 'rejected', reason: 'usage: /job <n|name> pause|resume|run|delete' };
+    return { kind: 'rejected', reason: 'usage: /job <n|name> pause|resume|run|delete|chat' };
   }
   if (action === 'approve') {
     await reply(
@@ -162,11 +163,17 @@ async function handleJob(
     );
     return { kind: 'handled' };
   }
-  if (action !== 'pause' && action !== 'resume' && action !== 'run' && action !== 'delete') {
+  if (
+    action !== 'pause' &&
+    action !== 'resume' &&
+    action !== 'run' &&
+    action !== 'delete' &&
+    action !== 'chat'
+  ) {
     await reply(
       context,
       event.chatId,
-      `Forge: unknown action "${rawAction}" — use pause, resume, run, or delete.`,
+      `Forge: unknown action "${rawAction}" — use pause, resume, run, delete, or chat.`,
     );
     return { kind: 'rejected', reason: `unknown action: ${rawAction}` };
   }
@@ -203,6 +210,34 @@ async function handleJob(
         `Forge: resumed "${jobFile.job.name}" [${jobFile.job.id}].`,
       );
       return { kind: 'handled' };
+    case 'chat': {
+      // Open (or reuse) the job's discuss chat and seed it. Not activated: a
+      // chat opened from the phone should not steal the foreground from
+      // whatever the user is doing in the window.
+      //
+      // Caught here, not left to propagate: a failed open (chat limit reached,
+      // a send error, a store error) would otherwise surface as a transport
+      // failure and be redelivered up to three times, each attempt re-running
+      // the open. A clear rejection is the right outcome for a non-transient
+      // failure; the user can retry the command.
+      try {
+        await openDiscussChat(context.host, context.store, jobFile, false);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        await reply(
+          context,
+          event.chatId,
+          `Forge: could not open the discuss chat for "${jobFile.job.name}" [${jobFile.job.id}].\n\n${detail}`,
+        );
+        return { kind: 'rejected', reason: `could not open discuss chat: ${detail}` };
+      }
+      await reply(
+        context,
+        event.chatId,
+        `Forge: opened the discuss chat for "${jobFile.job.name}" [${jobFile.job.id}]. It is seeded with the job, its recent runs, and the last observation — send a message there to discuss it.`,
+      );
+      return { kind: 'handled' };
+    }
     case 'run':
       await context.store.requestRun(jobFile.job.id);
       await reply(

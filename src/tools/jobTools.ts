@@ -13,7 +13,7 @@
 import * as path from 'path';
 import type { ForgeConfig } from '../config/types';
 import type { JobStore } from '../jobs/JobStore';
-import { JobSchema, type JobFile, type RunRow } from '../jobs/jobSchema';
+import { JobSchema, type JobFile } from '../jobs/jobSchema';
 import {
   describeAction,
   describeCheck,
@@ -22,7 +22,8 @@ import {
   formatWhen,
   truncate,
 } from '../jobs/jobDescribe';
-import type { ForgeConversationSummary, ForgeHostFacade } from '../sidebar/ForgeHostFacade';
+import { openDiscussChat } from '../jobs/jobDiscuss';
+import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import type { RegisteredTool } from './ToolRegistry';
 
 /** The actions `manage_jobs` can perform. */
@@ -393,59 +394,8 @@ async function discussJob(deps: ManageJobsDeps, jobFile: JobFile): Promise<strin
   if (!host) {
     throw new Error('manage_jobs: `discuss` is not available in this window (no host facade).');
   }
-  const { job, state } = jobFile;
-  let conversationId: string | null = state.conversation_id;
-  if (conversationId) {
-    try {
-      await host.restoreConversation(conversationId, { activate: true });
-    } catch {
-      // The conversation no longer exists; fall through and create a new one.
-      conversationId = null;
-    }
-  }
-  if (!conversationId) {
-    const created: ForgeConversationSummary = await host.createConversation({ activate: true });
-    conversationId = created.id;
-  }
-  const seed = buildDiscussSeed(jobFile, await deps.store.readRuns(job.id));
-  await host.send(conversationId, seed);
-  // Persist the conversation id so the next `discuss` reuses the same chat.
-  const stateResult = await deps.store.load(job.id);
-  if (stateResult) {
-    const newState = { ...stateResult.state, conversation_id: conversationId };
-    await deps.store.saveState(job.id, newState);
-  }
-  return `Opened the discuss chat for "${job.name}" [${job.id}] and seeded it with the job, its recent runs, and the last observation. It is now an ordinary chat where manage_jobs is available.`;
-}
-
-/** Build the discuss-chat seed (B.6): the job, last 10 run rows, last observation. */
-function buildDiscussSeed(jobFile: JobFile, runs: RunRow[]): string {
-  const { job, state } = jobFile;
-  const recent = runs.slice(-10);
-  const runLines = recent.length
-    ? recent.map(
-        (row) =>
-          `- ${new Date(row.at).toLocaleString()}: ${row.outcome}` +
-          `${row.changed ? ' (changed)' : ''}${row.late ? ' (late)' : ''} — ${row.summary}`,
-      )
-    : ['(no runs yet)'];
-  const parts = [
-    `Job "${job.name}" [${job.id}]`,
-    '',
-    'Definition:',
-    JSON.stringify(job, null, 2),
-    '',
-    `Last observation: ${state.last_observation ?? '(none yet)'}`,
-    '',
-    `Last ${recent.length} run(s):`,
-    ...runLines,
-    '',
-    'The user wants to discuss this job.',
-  ];
-  let seed = parts.join('\n');
-  if (seed.length > 4000) {
-    const tail = '\n\nThe user wants to discuss this job.';
-    seed = parts.join('\n').slice(0, 4000 - tail.length) + tail;
-  }
-  return seed;
+  // The tool runs in a window where the user is present, so the chat is brought
+  // to the foreground (activate: true). The Telegram entry point does not.
+  await openDiscussChat(host, deps.store, jobFile, true);
+  return `Opened the discuss chat for "${jobFile.job.name}" [${jobFile.job.id}] and seeded it with the job, its recent runs, and the last observation. It is now an ordinary chat where manage_jobs is available.`;
 }

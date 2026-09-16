@@ -64,6 +64,21 @@
   controller, so the phone edits the same files the scheduler and `manage_jobs`
   use.
 
+### Persistent agent jobs (Phase B4) — the job discuss chat from the phone
+
+- **`/job <n|name> chat`**: opens (or reuses) the job's discuss chat and seeds
+  it with the job definition, the last 10 run rows, and the last observation
+  (B.6). Not activated — a chat opened from the phone does not steal the
+  foreground from whatever is in the window. The conversation id is persisted
+  in `state.conversation_id`, so the next entry point reuses the same chat.
+- **Shared seeding path**: the discuss logic is extracted from `jobTools.ts`
+  into `src/jobs/jobDiscuss.ts` (`openDiscussChat` + `buildDiscussSeed`), now
+  used by both `manage_jobs {action:"discuss"}` (B2) and `/job <n> chat`
+  (B4), so the seed and the conversation-id persistence cannot diverge between
+  the two surfaces.
+- The `manage_jobs` `discuss` action now activates the chat (the user is
+  present in the window); the Telegram entry point does not.
+
 ## 0.16.1
 
 ### Project instructions
