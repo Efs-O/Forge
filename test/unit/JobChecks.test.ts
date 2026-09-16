@@ -73,6 +73,21 @@ describe('githubReleaseCheck', () => {
     expect(result.summary).toBe('no new release');
   });
 
+  it('a 304 with NO baseline keeps the baseline null, never an empty string', async () => {
+    // Reachable when a job's state file was lost while the process kept its
+    // ETag cache. Returning '' here is not null, so the NEXT run's
+    // `lastObservation !== null` test reports a spurious "changed" — which for
+    // a llamacpp_update job is a real install attempt for a release already
+    // installed.
+    const result = await githubReleaseCheck(
+      { kind: 'github_release', repo: 'ggml-org/llama.cpp' },
+      null,
+      fakeCtx(null, 'W/"etag1"'),
+    );
+    expect(result.changed).toBe(false);
+    expect(result.observation).toBeNull();
+  });
+
   it('an asset pattern filters the recorded assets', async () => {
     const result = await githubReleaseCheck(
       { kind: 'github_release', repo: 'ggml-org/llama.cpp', asset_pattern: '*win-cuda-13.3-x64.zip' },

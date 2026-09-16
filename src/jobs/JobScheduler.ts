@@ -1,11 +1,12 @@
 import { FileLease } from '../util/FileLease';
 import { jobsFetch } from './jobsFetch';
-import { defaultOutboxDir, writeOutboxItem } from './JobOutbox';
+import { defaultOutboxDir } from './JobOutbox';
+import { JobDelivery } from './JobDelivery';
 import { githubIssueCheck, githubReleaseCheck } from './checks/github';
 import { diskSpaceCheck } from './checks/diskSpace';
 import type { CheckContext } from './checks/checkTypes';
 import { isDue, nextDue, wakeTimesFor } from './schedule';
-import type { Job, JobFile, JobState, RunRow } from './jobSchema';
+import type { JobFile, RunRow } from './jobSchema';
 import type { JobStore } from './JobStore';
 import type { PowerControl, SleepIfIdleInput } from '../system/PowerControl';
 import { shouldSleepIfIdle } from '../system/PowerControl';
@@ -77,6 +78,8 @@ export class JobScheduler {
   private readonly summarize: ((prompt: string) => Promise<string>) | undefined;
   private readonly tickMs: number;
   private readonly llamacpp: LlamacppAction | undefined;
+  /** User-facing delivery: the outbox, the toast, and the summarize timing (B.4). */
+  private readonly delivery: JobDelivery;
 
   private lease: FileLease | undefined;
   private timer: ReturnType<typeof setInterval> | undefined;
@@ -102,13 +105,21 @@ export class JobScheduler {
     this.busy = deps.busy ?? (() => undefined);
     this.summarize = deps.summarize;
     this.tickMs = deps.tickMs ?? DEFAULT_TICK_MS;
+    this.delivery = new JobDelivery({
+      store: this.store,
+      outboxDir: this.outboxDir,
+      notifyLocal: this.notifyLocal,
+      busy: this.busy,
+      summarize: this.summarize,
+      now: () => this.now().getTime(),
+    });
     this.llamacpp = deps.llamacpp
       ? new LlamacppAction(deps.llamacpp, {
           jobsRoot: this.store.root,
           allowedHosts: () => this.getConfig().allowedHosts,
           busy: this.busy,
           now: () => this.now().getTime(),
-          deliver: (jobId, text) => this.deliverForJob(jobId, text),
+          deliver: (jobId, text) => this.delivery.deliverForJob(jobId, text),
           notifyLocal: this.notifyLocal,
         })
       : undefined;
@@ -123,15 +134,7 @@ export class JobScheduler {
     // `immediate` defaults to true: production wants the first tick on
     // acquisition. A test drives ticks itself and passes `immediate: false`.
     const immediate = options.immediate ?? true;
-    try {
-      this.lease = await FileLease.acquire({
-        directory: this.leaseDirectory,
-        key: 'jobs-scheduler',
-        workspaceId: this.workspaceId,
-        instanceId: this.instanceId,
-        onLost: () => this.stop(),
-      });
-    } catch {
+    if (!(await this.acquireLease())) {
       // Another window owns the scheduler. Do not tick.
       return false;
     }
@@ -144,13 +147,55 @@ export class JobScheduler {
     return true;
   }
 
-  /** Stop the tick, release the lease, and dispose any held power requests. */
+  /**
+   * Try to take the `jobs-scheduler` lease. Returns whether this window now
+   * holds it. Used both on `start()` and on every tick that finds itself
+   * without one, so a lost lease is recovered rather than fatal.
+   */
+  private async acquireLease(): Promise<boolean> {
+    try {
+      this.lease = await FileLease.acquire({
+        directory: this.leaseDirectory,
+        key: 'jobs-scheduler',
+        workspaceId: this.workspaceId,
+        instanceId: this.instanceId,
+        onLost: () => this.handleLeaseLost(),
+      });
+      return true;
+    } catch {
+      this.lease = undefined;
+      return false;
+    }
+  }
+
+  /**
+   * Stop for good: the tick stops, the lease is released, and the scheduler
+   * cannot be restarted. This is disposal — `jobsSetup` calls it on
+   * deactivation and on a config reload that disables jobs.
+   *
+   * It is NOT what happens when the lease is merely lost; see
+   * {@link handleLeaseLost}.
+   */
   async stop(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
     await this.lease?.release();
+    this.lease = undefined;
+  }
+
+  /**
+   * The lease was lost — another window stole it, or a heartbeat failed. Drop
+   * it and go passive, but **stay alive and keep ticking**: the next tick tries
+   * to re-acquire, and picks the scheduler back up if it succeeds.
+   *
+   * This must never be `stop()`. Disposing here made a transient lease loss
+   * permanent for the lifetime of the window — silently, with no toast, no run
+   * row and no outbox item, while `ForgeScheduledWake` stayed armed and kept
+   * waking the machine for jobs that nobody was running any more.
+   */
+  private handleLeaseLost(): void {
     this.lease = undefined;
   }
 
@@ -186,15 +231,34 @@ export class JobScheduler {
    * calls it, and a test drives it directly.
    */
   async tick(): Promise<void> {
-    if (this.running || this.disposed || !this.lease) return;
+    if (this.running || this.disposed) return;
+    // No lease: try to take it. A window that lost its lease (or whose holder
+    // went away) picks the scheduler back up here rather than staying dead.
+    if (!this.lease) {
+      if (!(await this.acquireLease())) return;
+      await this.reconcileWakes();
+    }
     this.running = true;
     try {
       const now = this.now();
-      const gap = this.lastTickAt === undefined ? 0 : now.getTime() - this.lastTickAt;
-      this.lastTickAt = now.getTime();
-      const isResume = gap > RESUME_GAP_MS;
-
       const jobs = await this.store.loadAll();
+      const gap = this.lastTickAt === undefined ? 0 : now.getTime() - this.lastTickAt;
+      const firstTick = this.lastTickAt === undefined;
+      this.lastTickAt = now.getTime();
+      // A tick arriving long after the last one is a resume from sleep. The
+      // FIRST tick of a process has no previous tick to measure against, but it
+      // is the same situation in disguise — VS Code was closed while jobs fell
+      // due (D7) — so detect it from the job states instead, or D7's `late`
+      // flag never gets set on the one path it was written for.
+      const isResume = firstTick
+        ? jobs.some(
+            (jf) =>
+              jf.job.enabled &&
+              jf.state.next_due_at !== null &&
+              now.getTime() - jf.state.next_due_at > RESUME_GAP_MS,
+          )
+        : gap > RESUME_GAP_MS;
+
       const byId = new Map(jobs.map((jf) => [jf.job.id, jf]));
       const toRun: JobFile[] = [];
       const seen = new Set<string>();
@@ -229,7 +293,7 @@ export class JobScheduler {
 
       // A change recorded while a turn was streaming is summarized now that the
       // tick has reached it (the summary waits for idle, B.4).
-      await this.processPendingSummaries();
+      await this.delivery.processPendingSummaries();
 
       // A llamacpp_update that staged a build (apply, or an approved prepare)
       // switches now that the tick has reached it, only when idle (B5).
@@ -254,17 +318,17 @@ export class JobScheduler {
     const hold = job.wake ? this.power.holdAwake(`job ${job.id}`) : undefined;
     try {
       const result = await this.runCheck(jobFile);
-      const change = await this.deliverForChange(job, state, result);
+      const change = await this.delivery.deliverForChange(job, result);
       let delivered = change.delivered;
       if (state.consecutive_failures >= BACKOFF_THRESHOLD) {
-        await this.deliver(
+        await this.delivery.deliver(
           job,
           `recovered after ${state.consecutive_failures} consecutive failures`,
         );
         delivered++;
       }
       // When the check did not change, a previously pending summary must
-      // survive this run so processPendingSummaries can still deliver it once
+      // survive this run so JobDelivery.processPendingSummaries can deliver it once
       // idle. A no-change run must not clobber a pending summarize.
       const nextSummaryPending = result.changed ? change.summaryPending : state.summary_pending;
       const row: RunRow = {
@@ -296,74 +360,15 @@ export class JobScheduler {
           delivered: 0,
         })
         .catch(() => undefined);
-      await this.deliver(job, `failing: ${message}`).catch(() => undefined);
+      // The failure is REPORTED by applyBackoff, once, when the job crosses the
+      // threshold (B.3: "After 3 consecutive failures, report once"). Reporting
+      // every failed run instead turned a GitHub outage into a toast on every
+      // tick and inflated the coalesced outbox count for what was one
+      // continuous fault.
       await this.applyBackoff(jobFile, message).catch(() => undefined);
     } finally {
       hold?.dispose();
       this.runningJobs.delete(job.id);
-    }
-  }
-
-  /**
-   * Run the job's `on_change` for a change and deliver it. Returns how many
-   * outbox items were delivered and whether a summarize is still pending (the
-   * change was recorded but the model is busy, so the summary waits for idle).
-   */
-  private async deliverForChange(
-    job: Job,
-    _state: JobState,
-    result: { observation: string; changed: boolean; summary: string },
-  ): Promise<{ delivered: number; summaryPending: boolean }> {
-    if (!result.changed) return { delivered: 0, summaryPending: false };
-    if (job.on_change.kind === 'summarize') {
-      // A summarize runs only when no turn is streaming, so it never fights a
-      // live chat for the GPU. If busy, record the change and defer; the next
-      // idle tick summarizes it.
-      if (this.busy() !== undefined) return { delivered: 0, summaryPending: true };
-      const summary = await this.summarizeChange(job, result.observation);
-      await this.deliver(job, summary);
-      return { delivered: 1, summaryPending: false };
-    }
-    // notify: deliver the check's own summary.
-    await this.deliver(job, result.summary);
-    return { delivered: 1, summaryPending: false };
-  }
-
-  /**
-   * Summarize a recorded change with a no-tools model call. The prompt is built
-   * from the job name, the typed observation, and the requested focus — no
-   * free-form user prompt (B.5).
-   */
-  private async summarizeChange(job: Job, observation: string): Promise<string> {
-    if (!this.summarize) return 'summarize unavailable (no model wired)';
-    const focus = job.on_change.kind === 'summarize' ? job.on_change.focus : ['release_notes'];
-    const prompt =
-      `Summarize what changed for the job "${job.name}". ` +
-      `Focus: ${focus.join(', ')}. ` +
-      `The check's observation is:\n${observation}\n\n` +
-      'Write a short, plain summary of the change and why it matters. ' +
-      'If the observation is empty or you cannot tell, say so.';
-    const reply = await this.summarize(prompt);
-    return reply.trim().slice(0, 500);
-  }
-
-  /**
-   * Summarize any job whose change was recorded while a turn was streaming
-   * (`summary_pending`), now that a tick has reached it. Runs only when idle.
-   */
-  private async processPendingSummaries(): Promise<void> {
-    if (this.busy() !== undefined) return;
-    const jobs = await this.store.loadAll();
-    for (const { job, state } of jobs) {
-      if (!state.summary_pending) continue;
-      try {
-        const summary = await this.summarizeChange(job, state.last_observation ?? '');
-        await this.deliver(job, summary);
-        this.store.patchState(job.id, { summary_pending: false });
-      } catch {
-        // A failed summary is not fatal: the change is already in the run log.
-        this.notifyLocal(`Forge: could not summarize job "${job.name}".`);
-      }
     }
   }
 
@@ -387,28 +392,23 @@ export class JobScheduler {
     }
   }
 
-  /**
-   * Deliver a user-facing fact for a job: a toast in the scheduler window (no
-   * Telegram needed) and a coalesced outbox file for the Telegram lease holder
-   * to deliver to the owner chat (D2). The outbox write is the durable record;
-   * the toast is the local half when no Telegram window is around.
-   */
-  private async deliver(job: Job, text: string): Promise<void> {
-    const message = `Job "${job.name}": ${text}`;
-    this.notifyLocal(message);
-    await writeOutboxItem(this.outboxDir, job.id, job.name, message, this.now().getTime());
-  }
-
   /** Run the check. Returns the observation, whether it changed, and a summary. */
   private async runCheck(jobFile: JobFile): Promise<{
-    observation: string;
+    observation: string | null;
     changed: boolean;
     summary: string;
   }> {
     const { job, state } = jobFile;
     const { allowedHosts } = this.getConfig();
+    // The ETag cache is keyed PER JOB, not per URL alone. Two jobs watching the
+    // same repo share a URL, and a cache keyed on the URL alone hands job B a
+    // 304 on its very first run — leaving it with no baseline while the server
+    // says "nothing new", a state the check cannot tell apart from a real
+    // no-change. The same happens to one job whose state file was lost while
+    // the process kept its cache.
     const ctx: CheckContext = {
-      fetch: (url) => jobsFetch(url, { allowedHosts, etagCache: this.etagCache }),
+      fetch: (url) =>
+        jobsFetch(url, { allowedHosts, etagCache: this.etagCache, cacheKeyPrefix: job.id }),
       etagCache: this.etagCache,
       allowedHosts,
     };
@@ -432,7 +432,13 @@ export class JobScheduler {
     // (the tag comes from the observation) and the action to be wired.
     if (checkResult.changed && job.action?.kind === 'llamacpp_update') {
       if (job.check.kind === 'github_release' && this.llamacpp) {
-        const tag = (JSON.parse(checkResult.observation) as { tag?: string }).tag;
+        // `changed` is only ever true with a real observation, but the type is
+        // nullable now and a silent `JSON.parse(null)` is not the failure mode
+        // to pick for the one action that mutates the machine.
+        const tag =
+          checkResult.observation === null
+            ? undefined
+            : (JSON.parse(checkResult.observation) as { tag?: string }).tag;
         if (typeof tag === 'string' && tag.length > 0) {
           const stage = await this.llamacpp.stage(job.action, job.id, job.check.repo, tag);
           checkResult = { ...checkResult, summary: stage.summary };
@@ -445,16 +451,6 @@ export class JobScheduler {
       changed: checkResult.changed,
       summary: checkResult.summary,
     };
-  }
-
-  /** Deliver a fact for a job by id (the action does not hold the Job). */
-  private async deliverForJob(jobId: string, text: string): Promise<void> {
-    const jobFile = await this.store.load(jobId);
-    if (!jobFile) {
-      this.notifyLocal(`Forge: ${text}`);
-      return;
-    }
-    await this.deliver(jobFile.job, text);
   }
 
   /** Apply backoff after a failure: double the interval up to 24 h (B.3). */
@@ -486,8 +482,12 @@ export class JobScheduler {
       next_due_at: nextDueAt,
       consecutive_failures: count,
     });
-    // The first backoff is reported once; the recovery (a success after
-    // backoff) is reported by the next successful run.
+    // Report exactly once, on the run that crosses the threshold. Later
+    // failures keep extending the backoff silently; the recovery (a success
+    // after backoff) is reported by the next successful run.
+    if (count === BACKOFF_THRESHOLD) {
+      await this.delivery.deliver(job, `failing: ${message}`).catch(() => undefined);
+    }
     await this.store.appendRun(job.id, {
       at: now.getTime(),
       late: false,

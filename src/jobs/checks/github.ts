@@ -86,8 +86,9 @@ export async function githubReleaseCheck(
   const result = await ctx.fetch(url);
 
   if (result.notModified) {
-    // A 304 means the server has nothing new; the last observation stands.
-    return { observation: lastObservation ?? '', changed: false, summary: 'no new release' };
+    // A 304 means the server has nothing new; the last observation stands —
+    // including when it is null (no baseline yet), which must NOT become ''.
+    return { observation: lastObservation, changed: false, summary: 'no new release' };
   }
 
   const release = pickRelease(result.body, channel);
@@ -139,7 +140,7 @@ export async function githubIssueCheck(
   const result = await ctx.fetch(url);
 
   if (result.notModified) {
-    return { observation: lastObservation ?? '', changed: false, summary: 'issue unchanged' };
+    return { observation: lastObservation, changed: false, summary: 'issue unchanged' };
   }
 
   const issue = JSON.parse(result.body) as {

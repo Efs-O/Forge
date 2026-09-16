@@ -95,8 +95,32 @@ export async function writeOutboxItem(
   writeFileAtomicSync(itemPath(dir, jobId), JSON.stringify(item, null, 2));
 }
 
-/** Delete a job's pending item after it has been delivered. */
-export async function deleteOutboxItem(dir: string, jobId: string): Promise<void> {
+/**
+ * Delete a job's pending item after it has been delivered.
+ *
+ * `expectedChangedAt` makes this a compare-and-delete, and the watcher must
+ * pass it. Delivery is not instantaneous: the scheduler can write a NEWER
+ * change for the same job between the moment the watcher handed the text to the
+ * transport and the moment it unlinks. Because coalescing keeps exactly one
+ * file per job, that newer change lands on the very file about to be removed,
+ * and a blind unlink would drop a change nothing counted — the one outcome the
+ * outbox exists to prevent. When the file on disk no longer carries the
+ * `changed_at` that was delivered, the delete is skipped and the next drain
+ * sends the newer text.
+ *
+ * Omitting `expectedChangedAt` deletes unconditionally: that is for a caller
+ * discarding an item outright (a deleted job), not for a delivery.
+ */
+export async function deleteOutboxItem(
+  dir: string,
+  jobId: string,
+  expectedChangedAt?: number,
+): Promise<void> {
+  if (expectedChangedAt !== undefined) {
+    const current = await readOutboxItem(dir, jobId).catch(() => undefined);
+    // Gone already, or superseded by a newer change: nothing to delete here.
+    if (!current || current.changed_at !== expectedChangedAt) return;
+  }
   await fs.promises.unlink(itemPath(dir, jobId)).catch((err: NodeJS.ErrnoException) => {
     if (err.code !== 'ENOENT') throw err;
   });

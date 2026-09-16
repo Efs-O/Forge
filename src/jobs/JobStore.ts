@@ -2,6 +2,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { writeFileAtomicSync } from '../util/atomicWrite';
+import { clearStaged } from './actions/stagedBuild';
+import { deleteOutboxItem } from './JobOutbox';
 import {
   JobSchema,
   JobStateSchema,
@@ -63,6 +65,15 @@ export class JobStore {
   /** The directory holding `run_now` marker files (B2). */
   get runRequestsDir(): string {
     return this.runRequests;
+  }
+
+  /**
+   * The coalescing outbox directory for this store's root (D2). Derived from
+   * the root rather than from `defaultOutboxDir()` so a store rooted somewhere
+   * else (a test) cleans up its own outbox and never the real one.
+   */
+  get outboxDir(): string {
+    return path.join(this.jobsDir, 'outbox');
   }
 
   /** Create the directory tree if it does not exist. */
@@ -206,7 +217,27 @@ export class JobStore {
     return result.data;
   }
 
-  /** Delete a job's definition, state, run log, and any pending run request. */
+  /**
+   * Delete every durable trace of a job: its definition, state, run log, any
+   * pending `run_now` marker, any staged `llamacpp_update` build, and any
+   * pending outbox notification.
+   *
+   * The last two are not optional tidiness. `processPendingSwitches` enumerates
+   * `staged/` directly and never consults this store, so a staged build left
+   * behind by a delete will still write `llama_server.binary` and restart the
+   * backend for a job that no longer exists — the one action in the feature
+   * that mutates the machine, surviving the command whose whole purpose is to
+   * stop it. A left-behind outbox item is the milder version: a notification
+   * arrives for a job the user just removed.
+   *
+   * The invariant to preserve when adding a new per-job artifact: **every
+   * directory under the jobs root must be cleaned here.** `JobStore.test.ts`
+   * enforces it by enumerating the root with `readdir` rather than a fixed
+   * list, so a later phase that invents a new directory fails this test.
+   *
+   * Each artifact is removed through its owning module (`clearStaged`,
+   * `deleteOutboxItem`) rather than by re-deriving its path here.
+   */
   async delete(id: string): Promise<void> {
     for (const full of [
       path.join(this.jobsDir, `${id}.json`),
@@ -218,6 +249,8 @@ export class JobStore {
         if (err.code !== 'ENOENT') throw err;
       });
     }
+    clearStaged(this.jobsDir, id);
+    await deleteOutboxItem(this.outboxDir, id);
   }
 
   /**

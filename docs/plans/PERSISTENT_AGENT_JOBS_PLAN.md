@@ -577,6 +577,48 @@ phase ends green on CI and is committed separately with its `CHANGES.md` entry.
 - Dish cron WoL as a second wake path. That is site-specific and belongs in
   the network repo.
 
+## State × lifecycle ledger
+
+**Added 2026-09-16, retroactively, from the audit
+([PERSISTENT_AGENT_JOBS_AUDIT.md](PERSISTENT_AGENT_JOBS_AUDIT.md)). This is the
+worked example the `FORGE.md` / `CLAUDE.md` plan-doc rule points at — written
+after the fact here, but it belongs *before* phase 1 in every future plan.**
+
+Why it exists: every high-severity defect the audit found lived in a seam
+between two modules written in two different phases, not inside any one file.
+Each phase was reviewed against its own spec and passed. Nothing in that process
+ever asks "what does the `delete` written in B2 owe the `staged/` file invented
+in B5?" A ledger asks it on paper, before the code exists.
+
+**Rows** = every durable thing the feature writes. **Columns** = every lifecycle
+event that must have an answer for it. Fill every cell. An empty cell is a bug
+you have not written yet.
+
+| Durable artifact | Owner | Job deleted | Job paused | Crash mid-write | Scheduler loses lease / window closes | TTL / expiry |
+| --- | --- | --- | --- | --- | --- | --- |
+| `jobs/<id>.json` (definition) | `JobStore` | removed | kept, `enabled:false` | atomic write, prior intact | untouched (file is the source of truth) | none |
+| `jobs/state/<id>.json` | `JobStore` | removed | kept | atomic; corrupt ⇒ `defaultState()` and re-baseline | untouched | none |
+| `jobs/runs/<id>.jsonl` | `JobStore` | removed | kept | append-only; partial line skipped on read | untouched | none (grows forever, by design) |
+| `jobs/run_requests/<id>` | `JobStore` | removed | kept (a marker overrides `enabled`, deliberately) | consumed *before* the run, so a crash cannot re-fire it | kept; the next lease holder consumes it | none |
+| `jobs/staged/<id>.json` | `stagedBuild` | **✗ NOT removed — audit F1** | kept (a paused job can still switch) | atomic; corrupt ⇒ treated as absent | kept; next holder switches it | `STAGE_TTL_MS` 24 h, checked in `performSwitch` + `approveStaged` |
+| `jobs/outbox/<id>.json` | `JobOutbox` | **✗ NOT removed — audit F1** | kept | atomic; corrupt item skipped | kept; the Telegram holder drains it | 24 h ⇒ rendered as a count, never deleted by age |
+| `jobs/jobs-scheduler.lease.json` | `FileLease` | n/a | n/a | stale lease is stealable | released on `stop()`; **✗ `onLost` disposes the scheduler permanently — audit F2** | lease's own staleness window |
+| `ForgeScheduledWake` (Task Scheduler) | `PowerControl` | reconciled on the store watch | reconciled (a disabled job contributes no wake) | n/a (Windows owns it) | **✗ survives a disposed scheduler — keeps waking the PC for jobs nobody runs** | none; `[]` deletes the task |
+| `%LOCALAPPDATA%\Forge\llama.cpp-<tag>\` | `llamacppUpdate` stage 4 | kept (old builds are never deleted — intentional) | kept | **✗ partial extract is never cleaned, and blocks every retry of that tag — audit F3** | kept | none |
+| `%LOCALAPPDATA%\Forge\staging\*.zip` | `llamacppUpdate` stage 2 | kept | kept | **✗ never deleted on either success or failure — ~1 GB leaked per release** | kept | none |
+| `.forge/config.yaml` `llama_server.binary` | `ConfigWriter` via `setBinary` | **✗ a deleted job's staged build still writes it — audit F1** | n/a | comment-preserving write | n/a | rollback target snapshotted at *stage* time, used up to 24 h later — **✗ audit F5** |
+| `state.conversation_id` → a session under `~/.forge/sessions/` | `jobDiscuss` | state file removed; **the conversation itself is deliberately kept** (it is an ordinary chat the user may still want) | kept | `patchState` read+write with no await between | untouched | none |
+
+Six of the audit's thirteen findings — including both high-severity ones — are
+visible as empty cells in this table. None of them required reading a line of
+code to spot.
+
+**Make one row CI-enforceable.** A ledger is still prose. Pick the row whose gap
+is cheapest to guard and turn it into a test that fails when a later phase adds
+a new artifact: assert that `JobStore.delete()` removes a file from *every*
+directory under the jobs root, enumerated with `readdir`, not from a hardcoded
+list. A B5 that invents `staged/` then fails a B1 test until someone wires it up.
+
 ## Acceptance criteria
 
 Checklist of invariants and edge cases, each mapped to a test or a named

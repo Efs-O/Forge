@@ -25,6 +25,15 @@ export interface JobsFetchOptions {
    * stale cached observation.
    */
   forceFresh?: boolean;
+  /**
+   * Namespaces this caller's entries in the shared ETag cache. The scheduler
+   * passes the job id: two jobs watching the same URL must not share an ETag,
+   * or the second one's first run gets a 304 and never establishes a baseline.
+   */
+  cacheKeyPrefix?: string;
+  /** Cap on the response body read into memory. Defaults to 8 MiB; injectable
+   *  so the cap itself is testable without a huge fixture. */
+  maxBytes?: number;
 }
 
 export interface JobsFetchResult {
@@ -45,31 +54,101 @@ export class JobsFetchRefusedError extends Error {
   }
 }
 
+/** The maximum body a job will read into memory. A release list is tens of KB;
+ *  anything near this is a misconfigured endpoint, not a check. */
+const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+const MAX_REDIRECT_HOPS = 10;
+
+/** Assert a URL's host is allowed, returning the lowercased host. */
+function gateHost(url: string, allowedHosts: readonly string[], what: string): string {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    throw new Error(`Forge: job ${what} URL is not a valid URL: ${url}`);
+  }
+  if (!allowedHosts.some((h) => h.toLowerCase() === host)) {
+    throw new JobsFetchRefusedError(host);
+  }
+  return host;
+}
+
+/**
+ * Fetch with the host gate re-checked at EVERY redirect hop.
+ *
+ * `redirect: 'manual'` is the whole point: the platform's default `follow`
+ * checks the gate once, on the URL we hand it, and then streams the body from
+ * wherever the server points — which is not a gate at all. GitHub asset URLs
+ * 302 to a CDN on a different host, so both the API path and the download path
+ * need this, and having it in one place is what stops them drifting apart
+ * again (they had: the download re-gated, the API did not).
+ *
+ * Returns the final non-redirect response and the host that served it.
+ */
+async function fetchGated(
+  url: string,
+  allowedHosts: readonly string[],
+  headers: Record<string, string>,
+  what: string,
+): Promise<{ response: Response; host: string }> {
+  let currentUrl = url;
+  for (let hop = 0; hop < MAX_REDIRECT_HOPS; hop++) {
+    const host = gateHost(currentUrl, allowedHosts, what);
+    const response = await fetch(currentUrl, { redirect: 'manual', headers });
+    if (response.status >= 300 && response.status < 400 && response.status !== 304) {
+      const location = response.headers.get('location');
+      if (!location) {
+        throw new Error(`Forge: job ${what} redirect from ${host} had no Location header`);
+      }
+      currentUrl = new URL(location, currentUrl).toString();
+      continue;
+    }
+    return { response, host };
+  }
+  throw new Error(`Forge: job ${what} exceeded ${MAX_REDIRECT_HOPS} redirects`);
+}
+
+/**
+ * Read a response body as text, enforcing a byte cap as it streams so an
+ * enormous body is never fully materialised. `response.text()` has no cap and
+ * would happily buffer a gigabyte.
+ */
+async function readTextCapped(response: Response, maxBytes: number): Promise<string> {
+  const body = response.body;
+  if (!body) return '';
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw new Error(`Forge: job fetch response exceeded ${maxBytes} bytes`);
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks.map((c) => Buffer.from(c))).toString('utf8');
+}
+
 /**
  * Fetch a URL, gated by `allowed_hosts` and ETag-cached. Throws
  * `JobsFetchRefusedError` when the host is not allowed.
  */
 export async function jobsFetch(url: string, options: JobsFetchOptions): Promise<JobsFetchResult> {
-  let host: string;
-  try {
-    host = new URL(url).hostname.toLowerCase();
-  } catch {
-    throw new Error(`Forge: job fetch URL is not a valid URL: ${url}`);
-  }
-
-  if (!options.allowedHosts.some((h) => h.toLowerCase() === host)) {
-    throw new JobsFetchRefusedError(host);
-  }
-
   const headers: Record<string, string> = {
     'User-Agent': 'forge-llm-job',
     Accept: 'application/vnd.github+json',
   };
   const forceFresh = options.forceFresh === true;
-  const cachedEtag = forceFresh ? undefined : options.etagCache.get(url);
+  const cacheKey = options.cacheKeyPrefix ? `${options.cacheKeyPrefix}|${url}` : url;
+  const cachedEtag = forceFresh ? undefined : options.etagCache.get(cacheKey);
   if (cachedEtag) headers['If-None-Match'] = cachedEtag;
 
-  const response = await fetch(url, { headers });
+  // Gated at every hop, not only on `url` — see `fetchGated`.
+  const { response, host } = await fetchGated(url, options.allowedHosts, headers, 'fetch');
 
   if (response.status === 304) {
     return { notModified: true, body: '', etag: cachedEtag ?? null };
@@ -79,9 +158,9 @@ export async function jobsFetch(url: string, options: JobsFetchOptions): Promise
     throw new Error(`Forge: job fetch from ${host} failed with HTTP ${response.status}`);
   }
 
-  const body = await response.text();
+  const body = await readTextCapped(response, options.maxBytes ?? MAX_RESPONSE_BYTES);
   const etag = response.headers.get('ETag');
-  if (etag && !forceFresh) options.etagCache.set(url, etag);
+  if (etag && !forceFresh) options.etagCache.set(cacheKey, etag);
   return { notModified: false, body, etag };
 }
 
@@ -156,7 +235,6 @@ export interface JobsDownloadOptions {
 }
 
 const DEFAULT_MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024;
-const MAX_REDIRECT_HOPS = 10;
 
 export async function jobsDownloadBinary(
   url: string,
@@ -164,37 +242,18 @@ export async function jobsDownloadBinary(
   options: JobsDownloadOptions,
 ): Promise<number> {
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_DOWNLOAD_BYTES;
-  let currentUrl = url;
-  for (let hop = 0; hop < MAX_REDIRECT_HOPS; hop++) {
-    let host: string;
-    try {
-      host = new URL(currentUrl).hostname.toLowerCase();
-    } catch {
-      throw new Error(`Forge: job download URL is not a valid URL: ${currentUrl}`);
-    }
-    if (!options.allowedHosts.some((h) => h.toLowerCase() === host)) {
-      throw new JobsFetchRefusedError(host);
-    }
-    const response = await fetch(currentUrl, {
-      redirect: 'manual',
-      headers: { 'User-Agent': 'forge-llm-job' },
-    });
-    if (response.status >= 300 && response.status < 400) {
-      const location = response.headers.get('location');
-      if (!location) {
-        throw new Error(`Forge: job download redirect from ${host} had no Location header`);
-      }
-      currentUrl = new URL(location, currentUrl).toString();
-      continue;
-    }
-    if (!response.ok) {
-      throw new Error(`Forge: job download from ${host} failed with HTTP ${response.status}`);
-    }
-    const body = response.body;
-    if (!body) throw new Error(`Forge: job download from ${host} had no body`);
-    return await streamBodyToFile(body, destPath, maxBytes);
+  const { response, host } = await fetchGated(
+    url,
+    options.allowedHosts,
+    { 'User-Agent': 'forge-llm-job' },
+    'download',
+  );
+  if (!response.ok) {
+    throw new Error(`Forge: job download from ${host} failed with HTTP ${response.status}`);
   }
-  throw new Error(`Forge: job download exceeded ${MAX_REDIRECT_HOPS} redirects`);
+  const body = response.body;
+  if (!body) throw new Error(`Forge: job download from ${host} had no body`);
+  return await streamBodyToFile(body, destPath, maxBytes);
 }
 
 /** Stream a web `ReadableStream` body to a file, enforcing a byte cap. */

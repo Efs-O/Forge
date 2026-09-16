@@ -439,6 +439,29 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Suspend + wake-timer commands (sole spawn) | `src/system/PowerControl.ts`       |
 | Wake config parsing + report formatting    | `src/system/wakeInfo.ts`           |
 
+## Persistent agent jobs (plan: `docs/plans/PERSISTENT_AGENT_JOBS_PLAN.md`)
+
+| Concern                                                    | Owner                                                          |
+| ---------------------------------------------------------- | -------------------------------------------------------------- |
+| Job definition + state + run-log store (disk layout)       | `src/jobs/JobStore.ts`                                         |
+| Job schema (Zod) + state / run-row types                   | `src/jobs/jobSchema.ts`                                        |
+| Schedule math (`nextDue`, `isDue`, `wakeTimesFor`)         | `src/jobs/schedule.ts`                                         |
+| Tick loop, lease, backoff, concurrency                     | `src/jobs/JobScheduler.ts`                                     |
+| Outbox write, local toast, summarize-waits-for-idle        | `src/jobs/JobDelivery.ts`                                      |
+| Coalescing outbox (one pending message per job)            | `src/jobs/JobOutbox.ts`                                        |
+| Gated jobs network fetch (release API, binary download)    | `src/jobs/jobsFetch.ts`                                        |
+| Check kinds (github_release, github_issue, disk_space)     | `src/jobs/checks/github.ts`, `src/jobs/checks/diskSpace.ts`    |
+| Check context + result types                               | `src/jobs/checks/checkTypes.ts`                                |
+| Human-readable job description (for `/jobs`)               | `src/jobs/jobDescribe.ts`                                      |
+| Discuss chat seeding (`manage_jobs` + `/job chat`)         | `src/jobs/jobDiscuss.ts`                                       |
+| `llamacpp_update` action (stages 2-8, switch, rollback)    | `src/jobs/actions/llamacppUpdate.ts`                           |
+| Scheduler-facing llamacpp action wrapper + busy gate       | `src/jobs/actions/llamacppAction.ts`                           |
+| Staged build metadata + 24 h TTL                           | `src/jobs/actions/stagedBuild.ts`                              |
+| llamacpp IO (sha256, extractZip, runCommand, setBinary)    | `src/jobs/actions/llamacppIo.ts`                               |
+| Production jobs wiring (scheduler + action deps)           | `src/vscode/jobsSetup.ts`                                      |
+| Telegram `/jobs` + `/job <n>` commands                     | `src/remote/RemoteJobCommands.ts`                              |
+| Outbox watcher (drains the outbox to the owner chat)       | `src/remote/JobOutboxWatcher.ts`                               |
+
 ## Misc
 
 | Concern                                     | Owner                         |

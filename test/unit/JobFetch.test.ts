@@ -38,6 +38,74 @@ describe('jobsFetch (D5 host gate)', () => {
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
+  it('re-gates at every redirect hop, like the download path does', async () => {
+    // The API path used to call fetch() with the platform default
+    // `redirect: 'follow'`, which checks the gate once and then reads the body
+    // from wherever the server points. That is not a gate.
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      new Response(null, { status: 302, headers: { Location: 'https://evil.example.com/x' } }),
+    );
+    await expect(
+      jobsFetch('https://api.github.com/x', {
+        allowedHosts: ['api.github.com'],
+        etagCache: new Map(),
+      }),
+    ).rejects.toThrow(JobsFetchRefusedError);
+    // The redirect target was never fetched.
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('follows a redirect to an allowed host', async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(
+        new Response(null, { status: 302, headers: { Location: 'https://api.github.com/moved' } }),
+      )
+      .mockResolvedValueOnce(okResponse('moved-body'));
+    const result = await jobsFetch('https://api.github.com/x', {
+      allowedHosts: ['api.github.com'],
+      etagCache: new Map(),
+    });
+    expect(result.body).toBe('moved-body');
+  });
+
+  it('caps the response body instead of buffering it without limit', async () => {
+    const huge = 'x'.repeat(200);
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(okResponse(huge));
+    await expect(
+      jobsFetch('https://api.github.com/x', {
+        allowedHosts: ['api.github.com'],
+        etagCache: new Map(),
+        maxBytes: 100,
+      }),
+    ).rejects.toThrow(/exceeded 100 bytes/);
+  });
+
+  it('namespaces the ETag cache per caller, so two jobs on one URL do not share it', async () => {
+    // A shared cache hands the SECOND job a 304 on its very first run, leaving
+    // it with no baseline while the server says "nothing new" — a state the
+    // check cannot tell apart from a real no-change.
+    const etagCache = new Map<string, string>();
+    const url = 'https://api.github.com/repos/ggml-org/llama.cpp/releases/latest';
+    // A fresh Response per call: a body stream can only be read once.
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockImplementation(() =>
+      Promise.resolve(okResponse('body', 'W/"v1"')),
+    );
+
+    await jobsFetch(url, { allowedHosts: ['api.github.com'], etagCache, cacheKeyPrefix: 'job-a' });
+    const second = await jobsFetch(url, {
+      allowedHosts: ['api.github.com'],
+      etagCache,
+      cacheKeyPrefix: 'job-b',
+    });
+
+    expect(second.notModified).toBe(false);
+    // job-b sent no If-None-Match, because job-a's ETag is not its own.
+    const lastCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    const headers = (lastCall?.[1] as { headers: Record<string, string> }).headers;
+    expect(headers['If-None-Match']).toBeUndefined();
+    expect([...etagCache.keys()]).toEqual([`job-a|${url}`, `job-b|${url}`]);
+  });
+
   it('allows a listed host, case-insensitively', async () => {
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(okResponse('body'));
     const result = await jobsFetch('https://API.GITHUB.com/repo', {

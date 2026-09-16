@@ -19,7 +19,9 @@ const RepoSchema = z
   .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, 'use owner/name, e.g. ggml-org/llama.cpp');
 
 /** A local `HH:MM` clock time. */
-const ClockTimeSchema = z.string().regex(/^\d{1,2}:\d{2}$/, 'use HH:MM, e.g. 06:00');
+const ClockTimeSchema = z
+  .string()
+  .regex(/^([01]?\d|2[0-3]):[0-5]\d$/, 'use HH:MM, e.g. 06:00 (24-hour clock, 00:00-23:59)');
 
 export const WeekdaySchema = z.enum(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
 export type Weekday = z.infer<typeof WeekdaySchema>;
@@ -107,7 +109,11 @@ export const ActionSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('llamacpp_update'),
     mode: z.enum(['prepare', 'apply']),
-    /** Asset filename pattern, e.g. `llama-b{tag}-bin-win-cuda-*-x64.zip`. */
+    /**
+     * Asset filename `*`-glob, e.g. `llama-*-bin-win-cuda-*-x64.zip`.
+     * A literal `{tag}` is NOT substituted — the pattern is matched as a
+     * glob, so write a `*` where the tag varies.
+     */
     asset_pattern: z.string().min(1),
   }),
 ]);

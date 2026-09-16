@@ -201,4 +201,106 @@ describe('JobStore delete', () => {
   it('delete is idempotent for a job that never existed', async () => {
     await expect(store.delete('ghost')).resolves.toBeUndefined();
   });
+
+  it('removes a staged llamacpp_update build, so a deleted job cannot still switch', async () => {
+    await store.saveJob(job());
+    const stagedDir = path.join(root, 'staged');
+    await fs.promises.mkdir(stagedDir, { recursive: true });
+    await fs.promises.writeFile(
+      path.join(stagedDir, 'disk.json'),
+      JSON.stringify({
+        job_id: 'disk',
+        tag: 'b10991',
+        new_binary: 'C:\\x\\llama-server.exe',
+        old_binary: 'C:\\old\\llama-server.exe',
+        assets: [],
+        staged_at: Date.now(),
+        switch_pending: true,
+        mode: 'apply',
+      }),
+      'utf8',
+    );
+
+    await store.delete('disk');
+
+    // processPendingSwitches enumerates staged/ directly and never consults the
+    // store, so a leftover file here would still rewrite llama_server.binary
+    // and restart the backend for a job the user just deleted.
+    await expect(fs.promises.access(path.join(stagedDir, 'disk.json'))).rejects.toThrow();
+  });
+
+  it('removes a pending outbox notification', async () => {
+    await store.saveJob(job());
+    await fs.promises.mkdir(store.outboxDir, { recursive: true });
+    await fs.promises.writeFile(
+      path.join(store.outboxDir, 'disk.json'),
+      JSON.stringify({
+        job_id: 'disk',
+        name: 'Disk',
+        text: 'Job "Disk": something',
+        changed_at: 1,
+        earlier_count: 0,
+        first_undelivered_at: 1,
+      }),
+      'utf8',
+    );
+
+    await store.delete('disk');
+
+    await expect(fs.promises.access(path.join(store.outboxDir, 'disk.json'))).rejects.toThrow();
+  });
+
+  /**
+   * The cross-phase guard. Every high-severity defect in the jobs audit lived in
+   * a seam between two phases, and this one — B2's `delete` not knowing about
+   * B5's `staged/` — is the shape this test exists to stop repeating.
+   *
+   * It enumerates the jobs root with `readdir` instead of naming directories, so
+   * a LATER phase that invents a new per-job directory fails this EARLIER
+   * phase's test until someone wires it into `delete`. That is the point: the
+   * check has to come from the filesystem, not from a list a new phase can
+   * forget to update.
+   */
+  it('leaves nothing behind in ANY directory under the jobs root', async () => {
+    await store.saveJob(job());
+    await store.saveState('disk', {
+      last_run_at: 1,
+      last_ok_at: 1,
+      last_observation: '{}',
+      consecutive_failures: 0,
+      next_due_at: 1,
+      conversation_id: null,
+      summary_pending: false,
+    });
+    await store.appendRun('disk', {
+      at: 1,
+      late: false,
+      outcome: 'ok',
+      changed: false,
+      summary: 'ran',
+      delivered: 0,
+    });
+    await store.requestRun('disk');
+    // Every other per-job directory the feature writes, discovered rather than
+    // assumed: seed each with a file named for the job.
+    for (const dir of ['staged', 'outbox']) {
+      await fs.promises.mkdir(path.join(root, dir), { recursive: true });
+      await fs.promises.writeFile(path.join(root, dir, 'disk.json'), '{}', 'utf8');
+    }
+
+    await store.delete('disk');
+
+    const dirs = (await fs.promises.readdir(root, { withFileTypes: true }))
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name);
+    expect(dirs.length).toBeGreaterThanOrEqual(5);
+    const survivors: string[] = [];
+    for (const dir of dirs) {
+      for (const entry of await fs.promises.readdir(path.join(root, dir))) {
+        // A marker file is the bare id; everything else is `<id>.<ext>`.
+        if (entry === 'disk' || entry.startsWith('disk.')) survivors.push(`${dir}/${entry}`);
+      }
+    }
+    expect(survivors).toEqual([]);
+  });
 });

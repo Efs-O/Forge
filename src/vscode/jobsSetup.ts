@@ -139,6 +139,10 @@ export function setupJobs(
           void scheduler.stop();
           scheduler = undefined;
           started = false;
+          // The store watch was installed by the scheduler that just stopped;
+          // leaving it running would keep an fs.watch alive against a disposed
+          // scheduler until the window closes.
+          store.unwatch();
         }
         return;
       }

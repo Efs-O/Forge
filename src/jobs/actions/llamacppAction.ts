@@ -18,7 +18,7 @@ export interface LlamacppActionDeps {
   /** The config slice the action reads (current binary, embeddings, host). */
   getLlamacppConfig: () => {
     currentBinary: string | undefined;
-    embeddings: { enabled?: boolean; model_path?: string; port?: number } | undefined;
+    embeddings: { enabled?: boolean; model_path?: string } | undefined;
     llama_server: { host?: string; port?: number } | undefined;
   };
   runCommand: LlamacppUpdateEnv['runCommand'];

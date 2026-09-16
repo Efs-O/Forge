@@ -48,7 +48,7 @@ export interface LlamacppUpdateEnv {
   /** The current config, for the old binary and the embeddings smoke test. */
   getConfig: () => {
     currentBinary: string | undefined;
-    embeddings: { enabled?: boolean; model_path?: string; port?: number } | undefined;
+    embeddings: { enabled?: boolean; model_path?: string } | undefined;
     llama_server: { host?: string; port?: number } | undefined;
   };
   /** Run a command, returning {code, stdout, stderr}. */
@@ -86,11 +86,7 @@ export interface LlamacppUpdateEnv {
 }
 
 export interface StageResult {
-  /** True when a build was staged (or is already pending a switch). */
-  staged: boolean;
-  /** True when a switch is now requested (apply, or an approved prepare). */
-  switchPending: boolean;
-  /** One line for the run log. */
+  /** One line for the run log. The only field the scheduler reads. */
   summary: string;
 }
 
@@ -107,16 +103,21 @@ export async function stageLlamacppUpdate(
   tag: string,
   env: LlamacppUpdateEnv,
 ): Promise<StageResult> {
-  let downloaded: { name: string; path: string; digest: string }[];
+  const downloaded: { name: string; path: string; digest: string }[] = [];
   let newBinary: string;
+  // Whether THIS run created the build dir. A pre-existing `llama.cpp-<tag>\`
+  // is never ours to delete (old builds are kept on purpose); a partial one we
+  // created and then failed to fill must be removed, or it blocks every retry
+  // of the tag at the "already exists" guard below (audit F3).
+  let createdBuildDir = false;
+  let staging: string;
   try {
     const release = await jobsFetchReleaseByTag(repo, tag, env.fetchOptions());
     const assets = pickAssets(release, tag, action.asset_pattern);
-    const staging = stagingDir(env.localRoot);
+    staging = stagingDir(env.localRoot);
     fs.mkdirSync(staging, { recursive: true });
 
     // Stage 2: download each asset to the staging dir (gated, redirect-safe).
-    downloaded = [];
     for (const asset of assets) {
       const dest = path.join(staging, asset.name);
       await jobsDownloadBinary(asset.downloadUrl, dest, {
@@ -146,6 +147,7 @@ export async function stageLlamacppUpdate(
       throw new Error(`Forge: build folder ${buildDir} already exists; not overwriting`);
     }
     fs.mkdirSync(buildDir, { recursive: true });
+    createdBuildDir = true;
     for (const asset of downloaded) {
       await env.extractZip(asset.path, buildDir);
     }
@@ -156,10 +158,27 @@ export async function stageLlamacppUpdate(
 
     // Stage 5: smoke test the new binary.
     await smokeTest(newBinary, tag, env);
+
+    // The zips have served their purpose (verified + extracted). Delete them
+    // before the switch so a successful stage does not leak ~1 GB per release
+    // (audit F3). A failure path does the same in the catch below.
+    for (const asset of downloaded) {
+      fs.rmSync(asset.path, { force: true });
+    }
   } catch (err) {
     // A failure before the switch must not leave a pre-existing staged build
     // (e.g. a previous switch_pending) switchable. Clear this job's stage.
     clearStaged(env.jobsRoot, jobId);
+    // Remove the partial build dir ONLY if this run created it — never a
+    // pre-existing build — so a half-extracted tag does not permanently block
+    // the next retry at the "already exists" guard (audit F3). Delete the
+    // downloaded zips too; they are per-run and never reused across attempts.
+    if (createdBuildDir) {
+      fs.rmSync(buildDirForTag(env.localRoot, tag), { recursive: true, force: true });
+    }
+    for (const asset of downloaded) {
+      fs.rmSync(asset.path, { force: true });
+    }
     throw err;
   }
 
@@ -181,7 +200,7 @@ export async function stageLlamacppUpdate(
       ? `${tag} staged and passed the smoke test; switching when idle`
       : `${tag} staged and passed the smoke test; reply /job <n> approve to switch`;
   await env.deliver(jobId, summary);
-  return { staged: true, switchPending: staged.switch_pending, summary };
+  return { summary };
 }
 
 /**
@@ -198,7 +217,12 @@ export async function performSwitch(
     clearStaged(jobsRoot, staged.job_id);
     return { ok: false, summary: `${staged.tag} approval expired; not switching` };
   }
-  const oldBinary = staged.old_binary;
+  // The restore target is the binary in the config RIGHT NOW, not the one
+  // snapshotted at stage time: between staging and the switch (up to 24 h in
+  // prepare mode) the user or another job may have changed it, and restoring
+  // the stale value would point the config at a build that no longer applies
+  // (audit F5). `staged.old_binary` is kept only as a display fact.
+  const oldBinary = env.getConfig().currentBinary;
   env.setBinary(staged.new_binary);
   const model = env.activeModel();
   if (!model) {
@@ -215,9 +239,21 @@ export async function performSwitch(
     await env.restartModel(model);
   } catch (err) {
     // Always restore the previous binary, even when there was none: a
-    // post-check failure must never leave the config on a broken build.
+    // post-check failure must never leave the config on a broken build. When the
+    // restore target is an absolute path (as in production), verify it still
+    // exists before writing it back — the user may have deleted the old build
+    // between staging and the switch, and writing a dead path would leave the
+    // config pointing at nothing (audit F5). A relative value is restored as-is:
+    // this layer has no base to resolve it against, and it resolves the same way
+    // it did before the switch.
+    if (oldBinary !== undefined && path.isAbsolute(oldBinary) && !fs.existsSync(oldBinary)) {
+      clearStaged(jobsRoot, staged.job_id);
+      const detail = err instanceof Error ? err.message : String(err);
+      const summary = `post-check failed after switching to ${staged.tag} (${detail}); restore target ${oldBinary} no longer exists — config left on ${staged.tag}, fix llama_server.binary manually`;
+      await env.deliver(staged.job_id, summary);
+      return { ok: false, summary };
+    }
     env.setBinary(oldBinary);
-    await env.restartModel(model).catch(() => undefined);
     // Clear the stage so the next idle tick does not retry the same broken
     // binary in a loop. The extracted build folder stays on disk (old builds
     // are never deleted); the job re-stages on the next release.
@@ -225,6 +261,16 @@ export async function performSwitch(
     const detail = err instanceof Error ? err.message : String(err);
     const summary = `post-check failed after switching to ${staged.tag} (${detail}); restored ${oldBinary ?? 'previous'} binary`;
     await env.deliver(staged.job_id, summary);
+    // The restore restart is the post-check for the restored binary. A failure
+    // here is not swallowed (audit F5): it means the config now points at a
+    // build that does not serve, and the user must be told.
+    try {
+      await env.restartModel(model);
+    } catch (restoreErr) {
+      const restoreDetail = restoreErr instanceof Error ? restoreErr.message : String(restoreErr);
+      const restoreSummary = `restored ${oldBinary ?? 'previous'} binary but it failed to start (${restoreDetail}) — fix llama_server.binary manually`;
+      await env.deliver(staged.job_id, restoreSummary);
+    }
     return { ok: false, summary };
   }
   clearStaged(jobsRoot, staged.job_id);

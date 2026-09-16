@@ -10,8 +10,18 @@ import type { JobsFetchResult } from '../jobsFetch';
  * the previous observation.
  */
 export interface CheckResult {
-  /** The value to store as the new `last_observation`. */
-  observation: string;
+  /**
+   * The value to store as the new `last_observation`, or `null` when the check
+   * has nothing to record (a 304 on a job that has no baseline yet).
+   *
+   * `null` rather than `''` is load-bearing. "Changed" is decided by
+   * `lastObservation !== null` — the rule that a first run only establishes a
+   * baseline and never reports a change (B.2). An empty-string sentinel is not
+   * null, so it silently converts the *next* run into a spurious "changed",
+   * which for a `llamacpp_update` job means a real install attempt for a
+   * release the user already has.
+   */
+  observation: string | null;
   /** Whether the check reports a change worth acting on. */
   changed: boolean;
   /** One line for the run log. */

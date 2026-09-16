@@ -31,6 +31,39 @@ afterEach(async () => {
 });
 
 describe('JobOutboxWatcher (B.4 delivery route)', () => {
+  it('keeps a change written while the delivery was in flight', async () => {
+    await writeOutboxItem(dir, 'j', 'J', 'first', 1);
+    // Delivery is not instantaneous. Coalescing keeps one file per job, so a
+    // newer change lands on the very file the watcher is about to unlink — a
+    // blind delete-by-id would drop a change nothing ever counted.
+    const watcher = new JobOutboxWatcher({
+      outboxDir: dir,
+      deliver: async (text) => {
+        delivered.push(text);
+        await writeOutboxItem(dir, 'j', 'J', 'second', 2);
+        return 1;
+      },
+      now: () => 1000,
+    });
+
+    await watcher.drain();
+
+    expect(delivered).toEqual(['first']);
+    const files = await fs.promises.readdir(dir);
+    expect(files).toContain('j.json');
+    const kept = JSON.parse(await fs.promises.readFile(path.join(dir, 'j.json'), 'utf8')) as {
+      text: string;
+    };
+    expect(kept.text).toBe('second');
+
+    // And the next drain delivers it rather than losing it. (It carries the
+    // coalescing suffix: the second write bumped `earlier_count`, which is the
+    // existing counter's behaviour, not something this fix changes.)
+    await watcher.drain();
+    expect(delivered).toHaveLength(2);
+    expect(delivered[1]).toContain('second');
+  });
+
   it('deletes a file only after delivery is accepted (reached > 0)', async () => {
     await writeOutboxItem(dir, 'j', 'J', 'hello', 1);
     const watcher = makeWatcher();

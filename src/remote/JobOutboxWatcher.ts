@@ -105,7 +105,11 @@ export class JobOutboxWatcher {
           return 0;
         });
         if (reached > 0) {
-          await deleteOutboxItem(this.outboxDir, item.job_id).catch((err) => {
+          // Compare-and-delete on `changed_at`: the scheduler may have written a
+          // newer change for this job while the delivery was in flight, and
+          // coalescing puts it in this same file. Removing it blind would drop a
+          // change nothing counted.
+          await deleteOutboxItem(this.outboxDir, item.job_id, item.changed_at).catch((err) => {
             this.onError(`Forge could not remove a delivered job item: ${(err as Error).message}`);
           });
         }
