@@ -177,13 +177,32 @@ export class JobScheduler {
       const isResume = gap > RESUME_GAP_MS;
 
       const jobs = await this.store.loadAll();
-      const due = jobs.filter((jf) => jf.job.enabled && isDue(jf.state, now));
+      const byId = new Map(jobs.map((jf) => [jf.job.id, jf]));
+      const toRun: JobFile[] = [];
+      const seen = new Set<string>();
+      // A `run_now` marker (B2) runs the job on this tick even if it is not due
+      // or paused — an explicit request overrides the schedule. The marker is
+      // consumed before the run, so a crash mid-run does not leave a stale
+      // request that fires again on the next tick.
+      for (const id of await this.store.consumeRunRequests()) {
+        const jobFile = byId.get(id);
+        if (!jobFile || seen.has(id)) continue;
+        seen.add(id);
+        toRun.push(jobFile);
+      }
+      // Then the jobs that fell due normally. A job already queued by a marker
+      // is not run twice in the same tick.
+      for (const jf of jobs) {
+        if (!jf.job.enabled || seen.has(jf.job.id) || !isDue(jf.state, now)) continue;
+        seen.add(jf.job.id);
+        toRun.push(jf);
+      }
       const limit = this.getConfig().maxConcurrent;
       let cursor = 0;
-      const workers = Array.from({ length: Math.min(limit, due.length) }, async () => {
-        while (cursor < due.length) {
+      const workers = Array.from({ length: Math.min(limit, toRun.length) }, async () => {
+        while (cursor < toRun.length) {
           const index = cursor++;
-          const jobFile = due[index]!;
+          const jobFile = toRun[index]!;
           if (this.runningJobs.has(jobFile.job.id)) continue;
           await this.runJob(jobFile, isResume);
         }

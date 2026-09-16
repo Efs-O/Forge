@@ -22,6 +22,8 @@ import type { SidebarProvider } from '../sidebar/SidebarProvider';
  */
 
 export interface JobsSetup {
+  /** The shared job store, so the `manage_jobs` tool edits the same files the scheduler watches. */
+  readonly store: JobStore;
   /** Reconcile the recurring wake task after a config reload. */
   onConfigReloaded(): void;
   dispose(): void;
@@ -35,8 +37,8 @@ export function setupJobs(
   getConfig: () => ForgeConfig,
   workspaceId: string,
   sidebar: SidebarProvider,
+  store: JobStore = new JobStore(),
 ): JobsSetup {
-  const store = new JobStore();
   // One owner of the power spawn sites, shared with the tool and the remote
   // commands: PowerControl is stateless, so a second instance would be a
   // second owner of the same `schtasks`/`powercfg` sites.
@@ -91,6 +93,7 @@ export function setupJobs(
   else void power.setScheduledWakes([]);
 
   const setup: JobsSetup = {
+    store,
     onConfigReloaded: () => {
       // A reload can disable jobs (delete the task) or change the schedule
       // (re-register it). Reconcile either way; a no-op when there is no lease.

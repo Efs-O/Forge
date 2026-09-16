@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## 0.16.1
+## 0.16.2
 
 ### Persistent agent jobs (Phase B1)
 
@@ -26,6 +26,26 @@
   counts as a resume and runs overdue jobs once, marked `late`. Backoff pushes a
   job out after 3 consecutive failures. `summarize` runs a no-tools model call
   only when no turn is streaming.
+
+### Persistent agent jobs (Phase B2) — the `manage_jobs` tool
+
+- **`manage_jobs`** (`src/tools/jobTools.ts`): one agent tool with an `action`
+  enum (`list`, `get`, `create`, `update`, `pause`, `resume`, `delete`,
+  `run_now`, `discuss`) instead of five tools — one round per call. Advertised
+  in every conversation when `jobs.enabled`. `update` takes a partial
+  `definition` (e.g. only `schedule`), so "check at 08:00 instead" is one call.
+  `delete` always asks for approval, even under /clanker.
+- **Permissions**: `read` for `list`/`get`, `write` for the mutating actions,
+  `delete` for `delete` — derived from the validated `action` arg, never used
+  for advertisement.
+- **`run_now`** writes a `run_requests/<id>` marker the scheduler consumes on
+  its next tick, so a request issued from a window that does not hold the jobs
+  lease still runs the job in the lease holder. The marker is idempotent and is
+  deleted as it is consumed, so a crash mid-run cannot re-fire it.
+- **`discuss`** opens (or reuses) the job's discuss chat and seeds it with the
+  job definition, the last 10 run rows, and the last observation (B.6).
+
+## 0.16.1
 
 ### Project instructions
 

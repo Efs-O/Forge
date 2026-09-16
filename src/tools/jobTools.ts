@@ -1,0 +1,497 @@
+/**
+ * `manage_jobs` — the single agent tool for persistent agent jobs (B2, D4).
+ * One tool with an `action` enum instead of five: one round per call. Advertised
+ * in every conversation when `jobs.enabled`, so a watch can be added, edited,
+ * paused, resumed, or removed from wherever the user is talking (user
+ * requirement, 2026-09-14). Permissions: `read` for `list`/`get`, `write` for
+ * the mutating actions, `delete` for `delete` (always approval, even under
+ * /clanker). `run_now` writes a `run_requests/<id>` marker the scheduler
+ * consumes on its next tick; `discuss` opens or reuses the job's discuss chat
+ * and seeds it (B.6).
+ */
+
+import * as path from 'path';
+import type { ForgeConfig } from '../config/types';
+import type { JobStore } from '../jobs/JobStore';
+import { JobSchema, type Job, type JobFile, type RunRow } from '../jobs/jobSchema';
+import type { ForgeConversationSummary, ForgeHostFacade } from '../sidebar/ForgeHostFacade';
+import type { RegisteredTool } from './ToolRegistry';
+
+/** The actions `manage_jobs` can perform. */
+const ACTIONS = [
+  'list',
+  'get',
+  'create',
+  'update',
+  'pause',
+  'resume',
+  'delete',
+  'run_now',
+  'discuss',
+] as const;
+type Action = (typeof ACTIONS)[number];
+
+export interface ManageJobsDeps {
+  store: JobStore;
+  getConfig: () => ForgeConfig;
+  /** Host facade for `discuss`. A lazy getter (the sidebar provider is created
+   * after the tool registry); undefined until wired, in which case `discuss`
+   * degrades to a clear error and the other actions still work. */
+  hostFacade?: () => ForgeHostFacade | undefined;
+  /** Injectable for tests. */
+  now?: () => Date;
+}
+
+/** The actions that mutate a job (need `write`). */
+const WRITE_ACTIONS: ReadonlySet<Action> = new Set([
+  'create',
+  'update',
+  'pause',
+  'resume',
+  'run_now',
+  'discuss',
+]);
+
+/** `delete` is the only action that removes a job. */
+const DELETE_ACTION: Action = 'delete';
+
+/** The job fields `update` may change (everything except the id). */
+const UPDATABLE_KEYS = [
+  'name',
+  'enabled',
+  'wake',
+  'after',
+  'schedule',
+  'check',
+  'on_change',
+  'action',
+];
+
+export function makeManageJobsTool(deps: ManageJobsDeps): RegisteredTool {
+  const tool: RegisteredTool = {
+    // Inline literal: the tool-audit catalog extracts this statically, so it
+    // must be an object literal, not a reference to a const.
+    definition: {
+      type: 'function',
+      function: {
+        name: 'manage_jobs',
+        description:
+          'Manage persistent agent jobs: list, inspect, create, update, pause, resume, delete, run now, ' +
+          "or open a job's discuss chat. Available in every chat when jobs are enabled. " +
+          '`update` takes a partial definition (for example only `schedule`), so "check at 08:00 instead" ' +
+          'is one call. `delete` always asks for approval. `run_now` runs the job on the next scheduler ' +
+          'tick, even from a window that does not hold the lease.',
+        parameters: {
+          type: 'object',
+          properties: {
+            action: {
+              type: 'string',
+              enum: [
+                'list',
+                'get',
+                'create',
+                'update',
+                'pause',
+                'resume',
+                'delete',
+                'run_now',
+                'discuss',
+              ],
+              description:
+                'What to do. `list` lists all jobs; `get` inspects one; `create` adds one; `update` ' +
+                'changes one (partial definition); `pause`/`resume` toggle it; `delete` removes it ' +
+                '(always asks for approval); `run_now` runs it on the next tick; `discuss` opens its ' +
+                'discuss chat.',
+            },
+            job: {
+              type: 'string',
+              description:
+                'The job id or name, fuzzy-matched. Required for every action except `list` and ' +
+                '`create`. An ambiguous match returns the candidates instead of guessing.',
+            },
+            definition: {
+              type: 'object',
+              description:
+                'For `create` and `update` only: the job definition (a partial for `update`). Fields: ' +
+                '`name` (string), `enabled` (bool), `wake` (bool), `after` (stay_awake|sleep_if_idle), ' +
+                '`schedule` ({kind:interval,minutes} | {kind:daily,at:"HH:MM"} | {kind:weekly,days,at}), ' +
+                '`check` ({kind:github_release,repo,asset_pattern?} | {kind:github_issue,repo,issue_number} ' +
+                '| {kind:disk_space,path,min_free_gb}), `on_change` ({kind:notify} | {kind:summarize,focus[]}), ' +
+                '`action` (null | {kind:llamacpp_update,mode,asset_pattern}).',
+            },
+          },
+          required: ['action'],
+          additionalProperties: false,
+        },
+      },
+    },
+    permission: 'read',
+    // `list`/`get` need only `read`; the mutating actions add `write`, and `delete` adds `delete`.
+    // Derived from the validated `action` arg, never used for advertisement.
+    additionalPermissionsForArgs: (args) => {
+      const action = args['action'];
+      if (action === DELETE_ACTION) return ['delete'];
+      if (typeof action === 'string' && WRITE_ACTIONS.has(action as Action)) return ['write'];
+      return [];
+    },
+    // Job files live under `~/.forge/jobs/` (outside the workspace), so no editor diff.
+    mutation: {
+      paths: (args) => {
+        const action = args['action'];
+        if (typeof action !== 'string' || !WRITE_ACTIONS.has(action as Action)) return [];
+        const id = typeof args['job'] === 'string' ? args['job'] : undefined;
+        if (!id) return [];
+        return [
+          path.join(deps.store.root, `${id}.json`),
+          path.join(deps.store.root, 'state', `${id}.json`),
+        ];
+      },
+      showDiff: false,
+    },
+    // Advertised only when a `jobs:` block is present.
+    advertise: () => deps.getConfig().jobs?.enabled === true,
+    // `delete` always asks, even under /clanker: `dangerous` is what keeps
+    // clanker from removing a job without anyone being asked.
+    approval: (args) => {
+      if (args['action'] !== DELETE_ACTION) return undefined;
+      return {
+        dangerous: true,
+        detail: `Delete job "${String(args['job'] ?? '')}". Its definition, state, and run log are removed.`,
+      };
+    },
+    handler: (args) => runManageJobs(deps, args),
+  };
+  return tool;
+}
+
+async function runManageJobs(deps: ManageJobsDeps, args: Record<string, unknown>): Promise<string> {
+  const rawAction = args['action'];
+  if (typeof rawAction !== 'string' || !ACTIONS.includes(rawAction as Action)) {
+    throw new Error(`manage_jobs: action must be one of ${ACTIONS.join(', ')}.`);
+  }
+  const action = rawAction as Action;
+
+  if (action === 'list') return listJobs(deps);
+
+  if (action === 'create') return createJob(deps, args);
+
+  // Every other action needs a resolvable job.
+  const ref = args['job'];
+  if (typeof ref !== 'string' || !ref.trim()) {
+    throw new Error(`manage_jobs: \`job\` (id or name) is required for ${action}.`);
+  }
+  const match = await resolveJob(deps, ref);
+  if (match.kind === 'none') {
+    throw new Error(
+      `manage_jobs: no job matches "${ref}". List the jobs with {action:"list"} to see the ids and names.`,
+    );
+  }
+  if (match.kind === 'ambiguous') {
+    const names = match.candidates.map((jf) => `${jf.job.name} (${jf.job.id})`).join(', ');
+    throw new Error(
+      `manage_jobs: "${ref}" is ambiguous — it matches: ${names}. Use the exact id to pick one.`,
+    );
+  }
+
+  switch (action) {
+    case 'get':
+      return describeJob(match.jobFile);
+    case 'update':
+      return updateJob(deps, match.jobFile, args);
+    case 'pause':
+      return setEnabled(deps, match.jobFile, false);
+    case 'resume':
+      return setEnabled(deps, match.jobFile, true);
+    case 'delete':
+      await deps.store.delete(match.jobFile.job.id);
+      return `Deleted job "${match.jobFile.job.name}" (${match.jobFile.job.id}).`;
+    case 'run_now': {
+      await deps.store.requestRun(match.jobFile.job.id);
+      return `Run requested for "${match.jobFile.job.name}" (${match.jobFile.job.id}). It will run on the next scheduler tick, in whichever window holds the jobs lease.`;
+    }
+    case 'discuss':
+      return discussJob(deps, match.jobFile);
+    default:
+      throw new Error(`manage_jobs: unhandled action "${action}".`);
+  }
+}
+
+/** The result of fuzzy-matching a job reference. */
+type JobMatch =
+  | { kind: 'none' }
+  | { kind: 'ambiguous'; candidates: JobFile[] }
+  | { kind: 'one'; jobFile: JobFile };
+
+/** Resolve a job by exact id, exact name, or unique substring (case-insensitive). */
+async function resolveJob(deps: ManageJobsDeps, ref: string): Promise<JobMatch> {
+  const all = await deps.store.loadAll();
+  const needle = ref.trim().toLowerCase();
+  const exact = all.find(
+    (jf) => jf.job.id.toLowerCase() === needle || jf.job.name.toLowerCase() === needle,
+  );
+  if (exact) return { kind: 'one', jobFile: exact };
+  const partial = all.filter(
+    (jf) => jf.job.id.toLowerCase().includes(needle) || jf.job.name.toLowerCase().includes(needle),
+  );
+  if (partial.length === 0) return { kind: 'none' };
+  if (partial.length === 1) return { kind: 'one', jobFile: partial[0]! };
+  return { kind: 'ambiguous', candidates: partial };
+}
+
+/** One line per job: name, enabled, schedule, last run and outcome, next due. */
+async function listJobs(deps: ManageJobsDeps): Promise<string> {
+  const all = await deps.store.loadAll();
+  if (all.length === 0) {
+    return 'No jobs are defined. Create one with {action:"create","definition":{...}}.';
+  }
+  const now = (deps.now ?? (() => new Date()))();
+  const lines = all.map((jf) => {
+    const { job, state } = jf;
+    const status = job.enabled ? 'enabled' : 'paused';
+    const last = state.last_run_at === null ? 'never' : formatWhen(state.last_run_at, now);
+    const outcome = lastOutcome(state);
+    const next =
+      state.next_due_at === null
+        ? 'not scheduled'
+        : job.enabled
+          ? `next ${formatWhen(state.next_due_at, now)}`
+          : 'paused';
+    return `- ${job.name} [${job.id}] — ${status} · ${describeSchedule(job.schedule)} · last ${last} (${outcome}) · ${next}`;
+  });
+  return lines.join('\n');
+}
+
+/** The outcome of the most recent run, or 'no runs yet'. */
+function lastOutcome(state: JobFile['state']): string {
+  if (state.last_run_at === null) return 'no runs yet';
+  if (state.consecutive_failures > 0) return `failing ×${state.consecutive_failures}`;
+  return 'ok';
+}
+
+/** Create a job from a full definition. The id is generated; the name is required. */
+async function createJob(deps: ManageJobsDeps, args: Record<string, unknown>): Promise<string> {
+  const raw = args['definition'];
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new Error('manage_jobs: `create` requires an object `definition`.');
+  }
+  const partial = raw as Record<string, unknown>;
+  if (typeof partial['name'] !== 'string' || !partial['name'].trim()) {
+    throw new Error('manage_jobs: a new job needs a `name`.');
+  }
+  const existing = await deps.store.loadAll();
+  const taken = new Set(existing.map((jf) => jf.job.id));
+  const id = uniqueId(partial['name'] as string, taken);
+  const nowMs = Date.now();
+  const candidate: Record<string, unknown> = {
+    version: 1,
+    id,
+    name: partial['name'],
+    enabled: partial['enabled'] ?? true,
+    wake: partial['wake'] ?? false,
+    after: partial['after'] ?? 'stay_awake',
+    schedule: partial['schedule'],
+    check: partial['check'],
+    on_change: partial['on_change'],
+    action: partial['action'] ?? null,
+    created_at: nowMs,
+    updated_at: nowMs,
+  };
+  const result = JobSchema.safeParse(candidate);
+  if (!result.success) {
+    throw new Error(`manage_jobs: invalid job definition: ${result.error.message}`);
+  }
+  await deps.store.saveJob(result.data);
+  return `Created job "${result.data.name}" [${id}]. It will run on the next scheduler tick when due.`;
+}
+
+/** Build a stable id from the name: a slug, suffixed if taken (so two "llama.cpp" jobs can coexist). */
+function uniqueId(name: string, taken: ReadonlySet<string>): string {
+  const slug =
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40) || 'job';
+  if (!taken.has(slug)) return slug;
+  for (let n = 2; ; n++) {
+    const candidate = `${slug}-${n}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+}
+
+/** Apply a partial definition to an existing job; the id is never edited. */
+async function updateJob(
+  deps: ManageJobsDeps,
+  jobFile: JobFile,
+  args: Record<string, unknown>,
+): Promise<string> {
+  const raw = args['definition'];
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new Error('manage_jobs: `update` requires an object `definition`.');
+  }
+  const partial = raw as Record<string, unknown>;
+  const unknown = Object.keys(partial).filter((key) => !UPDATABLE_KEYS.includes(key));
+  if (unknown.length) throw new Error(`manage_jobs: update cannot set: ${unknown.join(', ')}.`);
+  const { id, ...current } = jobFile.job;
+  const merged: Record<string, unknown> = { ...current };
+  for (const key of UPDATABLE_KEYS) {
+    if (partial[key] !== undefined) merged[key] = partial[key];
+  }
+  merged['updated_at'] = Date.now();
+  const result = JobSchema.safeParse({ ...merged, id });
+  if (!result.success) {
+    throw new Error(`manage_jobs: update rejected: ${result.error.message}`);
+  }
+  await deps.store.saveJob(result.data);
+  return `Updated job "${result.data.name}" [${id}].`;
+}
+
+/** Pause or resume a job (sets `enabled`). */
+async function setEnabled(
+  deps: ManageJobsDeps,
+  jobFile: JobFile,
+  enabled: boolean,
+): Promise<string> {
+  // The job is already a validated `Job`; flipping `enabled` cannot make it invalid.
+  await deps.store.saveJob({ ...jobFile.job, enabled, updated_at: Date.now() });
+  return `${enabled ? 'Resumed' : 'Paused'} job "${jobFile.job.name}" [${jobFile.job.id}].`;
+}
+
+/** A human-readable description of a job (for `get`). */
+function describeJob(jobFile: JobFile): string {
+  const { job, state } = jobFile;
+  const lines = [
+    `Job "${job.name}" [${job.id}]`,
+    `  status: ${job.enabled ? 'enabled' : 'paused'}`,
+    `  schedule: ${describeSchedule(job.schedule)}`,
+    `  check: ${describeCheck(job.check)}`,
+    `  on_change: ${describeOnChange(job.on_change)}`,
+    `  action: ${job.action ? describeAction(job.action) : 'none'}`,
+    `  wake: ${job.wake ? `yes (${job.after})` : 'no'}`,
+    `  last run: ${state.last_run_at === null ? 'never' : formatWhen(state.last_run_at, new Date())}`,
+    `  last ok: ${state.last_ok_at === null ? 'never' : formatWhen(state.last_ok_at, new Date())}`,
+    `  consecutive failures: ${state.consecutive_failures}`,
+    `  next due: ${state.next_due_at === null ? 'not scheduled' : formatWhen(state.next_due_at, new Date())}`,
+  ];
+  if (state.last_observation) {
+    lines.push(`  last observation: ${truncate(state.last_observation, 400)}`);
+  }
+  return lines.join('\n');
+}
+
+/** Open (or reuse) the job's discuss chat and seed it (B.6). */
+async function discussJob(deps: ManageJobsDeps, jobFile: JobFile): Promise<string> {
+  const host = deps.hostFacade?.();
+  if (!host) {
+    throw new Error('manage_jobs: `discuss` is not available in this window (no host facade).');
+  }
+  const { job, state } = jobFile;
+  let conversationId: string | null = state.conversation_id;
+  if (conversationId) {
+    try {
+      await host.restoreConversation(conversationId, { activate: true });
+    } catch {
+      // The conversation no longer exists; fall through and create a new one.
+      conversationId = null;
+    }
+  }
+  if (!conversationId) {
+    const created: ForgeConversationSummary = await host.createConversation({ activate: true });
+    conversationId = created.id;
+  }
+  const seed = buildDiscussSeed(jobFile, await deps.store.readRuns(job.id));
+  await host.send(conversationId, seed);
+  // Persist the conversation id so the next `discuss` reuses the same chat.
+  const stateResult = await deps.store.load(job.id);
+  if (stateResult) {
+    const newState = { ...stateResult.state, conversation_id: conversationId };
+    await deps.store.saveState(job.id, newState);
+  }
+  return `Opened the discuss chat for "${job.name}" [${job.id}] and seeded it with the job, its recent runs, and the last observation. It is now an ordinary chat where manage_jobs is available.`;
+}
+
+/** A short human-readable form of a schedule. */
+function describeSchedule(schedule: Job['schedule']): string {
+  switch (schedule.kind) {
+    case 'interval':
+      return `every ${schedule.minutes} min`;
+    case 'daily':
+      return `daily at ${schedule.at}`;
+    case 'weekly':
+      return `weekly on ${schedule.days.join('/')} at ${schedule.at}`;
+  }
+}
+
+/** A short human-readable form of a check. */
+function describeCheck(check: Job['check']): string {
+  switch (check.kind) {
+    case 'github_release':
+      return `github_release ${check.repo}${check.asset_pattern ? ` (asset ${check.asset_pattern})` : ''}`;
+    case 'github_issue':
+      return `github_issue ${check.repo}#${check.issue_number}`;
+    case 'disk_space':
+      return `disk_space ${check.path} (min ${check.min_free_gb} GB free)`;
+  }
+}
+
+/** A short human-readable form of an on_change policy. */
+function describeOnChange(onChange: Job['on_change']): string {
+  return onChange.kind === 'notify' ? 'notify' : `summarize (${onChange.focus.join(', ')})`;
+}
+
+/** A short human-readable form of an action. */
+function describeAction(action: NonNullable<Job['action']>): string {
+  return `${action.kind} [${action.mode}]`;
+}
+
+/** Build the discuss-chat seed (B.6): the job, last 10 run rows, last observation. */
+function buildDiscussSeed(jobFile: JobFile, runs: RunRow[]): string {
+  const { job, state } = jobFile;
+  const recent = runs.slice(-10);
+  const runLines = recent.length
+    ? recent.map(
+        (row) =>
+          `- ${new Date(row.at).toLocaleString()}: ${row.outcome}` +
+          `${row.changed ? ' (changed)' : ''}${row.late ? ' (late)' : ''} — ${row.summary}`,
+      )
+    : ['(no runs yet)'];
+  const parts = [
+    `Job "${job.name}" [${job.id}]`,
+    '',
+    'Definition:',
+    JSON.stringify(job, null, 2),
+    '',
+    `Last observation: ${state.last_observation ?? '(none yet)'}`,
+    '',
+    `Last ${recent.length} run(s):`,
+    ...runLines,
+    '',
+    'The user wants to discuss this job.',
+  ];
+  let seed = parts.join('\n');
+  if (seed.length > 4000) {
+    const tail = '\n\nThe user wants to discuss this job.';
+    seed = parts.join('\n').slice(0, 4000 - tail.length) + tail;
+  }
+  return seed;
+}
+
+/** Format an epoch-ms timestamp relative to `now`, for list/get output. */
+function formatWhen(epochMs: number, now: Date): string {
+  const then = new Date(epochMs);
+  const diff = now.getTime() - epochMs;
+  const future = diff < 0;
+  const abs = Math.abs(diff);
+  const minutes = Math.round(abs / 60_000);
+  if (minutes < 1) return future ? 'now' : 'just now';
+  const hours = Math.round(abs / 3_600_000);
+  if (hours < 24) return future ? `in ${hours}h` : `${hours}h ago`;
+  const days = Math.round(abs / 86_400_000);
+  if (days < 7) return future ? `in ${days}d` : `${days}d ago`;
+  return then.toLocaleDateString();
+}
+
+/** Truncate a string to `max` characters, adding an ellipsis when cut. */
+function truncate(text: string, max: number): string {
+  return text.length <= max ? text : text.slice(0, max - 1) + '…';
+}

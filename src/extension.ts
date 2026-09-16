@@ -55,6 +55,7 @@ import { TelegramChannel, TELEGRAM_BOT_TOKEN_SECRET } from './remote/TelegramCha
 import { registerRemoteCommands } from './vscode/remoteCommands';
 import { startWakeRelay } from './vscode/wakeRelaySetup';
 import { setupJobs } from './vscode/jobsSetup';
+import { JobStore } from './jobs/JobStore';
 
 let activeRemoteRuntime: RemoteRuntime | undefined;
 
@@ -141,6 +142,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     secrets: context.secrets,
   });
   const toolRegistry = new ToolRegistry();
+  // One job store, shared by the scheduler and the `manage_jobs` tool, so the
+  // tool edits the same files the scheduler watches. Created here (before the
+  // tool registry) and passed to both. `sidebarProvider` is assigned below;
+  // this closure only runs at `discuss` time, long after activation.
+  const jobsStore = new JobStore();
+  const jobsHostFacade = (): import('./sidebar/ForgeHostFacade').ForgeHostFacade | undefined =>
+    sidebarProvider.getHostFacade();
   // One owner for agent questions, shared by ask_user and the sidebar facade so
   // a remotely driven turn can answer from the chat that started it.
   const userQuestions = new UserQuestionService();
@@ -166,6 +174,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     () => config,
     () => pool.backendProcesses(),
     (relativePath) => chatAttachments.resolve(relativePath),
+    { store: jobsStore, hostFacade: jobsHostFacade },
   );
 
   // External MCP stdio servers (e.g. halluscribe-mcp). Bridged as a
@@ -292,7 +301,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     : createHash('sha256').update(`no-workspace:${activeConfigPath}`).digest('hex');
   // Persistent agent jobs (B1). Runs in whichever window wins the
   // `jobs-scheduler` lease; a no-op when `jobs.enabled` is false.
-  const jobsSetup = setupJobs(context, () => config, workspaceId, sidebarProvider);
+  const jobsSetup = setupJobs(context, () => config, workspaceId, sidebarProvider, jobsStore);
   const remoteRuntime = new RemoteRuntime({
     storageDirectory: context.globalStorageUri.fsPath,
     ...(workspaceRoot ? { workspaceRoot } : {}),

@@ -42,6 +42,7 @@ export class JobStore {
   private readonly jobsDir: string;
   private readonly stateDir: string;
   private readonly runsDir: string;
+  private readonly runRequests: string;
   private watcher: fs.FSWatcher | undefined;
   private watchDebounce: ReturnType<typeof setTimeout> | undefined;
   private onChangeCallback: (() => void) | undefined;
@@ -51,6 +52,7 @@ export class JobStore {
     this.jobsDir = root;
     this.stateDir = path.join(root, 'state');
     this.runsDir = path.join(root, 'runs');
+    this.runRequests = path.join(root, 'run_requests');
   }
 
   /** The jobs directory (for the lease and tests). */
@@ -58,11 +60,17 @@ export class JobStore {
     return this.jobsDir;
   }
 
+  /** The directory holding `run_now` marker files (B2). */
+  get runRequestsDir(): string {
+    return this.runRequests;
+  }
+
   /** Create the directory tree if it does not exist. */
   async ensureDirs(): Promise<void> {
     await fs.promises.mkdir(this.jobsDir, { recursive: true });
     await fs.promises.mkdir(this.stateDir, { recursive: true });
     await fs.promises.mkdir(this.runsDir, { recursive: true });
+    await fs.promises.mkdir(this.runRequests, { recursive: true });
   }
 
   /**
@@ -157,12 +165,13 @@ export class JobStore {
     return result.data;
   }
 
-  /** Delete a job's definition, state, and run log. */
+  /** Delete a job's definition, state, run log, and any pending run request. */
   async delete(id: string): Promise<void> {
     for (const full of [
       path.join(this.jobsDir, `${id}.json`),
       path.join(this.stateDir, `${id}.json`),
       path.join(this.runsDir, `${id}.jsonl`),
+      path.join(this.runRequests, id),
     ]) {
       await fs.promises.unlink(full).catch((err: NodeJS.ErrnoException) => {
         if (err.code !== 'ENOENT') throw err;
@@ -201,6 +210,53 @@ export class JobStore {
       .split('\n')
       .filter((line) => line.trim().length > 0)
       .map((line) => RunRowSchema.parse(JSON.parse(line)));
+  }
+
+  /**
+   * Write a `run_now` marker for a job (B2). The marker is a file in
+   * `run_requests/`; the scheduler consumes it on its next tick, so a
+   * `run_now` issued from a window that does not hold the lease still runs the
+   * job in the lease holder. The marker is idempotent: writing it again before
+   * the scheduler consumes it does not double-run the job.
+   */
+  async requestRun(id: string): Promise<void> {
+    await this.ensureDirs();
+    const full = path.join(this.runRequests, `${id}`);
+    await fs.promises
+      .writeFile(full, `requested ${Date.now()}\n`, { flag: 'wx' })
+      .catch((err: NodeJS.ErrnoException) => {
+        if (err.code !== 'EEXIST') throw err;
+      });
+  }
+
+  /**
+   * Consume every pending `run_now` marker, returning the job ids (deduplicated,
+   * in the order the markers were written). The markers are deleted as they are
+   * consumed, so a job is run at most once per marker. An unreadable or
+   * malformed marker is skipped, not fatal.
+   */
+  async consumeRunRequests(): Promise<string[]> {
+    let entries: fs.Dirent[];
+    try {
+      entries = await fs.promises.readdir(this.runRequests, { withFileTypes: true });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw err;
+    }
+    const ids: string[] = [];
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name) continue;
+      // The marker file name is the job id verbatim (requestRun writes it with no
+      // extension), so use it directly — job ids may contain a dot, so any
+      // extension-stripping would corrupt them.
+      ids.push(entry.name);
+      await fs.promises
+        .unlink(path.join(this.runRequests, entry.name))
+        .catch((err: NodeJS.ErrnoException) => {
+          if (err.code !== 'ENOENT') throw err;
+        });
+    }
+    return ids;
   }
 
   /**

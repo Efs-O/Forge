@@ -58,6 +58,7 @@ import { makeSafePowerShellTool } from './safePowerShellTool';
 import { makeSystemStatusTool } from './systemStatusTool';
 import type { BackendProcess } from '../system/SystemReport';
 import { makeLoadToolGroupTool } from './toolGroupTools';
+import { makeManageJobsTool } from './jobTools';
 import { makeReadToolResultTool } from './toolResultTools';
 import { makeUpdatePlanTool } from './planTools';
 import {
@@ -76,6 +77,8 @@ import {
 } from './gitTools';
 import { makeSearchCodebaseTool } from './semanticSearchTool';
 import type { IndexManager } from '../search/IndexManager';
+import type { JobStore } from '../jobs/JobStore';
+import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import { makeApplyLineEditsTool } from './structuredEditTool';
 import { makeViewImageTool } from './imageTool';
 import { makeWaitTool } from './waitTool';
@@ -103,6 +106,7 @@ export function registerAllTools(
   getConfig?: () => ForgeConfig,
   backendProcesses?: () => readonly BackendProcess[],
   resolveChatAttachment?: (relativePath: string) => string,
+  jobs?: { store: JobStore; hostFacade: () => ForgeHostFacade | undefined },
 ): void {
   // v0.1 builtins
   registry.register(makeReadFileTool());
@@ -207,6 +211,20 @@ export function registerAllTools(
         secrets,
         notifications,
         ...(resolveChatAttachment ? { resolveAttachment: resolveChatAttachment } : {}),
+      }),
+    );
+  }
+
+  // Persistent agent jobs (B2). Self-suppressing until a `jobs:` block is
+  // present, so a config without one keeps the tool list unchanged. The tool
+  // needs `getConfig` for its advertise predicate, so it is registered only
+  // when both the jobs wiring and a config getter are supplied.
+  if (jobs && getConfig) {
+    registry.register(
+      makeManageJobsTool({
+        store: jobs.store,
+        getConfig,
+        ...(jobs.hostFacade ? { hostFacade: jobs.hostFacade } : {}),
       }),
     );
   }
