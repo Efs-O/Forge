@@ -1,5 +1,15 @@
 # Forge — Recent Changes
 
+## 0.16.5
+
+### Persistent agent jobs — delete-during-in-flight fix
+
+- A job deleted **while its check is in flight** can no longer stage a
+  `llamacpp_update` build, and a staged build whose job no longer exists is
+  dropped before the idle tick — so a deleted job can never switch
+  `llama_server.binary`. (Closes the gap the audit's F1 left open from the
+  other direction; caught by the post-fix Codex review.)
+
 ## 0.16.4
 
 ### `ask_live_session` — ask the Claude Code session that is already running
