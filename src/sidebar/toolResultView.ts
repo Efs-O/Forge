@@ -43,6 +43,7 @@ export function resultLabel(toolName: string, result: string, pathArg: string | 
  */
 export const PROSE_RESULT_TOOLS = new Set([
   'ask_local_agent',
+  'ask_live_session',
   'ask_user',
   'web_search',
   'image_search',

@@ -4,6 +4,7 @@ import { loadConfig } from '../config/ConfigLoader';
 import type { NativeCommandDeps } from './commandDeps';
 import { runBackendAction } from './commandHelpers';
 import { registerEditorCommands } from './editorCommands';
+import { registerAgentBusCommands } from './agentBusCommands';
 import { runAddModelWizard } from '../sidebar/AddModelWizard';
 import { migrateConfig } from '../config/ConfigMigrator';
 import { mergeGroupsIntoModel } from '../config/ConfigResolver';
@@ -194,4 +195,5 @@ export function registerNativeCommands(
     }),
   );
   registerEditorCommands(context, deps);
+  registerAgentBusCommands(context);
 }

@@ -248,6 +248,18 @@ voice:
     # read the rest in the written message. Long voice notes cannot be skimmed.
     max_chars: 1200
 
+# Agent bus: the ask_live_session tool asks a Claude Code session that is
+# ALREADY RUNNING and already knows your work (ask_local_agent always starts a
+# new, empty one). Absent = the tool is never offered. The Claude session must
+# be listening: run "Forge: Copy Claude Bus Prompt" and paste the result into
+# it. Files live in ~/.forge/agent-bus/.
+# agent_bus:
+#   enabled: true
+#   # Optional, for target "codex": an open Codex session, resumed in a terminal
+#   # with `codex resume <thread> --sandbox workspace-write --add-dir <bus folder>`.
+#   codex_thread: <thread id>
+#   codex_cli: codex        # bare name on PATH or an absolute path
+
 # image_search tool: reverse image search (Google Lens via SerpApi). Absent =
 # the tool is never offered to a model. Needs net.search permission. Store the
 # SerpApi key with "Forge: Set Cloud Provider Token" under secret_key_name; the

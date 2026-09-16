@@ -59,6 +59,7 @@ import { makeSystemStatusTool } from './systemStatusTool';
 import type { BackendProcess } from '../system/SystemReport';
 import { makeLoadToolGroupTool } from './toolGroupTools';
 import { makeManageJobsTool } from './jobTools';
+import { makeLiveSessionTool } from './liveSessionTool';
 import { makeReadToolResultTool } from './toolResultTools';
 import { makeUpdatePlanTool } from './planTools';
 import {
@@ -228,6 +229,10 @@ export function registerAllTools(
       }),
     );
   }
+
+  // The agent bus. Self-suppressing until `agent_bus.enabled`, so a config
+  // without it keeps the tool list unchanged.
+  if (getConfig) registry.register(makeLiveSessionTool({ getConfig }));
 
   // Registered last, and self-suppressing until a lazy group is actually
   // bridged in: definitions() follows insertion order, so appending here

@@ -461,6 +461,12 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Production jobs wiring (scheduler + action deps)           | `src/vscode/jobsSetup.ts`                                      |
 | Telegram `/jobs` + `/job <n>` commands                     | `src/remote/RemoteJobCommands.ts`                              |
 | Outbox watcher (drains the outbox to the owner chat)       | `src/remote/JobOutboxWatcher.ts`                               |
+| Agent-bus protocol (ids, heartbeat, wait, orphans, TTL)    | `src/agentBus/agentBus.ts`                                     |
+| Agent-bus shipped text (README, watch.sh, arm prompt)      | `src/agentBus/busContent.ts`                                   |
+| Agent-bus delivery to an open Codex (`codex queue`)        | `src/agentBus/codexDelivery.ts`                                |
+| `agent_bus:` config schema                                 | `src/config/agentBusSchema.ts`                                 |
+| `ask_live_session` tool                                    | `src/tools/liveSessionTool.ts`                                 |
+| "Copy Claude Bus Prompt" command                           | `src/vscode/agentBusCommands.ts`                               |
 
 ## Misc
 

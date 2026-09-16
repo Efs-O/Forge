@@ -12,6 +12,7 @@ import {
 import { VoiceConfigSchema } from './voiceSchema';
 import { ImageGenerationConfigSchema } from './imageGenerationSchema';
 import { JobsConfigSchema } from './jobsSchema';
+import { AgentBusConfigSchema } from './agentBusSchema';
 import { ImageSearchConfigSchema } from './imageSearchSchema';
 
 const ToolPermissionSchema = z.enum(
@@ -295,6 +296,7 @@ export const ForgeConfigSchema = z
     voice: VoiceConfigSchema,
     image_generation: ImageGenerationConfigSchema,
     jobs: JobsConfigSchema,
+    agent_bus: AgentBusConfigSchema,
     image_search: ImageSearchConfigSchema,
     log_level: z.enum(['trace', 'debug', 'info', 'warn', 'error']).optional(),
     // v0.3 additions

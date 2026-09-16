@@ -1,5 +1,34 @@
 # Forge — Recent Changes
 
+## 0.16.4
+
+### `ask_live_session` — ask the Claude Code session that is already running
+
+- **A new tool, `ask_live_session`** (opt-in: `agent_bus: { enabled: true }`).
+  The agent can now ask a Claude Code session that is already running and
+  already knows the work, instead of `ask_local_agent`, which always starts a
+  new, empty session. The exchange shows in the chat as **Asked Claude** /
+  **Claude says**.
+- **Knows when nobody is listening.** The listening session's watcher updates
+  a heartbeat file; with no listener, the tool answers at once, without
+  sending, and shows the prompt that starts one. A heartbeat 30 s–3 min old
+  counts as "re-arming", and the wait is capped at 3 minutes.
+- **Late answers are never lost.** An answer that arrives after the wait ends
+  is shown once at the start of the next call.
+- **Ships its own protocol.** Forge writes `~/.forge/agent-bus/README.md` and
+  `watch.sh`, and the new command **Forge: Copy Claude Bus Prompt** copies a
+  self-contained prompt that turns any open Claude Code session into a
+  listener. No memory or instruction file is needed on either side.
+- **Codex too.** With `target: "codex"`, the question goes into an open Codex
+  session through `codex queue` and shows there as a normal message; the chat
+  shows **Asked Codex** / **Codex says**. Set `agent_bus.codex_thread` to the
+  thread id, and open the session in a terminal with
+  `codex resume <thread> --sandbox workspace-write --add-dir <bus folder>`.
+  Codex has no heartbeat, so a closed window shows up only as "no answer".
+- Questions and answers are written through a `.tmp` file and a rename, ids
+  cannot collide, finished exchanges leave no files behind, and anything
+  older than 24 h is swept.
+
 ## 0.16.3
 
 ### Persistent agent jobs — audit fixes
