@@ -2,27 +2,18 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { randomBytes } from 'crypto';
-import { BUS_README, WATCH_SCRIPT } from './busContent';
+import { BUS_README, CLIENT_SCRIPT } from './busContent';
 
 /**
- * The agent-bus file protocol (docs/plans/AGENT_BUS_TOOL_PLAN.md). Every
- * artifact below has a row in that plan's state × lifecycle ledger; a new one
- * needs a row there and cleanup here, or the "leaves nothing behind" test fails.
+ * The agent-bus files (docs/plans/AGENT_MESSAGING_PLAN.md). Every artifact
+ * below has a row in that plan's state × lifecycle ledger; a new one needs a
+ * row there and cleanup here, or the "leaves nothing behind" test fails.
  */
 
 /** Ids this module mints start with this, so orphan detection never claims
  *  a reply that belongs to another asker (a Codex shell, a script). */
 export const FORGE_ID_PREFIX = 'fg';
 
-/** Heartbeat younger than this: the listener is live. */
-export const FRESH_MS = 30_000;
-/**
- * Heartbeat younger than this: the listener may only be re-arming. Its Monitor
- * expires every 30 min and is re-armed when the session gets to the notice,
- * which can take minutes while it is busy with its user. A single 30 s cutoff
- * reported live sessions as dead (found in the live test, 2026-09-16).
- */
-export const STALE_MS = 3 * 60_000;
 /** Anything older than this is swept at the start of a call. */
 export const TTL_MS = 24 * 60 * 60_000;
 
@@ -30,8 +21,14 @@ export interface BusPaths {
   root: string;
   inbox: string;
   outbox: string;
-  heartbeat: string;
+  /** `{url, token}` of the running Forge's inbound routes. */
+  endpoint: string;
+  /** The client other agents run (`forge.sh`). */
+  script: string;
 }
+
+/** Written by the 0.16.4 watcher design; deleted on sight. */
+const LEGACY_FILES = ['watch.sh', 'listening'];
 
 /** The bus lives under the OS profile, never the workspace: a
  *  `workspaceFolders[0]` that is not the repo root cannot move it. */
@@ -41,7 +38,8 @@ export function busPaths(home: string = os.homedir()): BusPaths {
     root,
     inbox: path.join(root, 'inbox'),
     outbox: path.join(root, 'outbox'),
-    heartbeat: path.join(root, 'listening'),
+    endpoint: path.join(root, 'endpoint.json'),
+    script: path.join(root, 'forge.sh'),
   };
 }
 
@@ -55,12 +53,17 @@ function writeIfChanged(file: string, content: string): void {
   if (current !== content) fs.writeFileSync(file, content, 'utf8');
 }
 
-/** Create the folders and (re)write the shipped README and watcher. */
+/** Create the folders, (re)write the shipped README and client, and delete
+ *  what the watcher design left behind. */
 export function ensureBus(paths: BusPaths): void {
   fs.mkdirSync(paths.inbox, { recursive: true });
   fs.mkdirSync(paths.outbox, { recursive: true });
   writeIfChanged(path.join(paths.root, 'README.md'), BUS_README);
-  writeIfChanged(path.join(paths.root, 'watch.sh'), WATCH_SCRIPT);
+  writeIfChanged(paths.script, CLIENT_SCRIPT);
+  for (const name of LEGACY_FILES) unlinkQuiet(path.join(paths.root, name));
+  for (const name of fs.readdirSync(paths.inbox)) {
+    if (name.endsWith('.notified')) unlinkQuiet(path.join(paths.inbox, name));
+  }
 }
 
 export function newBusId(now: number = Date.now(), random: () => string = randomHex): string {
@@ -69,24 +72,6 @@ export function newBusId(now: number = Date.now(), random: () => string = random
 
 function randomHex(): string {
   return randomBytes(4).toString('hex');
-}
-
-export type ListenerState = 'fresh' | 'stale' | 'absent';
-
-export function listenerState(
-  paths: BusPaths,
-  now: number = Date.now(),
-): { state: ListenerState; ageMs?: number } {
-  let mtime: number;
-  try {
-    mtime = fs.statSync(paths.heartbeat).mtimeMs;
-  } catch {
-    return { state: 'absent' };
-  }
-  const ageMs = Math.max(0, now - mtime);
-  if (ageMs < FRESH_MS) return { state: 'fresh', ageMs };
-  if (ageMs < STALE_MS) return { state: 'stale', ageMs };
-  return { state: 'absent', ageMs };
 }
 
 const questionFile = (paths: BusPaths, id: string): string =>
@@ -102,32 +87,34 @@ function unlinkQuiet(file: string): void {
   }
 }
 
-/** Write via a .tmp and a rename: the watcher only globs `*.md`, so it can
- *  never read half a question. `muted` writes the watcher's marker first, so a
- *  question sent to Codex is recorded (for cleanup and late answers) without
- *  the Claude listener also answering it. */
-export function writeQuestion(
-  paths: BusPaths,
-  id: string,
-  subject: string,
-  body: string,
-  muted = false,
-): void {
-  const file = questionFile(paths, id);
-  if (muted) fs.writeFileSync(`${file}.notified`, '');
-  const text =
-    `Subject: ${subject}\n\n${body}\n\n` +
-    `(Reply by writing outbox/${id}-reply.md via a .tmp file and a rename.)\n`;
+/** Replies are ids from any asker, so they are checked before they name a file. */
+export const BUS_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,80}$/;
+
+function writeAtomic(file: string, text: string): void {
   fs.writeFileSync(`${file}.tmp`, text, 'utf8');
   fs.renameSync(`${file}.tmp`, file);
 }
 
-/** Remove the question and the watcher's marker. A reply that lands after
- *  this is an orphan, announced once by {@link takeOrphans}. */
+/** The answer a waiting {@link waitForReply} picks up (the `/agent/reply` route). */
+export function writeReply(paths: BusPaths, id: string, text: string): void {
+  if (!BUS_ID_PATTERN.test(id)) throw new Error(`not a bus id: ${id}`);
+  fs.mkdirSync(paths.outbox, { recursive: true });
+  writeAtomic(replyFile(paths, id), text);
+}
+
+/** The record that a question is still waited on: {@link takeOrphans} leaves
+ *  its reply alone. Written via .tmp and a rename, like every bus file. */
+export function writeQuestion(paths: BusPaths, id: string, subject: string, body: string): void {
+  const text =
+    `Subject: ${subject}\n\n${body}\n\n` +
+    `(Reply with forge.sh reply ${id}, or write outbox/${id}-reply.md via a .tmp file and a rename.)\n`;
+  writeAtomic(questionFile(paths, id), text);
+}
+
+/** Remove the question. A reply that lands after this is an orphan,
+ *  announced once by {@link takeOrphans}. */
 export function withdrawQuestion(paths: BusPaths, id: string): void {
-  const file = questionFile(paths, id);
-  unlinkQuiet(file);
-  unlinkQuiet(`${file}.notified`);
+  unlinkQuiet(questionFile(paths, id));
 }
 
 function abortableSleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
@@ -146,10 +133,9 @@ function abortableSleep(ms: number, signal: AbortSignal | undefined): Promise<vo
 }
 
 /**
- * Wait for `<id>-reply.md`. The listener renames a finished .tmp into place,
+ * Wait for `<id>-reply.md`. Every writer renames a finished .tmp into place,
  * so the file is complete whenever it exists. Resolves undefined on timeout or
- * abort. Polling a local stat once a second costs nothing; the rate limit that
- * matters is the watcher's, not ours.
+ * abort. Polling a local stat once a second costs nothing.
  */
 export async function waitForReply(
   paths: BusPaths,

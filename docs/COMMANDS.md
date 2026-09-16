@@ -19,7 +19,7 @@ These commands are currently contributed by the extension.
 | `Forge: Stop Backend`         | Stop the active backend              |
 | `Forge: Show Backend Console` | Reveal backend logs or console       |
 | `Forge: Restart Backend`      | Restart the managed backend          |
-| `Forge: Copy Claude Bus Prompt` | Copy the prompt that makes an open Claude Code session listen on the agent bus |
+| `Forge: Show Live Claude Sessions` | List the Claude Code sessions `ask_live_session` can reach; pick one to copy its name |
 | `Forge: Open Config`          | Open the active config file          |
 | `Forge: Validate Config`      | Validate the active config           |
 | `Forge: Pick Model`           | Pick the active model                |

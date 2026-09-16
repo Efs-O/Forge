@@ -248,13 +248,22 @@ voice:
     # read the rest in the written message. Long voice notes cannot be skimmed.
     max_chars: 1200
 
-# Agent bus: the ask_live_session tool asks a Claude Code session that is
-# ALREADY RUNNING and already knows your work (ask_local_agent always starts a
-# new, empty one). Absent = the tool is never offered. The Claude session must
-# be listening: run "Forge: Copy Claude Bus Prompt" and paste the result into
-# it. Files live in ~/.forge/agent-bus/.
+# Agent messaging: the ask_live_session tool asks a Claude Code or Codex
+# session that is ALREADY RUNNING and already knows your work (ask_local_agent
+# always starts a new, empty one); the question shows in that session's window.
+# Those sessions message Forge back with ~/.forge/agent-bus/forge.sh, which
+# needs control_server enabled. Absent = no tool and no /agent routes. A Claude
+# session in bypass-permissions mode holds Forge's messages for approval unless
+# ~/.claude/settings.json has "crossSessionInbound": "accept" (Forge never sets
+# it). See docs/plans/AGENT_MESSAGING_PLAN.md.
 # agent_bus:
 #   enabled: true
+#   # Which Claude session to ask when the agent names none. Unset: the only one
+#   # open in this workspace. Give a session a fixed name with /rename.
+#   claude_session: forge-main
+#   claude_transport: pipe  # or relay: a `claude -p` sends it (~$0.10 each)
+#   claude_cli: claude      # relay only: bare name on PATH or an absolute path
+#   relay_model: haiku      # relay only
 #   # Optional, for target "codex": an open Codex session, resumed in a terminal
 #   # with `codex resume <thread> --sandbox workspace-write --add-dir <bus folder>`.
 #   codex_thread: <thread id>

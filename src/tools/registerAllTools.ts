@@ -230,9 +230,16 @@ export function registerAllTools(
     );
   }
 
-  // The agent bus. Self-suppressing until `agent_bus.enabled`, so a config
+  // Agent messaging. Self-suppressing until `agent_bus.enabled`, so a config
   // without it keeps the tool list unchanged.
-  if (getConfig) registry.register(makeLiveSessionTool({ getConfig }));
+  if (getConfig) {
+    registry.register(
+      makeLiveSessionTool({
+        getConfig,
+        workspaceRoots: () => (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath),
+      }),
+    );
+  }
 
   // Registered last, and self-suppressing until a lazy group is actually
   // bridged in: definitions() follows insertion order, so appending here

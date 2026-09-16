@@ -14,6 +14,7 @@ import { sendJson, requireModel, readJson, handleChat, CHAT_BODY_BYTES } from '.
 import type { ChatProxyFn } from '../llm/ControlChatProxy';
 import { getLogger } from '../util/logger';
 import type { IControlServerRegistry } from './ControlServerRegistry';
+import type { AgentRoutes } from './agentRoutes';
 import { buildControlModelCatalog, type ControlModelCatalogEntry } from './ControlModelCatalog';
 import {
   ensureModelLoaded,
@@ -43,6 +44,8 @@ export interface ControlServerDeps {
   chatProxy?: ChatProxyFn;
   registry?: IControlServerRegistry;
   version?: string;
+  /** The token-guarded `/agent/*` routes (agentRoutes.ts). Absent ⇒ 404. */
+  agentRoutes?: AgentRoutes;
 }
 
 export interface EnsureResult {
@@ -73,6 +76,7 @@ export interface ControlStatus {
  *   POST /release {model} → { released: boolean }        (hold bookkeeping only)
  *   POST /unload  {model} → { unloaded: boolean }        (eager teardown; 409 if held)
  *   POST /chat    {model, messages, …} → { content, finish_reason }  (buffered cloud completion)
+ *   POST /agent/* → agent messaging, bearer-token only (agentRoutes.ts)
  */
 export class ControlServer implements vscode.Disposable {
   private server: http.Server | null = null;
@@ -92,6 +96,7 @@ export class ControlServer implements vscode.Disposable {
   private readonly chatProxy?: ChatProxyFn;
   private readonly registry?: IControlServerRegistry;
   private readonly version: string;
+  private readonly agentRoutes?: AgentRoutes;
 
   constructor(
     private readonly pool: IBackendPool,
@@ -106,10 +111,13 @@ export class ControlServer implements vscode.Disposable {
     if (deps.chatProxy) this.chatProxy = deps.chatProxy;
     if (deps.registry) this.registry = deps.registry;
     this.version = deps.version ?? 'unknown';
+    if (deps.agentRoutes) this.agentRoutes = deps.agentRoutes;
+    this.agentRoutes?.setEnabled(config.agent_bus?.enabled === true);
   }
 
   applyForgeConfig(next: ForgeConfig): void {
     this.config = next;
+    this.agentRoutes?.setEnabled(next.agent_bus?.enabled === true);
   }
 
   start(): void {
@@ -131,6 +139,7 @@ export class ControlServer implements vscode.Disposable {
     server.listen(this.port, '127.0.0.1', () => {
       const url = `http://127.0.0.1:${this.port}`;
       log.info(`[ControlServer] listening on ${url}`);
+      this.agentRoutes?.onListening(url);
       try {
         this.registry?.publish({
           url,
@@ -149,6 +158,7 @@ export class ControlServer implements vscode.Disposable {
   dispose(): void {
     this.server?.close();
     this.server = null;
+    this.agentRoutes?.dispose();
     try {
       this.registry?.removeIfOwned(process.pid);
     } catch (err) {
@@ -195,6 +205,11 @@ export class ControlServer implements vscode.Disposable {
       const method = req.method ?? 'GET';
       const path = (req.url ?? '/').split('?')[0];
 
+      if (path.startsWith('/agent/')) {
+        if (!this.agentRoutes)
+          return sendJson(res, 404, { error: `no route for ${method} ${path}` });
+        return await this.agentRoutes.handle(req, res);
+      }
       if (method === 'GET' && path === '/healthz') {
         return sendJson(res, 200, { ok: true });
       }

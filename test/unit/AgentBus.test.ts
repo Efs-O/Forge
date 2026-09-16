@@ -3,22 +3,25 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  FRESH_MS,
-  STALE_MS,
   TTL_MS,
   busPaths,
   clearExchange,
   ensureBus,
-  listenerState,
   newBusId,
   sweepStale,
   takeOrphans,
   waitForReply,
   withdrawQuestion,
   writeQuestion,
+  writeReply,
   type BusPaths,
 } from '../../src/agentBus/agentBus';
-import { BUS_README, WATCH_SCRIPT, armPrompt } from '../../src/agentBus/busContent';
+import {
+  BUS_README,
+  CLIENT_SCRIPT,
+  claudeQuestion,
+  forgeInboundPrompt,
+} from '../../src/agentBus/busContent';
 import { codexMessage } from '../../src/agentBus/codexDelivery';
 
 let home: string;
@@ -33,12 +36,6 @@ afterEach(async () => {
   await fs.promises.rm(home, { recursive: true, force: true });
 });
 
-function writeReply(id: string, text: string): void {
-  const file = path.join(paths.outbox, `${id}-reply.md`);
-  fs.writeFileSync(`${file}.tmp`, text);
-  fs.renameSync(`${file}.tmp`, file);
-}
-
 function setAge(file: string, ageMs: number): void {
   const t = new Date(Date.now() - ageMs);
   fs.utimesSync(file, t, t);
@@ -50,35 +47,34 @@ describe('ensureBus', () => {
     expect(fs.existsSync(paths.inbox)).toBe(true);
     expect(fs.existsSync(paths.outbox)).toBe(true);
     expect(fs.readFileSync(path.join(paths.root, 'README.md'), 'utf8')).toBe(BUS_README);
-    expect(fs.readFileSync(path.join(paths.root, 'watch.sh'), 'utf8')).toBe(WATCH_SCRIPT);
+    expect(fs.readFileSync(paths.script, 'utf8')).toBe(CLIENT_SCRIPT);
   });
 
-  it('rewrites a stale watcher so the disk never drifts from the code', () => {
+  it('rewrites a stale client so the disk never drifts from the code', () => {
     ensureBus(paths);
-    fs.writeFileSync(path.join(paths.root, 'watch.sh'), 'old hand-written watcher');
+    fs.writeFileSync(paths.script, 'old hand-written client');
     ensureBus(paths);
-    expect(fs.readFileSync(path.join(paths.root, 'watch.sh'), 'utf8')).toBe(WATCH_SCRIPT);
+    expect(fs.readFileSync(paths.script, 'utf8')).toBe(CLIENT_SCRIPT);
   });
 
-  it('ships a watcher that touches the heartbeat', () => {
-    expect(WATCH_SCRIPT).toContain('touch "$ROOT/listening"');
-  });
-});
-
-describe('listenerState', () => {
-  beforeEach(() => ensureBus(paths));
-
-  it('is absent with no heartbeat file', () => {
-    expect(listenerState(paths).state).toBe('absent');
+  it('deletes what the watcher design left behind', () => {
+    ensureBus(paths);
+    fs.writeFileSync(path.join(paths.root, 'watch.sh'), '');
+    fs.writeFileSync(path.join(paths.root, 'listening'), '');
+    fs.writeFileSync(path.join(paths.inbox, 'fg1-a-forge.md.notified'), '');
+    ensureBus(paths);
+    expect(fs.readdirSync(paths.root).sort()).toEqual(['README.md', 'forge.sh', 'inbox', 'outbox']);
+    expect(fs.readdirSync(paths.inbox)).toEqual([]);
   });
 
-  it('is fresh, stale, then absent as the heartbeat ages', () => {
-    fs.writeFileSync(paths.heartbeat, '');
-    expect(listenerState(paths).state).toBe('fresh');
-    setAge(paths.heartbeat, FRESH_MS + 5_000);
-    expect(listenerState(paths).state).toBe('stale');
-    setAge(paths.heartbeat, STALE_MS + 5_000);
-    expect(listenerState(paths).state).toBe('absent');
+  it('ships a client whose backslashes survived the template literal', () => {
+    expect(CLIENT_SCRIPT).toContain('"Authorization: Bearer $TOKEN" \\\n');
+    expect(CLIENT_SCRIPT).toContain(`cut -d'"' -f4`);
+    expect(CLIENT_SCRIPT).not.toContain('${');
+  });
+
+  it('ships a README with the size limit filled in', () => {
+    expect(BUS_README).toContain('at most\n8000 characters');
   });
 });
 
@@ -106,7 +102,7 @@ describe('exchange', () => {
 
   it('returns a reply that lands during the wait', async () => {
     writeQuestion(paths, 'fg1-a', 's', 'q');
-    setTimeout(() => writeReply('fg1-a', 'the answer'), 50);
+    setTimeout(() => writeReply(paths, 'fg1-a', 'the answer'), 50);
     await expect(waitForReply(paths, 'fg1-a', 5_000, undefined, 10)).resolves.toBe('the answer');
   });
 
@@ -127,12 +123,24 @@ describe('exchange', () => {
 
   it('a finished exchange leaves nothing behind in either folder', async () => {
     writeQuestion(paths, 'fg1-a', 's', 'q');
-    fs.writeFileSync(path.join(paths.inbox, 'fg1-a-forge.md.notified'), '');
-    writeReply('fg1-a', 'answer');
+    writeReply(paths, 'fg1-a', 'answer');
     await waitForReply(paths, 'fg1-a', 1_000, undefined, 10);
     clearExchange(paths, 'fg1-a');
     expect(fs.readdirSync(paths.inbox)).toEqual([]);
     expect(fs.readdirSync(paths.outbox)).toEqual([]);
+  });
+});
+
+describe('writeReply', () => {
+  it('lands atomically where waitForReply looks', async () => {
+    writeReply(paths, 'fg1-a', 'routed answer');
+    expect(fs.readdirSync(paths.outbox)).toEqual(['fg1-a-reply.md']);
+    await expect(waitForReply(paths, 'fg1-a', 100, undefined, 10)).resolves.toBe('routed answer');
+  });
+
+  it('refuses an id that could name another file', () => {
+    expect(() => writeReply(paths, '../evil', 'x')).toThrow(/not a bus id/);
+    expect(() => writeReply(paths, '', 'x')).toThrow(/not a bus id/);
   });
 });
 
@@ -142,25 +150,25 @@ describe('late replies', () => {
   it('are announced once, then deleted, and never repeated', () => {
     writeQuestion(paths, 'fg1-a', 's', 'q');
     withdrawQuestion(paths, 'fg1-a');
-    writeReply('fg1-a', 'late');
+    writeReply(paths, 'fg1-a', 'late');
     expect(takeOrphans(paths, 3)).toEqual({ shown: [{ id: 'fg1-a', text: 'late' }], more: 0 });
     expect(takeOrphans(paths, 3)).toEqual({ shown: [], more: 0 });
   });
 
   it('are not claimed while the question is still pending', () => {
     writeQuestion(paths, 'fg1-a', 's', 'q');
-    writeReply('fg1-a', 'on time');
+    writeReply(paths, 'fg1-a', 'on time');
     expect(takeOrphans(paths, 3).shown).toEqual([]);
   });
 
   it("never claims another asker's reply", () => {
-    writeReply('sh123-99', 'a codex answer');
+    writeReply(paths, 'sh123-99', 'a codex answer');
     expect(takeOrphans(paths, 3).shown).toEqual([]);
     expect(fs.existsSync(path.join(paths.outbox, 'sh123-99-reply.md'))).toBe(true);
   });
 
   it('caps the list and counts the rest', () => {
-    for (const id of ['fg1-a', 'fg2-b', 'fg3-c', 'fg4-d']) writeReply(id, id);
+    for (const id of ['fg1-a', 'fg2-b', 'fg3-c', 'fg4-d']) writeReply(paths, id, id);
     const orphans = takeOrphans(paths, 3);
     expect(orphans.shown).toHaveLength(3);
     expect(orphans.more).toBe(1);
@@ -181,18 +189,28 @@ describe('sweepStale', () => {
   });
 });
 
-describe('armPrompt', () => {
-  it('is self-contained: watcher, reply path, visibility rule, README', () => {
-    const prompt = armPrompt('C:\\Users\\someone\\.forge\\agent-bus');
-    expect(prompt).toContain('bash "C:/Users/someone/.forge/agent-bus/watch.sh"');
-    expect(prompt).toContain('outbox/<same id>-reply.md');
-    expect(prompt).toContain('**Forge asks:**');
-    expect(prompt).toContain('README.md');
+describe('messages', () => {
+  it('a Claude question carries the id and a runnable reply command', () => {
+    const msg = claudeQuestion(
+      'C:\\Users\\me\\.forge\\agent-bus\\forge.sh',
+      'fg1-a',
+      'subj',
+      'body',
+    );
+    expect(msg).toContain('[Forge asks, question fg1-a] subj');
+    expect(msg).toContain(
+      `bash "C:/Users/me/.forge/agent-bus/forge.sh" reply fg1-a <<'FORGE_REPLY'`,
+    );
+    expect(msg).toContain('body');
   });
-});
 
-describe('codexMessage', () => {
-  it('carries the reply contract with a forward-slash path', () => {
+  it('an inbound message names its sender and how to answer', () => {
+    const prompt = forgeInboundPrompt('forge-dd', '  hi  ');
+    expect(prompt.startsWith('**forge-dd says:**\n\nhi\n')).toBe(true);
+    expect(prompt).toContain('session: "forge-dd"');
+  });
+
+  it('a Codex question carries the reply contract with a forward-slash path', () => {
     const msg = codexMessage('C:\\bus\\outbox\\fg1-a-reply.md', 'fg1-a', 'subj', 'body');
     expect(msg).toContain('C:/bus/outbox/fg1-a-reply.md.tmp');
     expect(msg).toContain('body');

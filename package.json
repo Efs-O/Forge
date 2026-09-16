@@ -97,8 +97,8 @@
         "title": "Forge: Show Backend Console"
       },
       {
-        "command": "forge.copyClaudeBusPrompt",
-        "title": "Forge: Copy Claude Bus Prompt"
+        "command": "forge.listClaudeSessions",
+        "title": "Forge: Show Live Claude Sessions"
       },
       {
         "command": "forge.restartBackend",

@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { busPaths, ensureBus, type BusPaths } from '../../src/agentBus/agentBus';
+import type { ClaudeSession } from '../../src/agentBus/claudePeer';
 import { makeLiveSessionTool } from '../../src/tools/liveSessionTool';
 import type { ForgeConfig } from '../../src/config/types';
 
@@ -10,16 +11,51 @@ let home: string;
 let paths: BusPaths;
 let enabled: boolean;
 let codexThread: string | undefined;
+let claudeSession: string | undefined;
+let sessions: ClaudeSession[];
+let sent: { session: string; message: string }[];
+let sendFails: boolean;
 let queued: { cli: string; thread: string; message: string }[];
 let queueFails: boolean;
+
+const ROOT = path.resolve('/work/forge');
+
+function session(name: string, cwd = ROOT, extra: Partial<ClaudeSession> = {}): ClaudeSession {
+  return {
+    pid: 100,
+    name,
+    cwd,
+    status: 'idle',
+    sdk: false,
+    pipe: 'pipe',
+    peerProtocol: 1,
+    startedAt: 1,
+    ...extra,
+  };
+}
 
 const tool = (): ReturnType<typeof makeLiveSessionTool> =>
   makeLiveSessionTool({
     getConfig: () =>
       ({
-        agent_bus: { enabled, codex_thread: codexThread, codex_cli: 'codex' },
+        agent_bus: {
+          enabled,
+          codex_thread: codexThread,
+          codex_cli: 'codex',
+          claude_session: claudeSession,
+          claude_transport: 'pipe',
+          claude_cli: 'claude',
+          relay_model: 'haiku',
+        },
       }) as unknown as ForgeConfig,
+    workspaceRoots: () => [ROOT],
     paths: () => paths,
+    claudeSessions: () => sessions,
+    sendClaude: (s, message) => {
+      if (sendFails) return Promise.reject(new Error('pipe is gone'));
+      sent.push({ session: s.name, message });
+      return Promise.resolve();
+    },
     queueCodex: (cli, thread, message) => {
       if (queueFails) return Promise.reject(new Error('thread not found'));
       queued.push({ cli, thread, message });
@@ -32,6 +68,10 @@ beforeEach(async () => {
   paths = busPaths(home);
   enabled = true;
   codexThread = undefined;
+  claudeSession = undefined;
+  sessions = [session('forge-dd')];
+  sent = [];
+  sendFails = false;
   queued = [];
   queueFails = false;
   ensureBus(paths);
@@ -41,11 +81,7 @@ afterEach(async () => {
   await fs.promises.rm(home, { recursive: true, force: true });
 });
 
-function beat(): void {
-  fs.writeFileSync(paths.heartbeat, '');
-}
-
-/** Answer the first question that appears, the way a listener would. */
+/** Answer the first question that appears, the way forge.sh's fallback would. */
 function answerNextQuestion(text: string): void {
   const timer = setInterval(() => {
     const q = fs.readdirSync(paths.inbox).find((n) => n.endsWith('-forge.md'));
@@ -67,29 +103,77 @@ describe('ask_live_session', () => {
     await expect(t.handler(ask)).rejects.toThrow(/disabled/);
   });
 
-  it('with no listener, answers at once, sends nothing, and shows the arm prompt', async () => {
+  it('with no live session, answers at once and sends nothing', async () => {
+    sessions = [];
     const started = Date.now();
     const result = await tool().handler(ask);
     expect(Date.now() - started).toBeLessThan(1_000);
-    expect(result).toContain('NOT sent');
-    expect(result).toContain('watch.sh');
+    expect(result).toContain('nothing was sent');
     expect(result).toContain('ask_local_agent');
+    expect(sent).toEqual([]);
     expect(fs.readdirSync(paths.inbox)).toEqual([]);
   });
 
-  it('returns the exchange formatted for the chat, and leaves nothing behind', async () => {
-    beat();
-    answerNextQuestion('Subject: RE\n\nYes, X holds.');
+  it('sends into the one session in this workspace and returns the exchange', async () => {
+    sessions = [session('forge-dd'), session('elsewhere', path.resolve('/other'))];
+    answerNextQuestion('Yes, X holds.');
     const result = await tool().handler(ask);
-    expect(result).toContain('**Asked Claude:** Does X hold?');
-    expect(result).toContain('**Claude says:**');
+    expect(sent).toHaveLength(1);
+    expect(sent[0].session).toBe('forge-dd');
+    expect(sent[0].message).toContain('Check X.');
+    expect(sent[0].message).toMatch(/forge\.sh" reply fg\d+-[0-9a-f]{8} <</);
+    expect(result).toContain('**Asked Claude (forge-dd):** Does X hold?');
+    expect(result).toContain('**Claude (forge-dd) says:**');
     expect(result).toContain('Yes, X holds.');
     expect(fs.readdirSync(paths.inbox)).toEqual([]);
     expect(fs.readdirSync(paths.outbox)).toEqual([]);
   });
 
+  it('never guesses between several sessions in this workspace', async () => {
+    sessions = [session('forge-dd'), session('forge-ef')];
+    const result = await tool().handler(ask);
+    expect(result).toContain('Several');
+    expect(result).toContain('`forge-dd`');
+    expect(result).toContain('`forge-ef`');
+    expect(result).toContain('claude_session');
+    expect(sent).toEqual([]);
+  });
+
+  it('picks by name from the argument, then from config, in any folder', async () => {
+    sessions = [session('forge-dd'), session('review', path.resolve('/other'))];
+    answerNextQuestion('a');
+    await tool().handler({ ...ask, session: 'REVIEW' });
+    expect(sent[0].session).toBe('review');
+
+    claudeSession = 'forge-dd';
+    answerNextQuestion('b');
+    await tool().handler(ask);
+    expect(sent[1].session).toBe('forge-dd');
+  });
+
+  it('skips SDK-launched sessions unless named', async () => {
+    sessions = [session('forge-dd'), session('bot', ROOT, { sdk: true })];
+    answerNextQuestion('a');
+    await tool().handler(ask);
+    expect(sent[0].session).toBe('forge-dd');
+  });
+
+  it('reports a named session that is not running', async () => {
+    const result = await tool().handler({ ...ask, session: 'ghost' });
+    expect(result).toContain('No live Claude Code session is named `ghost`');
+    expect(result).toContain('`forge-dd`');
+    expect(sent).toEqual([]);
+  });
+
+  it('a failed send withdraws the question and reports the reason', async () => {
+    sendFails = true;
+    const result = await tool().handler(ask);
+    expect(result).toContain('NOT sent');
+    expect(result).toContain('pipe is gone');
+    expect(fs.readdirSync(paths.inbox)).toEqual([]);
+  });
+
   it('on /stop, returns promptly and withdraws the question', async () => {
-    beat();
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 50);
     const started = Date.now();
@@ -100,16 +184,13 @@ describe('ask_live_session', () => {
   });
 
   it('shows an answer that arrived after a stop at the start of the next call, once', async () => {
-    beat();
     const controller = new AbortController();
     controller.abort();
     await tool().handler(ask, { abortSignal: controller.signal });
-    // The listener answers the withdrawn question anyway.
-    const orphan = fs.readdirSync(paths.outbox).length;
-    expect(orphan).toBe(0);
+    expect(fs.readdirSync(paths.outbox)).toEqual([]);
     fs.writeFileSync(path.join(paths.outbox, 'fg1-zz-reply.md'), 'late answer');
 
-    fs.rmSync(paths.heartbeat);
+    sessions = [];
     const next = await tool().handler(ask);
     expect(next).toContain('**Late answer**');
     expect(next).toContain('late answer');
@@ -117,9 +198,10 @@ describe('ask_live_session', () => {
     expect(again).not.toContain('late answer');
   });
 
-  it('rejects a multi-line subject and an out-of-range wait', async () => {
+  it('rejects a multi-line subject, an out-of-range wait and an empty session', async () => {
     await expect(tool().handler({ ...ask, subject: 'a\nb' })).rejects.toThrow(/one line/);
     await expect(tool().handler({ ...ask, wait_minutes: 21 })).rejects.toThrow(/wait_minutes/);
+    await expect(tool().handler({ ...ask, session: ' ' })).rejects.toThrow(/session/);
   });
 
   describe('target codex', () => {
@@ -133,15 +215,11 @@ describe('ask_live_session', () => {
       expect(fs.readdirSync(paths.inbox)).toEqual([]);
     });
 
-    it('queues into the thread with no heartbeat, hides it from the Claude watcher, and labels the answer', async () => {
+    it('queues into the thread, never touches Claude, and labels the answer', async () => {
       codexThread = 'thread-1';
       answerNextQuestion('Yes from Codex.');
-      const pending = tool().handler(askCodex);
-      await new Promise((r) => setTimeout(r, 10));
-      // The watcher's marker exists before the question does.
-      const names = fs.readdirSync(paths.inbox);
-      expect(names.some((n) => n.endsWith('-forge.md.notified'))).toBe(true);
-      const result = await pending;
+      const result = await tool().handler(askCodex);
+      expect(sent).toEqual([]);
       expect(queued).toHaveLength(1);
       expect(queued[0].thread).toBe('thread-1');
       expect(queued[0].message).toContain('-reply.md.tmp');

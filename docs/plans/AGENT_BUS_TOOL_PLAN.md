@@ -1,7 +1,9 @@
 # `ask_live_session` — the agent bus as a tool
 
 **Date:** 2026-09-16 · **Status:** implemented in 0.16.4, both targets (Claude via
-the watcher, Codex via `codex queue`; see "Codex" below).
+the watcher, Codex via `codex queue`; see "Codex" below). **The Claude half
+(watcher, heartbeat, arm prompt) is superseded (next release) by
+[AGENT_MESSAGING_PLAN.md](AGENT_MESSAGING_PLAN.md).**
 
 ## Problem
 

@@ -1,5 +1,31 @@
 # Forge — Recent Changes
 
+## Unreleased
+
+### Agent messaging: Forge, Claude Code and Codex talk directly
+
+- **No more listener.** `ask_live_session` now writes a question straight into
+  the running Claude Code session's own message pipe, where it appears in that
+  session's chat at once. There is nothing to arm or re-arm: the watcher,
+  heartbeat, arm prompt, "Copy Claude Bus Prompt" command and SessionStart hook
+  are gone, and their leftover files are deleted.
+- **Claude and Codex can message Forge first.** `~/.forge/agent-bus/forge.sh
+  say <name>` (or `POST /agent/message` with the token from `endpoint.json`)
+  shows up as **<name> says:** in the active chat, straight away when idle or
+  when the running turn ends. Answers to Forge's questions go through
+  `forge.sh reply <id>` (`POST /agent/reply`), falling back to the outbox file.
+  Both routes need `control_server` and `agent_bus` enabled, and a bearer token
+  that changes on every start.
+- **Choosing a session never guesses.** With several Claude sessions open, the
+  tool lists them and asks. Pin one with `agent_bus.claude_session`, or see
+  them with **Forge: Show Live Claude Sessions**.
+- **`agent_bus.claude_transport: relay`** sends through a one-shot
+  `claude -p` instead (about $0.10 a message), for a Claude Code version whose
+  pipe Forge does not speak.
+- A Claude session running with bypass permissions holds Forge's messages for
+  approval unless `~/.claude/settings.json` has
+  `"crossSessionInbound": "accept"`. Forge never sets it.
+
 ## 0.16.5
 
 ### Persistent agent jobs — delete-during-in-flight fix

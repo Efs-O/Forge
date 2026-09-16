@@ -12,6 +12,7 @@ import { ControlServer } from './backend/ControlServer';
 import { ControlServerRegistry, controlServerRegistryPath } from './backend/ControlServerRegistry';
 import { buildControlChatProxy } from './llm/ControlChatProxy';
 import { registerControlServerCommands } from './vscode/controlCommands';
+import { setupAgentMessaging } from './vscode/agentMessagingSetup';
 import type { ForgeConfig } from './config/types';
 import { loadConfig, findConfigPath } from './config/ConfigLoader';
 import { updateConfigFile } from './config/ConfigWriter';
@@ -190,12 +191,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const checkpoints = createCheckpointStack(context);
 
-  // Localhost model-control API for external orchestrators + the Forge command
-  // palette. Always instantiated (cheap); the HTTP listener opens only when enabled.
+  // Localhost control API (models, chat proxy, agent messages); listens only when enabled.
   const registryPath = controlServerRegistryPath();
   const registry = registryPath ? new ControlServerRegistry(registryPath) : undefined;
   const packageVersion = context.extension.packageJSON['version'];
   const controlServer = new ControlServer(pool, config, {
+    agentRoutes: setupAgentMessaging(context, () => sidebarProvider),
     chatProxy: buildControlChatProxy(() => config, context.secrets),
     ...(registry ? { registry } : {}),
     version: typeof packageVersion === 'string' ? packageVersion : 'unknown',
@@ -205,8 +206,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   registerControlServerCommands(context, controlServer);
 
   // ── KeepUndo CodeLens + Diff Decorations ─────────────────────────────────
-  // Declared before SidebarProvider so the provider can reference its methods
-  // Assigned after CodeLens construction; callbacks only run after activation completes.
+  // Declared early (closures above use it); assigned after CodeLens construction.
   // eslint-disable-next-line prefer-const
   let sidebarProvider: SidebarProvider;
 
