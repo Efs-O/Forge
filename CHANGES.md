@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## Unreleased
+## 0.16.6
 
 ### Agent messaging: Forge, Claude Code and Codex talk directly
 
