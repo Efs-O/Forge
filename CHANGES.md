@@ -1,5 +1,26 @@
 # Forge — Recent Changes
 
+## 0.16.3
+
+### Persistent agent jobs — audit fixes
+
+- **Deleting a job now removes its staged build and pending outbox message**,
+  so a deleted job can no longer switch the llama.cpp backend or deliver a
+  stale notification.
+- **The scheduler survives losing its lease** (window closed / another window
+  took over) instead of disposing itself permanently.
+- **The `llamacpp_update` action is leak- and retry-safe**: a failed stage
+  removes only the build dir it created (a pre-existing build is never
+  touched) and deletes the downloaded zips on both success and failure; the
+  rollback target is the binary in `config.yaml` at switch time, and a failed
+  restore restart is reported rather than swallowed.
+- **Jobs network access is tighter**: the host gate is re-checked at every
+  redirect hop and downloads are size-capped.
+- **Failure reporting is quieter**: a job's failure is reported once at the
+  backoff threshold, with a "recovered" note after a later success.
+- **`docs/JOBS.md`**: a user guide and the manual test procedure for the
+  whole feature, including the end-to-end `llamacpp_update` run.
+
 ## 0.16.2
 
 ### Persistent agent jobs (Phase B1)
