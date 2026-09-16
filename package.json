@@ -134,7 +134,11 @@
       },
       {
         "command": "forge.unloadModel",
-        "title": "Forge: Unload Model"
+        "title": "Forge: Unload Active Chat's Model"
+      },
+      {
+        "command": "forge.unloadAllModels",
+        "title": "Forge: Unload All Models"
       },
       {
         "command": "forge.explainSelection",

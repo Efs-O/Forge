@@ -28,7 +28,8 @@ These commands are currently contributed by the extension.
 | `Forge: Add Models`           | Add model entries to the config      |
 | `Forge: Compact config into groups` | Migrate the config into shared groups (comment-preserving) |
 | `Forge: Setup Wizard`         | Run the first-run or repair flow     |
-| `Forge: Unload Model`         | Stop all backends and release models |
+| `Forge: Unload Active Chat's Model` | Release only the active chat's model |
+| `Forge: Unload All Models`    | Stop all backends and release models |
 | `Forge: New Chat`             | Open a new conversation tab          |
 | `Forge: Clear Active Chat`    | Clear the active tab                 |
 | `Forge: Undo Last Turn`       | Restore the previous checkpoint      |

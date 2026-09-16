@@ -26,6 +26,16 @@
   approval unless `~/.claude/settings.json` has
   `"crossSessionInbound": "accept"`. Forge never sets it.
 
+### `/unload` frees only this chat's model; `/unloadall` frees everything
+
+- **`/unload` no longer stops every model.** In the sidebar, the command
+  palette (**Forge: Unload Active Chat's Model**) and Telegram, it now releases
+  only the model the current chat uses; other loaded models keep running.
+  Another chat on the same model loses it too, since they share one server.
+  It refuses while a turn is running on that model.
+- **`/unloadall`** (sidebar, Telegram) and **Forge: Unload All Models** keep the
+  old stop-everything behaviour.
+
 ## 0.16.5
 
 ### Persistent agent jobs — delete-during-in-flight fix

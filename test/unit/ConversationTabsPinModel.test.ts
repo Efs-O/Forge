@@ -184,3 +184,42 @@ describe('ConversationTabs.pinModel VRAM release', () => {
     expect(release).not.toHaveBeenCalled();
   });
 });
+
+describe('ConversationTabs.unloadModelOf', () => {
+  it("releases only the tab's own model, never the other loaded one", async () => {
+    const { tabs, release, posted } = harness({ tabs: ['27b', '12b'], loaded: ['27b', '12b'] });
+
+    // The bug: /unloadModel in the 27b tab stopped the 12b as well.
+    await expect(tabs.unloadModelOf('tab0')).resolves.toEqual({ model: '27b', wasLoaded: true });
+
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledWith('27b');
+    expect(posted).toContainEqual({
+      type: 'backendDown',
+      message: '27b unloaded. Send a prompt to load it again.',
+    });
+  });
+
+  it('reports a model that was not loaded without releasing anything', async () => {
+    const { tabs, release } = harness({ tabs: ['27b'], loaded: ['12b'] });
+
+    await expect(tabs.unloadModelOf('tab0')).resolves.toEqual({ model: '27b', wasLoaded: false });
+    expect(release).not.toHaveBeenCalled();
+  });
+
+  it('refuses while a turn is running on that model', async () => {
+    const { tabs, release } = harness({ tabs: ['12b'], streamingIds: ['tab0'] });
+
+    await expect(tabs.unloadModelOf('tab0')).rejects.toThrow('a turn is still running on "12b"');
+    expect(release).not.toHaveBeenCalled();
+  });
+
+  it('does not post backendDown for a tab that is not active', async () => {
+    const { tabs, release, posted } = harness({ tabs: ['27b', '12b'], loaded: ['27b', '12b'] });
+
+    await tabs.unloadModelOf('tab1');
+
+    expect(release).toHaveBeenCalledWith('12b');
+    expect(posted.some((m) => m.type === 'backendDown')).toBe(false);
+  });
+});

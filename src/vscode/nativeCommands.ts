@@ -181,12 +181,22 @@ export function registerNativeCommands(
       void vscode.window.showInformationMessage('Forge: active chat cleared');
     }),
     vscode.commands.registerCommand('forge.unloadModel', async () => {
+      try {
+        const { model, wasLoaded } = await deps.sidebar.unloadConversationModel();
+        if (wasLoaded) deps.statusBar.setStopped(model);
+        void vscode.window.showInformationMessage(
+          `Forge: ${model} ${wasLoaded ? 'unloaded' : 'was not loaded'}`,
+        );
+      } catch (err) {
+        void vscode.window.showErrorMessage(`Forge: ${(err as Error).message}`);
+      }
+    }),
+    vscode.commands.registerCommand('forge.unloadAllModels', async () => {
       const modelName = deps.getConfig().active_model;
-      deps.statusBar.setStopped(modelName);
       try {
         await deps.sidebar.unloadModels();
         deps.statusBar.setStopped(modelName);
-        void vscode.window.showInformationMessage('Forge: models unloaded');
+        void vscode.window.showInformationMessage('Forge: all models unloaded');
       } catch (err) {
         const message = (err as Error).message;
         deps.statusBar.setError(message);

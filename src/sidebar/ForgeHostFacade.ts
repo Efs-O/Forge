@@ -72,6 +72,8 @@ export interface ForgeHostFacade {
   ): Promise<CompactionOutcome>;
   setConversationModel(conversationId: string, modelName: string | null): Promise<void>;
   unloadModels(): Promise<void>;
+  /** Unload only the model this conversation uses; other loaded models stay. */
+  unloadConversationModel(conversationId: string): Promise<{ model: string; wasLoaded: boolean }>;
   restartModel(modelName: string): Promise<void>;
   /**
    * Model → pid for the llama-servers this window spawned, so a remote
@@ -159,6 +161,9 @@ export interface SidebarHostFacadeDeps {
   ) => Promise<CompactionOutcome>;
   setConversationModel: (conversationId: string, modelName: string | null) => boolean;
   unloadModels: () => Promise<void>;
+  unloadConversationModel: (
+    conversationId: string,
+  ) => Promise<{ model: string; wasLoaded: boolean }>;
   restartModel: (modelName: string) => Promise<void>;
   backendProcesses?: () => readonly BackendProcess[];
   onCompactionEvent?: (listener: (event: CompactionEvent) => void) => { dispose(): void };
@@ -270,6 +275,10 @@ export class SidebarHostFacade implements ForgeHostFacade {
 
   unloadModels(): Promise<void> {
     return this.deps.unloadModels();
+  }
+
+  unloadConversationModel(conversationId: string): Promise<{ model: string; wasLoaded: boolean }> {
+    return this.deps.unloadConversationModel(conversationId);
   }
 
   restartModel(modelName: string): Promise<void> {

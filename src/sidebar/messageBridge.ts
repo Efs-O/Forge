@@ -31,6 +31,7 @@ export interface SessionHistoryMeta {
 /** Slash commands from the sidebar input (`/` menu); kept in sync with `webview-ui/src/slashCommands.ts`. */
 export type ForgeSlashCommandId =
   | 'unloadModel'
+  | 'unloadAll'
   | 'restartBackend'
   | 'reindex'
   | 'newChat'
@@ -49,7 +50,6 @@ export type ForgeSlashCommandId =
   | 'system';
 
 // ── Host → Webview ────────────────────────────────────────────────────────────
-
 export interface TokenMsg {
   type: 'token';
   text: string;

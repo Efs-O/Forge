@@ -213,7 +213,7 @@ drives, which is how you find out from a train why the model will not load.
 **Commands.** `/status`, `/context`, `/system`, `/view`, `/stop`,
 `/steer <prompt>` (jumps the queue and interrupts the active turn), `/new`,
 `/chats`, `/chat`, `/resume`, `/model`, `/queue`, `/drop`,
-`/ratelimit`, `/unload`, `/restart`, `/reload`, `/compact`, `/lock`,
+`/ratelimit`, `/unload`, `/unloadall`, `/restart`, `/reload`, `/compact`, `/lock`,
 `/timeout`, `/notify`, `/mirror`, `/voice`, `/clanker on|off`, `/workspace`,
 `/sleep`, `/wake`, `/help`. Telegram shows them in its native command menu.
 
@@ -533,7 +533,8 @@ Type `/` in chat to open the built-in command list. Forge also contributes comma
 
 | Slash command | What it does                                     |
 | ------------- | ------------------------------------------------ |
-| `/unload`     | Stop all backends and release loaded models      |
+| `/unload`     | Release only this chat's model from memory       |
+| `/unloadall`  | Stop all backends and release every loaded model |
 | `/restart`    | Restart or reconnect the backend                 |
 | `/reindex`    | Rebuild the local semantic search index          |
 | `/new`        | Open a new conversation tab                      |

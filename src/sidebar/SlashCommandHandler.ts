@@ -32,8 +32,9 @@ export interface SlashCommandDeps extends CompactionDeps {
   getConfig: () => ForgeConfig;
   pool: IBackendPool;
   events: SidebarProviderEvents;
-  /** Owned by SidebarProvider. Throws on failure; this handler reports it. */
+  /** Owned by SidebarProvider. Both throw on failure; this handler reports it. */
   unloadModels: () => Promise<void>;
+  unloadActiveModel: () => Promise<{ model: string; wasLoaded: boolean }>;
   reindexCodebase: () => Promise<void>;
   newConversation: () => Promise<void>;
   clearMessages: () => void;
@@ -72,24 +73,13 @@ export class SlashCommandHandler {
   async handle(commandId: ForgeSlashCommandId): Promise<void> {
     const { deps } = this;
     switch (commandId) {
-      case 'unloadModel':
-        // One owner for the sequence (SidebarProvider.unloadModels), so the
-        // sidebar and a paired chat cannot drift apart. It throws rather than
-        // reporting; the remote caller needs the failure to reach the chat, so
-        // only this surface swallows it into the webview.
-        try {
-          await deps.unloadModels();
-          // Window-scoped: a paired chat that ran /unload gets its own reply
-          // from the command handler, but a chat that did not run it is just as
-          // affected and used to hear nothing at all.
-          this.emitActivity({ text: 'Forge: models unloaded.' });
-        } catch (err) {
-          deps.post({
-            type: 'error',
-            message: `Failed to unload models: ${(err as Error).message}`,
-          });
-        }
-        return;
+      case 'unloadModel': // only the active tab's model
+        return this.runUnload(async () => {
+          const { model, wasLoaded } = await deps.unloadActiveModel();
+          return `Forge: ${model} ${wasLoaded ? 'unloaded' : 'was not loaded'}.`;
+        });
+      case 'unloadAll':
+        return this.runUnload(() => deps.unloadModels().then(() => 'Forge: all models unloaded.'));
 
       case 'restartBackend':
         try {
@@ -476,6 +466,16 @@ Key directories and what they contain (3-8 entries).
 1-3 dangerous operations that need explicit user confirmation before running.
 
 Be specific and factual. Do not invent paths or names not present in the scan results above.`;
+  }
+
+  /** The owners throw; only this surface swallows into the webview. The notice
+   *  is window-scoped: a paired chat that did not run it is just as affected. */
+  private async runUnload(unload: () => Promise<string>): Promise<void> {
+    try {
+      this.emitActivity({ text: await unload() });
+    } catch (err) {
+      this.deps.post({ type: 'error', message: `Failed to unload: ${(err as Error).message}` });
+    }
   }
 
   /**

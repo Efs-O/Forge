@@ -85,6 +85,7 @@ export function createSidebarHostFacade(deps: SidebarFacadeDeps): ForgeHostFacad
     setConversationModel: (conversationId, modelName) =>
       tabs.setModelById(conversationId, modelName),
     unloadModels: () => deps.unloadModels(),
+    unloadConversationModel: (conversationId) => tabs.unloadModelOf(conversationId),
     restartModel: (modelName) => deps.restartModel(modelName),
     backendProcesses: () => deps.pool.backendProcesses(),
   });

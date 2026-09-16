@@ -395,6 +395,20 @@ async function executeRemoteCommand(
   if (command === '/unload') {
     const idleReason = globalBusyReason(context);
     if (idleReason) return { kind: 'rejected', reason: idleReason };
+    const binding = context.store.binding(event.channel, event.chatId);
+    if (!binding) {
+      return { kind: 'rejected', reason: 'this chat has no conversation; use /unloadall' };
+    }
+    const { model, wasLoaded } = await context.host.unloadConversationModel(binding.conversationId);
+    const text = wasLoaded
+      ? `Forge: ${model} unloaded, memory released. Other loaded models stay; /unloadall frees them too.`
+      : `Forge: ${model} was not loaded.`;
+    await context.channel.send(event.chatId, text, { signal: context.signal });
+    return { kind: 'handled' };
+  }
+  if (command === '/unloadall') {
+    const idleReason = globalBusyReason(context);
+    if (idleReason) return { kind: 'rejected', reason: idleReason };
     await context.host.unloadModels();
     await context.channel.send(
       event.chatId,

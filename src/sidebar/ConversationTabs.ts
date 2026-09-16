@@ -335,6 +335,36 @@ export class ConversationTabs {
     this.deps.post({ type: 'backendDown', message: `${base} unloaded.` });
   }
 
+  /**
+   * `/unloadModel`: free the model behind ONE tab, leaving every other loaded
+   * model alone (`unloadModels` is the stop-everything path). Another tab on
+   * the same base loses it too — they share one backend. Throws on a refusal so
+   * each surface words the failure itself.
+   */
+  async unloadModelOf(convId: string): Promise<{ model: string; wasLoaded: boolean }> {
+    const sidebar = this.deps.getSidebar();
+    const conv = sidebar.conversations.find((c) => c.id === convId);
+    if (!conv) throw new Error('conversation not found');
+    const model = conv.active_model ?? this.deps.getConfig().active_model;
+    const base = this.deps.baseOf(model);
+    if (!model || !base) throw new Error('this chat has no model selected');
+    await this.deps.agentLoop.waitForCancelledTurns();
+    if (!this.deps.pool.isLoaded(base)) return { model: base, wasLoaded: false };
+    if (this.streamingHolder(model, convId)) {
+      throw new Error(`a turn is still running on "${base}" — stop it first`);
+    }
+    await this.deps.pool.release(base);
+    log.info(`[ConversationTabs] unloaded "${base}" for conversation ${convId}`);
+    this.deps.events.onBackendStopped?.(base);
+    if (convId === sidebar.activeConversationId) {
+      this.deps.post({
+        type: 'backendDown',
+        message: `${base} unloaded. Send a prompt to load it again.`,
+      });
+    }
+    return { model: base, wasLoaded: true };
+  }
+
   /** The closed tab may have been the last user of a model still holding VRAM. */
   private offerUnload(modelName: string): void {
     const base = this.unloadCandidate(modelName);

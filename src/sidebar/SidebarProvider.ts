@@ -137,6 +137,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         keep: () => this.keep(),
         rememberClankerMode: (on) => void this.workspaceState.update('forge.clankerMode', on),
         unloadModels: () => this.unloadModels(),
+        unloadActiveModel: () => this.unloadConversationModel(),
       },
       {
         pool,
@@ -278,6 +279,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       type: 'backendDown',
       message: 'All models unloaded. Send a prompt to start the backend again.',
     });
+  }
+
+  /** Unload only one chat's model (default: the active tab). Throws on refusal. */
+  unloadConversationModel(conversationId?: string): Promise<{ model: string; wasLoaded: boolean }> {
+    return this.tabs.unloadModelOf(conversationId ?? this.getActive().id);
   }
 
   /** Addressed lifecycle seam for owner-authenticated remote controls. */

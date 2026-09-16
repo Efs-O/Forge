@@ -64,6 +64,7 @@ export interface SidebarHost {
   rememberClankerMode: (on: boolean) => void;
   /** Sole owner of the unload sequence; the slash command routes through it. */
   unloadModels: () => Promise<void>;
+  unloadActiveModel: () => Promise<{ model: string; wasLoaded: boolean }>;
 }
 
 /** The construction-time collaborators, straight from the provider's ctor. */
@@ -177,6 +178,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     ...compactionDeps,
     getConfig: host.getConfig,
     unloadModels: host.unloadModels,
+    unloadActiveModel: host.unloadActiveModel,
     pool,
     events,
     reindexCodebase: host.reindexCodebase,
