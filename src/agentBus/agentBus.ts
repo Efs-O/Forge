@@ -30,6 +30,13 @@ export interface BusPaths {
 /** Written by the 0.16.4 watcher design; deleted on sight. */
 const LEGACY_FILES = ['watch.sh', 'listening'];
 
+/**
+ * A pending question's record. Not `.md`: a 0.16.4 watcher still running in
+ * some Claude session globs `inbox/*.md`, and would hand our question to that
+ * session instead of the one we asked.
+ */
+const PENDING_SUFFIX = '-forge.pending';
+
 /** The bus lives under the OS profile, never the workspace: a
  *  `workspaceFolders[0]` that is not the repo root cannot move it. */
 export function busPaths(home: string = os.homedir()): BusPaths {
@@ -60,9 +67,19 @@ export function ensureBus(paths: BusPaths): void {
   fs.mkdirSync(paths.outbox, { recursive: true });
   writeIfChanged(path.join(paths.root, 'README.md'), BUS_README);
   writeIfChanged(paths.script, CLIENT_SCRIPT);
-  for (const name of LEGACY_FILES) unlinkQuiet(path.join(paths.root, name));
-  for (const name of fs.readdirSync(paths.inbox)) {
-    if (name.endsWith('.notified')) unlinkQuiet(path.join(paths.inbox, name));
+  const legacy = [
+    ...LEGACY_FILES.map((name) => path.join(paths.root, name)),
+    ...fs
+      .readdirSync(paths.inbox)
+      .filter((name) => name.endsWith('.notified'))
+      .map((name) => path.join(paths.inbox, name)),
+  ];
+  for (const file of legacy) {
+    try {
+      unlinkQuiet(file);
+    } catch {
+      // Best effort: a leftover must never block a question. Retried next call.
+    }
   }
 }
 
@@ -75,7 +92,7 @@ function randomHex(): string {
 }
 
 const questionFile = (paths: BusPaths, id: string): string =>
-  path.join(paths.inbox, `${id}-forge.md`);
+  path.join(paths.inbox, `${id}${PENDING_SUFFIX}`);
 export const replyFile = (paths: BusPaths, id: string): string =>
   path.join(paths.outbox, `${id}-reply.md`);
 

@@ -84,10 +84,10 @@ afterEach(async () => {
 /** Answer the first question that appears, the way forge.sh's fallback would. */
 function answerNextQuestion(text: string): void {
   const timer = setInterval(() => {
-    const q = fs.readdirSync(paths.inbox).find((n) => n.endsWith('-forge.md'));
+    const q = fs.readdirSync(paths.inbox).find((n) => n.endsWith('-forge.pending'));
     if (!q) return;
     clearInterval(timer);
-    const file = path.join(paths.outbox, q.replace(/-forge\.md$/, '-reply.md'));
+    const file = path.join(paths.outbox, q.replace(/-forge\.pending$/, '-reply.md'));
     fs.writeFileSync(`${file}.tmp`, text);
     fs.renameSync(`${file}.tmp`, file);
   }, 20);

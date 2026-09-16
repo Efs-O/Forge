@@ -124,7 +124,7 @@ out of scope here.
 | `outbox/<id>-reply.md`                        | `/agent/reply` (tmp + rename)                                                       | tool after reading (unchanged)                       | route 404                                              | unchanged                                                                          | orphan → next call, once                          | 24 h sweep (unchanged)               |
 | Inbound queue (memory)                        | `/agent/message` while busy                                                         | drained at turn end                                  | 404                                                    | lost with the process; the sender got 202 → documented as "best effort while busy" | lost                                              | cap 20                               |
 | Peer pipe message                             | `PeerPipeTransport`                                                                 | Claude Code                                          | tool not advertised                                    | half frame → receiver rejects the frame                                            | receiver dies → connect fails → tool says so      | Claude Code holds it ~1 week if held |
-| `inbox/<id>-forge.md` (pending record)        | tool, before delivery (tmp + rename)                                                | tool: on answer, on failed delivery, on timeout/stop | tool not advertised → never written                    | tmp only → the question counts as withdrawn                                        | turn dies → next call sees the reply as an orphan | 24 h sweep                           |
+| `inbox/<id>-forge.pending` (pending record)   | tool, before delivery (tmp + rename)                                                | tool: on answer, on failed delivery, on timeout/stop | tool not advertised → never written                    | tmp only → the question counts as withdrawn                                        | turn dies → next call sees the reply as an orphan | 24 h sweep                           |
 | `forge.sh`, `README.md`                       | `ensureBus` (on activation when enabled, and each call), rewritten when they differ | never (they are the protocol)                        | left in place; `forge.sh` then reports "not reachable" | rewritten next time                                                                | —                                                 | none                                 |
 | `.notified`, `listening`, `watch.sh` (0.16.4) | never again                                                                         | `ensureBus` deletes them on sight                    | —                                                      | —                                                                                  | —                                                 | —                                    |
 | SessionStart hook (local, gitignored)         | never again                                                                         | removed by hand from `.claude/`                      | —                                                      | —                                                                                  | —                                                 | —                                    |
@@ -153,9 +153,13 @@ exchange and fails on anything other than `README.md`, `endpoint.json`,
   file. `reply` falls back to the outbox file, so an answer lands even with
   the control server off. The live test caught `say` posting to the wrong
   route, so a test now runs the real script against the real routes.
-- **`inbox/<id>-forge.md` stays**, as the "still waited on" record that stops
+- **`inbox/<id>-forge.pending` stays**, as the "still waited on" record that stops
   `takeOrphans` from claiming a reply that is on time. No watcher reads it
   any more; `.notified`, `listening` and `watch.sh` are deleted on sight.
+  It is not `.md`: three orphaned 0.16.4 watchers were still running at the
+  end of the build (one armed by the SessionStart hook in another session),
+  and they glob `inbox/*.md`, so they would have handed Forge's question to
+  the wrong session.
 - **Routes take plain text** (`?from=` / `?id=` in the query) as well as
   JSON. An answer may be 32 000 chars; a new message 8 000.
 - **Codex keeps the file reply.** Its `workspace-write` sandbox has no

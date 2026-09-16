@@ -94,8 +94,9 @@ describe('exchange', () => {
 
   it('writes the question atomically, with no .tmp left behind', () => {
     writeQuestion(paths, 'fg1-a', 'subj', 'body');
-    expect(fs.readdirSync(paths.inbox)).toEqual(['fg1-a-forge.md']);
-    const text = fs.readFileSync(path.join(paths.inbox, 'fg1-a-forge.md'), 'utf8');
+    // Never `.md`: a leftover 0.16.4 watcher globs inbox/*.md.
+    expect(fs.readdirSync(paths.inbox)).toEqual(['fg1-a-forge.pending']);
+    const text = fs.readFileSync(path.join(paths.inbox, 'fg1-a-forge.pending'), 'utf8');
     expect(text.startsWith('Subject: subj\n')).toBe(true);
     expect(text).toContain('outbox/fg1-a-reply.md');
   });

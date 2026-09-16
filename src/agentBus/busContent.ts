@@ -65,7 +65,7 @@ Codex message each other, each message shown in the receiving window.
 
     endpoint.json   url + token of the running Forge (rotated on every start)
     forge.sh        the client: answer Forge, or send Forge a message
-    inbox/          questions Forge is waiting on   <id>-forge.md
+    inbox/          questions Forge is waiting on   <id>-forge.pending
     outbox/         file answers                    <id>-reply.md
 
 ## Doors
