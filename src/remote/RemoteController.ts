@@ -45,7 +45,8 @@ export class RemoteController {
   private readonly activeConversations = new Set<string>();
   private readonly fanout: RemoteNotificationFanout;
   private rateLimiter: RemoteRateLimiter;
-  private readonly outbox: RemoteOutboxDelivery;
+  /** Public so the jobs outbox watcher (in the transport manager) can kick it. */
+  readonly outbox: RemoteOutboxDelivery;
   private readonly approvals: RemoteApprovalBridge;
   private readonly questions: RemoteQuestionBridge;
   private readonly progress: RemoteAgentProgress;

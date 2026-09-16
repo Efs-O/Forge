@@ -11,6 +11,9 @@ import { RemoteTransportLease } from './RemoteTransportLease';
 import type { RemoteChannel, RemoteRuntimeOptions } from './types';
 import { RemoteAuditLog } from './RemoteAuditLog';
 import { subscribeHostToRemote, type HostSubscriptions } from './remoteHostSubscriptions';
+import { JobOutboxWatcher } from './JobOutboxWatcher';
+import { deliverOwnerNotification } from './ownerNotification';
+import { defaultOutboxDir } from '../jobs/JobOutbox';
 import {
   buildRemoteControllerOptions,
   type RemoteControllerOptionsDeps,
@@ -22,6 +25,13 @@ export interface ActiveTransport {
   lease: RemoteTransportLease;
   subscriptions: HostSubscriptions;
   voice?: VoiceBridgeBundle | undefined;
+  /**
+   * Drains the jobs outbox to the owner chat (B.4). Present only when
+   * `jobs.enabled`: this window holds the Telegram lease, so it is the one
+   * whose sink can reach the owner's phone, and it is the one that delivers
+   * what the scheduler window wrote.
+   */
+  jobOutboxWatcher?: JobOutboxWatcher | undefined;
 }
 
 /**
@@ -118,12 +128,26 @@ export class RemoteTransportManager {
         // complete while a transport is activating. Controller.start() starts
         // the durable outbox, which flushes anything queued here.
         await controller.start();
+        // The jobs outbox is drained by whoever holds the Telegram lease, not
+        // by the scheduler window (whose sink cannot reach the owner's phone).
+        // Gated on `jobs.enabled` so a jobs-less config adds no watcher.
+        const jobOutboxWatcher =
+          channelName === 'telegram' && config.jobs?.enabled === true
+            ? new JobOutboxWatcher({
+                outboxDir: defaultOutboxDir(),
+                deliver: (text) =>
+                  deliverOwnerNotification(channel, this.auth, this.store, controller.outbox, text),
+                onError: (message) => this.options.notifyLocal(message),
+              })
+            : undefined;
+        jobOutboxWatcher?.start();
         this.active.set(channelName, {
           channel,
           controller,
           lease,
           subscriptions,
           ...(voice ? { voice } : {}),
+          ...(jobOutboxWatcher ? { jobOutboxWatcher } : {}),
         });
         this.notifyStatus();
       } catch (err) {
@@ -147,6 +171,7 @@ export class RemoteTransportManager {
     this.active.delete(name);
     this.notifyStatus();
     transport.subscriptions.dispose();
+    transport.jobOutboxWatcher?.stop();
     await transport.voice?.dispose();
     await transport.controller.stop();
     await transport.lease.release();

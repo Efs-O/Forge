@@ -281,6 +281,15 @@ export interface ImageGenerationConfig {
   output_dir: string;
 }
 
+/** `jobs:` block (validated by jobsSchema.ts). Absent means no scheduler. */
+export interface JobsConfig {
+  enabled: boolean;
+  /** Outbound fetch gate: a job fetches only from a host in this list. */
+  allowed_hosts: string[];
+  /** How many jobs may run at once. */
+  max_concurrent: number;
+}
+
 /** `image_search:` block (validated by imageSearchSchema.ts). */
 export interface ImageSearchConfig {
   provider: 'serpapi_lens';
@@ -373,6 +382,8 @@ export interface ForgeConfig {
   voice?: VoiceConfig;
   /** `generate_image` backends. Absent means the tool is not advertised. */
   image_generation?: ImageGenerationConfig;
+  /** Persistent agent jobs. Absent means no scheduler, no lease, no tool. */
+  jobs?: JobsConfig;
   /** Reverse image search. Absent means `image_search` is not advertised. */
   image_search?: ImageSearchConfig;
   log_level?: 'trace' | 'debug' | 'info' | 'warn' | 'error';

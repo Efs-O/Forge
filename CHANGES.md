@@ -2,6 +2,31 @@
 
 ## 0.16.1
 
+### Persistent agent jobs (Phase B1)
+
+- **A `jobs:` block and a background job scheduler** (opt-in; absent means no
+  scheduler, no lease, no tool). Jobs are defined by hand as JSON under
+  `~/.forge/jobs/` (one `<id>.json` definition, a separate `state/<id>.json`,
+  and an append-only `runs/<id>.jsonl` log). The scheduler runs in whichever
+  window wins a `jobs-scheduler` file lease, ticks every 30 s, and runs at most
+  `max_concurrent` jobs at once.
+- **Three checks**: `github_release` (new release / asset), `github_issue`
+  (state, comment count, last comment), and `disk_space` (free-space threshold
+  crossing). The first run only records a baseline and never reports "changed";
+  a `github` fetch is gated to `jobs.allowed_hosts` and uses ETag `If-None-Match`
+  so an unchanged check costs nothing against the API rate limit.
+- **Delivery**: a change is toasted locally and written to a coalescing outbox
+  file (one per job; a second change supersedes the text and bumps a count; an
+  item older than 24 h is delivered as a count, not a flood). The window holding
+  the Telegram lease drains the outbox to the owner chat, deleting a file only
+  after delivery is accepted and keeping it pending when there is no owner yet.
+- **Wakes and lifecycle**: `wake: true` daily/weekly jobs register a recurring
+  `ForgeScheduledWake` task (shifted earlier by the wake lead time, including
+  across midnight); disabling a job deletes its wake. A tick more than 90 s late
+  counts as a resume and runs overdue jobs once, marked `late`. Backoff pushes a
+  job out after 3 consecutive failures. `summarize` runs a no-tools model call
+  only when no turn is streaming.
+
 ### Project instructions
 
 - **`FORGE.md` budget raised from 15,000 to 25,000 bytes**

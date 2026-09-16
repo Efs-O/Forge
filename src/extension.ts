@@ -53,7 +53,8 @@ import { RemoteRuntime } from './remote/RemoteRuntime';
 import { workspaceIdFor } from './remote/RemoteWorkspaceHandoff';
 import { TelegramChannel, TELEGRAM_BOT_TOKEN_SECRET } from './remote/TelegramChannel';
 import { registerRemoteCommands } from './vscode/remoteCommands';
-import { RelaySleepServer } from './remote/RelaySleepServer';
+import { startWakeRelay } from './vscode/wakeRelaySetup';
+import { setupJobs } from './vscode/jobsSetup';
 
 let activeRemoteRuntime: RemoteRuntime | undefined;
 
@@ -289,6 +290,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const workspaceId = workspaceRoot
     ? workspaceIdFor(workspaceRoot)
     : createHash('sha256').update(`no-workspace:${activeConfigPath}`).digest('hex');
+  // Persistent agent jobs (B1). Runs in whichever window wins the
+  // `jobs-scheduler` lease; a no-op when `jobs.enabled` is false.
+  const jobsSetup = setupJobs(context, () => config, workspaceId, sidebarProvider);
   const remoteRuntime = new RemoteRuntime({
     storageDirectory: context.globalStorageUri.fsPath,
     ...(workspaceRoot ? { workspaceRoot } : {}),
@@ -356,25 +360,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     onStatusChanged: () => void publishRemoteStatus(),
   });
   activeRemoteRuntime = remoteRuntime;
-  const wakeRelay = config.remote?.wake_relay;
-  if (wakeRelay?.enabled) {
-    const relayServer = new RelaySleepServer();
-    try {
-      await relayServer.start({
-        host: wakeRelay.host,
-        port: wakeRelay.port,
-        relayIp: wakeRelay.relay_ip,
-        secrets: context.secrets,
-        forge: sidebarProvider.getHostFacade(),
-        notify: (message) => void vscode.window.showErrorMessage(message),
-      });
-      context.subscriptions.push(relayServer);
-    } catch (err) {
-      void vscode.window.showErrorMessage(
-        `Forge wake relay failed to start: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  }
+  await startWakeRelay(context, config, sidebarProvider.getHostFacade());
   const publishRemoteStatus = async (): Promise<void> => {
     sidebarProvider.setRemoteStatus(await remoteRuntime.status());
   };
@@ -438,6 +424,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (config.control_server?.enabled) controlServer.start();
         statusBar.setStopped(config.active_model);
         ModelManagerPanel.current?.refresh();
+        // A reload can disable jobs (delete the recurring wake task) or change
+        // a schedule (re-register it). Reconcile either way.
+        jobsSetup?.onConfigReloaded();
         void remoteRuntime.applyConfig(config).catch((err) => {
           void vscode.window.showErrorMessage(
             `Forge remote failed to reload: ${(err as Error).message}`,

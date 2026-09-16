@@ -93,6 +93,16 @@ export class RemoteAuth {
     return (await this.secrets.get(ownerSecretKey(channel))) !== undefined;
   }
 
+  /**
+   * The paired owner's sender id, or undefined when the channel has no owner.
+   *
+   * For a private chat the sender id is the chat id, so this is also the chat
+   * a job notification should be delivered to (the "owner chat" route, B.4).
+   */
+  async getOwner(channel: RemoteInboundEvent['channel']): Promise<string | undefined> {
+    return this.secrets.get(ownerSecretKey(channel));
+  }
+
   async gate(event: RemoteInboundEvent): Promise<RemoteGateResult> {
     return this.sessionAuth.gate(event, event.senderId);
   }
