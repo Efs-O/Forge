@@ -1,5 +1,6 @@
 import * as path from 'path';
 import type { ForgeConfig } from '../config/types';
+import type { JobStore } from '../jobs/JobStore';
 import { mergeGroupsIntoModel } from '../config/ConfigResolver';
 import { describeModelPickerModel } from '../sidebar/ModelPickerGroups';
 import { RemoteAttachmentStore } from './RemoteAttachmentStore';
@@ -42,6 +43,12 @@ export interface RemoteControllerOptions {
   onError?: (message: string) => void;
   /** Global spoken-reply toggle, persisted to config.yaml. */
   voiceToggle?: { get: () => boolean; set: (on: boolean) => Promise<void> };
+  /**
+   * The persistent-jobs surface (B3): the shared `JobStore` and whether jobs
+   * are enabled in the active config. Present only when the runtime wired one
+   * in; `/jobs` and `/job` are inert otherwise.
+   */
+  jobs?: { store: JobStore; enabled: boolean } | undefined;
 }
 
 /**
@@ -109,6 +116,12 @@ export interface RemoteControllerOptionsDeps {
     channel: string,
     chatId: string,
   ) => Promise<void>;
+  /**
+   * The shared `JobStore` (B3), created once in extension.ts and passed to
+   * both the scheduler and the `manage_jobs` tool. Stable across config
+   * reloads; the `enabled` flag is read live from the config in the builder.
+   */
+  jobsStore?: JobStore | undefined;
 }
 
 /**
@@ -163,6 +176,12 @@ export function buildRemoteControllerOptions(
     setRateLimit: deps.setRateLimit,
     reloadWindow: deps.reloadWindow,
     onError: deps.onError,
+    // The persistent-jobs surface (B3). The store is a stable object from the
+    // runtime; `enabled` is read live from the config so a reload that turns
+    // jobs off disables /jobs and /job without a transport rebuild.
+    ...(deps.jobsStore
+      ? { jobs: { store: deps.jobsStore, enabled: config.jobs?.enabled === true } }
+      : {}),
     ...(deps.hasConfigPath
       ? {
           voiceToggle: {

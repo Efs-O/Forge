@@ -13,6 +13,8 @@ import { formatSystemReport } from '../system/formatSystemReport';
 import type { ModelPickerDescriptor } from '../sidebar/ModelPickerGroups';
 import { PowerControl } from '../system/PowerControl';
 import { handleRemotePowerCommand } from './RemotePowerCommands';
+import { handleRemoteJobCommand } from './RemoteJobCommands';
+import type { JobStore } from '../jobs/JobStore';
 import { switchWorkspaceCommand } from './remoteWorkspaceCommand';
 import {
   resolveConversationSelection,
@@ -63,6 +65,13 @@ export interface RemoteCommandContext {
    * code ready would send them looking for an authenticator they never set up.
    */
   totpEnrolled?: (() => Promise<boolean>) | undefined;
+  /**
+   * The persistent-jobs surface (B3): the shared `JobStore` and whether jobs are
+   * enabled. Present only when the runtime wired one in; `/jobs` and `/job` are
+   * inert otherwise. Kept as a narrow slice so the handler does not import the
+   * store's full surface for a config read.
+   */
+  jobs?: { store: JobStore; enabled: boolean } | undefined;
 }
 
 /**
@@ -109,6 +118,16 @@ async function executeRemoteCommand(
     power: powerControl,
   });
   if (powerCommand) return powerCommand;
+  if (context.jobs) {
+    const jobCommand = await handleRemoteJobCommand(command, operands, event, {
+      channel: context.channel,
+      host: context.host,
+      signal: context.signal,
+      store: context.jobs.store,
+      jobsEnabled: context.jobs.enabled,
+    });
+    if (jobCommand) return jobCommand;
+  }
   if (command === '/clanker') {
     const desired = argument?.toLowerCase();
     if (desired !== 'on' && desired !== 'off') {

@@ -106,6 +106,14 @@ export class JobStore {
       const state = await this.readState(result.data.id);
       jobs.push({ job: result.data, state });
     }
+    // Sort canonically (creation order, then id) so the list is deterministic
+    // across calls and platforms: `readdir` order is not, and the Telegram
+    // `/jobs` numbering and `/job <n>` resolution both depend on it.
+    jobs.sort((a, b) =>
+      a.job.created_at !== b.job.created_at
+        ? a.job.created_at - b.job.created_at
+        : a.job.id.localeCompare(b.job.id),
+    );
     return jobs;
   }
 

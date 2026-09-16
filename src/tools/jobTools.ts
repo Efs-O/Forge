@@ -13,7 +13,15 @@
 import * as path from 'path';
 import type { ForgeConfig } from '../config/types';
 import type { JobStore } from '../jobs/JobStore';
-import { JobSchema, type Job, type JobFile, type RunRow } from '../jobs/jobSchema';
+import { JobSchema, type JobFile, type RunRow } from '../jobs/jobSchema';
+import {
+  describeAction,
+  describeCheck,
+  describeOnChange,
+  describeSchedule,
+  formatWhen,
+  truncate,
+} from '../jobs/jobDescribe';
 import type { ForgeConversationSummary, ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import type { RegisteredTool } from './ToolRegistry';
 
@@ -410,40 +418,6 @@ async function discussJob(deps: ManageJobsDeps, jobFile: JobFile): Promise<strin
   return `Opened the discuss chat for "${job.name}" [${job.id}] and seeded it with the job, its recent runs, and the last observation. It is now an ordinary chat where manage_jobs is available.`;
 }
 
-/** A short human-readable form of a schedule. */
-function describeSchedule(schedule: Job['schedule']): string {
-  switch (schedule.kind) {
-    case 'interval':
-      return `every ${schedule.minutes} min`;
-    case 'daily':
-      return `daily at ${schedule.at}`;
-    case 'weekly':
-      return `weekly on ${schedule.days.join('/')} at ${schedule.at}`;
-  }
-}
-
-/** A short human-readable form of a check. */
-function describeCheck(check: Job['check']): string {
-  switch (check.kind) {
-    case 'github_release':
-      return `github_release ${check.repo}${check.asset_pattern ? ` (asset ${check.asset_pattern})` : ''}`;
-    case 'github_issue':
-      return `github_issue ${check.repo}#${check.issue_number}`;
-    case 'disk_space':
-      return `disk_space ${check.path} (min ${check.min_free_gb} GB free)`;
-  }
-}
-
-/** A short human-readable form of an on_change policy. */
-function describeOnChange(onChange: Job['on_change']): string {
-  return onChange.kind === 'notify' ? 'notify' : `summarize (${onChange.focus.join(', ')})`;
-}
-
-/** A short human-readable form of an action. */
-function describeAction(action: NonNullable<Job['action']>): string {
-  return `${action.kind} [${action.mode}]`;
-}
-
 /** Build the discuss-chat seed (B.6): the job, last 10 run rows, last observation. */
 function buildDiscussSeed(jobFile: JobFile, runs: RunRow[]): string {
   const { job, state } = jobFile;
@@ -474,24 +448,4 @@ function buildDiscussSeed(jobFile: JobFile, runs: RunRow[]): string {
     seed = parts.join('\n').slice(0, 4000 - tail.length) + tail;
   }
   return seed;
-}
-
-/** Format an epoch-ms timestamp relative to `now`, for list/get output. */
-function formatWhen(epochMs: number, now: Date): string {
-  const then = new Date(epochMs);
-  const diff = now.getTime() - epochMs;
-  const future = diff < 0;
-  const abs = Math.abs(diff);
-  const minutes = Math.round(abs / 60_000);
-  if (minutes < 1) return future ? 'now' : 'just now';
-  const hours = Math.round(abs / 3_600_000);
-  if (hours < 24) return future ? `in ${hours}h` : `${hours}h ago`;
-  const days = Math.round(abs / 86_400_000);
-  if (days < 7) return future ? `in ${days}d` : `${days}d ago`;
-  return then.toLocaleDateString();
-}
-
-/** Truncate a string to `max` characters, adding an ellipsis when cut. */
-function truncate(text: string, max: number): string {
-  return text.length <= max ? text : text.slice(0, max - 1) + '…';
 }

@@ -45,6 +45,25 @@
 - **`discuss`** opens (or reuses) the job's discuss chat and seeds it with the
   job definition, the last 10 run rows, and the last observation (B.6).
 
+### Persistent agent jobs (Phase B3) — Telegram `/jobs` and `/job`
+
+- **`/jobs`** (`src/remote/RemoteJobCommands.ts`): lists the jobs, numbered,
+  with each one's schedule, status, last run and outcome, and next due. Inert
+  when `jobs.enabled` is false.
+- **`/job <n|name> pause|resume|run|delete`**: acts on one job, resolved by
+  list number, exact id, exact name, or unique substring (an ambiguous match
+  returns the candidates). `run` writes a `run_requests/<id>` marker the
+  scheduler consumes, so a run requested from the Telegram window still runs in
+  whichever window holds the jobs lease. `delete` asks for
+  `/job <n> delete confirm` first (90s window), like `/sleep`.
+- **`/job <n> approve`** answers with a clear "not available yet" — it approves
+  a `llamacpp_update` and is implemented in phase B5.
+- Both commands are added to `TELEGRAM_BOT_COMMANDS`, the `/help` text (new
+  `Jobs` section), and the command drift guard's `SOURCES` list. The shared
+  `JobStore` is threaded from `extension.ts` through `RemoteRuntime` to the
+  controller, so the phone edits the same files the scheduler and `manage_jobs`
+  use.
+
 ## 0.16.1
 
 ### Project instructions

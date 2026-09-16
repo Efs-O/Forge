@@ -76,6 +76,23 @@ describe('JobStore', () => {
     const loaded = await store.load('disk');
     expect(loaded?.state.next_due_at).toBeNull();
   });
+
+  it('loadAll returns jobs in a deterministic order (creation, then id)', async () => {
+    // Write in an order that is not the canonical one; the store must not rely
+    // on readdir order (which is platform-dependent).
+    await store.saveJob(job({ id: 'zeta', name: 'Zeta', created_at: 3 }));
+    await store.saveJob(job({ id: 'alpha', name: 'Alpha', created_at: 1 }));
+    await store.saveJob(job({ id: 'mid', name: 'Mid', created_at: 2 }));
+    const all = await store.loadAll();
+    expect(all.map((jf) => jf.job.id)).toEqual(['alpha', 'mid', 'zeta']);
+    // A tie on created_at breaks by id.
+    await store.saveJob(job({ id: 'tie-a', name: 'Tie A', created_at: 5 }));
+    await store.saveJob(job({ id: 'tie-b', name: 'Tie B', created_at: 5 }));
+    const ties = (await store.loadAll())
+      .filter((jf) => jf.job.created_at === 5)
+      .map((jf) => jf.job.id);
+    expect(ties).toEqual(['tie-a', 'tie-b']);
+  });
 });
 
 describe('JobStore run log', () => {

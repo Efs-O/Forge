@@ -29,6 +29,8 @@ export const TELEGRAM_BOT_COMMANDS = [
   { command: 'context', description: 'Context usage and tokens' },
   { command: 'drop', description: 'Drop queued prompt or all' },
   { command: 'help', description: 'Show all Forge commands' },
+  { command: 'job', description: 'Act on a job by number or name: pause, resume, run, delete' },
+  { command: 'jobs', description: 'List the persistent agent jobs' },
   { command: 'lock', description: 'Lock this remote session' },
   { command: 'mirror', description: 'Echo sidebar answers here on/off' },
   { command: 'model', description: 'List models, or pin one to this chat by number or name' },

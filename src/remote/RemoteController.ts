@@ -425,9 +425,8 @@ export class RemoteController {
           workspaceAliases: this.options.workspaceAliases,
           totpEnrolled: () => this.auth.totpEnrolled(this.channel.name),
           // Without this, `/workspace list` never marks the current entry and
-          // the "already in this workspace" guard on `/new <alias>` can never
-          // fire — RemoteRuntime computes the alias and the handler reads it,
-          // but nothing joined the two.
+          // the "already in this workspace" guard on `/new <alias>` can never fire.
+          // RemoteRuntime computes the alias and the handler reads it, but nothing joined the two.
           ...(this.options.currentWorkspaceAlias
             ? { currentWorkspaceAlias: this.options.currentWorkspaceAlias }
             : {}),
@@ -451,6 +450,7 @@ export class RemoteController {
           ...(this.options.setRateLimit ? { setRateLimit: this.options.setRateLimit } : {}),
           ...(this.options.reloadWindow ? { reloadWindow: this.options.reloadWindow } : {}),
           ...(this.options.voiceToggle ? { voiceToggle: this.options.voiceToggle } : {}),
+          ...(this.options.jobs ? { jobs: this.options.jobs } : {}),
           resumeCurrent: (resumeEvent, resumeDedupKey) =>
             resumeRemoteConversation(resumeEvent, resumeDedupKey, this.promptDeps),
         },

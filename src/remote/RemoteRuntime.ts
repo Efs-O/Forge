@@ -478,6 +478,7 @@ export class RemoteRuntime {
       hasConfigPath: this.options.configPath !== undefined,
       switchWorkspace: (config, alias, channel, chatId) =>
         this.switchWorkspace(config, alias, channel, chatId),
+      ...(this.options.jobStore ? { jobsStore: this.options.jobStore } : {}),
     };
   }
 }

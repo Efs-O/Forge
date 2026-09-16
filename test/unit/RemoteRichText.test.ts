@@ -79,6 +79,8 @@ describe('remote command map', () => {
     // precisely because they live in their own file and this list did not name
     // it. Any new file holding a `command === '/x'` line belongs here too.
     'src/remote/RemotePowerCommands.ts',
+    // B3: /jobs and /job live in their own file, same reason as the power one.
+    'src/remote/RemoteJobCommands.ts',
   ];
   // Aliases that still answer but are hidden from the help text and native
   // menu — two names for one thing in the command map is what made the old one

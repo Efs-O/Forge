@@ -301,6 +301,12 @@ export interface RemoteRuntimeOptions {
   confirmWhisperServerStart?: ((detail: string) => Promise<boolean>) | undefined;
   /** Absolute path to `.forge/config.yaml`; enables the persisted /voice toggle. */
   configPath?: string | undefined;
+  /**
+   * The shared `JobStore` (B3), created once in extension.ts. Passed to the
+   * controller-options builder so `/jobs` and `/job` can read and write the
+   * same files the scheduler and the `manage_jobs` tool use.
+   */
+  jobStore?: import('../jobs/JobStore').JobStore | undefined;
   /** Handoff watch/rollback timings. Present so a test need not wait out the
    *  real ones; production uses the coordinator's defaults. */
   handoffWatch?: { pollIntervalMs?: number; rollbackDelayMs?: number } | undefined;

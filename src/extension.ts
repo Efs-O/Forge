@@ -309,6 +309,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     configPath: activeConfigPath,
     host: sidebarProvider.getHostFacade(),
     secrets: context.secrets,
+    // Shared job store (B3): /jobs and /job edit the same files the scheduler and manage_jobs use.
+    jobStore: jobsStore,
     channelFactories: {
       telegram: async (cursor) => {
         const token = await context.secrets.get(TELEGRAM_BOT_TOKEN_SECRET);
