@@ -249,6 +249,11 @@ export async function performSwitch(
     if (oldBinary !== undefined && path.isAbsolute(oldBinary) && !fs.existsSync(oldBinary)) {
       clearStaged(jobsRoot, staged.job_id);
       const detail = err instanceof Error ? err.message : String(err);
+      // The config is deliberately LEFT on the failed tag rather than unset.
+      // An unset binary guarantees the next model load fails with a generic
+      // "binary missing" that names nothing; the failed tag still points at a
+      // real build the user can inspect, and the message below names the exact
+      // key to fix. (Claude's audit note, 2026-09-16.)
       const summary = `post-check failed after switching to ${staged.tag} (${detail}); restore target ${oldBinary} no longer exists — config left on ${staged.tag}, fix llama_server.binary manually`;
       await env.deliver(staged.job_id, summary);
       return { ok: false, summary };
