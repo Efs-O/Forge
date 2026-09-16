@@ -1,5 +1,8 @@
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { JobsFetchRefusedError, jobsFetch } from '../../src/jobs/jobsFetch';
+import { JobsFetchRefusedError, jobsDownloadBinary, jobsFetch } from '../../src/jobs/jobsFetch';
 
 const realFetch = globalThis.fetch;
 
@@ -79,5 +82,81 @@ describe('jobsFetch (D5 host gate)', () => {
         etagCache: new Map(),
       }),
     ).rejects.toThrow(/403/);
+  });
+});
+
+/** A 200 response whose body streams the given bytes. */
+function bodyResponse(bytes: Uint8Array): Response {
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(bytes);
+      controller.close();
+    },
+  });
+  return new Response(stream, { status: 200 });
+}
+
+describe('jobsDownloadBinary (D5 redirect re-gate + byte cap)', () => {
+  let dest: string;
+  beforeEach(() => {
+    dest = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'forge-dl-')), 'asset.zip');
+  });
+  afterEach(() => {
+    fs.rmSync(path.dirname(dest), { recursive: true, force: true });
+  });
+
+  it('downloads to disk when the host is allowed', async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      bodyResponse(new TextEncoder().encode('zipdata')),
+    );
+    const written = await jobsDownloadBinary('https://api.github.com/a.zip', dest, {
+      allowedHosts: ['api.github.com'],
+    });
+    expect(written).toBe(7);
+    expect(fs.readFileSync(dest, 'utf8')).toBe('zipdata');
+  });
+
+  it('re-gates at every redirect hop (a 302 to an unlisted host is refused)', async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 302,
+          headers: { Location: 'https://cdn.evil.example/a.zip' },
+        }),
+      )
+      .mockResolvedValueOnce(bodyResponse(new TextEncoder().encode('x')));
+    await expect(
+      jobsDownloadBinary('https://api.github.com/a.zip', dest, { allowedHosts: ['api.github.com'] }),
+    ).rejects.toThrow(JobsFetchRefusedError);
+    // The second hop was never fetched.
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    expect(fs.existsSync(dest)).toBe(false);
+  });
+
+  it('follows a redirect to an allowed host', async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 302,
+          headers: { Location: 'https://release-assets.githubusercontent.com/a.zip' },
+        }),
+      )
+      .mockResolvedValueOnce(bodyResponse(new TextEncoder().encode('zipdata')));
+    await jobsDownloadBinary('https://api.github.com/a.zip', dest, {
+      allowedHosts: ['api.github.com', 'release-assets.githubusercontent.com'],
+    });
+    expect(fs.readFileSync(dest, 'utf8')).toBe('zipdata');
+  });
+
+  it('refuses a download that exceeds the byte cap', async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      bodyResponse(new Uint8Array(1024).fill(1)),
+    );
+    await expect(
+      jobsDownloadBinary('https://api.github.com/a.zip', dest, {
+        allowedHosts: ['api.github.com'],
+        maxBytes: 512,
+      }),
+    ).rejects.toThrow(/exceeded 512 bytes/);
   });
 });

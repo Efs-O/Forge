@@ -476,6 +476,13 @@ Stages, one run-log row each:
   allowed from day one; no count of earlier `prepare` runs is required.
   `prepare` stays available per job. Steps 3, 5, 7's streaming deferral, and 8
   run in both modes; `apply` removes only the human approval.
+- **Known limitation (intentional): the idle check is a snapshot, not a lock.**
+  Step 7 checks `busy()` once before the config write + restart, but a turn can
+  start in that window. The window is tiny (a single tick, sub-second) and the
+  restart is the same `restartModel` a turn would trigger, so the worst case is
+  a brief GPU contention, not a corruption. A shared turn/restart exclusion
+  lock is out of scope for v1; the post-check (step 8) still catches a broken
+  backend and rolls back.
 
 ## B.8 Config (`src/config/jobsSchema.ts`, following `imageGenerationSchema.ts`)
 

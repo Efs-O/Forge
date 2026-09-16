@@ -9,6 +9,7 @@ import type { Job, JobFile, JobState, RunRow } from './jobSchema';
 import type { JobStore } from './JobStore';
 import type { PowerControl, SleepIfIdleInput } from '../system/PowerControl';
 import { shouldSleepIfIdle } from '../system/PowerControl';
+import { LlamacppAction, type LlamacppActionDeps } from './actions/llamacppAction';
 
 /**
  * The job scheduler: the tick loop that runs due jobs, holds the
@@ -46,6 +47,12 @@ export interface JobSchedulerDeps {
   summarize?: (prompt: string) => Promise<string>;
   /** The tick interval in ms. Defaults to 30 s. */
   tickMs?: number;
+  /**
+   * The `llamacpp_update` action deps (B5). Absent = the action is not wired
+   * (a `llamacpp_update` job then records the change but does not mutate the
+   * machine). Production wires it in `jobsSetup.ts`.
+   */
+  llamacpp?: LlamacppActionDeps;
 }
 
 const DEFAULT_TICK_MS = 30_000;
@@ -69,6 +76,7 @@ export class JobScheduler {
   private readonly busy: () => string | undefined;
   private readonly summarize: ((prompt: string) => Promise<string>) | undefined;
   private readonly tickMs: number;
+  private readonly llamacpp: LlamacppAction | undefined;
 
   private lease: FileLease | undefined;
   private timer: ReturnType<typeof setInterval> | undefined;
@@ -94,6 +102,16 @@ export class JobScheduler {
     this.busy = deps.busy ?? (() => undefined);
     this.summarize = deps.summarize;
     this.tickMs = deps.tickMs ?? DEFAULT_TICK_MS;
+    this.llamacpp = deps.llamacpp
+      ? new LlamacppAction(deps.llamacpp, {
+          jobsRoot: this.store.root,
+          allowedHosts: () => this.getConfig().allowedHosts,
+          busy: this.busy,
+          now: () => this.now().getTime(),
+          deliver: (jobId, text) => this.deliverForJob(jobId, text),
+          notifyLocal: this.notifyLocal,
+        })
+      : undefined;
   }
 
   /**
@@ -212,6 +230,10 @@ export class JobScheduler {
       // A change recorded while a turn was streaming is summarized now that the
       // tick has reached it (the summary waits for idle, B.4).
       await this.processPendingSummaries();
+
+      // A llamacpp_update that staged a build (apply, or an approved prepare)
+      // switches now that the tick has reached it, only when idle (B5).
+      await this.llamacpp?.processPendingSwitches();
 
       // D6: a job that woke the machine and found nothing to do may suspend
       // again, but only on a resume, only if no input and nothing is busy.
@@ -404,14 +426,18 @@ export class JobScheduler {
         break;
     }
 
-    // A mutating action (llamacpp_update) runs when the check reports a change.
-    // In B1 it is stubbed: the change is recorded and reported; the action
-    // itself lands in B5.
+    // A mutating action (llamacpp_update) runs when the check reports a change
+    // (B5). It is the only action that mutates the machine; a failure here is a
+    // failed run and backs off like any other. It needs a github_release check
+    // (the tag comes from the observation) and the action to be wired.
     if (checkResult.changed && job.action?.kind === 'llamacpp_update') {
-      checkResult = {
-        ...checkResult,
-        summary: `${checkResult.summary}; llamacpp_update (${job.action.mode}) staged — runs in B5`,
-      };
+      if (job.check.kind === 'github_release' && this.llamacpp) {
+        const tag = (JSON.parse(checkResult.observation) as { tag?: string }).tag;
+        if (typeof tag === 'string' && tag.length > 0) {
+          const stage = await this.llamacpp.stage(job.action, job.id, job.check.repo, tag);
+          checkResult = { ...checkResult, summary: stage.summary };
+        }
+      }
     }
 
     return {
@@ -419,6 +445,16 @@ export class JobScheduler {
       changed: checkResult.changed,
       summary: checkResult.summary,
     };
+  }
+
+  /** Deliver a fact for a job by id (the action does not hold the Job). */
+  private async deliverForJob(jobId: string, text: string): Promise<void> {
+    const jobFile = await this.store.load(jobId);
+    if (!jobFile) {
+      this.notifyLocal(`Forge: ${text}`);
+      return;
+    }
+    await this.deliver(jobFile.job, text);
   }
 
   /** Apply backoff after a failure: double the interval up to 24 h (B.3). */

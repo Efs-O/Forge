@@ -79,6 +79,40 @@
 - The `manage_jobs` `discuss` action now activates the chat (the user is
   present in the window); the Telegram entry point does not.
 
+### Persistent agent jobs (Phase B5) — the `llamacpp_update` action
+
+The only mutating job action, and the last phase of the jobs feature. A
+`github_release` job with `action: { kind: "llamacpp_update", mode: "prepare" | "apply" }`
+now installs a new llama.cpp build when a new release is detected, through
+fixed TypeScript stages (the model never authors a step):
+
+- **Download** the tag's `llama-b<tag>` + `cudart-llama-b<tag>` zips to
+  `%LOCALAPPDATA%\Forge\staging\` (the asset pattern comes from the job, never
+  a hardcoded default). The download is gated by `jobs.allowed_hosts` and
+  follows redirects manually so the gate is re-checked at every hop (GitHub
+  asset URLs 302 to a CDN).
+- **Verify** each asset's SHA-256 against the release API `digest`. A missing
+  digest or a mismatch stops before anything is written; a release missing the
+  cudart zip is refused as a partial build.
+- **Extract** both zips into `llama.cpp-<tag>\`; an existing folder stops the
+  run. Old build folders are never deleted.
+- **Smoke test**: `--version` reports the tag, `--list-devices` runs, and (when
+  embeddings are configured) one embedding round-trip on a free port succeeds.
+- **`prepare`** stops here and asks for approval (24 h expiry); **`apply`**
+  skips the gate and requests the switch immediately (the no-gate decision,
+  2026-09-14). Both modes run every safety stage.
+- **Switch** writes only `llama_server.binary` (comments and per-group pins
+  preserved), restarts the backend only when no turn is streaming, then
+  **post-checks** the backend; on failure it restores the previous binary,
+  restarts, and reports.
+
+`/job <n> approve` now performs the real approval for a `prepare` staged build
+(it sets `switch_pending`; the scheduler switches on its next idle tick).
+`github_release` checks gain a `channel` field (`latest` default, or
+`prerelease` for the llama.cpp nightly `bNNNN` builds, which `/releases/latest`
+never returns). The action's orchestration lives in `src/jobs/actions/` so the
+scheduler stays under its line limit.
+
 ## 0.16.1
 
 ### Project instructions

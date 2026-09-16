@@ -19,6 +19,7 @@ import type { JobStore } from '../jobs/JobStore';
 import type { JobFile } from '../jobs/jobSchema';
 import { describeSchedule, formatWhen } from '../jobs/jobDescribe';
 import { openDiscussChat } from '../jobs/jobDiscuss';
+import { approveStaged } from '../jobs/actions/llamacppUpdate';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
 
@@ -156,11 +157,17 @@ async function handleJob(
     return { kind: 'rejected', reason: 'usage: /job <n|name> pause|resume|run|delete|chat' };
   }
   if (action === 'approve') {
-    await reply(
-      context,
-      event.chatId,
-      'Forge: /job approve is not available yet — it approves a llamacpp_update (phase B5).',
-    );
+    // Approve a staged `llamacpp_update` (B5). The approve sets `switch_pending`
+    // on the staged file; the scheduler (lease holder) performs the switch on
+    // its next idle tick. It needs a job reference, so resolve the job first.
+    const all = await context.store.loadAll();
+    const match = resolveJob(all, ref);
+    if (match.kind !== 'one') {
+      await reply(context, event.chatId, `Forge: no single job matches "${ref}" to approve.`);
+      return { kind: 'rejected', reason: `no job matches: ${ref}` };
+    }
+    const message = approveStaged(context.store.root, match.jobFile.job.id, Date.now());
+    await reply(context, event.chatId, `Forge: ${message}`);
     return { kind: 'handled' };
   }
   if (

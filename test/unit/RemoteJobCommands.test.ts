@@ -318,11 +318,11 @@ describe('/job — chat', () => {
 });
 
 describe('/job — approve', () => {
-  it('answers with a clear not-yet message', async () => {
+  it('reports when there is no staged build to approve', async () => {
     await store.saveJob(job());
     const result = await run('/job disk approve');
     expect(result).toEqual({ kind: 'handled' });
-    expect(channel.sent.at(-1)!.text).toContain('not available yet');
+    expect(channel.sent.at(-1)!.text).toContain('no staged build');
   });
 });
 

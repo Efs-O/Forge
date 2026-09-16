@@ -55,6 +55,14 @@ export const CheckSchema = z.discriminatedUnion('kind', [
     repo: RepoSchema,
     /** Glob on the asset file names; omit to track the release regardless. */
     asset_pattern: z.string().min(1).optional(),
+    /**
+     * Which release channel to watch. `latest` (the default) is the newest
+     * non-prerelease release — `/releases/latest`. `prerelease` is the newest
+     * prerelease — the llama.cpp nightly `bNNNN` builds, which `/releases/latest`
+     * never returns (it returns a stub instead). A `llamacpp_update` job must
+     * use `prerelease` or it will never see a real build.
+     */
+    channel: z.enum(['latest', 'prerelease']).default('latest'),
   }),
   z.object({
     kind: z.literal('github_issue'),

@@ -28,6 +28,41 @@ interface ReleaseAsset {
   digest?: unknown;
 }
 
+interface ReleasePayload {
+  tag_name?: unknown;
+  published_at?: unknown;
+  body?: unknown;
+  assets?: ReleaseAsset[];
+  message?: unknown;
+  prerelease?: unknown;
+  draft?: unknown;
+}
+
+/**
+ * Pick the release a check tracks from the API body. For `latest` the body is
+ * a single release object. For `prerelease` the body is a list of the newest
+ * releases; the newest prerelease is the first entry that is a prerelease and
+ * not a draft. The list is short (`per_page=100`) and already newest-first.
+ */
+function pickRelease(body: string, channel: 'latest' | 'prerelease'): ReleasePayload {
+  const parsed = JSON.parse(body) as unknown;
+  if (channel === 'latest') return parsed as ReleasePayload;
+  if (!Array.isArray(parsed)) {
+    throw new Error('Forge: expected a list of releases for a prerelease check');
+  }
+  const release = parsed.find(
+    (r) =>
+      r &&
+      typeof r === 'object' &&
+      (r as ReleasePayload).prerelease === true &&
+      (r as ReleasePayload).draft !== true,
+  );
+  if (!release) {
+    throw new Error('Forge: no prerelease release found to track');
+  }
+  return release as ReleasePayload;
+}
+
 /**
  * Watch a repo's latest release. The observation is a JSON blob of the tag,
  * publish time, matching assets, and a bounded body. It changes when the tag
@@ -38,7 +73,16 @@ export async function githubReleaseCheck(
   lastObservation: string | null,
   ctx: CheckContext,
 ): Promise<CheckResult> {
-  const url = `https://api.github.com/repos/${check.repo}/releases/latest`;
+  // `prerelease` targets the newest prerelease (the llama.cpp nightly `bNNNN`
+  // builds); `/releases/latest` returns the newest NON-prerelease, which for
+  // llama.cpp is a stub, so a prerelease job must not use it.
+  // A check built directly (not through the schema) has no `channel` key; the
+  // schema's default is `latest`, so treat a missing channel the same.
+  const channel: 'latest' | 'prerelease' = check.channel ?? 'latest';
+  const url =
+    channel === 'prerelease'
+      ? `https://api.github.com/repos/${check.repo}/releases?per_page=100`
+      : `https://api.github.com/repos/${check.repo}/releases/latest`;
   const result = await ctx.fetch(url);
 
   if (result.notModified) {
@@ -46,16 +90,10 @@ export async function githubReleaseCheck(
     return { observation: lastObservation ?? '', changed: false, summary: 'no new release' };
   }
 
-  const release = JSON.parse(result.body) as {
-    tag_name?: unknown;
-    published_at?: unknown;
-    body?: unknown;
-    assets?: ReleaseAsset[];
-    message?: unknown;
-  };
+  const release = pickRelease(result.body, channel);
   if (typeof release.tag_name !== 'string') {
     throw new Error(
-      `Forge: could not read the latest release for ${check.repo}: ${
+      `Forge: could not read the ${channel} release for ${check.repo}: ${
         typeof release.message === 'string' ? release.message : 'no tag_name in response'
       }`,
     );

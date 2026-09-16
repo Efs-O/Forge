@@ -1,10 +1,13 @@
 import { randomUUID } from 'crypto';
 import * as vscode from 'vscode';
+import { findConfigPath } from '../config/ConfigLoader';
 import type { ForgeConfig } from '../config/types';
 import { JobStore } from '../jobs/JobStore';
 import { JobScheduler } from '../jobs/JobScheduler';
 import { PowerControl } from '../system/PowerControl';
 import type { SidebarProvider } from '../sidebar/SidebarProvider';
+import { forgeLocalRoot } from '../jobs/actions/stagedBuild';
+import { extractZip, makeSetBinary, runCommand, sha256File } from '../jobs/actions/llamacppIo';
 
 /**
  * Wires the persistent agent jobs scheduler (B1). All the wiring lives here
@@ -39,6 +42,15 @@ export function setupJobs(
   sidebar: SidebarProvider,
   store: JobStore = new JobStore(),
 ): JobsSetup {
+  // The config path the `llamacpp_update` action switches. Derived the same
+  // way `extension.ts` derives it (workspace `.forge/`, then global storage),
+  // so the action stays wired without a 6th arg that would push `extension.ts`
+  // past its 500-line stop. `setupJobs` runs only after activation found a
+  // config, so this resolves to the same path.
+  const configPath = findConfigPath(
+    context.globalStorageUri.fsPath,
+    vscode.workspace.getConfiguration('forge').get<string>('configFile'),
+  );
   // One owner of the power spawn sites, shared with the tool and the remote
   // commands: PowerControl is stateless, so a second instance would be a
   // second owner of the same `schtasks`/`powercfg` sites.
@@ -68,6 +80,30 @@ export function setupJobs(
         return streamingConversationIds.length > 0 ? 'a turn is streaming' : undefined;
       },
       summarize: async (prompt) => sidebar.runPromptToMarkdown(prompt),
+      // The only mutating action (B5). Wired only when a config path is known:
+      // without it there is no `llama_server.binary` to switch, so a
+      // llamacpp_update job records the change but does not mutate the machine.
+      ...(configPath
+        ? {
+            llamacpp: {
+              localRoot: forgeLocalRoot(),
+              getLlamacppConfig: () => {
+                const c = getConfig();
+                return {
+                  currentBinary: c.llama_server?.binary,
+                  embeddings: c.embeddings,
+                  llama_server: c.llama_server,
+                };
+              },
+              runCommand,
+              sha256File,
+              extractZip,
+              setBinary: makeSetBinary(configPath),
+              restartModel: (modelName) => sidebar.restartModel(modelName),
+              activeModel: () => getConfig().active_model ?? undefined,
+            },
+          }
+        : {}),
     });
 
   let started = false;
