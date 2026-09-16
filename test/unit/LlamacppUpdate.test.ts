@@ -28,7 +28,7 @@ import {
   writeStaged,
   type StagedBuild,
 } from '../../src/jobs/actions/stagedBuild';
-import type { Action } from '../../src/jobs/jobSchema';
+import type { Action, JobFile } from '../../src/jobs/jobSchema';
 
 const TAG = 'b10991';
 const MAIN = `llama-${TAG}-bin-win-cuda-13.3-x64.zip`;
@@ -49,6 +49,8 @@ let currentBinary: string | undefined;
 let versionOut: string;
 let versionCode: number | null;
 let devicesCode: number | null;
+/** Jobs deleted while their check or stage was in flight. */
+let deletedJobs: Set<string>;
 
 const action: Extract<Action, { kind: 'llamacpp_update' }> = {
   kind: 'llamacpp_update',
@@ -70,6 +72,7 @@ function makeEnv() {
   const env: LlamacppUpdateEnv = {
     jobsRoot,
     localRoot,
+    jobExists: async (jobId) => !deletedJobs.has(jobId),
     fetchOptions: () => ({ allowedHosts: ['api.github.com'], etagCache: new Map() }),
     getConfig: () => ({
       currentBinary,
@@ -92,7 +95,8 @@ function makeEnv() {
       restartCalls.push(model);
       // Fail the first restart (the switch's post-check); the restore restart
       // (the second call) succeeds so the failure path can clear the stage.
-      if (restartFail && restartCalls.length === 1) throw new Error('server did not become healthy');
+      if (restartFail && restartCalls.length === 1)
+        throw new Error('server did not become healthy');
     },
     activeModel: () => activeModel,
     deliver: async (_job, text) => {
@@ -123,6 +127,7 @@ function writeStagedFor(jobId: string, overrides: Partial<StagedBuild> = {}): St
 }
 
 beforeEach(() => {
+  deletedJobs = new Set();
   localRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-llama-local-'));
   jobsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-llama-jobs-'));
   nowMs = 1_700_000_000_000;
@@ -146,12 +151,20 @@ afterEach(() => {
 });
 
 describe('stageLlamacppUpdate (stages 2-6)', () => {
+  it('a job deleted during its check is never staged, and nothing is downloaded', async () => {
+    deletedJobs.add('llama');
+    const result = await stageLlamacppUpdate(action, 'llama', 'ggml-org/llama.cpp', TAG, makeEnv());
+    expect(result.summary).toMatch(/deleted during its check/);
+    expect(jobsDownloadBinary).not.toHaveBeenCalled();
+    expect(readStaged(jobsRoot, 'llama')).toBeUndefined();
+  });
+
   it('digest mismatch stops before extract and leaves no staged file', async () => {
     const env = makeEnv();
     env.sha256File = async () => 'deadbeef'; // differs from MAIN_DIGEST
-    await expect(stageLlamacppUpdate(action, 'llama', 'ggml-org/llama.cpp', TAG, env)).rejects.toThrow(
-      /digest mismatch/,
-    );
+    await expect(
+      stageLlamacppUpdate(action, 'llama', 'ggml-org/llama.cpp', TAG, env),
+    ).rejects.toThrow(/digest mismatch/);
     expect(jobsDownloadBinary).toHaveBeenCalledTimes(2);
     expect(readStaged(jobsRoot, 'llama')).toBeUndefined();
     expect(setBinaries).toEqual([]);
@@ -166,9 +179,9 @@ describe('stageLlamacppUpdate (stages 2-6)', () => {
       ],
     });
     const env = makeEnv();
-    await expect(stageLlamacppUpdate(action, 'llama', 'ggml-org/llama.cpp', TAG, env)).rejects.toThrow(
-      /no digest/,
-    );
+    await expect(
+      stageLlamacppUpdate(action, 'llama', 'ggml-org/llama.cpp', TAG, env),
+    ).rejects.toThrow(/no digest/);
     expect(readStaged(jobsRoot, 'llama')).toBeUndefined();
   });
 
@@ -178,9 +191,9 @@ describe('stageLlamacppUpdate (stages 2-6)', () => {
       assets: [{ name: MAIN, digest: MAIN_DIGEST, downloadUrl: `https://github.com/x/${MAIN}` }],
     });
     const env = makeEnv();
-    await expect(stageLlamacppUpdate(action, 'llama', 'ggml-org/llama.cpp', TAG, env)).rejects.toThrow(
-      /missing the cudart/,
-    );
+    await expect(
+      stageLlamacppUpdate(action, 'llama', 'ggml-org/llama.cpp', TAG, env),
+    ).rejects.toThrow(/missing the cudart/);
   });
 
   it('an asset_pattern matching neither picked asset fails loudly', async () => {
@@ -198,9 +211,9 @@ describe('stageLlamacppUpdate (stages 2-6)', () => {
   it('an existing build folder stops the run without overwriting', async () => {
     const env = makeEnv();
     fs.mkdirSync(buildDirForTag(localRoot, TAG), { recursive: true });
-    await expect(stageLlamacppUpdate(action, 'llama', 'ggml-org/llama.cpp', TAG, env)).rejects.toThrow(
-      /already exists/,
-    );
+    await expect(
+      stageLlamacppUpdate(action, 'llama', 'ggml-org/llama.cpp', TAG, env),
+    ).rejects.toThrow(/already exists/);
     expect(readStaged(jobsRoot, 'llama')).toBeUndefined();
   });
 
@@ -208,9 +221,9 @@ describe('stageLlamacppUpdate (stages 2-6)', () => {
     versionCode = 1;
     versionOut = 'boom';
     const env = makeEnv();
-    await expect(stageLlamacppUpdate(action, 'llama', 'ggml-org/llama.cpp', TAG, env)).rejects.toThrow(
-      /--version did not report/,
-    );
+    await expect(
+      stageLlamacppUpdate(action, 'llama', 'ggml-org/llama.cpp', TAG, env),
+    ).rejects.toThrow(/--version did not report/);
     expect(setBinaries).toEqual([]);
     expect(readStaged(jobsRoot, 'llama')).toBeUndefined();
   });
@@ -230,9 +243,9 @@ describe('stageLlamacppUpdate (stages 2-6)', () => {
     writeStagedFor('llama', { switch_pending: true });
     const env = makeEnv();
     env.sha256File = async () => 'deadbeef';
-    await expect(stageLlamacppUpdate(action, 'llama', 'ggml-org/llama.cpp', TAG, env)).rejects.toThrow(
-      /digest mismatch/,
-    );
+    await expect(
+      stageLlamacppUpdate(action, 'llama', 'ggml-org/llama.cpp', TAG, env),
+    ).rejects.toThrow(/digest mismatch/);
     expect(readStaged(jobsRoot, 'llama')).toBeUndefined();
   });
 
@@ -259,9 +272,9 @@ describe('stageLlamacppUpdate (stages 2-6)', () => {
       }
       fs.writeFileSync(path.join(dest, 'llama-server.exe'), 'binary');
     };
-    await expect(stageLlamacppUpdate(action, 'llama', 'ggml-org/llama.cpp', TAG, env)).rejects.toThrow(
-      /disk full/,
-    );
+    await expect(
+      stageLlamacppUpdate(action, 'llama', 'ggml-org/llama.cpp', TAG, env),
+    ).rejects.toThrow(/disk full/);
     // The partial build dir must be gone, so the retry is not blocked at the
     // "already exists" guard. The staged zips are deleted too.
     expect(fs.existsSync(buildDirForTag(localRoot, TAG))).toBe(false);
@@ -287,9 +300,9 @@ describe('stageLlamacppUpdate (stages 2-6)', () => {
   it('the staging zips are deleted after a failed stage (F3)', async () => {
     const env = makeEnv();
     env.sha256File = async () => 'deadbeef'; // digest mismatch, after download
-    await expect(stageLlamacppUpdate(action, 'llama', 'ggml-org/llama.cpp', TAG, env)).rejects.toThrow(
-      /digest mismatch/,
-    );
+    await expect(
+      stageLlamacppUpdate(action, 'llama', 'ggml-org/llama.cpp', TAG, env),
+    ).rejects.toThrow(/digest mismatch/);
     expect(fs.existsSync(path.join(localRoot, 'staging', MAIN))).toBe(false);
     expect(fs.existsSync(path.join(localRoot, 'staging', CUDART))).toBe(false);
   });
@@ -362,7 +375,10 @@ describe('performSwitch (stages 7-8)', () => {
     // and the switch the user changed it to 'user-changed-binary'. The
     // post-check fails and the rollback must restore the value that was in the
     // config a moment before the switch, not the stale staged snapshot.
-    const staged = writeStagedFor('llama', { switch_pending: true, old_binary: 'staged-old-binary' });
+    const staged = writeStagedFor('llama', {
+      switch_pending: true,
+      old_binary: 'staged-old-binary',
+    });
     currentBinary = 'user-changed-binary';
     restartFail = true;
     const env = makeEnv();
@@ -375,7 +391,10 @@ describe('performSwitch (stages 7-8)', () => {
   it('does not write back a restore target that no longer exists (F5)', async () => {
     // The config binary at switch time points at a build that has been deleted.
     // Writing it back would leave the config on a path that does not resolve.
-    const staged = writeStagedFor('llama', { switch_pending: true, old_binary: 'staged-old-binary' });
+    const staged = writeStagedFor('llama', {
+      switch_pending: true,
+      old_binary: 'staged-old-binary',
+    });
     // A non-existent absolute path (the production shape of currentBinary).
     currentBinary = path.join(localRoot, 'deleted-build', 'llama-server.exe');
     restartFail = true;
@@ -435,7 +454,7 @@ describe('LlamacppAction (scheduler-facing wrapper)', () => {
       activeModel: () => activeModel,
     };
     const action = new LlamacppAction(deps, {
-      jobsRoot,
+      store: { root: jobsRoot, load: async () => ({}) as JobFile },
       allowedHosts: () => ['api.github.com'],
       busy: () => busy,
       now: () => nowMs,
@@ -458,6 +477,16 @@ describe('LlamacppAction (scheduler-facing wrapper)', () => {
 });
 
 describe('processPendingSwitches (idle-tick pass)', () => {
+  it('never switches a staged build whose job was deleted, and drops it', async () => {
+    writeStagedFor('gone', { switch_pending: true });
+    deletedJobs.add('gone');
+    const summaries = await processPendingSwitches(jobsRoot, makeEnv());
+    expect(summaries).toEqual([]);
+    expect(setBinaries).toEqual([]);
+    expect(restartCalls).toEqual([]);
+    expect(readStaged(jobsRoot, 'gone')).toBeUndefined();
+  });
+
   it('switches only the builds that are pending, leaving the rest staged', async () => {
     writeStagedFor('pending', { switch_pending: true });
     writeStagedFor('waiting', { switch_pending: false });

@@ -5,6 +5,7 @@ import {
   type StageResult,
 } from './llamacppUpdate';
 import type { Action } from '../jobSchema';
+import type { JobStore } from '../JobStore';
 
 /**
  * The deps the `llamacpp_update` action needs that the scheduler does not
@@ -43,8 +44,9 @@ export interface LlamacppActionDeps {
  * outbox-backed deliver.
  */
 export interface LlamacppActionContext {
-  /** The jobs root (holds `staged/`). */
-  jobsRoot: string;
+  /** The job store: its root holds `staged/`, and `load` says whether a job
+   *  still exists (a delete can race an in-flight check). */
+  store: Pick<JobStore, 'root' | 'load'>;
   /** The `jobs:` allowed hosts, read through a getter so reloads apply. */
   allowedHosts: () => readonly string[];
   /** The reason a turn is outstanding, or undefined when idle. */
@@ -75,7 +77,8 @@ export class LlamacppAction {
   private buildEnv(): LlamacppUpdateEnv {
     const d = this.deps;
     return {
-      jobsRoot: this.ctx.jobsRoot,
+      jobsRoot: this.ctx.store.root,
+      jobExists: async (jobId) => (await this.ctx.store.load(jobId)) !== undefined,
       localRoot: d.localRoot,
       fetchOptions: () => ({ allowedHosts: this.ctx.allowedHosts(), etagCache: new Map() }),
       getConfig: d.getLlamacppConfig,
@@ -112,7 +115,7 @@ export class LlamacppAction {
   async processPendingSwitches(): Promise<void> {
     if (this.ctx.busy() !== undefined) return;
     try {
-      await runPendingSwitches(this.ctx.jobsRoot, this.buildEnv());
+      await runPendingSwitches(this.ctx.store.root, this.buildEnv());
     } catch (err) {
       this.ctx.notifyLocal(
         `Forge: llamacpp_update switch failed: ${err instanceof Error ? err.message : String(err)}`,

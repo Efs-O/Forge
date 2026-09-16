@@ -115,7 +115,7 @@ export class JobScheduler {
     });
     this.llamacpp = deps.llamacpp
       ? new LlamacppAction(deps.llamacpp, {
-          jobsRoot: this.store.root,
+          store: this.store,
           allowedHosts: () => this.getConfig().allowedHosts,
           busy: this.busy,
           now: () => this.now().getTime(),

@@ -43,6 +43,12 @@ export interface LlamacppUpdateEnv {
   jobsRoot: string;
   /** The `%LOCALAPPDATA%\Forge` root the builds live under. */
   localRoot: string;
+  /**
+   * Whether the job still exists. A delete can land while its check is in
+   * flight (after `delete` cleaned `staged/`), so staging and switching both
+   * ask, and a build whose job is gone is never staged or switched.
+   */
+  jobExists: (jobId: string) => Promise<boolean>;
   /** The `jobs:` fetch options (allowed hosts + ETag cache). */
   fetchOptions: () => JobsFetchOptions;
   /** The current config, for the old binary and the embeddings smoke test. */
@@ -103,6 +109,9 @@ export async function stageLlamacppUpdate(
   tag: string,
   env: LlamacppUpdateEnv,
 ): Promise<StageResult> {
+  if (!(await env.jobExists(jobId))) {
+    return { summary: `job ${jobId} was deleted during its check; nothing staged` };
+  }
   const downloaded: { name: string; path: string; digest: string }[] = [];
   let newBinary: string;
   // Whether THIS run created the build dir. A pre-existing `llama.cpp-<tag>\`
@@ -304,7 +313,12 @@ export async function processPendingSwitches(
   for (const file of entries) {
     const jobId = file.slice(0, -'.json'.length);
     const staged = readStaged(jobsRoot, jobId);
-    if (!staged || !staged.switch_pending) continue;
+    if (!staged) continue;
+    if (!(await env.jobExists(jobId))) {
+      clearStaged(jobsRoot, jobId); // orphaned: its job was deleted after staging began
+      continue;
+    }
+    if (!staged.switch_pending) continue;
     const result = await performSwitch(jobsRoot, staged, env);
     summaries.push(result.summary);
   }

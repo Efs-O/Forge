@@ -108,6 +108,10 @@ export async function writeOutboxItem(
  * `changed_at` that was delivered, the delete is skipped and the next drain
  * sends the newer text.
  *
+ * The compare and the unlink are not atomic. That is safe only because the
+ * outbox writer and this deleter are both the lease holder; if a second window
+ * can ever write outbox items without the lease, revisit (claim by rename).
+ *
  * Omitting `expectedChangedAt` deletes unconditionally: that is for a caller
  * discarding an item outright (a deleted job), not for a delivery.
  */
