@@ -5,7 +5,7 @@ import type { CompactionEvent } from '../sidebar/CompactionService';
 import { RemoteAuth } from './RemoteAuth';
 import { RemoteController } from './RemoteController';
 import { buildVoiceBridge, type VoiceBridgeBundle } from './RemoteVoiceBridge';
-import { buildSpeechDelivery } from './RemoteSpeechDelivery';
+import { buildSpeechDelivery, type RemoteSpeechDelivery } from './RemoteSpeechDelivery';
 import { RemoteRequestStore } from './RemoteRequestStore';
 import { RemoteTransportLease } from './RemoteTransportLease';
 import type { RemoteChannel, RemoteRuntimeOptions } from './types';
@@ -25,6 +25,7 @@ export interface ActiveTransport {
   lease: RemoteTransportLease;
   subscriptions: HostSubscriptions;
   voice?: VoiceBridgeBundle | undefined;
+  speech?: RemoteSpeechDelivery | undefined;
   /**
    * Drains the jobs outbox to the owner chat (B.4). Present only when
    * `jobs.enabled`: this window holds the Telegram lease, so it is the one
@@ -108,6 +109,7 @@ export class RemoteTransportManager {
       voice = buildVoiceBridge(channel, config, undefined, {
         confirmServerStart: this.options.confirmWhisperServerStart,
       });
+      const speech = buildSpeechDelivery(channel, config, undefined, this.options.notifyLocal);
       const controller = new RemoteController(
         channel,
         this.store,
@@ -116,7 +118,7 @@ export class RemoteTransportManager {
         buildRemoteControllerOptions(config, this.deps),
         this.audit,
         voice,
-        buildSpeechDelivery(channel, config, undefined, this.options.notifyLocal),
+        speech,
       );
       const subscriptions = subscribeHostToRemote(this.options.host, controller, {
         onCompaction: (event) => this.onCompaction(event, controller),
@@ -147,6 +149,7 @@ export class RemoteTransportManager {
           lease,
           subscriptions,
           ...(voice ? { voice } : {}),
+          ...(speech ? { speech } : {}),
           ...(jobOutboxWatcher ? { jobOutboxWatcher } : {}),
         });
         this.notifyStatus();

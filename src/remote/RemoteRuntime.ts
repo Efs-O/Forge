@@ -230,12 +230,13 @@ export class RemoteRuntime {
   }
 
   /**
-   * Persist `voice.output.enabled` to config.yaml and rebuild the transports so
-   * the change applies without a window reload. The write is schema-validated
-   * and atomic (temp + rename, .bak backup) by updateConfigFile. Re-reading
-   * the file keeps the in-memory config and the file in agreement, and the
-   * changed voice runtime signature forces a full transport rebuild (the
-   * in-place path would not rebuild the speech delivery).
+   * Persist `voice.output.enabled` to config.yaml and apply it without a window
+   * reload. The write is schema-validated and atomic (temp + rename, .bak
+   * backup) by updateConfigFile. Re-reading the file keeps the in-memory config
+   * and the file in agreement. `output.enabled` is excluded from the voice
+   * runtime signature, so this takes the in-place path (speech.setEnabled) and
+   * the controller -- with the pending auto-deletes of this very command --
+   * survives.
    *
    * Routed through lifecycleTail (like applyConfig) so a /voice toggle cannot
    * interleave a second replace() over the active map with a concurrent
@@ -380,6 +381,7 @@ export class RemoteRuntime {
     });
     for (const transport of this.manager.values()) {
       transport.controller.updateOptions(buildRemoteControllerOptions(config, this.deps));
+      transport.speech?.setEnabled(config.voice?.output?.enabled === true);
     }
   }
 

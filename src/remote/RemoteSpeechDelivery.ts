@@ -32,6 +32,12 @@ export interface SpeechSettings {
 
 export class RemoteSpeechDelivery {
   private warned = false;
+  /**
+   * Live on/off, flipped by `/voice` without rebuilding the transport: a
+   * rebuild disposes the controller and with it the pending auto-deletes of
+   * the very `/voice` command that caused it.
+   */
+  private on = true;
 
   constructor(
     private readonly channel: RemoteChannel,
@@ -46,9 +52,13 @@ export class RemoteSpeechDelivery {
    * which is false for every ordinary "nothing worth speaking" case as well as
    * for failures -- the caller treats both the same.
    */
+  setEnabled(on: boolean): void {
+    this.on = on;
+  }
+
   async speak(chatId: string, markdown: string): Promise<boolean> {
     const settings = this.settings();
-    if (!settings.enabled || !this.channel.sendVoice) return false;
+    if (!this.on || !settings.enabled || !this.channel.sendVoice) return false;
     // The chat label is a written navigation aid and nothing else. Its title is
     // the sender's own first prompt, so leaving it in made every spoken reply
     // open by reading the question back before answering it.
@@ -70,11 +80,14 @@ export class RemoteSpeechDelivery {
     } catch (error) {
       if (!this.warned) {
         this.warned = true;
-        this.onError?.(
-          `Forge: spoken replies are failing (${
-            error instanceof Error ? error.message : String(error)
-          }). Text delivery is unaffected.`,
-        );
+        const message = `Forge: spoken replies are failing (${
+          error instanceof Error ? error.message : String(error)
+        }). Text delivery is unaffected.`;
+        this.onError?.(message);
+        // The sender is usually away from the PC; a local popup alone is unseen.
+        await this.channel
+          .send(chatId, message, this.signal ? { signal: this.signal } : {})
+          .catch(() => undefined);
       }
       return false;
     } finally {
@@ -105,14 +118,15 @@ export function buildSpeechDelivery(
   signal?: AbortSignal,
   onError?: (message: string) => void,
 ): RemoteSpeechDelivery | undefined {
+  // Built whenever Piper is configured, so `/voice on|off` is a live flag
+  // (setEnabled) rather than a transport rebuild.
   const output = config.voice?.output;
-  if (output?.enabled !== true) return undefined;
-  if (!output.piper_binary || !output.voices_dir) return undefined;
+  if (!output?.piper_binary || !output.voices_dir) return undefined;
   const piperOptions: PiperOptions = {
     binary: output.piper_binary,
     voicesDir: output.voices_dir,
   };
-  return new RemoteSpeechDelivery(
+  const delivery = new RemoteSpeechDelivery(
     channel,
     new PiperRunner(piperOptions),
     () => ({
@@ -125,4 +139,6 @@ export function buildSpeechDelivery(
     signal,
     onError,
   );
+  delivery.setEnabled(output.enabled === true);
+  return delivery;
 }

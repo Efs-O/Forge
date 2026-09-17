@@ -80,7 +80,7 @@ function runtimeWith(configPath: string | undefined): {
 }
 
 describe('RemoteRuntime.setVoiceOutput persistence', () => {
-  it('writes voice.output.enabled to config.yaml, preserves siblings + comments, and rebuilds transports', async () => {
+  it('writes voice.output.enabled to config.yaml, preserves siblings + comments, and applies it', async () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-voice-ws-'));
     dirs.push(workspace);
     const configPath = path.join(workspace, 'config.yaml');
