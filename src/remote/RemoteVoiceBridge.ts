@@ -223,7 +223,7 @@ export class RemoteVoiceBridge {
     const preamble = replaced ? 'Forge: replaced your previous draft.\n' : '';
     await this.say(
       event.chatId,
-      `${preamble}Heard: "${result.text}"\n\n/ok to send, /no to discard, or type a correction.`,
+      `${preamble}Heard: "${result.text}"\n\n/ok to send, /no to discard, or type a replacement message (sent instead of this).`,
     );
     return { kind: 'handled' };
   }
