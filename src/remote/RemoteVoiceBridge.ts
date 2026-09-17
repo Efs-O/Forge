@@ -184,7 +184,12 @@ export class RemoteVoiceBridge {
       // `ingress.run` already wrote the terminal audit row; this is the half the
       // user sees. A silent rejection is the `ask_user` failure again -- the
       // sender must never be left wondering whether Forge heard them.
-      await this.say(event.chatId, `Forge: could not use that voice note (${result.reason}).`);
+      // The last line of the detail is the actual cause (whisper-cli's stderr ends on it).
+      const cause = result.detail.trim().split(/\r?\n/).pop()?.slice(0, 300) ?? '';
+      await this.say(
+        event.chatId,
+        `Forge: could not use that voice note (${result.reason}). ${cause}`.trim(),
+      );
       return { kind: 'handled' };
     }
 
