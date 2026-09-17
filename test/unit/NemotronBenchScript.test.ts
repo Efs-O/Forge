@@ -10,6 +10,7 @@ describe('nemotron benchmark script', () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('--base-url');
+    expect(result.stdout).toContain('--greek-eval');
     expect(result.stdout).toContain('never starts, stops, unloads');
   });
 

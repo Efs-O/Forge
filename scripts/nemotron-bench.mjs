@@ -6,13 +6,15 @@
  * ToolRegistry, so this cannot silently drift to an ad-hoc schema.
  */
 import { build } from 'esbuild';
-import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const DEFAULT_OUTPUT = resolve(ROOT, 'docs', 'benchmarks');
+const DEFAULT_GREEK_EVAL = 'N:/vs code apps/Gemma4GR/data/nemotron_greek_eval/eval.jsonl';
+const GREEK_TOOL_SCENARIOS = resolve(ROOT, 'benchmarks', 'nemotron-greek-tool-calls.json');
 const HARDWARE = '2x RTX 5060 Ti 16 GB (PCIe Gen3 x8) + RTX 3060 12 GB (x4); i7-8700K DDR4';
 
 function value(args, flag) {
@@ -22,7 +24,7 @@ function value(args, flag) {
 
 function usage() {
   return [
-    'Usage: node scripts/nemotron-bench.mjs --base-url http://127.0.0.1:PORT --model MODEL_ID [--out docs/benchmarks]',
+    'Usage: node scripts/nemotron-bench.mjs --base-url http://127.0.0.1:PORT --model MODEL_ID [--greek-eval PATH] [--out docs/benchmarks]',
     '',
     'The server must already be running. This command never starts, stops, unloads, or downloads a model.',
   ].join('\n');
@@ -35,7 +37,8 @@ function options(args) {
   if (!baseUrl || !/^https?:\/\//u.test(baseUrl)) throw new Error('--base-url must be an HTTP(S) URL.');
   if (!model) throw new Error('--model is required; refuse to guess a served model.');
   const output = resolve(ROOT, value(args, '--out') ?? DEFAULT_OUTPUT);
-  return { baseUrl, model, output };
+  const greekEval = resolve(value(args, '--greek-eval') ?? DEFAULT_GREEK_EVAL);
+  return { baseUrl, model, output, greekEval };
 }
 
 async function loadForgeToolDefinitions() {
@@ -105,6 +108,57 @@ function scenario(id, expectedTool, prompt, codingCheck) {
   return { id, expectedTool, prompt, codingCheck };
 }
 
+function greekToolScenarios() {
+  const entries = JSON.parse(readFileSync(GREEK_TOOL_SCENARIOS, 'utf8'));
+  if (!Array.isArray(entries) || entries.length < 6 || entries.length > 10) {
+    throw new Error('Greek tool-call fixture must contain 6–10 scenarios.');
+  }
+  return entries.map((entry) => scenario(
+    entry.id,
+    entry.expected_tool,
+    entry.prompt,
+    (args) => JSON.stringify(args) === JSON.stringify(entry.expected_args),
+  ));
+}
+
+function greekRatio(text) {
+  const letters = [...text].filter((char) => /\p{L}/u.test(char));
+  return letters.length === 0 ? 0 : letters.filter((char) => /[\u0370-\u03ff\u1f00-\u1fff]/u.test(char)).length / letters.length;
+}
+
+function tokenF1(reference, answer) {
+  const tokens = (text) => text.toLocaleLowerCase('el-GR').match(/[\p{L}\p{N}]+/gu) ?? [];
+  const left = tokens(reference); const right = tokens(answer);
+  const counts = new Map(left.map((token) => [token, (left.filter((item) => item === token).length)]));
+  let overlap = 0;
+  for (const token of right) {
+    const remaining = counts.get(token) ?? 0;
+    if (remaining > 0) { overlap += 1; counts.set(token, remaining - 1); }
+  }
+  return left.length + right.length === 0 ? 0 : (2 * overlap) / (left.length + right.length);
+}
+
+function charF1(reference, answer) {
+  const grams = (text) => {
+    const chars = [...text.toLocaleLowerCase('el-GR')].filter((char) => /[\p{L}\p{N}]/u.test(char));
+    return chars.slice(0, -2).map((_, index) => chars.slice(index, index + 3).join(''));
+  };
+  const left = grams(reference); const right = grams(answer);
+  const counts = new Map(left.map((gram) => [gram, (left.filter((item) => item === gram).length)]));
+  let overlap = 0;
+  for (const gram of right) { const remaining = counts.get(gram) ?? 0; if (remaining > 0) { overlap += 1; counts.set(gram, remaining - 1); } }
+  return left.length + right.length === 0 ? 0 : (2 * overlap) / (left.length + right.length);
+}
+
+function greekEvaluation(file) {
+  if (!existsSync(file)) throw new Error(`Greek evaluation set not found: ${file}`);
+  const rows = readFileSync(file, 'utf8').trim().split(/\r?\n/u).filter(Boolean).map(JSON.parse);
+  if (rows.length === 0 || !rows.every((row) => typeof row.q === 'string' && typeof row.a === 'string')) {
+    throw new Error('Greek evaluation rows must be non-empty JSONL objects with q and a strings.');
+  }
+  return rows;
+}
+
 function scenarios() {
   const strict = (tool, args) =>
     `Call only ${tool} with valid JSON. Use these exact arguments: ${JSON.stringify(args)}. Do not explain.`;
@@ -171,6 +225,17 @@ function markdown(result) {
     '| --- | --- | --- | --- | ---: | ---: |',
     rows,
     '',
+    '## Greek-language evaluation',
+    '',
+    `Held-out set: ${result.greek.evaluation_file} (${result.greek.examples} rows; SHA-256 ${result.greek.sha256}).`,
+    'Quality is character 3-gram F1 and whitespace/token F1 against each held-out reference; language fidelity is the mean Greek-Unicode-letter share. Greek QA rows and model answers are deliberately not written into Forge artifacts.',
+    '',
+    '| Thinking | QA char-F1 | QA token-F1 | Greek-script share | Greek tools |',
+    '| --- | ---: | ---: | ---: | ---: |',
+    ...result.greek.modes.map((mode) => `| ${mode.thinking ? 'on' : 'off'} | ${(mode.char_f1 * 100).toFixed(1)}% | ${(mode.token_f1 * 100).toFixed(1)}% | ${(mode.greek_script_share * 100).toFixed(1)}% | ${mode.tool_successes}/${mode.tool_total} |`),
+    '',
+    'Gemma 4 E4B reference: base 3/4 (75.0%), fine-tuned 3/4 (75.0%) from Gemma4GR `tests/benchmark_results`. Those were a four-question `must_contain` smoke run, not this validation-only F1 evaluation, so they are not directly comparable.',
+    '',
     `Raw result: ${result.raw_file}`,
     '',
     'The benchmark validates tool name plus required JSON fields. It does not execute model-proposed terminal commands.',
@@ -189,8 +254,13 @@ async function main() {
     const props = await jsonRequest(`${input.baseUrl}/props`, {});
     const models = await jsonRequest(`${input.baseUrl}/v1/models`, {});
     const definitionsByName = new Map(definitions.map((definition) => [definition.function.name, definition]));
+    const greekRows = greekEvaluation(input.greekEval);
+    const greekHash = (await import('node:crypto')).createHash('sha256').update(readFileSync(input.greekEval)).digest('hex');
     const results = [];
-    for (const test of scenarios()) {
+    const greekModes = [];
+    for (const thinking of [false, true]) {
+      const greekTools = [];
+      for (const test of greekToolScenarios()) {
       const response = await jsonRequest(`${input.baseUrl}/v1/chat/completions`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -203,7 +273,7 @@ async function main() {
           top_p: 0.95,
           max_tokens: 512,
           stream: false,
-          chat_template_kwargs: { enable_thinking: false },
+          chat_template_kwargs: { enable_thinking: thinking },
         }),
       });
       const call = callFor(response);
@@ -211,7 +281,7 @@ async function main() {
       const valid = Boolean(call && definition && requires(definition, call.args));
       const correct = valid && call.name === test.expectedTool;
       const pass = Boolean(correct && (!test.codingCheck || test.codingCheck(call.args)));
-      results.push({
+      greekTools.push({
         id: test.id,
         expected_tool: test.expectedTool,
         actual_tool: call?.name,
@@ -220,6 +290,18 @@ async function main() {
         timing: timing(response),
         response,
       });
+      }
+      const qa = [];
+      for (const row of greekRows) {
+        const response = await jsonRequest(`${input.baseUrl}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: input.model, messages: [{ role: 'user', content: row.q }], temperature: 0.1, max_tokens: 512, stream: false, chat_template_kwargs: { enable_thinking: thinking } }) });
+        const answer = response?.choices?.[0]?.message?.content ?? '';
+        qa.push({ char: charF1(row.a, answer), token: tokenF1(row.a, answer), greek: greekRatio(answer) });
+      }
+      greekModes.push({ thinking, char_f1: qa.reduce((sum, item) => sum + item.char, 0) / qa.length, token_f1: qa.reduce((sum, item) => sum + item.token, 0) / qa.length, greek_script_share: qa.reduce((sum, item) => sum + item.greek, 0) / qa.length, tool_successes: greekTools.filter((entry) => entry.pass).length, tool_total: greekTools.length, tool_scenarios: greekTools });
+    }
+    for (const test of scenarios()) {
+      const response = await jsonRequest(`${input.baseUrl}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: input.model, messages: [{ role: 'user', content: test.prompt }], tools: definitions, tool_choice: 'required', temperature: 0.6, top_p: 0.95, max_tokens: 512, stream: false, chat_template_kwargs: { enable_thinking: false } }) });
+      const call = callFor(response); const definition = call ? definitionsByName.get(call.name) : undefined; const valid = Boolean(call && definition && requires(definition, call.args)); const correct = valid && call.name === test.expectedTool; results.push({ id: test.id, expected_tool: test.expectedTool, actual_tool: call?.name, valid_required_args: valid, pass: Boolean(correct && (!test.codingCheck || test.codingCheck(call.args))), timing: timing(response), response });
     }
     const toolSuccesses = results.filter((entry) => entry.pass).length;
     const coding = results.filter((entry) => entry.id.startsWith('coding-'));
@@ -241,6 +323,7 @@ async function main() {
       tool_success_rate: Number(((toolSuccesses / results.length) * 100).toFixed(1)),
       coding_successes: coding.filter((entry) => entry.pass).length,
       scenarios: results,
+      greek: { evaluation_file: input.greekEval, sha256: greekHash, examples: greekRows.length, modes: greekModes },
       raw_file: rawName,
     };
     if (!existsSync(input.output)) mkdirSync(input.output, { recursive: true });
