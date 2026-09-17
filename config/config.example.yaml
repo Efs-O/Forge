@@ -35,6 +35,12 @@ forge_instructions:
 custom_instructions: >-
   Use the repository-specific FORGE.md injected by Forge (or AGENTS.md only as a compatibility fallback). Keep it concise and update it only when the user explicitly asks to record durable project instructions.
 
+# WARNING: FULL PERMISSIONS. Every one of these is OFF by default; this example
+# turns them ALL ON, so the agent may delete files, run terminal and headless
+# commands, write to git, delegate to other agents, and search/fetch the web.
+# Writes, terminal and git actions still ask for confirmation — unless you turn
+# that off with /clanker. Review this block before your first session and set
+# anything you do not want to false (or delete the line).
 permissions:
   fs:
     delete: true
