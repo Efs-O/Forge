@@ -1,7 +1,6 @@
 import type { ToolPermission } from '../tools/ToolRegistry';
 import type { EmbeddingPromptStyle } from '../search/embeddingPrompts';
 import type { AgentBusConfig } from './agentBusSchema';
-
 /** Sampling parameter overrides shared by models, profiles, and defaults. */
 export interface SamplingConfig {
   temperature?: number;
@@ -169,6 +168,7 @@ export interface ModelConfig {
   system_prompt_mode?: SystemPromptMode;
   /** When true, enable thinking/reasoning tokens for this model. */
   think?: boolean;
+  chat_template_thinking?: boolean;
   /** Ollama reasoning effort level when think is enabled. */
   reasoning_effort?: 'high' | 'medium' | 'low' | 'none';
   /** When true, strip visible thinking/channel markup when think is explicitly false. */

@@ -87,6 +87,7 @@ const ModelConfigSchema = z.object({
   system_prompt: z.string().optional(),
   system_prompt_mode: z.enum(['append', 'replace']).optional(),
   think: z.boolean().optional(),
+  chat_template_thinking: z.boolean().optional(),
   reasoning_effort: ReasoningEffortSchema.optional(),
   strip_thinking_channels: z.boolean().optional(),
   api_key_secret: z.string().min(1).optional(),

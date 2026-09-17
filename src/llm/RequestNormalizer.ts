@@ -19,15 +19,19 @@ export function normalizeRequestForModel(
 
   const provider = model.provider ?? 'llama.cpp';
   if (provider === 'llama.cpp') {
+    const chatTemplateKwargs = model.chat_template_thinking
+      ? { ...request.chat_template_kwargs, enable_thinking: model.think !== false }
+      : request.chat_template_kwargs;
     // Qwen 3.8's GGUF Jinja template defaults to xhigh unless this kwarg is
     // present. llama-server forwards chat_template_kwargs directly to it.
     if (model.think !== true || model.reasoning_effort === undefined) {
-      return request;
+      if (chatTemplateKwargs === undefined) return request;
+      return { ...request, chat_template_kwargs: chatTemplateKwargs };
     }
     return {
       ...request,
       chat_template_kwargs: {
-        ...request.chat_template_kwargs,
+        ...chatTemplateKwargs,
         reasoning_effort: model.reasoning_effort,
       },
     };

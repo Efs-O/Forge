@@ -453,6 +453,7 @@
     "bench:smoke": "node scripts/forge-bench.mjs",
     "bench:qwen-suite": "node scripts/forge-bench-suite.mjs",
     "bench:ping": "node scripts/forge-bench.mjs --ping",
+    "bench:nemotron": "node scripts/nemotron-bench.mjs",
     "probe:claude-cold-resume": "node scripts/test-claude-cold-resume.mjs",
     "probe:codex-persistent": "node scripts/spike-codex-persistent-protocol.mjs",
     "test:watch": "vitest",

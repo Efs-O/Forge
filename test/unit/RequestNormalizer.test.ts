@@ -73,4 +73,18 @@ describe('normalizeRequestForModel', () => {
       reasoning_effort: 'medium',
     });
   });
+
+  it('maps the resolved thinking control to a template enable_thinking kwarg', () => {
+    const model: ModelConfig = {
+      name: 'nemotron',
+      provider: 'llama.cpp',
+      gguf_path: 'C:/models/nemotron.gguf',
+      chat_template_thinking: true,
+      think: false,
+    };
+
+    expect(normalizeRequestForModel(baseRequest, model).chat_template_kwargs).toEqual({
+      enable_thinking: false,
+    });
+  });
 });
