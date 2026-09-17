@@ -68,6 +68,14 @@ describe('composeEmbeddingServerArgs', () => {
     expect(argValue(args, '-m')).toBe('/models/e.gguf');
     expect(argValue(args, '--port')).toBe('8099');
   });
+
+  it('pins the embedding server to embeddings.device only when configured', () => {
+    expect(composeEmbeddingServerArgs(makeConfig())).not.toContain('--device');
+    const config = makeConfig({
+      embeddings: { enabled: true, model_path: '/models/e.gguf', device: 'CUDA2' },
+    });
+    expect(argValue(composeEmbeddingServerArgs(config), '--device')).toBe('CUDA2');
+  });
 });
 
 describe('embeddingModelMatches', () => {

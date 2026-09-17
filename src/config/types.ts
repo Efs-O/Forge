@@ -255,6 +255,7 @@ export interface EmbeddingsConfig {
   model_path?: string;
   port?: number;
   n_ctx?: number;
+  device?: string; // llama.cpp `--device` list for the embedding server, e.g. `CUDA2`
   prompt_style?: EmbeddingPromptStyle;
   auto_index_on_search?: boolean;
   /** Ask before starting the embedding server when it is cold. */

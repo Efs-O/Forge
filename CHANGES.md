@@ -1,5 +1,17 @@
 # Forge — Recent Changes
 
+## Unreleased
+
+- **`embeddings.device`** chooses where the embedding server runs (passed to
+  llama.cpp as `--device`): `none` keeps it on the CPU, where a 300M embedder is
+  fast and costs no VRAM; `CUDA2` pins it to one GPU. Without it the embedder
+  still spreads over every visible GPU.
+- **`config/config.example.yaml` is now a complete working config** (the
+  author's own, with paths replaced by `xxxx/` placeholders): Gemma 4, Qwen3.8
+  with MTP and DFlash 2 drafters, Flash-Next, Ollama, OpenRouter, xAI, Cerebras
+  and CLI agents. Remote control, voice, embeddings and the wake relay are
+  switched off until you fill in their paths.
+
 ## 0.16.6
 
 ### Agent messaging: Forge, Claude Code and Codex talk directly

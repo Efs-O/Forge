@@ -1,604 +1,977 @@
 # =============================================================================
-# Forge — example configuration
+# Forge — example configuration (a complete, working setup)
 # =============================================================================
-#
 # QUICK START
-#   1. In your project, create a folder named  .forge
-#   2. Copy this file into it and rename it to  config.yaml
-#      (final path: <your-project>/.forge/config.yaml)
-#   3. Edit the two things that CANNOT be guessed:
-#        - llama_server.binary   -> where your llama-server executable lives
-#        - models[].gguf_path    -> where your .gguf model file lives
-#   4. Set `active_model` to the name of the model you want on startup.
-#   5. Reload the VS Code window.
+#   1. Create <your-project>/.forge/ and copy this file there as config.yaml.
+#   2. Replace every `xxxx/` with the real folder on your machine:
+#        llama_server.binary, models[].gguf_path / mmproj_path / --model-draft,
+#        and the optional tools (embeddings, voice, MCP servers, CLI agents).
+#   3. Delete the model entries you do not have, and point `active_model` at
+#      one you kept. Every `name` in `aliases` must still exist.
+#   4. Reload the VS Code window.
 #
-# Forge will not start a local model until those paths are real. If a path is
-# wrong it says so out loud — it never silently falls back to something else.
+# Forge never falls back silently: a wrong path is reported, not guessed.
+# API keys are NEVER stored here — use "Forge: Set Cloud Provider Token"; this
+# file only names the secret (`api_key_secret`).
 #
-# You do NOT need every section below. The only required keys are `models` and
-# `active_model`; `llama_server.binary` is required if you run a local GGUF.
-# Everything else has a sensible default and is here to be discovered.
-#
-# API KEYS ARE NEVER STORED IN THIS FILE.
-# Use the Command Palette -> "Forge: Set Cloud Provider Token". Keys go into VS
-# Code SecretStorage. This file only ever names the secret (`api_key_secret`),
-# so it is safe to commit.
-#
-# -----------------------------------------------------------------------------
-# THE MENTAL MODEL — three layers decide what a request looks like
-# -----------------------------------------------------------------------------
-#   models:   one entry per GGUF / endpoint / CLI. FACTS ONLY — where it lives,
-#             how big its context is. Spawn-time facts for llama.cpp go under
-#             `spawn:`. Vision is auto-derived from `mmproj_path` (you do not
-#             write `capabilities: [vision]`).
-#   groups:   settings shared by a family of models — the provider, the endpoint,
-#             the VRAM budget, the sampling recipe. A model joins with `group:`.
-#   defaults: request-time fields shared by EVERY model (system prompt, sampling).
-#   profiles: request-time role presets, picked with `active_model: name@profile`.
-#
-#   Request-time precedence:  defaults  <  group  <  model fields  <  profile
-#   Spawn-time precedence:    group.spawn  <  model.spawn
+# Precedence — request time: defaults < group < model < profile.
+#              spawn time:   group.spawn < model.spawn.
+# The GPU layout below is 2x RTX 5060 Ti 16 GB (CUDA0/1) + RTX 3060 12 GB
+# (CUDA2); re-tune `--device` / `--tensor-split` for your cards. An external
+# drafter (--model-draft) must sit on the LAST --device.
 # =============================================================================
 
-# Which model to load on startup. Either `name` or `name@profile`.
-# This MUST match one of the `name:` values under `models:` below.
-active_model: my-local-model@main
+# ===========================================================================
+# A. CORE BEHAVIOR
+# ===========================================================================
 
-# trace | debug | info | warn | error. Defaults to info. Set here, this WINS over
-# the `forge.logLevel` VS Code setting — that setting only applies when this key
-# is absent.
-#
-# `debug` additionally surfaces the per-request prompt-cache line in the Forge
-# output channel:
-#     [cache] prompt=24610 cached=24102 (97.9%) evaluated=508
-# `cached` is how much of the prompt llama-server reused from its KV cache
-# instead of re-running it, so it is the fastest way to tell whether Forge is
-# keeping your prompt prefix stable. High 90s is healthy on an agent turn; a
-# drop to 0 on a conversation that only grew means something rewrote the HEAD of
-# the prompt. See docs/plans/PROMPT_PREFIX_STABILITY_PLAN.md.
-# log_level: debug
+active_model: qwen38-27b-dflash2-ud-q6k-vision
 
-# -----------------------------------------------------------------------------
-# Project memory
-# -----------------------------------------------------------------------------
-# Forge can drop a small FORGE.md into your project as a scratchpad of durable
-# project instructions. The agent reads it automatically every turn; it only
-# writes to it when you explicitly ask it to remember something.
+log_level: debug
+
 forge_instructions:
   auto_create: true
 
 custom_instructions: >-
-  Use the repository-specific FORGE.md injected by Forge.
-  Keep it concise and update it only when the user explicitly asks to record
-  durable project instructions.
+  Use the repository-specific FORGE.md injected by Forge (or AGENTS.md only as a compatibility fallback). Keep it concise and update it only when the user explicitly asks to record durable project instructions.
 
-# -----------------------------------------------------------------------------
-# Permissions — what the agent is allowed to do
-# -----------------------------------------------------------------------------
-# READ THIS BEFORE EDITING. The block is all-or-nothing: as soon as a
-# `permissions:` key exists, every group you do NOT list falls back to its
-# schema default, which is mostly `false`. Writing only an `exec:` block
-# silently disables web search, file deletion and git writes.
-#
-# So: keep all five groups present and flip individual booleans. If you delete
-# this block entirely you get the defaults, which are deliberately cautious.
-#
-# Every action is still gated by the per-action confirmation prompt in the
-# sidebar — these switches decide which tools the model is even TOLD about.
 permissions:
   fs:
-    read: true
-    write: true
-    # `delete: false` does not just refuse — it removes `delete_file` from the
-    # tool list entirely, so the model does not know it exists and reaches for a
-    # shell `rm` instead (which is denied). If you want deletes, say so here.
     delete: true
-
   exec:
-    # Bounded, structured, shell-free commands + read-only inspection.
     headless: true
-    # Terminal commands are PASTE-ONLY: Forge types the command into your
-    # terminal but never sends the final Enter. You press it.
-    terminal: false
-
+    terminal: true
   git:
-    read: true
-    # Grants four structured, flag-free tools: create_branch, switch_branch,
-    # stage, commit. This is NOT a security boundary — with exec.headless on,
-    # the agent can already run git directly. The real guard is the denylist
-    # (reset --hard, clean -f, checkout --, restore, push, rebase, branch -D,
-    # stash drop/clear, filter-branch), which is always on.
-    write: false
-
-  net:
-    # Requires a search key — see the `search:` section below.
-    search: false
-    # web_fetch is GET-only and SSRF-guarded (loopback, link-local and private
-    # ranges are rejected). The residual risk is prompt injection from page
-    # content, which is inherent to reading the web.
-    fetch: false
-
+    write: true
   agents:
-    # Allows delegating a task to a local CLI agent (claude / codex below).
-    delegate: false
+    delegate: true
+  net:
+    search: true
+    fetch: true
 
-# -----------------------------------------------------------------------------
-# llama.cpp — required only if you run local GGUF models
-# -----------------------------------------------------------------------------
-llama_server:
-  # The llama-server executable from your llama.cpp build. No default — Forge
-  # cannot guess this, and will tell you plainly if it is missing.
-  #   Windows:      "C:/llama.cpp/llama-server.exe"
-  #   macOS/Linux:  "/usr/local/bin/llama-server"
-  binary: 'C:/path/to/llama.cpp/llama-server.exe'
-  host: '127.0.0.1'
-  port: 8080
-  flash_attn_default: true
-
-# -----------------------------------------------------------------------------
-# Optional conveniences
-# -----------------------------------------------------------------------------
-
-# Summarise the conversation automatically as it approaches the context limit.
-auto_compact:
+# Persistent agent jobs (docs/JOBS.md).
+jobs:
   enabled: true
-  at: 0.85 # trigger at 85% of the per-conversation context window
-  resume: true # carry on with the task after compacting
+  # Hosts a job may fetch from.
+  allowed_hosts:
+    - api.github.com
+    - objects.githubusercontent.com
+  max_concurrent: 2
 
-# Remote control is default-deny. Provider tokens and paired owner IDs are
-# stored through VS Code SecretStorage, never in this file.
-remote:
-  enabled: false
-  queue_limit: 5
-  max_message_chars: 12000
-  rate_limit_per_minute: 30
-  # Seconds to keep a recognized /command before deleting it from Telegram; 0 disables.
-  delete_command_messages_after: 5
-  # Seconds to keep Forge's reply to a /command before deleting it; 0 disables.
-  # Approval prompts and paginated lists are never auto-deleted.
-  delete_command_replies_after: 10
-  auth:
-    # 0 disables only inactivity expiry; TOTP still locks after restart or /lock.
-    inactivity_timeout_minutes: 30
-  attachments:
-    # Stored below .forge/remote-inbox, never as tracked project files.
-    enabled: false
-    # 1-365 days; null keeps attachments forever (no pruning).
-    retain_days: 30
-    accept_pdf: true
-  # Aliases are the only remote workspace-switch targets; paths are never
-  # inferred from an incoming Telegram command.
-  workspace_aliases: {}
-  # Example:
-  #   ssuno:
-  #     path: N:/vs code apps/Ssuno
-  #     display_name: Ssuno
-  # Optional, private-LAN receiver for the separately deployed WakeSleep relay.
-  # The pairing secret stays in VS Code SecretStorage, never in this file.
-  # wake_relay:
-  #   enabled: false
-  #   host: 192.168.1.70
-  #   port: 8742
-  #   relay_ip: 192.168.1.81
-  telegram:
-    enabled: false
-  whatsapp:
-    enabled: false # experimental linked-device adapter; see docs/REMOTE_CONTROL.md
+# ===========================================================================
+# B. MODEL DEFINITIONS  (x_shared defines the &reasoning_budget_message anchor — must stay above models)
+# ===========================================================================
 
-# Voice: spoken input and spoken replies over the remote channel (Telegram).
-# Off by default, and there are no default paths on purpose -- a wrong guess at
-# where a 3 GB model lives fails at record time with a bare non-zero exit.
-#
-# The engine and model size are decided, not tunable: whisper.cpp because it is
-# one .exe plus one .bin where faster-whisper needs a CUDA runtime the user has
-# to install, and large-v3 because `turbo` was measured hallucinating an outro.
-voice:
-  enabled: false
-  # whisper-cli.exe from a CUDA build of whisper.cpp.
-  # whisper_binary: C:/tools/whisper.cpp/build/bin/Release/whisper-cli.exe
-  # ggml-large-v3.bin. Check the file size -- a truncated download still loads.
-  # whisper_model: C:/tools/whisper.cpp/models/ggml-large-v3.bin
-  # `auto` detects per utterance; an ISO code ("en", "el") forces one.
-  language: auto
-  # Which device decodes. Omit the block entirely and whisper-cli keeps its own
-  # defaults: GPU on, device 0, 4 threads, 5 beams, flash-attn on. A CUDA build
-  # already uses the GPU, so this is about WHICH card, not whether.
-  compute:
-    gpu: true
-    # `-dev N`, a CUDA ordinal. This is llama.cpp's device order, which need NOT
-    # match nvidia-smi's -- read it off whisper-cli's own startup banner, which
-    # prints every device it found by name. Point it at the card the chat model
-    # is not using.
-    # device: 1
-    # threads: 8      # only matters with `gpu: false`
-    # beam_size: 5    # lower is faster and more literal; 1 is greedy
-    # flash_attn: true
-  server:
-    # Keep the model behind a local whisper-server between notes. This cuts the
-    # measured ~5.5 s model load to a ~0.3 s warm request, at ~3.6 GB VRAM.
-    enabled: false
-    # Build with: cmake --build build --config Release --target whisper-server
-    # binary: C:/tools/whisper.cpp/build/bin/Release/whisper-server.exe
-    port: 8092
-    # Zero keeps it resident until this VS Code window closes.
-    idle_timeout_ms: 600000
-    confirm_on_start: true
-  # Decoder bias: a vocabulary list, not an instruction. whisper.cpp truncates
-  # it at 224 tokens. Add the terms it mishears -- domain nouns and proper names
-  # are what it gets wrong.
-  bias_prompt: ""
-  # Trailing-silence trim. The same filter that drops a spurious final line also
-  # clips soft consonants and short negations, so off is the safe direction.
-  trim_silence: true
-  input:
-    max_bytes: 26214400 # 25 MiB, rejected before anything is decoded
-    max_seconds: 300 # rejected from the client-reported duration
-  # Spoken replies via Piper. Flagged separately from input because they are
-  # different capabilities with different failure modes, and input is useful on
-  # its own. Nothing is bundled: the Greek JOY voice is CC BY-NC 4.0, so both
-  # paths point at your own Piper install. Piper is ONNX and CPU-only unless
-  # your build ships the onnxruntime CUDA provider.
-  output:
-    enabled: false
-    # piper_binary: C:/tools/piper/piper.exe
-    # voices_dir: C:/tools/piper/voices
-    voice_en: en_US-amy-medium
-    voice_el: el_GR-joy-medium
-    # Past this a spoken reply is truncated at a sentence boundary and told to
-    # read the rest in the written message. Long voice notes cannot be skimmed.
-    max_chars: 1200
+x_shared:
+  reasoning_budget_message: &reasoning_budget_message " Stop reasoning now. Do not repeat, reconsider, or restate conclusions already reached.
+   If you have decided the next action, take it immediately. If one specific fact is missing, verify only that fact with the appropriate tool.
+    Otherwise end reasoning and produce the answer or tool call now."
 
-# Agent messaging: the ask_live_session tool asks a Claude Code or Codex
-# session that is ALREADY RUNNING and already knows your work (ask_local_agent
-# always starts a new, empty one); the question shows in that session's window.
-# Those sessions message Forge back with ~/.forge/agent-bus/forge.sh, which
-# needs control_server enabled. Absent = no tool and no /agent routes. A Claude
-# session in bypass-permissions mode holds Forge's messages for approval unless
-# ~/.claude/settings.json has "crossSessionInbound": "accept" (Forge never sets
-# it). See docs/plans/AGENT_MESSAGING_PLAN.md.
-# agent_bus:
-#   enabled: true
-#   # Which Claude session to ask when the agent names none. Unset: the only one
-#   # open in this workspace. Give a session a fixed name with /rename.
-#   claude_session: forge-main
-#   claude_transport: pipe  # or relay: a `claude -p` sends it (~$0.10 each)
-#   claude_cli: claude      # relay only: bare name on PATH or an absolute path
-#   relay_model: haiku      # relay only
-#   # Optional, for target "codex": an open Codex session, resumed in a terminal
-#   # with `codex resume <thread> --sandbox workspace-write --add-dir <bus folder>`.
-#   codex_thread: <thread id>
-#   codex_cli: codex        # bare name on PATH or an absolute path
-
-# image_search tool: reverse image search (Google Lens via SerpApi). Absent =
-# the tool is never offered to a model. Needs net.search permission. Store the
-# SerpApi key with "Forge: Set Cloud Provider Token" under secret_key_name; the
-# free plan is 250 searches/month. SerpApi only accepts a public URL, so an
-# attached image is first uploaded to Litterbox (litterbox.catbox.moe), which
-# deletes it after 1 hour -- the image is publicly reachable until then.
-# See docs/plans/IMAGE_SEARCH_TOOL_PLAN.md.
-# image_search:
-#   provider: serpapi_lens
-#   secret_key_name: serpapi
-#   max_results: 8            # per section; the raw response is ~400 KB
-#   confirm_upload: false     # true = ask before an attachment is uploaded
-#   thumbnails: 4             # top matches saved to .forge/image-search, shown in
-#                             # the tool row and sent as photos to Telegram; 0 = off
-#   timeout_ms: 90000         # type "all" measured at ~52 s
-
-# generate_image tool. Absent = the tool is never offered to a model. Backends
-# are OpenAI-style /v1/images/generations endpoints; keys resolve exactly like a
-# chat model on the same provider (SecretStorage, and for xai the OpenCode OAuth
-# login as a fallback). A local ComfyUI backend is planned, not implemented --
-# see docs/plans/IMAGE_GENERATION_TOOL_PLAN.md.
-# image_generation:
-#   default: grok-imagine
-#   output_dir: generated-images     # workspace-relative
-#   backends:
-#     - name: grok-imagine
-#       provider: xai                # xai | openai | openai-compatible
-#       model: grok-imagine-image-2.0
-#       api_key_secret: xai
-#       confirm_each: true           # default; asks even under /clanker (billed)
-#     - name: gpt-image
-#       provider: openai
-#       model: gpt-image-1
-#       api_key_secret: openai
-
-# How many models may be loaded at once across all VS Code windows.
-# Local GGUFs are VRAM-bound; raise this only if you have the memory.
-max_simultaneous_models: 4
-
-# Let other Forge VS Code windows on this machine borrow a compatible, already
-# running llama.cpp process instead of each spawning their own copy.
-shared_runtime:
-  enabled: true
-
-# Small local HTTP API for external tools (scripts, Forge Relay). Off by
-# default; nothing outside your machine can reach it.
-control_server:
-  enabled: false
-  port: 8799
-
-# Web search. Bring your own key: Command Palette -> "Forge: Set Cloud Provider
-# Token", using the secret name below. Also needs `permissions.net.search: true`.
-# search:
-#   provider: tavily          # tavily | brave
-#   secret_key_name: forge.tavily.apiKey
-#   max_results: 5
-
-# Local semantic code search (the `search_codebase` tool). Spawns a SECOND
-# llama-server on its own port holding a small embedding model (~265 MB VRAM)
-# alongside your chat model. The index is a plain JSON file under .forge/ —
-# no native dependencies, nothing leaves your machine.
-# embeddings:
-#   enabled: true
-#   model_path: "C:/path/to/embeddinggemma-300m-Q4_0.gguf"
-#   port: 8091
-#   # EmbeddingGemma is trained with task prefixes; using them is a large win.
-#   # Measured on a real repo (2679 chunks, 10 queries): MRR 0.384 -> 0.634.
-#   prompt_style: gemma
-#   auto_index_on_search: true
-#   confirm_on_start: true
-#   idle_timeout_ms: 120000
-#   max_file_size_kb: 256
-#   # Scope this deliberately. The schema default is `**/*`, which happily
-#   # embeds package-lock.json and every stray file in your repo.
-#   # These globs are anchored at the WORKSPACE ROOT and are depth-agnostic on
-#   # purpose: "src/**" would never reach a nested subproject/src/**.
-#   include_globs: [ "**/src/**", "**/test/**", "**/tests/**", "**/docs/**" ]
-#   exclude_globs: [ "**/node_modules/**", "**/dist/**", "**/out/**", "**/.git/**", "**/.forge/**" ]
-
-# -----------------------------------------------------------------------------
-# Request-time defaults — the base layer under every model and profile
-# -----------------------------------------------------------------------------
 defaults:
-  # Tool calls allowed in a single turn before Forge stops the loop. This is a
-  # runaway guard, NOT a judgement about how big a task may be — the built-in
-  # default of 500 permits long-running implementation work while retaining a
-  # finite runaway guard.
-  max_tool_rounds: 500
-
+  max_tool_rounds: 1000
   system_prompt: |
-    You are Forge, a local AI coding assistant running inside VS Code.
-    ALWAYS use tools to accomplish tasks. Never describe what you would do - do it by calling the tools directly.
-    When the user asks you to read, audit, or investigate files, call read_file immediately. Do not summarize what you plan to do.
-    After each tool result, continue calling tools until the task is complete, then give a short summary.
+    You are Forge, an autonomous software-engineering agent operating inside VS Code.
+
+    Complete the user's requested task using the available workspace, tools, and evidence. Prefer direct action over narrating intended actions.
+    For workspace tasks, inspect relevant existing code before making assumptions or changes. Search for existing implementations before creating new mechanisms,
+     and prefer extending existing architecture over duplicating it.
+    FRESHNESS AND UNCERTAINTY
+    When uncertain about a technical fact that may have changed since training — including APIs, libraries, model/runtime support, CLI flags, versions, bugs, compatibility, or current behavior 
+    — verify it from current authoritative online sources before relying on internal knowledge or extended reasoning.
+    Prefer primary sources such as official documentation, upstream repositories, release notes, issues, and source code. Use internal knowledge directly for stable facts.
+    PATHS AND CODE SEARCH
+    When locating a file, path, executable, symbol, configuration value, or implementation, search the workspace and relevant source/configuration first.
+    If code or configuration already contains or constructs the path, trace that path instead of searching the filesystem for the same resource.
+    Prefer targeted searches by filename, symbol, string, or known directory. Never recursively search an entire drive or large filesystem tree unless
+     targeted workspace/code searches have failed and a broad filesystem search is genuinely necessary.
+    EXECUTION
+    Make the smallest coherent change that fully satisfies the request. Preserve existing behavior outside the requested scope. 
+    Treat explicit scope restrictions as hard constraints.
+    After each result, determine what specific information or action is still required. If something necessary remains, continue. 
+    If the requested task is complete and sufficient evidence exists, stop investigating and answer.
+    Do not repeat equivalent searches, reread information already available, or investigate unrelated areas without a concrete unresolved question. 
+    At large context sizes, prefer targeted searches and reads over broad scans.
+    Do not invent file contents, repository structure, command output, test results, or implementation details. Do not claim something was changed, 
+    fixed, verified, or succeeded unless evidence supports it.
+    Continue autonomously through ordinary multi-step work. Do not stop merely to report progress or ask for confirmation between routine steps. 
+    Ask only when required information cannot be obtained, a materially different choice requires the user's decision, or proceeding would exceed the requested scope.
+    When verification is appropriate, use the narrowest useful verification. Do not perform unrelated testing, cleanup, or refactoring.
+    Once the requested work is complete, stop. Do not continue investigating merely because more investigation is possible.
+    Finish with a concise summary of what was done or found, relevant verification, and genuine unresolved issues.
+
 
   sampling:
     temperature: 0.6
     top_p: 0.95
-    max_tokens: 32768
+    max_tokens: 98304
 
-# -----------------------------------------------------------------------------
-# Profiles — request-time role presets
-# -----------------------------------------------------------------------------
-# Select one by suffixing the model name: `active_model: my-local-model@main`.
-# One loaded model can serve every role, so you do not need a separate entry
-# per role. Precedence: defaults < group < model fields < profile.
 profiles:
-  # Interactive coding driver — the everyday one.
   main:
     think: true
     reasoning_effort: medium
-
-  # Plans and delegates, still reasons.
   subcoordinator:
     think: true
     reasoning_effort: low
-
-  # Headless worker: no reasoning, tight sampling, for dispatched sub-tasks.
   worker:
     think: false
     reasoning_effort: none
     sampling:
       temperature: 0.2
 
-# Optional back-compat shim: map an old model name to a current one, so
-# anything still dispatching by the old name keeps working.
-# aliases:
-#   my-old-model-name: my-local-model
+aliases:
+  gemma4-12b-it-ud-q5kxl: gemma4-12b-it-ud-q5kxl-vision
+  gemma4-12b-it-ud-q5kxl-mtp: gemma4-12b-it-ud-q5kxl-mtp-vision
+  gemma4-26b-a4b-it-qat-q4kxl: gemma4-26b-a4b-it-qat-q4kxl-vision
+  gemma4-31b-it-q3ks: gemma4-31b-it-q3ks-vision
+  gemma4-31b-it-q3ks-mtp: gemma4-31b-it-q3ks-mtp-vision
+  gemma4-31b-it-q3ks-mtp-no-mmproj: gemma4-31b-it-q3ks-mtp-no-vision
+  gemma4-e4b-it-ud-q4kxl: gemma4-e4b-it-ud-q4kxl-vision
+  qwen38-27b-mtp-ud-q4kxl: qwen38-27b-mtp-ud-q4kxl-vision
+  qwen38-27b-dflash2-ud-q6k: qwen38-27b-dflash2-ud-q6k-vision
+  qwopus38-27b-flash-mtp-q5km: qwopus38-27b-flash-mtp-q5km-no-vision
+  qwen38-flashnext-ud-q3kxl-mtp: qwen38-flashnext-ud-q3kxl-mtp-no-vision
+  glm-5.3-flash-ud-iq1s: glm-5.3-flash-ud-iq1s-no-vision
 
-# =============================================================================
-# MODELS
-# =============================================================================
-# `name` is what you see in the picker AND, for cloud providers, the model id
-# sent upstream verbatim — so cloud names must match the provider's id exactly.
-# Local GGUF entries can be named whatever you like.
-models:
-  # ---------------------------------------------------------------------------
-  # 1. Local GGUF via llama.cpp — the main event
-  # ---------------------------------------------------------------------------
-  - name: my-local-model
-    # The only line you MUST change. Absolute path to your .gguf file.
-    gguf_path: 'C:/path/to/models/your-model-Q4_K_M.gguf'
-
-    # OPTIONAL: vision projector. Its mere presence turns on image support —
-    # do not also write `capabilities: [vision]`.
-    # mmproj_path: "C:/path/to/models/mmproj-F16.gguf"
-
-    # OPTIONAL: drop images from the model-facing copy once this many later USER
-    # messages exist, to reclaim context on long conversations. Counts user turns,
-    # not tool rounds, so a tool-heavy round cannot evict an image you just
-    # attached. `0` = keep it for the turn it arrived in, drop it on your next
-    # prompt. OMIT to never age images out (the default). 4 is a sane starting
-    # point; there is no implicit fallback, so nothing happens until you set it.
-    # image_retention_turns: 4
-
-    think: true
-    reasoning_effort: low
-
-    spawn:
-      # TOTAL context across all slots. Per-conversation context is
-      # num_ctx / n_parallel — with n_parallel: 4, a num_ctx of 131072 gives
-      # each conversation 32768, not 131072. This trips people up constantly.
-      num_ctx: 32768
-      # Concurrent slots. 1 = the interactive driver gets the whole window.
-      n_parallel: 1
-      extra_llama_server_args:
-        # Cap thinking so the model cannot spend a whole turn reasoning.
-        - '--reasoning-budget'
-        - '3072'
-        # What llama.cpp appends when that budget is hit. Nudging the model back
-        # toward tool calls works far better than letting it stall.
-        - '--reasoning-budget-message'
-        - 'I have been reasoning too long. If I am unsure whether a tool exists, or whether a path is right, I should call it and read the result instead of reasoning further.'
-        # How much of the prompt gets re-evaluated when an edit lands mid-prompt.
-        # llama.cpp reuses the longest prefix its slot already holds, but on
-        # hybrid/recurrent (Qwen GDN) and sliding-window (gemma) models it can
-        # only rewind to a context CHECKPOINT, never to an arbitrary token — so
-        # this spacing is the real granularity of that reuse. At the default
-        # 8192, an edit to the last message of a 31K prompt still re-evaluated
-        # 7272 tokens (~11 s); at 1024 it cost 32 tokens (~0.6 s).
-        #
-        # Cheap, not free: no measurable VRAM, but ~300 MB of HOST RAM at a 31K
-        # prompt, since checkpoints live in RAM under --cache-ram (default 8192
-        # MiB). Measure AFTER processing a prompt -- none exist at load.
-        # Measured on Qwen3.8-27B (GDN) with llama.cpp b10621 and b10673; the
-        # flag is spelled --ctx-checkpoints/--swa-checkpoints so it should serve
-        # gemma's SWA cache too, but that has not been measured.
-        # See docs/plans/SLOT_AFFINITY_AND_CHECKPOINTS_PLAN.md.
-        - '--checkpoint-min-step'
-        - '1024'
-
-    group: llamacpp-local
-
-  # ---------------------------------------------------------------------------
-  # 2. Ollama, running locally
-  # ---------------------------------------------------------------------------
-  # Requires the Ollama daemon plus `ollama pull <model>` first. `name` must be
-  # the exact Ollama tag.
-  - name: 'qwen3:8b'
-    num_ctx: 32768
-    sampling: { max_tokens: 32768 }
-    group: ollama-local
-
-  # ---------------------------------------------------------------------------
-  # 3. External CLI agents — Claude Code and Codex
-  # ---------------------------------------------------------------------------
-  # These shell out to a coding CLI already installed and logged in on your
-  # machine. Auth is that CLI's own login (`claude` / `codex`) and uses your
-  # existing subscription — Forge stores NO key for them and sends no traffic
-  # of its own. They run with their OWN tools, not Forge's.
-  #
-  # Requires `permissions.agents.delegate: true` above.
-  #
-  # Find the paths with:  where claude   /   where codex     (Windows)
-  #                       which claude   /   which codex     (macOS/Linux)
-  - name: claude-code
-    provider: cli
-    cli: 'C:/Users/<you>/AppData/Roaming/npm/node_modules/@anthropic-ai/claude-code/bin/claude.exe'
-    comment: 'Claude Code CLI — external agent, uses your existing Claude subscription'
-
-  - name: codex
-    provider: cli
-    cli: 'C:/Users/<you>/AppData/Roaming/npm/node_modules/@openai/codex/bin/codex.js'
-    comment: 'Codex CLI — external agent, uses your existing OpenAI subscription'
-
-  # ---------------------------------------------------------------------------
-  # 4. Cloud, via an OpenAI-compatible endpoint (optional)
-  # ---------------------------------------------------------------------------
-  # Opt-in and off unless you configure it. Store the key with
-  # "Forge: Set Cloud Provider Token" under the secret name in `api_key_secret`.
-  # `name` is sent upstream verbatim, so it must be the provider's exact id.
-  # - name: "some-vendor/some-model"
-  #   api_key_secret: my-provider
-  #   num_ctx: 131072
-  #   # `capabilities` REPLACES the group's list wholesale — it does not merge.
-  #   # So restate tool-call/long-context whenever you add vision.
-  #   capabilities: [tool-call, long-context]
-  #   sampling: { max_tokens: 32768 }
-  #   group: openai-compatible-cloud
-
-# -----------------------------------------------------------------------------
-# External MCP servers (optional)
-# -----------------------------------------------------------------------------
-# stdio MCP servers bridged into the tool registry, read-only and auto-discovered.
-# Cap each server's output: an uncapped result can fill the whole context window
-# and stall the turn with no visible error.
-# mcp_servers:
-#   - name: my-server
-#     command: "C:/path/to/my-mcp-server.exe"
-#     max_result_chars: 20000
-
-# =============================================================================
-# GROUPS — shared settings for a family of models
-# =============================================================================
 groups:
-  llamacpp-local:
-    provider: llama.cpp
-    think: true
-
-    # ---- VRAM: the part that actually bites ---------------------------------
-    # n_gpu_layers: 999, NOT -1.
-    #   `-ngl -1` is AUTO-FIT, not "all". It holds back a ~1024 MiB margin and
-    #   parks whatever it thinks will not fit on the CPU. The tell in the loader
-    #   log is "tensor overrides to CPU are used with mmap enabled" — your model
-    #   is silently running partly on CPU at a fraction of the speed. On hybrid
-    #   (Gated Delta Net) models, ONE stranded CPU layer disables the fused
-    #   kernel for the WHOLE model: measured 26 t/s -> 12 t/s.
-    #   Setting it explicitly also disables auto-fit, so the num_ctx budget is
-    #   yours to keep. An over-budget load then FAILS LOUDLY at startup instead
-    #   of degrading silently — which is what you want.
-    #
-    # If a load fails, cut `num_ctx` — do not restore auto-fit.
-    #
-    # Also: on Windows, WDDM pages VRAM over PCIe rather than refusing to
-    # allocate. Leaving under ~1 GB free does not crash, it just goes very slow
-    # (measured 35 t/s -> 5 t/s). Budget for headroom.
-    #
-    # type_k/type_v q4_0 quantises the KV cache, which is usually where the
-    # context window's memory goes. q8_0 is higher quality and roughly double.
-    spawn:
-      # Conservative default for arbitrary GGUFs. The 2,048 Qwen result below
-      # is model- and GPU-specific; do not copy it to a tight model blindly.
-      n_batch: 512
-      type_k: q4_0
-      type_v: q4_0
-      flash_attn: true
-      n_gpu_layers: 999
-
-    # Qwen 3.8 27B Q3_K_XL MTP on the 16 GB RTX 5060 Ti used this measured
-    # profile at a 50k context. It is NOT a general GGUF recipe: it requires a
-    # Qwen MTP-capable model and should be benchmarked on the target hardware.
-    #
-    # n_batch: 2048
-    # extra_llama_server_args:
-    #   - "--ubatch-size"
-    #   - "1024"
-    #   - "--spec-type"
-    #   - "draft-mtp,ngram-mod"
-    #   - "--spec-draft-n-max"
-    #   - "2"
-    #   - "--spec-ngram-mod-n-match"
-    #   - "16"
-    #   - "--spec-ngram-mod-n-min"
-    #   - "16"
-    #   - "--spec-ngram-mod-n-max"
-    #   - "64"
-
-    # Sampling recipes are model-family specific — use the one the model's
-    # authors publish. Two worth knowing:
-    #   Gemma:  temperature 1.0, top_p 0.95, top_k 64
-    #   Qwen:   temperature 0.6, top_p 0.95, top_k 20
-    # Use `repeat_penalty`, NOT `repetition_penalty` — llama.cpp ignores unknown
-    # keys in SILENCE, so the wrong spelling does nothing and never says so.
-    # 1.0 is off; 1.05-1.15 helps if output repeats; above 1.2 hurts coherence.
-    sampling: { top_k: 64, top_p: 0.95, min_p: 0, repeat_penalty: 1.0 }
-
-    # Cap or disable individual tools for this family. A limit of 0 un-advertises
-    # the tool completely, so its schema stops being rendered into every prompt —
-    # useful for keeping a small local model's tool list short and reliable.
-    # tool_call_limits:
-    #   some_noisy_tool: 0
-
   ollama-local:
     provider: ollama
     endpoint: http://127.0.0.1:11434
     think: true
     reasoning_effort: medium
+  openai-compatible-cloud:
+    provider: openai-compatible
+    endpoint: https://api.cerebras.ai
+    sampling: { temperature: 0.7, max_tokens: 32768 }
+  llamacpp-gemma4:
+    think: true
+    spawn: { n_batch: 512, type_k: q8_0, type_v: q8_0, flash_attn: true, n_gpu_layers: 999 }
+    sampling: { top_k: 64, top_p: 0.95, min_p: 0, seed: 0, presence_penalty: 0, repeat_penalty: 1.1, repeat_last_n: 64 }
+  openrouter-cloud:
+    provider: openrouter
+    num_ctx: 262144
+    capabilities:
+      - tool-call
+      - long-context
+    sampling: { max_tokens: 16384 }
+  xai-cloud:
+    provider: xai
+    sampling: { temperature: 0.7 }
+  llamacpp-qwen3:
+    spawn:
+      num_ctx: 100000
+      n_batch: 4096
+      n_parallel: 1
+      type_k: q8_0
+      type_v: q8_0
+      flash_attn: true
+      n_gpu_layers: 999
 
-  # openai-compatible-cloud:
-  #   provider: openai-compatible
-  #   endpoint: https://api.your-provider.com
-  #   capabilities: [tool-call, long-context]
-  #   sampling: { temperature: 0.7, max_tokens: 32768 }
+    sampling: { temperature: 0.6, top_p: 0.95, top_k: 20, min_p: 0, presence_penalty: 0, repeat_penalty: 1, max_tokens: 16384 }
+
+  llamacpp-glm5:
+    think: true
+    spawn:
+      num_ctx: 65536
+      n_batch: 512
+      type_k: q8_0
+      type_v: q8_0
+      flash_attn: false
+      n_gpu_layers: 999
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 20
+      min_p: 0
+      presence_penalty: 0
+      repeat_penalty: 1
+      max_tokens: 16384
+
+  llamacpp-qwen4exp:
+    think: true
+    spawn:
+      num_ctx: 100000
+      n_parallel: 1
+      n_gpu_layers: -1
+      n_batch: 4096
+      type_k: Q8_0
+      type_v: Q8_0
+      flash_attn: true
+      extra_llama_server_args:
+        - "--device"
+        - "CUDA0,CUDA1"
+        - "--split-mode"
+        - "layer"
+        - "--tensor-split"
+        - "1,1"
+        - "--ubatch-size"
+        - "4096"
+        - "--load-mode"
+        - "none"
+    sampling:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 20
+      min_p: 0
+      presence_penalty: 0
+      repeat_penalty: 1
+      max_tokens: 16384
+
+models:
+
+  - name: gemma4-e4b-it-ud-q4kxl-vision
+    gguf_path: "xxxx/gemma-4-E4B-it-UD-Q4_K_XL.gguf"
+    mmproj_path: "xxxx/mmproj-F16.gguf"
+    image_retention_turns: 2
+    spawn:
+      num_ctx: 131072
+      n_parallel: 4
+      extra_llama_server_args:
+        - "--reasoning-budget"
+        - "3072"
+        - "--model-draft"
+        - "xxxx/mtp-gemma-4-E4B-it.gguf"
+        - "--spec-type"
+        - "draft-mtp"
+        - "--spec-draft-n-max"
+        - "1"
+        - "--spec-draft-ngl"
+        - "all"
+        - "--spec-draft-type-k"
+        - "q8_0"
+        - "--spec-draft-type-v"
+        - "q8_0"
+        - "--kv-unified"
+        - "--reasoning-budget-message"
+        - *reasoning_budget_message
+        - "--checkpoint-min-step"
+        - "1024" 
+    sampling:
+      stop: "<end_of_turn>"
+    group: llamacpp-gemma4
+
+
+  - name: gemma4-26b-a4b-it-qat-q4kxl-vision
+    short_name: gemma4-qat
+    gguf_path: "xxxx/gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf"
+    mmproj_path: "xxxx/mmproj-BF16.gguf"
+    image_retention_turns: 2
+    spawn:
+      num_ctx: 55000
+      n_parallel: 1
+      extra_llama_server_args:
+        - "--reasoning-budget"
+        - "3072"
+        - "--model-draft"
+        - "xxxx/mtp-gemma-4-26B-A4B-it.gguf"
+        - "--spec-type"
+        - "draft-mtp"
+        - "--spec-draft-n-max"
+        - "1"
+        - "--spec-draft-ngl"
+        - "all"
+        - "--spec-draft-type-k"
+        - "q8_0"
+        - "--spec-draft-type-v"
+        - "q8_0"
+        - "--kv-unified"
+        - "--no-mmproj-offload"
+        - "--reasoning-budget-message"
+        - *reasoning_budget_message
+        - "--checkpoint-min-step"
+        - "1024"
+    sampling:
+      stop: "<end_of_turn>"
+    group: llamacpp-gemma4
+
+
+  - name: gemma4-12b-it-ud-q5kxl-vision
+    gguf_path: "xxxx/gemma-4-12b-it-UD-Q5_K_XL.gguf"
+    mmproj_path: "xxxx/mmproj-F16.gguf"
+    image_retention_turns: 2
+    spawn:
+      num_ctx: 65536
+      n_parallel: 1
+      extra_llama_server_args:
+        - "--reasoning-budget"
+        - "3072"
+        - "--model-draft"
+        - "xxxx/mtp-gemma-4-12b-it.gguf"
+        - "--spec-type"
+        - "draft-mtp"
+        - "--spec-draft-n-max"
+        - "1"
+        - "--spec-draft-ngl"
+        - "all"
+        - "--spec-draft-type-k"
+        - "q8_0"
+        - "--spec-draft-type-v"
+        - "q8_0"
+        - "--kv-unified"
+        - "--reasoning-budget-message"
+        - *reasoning_budget_message
+        - "--checkpoint-min-step"
+        - "1024" 
+    sampling:
+      stop: "<end_of_turn>"
+    group: llamacpp-gemma4
+
+
+  - name: gemma4-12b-it-ud-q5kxl-mtp-vision
+    gguf_path: "xxxx/gemma-4-12b-it-UD-Q5_K_XL.gguf"
+    mmproj_path: "xxxx/mmproj-F16.gguf"
+    image_retention_turns: 2
+    spawn:
+      num_ctx: 100000
+      n_parallel: 1
+      n_batch: 4096
+      extra_llama_server_args:
+        - "--reasoning-budget"
+        - "3072"
+        - "--model-draft"
+        - "xxxx/mtp-gemma-4-12b-it.gguf"
+        - "--spec-type"
+        - "draft-mtp"
+        - "--spec-draft-n-max"
+        - "1"
+        - "--spec-draft-ngl"
+        - "all"
+        - "--spec-draft-type-k"
+        - "q8_0"
+        - "--spec-draft-type-v"
+        - "q8_0"
+        - "--kv-unified"
+        - "--reasoning-budget-message"
+        - *reasoning_budget_message
+        - "--checkpoint-min-step"
+        - "1024"
+    sampling:
+      stop: "<end_of_turn>"
+    group: llamacpp-gemma4
+
+
+  - name: gemma4-31b-it-q3ks-vision
+    gguf_path: "xxxx/gemma-4-31B-it-Q3_K_S.gguf"
+    mmproj_path: "xxxx/mmproj-F16.gguf"
+    image_retention_turns: 2
+    spawn:
+      num_ctx: 32768
+      n_parallel: 1
+      extra_llama_server_args: [ "--reasoning-budget", "4096", "--reasoning-budget-message", *reasoning_budget_message, "--checkpoint-min-step", "1024" ]
+    sampling:
+      stop: "<end_of_turn>"
+    group: llamacpp-gemma4
+
+
+  - name: gemma4-31b-it-q3ks-mtp-vision
+    gguf_path: "xxxx/gemma-4-31B-it-Q3_K_S.gguf"
+    mmproj_path: "xxxx/mmproj-F16.gguf"
+    image_retention_turns: 2
+    spawn:
+      num_ctx: 100000
+      n_parallel: 1
+      n_gpu_layers: -1
+      n_batch: 4096
+      extra_llama_server_args:
+        - "--reasoning-budget"
+        - "4096"
+        - "--model-draft"
+        - "xxxx/mtp-gemma-4-31B-it.gguf"
+        - "--spec-type"
+        - "draft-mtp"
+        - "--spec-draft-n-max"
+        - "1"
+        - "--spec-draft-ngl"
+        - "all"
+        - "--spec-draft-type-k"
+        - "q8_0"
+        - "--spec-draft-type-v"
+        - "q8_0"
+        - "--kv-unified"
+        - "--no-mmproj-offload"
+        - "--reasoning-budget-message"
+        - *reasoning_budget_message
+        - "--checkpoint-min-step"
+        - "1024"
+    sampling:
+      stop: "<end_of_turn>"
+    group: llamacpp-gemma4
+
+
+  - name: gemma4-31b-it-q3ks-mtp-no-vision
+    gguf_path: "xxxx/gemma-4-31B-it-Q3_K_S.gguf"
+    spawn:
+      num_ctx: 32768
+      n_parallel: 1
+      n_gpu_layers: -1
+      n_batch: 4096
+      extra_llama_server_args:
+        - "--reasoning-budget"
+        - "4096"
+        - "--model-draft"
+        - "xxxx/mtp-gemma-4-31B-it.gguf"
+        - "--spec-type"
+        - "draft-mtp"
+        - "--spec-draft-n-max"
+        - "1"
+        - "--spec-draft-ngl"
+        - "all"
+        - "--spec-draft-type-k"
+        - "q8_0"
+        - "--spec-draft-type-v"
+        - "q8_0"
+        - "--kv-unified"
+        - "--reasoning-budget-message"
+        - *reasoning_budget_message
+        - "--checkpoint-min-step"
+        - "1024"
+    sampling:
+      stop: "<end_of_turn>"
+    group: llamacpp-gemma4
+
+
+  # Fast tasks: target on the two 5060 Tis, vision projector on the 3060.
+  - name: qwen38-27b-mtp-ud-q4kxl-vision
+    gguf_path: "xxxx/Qwen3.8-27B-UD-Q4_K_XL.gguf"
+    mmproj_path: "xxxx/mmproj-BF16.gguf"
+    image_retention_turns: 2
+    think: true
+    reasoning_effort: low
+    spawn:
+      num_ctx: 198000
+      n_parallel: 1
+      n_gpu_layers: 99
+      n_batch: 16384
+      extra_llama_server_args:
+        - "--device"
+        - "CUDA1,CUDA0"
+        - "--split-mode"
+        - "layer"
+        - "--tensor-split"
+        - "32,26"
+        - "--mmproj-device"
+        - "CUDA2"
+        - "--reasoning-budget"
+        - "4096"
+        - "--reasoning-budget-message"
+        - *reasoning_budget_message
+        - "--ubatch-size"
+        - "1024"
+        - "--spec-type"
+        - "draft-mtp,ngram-mod"
+        - "--spec-draft-n-max"
+        - "3"
+        - "--spec-ngram-mod-n-match"
+        - "16"
+        - "--spec-ngram-mod-n-min"
+        - "16"
+        - "--spec-ngram-mod-n-max"
+        - "64"
+        - "--ctx-checkpoints"
+        - "8"
+        - "--checkpoint-min-step"
+        - "1024"
+    sampling:
+      preserve_thinking: true
+    group: llamacpp-qwen3
+
+
+  - name: qwopus38-27b-flash-mtp-q5km-no-vision
+    gguf_path: "xxxx/Qwopus3.8-27B-Flash-MTP-Q5_K_M.gguf"
+    think: false
+    reasoning_effort: none
+
+    system_prompt: |
+      QWOPUS AGENT-LOOP RULES:
+      Use tools only while additional evidence or action is genuinely required.
+
+      The moment you determine that you have enough evidence to produce the
+      user's requested deliverable, stop calling tools and produce the final
+      answer immediately.
+
+      If you reach any equivalent conclusion such as:
+      - "I have enough evidence"
+      - "I have enough information"
+      - "I can now answer"
+      - "let me compile my findings"
+      - "let me present the findings"
+      - "I now have a comprehensive picture"
+
+      then your next action should normally be the final answer, not another
+      read, search, list, or inspection call.
+
+      Continue gathering evidence after that point only when one specific
+      missing fact is required for correctness. Obtain only that missing fact,
+      then synthesize the answer.
+
+      Never repeat a tool call that already returned usable information.
+      Never repeatedly re-read the same file, repeat the same search, or repeat
+      a progress statement without a concrete new reason.
+
+      If you notice that you are repeating tool calls, repeating progress
+      statements, or repeatedly announcing that you are about to answer, stop
+      the tool loop immediately and synthesize the final answer from the
+      evidence already in context.
+
+      At large context sizes, prefer targeted searches and synthesis over broad
+      full-file reads. Do not bulk-read files merely because context remains.
+
+    spawn:
+      num_ctx: 100000
+      n_parallel: 1
+      n_gpu_layers: -1
+      n_batch: 4096
+      extra_llama_server_args:
+        - "--ubatch-size"
+        - "1024"
+        - "--spec-type"
+        - "draft-mtp"
+        - "--spec-draft-n-max"
+        - "2"
+        - "--ctx-checkpoints"
+        - "8"
+        - "--checkpoint-min-step"
+        - "1024"
+    sampling:
+     preserve_thinking: false
+    group: llamacpp-qwen3
+
+
+  # Daily driver. DFlash 2 drafter + vision projector on the 3060. An external
+  # drafter must sit on the LAST --device (it shares output.weight). With 26,32,2
+  # CUDA1 OOMs. Benchmarks: docs/QWEN38_27B_DRAFTER_BENCHMARK.md.
+  - name: qwen38-27b-dflash2-ud-q6k-vision
+    gguf_path: "xxxx/Qwen3.8-27B-UD-Q6_K.gguf"
+    mmproj_path: "xxxx/mmproj-BF16.gguf"
+    image_retention_turns: 2
+    think: true
+    reasoning_effort: low
+    spawn:
+      num_ctx: 198000
+      n_parallel: 1
+      n_gpu_layers: 99
+      n_batch: 16384
+      extra_llama_server_args:
+        - "--device"
+        - "CUDA0,CUDA1,CUDA2"
+        - "--split-mode"
+        - "layer"
+        - "--tensor-split"
+        - "26,26,8"
+        - "--mmproj-device"
+        - "CUDA2"
+        - "--reasoning-budget"
+        - "4096"
+        - "--reasoning-budget-message"
+        - *reasoning_budget_message
+        - "--ubatch-size"
+        - "1024"
+        - "--model-draft"
+        - "xxxx/Qwen3.8-27B-DFlash2-Q8_0.gguf"
+        - "--spec-draft-device"
+        - "CUDA2"
+        - "--spec-draft-ngl"
+        - "99"
+        - "--spec-draft-type-k"
+        - "q8_0"
+        - "--spec-draft-type-v"
+        - "q8_0"
+        - "--spec-type"
+        - "draft-dflash"
+        - "--spec-draft-n-max"
+        - "5"
+        - "--ctx-checkpoints"
+        - "8"
+        - "--checkpoint-min-step"
+        - "1024"
+    sampling:
+      preserve_thinking: true
+    group: llamacpp-qwen3
+
+
+  - name: qwen38-flashnext-ud-q3kxl-mtp-no-vision
+    gguf_path: "xxxx/Qwen3.8-Flash-Next-UD-Q3_K_XL-00001-of-00003.gguf"
+    think: true
+    reasoning_effort: low
+    spawn:
+      num_ctx: 65000
+      n_parallel: 1
+      # MoE, 48 layers: all layers on GPU; only early layers' experts stay in RAM.
+      n_gpu_layers: 99
+      n_batch : 8192
+      type_k: q8_0
+      type_v: q8_0
+      flash_attn: true
+      extra_llama_server_args:
+        - "--device"
+        - "CUDA0,CUDA1,CUDA2"
+        - "--split-mode"
+        - "layer"
+        # Layer counts over 49 positions (48 + output), not VRAM ratios. Full layer
+        # ~1.14 GB on GPU, experts-on-CPU layer ~0.1, layer 30 ~1.53. Measured
+        # 2026-09-16: 15.52 / 15.42 / 11.52 GB, 9.47 t/s gen, 91.6 t/s prefill.
+        # OOM or ~1 t/s mid-answer (WDDM paging) -> fallback 29,11,9 + n-cpu-moe 21.
+        - "--tensor-split"
+        - "28,12,9"
+        # Each step down moves one layer's experts (~1.04 GB) onto CUDA0.
+        - "--n-cpu-moe"
+        - "21"
+        - "--ubatch-size"
+        - "512"
+        - "--reasoning-budget"
+        - "4096"  
+        - "--reasoning-budget-message"
+        - *reasoning_budget_message
+        - "--ctx-checkpoints"
+        - "8"
+        - "--checkpoint-min-step"
+        - "1024"
+         
+    sampling:
+      preserve_thinking: true
+    group: llamacpp-qwen4exp
+
+  # EXPERIMENTAL: shared MTP head for Flash-Next. The draft must sit on the last
+  # --device (CUDA2); its MoE weights stay in RAM.
+  - name: qwen38-flashnext-ud-q3kxl-mtp-experimental-no-vision
+    gguf_path: "xxxx/Qwen3.8-Flash-Next-UD-Q3_K_XL-00001-of-00003.gguf"
+    llama_server_binary: "xxxx/llama-server.exe"
+    think: true
+    reasoning_effort: low
+    spawn:
+      num_ctx: 90000
+      n_parallel: 1
+      n_gpu_layers: 99
+      n_batch: 4096
+      type_k: q8_0
+      type_v: q8_0
+      flash_attn: true
+      extra_llama_server_args:
+        - "--threads"
+        - "12"
+        - "--threads-batch"
+        - "12"
+        - "--device"
+        - "CUDA0,CUDA1,CUDA2"
+        - "--split-mode"
+        - "layer"
+        - "--tensor-split"
+        - "29,12,8"
+        - "--n-cpu-moe"
+        - "20"
+        - "--model-draft"
+        - "xxxx/mtp-Qwen3.8-Flash-Next-shared-Q4_K_M.gguf"
+        - "--spec-type"
+        - "draft-mtp,ngram-mod"
+        - "--spec-draft-device"
+        - "CUDA2"
+        - "--spec-draft-ngl"
+        - "99"
+        - "--spec-draft-cpu-moe"
+        - "--spec-draft-type-k"
+        - "q8_0"
+        - "--spec-draft-type-v"
+        - "q8_0"
+        - "--spec-draft-n-max"
+        - "5"
+        - "--spec-ngram-mod-n-match"
+        - "16"
+        - "--spec-ngram-mod-n-min"
+        - "16"
+        - "--spec-ngram-mod-n-max"
+        - "64"
+        - "--ubatch-size"
+        - "512"
+        - "--reasoning-budget"
+        - "4096"
+        - "--reasoning-budget-message"
+        - *reasoning_budget_message
+        - "--ctx-checkpoints"
+        - "8"
+        - "--checkpoint-min-step"
+        - "1024"
+    sampling:
+      preserve_thinking: true
+    group: llamacpp-qwen4exp
+
+  - name: glm-5.3-flash-ud-iq1s-no-vision
+    gguf_path: "xxxx/GLM-5.3-Flash-UD-IQ1_S-00001-of-00003.gguf"
+    llama_server_binary: "xxxx/llama-server.exe"
+    startup_timeout_ms: 300000
+    think: true
+    reasoning_effort: low
+    spawn:
+      num_ctx: 45000
+      n_parallel: 1
+      n_gpu_layers: -1
+      n_batch : 1024
+      type_k: q4_0
+      type_v: q4_0
+      flash_attn: true
+      extra_llama_server_args:
+        - "--ubatch-size"
+        - "1024"
+        - "--reasoning-budget"
+        - "4096"
+        - "--reasoning-budget-message"
+        - *reasoning_budget_message
+        - "--spec-type"
+        - "draft-mtp"
+        - "--spec-draft-n-max"
+        - "3"
+        - "--spec-draft-ngl"
+        - "all"
+        - "--ctx-checkpoints"
+        - "8"
+        - "--checkpoint-min-step"
+        - "1024"
+    sampling:
+      preserve_thinking: true
+    group: llamacpp-glm5
+
+
+  - name: "gemma4:e2b"
+    num_ctx: 131072
+    sampling: { max_tokens: 131072 }
+    group: ollama-local
+
+
+  - name: "deepseek-v4-flash:cloud"
+    num_ctx: 1000000
+    sampling: { max_tokens: 65536 }
+    group: ollama-local
+
+
+  - name: "deepseek-v4-pro:cloud"
+    num_ctx: 1000000
+    sampling: { max_tokens: 65536 }
+    group: ollama-local
+
+
+  - name: "kimi-k2.6:cloud"
+    num_ctx: 262144
+    sampling: { max_tokens: 131072 }
+    group: ollama-local
+
+
+  - name: "glm-5.1:cloud"
+    num_ctx: 198000
+    sampling: { max_tokens: 131072 }
+    group: ollama-local
+
+
+  - name: "minimax-m2.7:cloud"
+    num_ctx: 200000
+    sampling: { max_tokens: 131072 }
+    group: ollama-local
+
+
+  # xAI via `opencode auth login` (SuperGrok OAuth). grok-imagine is images-only, not listed here.
+  - name: grok-4.6
+    api_key_secret: xai
+    num_ctx: 500000
+    capabilities: [ tool-call, long-context, vision ]
+    image_retention_turns: 2
+    sampling: { max_tokens: 30000 }
+    group: xai-cloud
+
+
+  - name: grok-build-0.1
+    api_key_secret: xai
+    num_ctx: 256000
+    capabilities: [ tool-call, long-context, vision ]
+    image_retention_turns: 2
+    sampling: { max_tokens: 30000 }
+    group: xai-cloud
+
+
+  - name: "openrouter/free"
+    api_key_secret: openrouter
+    group: openrouter-cloud
+
+
+  - name: "z-ai/glm-5.3-flash"
+    api_key_secret: openrouter
+    num_ctx: 1048576
+    capabilities: [ tool-call, long-context, vision ]
+    image_retention_turns: 2
+    sampling: { max_tokens: 131072 }
+    group: openrouter-cloud
+
+
+  - name: "deepseek/deepseek-v4-flash-0731"
+    api_key_secret: openrouter
+    num_ctx: 1310720
+    sampling: { max_tokens: 131072 }
+    group: openrouter-cloud
+
+
+  - name: "bytedance-seed/seed-2.0-mini"
+    api_key_secret: openrouter
+    capabilities: [ tool-call, long-context, vision ]
+    image_retention_turns: 2
+    sampling: { max_tokens: 131072 }
+    group: openrouter-cloud
+
+
+  - name: "qwen/qwen3.8-max"
+    api_key_secret: openrouter
+    num_ctx: 1000000
+    capabilities: [ tool-call, long-context, vision ]
+    image_retention_turns: 2
+    sampling: { max_tokens: 131072 }
+    group: openrouter-cloud
+
+
+  - name: gemma-4-31b
+    api_key_secret: cerebras
+    model: gemma-4-31b
+    group: openai-compatible-cloud
+
+
+  - name: qwen-3.8-27b
+    api_key_secret: cerebras
+    model: qwen-3.8-27b
+    group: openai-compatible-cloud
+
+  - name: claude-code
+    provider: cli
+    cli: 'xxxx/claude.exe'
+    comment: "Claude Code CLI — external agent, uses existing Claude subscription"
+
+
+  - name: codex
+    provider: cli
+    cli: 'xxxx/codex.exe'
+    comment: "Codex CLI — external agent, uses existing OpenAI subscription"
+
+
+mcp_servers:
+  - name: halluscribe
+    command: xxxx/halluscribe-mcp.exe
+    max_result_chars: 6000
+
+# ===========================================================================
+# C. LOCAL RUNTIME & RESOURCES
+# ===========================================================================
+
+llama_server:
+  binary: "xxxx/llama-server.exe"
+  host: "127.0.0.1"
+  port: 8080
+  flash_attn_default: true
+
+max_simultaneous_models: 4
+
+shared_runtime:
+  enabled: true
+
+control_server:
+  enabled: true
+  port: 8799
+
+benchmark:
+  base_url: "http://127.0.0.1:8084"
+
+auto_compact:
+  enabled: true
+  at: 0.85
+  resume: true
+
+search:
+  provider: tavily
+  secret_key_name: forge.tavily.apiKey
+  max_results: 20
+
+embeddings:
+  enabled: false
+  model_path: "xxxx/embeddinggemma-300m-Q4_0.gguf"
+  port: 8091
+  device: none         # CPU: the 300M embedder is fast there and keeps GPU VRAM free
+  prompt_style: gemma
+  auto_index_on_search: true
+  confirm_on_start: true
+  idle_timeout_ms: 120000
+  max_file_size_kb: 256
+  include_globs: [ "**/src/**", "**/test/**", "**/tests/**", "**/docs/**" ]
+  exclude_globs: [ "**/node_modules/**", "**/dist/**", "**/out/**", "**/.git/**", "**/.forge/**" ]
+
+# generate_image tool (xAI grok-imagine, ~$0.04 per image).
+image_generation:
+  default: grok-imagine
+  output_dir: generated-images
+  backends:
+    - name: grok-imagine
+      provider: xai
+      model: grok-imagine-image-2.0
+      api_key_secret: xai
+      confirm_each: true
+
+# view_video frame sampling (needs ffmpeg/ffprobe on PATH or ffmpeg_path).
+# frame_max_dimension is the context knob. Measured on a 5 s clip with
+# Qwen3.8-27B: unscaled 1920x1088 = 22,501 prompt tokens, 640 px = 2,479,
+# 384 px = 983.
+video:
+  frame_max_dimension: 640
+
+# Reverse image search (SerpApi Google Lens; attachments go to Litterbox for 1 h).
+image_search:
+  provider: serpapi_lens
+  secret_key_name: serpapi
+  max_results: 8
+  confirm_upload: false   # true = ask before an attachment leaves the machine
+  thumbnails: 4           # sidebar tool row + Telegram photos; 0 = off
+  timeout_ms: 90000       # type "all" measured ~52 s
+
+# ===========================================================================
+# D. REMOTE SURFACES  (voice = TTS/STT; remote = Telegram/WhatsApp)
+# ===========================================================================
+
+voice:
+  enabled: false
+  whisper_binary: "xxxx/whisper-cli.exe"
+  whisper_model: "xxxx/ggml-large-v3.bin"
+  language: auto
+  compute:
+    gpu: true
+    device: 2   # whisper.cpp CUDA ordinal: the RTX 3060
+  bias_prompt: "Forge, VRAM, CUDA, GGUF, llama.cpp, Ollama, TypeScript, esbuild, vitest, git, commit, npm"
+  input:
+    max_bytes: 26214400
+    max_seconds: 300
+  trim_silence: true
+  output:
+    enabled: false
+    piper_binary: "xxxx/piper.exe"
+    voices_dir: "xxxx/voices"
+    voice_en: en_US-amy-medium
+    voice_el: el_GR-joy-medium
+    max_chars: 1200
+
+remote:
+  enabled: false
+  queue_limit: 5
+  max_message_chars: 20000
+  rate_limit_per_minute: 30
+  # LiteBeam WakeSleep relay receiver; secret in SecretStorage (forge.remote.wakeRelay.secret).
+  wake_relay:
+    enabled: false
+    host: 0.0.0.0
+    port: 8742
+    relay_ip: 0.0.0.0
+  telegram:
+    enabled: false
+  whatsapp:
+    enabled: false
+  auth:
+    inactivity_timeout_minutes: 500
+  attachments:
+    enabled: true
+    accept_pdf: true
+    retain_days: null
+
+# Agent bus: ask_live_session writes straight into a running Claude Code / Codex session.
+agent_bus:
+  enabled: true
+  # Default session for ask_live_session; set a stable name with /rename.
+  # claude_session: my-session   # pin one; list them with Forge: Show Live Claude Sessions
+  # codex_thread: <thread id>

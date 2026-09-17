@@ -161,6 +161,12 @@ const EmbeddingsConfigSchema = z
     // Embedding model's context window. Also pins --batch-size/--ubatch-size,
     // which must be >= the largest chunk or llama.cpp rejects it (HTTP 500).
     n_ctx: z.number().int().positive().optional(),
+    // llama.cpp `--device` value: `CUDA2`, or `none` for CPU only. Absent means
+    // llama.cpp's default, which spreads over every visible GPU.
+    device: z
+      .string()
+      .regex(/^[A-Za-z0-9_]+(,[A-Za-z0-9_]+)*$/)
+      .optional(),
     // Task prefixes applied to documents and queries. `gemma` is correct for
     // EmbeddingGemma only — it would corrupt nomic-embed/bge results. Changing
     // this invalidates the stored index and forces a rebuild.

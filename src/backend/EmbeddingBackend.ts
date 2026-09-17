@@ -220,6 +220,8 @@ export function composeEmbeddingServerArgs(config: ForgeConfig): string[] {
 
   const gpuLayers = config.llama_server.n_gpu_layers;
   if (gpuLayers !== undefined) args.push('--n-gpu-layers', String(gpuLayers));
+  const device = config.embeddings?.device;
+  if (device) args.push('--device', device);
 
   // Embedding inputs are pooled non-causally, so llama.cpp cannot split one
   // input across physical batches: the whole chunk must fit in n_ubatch or the
