@@ -40,3 +40,17 @@ Gemma 4 E4B reference: base 3/4 (75.0%), fine-tuned 3/4 (75.0%) from Gemma4GR `t
 Raw result: nemotron-raw-2026-09-17T19-04-30-561Z.json
 
 The benchmark validates tool name plus required JSON fields. It does not execute model-proposed terminal commands.
+
+## Q8_0 control (2026-09-17)
+
+Same frozen 39-row Greek pilot and strict-schema tool benchmark, served locally on port 8092. The Q4_K_M baseline above is unchanged. Q8 run context was 16384, versus Q4's 65,536.
+
+| Measure | Q4_K_M | Q8_0 | Delta |
+| --- | ---: | ---: | ---: |
+| Greek QA char-F1, thinking off | 7.2% | 7,0% | -0,2 pp |
+| Greek QA char-F1, thinking on | 7.8% | 6,9% | -0,9 pp |
+| Greek-script share, off | 76.8% | 77,7% | +0,9 pp |
+| Greek-script share, on | 58.1% | 53,3% | -4,8 pp |
+| Greek tools | 3/8 | 4/8 | 1 |
+| English tool calling | 10/12 | 10/12 | 0 |
+| Generation tok/s | 78–99 | 63.8–71.2 | n/a |
