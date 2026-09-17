@@ -122,3 +122,6 @@ __pycache__/
 
 # Output of the generate_image tool (xAI/Grok) - regenerable, never track.
 generated-images/
+
+# One-off local analysis scripts (underscore prefix) - kept on disk, never tracked.
+scripts/_*.mjs

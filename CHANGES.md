@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## Unreleased
+## 0.16.7
 
 - **`embeddings.device`** chooses where the embedding server runs (passed to
   llama.cpp as `--device`): `none` keeps it on the CPU, where a 300M embedder is
@@ -10,7 +10,11 @@
   author's own, with paths replaced by `xxxx/` placeholders): Gemma 4, Qwen3.8
   with MTP and DFlash 2 drafters, Flash-Next, Ollama, OpenRouter, xAI, Cerebras
   and CLI agents. Remote control, voice, embeddings and the wake relay are
-  switched off until you fill in their paths.
+  switched off until you fill in their paths. A warning above `permissions:`
+  says plainly that the example turns every permission on.
+- **CI now gates the tool-schema size** (`ToolSchemaBudget.test.ts`): the
+  character count of the fully advertised `tools` array has a budget, so adding
+  a tool forces a decision when it is added.
 
 ## 0.16.6
 
