@@ -1,5 +1,14 @@
 # Forge — Recent Changes
 
+## 0.16.9
+
+- **`ask_live_session` (Codex) works on Windows.** Resolving the `codex` CLI
+  now prefers the `.cmd` shim over the extensionless npm shell script, which
+  Node could not spawn (`ENOENT`). The live-session door to an open Codex
+  session is usable again; the Claude peer-pipe door is unchanged.
+- Local build for the agent-mesh work (plan + investigation in
+  `docs/plans/AGENT_MESH_PLAN.md` and `docs/AGENT_COMMUNICATION_INVESTIGATION.md`).
+
 ## 0.16.7
 
 - **`embeddings.device`** chooses where the embedding server runs (passed to
