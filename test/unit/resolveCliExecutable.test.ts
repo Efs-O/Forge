@@ -1,6 +1,9 @@
 import * as path from 'path';
 import { describe, expect, it, vi } from 'vitest';
-import { resolveCliExecutable } from '../../src/agents/resolveCliExecutable';
+import {
+  pickExecutable,
+  resolveCliExecutable,
+} from '../../src/agents/resolveCliExecutable';
 
 // Paths must be absolute on the *running* platform: production uses the
 // platform's path.isAbsolute, so a hardcoded `C:\...` is not absolute on POSIX
@@ -37,5 +40,23 @@ describe('resolveCliExecutable', () => {
     await expect(resolveCliExecutable('codex', 'codex', { which })).rejects.toThrow(
       'codex CLI not found on PATH — install it and log in.',
     );
+  });
+
+  it('prefers the .cmd shim on Windows when where lists the extensionless shim first', () => {
+    const matches = [
+      'C:\\Users\\me\\AppData\\Roaming\\npm\\codex',
+      'C:\\Users\\me\\AppData\\Roaming\\npm\\codex.cmd',
+    ];
+    expect(pickExecutable(matches, 'win32')).toBe(matches[1]);
+  });
+
+  it('keeps the first match on Windows when no .cmd/.bat shim is present', () => {
+    const matches = ['C:\\Program Files\\codex\\codex.exe'];
+    expect(pickExecutable(matches, 'win32')).toBe(matches[0]);
+  });
+
+  it('keeps the first match on POSIX regardless of extension', () => {
+    const matches = ['/usr/local/bin/codex', '/usr/local/bin/codex.cmd'];
+    expect(pickExecutable(matches, 'linux')).toBe(matches[0]);
   });
 });

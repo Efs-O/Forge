@@ -3,6 +3,7 @@ import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { CliAgentError } from './CliAgentError';
+import { needsWindowsCmdShellWrap } from './windowsCmdShim';
 import type { CliAgentName } from './types';
 
 const execFileAsync = promisify(execFile);
@@ -14,15 +15,34 @@ export interface ResolveCliExecutableDeps {
   which?: (name: string) => Promise<string>;
 }
 
+/**
+ * Chooses the best executable from `where`/`which` output. On Windows `where`
+ * lists the extensionless npm shim (e.g. `npm\codex`) BEFORE the `.cmd` one
+ * (e.g. `npm\codex.cmd`). Node cannot CreateProcess the extensionless shell
+ * script (ENOENT), so prefer the `.cmd`/`.bat` match that spawnCliProcess
+ * already knows how to wrap through cmd.exe. On POSIX the first match is the
+ * executable — return it unchanged.
+ */
+export function pickExecutable(
+  matches: readonly string[],
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (platform === 'win32') {
+    const shellShim = matches.find((m) => needsWindowsCmdShellWrap(m));
+    if (shellShim) return shellShim;
+  }
+  return matches[0];
+}
+
 async function defaultWhich(name: string): Promise<string> {
   const finder = process.platform === 'win32' ? 'where' : 'which';
   const { stdout } = await execFileAsync(finder, [name]);
-  const first = stdout
+  const matches = stdout
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .find(Boolean);
-  if (!first) throw new Error(`${finder} returned no match for "${name}"`);
-  return first;
+    .filter(Boolean);
+  if (matches.length === 0) throw new Error(`${finder} returned no match for "${name}"`);
+  return pickExecutable(matches);
 }
 
 /**
