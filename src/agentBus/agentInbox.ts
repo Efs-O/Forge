@@ -13,6 +13,18 @@ export interface InboxHost {
   submit(prompt: string): Promise<void>;
   /** Tell the user a message could not be delivered. */
   warn(message: string): void;
+  /**
+   * Called when a bus-started turn ends (AGENT_MESH_PLAN §9, P1). The sender
+   * gets one `finished · …` line and a board event is written. Absent ⇒ no
+   * finished notice (a user-typed turn has no bus sender).
+   */
+  onBusTurnFinished?(from: string, durationMs: number): void;
+}
+
+interface QueuedMessage {
+  prompt: string;
+  /** The bus sender alias, when the message came through the agent bus. */
+  from?: string;
 }
 
 /**
@@ -23,7 +35,7 @@ export interface InboxHost {
  * loss ("best effort while busy").
  */
 export class AgentInbox {
-  private readonly queue: string[] = [];
+  private readonly queue: QueuedMessage[] = [];
   private draining = false;
   private disposed = false;
 
@@ -33,9 +45,9 @@ export class AgentInbox {
   ) {}
 
   /** Queue a prompt; returns its place in line, or undefined when full. */
-  accept(prompt: string): number | undefined {
+  accept(prompt: string, from?: string): number | undefined {
     if (this.disposed || this.queue.length >= INBOX_CAP) return undefined;
-    this.queue.push(prompt);
+    this.queue.push({ prompt, ...(from ? { from } : {}) });
     void this.drain();
     return this.queue.length;
   }
@@ -66,13 +78,24 @@ export class AgentInbox {
           await new Promise((r) => setTimeout(r, this.pollMs));
           continue;
         }
-        const prompt = this.queue.shift() as string;
+        const item = this.queue.shift() as QueuedMessage;
+        const startedAt = Date.now();
         try {
-          await this.host.submit(prompt);
+          await this.host.submit(item.prompt);
+          // §9: a bus-started turn just ended — the sender gets one finished
+          // line + a board event. A user-typed turn has no `from`, so this
+          // fires only for agent messages.
+          if (item.from && this.host.onBusTurnFinished) {
+            try {
+              this.host.onBusTurnFinished(item.from, Date.now() - startedAt);
+            } catch (notifyErr) {
+              log.error(`[agentInbox] finished notice failed: ${String(notifyErr)}`);
+            }
+          }
         } catch (err) {
           if (this.busy()) {
             // Lost a race with a prompt the user typed: keep its place.
-            this.queue.unshift(prompt);
+            this.queue.unshift(item);
             continue;
           }
           const why = err instanceof Error ? err.message : String(err);

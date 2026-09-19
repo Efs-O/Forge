@@ -170,6 +170,7 @@ export class AgentRoutes {
       }
       const queued = this.deps.inbox.accept(
         forgeInboundPrompt(from, requireText(fields, MAX_INBOUND_CHARS)),
+        from,
       );
       if (queued === undefined)
         throw new HttpError(429, 'Forge has too many unread agent messages');

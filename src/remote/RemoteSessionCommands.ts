@@ -51,9 +51,13 @@ export async function handleRemoteSessionCommand(
     const status = context.host.status();
     const binding = context.store.binding(event.channel, event.chatId);
     const queued = binding ? ownQueue(event, context, binding.conversationId).length : 0;
-    const requests = context.store.requestHealth();
     const outbox = context.store.outboxHealth();
     const conversation = status.conversations.find((item) => item.id === binding?.conversationId);
+    // §5/M9: the crash-unknown count is scoped to *this chat's* conversation.
+    // An unbound chat shows no count and never falls back to the global total.
+    const crashUnknown = binding
+      ? `${context.store.requestHealthForConversation(binding.conversationId).unknown} crash-unknown`
+      : 'no conversation bound (crash-unknown not shown)';
     await sendRichText(
       context.channel,
       event.chatId,
@@ -64,7 +68,7 @@ export async function handleRemoteSessionCommand(
       }\n` +
         `Chat: ${conversation ? `${conversation.title} · ${conversation.id}` : 'none bound'}\n` +
         `Model: ${conversation?.activeModel ?? 'default'}\n` +
-        `Forge: ${status.requestChains.length} active request(s), ${queued} queued here, ${status.streamingConversationIds.length} streaming, ${requests.unknown} crash-unknown, ${outbox.pending} notifications pending, ${outbox.abandoned} abandoned.\n` +
+        `Forge: ${status.requestChains.length} active request(s), ${queued} queued here, ${status.streamingConversationIds.length} streaming, ${crashUnknown}, ${outbox.pending} notifications pending, ${outbox.abandoned} abandoned.\n` +
         `Context: ${describeBudget(binding && context.host.contextBudget(binding.conversationId))}\n` +
         // Sits under Context because it answers the same question: what this
         // chat has spent. Tool calls are counted as dispatched, so a refused or

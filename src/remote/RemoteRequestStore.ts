@@ -123,6 +123,23 @@ export class RemoteRequestStore {
     };
   }
 
+  /**
+   * Per-conversation health (AGENT_MESH_PLAN §5, P1): the calling chat's
+   * counts, not the global total. Legacy records without conversation
+   * metadata are excluded (`unknown-scope`); `unknown` stays `unknown`.
+   */
+  requestHealthForConversation(conversationId: string) {
+    const count = (state: string) =>
+      this.state.requests.filter(
+        (item) =>
+          typeof item.conversationId === 'string' &&
+          item.conversationId.length > 0 &&
+          item.conversationId === conversationId &&
+          item.state === state,
+      ).length;
+    return { queued: count('queued'), running: count('running'), unknown: count('unknown') };
+  }
+
   binding(channel: string, chatId: string): RemoteBinding | undefined {
     return this.state.bindings.find((item) => item.channel === channel && item.chatId === chatId);
   }

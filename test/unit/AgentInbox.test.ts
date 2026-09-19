@@ -8,12 +8,14 @@ function host(overrides: Partial<InboxHost> = {}): InboxHost & {
   warnings: string[];
   busy: boolean;
   finish: () => void;
+  finished: { from: string; durationMs: number }[];
 } {
   const state = {
     submitted: [] as string[],
     warnings: [] as string[],
     busy: false,
     release: [] as (() => void)[],
+    finished: [] as { from: string; durationMs: number }[],
   };
   return {
     get submitted() {
@@ -28,6 +30,9 @@ function host(overrides: Partial<InboxHost> = {}): InboxHost & {
     set busy(v: boolean) {
       state.busy = v;
     },
+    get finished() {
+      return state.finished;
+    },
     finish: () => state.release.shift()?.(),
     isBusy: () => state.busy,
     submit: (prompt) => {
@@ -35,6 +40,7 @@ function host(overrides: Partial<InboxHost> = {}): InboxHost & {
       return new Promise<void>((r) => state.release.push(r));
     },
     warn: (m) => state.warnings.push(m),
+    onBusTurnFinished: (from, durationMs) => state.finished.push({ from, durationMs }),
     ...overrides,
   };
 }
@@ -102,6 +108,56 @@ describe('AgentInbox', () => {
     await tick();
     expect(h.warnings).toHaveLength(2);
     expect(h.warnings[0]).toContain('no model');
+    inbox.dispose();
+  });
+
+  it('fires the finished notice for a bus-started turn, once, at turn end (§9, P1)', async () => {
+    const h = host();
+    const inbox = new AgentInbox(h, 5);
+    inbox.accept('prompt', 'codex');
+    await tick();
+    expect(h.submitted).toEqual(['prompt']);
+    expect(h.finished).toEqual([]); // not yet: the turn is still running
+    h.finish();
+    await tick();
+    expect(h.finished).toEqual([
+      { from: 'codex', durationMs: expect.any(Number) },
+    ]);
+    inbox.dispose();
+  });
+
+  it('does not fire a finished notice for a turn with no bus sender', async () => {
+    const h = host();
+    const inbox = new AgentInbox(h, 5);
+    inbox.accept('typed-by-user'); // no `from`
+    await tick();
+    h.finish();
+    await tick();
+    expect(h.finished).toEqual([]);
+    inbox.dispose();
+  });
+
+  it('fires a finished notice for each bus message, in order', async () => {
+    const h = host();
+    const inbox = new AgentInbox(h, 5);
+    inbox.accept('one', 'claude');
+    inbox.accept('two', 'codex');
+    await tick();
+    h.finish();
+    await tick();
+    h.finish();
+    await tick();
+    expect(h.finished.map((f) => f.from)).toEqual(['claude', 'codex']);
+    inbox.dispose();
+  });
+
+  it('does not fire a finished notice when the turn fails to submit', async () => {
+    const h = host({ submit: () => Promise.reject(new Error('no model')) });
+    const inbox = new AgentInbox(h, 5);
+    inbox.accept('a', 'codex');
+    await tick();
+    expect(h.finished).toEqual([]);
+    expect(h.warnings).toHaveLength(1);
     inbox.dispose();
   });
 });
