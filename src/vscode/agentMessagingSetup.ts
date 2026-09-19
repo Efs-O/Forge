@@ -56,5 +56,6 @@ export function setupAgentMessaging(
     paths: () => busPaths(),
     inbox,
     relay: mesh.relay,
+    validateFrom: mesh.validateFrom,
   });
 }

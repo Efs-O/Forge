@@ -85,6 +85,23 @@ describe('ownership + creation lease (M2/M3)', () => {
     expect(claimCreation(root, 'codex', host(2), d)).toEqual({ claimed: true });
   });
 
+  it('a torn claim is never reclaimed — it proves nothing, so the waiter waits (M2)', () => {
+    const d = deps(new Set([1, 2])); // both alive
+    // Simulate a claimant mid-write: the file exists but its JSON is torn/empty,
+    // so it names no host. Reclaiming it would race a possibly-live creator into
+    // a double spawn; the waiter must wait (bounded) and report "in progress".
+    const claimFile = path.join(root, 'ownership', 'codex.claim');
+    fs.mkdirSync(path.dirname(claimFile), { recursive: true });
+    fs.writeFileSync(claimFile, '{"host_pid":'); // torn: incomplete JSON
+    const res = claimCreation(root, 'codex', host(2), { ...d, deadlineMs: 30 });
+    expect(res.claimed).toBe(false);
+    expect(res.holder).toBeUndefined(); // no host to attribute
+    // The torn claim is NOT stale (no dead host to prove), and the file is
+    // untouched — the waiter did not race the (possibly live) creator.
+    expect(isClaimStale(root, 'codex', d)).toBe(false);
+    expect(fs.readFileSync(claimFile, 'utf8')).toBe('{"host_pid":');
+  });
+
   it('releaseClaim removes the claim', () => {
     const d = deps(new Set([1]));
     claimCreation(root, 'codex', host(1), d);

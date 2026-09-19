@@ -162,6 +162,98 @@ describe('orchestrator: tell + FIFO (M5)', () => {
   });
 });
 
+describe('orchestrator: FIFO single-flight + failure states (M5/§2)', () => {
+  it('two concurrent first-use tells install ONE FIFO (no second turn)', async () => {
+    const adapter = new FakeAdapter(true);
+    let resolveAdapter: (() => void) | undefined;
+    const gate = new Promise<void>((r) => (resolveAdapter = r));
+    const orch = new MeshOrchestrator({
+      busRoot: root,
+      knownAliases: () => ['codex'],
+      scope: () => ({ workspace: '/ws' }),
+      onEvent: (e) => board.push(e),
+      provider: {
+        // Slow resolution: both tells observe an empty FIFO map before either
+        // installs. Without single-flight, two FIFOs would each start a turn.
+        resolveAdapter: async () => {
+          await gate;
+          return adapter;
+        },
+        isOwned: () => true,
+      },
+    });
+    // Both tells run synchronously up to the gate before the next line, so the
+    // second one observes the first's in-flight `creating` entry.
+    const pa = orch.tell('codex', 'one');
+    const pb = orch.tell('codex', 'two');
+    resolveAdapter!();
+    const [a, b] = await Promise.all([pa, pb]);
+    expect('error' in a).toBe(false);
+    expect('error' in b).toBe(false);
+    await flush();
+    // Only the first turn has started; the second is queued behind it. One
+    // FIFO serialized them — a second FIFO would have started both at once.
+    expect(adapter.sends).toEqual(['one']);
+    expect(board.filter((e) => e.state === 'started').length).toBe(1);
+    expect(board.filter((e) => e.state === 'accepted').length).toBe(2);
+    adapter.complete('completed');
+    await flush();
+    expect(adapter.sends).toEqual(['one', 'two']);
+  });
+
+  it('a send that throws AFTER started ends cancelled, not rejected (§2)', async () => {
+    let rejectSend: ((e: Error) => void) | undefined;
+    const sendPromise = new Promise<TurnResult>((_, rej) => (rejectSend = rej));
+    const throwingAdapter: MeshAdapter = {
+      kind: 'codex',
+      observesTurns: true,
+      // The observing send rejects: the turn began (started was written) but
+      // then crashed. started→rejected is illegal, so it must end cancelled.
+      send: () => sendPromise,
+    };
+    const orch = new MeshOrchestrator({
+      busRoot: root,
+      knownAliases: () => ['codex'],
+      scope: () => ({ workspace: '/ws' }),
+      onEvent: (e) => board.push(e),
+      provider: { resolveAdapter: async () => throwingAdapter, isOwned: () => true },
+    });
+    await orch.tell('codex', 'boom');
+    await flush();
+    // started was written before the send threw.
+    expect(board.some((e) => e.state === 'started')).toBe(true);
+    rejectSend!(new Error('turn crashed'));
+    await flush();
+    // The terminal state is cancelled (started→rejected is illegal).
+    const terminal = board.filter((e) => e.state === 'cancelled' || e.state === 'rejected');
+    expect(terminal.map((e) => e.state)).toEqual(['cancelled']);
+  });
+
+  it('dispose writes a timeout for each queued-but-unsent message (M5)', async () => {
+    const adapter = new FakeAdapter(true);
+    const orch = new MeshOrchestrator({
+      busRoot: root,
+      knownAliases: () => ['codex'],
+      scope: () => ({ workspace: '/ws' }),
+      onEvent: (e) => board.push(e),
+      provider: { resolveAdapter: async () => adapter, isOwned: () => true },
+    });
+    await orch.tell('codex', 'running'); // starts a turn
+    await flush();
+    await orch.tell('codex', 'queued-1');
+    await orch.tell('codex', 'queued-2');
+    await flush();
+    // The first turn is active; the other two are queued (accepted, not started).
+    expect(board.filter((e) => e.state === 'accepted').length).toBe(3);
+    expect(board.filter((e) => e.state === 'started').length).toBe(1);
+    orch.dispose();
+    // The two queued messages get a terminal timeout; the in-flight one does
+    // not (it is covered by its own completion).
+    const timeouts = board.filter((e) => e.state === 'timeout');
+    expect(timeouts).toHaveLength(2);
+  });
+});
+
 describe('orchestrator: host-side relay (M6)', () => {
   it('forwards with two hop events sharing one exchange id, zero model turns', async () => {
     const adapter = new FakeAdapter(true);

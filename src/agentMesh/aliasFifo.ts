@@ -81,7 +81,19 @@ export class AliasFifo {
 
   dispose(): void {
     this.disposed = true;
-    this.queue.length = 0;
+    // The queue is in memory (M5): on window shutdown, queued-but-unsent
+    // messages are lost with the window. Write a terminal `timeout` for each so
+    // the board never shows them as in-flight forever (the plan's "recovery
+    // writes a timeout for each accepted-but-not-started exchange"). The
+    // in-flight message is covered by its own completion/cancellation.
+    const pending = this.queue.splice(0);
+    for (const msg of pending) {
+      this.deps.onEvent({
+        exchangeId: msg.exchangeId,
+        state: 'timeout',
+        detail: 'window shutting down; queued message not sent',
+      });
+    }
   }
 
   private async drain(): Promise<void> {
@@ -100,8 +112,10 @@ export class AliasFifo {
   private async runOne(msg: FifoMessage): Promise<void> {
     // Observing adapters: the turn begins now, so `started` is truthful here.
     // Non-observing: no `started` — the transport only accepts it.
+    let started = false;
     if (this.adapter.observesTurns) {
       this.deps.onEvent({ exchangeId: msg.exchangeId, state: 'started' });
+      started = true;
     }
     try {
       const result = await this.adapter.send(msg.message);
@@ -118,9 +132,13 @@ export class AliasFifo {
       // non-terminal deadline) moves it. Nothing to write here.
     } catch (err) {
       const why = err instanceof Error ? err.message : String(err);
+      // A turn that already started cannot become `rejected` (that state means
+      // "never accepted"); it ends `cancelled`. A turn that never started (a
+      // non-observing send that threw, or an observing send that threw before
+      // the turn began) is `rejected`.
       this.deps.onEvent({
         exchangeId: msg.exchangeId,
-        state: 'rejected',
+        state: started ? 'cancelled' : 'rejected',
         detail: why,
       });
     }

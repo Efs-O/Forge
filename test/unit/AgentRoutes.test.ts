@@ -225,3 +225,55 @@ describe('forge.sh against the routes', () => {
     expect(accepted).toEqual([]);
   }, 30_000);
 });
+
+describe('sender validation and relay gating (M6/§4)', () => {
+  // Reassign the module-level `routes` (the server closure reads it by name)
+  // and re-enable it, since beforeEach enabled the original instance.
+  function install(deps: ConstructorParameters<typeof AgentRoutes>[0]): void {
+    routes = new AgentRoutes(deps);
+    routes.setEnabled(true);
+    routes.onListening(base);
+  }
+
+  it('rejects an unknown `from` with the live list, before the inbox', async () => {
+    install({
+      paths: () => paths,
+      inbox: { accept: (p) => (accepted.push(p), accepted.length) },
+      token: TOKEN,
+      validateFrom: (from) =>
+        from === 'codex' || from === 'forge'
+          ? { ok: true }
+          : { ok: false, error: `unknown sender "${from}"; live aliases: codex` },
+    });
+    const { status, body } = await post('/agent/message?from=mallory', 'hi');
+    expect(status).toBe(400);
+    expect(body.error).toContain('mallory');
+    expect(accepted).toEqual([]);
+  });
+
+  it('accepts a known `from` and delivers to the inbox', async () => {
+    install({
+      paths: () => paths,
+      inbox: { accept: (p) => (accepted.push(p), accepted.length) },
+      token: TOKEN,
+      validateFrom: (from) => (from === 'codex' ? { ok: true } : { ok: false, error: 'no' }),
+    });
+    const { status } = await post('/agent/message?from=codex', 'hi');
+    expect(status).toBe(202);
+    expect(accepted).toHaveLength(1);
+  });
+
+  it('rejects a non-Forge `to` when no relay is installed (no silent inbox delivery)', async () => {
+    install({
+      paths: () => paths,
+      inbox: { accept: (p) => (accepted.push(p), accepted.length) },
+      token: TOKEN,
+      validateFrom: () => ({ ok: true }),
+      // no relay
+    });
+    const { status, body } = await post('/agent/message?from=codex&to=claude', 'hi');
+    expect(status).toBe(400);
+    expect(body.error).toContain('no relay');
+    expect(accepted).toEqual([]);
+  });
+});

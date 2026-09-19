@@ -22,13 +22,19 @@ export interface AgentRoutesDeps {
   /**
    * The host-side relay (AGENT_MESH_PLAN M6). When an inbound message names a
    * `to` that is not Forge, the host forwards it through the recipient's
-   * adapter with zero Forge model turns. Absent ⇒ no relay (legacy behavior).
+   * adapter with zero Forge model turns. Absent ⇒ a non-Forge `to` is rejected
+   * (not silently delivered to the Forge inbox).
    */
   relay?: (
     from: string,
     to: string,
     text: string,
   ) => Promise<{ ok: true; exchangeId: string } | { ok: false; error: string }>;
+  /**
+   * Validate an inbound `from` against live aliases (M6/§4). An unknown or
+   * forged sender is rejected with the live list. Absent ⇒ shape check only.
+   */
+  validateFrom?: (from: string) => { ok: true } | { ok: false; error: string };
 }
 
 interface Fields {
@@ -158,11 +164,20 @@ export class AgentRoutes {
       if (!FROM_PATTERN.test(from)) {
         throw new HttpError(400, 'from must be 1-40 chars: letters, digits, space . _ -');
       }
+      // M6/§4: an unknown or forged sender is rejected with the live list.
+      const sender = this.deps.validateFrom?.(from);
+      if (sender && !sender.ok) throw new HttpError(400, sender.error);
       // M6: an inbound message addressed to another agent (to != forge) is
       // relayed by the host through the recipient's adapter, with zero Forge
-      // model turns. The model never decides whether to relay.
+      // model turns. The model never decides whether to relay. A non-Forge `to`
+      // with no relay installed is rejected, not silently delivered to the
+      // Forge inbox (which would treat a message meant for another agent as a
+      // prompt for itself).
       const to = (fields['to'] ?? '').trim();
-      if (to && to.toLowerCase() !== 'forge' && this.deps.relay) {
+      if (to && to.toLowerCase() !== 'forge') {
+        if (!this.deps.relay) {
+          throw new HttpError(400, `no relay available to deliver to "${to}"`);
+        }
         const text = requireText(fields, MAX_INBOUND_CHARS);
         const result = await this.deps.relay(from, to, text);
         if (!result.ok) throw new HttpError(400, result.error);

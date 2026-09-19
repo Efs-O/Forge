@@ -83,26 +83,42 @@ export class MeshOrchestrator {
 
   constructor(private readonly deps: OrchestratorDeps) {}
 
-  /** The in-memory FIFO for an alias, created on first use (M5). */
+  /**
+   * The in-memory FIFO for an alias, created on first use (M5). Single-flight:
+   * two concurrent first-use calls for the same alias must install ONE FIFO,
+   * or the second would start a turn while the first is active (M5 violation).
+   * The `creating` map dedupes the in-flight resolution.
+   */
+  private readonly creating = new Map<string, Promise<AliasFifo | undefined>>();
+
   private async fifoFor(alias: string): Promise<AliasFifo | undefined> {
     const existing = this.fifos.get(alias);
     if (existing) return existing;
-    const adapter = await this.deps.provider.resolveAdapter(alias);
-    if (!adapter) return undefined;
-    const fifo = new AliasFifo(adapter, {
-      onEvent: (e: FifoEvent) => {
-        this.deps.onEvent({
-          exchangeId: e.exchangeId,
-          from: this.host,
-          to: alias,
-          type: 'state',
-          state: e.state,
-          ...(e.detail ? { detail: e.detail } : {}),
-        });
-      },
-    });
-    this.fifos.set(alias, fifo);
-    return fifo;
+    const inflight = this.creating.get(alias);
+    if (inflight) return inflight;
+    const promise = (async () => {
+      const adapter = await this.deps.provider.resolveAdapter(alias);
+      if (!adapter) return undefined;
+      // Re-check: a concurrent call may have installed it while we resolved.
+      const installed = this.fifos.get(alias);
+      if (installed) return installed;
+      const fifo = new AliasFifo(adapter, {
+        onEvent: (e: FifoEvent) => {
+          this.deps.onEvent({
+            exchangeId: e.exchangeId,
+            from: this.host,
+            to: alias,
+            type: 'state',
+            state: e.state,
+            ...(e.detail ? { detail: e.detail } : {}),
+          });
+        },
+      });
+      this.fifos.set(alias, fifo);
+      return fifo;
+    })().finally(() => this.creating.delete(alias));
+    this.creating.set(alias, promise);
+    return promise;
   }
 
   /**

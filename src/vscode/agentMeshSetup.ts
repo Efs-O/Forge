@@ -4,7 +4,7 @@ import { busPaths } from '../agentBus/agentBus';
 import type { ForgeConfig } from '../config/types';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import { listAliases } from '../agentMesh/aliasRegistry';
-import type { ExchangeState } from '../agentMesh/deliveryState';
+import { isTerminal, type ExchangeState } from '../agentMesh/deliveryState';
 import {
   appendEvent,
   EXCHANGES_LOCK_NAME,
@@ -39,6 +39,8 @@ export interface AgentMesh {
     to: string,
     text: string,
   ) => Promise<{ ok: true; exchangeId: string } | { ok: false; error: string }>;
+  /** Validate an inbound sender alias (M6/§4); unknown `from` is rejected. */
+  validateFrom: (from: string) => { ok: true } | { ok: false; error: string };
   /** Dispose owned sessions + FIFOs (extension deactivate). */
   dispose: () => Promise<void>;
 }
@@ -66,6 +68,12 @@ export function setupAgentMesh(
     return { workspace: workspaceRoot, ...(conversation ? { conversation } : {}) };
   };
 
+  // M9: an exchange inherits the scope of its FIRST event. Reading the active
+  // conversation per event would split an exchange that is accepted in
+  // conversation A and completed after the user switches to B — leaking or
+  // hiding board lines across conversations. The first event's scope wins.
+  const exchangeScope = new Map<string, { workspace: string; conversation?: string }>();
+
   const onEvent: (e: {
     exchangeId: string;
     from: string;
@@ -74,7 +82,8 @@ export function setupAgentMesh(
     state: ExchangeState;
     detail?: string;
   }) => void = (e) => {
-    const s = scope();
+    const s = exchangeScope.get(e.exchangeId) ?? scope();
+    if (!exchangeScope.has(e.exchangeId)) exchangeScope.set(e.exchangeId, s);
     void appendEvent(
       exchangePaths,
       {
@@ -93,12 +102,36 @@ export function setupAgentMesh(
     ).catch((err) =>
       vscode.window.showErrorMessage(`[agent mesh] could not write a board event: ${String(err)}`),
     );
+    // The exchange is over at a terminal state: its scope is no longer needed,
+    // so the map is bounded to in-flight exchanges only.
+    if (isTerminal(e.state)) exchangeScope.delete(e.exchangeId);
   };
 
   const provider = new MeshSessionProvider({
     busRoot: paths.root,
     getConfig,
     workspaceRoots: () => (workspaceRoot ? [workspaceRoot] : []),
+    // M3: a failed thread resume is a visible context loss, never a silent
+    // fresh thread.
+    onContextLost: (alias, reason) => {
+      const s = scope();
+      void appendEvent(
+        exchangePaths,
+        {
+          eventId: `context-lost-${alias}-${Date.now()}`,
+          ts: Date.now(),
+          exchangeId: `context-lost-${alias}`,
+          workspace: s.workspace,
+          ...(s.conversation ? { conversation: s.conversation } : {}),
+          from: 'forge',
+          to: alias,
+          type: 'notice',
+          state: 'context_lost',
+          detail: `thread resume failed: ${reason}`,
+        },
+        {},
+      ).catch(() => undefined);
+    },
   });
 
   const knownAliases = (): string[] => {
@@ -157,6 +190,8 @@ export function setupAgentMesh(
     return { ok: true, exchangeId: result.exchangeId };
   };
 
+  const validateFrom: AgentMesh['validateFrom'] = (from) => orchestrator.validateFrom(from);
+
   const dispose = async (): Promise<void> => {
     orchestrator.dispose();
     await provider.dispose();
@@ -164,5 +199,5 @@ export function setupAgentMesh(
   };
   context.subscriptions.push({ dispose: () => void dispose() });
 
-  return { orchestrator, provider, relay, dispose };
+  return { orchestrator, provider, relay, validateFrom, dispose };
 }

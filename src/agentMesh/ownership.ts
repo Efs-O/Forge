@@ -135,21 +135,32 @@ export function listOwnedAliases(root: string): string[] {
 // Creation lease (M2): prevents a concurrent double-spawn.
 // ---------------------------------------------------------------------------
 
-export type ClaimResult = { claimed: true } | { claimed: false; holder: HostId };
+export type ClaimResult = { claimed: true } | { claimed: false; holder?: HostId };
 
 /**
  * Claim the creation lease for an alias. O_EXCL create; if the claim exists and
  * its holder is alive, we lose (we wait on the record instead of racing). A
- * claim whose holder is dead — or that names our own pid — is reclaimed.
+ * claim whose holder is **proven dead** — or that names our own pid — is
+ * reclaimed.
+ *
+ * M2 safety: a torn or empty claim file (a claimant mid-write, or a crash
+ * mid-write) names no host, so it is **not** proof of death. Reclaiming it
+ * would race a possibly-live creator into a double spawn. Instead the waiter
+ * waits (bounded by `deadlineMs`) and then reports "in progress" — it never
+ * reclaims a claim it cannot attribute to a dead host. A genuinely orphaned
+ * torn claim (crash mid-write) is rare and self-limits: the next owner-host
+ * death recovery clears it, and no second spawn is ever started in the mean
+ * time.
  */
 export function claimCreation(
   root: string,
   alias: string,
   host: HostId,
-  deps: HostLivenessDeps = {},
+  deps: HostLivenessDeps & { deadlineMs?: number } = {},
 ): ClaimResult {
   const alive = deps.isHostAlive ?? ((h: HostId) => isHostAlive(h, deps));
   const file = claimPath(root, alias);
+  const deadline = Date.now() + (deps.deadlineMs ?? 120_000);
   fs.mkdirSync(ownershipDir(root), { recursive: true });
   for (;;) {
     try {
@@ -174,22 +185,38 @@ export function claimCreation(
     try {
       rec = JSON.parse(fs.readFileSync(file, 'utf8')) as ClaimRecord;
     } catch {
-      rec = undefined; // torn: reclaim
+      rec = undefined; // torn or empty
     }
     const holder: HostId | undefined =
       rec && Number.isFinite(rec.host_pid) && Number.isFinite(rec.host_started_at)
         ? { pid: rec.host_pid, startedAt: rec.host_started_at }
         : undefined;
     if (!holder) {
+      // Torn/empty: no host to prove dead. Never reclaim — wait (bounded).
+      if (Date.now() >= deadline) return { claimed: false };
+      sleepSync(20);
+      continue;
+    }
+    if (holder.pid === host.pid) {
+      // Ours: reclaim (a leftover from a prior attempt in this host).
       unlinkQuiet(file);
       continue;
     }
-    if (holder.pid === host.pid || !alive(holder)) {
-      // Ours, or the claimant is dead: reclaim.
+    if (!alive(holder)) {
+      // Claimant proven dead: reclaim.
       unlinkQuiet(file);
       continue;
     }
+    // Holder alive: we lose.
     return { claimed: false, holder };
+  }
+}
+
+/** A short synchronous pause (the claim wait is not a hot loop). */
+function sleepSync(ms: number): void {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    /* spin */
   }
 }
 
@@ -197,7 +224,12 @@ export function releaseClaim(root: string, alias: string): void {
   unlinkQuiet(claimPath(root, alias));
 }
 
-/** Is the creation claim for an alias stale (its holder dead)? */
+/**
+ * Is the creation claim for an alias stale (its holder proven dead)? A torn or
+ * empty claim names no host, so it is NOT stale — it is not proof of death, and
+ * reclaiming it would race a possibly-live creator (M2). Only a claim whose
+ * named host is dead is stale.
+ */
 export function isClaimStale(root: string, alias: string, deps: HostLivenessDeps = {}): boolean {
   const alive = deps.isHostAlive ?? ((h: HostId) => isHostAlive(h, deps));
   let rec: ClaimRecord | undefined;
@@ -206,7 +238,7 @@ export function isClaimStale(root: string, alias: string, deps: HostLivenessDeps
   } catch {
     return false; // no claim
   }
-  if (!rec || !Number.isFinite(rec.host_pid) || !Number.isFinite(rec.host_started_at)) return true;
+  if (!rec || !Number.isFinite(rec.host_pid) || !Number.isFinite(rec.host_started_at)) return false;
   return !alive({ pid: rec.host_pid, startedAt: rec.host_started_at });
 }
 

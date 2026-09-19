@@ -13,7 +13,7 @@ import { relayToClaude } from '../agentBus/claudeRelay';
 import { getAlias, registerAlias, resolveSessionIdentity } from './aliasRegistry';
 import { ClaudePeerAdapter, CodexOwnedAdapter, CodexQueueAdapter } from './adapters';
 import type { MeshAdapter } from './meshAdapter';
-import { getHostIdentity, type HostLivenessDeps } from './hostIdentity';
+import { getHostIdentity, isHostAlive, type HostLivenessDeps } from './hostIdentity';
 import { claimCreation, readOwnership, releaseClaim, writeOwnership } from './ownership';
 import type { SessionProvider } from './meshOrchestrator';
 
@@ -59,6 +59,13 @@ export interface SessionProviderDeps extends HostLivenessDeps {
   codexFactory?: OwnedCodexFactory;
   /** First-creation consent gate (M2). Returns true to allow. */
   requestConsent?: (alias: string) => Promise<boolean>;
+  /**
+   * Called when a thread RESUME fails (M3). The plan never swaps in a fresh
+   * thread silently: a failed resume is a visible `context_lost` board event.
+   * A fresh creation (no prior thread) failing is not a context loss — it is
+   * just a creation error.
+   */
+  onContextLost?: (alias: string, reason: string) => void;
 }
 
 export class MeshSessionProvider implements SessionProvider {
@@ -100,6 +107,13 @@ export class MeshSessionProvider implements SessionProvider {
     if (existing) return new CodexOwnedAdapter(existing);
     const rec = readOwnership(this.deps.busRoot, 'codex');
     const aliasRec = getAlias(this.deps.busRoot, 'codex');
+    // M2: a session another LIVE window owns is never re-spawned here. This
+    // window does not hold its stdio pipe, so it cannot drive it; spawning a
+    // second app-server for the same thread would leave two live pipes on one
+    // alias. Fall back to a user-opened queue session (if pinned), else none.
+    if (rec?.owner_host && this.isForeignLiveOwner(rec.owner_host)) {
+      return this.codexAdapter();
+    }
     // A registered alias or a prior thread_id → resume owned (M3).
     if (rec?.thread_id || aliasRec) {
       const result = await this.ensureOwnedCodex('codex');
@@ -107,6 +121,16 @@ export class MeshSessionProvider implements SessionProvider {
     }
     // No alias and no thread: the user-opened pin (non-observing).
     return this.codexAdapter();
+  }
+
+  /**
+   * True when `owner` is a live host that is NOT this one. `isHostAlive` is
+   * true for self, so the pid comparison is what separates "I own it" (resume
+   * is safe) from "another window owns it" (never race it).
+   */
+  private isForeignLiveOwner(owner: { pid: number; startedAt: number }): boolean {
+    if (!isHostAlive(owner, this.deps)) return false;
+    return owner.pid !== getHostIdentity(this.deps).pid;
   }
 
   private claudeAdapter(): MeshAdapter | undefined {
@@ -166,11 +190,11 @@ export class MeshSessionProvider implements SessionProvider {
         error: `creation for "${alias}" is already in progress (another window holds the lease)`,
       };
     }
+    const rec = readOwnership(this.deps.busRoot, alias);
+    const aliasRec = getAlias(this.deps.busRoot, alias);
+    const threadId = rec?.thread_id ?? aliasRec?.session_id;
     try {
       const bus = this.deps.getConfig().agent_bus;
-      const rec = readOwnership(this.deps.busRoot, alias);
-      const aliasRec = getAlias(this.deps.busRoot, alias);
-      const threadId = rec?.thread_id ?? aliasRec?.session_id;
 
       // First creation (no prior consent recorded): gate it.
       if (!aliasRec && !threadId) {
@@ -214,6 +238,12 @@ export class MeshSessionProvider implements SessionProvider {
       return new CodexOwnedAdapter(session);
     } catch (err) {
       const why = err instanceof Error ? err.message : String(err);
+      // M3: a failed RESUME (a prior thread existed) is a visible context loss —
+      // the plan never swaps in a fresh thread silently. A fresh creation
+      // failing (no prior thread) is just a creation error.
+      if (threadId && this.deps.onContextLost) {
+        this.deps.onContextLost(alias, why);
+      }
       return { error: `could not create the owned ${alias} session: ${why}` };
     } finally {
       releaseClaim(this.deps.busRoot, alias);
