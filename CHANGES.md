@@ -1,5 +1,37 @@
 # Forge — Recent Changes
 
+## 0.16.10
+
+### Agent mesh, phase 0 — identity, ownership, and truthful delivery states
+
+The foundation for Forge ↔ Claude ↔ Codex communication visible to the user
+(plan: `docs/plans/AGENT_MESH_PLAN.md`). This phase lays the durable, multi-window-safe
+substrate the later phases build on; it ships no new user-facing surface yet.
+
+- **`tell_live_session`** — a new tool that sends a **one-way** note ("started",
+  "blocked", "turn finished") to a live Claude or Codex session and returns at
+  once. It is a distinct typed primitive, not `ask_live_session` with `wait: false`:
+  a notification has no expected answer and never blocks.
+- **Truthful delivery states.** A message now moves `created → accepted → started
+  → completed` (or `rejected` / `timeout` / `cancelled`), and a transport exit code
+  can advance it **only** to `accepted`. A Forge-owned session reports `started` and
+  `completed` directly; a user-opened session honestly stays `accepted` until a
+  verdict appears. The old single "delivered" that pretended `codex queue` exit 0
+  meant "processed" is gone.
+- **Stable identity + ownership.** Each agent has a stable alias (`codex`, `claude`)
+  in `~/.forge/agent-bus/aliases.json`; the config `codex_thread` / `claude_session`
+  values become deprecated pins (an alias wins). Forge-owned sessions are recorded
+  per alias in `ownership/<alias>.json` with the host that holds the pipe, and a
+  creation lease prevents two windows double-spawning one session.
+- **Multi-window safe.** Every VS Code window is its own host sharing the bus
+  folder, so the exchange log (`exchanges.jsonl`) takes one interprocess lock, and
+  a session is reaped on restart **only** when its owning host is proven dead — a
+  peer window's live session is never touched. A dead owner's thread id is kept so
+  the next message resumes it (warm survives a restart through the thread).
+- **The exchange board's durable store.** An append-only event log with whole-terminal-exchange
+  compaction (non-terminal exchanges are never dropped; a stalled one gets a `timeout`
+  after a deadline). The board render lands in a later phase.
+
 ## 0.16.9
 
 - **`ask_live_session` (Codex) works on Windows.** Resolving the `codex` CLI

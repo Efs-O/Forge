@@ -127,10 +127,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(embeddingBackend);
   const indexManager = new IndexManager(config, embeddingBackend);
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
-  // One registry for the whole extension. Sharing it between delegation and
-  // the sidebar's CLI chat means a repeat `ask_local_agent` to Claude Code
-  // resumes the warm process instead of re-paying its cold start, and that
-  // max_cli_agents caps the true number of live CLI processes.
+  // One registry for the whole extension: delegation and the sidebar's CLI chat
+  // share it, so a repeat `ask_local_agent` resumes the warm process.
   const cliSessions = new CliSessionRegistry(
     config.max_cli_agents ?? DEFAULT_MAX_CLI_AGENTS,
     config.cli_idle_timeout_ms ?? DEFAULT_CLI_IDLE_TIMEOUT_MS,
@@ -143,10 +141,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     secrets: context.secrets,
   });
   const toolRegistry = new ToolRegistry();
-  // One job store, shared by the scheduler and the `manage_jobs` tool, so the
-  // tool edits the same files the scheduler watches. Created here (before the
-  // tool registry) and passed to both. `sidebarProvider` is assigned below;
-  // this closure only runs at `discuss` time, long after activation.
+  // One job store, shared by the scheduler and the `manage_jobs` tool.
   const jobsStore = new JobStore();
   const jobsHostFacade = (): import('./sidebar/ForgeHostFacade').ForgeHostFacade | undefined =>
     sidebarProvider.getHostFacade();
@@ -196,7 +191,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const registry = registryPath ? new ControlServerRegistry(registryPath) : undefined;
   const packageVersion = context.extension.packageJSON['version'];
   const controlServer = new ControlServer(pool, config, {
-    agentRoutes: setupAgentMessaging(context, () => sidebarProvider),
+    agentRoutes: setupAgentMessaging(
+      context,
+      () => sidebarProvider,
+      () => config,
+      workspaceRoot,
+    ),
     chatProxy: buildControlChatProxy(() => config, context.secrets),
     ...(registry ? { registry } : {}),
     version: typeof packageVersion === 'string' ? packageVersion : 'unknown',

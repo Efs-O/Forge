@@ -92,6 +92,7 @@ const EXPECTED_NATIVE_NAMES = [
   'stage',
   'stop_execution',
   'switch_branch',
+  'tell_live_session',
   'update_plan',
   'view_image',
   'view_video',
@@ -150,7 +151,7 @@ function makeRegistry(
 }
 
 describe('registerAllTools canonical coordinator catalog', () => {
-  it('exposes the exact 76-tool native catalog when all optional wiring is present', () => {
+  it('exposes the exact 77-tool native catalog when all optional wiring is present', () => {
     const registry = makeRegistry({ search: true, delegation: true });
     expect(registry.names().sort()).toEqual(EXPECTED_NATIVE_NAMES);
     // load_tool_group is registered but suppresses its own advertisement while
@@ -169,7 +170,8 @@ describe('registerAllTools canonical coordinator catalog', () => {
           name !== 'load_tool_group' &&
           name !== 'generate_image' &&
           name !== 'image_search' &&
-          name !== 'ask_live_session',
+          name !== 'ask_live_session' &&
+          name !== 'tell_live_session',
       ),
     );
   });

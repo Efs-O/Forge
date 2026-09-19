@@ -19,6 +19,16 @@ export interface AgentRoutesDeps {
   inbox: Pick<AgentInbox, 'accept'>;
   /** Injected by tests; production mints one per activation. */
   token?: string;
+  /**
+   * The host-side relay (AGENT_MESH_PLAN M6). When an inbound message names a
+   * `to` that is not Forge, the host forwards it through the recipient's
+   * adapter with zero Forge model turns. Absent ⇒ no relay (legacy behavior).
+   */
+  relay?: (
+    from: string,
+    to: string,
+    text: string,
+  ) => Promise<{ ok: true; exchangeId: string } | { ok: false; error: string }>;
 }
 
 interface Fields {
@@ -147,6 +157,16 @@ export class AgentRoutes {
       const from = (fields['from'] ?? '').trim();
       if (!FROM_PATTERN.test(from)) {
         throw new HttpError(400, 'from must be 1-40 chars: letters, digits, space . _ -');
+      }
+      // M6: an inbound message addressed to another agent (to != forge) is
+      // relayed by the host through the recipient's adapter, with zero Forge
+      // model turns. The model never decides whether to relay.
+      const to = (fields['to'] ?? '').trim();
+      if (to && to.toLowerCase() !== 'forge' && this.deps.relay) {
+        const text = requireText(fields, MAX_INBOUND_CHARS);
+        const result = await this.deps.relay(from, to, text);
+        if (!result.ok) throw new HttpError(400, result.error);
+        return sendJson(res, 202, { relayed: true, exchangeId: result.exchangeId });
       }
       const queued = this.deps.inbox.accept(
         forgeInboundPrompt(from, requireText(fields, MAX_INBOUND_CHARS)),

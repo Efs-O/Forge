@@ -60,6 +60,7 @@ import type { BackendProcess } from '../system/SystemReport';
 import { makeLoadToolGroupTool } from './toolGroupTools';
 import { makeManageJobsTool } from './jobTools';
 import { makeLiveSessionTool } from './liveSessionTool';
+import { makeTellLiveSessionTool } from './tellLiveSessionTool';
 import { makeReadToolResultTool } from './toolResultTools';
 import { makeUpdatePlanTool } from './planTools';
 import {
@@ -239,6 +240,8 @@ export function registerAllTools(
         workspaceRoots: () => (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath),
       }),
     );
+    // The one-way push (P0): a distinct typed primitive, not ask with wait:false.
+    registry.register(makeTellLiveSessionTool({ getConfig }));
   }
 
   // Registered last, and self-suppressing until a lazy group is actually

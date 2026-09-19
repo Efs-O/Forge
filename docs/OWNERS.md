@@ -473,6 +473,24 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | `ask_live_session` tool                                    | `src/tools/liveSessionTool.ts`                                 |
 | "Show Live Claude Sessions" command                        | `src/vscode/agentBusCommands.ts`                               |
 
+## Agent mesh (plan: `docs/plans/AGENT_MESH_PLAN.md`)
+
+| Concern                                                  | Owner                                       |
+| -------------------------------------------------------- | ------------------------------------------- |
+| Host identity + liveness (M1/M2 staleness primitive)     | `src/agentMesh/hostIdentity.ts`             |
+| Delivery state machine (§2)                              | `src/agentMesh/deliveryState.ts`            |
+| Exchange event log + interprocess lock + compaction (M1/M8) | `src/agentMesh/exchangeLog.ts`           |
+| Alias registry + deprecated-pin resolution (§0/§4)       | `src/agentMesh/aliasRegistry.ts`            |
+| Per-alias ownership + creation lease + recovery (M2/M3)  | `src/agentMesh/ownership.ts`                |
+| Per-alias host-side FIFO (M5)                            | `src/agentMesh/aliasFifo.ts`                |
+| Host-side wait + cost guard (M7)                         | `src/agentMesh/hostWait.ts`                 |
+| Delivery adapters (owned Codex / Claude peer / Codex queue) | `src/agentMesh/adapters.ts`            |
+| Session provider (owned-session lifecycle, M2/M3)        | `src/agentMesh/sessionProvider.ts`          |
+| Mesh orchestrator (tell + host-side relay M6)            | `src/agentMesh/meshOrchestrator.ts`         |
+| Process-wide orchestrator handle                         | `src/agentMesh/meshContext.ts`              |
+| `tell_live_session` tool (§1)                            | `src/tools/tellLiveSessionTool.ts`          |
+| Agent-mesh activation wiring (orchestrator + recovery)   | `src/vscode/agentMeshSetup.ts`              |
+
 ## Misc
 
 | Concern                                     | Owner                         |

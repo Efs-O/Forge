@@ -38,6 +38,11 @@ export class CodexAppServerSession {
     return this.threadId;
   }
 
+  /** The child process pid, when the app-server is running (ownership records). */
+  get pid(): number | undefined {
+    return this.child?.pid;
+  }
+
   async send(task: string, options: CliAgentSessionSendOptions = {}): Promise<CliAgentRunResult> {
     if (this.currentState === 'disposed') throw new Error('CLI agent session is disposed.');
     if (this.active) throw new Error('CLI agent session already has an active turn.');
