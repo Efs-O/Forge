@@ -3,9 +3,7 @@ import { loadConfig } from '../config/ConfigLoader';
 import { updateConfigFile } from '../config/ConfigWriter';
 import { setNestedField } from '../config/ConfigWriterHelpers';
 import type { ForgeConfig } from '../config/types';
-import type { CompactionEvent } from '../sidebar/CompactionService';
 import { RemoteAuth } from './RemoteAuth';
-import type { RemoteController } from './RemoteController';
 import { RemoteRequestStore } from './RemoteRequestStore';
 import { RemoteLeaseError } from './RemoteTransportLease';
 import { RemoteAuditLog } from './RemoteAuditLog';
@@ -25,7 +23,7 @@ import {
   announceWorkspaceArrivals,
 } from './RemoteWorkspaceHandoff';
 import type { WorkspaceArrival } from './RemoteWorkspaceHandoff';
-import { remoteCompactionNotice } from './remoteCompactionNotice';
+import { RemoteCompactionNoticeBuffers } from './compactionNoticeBuffer';
 import { voiceRuntimeSignature } from './voiceRuntimeSignature';
 import {
   type RemoteRuntimeOptions,
@@ -53,6 +51,7 @@ export class RemoteRuntime {
   private readonly manager: RemoteTransportManager;
   private readonly deps: RemoteControllerOptionsDeps;
   private readonly coordinator: RemoteHandoffCoordinator;
+  private readonly compactionBuffers: RemoteCompactionNoticeBuffers;
   private lifecycleTail: Promise<void> = Promise.resolve();
   private disposed = false;
   private appliedConfig: ForgeConfig | undefined;
@@ -72,6 +71,9 @@ export class RemoteRuntime {
       path.join(options.storageDirectory, 'remote-audit-v1.json'),
       options.secrets,
     );
+    this.compactionBuffers = new RemoteCompactionNoticeBuffers((message) =>
+      options.notifyLocal(`Forge remote compaction notification failed: ${message}`),
+    );
     this.deps = this.controllerOptionsDeps();
     this.manager = new RemoteTransportManager(
       options,
@@ -79,7 +81,10 @@ export class RemoteRuntime {
       this.auth,
       this.audit,
       this.deps,
-      (event, controller) => this.onCompactionEvent(event, controller),
+      (event, controller) => this.compactionBuffers.onCompactionEvent(event, controller),
+      (controller, conversationId) =>
+        this.compactionBuffers.beforeConversationNotify(controller, conversationId),
+      (controller) => this.compactionBuffers.onTransportStopped(controller),
       () => this.notifyStatus(),
     );
     this.coordinator = new RemoteHandoffCoordinator({
@@ -435,16 +440,6 @@ export class RemoteRuntime {
       await this.coordinator.rollbackNow(rollback);
       throw err;
     }
-  }
-
-  private onCompactionEvent(event: CompactionEvent, controller: RemoteController): void {
-    const text = remoteCompactionNotice(event);
-    if (text === undefined) return;
-    void controller.enqueueHostNotification(event.conversationId, text).catch((err) => {
-      this.options.notifyLocal(
-        `Forge remote compaction notification failed: ${(err as Error).message}`,
-      );
-    });
   }
 
   /**

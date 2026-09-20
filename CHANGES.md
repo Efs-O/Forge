@@ -1,5 +1,25 @@
 # Forge — Recent Changes
 
+## 0.16.11
+
+### Quieter remote compaction notices + higher tool-round ceiling
+
+- **Aggregated remote compaction messages.** A long unattended run auto-compacts
+  several times; each one used to send a "compacting…" *and* a "compaction
+  complete." pair to the phone — five compactions, ten messages. The started
+  message is gone, and completed auto-compactions are now buffered per
+  transport+conversation and flushed as ONE line ("Forge: 5 compactions
+  complete."). The flush fires on a 3 s quiet timer or eagerly before the next
+  conversation-scoped notification, so the summary always lands ahead of the
+  answer it would otherwise overtake. A failed compaction is still reported
+  immediately, after any pending successes. Manual `/compact` from the phone is
+  unchanged (it has its own progress message).
+- **Tool-round ceiling raised 500 → 1000.** `max_tool_rounds` in config could
+  never exceed 500 (the clamp sat at the same value as the default), so a
+  configured 1000 was silently ignored and long autonomous turns died at the
+  wall. Both `MAX_TOOL_ROUNDS` and `MAX_CONFIGURABLE_TOOL_ROUNDS` are now 1000;
+  the runaway guard is preserved.
+
 ## 0.16.10
 
 ### Agent mesh, phase 0 — identity, ownership, and truthful delivery states

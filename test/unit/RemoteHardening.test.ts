@@ -713,7 +713,15 @@ describe('remote runtime lifecycle', () => {
       name: 'telegram',
       onEvent: () => ({ dispose: () => undefined }),
       async start() {
-        compactionListener?.({ conversationId: 'c1', phase: 'started', trigger: 'auto' });
+        // A failed compaction is delivered immediately (not aggregated), so
+        // this proves the subscription was live before channel.start() resolved
+        // — the same guarantee the old "compacting…" started message asserted.
+        compactionListener?.({
+          conversationId: 'c1',
+          phase: 'finished',
+          outcome: 'failed',
+          trigger: 'auto',
+        });
       },
       async send(chatId, text) {
         sent.push({ chatId, text });
@@ -742,7 +750,7 @@ describe('remote runtime lifecycle', () => {
 
     await runtime.applyConfig(enabled);
     await vi.waitFor(() =>
-      expect(sent).toContainEqual({ chatId: 'chat-a', text: 'Forge: compacting…' }),
+      expect(sent).toContainEqual({ chatId: 'chat-a', text: 'Forge: compaction failed.' }),
     );
     await runtime.dispose();
   });

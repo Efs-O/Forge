@@ -68,11 +68,11 @@ function activeTerminalCwd(): string | undefined {
 
 /** Tool rounds per sidebar turn when the model does not set `max_tool_rounds`.
  */
-export const MAX_TOOL_ROUNDS = 500;
+export const MAX_TOOL_ROUNDS = 1000;
 
 /** Ceiling on a configured `max_tool_rounds`. The cap's job is to stop a
  *  runaway loop eventually; an unbounded value would remove that guarantee. */
-export const MAX_CONFIGURABLE_TOOL_ROUNDS = 500;
+export const MAX_CONFIGURABLE_TOOL_ROUNDS = 1000;
 
 /**
  * Rounds this model may spend on one turn.

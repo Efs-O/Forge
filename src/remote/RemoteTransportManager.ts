@@ -57,6 +57,11 @@ export class RemoteTransportManager {
     private readonly audit: RemoteAuditLog,
     private readonly deps: RemoteControllerOptionsDeps,
     private readonly onCompaction: (event: CompactionEvent, controller: RemoteController) => void,
+    private readonly onBeforeConversationNotify: (
+      controller: RemoteController,
+      conversationId: string,
+    ) => Promise<void>,
+    private readonly onTransportStopped: (controller: RemoteController) => void,
     private readonly notifyStatus: () => void,
   ) {}
 
@@ -124,6 +129,8 @@ export class RemoteTransportManager {
         onCompaction: (event) => this.onCompaction(event, controller),
         onActivityError: (message) =>
           this.options.notifyLocal(`Forge remote activity notification failed: ${message}`),
+        onBeforeConversationNotify: (ctrl, conversationId) =>
+          this.onBeforeConversationNotify(ctrl, conversationId),
       });
       try {
         // Subscribe before channel startup: an automatic compaction can
@@ -155,6 +162,7 @@ export class RemoteTransportManager {
         this.notifyStatus();
       } catch (err) {
         subscriptions.dispose();
+        this.onTransportStopped(controller);
         await voice?.dispose();
         throw err;
       }
@@ -174,6 +182,10 @@ export class RemoteTransportManager {
     this.active.delete(name);
     this.notifyStatus();
     transport.subscriptions.dispose();
+    // Drop the transport's pending aggregated-compaction state with it: the
+    // buffer is a display convenience, and a stopped transport must not fire a
+    // stray "N compactions complete." into a chat that no longer has a sink.
+    this.onTransportStopped(transport.controller);
     transport.jobOutboxWatcher?.stop();
     await transport.voice?.dispose();
     await transport.controller.stop();

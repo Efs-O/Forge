@@ -12,6 +12,16 @@ export interface HostSubscriptionHandlers {
   /** Compaction is trigger-filtered by policy, so the runtime keeps that call. */
   onCompaction: (event: CompactionEvent) => void;
   onActivityError: (message: string) => void;
+  /**
+   * Flushes anything buffered for this conversation BEFORE a conversation-scoped
+   * notification is enqueued, so an aggregated "N compactions complete." lands
+   * ahead of the turn echo / failure / notify_user it would otherwise overtake.
+   * Must resolve before the caller enqueues; the outbox preserves enqueue order.
+   */
+  onBeforeConversationNotify: (
+    controller: RemoteController,
+    conversationId: string,
+  ) => Promise<void>;
 }
 
 /**
@@ -38,6 +48,7 @@ export function subscribeHostToRemote(
     // the chat watching the turn, where it lands in order with the narration.
     host.onUserNotification?.(async (event) => {
       if (event.conversationId === undefined) return 0;
+      await handlers.onBeforeConversationNotify(controller, event.conversationId);
       if (event.imagePath) {
         return controller.deliverHostImage(event.conversationId, event.imagePath, event.text);
       }
@@ -51,7 +62,12 @@ export function subscribeHostToRemote(
     // turn echo arrives on this hook too and routes through mirrorTurn, so a
     // prompt that came from a chat is not answered there twice.
     host.onHostActivity?.((event: HostActivityEvent) => {
-      void routeHostActivity(event, controller).catch((err) => {
+      void (async () => {
+        if (event.conversationId !== undefined) {
+          await handlers.onBeforeConversationNotify(controller, event.conversationId);
+        }
+        await routeHostActivity(event, controller);
+      })().catch((err) => {
         handlers.onActivityError((err as Error).message);
       });
     }),
