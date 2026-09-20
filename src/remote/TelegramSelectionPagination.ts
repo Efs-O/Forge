@@ -1,10 +1,11 @@
-import type { RemoteSelectionControls, RemoteSelectionPages } from './types';
+import type { RemoteSelectionChoice, RemoteSelectionControls, RemoteSelectionPages } from './types';
 
 export interface TelegramSelectionCallback {
   kind: RemoteSelectionControls['kind'];
   token: string;
-  action: 'show' | 'close';
+  action: 'show' | 'close' | 'select';
   page?: number;
+  choice?: number;
 }
 
 /**
@@ -32,6 +33,16 @@ export function createTelegramSelectionPages(call: TelegramBotCall): RemoteSelec
         chatId,
         messageId,
         text,
+        controls,
+        options?.signal,
+        options?.parseMode,
+      ),
+    sendChoices: (chatId, text, choices, controls, options) =>
+      sendTelegramSelectionChoices(
+        call,
+        chatId,
+        text,
+        choices,
         controls,
         options?.signal,
         options?.parseMode,
@@ -67,13 +78,43 @@ export function telegramSelectionKeyboard(controls: RemoteSelectionControls): {
   return { inline_keyboard: rows };
 }
 
+function telegramChoiceKeyboard(
+  controls: RemoteSelectionControls,
+  choices: readonly RemoteSelectionChoice[],
+): { inline_keyboard: TelegramButton[][] } {
+  return {
+    inline_keyboard: [
+      ...choices.map((choice) => [
+        {
+          text: choice.label,
+          callback_data: encodeSelectionChoice(controls, choice.value),
+        },
+      ]),
+      [
+        {
+          text: '✕ Close',
+          callback_data: encodeSelectionCallback(controls, 'x'),
+        },
+      ],
+    ],
+  };
+}
+
 export function parseTelegramSelectionCallback(
   data: string,
 ): TelegramSelectionCallback | undefined {
-  const match = /^s:([A-Za-z0-9_-]{12}):([cmw]):(x|[0-9])$/.exec(data);
+  const match = /^s:([A-Za-z0-9_-]{12}):([cmw]):(x|[0-9]|p[0-9]{1,2})$/.exec(data);
   if (!match) return undefined;
   const kind = KIND_BY_CODE[match[2] as keyof typeof KIND_BY_CODE];
   if (match[3] === 'x') return { kind, token: match[1]!, action: 'close' };
+  if (match[3]!.startsWith('p')) {
+    return {
+      kind,
+      token: match[1]!,
+      action: 'select',
+      choice: Number(match[3]!.slice(1)),
+    };
+  }
   return { kind, token: match[1]!, action: 'show', page: Number(match[3]) };
 }
 
@@ -134,6 +175,35 @@ function encodeSelectionCallback(controls: RemoteSelectionControls, target: numb
     throw new Error('Forge Telegram selection callback exceeds the Bot API limit.');
   }
   return data;
+}
+
+function encodeSelectionChoice(controls: RemoteSelectionControls, choice: number): string {
+  const data = `s:${controls.token}:${CODE_BY_KIND[controls.kind]}:p${choice}`;
+  if (Buffer.byteLength(data, 'utf8') > 64) {
+    throw new Error('Forge Telegram selection callback exceeds the Bot API limit.');
+  }
+  return data;
+}
+
+async function sendTelegramSelectionChoices(
+  call: TelegramBotCall,
+  chatId: string,
+  text: string,
+  choices: readonly RemoteSelectionChoice[],
+  controls: RemoteSelectionControls,
+  signal?: AbortSignal,
+  parseMode?: 'HTML',
+): Promise<void> {
+  await call(
+    'sendMessage',
+    {
+      chat_id: chatId,
+      text,
+      ...(parseMode ? { parse_mode: parseMode } : {}),
+      reply_markup: telegramChoiceKeyboard(controls, choices),
+    },
+    signal,
+  );
 }
 
 function parseMessageId(value: string): number {

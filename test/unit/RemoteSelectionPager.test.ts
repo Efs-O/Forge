@@ -479,6 +479,60 @@ describe('remote selection pagination', () => {
     );
   });
 
+  it('uses a second profile choice before pinning a numbered model', async () => {
+    const store = await requestStore();
+    const channel = new FakeRemoteChannel();
+    const ctx: RemoteSelectionContext = {
+      ...context(channel, store, 0),
+      modelEntries: [
+        { name: 'qwen', group: 'Local — llama.cpp', profiles: ['main', 'audit'] },
+      ],
+    };
+    await store.setBinding({
+      channel: 'fake',
+      chatId: 'chat',
+      workspaceId: 'workspace',
+      conversationId: 'conversation-1',
+    });
+    const setConversationModel = vi.fn(async () => undefined);
+    (ctx.host as unknown as { setConversationModel: typeof setConversationModel }).setConversationModel =
+      setConversationModel;
+    const handlerCtx = {
+      ...ctx,
+      workspaceId: 'workspace',
+      inactivityTimeoutMinutes: 30,
+      rateLimitPerMinute: 30,
+    };
+
+    await expect(handleRemoteCommand(textEvent('/model 1'), handlerCtx, 'profile-step-one')).resolves.toEqual(
+      { kind: 'handled' },
+    );
+    expect(setConversationModel).not.toHaveBeenCalled();
+    expect(channel.selectionChoiceSends[0]?.choices.map((choice) => choice.label)).toEqual([
+      'No profile',
+      '@main',
+      '@audit',
+    ]);
+
+    const profileChoices = channel.selectionChoiceSends[0]!;
+    await expect(
+      handleRemoteSelectionAction(
+        selectionEvent(profileChoices.controls.token, {
+          selectionKind: 'models',
+          action: 'select',
+          page: undefined,
+          choice: 2,
+          messageId: '42',
+        }),
+        ctx,
+        'profile-step-two',
+      ),
+    ).resolves.toEqual({ kind: 'handled' });
+    expect(setConversationModel).toHaveBeenCalledWith('conversation-1', 'qwen@audit');
+    expect(channel.selectionCloses).toEqual([{ chatId: 'chat', messageId: '42' }]);
+    expect(channel.sent.at(-1)?.text).toBe('Forge: pinned qwen@audit to this chat.');
+  });
+
   it('matches the sidebar group order and sorts names within each group', async () => {
     const store = await requestStore();
     const channel = new FakeRemoteChannel();

@@ -351,6 +351,49 @@ describe('TelegramChannel', () => {
     expect(parseTelegramSelectionCallback('a:approval')).toBeUndefined();
   });
 
+  it('renders profile choices as selectable Telegram buttons', async () => {
+    const calls: Array<{ method: string; body: Record<string, unknown> }> = [];
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor: async () => undefined,
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        calls.push({
+          method: String(url).split('/').at(-1)!,
+          body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+        });
+        return response({ message_id: 42 });
+      }) as typeof fetch,
+    });
+    const controls = { kind: 'models' as const, token: 'abcdefghijkl', page: 0, pageCount: 1 };
+
+    await channel.selectionPages.sendChoices?.(
+      'chat',
+      'Choose profile',
+      [
+        { label: 'No profile', value: 0 },
+        { label: '@audit', value: 1 },
+      ],
+      controls,
+    );
+
+    expect(calls[0]?.body).toMatchObject({
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: 'No profile', callback_data: 's:abcdefghijkl:m:p0' }],
+          [{ text: '@audit', callback_data: 's:abcdefghijkl:m:p1' }],
+          [{ text: '✕ Close', callback_data: 's:abcdefghijkl:m:x' }],
+        ],
+      },
+    });
+    expect(parseTelegramSelectionCallback('s:abcdefghijkl:m:p1')).toEqual({
+      kind: 'models',
+      token: 'abcdefghijkl',
+      action: 'select',
+      choice: 1,
+    });
+  });
+
   it('round-trips every selection kind, so a workspace page is not stamped as models', () => {
     for (const kind of ['conversations', 'models', 'workspaces'] as const) {
       const keyboard = telegramSelectionKeyboard({

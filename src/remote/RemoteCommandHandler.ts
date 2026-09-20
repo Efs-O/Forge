@@ -6,6 +6,7 @@ import {
   sendModelSelection,
   sendWorkspaceSelection,
 } from './RemoteSelectionPager';
+import { sendModelProfileSelection } from './RemoteModelProfileSelection';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
 import { collectSystemReport } from '../system/SystemReport';
@@ -367,6 +368,10 @@ async function executeRemoteCommand(
       !modelPickerSelectionEntries(context.modelEntries).some((model) => model.name === modelName)
     ) {
       return { kind: 'rejected', reason: 'model is unavailable; use /models' };
+    }
+    const baseEntry = context.modelEntries.find((model) => model.name === modelName);
+    if (baseEntry?.profiles?.length && !modelName.includes('@')) {
+      return sendModelProfileSelection(event, context, modelName);
     }
     await context.host.setConversationModel(binding.conversationId, modelName);
     await context.channel.send(event.chatId, `Forge: pinned ${modelName} to this chat.`, {

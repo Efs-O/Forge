@@ -4,6 +4,8 @@ import {
   sortModelPickerEntries,
   type ModelPickerDescriptor,
 } from '../sidebar/ModelPickerGroups';
+import { selectModelProfile } from './RemoteModelProfileSelection';
+import { SELECTION_TTL_MS } from './RemoteSelectionConstants';
 import { boldLeadingNumber, boldNumberedLine, markupTelegramLines } from './telegramHtml';
 import { formatRemoteDateTime } from './RemoteDateTime';
 import type { RemoteRequestStore } from './RemoteRequestStore';
@@ -18,7 +20,6 @@ import type {
 const OTHER_MODELS_GROUP = 'Other models';
 
 const PAGE_SIZE = 10;
-const SELECTION_TTL_MS = 10 * 60_000;
 
 export interface RemoteSelectionContext {
   channel: RemoteChannel;
@@ -159,6 +160,9 @@ async function executeSelectionAction(
   event: SelectionEvent,
   context: RemoteSelectionContext,
 ): Promise<RemoteInboundDisposition> {
+  if (event.action === 'select') {
+    return selectModelProfile(event, context);
+  }
   // Close is dismissal of a message, not an operation on a list, so it must
   // never be gated on the list still being live. Gating it left every expired
   // or superseded list -- a second /models supersedes the first -- with a

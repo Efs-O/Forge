@@ -198,6 +198,7 @@ export function telegramUpdateToEvent(
       selectionToken: selection.token,
       action: selection.action,
       ...(selection.page === undefined ? {} : { page: selection.page }),
+      ...(selection.choice === undefined ? {} : { choice: selection.choice }),
       messageId: String(callback.message.message_id),
     };
   }

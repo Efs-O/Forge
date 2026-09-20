@@ -2,6 +2,7 @@ import type {
   RemoteChannel,
   RemoteInboundDisposition,
   RemoteInboundEvent,
+  RemoteSelectionChoice,
   RemoteSelectionControls,
 } from './types';
 
@@ -26,6 +27,12 @@ export class FakeRemoteChannel implements RemoteChannel {
     text: string;
     controls: RemoteSelectionControls;
     parseMode?: 'HTML';
+  }> = [];
+  readonly selectionChoiceSends: Array<{
+    chatId: string;
+    text: string;
+    choices: readonly RemoteSelectionChoice[];
+    controls: RemoteSelectionControls;
   }> = [];
   /**
    * Opt-in, because its presence is what the pager reads as "this transport
@@ -56,6 +63,14 @@ export class FakeRemoteChannel implements RemoteChannel {
       options?: { parseMode?: 'HTML' },
     ): Promise<void> => {
       this.selectionEdits.push({ chatId, messageId, text, controls, ...pageMode(options) });
+    },
+    sendChoices: async (
+      chatId: string,
+      text: string,
+      choices: readonly RemoteSelectionChoice[],
+      controls: RemoteSelectionControls,
+    ): Promise<void> => {
+      this.selectionChoiceSends.push({ chatId, text, choices, controls });
     },
     close: async (chatId: string, messageId: string): Promise<void> => {
       this.selectionCloses.push({ chatId, messageId });

@@ -62,8 +62,9 @@ export const RemoteInboundEventSchema = z.discriminatedUnion('kind', [
     kind: z.literal('selection'),
     selectionKind: z.enum(['models', 'conversations', 'workspaces']),
     selectionToken: z.string().regex(/^[A-Za-z0-9_-]{12}$/),
-    action: z.enum(['show', 'close']),
+    action: z.enum(['show', 'close', 'select']),
     page: z.number().int().min(0).max(9).optional(),
+    choice: z.number().int().min(0).max(99).optional(),
     messageId: z.string().min(1).max(256),
   }),
 ]);
@@ -145,10 +146,23 @@ export interface RemoteSelectionControls {
   pageCount: number;
 }
 
+export interface RemoteSelectionChoice {
+  label: string;
+  value: number;
+}
+
 export interface RemoteSelectionPages {
   send(
     chatId: string,
     text: string,
+    controls: RemoteSelectionControls,
+    options?: { signal?: AbortSignal; parseMode?: 'HTML' },
+  ): Promise<void>;
+  /** Optional item picker used by transports with native choice buttons. */
+  sendChoices?(
+    chatId: string,
+    text: string,
+    choices: readonly RemoteSelectionChoice[],
     controls: RemoteSelectionControls,
     options?: { signal?: AbortSignal; parseMode?: 'HTML' },
   ): Promise<void>;
