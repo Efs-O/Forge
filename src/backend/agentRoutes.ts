@@ -32,6 +32,16 @@ export interface AgentRoutesDeps {
     text: string,
   ) => Promise<{ ok: true; exchangeId: string } | { ok: false; error: string }>;
   /**
+   * F-06: a `priority=steer` message to another agent interrupts its active
+   * turn and runs the steer next. Absent ⇒ `priority=steer` is treated as an
+   * ordinary relay (the field is ignored).
+   */
+  steer?: (
+    from: string,
+    to: string,
+    text: string,
+  ) => Promise<{ ok: true; exchangeId: string } | { ok: false; error: string }>;
+  /**
    * Validate an inbound `from` against live aliases (M6/§4). An unknown or
    * forged sender is rejected with the live list. Absent ⇒ shape check only.
    */
@@ -185,11 +195,15 @@ export class AgentRoutes {
       // prompt for itself).
       const to = (fields['to'] ?? '').trim();
       if (to && to.toLowerCase() !== 'forge') {
-        if (!this.deps.relay) {
+        const text = requireText(fields, MAX_INBOUND_CHARS);
+        // F-06: a `priority=steer` message interrupts the recipient's active
+        // turn and runs the steer next, instead of queuing behind it.
+        const isSteer = (fields['priority'] ?? '').trim().toLowerCase() === 'steer';
+        const deliver = isSteer && this.deps.steer ? this.deps.steer : this.deps.relay;
+        if (!deliver) {
           throw new HttpError(400, `no relay available to deliver to "${to}"`);
         }
-        const text = requireText(fields, MAX_INBOUND_CHARS);
-        const result = await this.deps.relay(from, to, text);
+        const result = await deliver(from, to, text);
         if (!result.ok) throw new HttpError(400, result.error);
         return sendJson(res, 202, { relayed: true, exchangeId: result.exchangeId });
       }

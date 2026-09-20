@@ -4,7 +4,7 @@ import type { BackendController } from './BackendController';
 import type { ForgeConfig, ModelConfig } from '../config/types';
 import { composeLlamaServerArgs } from './LlamaServerArgs';
 import { spawnLlamaServer, killLlamaProcess } from './llamaProcess';
-import { waitForHealthy, probeHttp, probeServedModel } from './HealthCheck';
+import { waitForHealthy, probeHttp, probeHealthy, probeServedModel } from './HealthCheck';
 import { startAdoptedServerMonitor } from './adoptedServerMonitor';
 import { attachServerDiagnostics } from './serverDiagnostics';
 import { assertModelFilesExist, servedModelMatches } from './modelFileChecks';

@@ -53,6 +53,10 @@ export interface CodexDiscoveryResult {
   threads: DiscoveredThread[];
 }
 
+/** F-11: a bound on how many `thread/list` pages to follow (avoids an infinite
+ * cursor loop on a misbehaving app-server). */
+const MAX_PAGES = 50;
+
 /**
  * Discover live Codex threads on the local app-server. Spawns a throwaway
  * app-server, lists its threads, and disposes — it never owns a session.
@@ -90,20 +94,53 @@ export class CodexDiscovery {
     if (this.options.signal) {
       this.options.signal.addEventListener('abort', () => this.dispose(), { once: true });
     }
+    // F-11: a hard bound on the whole discovery. Without it a hung app-server
+    // (a response that never arrives) leaves `discover()` awaiting forever, so
+    // its `finally` never runs and the throwaway process leaks. The timer
+    // disposes the process and rejects any in-flight request.
+    let timeout: NodeJS.Timeout | undefined;
+    if (this.options.timeoutMs && this.options.timeoutMs > 0) {
+      timeout = setTimeout(() => {
+        this.protocolError =
+          this.protocolError ?? `Codex discovery timed out after ${this.options.timeoutMs}ms.`;
+        this.pending.rejectAll(new Error(this.protocolError));
+        void this.dispose();
+      }, this.options.timeoutMs);
+      timeout.unref?.();
+    }
     try {
       await this.request('initialize', {
         clientInfo: { name: 'forge', title: 'Forge', version: '1' },
         capabilities: null,
       });
       this.notify('initialized');
-      // List all threads; the caller matches by cwd/name in-process. (The
-      // `cwd` filter is a `ThreadListCwdFilter` object whose exact shape we do
-      // not pin here — matching in-process is correct and version-tolerant.)
-      const result = await this.request('thread/list', {});
-      return { threads: this.parseThreads(result) };
+      // F-11: follow the pagination cursor so a matching thread on a later page
+      // is not invisible (a no-match/one-match decision would otherwise be
+      // wrong). The caller matches by cwd/name in-process.
+      const threads: DiscoveredThread[] = [];
+      let cursor: string | undefined;
+      for (let page = 0; page < MAX_PAGES; page++) {
+        const result = await this.request('thread/list', {
+          ...(cursor ? { cursor } : {}),
+        });
+        threads.push(...this.parseThreads(result));
+        cursor = this.nextCursor(result);
+        if (!cursor) break;
+      }
+      return { threads };
     } finally {
+      if (timeout) clearTimeout(timeout);
       await this.dispose();
     }
+  }
+
+  /** The next-page cursor from a `thread/list` response, when present. */
+  private nextCursor(result: unknown): string | undefined {
+    const value =
+      result && typeof result === 'object' ? (result as Record<string, unknown>) : undefined;
+    if (!value) return undefined;
+    const next = value['next_cursor'] ?? value['nextCursor'] ?? value['cursor'];
+    return typeof next === 'string' && next ? next : undefined;
   }
 
   private parseThreads(result: unknown): DiscoveredThread[] {

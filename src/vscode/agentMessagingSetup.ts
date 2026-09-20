@@ -57,6 +57,8 @@ export function setupAgentMessaging(
     paths: () => busPaths(),
     inbox,
     relay: mesh.relay,
+    // F-06: a `priority=steer` message interrupts the recipient's active turn.
+    steer: mesh.steer,
     validateFrom: mesh.validateFrom,
     // §8/P3: a `to: forge` message that parses as a typed lifecycle command is
     // dispatched (standby/wake/close/steer/say/handoff) and the reply returned

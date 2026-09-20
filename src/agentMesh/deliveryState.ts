@@ -85,6 +85,12 @@ export function canTransition(from: ExchangeState, to: ExchangeState): boolean {
  *
  * The log is append-only and never rewritten, so "latest state" is always
  * derived by reading — this is the single place that rule is implemented.
+ *
+ * F-03: once an exchange reaches a TERMINAL state, it stays there. A late
+ * event after a terminal (a verdict that arrives after the non-terminal
+ * deadline wrote `timeout`, a duplicate completion) is an ORPHAN, not a new
+ * completion — deriving "last event wins" would let a late `completed` flip a
+ * `timeout` back to success. So derivation stops at the first terminal state.
  */
 export function deriveLatestState(
   events: ReadonlyArray<{ state: ExchangeState; eventId: string }>,
@@ -95,6 +101,7 @@ export function deriveLatestState(
     if (seen.has(e.eventId)) continue;
     seen.add(e.eventId);
     latest = e.state;
+    if (isTerminal(e.state)) return e.state;
   }
   return latest;
 }

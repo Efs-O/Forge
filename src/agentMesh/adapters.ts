@@ -32,6 +32,11 @@ export class CodexOwnedAdapter implements MeshAdapter {
       finalText: result.finalText,
     };
   }
+
+  /** F-06: interrupt the running turn (a `priority=steer` message). */
+  interrupt(): void {
+    this.session.interrupt();
+  }
 }
 
 /**
@@ -54,6 +59,11 @@ export class ClaudeOwnedAdapter implements MeshAdapter {
       status: result.status === 'timed_out' ? 'failed' : result.status,
       finalText: result.finalText,
     };
+  }
+
+  /** F-06: interrupt the running turn (a `priority=steer` message). */
+  interrupt(): void {
+    this.session.interrupt();
   }
 }
 

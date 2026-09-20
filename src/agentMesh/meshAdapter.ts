@@ -41,6 +41,12 @@ export interface MeshAdapter {
    * caller) owns the started/completed timing from `observesTurns`.
    */
   send(message: string, options?: MeshSendOptions): Promise<TurnResult>;
+  /**
+   * F-06: interrupt the active turn (a `priority=steer` message). The current
+   * `send()` resolves with a cancelled status so the FIFO can proceed to the
+   * steer. Absent for non-observing adapters (no turn to interrupt).
+   */
+  interrupt?(): void;
 }
 
 /** A factory for an adapter bound to one alias's resolved session. */

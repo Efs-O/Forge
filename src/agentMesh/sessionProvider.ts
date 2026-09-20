@@ -4,23 +4,22 @@ import { resolveCliExecutable } from '../agents/resolveCliExecutable';
 import type { CodexAppServerSession } from '../agents/CodexAppServerSession';
 import type { ClaudeOwnedSession } from '../agents/ClaudeOwnedSession';
 import { queueToCodex } from '../agentBus/codexDelivery';
+import { pickClaudeSession, readClaudeSessions, type ClaudeSession } from '../agentBus/claudePeer';
+import { getAlias, registerAlias } from './aliasRegistry';
+import { ClaudeOwnedAdapter, ClaudePeerAdapter, CodexOwnedAdapter } from './adapters';
+import { codexQueueAdapterIfLive } from './codexPinLiveness';
 import {
-  pickClaudeSession,
-  readClaudeSessions,
-  sendPeerMessage,
-  type ClaudeSession,
-} from '../agentBus/claudePeer';
-import { relayToClaude } from '../agentBus/claudeRelay';
-import { getAlias, registerAlias, resolveSessionIdentity } from './aliasRegistry';
-import {
-  ClaudeOwnedAdapter,
-  ClaudePeerAdapter,
-  CodexOwnedAdapter,
-  CodexQueueAdapter,
-} from './adapters';
+  beginCreation,
+  defaultClaudeFactory,
+  defaultCodexFactory,
+  defaultSendClaude,
+  gateFirstCreationConsent,
+  type OwnedClaudeFactory,
+  type OwnedCodexFactory,
+} from './creationPreamble';
 import type { MeshAdapter } from './meshAdapter';
 import { getHostIdentity, isHostAlive, type HostLivenessDeps } from './hostIdentity';
-import { claimCreation, readOwnership, releaseClaim, writeOwnership } from './ownership';
+import { readOwnership, releaseClaim, writeOwnership } from './ownership';
 import type { SessionProvider } from './meshOrchestrator';
 
 /**
@@ -41,26 +40,6 @@ import type { SessionProvider } from './meshOrchestrator';
  *   recovery when this window's owned session's owner host is dead (M2/M3).
  */
 
-export interface OwnedCodexFactory {
-  create(options: {
-    alias: string;
-    threadId: string | undefined;
-    executable: string;
-    cwd: string;
-    model?: string;
-  }): Promise<CodexAppServerSession>;
-}
-
-export interface OwnedClaudeFactory {
-  create(options: {
-    alias: string;
-    sessionId: string | undefined;
-    executable: string;
-    cwd: string;
-    model?: string;
-  }): Promise<ClaudeOwnedSession>;
-}
-
 export interface SessionProviderDeps extends HostLivenessDeps {
   busRoot: string;
   getConfig: () => ForgeConfig;
@@ -75,7 +54,12 @@ export interface SessionProviderDeps extends HostLivenessDeps {
   codexFactory?: OwnedCodexFactory;
   /** Injectable for tests; production spawns a real owned Claude stdio session. */
   claudeFactory?: OwnedClaudeFactory;
-  /** First-creation consent gate (M2). Returns true to allow. */
+  /**
+   * First-creation consent gate (M2). A Forge-owned alias's first creation is a
+   * user-visible, one-time consented privileged spawn. **Required** in production
+   * wiring: when absent, a first creation is REFUSED (never auto-consented) —
+   * a silent privileged spawn is the F-01 defect this gate exists to prevent.
+   */
   requestConsent?: (alias: string) => Promise<boolean>;
   /**
    * Called when a thread RESUME fails (M3): a failed resume is a visible
@@ -98,6 +82,32 @@ export class MeshSessionProvider implements SessionProvider {
 
   isOwned(alias: string): boolean {
     return this.owned.has(alias) || this.claudeOwned.has(alias);
+  }
+
+  /**
+   * F-07: record activity on the alias's ownership record (the idle-TTL
+   * reaper's clock). Called when a message is sent to an owned session, so a
+   * busy session is never reaped while in use. Parked sessions are exempt from
+   * the TTL (park-but-warm), so this is a no-op for them.
+   */
+  touchActivity(alias: string): void {
+    const a = alias.trim().toLowerCase();
+    const rec = readOwnership(this.deps.busRoot, a);
+    if (!rec) return;
+    writeOwnership(this.deps.busRoot, { ...rec, last_activity: Date.now() });
+  }
+
+  /**
+   * True when the alias's adapter OBSERVES turns (an owned session this window
+   * holds, or a foreign live owner). A non-observing alias (a user-opened
+   * session reached by `codex queue` / a peer pipe) stays `accepted` until a
+   * verdict appears, so the orchestrator binds the exchange id into the
+   * message so the agent's verdict can be correlated (F-03).
+   */
+  isObserving(alias: string): boolean {
+    if (this.isOwned(alias)) return true;
+    const rec = readOwnership(this.deps.busRoot, alias);
+    return !!(rec?.owner_host && this.isForeignLiveOwner(rec.owner_host));
   }
 
   /**
@@ -126,15 +136,16 @@ export class MeshSessionProvider implements SessionProvider {
     // second app-server for the same thread would leave two live pipes on one
     // alias. Fall back to a user-opened queue session (if pinned), else none.
     if (rec?.owner_host && this.isForeignLiveOwner(rec.owner_host)) {
-      return this.codexAdapter();
+      return this.codexAdapterIfLive();
     }
     // A registered alias or a prior thread_id → resume owned (M3).
     if (rec?.thread_id || aliasRec) {
       const result = await this.ensureOwnedCodex('codex');
       return 'error' in result ? undefined : result;
     }
-    // No alias and no thread: the user-opened pin (non-observing).
-    return this.codexAdapter();
+    // No alias and no thread: the user-opened pin (non-observing). F-05: only
+    // when its thread is actually live on the app-server.
+    return this.codexAdapterIfLive();
   }
 
   /**
@@ -145,6 +156,18 @@ export class MeshSessionProvider implements SessionProvider {
   private isForeignLiveOwner(owner: { pid: number; startedAt: number }): boolean {
     if (!isHostAlive(owner, this.deps)) return false;
     return owner.pid !== getHostIdentity(this.deps).pid;
+  }
+
+  /**
+   * True when THIS window is the live owner of the alias's record (F-02). Only
+   * the owner may mutate parked/close the record: a peer window that cleared
+   * another window's `owner_host` would orphan the live stdio pipe and let a
+   * later message spawn a second pipe on the same alias.
+   */
+  private isOwner(alias: string): boolean {
+    const rec = readOwnership(this.deps.busRoot, alias);
+    if (!rec?.owner_host) return false;
+    return rec.owner_host.pid === getHostIdentity(this.deps).pid;
   }
 
   /**
@@ -187,23 +210,23 @@ export class MeshSessionProvider implements SessionProvider {
     return new ClaudePeerAdapter(picked.session, send);
   }
 
-  private codexAdapter(): MeshAdapter | undefined {
-    const existing = this.owned.get('codex');
-    if (existing) return new CodexOwnedAdapter(existing);
-    // No in-memory owned session. A first creation or a resume is async
-    // (ensureOwnedCodex); getAdapter is sync, so it only returns the
-    // user-opened pin here (non-observing). The orchestrator's `tell` calls
-    // ensureOwnedCodex for the owned path.
-    const bus = this.deps.getConfig().agent_bus;
-    const identity = resolveSessionIdentity(this.deps.busRoot, 'codex', bus?.codex_thread);
-    if (identity && !identity.fromAlias) {
-      return new CodexQueueAdapter(
-        bus?.codex_cli ?? 'codex',
-        identity.session_id,
-        this.deps.queueCodex ?? queueToCodex,
-      );
-    }
-    return undefined;
+  private codexAdapterCtx() {
+    return {
+      ownedCodex: this.owned.get('codex'),
+      getConfig: this.deps.getConfig,
+      busRoot: this.deps.busRoot,
+      ...(this.deps.queueCodex ? { queueCodex: this.deps.queueCodex } : {}),
+    };
+  }
+
+  /**
+   * The non-observing queue adapter, but only when the config pin is a LIVE
+   * thread (F-05). A dead UUID in `agent_bus.codex_thread` is not a live
+   * identity: returning no adapter makes `tell` refuse rather than record an
+   * accepted exchange against a ghost thread.
+   */
+  private async codexAdapterIfLive(): Promise<MeshAdapter | undefined> {
+    return codexQueueAdapterIfLive(this.codexAdapterCtx());
   }
 
   /**
@@ -223,28 +246,27 @@ export class MeshSessionProvider implements SessionProvider {
   }
 
   private async createOwnedCodex(alias: string): Promise<MeshAdapter | { error: string }> {
-    const host = getHostIdentity(this.deps);
-    const claim = claimCreation(this.deps.busRoot, alias, host, this.deps);
-    if (!claim.claimed) {
-      return {
-        error: `creation for "${alias}" is already in progress (another window holds the lease)`,
-      };
-    }
-    const rec = readOwnership(this.deps.busRoot, alias);
-    const aliasRec = getAlias(this.deps.busRoot, alias);
+    const start = await beginCreation(
+      this.deps.busRoot,
+      alias,
+      (o) => this.isForeignLiveOwner(o),
+      () => this.ensureOwnedCodex(alias),
+      this.deps,
+    );
+    if (start.kind === 'join') return this.ensureOwnedCodex(alias);
+    if (start.kind === 'refuse') return { error: start.error };
+    const { host, rec, aliasRec } = start;
     const threadId = rec?.thread_id ?? aliasRec?.session_id;
     try {
       const bus = this.deps.getConfig().agent_bus;
 
-      // First creation (no prior consent recorded): gate it.
-      if (!aliasRec && !threadId) {
-        const consent = await (this.deps.requestConsent ?? (async () => true))(alias);
-        if (!consent) {
-          return {
-            error: `creating a Forge-owned ${alias} session was not consented; nothing was started`,
-          };
-        }
-      }
+      // First creation (no prior consent recorded): gate it (F-01).
+      const refusal = await gateFirstCreationConsent(
+        alias,
+        !aliasRec && !threadId,
+        this.deps.requestConsent,
+      );
+      if (refusal) return { error: refusal };
 
       const executable = await resolveCliExecutable(bus?.codex_cli ?? 'codex', 'codex');
       const factory = this.deps.codexFactory ?? defaultCodexFactory();
@@ -309,28 +331,27 @@ export class MeshSessionProvider implements SessionProvider {
   }
 
   private async createOwnedClaude(alias: string): Promise<MeshAdapter | { error: string }> {
-    const host = getHostIdentity(this.deps);
-    const claim = claimCreation(this.deps.busRoot, alias, host, this.deps);
-    if (!claim.claimed) {
-      return {
-        error: `creation for "${alias}" is already in progress (another window holds the lease)`,
-      };
-    }
-    const rec = readOwnership(this.deps.busRoot, alias);
-    const aliasRec = getAlias(this.deps.busRoot, alias);
+    const start = await beginCreation(
+      this.deps.busRoot,
+      alias,
+      (o) => this.isForeignLiveOwner(o),
+      () => this.ensureOwnedClaude(alias),
+      this.deps,
+    );
+    if (start.kind === 'join') return this.ensureOwnedClaude(alias);
+    if (start.kind === 'refuse') return { error: start.error };
+    const { host, rec, aliasRec } = start;
     const sessionId = rec?.session_id || aliasRec?.session_id || undefined;
     try {
       const bus = this.deps.getConfig().agent_bus;
 
-      // First creation (no prior consent recorded): gate it.
-      if (!aliasRec && !sessionId) {
-        const consent = await (this.deps.requestConsent ?? (async () => true))(alias);
-        if (!consent) {
-          return {
-            error: `creating a Forge-owned ${alias} session was not consented; nothing was started`,
-          };
-        }
-      }
+      // First creation (no prior consent recorded): gate it (F-01).
+      const refusal = await gateFirstCreationConsent(
+        alias,
+        !aliasRec && !sessionId,
+        this.deps.requestConsent,
+      );
+      if (refusal) return { error: refusal };
 
       const executable = await resolveCliExecutable(bus?.claude_cli ?? 'claude', 'claude');
       const factory = this.deps.claudeFactory ?? defaultClaudeFactory();
@@ -402,6 +423,9 @@ export class MeshSessionProvider implements SessionProvider {
     const a = alias.trim().toLowerCase();
     const rec = readOwnership(this.deps.busRoot, a);
     if (!rec) return false;
+    // F-02: only the live owner may mutate the record. A peer window parking
+    // another window's session would corrupt the ownership it does not hold.
+    if (rec.owner_host && !this.isOwner(a)) return false;
     writeOwnership(this.deps.busRoot, { ...rec, parked: true });
     return true;
   }
@@ -411,6 +435,8 @@ export class MeshSessionProvider implements SessionProvider {
     const a = alias.trim().toLowerCase();
     const rec = readOwnership(this.deps.busRoot, a);
     if (!rec) return false;
+    // F-02: owner-only mutation (a peer window must not wake a session it does not hold).
+    if (rec.owner_host && !this.isOwner(a)) return false;
     writeOwnership(this.deps.busRoot, { ...rec, parked: false });
     return true;
   }
@@ -432,6 +458,11 @@ export class MeshSessionProvider implements SessionProvider {
     const a = alias.trim().toLowerCase();
     const rec = readOwnership(this.deps.busRoot, a);
     if (!rec) return false;
+    // F-02: only the live owner may close. A peer window that cleared another
+    // window's `owner_host` would orphan the live stdio pipe (the process keeps
+    // running with no owner record, and a later message spawns a second pipe on
+    // the same alias). Refuse: the owner window must close its own session.
+    if (rec.owner_host && !this.isOwner(a)) return false;
     const codex = this.owned.get(a);
     const claude = this.claudeOwned.get(a);
     if (codex) {
@@ -457,43 +488,4 @@ export class MeshSessionProvider implements SessionProvider {
     this.claudeOwned.clear();
     await Promise.all(sessions.map((s) => s.dispose()));
   }
-}
-
-function defaultSendClaude(
-  bus: ForgeConfig['agent_bus'],
-): (session: ClaudeSession, message: string, signal?: AbortSignal) => Promise<void> {
-  return (session, message, signal) => {
-    if (bus?.claude_transport === 'relay') {
-      return relayToClaude(bus.claude_cli, bus.relay_model, session.name, message, signal);
-    }
-    return sendPeerMessage(session, 'Forge', message);
-  };
-}
-
-function defaultCodexFactory(): OwnedCodexFactory {
-  return {
-    create: async ({ executable, cwd, model, threadId }) => {
-      const { CodexAppServerSession } = await import('../agents/CodexAppServerSession');
-      return new CodexAppServerSession({
-        executable,
-        cwd,
-        ...(model ? { model } : {}),
-        ...(threadId ? { confirmedSessionId: threadId } : {}),
-      });
-    },
-  };
-}
-
-function defaultClaudeFactory(): OwnedClaudeFactory {
-  return {
-    create: async ({ executable, cwd, model, sessionId }) => {
-      const { ClaudeOwnedSession } = await import('../agents/ClaudeOwnedSession');
-      return new ClaudeOwnedSession({
-        executable,
-        cwd,
-        ...(model ? { model } : {}),
-        ...(sessionId ? { confirmedSessionId: sessionId } : {}),
-      });
-    },
-  };
 }

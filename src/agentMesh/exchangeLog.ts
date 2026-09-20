@@ -243,6 +243,13 @@ export function latestStates(events: readonly ExchangeEvent[]): Map<string, Exch
  * Append one event under the in-process queue and the interprocess lock.
  * `seq` is assigned from the current log length (recomputed under the lock so
  * two processes cannot mint the same seq).
+ *
+ * F-03: the transition is validated against the exchange's current derived
+ * state before it is recorded. An illegal transition (e.g. a late `completed`
+ * after a terminal `timeout`) is REJECTED — not appended — so the board can
+ * never report a success for an exchange that already timed out. A brand-new
+ * exchange has no prior state, so its first event is checked from the implicit
+ * `created` state.
  */
 export function appendEvent(
   paths: ExchangeLogPaths,
@@ -255,6 +262,22 @@ export function appendEvent(
     acquireLockFile(paths.lock, holder, deps, deadline);
     try {
       const existing = readEvents(paths.log);
+      // F-03: a terminal state is FINAL. A new event for an exchange that has
+      // already reached a terminal state (a `completed` that arrives after the
+      // non-terminal deadline wrote `timeout`, a duplicate completion) is an
+      // ORPHAN — it is not recorded, so the board can never report a success
+      // for an exchange that already timed out. A brand-new exchange (no prior
+      // events) and any event while the exchange is still non-terminal are
+      // recorded: the latter includes the relay's two `accepted` hops and a
+      // non-advancing re-accept, which are distinct events, not transitions.
+      // The read side enforces the same rule: `deriveLatestState` stops at the
+      // first terminal state, so even a stray late event cannot flip a terminal
+      // exchange back to a live one.
+      const prior = existing.filter((e) => e.exchangeId === event.exchangeId);
+      if (prior.length > 0) {
+        const current = deriveLatestState(prior) as ExchangeState;
+        if (isTerminal(current)) return; // orphan: the exchange is already over
+      }
       const seq = existing.length > 0 ? Math.max(...existing.map((e) => e.seq)) + 1 : 1;
       const full: ExchangeEvent = { ...event, seq };
       fs.mkdirSync(path.dirname(paths.log), { recursive: true });

@@ -40,6 +40,12 @@ export interface OwnershipRecord {
   created_at: number;
   /** Parked (park-but-warm): exempt from the idle TTL (M4). */
   parked: boolean;
+  /**
+   * F-07: the last activity timestamp (a message sent or received on the
+   * owned session). The idle TTL reaper uses this to reap a long-idle owned
+   * session (keeping `thread_id` for resume). Absent on older records.
+   */
+  last_activity?: number;
 }
 
 export interface ClaimRecord {
@@ -106,6 +112,7 @@ export function readOwnership(root: string, alias: string): OwnershipRecord | un
       workspace: typeof rec.workspace === 'string' ? rec.workspace : '',
       created_at: typeof rec.created_at === 'number' ? rec.created_at : 0,
       parked: rec.parked === true,
+      ...(typeof rec.last_activity === 'number' ? { last_activity: rec.last_activity } : {}),
     };
   } catch {
     return undefined; // corrupt: treat as absent; the next write repairs it
@@ -269,11 +276,23 @@ export function recoverOwnership(root: string, deps: HostLivenessDeps = {}): Rec
   for (const alias of listOwnedAliases(root)) {
     const rec = readOwnership(root, alias);
     if (!rec) continue;
+    // F-04: a torn/empty claim with a matching record is a leftover (the
+    // claimant finished and released its claim). Clear it so it cannot
+    // deadlock every later first creation.
+    clearTornClaimWithRecord(root, alias);
     if (rec.owner_host && alive(rec.owner_host)) {
       actions.push({ alias, action: 'untouched' });
       continue;
     }
-    // Owner host dead (or already null): reap, keep thread_id.
+    // F-02: an already-null owner is a CLEAN close (or a prior reap), not a
+    // crash. Reporting it as `reaped` would emit a false `crash-<alias>` board
+    // event on every restart. Only a record that named a now-dead host is a
+    // genuine reap.
+    if (!rec.owner_host) {
+      actions.push({ alias, action: 'untouched' });
+      continue;
+    }
+    // Owner host dead: reap, keep thread_id.
     const updated: OwnershipRecord = { ...rec, owner_host: null };
     writeOwnership(root, updated);
     actions.push({
@@ -302,4 +321,54 @@ export function recoverOwnership(root: string, deps: HostLivenessDeps = {}): Rec
 /** Convenience: the current host, for records written by this window. */
 export function currentHost(deps: HostLivenessDeps = {}): HostId {
   return getHostIdentity(deps);
+}
+
+/**
+ * F-04: wait (bounded, async) for an ownership record to appear. A second
+ * caller that loses the creation lease to a live holder polls until the holder
+ * writes its record (or the deadline), so it can join the peer's session
+ * instead of reporting "in progress" while the peer is about to be ready.
+ * Returns the record once present, or undefined on timeout.
+ */
+export async function waitForRecord(
+  root: string,
+  alias: string,
+  deadlineMs: number,
+): Promise<OwnershipRecord | undefined> {
+  const end = Date.now() + deadlineMs;
+  for (;;) {
+    const rec = readOwnership(root, alias);
+    if (rec) return rec;
+    if (Date.now() >= end) return undefined;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
+/**
+ * F-04: a torn/empty claim file that names no host is not proof of death, so
+ * `claimCreation` never reclaims it. But if the ownership record for that alias
+ * already exists, the claimant finished and released its claim — the torn file
+ * is a leftover that would otherwise deadlock every later first creation. This
+ * clears it. Returns true when a leftover claim was removed.
+ */
+export function clearTornClaimWithRecord(root: string, alias: string): boolean {
+  const file = claimPath(root, alias);
+  let raw: string;
+  try {
+    raw = fs.readFileSync(file, 'utf8');
+  } catch {
+    return false; // no claim
+  }
+  let rec: ClaimRecord | undefined;
+  try {
+    rec = JSON.parse(raw) as ClaimRecord;
+  } catch {
+    rec = undefined; // torn/empty
+  }
+  if (rec && Number.isFinite(rec.host_pid) && Number.isFinite(rec.host_started_at)) {
+    return false; // well-formed: leave it to the normal dead-holder reclaim
+  }
+  if (!readOwnership(root, alias)) return false; // no record: a live creator may be mid-spawn
+  unlinkQuiet(file);
+  return true;
 }

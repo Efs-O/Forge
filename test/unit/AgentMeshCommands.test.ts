@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { isMeshCommand, parseMeshCommand } from '../../src/agentMesh/meshCommands';
 import { MeshSessionProvider } from '../../src/agentMesh/sessionProvider';
 import { readOwnership, writeOwnership, type OwnershipRecord } from '../../src/agentMesh/ownership';
+import { getHostIdentity } from '../../src/agentMesh/hostIdentity';
 import type { ForgeConfig } from '../../src/config/types';
 
 // ── Pure command grammar (§8) ────────────────────────────────────────────────
@@ -82,12 +83,15 @@ function makeProvider(): MeshSessionProvider {
 }
 
 function seedRecord(alias: string, patch: Partial<OwnershipRecord> = {}): void {
+  // Default owner_host is THIS window (the owner case): park/wake/close are
+  // owner-authorized (F-02). A test that models a foreign window passes a
+  // foreign owner_host explicitly.
   const rec: OwnershipRecord = {
     alias,
     agent: 'codex',
     session_id: 'thread-1',
     thread_id: 'thread-1',
-    owner_host: { pid: 1, startedAt: 1000 },
+    owner_host: getHostIdentity(),
     workspace: '/ws',
     created_at: 1,
     parked: false,
@@ -143,5 +147,19 @@ describe('standby state machine (§2b, P3)', () => {
   it('close is a no-op (false) for a user-opened session (no record)', async () => {
     const p = makeProvider();
     expect(await p.close('ghost')).toBe(false);
+  });
+
+  it('F-02: a foreign window cannot park/wake/close a session it does not own', async () => {
+    // A record owned by ANOTHER live window: this window is not the owner, so
+    // the lifecycle mutations are refused and the record is left intact.
+    const foreign = { pid: 1, startedAt: 1 }; // a live foreign host (pid 1 is alive)
+    seedRecord('codex', { owner_host: foreign });
+    const p = makeProvider();
+    expect(p.park('codex')).toBe(false);
+    expect(p.wake('codex')).toBe(false);
+    expect(await p.close('codex')).toBe(false);
+    // The record is untouched: the foreign owner_host is still set.
+    expect(readOwnership(root, 'codex')?.owner_host).toEqual(foreign);
+    expect(readOwnership(root, 'codex')?.parked).toBe(false);
   });
 });

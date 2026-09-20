@@ -119,10 +119,11 @@ describe('exchange log (M1/M8)', () => {
     const d = makeHost(1, 1000, new Set([1]));
     await appendEvent(paths, ev('x1', 'created', 1), d);
     await appendEvent(paths, ev('x1', 'accepted', 2), d);
-    await appendEvent(paths, ev('x1', 'completed', 3), d);
+    await appendEvent(paths, ev('x1', 'started', 3), d);
+    await appendEvent(paths, ev('x1', 'completed', 4), d);
     await compact(paths, { now: 100, maxExchanges: 5, ttlMs: 1_000_000 }, d);
     const kept = readEvents(paths.log).filter((e) => e.exchangeId === 'x1');
-    expect(kept).toHaveLength(3); // whole exchange, not a fragment
+    expect(kept).toHaveLength(4); // whole exchange, not a fragment
   });
 
   it('gives a past-deadline non-terminal exchange a terminal timeout event (M8)', async () => {

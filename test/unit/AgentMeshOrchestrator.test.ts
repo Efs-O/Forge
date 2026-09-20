@@ -68,6 +68,10 @@ function makeOrchestrator(opts: {
     provider: {
       resolveAdapter: async (alias) => opts.adapters[alias.trim().toLowerCase()],
       isOwned: (alias) => owned.has(alias.trim().toLowerCase()),
+      isObserving: (alias) => owned.has(alias.trim().toLowerCase()),
+      touchActivity: () => undefined,
+      isParked: () => false,
+      wake: () => false,
     },
   });
 }
@@ -133,10 +137,10 @@ describe('orchestrator: tell + FIFO (M5)', () => {
           ...(e.detail ? { detail: e.detail } : {}),
         }),
     });
-    fifo.enqueue({ exchangeId: 'e1', message: 'first' });
+    await fifo.enqueue({ exchangeId: 'e1', message: 'first' });
     await flush(); // e1 is now started (turn running)
-    expect(fifo.enqueue({ exchangeId: 'e2', message: 'second' }).accepted).toBe(true);
-    const res = fifo.enqueue({ exchangeId: 'e3', message: 'third' });
+    expect((await fifo.enqueue({ exchangeId: 'e2', message: 'second' })).accepted).toBe(true);
+    const res = await fifo.enqueue({ exchangeId: 'e3', message: 'third' });
     expect(res.accepted).toBe(false);
     expect(res.queueLength).toBe(1);
     expect(board.some((e) => e.exchangeId === 'e3' && e.state === 'rejected')).toBe(true);
@@ -148,7 +152,11 @@ describe('orchestrator: tell + FIFO (M5)', () => {
     const orch = makeOrchestrator({ adapters: { codex: adapter } });
     await orch.tell('codex', 'hi');
     await flush();
-    expect(adapter.sends).toEqual(['hi']);
+    // F-03: a non-observing recipient gets the exchange id bound into the
+    // message (the verdict-file instruction), so the send carries it.
+    expect(adapter.sends).toHaveLength(1);
+    expect(adapter.sends[0]).toContain('hi');
+    expect(adapter.sends[0]).toContain('.verdict.md');
     const states = board.map((e) => e.state);
     expect(states).toEqual(['accepted']); // no started, no completed
   });
@@ -180,6 +188,10 @@ describe('orchestrator: FIFO single-flight + failure states (M5/§2)', () => {
           return adapter;
         },
         isOwned: () => true,
+        isObserving: () => true,
+        touchActivity: () => undefined,
+        isParked: () => false,
+        wake: () => false,
       },
     });
     // Both tells run synchronously up to the gate before the next line, so the
@@ -216,7 +228,14 @@ describe('orchestrator: FIFO single-flight + failure states (M5/§2)', () => {
       knownAliases: () => ['codex'],
       scope: () => ({ workspace: '/ws' }),
       onEvent: (e) => board.push(e),
-      provider: { resolveAdapter: async () => throwingAdapter, isOwned: () => true },
+      provider: {
+        resolveAdapter: async () => throwingAdapter,
+        isOwned: () => true,
+        isObserving: () => true,
+        touchActivity: () => undefined,
+        isParked: () => false,
+        wake: () => false,
+      },
     });
     await orch.tell('codex', 'boom');
     await flush();
@@ -236,7 +255,14 @@ describe('orchestrator: FIFO single-flight + failure states (M5/§2)', () => {
       knownAliases: () => ['codex'],
       scope: () => ({ workspace: '/ws' }),
       onEvent: (e) => board.push(e),
-      provider: { resolveAdapter: async () => adapter, isOwned: () => true },
+      provider: {
+        resolveAdapter: async () => adapter,
+        isOwned: () => true,
+        isObserving: () => true,
+        touchActivity: () => undefined,
+        isParked: () => false,
+        wake: () => false,
+      },
     });
     await orch.tell('codex', 'running'); // starts a turn
     await flush();
@@ -325,6 +351,8 @@ describe('orchestrator: typed lifecycle commands (§8, P3)', () => {
         },
         isParked: (a) => parked.has(a),
         close: async () => true,
+        isObserving: () => true,
+        touchActivity: () => undefined,
       },
     });
     const out = await orch.handleCommand({ verb: 'steer', alias: 'codex', message: 'stop' });
@@ -349,6 +377,8 @@ describe('orchestrator: typed lifecycle commands (§8, P3)', () => {
         wake: (a) => (parked.delete(a), true),
         isParked: (a) => parked.has(a),
         close: async () => true,
+        isObserving: () => true,
+        touchActivity: () => undefined,
       },
     });
     expect(await orch.handleCommand({ verb: 'standby', alias: 'codex' })).toContain('parked');

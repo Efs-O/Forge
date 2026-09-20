@@ -82,7 +82,23 @@ export class ClaudeOwnedSession {
   async send(task: string, options: { signal?: AbortSignal } = {}): Promise<CliAgentRunResult> {
     if (this.lifecycle === 'disposed') throw new Error('Claude owned session is disposed.');
     if (this.active) throw new Error('Claude owned session already has an active turn.');
-    await this.ensureStarted();
+    // F-10: reserve the active slot BEFORE the await. The old check was before
+    // `ensureStarted()` but `this.active` was assigned only after it, so two
+    // concurrent cold sends both passed the check and both wrote a user frame.
+    // Reserving up front (and releasing on start failure) makes the check
+    // atomic across the await.
+    const placeholder: ActiveTurn = {
+      text: '',
+      resolve: () => undefined, // replaced below; never called
+      interrupted: false,
+    };
+    this.active = placeholder;
+    try {
+      await this.ensureStarted();
+    } catch (err) {
+      if (this.active === placeholder) this.active = undefined;
+      throw err;
+    }
     this.lifecycle = 'running';
     return new Promise<CliAgentRunResult>((resolve) => {
       const onAbort = (): void => {
@@ -97,11 +113,22 @@ export class ClaudeOwnedSession {
         interrupted: false,
         ...(options.signal ? { signal: options.signal, onAbort } : {}),
       };
+      // Replace the placeholder reserved before the await (F-10).
       this.active = active;
       if (options.signal?.aborted) onAbort();
       else options.signal?.addEventListener('abort', onAbort, { once: true });
       this.writeUserMessage(task);
     });
+  }
+
+  /**
+   * F-06: interrupt the active turn (a `priority=steer` message). Streaming
+   * input has no interrupt RPC, so the turn is marked interrupted and ends as
+   * `cancelled` on its next `result` (or on dispose). The FIFO then proceeds to
+   * the steer.
+   */
+  interrupt(): void {
+    if (this.active) this.active.interrupted = true;
   }
 
   async dispose(): Promise<void> {

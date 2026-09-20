@@ -33,8 +33,12 @@ export interface FifoEvent {
 }
 
 export interface AliasFifoDeps {
-  /** Report a board event (the orchestrator writes it to the exchange log). */
-  onEvent: (e: FifoEvent) => void;
+  /**
+   * Report a board event (the orchestrator writes it to the exchange log).
+   * F-03: the `accepted` event is awaited, so it is durable before the caller
+   * is told the message was accepted — a crash after the return cannot lose it.
+   */
+  onEvent: (e: FifoEvent) => Promise<void> | void;
   /** The queue bound. Overflow is `rejected` and reported, never dropped. */
   bound?: number;
 }
@@ -59,10 +63,10 @@ export class AliasFifo {
   }
 
   /** Queue a message. Returns whether it was accepted (false on overflow). */
-  enqueue(msg: FifoMessage): EnqueueResult {
+  async enqueue(msg: FifoMessage): Promise<EnqueueResult> {
     if (this.disposed) return { accepted: false, queueLength: 0 };
     if (this.queue.length >= this.bound) {
-      this.deps.onEvent({
+      await this.deps.onEvent({
         exchangeId: msg.exchangeId,
         state: 'rejected',
         detail: `queue full (${this.bound}); message not sent`,
@@ -70,13 +74,26 @@ export class AliasFifo {
       return { accepted: false, queueLength: this.queue.length };
     }
     this.queue.push(msg);
-    this.deps.onEvent({ exchangeId: msg.exchangeId, state: 'accepted' });
+    // F-03: the durable `accepted` — awaited so it is on disk before the
+    // caller is told the message was accepted.
+    await this.deps.onEvent({ exchangeId: msg.exchangeId, state: 'accepted' });
     void this.drain();
     return { accepted: true };
   }
 
   get pending(): number {
     return this.queue.length;
+  }
+
+  /**
+   * F-06: a steer. Interrupts the active turn (so the current `send()` resolves
+   * as `cancelled` and the drain loop advances), then queues the steer message
+   * — which runs next, before any ordinary queued message. A steer to a
+   * non-observing adapter has no turn to interrupt, so it is just enqueued.
+   */
+  async steer(msg: FifoMessage): Promise<EnqueueResult> {
+    this.adapter.interrupt?.();
+    return this.enqueue(msg);
   }
 
   dispose(): void {

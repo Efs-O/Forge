@@ -38,6 +38,14 @@ export interface SessionProvider {
   resolveAdapter(alias: string): Promise<MeshAdapter | undefined>;
   /** Whether this alias has a live, owned session this window holds. */
   isOwned(alias: string): boolean;
+  /**
+   * Whether the alias's adapter observes turns (F-03). A non-observing alias
+   * stays `accepted` until a verdict appears, so the exchange id is bound into
+   * the message so the agent's verdict can be correlated.
+   */
+  isObserving(alias: string): boolean;
+  /** F-07: record activity on the alias's owned session (the idle-TTL clock). */
+  touchActivity(alias: string): void;
   /** Standby: park-but-warm (§2b). True when a record was parked. */
   park(alias: string): boolean;
   /** Wake a parked session (§2b). True when a record was woken. */
@@ -74,7 +82,11 @@ export interface OrchestratorDeps extends HostLivenessDeps {
   busRoot: string;
   provider: SessionProvider;
   scope: () => MeshScope;
-  /** Write a board event (wired to the exchange log by the wiring layer). */
+  /**
+   * Write a board event (wired to the exchange log by the wiring layer).
+   * F-03: must be durable before the tell/relay result is returned, so the
+   * accepted state is on disk before the caller is told the exchange exists.
+   */
   onEvent: (e: {
     exchangeId: string;
     from: string;
@@ -82,12 +94,26 @@ export interface OrchestratorDeps extends HostLivenessDeps {
     type: string;
     state: ExchangeState;
     detail?: string;
-  }) => void;
+  }) => Promise<void> | void;
   /**
    * The set of known aliases (registered + the live config pins). Used to
    * validate a relay's `to` and to report the live list on an unknown `to`.
    */
   knownAliases: () => string[];
+  /**
+   * F-03: the outbox dir where a non-observing agent writes its verdict
+   * (`<exchangeId>.verdict.md`). Passed to the adapter so it can bind the
+   * exchange id to the verdict instruction; the wiring polls it to complete
+   * the exchange.
+   */
+  verdictDir?: string;
+  /**
+   * F-09: render an observational command (status/board/peers/queue/context)
+   * into a reply string. The wiring layer knows the scope and board projection,
+   * so it renders; the orchestrator dispatches. Absent ⇒ the command reports
+   * that the host has no board (the placeholder is preserved).
+   */
+  onObservation?: (verb: 'status' | 'board' | 'peers' | 'queue' | 'context') => string;
 }
 
 export class MeshOrchestrator {
@@ -116,7 +142,10 @@ export class MeshOrchestrator {
       const installed = this.fifos.get(alias);
       if (installed) return installed;
       const fifo = new AliasFifo(adapter, {
-        onEvent: (e: FifoEvent) => {
+        // F-03: propagate the promise so the FIFO's `await` on the durable
+        // `accepted` is real — the event is on disk before the caller is told
+        // the message was accepted.
+        onEvent: (e: FifoEvent) =>
           this.deps.onEvent({
             exchangeId: e.exchangeId,
             from: this.host,
@@ -124,8 +153,7 @@ export class MeshOrchestrator {
             type: 'state',
             state: e.state,
             ...(e.detail ? { detail: e.detail } : {}),
-          });
-        },
+          }),
       });
       this.fifos.set(alias, fifo);
       return fifo;
@@ -145,15 +173,57 @@ export class MeshOrchestrator {
         error: `unknown recipient "${to}"; live aliases: ${this.deps.knownAliases().join(', ') || 'none'}`,
       };
     }
+    // F-06: an ordinary send also wakes a parked session (§2b), so the durable
+    // parked record does not lag the new active turn.
+    if (this.deps.provider.isParked(alias)) this.deps.provider.wake(alias);
     const fifo = await this.fifoFor(alias);
     if (!fifo) {
       return { error: `no live session for "${to}" (no alias, no live pin, no owned session)` };
     }
     const exchangeId = newEventId();
-    const res = fifo.enqueue({ exchangeId, message });
+    // F-03: a non-observing recipient (a user-opened session) cannot be
+    // observed directly, so the exchange id is bound into the message. The
+    // agent's verdict file is named `<exchangeId>.verdict.md`, which the
+    // wiring polls to complete the exchange (an exchange-correlated verdict,
+    // not a transport exit code).
+    const outbound = this.deps.provider.isObserving(alias)
+      ? message
+      : `${message}\n\n[forge: when you finish this, write your verdict to outbox/${exchangeId}.verdict.md]`;
+    // F-03: the FIFO's `accepted` is the durable acknowledgement — awaited so
+    // it is on disk before we return the exchange id.
+    const res = await fifo.enqueue({ exchangeId, message: outbound });
     if (!res.accepted) {
       return { error: `queue full for "${to}" (${res.queueLength}); message rejected` };
     }
+    // F-07: a message just went to this session; refresh its idle-TTL clock.
+    this.deps.provider.touchActivity(alias);
+    return { exchangeId, to: alias, observing: this.deps.provider.isOwned(alias) };
+  }
+
+  /**
+   * F-06: a steer. Interrupts the recipient's active turn (so it resolves as
+   * `cancelled` and the FIFO advances) and queues the steer to run next, before
+   * any ordinary queued message. Wakes a parked session first (§2b).
+   */
+  async steer(to: string, message: string): Promise<TellOutcome | { error: string }> {
+    const alias = to.trim().toLowerCase();
+    if (!this.isKnownAlias(alias)) {
+      return {
+        error: `unknown recipient "${to}"; live aliases: ${this.deps.knownAliases().join(', ') || 'none'}`,
+      };
+    }
+    if (this.deps.provider.isParked(alias)) this.deps.provider.wake(alias);
+    const fifo = await this.fifoFor(alias);
+    if (!fifo) {
+      return { error: `no live session for "${to}" (no alias, no live pin, no owned session)` };
+    }
+    const exchangeId = newEventId();
+    // F-03: the FIFO's `accepted` is the durable acknowledgement (awaited).
+    const res = await fifo.steer({ exchangeId, message });
+    if (!res.accepted) {
+      return { error: `queue full for "${to}" (${res.queueLength}); steer rejected` };
+    }
+    this.deps.provider.touchActivity(alias);
     return { exchangeId, to: alias, observing: this.deps.provider.isOwned(alias) };
   }
 
@@ -186,8 +256,9 @@ export class MeshOrchestrator {
       return { error: `no live session for "${to}"` };
     }
     const exchangeId = newEventId();
-    // Hop 1: the inbound message, as received.
-    this.deps.onEvent({
+    // Hop 1: the inbound message, as received. F-03: durable before the relay
+    // result is returned.
+    await this.deps.onEvent({
       exchangeId,
       from,
       to: this.host,
@@ -195,12 +266,14 @@ export class MeshOrchestrator {
       state: 'accepted',
       detail: 'inbound bus message',
     });
-    const res = fifo.enqueue({ exchangeId, message });
+    const res = await fifo.enqueue({ exchangeId, message });
     if (!res.accepted) {
       return { error: `queue full for "${to}" (${res.queueLength}); relay rejected` };
     }
-    // Hop 2: the host's forward to the recipient.
-    this.deps.onEvent({
+    // F-07: a relayed message just reached this session; refresh its TTL clock.
+    this.deps.provider.touchActivity(recipient);
+    // Hop 2: the host's forward to the recipient (idempotent `accepted`).
+    await this.deps.onEvent({
       exchangeId,
       from: this.host,
       to: recipient,
@@ -294,13 +367,11 @@ export class MeshOrchestrator {
         return 'error' in res ? res.error : `sent to ${res.to} (exchange ${res.exchangeId})`;
       }
       case 'steer': {
-        // A steer to a parked session wakes it (§6/§2b), then the message goes
-        // through the FIFO (one active turn per alias, M5).
-        if (this.deps.provider.isParked(cmd.alias)) this.deps.provider.wake(cmd.alias);
+        // F-06: a steer interrupts the active turn and runs next (§6/§2b).
         const message = cmd.message.trim()
           ? cmd.message
           : 'steer: interrupt the current work and report status';
-        const res = await this.tell(cmd.alias, message);
+        const res = await this.steer(cmd.alias, message);
         return 'error' in res ? res.error : `steered ${res.to} (exchange ${res.exchangeId})`;
       }
       case 'standby': {
@@ -327,9 +398,10 @@ export class MeshOrchestrator {
           : `"${cmd.alias}" is not a Forge-owned session (never closes a user-opened session)`;
       }
       default:
-        // Observational commands (status/board/peers/queue/context) are handled
-        // by the wiring layer, which knows the scope and board projection. The
-        // orchestrator reports that here so the grammar stays complete.
+        // F-09: observational commands render real scoped state through the
+        // wiring layer's projection. Without a renderer installed, the
+        // placeholder is preserved (the grammar stays complete).
+        if (this.deps.onObservation) return this.deps.onObservation(cmd.verb);
         return `"${cmd.verb}" is handled by the host (scope + board)`;
     }
   }
