@@ -58,6 +58,7 @@ export function totpSecretKey(channel: RemoteInboundEvent['channel']): string {
  */
 const ACTIONABLE_WHEN_AUTHENTICATED = new Set<RemoteInboundEvent['kind']>([
   'action',
+  'contact_action',
   'selection',
   'text',
   'voice',

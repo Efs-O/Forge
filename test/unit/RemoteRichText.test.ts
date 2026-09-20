@@ -81,14 +81,24 @@ describe('remote command map', () => {
     'src/remote/RemotePowerCommands.ts',
     // B3: /jobs and /job live in their own file, same reason as the power one.
     'src/remote/RemoteJobCommands.ts',
+    // Contact management is intentionally isolated from the ordinary command
+    // handler so non-owner users can never reach it.
+    'src/remote/TelegramContactService.ts',
   ];
   // Aliases that still answer but are hidden from the help text and native
   // menu — two names for one thing in the command map is what made the old one
   // hard to read. `/list` and `/select` were renamed to `/chats` and `/chat`;
   // `/models` was folded into `/model` (bare `/model` lists, `/model <n>` pins),
   // but it still pages the model list on a plain-text transport, so it answers.
-  const UNDOCUMENTED_ALIASES = new Set(['/commands', '/list', '/select', '/models']);
-  const EXTRA_IMPLEMENTED = ['/steer'];
+  const UNDOCUMENTED_ALIASES = new Set([
+    '/commands',
+    '/list',
+    '/select',
+    '/models',
+    // Contact onboarding is intentionally not an owner command/menu entry.
+    '/start',
+  ]);
+  const EXTRA_IMPLEMENTED = ['/contact', '/contacts', '/send', '/steer'];
 
   const implemented = new Set(
     SOURCES.flatMap((file) =>

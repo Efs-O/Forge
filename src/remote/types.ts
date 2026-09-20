@@ -59,6 +59,12 @@ export const RemoteInboundEventSchema = z.discriminatedUnion('kind', [
     correlationId: z.string().min(1).max(256),
   }),
   InboundBaseSchema.extend({
+    kind: z.literal('contact_action'),
+    action: z.enum(['send', 'cancel']),
+    correlationId: z.string().regex(/^[A-Za-z0-9_-]{16,48}$/),
+    messageId: z.string().min(1).max(256),
+  }),
+  InboundBaseSchema.extend({
     kind: z.literal('selection'),
     selectionKind: z.enum(['models', 'conversations', 'workspaces']),
     selectionToken: z.string().regex(/^[A-Za-z0-9_-]{12}$/),
@@ -121,6 +127,58 @@ export interface RemoteAttachmentReference {
   mediaType: string;
   relativePath: string;
   bytes: number;
+}
+
+export type RemoteContactStatus = 'active' | 'disabled';
+
+export interface RemoteContactRecord {
+  id: string;
+  displayName: string;
+  telegramChatId: string;
+  telegramUserId: string;
+  role: 'contact_only';
+  status: RemoteContactStatus;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface RemoteContactPendingRecord {
+  id: string;
+  telegramChatId: string;
+  telegramUserId: string;
+  createdAt: number;
+  updatedAt: number;
+  status: 'pending' | 'approved' | 'rejected';
+}
+
+export interface RemoteContactThreadMessage {
+  id: string;
+  contactId: string;
+  role: 'contact' | 'assistant';
+  text: string;
+  createdAt: number;
+}
+
+export type RemoteContactOutboundState =
+  | 'pending'
+  | 'confirmed'
+  | 'cancelled'
+  | 'expired'
+  | 'sent'
+  | 'failed';
+
+export interface RemoteContactOutboundRecord {
+  id: string;
+  contactId: string;
+  ownerId: string;
+  ownerChatId: string;
+  recipientChatId: string;
+  recipientDisplayName: string;
+  text: string;
+  createdAt: number;
+  expiresAt: number;
+  updatedAt: number;
+  state: RemoteContactOutboundState;
 }
 
 export interface RemoteOutboxRecord {
@@ -191,6 +249,23 @@ export interface RemoteChannel {
     text: string,
     options?: { correlationId?: string; signal?: AbortSignal },
   ): Promise<string[] | void>;
+  /** Optional typed inline keyboard used by Telegram contact approvals. */
+  sendInlineKeyboard?(
+    chatId: string,
+    text: string,
+    buttons: readonly RemoteContactButton[][],
+    options?: { signal?: AbortSignal },
+  ): Promise<string | undefined>;
+  answerCallbackQuery?(
+    callbackId: string,
+    text?: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<void>;
+  clearInlineKeyboard?(
+    chatId: string,
+    messageId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<void>;
   /** Telegram-only rich-text delivery. Other transports keep plain text. */
   sendHtml?(
     chatId: string,
@@ -263,6 +338,11 @@ export interface RemoteChannel {
   requestPairingCode?(phoneNumber: string): Promise<string>;
   unlink?(): Promise<void>;
   healthCheck?(): Promise<RemoteTransportHealth>;
+}
+
+export interface RemoteContactButton {
+  text: string;
+  callbackData: string;
 }
 
 /**

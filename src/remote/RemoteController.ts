@@ -34,6 +34,7 @@ import {
 import type { RemoteSpeechDelivery } from './RemoteSpeechDelivery';
 import { handleRemoteSelectionAction } from './RemoteSelectionPager';
 import type { RemoteControllerOptions } from './remoteControllerOptions';
+import type { TelegramContactService } from './TelegramContactService';
 export type { RemoteControllerOptions };
 
 /** Durable transport-independent admission, FIFO execution, and notification. */
@@ -83,6 +84,7 @@ export class RemoteController {
     private readonly voice?: VoiceBridgeBundle | undefined,
     /** Absent when `voice.output.enabled` is false; replies stay text-only. */
     speech?: RemoteSpeechDelivery | undefined,
+    private readonly contactService?: TelegramContactService,
   ) {
     this.rateLimiter = new RemoteRateLimiter(options.rateLimitPerMinute);
     this.outbox = new RemoteOutboxDelivery(
@@ -184,6 +186,7 @@ export class RemoteController {
     this.progressSubscription = undefined;
     this.approvals.stop();
     this.questions.stop();
+    this.contactService?.dispose();
     await Promise.allSettled(
       [...this.activeConversations].map((conversationId) => this.host.cancel(conversationId)),
     );
@@ -211,7 +214,6 @@ export class RemoteController {
   async broadcastHostNotification(text: string): Promise<number> {
     return this.fanout.toWorkspace(text);
   }
-
   async mirrorTurn(conversationId: string, text: string): Promise<number> {
     return this.fanout.mirrorTurn(conversationId, text);
   }
@@ -235,7 +237,6 @@ export class RemoteController {
   isNotifyOn(chatId: string): boolean {
     return this.fanout.isNotifyOn(chatId);
   }
-
   async handle(raw: RemoteInboundEvent): Promise<RemoteInboundDisposition> {
     if (!this.accepting) return { kind: 'retry', reason: 'remote runtime is stopping' };
     const parsed = RemoteInboundEventSchema.safeParse(raw);
@@ -245,6 +246,8 @@ export class RemoteController {
     if (event.chatType !== 'private') return { kind: 'rejected', reason: 'private chats only' };
 
     if (!(await this.auth.isOwner(event))) {
+      const contactResult = await this.contactService?.handleNonOwner(event);
+      if (contactResult) return contactResult;
       if ((await this.auth.tryPair(event)) === 'paired') {
         await this.audit?.record(event, 'paired').catch(() => undefined);
         await this.channel.send(event.chatId, 'Forge remote pairing complete.', {
@@ -257,16 +260,6 @@ export class RemoteController {
     const gate = await this.auth.gate(event);
     if (gate.kind === 'challenge') {
       await this.audit?.record(event, 'authentication_challenge').catch(() => undefined);
-      // Hold a PROMPT rather than discarding it: the sender is already proven to
-      // be the enrolled owner, so only the second factor is outstanding, and
-      // retyping a long prompt on a phone is the whole cost of expiry.
-      //
-      // A command is never held. It costs nothing to retype, and holding one
-      // fires it at a moment its sender did not choose: `/reload` typed at a
-      // locked session came back with the code and reloaded the window, which
-      // locked the session again — the same command arriving twice from one
-      // keystroke. The reason a prompt is worth holding (it is expensive to
-      // reproduce) is exactly the reason a command is not.
       const held = event.kind === 'text' && !isRemoteCommand(event.text);
       if (held) this.pending.hold(event);
       const idleMinutes = this.options.inactivityTimeoutMinutes ?? 30;
@@ -316,10 +309,6 @@ export class RemoteController {
         `Forge: running your held prompt — ${previewPrompt(heldPrompt.text)}`,
         { signal: this.abort.signal },
       );
-      // Re-entering handle() is what keeps /commands, /steer, attachments and the
-      // length check working on a replay. It cannot recurse: the held event now
-      // gates as authorized without newlyAuthenticated, so this branch is
-      // unreachable the second time.
       return await this.handle(heldPrompt);
     }
     if (event.kind === 'text' && event.text === '/lock') {
@@ -363,6 +352,14 @@ export class RemoteController {
       }
       this.auth.touch(event);
       return { kind: 'handled' };
+    }
+    if (event.kind === 'contact_action') {
+      return (
+        (await this.contactService?.handleAction(event)) ?? {
+          kind: 'rejected',
+          reason: 'contact service unavailable',
+        }
+      );
     }
     if (event.kind === 'voice') {
       if (!this.voice) {
@@ -451,6 +448,9 @@ export class RemoteController {
           ...(this.options.reloadWindow ? { reloadWindow: this.options.reloadWindow } : {}),
           ...(this.options.voiceToggle ? { voiceToggle: this.options.voiceToggle } : {}),
           ...(this.options.jobs ? { jobs: this.options.jobs } : {}),
+          ...(this.contactService
+            ? { contactCommands: this.contactService.handleOwnerCommand.bind(this.contactService) }
+            : {}),
           resumeCurrent: (resumeEvent, resumeDedupKey) =>
             resumeRemoteConversation(resumeEvent, resumeDedupKey, this.promptDeps),
         },

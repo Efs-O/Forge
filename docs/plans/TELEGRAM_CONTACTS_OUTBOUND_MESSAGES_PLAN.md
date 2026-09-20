@@ -1,6 +1,7 @@
 # Telegram Contacts and Approved Contact Messages — Implementation Plan
 
-Status: plan only. No source implementation is included in this change.
+Status: implemented 2026-09-21. Source, focused tests, and the starter contact
+instructions template are included; live Telegram verification remains manual.
 
 ## Goal
 
@@ -244,8 +245,8 @@ Create a focused loader for `.forge/contact-instructions.md`:
 - reload safely when the file changes;
 - never merge the file into the normal `FORGE.md` instruction chain.
 
-The implementation should provide a concise starter template for setup, but
-must never overwrite an existing owner-authored file.
+The implementation provides `config/contact-instructions.example.md` as a
+starter template, but never overwrites an existing owner-authored file.
 
 ### 7. `src/remote/ContactPolicy.ts` — pure contact policy
 
@@ -475,16 +476,29 @@ After implementation:
 
 ## Completion gates
 
-- [ ] Every inbound Telegram event is authorized before any Forge session or
+- [x] Every inbound Telegram event is authorized before any Forge session or
   agent routing.
-- [ ] Contact records and outbound drafts are schema-validated and atomically
+- [x] Contact records and outbound drafts are schema-validated and atomically
   persisted.
-- [ ] Contacts cannot access owner commands, sessions, tools, files, settings,
+- [x] Contacts cannot access owner commands, sessions, tools, files, settings,
   model controls, prompts, logs, or other contacts.
-- [ ] Same-model contact work uses only a free `n_parallel` slot.
-- [ ] Different-model loading/eviction is refused.
-- [ ] Every substantive contact-facing message requires owner confirmation.
-- [ ] Duplicate and foreign callbacks cannot send.
-- [ ] Logging is metadata-only and privacy-safe.
-- [ ] `npm run ci`, `npm run package`, `git diff --check`, and `git status` pass
+- [x] Same-model contact work uses only a free `n_parallel` slot.
+- [x] Different-model loading/eviction is refused.
+- [x] Every substantive contact-facing message requires owner confirmation.
+- [x] Duplicate and foreign callbacks cannot send.
+- [x] Logging is metadata-only and privacy-safe.
+- [x] `npm run ci`, `npm run package`, `git diff --check`, and `git status` pass
   after the final implementation/test/plan edits.
+
+## Implementation notes
+
+- Contact state is exposed through `RemoteContactStore` and retention through
+  `RemoteContactRetention`, keeping `RemoteRequestStore` under the 500-line
+  lint boundary while preserving its single serialized persistence owner.
+- The host contact seam pins the already-ready backend with the existing
+  non-evicting delegation hold for the complete generation. It refuses cold
+  starts, different active models, unknown standalone prompt activity, and
+  exhausted parallel capacity.
+- Missing `.forge/contact-instructions.md` is allowed: Forge still applies the
+  built-in deny-list and contact-only policy. The example file documents the
+  optional owner-authored additions.

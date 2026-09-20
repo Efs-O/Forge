@@ -7,6 +7,9 @@ import { RemoteController } from './RemoteController';
 import { buildVoiceBridge, type VoiceBridgeBundle } from './RemoteVoiceBridge';
 import { buildSpeechDelivery, type RemoteSpeechDelivery } from './RemoteSpeechDelivery';
 import { RemoteRequestStore } from './RemoteRequestStore';
+import { RemoteContactStore } from './RemoteContactStore';
+import { ContactInstructionsLoader } from './ContactInstructionsLoader';
+import { TelegramContactService } from './TelegramContactService';
 import { RemoteTransportLease } from './RemoteTransportLease';
 import type { RemoteChannel, RemoteRuntimeOptions } from './types';
 import { RemoteAuditLog } from './RemoteAuditLog';
@@ -26,6 +29,7 @@ export interface ActiveTransport {
   subscriptions: HostSubscriptions;
   voice?: VoiceBridgeBundle | undefined;
   speech?: RemoteSpeechDelivery | undefined;
+  contactService?: TelegramContactService | undefined;
   /**
    * Drains the jobs outbox to the owner chat (B.4). Present only when
    * `jobs.enabled`: this window holds the Telegram lease, so it is the one
@@ -115,6 +119,18 @@ export class RemoteTransportManager {
         confirmServerStart: this.options.confirmWhisperServerStart,
       });
       const speech = buildSpeechDelivery(channel, config, undefined, this.options.notifyLocal);
+      const contactService =
+        channelName === 'telegram'
+          ? new TelegramContactService(
+              channel,
+              this.auth,
+              new RemoteContactStore(this.store),
+              this.options.host,
+              new ContactInstructionsLoader(this.deps.workspaceRoot),
+              this.audit,
+              this.options.notifyLocal,
+            )
+          : undefined;
       const controller = new RemoteController(
         channel,
         this.store,
@@ -124,6 +140,7 @@ export class RemoteTransportManager {
         this.audit,
         voice,
         speech,
+        contactService,
       );
       const subscriptions = subscribeHostToRemote(this.options.host, controller, {
         onCompaction: (event) => this.onCompaction(event, controller),
@@ -157,12 +174,14 @@ export class RemoteTransportManager {
           subscriptions,
           ...(voice ? { voice } : {}),
           ...(speech ? { speech } : {}),
+          ...(contactService ? { contactService } : {}),
           ...(jobOutboxWatcher ? { jobOutboxWatcher } : {}),
         });
         this.notifyStatus();
       } catch (err) {
         subscriptions.dispose();
         this.onTransportStopped(controller);
+        contactService?.dispose();
         await voice?.dispose();
         throw err;
       }

@@ -8,7 +8,12 @@ import { downloadTelegramAttachment, downloadTelegramAttachmentToFile } from './
 import { pollTelegramUpdates, TELEGRAM_CURSOR_KEY } from './TelegramPolling';
 export { MAX_TELEGRAM_IMAGES_PER_MESSAGE } from './TelegramAlbumBuffer';
 export { splitTelegramText } from './TelegramText';
-import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
+import type {
+  RemoteChannel,
+  RemoteContactButton,
+  RemoteInboundDisposition,
+  RemoteInboundEvent,
+} from './types';
 import { createTelegramSelectionPages } from './TelegramSelectionPagination';
 import { postTelegram, TelegramChatQueue } from './telegramSendQueue';
 
@@ -26,6 +31,8 @@ export const TELEGRAM_BOT_COMMANDS = [
   { command: 'chats', description: 'List recent conversations' },
   { command: 'clanker', description: 'Set approval-gate mode' },
   { command: 'compact', description: 'Compact the conversation' },
+  { command: 'contact', description: 'Approve or disable a contact' },
+  { command: 'contacts', description: 'List pending or active contacts' },
   { command: 'context', description: 'Context usage and tokens' },
   { command: 'drop', description: 'Drop queued prompt or all' },
   { command: 'help', description: 'Show all Forge commands' },
@@ -44,6 +51,7 @@ export const TELEGRAM_BOT_COMMANDS = [
   { command: 'reload', description: 'Reload VS Code window' },
   { command: 'restart', description: 'Restart the pinned model' },
   { command: 'resume', description: 'Continue the current conversation' },
+  { command: 'send', description: 'Prepare a confirmed message to a contact' },
   { command: 'sleep', description: 'Suspend this machine (needs /sleep confirm)' },
   { command: 'status', description: 'Session, model, queue' },
   { command: 'steer', description: 'Run queued <n> or new text now' },
@@ -218,6 +226,64 @@ export class TelegramChannel implements RemoteChannel {
     const sent = await this.call('sendMessage', { chat_id: chatId, text }, options?.signal);
     const parsed = TelegramSentMessageSchema.safeParse(sent);
     return parsed.success ? String(parsed.data.message_id) : undefined;
+  }
+
+  async sendInlineKeyboard(
+    chatId: string,
+    text: string,
+    buttons: readonly RemoteContactButton[][],
+    options?: { signal?: AbortSignal },
+  ): Promise<string | undefined> {
+    const chunks = splitTelegramText(text);
+    const keyboard = buttons.map((row) =>
+      row.map((button) => {
+        if (Buffer.byteLength(button.callbackData, 'utf8') > TELEGRAM_CALLBACK_DATA_LIMIT_BYTES) {
+          throw new Error('Forge Telegram callback identifier exceeds the Bot API limit.');
+        }
+        return { text: button.text, callback_data: button.callbackData };
+      }),
+    );
+    let firstMessageId: string | undefined;
+    for (let index = 0; index < chunks.length; index++) {
+      const sent = await this.call(
+        'sendMessage',
+        {
+          chat_id: chatId,
+          text: chunks[index],
+          ...(index === 0 ? { reply_markup: { inline_keyboard: keyboard } } : {}),
+        },
+        options?.signal,
+      );
+      if (index === 0) {
+        const parsed = TelegramSentMessageSchema.safeParse(sent);
+        if (parsed.success) firstMessageId = String(parsed.data.message_id);
+      }
+    }
+    return firstMessageId;
+  }
+
+  async answerCallbackQuery(
+    callbackId: string,
+    text?: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<void> {
+    await this.call(
+      'answerCallbackQuery',
+      { callback_query_id: callbackId, ...(text ? { text } : {}) },
+      options?.signal,
+    );
+  }
+
+  async clearInlineKeyboard(
+    chatId: string,
+    messageId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<void> {
+    await this.call(
+      'editMessageReplyMarkup',
+      { chat_id: chatId, message_id: Number(messageId), reply_markup: { inline_keyboard: [] } },
+      options?.signal,
+    );
   }
 
   async editMessage(

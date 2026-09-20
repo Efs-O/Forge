@@ -202,6 +202,21 @@ export function telegramUpdateToEvent(
       messageId: String(callback.message.message_id),
     };
   }
+  const contact = /^c:([A-Za-z0-9_-]{16,48}):([sc])$/.exec(callback.data);
+  if (contact) {
+    return {
+      channel: 'telegram',
+      kind: 'contact_action',
+      providerMessageId: callback.id,
+      senderId: String(callback.from.id),
+      chatId: String(callback.message.chat.id),
+      chatType: telegramChatType(callback.message.chat.type),
+      receivedAt: Date.now(),
+      action: contact[2] === 's' ? 'send' : 'cancel',
+      correlationId: contact[1]!,
+      messageId: String(callback.message.message_id),
+    };
+  }
   const match = /^([ad]):(.+)$/.exec(callback.data);
   if (!match) return undefined;
   return {

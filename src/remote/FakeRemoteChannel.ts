@@ -1,5 +1,6 @@
 import type {
   RemoteChannel,
+  RemoteContactButton,
   RemoteInboundDisposition,
   RemoteInboundEvent,
   RemoteSelectionChoice,
@@ -14,6 +15,13 @@ export class FakeRemoteChannel implements RemoteChannel {
   readonly deleted: Array<{ chatId: string; messageId: string }> = [];
   readonly photos: Array<{ chatId: string; filePath: string; caption: string }> = [];
   readonly progress: Array<{ chatId: string; text: string }> = [];
+  readonly inlineKeyboards: Array<{
+    chatId: string;
+    text: string;
+    buttons: readonly RemoteContactButton[][];
+  }> = [];
+  readonly callbackAnswers: Array<{ callbackId: string; text?: string }> = [];
+  readonly clearedKeyboards: Array<{ chatId: string; messageId: string }> = [];
   readonly edits: Array<{ chatId: string; messageId: string; text: string }> = [];
   readonly selectionPageSends: Array<{
     chatId: string;
@@ -119,6 +127,23 @@ export class FakeRemoteChannel implements RemoteChannel {
   async sendProgress(chatId: string, text: string): Promise<string> {
     this.progress.push({ chatId, text });
     return String(this.progress.length);
+  }
+
+  async sendInlineKeyboard(
+    chatId: string,
+    text: string,
+    buttons: readonly RemoteContactButton[][],
+  ): Promise<string> {
+    this.inlineKeyboards.push({ chatId, text, buttons });
+    return `keyboard-${this.inlineKeyboards.length}`;
+  }
+
+  async answerCallbackQuery(callbackId: string, text?: string): Promise<void> {
+    this.callbackAnswers.push({ callbackId, ...(text ? { text } : {}) });
+  }
+
+  async clearInlineKeyboard(chatId: string, messageId: string): Promise<void> {
+    this.clearedKeyboards.push({ chatId, messageId });
   }
 
   async editMessage(chatId: string, messageId: string, text: string): Promise<void> {

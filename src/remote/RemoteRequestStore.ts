@@ -40,12 +40,12 @@ import {
   removeSelection,
   replaceSelection,
 } from './RemoteSelectionState';
+import { pruneContactState } from './RemoteContactRetention';
 
 export function remoteDedupKey(channel: string, chatId: string, messageId: string): string {
   return `${channel}\u0000${chatId}\u0000${messageId}`;
 }
 
-/** Versioned global-storage state with one serialized atomic mutation owner. */
 export class RemoteRequestStore {
   private state: RemoteStoreState = structuredClone(EMPTY_REMOTE_STATE);
   private mutationTail: Promise<void> = Promise.resolve();
@@ -88,6 +88,14 @@ export class RemoteRequestStore {
 
   getRequest(id: string): RemoteRequestRecord | undefined {
     return this.state.requests.find((request) => request.id === id);
+  }
+  contactRead<T>(reader: (state: RemoteStoreState) => T): T {
+    return reader(this.state);
+  }
+
+  contactMutate<T>(mutator: (draft: RemoteStoreState) => T, reloadFirst = true): Promise<T> {
+    let result!: T;
+    return this.mutate((draft) => (result = mutator(draft)), reloadFirst).then(() => result);
   }
 
   queued(conversationId?: string, channel?: RemoteRequestRecord['channel']): RemoteRequestRecord[] {
@@ -426,11 +434,6 @@ export class RemoteRequestStore {
     });
   }
 
-  /**
-   * Rereads the file. Every window shares one state file and `persist()` writes
-   * the whole document, so a window that sat idle while another wrote must
-   * reread before mutating or its stale copy reverts the other window's work.
-   */
   async refresh(): Promise<void> {
     const operation = this.mutationTail.then(() => this.reload());
     this.mutationTail = operation.catch(() => undefined);
@@ -441,14 +444,10 @@ export class RemoteRequestStore {
     try {
       this.state = RemoteStateSchema.parse(JSON.parse(await fs.readFile(this.filePath, 'utf8')));
     } catch (err) {
-      // A file that is missing or unreadable leaves the in-memory copy in
-      // place: this is a refresh, not a load, and has no state to recover to.
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
     }
   }
 
-  /** `reloadFirst` rereads and mutates inside one queue entry, so a decision
-   *  taken on another window's writes cannot be overtaken between the two. */
   private mutate(mutator: (draft: RemoteStoreState) => void, reloadFirst = false): Promise<void> {
     const operation = this.mutationTail.then(async () => {
       if (reloadFirst) await this.reload();
@@ -471,6 +470,7 @@ export class RemoteRequestStore {
       draft.workspaceHandoffs = draft.workspaceHandoffs.filter(
         (item) => item.expiresAt >= Date.now(),
       );
+      pruneContactState(draft, cutoff, Date.now());
       RemoteStateSchema.parse(draft);
       await this.persist(draft);
       this.state = draft;

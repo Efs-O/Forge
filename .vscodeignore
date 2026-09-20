@@ -40,6 +40,7 @@ vitest.config.*
 # unnoticed: benchmarks/COST_ESTIMATES.md rode along in every VSIX until 0.15.27.
 **/*.md
 !README.md
+!config/contact-instructions.example.md
 # Generated from CHANGES.md by scripts/sync-changelog.mjs. Without this line the
 # `*.md` rule above strips it and both registries show "No changelog available".
 !CHANGELOG.md

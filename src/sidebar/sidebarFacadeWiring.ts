@@ -36,6 +36,9 @@ export function createSidebarHostFacade(deps: SidebarFacadeDeps): ForgeHostFacad
     // unless the pipeline draws one.
     send: (conversationId, text, attachments, options) =>
       send.send(text, attachments, conversationId, undefined, { ...options, echoPrompt: true }),
+    runContactPrompt: (text, systemPromptText) =>
+      agentLoop.runContactPrompt(text, systemPromptText),
+    cancelContactPrompts: () => agentLoop.cancelContactPrompts(),
     cancel: async (conversationId) => {
       requestChains.markCancelling(conversationId);
       await agentLoop.cancel(conversationId);

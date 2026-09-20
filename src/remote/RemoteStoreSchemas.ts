@@ -86,6 +86,48 @@ const WorkspaceHandoffSchema = z.object({
   expiresAt: z.number(),
 });
 
+const ContactPendingSchema = z.object({
+  id: z.string().min(1).max(128),
+  telegramChatId: z.string().regex(/^-?[0-9]{1,32}$/),
+  telegramUserId: z.string().regex(/^[0-9]{1,32}$/),
+  createdAt: z.number().int().nonnegative(),
+  updatedAt: z.number().int().nonnegative(),
+  status: z.enum(['pending', 'approved', 'rejected']),
+});
+
+const ContactSchema = z.object({
+  id: z.string().min(1).max(128),
+  displayName: z.string().trim().min(1).max(80),
+  telegramChatId: z.string().regex(/^-?[0-9]{1,32}$/),
+  telegramUserId: z.string().regex(/^[0-9]{1,32}$/),
+  role: z.literal('contact_only'),
+  status: z.enum(['active', 'disabled']),
+  createdAt: z.number().int().nonnegative(),
+  updatedAt: z.number().int().nonnegative(),
+});
+
+const ContactThreadMessageSchema = z.object({
+  id: z.string().min(1).max(128),
+  contactId: z.string().min(1).max(128),
+  role: z.enum(['contact', 'assistant']),
+  text: z.string().min(1).max(12_000),
+  createdAt: z.number().int().nonnegative(),
+});
+
+const ContactOutboundSchema = z.object({
+  id: z.string().regex(/^[A-Za-z0-9_-]{16,48}$/),
+  contactId: z.string().min(1).max(128),
+  ownerId: z.string().regex(/^[0-9]{1,32}$/),
+  ownerChatId: z.string().regex(/^-?[0-9]{1,32}$/),
+  recipientChatId: z.string().regex(/^-?[0-9]{1,32}$/),
+  recipientDisplayName: z.string().trim().min(1).max(80),
+  text: z.string().min(1).max(12_000),
+  createdAt: z.number().int().nonnegative(),
+  expiresAt: z.number().int().nonnegative(),
+  updatedAt: z.number().int().nonnegative(),
+  state: z.enum(['pending', 'confirmed', 'cancelled', 'expired', 'sent', 'failed']),
+});
+
 export const LegacyRemoteStateSchema = z.object({
   version: z.literal(1),
   requests: z.array(RequestSchema),
@@ -104,6 +146,10 @@ export const RemoteStateSchema = z.object({
   controlReceipts: z.array(ControlReceiptSchema).default([]),
   selections: z.array(RemoteSelectionSchema).default([]),
   workspaceHandoffs: z.array(WorkspaceHandoffSchema).default([]),
+  contactPending: z.array(ContactPendingSchema).default([]),
+  contacts: z.array(ContactSchema).default([]),
+  contactThread: z.array(ContactThreadMessageSchema).default([]),
+  contactOutbound: z.array(ContactOutboundSchema).default([]),
 });
 
 export type RemoteStoreState = z.infer<typeof RemoteStateSchema>;
@@ -119,6 +165,10 @@ export const EMPTY_REMOTE_STATE: RemoteStoreState = {
   controlReceipts: [],
   selections: [],
   workspaceHandoffs: [],
+  contactPending: [],
+  contacts: [],
+  contactThread: [],
+  contactOutbound: [],
 };
 
 export const MAX_RECORDS = 1_000;
@@ -141,5 +191,9 @@ export function migrateLegacyState(
     controlReceipts: legacy.controlReceipts,
     selections: [],
     workspaceHandoffs: [],
+    contactPending: [],
+    contacts: [],
+    contactThread: [],
+    contactOutbound: [],
   };
 }

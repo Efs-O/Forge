@@ -33,6 +33,7 @@ import type { ToolApprovalSink, ToolApprovalRequestEvent } from './ToolApprovalS
 import { recordModelUsage } from './modelManager/usageTracker';
 import type { AgentProgressEvent, AgentProgressListener } from './AgentProgress';
 import { CliAgentDriver } from '../agents/CliAgentDriver';
+import { resolveRequestModel } from '../config/ConfigResolver';
 import {
   CliSessionRegistry,
   DEFAULT_CLI_IDLE_TIMEOUT_MS,
@@ -54,6 +55,7 @@ export class AgentLoop {
   private readonly services: TurnServices;
   /** Every out-of-band prompt remains independently cancellable by owner. */
   private readonly promptRunControllers = new Map<AbortController, string | undefined>();
+  private contactPromptReservations = 0;
   private readonly sessionTimer = new SessionTimer();
   /**
    * Resolves a conversation id to its runtime object. Set by the SidebarProvider
@@ -422,6 +424,54 @@ export class AgentLoop {
     options?: PromptRunOptions,
   ): Promise<string> {
     return runPromptToMarkdown(this.services, text, conversationId, options);
+  }
+
+  /**
+   * Runs the contact-only prompt without allowing PromptRun to cold-start or
+   * evict a model. The reservation is synchronous with the capacity decision,
+   * so two contact batches cannot both observe the same free slot.
+   */
+  async runContactPrompt(text: string, systemPromptText: string): Promise<string> {
+    const config = this.services.getConfig();
+    if (!config.active_model) throw new Error('Forge contact model is unavailable.');
+    const fallbackModel = config.active_model;
+    const target = resolveRequestModel(config, fallbackModel).name;
+    if (!this.services.pool.isLoaded(target) || !this.services.pool.isModelReady(target)) {
+      throw new Error('Forge contact model is unavailable.');
+    }
+    const activeModels = [...this.lifecycle.streamingIds()].map(
+      (id) => this.conversationLookup?.(id)?.active_model ?? fallbackModel,
+    );
+    if (activeModels.some((model) => resolveRequestModel(config, model).name !== target)) {
+      throw new Error('Forge contact model is unavailable.');
+    }
+    const ownerPromptRuns = [...this.promptRunControllers.values()].filter(
+      (id) => id !== '__forge_contact__',
+    ).length;
+    if (ownerPromptRuns > 0) throw new Error('Forge contact model is unavailable.');
+    const capacity = this.services.pool.parallelCapacity(target);
+    const occupied = activeModels.length + this.contactPromptReservations;
+    if (occupied >= capacity) throw new Error('Forge contact model is unavailable.');
+    this.contactPromptReservations += 1;
+    let hold;
+    try {
+      hold = await this.services.pool.acquireForDelegation(target, target);
+      if (!hold.backend.isReady()) throw new Error('Forge contact model is unavailable.');
+      return await runPromptToMarkdown(this.services, text, '__forge_contact__', {
+        modelName: target,
+        systemPromptText,
+        outputTokens: 1_024,
+        alwaysStripThinking: true,
+        backend: hold.backend,
+      });
+    } finally {
+      hold?.release();
+      this.contactPromptReservations -= 1;
+    }
+  }
+
+  cancelContactPrompts(): void {
+    this.abortPromptRuns('__forge_contact__');
   }
   private warnOnce(key: string, message: string): void {
     this.capabilities.warnOnce(key, message, (text) => {

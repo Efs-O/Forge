@@ -14,6 +14,7 @@ export const HELP_SECTIONS = new Set([
   'Queue',
   'Models',
   'Jobs',
+  'Contacts',
   'Window',
   'Machine',
 ]);
@@ -29,6 +30,8 @@ Queue: /drop <n|all> · /queue · /steer <n-or-prompt>
 Models: /model [n-or-name] · /restart · /unload · /unloadall
 
 Jobs: /job <n|name> pause|resume|run|delete|chat · /jobs
+
+Contacts: /contact approve|disable · /contacts pending|list · /send <name>: <message>
 
 Window: /clanker on|off · /compact · /lock · /ratelimit [1-600|off] · /reload · /timeout [1-1440|off]
 

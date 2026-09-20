@@ -9,6 +9,7 @@
  */
 
 import * as vscode from 'vscode';
+import type { BackendController } from '../backend/BackendController';
 import type { ForgeConfig } from '../config/types';
 import type { ChatCompletionRequest } from '../llm/types';
 import type { IBackendPool } from '../backend/BackendPool';
@@ -56,12 +57,16 @@ export interface PromptRunOptions {
   /** Template rendered as the ONLY system message — no execute persona, no
    *  FORGE.md, no workspace facts. Sent in `replace` mode. */
   systemPromptTemplate?: string;
+  /** Literal replacement system prompt, used by isolated contact requests. */
+  systemPromptText?: string;
   /** Output room ON TOP of the model's reasoning reserve. Thinking spends from
    *  the same budget, so a bare 4096 can be exhausted before any prose. */
   outputTokens?: number;
   /** Strip thinking channels regardless of `model.think`. A `<think>` block
    *  arriving as `content` would otherwise be stored verbatim. */
   alwaysStripThinking?: boolean;
+  /** Already-held backend for host-owned non-evicting runs. */
+  backend?: BackendController;
 }
 
 /**
@@ -81,6 +86,17 @@ function renderReplacementPrompt(ctx: PromptRunContext, template: string): strin
   return rendered;
 }
 
+function replacementPrompt(ctx: PromptRunContext, options: PromptRunOptions): string | undefined {
+  if (options.systemPromptText !== undefined) {
+    const text = options.systemPromptText.trim();
+    if (!text) throw new Error('Forge: replacement system prompt is empty.');
+    return text;
+  }
+  return options.systemPromptTemplate
+    ? renderReplacementPrompt(ctx, options.systemPromptTemplate)
+    : undefined;
+}
+
 export async function runPromptToMarkdown(
   ctx: PromptRunContext,
   text: string,
@@ -93,17 +109,21 @@ export async function runPromptToMarkdown(
   // Request-time resolution (defaults + base + @profile, F6).
   const selectedModel = resolveRequestModel(config, requested, (m) => log.info(m));
 
-  const backend = await ctx.pool.acquire(selectedModel.name);
-  if (!backend.isReady()) await backend.start();
+  const backend = options.backend ?? (await ctx.pool.acquire(selectedModel.name));
+  if (!backend.isReady()) {
+    if (options.backend) throw new Error('Forge: reserved contact backend is not ready.');
+    await backend.start();
+  }
   ctx.events.onBackendReady?.(backend.loadedModel());
 
   const activeFile = vscode.window.activeTextEditor?.document.uri.fsPath;
-  const messages = options.systemPromptTemplate
+  const replacement = replacementPrompt(ctx, options);
+  const messages = replacement
     ? injectSystemPrompt(
         [{ role: 'user', content: text }],
         undefined,
         undefined,
-        renderReplacementPrompt(ctx, options.systemPromptTemplate),
+        replacement,
         'replace',
       )
     : injectSystemPrompt(

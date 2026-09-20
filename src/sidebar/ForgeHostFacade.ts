@@ -44,6 +44,9 @@ export interface ForgeHostFacade {
     attachments?: AttachmentData[],
     options?: { remoteRequestId?: string },
   ): Promise<ForgeRequestOutcome>;
+  /** Isolated, no-tools contact generation on a currently ready model slot. */
+  runContactPrompt?(text: string, systemPromptText: string): Promise<string>;
+  cancelContactPrompts?(): void;
   cancel(conversationId: string): Promise<void>;
   /** Interrupt only the active turn so a durable steering prompt can run next. */
   interrupt(conversationId: string): Promise<void>;
@@ -136,6 +139,8 @@ export interface SidebarHostFacadeDeps {
     attachments?: AttachmentData[],
     options?: { remoteRequestId?: string },
   ) => Promise<ForgeRequestOutcome>;
+  runContactPrompt?: (text: string, systemPromptText: string) => Promise<string>;
+  cancelContactPrompts?: () => void;
   cancel: (conversationId: string) => Promise<void>;
   interrupt: (conversationId: string) => Promise<void>;
   queueIntent: (conversationId: string) => void;
@@ -215,6 +220,15 @@ export class SidebarHostFacade implements ForgeHostFacade {
     options?: { remoteRequestId?: string },
   ): Promise<ForgeRequestOutcome> {
     return this.deps.send(conversationId, text, attachments, options);
+  }
+
+  runContactPrompt(text: string, systemPromptText: string): Promise<string> {
+    if (!this.deps.runContactPrompt) throw new Error('Forge contact generation is unavailable.');
+    return this.deps.runContactPrompt(text, systemPromptText);
+  }
+
+  cancelContactPrompts(): void {
+    this.deps.cancelContactPrompts?.();
   }
 
   cancel(conversationId: string): Promise<void> {
