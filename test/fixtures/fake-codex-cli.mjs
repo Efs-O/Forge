@@ -87,6 +87,33 @@ if (process.argv.includes('app-server')) {
       });
       return;
     }
+    if (message.method === 'thread/list') {
+      // The versioned contract (ThreadListResponse): data: Thread[]. A couple
+      // of fixture threads so the discovery test can assert parsing + matching.
+      line({
+        id: message.id,
+        result: {
+          data: [
+            {
+              id: 'fixture-thread-1',
+              cwd: '/ws/one',
+              name: 'first thread',
+              preview: 'hello one',
+              updatedAt: 1000,
+            },
+            {
+              id: 'fixture-thread-2',
+              cwd: '/ws/two',
+              preview: 'hello two',
+              updatedAt: 2000,
+            },
+          ],
+          nextCursor: null,
+          backwardsCursor: null,
+        },
+      });
+      return;
+    }
     if (message.method === 'turn/start') {
       turn += 1;
       activeTurn = `turn-${turn}`;
