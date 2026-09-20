@@ -4,6 +4,53 @@
 A resumed turn reads this first. The plan is FINAL (v2.1, GO from both auditors).
 Everything below is verified state as of 23:46 local, 2026-09-19.
 
+## IMPLEMENTATION PROGRESS (updated 2026-09-20, full-auto phase-by-phase)
+
+Strategy (user-approved): implement each phase → validate (tests + `npm run ci`) →
+commit → next phase. Codex reviews P0 and P3; other phases gated on self-review +
+CI only. User is on Telegram; ping at each commit.
+
+- **P0 foundation — DONE, committed `096a33e`.** Modules in `src/agentMesh/`
+  (hostIdentity, aliasRegistry, ownership, exchangeLog, deliveryState, aliasFifo,
+  meshAdapter, adapters, meshOrchestrator, sessionProvider, meshContext,
+  boardView), `src/tools/tellLiveSessionTool.ts`, `src/vscode/agentMeshSetup.ts`.
+  32+ unit tests. `npm run ci` green. Version 0.16.10.
+- **P0 fix (Codex fix-review findings) — DONE, committed (this session).**
+  (1) `ownership.ts claimCreation` no longer spins on a torn/empty claim (the
+  `sleepSync` up to 120 s froze the extension host — a DoS); it returns
+  `{ claimed: false }` immediately (M2-safe: never reclaim without proven death).
+  (2) `agentMeshSetup.ts` `exchangeScope` map no longer leaks non-observing
+  exchanges: each entry carries `firstEventAt`; a sweep on every event drops
+  entries older than the M8 `NON_TERMINAL_DEADLINE_MS` (same window the log uses
+  to turn a non-terminal exchange into a terminal `timeout`). Codex fix-review
+  verdict: NO-GO overall but #2 (FIFO single-flight) and #6 (scope inheritance)
+  RESOLVED; remaining sub-points are P4-scope refinements (user-owned vs
+  Forge-owned alias, config-pin liveness proof, PID-reuse ambiguity).
+- **P1 scoped `/status` + finished notice — DONE (committed with P2 board).**
+  `requestHealthForConversation` (per-conversation counts, legacy excluded,
+  `unknown` stays `unknown`) + `describeAgentBoard` in `RemoteSessionCommands.ts`.
+  Normal-case finished notice: `AgentInbox.onBusTurnFinished` →
+  `orchestrator.tell(from, "finished · N min")` (the §9 "you can stop" signal to
+  the bus sender). Crash case: `recoverOwnership` reaped action → `crashed`
+  board row at recovery. **Deferred sub-part:** the plan's "best-effort send the
+  finished notice *then*" for the CRASH case is a user-facing push (Telegram +
+  webview) needing remote-runtime wiring not required by any acceptance
+  criterion; the `crashed` board row is the recovery-time event the plan names.
+  Revisit if the user wants a phone ping on crash.
+- **P2 board (render only) — Telegram side DONE, committed (this session).**
+  `boardView.ts` (pure projection: latest state per exchange, scoped by
+  conversation per M9, last-N limit, live-session status) +
+  `describeAgentBoard` in `RemoteSessionCommands.ts`. Tests: AgentMeshBoardView
+  (6) + AgentMeshBoardStatus (5). **Deferred:** the sidebar DOM "Agent board"
+  section (a thin React render of the same projection + a host push message
+  type); the testable P2 criterion (12) is the Telegram side, which is done.
+- **P3 standby/wake + /steer + typed command surface + queue visibility — NEXT.**
+  (Agreed: Codex reviews this phase.)
+- **P4 Claude owned stdio session + Codex discovery — PENDING.** (Codex also
+  reviews. Stale `agent_bus.claude_session: forge-dd` in config.yaml — live
+  sessions are `forge-22`/`forge-7a`; matters here.)
+- **P5 FORGE.md + tool description cleanup — PENDING.**
+
 ## The plan is DONE and approved — do NOT re-review it
 - **Plan:** `docs/plans/AGENT_MESH_PLAN.md` = **v2.1** (my v2 + Claude's normative
   "v2.1 audit amendments M1–M9" section right after "Why").

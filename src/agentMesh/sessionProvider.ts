@@ -262,6 +262,60 @@ export class MeshSessionProvider implements SessionProvider {
     await session.dispose();
   }
 
+  /**
+   * Standby: park-but-warm (§2b, P3). Sets `parked: true` on the ownership
+   * record (durable: survives a restart, and exempts the session from the idle
+   * TTL while parked, M4). The in-memory session is NOT disposed — "warm" means
+   * the thread stays resumable. `undefined` when the alias has no ownership
+   * record (nothing to park).
+   */
+  park(alias: string): boolean {
+    const a = alias.trim().toLowerCase();
+    const rec = readOwnership(this.deps.busRoot, a);
+    if (!rec) return false;
+    writeOwnership(this.deps.busRoot, { ...rec, parked: true });
+    return true;
+  }
+
+  /** Wake a parked session (§2b). Clears `parked`; `undefined` when no record. */
+  wake(alias: string): boolean {
+    const a = alias.trim().toLowerCase();
+    const rec = readOwnership(this.deps.busRoot, a);
+    if (!rec) return false;
+    writeOwnership(this.deps.busRoot, { ...rec, parked: false });
+    return true;
+  }
+
+  /** Is the alias parked? (The board's `parked` state, §2b.) */
+  isParked(alias: string): boolean {
+    return readOwnership(this.deps.busRoot, alias.trim().toLowerCase())?.parked === true;
+  }
+
+  /**
+   * Close: hard-kill a Forge-owned session (§8, P3). Disposes the in-memory
+   * session (if this window holds it) and clears `owner_host` on the record.
+   * The `thread_id` is kept (M3: a later `say`/`steer` resumes the same thread).
+   * **Never** targets a user-opened session: a user-opened session has no
+   * ownership record, so there is nothing to kill here. `undefined` when the
+   * alias has no ownership record.
+   */
+  async close(alias: string): Promise<boolean> {
+    const a = alias.trim().toLowerCase();
+    const rec = readOwnership(this.deps.busRoot, a);
+    if (!rec) return false;
+    const session = this.owned.get(a);
+    if (session) {
+      this.owned.delete(a);
+      await session.dispose();
+    }
+    writeOwnership(this.deps.busRoot, {
+      ...rec,
+      owner_host: null,
+      parked: false,
+    });
+    return true;
+  }
+
   /** Dispose all in-memory owned sessions (window shutdown). */
   async dispose(): Promise<void> {
     const sessions = [...this.owned.values()];

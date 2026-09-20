@@ -3,6 +3,7 @@ import type * as http from 'http';
 import { randomBytes, timingSafeEqual } from 'crypto';
 import { BUS_ID_PATTERN, ensureBus, writeReply, type BusPaths } from '../agentBus/agentBus';
 import { MAX_INBOUND_CHARS, forgeInboundPrompt } from '../agentBus/busContent';
+import { parseMeshCommand } from '../agentMesh/meshCommands';
 import type { AgentInbox } from '../agentBus/agentInbox';
 import { sendJson } from './controlHttp';
 import { getLogger } from '../util/logger';
@@ -35,6 +36,15 @@ export interface AgentRoutesDeps {
    * forged sender is rejected with the live list. Absent ⇒ shape check only.
    */
   validateFrom?: (from: string) => { ok: true } | { ok: false; error: string };
+  /**
+   * Dispatch a typed lifecycle command (§8, P3). When an inbound `to: forge`
+   * message parses as a mesh command (`standby codex`, `close codex`, …), it is
+   * dispatched here and the reply is written to the sender's inbox — not queued
+   * as an ordinary prompt. Absent ⇒ the text is treated as an ordinary message.
+   */
+  handleCommand?: (
+    text: string,
+  ) => Promise<{ ok: true; reply: string } | { ok: false; error: string }>;
 }
 
 interface Fields {
@@ -183,10 +193,18 @@ export class AgentRoutes {
         if (!result.ok) throw new HttpError(400, result.error);
         return sendJson(res, 202, { relayed: true, exchangeId: result.exchangeId });
       }
-      const queued = this.deps.inbox.accept(
-        forgeInboundPrompt(from, requireText(fields, MAX_INBOUND_CHARS)),
-        from,
-      );
+      // §8/P3: a `to: forge` message that parses as a typed lifecycle command
+      // is dispatched, not queued as a prompt. The reply goes to the sender.
+      const text = requireText(fields, MAX_INBOUND_CHARS);
+      if (this.deps.handleCommand) {
+        const cmd = parseMeshCommand(text);
+        if (cmd) {
+          const result = await this.deps.handleCommand(text);
+          if (!result.ok) throw new HttpError(400, result.error);
+          return sendJson(res, 200, { command: cmd.verb, reply: result.reply });
+        }
+      }
+      const queued = this.deps.inbox.accept(forgeInboundPrompt(from, text), from);
       if (queued === undefined)
         throw new HttpError(429, 'Forge has too many unread agent messages');
       return sendJson(res, 202, { queued });

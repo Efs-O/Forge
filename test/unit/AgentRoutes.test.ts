@@ -277,3 +277,57 @@ describe('sender validation and relay gating (M6/§4)', () => {
     expect(accepted).toEqual([]);
   });
 });
+
+describe('typed lifecycle command dispatch (§8, P3)', () => {
+  function install(deps: ConstructorParameters<typeof AgentRoutes>[0]): void {
+    routes = new AgentRoutes(deps);
+    routes.setEnabled(true);
+    routes.onListening(base);
+  }
+
+  it('dispatches a `to: forge` mesh command, not the inbox', async () => {
+    let got: string | undefined;
+    install({
+      paths: () => paths,
+      inbox: { accept: (p) => (accepted.push(p), accepted.length) },
+      token: TOKEN,
+      validateFrom: () => ({ ok: true }),
+      handleCommand: async (text) => {
+        got = text;
+        return { ok: true, reply: 'codex parked' };
+      },
+    });
+    const { status, body } = await post('/agent/message?from=codex', 'standby codex');
+    expect(status).toBe(200);
+    expect(body).toEqual({ command: 'standby', reply: 'codex parked' });
+    expect(got).toBe('standby codex');
+    expect(accepted).toEqual([]); // not queued as a prompt
+  });
+
+  it('treats ordinary `to: forge` text as a prompt, not a command', async () => {
+    install({
+      paths: () => paths,
+      inbox: { accept: (p) => (accepted.push(p), accepted.length) },
+      token: TOKEN,
+      validateFrom: () => ({ ok: true }),
+      handleCommand: async () => ({ ok: true, reply: 'should not be called' }),
+    });
+    const { status } = await post('/agent/message?from=codex', 'please review the plan');
+    expect(status).toBe(202);
+    expect(accepted).toHaveLength(1);
+  });
+
+  it('a command that fails to dispatch is a 400, not a queued prompt', async () => {
+    install({
+      paths: () => paths,
+      inbox: { accept: (p) => (accepted.push(p), accepted.length) },
+      token: TOKEN,
+      validateFrom: () => ({ ok: true }),
+      handleCommand: async () => ({ ok: false, error: 'no session to park' }),
+    });
+    const { status, body } = await post('/agent/message?from=codex', 'standby ghost');
+    expect(status).toBe(400);
+    expect(body.error).toContain('no session to park');
+    expect(accepted).toEqual([]);
+  });
+});

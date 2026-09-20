@@ -302,3 +302,58 @@ describe('orchestrator: sender validation (§4)', () => {
     if (!bad.ok) expect(bad.error).toContain('mallory');
   });
 });
+
+describe('orchestrator: typed lifecycle commands (§8, P3)', () => {
+  it('a steer to a parked session wakes it, then sends (§6/§2b)', async () => {
+    const adapter = new FakeAdapter(true);
+    const parked = new Set<string>(['codex']);
+    const orch = new MeshOrchestrator({
+      busRoot: root,
+      knownAliases: () => ['codex'],
+      scope: () => ({ workspace: '/ws' }),
+      onEvent: (e) => board.push(e),
+      provider: {
+        resolveAdapter: async () => adapter,
+        isOwned: () => true,
+        park: (a) => {
+          parked.add(a);
+          return true;
+        },
+        wake: (a) => {
+          parked.delete(a);
+          return true;
+        },
+        isParked: (a) => parked.has(a),
+        close: async () => true,
+      },
+    });
+    const out = await orch.handleCommand({ verb: 'steer', alias: 'codex', message: 'stop' });
+    expect(out).toContain('steered codex');
+    // The steer woke the parked session before sending.
+    expect(parked.has('codex')).toBe(false);
+    await flush();
+    expect(adapter.sends).toEqual(['stop']);
+  });
+
+  it('standby parks the session; wake unparks it (§2b)', async () => {
+    const parked = new Set<string>();
+    const orch = new MeshOrchestrator({
+      busRoot: root,
+      knownAliases: () => ['codex'],
+      scope: () => ({ workspace: '/ws' }),
+      onEvent: (e) => board.push(e),
+      provider: {
+        resolveAdapter: async () => new FakeAdapter(true),
+        isOwned: () => true,
+        park: (a) => (parked.add(a), true),
+        wake: (a) => (parked.delete(a), true),
+        isParked: (a) => parked.has(a),
+        close: async () => true,
+      },
+    });
+    expect(await orch.handleCommand({ verb: 'standby', alias: 'codex' })).toContain('parked');
+    expect(parked.has('codex')).toBe(true);
+    expect(await orch.handleCommand({ verb: 'wake', alias: 'codex' })).toContain('woken');
+    expect(parked.has('codex')).toBe(false);
+  });
+});

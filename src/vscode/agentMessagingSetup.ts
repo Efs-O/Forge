@@ -4,6 +4,7 @@ import { AgentInbox } from '../agentBus/agentInbox';
 import { AgentRoutes } from '../backend/agentRoutes';
 import type { ForgeConfig } from '../config/types';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
+import { parseMeshCommand } from '../agentMesh/meshCommands';
 import { setupAgentMesh } from './agentMeshSetup';
 
 /**
@@ -57,5 +58,18 @@ export function setupAgentMessaging(
     inbox,
     relay: mesh.relay,
     validateFrom: mesh.validateFrom,
+    // §8/P3: a `to: forge` message that parses as a typed lifecycle command is
+    // dispatched (standby/wake/close/steer/say/handoff) and the reply returned
+    // to the caller's `forge.sh cmd` call. Ordinary text falls through to the inbox.
+    handleCommand: async (text) => {
+      const cmd = parseMeshCommand(text);
+      if (!cmd) return { ok: false as const, error: 'not a recognised mesh command' };
+      try {
+        const reply = await mesh.orchestrator.handleCommand(cmd);
+        return { ok: true as const, reply };
+      } catch (err) {
+        return { ok: false as const, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
   });
 }

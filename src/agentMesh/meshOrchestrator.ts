@@ -9,6 +9,7 @@ import type { ExchangeState } from './deliveryState';
 import { newEventId } from './exchangeLog';
 import type { MeshAdapter } from './meshAdapter';
 import type { HostLivenessDeps } from './hostIdentity';
+import type { MeshCommand } from './meshCommands';
 
 /**
  * The agent-mesh orchestrator (AGENT_MESH_PLAN §1, §4, M6, M7). The single
@@ -37,6 +38,18 @@ export interface SessionProvider {
   resolveAdapter(alias: string): Promise<MeshAdapter | undefined>;
   /** Whether this alias has a live, owned session this window holds. */
   isOwned(alias: string): boolean;
+  /** Standby: park-but-warm (§2b). True when a record was parked. */
+  park(alias: string): boolean;
+  /** Wake a parked session (§2b). True when a record was woken. */
+  wake(alias: string): boolean;
+  /** Is the alias parked? (the board's `parked` state, §2b.) */
+  isParked(alias: string): boolean;
+  /**
+   * Close: hard-kill a Forge-owned session (§8). Disposes the in-memory
+   * session (if held) and clears `owner_host`; keeps `thread_id` (M3). Never
+   * targets a user-opened session (no ownership record). True when closed.
+   */
+  close(alias: string): Promise<boolean>;
 }
 
 export interface MeshScope {
@@ -262,5 +275,62 @@ export class MeshOrchestrator {
   dispose(): void {
     for (const fifo of this.fifos.values()) fifo.dispose();
     this.fifos.clear();
+  }
+
+  /** The pending (queued-but-unsent) message count for an alias (§7). */
+  queueLength(alias: string): number {
+    return this.fifos.get(alias.trim().toLowerCase())?.pending ?? 0;
+  }
+
+  /**
+   * Dispatch a typed lifecycle command (§8, P3). The single owner of the
+   * command grammar is `meshCommands.ts`; this method supplies the handlers.
+   * Returns the reply string (what the caller shows the sender).
+   */
+  async handleCommand(cmd: MeshCommand): Promise<string> {
+    switch (cmd.verb) {
+      case 'say': {
+        const res = await this.tell(cmd.alias, cmd.message);
+        return 'error' in res ? res.error : `sent to ${res.to} (exchange ${res.exchangeId})`;
+      }
+      case 'steer': {
+        // A steer to a parked session wakes it (§6/§2b), then the message goes
+        // through the FIFO (one active turn per alias, M5).
+        if (this.deps.provider.isParked(cmd.alias)) this.deps.provider.wake(cmd.alias);
+        const message = cmd.message.trim()
+          ? cmd.message
+          : 'steer: interrupt the current work and report status';
+        const res = await this.tell(cmd.alias, message);
+        return 'error' in res ? res.error : `steered ${res.to} (exchange ${res.exchangeId})`;
+      }
+      case 'standby': {
+        const ok = this.deps.provider.park(cmd.alias);
+        return ok
+          ? `${cmd.alias} parked (warm; the thread stays resumable)`
+          : `no session to park for "${cmd.alias}"`;
+      }
+      case 'wake': {
+        const ok = this.deps.provider.wake(cmd.alias);
+        return ok ? `${cmd.alias} woken` : `no parked session for "${cmd.alias}"`;
+      }
+      case 'handoff': {
+        const message = cmd.context.trim()
+          ? `handoff: my part is done. ${cmd.context}`
+          : 'handoff: my part is done; you take over.';
+        const res = await this.tell(cmd.alias, message);
+        return 'error' in res ? res.error : `handed off to ${res.to} (exchange ${res.exchangeId})`;
+      }
+      case 'close': {
+        const ok = await this.deps.provider.close(cmd.alias);
+        return ok
+          ? `${cmd.alias} closed (Forge-owned session killed; thread kept for resume)`
+          : `"${cmd.alias}" is not a Forge-owned session (never closes a user-opened session)`;
+      }
+      default:
+        // Observational commands (status/board/peers/queue/context) are handled
+        // by the wiring layer, which knows the scope and board projection. The
+        // orchestrator reports that here so the grammar stays complete.
+        return `"${cmd.verb}" is handled by the host (scope + board)`;
+    }
   }
 }
