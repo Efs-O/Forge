@@ -66,7 +66,8 @@ export function readAliases(root: string): AliasTable {
       r &&
       typeof r === 'object' &&
       (r.agent === 'claude' || r.agent === 'codex') &&
-      typeof r.session_id === 'string'
+      typeof r.session_id === 'string' &&
+      r.session_id.trim().length > 0
     ) {
       out[alias] = {
         agent: r.agent,

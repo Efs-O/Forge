@@ -76,7 +76,13 @@ export class AliasFifo {
     this.queue.push(msg);
     // F-03: the durable `accepted` — awaited so it is on disk before the
     // caller is told the message was accepted.
-    await this.deps.onEvent({ exchangeId: msg.exchangeId, state: 'accepted' });
+    try {
+      await this.deps.onEvent({ exchangeId: msg.exchangeId, state: 'accepted' });
+    } catch (err) {
+      const index = this.queue.indexOf(msg);
+      if (index >= 0) this.queue.splice(index, 1);
+      throw err;
+    }
     void this.drain();
     return { accepted: true };
   }
@@ -92,8 +98,29 @@ export class AliasFifo {
    * non-observing adapter has no turn to interrupt, so it is just enqueued.
    */
   async steer(msg: FifoMessage): Promise<EnqueueResult> {
+    if (this.disposed) return { accepted: false, queueLength: 0 };
+    if (this.queue.length >= this.bound) {
+      await this.deps.onEvent({
+        exchangeId: msg.exchangeId,
+        state: 'rejected',
+        detail: `queue full (${this.bound}); steer not sent`,
+      });
+      return { accepted: false, queueLength: this.queue.length };
+    }
+    // A steer is admitted at the front of the waiting queue. Interrupt only
+    // after its accepted event is durable; a rejected steer must not cancel
+    // useful work without delivering its replacement.
+    this.queue.unshift(msg);
+    try {
+      await this.deps.onEvent({ exchangeId: msg.exchangeId, state: 'accepted' });
+    } catch (err) {
+      const index = this.queue.indexOf(msg);
+      if (index >= 0) this.queue.splice(index, 1);
+      throw err;
+    }
     this.adapter.interrupt?.();
-    return this.enqueue(msg);
+    void this.drain();
+    return { accepted: true };
   }
 
   dispose(): void {
@@ -119,7 +146,16 @@ export class AliasFifo {
     try {
       while (!this.disposed && this.queue.length > 0) {
         const msg = this.queue.shift() as FifoMessage;
-        await this.runOne(msg);
+        try {
+          await this.runOne(msg);
+        } catch {
+          // A board-event write failed (onEvent is durable and rethrows). The
+          // message was already shifted off the queue, so without this the
+          // error would break the loop and wedge the FIFO — every later
+          // message would never drain. Swallow it and keep draining: the
+          // exchange's durable state is incomplete, but the queue must not
+          // jam on one bad write.
+        }
       }
     } finally {
       this.running = false;
@@ -129,21 +165,34 @@ export class AliasFifo {
   private async runOne(msg: FifoMessage): Promise<void> {
     // Observing adapters: the turn begins now, so `started` is truthful here.
     // Non-observing: no `started` — the transport only accepts it.
+    //
+    // These are board PROJECTIONS, not the durable ack (that was written in
+    // `enqueue`/`steer`). A failed projection write must not prevent the
+    // message from being delivered or wedge the queue, so each is best-effort:
+    // `onEvent` rethrows on a failed durable write, and we swallow it here.
     let started = false;
     if (this.adapter.observesTurns) {
-      this.deps.onEvent({ exchangeId: msg.exchangeId, state: 'started' });
-      started = true;
+      try {
+        await this.deps.onEvent({ exchangeId: msg.exchangeId, state: 'started' });
+        started = true;
+      } catch {
+        started = true; // the turn starts regardless; the board just won't show it
+      }
     }
     try {
       const result = await this.adapter.send(msg.message);
       if (this.adapter.observesTurns) {
-        this.deps.onEvent({
-          exchangeId: msg.exchangeId,
-          state: result.status === 'completed' ? 'completed' : 'cancelled',
-          ...(result.status !== 'completed' && result.finalText
-            ? { detail: result.finalText }
-            : {}),
-        });
+        try {
+          await this.deps.onEvent({
+            exchangeId: msg.exchangeId,
+            state: result.status === 'completed' ? 'completed' : 'cancelled',
+            ...(result.status !== 'completed' && result.finalText
+              ? { detail: result.finalText }
+              : {}),
+          });
+        } catch {
+          // board projection: best-effort
+        }
       }
       // Non-observing: the exchange stays `accepted`; a later verdict (or the
       // non-terminal deadline) moves it. Nothing to write here.
@@ -153,11 +202,15 @@ export class AliasFifo {
       // "never accepted"); it ends `cancelled`. A turn that never started (a
       // non-observing send that threw, or an observing send that threw before
       // the turn began) is `rejected`.
-      this.deps.onEvent({
-        exchangeId: msg.exchangeId,
-        state: started ? 'cancelled' : 'rejected',
-        detail: why,
-      });
+      try {
+        await this.deps.onEvent({
+          exchangeId: msg.exchangeId,
+          state: started ? 'cancelled' : 'rejected',
+          detail: why,
+        });
+      } catch {
+        // board projection: best-effort
+      }
     }
   }
 }

@@ -12,7 +12,7 @@ function unlinkQuietFile(file: string): void {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
   }
 }
-import { deriveLatestState, isTerminal, type ExchangeState } from './deliveryState';
+import { canTransition, deriveLatestState, isTerminal, type ExchangeState } from './deliveryState';
 
 /**
  * The exchange board's durable store (AGENT_MESH_PLAN §3, M1, M8).
@@ -200,6 +200,22 @@ export function appendEvent(
       if (prior.length > 0) {
         const current = deriveLatestState(prior) as ExchangeState;
         if (isTerminal(current)) return; // orphan: the exchange is already over
+        // A `verdict` event completes a non-observing exchange that honestly
+        // stays at `accepted`/`observed` until the agent writes its verdict
+        // (F-03). That is an exchange-correlated completion, not a transport
+        // exit, so it is the one case allowed to jump to `completed` from a
+        // non-started state. Everything else must follow the strict table.
+        const isVerdictCompletion =
+          event.type === 'verdict' &&
+          event.state === 'completed' &&
+          (current === 'accepted' || current === 'observed');
+        if (
+          event.state !== current &&
+          !isVerdictCompletion &&
+          !canTransition(current, event.state)
+        ) {
+          throw new Error(`illegal exchange transition ${current} -> ${event.state}`);
+        }
       }
       const seq = existing.length > 0 ? Math.max(...existing.map((e) => e.seq)) + 1 : 1;
       const full: ExchangeEvent = { ...event, seq };

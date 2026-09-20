@@ -126,6 +126,31 @@ describe('exchange log (M1/M8)', () => {
     expect(kept).toHaveLength(4); // whole exchange, not a fragment
   });
 
+  it('a verdict completes a non-observing exchange that stays accepted (F-03)', async () => {
+    const d = makeHost(1, 1000, new Set([1]));
+    await appendEvent(paths, ev('x1', 'created', 1), d);
+    await appendEvent(paths, ev('x1', 'accepted', 2), d); // non-observing: stays accepted
+    // A `verdict` event is the exchange-correlated completion: allowed to jump
+    // accepted -> completed even though a transport exit never may.
+    await appendEvent(
+      paths,
+      { ...ev('x1', 'completed', 3), type: 'verdict', detail: 'done' },
+      d,
+    );
+    expect(latestStates(readEvents(paths.log)).get('x1')).toBe('completed');
+  });
+
+  it('rejects a non-verdict completed on an accepted exchange (transport exit)', async () => {
+    const d = makeHost(1, 1000, new Set([1]));
+    await appendEvent(paths, ev('x1', 'created', 1), d);
+    await appendEvent(paths, ev('x1', 'accepted', 2), d);
+    // A bare `completed` (not a verdict) on an accepted exchange is illegal: a
+    // transport exit may only advance to accepted.
+    await expect(appendEvent(paths, ev('x1', 'completed', 3), d)).rejects.toThrow(
+      /illegal exchange transition/,
+    );
+  });
+
   it('gives a past-deadline non-terminal exchange a terminal timeout event (M8)', async () => {
     const d = makeHost(1, 1000, new Set([1]));
     await appendEvent(paths, ev('x1', 'created', 1), d);

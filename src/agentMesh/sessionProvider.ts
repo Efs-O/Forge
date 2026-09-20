@@ -167,7 +167,12 @@ export class MeshSessionProvider implements SessionProvider {
   private isOwner(alias: string): boolean {
     const rec = readOwnership(this.deps.busRoot, alias);
     if (!rec?.owner_host) return false;
-    return rec.owner_host.pid === getHostIdentity(this.deps).pid;
+    // The M1 liveness check: same pid AND start time within tolerance (a pid
+    // that was recycled is a different process, so the record is not ours).
+    // Reusing `isHostAlive` keeps the tolerance consistent with the rest of the
+    // mesh rather than an exact `startedAt ===` that Windows start-time jitter
+    // would break.
+    return isHostAlive(rec.owner_host, this.deps);
   }
 
   /**

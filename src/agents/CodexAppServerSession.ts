@@ -46,7 +46,25 @@ export class CodexAppServerSession {
   async send(task: string, options: CliAgentSessionSendOptions = {}): Promise<CliAgentRunResult> {
     if (this.currentState === 'disposed') throw new Error('CLI agent session is disposed.');
     if (this.active) throw new Error('CLI agent session already has an active turn.');
-    await this.ensureStarted();
+    // Reserve the active slot before the cold-start await. Without this,
+    // concurrent first sends both pass the check while initialize/thread-start
+    // is in flight and then issue two turn/start requests on one thread.
+    const placeholder: ActiveTurn = {
+      text: '',
+      agentMessageText: new Map(),
+      sawCommandExecution: false,
+      interrupted: false,
+      interruptSent: false,
+      resolve: () => undefined,
+      onAbort: () => undefined,
+    };
+    this.active = placeholder;
+    try {
+      await this.ensureStarted();
+    } catch (err) {
+      if (this.active === placeholder) this.active = undefined;
+      throw err;
+    }
     this.currentState = 'running';
     return new Promise<CliAgentRunResult>((resolve) => {
       const onAbort = (): void => {

@@ -190,8 +190,14 @@ export class MeshOrchestrator {
       ? message
       : `${message}\n\n[forge: when you finish this, write your verdict to outbox/${exchangeId}.verdict.md]`;
     // F-03: the FIFO's `accepted` is the durable acknowledgement — awaited so
-    // it is on disk before we return the exchange id.
-    const res = await fifo.enqueue({ exchangeId, message: outbound });
+    // it is on disk before we return the exchange id. A failed durable write
+    // throws (onEvent rethrows); surface it as a clean error, not a 500.
+    let res;
+    try {
+      res = await fifo.enqueue({ exchangeId, message: outbound });
+    } catch (err) {
+      return { error: `could not durably record the send to "${to}": ${String(err)}` };
+    }
     if (!res.accepted) {
       return { error: `queue full for "${to}" (${res.queueLength}); message rejected` };
     }
@@ -219,7 +225,12 @@ export class MeshOrchestrator {
     }
     const exchangeId = newEventId();
     // F-03: the FIFO's `accepted` is the durable acknowledgement (awaited).
-    const res = await fifo.steer({ exchangeId, message });
+    let res;
+    try {
+      res = await fifo.steer({ exchangeId, message });
+    } catch (err) {
+      return { error: `could not durably record the steer to "${to}": ${String(err)}` };
+    }
     if (!res.accepted) {
       return { error: `queue full for "${to}" (${res.queueLength}); steer rejected` };
     }
@@ -257,30 +268,34 @@ export class MeshOrchestrator {
     }
     const exchangeId = newEventId();
     // Hop 1: the inbound message, as received. F-03: durable before the relay
-    // result is returned.
-    await this.deps.onEvent({
-      exchangeId,
-      from,
-      to: this.host,
-      type: 'relay',
-      state: 'accepted',
-      detail: 'inbound bus message',
-    });
-    const res = await fifo.enqueue({ exchangeId, message });
-    if (!res.accepted) {
-      return { error: `queue full for "${to}" (${res.queueLength}); relay rejected` };
+    // result is returned. A failed durable write throws; surface it cleanly.
+    try {
+      await this.deps.onEvent({
+        exchangeId,
+        from,
+        to: this.host,
+        type: 'relay',
+        state: 'accepted',
+        detail: 'inbound bus message',
+      });
+      const res = await fifo.enqueue({ exchangeId, message });
+      if (!res.accepted) {
+        return { error: `queue full for "${to}" (${res.queueLength}); relay rejected` };
+      }
+      // F-07: a relayed message just reached this session; refresh its TTL clock.
+      this.deps.provider.touchActivity(recipient);
+      // Hop 2: the host's forward to the recipient (idempotent `accepted`).
+      await this.deps.onEvent({
+        exchangeId,
+        from: this.host,
+        to: recipient,
+        type: 'relay',
+        state: 'accepted',
+        detail: 'host relay',
+      });
+    } catch (err) {
+      return { error: `could not durably record the relay to "${to}": ${String(err)}` };
     }
-    // F-07: a relayed message just reached this session; refresh its TTL clock.
-    this.deps.provider.touchActivity(recipient);
-    // Hop 2: the host's forward to the recipient (idempotent `accepted`).
-    await this.deps.onEvent({
-      exchangeId,
-      from: this.host,
-      to: recipient,
-      type: 'relay',
-      state: 'accepted',
-      detail: 'host relay',
-    });
     return {
       exchangeId,
       to: recipient,

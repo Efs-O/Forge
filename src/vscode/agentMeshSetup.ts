@@ -13,6 +13,9 @@ import {
   EXCHANGES_LOG_NAME,
   NON_TERMINAL_DEADLINE_MS,
   newEventId,
+  groupByExchange,
+  latestStates,
+  readEvents,
   type ExchangeLogPaths,
 } from '../agentMesh/exchangeLog';
 import {
@@ -25,6 +28,7 @@ import { MeshOrchestrator } from '../agentMesh/meshOrchestrator';
 import { MeshSessionProvider } from '../agentMesh/sessionProvider';
 import { projectBoard, projectLiveSessions } from '../agentMesh/boardView';
 import { setBoardContext, setMeshOrchestrator } from '../agentMesh/meshContext';
+import { TurnStatus } from '../agentMesh/turnStatus';
 
 /**
  * Agent-mesh activation wiring (AGENT_MESH_PLAN P0). Creates the orchestrator
@@ -160,7 +164,17 @@ export function setupAgentMesh(
   }) => Promise<void> = async (e) => {
     sweepStaleScopes();
     const existing = exchangeScope.get(e.exchangeId);
-    const s = existing?.scope ?? scope();
+    const prior = existing
+      ? undefined
+      : readEvents(exchangePaths.log).find((event) => event.exchangeId === e.exchangeId);
+    const s =
+      existing?.scope ??
+      (prior
+        ? {
+            workspace: prior.workspace,
+            ...(prior.conversation ? { conversation: prior.conversation } : {}),
+          }
+        : scope());
     if (!existing) exchangeScope.set(e.exchangeId, { scope: s, firstEventAt: Date.now() });
     try {
       await appendEvent(
@@ -181,6 +195,7 @@ export function setupAgentMesh(
       );
     } catch (err) {
       vscode.window.showErrorMessage(`[agent mesh] could not write a board event: ${String(err)}`);
+      throw err;
     }
     // The exchange is over at a terminal state: its scope is no longer needed,
     // so the map is bounded to in-flight exchanges only.
@@ -286,35 +301,17 @@ export function setupAgentMesh(
   // F-08: the bus-turn status file. While a bus-started turn runs, the sender
   // can see it is in flight; it is deleted at terminal completion. The normal
   // in-process finished notice lives in agentMessagingSetup; this is the
-  // crash-recovery half (a turn whose owner host died is terminalized below).
+  // crash-recovery half (a turn whose owner host died is swept at startup).
+  const turnStatus = new TurnStatus(statusDir);
   let activeTurnId: string | undefined;
-  const writeStatusFile = (turnId: string, detail: string): void => {
-    try {
-      fs.mkdirSync(statusDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(statusDir, `${turnId}.json`),
-        `${JSON.stringify({ turnId, ts: Date.now(), detail }, null, 2)}\n`,
-        'utf8',
-      );
-    } catch {
-      // Best-effort; a status-file failure must not block a turn.
-    }
-  };
-  const clearStatusFile = (turnId: string): void => {
-    try {
-      fs.unlinkSync(path.join(statusDir, `${turnId}.json`));
-    } catch {
-      // Absent: nothing to clear.
-    }
-  };
   // Exposed so the wiring (agentMessagingSetup) can mark a bus turn in flight.
   const markTurnStarted = (turnId: string): void => {
     activeTurnId = turnId;
-    writeStatusFile(turnId, 'bus turn in flight');
+    turnStatus.markTurnStarted(turnId, 'bus turn in flight');
   };
   const markTurnFinished = (turnId: string): void => {
     if (activeTurnId === turnId) activeTurnId = undefined;
-    clearStatusFile(turnId);
+    turnStatus.markTurnFinished(turnId);
   };
 
   // Startup recovery (M2/M3, F-02, F-08): reap a dead owner host's session
@@ -336,20 +333,28 @@ export function setupAgentMesh(
           state: 'crashed',
           detail: 'owned session lost; thread kept for resume',
         });
-        // F-08: the dead owner's in-memory FIFO is gone, so its
-        // accepted-but-not-started exchanges are lost messages. They are
-        // terminalized as `timeout` by the compaction loop (a past-deadline
-        // non-terminal exchange gets a deterministic `timeout` event); the
-        // board never shows them as in-flight forever.
-      }
-      // F-08: a status file left by a crashed bus turn is stale — clear it.
-      try {
-        for (const name of fs.readdirSync(statusDir)) {
-          if (name.endsWith('.json')) fs.unlinkSync(path.join(statusDir, name));
+        // F-08: the dead owner's in-memory FIFO is gone. Terminalize every
+        // accepted message addressed to this alias immediately instead of
+        // leaving a lost message looking live until the 24-hour compaction
+        // deadline.
+        const events = readEvents(exchangePaths.log);
+        const states = latestStates(events);
+        for (const [exchangeId, exchangeEvents] of groupByExchange(events)) {
+          if (states.get(exchangeId) !== 'accepted') continue;
+          if (!exchangeEvents.some((event) => event.to?.toLowerCase() === action.alias)) continue;
+          await onEvent({
+            exchangeId,
+            from: 'forge',
+            to: action.alias,
+            type: 'state',
+            state: 'timeout',
+            detail: 'owner host died before the queued message started',
+          });
         }
-      } catch {
-        // Absent: nothing to clear.
       }
+      // F-08: clear only status files whose owning host is proven dead. A
+      // second extension window may have a live turn in the shared directory.
+      turnStatus.sweepDead();
     } catch {
       // Recovery is best-effort; a failure here must not block activation.
     }
@@ -450,7 +455,7 @@ export function setupAgentMesh(
     if (verdictTimer) clearInterval(verdictTimer);
     orchestrator.dispose();
     await provider.dispose();
-    if (activeTurnId) clearStatusFile(activeTurnId);
+    if (activeTurnId) turnStatus.markTurnFinished(activeTurnId);
     setMeshOrchestrator(undefined);
     setBoardContext(undefined);
   };
