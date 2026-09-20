@@ -78,9 +78,9 @@ export class MeshSessionProvider implements SessionProvider {
   private readonly owned = new Map<string, CodexAppServerSession>();
   private readonly claudeOwned = new Map<string, ClaudeOwnedSession>();
   private readonly creating = new Map<string, Promise<MeshAdapter | { error: string }>>();
-
+  /** Aliases currently being disposed by TTL/recovery. */
+  private readonly reaping = new Set<string>();
   constructor(private readonly deps: SessionProviderDeps) {}
-
   /** The in-memory owned session for an alias, if this window holds it. */
   getOwned(alias: string): CodexAppServerSession | undefined {
     return this.owned.get(alias);
@@ -103,17 +103,9 @@ export class MeshSessionProvider implements SessionProvider {
     writeOwnership(this.deps.busRoot, { ...rec, last_activity: Date.now() });
   }
 
-  /**
-   * True when the alias's adapter OBSERVES turns (an owned session this window
-   * holds, or a foreign live owner). A non-observing alias (a user-opened
-   * session reached by `codex queue` / a peer pipe) stays `accepted` until a
-   * verdict appears, so the orchestrator binds the exchange id into the
-   * message so the agent's verdict can be correlated (F-03).
-   */
+  /** True only when this window holds the adapter and can observe its turns. */
   isObserving(alias: string): boolean {
-    if (this.isOwned(alias)) return true;
-    const rec = readOwnership(this.deps.busRoot, alias);
-    return !!(rec?.owner_host && this.isForeignLiveOwner(rec.owner_host));
+    return this.isOwned(alias);
   }
 
   /**
@@ -123,6 +115,7 @@ export class MeshSessionProvider implements SessionProvider {
    */
   async resolveAdapter(alias: string): Promise<MeshAdapter | undefined> {
     const a = alias.trim().toLowerCase();
+    if (this.reaping.has(a)) return undefined;
     if (a === 'claude') return this.claudeAdapterAsync();
     if (a === 'codex') return this.codexAdapterAsync();
     return undefined;
@@ -242,6 +235,8 @@ export class MeshSessionProvider implements SessionProvider {
    */
   ensureOwnedCodex(alias: string): Promise<MeshAdapter | { error: string }> {
     const a = alias.trim().toLowerCase();
+    if (this.reaping.has(a))
+      return Promise.resolve({ error: `owned ${a} session is being reaped; try again shortly` });
     const existing = this.owned.get(a);
     if (existing) return Promise.resolve(new CodexOwnedAdapter(existing));
     const inflight = this.creating.get(a);
@@ -256,16 +251,17 @@ export class MeshSessionProvider implements SessionProvider {
       this.deps.busRoot,
       alias,
       (o) => this.isForeignLiveOwner(o),
-      () => this.ensureOwnedCodex(alias),
       this.deps,
     );
-    if (start.kind === 'join') return this.ensureOwnedCodex(alias);
+    if (start.kind === 'join') {
+      const fallback = await this.codexAdapterIfLive();
+      return fallback ?? { error: `another window owns the ${alias} session` };
+    }
     if (start.kind === 'refuse') return { error: start.error };
     const { host, rec, aliasRec } = start;
     const threadId = rec?.thread_id ?? aliasRec?.session_id;
     try {
       const bus = this.deps.getConfig().agent_bus;
-
       // First creation (no prior consent recorded): gate it (F-01).
       const refusal = await gateFirstCreationConsent(
         alias,
@@ -327,6 +323,8 @@ export class MeshSessionProvider implements SessionProvider {
    */
   ensureOwnedClaude(alias: string): Promise<MeshAdapter | { error: string }> {
     const a = alias.trim().toLowerCase();
+    if (this.reaping.has(a))
+      return Promise.resolve({ error: `owned ${a} session is being reaped; try again shortly` });
     const existing = this.claudeOwned.get(a);
     if (existing) return Promise.resolve(new ClaudeOwnedAdapter(existing));
     const inflight = this.creating.get(a);
@@ -341,16 +339,15 @@ export class MeshSessionProvider implements SessionProvider {
       this.deps.busRoot,
       alias,
       (o) => this.isForeignLiveOwner(o),
-      () => this.ensureOwnedClaude(alias),
       this.deps,
     );
-    if (start.kind === 'join') return this.ensureOwnedClaude(alias);
+    if (start.kind === 'join')
+      return this.claudeAdapter() ?? { error: `another window owns the ${alias} session` };
     if (start.kind === 'refuse') return { error: start.error };
     const { host, rec, aliasRec } = start;
     const sessionId = rec?.session_id || aliasRec?.session_id || undefined;
     try {
       const bus = this.deps.getConfig().agent_bus;
-
       // First creation (no prior consent recorded): gate it (F-01).
       const refusal = await gateFirstCreationConsent(
         alias,
@@ -409,13 +406,19 @@ export class MeshSessionProvider implements SessionProvider {
    */
   async reap(alias: string): Promise<void> {
     const a = alias.trim().toLowerCase();
-    const codex = this.owned.get(a);
-    const claude = this.claudeOwned.get(a);
-    if (!codex && !claude) return;
-    this.owned.delete(a);
-    this.claudeOwned.delete(a);
-    if (codex) await codex.dispose();
-    if (claude) await claude.dispose();
+    if (this.reaping.has(a)) return;
+    this.reaping.add(a);
+    try {
+      const codex = this.owned.get(a);
+      const claude = this.claudeOwned.get(a);
+      if (!codex && !claude) return;
+      this.owned.delete(a);
+      this.claudeOwned.delete(a);
+      if (codex) await codex.dispose();
+      if (claude) await claude.dispose();
+    } finally {
+      this.reaping.delete(a);
+    }
   }
 
   /**

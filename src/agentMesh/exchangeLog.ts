@@ -314,12 +314,13 @@ export function compact(
       }
       terminal.sort((a, b) => b.lastTs - a.lastTs);
       const keep = new Set<string>();
+      // M8: when there are at least N terminal exchanges, last-N wins even if
+      // those exchanges are recent. The TTL is only a backstop for a smaller
+      // log, so a busy window cannot retain an unbounded recent tail.
+      const hasLastN = terminal.length >= maxExchanges;
       terminal.forEach((t, i) => {
         const tooOld = now - t.lastTs > ttlMs;
-        // Keep if within last-N OR (not past the TTL backstop). Drop only when
-        // outside last-N AND past the TTL — last-N is the primary, TTL the
-        // backstop that also cleans a small-but-old log.
-        if (i < maxExchanges || !tooOld) keep.add(t.id);
+        if (i < maxExchanges || (!hasLastN && !tooOld)) keep.add(t.id);
       });
 
       // A terminal exchange is dropped only if it is in neither keep nor

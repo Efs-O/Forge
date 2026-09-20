@@ -110,14 +110,15 @@ export class ClaudeOwnedSession {
       const active: ActiveTurn = {
         text: '',
         resolve,
-        interrupted: false,
+        interrupted: placeholder.interrupted,
         ...(options.signal ? { signal: options.signal, onAbort } : {}),
       };
       // Replace the placeholder reserved before the await (F-10).
       this.active = active;
       if (options.signal?.aborted) onAbort();
       else options.signal?.addEventListener('abort', onAbort, { once: true });
-      this.writeUserMessage(task);
+      if (active.interrupted) void this.stop('Claude owned session interrupted.');
+      else this.writeUserMessage(task);
     });
   }
 
@@ -128,7 +129,12 @@ export class ClaudeOwnedSession {
    * the steer.
    */
   interrupt(): void {
-    if (this.active) this.active.interrupted = true;
+    if (!this.active) return;
+    this.active.interrupted = true;
+    // Claude's streaming-input transport has no interrupt RPC. Closing the
+    // owned process resolves the active turn immediately; the next FIFO item
+    // starts a fresh process with the same session id and can resume context.
+    if (this.lifecycle === 'running') void this.stop('Claude owned session interrupted.');
   }
 
   async dispose(): Promise<void> {

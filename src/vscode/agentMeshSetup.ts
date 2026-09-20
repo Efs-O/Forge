@@ -29,26 +29,9 @@ import { MeshSessionProvider } from '../agentMesh/sessionProvider';
 import { projectBoard, projectLiveSessions } from '../agentMesh/boardView';
 import { setBoardContext, setMeshOrchestrator } from '../agentMesh/meshContext';
 import { TurnStatus } from '../agentMesh/turnStatus';
+import { validateInboundSender } from '../agentMesh/senderValidation';
 
-/**
- * Agent-mesh activation wiring (AGENT_MESH_PLAN P0). Creates the orchestrator
- * (the single entry point for `tell` and the host-side relay M6) and the
- * session provider (the M2 owner of in-memory owned sessions), wires board
- * events to the exchange log, runs startup recovery (M2/M3), and exposes a
- * `relay` for the inbound routes.
- *
- * `getSidebar` is lazy: activation creates the control server before the
- * sidebar exists. The board scope reads the active conversation lazily, so an
- * event written before the sidebar is up is workspace-scoped only (M9: an
- * event with no conversation is sidebar-only, never Telegram).
- *
- * F-01: a first Forge-owned creation is a user-visible, one-time consented
- * privileged spawn. The wiring supplies the consent gate (a VS Code
- * confirmation); the provider refuses a first creation when none is supplied.
- * F-03: board events are durable before a tell/relay returns, and a verdict
- * poller completes non-observing exchanges. F-07: a compaction scheduler keeps
- * the log bounded and an idle-TTL reaper reaps long-idle owned sessions.
- */
+/** Agent-mesh activation wiring: durable board, recovery, relay, and lifecycle timers. */
 
 export interface AgentMesh {
   orchestrator: MeshOrchestrator;
@@ -66,7 +49,7 @@ export interface AgentMesh {
     text: string,
   ) => Promise<{ ok: true; exchangeId: string } | { ok: false; error: string }>;
   /** Validate an inbound sender alias (M6/§4); unknown `from` is rejected. */
-  validateFrom: (from: string) => { ok: true } | { ok: false; error: string };
+  validateFrom: (from: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   /** F-08: mark a bus-started turn in flight (writes status/<turn>.json). */
   markTurnStarted: (turnId: string) => void;
   /** F-08: mark a bus turn finished (deletes status/<turn>.json). */
@@ -83,7 +66,7 @@ function disabledMesh(): AgentMesh {
     provider: undefined as unknown as MeshSessionProvider,
     relay: reject,
     steer: reject,
-    validateFrom: () => ({ ok: false, error: 'agent bus is disabled' }),
+    validateFrom: async () => ({ ok: false, error: 'agent bus is disabled' }),
     markTurnStarted: () => undefined,
     markTurnFinished: () => undefined,
     dispose: async () => undefined,
@@ -298,10 +281,7 @@ export function setupAgentMesh(
     onObservation: renderObservation,
   });
   setMeshOrchestrator(orchestrator);
-  // F-08: the bus-turn status file. While a bus-started turn runs, the sender
-  // can see it is in flight; it is deleted at terminal completion. The normal
-  // in-process finished notice lives in agentMessagingSetup; this is the
-  // crash-recovery half (a turn whose owner host died is swept at startup).
+  // F-08: status files are written while bus turns run and swept after a crash.
   const turnStatus = new TurnStatus(statusDir);
   let activeTurnId: string | undefined;
   // Exposed so the wiring (agentMessagingSetup) can mark a bus turn in flight.
@@ -314,11 +294,8 @@ export function setupAgentMesh(
     turnStatus.markTurnFinished(turnId);
   };
 
-  // Startup recovery (M2/M3, F-02, F-08): reap a dead owner host's session
-  // (keeping its thread_id for resume), write a `crashed` board event
-  // (idempotent by event id), and terminalize that owner's accepted-but-not-
-  // started FIFO exchanges as `timeout`. A record whose owner is already null
-  // is a clean close, not a crash (F-02), so it produces no crash event.
+  // Startup recovery reaps dead owners, records the crash, and times out their
+  // accepted-but-not-started FIFO exchanges. A null owner is a clean close.
   void (async () => {
     try {
       const recovery = recoverOwnership(paths.root);
@@ -352,18 +329,16 @@ export function setupAgentMesh(
           });
         }
       }
+    } catch {
+      // Recovery is best-effort; a failure here must not block activation.
+    } finally {
       // F-08: clear only status files whose owning host is proven dead. A
       // second extension window may have a live turn in the shared directory.
       turnStatus.sweepDead();
-    } catch {
-      // Recovery is best-effort; a failure here must not block activation.
     }
   })();
 
-  // F-07: a bounded maintenance loop. Every interval it (1) compacts the log
-  // to the last-N terminal exchanges (turning past-deadline non-terminal
-  // exchanges into `timeout`), and (2) reaps owned sessions idle longer than
-  // the TTL (keeping thread_id for resume; parked sessions are exempt).
+  // F-07: bounded compaction and idle-TTL maintenance; parked sessions are exempt.
   const runMaintenance = async (): Promise<void> => {
     try {
       await compact(exchangePaths, {}, {});
@@ -396,27 +371,44 @@ export function setupAgentMesh(
       // Maintenance is best-effort; a failure must not crash the host.
     }
   };
-  const maintenanceTimer = setInterval(() => void runMaintenance(), MAINTENANCE_INTERVAL_MS);
+  let maintenanceRun: Promise<void> | undefined;
+  const maintenanceTimer = setInterval(() => {
+    if (maintenanceRun) return;
+    maintenanceRun = runMaintenance().finally(() => {
+      maintenanceRun = undefined;
+    });
+  }, MAINTENANCE_INTERVAL_MS);
   maintenanceTimer.unref?.();
 
-  // F-03: the verdict poller. A non-observing exchange (a user-opened session
-  // reached by `codex queue` / a peer pipe) stays `accepted` until a verdict
-  // appears. The verdict file is named `<exchangeId>.verdict.md` in the outbox
-  // (the exchange id is bound into the message by the orchestrator). When it
-  // appears, the exchange is completed — an exchange-correlated verdict, not a
-  // transport exit code. A late verdict after the exchange timed out is an
-  // orphan: the terminal `timeout` is final (the log rejects the transition).
-  const pollVerdicts = async (): Promise<void> => {
+  // F-03: consume exchange-correlated verdicts for non-observing sends; late or
+  // unknown verdicts are discarded as orphans.
+  const pollVerdictsOnce = async (): Promise<void> => {
     let names: string[];
     try {
       names = fs.readdirSync(outboxDir);
     } catch {
       return; // no outbox yet
     }
+    const states = latestStates(readEvents(exchangePaths.log));
     for (const name of names) {
       if (!name.endsWith('.verdict.md')) continue;
       const exchangeId = name.slice(0, -'.verdict.md'.length);
       const file = path.join(outboxDir, name);
+      const state = states.get(exchangeId);
+      // A verdict is only meaningful for an exchange already accepted by the
+      // mesh. Unknown files and verdicts for terminal exchanges are orphans;
+      // consume them once without creating a false completed exchange.
+      if (state === undefined || isTerminal(state) || state === 'created') {
+        try {
+          fs.unlinkSync(file);
+        } catch {
+          // Absent: another window consumed the orphan.
+        }
+        void vscode.window.showWarningMessage(
+          `[agent mesh] ignored orphan verdict for exchange ${exchangeId}`,
+        );
+        continue;
+      }
       let body = '';
       try {
         body = fs.readFileSync(file, 'utf8');
@@ -437,6 +429,14 @@ export function setupAgentMesh(
       }
     }
   };
+  let verdictPoll: Promise<void> | undefined;
+  const pollVerdicts = (): Promise<void> => {
+    if (verdictPoll) return verdictPoll;
+    verdictPoll = pollVerdictsOnce().finally(() => {
+      verdictPoll = undefined;
+    });
+    return verdictPoll;
+  };
   const verdictTimer = setInterval(() => void pollVerdicts(), MAINTENANCE_INTERVAL_MS);
   verdictTimer.unref?.();
 
@@ -453,7 +453,15 @@ export function setupAgentMesh(
     return { ok: true, exchangeId: result.exchangeId };
   };
 
-  const validateFrom: AgentMesh['validateFrom'] = (from) => orchestrator.validateFrom(from);
+  const validateFrom: AgentMesh['validateFrom'] = (from) =>
+    validateInboundSender(
+      from,
+      (value) => orchestrator.validateFrom(value),
+      paths.root,
+      getConfig,
+      workspaceRoot,
+      () => orchestrator.aliases(),
+    );
 
   const dispose = async (): Promise<void> => {
     if (maintenanceTimer) clearInterval(maintenanceTimer);

@@ -124,6 +124,13 @@
   font-size: 0.88em;
 }
 
+.ms-profile,
+.ms-profile-hint {
+  margin-left: 3px;
+  font-size: 0.88em;
+  opacity: 0.8;
+}
+
 /* ── Dropdown panel ─────────────────────────────────────────────────────── */
 
 /* Anchored to the BOTTOM of the trigger and growing upward: the selector now

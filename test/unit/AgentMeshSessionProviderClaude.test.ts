@@ -3,14 +3,17 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MeshSessionProvider } from '../../src/agentMesh/sessionProvider';
-import { readOwnership } from '../../src/agentMesh/ownership';
+import { claimCreation, readOwnership, writeOwnership } from '../../src/agentMesh/ownership';
 import { getAlias, registerAlias } from '../../src/agentMesh/aliasRegistry';
 import type { ForgeConfig } from '../../src/config/types';
 
 /** A controllable fake owned Claude session (no real process). */
 class FakeClaudeSession {
   disposed = false;
-  constructor(private readonly confirmed: string | undefined) {}
+  constructor(
+    private readonly confirmed: string | undefined,
+    private readonly disposeWait?: Promise<void>,
+  ) {}
   get confirmedSessionId(): string | undefined {
     return this.confirmed;
   }
@@ -22,12 +25,14 @@ class FakeClaudeSession {
   }
   async dispose(): Promise<void> {
     this.disposed = true;
+    await this.disposeWait;
   }
 }
 
 function makeProvider(opts: {
   consent?: boolean;
   factory?: (sessionId: string | undefined) => FakeClaudeSession;
+  disposeWait?: Promise<void>;
 } = {}): MeshSessionProvider {
   const config: ForgeConfig = {
     agent_bus: { claude_session: '', codex_thread: '', claude_cli: 'claude' },
@@ -42,7 +47,9 @@ function makeProvider(opts: {
     requestConsent: async () => opts.consent ?? true,
     claudeFactory: {
       create: async ({ sessionId }) =>
-        opts.factory ? opts.factory(sessionId) : new FakeClaudeSession('owned-id'),
+        opts.factory
+          ? opts.factory(sessionId)
+          : new FakeClaudeSession('owned-id', opts.disposeWait),
     },
   });
 }
@@ -135,6 +142,53 @@ describe('MeshSessionProvider: owned Claude path (P4)', () => {
     await p.reap('claude');
     expect(session?.disposed).toBe(true);
     expect(p.isOwned('claude')).toBe(false);
+  });
+
+  it('does not resolve a replacement while an owned session is being reaped', async () => {
+    let release!: () => void;
+    const disposeWait = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const p = makeProvider({ disposeWait });
+    await p.ensureOwnedClaude('claude');
+
+    const reaping = p.reap('claude');
+    await Promise.resolve();
+
+    await expect(p.resolveAdapter('claude')).resolves.toBeUndefined();
+    release();
+    await reaping;
+  });
+
+  it('a losing window falls back after the live creator writes its record', async () => {
+    const foreign = { pid: 4242, startedAt: 1000 };
+    writeOwnership(root, {
+      alias: 'claude',
+      agent: 'claude',
+      session_id: 'foreign-id',
+      owner_host: foreign,
+      workspace: '/ws',
+      created_at: 1,
+      parked: false,
+    });
+    claimCreation(root, 'claude', foreign, {
+      selfPid: 9999,
+      isAlive: (pid) => pid === foreign.pid || pid === 9999,
+      processStartMs: () => 1000,
+    });
+    const p = new MeshSessionProvider({
+      busRoot: root,
+      getConfig: () => ({ agent_bus: { claude_session: '', codex_thread: '' } }) as ForgeConfig,
+      workspaceRoots: () => ['/ws'],
+      claudeSessions: () => [],
+      selfPid: 9999,
+      isAlive: (pid) => pid === foreign.pid || pid === 9999,
+      processStartMs: () => 1000,
+    });
+
+    const result = await p.ensureOwnedClaude('claude');
+    expect('error' in result).toBe(true);
+    if ('error' in result) expect(result.error).toContain('another window owns');
   });
 
   it('close kills the owned session but keeps the record (M3: resumable)', async () => {

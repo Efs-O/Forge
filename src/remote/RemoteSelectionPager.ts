@@ -80,6 +80,9 @@ export async function sendModelSelection(
   if (context.modelEntries.length === 0) {
     return { kind: 'rejected', reason: 'no configured models are available' };
   }
+  // Keep the persisted list to one value per configured model. The selection
+  // schema caps lists at 100 items; profiles remain selectable by typing the
+  // displayed `base@profile` form and are validated below.
   const values = sortModelPickerEntries(context.modelEntries).map((model) => model.name);
   const page = parseRequestedPage(pageArgument, values.length);
   if (page === undefined) {
@@ -325,7 +328,11 @@ function formatModels(
       lines.push(group.toUpperCase());
       previousGroup = group;
     }
-    lines.push(`${start + offset + 1}. ${clip(name, 220)}`);
+    const profiles = byName.get(name)?.profiles;
+    const profileHint = profiles?.length
+      ? ` · profiles: ${profiles.map((profile) => `@${profile}`).join(', ')}`
+      : '';
+    lines.push(`${start + offset + 1}. ${clip(name, 220)}${profileHint}`);
   }
   return lines;
 }

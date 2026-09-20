@@ -120,6 +120,22 @@ describe('orchestrator: tell + FIFO (M5)', () => {
     expect(board.filter((e) => e.state === 'completed').length).toBe(2);
   });
 
+  it('exposes pending messages with their recipient aliases for F-09', async () => {
+    const adapter = new FakeAdapter(true);
+    const orch = makeOrchestrator({ adapters: { codex: adapter }, owned: new Set(['codex']) });
+    await orch.tell('codex', 'first');
+    await flush();
+    await orch.tell('codex', 'queued line 1\nqueued line 2');
+
+    expect(orch.pendingMessages()).toEqual([
+      { alias: 'codex', message: 'queued line 1\nqueued line 2' },
+    ]);
+
+    adapter.complete();
+    await flush();
+    expect(orch.pendingMessages()).toEqual([]);
+  });
+
   it('queue overflow is rejected and reported, never dropped (M5)', async () => {
     // Direct FIFO with a small bound: the bound is on the WAITING queue (the
     // in-flight turn is separate). With bound 1: e1 runs, e2 waits (accepted),
@@ -299,6 +315,18 @@ describe('orchestrator: host-side relay (M6)', () => {
     }
     await flush();
     expect(adapter.sends).toEqual(['pass this on']);
+  });
+
+  it('binds a verdict id when relaying to a non-observing session', async () => {
+    const adapter = new FakeAdapter(false);
+    const orch = makeOrchestrator({ adapters: { claude: adapter } });
+
+    const out = await orch.relay('codex', 'claude', 'pass this on');
+    expect('error' in out).toBe(false);
+    await flush();
+
+    expect(adapter.sends[0]).toContain('pass this on');
+    expect(adapter.sends[0]).toContain('.verdict.md');
   });
 
   it('refuses to relay a relay (hop count ≤ 2)', async () => {

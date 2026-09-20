@@ -15,9 +15,8 @@ import { claimCreation, readOwnership, waitForRecord, type OwnershipRecord } fro
  * before spawning:
  *
  * 1. **Claim the lease** (O_EXCL). If another window holds it, wait (bounded)
- *    for its ownership record and signal a re-resolve (the caller re-enters
- *    `ensureOwned*`, which now finds the record) instead of reporting an error
- *    while the peer's session is about to be ready. A torn claim (no holder) or
+ *    for its ownership record and signal a safe fallback instead of reporting
+ *    an error while the peer's session is about to be ready. A torn claim (no holder) or
  *    a timeout is a refusal.
  * 2. **Gate first-creation consent** (F-01). When there is no prior alias or
  *    session id, a first creation is a user-visible, one-time consented
@@ -39,25 +38,18 @@ export async function beginCreation(
   busRoot: string,
   alias: string,
   isForeignLiveOwner: (owner: { pid: number; startedAt: number }) => boolean,
-  reResolve: () => Promise<unknown>,
   deps: HostLivenessDeps,
 ): Promise<CreationStart> {
   const host = getHostIdentity(deps);
   const claim = claimCreation(busRoot, alias, host, deps);
   if (!claim.claimed) {
     // F-04: a live holder is creating. Wait (bounded) for its ownership record
-    // and re-resolve (join it), instead of reporting an error while the peer's
-    // session is about to be ready. A torn claim (no holder) or a timeout is
-    // still a refusal — we never race a possibly-live creator.
+    // and use a safe fallback instead of racing a possibly-live creator.
     if (claim.holder) {
       const rec = await waitForRecord(busRoot, alias, 5_000);
-      // Join when the peer has FINISHED creating: its record names a live
-      // owner (foreign or self). Re-resolving then finds the record and resumes
-      // the peer's session instead of spawning a second one. (If the holder is
-      // still mid-spawn with no record yet, waitForRecord times out and we
-      // refuse — we never race a possibly-live creator.)
+      // The caller uses its non-observing fallback; it must not re-enter its
+      // own in-flight creation promise.
       if (rec && rec.owner_host && isForeignLiveOwner(rec.owner_host)) {
-        await reResolve();
         return { kind: 'join' };
       }
     }

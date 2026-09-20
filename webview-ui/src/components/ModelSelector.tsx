@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { splitModelProfile } from '../../../src/config/ConfigResolver';
 import type { ModelEntry, ModelResidency } from '../../../src/sidebar/messageBridge';
 import { groupModels } from '../modelGroups';
 
@@ -26,6 +27,10 @@ function ResidencyDot({ residency }: { residency?: ModelResidency }): React.Reac
 }
 
 const ROLE_SUFFIXES = ['-coding', '-vision', '-worker'] as const;
+
+function ProfileName({ profile }: { profile?: string }): React.ReactElement | null {
+  return profile ? <span className="ms-profile">@{profile}</span> : null;
+}
 
 function ModelName({ name }: { name: string }): React.ReactElement {
   for (const suffix of ROLE_SUFFIXES) {
@@ -55,15 +60,22 @@ export function ModelSelector({
   disabled,
 }: SelectorProps): React.ReactElement {
   const [open, setOpen] = useState(false);
+  const [profileModel, setProfileModel] = useState<ModelEntry | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
     function onDown(e: MouseEvent) {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setProfileModel(null);
+      }
     }
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key === 'Escape') {
+        setOpen(false);
+        setProfileModel(null);
+      }
     }
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
@@ -74,6 +86,14 @@ export function ModelSelector({
   }, [open]);
 
   const groups = groupModels(models);
+  const activeSelection = activeModel ? splitModelProfile(activeModel) : undefined;
+  const activeModelEntry = activeSelection
+    ? models.find((model) => model.name === activeSelection.base)
+    : undefined;
+  const close = () => {
+    setOpen(false);
+    setProfileModel(null);
+  };
 
   return (
     <div className="ms-root" ref={rootRef}>
@@ -90,8 +110,9 @@ export function ModelSelector({
         <span className="ms-trigger-name">
           {activeModel ? (
             <>
-              <ResidencyDot residency={models.find((m) => m.name === activeModel)?.residency} />
-              <ModelName name={activeModel} />
+              <ResidencyDot residency={activeModelEntry?.residency} />
+              <ModelName name={activeSelection?.base ?? activeModel} />
+              <ProfileName profile={activeSelection?.profile} />
             </>
           ) : (
             <span className="ms-placeholder">No model selected</span>
@@ -104,40 +125,93 @@ export function ModelSelector({
 
       {open && (
         <div className="ms-panel" role="listbox" aria-label="Select model">
-          <div
-            className={`ms-item${!activeModel ? ' ms-item--active' : ''}`}
-            role="option"
-            aria-selected={!activeModel}
-            onClick={() => {
-              onModelChange(null);
-              setOpen(false);
-            }}
-          >
-            <span className="ms-placeholder">No model selected</span>
-          </div>
-
-          {groups.map(({ label, entries }) => (
-            <div key={label} className="ms-group">
+          {profileModel ? (
+            <>
               <div className="ms-group-header" aria-hidden="true">
-                {label}
+                {profileModel.name} — profile
               </div>
-              {entries.map((m) => (
-                <div
-                  key={m.name}
-                  className={`ms-item${m.name === activeModel ? ' ms-item--active' : ''}`}
-                  role="option"
-                  aria-selected={m.name === activeModel}
-                  onClick={() => {
-                    onModelChange(m.name);
-                    setOpen(false);
-                  }}
-                >
-                  <ResidencyDot residency={m.residency} />
-                  <ModelName name={m.name} />
+              <div
+                className="ms-item"
+                role="option"
+                aria-selected={false}
+                onClick={() => setProfileModel(null)}
+              >
+                ← All models
+              </div>
+              <div
+                className={`ms-item${activeModel === profileModel.name ? ' ms-item--active' : ''}`}
+                role="option"
+                aria-selected={activeModel === profileModel.name}
+                onClick={() => {
+                  onModelChange(profileModel.name);
+                  close();
+                }}
+              >
+                <span className="ms-placeholder">No profile</span>
+              </div>
+              {(profileModel.profiles ?? []).map((profile) => {
+                const selection = `${profileModel.name}@${profile}`;
+                return (
+                  <div
+                    key={selection}
+                    className={`ms-item${activeModel === selection ? ' ms-item--active' : ''}`}
+                    role="option"
+                    aria-selected={activeModel === selection}
+                    onClick={() => {
+                      onModelChange(selection);
+                      close();
+                    }}
+                  >
+                    @{profile}
+                  </div>
+                );
+              })}
+            </>
+          ) : (
+            <>
+              <div
+                className={`ms-item${!activeModel ? ' ms-item--active' : ''}`}
+                role="option"
+                aria-selected={!activeModel}
+                onClick={() => {
+                  onModelChange(null);
+                  close();
+                }}
+              >
+                <span className="ms-placeholder">No model selected</span>
+              </div>
+
+              {groups.map(({ label, entries }) => (
+                <div key={label} className="ms-group">
+                  <div className="ms-group-header" aria-hidden="true">
+                    {label}
+                  </div>
+                  {entries.map((m) => (
+                    <div
+                      key={m.name}
+                      className={`ms-item${m.name === activeModel ? ' ms-item--active' : ''}`}
+                      role="option"
+                      aria-selected={m.name === activeModel}
+                      onClick={() => {
+                        if (m.profiles && m.profiles.length > 0) {
+                          setProfileModel(m);
+                          return;
+                        }
+                        onModelChange(m.name);
+                        close();
+                      }}
+                    >
+                      <ResidencyDot residency={m.residency} />
+                      <ModelName name={m.name} />
+                      {m.profiles && m.profiles.length > 0 && (
+                        <span className="ms-profile-hint"> + profile</span>
+                      )}
+                    </div>
+                  ))}
                 </div>
               ))}
-            </div>
-          ))}
+            </>
+          )}
         </div>
       )}
     </div>

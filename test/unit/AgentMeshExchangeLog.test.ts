@@ -126,6 +126,18 @@ describe('exchange log (M1/M8)', () => {
     expect(kept).toHaveLength(4); // whole exchange, not a fragment
   });
 
+  it('M8: last-N wins over the TTL when the terminal log has reached N', async () => {
+    const d = makeHost(1, 1000, new Set([1]));
+    await appendEvent(paths, ev('oldest', 'completed', 1), d);
+    await appendEvent(paths, ev('newest', 'completed', 2), d);
+
+    await compact(paths, { now: 3, maxExchanges: 1, ttlMs: 1_000_000 }, d);
+
+    const states = latestStates(readEvents(paths.log));
+    expect(states.has('oldest')).toBe(false);
+    expect(states.get('newest')).toBe('completed');
+  });
+
   it('a verdict completes a non-observing exchange that stays accepted (F-03)', async () => {
     const d = makeHost(1, 1000, new Set([1]));
     await appendEvent(paths, ev('x1', 'created', 1), d);

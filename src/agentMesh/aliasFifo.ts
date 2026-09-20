@@ -91,6 +91,11 @@ export class AliasFifo {
     return this.queue.length;
   }
 
+  /** A read-only snapshot for the Telegram queue view (F-09). */
+  get pendingMessages(): readonly FifoMessage[] {
+    return this.queue.map((message) => ({ ...message }));
+  }
+
   /**
    * F-06: a steer. Interrupts the active turn (so the current `send()` resolves
    * as `cancelled` and the drain loop advances), then queues the steer message

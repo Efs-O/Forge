@@ -8,7 +8,7 @@
  */
 
 import type { ForgeConfig } from '../config/types';
-import { mergeGroupsIntoModel } from '../config/ConfigResolver';
+import { listProfiles, mergeGroupsIntoModel } from '../config/ConfigResolver';
 import type { HostToWebview, ModelResidency, SessionSyncMsg } from './messageBridge';
 import { classifyModelRoute } from '../llm/ModelRouteClassifier';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
@@ -55,6 +55,7 @@ export function buildModelsMessage(
   /** The active tab's pin wins over the config default, just like sending does. */
   activeModel: string | null = config.active_model,
 ): HostToWebview {
+  const profiles = listProfiles(config);
   return {
     type: 'models',
     models: config.models.map((configured) => {
@@ -67,6 +68,7 @@ export function buildModelsMessage(
       return {
         ...picker,
         provider: model.provider ?? 'llama.cpp',
+        ...(profiles.length > 0 ? { profiles } : {}),
         ...(residency ? { residency } : {}),
       };
     }),

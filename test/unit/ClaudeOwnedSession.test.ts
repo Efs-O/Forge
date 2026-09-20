@@ -54,6 +54,21 @@ describe('ClaudeOwnedSession (P4: persistent stdio Claude session)', () => {
     expect(result.status).toBe('failed');
   });
 
+  it('interrupts a running turn so the FIFO can advance', async () => {
+    const current = session();
+    const pending = current.send('TRIGGER_SLOW');
+    await new Promise((r) => setTimeout(r, 50));
+
+    current.interrupt();
+
+    await expect(pending).resolves.toMatchObject({ status: 'failed' });
+    await expect(current.send('after interrupt')).resolves.toMatchObject({
+      status: 'completed',
+      sessionId: 'fixture-session-id',
+    });
+    await current.dispose();
+  });
+
   it('exposes the child pid while running (ownership records)', async () => {
     const current = session();
     await current.send('hello');

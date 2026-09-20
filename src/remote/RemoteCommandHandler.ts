@@ -10,7 +10,10 @@ import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
 import { collectSystemReport } from '../system/SystemReport';
 import { formatSystemReport } from '../system/formatSystemReport';
-import type { ModelPickerDescriptor } from '../sidebar/ModelPickerGroups';
+import {
+  modelPickerSelectionEntries,
+  type ModelPickerDescriptor,
+} from '../sidebar/ModelPickerGroups';
 import { PowerControl } from '../system/PowerControl';
 import { handleRemotePowerCommand } from './RemotePowerCommands';
 import { handleRemoteJobCommand } from './RemoteJobCommands';
@@ -359,7 +362,10 @@ async function executeRemoteCommand(
       return { kind: 'rejected', reason: 'the bound conversation is busy or has queued work' };
     }
     const modelName = resolveModelSelection(context, event, argument);
-    if (!modelName || !context.modelEntries.some((model) => model.name === modelName)) {
+    if (
+      !modelName ||
+      !modelPickerSelectionEntries(context.modelEntries).some((model) => model.name === modelName)
+    ) {
       return { kind: 'rejected', reason: 'model is unavailable; use /models' };
     }
     await context.host.setConversationModel(binding.conversationId, modelName);

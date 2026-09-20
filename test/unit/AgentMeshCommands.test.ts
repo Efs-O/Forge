@@ -184,6 +184,7 @@ describe('standby state machine (§2b, P3)', () => {
       processStartMs: () => startedAt, // both hosts report the same start time
     });
     expect(p.isOwner('codex')).toBe(false);
+    expect(p.isObserving('codex')).toBe(false);
     expect(p.park('codex')).toBe(false);
     expect(p.wake('codex')).toBe(false);
     expect(readOwnership(root, 'codex')?.owner_host).toEqual(foreign);

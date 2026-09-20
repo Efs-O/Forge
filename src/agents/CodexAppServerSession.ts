@@ -76,7 +76,7 @@ export class CodexAppServerSession {
         text: '',
         agentMessageText: new Map(),
         sawCommandExecution: false,
-        interrupted: false,
+        interrupted: placeholder.interrupted,
         interruptSent: false,
         resolve,
         ...(options.signal ? { signal: options.signal } : {}),

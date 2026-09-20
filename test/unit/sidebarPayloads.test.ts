@@ -39,6 +39,16 @@ describe('buildModelsMessage', () => {
     expect(msg).toMatchObject({ type: 'models', active: 'vision' });
   });
 
+  it('exposes configured request profiles for each base model', () => {
+    const msg = buildModelsMessage({
+      active_model: 'a@audit',
+      profiles: { audit: { think: true } },
+      models: [{ name: 'a' }, { name: 'b', provider: 'ollama' }],
+    } as ForgeConfig) as { models: ModelEntry[] };
+
+    expect(msg.models.map((model) => model.profiles)).toEqual([['audit'], ['audit']]);
+  });
+
   it('omits residency entirely when no pool is supplied', () => {
     const msg = buildModelsMessage({ active_model: 'a', models: [{ name: 'a' }] } as ForgeConfig);
     expect((msg as { models: ModelEntry[] }).models[0]).not.toHaveProperty('residency');

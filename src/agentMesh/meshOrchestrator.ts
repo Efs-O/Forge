@@ -73,6 +73,11 @@ export interface TellOutcome {
   observing: boolean;
 }
 
+export interface PendingMeshMessage {
+  alias: string;
+  message: string;
+}
+
 export interface RelayOutcome extends TellOutcome {
   /** The two hop events share this exchange id (M6). */
   relayed: true;
@@ -278,7 +283,10 @@ export class MeshOrchestrator {
         state: 'accepted',
         detail: 'inbound bus message',
       });
-      const res = await fifo.enqueue({ exchangeId, message });
+      const outbound = this.deps.provider.isObserving(recipient)
+        ? message
+        : `${message}\n\n[forge: when you finish this, write your verdict to outbox/${exchangeId}.verdict.md]`;
+      const res = await fifo.enqueue({ exchangeId, message: outbound });
       if (!res.accepted) {
         return { error: `queue full for "${to}" (${res.queueLength}); relay rejected` };
       }
@@ -368,6 +376,17 @@ export class MeshOrchestrator {
   /** The pending (queued-but-unsent) message count for an alias (§7). */
   queueLength(alias: string): number {
     return this.fifos.get(alias.trim().toLowerCase())?.pending ?? 0;
+  }
+
+  /** Pending unsent bus messages for the Telegram queue view (F-09). */
+  pendingMessages(): PendingMeshMessage[] {
+    const messages: PendingMeshMessage[] = [];
+    for (const [alias, fifo] of this.fifos) {
+      for (const message of fifo.pendingMessages) {
+        messages.push({ alias, message: message.message });
+      }
+    }
+    return messages;
   }
 
   /**

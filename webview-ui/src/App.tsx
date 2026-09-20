@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useReducer, useCallback, useRef, useState } from 'react';
+import { splitModelProfile } from '../../src/config/ConfigResolver';
 import type {
   AttachmentData,
   ForgeSlashCommandId,
@@ -357,7 +358,8 @@ export function App(): React.ReactElement {
   const uiBusy = generating;
   // `residency` is sent only for models Forge itself hosts, so its presence is
   // the local/remote answer already — no second heuristic to drift from it.
-  const activeModelEntry = state.models.find((model) => model.name === state.activeModel);
+  const activeBaseModel = state.activeModel ? splitModelProfile(state.activeModel).base : undefined;
+  const activeModelEntry = state.models.find((model) => model.name === activeBaseModel);
   const activeModelIsLocal = activeModelEntry?.residency !== undefined;
 
   const queuedIds = useMemo(

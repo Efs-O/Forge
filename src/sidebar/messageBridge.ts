@@ -1,6 +1,5 @@
 import type { QuestionGroup } from '../util/questionAnswers';
 import type { ChatAttachmentRef } from '../llm/types';
-
 export type { ChatAttachmentRef };
 
 /** Tab row mirrored for host + webview. */
@@ -128,6 +127,7 @@ export interface ModelEntry {
   provider: string;
   /** Presentation-only category calculated by the extension host. */
   group?: string;
+  profiles?: readonly string[];
   /**
    * Absent when residency is not a meaningful concept for this model — every
    * remote route, including Ollama *cloud* models, which reach the daemon on

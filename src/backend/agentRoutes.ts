@@ -45,7 +45,12 @@ export interface AgentRoutesDeps {
    * Validate an inbound `from` against live aliases (M6/§4). An unknown or
    * forged sender is rejected with the live list. Absent ⇒ shape check only.
    */
-  validateFrom?: (from: string) => { ok: true } | { ok: false; error: string };
+  validateFrom?: (
+    from: string,
+  ) =>
+    | { ok: true }
+    | { ok: false; error: string }
+    | Promise<{ ok: true } | { ok: false; error: string }>;
   /**
    * Dispatch a typed lifecycle command (§8, P3). When an inbound `to: forge`
    * message parses as a mesh command (`standby codex`, `close codex`, …), it is
@@ -185,7 +190,7 @@ export class AgentRoutes {
         throw new HttpError(400, 'from must be 1-40 chars: letters, digits, space . _ -');
       }
       // M6/§4: an unknown or forged sender is rejected with the live list.
-      const sender = this.deps.validateFrom?.(from);
+      const sender = await this.deps.validateFrom?.(from);
       if (sender && !sender.ok) throw new HttpError(400, sender.error);
       // M6: an inbound message addressed to another agent (to != forge) is
       // relayed by the host through the recipient's adapter, with zero Forge

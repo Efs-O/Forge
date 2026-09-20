@@ -27,7 +27,10 @@ export interface TurnStatusRecord {
 }
 
 export class TurnStatus {
-  constructor(private readonly dir: string) {}
+  constructor(
+    private readonly dir: string,
+    private readonly renameFile: typeof fs.renameSync = fs.renameSync,
+  ) {}
 
   /** Mark a bus turn in flight (writes `status/<turnId>.json`). */
   markTurnStarted(turnId: string, detail: string): void {
@@ -47,13 +50,22 @@ export class TurnStatus {
         context_pct: null,
         detail,
       };
-      fs.writeFileSync(
-        path.join(this.dir, `${turnId}.json`),
-        `${JSON.stringify(record, null, 2)}\n`,
-        'utf8',
-      );
+      const file = path.join(this.dir, `${turnId}.json`);
+      const tmp = `${file}.tmp`;
+      fs.writeFileSync(tmp, `${JSON.stringify(record, null, 2)}\n`, 'utf8');
+      try {
+        this.renameFile(tmp, file);
+      } catch (err) {
+        try {
+          fs.unlinkSync(tmp);
+        } catch (cleanupErr) {
+          if ((cleanupErr as NodeJS.ErrnoException).code !== 'ENOENT') throw cleanupErr;
+        }
+        throw err;
+      }
     } catch {
-      // Best-effort; a status-file failure must not block a turn.
+      // Best-effort; a status-file failure must not block a turn. The tmp +
+      // rename above keeps a crash from leaving a partial JSON status record.
     }
   }
 

@@ -8,7 +8,11 @@
  * `/workspace <n>`, and of the miss messages that name the sanctioned list.
  */
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
-import { sortModelPickerEntries, type ModelPickerDescriptor } from '../sidebar/ModelPickerGroups';
+import {
+  modelPickerSelectionEntries,
+  sortModelPickerEntries,
+  type ModelPickerDescriptor,
+} from '../sidebar/ModelPickerGroups';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteInboundEvent } from './types';
 
@@ -120,10 +124,13 @@ export function resolveModelSelection(
 ): string | undefined {
   const fromPager = resolveSelection(context, event, 'models', argument);
   if (fromPager) return fromPager;
-  if (!/^\d+$/.test(argument)) return undefined;
-  const entries = sortModelPickerEntries(context.modelEntries ?? []);
+  const entries = modelPickerSelectionEntries(context.modelEntries ?? []);
+  if (!/^\d+$/.test(argument)) {
+    return entries.find((entry) => entry.name === argument)?.name;
+  }
+  const baseEntries = sortModelPickerEntries(context.modelEntries ?? []);
   const index = Number(argument) - 1;
-  return index >= 0 && index < entries.length ? entries[index]!.name : undefined;
+  return index >= 0 && index < baseEntries.length ? baseEntries[index]!.name : undefined;
 }
 
 /** Conversation ids are UUIDs; a chat message wants the recognisable ends. */

@@ -14,6 +14,7 @@ import {
   sendModelSelection,
   type RemoteSelectionContext,
 } from '../../src/remote/RemoteSelectionPager';
+import { resolveModelSelection } from '../../src/remote/remoteCommandSelectors';
 import { generateTotp } from '../../src/remote/RemoteTotp';
 import type { RemoteInboundEvent } from '../../src/remote/types';
 import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
@@ -514,6 +515,44 @@ describe('remote selection pagination', () => {
       'alpha-openai',
       'zeta-openai',
     ]);
+  });
+
+  it('lists request profiles as selectable model variants', async () => {
+    const store = await requestStore();
+    const channel = new FakeRemoteChannel();
+    const ctx: RemoteSelectionContext = {
+      ...context(channel, store, 0),
+      modelEntries: [
+        { name: 'qwen', group: 'Local — llama.cpp', profiles: ['audit'] },
+      ],
+    };
+
+    await expect(sendModelSelection(textEvent('/models'), ctx)).resolves.toEqual({
+      kind: 'handled',
+    });
+    expect(store.selection('fake', 'chat', 'models')?.values).toEqual(['qwen']);
+    expect(channel.selectionPageSends[0]?.text).toContain('1. qwen · profiles: @audit');
+    expect(resolveModelSelection(ctx, textEvent('/model qwen@audit'), 'qwen@audit')).toBe(
+      'qwen@audit',
+    );
+  });
+
+  it('keeps the Telegram selection state under the 100-value schema cap', async () => {
+    const store = await requestStore();
+    const channel = new FakeRemoteChannel();
+    const ctx: RemoteSelectionContext = {
+      ...context(channel, store, 0),
+      modelEntries: Array.from({ length: 100 }, (_, index) => ({
+        name: `model-${index + 1}`,
+        group: 'Local — llama.cpp' as const,
+        profiles: ['audit', 'main', 'worker'],
+      })),
+    };
+
+    await expect(sendModelSelection(textEvent('/models'), ctx)).resolves.toEqual({
+      kind: 'handled',
+    });
+    expect(store.selection('fake', 'chat', 'models')?.values).toHaveLength(100);
   });
 
   it('underlines group headings on an HTML transport without trusting a model name', async () => {

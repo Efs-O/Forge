@@ -20,6 +20,27 @@ export type ModelPickerGroup = (typeof MODEL_PICKER_GROUP_ORDER)[number];
 export interface ModelPickerDescriptor {
   name: string;
   group: ModelPickerGroup;
+  /** Request-time profiles the picker can apply to this base model. */
+  profiles?: readonly string[];
+}
+
+/**
+ * Expands the base entries into the concrete ids accepted by `/model` and the
+ * remote selection pager. Profiles do not create another backend; they only
+ * change request-time settings on the same base model.
+ */
+export function modelPickerSelectionEntries(
+  entries: readonly ModelPickerDescriptor[],
+): ModelPickerDescriptor[] {
+  return sortModelPickerEntries(
+    entries.flatMap((entry) => [
+      { name: entry.name, group: entry.group },
+      ...(entry.profiles ?? []).map((profile) => ({
+        name: `${entry.name}@${profile}`,
+        group: entry.group,
+      })),
+    ]),
+  );
 }
 
 function titleCase(label: string): string {

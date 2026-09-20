@@ -3,7 +3,7 @@ import { HELP_TEXT, decorateHelpLine } from './remoteHelpText';
 import { boldLeadingNumber, boldLineLabel, sendRichText } from './telegramHtml';
 import type { RemoteInboundDisposition, RemoteInboundEvent } from './types';
 import { MAX_VIEW_COUNT, parseViewCount, sendTranscriptView } from './RemoteTranscriptView';
-import { getBoardContext } from '../agentMesh/meshContext';
+import { getBoardContext, getMeshOrchestrator } from '../agentMesh/meshContext';
 import { projectBoard, projectLiveSessions } from '../agentMesh/boardView';
 
 type TextEvent = Extract<RemoteInboundEvent, { kind: 'text' }>;
@@ -259,18 +259,32 @@ export async function handleRemoteSessionCommand(
     const binding = context.store.binding(event.channel, event.chatId);
     if (!binding) return { kind: 'rejected', reason: 'no conversation is bound' };
     const queued = ownQueue(event, context, binding.conversationId);
+    const busQueued = getMeshOrchestrator()?.pendingMessages() ?? [];
+    const entries = [
+      ...queued.map(
+        (item) => `${item.priority === 'steer' ? '[steer] ' : ''}${truncate(item.text, 160)}`,
+      ),
+      ...busQueued.map(
+        (item) => `agent-bus ${item.alias}: ${truncate(firstLine(item.message), 160)}`,
+      ),
+    ];
+    const notes = [
+      ...(queued.length > 0
+        ? [
+            'These run in order once the current turn ends. Use /steer <number> to run one now, or /drop <number|all> to cancel.',
+          ]
+        : []),
+      ...(busQueued.length > 0
+        ? ['Agent-bus items are shown for visibility; manage them with mesh lifecycle commands.']
+        : []),
+    ];
     await sendRichText(
       context.channel,
       event.chatId,
-      queued.length === 0
+      entries.length === 0
         ? 'Forge: no queued prompts for this chat.'
-        : queued
-            .map(
-              (item, index) =>
-                `${index + 1}. ${item.priority === 'steer' ? '[steer] ' : ''}${truncate(item.text, 160)}`,
-            )
-            .join('\n\n') +
-            '\n\nThese run in order once the current turn ends. Use /steer <number> to run one now, or /drop <number|all> to cancel.',
+        : entries.map((entry, index) => `${index + 1}. ${entry}`).join('\n\n') +
+            (notes.length > 0 ? `\n\n${notes.join('\n\n')}` : ''),
       (line) => (line.startsWith('These run') ? `<i>${line}</i>` : boldLeadingNumber(line)),
       { signal: context.signal },
     );
@@ -329,4 +343,8 @@ function ownQueue(event: TextEvent, context: RemoteCommandContext, conversationI
 
 function truncate(value: string, maximum: number): string {
   return value.length > maximum ? `${value.slice(0, maximum - 1)}…` : value;
+}
+
+function firstLine(value: string): string {
+  return value.split(/\r?\n/u, 1)[0]?.trim() || '(empty)';
 }
