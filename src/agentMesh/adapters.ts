@@ -1,4 +1,5 @@
 import type { CodexAppServerSession } from '../agents/CodexAppServerSession';
+import type { ClaudeOwnedSession } from '../agents/ClaudeOwnedSession';
 import type { ClaudeSession } from '../agentBus/claudePeer';
 import type { MeshAdapter, MeshSendOptions, TurnResult } from './meshAdapter';
 
@@ -20,6 +21,29 @@ export class CodexOwnedAdapter implements MeshAdapter {
   readonly observesTurns = true;
 
   constructor(private readonly session: CodexAppServerSession) {}
+
+  async send(message: string, options?: MeshSendOptions): Promise<TurnResult> {
+    const result = await this.session.send(
+      message,
+      options?.signal ? { signal: options.signal } : {},
+    );
+    return {
+      status: result.status === 'timed_out' ? 'failed' : result.status,
+      finalText: result.finalText,
+    };
+  }
+}
+
+/**
+ * Observing: the Forge-owned persistent Claude session (P4). Forge holds the
+ * stdio process, so it sees the turn begin and end → real `started`/`completed`
+ * states, the same lifecycle semantics as the owned Codex app-server.
+ */
+export class ClaudeOwnedAdapter implements MeshAdapter {
+  readonly kind = 'claude' as const;
+  readonly observesTurns = true;
+
+  constructor(private readonly session: ClaudeOwnedSession) {}
 
   async send(message: string, options?: MeshSendOptions): Promise<TurnResult> {
     const result = await this.session.send(
