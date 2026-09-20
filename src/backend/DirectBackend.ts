@@ -4,7 +4,7 @@ import type { BackendController } from './BackendController';
 import type { ForgeConfig, ModelConfig } from '../config/types';
 import { composeLlamaServerArgs } from './LlamaServerArgs';
 import { spawnLlamaServer, killLlamaProcess } from './llamaProcess';
-import { waitForHealthy, probeHealthy, probeServedModel } from './HealthCheck';
+import { waitForHealthy, probeHttp, probeServedModel } from './HealthCheck';
 import { startAdoptedServerMonitor } from './adoptedServerMonitor';
 import { attachServerDiagnostics } from './serverDiagnostics';
 import { assertModelFilesExist, servedModelMatches } from './modelFileChecks';
@@ -217,7 +217,8 @@ export class DirectBackend implements BackendController {
     // set, so a healthy server on this port may be serving a DIFFERENT model.
     // Adopting it blindly would silently answer requests with the wrong model.
     const baseUrl = `http://${this.host}:${this.port}`;
-    if (await probeHealthy(baseUrl)) {
+    const existing = await probeHttp(baseUrl);
+    if (existing.ok) {
       const served = await probeServedModel(baseUrl);
       if (!servedModelMatches(served, model)) {
         const servedLabel = served ?? 'an unidentifiable model';
@@ -243,6 +244,18 @@ export class DirectBackend implements BackendController {
       this.adoptedServer = true;
       this.startAdoptedMonitor();
       return;
+    }
+
+    // A non-Forge HTTP service on the configured port is not a cold
+    // llama-server. Starting another process there cannot succeed, and the
+    // old readiness loop misreported its HTTP 404 as a 120-second timeout.
+    if (existing.reachable) {
+      const status = existing.status ?? 'unknown';
+      const detail = existing.statusText ? ` ${existing.statusText}` : '';
+      throw new Error(
+        `Port ${this.port} is occupied by an HTTP service: GET ${baseUrl}/v1/models ` +
+          `returned HTTP ${status}${detail}. Stop that service or configure a free llama-server port.`,
+      );
     }
 
     // Fail fast with the real cause when a configured file is absent. Otherwise

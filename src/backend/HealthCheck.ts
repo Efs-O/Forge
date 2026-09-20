@@ -2,11 +2,26 @@ import type { ChildProcess } from 'child_process';
 
 /** Single non-retrying probe — true if the server is already up on this URL. */
 export async function probeHealthy(baseUrl: string): Promise<boolean> {
+  return (await probeHttp(baseUrl)).ok;
+}
+
+export interface HttpProbeResult {
+  reachable: boolean;
+  ok: boolean;
+  status?: number;
+  statusText?: string;
+}
+
+/**
+ * Probe the endpoint while preserving the distinction between an unreachable
+ * port and a reachable HTTP service that is not llama-server.
+ */
+export async function probeHttp(baseUrl: string): Promise<HttpProbeResult> {
   try {
     const res = await fetch(`${baseUrl}/v1/models`, { signal: AbortSignal.timeout(2000) });
-    return res.ok;
+    return { reachable: true, ok: res.ok, status: res.status, statusText: res.statusText };
   } catch {
-    return false;
+    return { reachable: false, ok: false };
   }
 }
 
@@ -115,6 +130,13 @@ export async function waitForHealthy(
       try {
         const res = await fetch(url, { signal: signal ?? null });
         if (res.ok) done({ ok: true });
+        else if (res.status >= 400 && res.status < 500) {
+          done({
+            ok: false,
+            reason: 'error',
+            message: `${url} returned HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}`,
+          });
+        }
       } catch {
         // not ready yet — keep polling
       }

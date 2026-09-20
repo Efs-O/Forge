@@ -2,9 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { DirectBackend } from '../../src/backend/DirectBackend';
 import type { ForgeConfig } from '../../src/config/types';
 
-const { probeHealthy, probeServedModel, ensureOllamaReady, releaseOllamaModel } = vi.hoisted(
+const { probeHttp, probeServedModel, ensureOllamaReady, releaseOllamaModel } = vi.hoisted(
   () => ({
-    probeHealthy: vi.fn(),
+    probeHttp: vi.fn(),
     probeServedModel: vi.fn(),
     ensureOllamaReady: vi.fn(),
     releaseOllamaModel: vi.fn(),
@@ -18,7 +18,7 @@ vi.mock('vscode', () => ({
 }));
 
 vi.mock('../../src/backend/HealthCheck', () => ({
-  probeHealthy,
+  probeHttp,
   probeServedModel,
   waitForHealthy: vi.fn(),
 }));
@@ -51,7 +51,7 @@ function config(): ForgeConfig {
 
 describe('DirectBackend adopted server lifecycle', () => {
   it('does not claim it can unload a matching server owned by another window', async () => {
-    probeHealthy.mockResolvedValue(true);
+    probeHttp.mockResolvedValue({ reachable: true, ok: true });
     probeServedModel.mockResolvedValue('N:/models/Qwen.gguf');
     const backend = new DirectBackend(config());
 
@@ -69,7 +69,7 @@ describe('DirectBackend adopted server lifecycle', () => {
  */
 describe('DirectBackend stop() teardown ordering', () => {
   it('still releases a resident Ollama model before clearing its state', async () => {
-    probeHealthy.mockResolvedValue(true);
+    probeHttp.mockResolvedValue({ reachable: false, ok: false });
     ensureOllamaReady.mockResolvedValue(undefined);
     releaseOllamaModel.mockClear();
     const backend = new DirectBackend(config());
@@ -100,7 +100,7 @@ describe('DirectBackend stop() teardown ordering', () => {
  */
 describe('DirectBackend hotSwap() must not mutate config.active_model', () => {
   it('fast path: already-active model does not overwrite config.active_model', async () => {
-    probeHealthy.mockResolvedValue(true);
+    probeHttp.mockResolvedValue({ reachable: true, ok: true });
     probeServedModel.mockResolvedValue('N:/models/Qwen.gguf');
     const cfg = config();
     const backend = new DirectBackend(cfg);
@@ -114,7 +114,7 @@ describe('DirectBackend hotSwap() must not mutate config.active_model', () => {
   });
 
   it('Ollama branch: swapping to an Ollama model does not overwrite config.active_model', async () => {
-    probeHealthy.mockResolvedValue(true);
+    probeHttp.mockResolvedValue({ reachable: false, ok: false });
     ensureOllamaReady.mockResolvedValue(undefined);
     releaseOllamaModel.mockClear();
     const cfg = config();
@@ -127,7 +127,7 @@ describe('DirectBackend hotSwap() must not mutate config.active_model', () => {
   });
 
   it('llama.cpp branch: swapping to a llama.cpp model does not overwrite config.active_model', async () => {
-    probeHealthy.mockResolvedValue(true);
+    probeHttp.mockResolvedValue({ reachable: true, ok: true });
     probeServedModel.mockResolvedValue('N:/models/Qwen.gguf');
     const cfg = config();
     // Start with a different active_model so we can detect a write.
@@ -139,5 +139,19 @@ describe('DirectBackend hotSwap() must not mutate config.active_model', () => {
 
     expect(backend.loadedModel()).toBe('qwen');
     expect(cfg.active_model).toBe('some-other-model'); // unchanged — hotSwap must not write it
+  });
+
+  it('refuses a reachable non-llama HTTP service on the configured port', async () => {
+    probeHttp.mockResolvedValue({
+      reachable: true,
+      ok: false,
+      status: 404,
+      statusText: 'Not Found',
+    });
+    const backend = new DirectBackend(config());
+
+    await expect(backend.hotSwap('qwen')).rejects.toThrow(
+      'Port 8080 is occupied by an HTTP service',
+    );
   });
 });
