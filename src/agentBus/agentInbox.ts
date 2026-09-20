@@ -19,6 +19,19 @@ export interface InboxHost {
    * finished notice (a user-typed turn has no bus sender).
    */
   onBusTurnFinished?(from: string, durationMs: number): void;
+  /**
+   * Called when a bus-started turn BEGINS (F-08). The wiring writes a durable
+   * status file so a crashed turn can be detected at the next window's startup.
+   */
+  onBusTurnStarted?(turnId: string): void;
+  /**
+   * Called when a bus-started turn ENDS, on EVERY exit (success or failure)
+   * (F-08). The wiring clears the turn's status file. This is distinct from
+   * `onBusTurnFinished` (the sender notice, which fires only on success): a
+   * failed turn still must not leave a stale "running" status record, but it
+   * has no successful turn to report to the sender.
+   */
+  onBusTurnStatusCleared?(turnId: string): void;
 }
 
 interface QueuedMessage {
@@ -80,11 +93,22 @@ export class AgentInbox {
         }
         const item = this.queue.shift() as QueuedMessage;
         const startedAt = Date.now();
+        // F-08: a stable turn id for the status file (start writes it, finish
+        // clears it). Only bus turns (a `from` alias) get one; user-typed
+        // prompts have no bus sender and no status file.
+        const turnId = item.from ? `bus-${item.from}-${startedAt}` : undefined;
+        if (turnId && this.host.onBusTurnStarted) {
+          try {
+            this.host.onBusTurnStarted(turnId);
+          } catch (startErr) {
+            log.error(`[agentInbox] status mark-start failed: ${String(startErr)}`);
+          }
+        }
         try {
           await this.host.submit(item.prompt);
           // §9: a bus-started turn just ended — the sender gets one finished
           // line + a board event. A user-typed turn has no `from`, so this
-          // fires only for agent messages.
+          // fires only for agent messages, and only on success.
           if (item.from && this.host.onBusTurnFinished) {
             try {
               this.host.onBusTurnFinished(item.from, Date.now() - startedAt);
@@ -96,11 +120,23 @@ export class AgentInbox {
           if (this.busy()) {
             // Lost a race with a prompt the user typed: keep its place.
             this.queue.unshift(item);
-            continue;
+          } else {
+            const why = err instanceof Error ? err.message : String(err);
+            log.error(`[agentInbox] could not deliver an agent message: ${why}`);
+            this.host.warn(`Forge: an agent message could not be shown: ${why}`);
           }
-          const why = err instanceof Error ? err.message : String(err);
-          log.error(`[agentInbox] could not deliver an agent message: ${why}`);
-          this.host.warn(`Forge: an agent message could not be shown: ${why}`);
+        } finally {
+          // F-08: clear the status file on EVERY exit (success or failure) so a
+          // normal finish never leaves a stale "running" record. Only a crash
+          // (process death) leaves one, and that is what the startup sweep
+          // detects.
+          if (turnId && this.host.onBusTurnStatusCleared) {
+            try {
+              this.host.onBusTurnStatusCleared(turnId);
+            } catch (clearErr) {
+              log.error(`[agentInbox] status clear failed: ${String(clearErr)}`);
+            }
+          }
         }
       }
     } finally {

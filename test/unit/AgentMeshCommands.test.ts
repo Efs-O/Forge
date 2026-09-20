@@ -162,4 +162,31 @@ describe('standby state machine (§2b, P3)', () => {
     expect(readOwnership(root, 'codex')?.owner_host).toEqual(foreign);
     expect(readOwnership(root, 'codex')?.parked).toBe(false);
   });
+
+  it('F-02: a LIVE foreign owner (matching start time) is still not the owner', () => {
+    // The hard case the previous test missed: a foreign host that isHostAlive
+    // considers LIVE (pid alive, start time matches) but is NOT this window.
+    // `isOwner` must still refuse — using `isHostAlive` alone would return true
+    // for a live foreign host and let a peer window mutate a session it does
+    // not own. The distinguishing check is the pid match.
+    const foreignPid = 424242;
+    const selfPid = 999999;
+    const startedAt = 1_700_000_000_000;
+    const foreign = { pid: foreignPid, startedAt };
+    seedRecord('codex', { owner_host: foreign });
+    const cfg: ForgeConfig = { agent_bus: { claude_session: '', codex_thread: '' } } as ForgeConfig;
+    const p = new MeshSessionProvider({
+      busRoot: root,
+      getConfig: () => cfg,
+      workspaceRoots: () => ['/ws'],
+      selfPid,
+      isAlive: (pid) => pid === foreignPid || pid === selfPid,
+      processStartMs: () => startedAt, // both hosts report the same start time
+    });
+    expect(p.isOwner('codex')).toBe(false);
+    expect(p.park('codex')).toBe(false);
+    expect(p.wake('codex')).toBe(false);
+    expect(readOwnership(root, 'codex')?.owner_host).toEqual(foreign);
+    expect(readOwnership(root, 'codex')?.parked).toBe(false);
+  });
 });

@@ -373,6 +373,11 @@ export function setupAgentMesh(
         const rec = readOwnership(paths.root, alias);
         if (!rec) continue;
         if (rec.parked) continue; // park-but-warm: exempt (M4)
+        // F-02: reap only a session THIS window owns. An idle session owned by
+        // another live window is not ours to reap — nulling its owner record
+        // would orphan the live process that window holds and let a later
+        // message spawn a duplicate.
+        if (!provider.isOwner(alias)) continue;
         const last = rec.last_activity ?? rec.created_at;
         if (Date.now() - last > IDLE_TTL_MS) {
           await provider.reap(alias);

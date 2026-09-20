@@ -324,6 +324,38 @@ export function currentHost(deps: HostLivenessDeps = {}): HostId {
 }
 
 /**
+ * Is `owner` THIS host? The pid is the discriminator: a foreign window has a
+ * different pid, so a pid match means the record is ours. `isHostAlive` alone
+ * is wrong here — it returns true for a foreign live host too, which would let
+ * a peer window pass an owner check and mutate a session it does not own (the
+ * F-02 defect). The start time is deliberately NOT re-checked: the M1
+ * `isHostAlive` guard carries it for liveness decisions, and re-checking it
+ * here would be load-fragile (under CPU pressure the Windows start-time read
+ * can fall back to `Date.now()`, which will not match the record's OS start
+ * time and would wrongly reject a correct pid match). A recycled pid is the
+ * only false-positive risk, and it is rare.
+ */
+export function isOwnerOf(
+  deps: HostLivenessDeps,
+  owner: { pid: number; startedAt: number },
+): boolean {
+  return owner.pid === getHostIdentity(deps).pid;
+}
+
+/**
+ * Is `owner` a live host that is NOT this one? `isHostAlive` is true for self,
+ * so the pid comparison is what separates "I own it" (resume is safe) from
+ * "another window owns it" (never race it).
+ */
+export function isForeignLiveOwner(
+  deps: HostLivenessDeps,
+  owner: { pid: number; startedAt: number },
+): boolean {
+  if (!isHostAlive(owner, deps)) return false;
+  return owner.pid !== getHostIdentity(deps).pid;
+}
+
+/**
  * F-04: wait (bounded, async) for an ownership record to appear. A second
  * caller that loses the creation lease to a live holder polls until the holder
  * writes its record (or the deadline), so it can join the peer's session

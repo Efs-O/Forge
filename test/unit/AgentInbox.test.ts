@@ -160,4 +160,39 @@ describe('AgentInbox', () => {
     expect(h.warnings).toHaveLength(1);
     inbox.dispose();
   });
+
+  it('F-08: marks the bus turn started and clears the status file even when the turn fails', async () => {
+    const started: string[] = [];
+    const cleared: string[] = [];
+    const h = host({
+      submit: () => Promise.reject(new Error('no model')),
+      onBusTurnStarted: (id) => started.push(id),
+      onBusTurnStatusCleared: (id) => cleared.push(id),
+    });
+    const inbox = new AgentInbox(h, 5);
+    inbox.accept('a', 'codex');
+    await tick();
+    expect(started).toHaveLength(1);
+    expect(cleared).toEqual(started); // cleared with the same turn id
+    expect(h.finished).toEqual([]); // no notice on failure
+    inbox.dispose();
+  });
+
+  it('F-08: clears the status file after a successful bus turn too', async () => {
+    const started: string[] = [];
+    const cleared: string[] = [];
+    const h = host({
+      onBusTurnStarted: (id) => started.push(id),
+      onBusTurnStatusCleared: (id) => cleared.push(id),
+    });
+    const inbox = new AgentInbox(h, 5);
+    inbox.accept('a', 'codex');
+    await tick();
+    h.finish();
+    await tick();
+    expect(started).toHaveLength(1);
+    expect(cleared).toEqual(started);
+    expect(h.finished).toHaveLength(1); // notice fires on success
+    inbox.dispose();
+  });
 });

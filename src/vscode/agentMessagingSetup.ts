@@ -40,9 +40,22 @@ export function setupAgentMessaging(
       await facade.send(facade.status().activeConversationId, prompt);
     },
     warn: (message) => void vscode.window.showWarningMessage(message),
-    // §9 (P1): a bus-started turn just ended. The sender gets one `finished`
-    // line via tell (which writes the board event), so there are no silent
-    // stalls. A user-typed turn has no bus sender, so this never fires for it.
+    // F-08: a bus-started turn began — write its durable status file so a
+    // crashed turn can be detected at the next window's startup.
+    onBusTurnStarted: (turnId) => {
+      mesh.markTurnStarted(turnId);
+    },
+    // F-08: a bus-started turn ended (success OR failure) — clear its status
+    // file. The inbox calls this in a `finally`, so a normal finish never
+    // leaves a stale "running" record; only a crash does, and the startup
+    // sweep detects that.
+    onBusTurnStatusCleared: (turnId) => {
+      mesh.markTurnFinished(turnId);
+    },
+    // §9 (P1): a bus-started turn just ended successfully. The sender gets one
+    // `finished` line via tell (which writes the board event), so there are no
+    // silent stalls. A user-typed turn has no bus sender, so this never fires
+    // for it.
     onBusTurnFinished: (from, durationMs) => {
       const minutes = Math.max(1, Math.round(durationMs / 60_000));
       void mesh.orchestrator

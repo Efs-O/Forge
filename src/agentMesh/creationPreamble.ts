@@ -51,7 +51,12 @@ export async function beginCreation(
     // still a refusal — we never race a possibly-live creator.
     if (claim.holder) {
       const rec = await waitForRecord(busRoot, alias, 5_000);
-      if (rec && rec.owner_host && !isForeignLiveOwner(rec.owner_host)) {
+      // Join when the peer has FINISHED creating: its record names a live
+      // owner (foreign or self). Re-resolving then finds the record and resumes
+      // the peer's session instead of spawning a second one. (If the holder is
+      // still mid-spawn with no record yet, waitForRecord times out and we
+      // refuse — we never race a possibly-live creator.)
+      if (rec && rec.owner_host && isForeignLiveOwner(rec.owner_host)) {
         await reResolve();
         return { kind: 'join' };
       }

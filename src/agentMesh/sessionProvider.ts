@@ -18,8 +18,14 @@ import {
   type OwnedCodexFactory,
 } from './creationPreamble';
 import type { MeshAdapter } from './meshAdapter';
-import { getHostIdentity, isHostAlive, type HostLivenessDeps } from './hostIdentity';
-import { readOwnership, releaseClaim, writeOwnership } from './ownership';
+import type { HostLivenessDeps } from './hostIdentity';
+import {
+  isForeignLiveOwner,
+  isOwnerOf,
+  readOwnership,
+  releaseClaim,
+  writeOwnership,
+} from './ownership';
 import type { SessionProvider } from './meshOrchestrator';
 
 /**
@@ -154,25 +160,20 @@ export class MeshSessionProvider implements SessionProvider {
    * is safe) from "another window owns it" (never race it).
    */
   private isForeignLiveOwner(owner: { pid: number; startedAt: number }): boolean {
-    if (!isHostAlive(owner, this.deps)) return false;
-    return owner.pid !== getHostIdentity(this.deps).pid;
+    return isForeignLiveOwner(this.deps, owner);
   }
 
   /**
    * True when THIS window is the live owner of the alias's record (F-02). Only
-   * the owner may mutate parked/close the record: a peer window that cleared
-   * another window's `owner_host` would orphan the live stdio pipe and let a
-   * later message spawn a second pipe on the same alias.
+   * the owner may mutate parked/close the record or reap it: a peer window that
+   * cleared another window's `owner_host` would orphan the live stdio pipe and
+   * let a later message spawn a second pipe on the same alias. Public so the
+   * maintenance loop can reap only sessions it owns.
    */
-  private isOwner(alias: string): boolean {
+  isOwner(alias: string): boolean {
     const rec = readOwnership(this.deps.busRoot, alias);
     if (!rec?.owner_host) return false;
-    // The M1 liveness check: same pid AND start time within tolerance (a pid
-    // that was recycled is a different process, so the record is not ours).
-    // Reusing `isHostAlive` keeps the tolerance consistent with the rest of the
-    // mesh rather than an exact `startedAt ===` that Windows start-time jitter
-    // would break.
-    return isHostAlive(rec.owner_host, this.deps);
+    return isOwnerOf(this.deps, rec.owner_host);
   }
 
   /**
