@@ -122,7 +122,10 @@ export function makeLiveSessionTool(deps: LiveSessionDeps): RegisteredTool {
           'ask_local_agent, whenever the user means "the live session", "the other Claude", ' +
           '"the open Codex", or the session that owns the other half of a task, and to answer ' +
           'a message another session sent you: ask_local_agent always starts a NEW, empty ' +
-          "session that knows nothing. The question appears in that session's own window. " +
+          'session that knows nothing. The target is resolved by its mesh alias (claude / ' +
+          'codex); a Forge-owned session is created on first use with one-time consent, and ' +
+          'the config thread/session value is a deprecated pin (the alias wins). The question ' +
+          "appears in that session's own window. " +
           'Returns the exchange formatted for the user, so you do not need to quote it. If ' +
           'the session cannot be reached, it returns at once without sending and says why. ' +
           'One question per call; blocks until the answer, the wait limit, or /stop.',
@@ -145,7 +148,9 @@ export function makeLiveSessionTool(deps: LiveSessionDeps): RegisteredTool {
               type: 'string',
               enum: ['claude', 'codex'],
               description:
-                'Which live session: "claude" (default) or "codex" (the open Codex session set in config).',
+                'Which live session: "claude" (default) or "codex". Resolved by alias; a ' +
+                'Forge-owned session is created with one-time consent, and the config ' +
+                'thread/session value is a deprecated pin (the alias wins).',
             },
             session: {
               type: 'string',

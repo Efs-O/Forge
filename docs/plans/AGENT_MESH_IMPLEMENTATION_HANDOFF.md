@@ -44,12 +44,53 @@ CI only. User is on Telegram; ping at each commit.
   (6) + AgentMeshBoardStatus (5). **Deferred:** the sidebar DOM "Agent board"
   section (a thin React render of the same projection + a host push message
   type); the testable P2 criterion (12) is the Telegram side, which is done.
-- **P3 standby/wake + /steer + typed command surface + queue visibility — NEXT.**
-  (Agreed: Codex reviews this phase.)
-- **P4 Claude owned stdio session + Codex discovery — PENDING.** (Codex also
-  reviews. Stale `agent_bus.claude_session: forge-dd` in config.yaml — live
-  sessions are `forge-22`/`forge-7a`; matters here.)
-- **P5 FORGE.md + tool description cleanup — PENDING.**
+- **P3 standby/wake + /steer + typed command surface + queue visibility — DONE,
+  committed (this session).** `meshCommands.ts` (typed grammar: say/steer/
+  standby/wake/handoff/close + status/board/peers/queue/context); `park`/`wake`/
+  `isParked`/`close` in `sessionProvider.ts` (durable `parked` flag; close keeps
+  `thread_id`, never targets user-opened); `handleCommand` + `queueLength` in
+  `meshOrchestrator.ts` (steer-to-parked wakes first, §6/§2b); bus dispatch in
+  `agentRoutes.ts` + `agentMessagingSetup.ts` (a `to: forge` message that parses
+  as a command is dispatched, not queued). Tests: AgentMeshCommands (13),
+  orchestrator +2, AgentRoutes +3. `npm run ci` green. **Deferred (named):**
+  criterion 3's integration (real owned Codex park/wake) = live test; criterion
+  11's Telegram queue-view listing.
+- **P4 Claude owned stdio session + Codex discovery — DONE, committed (this
+  session).** Two commits, each CI-green.
+  - **Claude owned session:** `src/agents/ClaudeOwnedSession.ts` (persistent
+    `claude -p --input-format stream-json` session Forge owns; warm across
+    turns, session id from the init message, `--resume` for M3, one active
+    turn at a time, malformed-output failure) + `ClaudeOwnedAdapter` in
+    `adapters.ts` (observing) + the owned-Claude path wired into
+    `sessionProvider.ts` (in-memory → owned adapter; registered alias / prior
+    session_id → resume owned, M3; else the user-opened peer/relay). **Also
+    fixed a real bug found while wiring it:** the first-creation consent gate
+    (`requestConsent`) was called without `await` in BOTH the Codex and Claude
+    paths (a Promise is always truthy → consent was never enforced); now
+    awaited in both. Tests: ClaudeOwnedSession (5) +
+    AgentMeshSessionProviderClaude (7: consent, creation lease = one spawn
+    under concurrency, M3 resume, reap, close).
+  - **Codex discovery:** `codex agents --remote` is a TUI with no scriptable
+    output, so discovery uses the app-server JSON-RPC `thread/list` directly
+    (`src/agentMesh/codexDiscovery.ts` — spawns a throwaway app-server, lists
+    threads, disposes; never owns a session). The versioned contract is the
+    generated JSON schema (`codex app-server generate-json-schema`).
+    `matchThread` resolves one/no/ambiguous (criterion #1). Tests:
+    CodexDiscovery (6, hermetic via a `thread/list` handler added to
+    fake-codex-cli.mjs).
+  - **Fixture note:** the P4 Claude fixture rewrite initially clobbered the
+    one-shot triggers the pre-existing CliAgentSession/CliAgentDriver tests
+    rely on (a seam defect); merged back so both modes coexist.
+  - **Not yet wired into `resolveAdapter`:** discovery is a standalone
+    capability (plan §0 keeps unknown-session discovery out of the v1 resolve
+    flow — alias/pin/owned are the resolution sources). It is available for a
+    future detect-or-create path and is separately tested, as the plan requires.
+  - **Still open (P4-adjacent, not blocking):** the stale
+    `agent_bus.claude_session: forge-dd` pin in config.yaml (live sessions are
+    forge-22/forge-7a). It is a deprecated pin (alias wins), so it is inert
+    unless no alias exists; fix when next touching config.
+- **P5 FORGE.md + tool description cleanup — PENDING** (self-contained, no live
+  dependency).
 
 ## The plan is DONE and approved — do NOT re-review it
 - **Plan:** `docs/plans/AGENT_MESH_PLAN.md` = **v2.1** (my v2 + Claude's normative
