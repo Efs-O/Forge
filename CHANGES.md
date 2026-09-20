@@ -1,5 +1,35 @@
 # Forge — Recent Changes
 
+## 0.16.12
+
+### Agent mesh, phases 1–5 + full review remediation
+
+The user-visible surface of the Forge ↔ Claude ↔ Codex mesh (plan:
+`docs/plans/AGENT_MESH_PLAN.md`), on top of the 0.16.10 foundation, hardened
+by a two-pass Codex review (14 findings, all remediated and re-reviewed).
+
+- **`ask_live_session` / `tell_live_session` now work for both agents.** A
+  Forge-owned persistent session is created on first use (one-time, user-visible
+  consent — never a silent privileged spawn), is resumable across restarts
+  (thread/session id kept), and is reaped only when its owner window is proven
+  dead. A second window joins the live session instead of opening a second pipe.
+- **Steering and standby.** A `priority=steer` message (or `/steer` from the
+  phone) interrupts the recipient's active turn and runs next; `standby` parks a
+  session warm (exempt from the idle TTL) and any send wakes it.
+- **Truthful, durable delivery states.** Board events are on disk before a send
+  is reported accepted; terminal states are final (a late verdict after a
+  timeout can never flip it back to success); a non-observing session completes
+  via an exchange-correlated verdict file, not a transport exit code.
+- **Crash recovery.** A dead owner's session is reaped with a `crashed` board
+  event, its queued exchanges terminalized as `timeout`, and its stale turn
+  status file swept (only files whose owner is proven dead are cleared).
+- **Telegram:** `/status` shows the scoped board + live sessions; `/queue` shows
+  per-alias mesh FIFO depth; `/steer`, `/standby`, `/wake`, `/close` dispatch.
+- **Multi-window safety:** ownership mutations (park/wake/close) are
+  owner-authorized; the alias registry read-modify-write and the exchanges log
+  share one interprocess lock; Codex config pins are used only when the thread
+  is actually live.
+
 ## 0.16.11
 
 ### Quieter remote compaction notices + higher tool-round ceiling
