@@ -156,11 +156,10 @@ export function claimCreation(
   root: string,
   alias: string,
   host: HostId,
-  deps: HostLivenessDeps & { deadlineMs?: number } = {},
+  deps: HostLivenessDeps = {},
 ): ClaimResult {
   const alive = deps.isHostAlive ?? ((h: HostId) => isHostAlive(h, deps));
   const file = claimPath(root, alias);
-  const deadline = Date.now() + (deps.deadlineMs ?? 120_000);
   fs.mkdirSync(ownershipDir(root), { recursive: true });
   for (;;) {
     try {
@@ -192,10 +191,13 @@ export function claimCreation(
         ? { pid: rec.host_pid, startedAt: rec.host_started_at }
         : undefined;
     if (!holder) {
-      // Torn/empty: no host to prove dead. Never reclaim — wait (bounded).
-      if (Date.now() >= deadline) return { claimed: false };
-      sleepSync(20);
-      continue;
+      // Torn/empty: no host to prove dead. M2 says reclaim only on proven
+      // death, so we never steal it — and we never block on it (a synchronous
+      // wait would freeze the extension host). Report "in progress"; the
+      // caller backs off. A genuinely orphaned torn claim (crash mid-write) is
+      // rare and self-limits: it cannot cause a double spawn, and it is cleared
+      // by a later provably-dead reclaim or owner-host-death recovery.
+      return { claimed: false };
     }
     if (holder.pid === host.pid) {
       // Ours: reclaim (a leftover from a prior attempt in this host).
@@ -209,14 +211,6 @@ export function claimCreation(
     }
     // Holder alive: we lose.
     return { claimed: false, holder };
-  }
-}
-
-/** A short synchronous pause (the claim wait is not a hot loop). */
-function sleepSync(ms: number): void {
-  const end = Date.now() + ms;
-  while (Date.now() < end) {
-    /* spin */
   }
 }
 

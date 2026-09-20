@@ -9,13 +9,14 @@ import {
   appendEvent,
   EXCHANGES_LOCK_NAME,
   EXCHANGES_LOG_NAME,
+  NON_TERMINAL_DEADLINE_MS,
   newEventId,
   type ExchangeLogPaths,
 } from '../agentMesh/exchangeLog';
 import { recoverOwnership } from '../agentMesh/ownership';
 import { MeshOrchestrator } from '../agentMesh/meshOrchestrator';
 import { MeshSessionProvider } from '../agentMesh/sessionProvider';
-import { setMeshOrchestrator } from '../agentMesh/meshContext';
+import { setBoardContext, setMeshOrchestrator } from '../agentMesh/meshContext';
 
 /**
  * Agent-mesh activation wiring (AGENT_MESH_PLAN P0). Creates the orchestrator
@@ -56,6 +57,8 @@ export function setupAgentMesh(
     log: path.join(paths.root, EXCHANGES_LOG_NAME),
     lock: path.join(paths.root, EXCHANGES_LOCK_NAME),
   };
+  // P2: the Telegram /status handler reads this to render the board.
+  setBoardContext({ root: paths.root, workspace: workspaceRoot, log: exchangePaths.log });
 
   const scope = (): { workspace: string; conversation?: string } => {
     let conversation: string | undefined;
@@ -72,7 +75,23 @@ export function setupAgentMesh(
   // conversation per event would split an exchange that is accepted in
   // conversation A and completed after the user switches to B — leaking or
   // hiding board lines across conversations. The first event's scope wins.
-  const exchangeScope = new Map<string, { workspace: string; conversation?: string }>();
+  //
+  // The map is bounded two ways: (1) a terminal event deletes its entry, and
+  // (2) a non-terminal exchange older than the M8 deadline — the same window
+  // the log uses to turn it into a terminal `timeout` — is swept on the next
+  // event, so a non-observing exchange that stays `accepted` forever cannot
+  // grow the map without bound.
+  const exchangeScope = new Map<
+    string,
+    { scope: { workspace: string; conversation?: string }; firstEventAt: number }
+  >();
+
+  const sweepStaleScopes = (): void => {
+    const now = Date.now();
+    for (const [id, entry] of exchangeScope) {
+      if (now - entry.firstEventAt > NON_TERMINAL_DEADLINE_MS) exchangeScope.delete(id);
+    }
+  };
 
   const onEvent: (e: {
     exchangeId: string;
@@ -82,8 +101,10 @@ export function setupAgentMesh(
     state: ExchangeState;
     detail?: string;
   }) => void = (e) => {
-    const s = exchangeScope.get(e.exchangeId) ?? scope();
-    if (!exchangeScope.has(e.exchangeId)) exchangeScope.set(e.exchangeId, s);
+    sweepStaleScopes();
+    const existing = exchangeScope.get(e.exchangeId);
+    const s = existing?.scope ?? scope();
+    if (!existing) exchangeScope.set(e.exchangeId, { scope: s, firstEventAt: Date.now() });
     void appendEvent(
       exchangePaths,
       {
@@ -196,6 +217,7 @@ export function setupAgentMesh(
     orchestrator.dispose();
     await provider.dispose();
     setMeshOrchestrator(undefined);
+    setBoardContext(undefined);
   };
   context.subscriptions.push({ dispose: () => void dispose() });
 

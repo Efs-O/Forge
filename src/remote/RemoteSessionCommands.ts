@@ -3,6 +3,8 @@ import { HELP_TEXT, decorateHelpLine } from './remoteHelpText';
 import { boldLeadingNumber, boldLineLabel, sendRichText } from './telegramHtml';
 import type { RemoteInboundDisposition, RemoteInboundEvent } from './types';
 import { MAX_VIEW_COUNT, parseViewCount, sendTranscriptView } from './RemoteTranscriptView';
+import { getBoardContext } from '../agentMesh/meshContext';
+import { projectBoard, projectLiveSessions } from '../agentMesh/boardView';
 
 type TextEvent = Extract<RemoteInboundEvent, { kind: 'text' }>;
 
@@ -24,11 +26,41 @@ const STATUS_LABELS = new Set([
   'Work',
   'Forge',
   'Context',
+  'Board',
+  'Sessions',
   'Approvals',
 ]);
 
 /** Line labels `/context` owns. */
 const CONTEXT_LABELS = new Set(['Forge context', 'Remaining']);
+
+/**
+ * The agent board lines for `/status` (AGENT_MESH_PLAN §3, P2). Scoped to the
+ * calling chat's conversation (M9): an unbound chat gets no board line. Absent
+ * when the agent bus is not up (`getBoardContext()` undefined) — `/status`
+ * never invents a board. The board is bounded (last 3 exchanges, newest first);
+ * the live-session line is one line.
+ */
+export function describeAgentBoard(conversation: string | undefined): string | undefined {
+  const ctx = getBoardContext();
+  if (!ctx) return undefined;
+  const sessions = projectLiveSessions(ctx.root);
+  const sessionsLine =
+    sessions.length === 0
+      ? 'Sessions: none'
+      : `Sessions: ${sessions.map((s) => `${s.alias} ${s.state}`).join(', ')}`;
+  if (conversation === undefined) {
+    // Unbound: no per-conversation board (M9), but the live-session line is
+    // workspace-scoped and still useful.
+    return sessionsLine;
+  }
+  const rows = projectBoard(ctx.log, ctx.workspace, conversation, 3);
+  const boardLine =
+    rows.length === 0
+      ? 'Board: none'
+      : `Board: ${rows.map((r) => `${r.from}${r.to ? `→${r.to}` : ''} ${r.label}`).join(', ')}`;
+  return `${boardLine}\n${sessionsLine}`;
+}
 
 /** Queue/session commands split from model, workspace, and lifecycle controls. */
 export async function handleRemoteSessionCommand(
@@ -58,6 +90,9 @@ export async function handleRemoteSessionCommand(
     const crashUnknown = binding
       ? `${context.store.requestHealthForConversation(binding.conversationId).unknown} crash-unknown`
       : 'no conversation bound (crash-unknown not shown)';
+    // P2: the agent board (scoped to this conversation, M9) + the live-session
+    // line. Absent when the agent bus is not up — /status never invents a board.
+    const boardLines = describeAgentBoard(binding?.conversationId);
     await sendRichText(
       context.channel,
       event.chatId,
@@ -77,6 +112,7 @@ export async function handleRemoteSessionCommand(
         `Work: ${String(conversation?.requestCount ?? 0)} model request(s), ${String(
           conversation?.toolCallCount ?? 0,
         )} tool call(s) in this chat\n` +
+        (boardLines ? `${boardLines}\n` : '') +
         `Approvals: ${context.host.clankerMode() ? 'CLANKER — non-dangerous tools auto-approved' : 'gated'}`,
       (line) => boldLineLabel(line, STATUS_LABELS),
       { signal: context.signal },
