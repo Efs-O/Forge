@@ -1,5 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { withLock } from './lock';
+import type { HostLivenessDeps } from './hostIdentity';
 
 /**
  * Session identity for the agent mesh (AGENT_MESH_PLAN §0, §4).
@@ -16,6 +18,13 @@ import * as path from 'path';
  */
 
 export const ALIASES_FILE_NAME = 'aliases.json';
+
+/** The interprocess lock that serializes alias read-modify-write (F-14). */
+export const ALIASES_LOCK_NAME = 'aliases.lock';
+
+function aliasesLockPath(root: string): string {
+  return path.join(root, ALIASES_LOCK_NAME);
+}
 
 export type AgentKind = 'claude' | 'codex';
 
@@ -79,20 +88,38 @@ export function writeAliases(root: string, table: AliasTable): void {
   fs.renameSync(tmp, file);
 }
 
-/** Register (or re-point) an alias. Returns the new table. */
-export function registerAlias(root: string, alias: string, record: AliasRecord): AliasTable {
-  const table = readAliases(root);
-  table[alias] = record;
-  writeAliases(root, table);
-  return table;
+/**
+ * Register (or re-point) an alias. Returns the new table.
+ *
+ * F-14: the read-modify-write is serialized under the alias lock, so two
+ * extension hosts registering different aliases concurrently cannot each rename
+ * a whole table based on a stale read and silently drop the other's alias.
+ */
+export function registerAlias(
+  root: string,
+  alias: string,
+  record: AliasRecord,
+  deps: HostLivenessDeps = {},
+): AliasTable {
+  return withLock(aliasesLockPath(root), deps, 5_000, () => {
+    const table = readAliases(root);
+    table[alias] = record;
+    writeAliases(root, table);
+    return table;
+  });
 }
 
-/** Remove an alias (the user's command). Returns the new table. */
-export function removeAlias(root: string, alias: string): AliasTable {
-  const table = readAliases(root);
-  delete table[alias];
-  writeAliases(root, table);
-  return table;
+/**
+ * Remove an alias (the user's command). Returns the new table.
+ * F-14: serialized under the alias lock (same read-modify-write race).
+ */
+export function removeAlias(root: string, alias: string, deps: HostLivenessDeps = {}): AliasTable {
+  return withLock(aliasesLockPath(root), deps, 5_000, () => {
+    const table = readAliases(root);
+    delete table[alias];
+    writeAliases(root, table);
+    return table;
+  });
 }
 
 export function getAlias(root: string, alias: string): AliasRecord | undefined {

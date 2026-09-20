@@ -1,7 +1,17 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
-import { getHostIdentity, isHostAlive, type HostId, type HostLivenessDeps } from './hostIdentity';
+import { getHostIdentity, type HostId, type HostLivenessDeps } from './hostIdentity';
+import { acquireLock, releaseLock } from './lock';
+
+/** Remove a tmp file, ignoring ENOENT (a compaction rewrite that failed mid-way). */
+function unlinkQuietFile(file: string): void {
+  try {
+    fs.unlinkSync(file);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  }
+}
 import { deriveLatestState, isTerminal, type ExchangeState } from './deliveryState';
 
 /**
@@ -72,93 +82,6 @@ export const EXCHANGES_LOCK_NAME = 'exchanges.lock';
 // ---------------------------------------------------------------------------
 // Lock (M1)
 // ---------------------------------------------------------------------------
-
-interface LockRecord {
-  host_pid: number;
-  host_started_at: number;
-}
-
-function acquireLockFile(
-  lockPath: string,
-  holder: HostId,
-  deps: ExchangeLogDeps,
-  deadline: number,
-): void {
-  const alive = deps.isHostAlive ?? ((h: HostId) => isHostAlive(h, deps));
-  for (;;) {
-    try {
-      const fd = fs.openSync(lockPath, 'wx');
-      try {
-        fs.writeSync(
-          fd,
-          JSON.stringify({ host_pid: holder.pid, host_started_at: holder.startedAt }),
-        );
-      } finally {
-        fs.closeSync(fd);
-      }
-      return;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-    }
-    // The lock exists. Is its holder dead?
-    let rec: LockRecord | undefined;
-    try {
-      rec = JSON.parse(fs.readFileSync(lockPath, 'utf8')) as LockRecord;
-    } catch {
-      rec = undefined; // torn/empty: treat as stale
-    }
-    const holderId: HostId | undefined =
-      rec && Number.isFinite(rec.host_pid) && Number.isFinite(rec.host_started_at)
-        ? { pid: rec.host_pid, startedAt: rec.host_started_at }
-        : undefined;
-    // Our own pid: a leftover we are entitled to reclaim (never deadlock on ourselves).
-    if (holderId && holderId.pid === holder.pid) {
-      unlinkQuiet(lockPath);
-      continue;
-    }
-    if (holderId && !alive(holderId)) {
-      // Holder proven dead: reclaim.
-      unlinkQuiet(lockPath);
-      continue;
-    }
-    // Holder is alive (or unprovable): wait.
-    if (Date.now() >= deadline) {
-      throw new Error(
-        `exchanges.lock held by live host pid ${holderId?.pid ?? '?'}; giving up after deadline`,
-      );
-    }
-    sleepSync(20);
-  }
-}
-
-function releaseLockFile(lockPath: string, holder: HostId): void {
-  try {
-    const rec = JSON.parse(fs.readFileSync(lockPath, 'utf8')) as LockRecord;
-    if (rec.host_pid === holder.pid && rec.host_started_at === holder.startedAt) {
-      unlinkQuiet(lockPath);
-      return;
-    }
-  } catch {
-    // Not ours or unreadable: do not unlink someone else's lock.
-  }
-}
-
-function unlinkQuiet(file: string): void {
-  try {
-    fs.unlinkSync(file);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-  }
-}
-
-function sleepSync(ms: number): void {
-  const end = Date.now() + ms;
-  // A short synchronous pause; the lock is held for one write, so contention
-  // is rare and this is not a hot loop.
-  while (Date.now() < end) {
-    /* spin */
-  }
-}
 
 // ---------------------------------------------------------------------------
 // In-process queue (M1): one window never holds the lock twice at once.
@@ -259,7 +182,7 @@ export function appendEvent(
   return enqueue(async () => {
     const holder = getHostIdentity(deps);
     const deadline = Date.now() + (deps.lockTimeoutMs ?? 5_000);
-    acquireLockFile(paths.lock, holder, deps, deadline);
+    acquireLock(paths.lock, holder, deps, deadline);
     try {
       const existing = readEvents(paths.log);
       // F-03: a terminal state is FINAL. A new event for an exchange that has
@@ -283,7 +206,7 @@ export function appendEvent(
       fs.mkdirSync(path.dirname(paths.log), { recursive: true });
       await fs.promises.appendFile(paths.log, `${JSON.stringify(full)}\n`, 'utf8');
     } finally {
-      releaseLockFile(paths.lock, holder);
+      releaseLock(paths.lock, holder);
     }
   });
 }
@@ -327,7 +250,7 @@ export function compact(
     const deadlineMs = options.nonTerminalDeadlineMs ?? NON_TERMINAL_DEADLINE_MS;
     const holder = getHostIdentity(deps);
     const deadline = Date.now() + (deps.lockTimeoutMs ?? 5_000);
-    acquireLockFile(paths.lock, holder, deps, deadline);
+    acquireLock(paths.lock, holder, deps, deadline);
     try {
       const events = readEvents(paths.log);
       const groups = groupByExchange(events);
@@ -405,12 +328,12 @@ export function compact(
       try {
         fs.renameSync(tmp, paths.log);
       } catch (err) {
-        unlinkQuiet(tmp);
+        unlinkQuietFile(tmp);
         throw err;
       }
       return { removedExchanges, removedEvents, timedOut };
     } finally {
-      releaseLockFile(paths.lock, holder);
+      releaseLock(paths.lock, holder);
     }
   });
 }

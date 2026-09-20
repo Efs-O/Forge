@@ -92,4 +92,37 @@ describe('alias registry (§0/§4)', () => {
     const table = readAliases(root);
     expect(Object.keys(table)).toEqual(['good']);
   });
+
+  it('F-14: sequential registration preserves both aliases (no stale-read loss)', () => {
+    // Two different aliases registered back-to-back: the second read-modify-
+    // write must see the first's entry, not a stale empty table.
+    registerAlias(root, 'codex', {
+      agent: 'codex',
+      session_id: 't1',
+      registered_at: 1,
+      by: 'forge',
+    });
+    registerAlias(root, 'claude', {
+      agent: 'claude',
+      session_id: 's1',
+      registered_at: 2,
+      by: 'user',
+    });
+    expect(readAliases(root)).toEqual({
+      codex: { agent: 'codex', session_id: 't1', registered_at: 1, by: 'forge' },
+      claude: { agent: 'claude', session_id: 's1', registered_at: 2, by: 'user' },
+    });
+  });
+
+  it('F-14: the alias lock is released after a write (no leftover lock file)', () => {
+    registerAlias(root, 'codex', {
+      agent: 'codex',
+      session_id: 't1',
+      registered_at: 1,
+      by: 'forge',
+    });
+    // The lock is acquired and released within the call; a leftover lock would
+    // block every later registration in this host.
+    expect(fs.existsSync(path.join(root, 'aliases.lock'))).toBe(false);
+  });
 });
