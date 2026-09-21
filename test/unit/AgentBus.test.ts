@@ -1,3 +1,4 @@
+import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -60,7 +61,7 @@ describe('CLIENT_SCRIPT usage block', () => {
   it('covers every verb and the text-source note (a new verb cannot truncate it)', () => {
     const usage = usageLines(CLIENT_SCRIPT).join('\n');
     // Every verb the client accepts must be documented in the usage block.
-    for (const verb of ['reply', 'say', 'send', 'steer', 'join', 'who']) {
+    for (const verb of ['reply', 'say', 'send', 'steer', 'cancel', 'join', 'who']) {
       expect(usage).toContain(`forge.sh ${verb}`);
     }
     // The note that was silently cut off when `who` pushed it past the old
@@ -97,10 +98,19 @@ describe('ensureBus', () => {
     expect(fs.readdirSync(paths.inbox)).toEqual([]);
   });
 
-  it('ships a client whose backslashes survived the template literal', () => {
+  it('ships the real forge.sh verbatim, LF-only, as valid bash', (ctx) => {
+    // The script is a file bundled as text (MESH_RUN_1_FINDINGS F1), so bash
+    // syntax such as `${1:-}` survives and a CRLF checkout cannot break it.
+    expect(CLIENT_SCRIPT.startsWith('#!/usr/bin/env bash\n')).toBe(true);
     expect(CLIENT_SCRIPT).toContain('"Authorization: Bearer $TOKEN" \\\n');
-    expect(CLIENT_SCRIPT).toContain(`cut -d'"' -f4`);
-    expect(CLIENT_SCRIPT).not.toContain('${');
+    expect(CLIENT_SCRIPT).toContain('VERB="${1:-}"');
+    expect(CLIENT_SCRIPT).not.toContain('\r');
+    const script = path.join(home, 'syntax-check.sh');
+    fs.writeFileSync(script, CLIENT_SCRIPT);
+    const check = spawnSync('bash', ['-n', script], { encoding: 'utf8' });
+    if (check.error) ctx.skip(); // No bash on this runner.
+    expect(check.stderr).toBe('');
+    expect(check.status).toBe(0);
   });
 
   it('ships a README with the size limit filled in', () => {

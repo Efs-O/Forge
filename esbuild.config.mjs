@@ -12,6 +12,8 @@ const extensionConfig = {
   bundle: true,
   outfile: 'dist/extension.js',
   external: ['vscode'],
+  // The agent-bus client script is a real file bundled as text (MESH_RUN_1_FINDINGS F1).
+  loader: { '.sh': 'text' },
   format: 'cjs',
   platform: 'node',
   target: 'node20',

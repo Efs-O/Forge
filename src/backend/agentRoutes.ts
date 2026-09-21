@@ -17,7 +17,7 @@ const FROM_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,39}$/;
 
 export interface AgentRoutesDeps {
   paths: () => BusPaths;
-  inbox: Pick<AgentInbox, 'accept'>;
+  inbox: Pick<AgentInbox, 'accept' | 'cancel'>;
   /** Injected by tests; production mints one per activation. */
   token?: string;
   /**
@@ -141,7 +141,8 @@ function requireText(fields: Fields, max: number): string {
 /**
  * The inbound half of agent messaging (docs/plans/AGENT_MESSAGING_PLAN.md), on
  * the control server:
- *   POST /agent/message {from, text}  → 202 {queued}  (a visible Forge turn)
+ *   POST /agent/message {from, text}  → 202 {queued, id}  (a visible Forge turn)
+ *   POST /agent/cancel  {from, id}    → 200 {cancelled} (withdraw a queued message)
  *   POST /agent/reply   {id, text}    → 200 {delivered} (answers ask_live_session)
  *   POST /agent/join    {alias, pid}  → 200 {joined}    (AGENT_MESH_PLAN §10)
  * These are the first control routes that put text in front of the model, so
@@ -189,6 +190,7 @@ export class AgentRoutes {
     const known =
       route === '/agent/message' ||
       route === '/agent/reply' ||
+      route === '/agent/cancel' ||
       (route === '/agent/join' && !!this.deps.join) ||
       (route === '/agent/who' && !!this.deps.who);
     if (!this.enabled || !known) {
@@ -230,6 +232,20 @@ export class AgentRoutes {
       // M6/§4: an unknown or forged sender is rejected with the live list.
       const sender = await this.deps.validateFrom?.(from);
       if (sender && !sender.ok) throw new HttpError(400, sender.error);
+      if (route === '/agent/cancel') {
+        const id = (fields['id'] ?? '').trim();
+        if (!id) throw new HttpError(400, 'id is required: a queued message id, or all');
+        const cancelled = this.deps.inbox.cancel(from, id);
+        if (cancelled === 0) {
+          throw new HttpError(
+            404,
+            id === 'all'
+              ? `no queued messages from "${from}"`
+              : `no queued message ${id} from "${from}": unknown, already started, or not yours`,
+          );
+        }
+        return sendJson(res, 200, { cancelled });
+      }
       // M6: an inbound message addressed to another agent (to != forge) is
       // relayed by the host through the recipient's adapter, with zero Forge
       // model turns. The model never decides whether to relay. A non-Forge `to`
@@ -263,14 +279,15 @@ export class AgentRoutes {
       }
       const steerForge =
         (fields['priority'] ?? '').trim().toLowerCase() === 'steer' && !!this.deps.interruptForge;
-      const queued = this.deps.inbox.accept(forgeInboundPrompt(from, text), from, steerForge);
-      if (queued === undefined)
+      const accepted = this.deps.inbox.accept(forgeInboundPrompt(from, text), from, steerForge);
+      if (accepted === undefined)
         throw new HttpError(429, 'Forge has too many unread agent messages');
+      const { position: queued, id } = accepted;
       if (steerForge) {
         await (this.deps.interruptForge as () => Promise<void>)();
-        return sendJson(res, 202, { queued, steered: true });
+        return sendJson(res, 202, { queued, id, steered: true });
       }
-      return sendJson(res, 202, { queued });
+      return sendJson(res, 202, { queued, id });
     } catch (err) {
       if (err instanceof HttpError) return sendJson(res, err.status, { error: err.message });
       throw err;

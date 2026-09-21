@@ -52,7 +52,7 @@ describe('AgentInbox', () => {
     inbox.accept('running');
     await tick();
     inbox.accept('queued');
-    expect(inbox.accept('steer', 'claude', true)).toBe(1);
+    expect(inbox.accept('steer', 'claude', true)?.position).toBe(1);
     h.finish();
     await tick();
     expect(h.submitted).toEqual(['running', 'steer']);
@@ -103,11 +103,31 @@ describe('AgentInbox', () => {
     inbox.dispose();
   });
 
+  it("cancel removes only the sender's own messages that have not started (F3)", async () => {
+    const h = host();
+    const inbox = new AgentInbox(h, 5);
+    inbox.accept('running', 'claude');
+    await tick();
+    const a = inbox.accept('a', 'claude');
+    const b = inbox.accept('b', 'codex');
+    inbox.accept('c', 'claude');
+    expect(a?.id).toMatch(/^m[0-9a-f]{8}$/);
+    expect(a?.id).not.toBe(b?.id);
+    expect(inbox.cancel('codex', a?.id as string)).toBe(0); // not codex's
+    expect(inbox.cancel('claude', a?.id as string)).toBe(1);
+    expect(inbox.cancel('claude', a?.id as string)).toBe(0); // already gone
+    expect(inbox.cancel('claude', 'all')).toBe(1); // 'c'; 'running' has started
+    h.finish();
+    await tick();
+    expect(h.submitted).toEqual(['running', 'b']);
+    inbox.dispose();
+  });
+
   it('caps the queue', () => {
     const h = host();
     h.busy = true;
     const inbox = new AgentInbox(h, 1_000);
-    for (let i = 0; i < INBOX_CAP; i++) expect(inbox.accept(`m${i}`)).toBe(i + 1);
+    for (let i = 0; i < INBOX_CAP; i++) expect(inbox.accept(`m${i}`)?.position).toBe(i + 1);
     expect(inbox.accept('overflow')).toBeUndefined();
     inbox.dispose();
     expect(inbox.pending).toBe(0);

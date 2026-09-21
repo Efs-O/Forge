@@ -1,3 +1,4 @@
+import { randomBytes } from 'crypto';
 import { getLogger } from '../util/logger';
 
 const log = getLogger();
@@ -35,6 +36,8 @@ export interface InboxHost {
 }
 
 interface QueuedMessage {
+  /** Returned to the sender so it can withdraw the message (`/agent/cancel`). */
+  id: string;
   prompt: string;
   /** The bus sender alias, when the message came through the agent bus. */
   from?: string;
@@ -58,16 +61,39 @@ export class AgentInbox {
   ) {}
 
   /**
-   * Queue a prompt; returns its place in line, or undefined when full. A steer
-   * (`front`) jumps the line so it runs as soon as the interrupted turn ends.
+   * Queue a prompt; returns its place in line and its id, or undefined when
+   * full. A steer (`front`) jumps the line so it runs as soon as the
+   * interrupted turn ends.
    */
-  accept(prompt: string, from?: string, front = false): number | undefined {
+  accept(
+    prompt: string,
+    from?: string,
+    front = false,
+  ): { position: number; id: string } | undefined {
     if (this.disposed || this.queue.length >= INBOX_CAP) return undefined;
-    const item = { prompt, ...(from ? { from } : {}) };
+    const id = `m${randomBytes(4).toString('hex')}`;
+    const item = { id, prompt, ...(from ? { from } : {}) };
     if (front) this.queue.unshift(item);
     else this.queue.push(item);
     void this.drain();
-    return front ? 1 : this.queue.length;
+    return { position: front ? 1 : this.queue.length, id };
+  }
+
+  /**
+   * Withdraw `from`'s queued message `id`, or all of them (`'all'`); returns
+   * how many were removed. Only messages that have not started: a running one
+   * is shifted off the queue already, and interrupting it is what a steer is
+   * for (MESH_RUN_1_FINDINGS F3). A sender can never cancel another's message.
+   */
+  cancel(from: string, id: string): number {
+    let removed = 0;
+    for (let i = this.queue.length - 1; i >= 0; i--) {
+      const item = this.queue[i] as QueuedMessage;
+      if (item.from !== from || (id !== 'all' && item.id !== id)) continue;
+      this.queue.splice(i, 1);
+      removed++;
+    }
+    return removed;
   }
 
   get pending(): number {

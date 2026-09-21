@@ -1,5 +1,24 @@
 # Forge — Recent Changes
 
+## 0.16.19
+
+### Agent mesh: fixes from the first mesh run
+
+Findings and measurements: docs/plans/MESH_RUN_1_FINDINGS.md.
+
+- **`forge.sh` is a real shell file now** (`src/agentBus/forge.sh`), bundled
+  as text. It used to live in a TypeScript template string, where bash's
+  `${1:-}` is an interpolation; that cost the local agent five failed
+  type-check rounds. A test runs `bash -n` on it, and it is LF-only even when
+  checked out with CRLF.
+- **`forge.sh cancel <your-name> <id|all>` withdraws a queued message.**
+  `forge.sh say` now prints the message id (`{"queued":n,"id":"m…"}`), and
+  `POST /agent/cancel` removes the sender's own messages that Forge has not
+  started. A stale note had cost the local agent a whole turn.
+- **Small follow-ups go to Codex, not back to Forge.** The bus README and
+  FORGE.md now say so: a one-line fix sent back to the local model took 45
+  minutes. The stale "one-time consent" wording is gone from both.
+
 ## 0.16.18
 
 ### Agent mesh: `forge.sh who` (AGENT_MESH_PLAN §11)

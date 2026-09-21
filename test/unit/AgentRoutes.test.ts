@@ -18,6 +18,8 @@ const TOKEN = 'f'.repeat(64);
 let home: string;
 let paths: BusPaths;
 let accepted: string[];
+/** Queued message id → sender, for the stub inbox's `cancel`. */
+let queuedFrom: Map<string, string>;
 let full: boolean;
 let routes: AgentRoutes;
 let server: http.Server;
@@ -27,14 +29,24 @@ beforeEach(async () => {
   home = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'forge-agent-routes-'));
   paths = busPaths(home);
   accepted = [];
+  queuedFrom = new Map();
   full = false;
   routes = new AgentRoutes({
     paths: () => paths,
     inbox: {
-      accept: (prompt) => {
+      accept: (prompt, from) => {
         if (full) return undefined;
         accepted.push(prompt);
-        return accepted.length;
+        const id = `m${accepted.length}`;
+        queuedFrom.set(id, from ?? '');
+        return { position: accepted.length, id };
+      },
+      cancel: (from, id) => {
+        let n = 0;
+        for (const [qid, qfrom] of queuedFrom) {
+          if (qfrom === from && (id === 'all' || qid === id)) n += Number(queuedFrom.delete(qid));
+        }
+        return n;
       },
     },
     token: TOKEN,
@@ -51,6 +63,17 @@ afterEach(async () => {
   await new Promise((r) => server.close(r));
   await fs.promises.rm(home, { recursive: true, force: true });
 });
+
+/** An inbox that records prompts and cancels nothing. */
+function stubInbox() {
+  return {
+    accept: (p: string) => (
+      accepted.push(p),
+      { position: accepted.length, id: `m${accepted.length}` }
+    ),
+    cancel: () => 0,
+  };
+}
 
 async function post(
   route: string,
@@ -120,13 +143,34 @@ describe('auth and limits', () => {
 describe('routes', () => {
   it('turns a message into a labelled prompt (text or JSON)', async () => {
     const plain = await post('/agent/message?from=forge-dd', 'hello');
-    expect(plain).toEqual({ status: 202, body: { queued: 1 } });
+    expect(plain).toEqual({ status: 202, body: { queued: 1, id: 'm1' } });
     const json = await post('/agent/message', JSON.stringify({ from: 'codex', text: 'yo' }), {
       type: 'application/json',
     });
     expect(json.status).toBe(202);
     expect(accepted[0]).toContain('**forge-dd says:**\n\nhello');
     expect(accepted[1]).toContain('**codex says:**\n\nyo');
+  });
+
+  it("cancel withdraws only the sender's own queued messages (F3)", async () => {
+    await post('/agent/message?from=claude', 'one');
+    await post('/agent/message?from=claude', 'two');
+    await post('/agent/message?from=codex', 'three');
+    expect(await post('/agent/cancel?from=codex&id=m1', '')).toEqual({
+      status: 404,
+      body: { error: 'no queued message m1 from "codex": unknown, already started, or not yours' },
+    });
+    expect(await post('/agent/cancel?from=claude&id=m1', '')).toEqual({
+      status: 200,
+      body: { cancelled: 1 },
+    });
+    expect((await post('/agent/cancel?from=claude&id=m1', '')).status).toBe(404);
+    expect((await post('/agent/cancel?from=claude', '')).status).toBe(400);
+    expect(await post('/agent/cancel?from=claude&id=all', '')).toEqual({
+      status: 200,
+      body: { cancelled: 1 },
+    });
+    expect([...queuedFrom.keys()]).toEqual(['m3']);
   });
 
   it('delivers a reply to the waiting question, and the exchange leaves only the shipped files', async () => {
@@ -202,6 +246,10 @@ describe('forge.sh against the routes', () => {
     const said = await runClient(['say', 'claude-review'], 'hello Forge\n');
     expect(said).toMatchObject({ code: 0 });
     expect(accepted[0]).toContain('**claude-review says:**\n\nhello Forge');
+    expect(said.out).toContain('"id":"m1"');
+    const cancelled = await runClient(['cancel', 'claude-review', 'm1'], '');
+    expect(cancelled.out).toContain('"cancelled":1');
+    expect((await runClient(['cancel', 'claude-review', 'm1'], '')).code).toBe(1);
 
     writeQuestion(paths, 'fg2-abc', 's', 'q');
     const replied = await runClient(['reply', 'fg2-abc'], 'pong\n');
@@ -228,7 +276,7 @@ describe('forge.sh against the routes', () => {
     const relays: [string, string, string][] = [];
     routes = new AgentRoutes({
       paths: () => paths,
-      inbox: { accept: () => 1 },
+      inbox: { accept: () => ({ position: 1, id: 'm1' }), cancel: () => 0 },
       token: TOKEN,
       join: (alias, pid) => (joins.push([alias, pid]), { ok: true, reply: 'joined' }),
       relay: async (from, to, text) => (
@@ -254,7 +302,11 @@ describe('forge.sh against the routes', () => {
     routes = new AgentRoutes({
       paths: () => paths,
       inbox: {
-        accept: (_prompt, _from, front) => (calls.push(`accept front=${String(front)}`), 1),
+        accept: (_prompt, _from, front) => (
+          calls.push(`accept front=${String(front)}`),
+          { position: 1, id: 'm1' }
+        ),
+        cancel: () => 0,
       },
       token: TOKEN,
       interruptForge: async () => void calls.push('interrupt'),
@@ -273,6 +325,8 @@ describe('forge.sh against the routes', () => {
     if (!usable) ctx.skip();
     expect((await runClient(['reply', '../x'], 'a')).code).toBe(2);
     expect((await runClient(['say', 'a b'], 'a')).code).toBe(2);
+    expect((await runClient(['cancel', 'x', '../m1'], '')).code).toBe(2);
+    expect((await runClient(['cancel', 'x'], '')).code).toBe(2);
     expect(accepted).toEqual([]);
   }, 30_000);
 });
@@ -289,7 +343,7 @@ describe('sender validation and relay gating (M6/§4)', () => {
   it('rejects an unknown `from` with the live list, before the inbox', async () => {
     install({
       paths: () => paths,
-      inbox: { accept: (p) => (accepted.push(p), accepted.length) },
+      inbox: stubInbox(),
       token: TOKEN,
       validateFrom: (from) =>
         from === 'codex' || from === 'forge'
@@ -305,7 +359,7 @@ describe('sender validation and relay gating (M6/§4)', () => {
   it('accepts a known `from` and delivers to the inbox', async () => {
     install({
       paths: () => paths,
-      inbox: { accept: (p) => (accepted.push(p), accepted.length) },
+      inbox: stubInbox(),
       token: TOKEN,
       validateFrom: (from) => (from === 'codex' ? { ok: true } : { ok: false, error: 'no' }),
     });
@@ -317,7 +371,7 @@ describe('sender validation and relay gating (M6/§4)', () => {
   it('rejects a non-Forge `to` when no relay is installed (no silent inbox delivery)', async () => {
     install({
       paths: () => paths,
-      inbox: { accept: (p) => (accepted.push(p), accepted.length) },
+      inbox: stubInbox(),
       token: TOKEN,
       validateFrom: () => ({ ok: true }),
       // no relay
@@ -340,7 +394,7 @@ describe('typed lifecycle command dispatch (§8, P3)', () => {
     let got: string | undefined;
     install({
       paths: () => paths,
-      inbox: { accept: (p) => (accepted.push(p), accepted.length) },
+      inbox: stubInbox(),
       token: TOKEN,
       validateFrom: () => ({ ok: true }),
       handleCommand: async (text) => {
@@ -358,7 +412,7 @@ describe('typed lifecycle command dispatch (§8, P3)', () => {
   it('treats ordinary `to: forge` text as a prompt, not a command', async () => {
     install({
       paths: () => paths,
-      inbox: { accept: (p) => (accepted.push(p), accepted.length) },
+      inbox: stubInbox(),
       token: TOKEN,
       validateFrom: () => ({ ok: true }),
       handleCommand: async () => ({ ok: true, reply: 'should not be called' }),
@@ -371,7 +425,7 @@ describe('typed lifecycle command dispatch (§8, P3)', () => {
   it('a command that fails to dispatch is a 400, not a queued prompt', async () => {
     install({
       paths: () => paths,
-      inbox: { accept: (p) => (accepted.push(p), accepted.length) },
+      inbox: stubInbox(),
       token: TOKEN,
       validateFrom: () => ({ ok: true }),
       handleCommand: async () => ({ ok: false, error: 'no session to park' }),
@@ -397,7 +451,7 @@ describe('GET /agent/who (§11)', () => {
   it('A6: 401 without a token, 404 while disabled, 200 with the token', async () => {
     install({
       paths: () => paths,
-      inbox: { accept: (p) => (accepted.push(p), accepted.length) },
+      inbox: stubInbox(),
       token: TOKEN,
       who: () => [
         { alias: 'forge', attachment: 'hub', activity: 'idle' },
@@ -419,7 +473,7 @@ describe('GET /agent/who (§11)', () => {
   it('is a GET-only route: a POST to /agent/who is 405', async () => {
     install({
       paths: () => paths,
-      inbox: { accept: (p) => (accepted.push(p), accepted.length) },
+      inbox: stubInbox(),
       token: TOKEN,
       who: () => [],
     });
@@ -434,7 +488,7 @@ describe('GET /agent/who (§11)', () => {
   it('A8: a who call leaves only the pre-existing bus artifacts behind', async () => {
     install({
       paths: () => paths,
-      inbox: { accept: (p) => (accepted.push(p), accepted.length) },
+      inbox: stubInbox(),
       token: TOKEN,
       who: () => [{ alias: 'forge', attachment: 'hub', activity: 'idle' }],
     });
@@ -477,7 +531,7 @@ describe('forge.sh who against the routes (§11)', () => {
     if (!usable) ctx.skip();
     install({
       paths: () => paths,
-      inbox: { accept: (p) => (accepted.push(p), accepted.length) },
+      inbox: stubInbox(),
       token: TOKEN,
       who: () => [
         { alias: 'forge', attachment: 'hub', activity: 'busy', detail: 'inbox 1' },
@@ -500,7 +554,7 @@ describe('forge.sh who against the routes (§11)', () => {
     if (!usable) ctx.skip();
     install({
       paths: () => paths,
-      inbox: { accept: (p) => (accepted.push(p), accepted.length) },
+      inbox: stubInbox(),
       token: TOKEN,
       who: () => [],
     });

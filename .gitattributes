@@ -11,3 +11,4 @@
 *.html text eol=lf
 .gitignore text eol=lf
 .prettierrc text eol=lf
+*.sh text eol=lf

@@ -462,7 +462,8 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Telegram `/jobs` + `/job <n>` commands                     | `src/remote/RemoteJobCommands.ts`                              |
 | Outbox watcher (drains the outbox to the owner chat)       | `src/remote/JobOutboxWatcher.ts`                               |
 | Agent-bus files (ids, wait, replies, orphans, TTL)         | `src/agentBus/agentBus.ts`                                     |
-| Agent-bus shipped text (README, forge.sh, message bodies)  | `src/agentBus/busContent.ts`                                   |
+| Agent-bus shipped text (README, message bodies)            | `src/agentBus/busContent.ts`                                   |
+| Agent-bus client script (`~/.forge/agent-bus/forge.sh`)    | `src/agentBus/forge.sh` (bundled as text by busContent.ts)     |
 | Claude session registry + peer-pipe delivery               | `src/agentBus/claudePeer.ts`                                   |
 | Claude delivery via a `claude -p` relay (opt-in)           | `src/agentBus/claudeRelay.ts`                                  |
 | Inbound agent messages → Forge turns (queue)               | `src/agentBus/agentInbox.ts`                                   |
