@@ -423,14 +423,20 @@ If phase 3 or the live test fails and the agent path is abandoned, the file is
 deleted along with `llamacpp_update` — no typed fallback is kept (owner's
 decision).
 
-## Out of scope
+## Fixes noticed during the run
 
-- **Follow-up after phase 5: `forge.sh say --model <name>`.** `/agent/message`
-  lands in the active chat on whatever model it has, so starting a phase on
-  Qwopus needed the owner to select it by hand. Add an optional `model` (and
-  a new-chat flag) to `/agent/message`, reusing the runner's
-  `setConversationModel` step from phase 3, so Claude can start a phase on any
-  model with no click.
+Owner, 2026-09-21: fix these as we go, not after phase 5. Claude implements
+them between phases (after a phase commit, before the next prompt), never while
+Forge is editing the tree; each is its own commit plus a VSIX install.
+
+| # | Found | Fix | Status |
+|---|---|---|---|
+| F1 | Phase 3 attempt 1: Qwopus ran the same two `holdAwake` searches 16 times; `ToolLoopGuard` threw with no warning, so the model never saw it was repeating. The system-prompt rule against repeats already existed and did not help | On the first exact repeat of a read-only call with an identical result, prefix the result with one line naming the earlier call and telling it to act or change approach; keep the throw for persistent loops | after phase 3 |
+| F2 | `forge.sh send claude codex` → `unknown recipient "codex"`: the alias is written with `session_id ""`, `readAliases` (`src/agentMesh/aliasRegistry.ts`) drops it, `knownAliases` (`src/vscode/agentMeshSetup.ts`) omits codex | Register the owned Codex under a routable id, or let `knownAliases` include owned sessions without one | after phase 3 |
+| F3 | A bus-started turn (`forge.sh say`) was not mirrored to Telegram | Treat bus turns as a remote origin for the mirror | after phase 3 (diagnose first) |
+| F4 | `/agent/message` lands on the active chat's model; starting a phase on Qwopus needed a manual model pick | Optional `model` (and new-chat flag) on `/agent/message` + `forge.sh say --model`, reusing phase 3's `setConversationModel` step | after phase 3 (needs it) |
+
+## Out of scope
 
 - Retrying a failed task automatically. The next schedule is the retry.
 - Pruning a job's chat. Compaction bounds the model's view and HalluScribe
