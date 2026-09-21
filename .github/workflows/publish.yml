@@ -33,17 +33,26 @@ jobs:
       - name: Quality gates
         run: npm run ci
 
-      - name: Publish to VS Code Marketplace
-        run: npm run publish
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
-
-      # Built once and reused by both steps below. `vsce publish` above packages
-      # internally and keeps nothing, so this is the first artifact on disk.
+      # The release is the artifact the canonical `npm run package` gate built
+      # (version check, release build, changelog sync), published as-is to
+      # every registry. Publishing through `npm run publish` let vsce repackage
+      # on its own path, skipping check-vsix-version.mjs (audit A11, 2026-09-21).
+      # The tag must name the version being packaged, or the release page and
+      # the registries disagree about what shipped.
       - name: Package the VSIX
         run: |
-          node scripts/sync-changelog.mjs
-          npx vsce package --no-dependencies --out "forge-llm-${GITHUB_REF_NAME#v}.vsix"
+          VERSION="$(node -p "require('./package.json').version")"
+          if [ "v$VERSION" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package.json version $VERSION" >&2
+            exit 1
+          fi
+          npm run package
+          test -f "forge-llm-$VERSION.vsix"
+
+      - name: Publish to VS Code Marketplace
+        run: npx vsce publish --packagePath "forge-llm-${GITHUB_REF_NAME#v}.vsix"
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
       # Open VSX lagged the Marketplace from 0.13.3 to 0.15.0 because the step
       # that published it was deleted in a954ead and never restored. It is

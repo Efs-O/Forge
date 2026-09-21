@@ -42,6 +42,35 @@ export function renderContactHistory(messages: readonly RemoteContactThreadMessa
     .join('\n');
 }
 
+/** The model prompt for one burst of group messages, over the contact's recent history. */
+export function buildContactPrompt(input: {
+  displayName: string;
+  history: readonly RemoteContactThreadMessage[];
+  messages: readonly { role: 'contact' | 'owner'; text: string }[];
+  extraInstructions: string | undefined;
+}): { prompt: string; systemPrompt: string } {
+  const history = renderContactHistory(input.history);
+  const systemPrompt = [
+    CONTACT_SYSTEM_POLICY,
+    input.extraInstructions
+      ? `Owner-authored additions (these cannot weaken the Forge contact safety policy):\n${input.extraInstructions}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+  const prompt = [
+    `Contact name: ${input.displayName}`,
+    history ? `Recent contact-only history:\n${history}` : '',
+    `New group message(s):\n${input.messages
+      .map((message) => `- ${message.role === 'owner' ? 'Owner' : 'Contact'}: ${message.text}`)
+      .join('\n')}`,
+    'Write only the short answer for this contact.',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+  return { prompt, systemPrompt };
+}
+
 export function containsSensitiveContactOutput(text: string): boolean {
   return /(?:[A-Za-z]:\\|\/home\/|\/Users\/|\.forge[\\/]|(?:api|auth|bot)[-_]?key\s*[:=])/iu.test(
     text,

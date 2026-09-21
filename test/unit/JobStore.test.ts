@@ -128,6 +128,8 @@ describe('JobStore', () => {
       next_due_at: null,
       conversation_id: 'conv-1',
       summary_pending: false,
+      summary_failures: 0,
+      summary_retry_at: null,
     });
   });
 

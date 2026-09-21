@@ -407,7 +407,18 @@ After implementation:
 10. Restart Forge and verify the binding, bounded history, rate limits, and
     pending owner alerts recover without duplicate replies.
 
-## Acceptance criteria
+## State × lifecycle ledger (contact request rows)
+
+Added 2026-09-21 with the audit A3/A6 fix. A contact message is stored as a
+`contactThread` row in the remote state file **before** the contact sees
+"thinking…". That row carries `inboundKey` (`channel:chat:providerMessageId`)
+and a `disposition`.
+
+| Durable artifact | Owner | Contact removed | Contact unbound / group lost | Crash mid-write | Window reload / crash mid-generation | TTL / trim |
+| --- | --- | --- | --- | --- | --- | --- |
+| `contactThread[]` row, `disposition` `pending`→`running`→`answered`/`failed` | `RemoteContactStore` (`appendInbound`, `setDisposition`, `reclaimUnfinished`) | the burst is cancelled and its rows settle `failed` | `processBurst` settles the rows `failed` instead of answering | one `contactMutate` write; the row is admitted atomically with its dedup check | `recoverInterrupted` after transport start: a `running` row older than the contact's latest answer is marked `answered`, and every other unfinished row is re-run once | the last 20 rows per contact, but a `pending`/`running` row is never trimmed |
+| `inboundKey` on that row | same | goes with the row | kept | same write as the row | a redelivered update (cursor not yet committed) is ignored, in-process or after reload | lives as long as the row, so dedup covers the recent 20 rows plus every unfinished one |
+
 
 - [x] Each approved contact can be bound to exactly one manually created
   private owner/bot/contact group.

@@ -15,6 +15,16 @@ import {
   type RunRow,
 } from './jobSchema';
 
+/**
+ * Whether a file in the jobs root is a job definition (`<id>.json`). The root
+ * also holds the scheduler lease (`jobs-scheduler.lease.json`), its heartbeat
+ * temporaries (`….lease.json.<token>.heartbeat-<ms>.tmp`) and atomic-write
+ * temporaries — none of them jobs, and none a reason to reconcile wakes.
+ */
+export function isJobDefinitionName(name: string): boolean {
+  return name.endsWith('.json') && !name.endsWith('.lease.json');
+}
+
 /** The default state for a job that has never run. */
 export function defaultState(): JobState {
   return {
@@ -25,6 +35,8 @@ export function defaultState(): JobState {
     next_due_at: null,
     conversation_id: null,
     summary_pending: false,
+    summary_failures: 0,
+    summary_retry_at: null,
   };
 }
 
@@ -94,11 +106,7 @@ export class JobStore {
   async loadAll(): Promise<JobFile[]> {
     await this.ensureDirs();
     const entries = await fs.promises.readdir(this.jobsDir, { withFileTypes: true });
-    // The jobs root also holds the scheduler's lease file
-    // (`jobs-scheduler.lease.json`), which is not a job. Skip it.
-    const files = entries.filter(
-      (e) => e.isFile() && e.name.endsWith('.json') && !e.name.endsWith('.lease.json'),
-    );
+    const files = entries.filter((e) => e.isFile() && isJobDefinitionName(e.name));
     const jobs: JobFile[] = [];
     for (const file of files) {
       const full = path.join(this.jobsDir, file.name);
@@ -366,15 +374,18 @@ export class JobStore {
   }
 
   /**
-   * Watch the jobs directory for changes (a `manage_jobs` edit from any
+   * Watch the job definitions for changes (a `manage_jobs` edit from any
    * window). Debounced 1s so a burst of writes coalesces into one callback.
-   * The callback is invoked with no arguments; the caller reloads.
+   * The callback is invoked with no arguments; the caller reloads. Only
+   * definition names count: the lease heartbeat writes a temporary every 5 s,
+   * and matching the final lease name alone let those through (audit A4).
+   * A null filename (platform could not say) still counts.
    */
   watch(onChange: () => void): void {
     this.onChangeCallback = onChange;
     void this.ensureDirs();
     this.watcher = fs.watch(this.jobsDir, (_eventType, filename) => {
-      if (filename?.toString().endsWith('.lease.json')) return;
+      if (filename && !isJobDefinitionName(filename.toString())) return;
       if (this.watchDebounce) return;
       this.watchDebounce = setTimeout(() => {
         this.watchDebounce = undefined;

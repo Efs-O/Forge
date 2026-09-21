@@ -6,7 +6,10 @@ const { streamModelChatCompletion } = vi.hoisted(() => ({
 }));
 vi.mock('../../src/llm/ChatClient', () => ({ streamModelChatCompletion }));
 
-import { CONTEXT_INPUT_EXHAUSTED_MESSAGE, runToolCallingLoop } from '../../src/agent/ToolCallingLoop';
+import {
+  CONTEXT_INPUT_EXHAUSTED_MESSAGE,
+  runToolCallingLoop,
+} from '../../src/agent/ToolCallingLoop';
 import { ToolCallTruncatedError } from '../../src/llm/ToolCallTruncatedError';
 import { ToolFailureTracker } from '../../src/tools/StripTools';
 
@@ -244,6 +247,18 @@ describe('truncated tool calls', () => {
     );
     expect(thinkFlags[0]).toBe(true);
     expect(thinkFlags[1]).toBe(false);
+
+    // chat_template_thinking models (Nemotron) run the same kwargs through
+    // the normalizer, which used to overwrite the retry's `false` with `true`.
+    thinkFlags.length = 0;
+    round = 0;
+    await runToolCallingLoop(
+      runOptions([{ role: 'user', content: 'go' }], {
+        model: { name: 'test-model', think: true, chat_template_thinking: true },
+        canUseThinkingKwargs: true,
+      }) as never,
+    );
+    expect(thinkFlags).toEqual([true, false]);
   });
 
   it('gives the retry a hard character ceiling, not just generic advice', async () => {

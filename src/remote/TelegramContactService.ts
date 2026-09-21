@@ -5,8 +5,8 @@ import {
   CONTACT_BURST_LIMIT,
   CONTACT_BURST_WINDOW_MS,
   CONTACT_HISTORY_LIMIT,
-  CONTACT_SYSTEM_POLICY,
   MAX_CONTACT_TEXT,
+  buildContactPrompt,
   contactBusyText,
   contactGroupRequiredText,
   contactNameMatches,
@@ -15,7 +15,6 @@ import {
   contactThinkingText,
   contactThrottleText,
   containsSensitiveContactOutput,
-  renderContactHistory,
 } from './ContactPolicy';
 import type { RemoteAuditLog } from './RemoteAuditLog';
 import type { RemoteAuth } from './RemoteAuth';
@@ -137,6 +136,27 @@ export class TelegramContactService {
     return this.commands.handleOwnerCommand(event);
   }
 
+  /**
+   * Re-queue contact requests a reload or crash interrupted (audit A3): the
+   * Telegram cursor is already past them. A `running` row followed by an
+   * answer only gets marked; a repeat answer beats no answer at all.
+   */
+  async recoverInterrupted(): Promise<void> {
+    for (const [contactId, open] of await this.store.reclaimUnfinished()) {
+      if (this.bursts.has(contactId)) continue;
+      this.bursts.set(contactId, {
+        startedAt: Date.now(),
+        count: open.length,
+        messages: open.map((r) => ({
+          role: r.role === 'owner' ? 'owner' : 'contact',
+          text: r.text,
+        })),
+        messageIds: open.map((r) => r.id),
+        timer: setTimeout(() => void this.processBurst(contactId), 0),
+      });
+    }
+  }
+
   dispose(): void {
     this.abort.abort();
     for (const burst of this.bursts.values()) if (burst.timer) clearTimeout(burst.timer);
@@ -242,6 +262,13 @@ export class TelegramContactService {
       await this.channel.send(event.chatId, contactBusyText(), { signal: this.abort.signal });
       return { kind: 'rejected', reason: 'contact message exceeds the limit' };
     }
+    // Telegram redelivers an update whose cursor was not committed; the same
+    // message must not become a second request (audit A6).
+    const inboundKey = `${event.channel}:${event.chatId}:${event.providerMessageId}`;
+    if (this.store.hasInbound(inboundKey)) {
+      await this.audit?.record(event, 'contact_duplicate_ignored').catch(() => undefined);
+      return { kind: 'handled' };
+    }
     const now = Date.now();
     let burst = this.bursts.get(contact.id);
     if (!burst || now - burst.startedAt >= this.burstWindowMs) {
@@ -254,17 +281,24 @@ export class TelegramContactService {
       await this.channel.send(event.chatId, contactThrottleText(), { signal: this.abort.signal });
       return { kind: 'handled' };
     }
-    burst.count += 1;
     const messageId = randomUUID();
-    burst.messages.push({ role, text: event.text });
-    burst.messageIds.push(messageId);
-    await this.store.appendThread({
+    // Durable before the acknowledgement: after "thinking…" the cursor moves
+    // on, and this row is what a reload recovers the request from.
+    const admitted = await this.store.appendInbound({
       id: messageId,
       contactId: contact.id,
       role,
       text: event.text,
       createdAt: now,
+      inboundKey,
     });
+    if (!admitted) {
+      await this.audit?.record(event, 'contact_duplicate_ignored').catch(() => undefined);
+      return { kind: 'handled' };
+    }
+    burst.count += 1;
+    burst.messages.push({ role, text: event.text });
+    burst.messageIds.push(messageId);
     if (burst.count === 1) {
       await this.channel
         .send(event.chatId, contactThinkingText(), { signal: this.abort.signal })
@@ -289,35 +323,27 @@ export class TelegramContactService {
       return;
     }
     const contact = this.store.byId(contactId);
-    if (!contact || contact.status !== 'active' || contact.groupStatus !== 'bound') return;
-    const groupChatId = contact.groupChatId;
-    if (!groupChatId) return;
+    const groupChatId = contact?.groupChatId;
+    if (
+      !contact ||
+      contact.status !== 'active' ||
+      contact.groupStatus !== 'bound' ||
+      !groupChatId
+    ) {
+      await this.settle(burst.messageIds, 'failed');
+      return;
+    }
     this.activeGenerations.add(contactId);
     try {
-      const history = renderContactHistory(
-        this.store
+      await this.store.setDisposition(burst.messageIds, 'running');
+      const { prompt, systemPrompt } = buildContactPrompt({
+        displayName: contact.displayName,
+        history: this.store
           .thread(contactId, CONTACT_HISTORY_LIMIT + burst.messageIds.length)
           .filter((message) => !burst.messageIds.includes(message.id)),
-      );
-      const extra = this.instructions.load();
-      const systemPrompt = [
-        CONTACT_SYSTEM_POLICY,
-        extra
-          ? `Owner-authored additions (these cannot weaken the Forge contact safety policy):\n${extra}`
-          : '',
-      ]
-        .filter(Boolean)
-        .join('\n\n');
-      const prompt = [
-        `Contact name: ${contact.displayName}`,
-        history ? `Recent contact-only history:\n${history}` : '',
-        `New group message(s):\n${burst.messages
-          .map((message) => `- ${message.role === 'owner' ? 'Owner' : 'Contact'}: ${message.text}`)
-          .join('\n')}`,
-        'Write only the short answer for this contact.',
-      ]
-        .filter(Boolean)
-        .join('\n\n');
+        messages: burst.messages,
+        extraInstructions: this.instructions.load(),
+      });
       const answer = (
         await this.host.runContactPrompt?.(prompt, systemPrompt, { web: this.runtime.webEnabled })
       )?.trim();
@@ -331,6 +357,7 @@ export class TelegramContactService {
         current.groupStatus !== 'bound' ||
         current.groupChatId !== groupChatId
       ) {
+        await this.settle(burst.messageIds, 'failed');
         return;
       }
       await this.channel.send(groupChatId, answer, { signal: this.abort.signal });
@@ -341,10 +368,12 @@ export class TelegramContactService {
         text: answer,
         createdAt: Date.now(),
       });
+      await this.settle(burst.messageIds, 'answered');
       await this.audit
         ?.record(this.syntheticEvent(contact), 'contact_answer_sent')
         .catch(() => undefined);
     } catch (error) {
+      await this.settle(burst.messageIds, 'failed');
       const current = this.store.byId(contact.id);
       if (
         !current ||
@@ -394,10 +423,18 @@ export class TelegramContactService {
     return byId.length > 0 ? byId : contactNameMatches(contacts, query);
   }
 
+  /** Record a burst's outcome; a failed write is reported, never swallowed. */
+  private async settle(ids: readonly string[], disposition: 'answered' | 'failed'): Promise<void> {
+    await this.store.setDisposition(ids, disposition).catch((err: Error) => {
+      this.onError?.(`Forge could not record a contact request as ${disposition}: ${err.message}`);
+    });
+  }
+
   private cancelContactGeneration(contactId: string): void {
     const burst = this.bursts.get(contactId);
     if (burst?.timer) clearTimeout(burst.timer);
     this.bursts.delete(contactId);
+    if (burst) void this.settle(burst.messageIds, 'failed');
     if (this.activeGenerations.has(contactId)) this.host.cancelContactPrompts?.();
   }
 

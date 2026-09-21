@@ -161,6 +161,13 @@ export const JobStateSchema = z.object({
   conversation_id: z.string().nullable().default(null),
   /** A change was recorded but its summarize is still waiting for idle (B.4). */
   summary_pending: z.boolean().default(false),
+  /**
+   * Consecutive failed attempts at the pending summary. Separate from
+   * `consecutive_failures`, which counts check failures (audit A9).
+   */
+  summary_failures: z.number().int().nonnegative().default(0),
+  /** Epoch ms before which a failed pending summary is not retried. */
+  summary_retry_at: z.number().int().nonnegative().nullable().default(null),
 });
 export type JobState = z.infer<typeof JobStateSchema>;
 

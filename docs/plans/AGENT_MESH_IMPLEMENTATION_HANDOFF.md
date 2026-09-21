@@ -232,7 +232,7 @@ gate, proceed on self-review + CI and tell the user.
 ## P0 STATUS (in progress, 2026-09-19)
 **Built + unit-tested (all green):** `src/agentMesh/` — hostIdentity,
 deliveryState, exchangeLog (M1 lock + M8 compaction), aliasRegistry, ownership
-(M2 lease + recovery, M3 thread-keep), aliasFifo (M5), hostWait (M7), adapters,
+(M2 lease + recovery, M3 thread-keep), aliasFifo (M5), adapters,
 sessionProvider (M2/M3 owned-session lifecycle), meshOrchestrator (tell + M6
 relay), meshContext. Plus `src/tools/tellLiveSessionTool.ts` (registered, 78th
 tool), `src/vscode/agentMeshSetup.ts` (wiring + startup recovery), and the M6

@@ -1,0 +1,11 @@
+Forge weekly audit final validation
+Audited tip: 1f282423239418763c865c3e6d6c58246f45b058
+Validation HEAD: 5299117cf01017a69769b25d4e627b34e82908b0
+Timestamp: 2026-09-21T21:57:48.5342290+03:00
+npm run ci exit: 1
+CI full log: C:\Users\efso office\AppData\Local\Temp\forge-weekly-audit-20260921-ci.log
+ Test Files  2 failed | 298 passed | 5 skipped (305)
+      Tests  2 failed | 2841 passed | 25 skipped (2868)
+   Duration  37.82s (transform 13.28s, setup 0ms, import 50.84s, tests 181.19s, environment 44.33s)
+npm run package exit: 1
+Package full log: C:\Users\efso office\AppData\Local\Temp\forge-weekly-audit-20260921-package.log

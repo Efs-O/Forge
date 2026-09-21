@@ -105,6 +105,13 @@ other seams were left open. These amendments are binding:
   **renders**. §4's `from`/`to` alias validation and §2b's host-side wait with
   its cost guard also move to P0. Codex's gap H was that these are prerequisites
   for truthful states, and v2 had left them in P2/P3.
+  *Status (2026-09-21 audit A10):* the log writer and sender validation
+  shipped. The host-side wait shipped as `waitForReply`
+  (`src/agentBus/agentBus.ts`, used by `tell_live_session`) plus the owned
+  sessions' FIFO wait. The standalone `hostWait.ts` module with its
+  `exceededCostGuard` had no caller and was removed, so **no empty-turn cost
+  guard is enforced anywhere**. It stays open until a fallback wait loop that
+  spends model turns exists to enforce it on.
 - **M8. Compaction never removes a non-terminal exchange.** Last-N and the TTL
   apply only to exchanges whose latest state is terminal (`completed`,
   `rejected`, `timeout`, `cancelled`, `crashed`, `recovered`, `context_lost`).
@@ -295,8 +302,8 @@ defined per adapter — **a state label is not a wake mechanism** (Codex, gap D)
     own window.
   - **Forge restart while parked:** ownership record survives; the owned stdio
     pipe does not → startup recovery reaps and marks `recovered: reaped` (§0).
-- **Cost guard (kept from v1):** a wait loop that has done > N empty model turns
-  stops and tells the user. The *preferred* wait is host-side (a Forge-owned
+- **Cost guard (kept from v1; NOT implemented, see M7 status):** a wait loop that
+  has done > N empty model turns stops and tells the user. The *preferred* wait is host-side (a Forge-owned
   blocking read / file watch with deadline + cancellation), **not** an agent shell
   sleep loop — a promised `bash` loop is a Windows portability dependency (Codex,
   §3). The blocking-shell pattern survives only as the documented fallback for a

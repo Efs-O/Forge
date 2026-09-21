@@ -14,6 +14,11 @@ import type { JobStore } from './JobStore';
  * because the window running the scheduler may not be the window holding the
  * Telegram transport.
  */
+/** First retry delay for a failed pending summary; doubles per failure. */
+const SUMMARY_RETRY_BASE_MS = 60_000;
+/** The longest a failed pending summary waits between attempts. */
+const SUMMARY_RETRY_MAX_MS = 6 * 60 * 60_000;
+
 export interface JobDeliveryDeps {
   store: JobStore;
   /** The coalescing outbox directory (D2). */
@@ -88,20 +93,46 @@ export class JobDelivery {
   /**
    * Summarize any job whose change was recorded while a turn was streaming
    * (`summary_pending`), now that a tick has reached it. Runs only when idle.
+   *
+   * A paused job does no model work: its change stays pending until it is
+   * resumed (audit A8). A failed attempt keeps the change pending and backs
+   * off, doubling from a minute to six hours, instead of retrying every tick;
+   * the first failure is reported once through the outbox so a phone-only
+   * user learns of it, and the eventual summary says it recovered (audit A9).
    */
   async processPendingSummaries(): Promise<void> {
     if (this.deps.busy() !== undefined) return;
+    const now = this.deps.now();
     const jobs = await this.deps.store.loadAll();
     for (const { job, state } of jobs) {
-      if (!state.summary_pending) continue;
+      if (!state.summary_pending || !job.enabled) continue;
+      if (state.summary_retry_at !== null && now < state.summary_retry_at) continue;
+      let summary: string;
       try {
-        const summary = await this.summarizeChange(job, state.last_observation ?? '');
-        await this.deliver(job, summary);
-        this.deps.store.patchState(job.id, { summary_pending: false });
-      } catch {
-        // A failed summary is not fatal: the change is already in the run log.
-        this.deps.notifyLocal(`Forge: could not summarize job "${job.name}".`);
+        summary = await this.summarizeChange(job, state.last_observation ?? '');
+      } catch (err) {
+        const failures = state.summary_failures + 1;
+        const delay = Math.min(SUMMARY_RETRY_MAX_MS, SUMMARY_RETRY_BASE_MS * 2 ** (failures - 1));
+        this.deps.store.patchState(job.id, {
+          summary_failures: failures,
+          summary_retry_at: now + delay,
+        });
+        if (failures === 1) {
+          await this.deliver(
+            job,
+            `could not summarize the recorded change (${(err as Error).message}); ` +
+              'retrying with backoff.',
+          );
+        }
+        continue;
       }
+      const recovered = state.summary_failures > 0 ? 'summary (recovered): ' : '';
+      await this.deliver(job, `${recovered}${summary}`);
+      this.deps.store.patchState(job.id, {
+        summary_pending: false,
+        summary_failures: 0,
+        summary_retry_at: null,
+      });
     }
   }
 

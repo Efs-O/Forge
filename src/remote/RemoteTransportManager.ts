@@ -156,6 +156,12 @@ export class RemoteTransportManager {
         // complete while a transport is activating. Controller.start() starts
         // the durable outbox, which flushes anything queued here.
         await controller.start();
+        // After start: a request a reload interrupted is answered over this channel.
+        contactService
+          ?.recoverInterrupted()
+          .catch((err: Error) =>
+            this.options.notifyLocal(`Forge contact recovery failed: ${err.message}`),
+          );
         // The jobs outbox is drained by whoever holds the Telegram lease, not
         // by the scheduler window (whose sink cannot reach the owner's phone).
         // Gated on `jobs.enabled` so a jobs-less config adds no watcher.

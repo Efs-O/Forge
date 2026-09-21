@@ -132,6 +132,8 @@ const ContactThreadMessageSchema = z.object({
   role: z.enum(['contact', 'owner', 'assistant']),
   text: z.string().min(1).max(12_000),
   createdAt: z.number().int().nonnegative(),
+  inboundKey: z.string().min(1).max(200).optional(),
+  disposition: z.enum(['pending', 'running', 'answered', 'failed']).optional(),
 });
 
 const ContactOutboundSchema = z.object({

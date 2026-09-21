@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from 'crypto';
 import type {
+  RemoteContactDisposition,
   RemoteContactGroupLinkRecord,
   RemoteContactOutboundRecord,
   RemoteContactOutboundState,
@@ -321,17 +322,68 @@ export class RemoteContactStore {
   }
 
   async appendThread(message: RemoteContactThreadMessage): Promise<void> {
+    await this.store.contactMutate((draft) => pushThread(draft, message));
+  }
+
+  /** Whether this inbound channel message was already admitted. */
+  hasInbound(inboundKey: string): boolean {
+    return this.store.contactRead((state) =>
+      state.contactThread.some((item) => item.inboundKey === inboundKey),
+    );
+  }
+
+  /**
+   * Admit an inbound contact request as a `pending` row, refusing — in the same
+   * mutation — one whose `inboundKey` is already stored. Returns false for a
+   * redelivered duplicate. The row is written before the contact sees any
+   * acknowledgement, so a reload can find the work again (`unfinished`).
+   */
+  async appendInbound(
+    message: RemoteContactThreadMessage & { inboundKey: string },
+  ): Promise<boolean> {
+    return this.store.contactMutate((draft) => {
+      if (draft.contactThread.some((item) => item.inboundKey === message.inboundKey)) return false;
+      pushThread(draft, { ...message, disposition: 'pending' });
+      return true;
+    });
+  }
+
+  async setDisposition(
+    ids: readonly string[],
+    disposition: RemoteContactDisposition,
+  ): Promise<void> {
+    if (ids.length === 0) return;
     await this.store.contactMutate((draft) => {
-      draft.contactThread.push(message);
-      const keep = new Set(
-        draft.contactThread
-          .filter((item) => item.contactId === message.contactId)
-          .slice(-20)
-          .map((item) => item.id),
-      );
-      draft.contactThread = draft.contactThread.filter(
-        (item) => item.contactId !== message.contactId || keep.has(item.id),
-      );
+      for (const item of draft.contactThread) {
+        if (ids.includes(item.id)) item.disposition = disposition;
+      }
+    });
+  }
+
+  /**
+   * The work a reload or crash interrupted, grouped by contact. A `running`
+   * row older than the contact's latest assistant reply was answered before
+   * the crash and is marked so here; what remains still needs an answer.
+   */
+  async reclaimUnfinished(): Promise<Map<string, RemoteContactThreadMessage[]>> {
+    return this.store.contactMutate((draft) => {
+      const open = new Map<string, RemoteContactThreadMessage[]>();
+      for (const item of draft.contactThread) {
+        if (item.disposition !== 'pending' && item.disposition !== 'running') continue;
+        const answeredAt = draft.contactThread
+          .filter((m) => m.contactId === item.contactId && m.role === 'assistant')
+          .at(-1)?.createdAt;
+        if (
+          item.disposition === 'running' &&
+          answeredAt !== undefined &&
+          item.createdAt <= answeredAt
+        ) {
+          item.disposition = 'answered';
+          continue;
+        }
+        open.set(item.contactId, [...(open.get(item.contactId) ?? []), item]);
+      }
+      return open;
     });
   }
 
@@ -392,4 +444,28 @@ export class RemoteContactStore {
       return true;
     });
   }
+}
+
+/**
+ * Append a thread row and keep the contact's last 20 — plus any request still
+ * unfinished, which trimming must never drop before it is answered.
+ */
+function pushThread(
+  draft: { contactThread: RemoteContactThreadMessage[] },
+  message: RemoteContactThreadMessage,
+): void {
+  const thread = [...draft.contactThread, message];
+  const keep = new Set(
+    thread
+      .filter((item) => item.contactId === message.contactId)
+      .slice(-20)
+      .map((item) => item.id),
+  );
+  draft.contactThread = thread.filter(
+    (item) =>
+      item.contactId !== message.contactId ||
+      keep.has(item.id) ||
+      item.disposition === 'pending' ||
+      item.disposition === 'running',
+  );
 }

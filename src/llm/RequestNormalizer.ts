@@ -19,8 +19,14 @@ export function normalizeRequestForModel(
 
   const provider = model.provider ?? 'llama.cpp';
   if (provider === 'llama.cpp') {
+    // The model flag is only the default: a recovery round sends an explicit
+    // `enable_thinking: false`, and overriding it here re-enabled the thinking
+    // that ate the budget the retry exists to reclaim.
     const chatTemplateKwargs = model.chat_template_thinking
-      ? { ...request.chat_template_kwargs, enable_thinking: model.think !== false }
+      ? {
+          ...request.chat_template_kwargs,
+          enable_thinking: request.chat_template_kwargs?.enable_thinking ?? model.think !== false,
+        }
       : request.chat_template_kwargs;
     // Qwen 3.8's GGUF Jinja template defaults to xhigh unless this kwarg is
     // present. llama-server forwards chat_template_kwargs directly to it.

@@ -11,6 +11,7 @@ import type { JobStore } from './JobStore';
 import type { PowerControl, SleepIfIdleInput } from '../system/PowerControl';
 import { shouldSleepIfIdle } from '../system/PowerControl';
 import { LlamacppAction, type LlamacppActionDeps } from './actions/llamacppAction';
+import { SCHEDULER_LEASE_KEY, WakeReconciler } from './schedulerWakes';
 
 /**
  * The job scheduler: the tick loop that runs due jobs, holds the
@@ -80,6 +81,8 @@ export class JobScheduler {
   private readonly llamacpp: LlamacppAction | undefined;
   /** User-facing delivery: the outbox, the toast, and the summarize timing (B.4). */
   private readonly delivery: JobDelivery;
+  /** The single writer of `ForgeScheduledWake` while this window holds the lease. */
+  private readonly wakes: WakeReconciler;
 
   private lease: FileLease | undefined;
   private timer: ReturnType<typeof setInterval> | undefined;
@@ -105,6 +108,7 @@ export class JobScheduler {
     this.busy = deps.busy ?? (() => undefined);
     this.summarize = deps.summarize;
     this.tickMs = deps.tickMs ?? DEFAULT_TICK_MS;
+    this.wakes = new WakeReconciler(this.power);
     this.delivery = new JobDelivery({
       store: this.store,
       outboxDir: this.outboxDir,
@@ -126,25 +130,20 @@ export class JobScheduler {
   }
 
   /**
-   * Acquire the lease and start the tick. Returns false when another window
-   * already owns the scheduler (the lease is held) — this window then does
-   * nothing, which is the correct behaviour for a non-owner.
+   * Try for the lease and start the tick. Returns whether this window owns the
+   * scheduler now. A non-owner still ticks — every tick without the lease only
+   * retries acquisition — so it takes over when the owner's window closes.
+   * Returning before the interval existed left the loser passive forever.
    */
   async start(options: { immediate?: boolean } = {}): Promise<boolean> {
     // `immediate` defaults to true: production wants the first tick on
     // acquisition. A test drives ticks itself and passes `immediate: false`.
     const immediate = options.immediate ?? true;
-    if (!(await this.acquireLease())) {
-      // Another window owns the scheduler. Do not tick.
-      return false;
-    }
-    // Reconcile the wake task on lease acquisition: a window that restarts
-    // must re-register the wakes for its jobs, not trust the task from a
-    // previous life.
-    await this.reconcileWakes();
+    const owner = await this.acquireLease();
+    if (owner) await this.reconcileWakes();
     this.timer = setInterval(() => void this.tick(), this.tickMs);
-    if (immediate) await this.tick();
-    return true;
+    if (owner && immediate) await this.tick();
+    return owner;
   }
 
   /**
@@ -156,11 +155,12 @@ export class JobScheduler {
     try {
       this.lease = await FileLease.acquire({
         directory: this.leaseDirectory,
-        key: 'jobs-scheduler',
+        key: SCHEDULER_LEASE_KEY,
         workspaceId: this.workspaceId,
         instanceId: this.instanceId,
         onLost: () => this.handleLeaseLost(),
       });
+      this.wakes.reset();
       return true;
     } catch {
       this.lease = undefined;
@@ -200,25 +200,21 @@ export class JobScheduler {
   }
 
   /**
-   * Reconcile the recurring wake task with the current set of enabled,
-   * `wake: true` jobs. Called on lease acquisition, on a job change, and on
-   * config reload. An empty set deletes the task, so disabling jobs cannot
-   * leave a stale task that wakes the machine.
+   * Reconcile the wake task with the enabled `wake: true` jobs (lease
+   * acquisition, job change, config reload). An empty set deletes the task.
    */
   async reconcileWakes(): Promise<void> {
     if (!this.lease) return;
-    const jobs = await this.store.loadAll();
-    const wakes = wakeTimesFor(
-      jobs.map((jf) => jf.job),
-      this.now(),
-    );
-    await this.power.setScheduledWakes(wakes);
+    const jobs = (await this.store.loadAll()).map((jf) => jf.job);
+    await this.wakes.reconcile(wakeTimesFor(jobs, this.now()));
   }
 
-  /** Watch the store and reconcile wakes on change. */
+  /** Watch the store and reconcile wakes on change; a no-op until this window holds the lease. */
   watch(): void {
     this.store.watch(() => {
-      void this.reconcileWakes();
+      this.reconcileWakes().catch((err: Error) =>
+        this.notifyLocal(`Forge jobs: could not update the scheduled wake: ${err.message}`),
+      );
     });
   }
 

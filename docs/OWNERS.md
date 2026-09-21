@@ -447,6 +447,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Job schema (Zod) + state / run-row types                   | `src/jobs/jobSchema.ts`                                        |
 | Schedule math (`nextDue`, `isDue`, `wakeTimesFor`)         | `src/jobs/schedule.ts`                                         |
 | Tick loop, lease, backoff, concurrency                     | `src/jobs/JobScheduler.ts`                                     |
+| Wake-task ownership (dedupe, lease-guarded delete)         | `src/jobs/schedulerWakes.ts`                                   |
 | Outbox write, local toast, summarize-waits-for-idle        | `src/jobs/JobDelivery.ts`                                      |
 | Coalescing outbox (one pending message per job)            | `src/jobs/JobOutbox.ts`                                        |
 | Gated jobs network fetch (release API, binary download)    | `src/jobs/jobsFetch.ts`                                        |
@@ -486,7 +487,6 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Alias registry + deprecated-pin resolution (§0/§4)       | `src/agentMesh/aliasRegistry.ts`            |
 | Per-alias ownership + creation lease + recovery (M2/M3)  | `src/agentMesh/ownership.ts`                |
 | Per-alias host-side FIFO (M5)                            | `src/agentMesh/aliasFifo.ts`                |
-| Host-side wait + cost guard (M7)                         | `src/agentMesh/hostWait.ts`                 |
 | Delivery adapters (owned Codex / Claude peer / Codex queue) | `src/agentMesh/adapters.ts`            |
 | Session provider (owned-session lifecycle, M2/M3)        | `src/agentMesh/sessionProvider.ts`          |
 | Mesh orchestrator (tell + host-side relay M6)            | `src/agentMesh/meshOrchestrator.ts`         |

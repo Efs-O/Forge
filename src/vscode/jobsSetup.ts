@@ -4,6 +4,7 @@ import { findConfigPath } from '../config/ConfigLoader';
 import type { ForgeConfig } from '../config/types';
 import { JobStore } from '../jobs/JobStore';
 import { JobScheduler } from '../jobs/JobScheduler';
+import { clearWakesIfUnowned } from '../jobs/schedulerWakes';
 import { PowerControl } from '../system/PowerControl';
 import type { SidebarProvider } from '../sidebar/SidebarProvider';
 import { forgeLocalRoot } from '../jobs/actions/stagedBuild';
@@ -14,14 +15,15 @@ import { extractZip, makeSetBinary, runCommand, sha256File } from '../jobs/actio
  * rather than in `extension.ts` (which is at its 500-line hard stop): one call
  * in activation, one line in the config-reload handler, one subscription.
  *
- * Without `jobs.enabled` there is no scheduler lease or tick. The small setup
- * object still exists so activation and reload can remove a stale recurring
- * wake task left by an earlier enabled configuration.
+ * Without `jobs.enabled` there is no scheduler tick. The small setup object
+ * still exists so activation and reload can remove a stale recurring wake task
+ * left by an earlier enabled configuration — but only when no live window holds
+ * the scheduler lease, because the task is machine-wide and that window's.
  *
  * The scheduler runs in whichever window wins the `jobs-scheduler` lease. The
- * other windows create the same object but `start()` returns false and they do
- * nothing — their `manage_jobs` tool still edits the job files, and the lease
- * holder picks up the change through the store watch.
+ * other enabled windows tick passively, retrying the lease, and take over when
+ * the owner's window closes; their `manage_jobs` tool edits the same job files,
+ * and the lease holder picks up the change through the store watch.
  */
 
 export interface JobsSetup {
@@ -113,20 +115,30 @@ export function setupJobs(
     started = true;
     const instance = makeScheduler();
     scheduler = instance;
-    void instance
-      .start()
-      .then((owner) => {
-        if (owner) instance.watch();
-      })
-      .catch((err) => {
-        started = false;
-        void vscode.window.showErrorMessage(
-          `Forge jobs scheduler failed to start: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      });
+    // Watch whether or not this window won the lease: the reconcile is a
+    // no-op without it, and a non-owner that takes over later must not need
+    // a second install.
+    instance.watch();
+    void instance.start().catch((err) => {
+      started = false;
+      void vscode.window.showErrorMessage(
+        `Forge jobs scheduler failed to start: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
   };
+  // Jobs off here: remove a stale wake task, unless a live window owns it.
+  const clearStaleWakes = (): Promise<void> =>
+    process.platform !== 'win32'
+      ? Promise.resolve()
+      : clearWakesIfUnowned({ power, directory: store.root, workspaceId, instanceId })
+          .then(() => undefined)
+          .catch((err: Error) => {
+            void vscode.window.showErrorMessage(
+              `Forge jobs: could not remove the scheduled wake task: ${err.message}`,
+            );
+          });
   if (getConfig().jobs?.enabled === true) startIfEnabled();
-  else void power.setScheduledWakes([]);
+  else void clearStaleWakes();
 
   const setup: JobsSetup = {
     store,
@@ -134,9 +146,8 @@ export function setupJobs(
       // A reload can disable jobs (delete the task) or change the schedule
       // (re-register it). Reconcile either way; a no-op when there is no lease.
       if (getConfig().jobs?.enabled !== true) {
-        void power.setScheduledWakes([]);
+        const stopping = scheduler?.stop() ?? Promise.resolve();
         if (scheduler) {
-          void scheduler.stop();
           scheduler = undefined;
           started = false;
           // The store watch was installed by the scheduler that just stopped;
@@ -144,6 +155,12 @@ export function setupJobs(
           // scheduler until the window closes.
           store.unwatch();
         }
+        // After our own lease is released, so an owner can clear its task.
+        void stopping.then(clearStaleWakes, (err: Error) => {
+          void vscode.window.showErrorMessage(
+            `Forge jobs scheduler did not stop cleanly: ${err.message}`,
+          );
+        });
         return;
       }
       startIfEnabled();

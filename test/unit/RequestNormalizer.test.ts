@@ -83,7 +83,23 @@ describe('normalizeRequestForModel', () => {
       think: false,
     };
 
-    expect(normalizeRequestForModel(baseRequest, model).chat_template_kwargs).toEqual({
+    const { chat_template_kwargs: _omitted, ...withoutKwargs } = baseRequest;
+    expect(normalizeRequestForModel(withoutKwargs, model).chat_template_kwargs).toEqual({
+      enable_thinking: false,
+    });
+  });
+
+  it('keeps an explicit enable_thinking:false from a recovery round', () => {
+    const model: ModelConfig = {
+      name: 'nemotron',
+      provider: 'llama.cpp',
+      gguf_path: 'C:/models/nemotron.gguf',
+      chat_template_thinking: true,
+      think: true,
+    };
+    const request = { ...baseRequest, chat_template_kwargs: { enable_thinking: false } };
+
+    expect(normalizeRequestForModel(request, model).chat_template_kwargs).toEqual({
       enable_thinking: false,
     });
   });
