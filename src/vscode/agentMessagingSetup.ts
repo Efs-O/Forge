@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { busPaths } from '../agentBus/agentBus';
-import { AgentInbox } from '../agentBus/agentInbox';
+import { AgentInbox, type InboxMessageOptions } from '../agentBus/agentInbox';
 import { AgentRoutes } from '../backend/agentRoutes';
 import { joinClaude } from '../agentMesh/claudeJoin';
 import type { ForgeConfig } from '../config/types';
@@ -32,14 +32,20 @@ export function setupAgentMessaging(
 ): AgentRoutes {
   const mesh = setupAgentMesh(context, getSidebar, getConfig, workspaceRoot);
   const inbox = new AgentInbox({
-    isBusy: () => {
+    isBusy: (options?: InboxMessageOptions) => {
+      if (options?.newChat) return false;
       const status = getSidebar().getHostFacade().status();
       return status.streamingConversationIds.includes(status.activeConversationId);
     },
-    submit: async (prompt) => {
+    submit: async (prompt, options?: InboxMessageOptions) => {
       const facade = getSidebar().getHostFacade();
       await vscode.commands.executeCommand('workbench.view.extension.forge-sidebar');
-      await facade.send(facade.status().activeConversationId, prompt);
+      let conversationId = facade.status().activeConversationId;
+      if (options?.newChat) {
+        conversationId = (await facade.createConversation({ activate: true })).id;
+      }
+      if (options?.model) await facade.setConversationModel(conversationId, options.model);
+      await facade.send(conversationId, prompt);
     },
     warn: (message) => void vscode.window.showWarningMessage(message),
     // F-08: a bus-started turn began — write its durable status file so a
@@ -71,6 +77,7 @@ export function setupAgentMessaging(
   return new AgentRoutes({
     paths: () => busPaths(),
     inbox,
+    configuredModels: () => getConfig().models.map((model) => model.name),
     relay: mesh.relay,
     // F-06: a `priority=steer` message interrupts the recipient's active turn.
     steer: mesh.steer,

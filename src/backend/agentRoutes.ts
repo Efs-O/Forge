@@ -1,10 +1,11 @@
 import * as fs from 'fs';
 import type * as http from 'http';
 import { randomBytes, timingSafeEqual } from 'crypto';
+import { z } from 'zod';
 import { BUS_ID_PATTERN, ensureBus, writeReply, type BusPaths } from '../agentBus/agentBus';
 import { MAX_INBOUND_CHARS, forgeInboundPrompt } from '../agentBus/busContent';
 import { parseMeshCommand } from '../agentMesh/meshCommands';
-import type { AgentInbox } from '../agentBus/agentInbox';
+import type { AgentInbox, InboxMessageOptions } from '../agentBus/agentInbox';
 import { sendJson } from './controlHttp';
 import { getLogger } from '../util/logger';
 
@@ -78,11 +79,18 @@ export interface AgentRoutesDeps {
    * formats. Absent ⇒ `GET /agent/who` is 404.
    */
   who?: () => Promise<unknown> | unknown;
+  /** Configured model names used to validate an inbound message's model. */
+  configuredModels?: () => readonly string[];
 }
 
 interface Fields {
-  [key: string]: string | undefined;
+  [key: string]: unknown;
 }
+
+const AgentMessageOptionsSchema = z.object({
+  model: z.string().trim().min(1).optional(),
+  new_chat: z.boolean().optional(),
+});
 
 class HttpError extends Error {
   constructor(
@@ -123,19 +131,26 @@ async function readFields(req: http.IncomingMessage, url: URL): Promise<Fields> 
     }
     if (typeof parsed !== 'object' || parsed === null)
       throw new HttpError(400, 'body must be an object');
-    const out: Fields = {};
-    for (const [k, v] of Object.entries(parsed)) if (typeof v === 'string') out[k] = v;
-    return out;
+    return parsed as Fields;
   }
-  return { ...Object.fromEntries(url.searchParams), text: body };
+  const fields: Fields = { ...Object.fromEntries(url.searchParams), text: body };
+  if (fields['new_chat'] === 'true') fields['new_chat'] = true;
+  if (fields['new_chat'] === 'false') fields['new_chat'] = false;
+  return fields;
 }
 
 function requireText(fields: Fields, max: number): string {
-  const text = fields['text'];
+  const text = typeof fields['text'] === 'string' ? fields['text'] : undefined;
   if (!text || !text.trim()) throw new HttpError(400, 'text is required');
   if (text.length > max)
     throw new HttpError(400, `text is ${text.length} chars; the limit is ${max}`);
   return text;
+}
+
+function zodMessage(error: z.ZodError): string {
+  return error.issues
+    .map((issue) => `${issue.path.join('.') || 'message'}: ${issue.message}`)
+    .join('; ');
 }
 
 /**
@@ -213,19 +228,21 @@ export class AgentRoutes {
     try {
       const fields = await readFields(req, url);
       if (route === '/agent/join' && this.deps.join) {
-        const alias = (fields['alias'] ?? '').trim().toLowerCase();
+        const alias = (typeof fields['alias'] === 'string' ? fields['alias'] : '')
+          .trim()
+          .toLowerCase();
         const pid = Number(fields['pid'] ?? '');
         const joined = this.deps.join(alias, pid);
         if (!joined.ok) throw new HttpError(400, joined.error);
         return sendJson(res, 200, { joined: true, reply: joined.reply });
       }
       if (route === '/agent/reply') {
-        const id = fields['id'] ?? '';
+        const id = typeof fields['id'] === 'string' ? fields['id'] : '';
         if (!BUS_ID_PATTERN.test(id)) throw new HttpError(400, 'id must be the question id');
         writeReply(this.deps.paths(), id, requireText(fields, MAX_REPLY_CHARS));
         return sendJson(res, 200, { delivered: true });
       }
-      const from = (fields['from'] ?? '').trim();
+      const from = (typeof fields['from'] === 'string' ? fields['from'] : '').trim();
       if (!FROM_PATTERN.test(from)) {
         throw new HttpError(400, 'from must be 1-40 chars: letters, digits, space . _ -');
       }
@@ -233,7 +250,7 @@ export class AgentRoutes {
       const sender = await this.deps.validateFrom?.(from);
       if (sender && !sender.ok) throw new HttpError(400, sender.error);
       if (route === '/agent/cancel') {
-        const id = (fields['id'] ?? '').trim();
+        const id = (typeof fields['id'] === 'string' ? fields['id'] : '').trim();
         if (!id) throw new HttpError(400, 'id is required: a queued message id, or all');
         const cancelled = this.deps.inbox.cancel(from, id);
         if (cancelled === 0) {
@@ -252,12 +269,15 @@ export class AgentRoutes {
       // with no relay installed is rejected, not silently delivered to the
       // Forge inbox (which would treat a message meant for another agent as a
       // prompt for itself).
-      const to = (fields['to'] ?? '').trim();
+      const to = (typeof fields['to'] === 'string' ? fields['to'] : '').trim();
       if (to && to.toLowerCase() !== 'forge') {
         const text = requireText(fields, MAX_INBOUND_CHARS);
         // F-06: a `priority=steer` message interrupts the recipient's active
         // turn and runs the steer next, instead of queuing behind it.
-        const isSteer = (fields['priority'] ?? '').trim().toLowerCase() === 'steer';
+        const isSteer =
+          (typeof fields['priority'] === 'string' ? fields['priority'] : '')
+            .trim()
+            .toLowerCase() === 'steer';
         const deliver = isSteer && this.deps.steer ? this.deps.steer : this.deps.relay;
         if (!deliver) {
           throw new HttpError(400, `no relay available to deliver to "${to}"`);
@@ -278,8 +298,15 @@ export class AgentRoutes {
         }
       }
       const steerForge =
-        (fields['priority'] ?? '').trim().toLowerCase() === 'steer' && !!this.deps.interruptForge;
-      const accepted = this.deps.inbox.accept(forgeInboundPrompt(from, text), from, steerForge);
+        (typeof fields['priority'] === 'string' ? fields['priority'] : '').trim().toLowerCase() ===
+          'steer' && !!this.deps.interruptForge;
+      const options = this.messageOptions(fields);
+      const accepted = this.deps.inbox.accept(
+        forgeInboundPrompt(from, text),
+        from,
+        steerForge,
+        options,
+      );
       if (accepted === undefined)
         throw new HttpError(429, 'Forge has too many unread agent messages');
       const { position: queued, id } = accepted;
@@ -292,6 +319,26 @@ export class AgentRoutes {
       if (err instanceof HttpError) return sendJson(res, err.status, { error: err.message });
       throw err;
     }
+  }
+
+  private messageOptions(fields: Fields): InboxMessageOptions {
+    const parsed = AgentMessageOptionsSchema.safeParse({
+      model: fields['model'],
+      new_chat: fields['new_chat'],
+    });
+    if (!parsed.success) throw new HttpError(400, zodMessage(parsed.error));
+
+    const validModels = [...(this.deps.configuredModels?.() ?? [])];
+    if (parsed.data.model && !validModels.includes(parsed.data.model)) {
+      throw new HttpError(
+        400,
+        `model: unknown model "${parsed.data.model}"; valid models: ${validModels.join(', ') || '(none configured)'}`,
+      );
+    }
+    return {
+      ...(parsed.data.model !== undefined ? { model: parsed.data.model } : {}),
+      ...(parsed.data.new_chat !== undefined ? { newChat: parsed.data.new_chat } : {}),
+    };
   }
 
   private authorized(header: string | undefined): boolean {

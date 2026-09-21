@@ -6,12 +6,17 @@ const log = getLogger();
 export const INBOX_CAP = 20;
 const BUSY_POLL_MS = 2_000;
 
+export interface InboxMessageOptions {
+  model?: string;
+  newChat?: boolean;
+}
+
 /** What the inbox needs from Forge's chat. */
 export interface InboxHost {
   /** True while the chat a message would land in is mid-turn, or not ready. */
-  isBusy(): boolean;
+  isBusy(options?: InboxMessageOptions): boolean;
   /** Start a visible turn with this prompt; resolves when the turn ends. */
-  submit(prompt: string): Promise<void>;
+  submit(prompt: string, options?: InboxMessageOptions): Promise<void>;
   /** Tell the user a message could not be delivered. */
   warn(message: string): void;
   /**
@@ -41,6 +46,7 @@ interface QueuedMessage {
   prompt: string;
   /** The bus sender alias, when the message came through the agent bus. */
   from?: string;
+  options?: InboxMessageOptions;
 }
 
 /**
@@ -69,10 +75,11 @@ export class AgentInbox {
     prompt: string,
     from?: string,
     front = false,
+    options?: InboxMessageOptions,
   ): { position: number; id: string } | undefined {
     if (this.disposed || this.queue.length >= INBOX_CAP) return undefined;
     const id = `m${randomBytes(4).toString('hex')}`;
-    const item = { id, prompt, ...(from ? { from } : {}) };
+    const item = { id, prompt, ...(from ? { from } : {}), ...(options ? { options } : {}) };
     if (front) this.queue.unshift(item);
     else this.queue.push(item);
     void this.drain();
@@ -105,9 +112,9 @@ export class AgentInbox {
     this.queue.length = 0;
   }
 
-  private busy(): boolean {
+  private busy(options?: InboxMessageOptions): boolean {
     try {
-      return this.host.isBusy();
+      return this.host.isBusy(options);
     } catch {
       return true; // The chat is not up yet (activation): try again shortly.
     }
@@ -118,7 +125,7 @@ export class AgentInbox {
     this.draining = true;
     try {
       while (!this.disposed && this.queue.length > 0) {
-        if (this.busy()) {
+        if (this.busy(this.queue[0]?.options)) {
           await new Promise((r) => setTimeout(r, this.pollMs));
           continue;
         }
@@ -136,7 +143,7 @@ export class AgentInbox {
           }
         }
         try {
-          await this.host.submit(item.prompt);
+          await this.host.submit(item.prompt, item.options);
           // §9: a bus-started turn just ended — the sender gets one finished
           // line + a board event. A user-typed turn has no `from`, so this
           // fires only for agent messages, and only on success.
@@ -148,7 +155,7 @@ export class AgentInbox {
             }
           }
         } catch (err) {
-          if (this.busy()) {
+          if (this.busy(item.options)) {
             // Lost a race with a prompt the user typed: keep its place.
             this.queue.unshift(item);
           } else {

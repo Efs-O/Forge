@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #   forge.sh reply <id> [file]        answer a question Forge is waiting on
-#   forge.sh say <your-name> [file]   send Forge a new message (starts a Forge turn)
+#   forge.sh say <your-name> [--model <name>] [--new] [file]  send Forge a new message (starts a Forge turn)
 #   forge.sh send <your-name> <to> [file]  relay a message to another agent (claude/codex)
 #   forge.sh steer <your-name> <to> [file] interrupt <to>'s running turn (forge/claude/codex); runs next
 #   forge.sh cancel <your-name> <id|all>  withdraw your queued message(s) to Forge not yet started
@@ -32,17 +32,32 @@ if [ "$VERB" = "who" ]; then
   exit 0
 fi
 [ $# -ge 2 ] || usage
-ARG="$2"; SRC="-"
-if [ "$VERB" = "send" ] || [ "$VERB" = "steer" ]; then
+ARG=""; SRC="-"; MODEL=""; NEW_CHAT=""
+if [ "$VERB" = "say" ]; then
+  shift
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --model) [ $# -ge 2 ] || usage; MODEL="$2"; shift 2;;
+      --new) NEW_CHAT=true; shift;;
+      --*) usage;;
+      *) if [ -z "$ARG" ]; then ARG="$1"; elif [ "$SRC" = "-" ]; then SRC="$1"; else usage; fi; shift;;
+    esac
+  done
+  [ -n "$ARG" ] || usage
+elif [ "$VERB" = "send" ] || [ "$VERB" = "steer" ]; then
+  ARG="$2"
   [ $# -ge 3 ] || usage
   TO="$3"; [ $# -ge 4 ] && SRC="$4"
   case "$TO" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: bad recipient '$TO'" >&2; exit 2;; esac
-elif [ $# -ge 3 ]; then SRC="$3"; fi
+elif [ $# -ge 2 ]; then
+  ARG="$2"
+  [ $# -ge 3 ] && SRC="$3"
+fi
 case "$VERB" in
   reply) case "$ARG" in ""|*[!A-Za-z0-9_-]*) echo "forge.sh: bad id '$ARG'" >&2; exit 2;; esac
          ROUTE=reply; QUERY="id=$ARG" ;;
   say)   case "$ARG" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
-         ROUTE=message; QUERY="from=$ARG" ;;
+         ROUTE=message; QUERY="from=$ARG"; [ -n "$MODEL" ] && QUERY="$QUERY&model=$MODEL"; [ -n "$NEW_CHAT" ] && QUERY="$QUERY&new_chat=true" ;;
   send)  case "$ARG" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
          ROUTE=message; QUERY="from=$ARG&to=$TO" ;;
   steer) case "$ARG" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac

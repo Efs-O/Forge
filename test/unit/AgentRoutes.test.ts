@@ -18,6 +18,7 @@ const TOKEN = 'f'.repeat(64);
 let home: string;
 let paths: BusPaths;
 let accepted: string[];
+let acceptedOptions: unknown[];
 /** Queued message id → sender, for the stub inbox's `cancel`. */
 let queuedFrom: Map<string, string>;
 let full: boolean;
@@ -29,14 +30,16 @@ beforeEach(async () => {
   home = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'forge-agent-routes-'));
   paths = busPaths(home);
   accepted = [];
+  acceptedOptions = [];
   queuedFrom = new Map();
   full = false;
   routes = new AgentRoutes({
     paths: () => paths,
     inbox: {
-      accept: (prompt, from) => {
+      accept: (prompt, from, _front, options) => {
         if (full) return undefined;
         accepted.push(prompt);
+        acceptedOptions.push(options);
         const id = `m${accepted.length}`;
         queuedFrom.set(id, from ?? '');
         return { position: accepted.length, id };
@@ -50,6 +53,7 @@ beforeEach(async () => {
       },
     },
     token: TOKEN,
+    configuredModels: () => ['alpha', 'beta'],
   });
   server = http.createServer((req, res) => void routes.handle(req, res));
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
@@ -150,6 +154,30 @@ describe('routes', () => {
     expect(json.status).toBe(202);
     expect(accepted[0]).toContain('**forge-dd says:**\n\nhello');
     expect(accepted[1]).toContain('**codex says:**\n\nyo');
+  });
+
+  it('accepts a configured model and a fresh-chat target', async () => {
+    const response = await post(
+      '/agent/message',
+      JSON.stringify({ from: 'codex', text: 'new phase', model: 'alpha', new_chat: true }),
+      { type: 'application/json' },
+    );
+    expect(response.status).toBe(202);
+    expect(acceptedOptions[0]).toEqual({ model: 'alpha', newChat: true });
+  });
+
+  it('rejects an unknown model with the configured valid names', async () => {
+    const response = await post('/agent/message?from=codex&model=missing', 'nope');
+    expect(response.status).toBe(400);
+    expect(response.body.error).toContain('unknown model "missing"');
+    expect(response.body.error).toContain('alpha, beta');
+    expect(accepted).toEqual([]);
+  });
+
+  it('validates new_chat as a boolean', async () => {
+    const response = await post('/agent/message?from=codex&new_chat=maybe', 'nope');
+    expect(response.status).toBe(400);
+    expect(accepted).toEqual([]);
   });
 
   it("cancel withdraws only the sender's own queued messages (F3)", async () => {
@@ -255,6 +283,13 @@ describe('forge.sh against the routes', () => {
     const replied = await runClient(['reply', 'fg2-abc'], 'pong\n');
     expect(replied.out).toContain('"delivered":true');
     await expect(waitForReply(paths, 'fg2-abc', 1_000, undefined, 10)).resolves.toBe('pong\n');
+  }, 30_000);
+
+  it('say parses --model and --new into the generated request', async (ctx) => {
+    if (!usable) ctx.skip();
+    const said = await runClient(['say', '--model', 'alpha', '--new', 'claude'], 'new chat\n');
+    expect(said.code).toBe(0);
+    expect(acceptedOptions[0]).toEqual({ model: 'alpha', newChat: true });
   }, 30_000);
 
   it('a reply still lands through the outbox file when Forge is gone; a message does not', async (ctx) => {
