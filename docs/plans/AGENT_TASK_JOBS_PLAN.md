@@ -109,16 +109,33 @@ One run:
    `state.task_run = { started_at, conversation_id: null }`.
 3. **Model.** If `action.model` differs from the resident model and nothing is
    streaming, call `unloadModels()` first. Two llama-servers on this PC spill
-   VRAM. Then create a **fresh conversation for this run** (not activated) and
-   `setConversationModel`. Record its id in `task_run.conversation_id`. The
-   conversation id also goes into the run row, so `/job <n> chat` can open the
-   transcript later.
+   VRAM. Then open **the job's own conversation**, not activated:
+   `state.conversation_id`, the same chat `/job <n> chat` and
+   `manage_jobs discuss` already open (B.6). It is created on the first run if
+   missing, with the same restore-or-create fallback `openDiscussChat` uses.
+   Then call `setConversationModel`. Record the id in
+   `task_run.conversation_id`.
+   - **One chat per job, for its whole life.** A run can see what earlier runs
+     found and reported, so a watch job does not notify about the same comment
+     twice. The owner can reply in that chat ("stop reporting X") and the next
+     run sees it. Auto-compaction bounds what the model reads, so the chat never
+     needs to be split to stay small.
+   - The session log keeps every turn verbatim. HalluScribe reads it as
+     summaries and raw transcripts, so **nothing is ever deleted**.
+   - When a job is created from a chat (`manage_jobs create`), its first message
+     is a short summary of why: the task, plus the lines of the originating chat
+     that explain it. The job then starts with the context the owner had.
 4. **Mark it unattended**, take `power.holdAwake`, and snapshot `config.yaml`'s
    bytes to `~/.forge/jobs/state/<id>.config.bak` (the rollback for step 7).
 5. **Send the prompt**, made of:
    - the task;
    - the observation;
    - the last 3 run rows;
+   - "The facts in this message are current; where they disagree with anything
+     earlier in this chat or its compaction summary, these win." Compaction
+     summaries have been misread as new news before
+     (`project_forge_compaction_resume_misread`), and an old "already installed
+     b1234" must not beat today's observation;
    - this block:
      > You are running unattended as scheduled job "<name>". Nobody will answer
      > questions or approvals. Dangerous actions will be denied. End your final
@@ -208,7 +225,7 @@ or fewer itself (MESH_RUN_1 F2). Claude signs off before the next phase starts.
 | `jobs/<id>.json` with `agent_task` | `manage_jobs create` | `manage_jobs delete`; must also delete `state/<id>.config.bak` | `enabled:false`; a running task finishes, and no new run starts | Existing atomic write (JobStore) | n/a, on disk | none |
 | `state.task_run` marker | Runner step 2, before anything else | Runner `finally` | Disable does not clear it; the run in flight still owns it | `patchState` is synchronous; worst case a stale marker → recovery reports it | **Recovery on `start()`: report + failed row + clear** (CI-enforced) | none; recovery is the expiry |
 | `state.task_pending` | Step 1 when busy | Next idle tick that runs it | Disable clears it | patchState | Survives; the next start's idle tick runs it | Dropped if older than one schedule period, with a run row "skipped: busy" |
-| Per-run conversation | Step 3 | **Never auto-deleted**: it is the forensic record. Archive it after the run | n/a | Created before the marker update: worst case an orphan conversation with no marker, visible in the list | Survives in state.vscdb | none; the owner archives |
+| The job's conversation (`state.conversation_id`, shared with discuss) | First run or first discuss, whichever comes first | **Never deleted by Forge**: the session log feeds HalluScribe. `manage_jobs delete` leaves it in place, and the owner may archive it | Stays; the owner can still chat in it | Created before `conversation_id` is patched: worst case one orphan chat, and the next run creates another. Visible, harmless | Survives in state.vscdb and the session log | none. Growth is bounded by auto-compaction for the model and is append-only on disk |
 | Unattended registry entry | Step 4 | `finally` (disposable) | n/a | In-memory | Vanishes with the process. **Correct**: a restored conversation is attended again | per run |
 | `holdAwake` | Step 4 | `finally` | n/a | In-memory | OS releases it with the process | per run |
 | `state/<id>.config.bak` | Step 4 | `finally` on success; kept on failure; `manage_jobs delete` | kept | Written whole before send; a partial file means step 4 failed → the run fails before the turn | Kept; recovery names its path in the report | none; the owner deletes it after reading |
@@ -229,8 +246,10 @@ listing the keys `agentTask.ts` patches) fails.
 
 ## Acceptance criteria
 
-1. A job with `check.none` + `agent_task` runs on schedule in a new,
-   non-activated conversation and appends one run row.
+1. A job with `check.none` + `agent_task` runs on schedule in the job's own
+   conversation (created on first run, reused afterwards, never activated) and
+   appends one run row. Two runs land in the same conversation; the second
+   run's prompt sees the first's final message, or its compaction summary.
 2. In an unattended conversation, a dangerous tool call is denied without any
    prompt appearing in the sidebar or on Telegram. A non-dangerous call runs
    without a prompt. The global clanker flag is unchanged throughout.
@@ -253,6 +272,8 @@ listing the keys `agentTask.ts` patches) fails.
 ## Out of scope
 
 - Retrying a failed task automatically. The next schedule is the retry.
+- Pruning a job's chat. Compaction bounds the model's view and HalluScribe
+  needs the full log; revisit only if the sidebar itself gets slow.
 - Streaming the whole job turn to Telegram (the remote-origin mirror). Only
   `notify_user` and the final report go there, so an overnight run does not
   send dozens of messages.
