@@ -300,16 +300,41 @@ The prompt that starts a Forge phase:
 
 > Implement phase N of docs/plans/AGENT_TASK_JOBS_PLAN.md only. Run npm run ci;
 > when green, commit. Then ask codex via ask_live_session to review that
-> commit, naming its hash and the phase. Never ask_user.
+> commit, naming its hash and the phase. Never ask_user. Do not end the
+> turn after that: stay on standby with your own tools until
+> ~/.forge/agent-bus/outbox/phase<N+1>-go.md exists, then follow it. Give up
+> after 3 hours and say so.
+
+State the standby as a goal and let the agent choose the tools. The first
+standby message dictated a `bash -c` loop, which exec_command refuses (shell
+script flags are banned). Qwopus then fell back to `wait` + reading the file
+on its own, which is the right shape anyway.
 
 | # | Scope | Files | Suggested writer |
 |---|---|---|---|
 | 1 | Schema: `check.none`, `action.agent_task`; the state fields `task_run` and `task_pending` (nullable, default null/false, so existing state files still parse); `manage_jobs` `task` field; `jobDescribe` renders it. No runtime behaviour yet | `jobSchema.ts`, `checks/`, `tools/jobTools.ts`, `jobDescribe.ts` | Forge (**Qwopus trial**, see the scorecard) |
-| 2 | Unattended registry, plus the approval, `ask_user` and `notify_user` branches | new `sidebar/unattendedConversations.ts`, `ToolApprovalService.ts`, `tools/uxTools.ts` | **Codex**, Claude signs off: this is the approval gate, and a subtle bug is an agent with auto-approval |
+| 2 | Unattended registry, plus the approval, `ask_user` and `notify_user` branches | new `sidebar/unattendedConversations.ts`, `ToolApprovalService.ts`, `ToolDispatch.ts` (policy-denial result), `tools/uxTools.ts` | **Codex**, Claude signs off: this is the approval gate, and a subtle bug is an agent with auto-approval |
 | 2b | ~~Audit fixes F2/F3~~ **done** by `50d0f3f` (weekly audit A2: a window that lost the lease keeps ticking and takes over; A4: the watcher ignores lease heartbeats) | — | — |
 | 3 | Runner steps 1–6, 8, 9 and crash recovery; wire into the scheduler, including the three scheduler behaviours above | new `jobs/agentTask.ts`, `JobScheduler.ts` (+ `runCheck` extraction if needed), `extension.ts` wiring | Forge (Qwopus if phase 1 passes, else Qwen Flash) |
 | 4 | Step 7: restart after turn, config backup and rollback | `agentTask.ts` | **Codex**, Claude signs off: touches the live binary |
 | 5 | The llama job plus `docs/LLAMACPP_UPDATE.md` (the "how", for the agent; it points at the `install_llamacpp` tool shipped in 0.16.20, which installs into `%LOCALAPPDATA%\Forge` without UAC); live overnight test; then retire `llamacpp_update` | config/job file, docs, removal | Forge writes the doc; the owner runs the test |
+
+### Phase 2 tool inventory for the unattended llama install
+
+This is the current tool catalog, before phase 5 changes anything. “Dangerous
+today” means the `ToolApprovalService` dangerous flag, not whether the tool can
+have meaningful side effects. Phase 2 auto-approves the non-dangerous entries
+only for the registered unattended conversation.
+
+| Tool / use | Permission or current gate | Dangerous today? | Phase 5 guidance |
+|---|---|---|---|
+| `install_llamacpp` — download, verify, extract, smoke-test, optionally switch `llama_server.binary` | `write` + `fetch`; approval metadata supplies detail but does not set `dangerous` | **No** | Use this sanctioned one-call path; it can run unattended under phase 2. It does not restart the backend. |
+| `read_file` — read `docs/LLAMACPP_UPDATE.md` and `config.yaml` | `read`; no confirmation | **No** | Safe prerequisite. |
+| `notify_user` — report progress or assumptions | `read`; no confirmation | **No** | In an unattended conversation it also writes the job outbox. |
+| `exec_command` — possible manual download/extract/smoke workaround | `headless`; normal confirmation, no dangerous metadata | **No** | Not needed for the sanctioned install; do not substitute it casually because its executable scope is broad despite the current flag. |
+| `edit_file` on `config.yaml` — manual `llama_server.binary` switch | `write`; normal confirmation, no dangerous metadata | **No** | Not needed when `install_llamacpp` uses `switch_config: true`; use only if phase 5 explicitly documents the fallback. |
+| `write_file` / `append_file` — manual scripts or config edits | `write`; normal confirmation, no dangerous metadata | **No** | Not needed for the install; large file writes still require chunking. |
+| `run_terminal` — paste a command into a terminal | `terminal`; normal confirmation, and a human must press Enter | **No** | Cannot complete an unattended install; do not use it. |
 
 ## State × lifecycle ledger
 
