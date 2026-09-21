@@ -1,5 +1,20 @@
 # Forge — Recent Changes
 
+## 0.16.13
+
+### Jobs: fix llamacpp_update asset picking + opt-in default
+
+- **`llamacpp_update` now picks the right assets from current llama.cpp
+  releases.** Upstream renamed the cudart zip (no longer carries the build
+  tag, e.g. `cudart-llama-bin-win-cuda-13.4-x64.zip`) and the first
+  `llama-<tag>-` asset in upload order is the `cpu-arm64` build — both broke
+  the picker. Selection is now steered by the job's `asset_pattern`, the
+  highest CUDA version wins, and the cudart zip is matched by
+  `cudart-llama-` prefix.
+- **Job scheduler is opt-in in the shipped template.**
+  `config.example.yaml` now ships `jobs: enabled: false` — a fresh install
+  does not start the scheduler until you turn it on.
+
 ## 0.16.12
 
 ### Agent mesh, phases 1–5 + full review remediation

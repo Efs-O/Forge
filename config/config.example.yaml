@@ -55,9 +55,10 @@ permissions:
     search: true
     fetch: true
 
-# Persistent agent jobs (docs/JOBS.md).
+# Persistent agent jobs (docs/JOBS.md). Opt-in: set `enabled: true` to start
+# the scheduler. With no jobs defined it is inert, but it is off by default.
 jobs:
-  enabled: true
+  enabled: false
   # Hosts a job may fetch from.
   allowed_hosts:
     - api.github.com
