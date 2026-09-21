@@ -1,5 +1,34 @@
 # Forge — Recent Changes
 
+## 0.16.21
+
+### Weekly audit fixes (2026-09-21)
+
+All eleven findings of `docs/reports/WEEKLY_IMPLEMENTATION_AUDIT_2026-09-21.md`
+are fixed, each with a regression test:
+
+- **Truncation recovery really turns thinking off** on models with
+  `chat_template_thinking`. Before, the model's own `think` setting overrode it.
+- **Jobs scheduler failover works.** A window that lost the first lease race
+  now takes over when the owning window closes. Before, it stayed idle.
+  Two overlapping ticks can no longer both run a due job.
+- **Telegram contacts survive a reload.** A contact message is saved before
+  "thinking…" is shown and is answered after the reload. A redelivered
+  Telegram update is no longer answered twice.
+- **Wake task:** it is re-registered only when the schedule changes, not on
+  every lease heartbeat. A window with jobs disabled no longer deletes the
+  task that another window's jobs rely on.
+- **Job summaries:** paused jobs do no summary work. A failing summary backs
+  off (from 1 minute up to 6 hours), is reported once, and says "recovered"
+  when it succeeds.
+- **Agent mesh lock:** a crash can no longer leave an empty lock that blocks
+  the mesh until someone deletes it by hand. Waiting sleeps instead of
+  spinning a CPU core.
+- **Release workflow** publishes the VSIX built by `npm run package` to every
+  registry, including its version check.
+- Removed the unused `hostWait.ts`. The mesh plan no longer claims an
+  empty-turn cost guard.
+
 ## 0.16.20
 
 ### Installing llama.cpp: one tool call instead of ~45 rounds
