@@ -33,6 +33,18 @@ import { validateInboundSender } from '../agentMesh/senderValidation';
 
 /** Agent-mesh activation wiring: durable board, recovery, relay, and lifecycle timers. */
 
+export function knownAliasesForMesh(root: string, agentBus: ForgeConfig['agent_bus']): string[] {
+  const set = new Set<string>(['forge']);
+  for (const alias of Object.keys(listAliases(root))) set.add(alias);
+  // A fresh owned Codex has no thread id until app-server startup completes,
+  // so its alias may not yet be present in aliases.json. Ownership itself is
+  // enough to make the stable alias routable by send/steer.
+  for (const alias of listOwnedAliases(root)) set.add(alias);
+  if (agentBus?.codex_thread) set.add('codex');
+  if (agentBus?.claude_session) set.add('claude');
+  return [...set];
+}
+
 export interface AgentMesh {
   orchestrator: MeshOrchestrator;
   provider: MeshSessionProvider;
@@ -204,12 +216,7 @@ export function setupAgentMesh(
   });
 
   const knownAliases = (): string[] => {
-    const bus = getConfig().agent_bus;
-    const set = new Set<string>(['forge']);
-    for (const alias of Object.keys(listAliases(paths.root))) set.add(alias);
-    if (bus?.codex_thread) set.add('codex');
-    if (bus?.claude_session) set.add('claude');
-    return [...set];
+    return knownAliasesForMesh(paths.root, getConfig().agent_bus);
   };
 
   // F-09: render the observational commands (status/board/peers/queue/context)

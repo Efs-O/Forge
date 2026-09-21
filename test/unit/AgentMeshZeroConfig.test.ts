@@ -6,8 +6,10 @@ import { MeshOrchestrator } from '../../src/agentMesh/meshOrchestrator';
 import type { MeshAdapter, TurnResult } from '../../src/agentMesh/meshAdapter';
 import { pickClaudePeer, PEER_PROTOCOL, type ClaudeSession } from '../../src/agentBus/claudePeer';
 import { joinClaude } from '../../src/agentMesh/claudeJoin';
-import { getAlias } from '../../src/agentMesh/aliasRegistry';
+import { getAlias, readAliases } from '../../src/agentMesh/aliasRegistry';
+import { readOwnership, writeOwnership } from '../../src/agentMesh/ownership';
 import { forgeInboundPrompt } from '../../src/agentBus/busContent';
+import { knownAliasesForMesh } from '../../src/vscode/agentMeshSetup';
 
 /** AGENT_MESH_PLAN §10: zero-config participation. */
 
@@ -34,10 +36,13 @@ afterEach(async () => {
   await fs.promises.rm(root, { recursive: true, force: true });
 });
 
-function orch(resolve: () => MeshAdapter | undefined): MeshOrchestrator {
+function orch(
+  resolve: () => MeshAdapter | undefined,
+  knownAliases: () => string[] = () => ['codex'],
+): MeshOrchestrator {
   return new MeshOrchestrator({
     busRoot: root,
-    knownAliases: () => ['codex'],
+    knownAliases,
     scope: () => ({ workspace: '/ws' }),
     onEvent: () => undefined,
     provider: {
@@ -104,6 +109,31 @@ describe('orchestrator.ask (§10)', () => {
     expect(current.sends).toEqual(['two']);
     current.complete('b');
     await p2;
+  });
+});
+
+describe('owned Codex routing with a pending thread id (F2)', () => {
+  it('routes send and steer when the owned alias has a blank session id', async () => {
+    writeOwnership(root, {
+      alias: 'codex',
+      agent: 'codex',
+      session_id: '',
+      owner_host: null,
+      workspace: '/ws',
+      created_at: 1,
+      parked: false,
+    });
+    expect(readOwnership(root, 'codex')?.session_id).toBe('');
+    expect(readAliases(root)).toEqual({});
+
+    const adapter = new Held('codex-owned');
+    const o = orch(() => adapter, () => knownAliasesForMesh(root, undefined));
+    const sent = await o.tell('codex', 'hello');
+    const steered = await o.steer('codex', 'stop');
+
+    expect('error' in sent).toBe(false);
+    expect('error' in steered).toBe(false);
+    o.dispose();
   });
 });
 
