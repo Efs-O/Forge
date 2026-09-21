@@ -56,6 +56,38 @@ describe('ToolLoopGuard', () => {
     expect(guard.afterRound(calls, result('second'))).toBe(false);
   });
 
+  it('warns on the third consecutive failed call for the same tool and path', () => {
+    const guard = new ToolLoopGuard();
+    const calls = call('read_file', { path: 'a' });
+    expect(guard.afterRound(calls, result('Error: first'))).toBe(false);
+    expect(guard.afterRound(calls, result('Error: second'))).toBe(false);
+    const third = result('Error: third');
+    expect(guard.afterRound(calls, third)).toBe(true);
+    expect(third[0]?.content).toContain(
+      '[Forge warning: 3 failed read_file calls in a row on a. Read the error: it says what is wrong. Change the arguments or stop.]',
+    );
+  });
+
+  it('does not warn after only two failures, and a success resets the streak', () => {
+    const guard = new ToolLoopGuard();
+    const calls = call('read_file', { path: 'a' });
+    guard.afterRound(calls, result('Error: first'));
+    guard.afterRound(calls, result('Error: second'));
+    expect(guard.afterRound(calls, result('contents'))).toBe(false);
+    guard.afterRound(calls, result('Error: after reset'));
+    guard.afterRound(calls, result('Error: after reset again'));
+    expect(guard.afterRound(calls, result('Error: third after reset'))).toBe(true);
+  });
+
+  it('does not combine failed calls for different paths', () => {
+    const guard = new ToolLoopGuard();
+    guard.afterRound(call('read_file', { path: 'a' }), result('Error: a1'));
+    guard.afterRound(call('read_file', { path: 'b' }), result('Error: b1'));
+    const pathA = result('Error: a2');
+    expect(guard.afterRound(call('read_file', { path: 'a' }), pathA)).toBe(false);
+    expect(pathA[0]?.content).toBe('Error: a2');
+  });
+
   it('blocks a repeated mutation before its third execution', () => {
     const guard = new ToolLoopGuard();
     const calls = call('write_file', { path: 'a', content: 'x' });

@@ -5,6 +5,12 @@ interface ToolRoundRecord {
   result: string;
 }
 
+interface FailedToolStreak {
+  tool: string;
+  path: string;
+  count: number;
+}
+
 /** Read-only investigation can legitimately repeat a search while auditing. */
 const IDENTICAL_READ_ONLY_ROUNDS = 6;
 const ALTERNATING_READ_ONLY_ROUNDS = 10;
@@ -52,6 +58,7 @@ function resultFingerprint(messages: ChatMessage[]): string {
 /** Detects exact and alternating no-progress tool cycles across completion rounds. */
 export class ToolLoopGuard {
   private readonly records: ToolRoundRecord[] = [];
+  private failedToolStreak: FailedToolStreak | undefined;
 
   beforeRound(calls: ToolCall[], isMutatingTool?: (name: string) => boolean): void {
     if (!calls.some((call) => isMutatingTool?.(call.function.name))) return;
@@ -74,6 +81,8 @@ export class ToolLoopGuard {
     isMutatingTool?: (name: string) => boolean,
   ): boolean {
     this.records.push({ call: callFingerprint(calls), result: resultFingerprint(resultMessages) });
+    const failure = this.warnOnRepeatedFailure(calls, resultMessages);
+    if (failure.tracked) return failure.warned;
     const length = this.records.length;
     const last = this.records[length - 1];
     if (
@@ -114,5 +123,58 @@ export class ToolLoopGuard {
       message.content = `${prefix}${message.content}`;
     }
     return true;
+  }
+
+  private warnOnRepeatedFailure(
+    calls: ToolCall[],
+    resultMessages: ChatMessage[],
+  ): { tracked: boolean; warned: boolean } {
+    const toolResults = resultMessages.filter(
+      (message) => message.role === 'tool' && typeof message.content === 'string',
+    );
+    let tracked = false;
+    let warned = false;
+    for (const [index, call] of calls.entries()) {
+      const result =
+        toolResults.find((message) => message.tool_call_id === call.id) ?? toolResults[index];
+      const path = this.pathArgument(call);
+      if (
+        !result ||
+        path === undefined ||
+        typeof result.content !== 'string' ||
+        !result.content.startsWith('Error:')
+      ) {
+        this.failedToolStreak = undefined;
+        continue;
+      }
+      tracked = true;
+      const previous = this.failedToolStreak;
+      const count =
+        previous?.tool === call.function.name && previous.path === path ? previous.count + 1 : 1;
+      this.failedToolStreak = { tool: call.function.name, path, count };
+      if (count < 3) continue;
+      result.content =
+        `[Forge warning: ${count} failed ${call.function.name} calls in a row on ${path}. ` +
+        'Read the error: it says what is wrong. Change the arguments or stop.]\n' +
+        result.content;
+      warned = true;
+    }
+    return { tracked, warned };
+  }
+
+  private pathArgument(call: ToolCall): string | undefined {
+    try {
+      const args: unknown = JSON.parse(call.function.arguments);
+      if (
+        args &&
+        typeof args === 'object' &&
+        typeof (args as { path?: unknown }).path === 'string'
+      ) {
+        return (args as { path: string }).path;
+      }
+    } catch {
+      // Invalid arguments cannot identify a path, so they are not part of this streak.
+    }
+    return undefined;
   }
 }
