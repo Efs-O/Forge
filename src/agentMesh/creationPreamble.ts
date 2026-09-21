@@ -18,10 +18,6 @@ import { claimCreation, readOwnership, waitForRecord, type OwnershipRecord } fro
  *    for its ownership record and signal a safe fallback instead of reporting
  *    an error while the peer's session is about to be ready. A torn claim (no holder) or
  *    a timeout is a refusal.
- * 2. **Gate first-creation consent** (F-01). When there is no prior alias or
- *    session id, a first creation is a user-visible, one-time consented
- *    privileged spawn. When the wiring supplies no consent gate, the creation
- *    is REFUSED — a silent privileged spawn is the F-01 defect this prevents.
  */
 
 export type CreationStart =
@@ -61,27 +57,6 @@ export async function beginCreation(
   const rec = readOwnership(busRoot, alias);
   const aliasRec = getAlias(busRoot, alias);
   return { kind: 'proceed', host, rec, aliasRec };
-}
-
-/**
- * F-01: gate a first creation on consent. Returns a refusal reason when consent
- * is required but either no gate is wired or the user declined; `undefined`
- * when the creation may proceed (not a first creation, or consent was given).
- */
-export async function gateFirstCreationConsent(
-  alias: string,
-  isFirstCreation: boolean,
-  requestConsent: ((alias: string) => Promise<boolean>) | undefined,
-): Promise<string | undefined> {
-  if (!isFirstCreation) return undefined;
-  if (!requestConsent) {
-    return `creating a Forge-owned ${alias} session requires consent, but no consent gate is wired; nothing was started`;
-  }
-  const consent = await requestConsent(alias);
-  if (!consent) {
-    return `creating a Forge-owned ${alias} session was not consented; nothing was started`;
-  }
-  return undefined;
 }
 
 // ---------------------------------------------------------------------------

@@ -185,33 +185,10 @@ export function setupAgentMesh(
     if (isTerminal(e.state)) exchangeScope.delete(e.exchangeId);
   };
 
-  // F-01: the one-time, user-visible consent gate for a first Forge-owned
-  // creation. A privileged spawn (a long-lived Claude/Codex process this window
-  // owns) is never started silently. The gate is per-alias and remembered for
-  // the session; a refusal is surfaced, not retried silently.
-  const consented = new Set<string>();
-  const requestConsent = async (alias: string): Promise<boolean> => {
-    if (consented.has(alias)) return true;
-    const action = await vscode.window.showWarningMessage(
-      `Forge wants to create a persistent, owned "${alias}" session (a long-lived ` +
-        `process this window owns, resumable across restarts). Allow?`,
-      { modal: true },
-      'Allow',
-      'Cancel',
-    );
-    if (action === 'Allow') {
-      consented.add(alias);
-      return true;
-    }
-    return false;
-  };
-
   const provider = new MeshSessionProvider({
     busRoot: paths.root,
     getConfig,
     workspaceRoots: () => (workspaceRoot ? [workspaceRoot] : []),
-    // F-01: the consent gate. A first creation without it is refused.
-    requestConsent,
     // M3: a failed thread resume is a visible context loss, never a silent
     // fresh thread.
     onContextLost: (alias, reason) => {

@@ -13,7 +13,6 @@ import {
   defaultClaudeFactory,
   defaultCodexFactory,
   defaultSendClaude,
-  gateFirstCreationConsent,
   type OwnedClaudeFactory,
   type OwnedCodexFactory,
 } from './creationPreamble';
@@ -35,8 +34,7 @@ import type { SessionProvider } from './meshOrchestrator';
  * - **Detect:** a joined Claude session (`forge.sh join`) while live; a live
  *   owned session; a registered alias or thread resumes (M3); an open Claude
  *   session in this workspace (non-observing).
- * - **Create:** otherwise Forge creates its own — consented once
- *   (`requestConsent`), under the creation lease (M2), ownership recorded with
+ * - **Create:** otherwise Forge creates its own — under the creation lease (M2), ownership recorded with
  *   `owner_host` = this window. Subsequent reuse is automatic.
  * - **Reap:** `reap(alias)` disposes the in-memory session (recovery, M2/M3).
  */
@@ -55,13 +53,6 @@ export interface SessionProviderDeps extends HostLivenessDeps {
   codexFactory?: OwnedCodexFactory;
   /** Injectable for tests; production spawns a real owned Claude stdio session. */
   claudeFactory?: OwnedClaudeFactory;
-  /**
-   * First-creation consent gate (M2). A Forge-owned alias's first creation is a
-   * user-visible, one-time consented privileged spawn. **Required** in production
-   * wiring: when absent, a first creation is REFUSED (never auto-consented) —
-   * a silent privileged spawn is the F-01 defect this gate exists to prevent.
-   */
-  requestConsent?: (alias: string) => Promise<boolean>;
   /**
    * Called when a thread RESUME fails (M3): a failed resume is a visible
    * `context_lost` board event (a fresh creation failing is not a context loss).
@@ -105,7 +96,7 @@ export class MeshSessionProvider implements SessionProvider {
 
   /**
    * Resolve the adapter for an alias, in the order the class comment gives.
-   * Undefined when none can be reached or created (e.g. consent declined).
+   * Undefined when none can be reached or created .
    * May create a Forge-owned session, so it is async.
    */
   async resolveAdapter(alias: string): Promise<MeshAdapter | undefined> {
@@ -132,7 +123,7 @@ export class MeshSessionProvider implements SessionProvider {
       return this.codexAdapterIfLive();
     }
     // A registered alias or prior thread resumes (M3); with neither, Forge
-    // creates its own (consented once). Not the config pin: `codex queue` only
+    // creates its own . Not the config pin: `codex queue` only
     // reaches a thread open in a Codex window, and "live" there only proves the
     // thread exists on disk, so a question queued to it waited unread.
     const result = await this.ensureOwnedCodex('codex');
@@ -182,7 +173,7 @@ export class MeshSessionProvider implements SessionProvider {
       return this.claudeAdapter();
     }
     // A prior owned session resumes (M3). Otherwise an open session in this
-    // workspace (non-observing), else Forge creates its own (consented once).
+    // workspace (non-observing), else Forge creates its own .
     if (rec?.session_id || (aliasRec && aliasRec.peer_pid === undefined)) {
       const result = await this.ensureOwnedClaude('claude');
       return 'error' in result ? undefined : result;
@@ -227,7 +218,7 @@ export class MeshSessionProvider implements SessionProvider {
   }
 
   /**
-   * Ensure an owned Codex session for the alias, creating (consented) or
+   * Ensure an owned Codex session for the alias, creating or
    * resuming (M3) as needed. The single async creation path. Idempotent: a
    * concurrent call for the same alias awaits the same in-flight creation.
    */
@@ -260,14 +251,6 @@ export class MeshSessionProvider implements SessionProvider {
     const threadId = rec?.thread_id ?? aliasRec?.session_id;
     try {
       const bus = this.deps.getConfig().agent_bus;
-      // First creation (no prior consent recorded): gate it (F-01).
-      const refusal = await gateFirstCreationConsent(
-        alias,
-        !aliasRec && !threadId,
-        this.deps.requestConsent,
-      );
-      if (refusal) return { error: refusal };
-
       const executable = await resolveCliExecutable(bus?.codex_cli ?? 'codex', 'codex');
       const factory = this.deps.codexFactory ?? defaultCodexFactory();
       const session = await factory.create({
@@ -313,7 +296,7 @@ export class MeshSessionProvider implements SessionProvider {
   }
 
   /**
-   * Ensure an owned Claude session for the alias, creating (consented) or
+   * Ensure an owned Claude session for the alias, creating or
    * resuming (M3) as needed. The single async creation path for Claude. The
    * `sessionId` (Claude session id) is the resume identity — the equivalent of
    * Codex's `thread_id`. Idempotent: a concurrent call for the same alias
@@ -348,14 +331,6 @@ export class MeshSessionProvider implements SessionProvider {
     const sessionId = rec?.session_id || aliasRec?.session_id || undefined;
     try {
       const bus = this.deps.getConfig().agent_bus;
-      // First creation (no prior consent recorded): gate it (F-01).
-      const refusal = await gateFirstCreationConsent(
-        alias,
-        !aliasRec && !sessionId,
-        this.deps.requestConsent,
-      );
-      if (refusal) return { error: refusal };
-
       const executable = await resolveCliExecutable(bus?.claude_cli ?? 'claude', 'claude');
       const factory = this.deps.claudeFactory ?? defaultClaudeFactory();
       const session = await factory.create({

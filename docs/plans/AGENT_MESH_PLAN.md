@@ -161,6 +161,11 @@ sessions as the default** (Codex, gap B + §4):
   user-visible consent (a confirmation, like `ask_local_agent`). Subsequent reuse
   within the alias is automatic. The user registers once, then is never the
   courier again — the v1 promise, honestly scoped.
+  **Superseded (user, 2026-09-21): no consent dialog.** Configuring a CLI agent
+  (`agent_bus.codex_cli` / `claude_cli`) is the opt-in, per CLAUDE.md's hard
+  stop. The in-memory gate re-asked after every reload. It was a desktop modal
+  that a Telegram-driven run could not answer, so it stalled the zero-config
+  flow it guarded. Removed in 0.16.17. Rollback is still the pre-run checkpoint.
 - **Detect:**
   - **Claude:** `readClaudeSessions()` (registry) + `pickClaudeSession()` (refuse
     to guess). Unchanged — it already works.

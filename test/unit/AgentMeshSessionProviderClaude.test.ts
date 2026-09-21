@@ -29,11 +29,12 @@ class FakeClaudeSession {
   }
 }
 
-function makeProvider(opts: {
-  consent?: boolean;
-  factory?: (sessionId: string | undefined) => FakeClaudeSession;
-  disposeWait?: Promise<void>;
-} = {}): MeshSessionProvider {
+function makeProvider(
+  opts: {
+    factory?: (sessionId: string | undefined) => FakeClaudeSession;
+    disposeWait?: Promise<void>;
+  } = {},
+): MeshSessionProvider {
   const config: ForgeConfig = {
     agent_bus: { claude_session: '', codex_thread: '', claude_cli: 'claude' },
   } as ForgeConfig;
@@ -44,7 +45,6 @@ function makeProvider(opts: {
     // No user-opened sessions: the peer/relay fallback is never available, so
     // the owned path is the only Claude door under test.
     claudeSessions: () => [],
-    requestConsent: async () => opts.consent ?? true,
     claudeFactory: {
       create: async ({ sessionId }) =>
         opts.factory
@@ -78,7 +78,7 @@ describe('MeshSessionProvider: owned Claude path (P4)', () => {
     await p.dispose();
   });
 
-  it('ensureOwnedClaude first-creation is consented and writes the ownership record', async () => {
+  it('ensureOwnedClaude first-creation writes the ownership record', async () => {
     const p = makeProvider();
     const res = await p.ensureOwnedClaude('claude');
     expect('error' in res).toBe(false);
@@ -89,15 +89,6 @@ describe('MeshSessionProvider: owned Claude path (P4)', () => {
     // A first owned creation registers the alias as by: 'forge'.
     expect(getAlias(root, 'claude')?.by).toBe('forge');
     await p.dispose();
-  });
-
-  it('a declined first creation starts nothing and writes no record', async () => {
-    const p = makeProvider({ consent: false });
-    const res = await p.ensureOwnedClaude('claude');
-    expect('error' in res).toBe(true);
-    if ('error' in res) expect(res.error).toContain('not consented');
-    expect(p.isOwned('claude')).toBe(false);
-    expect(readOwnership(root, 'claude')).toBeUndefined();
   });
 
   it('a prior alias session_id resumes owned (M3): the factory gets the id', async () => {
@@ -126,7 +117,10 @@ describe('MeshSessionProvider: owned Claude path (P4)', () => {
         return new FakeClaudeSession(sid ?? 'owned-id');
       },
     });
-    const [a, b] = await Promise.all([p.ensureOwnedClaude('claude'), p.ensureOwnedClaude('claude')]);
+    const [a, b] = await Promise.all([
+      p.ensureOwnedClaude('claude'),
+      p.ensureOwnedClaude('claude'),
+    ]);
     expect('error' in a).toBe(false);
     expect('error' in b).toBe(false);
     // One lease → one spawn, even under concurrent first-creation.
@@ -136,7 +130,9 @@ describe('MeshSessionProvider: owned Claude path (P4)', () => {
 
   it('reap disposes the in-memory owned Claude session', async () => {
     let session: FakeClaudeSession | undefined;
-    const p = makeProvider({ factory: (sid) => (session = new FakeClaudeSession(sid ?? 'owned-id')) });
+    const p = makeProvider({
+      factory: (sid) => (session = new FakeClaudeSession(sid ?? 'owned-id')),
+    });
     await p.ensureOwnedClaude('claude');
     expect(p.isOwned('claude')).toBe(true);
     await p.reap('claude');
@@ -193,7 +189,9 @@ describe('MeshSessionProvider: owned Claude path (P4)', () => {
 
   it('close kills the owned session but keeps the record (M3: resumable)', async () => {
     let session: FakeClaudeSession | undefined;
-    const p = makeProvider({ factory: (sid) => (session = new FakeClaudeSession(sid ?? 'owned-id')) });
+    const p = makeProvider({
+      factory: (sid) => (session = new FakeClaudeSession(sid ?? 'owned-id')),
+    });
     await p.ensureOwnedClaude('claude');
     expect(await p.close('claude')).toBe(true);
     expect(session?.disposed).toBe(true);
