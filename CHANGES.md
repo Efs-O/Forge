@@ -1,5 +1,21 @@
 # Forge — Recent Changes
 
+## 0.16.18
+
+### Agent mesh: `forge.sh who` (AGENT_MESH_PLAN §11)
+
+This is the first feature built end to end by the mesh. Qwen planned and
+implemented it, and Codex reviewed it.
+
+- **`forge.sh who` shows every mesh participant.** Each row gives how this
+  host reaches it (`hub`, `joined`, `owned`, `peer`) and what it is doing
+  (`busy`, `idle`, `parked`, `unknown`, `dead`). A session this host cannot
+  observe reports `unknown`, never `idle`. The data comes from the new
+  `GET /agent/who` route.
+- **`forge.sh` with no arguments shows the full usage block again.** Adding
+  the `who` line had cut off the last lines of the usage text. The block now
+  ends at the first line that is not a comment, instead of a fixed line range.
+
 ## 0.16.17
 
 ### Agent mesh: the run shows up on Telegram and in the session log

@@ -25,8 +25,9 @@ export const CLIENT_SCRIPT = String.raw`#!/usr/bin/env bash
 #   forge.sh who                      who is in the mesh, and what each is doing
 # The text comes from the file, or from stdin when no file is given.
 # Written by Forge on every start; edits are overwritten.
+
 # usage prints the leading comment block (lines after the shebang up to the
-# first non-# line) — derived, not a fixed range, so adding a verb line cannot
+# first non-# line; the blank line above ends it) — derived, not a fixed range, so adding a verb line cannot
 # silently cut off the last lines (the old fixed range dropped the text note
 # when the who line landed).
 usage() { awk 'NR==1{next} /^#/{print;next} {exit}' "$0" >&2; exit 2; }

@@ -66,6 +66,8 @@ describe('CLIENT_SCRIPT usage block', () => {
     // The note that was silently cut off when `who` pushed it past the old
     // `sed -n '2,7p'` range: a fixed range is exactly the bug this guards.
     expect(usage).toContain('The text comes from the file, or from stdin');
+    // Implementation comments below the block are for maintainers, not users.
+    expect(usage).not.toContain('usage prints');
   });
 });
 
