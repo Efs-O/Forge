@@ -17,6 +17,21 @@ function result(content: string): ChatMessage[] {
 }
 
 describe('ToolLoopGuard', () => {
+  it('warns on the first exact read-only repeat without throwing', () => {
+    const guard = new ToolLoopGuard();
+    expect(guard.afterRound(call('read_file', { path: 'a' }), result('same'))).toBe(false);
+    expect(guard.afterRound(call('read_file', { path: 'a' }), result('same'))).toBe(true);
+  });
+
+  it('warns when a repeat matches an earlier non-adjacent round', () => {
+    const guard = new ToolLoopGuard();
+    const a = call('read_file', { path: 'a' });
+    const b = call('read_file', { path: 'b' });
+    guard.afterRound(a, result('A'));
+    guard.afterRound(b, result('B'));
+    expect(guard.afterRound(a, result('A'))).toBe(true);
+  });
+
   it('normalizes JSON key order and stops six identical read-only no-progress results', () => {
     const guard = new ToolLoopGuard();
     for (let index = 0; index < 5; index++) {
@@ -32,6 +47,13 @@ describe('ToolLoopGuard', () => {
     guard.afterRound(call('get_status', {}), result('loading'));
     guard.afterRound(call('get_status', {}), result('still loading'));
     expect(() => guard.afterRound(call('get_status', {}), result('ready'))).not.toThrow();
+  });
+
+  it('does not warn when the repeated call has a different result', () => {
+    const guard = new ToolLoopGuard();
+    const calls = call('get_status', {});
+    guard.afterRound(calls, result('first'));
+    expect(guard.afterRound(calls, result('second'))).toBe(false);
   });
 
   it('blocks a repeated mutation before its third execution', () => {

@@ -68,7 +68,11 @@ export class ToolLoopGuard {
     }
   }
 
-  afterRound(calls: ToolCall[], resultMessages: ChatMessage[]): void {
+  afterRound(
+    calls: ToolCall[],
+    resultMessages: ChatMessage[],
+    isMutatingTool?: (name: string) => boolean,
+  ): boolean {
     this.records.push({ call: callFingerprint(calls), result: resultFingerprint(resultMessages) });
     const length = this.records.length;
     const last = this.records[length - 1];
@@ -95,5 +99,20 @@ export class ToolLoopGuard {
         throw new ToolLoopDetectedError('Forge: alternating tool-call cycle produced no progress.');
       }
     }
+
+    if (calls.some((call) => isMutatingTool?.(call.function.name))) return false;
+    const earlier = this.records.findIndex(
+      (record, index) =>
+        index < length - 1 && record.call === last?.call && record.result === last?.result,
+    );
+    if (earlier < 0) return false;
+    const prefix =
+      `[Forge warning: this read-only tool call and result repeat round ${earlier + 1}. ` +
+      'Act on the result you already have or change approach.]\n';
+    for (const message of resultMessages) {
+      if (message.role !== 'tool' || typeof message.content !== 'string') continue;
+      message.content = `${prefix}${message.content}`;
+    }
+    return true;
   }
 }

@@ -97,4 +97,46 @@ describe('runToolCallingLoop endpoint resolution', () => {
     expect(result.finishReason).toBe('stop');
     expect(streamModelChatCompletion.mock.calls.at(-1)?.[0]).toBe('http://127.0.0.1:8080');
   });
+
+  it('puts the repeat warning into the next model request', async () => {
+    streamModelChatCompletion.mockReset();
+    const requests: ChatMessage[][] = [];
+    let round = 0;
+    streamModelChatCompletion.mockImplementation(
+      async (_url: string, request: { messages: ChatMessage[] }, _model: unknown, h: Handlers) => {
+        requests.push(request.messages);
+        round += 1;
+        if (round < 3) {
+          h.onToolCalls([
+            {
+              id: `c${round}`,
+              type: 'function',
+              function: { name: 'read_file', arguments: '{"path":"a"}' },
+            },
+          ]);
+          h.onDone('tool_calls');
+          return;
+        }
+        h.onToken('done');
+        h.onDone('stop');
+      },
+    );
+    const messages: ChatMessage[] = [{ role: 'user', content: 'go' }];
+    await runToolCallingLoop({
+      ...options(async () => 'http://127.0.0.1:8080'),
+      messages,
+      getToolDefinitions: () => [
+        { type: 'function', function: { name: 'read_file' } },
+      ] as never,
+      dispatchToolCalls: async (calls: ToolCall[], msgs: ChatMessage[]) => {
+        for (const call of calls) {
+          msgs.push({ role: 'tool', content: 'same', tool_call_id: call.id, name: 'read_file' });
+        }
+      },
+      isMutatingTool: () => false,
+    } as never);
+
+    expect(requests[2]?.at(-1)?.content).toContain('repeat round 1');
+    expect(requests[2]?.at(-1)?.content).toContain('Act on the result you already have');
+  });
 });

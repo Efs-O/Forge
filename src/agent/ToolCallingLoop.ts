@@ -397,7 +397,12 @@ export async function runToolCallingLoop(
       await options.dispatchToolCalls(calls, options.messages);
       options.onMessagesChanged?.();
       try {
-        loopGuard.afterRound(calls, options.messages.slice(beforeDispatch));
+        const warned = loopGuard.afterRound(
+          calls,
+          options.messages.slice(beforeDispatch),
+          options.isMutatingTool,
+        );
+        if (warned) options.onMessagesChanged?.();
       } catch (error) {
         if (error instanceof ToolLoopDetectedError) options.onRepeatedCall?.();
         throw error;
