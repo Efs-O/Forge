@@ -131,7 +131,7 @@ describe('Telegram contact service', () => {
     );
   });
 
-  it('answers ordinary owner group messages and escalates explicit /owner requests privately', async () => {
+  it('answers ordinary owner group messages and acknowledges explicit /owner requests in-group', async () => {
     const value = await fixture();
     await approveAndBind(value);
     await expect(
@@ -154,9 +154,9 @@ describe('Telegram contact service', () => {
     });
     expect(
       value.channel.sent.some((item) => item.chatId === '1' && item.text.includes('I need help')),
-    ).toBe(true);
+    ).toBe(false);
     expect(value.channel.sent.at(-1)?.text).toBe(
-      'I notified the Forge owner. They can reply here.',
+      'The Forge owner can see your message in this group.',
     );
   });
 

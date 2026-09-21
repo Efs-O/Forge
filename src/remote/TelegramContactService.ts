@@ -10,7 +10,7 @@ import {
   contactBusyText,
   contactGroupRequiredText,
   contactNameMatches,
-  contactOwnerNotifiedText,
+  contactOwnerVisibleText,
   contactPrivateText,
   contactThinkingText,
   contactThrottleText,
@@ -117,7 +117,7 @@ export class TelegramContactService {
     }
     await this.store.markGroupVerified(contact.id, event.chatId);
     if (isCommand(event.text)) {
-      if (commandName(event.text) === 'owner') return this.escalateToOwner(event, contact);
+      if (commandName(event.text) === 'owner') return this.escalateToOwner(event);
       await this.audit?.record(event, 'contact_group_command_rejected').catch(() => undefined);
       await this.channel.send(event.chatId, 'Only /owner is available to contacts.', {
         signal: this.abort.signal,
@@ -373,10 +373,7 @@ export class TelegramContactService {
     }
   }
 
-  private async escalateToOwner(
-    event: ContactTextEvent,
-    contact: RemoteContactRecord,
-  ): Promise<RemoteInboundDisposition> {
+  private async escalateToOwner(event: ContactTextEvent): Promise<RemoteInboundDisposition> {
     const request = ownerCommandText(event.text);
     if (!request) {
       await this.channel.send(event.chatId, 'Use /owner followed by your question or request.', {
@@ -384,10 +381,7 @@ export class TelegramContactService {
       });
       return { kind: 'rejected', reason: 'owner request is empty' };
     }
-    const ownerId = await this.auth.getOwner('telegram');
-    if (!ownerId) return { kind: 'rejected', reason: 'owner is unavailable' };
-    await this.notifyOwner(ownerId, `Forge: ${contact.displayName} asks:\n${request}`);
-    await this.channel.send(event.chatId, contactOwnerNotifiedText(), {
+    await this.channel.send(event.chatId, contactOwnerVisibleText(), {
       signal: this.abort.signal,
     });
     await this.audit?.record(event, 'contact_owner_escalated').catch(() => undefined);

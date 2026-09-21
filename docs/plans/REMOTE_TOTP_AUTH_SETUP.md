@@ -124,8 +124,9 @@ chat. Then:
 
 The contact's old private bot chat is an onboarding/status surface after
 approval; ordinary contact questions there are rejected with a group notice.
-Only `/owner <message>` escalates a contact request privately to the owner.
-Forge never impersonates the owner. If Forge is offline, busy, using a
+Only `/owner <message>` marks a request for the owner in the shared group;
+Forge does not duplicate that message in the owner's private bot chat. Forge
+never impersonates the owner. If Forge is offline, busy, using a
 different active model, or has no free same-model capacity, the group receives
 a generic unavailable message and the owner receives a rate-limited runtime
 alert.

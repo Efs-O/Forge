@@ -32,10 +32,10 @@ Inside the group:
 
 - ordinary contact questions receive an automatic Forge reply;
 - the owner can read the complete conversation in Telegram;
-- the owner can post directly to the contact without Forge rewriting or
-  approving the message;
-- a contact request addressed to the owner produces a private owner
-  notification;
+- ordinary owner messages are also routed through the isolated assistant, with
+  the reply visible in the shared group;
+- a contact request addressed to the owner is acknowledged in the shared group
+  without a duplicate private Forge notification;
 - safe, read-only Internet assistance is available when configured;
 - no contact can access Forge tools, files, workspace data, credentials,
   settings, conversations, prompts, logs, or another contact.
@@ -134,9 +134,9 @@ Every inbound group event must be classified before any model call:
 
 | Sender/event | Behavior |
 | --- | --- |
-| Paired owner, ordinary text | Leave untouched; the owner is speaking directly to the contact. |
+| Paired owner, ordinary text | Run the isolated assistant and send the answer to the shared group. |
 | Approved contact, ordinary text | Run the isolated contact assistant and send the answer to the group. |
-| Approved contact, explicit owner request | Notify the owner privately; do not invent or impersonate an owner reply. |
+| Approved contact, explicit owner request | Acknowledge that the owner can see the request in the shared group; do not impersonate an owner reply. |
 | Unknown sender | Ignore/reject and audit; never invoke the model. |
 | Contact command | Allow only the small contact command set; never expose owner commands. |
 | Owner administrative command | Require the existing owner/TOTP boundary; group linking must not accept a TOTP code in the group. |
@@ -150,9 +150,8 @@ The first reliable escalation mechanism should be an explicit command:
 /owner <message for the Forge owner>
 ```
 
-Forge sends the exact request privately to the owner and replies in the group
-with a short status such as “I notified the owner.” The owner can answer
-directly in the group.
+Forge replies in the group with a short status such as “The Forge owner can see
+your message in this group.” The owner can answer directly in the group.
 
 Natural-language detection such as “please ask the owner” may be added as a
 conservative convenience layer, but it must never be the only route. Ambiguous
@@ -161,8 +160,8 @@ notifying the owner. Detection and escalation events must be tested in English
 and Greek, and the contact may not use the path to obtain owner identity,
 private messages, or internal details.
 
-Owner notifications must be rate-limited and coalesced. A normal conversation
-must not produce one private owner notification per message.
+Only genuine runtime failures may produce a rate-limited owner alert. A normal
+conversation must not produce private Forge notifications.
 
 ## Autonomous contact assistant
 
@@ -357,10 +356,10 @@ Add or update focused tests for:
 - manual link request and authenticated owner confirmation;
 - one-group/one-contact uniqueness and duplicate binding rejection;
 - approved contact messages accepted only in the bound group;
-- owner messages ignored by the contact model;
+- ordinary owner messages routed through the shared assistant;
 - unknown group members rejected and audited;
 - normal contact replies sent automatically without owner drafts;
-- exact `/owner` escalation and notification coalescing;
+- exact `/owner` group acknowledgement without duplicate private notification;
 - conservative natural-language owner-request detection in English and Greek;
 - no owner/private conversation leakage into contact prompts;
 - language matching and deny-list behavior;
@@ -379,8 +378,8 @@ Use a fake channel to cover:
 1. `/start` → owner approval;
 2. manual group link request → private owner confirmation → bound group;
 3. contact asks an ordinary question → automatic answer in that group;
-4. owner posts a direct reply → no model generation;
-5. contact sends `/owner ...` → private owner notification only;
+4. owner posts ordinary text → assistant answer in the group;
+5. contact sends `/owner ...` → group acknowledgement only;
 6. unknown group member → rejected and audited;
 7. four-message burst and a fifth message → coalescing/throttling;
 8. active owner task on the same model → free-slot behavior;
@@ -398,8 +397,8 @@ After implementation:
 2. Create a private group with only the owner, bot, and one approved contact.
 3. Bind the group and verify the owner confirmation occurs privately.
 4. Send ordinary text without mentioning the bot; verify automatic replies.
-5. Post from the owner; verify Forge does not answer or alter the message.
-6. Ask for the owner; verify only the private owner notification is sent.
+5. Post ordinary text from the owner; verify Forge answers in the group.
+6. Ask for the owner; verify no duplicate private Forge notification is sent.
 7. Ask for current weather with and without a location; verify safe web behavior
    and honest handling when web is disabled.
 8. Add an unapproved test account; verify it cannot use the group assistant.
@@ -416,9 +415,9 @@ After implementation:
   expected contact identity.
 - [x] Ordinary contact questions receive automatic replies without owner
   notification or Send/Cancel approval.
-- [x] The owner can participate directly in the same group.
-- [x] Contact requests explicitly addressed to the owner generate a private,
-  rate-limited owner notification.
+- [x] The owner can participate through the shared group assistant.
+- [x] Contact requests explicitly addressed to the owner are acknowledged in
+  the group without a duplicate private Forge notification.
 - [x] Unknown senders and unbound groups never reach the model.
 - [x] The contact model has no Forge tools or private Forge context.
 - [x] Safe read-only web access is opt-in, bounded, SSRF-resistant, and treats
@@ -435,18 +434,17 @@ After implementation:
 - `/contact link <contact-name>` is typed by the owner in the intended group;
   Forge sends a one-time token privately and `/contact bind <token>` is entered
   in the authenticated private owner chat.
-- The first slice ships explicit `/owner <message>` escalation. Natural-language
-  escalation is intentionally deferred because ambiguous owner requests should
-  not notify the owner unexpectedly.
+- The first slice ships explicit `/owner <message>` group acknowledgement.
+  Natural-language escalation is intentionally deferred because ambiguous
+  owner requests should not change routing unexpectedly.
 - The Telegram group is the owner-visible transcript surface. Forge keeps only
-  bounded contact/assistant history for context and recovery; owner group text
-  is never copied into the contact model context.
+  bounded contact/owner/assistant history for context and recovery.
 - Contact web access reuses the existing configured `web_search` and
   `web_fetch` tools through a narrow adapter. It is disabled unless both
   `remote.contacts.enabled` and `remote.contacts.web.enabled` are true.
 - The implemented defaults are 10 history messages, a four-message/5-second
   burst limit, at most two searches and three fetches per turn, and a
-  one-minute owner-alert cooldown per contact.
+  one-minute cooldown for genuine runtime owner alerts per contact.
 
 ## Implementation status
 
