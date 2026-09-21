@@ -64,6 +64,12 @@ export interface AgentRoutesDeps {
    * §10: `forge.sh join claude` — a user-opened session registers itself as an
    * alias by its pid. Absent ⇒ `/agent/join` is 404.
    */
+  /**
+   * §6: a `priority=steer` message to Forge itself interrupts Forge's active
+   * turn (same as Telegram `/steer`); the steer is queued first, so it runs
+   * next. Absent ⇒ a steer to Forge queues like any message.
+   */
+  interruptForge?: () => Promise<void>;
   join?: (alias: string, pid: number) => { ok: true; reply: string } | { ok: false; error: string };
 }
 
@@ -240,9 +246,15 @@ export class AgentRoutes {
           return sendJson(res, 200, { command: cmd.verb, reply: result.reply });
         }
       }
-      const queued = this.deps.inbox.accept(forgeInboundPrompt(from, text), from);
+      const steerForge =
+        (fields['priority'] ?? '').trim().toLowerCase() === 'steer' && !!this.deps.interruptForge;
+      const queued = this.deps.inbox.accept(forgeInboundPrompt(from, text), from, steerForge);
       if (queued === undefined)
         throw new HttpError(429, 'Forge has too many unread agent messages');
+      if (steerForge) {
+        await (this.deps.interruptForge as () => Promise<void>)();
+        return sendJson(res, 202, { queued, steered: true });
+      }
       return sendJson(res, 202, { queued });
     } catch (err) {
       if (err instanceof HttpError) return sendJson(res, err.status, { error: err.message });

@@ -1,5 +1,16 @@
 # Forge — Recent Changes
 
+## 0.16.16
+
+### Agent mesh: Claude and Codex can steer Forge mid-turn (AGENT_MESH_PLAN §6)
+
+- **`forge.sh steer <your-name> <to> [file]`.** Interrupts `<to>`'s running
+  turn and runs the text next. `<to>` is `forge`, `claude` or `codex`.
+- **A steer to Forge now interrupts Qwen.** Before, a bus steer reached only
+  owned Claude/Codex sessions. A message to Forge waited behind the running
+  turn, however wrong that turn was. Now it jumps the inbox queue, and Forge's
+  active turn is interrupted exactly like a Telegram `/steer`.
+
 ## 0.16.15
 
 ### Agent mesh: zero-config participation (AGENT_MESH_PLAN §11)

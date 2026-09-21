@@ -46,6 +46,19 @@ function host(overrides: Partial<InboxHost> = {}): InboxHost & {
 }
 
 describe('AgentInbox', () => {
+  it('a steer jumps the queue and runs as soon as the current turn ends', async () => {
+    const h = host();
+    const inbox = new AgentInbox(h, 5);
+    inbox.accept('running');
+    await tick();
+    inbox.accept('queued');
+    expect(inbox.accept('steer', 'claude', true)).toBe(1);
+    h.finish();
+    await tick();
+    expect(h.submitted).toEqual(['running', 'steer']);
+    inbox.dispose();
+  });
+
   it('submits at once when idle, and one turn at a time', async () => {
     const h = host();
     const inbox = new AgentInbox(h, 5);
@@ -120,9 +133,7 @@ describe('AgentInbox', () => {
     expect(h.finished).toEqual([]); // not yet: the turn is still running
     h.finish();
     await tick();
-    expect(h.finished).toEqual([
-      { from: 'codex', durationMs: expect.any(Number) },
-    ]);
+    expect(h.finished).toEqual([{ from: 'codex', durationMs: expect.any(Number) }]);
     inbox.dispose();
   });
 

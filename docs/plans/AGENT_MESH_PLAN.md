@@ -364,6 +364,13 @@ an authoritative idempotent receipt (Codex, gap G). v2 contract:
 - **Decision (user, 2026-09-19): a bus steer MAY interrupt a running turn**, same
   as remote steer. A steer to a **parked** session wakes it (§2b state machine).
   `forge.sh steer <alias> [file]` verb + README.
+- **Shipped 0.16.16.** Until then a steer interrupted only alias adapters (owned
+  Codex/Claude); a steer addressed to Forge itself just queued behind Qwen's
+  running turn, and the verb did not exist. Now `forge.sh steer <me> <to>` sends
+  `priority=steer`; for `to=forge` the inbox puts the message at the FRONT and
+  the host calls `ForgeHostFacade.interrupt()` on the active streaming chat — the
+  same interrupt Telegram `/steer` uses — so the steer is the next turn. No new
+  durable state (the inbox is memory-only).
 
 ### 7. Bus queue visibility in the Telegram view — P3
 - The remote/Telegram queue view lists pending **bus** messages too (alias + first

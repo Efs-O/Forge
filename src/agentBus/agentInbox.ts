@@ -57,12 +57,17 @@ export class AgentInbox {
     private readonly pollMs: number = BUSY_POLL_MS,
   ) {}
 
-  /** Queue a prompt; returns its place in line, or undefined when full. */
-  accept(prompt: string, from?: string): number | undefined {
+  /**
+   * Queue a prompt; returns its place in line, or undefined when full. A steer
+   * (`front`) jumps the line so it runs as soon as the interrupted turn ends.
+   */
+  accept(prompt: string, from?: string, front = false): number | undefined {
     if (this.disposed || this.queue.length >= INBOX_CAP) return undefined;
-    this.queue.push({ prompt, ...(from ? { from } : {}) });
+    const item = { prompt, ...(from ? { from } : {}) };
+    if (front) this.queue.unshift(item);
+    else this.queue.push(item);
     void this.drain();
-    return this.queue.length;
+    return front ? 1 : this.queue.length;
   }
 
   get pending(): number {

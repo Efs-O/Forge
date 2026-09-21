@@ -20,13 +20,14 @@ export const CLIENT_SCRIPT = String.raw`#!/usr/bin/env bash
 #   forge.sh reply <id> [file]        answer a question Forge is waiting on
 #   forge.sh say <your-name> [file]   send Forge a new message (starts a Forge turn)
 #   forge.sh send <your-name> <to> [file]  relay a message to another agent (claude/codex)
+#   forge.sh steer <your-name> <to> [file] interrupt <to>'s running turn (forge/claude/codex); runs next
 #   forge.sh join claude              this Claude Code session becomes the "claude" alias
 # The text comes from the file, or from stdin when no file is given.
 # Written by Forge on every start; edits are overwritten.
-usage() { sed -n '2,6p' "$0" >&2; exit 2; }
+usage() { sed -n '2,7p' "$0" >&2; exit 2; }
 [ $# -ge 2 ] || usage
 VERB="$1"; ARG="$2"; SRC="-"
-if [ "$VERB" = "send" ]; then
+if [ "$VERB" = "send" ] || [ "$VERB" = "steer" ]; then
   [ $# -ge 3 ] || usage
   TO="$3"; [ $# -ge 4 ] && SRC="$4"
   case "$TO" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: bad recipient '$TO'" >&2; exit 2;; esac
@@ -38,6 +39,8 @@ case "$VERB" in
          ROUTE=message; QUERY="from=$ARG" ;;
   send)  case "$ARG" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
          ROUTE=message; QUERY="from=$ARG&to=$TO" ;;
+  steer) case "$ARG" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
+         ROUTE=message; QUERY="from=$ARG&to=$TO&priority=steer" ;;
   join)  [ "$ARG" = "claude" ] || { echo "forge.sh: only 'join claude' exists" >&2; exit 2; }
          case "$CLAUDE_PID" in ""|*[!0-9]*) echo "forge.sh: CLAUDE_PID is not set: run this from inside a Claude Code session" >&2; exit 2;; esac
          ROUTE=join; QUERY="alias=$ARG&pid=$CLAUDE_PID"; SRC=/dev/null ;;
@@ -96,6 +99,12 @@ once. Forge then reaches it as \`claude\` through its peer pipe while it stays
 open. With no joined session, Forge uses the only Claude session open in the
 workspace, else starts its own (one-time consent). Relay to another agent with
 \`forge.sh send <your-name> <to>\`.
+
+## Steering (interrupt a running turn)
+
+\`forge.sh steer <your-name> <to>\` stops \`<to>\`'s running turn and runs your
+text next — \`forge\` (Forge's own model), \`claude\` or \`codex\`. Use it to
+correct an agent mid-turn instead of waiting for it to finish.
 
 ## Answering Forge
 

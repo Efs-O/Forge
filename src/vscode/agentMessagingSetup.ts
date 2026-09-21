@@ -73,6 +73,15 @@ export function setupAgentMessaging(
     relay: mesh.relay,
     // F-06: a `priority=steer` message interrupts the recipient's active turn.
     steer: mesh.steer,
+    // §6: a steer to Forge itself interrupts Forge's running turn, like
+    // Telegram `/steer`. An idle chat has nothing to interrupt.
+    interruptForge: async () => {
+      const facade = getSidebar().getHostFacade();
+      const status = facade.status();
+      if (status.streamingConversationIds.includes(status.activeConversationId)) {
+        await facade.interrupt(status.activeConversationId);
+      }
+    },
     validateFrom: mesh.validateFrom,
     // §10: an open Claude session joins as the `claude` alias by its pid.
     join: (alias, pid) => joinClaude(busPaths().root, alias, pid),

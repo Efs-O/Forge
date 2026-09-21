@@ -248,6 +248,27 @@ describe('forge.sh against the routes', () => {
     expect(relays).toEqual([['claude', 'codex', 'plan ready\n']]);
   }, 30_000);
 
+  it('steer to forge queues at the front and interrupts the running turn (§6)', async (ctx) => {
+    if (!usable) ctx.skip();
+    const calls: string[] = [];
+    routes = new AgentRoutes({
+      paths: () => paths,
+      inbox: {
+        accept: (_prompt, _from, front) => (calls.push(`accept front=${String(front)}`), 1),
+      },
+      token: TOKEN,
+      interruptForge: async () => void calls.push('interrupt'),
+    });
+    routes.setEnabled(true);
+    routes.onListening(base);
+    const steered = await runClient(['steer', 'claude', 'forge'], 'use ask_live_session');
+    expect(steered.out).toContain('"steered":true');
+    expect(calls).toEqual(['accept front=true', 'interrupt']);
+    const said = await runClient(['say', 'claude'], 'plain');
+    expect(said.out).toContain('"queued"');
+    expect(calls.slice(2)).toEqual(['accept front=false']);
+  }, 30_000);
+
   it('refuses a bad id or name before sending anything', async (ctx) => {
     if (!usable) ctx.skip();
     expect((await runClient(['reply', '../x'], 'a')).code).toBe(2);
