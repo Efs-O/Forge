@@ -55,13 +55,13 @@ is watching it.
 
 ```jsonc
 {
-  "id": "llamacpp-latest",
+  "id": "llama-updates",          // the existing job, converted in place (phase 5)
   "name": "Keep llama.cpp current",
   "schedule": { "kind": "daily", "at": "03:00" },
   "wake": true,
   // The cheap typed check still gates the expensive agent: no new release, no turn.
   "check": { "kind": "github_release", "repo": "ggml-org/llama.cpp", "channel": "prerelease" },
-  "on_change": { "kind": "notify" },
+  "on_change": { "kind": "notify" }, // ignored for agent_task: the agent's report is the one message
   "action": {
     "kind": "agent_task",
     "task": "A new llama.cpp release is out (see the observation). Install the CUDA Windows build next to the current one under %LOCALAPPDATA%\\Forge, point llama_server.binary in config.yaml at it, and say RESTART: yes. Read docs/LLAMACPP_UPDATE.md for how.",
@@ -336,7 +336,7 @@ listing the keys `agentTask.ts` patches) fails.
    when it needs a different model while one streams, it waits. Tested with a
    status stub for each case.
 9. **Live:** the owner leaves the PC asleep with a daily 03:00
-   `llamacpp-latest` job (`wake: true`, the model chosen after phase 3). By morning, Telegram
+   converted `llama-updates` job (`wake: true`, the model chosen after phase 3). By morning, Telegram
    holds exactly one message: installed `bNNNN` or `failed — <reason>`. The
    run's conversation shows the full turn.
 10. An `agent_task` run delivers exactly one outbox item, whatever
@@ -352,8 +352,26 @@ listing the keys `agentTask.ts` patches) fails.
 ## Before phase 1 starts
 
 The live `~/.forge/jobs/llama-updates.json` (every 15 min, `llamacpp_update`
-in `prepare` mode) is still enabled. It keeps firing during implementation and
-will ask for approvals mid-run. Set `enabled: false` until phase 5 replaces it.
+in `prepare` mode) was **disabled on 2026-09-21** so it cannot fire during
+implementation.
+
+**Phase 5 converts that file in place; it does not create a second job.**
+The same `id` keeps its run history, its `state/` file, and its last-seen
+release tag, so the first agent run fires on the next *new* release, not on
+the one already prepared. Changes to the file:
+
+| Field | Now | After phase 5 |
+|---|---|---|
+| `schedule` | interval 15 min | `daily 03:00` (one GitHub call a day is enough) |
+| `wake` | false | true (overnight run) |
+| `check` | `github_release` prerelease | unchanged |
+| `on_change` | notify | unchanged, ignored for `agent_task` |
+| `action` | `llamacpp_update` prepare + `asset_pattern` | `agent_task`, the task above; the asset pattern moves into `docs/LLAMACPP_UPDATE.md` |
+| `enabled` | false | true, after the doc exists |
+
+If phase 3 or the live test fails and the agent path is abandoned, the file is
+deleted along with `llamacpp_update` — no typed fallback is kept (owner's
+decision).
 
 ## Out of scope
 
