@@ -387,6 +387,13 @@ decision).
 
 ## Out of scope
 
+- **Follow-up after phase 5: `forge.sh say --model <name>`.** `/agent/message`
+  lands in the active chat on whatever model it has, so starting a phase on
+  Qwopus needed the owner to select it by hand. Add an optional `model` (and
+  a new-chat flag) to `/agent/message`, reusing the runner's
+  `setConversationModel` step from phase 3, so Claude can start a phase on any
+  model with no click.
+
 - Retrying a failed task automatically. The next schedule is the retry.
 - Pruning a job's chat. Compaction bounds the model's view and HalluScribe
   needs the full log; revisit only if the sidebar itself gets slow.
