@@ -1,7 +1,8 @@
 # Agent-task jobs — a job that runs an agent turn, unattended (impl plan)
 
 Status: plan, not started. Owner of the final call: Claude. Implementer: Forge,
-phase by phase; Codex reviews and fixes each phase.
+phase by phase; Claude reviews and fixes each phase. (Codex was the reviewer
+until 2026-09-21, when its credits ran out; the plan no longer depends on it.)
 
 **Phase 1 is a trial of Qwopus** (`qwopus38-27b-flash-mtp-q5km-no-vision`,
 thinking off, first real coding run). Claude scores it against this card, then
@@ -9,8 +10,8 @@ decides who writes phase 3:
 
 | Check | Pass |
 |---|---|
-| `npm run ci` green on its own commit | without Codex fixing a failure |
-| Codex review | no high-severity findings; at most 2 small fixes |
+| `npm run ci` green on its own commit | without Claude fixing a failure |
+| Claude review | no high-severity findings; at most 2 small fixes |
 | Scope | only the phase 1 files; nothing invented |
 | Tests | `check.none`, `agent_task`, the 4000-char cap, a rejected bad task, the new state fields' defaults |
 | Commit message | says what the commit does |
@@ -276,16 +277,27 @@ This happens only after two green unattended runs. Then:
 
 ## Phases
 
-Each phase is one commit to main with `npm run ci` green. Each ends with a
-Codex review over `ask_live_session`. Codex applies findings of about 20 lines
-or fewer itself (MESH_RUN_1 F2). Claude signs off before the next phase starts.
+Each phase is one commit to main with `npm run ci` green. A Forge-written
+phase ends with the agent asking `claude` over `ask_live_session` to review
+that commit, naming its hash and the phase. Claude reviews against this plan,
+applies findings of about 20 lines or fewer itself (MESH_RUN_1 F2: never send
+a small fix back to the local model), commits them, and signs off before the
+next phase starts. Larger findings go back to Forge as one message listing
+all of them.
+
+The prompt that starts a Forge phase:
+
+> Implement phase N of docs/plans/AGENT_TASK_JOBS_PLAN.md only. Run npm run ci;
+> when green, commit. Then ask claude via ask_live_session to review that
+> commit, naming its hash and the phase. Never ask_user.
 
 | # | Scope | Files | Suggested writer |
 |---|---|---|---|
 | 1 | Schema: `check.none`, `action.agent_task`; the state fields `task_run` and `task_pending` (nullable, default null/false, so existing state files still parse); `manage_jobs` `task` field; `jobDescribe` renders it. No runtime behaviour yet | `jobSchema.ts`, `checks/`, `tools/jobTools.ts`, `jobDescribe.ts` | Forge (**Qwopus trial**, see the scorecard) |
-| 2 | Unattended registry, plus the approval, `ask_user` and `notify_user` branches | new `sidebar/unattendedConversations.ts`, `ToolApprovalService.ts`, `tools/uxTools.ts` | **Codex**: this is the approval gate, and a subtle bug is an agent with auto-approval |
+| 2 | Unattended registry, plus the approval, `ask_user` and `notify_user` branches | new `sidebar/unattendedConversations.ts`, `ToolApprovalService.ts`, `tools/uxTools.ts` | **Claude**: this is the approval gate, and a subtle bug is an agent with auto-approval |
+| 2b | Audit fixes the runner depends on (weekly audit 2026-09-21): **F2** a window that loses the initial scheduler lease never retries, so jobs stop when the owner window closes; **F3** lease heartbeat `.tmp` files fire the job watcher. Tests assert the fixed behaviour | `JobScheduler.ts` / `vscode/jobsSetup.ts`, `JobStore.ts` | **Claude** |
 | 3 | Runner steps 1–6, 8, 9 and crash recovery; wire into the scheduler, including the three scheduler behaviours above | new `jobs/agentTask.ts`, `JobScheduler.ts` (+ `runCheck` extraction if needed), `extension.ts` wiring | Forge (Qwopus if phase 1 passes, else Qwen Flash) |
-| 4 | Step 7: restart after turn, config backup and rollback | `agentTask.ts` | **Codex**: touches the live binary |
+| 4 | Step 7: restart after turn, config backup and rollback | `agentTask.ts` | **Claude**: touches the live binary |
 | 5 | The llama job plus `docs/LLAMACPP_UPDATE.md` (the "how", for the agent); live overnight test; then retire `llamacpp_update` | config/job file, docs, removal | Forge writes the doc; the owner runs the test |
 
 ## State × lifecycle ledger
