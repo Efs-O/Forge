@@ -75,7 +75,7 @@ describe('HostProgressOpener', () => {
     expect(channel.edits.at(-1)?.text).toBe('Forge: failed.');
   });
 
-  it('asks once for an unpaired conversation, not once per token', async () => {
+  it('sends nothing for an unpaired conversation, however many tokens stream', async () => {
     const { channel, opener } = rig({ target: undefined });
     for (let index = 0; index < 20; index += 1) opener.handle(token(`t${String(index)}`));
     await settle();
@@ -106,6 +106,22 @@ describe('HostProgressOpener', () => {
     opener.handle(token('heard'));
     await settle();
     expect(channel.progress).toEqual([{ chatId: 'chat-2', text: 'Forge: working…' }]);
+  });
+
+  it('starts watching mid-turn when a chat is paired after the turn began', async () => {
+    const channel = new FakeRemoteChannel();
+    const signal = new AbortController().signal;
+    const progress = new RemoteAgentProgress(channel, signal, () => true, 3_900, 0);
+    let chatId: string | undefined;
+    const opener = new HostProgressOpener({ channel, signal, progress, target: () => chatId });
+    opener.handle(token('before pairing'));
+    await settle();
+    expect(channel.progress).toHaveLength(0);
+
+    chatId = 'chat-3';
+    opener.handle(token('after pairing'));
+    await settle();
+    expect(channel.progress).toEqual([{ chatId: 'chat-3', text: 'Forge: working…' }]);
   });
 
   it('leaves a chat-queued turn to the queue drain that opened it', async () => {

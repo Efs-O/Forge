@@ -45,12 +45,12 @@ export class HostProgressOpener {
   /** Conversations whose opening message has been requested but not returned. */
   private readonly opening = new Map<string, AgentProgressEvent[]>();
   /**
-   * Conversations this turn will get no message for -- nobody paired to them,
-   * or the transport refused the send.
-   *
-   * Without it the decision would be retaken on every streamed token, which
-   * for an unpaired conversation is one `sendProgress` per token. Cleared by
-   * the turn's `end`, so pairing a chat takes effect on the next turn.
+   * Conversations whose opening send the transport refused this turn. Cleared
+   * by the turn's `end`. An UNPAIRED conversation is not latched here: pairing
+   * is re-checked on every event (an in-memory lookup), so a chat paired
+   * mid-turn starts watching at once. The latch used to cover "unpaired" too,
+   * and a bus-started run is one long turn — a phone paired a minute after it
+   * began saw nothing for the rest of it.
    */
   private readonly declined = new Set<string>();
 
@@ -73,8 +73,10 @@ export class HostProgressOpener {
       return;
     }
     if (!this.deps.channel.sendProgress || !this.deps.channel.editMessage) return;
+    const chatId = this.deps.target(conversationId);
+    if (!chatId) return;
     this.opening.set(conversationId, [event]);
-    void this.open(conversationId);
+    void this.open(conversationId, chatId);
   }
 
   /** Drops held events for turns that will never get a message. */
@@ -83,17 +85,14 @@ export class HostProgressOpener {
     this.declined.clear();
   }
 
-  private async open(conversationId: string): Promise<void> {
+  private async open(conversationId: string, chatId: string): Promise<void> {
     try {
-      const chatId = this.deps.target(conversationId);
-      const messageId = chatId
-        ? await this.deps.channel.sendProgress?.(chatId, 'Forge: working…', {
-            signal: this.deps.signal,
-          })
-        : undefined;
+      const messageId = await this.deps.channel.sendProgress?.(chatId, 'Forge: working…', {
+        signal: this.deps.signal,
+      });
       // Re-checked after the await: the turn can end, or a chat-originated
       // prompt can claim the conversation, while the send is in flight.
-      if (!chatId || !messageId) {
+      if (!messageId) {
         this.declined.add(conversationId);
         return;
       }
