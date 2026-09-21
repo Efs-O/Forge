@@ -22,6 +22,17 @@ decides who writes phase 3:
 Claude audits the session log (`~/.forge/sessions`, deduped, by `forge_version`)
 for rounds, tool failures and repeats, and writes the verdict here.
 
+**Verdict (2026-09-21): pass; Qwopus writes phase 3.** `c7ee5a1`, 18 min,
+66 tool rounds: CI green on its own commit, in scope (the `runCheck.ts`
+extraction was forced by the 500-line cap), 0 `ask_user`, no loops, asked
+Codex with hash + phase, stopped when told. Misses: no tests, no OWNERS row.
+Codex's high finding (an `agent_task` job recorded "ok" and delivered with no
+runner) was a gap in *this plan's* phase split, not a Qwopus error; fixed with
+the tests and OWNERS row in `fe10660`. For phase 3 the prompt adds: every
+behaviour gets a test, every new file gets its `docs/OWNERS.md` row, and the
+`agent_task runner not wired yet` branch in `JobScheduler` is replaced, not
+kept.
+
 ## Why
 
 The shipped jobs feature (`docs/plans/PERSISTENT_AGENT_JOBS_PLAN.md`) never
