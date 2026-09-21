@@ -152,7 +152,7 @@ export function makeLiveSessionTool(deps: LiveSessionDeps): RegisteredTool {
           '"the open Codex", or the session that owns the other half of a task, and to answer ' +
           'a message another session sent you: ask_local_agent always starts a NEW, empty ' +
           'session that knows nothing. The target is resolved by its mesh alias (claude / ' +
-          'codex); a Forge-owned session is created on first use with one-time consent, and ' +
+          'codex); a Forge-owned session is created on first use, and ' +
           'the config thread/session value is a deprecated pin (the alias wins). The question ' +
           "appears in that session's own window. " +
           'Returns the exchange formatted for the user, so you do not need to quote it. If ' +

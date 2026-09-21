@@ -188,3 +188,18 @@ export function forgeInboundPrompt(from: string, text: string): string {
     `_(Agent-bus message. To answer, call \`ask_live_session\` with ${inboundHint(from)}.)_`
   );
 }
+
+/**
+ * The inverse of `forgeInboundPrompt`: who sent a bus-delivered prompt and what
+ * they said, or undefined for a prompt the user typed. Remote views label a bus
+ * prompt by its sender. Labelling it "You:" made an agent's words read as the
+ * user's own.
+ */
+export function parseForgeInboundPrompt(
+  prompt: string,
+): { from: string; text: string } | undefined {
+  const match = /^\*\*([A-Za-z0-9._ -]{1,40}) says:\*\*\s*/u.exec(prompt);
+  if (!match) return undefined;
+  const body = prompt.slice(match[0].length).replace(/\s*_\(Agent-bus message\.[\s\S]*$/u, '');
+  return { from: match[1] as string, text: body.trim() };
+}

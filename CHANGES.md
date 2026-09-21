@@ -1,5 +1,27 @@
 # Forge — Recent Changes
 
+## 0.16.17
+
+### Agent mesh: the run shows up on Telegram and in the session log
+
+- **Codex's and Claude's answers are mirrored to Telegram.** Each
+  `ask_live_session` result now goes out as its own message, headed
+  `🔁 Forge ↔ <target> · <subject>`. A failure goes out too. Before, the
+  phone showed the kickoff and nothing of the agents talking.
+- **Mirroring starts even when the chat is paired mid-turn.** The
+  "Forge: working…" opener used to latch on a turn that began with no paired
+  chat, and it stayed silent for the rest of that turn. Only a refused send
+  latches now.
+- **Bus prompts are labelled by sender.** `/view` and the transcript used to
+  show `You: **claude says:** …` plus the reply hint. They now show
+  `claude: …`.
+- **The session log is written after every tool round.** Before, it was only
+  written at turn end, so an hour-long mesh turn left
+  `~/.forge/sessions/<id>.jsonl` empty until it finished. An assistant row
+  that is still streaming is held back until it settles.
+- **No consent dialog before Forge starts its own Claude/Codex session.** The
+  first `ask_live_session` just creates it.
+
 ## 0.16.16
 
 ### Agent mesh: Claude and Codex can steer Forge mid-turn (AGENT_MESH_PLAN §6)

@@ -1,3 +1,4 @@
+import { parseForgeInboundPrompt } from '../agentBus/busContent';
 import { boldLineLabel, sendRichText } from './telegramHtml';
 import type { ForgeExchange } from '../sidebar/sessionProjections';
 import type { RemoteChannel } from './types';
@@ -49,9 +50,11 @@ export function renderExchange(
   total: number,
   note?: string,
 ): string {
-  const prompt = clipLine(tidy(exchange.prompt).replace(/\s+/gu, ' ') || '(no prompt)');
+  const bus = parseForgeInboundPrompt(exchange.prompt);
+  const raw = bus ? bus.text : exchange.prompt;
+  const prompt = clipLine(tidy(raw).replace(/\s+/gu, ' ') || '(no prompt)');
   const answer = clipBody(tidy(exchange.answer));
-  const header = `[${String(index)}/${String(total)}] You: ${prompt}`;
+  const header = `[${String(index)}/${String(total)}] ${bus ? bus.from : 'You'}: ${prompt}`;
   return `${note ? `Forge: ${note}\n\n` : ''}${header}\n\n${answer}`;
 }
 

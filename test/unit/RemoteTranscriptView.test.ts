@@ -6,6 +6,7 @@ import {
   renderExchange,
   sendTranscriptView,
 } from '../../src/remote/RemoteTranscriptView';
+import { forgeInboundPrompt, parseForgeInboundPrompt } from '../../src/agentBus/busContent';
 import { recentExchanges } from '../../src/sidebar/sessionProjections';
 import type { ChatMessage } from '../../src/llm/types';
 
@@ -32,6 +33,13 @@ describe('renderExchange', () => {
   it('heads each answer with its position and the prompt that asked for it', () => {
     const text = renderExchange({ prompt: 'resume', answer: 'Done.' }, 2, 3);
     expect(text).toBe('[2/3] You: resume\n\nDone.');
+  });
+
+  it('labels an agent-bus prompt by its sender, without the reply hint', () => {
+    const prompt = forgeInboundPrompt('claude', 'New three-way task');
+    const text = renderExchange({ prompt, answer: 'On it.' }, 1, 1);
+    expect(text).toBe('[1/1] claude: New three-way task\n\nOn it.');
+    expect(parseForgeInboundPrompt('plain prompt')).toBeUndefined();
   });
 
   it('keeps the header on one line however long the prompt was', () => {

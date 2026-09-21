@@ -226,9 +226,12 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
       request,
     ),
   );
-  agentLoop.setTranscriptChangedListener(() => {
+  // Flushed per round too: a mesh run is one turn that can last an hour, and
+  // a log written only at turn end showed nothing of it while it ran.
+  agentLoop.setTranscriptChangedListener((convId) => {
     host.persistSession();
     host.postSessionSync();
+    send.flushSessionLog(convId, true);
   });
 
   const send = new SendPipeline({

@@ -338,13 +338,22 @@ export class SendPipeline {
     return logger;
   }
 
-  /** Appends the finished turn to the on-disk transcript under ~/.forge. */
-  private flushSessionLog(convId: string): void {
+  /**
+   * Appends new transcript rows to the on-disk log under ~/.forge. Incremental
+   * (cursor-based), so it is safe per tool round as well as at turn end.
+   * `settledOnly` (the per-round path) holds back a trailing assistant row
+   * that may still be streaming: the cursor would move past it, and the log
+   * would keep its half-written text for good.
+   */
+  flushSessionLog(convId: string, settledOnly = false): void {
     const conv = this.deps.getSidebar().conversations.find((c) => c.id === convId);
     if (!conv || conv.messages.length === 0) return;
+    const last = conv.messages[conv.messages.length - 1];
+    const unsettled = settledOnly && last?.role === 'assistant' && !last.tool_calls?.length;
+    const messages = unsettled ? conv.messages.slice(0, -1) : conv.messages;
     const logger = this.loggerFor(conv);
     logger.updateTitle(conv.title);
-    logger.flush(conv.messages, conv.active_model ?? '', {
+    logger.flush(messages, conv.active_model ?? '', {
       inputTokens: conv.input_tokens ?? 0,
       outputTokens: conv.output_tokens ?? 0,
       requestCount: conv.model_request_count ?? 0,

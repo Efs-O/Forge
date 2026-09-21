@@ -34,6 +34,7 @@ import { ToolBudget } from '../tools/ToolBudget';
 import { hiddenLazyToolNames } from '../tools/lazyToolGroups';
 import { deriveStaticCapabilities } from '../config/ConfigResolver';
 import { applyToolCalls } from './transcriptMutations';
+import { mirrorLiveSessionAnswers } from './liveSessionMirror';
 import { extractToolDetail } from './toolSummary';
 import { injectTurnContext, type TurnContextState } from './turnContext';
 import { latestPastedTerminalCommand } from './compactionLedger';
@@ -375,9 +376,8 @@ export async function runModelTurn(
             ctx.onTranscriptChanged?.(conv);
           },
         );
-        // The token bar reports measured context, not a projection, so a tool
-        // result does not move it — the next round's usage frame does. The
-        // tick therefore lives in `onUsage` below.
+        mirrorLiveSessionAnswers(conv.id, toolCalls, messages, ctx.emitAgentProgress);
+        // Token bar ticks in `onUsage`: a tool result moves no measured context.
       },
       onMessagesChanged: () => ctx.onTranscriptChanged?.(conv),
       onToken: (text) => {
