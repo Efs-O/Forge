@@ -1,7 +1,7 @@
 import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import { assetMatches } from '../checks/github';
+import { pickAssets } from './llamacppAssets';
 import { jobsDownloadBinary, jobsFetchReleaseByTag, type JobsFetchOptions } from '../jobsFetch';
 import type { Action } from '../jobSchema';
 import {
@@ -340,36 +340,6 @@ export function approveStaged(jobsRoot: string, jobId: string, now: number): str
   if (staged.switch_pending) return `${staged.tag} is already switching`;
   writeStaged(jobsRoot, { ...staged, switch_pending: true });
   return `${staged.tag} approved; switching when idle`;
-}
-
-/**
- * Pick the assets to download for a tag: the main `llama-b<tag>` zip and the
- * `cudart-llama-b<tag>` zip (both required for a CUDA build). The job's
- * `asset_pattern`, when it matches anything, must match at least one of the
- * picked assets; a pattern that matches neither is a misconfiguration and
- * fails loudly rather than silently skipping the cudart zip.
- */
-function pickAssets(
-  release: { tag: string; assets: { name: string; digest: string; downloadUrl: string }[] },
-  tag: string,
-  assetPattern: string,
-): { name: string; digest: string; downloadUrl: string }[] {
-  const main = release.assets.find((a) => a.name.startsWith(`llama-${tag}-`));
-  const cudart = release.assets.find((a) => a.name.startsWith(`cudart-llama-${tag}-`));
-  const picked = [main, cudart].filter((a): a is NonNullable<typeof a> => a !== undefined);
-  if (picked.length === 0) {
-    throw new Error(`Forge: no llama-${tag} or cudart-llama-${tag} asset found in release ${tag}`);
-  }
-  if (picked.length < 2) {
-    throw new Error(`Forge: release ${tag} is missing the cudart zip; refusing a partial build`);
-  }
-  // The job's pattern must agree with at least one picked asset.
-  if (picked.every((a) => !assetMatches(a.name, assetPattern))) {
-    throw new Error(
-      `Forge: asset_pattern "${assetPattern}" matches neither ${picked.map((a) => a.name).join(' nor ')}`,
-    );
-  }
-  return picked;
 }
 
 /** Stage 5: `--version` reports the tag, `--list-devices` runs, and (when

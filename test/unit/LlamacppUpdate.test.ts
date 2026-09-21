@@ -196,7 +196,7 @@ describe('stageLlamacppUpdate (stages 2-6)', () => {
     ).rejects.toThrow(/missing the cudart/);
   });
 
-  it('an asset_pattern matching neither picked asset fails loudly', async () => {
+  it('an asset_pattern matching no main asset fails loudly, before any download', async () => {
     const bad: Extract<Action, { kind: 'llamacpp_update' }> = {
       kind: 'llamacpp_update',
       mode: 'prepare',
@@ -204,8 +204,50 @@ describe('stageLlamacppUpdate (stages 2-6)', () => {
     };
     const env = makeEnv();
     await expect(stageLlamacppUpdate(bad, 'llama', 'ggml-org/llama.cpp', TAG, env)).rejects.toThrow(
-      /asset_pattern/,
+      /matches no main asset/,
     );
+    expect(jobsDownloadBinary).not.toHaveBeenCalled();
+  });
+
+  it('picks the main build by asset_pattern in upload order, with the current untagged cudart naming', async () => {
+    // The real b11065 shape: assets in GitHub upload order (cpu-arm64 first),
+    // and the cudart without the tag in its name.
+    jobsFetchReleaseByTag.mockResolvedValue({
+      tag: TAG,
+      assets: [
+        { name: `llama-${TAG}-bin-win-cpu-arm64.zip`, digest: MAIN_DIGEST, downloadUrl: 'https://github.com/x/1' },
+        { name: `llama-${TAG}-bin-win-cpu-x64.zip`, digest: MAIN_DIGEST, downloadUrl: 'https://github.com/x/2' },
+        { name: `llama-${TAG}-bin-win-cuda-12.4-x64.zip`, digest: MAIN_DIGEST, downloadUrl: 'https://github.com/x/3' },
+        { name: `llama-${TAG}-bin-win-cuda-13.4-x64.zip`, digest: MAIN_DIGEST, downloadUrl: 'https://github.com/x/4' },
+        { name: 'cudart-llama-bin-win-cuda-12.4-x64.zip', digest: CUDART_DIGEST, downloadUrl: 'https://github.com/x/5' },
+        { name: 'cudart-llama-bin-win-cuda-13.4-x64.zip', digest: CUDART_DIGEST, downloadUrl: 'https://github.com/x/6' },
+      ],
+    });
+    const env = makeEnv();
+    await stageLlamacppUpdate(action, 'llama', 'ggml-org/llama.cpp', TAG, env);
+    // The newest CUDA x64 build, not the first-uploaded cpu-arm64 zip — and
+    // its untagged cudart partner, not the 12.4 one.
+    expect(jobsDownloadBinary.mock.calls.map((c) => c[0])).toEqual([
+      'https://github.com/x/4',
+      'https://github.com/x/6',
+    ]);
+    expect(readStaged(jobsRoot, 'llama')).toBeDefined();
+  });
+
+  it('still finds the cudart under the older tagged naming', async () => {
+    jobsFetchReleaseByTag.mockResolvedValue({
+      tag: TAG,
+      assets: [
+        { name: `llama-${TAG}-bin-win-cuda-13.3-x64.zip`, digest: MAIN_DIGEST, downloadUrl: `https://github.com/x/${MAIN}` },
+        { name: `cudart-llama-${TAG}-bin-win-cuda-13.3-x64.zip`, digest: CUDART_DIGEST, downloadUrl: `https://github.com/x/${CUDART}` },
+      ],
+    });
+    const env = makeEnv();
+    await stageLlamacppUpdate(action, 'llama', 'ggml-org/llama.cpp', TAG, env);
+    expect(jobsDownloadBinary.mock.calls.map((c) => c[0])).toEqual([
+      `https://github.com/x/${MAIN}`,
+      `https://github.com/x/${CUDART}`,
+    ]);
   });
 
   it('an existing build folder stops the run without overwriting', async () => {
