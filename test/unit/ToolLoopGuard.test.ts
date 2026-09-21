@@ -79,6 +79,14 @@ describe('ToolLoopGuard', () => {
     expect(guard.afterRound(calls, result('Error: third after reset'))).toBe(true);
   });
 
+  it('still throws when the identical failing call repeats', () => {
+    const guard = new ToolLoopGuard();
+    const calls = call('read_file', { path: 'a', start_line: 900 });
+    expect(() => {
+      for (let i = 0; i < 6; i++) guard.afterRound(calls, result('Error: past end'));
+    }).toThrow(ToolLoopDetectedError);
+  });
+
   it('does not combine failed calls for different paths', () => {
     const guard = new ToolLoopGuard();
     guard.afterRound(call('read_file', { path: 'a' }), result('Error: a1'));

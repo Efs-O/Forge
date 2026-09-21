@@ -81,8 +81,6 @@ export class ToolLoopGuard {
     isMutatingTool?: (name: string) => boolean,
   ): boolean {
     this.records.push({ call: callFingerprint(calls), result: resultFingerprint(resultMessages) });
-    const failure = this.warnOnRepeatedFailure(calls, resultMessages);
-    if (failure.tracked) return failure.warned;
     const length = this.records.length;
     const last = this.records[length - 1];
     if (
@@ -109,6 +107,9 @@ export class ToolLoopGuard {
       }
     }
 
+    // After the throws: a persistent identical failure must still end the turn.
+    const failure = this.warnOnRepeatedFailure(calls, resultMessages);
+    if (failure.tracked) return failure.warned;
     if (calls.some((call) => isMutatingTool?.(call.function.name))) return false;
     const earlier = this.records.findIndex(
       (record, index) =>
