@@ -37,6 +37,8 @@ export function defaultState(): JobState {
     summary_pending: false,
     summary_failures: 0,
     summary_retry_at: null,
+    task_run: null,
+    task_pending: false,
   };
 }
 

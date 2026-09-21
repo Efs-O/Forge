@@ -1,10 +1,8 @@
 import { FileLease } from '../util/FileLease';
-import { jobsFetch } from './jobsFetch';
+
 import { defaultOutboxDir } from './JobOutbox';
 import { JobDelivery } from './JobDelivery';
-import { githubIssueCheck, githubReleaseCheck } from './checks/github';
-import { diskSpaceCheck } from './checks/diskSpace';
-import type { CheckContext } from './checks/checkTypes';
+import { runCheck, buildCheckContext } from './checks/runCheck';
 import { isDue, nextDue, wakeTimesFor } from './schedule';
 import type { JobFile, RunRow } from './jobSchema';
 import type { JobStore } from './JobStore';
@@ -90,8 +88,7 @@ export class JobScheduler {
   private disposed = false;
   /** The wall-clock time of the last tick, for resume detection. */
   private lastTickAt: number | undefined;
-  /** The ETag cache, shared across runs for the process's lifetime. */
-  private readonly etagCache = new Map<string, string>();
+
   /** Job ids with a run in progress, so the same job is not double-run. */
   private readonly runningJobs = new Set<string>();
 
@@ -396,7 +393,7 @@ export class JobScheduler {
     changed: boolean;
     summary: string;
   }> {
-    const { job, state } = jobFile;
+    const { job } = jobFile;
     const { allowedHosts } = this.getConfig();
     // The ETag cache is keyed PER JOB, not per URL alone. Two jobs watching the
     // same repo share a URL, and a cache keyed on the URL alone hands job B a
@@ -404,25 +401,8 @@ export class JobScheduler {
     // says "nothing new", a state the check cannot tell apart from a real
     // no-change. The same happens to one job whose state file was lost while
     // the process kept its cache.
-    const ctx: CheckContext = {
-      fetch: (url) =>
-        jobsFetch(url, { allowedHosts, etagCache: this.etagCache, cacheKeyPrefix: job.id }),
-      etagCache: this.etagCache,
-      allowedHosts,
-    };
-
-    let checkResult;
-    switch (job.check.kind) {
-      case 'github_release':
-        checkResult = await githubReleaseCheck(job.check, state.last_observation, ctx);
-        break;
-      case 'github_issue':
-        checkResult = await githubIssueCheck(job.check, state.last_observation, ctx);
-        break;
-      case 'disk_space':
-        checkResult = await diskSpaceCheck(job.check, state.last_observation, ctx);
-        break;
-    }
+    const ctx = buildCheckContext(allowedHosts, job.id);
+    let checkResult = await runCheck(jobFile, ctx);
 
     // A mutating action (llamacpp_update) runs when the check reports a change
     // (B5). It is the only action that mutates the machine; a failure here is a

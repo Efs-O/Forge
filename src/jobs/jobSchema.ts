@@ -50,7 +50,7 @@ export const ScheduleSchema = z.discriminatedUnion('kind', [
 ]);
 export type Schedule = z.infer<typeof ScheduleSchema>;
 
-/** What a job watches. Exactly one of the three (B.2). */
+/** What a job watches. Exactly one of the four (B.2). */
 export const CheckSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('github_release'),
@@ -75,6 +75,10 @@ export const CheckSchema = z.discriminatedUnion('kind', [
     kind: z.literal('disk_space'),
     path: z.string().min(1),
     min_free_gb: z.number().positive(),
+  }),
+  /** No check: the job runs on every schedule tick. */
+  z.object({
+    kind: z.literal('none'),
   }),
 ]);
 export type Check = z.infer<typeof CheckSchema>;
@@ -104,7 +108,7 @@ export const OnChangeSchema = z.discriminatedUnion('kind', [
 ]);
 export type OnChange = z.infer<typeof OnChangeSchema>;
 
-/** The only mutating action (B.7). `prepare` asks for approval; `apply` does not. */
+/** The mutating actions (B.7). `llamacpp_update` is the fixed pipeline; `agent_task` runs an agent turn. */
 export const ActionSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('llamacpp_update'),
@@ -115,6 +119,21 @@ export const ActionSchema = z.discriminatedUnion('kind', [
      * glob, so write a `*` where the tag varies.
      */
     asset_pattern: z.string().min(1),
+  }),
+  /**
+   * An agent task: when the job fires, an agent reads the task, thinks,
+   * runs commands and finishes. The task is capped at 4000 characters.
+   */
+  z.object({
+    kind: z.literal('agent_task'),
+    /** The plain-language task for the agent. Capped at 4000 characters. */
+    task: z.string().min(1).max(4000, 'task must be at most 4000 characters'),
+    /** Optional model override; default: the default chat model. */
+    model: z.string().min(1).optional(),
+    /** Optional wall-clock cap in minutes; omitted = no clock cap. */
+    max_minutes: z.number().int().positive().optional(),
+    /** When to report: "failures_and_changes" or "always". */
+    report: z.enum(['failures_and_changes', 'always']).default('failures_and_changes'),
   }),
 ]);
 export type Action = z.infer<typeof ActionSchema>;
@@ -168,6 +187,22 @@ export const JobStateSchema = z.object({
   summary_failures: z.number().int().nonnegative().default(0),
   /** Epoch ms before which a failed pending summary is not retried. */
   summary_retry_at: z.number().int().nonnegative().nullable().default(null),
+  /**
+   * A task run is in progress. Set by the agent-task runner before anything
+   * else; cleared in its `finally`. Null when idle.
+   */
+  task_run: z
+    .object({
+      started_at: z.number().int().nonnegative(),
+      conversation_id: z.string().nullable().default(null),
+    })
+    .nullable()
+    .default(null),
+  /**
+   * A task run is pending (no slot free). Set by the runner when it cannot
+   * start immediately; the next idle tick retries. Default false.
+   */
+  task_pending: z.boolean().default(false),
 });
 export type JobState = z.infer<typeof JobStateSchema>;
 

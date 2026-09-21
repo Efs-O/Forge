@@ -28,6 +28,8 @@ export function describeCheck(check: Job['check']): string {
       return `github_issue ${check.repo}#${check.issue_number}`;
     case 'disk_space':
       return `disk_space ${check.path} (min ${check.min_free_gb} GB free)`;
+    case 'none':
+      return 'none (runs every tick)';
   }
 }
 
@@ -38,7 +40,12 @@ export function describeOnChange(onChange: Job['on_change']): string {
 
 /** A short human-readable form of an action. */
 export function describeAction(action: NonNullable<Job['action']>): string {
-  return `${action.kind} [${action.mode}]`;
+  switch (action.kind) {
+    case 'llamacpp_update':
+      return `llamacpp_update [${action.mode}]`;
+    case 'agent_task':
+      return `agent_task [${action.report}]${action.model ? ` (${action.model})` : ''}${action.max_minutes ? ` (max ${action.max_minutes}m)` : ''}`;
+  }
 }
 
 /** Format an epoch-ms timestamp relative to `now`, for list/get output. */
