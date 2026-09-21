@@ -49,8 +49,7 @@ is watching it.
     "kind": "agent_task",
     "task": "A new llama.cpp release is out (see the observation). Install the CUDA Windows build next to the current one under %LOCALAPPDATA%\\Forge, point llama_server.binary in config.yaml at it, and say RESTART: yes. Read docs/LLAMACPP_UPDATE.md for how.",
     "model": "qwen-flash",       // optional; default: the default chat model
-    "max_rounds": 40,             // optional; default: that model's max_tool_rounds
-    "max_minutes": 180,           // wall clock, including prefill; the slow model decides this
+    "max_minutes": 240,           // optional wall-clock cap; omitted = no clock cap, only the model's own caps
     "report": "failures_and_changes" // or "always"
   }
 }
@@ -158,10 +157,14 @@ One run:
      > `RESULT: ok | no_change | failed — <one sentence>`
      > If you changed llama_server.binary, add a line `RESTART: yes`. Do not
      > restart the backend yourself: you are running on it.
-6. **Race the turn against `max_minutes`.** On timeout, call
-   `cancel(conversationId)` and set the outcome to `timeout`. The round cap is
-   the agent loop's own `max_tool_rounds`, so the per-job `max_rounds` is only a
-   per-conversation override of it.
+6. **Caps: reuse the model's own.** The round and budget caps are the model's
+   existing `max_tool_rounds` and budget settings. They were tuned after an
+   18-hour Qwen run and are not duplicated per job. The one job-level knob is
+   the optional `max_minutes`. Once it elapses, the runner calls
+   `cancel(conversationId)` and the outcome is `timeout`. It exists so an
+   overnight run always has an answer on Telegram by morning, instead of still
+   running. There is no default: omitted means no clock cap (CLAUDE.md: no
+   hardcoded fallbacks for user-configurable params).
 7. **Restart after the turn.** This happens only if `RESTART: yes` and
    `RESULT: ok`. It is deterministic runner code, not the model, because the
    model runs on the backend being replaced:
