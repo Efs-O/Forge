@@ -41,6 +41,34 @@ function setAge(file: string, ageMs: number): void {
   fs.utimesSync(file, t, t);
 }
 
+/**
+ * The lines `usage()` prints: the leading comment block of the client (after the
+ * shebang, up to the first non-# line). Mirrors the awk in `usage()` so a change
+ * to either is caught here, not only by a bash-gated client run.
+ */
+function usageLines(script: string): string[] {
+  const lines = script.split('\n');
+  const out: string[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].startsWith('#')) out.push(lines[i]);
+    else break;
+  }
+  return out;
+}
+
+describe('CLIENT_SCRIPT usage block', () => {
+  it('covers every verb and the text-source note (a new verb cannot truncate it)', () => {
+    const usage = usageLines(CLIENT_SCRIPT).join('\n');
+    // Every verb the client accepts must be documented in the usage block.
+    for (const verb of ['reply', 'say', 'send', 'steer', 'join', 'who']) {
+      expect(usage).toContain(`forge.sh ${verb}`);
+    }
+    // The note that was silently cut off when `who` pushed it past the old
+    // `sed -n '2,7p'` range: a fixed range is exactly the bug this guards.
+    expect(usage).toContain('The text comes from the file, or from stdin');
+  });
+});
+
 describe('ensureBus', () => {
   it('creates the folders and the shipped files in an empty home', () => {
     ensureBus(paths);

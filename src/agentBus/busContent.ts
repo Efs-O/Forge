@@ -25,7 +25,11 @@ export const CLIENT_SCRIPT = String.raw`#!/usr/bin/env bash
 #   forge.sh who                      who is in the mesh, and what each is doing
 # The text comes from the file, or from stdin when no file is given.
 # Written by Forge on every start; edits are overwritten.
-usage() { sed -n '2,7p' "$0" >&2; exit 2; }
+# usage prints the leading comment block (lines after the shebang up to the
+# first non-# line) — derived, not a fixed range, so adding a verb line cannot
+# silently cut off the last lines (the old fixed range dropped the text note
+# when the who line landed).
+usage() { awk 'NR==1{next} /^#/{print;next} {exit}' "$0" >&2; exit 2; }
 # VERB is $1 (not the default-value form): a dollar-brace sequence would be
 # read as a template interpolation by the String.raw literal this script lives in.
 VERB="$1"; [ -n "$VERB" ] || usage
