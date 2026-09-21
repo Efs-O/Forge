@@ -24,6 +24,8 @@ for rounds, tool failures and repeats, and writes the verdict here.
 
 **Phase 3, first attempt:** stopped by Forge's loop guard ("alternating tool-call cycle produced no progress") after 43 calls. 26 good reads, then the same two `holdAwake` searches 16 times with identical results, no edit. Thinking is off, so no reasoning was logged. Restarted with a nudge naming the loop and plan step 4 (runner takes its own hold, releases in `finally`). Counts against the "Tool loop" check.
 
+**Phase 3, attempt 2:** stopped by Claude after 84+ calls and no edit (F5). The chat had grown to ~92K prompt tokens per request; the model config notes Qwen degrades past ~100K. Both attempts ran in the phase 1 chat, so neither is a fair read of Qwopus. **Rule from here: every phase starts in a fresh chat.**
+
 **Verdict (2026-09-21): pass; Qwopus writes phase 3.** `c7ee5a1`, 18 min,
 66 tool rounds: CI green on its own commit, in scope (the `runCheck.ts`
 extraction was forced by the 500-line cap), 0 `ask_user`, no loops, asked
@@ -434,7 +436,8 @@ Forge is editing the tree; each is its own commit plus a VSIX install.
 | F1 | Phase 3 attempt 1: Qwopus ran the same two `holdAwake` searches 16 times; `ToolLoopGuard` threw with no warning, so the model never saw it was repeating. The system-prompt rule against repeats already existed and did not help | On the first exact repeat of a read-only call with an identical result, prefix the result with one line naming the earlier call and telling it to act or change approach; keep the throw for persistent loops | after phase 3 |
 | F2 | `forge.sh send claude codex` → `unknown recipient "codex"`: the alias is written with `session_id ""`, `readAliases` (`src/agentMesh/aliasRegistry.ts`) drops it, `knownAliases` (`src/vscode/agentMeshSetup.ts`) omits codex | Register the owned Codex under a routable id, or let `knownAliases` include owned sessions without one | after phase 3 |
 | F3 | A bus-started turn (`forge.sh say`) was not mirrored to Telegram | Treat bus turns as a remote origin for the mirror | after phase 3 (diagnose first) |
-| F4 | `/agent/message` lands on the active chat's model; starting a phase on Qwopus needed a manual model pick | Optional `model` (and new-chat flag) on `/agent/message` + `forge.sh say --model`, reusing phase 3's `setConversationModel` step | after phase 3 (needs it) |
+| F4 | `/agent/message` lands in the active chat on its model: no way to start a phase on a chosen model **or in a fresh chat**. Phase 3 attempt 2 ran in the phase 1 chat at ~92K prompt tokens per request (131K window) and degraded | Optional `model` and `new_chat` on `/agent/message` + `forge.sh say --model <m> --new` | **promoted: Codex, next** (does not need phase 3) |
+| F5 | Phase 3 attempt 2: 84+ calls, no edits; `read_file` paged 100-line windows up to line 3600 of two ~497-line files, ignoring "start_line 2400 is past end_line 498 (file has 498 lines)" every time. Each error differs, so F1's identical-result check cannot see it | Count consecutive failures of the same tool on the same path; from the 3rd, prefix the result with a stop line naming the count and the file length | Codex, with F1 |
 
 ## Out of scope
 
