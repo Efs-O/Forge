@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as vscode from 'vscode';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolDispatch, resolveToolPath } from '../../src/sidebar/ToolDispatch';
+import { ToolApprovalPolicyDenied } from '../../src/sidebar/ToolApprovalService';
 import type { ChatMessage, ToolCall } from '../../src/llm/types';
 import type { CheckpointStack } from '../../src/checkpoint/CheckpointStack';
 import type { KeepUndoCodeLensProvider } from '../../src/sidebar/KeepUndoCodeLens';
@@ -528,6 +529,33 @@ describe('ToolDispatch', () => {
 
     expect(toolRegistry.get('write_file')?.handler).not.toHaveBeenCalled();
     expect(messages[0].content).toMatch(/declined/);
+  });
+
+  it('returns unattended policy denial guidance without counting a tool failure', async () => {
+    const handler = vi.fn().mockResolvedValue('written');
+    toolRegistry.register({
+      definition: {
+        type: 'function',
+        function: { name: 'write_file', description: 'Write a file', parameters: { type: 'object' } },
+      },
+      permission: 'write',
+      mutation: { paths: (args) => [args['path'] as string], showDiff: true },
+      handler,
+    });
+    requestApproval.mockRejectedValue(new ToolApprovalPolicyDenied('write_file'));
+
+    const messages: Array<{ role: string; content: string }> = [];
+    await dispatch.dispatch(
+      [makeToolCall('write_file', { path: 'config.yaml', content: 'x' })],
+      allowed,
+      messages as never,
+      'unattended-conversation',
+    );
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(messages[0]?.content).toContain('unattended: dangerous tool denied by policy');
+    expect(messages[0]?.content).toContain('RESULT: failed');
+    expect(failureTracker.record).not.toHaveBeenCalled();
   });
 
   it('handles malformed JSON arguments', async () => {

@@ -1,5 +1,9 @@
 import * as vscode from 'vscode';
 import type { HostToWebview } from './messageBridge';
+import {
+  unattendedConversations,
+  type UnattendedConversationRegistry,
+} from './unattendedConversations';
 
 export interface ToolApprovalRequestEvent {
   id: string;
@@ -17,6 +21,17 @@ export interface ToolApprovalResolvedEvent extends ToolApprovalRequestEvent {
 export interface ToolApprovalSink {
   requested(event: ToolApprovalRequestEvent): void;
   resolved(event: ToolApprovalResolvedEvent): void;
+}
+
+/** A tool was refused by unattended policy, rather than by a human. */
+export class ToolApprovalPolicyDenied extends Error {
+  constructor(toolName: string) {
+    super(
+      `unattended: dangerous tool denied by policy: "${toolName}". ` +
+        'Stop and report RESULT: failed naming the action you needed.',
+    );
+    this.name = 'ToolApprovalPolicyDenied';
+  }
 }
 
 interface PendingApproval extends ToolApprovalRequestEvent {
@@ -40,6 +55,7 @@ export class ToolApprovalService {
   constructor(
     private readonly post: (message: HostToWebview) => void,
     private readonly getView: () => vscode.WebviewView | undefined,
+    private readonly unattended: UnattendedConversationRegistry = unattendedConversations,
   ) {}
 
   addSink(sink: ToolApprovalSink): { dispose(): void } {
@@ -88,13 +104,17 @@ export class ToolApprovalService {
     conversationId?: string,
     signal?: AbortSignal,
   ): Promise<boolean> {
+    if (signal?.aborted) return Promise.resolve(false);
+    if (conversationId && this.unattended.has(conversationId)) {
+      if (dangerous) return Promise.reject(new ToolApprovalPolicyDenied(toolName));
+      return Promise.resolve(true);
+    }
     if (this.clankerMode && !dangerous) return Promise.resolve(true);
     if (!this.getView() && this.sinks.size === 0) {
       return Promise.reject(
         new Error(`Forge: sidebar is unavailable for tool approval (${toolName}).`),
       );
     }
-    if (signal?.aborted) return Promise.resolve(false);
     return new Promise<boolean>((resolve) => {
       const pending: PendingApproval = {
         id: `confirm-${Date.now()}-${Math.random().toString(36).slice(2)}`,

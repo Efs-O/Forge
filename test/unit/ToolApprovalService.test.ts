@@ -3,7 +3,11 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('vscode', () => ({ commands: { executeCommand: vi.fn() } }));
 
 import type { HostToWebview } from '../../src/sidebar/messageBridge';
-import { ToolApprovalService } from '../../src/sidebar/ToolApprovalService';
+import {
+  ToolApprovalPolicyDenied,
+  ToolApprovalService,
+} from '../../src/sidebar/ToolApprovalService';
+import { unattendedConversations } from '../../src/sidebar/unattendedConversations';
 
 describe('ToolApprovalService', () => {
   it('never bypasses dangerous cloud-worker approval in clanker mode', async () => {
@@ -24,6 +28,54 @@ describe('ToolApprovalService', () => {
     if (request?.type !== 'confirmRequest') throw new Error('confirmation was not posted');
     service.resolve(request.id, false);
     await expect(pending).resolves.toBe(false);
+  });
+
+  it('denies a dangerous unattended action without prompting or changing clanker mode', async () => {
+    const posted: HostToWebview[] = [];
+    const service = new ToolApprovalService(
+      (message) => posted.push(message),
+      () => ({}) as never,
+    );
+    const marker = unattendedConversations.mark('job-conversation');
+    try {
+      service.setClankerMode(true);
+      await expect(
+        service.request('install_llamacpp', 'switch config', true, 'job-conversation'),
+      ).rejects.toMatchObject({
+        name: 'ToolApprovalPolicyDenied',
+        message: expect.stringContaining('RESULT: failed'),
+      });
+      expect(posted.some((message) => message.type === 'confirmRequest')).toBe(false);
+      expect(service.getClankerMode()).toBe(true);
+      expect(new ToolApprovalPolicyDenied('x').message).toContain('policy');
+    } finally {
+      marker.dispose();
+    }
+  });
+
+  it('auto-approves only the non-dangerous call in the registered conversation', async () => {
+    const posted: HostToWebview[] = [];
+    const service = new ToolApprovalService(
+      (message) => posted.push(message),
+      () => ({}) as never,
+    );
+    const marker = unattendedConversations.mark('unattended-conversation');
+    try {
+      await expect(
+        service.request('edit_file', 'config.yaml', false, 'unattended-conversation'),
+      ).resolves.toBe(true);
+
+      const attended = service.request('edit_file', 'config.yaml', false, 'attended-conversation');
+      const request = posted.find(
+        (message) => message.type === 'confirmRequest' && message.conversationId === 'attended-conversation',
+      );
+      expect(request).toBeDefined();
+      if (request?.type !== 'confirmRequest') throw new Error('attended confirmation was not posted');
+      service.resolve(request.id, true);
+      await expect(attended).resolves.toBe(true);
+    } finally {
+      marker.dispose();
+    }
   });
 
   it('announces a remotely set clanker mode to the webview', () => {

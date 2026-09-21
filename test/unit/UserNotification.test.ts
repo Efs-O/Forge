@@ -1,10 +1,23 @@
-import { describe, expect, it, vi } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   NOTIFY_IDLE_RESET_MS,
   NOTIFY_TURN_LIMIT,
   UserNotificationService,
 } from '../../src/sidebar/UserNotificationService';
 import { makeNotifyUserTool } from '../../src/tools/uxTools';
+import { readOutboxItem, writeOutboxItem } from '../../src/jobs/JobOutbox';
+import { unattendedConversations } from '../../src/sidebar/unattendedConversations';
+
+const unattendedOutboxDirs: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    unattendedOutboxDirs.splice(0).map((directory) => fs.promises.rm(directory, { recursive: true, force: true })),
+  );
+});
 
 describe('UserNotificationService', () => {
   it('sums the chat counts reported by every sink', async () => {
@@ -106,6 +119,30 @@ describe('notify_user tool', () => {
     const result = await tool.handler({ message: 'build done' }, ctx('c1'));
     expect(result).toContain('did NOT receive it on their phone');
     expect(result).toContain('Do not claim you notified them remotely');
+  });
+
+  it('writes an unattended notification to the job outbox', async () => {
+    const service = new UserNotificationService();
+    const outboxDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'forge-unattended-'));
+    unattendedOutboxDirs.push(outboxDir);
+    const marker = unattendedConversations.mark('unattended-notification');
+    try {
+      const tool = makeNotifyUserTool(
+        service,
+        unattendedConversations,
+        (conversationId, message) =>
+          writeOutboxItem(outboxDir, conversationId, 'Llama job', message, 123),
+      );
+      const result = await tool.handler(
+        { message: 'the install needs attention' },
+        { beforeMutate: () => undefined, conversationId: 'unattended-notification' },
+      );
+      const item = await readOutboxItem(outboxDir, 'unattended-notification');
+      expect(item?.text).toBe('the install needs attention');
+      expect(result).toContain('job outbox');
+    } finally {
+      marker.dispose();
+    }
   });
 
   it('refuses past the burst cap and names the alternative', async () => {

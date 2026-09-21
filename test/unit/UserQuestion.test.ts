@@ -6,6 +6,7 @@ import type * as vscode from 'vscode';
 import { openQuickInputs } from '../support/vscode';
 import { UserQuestionService } from '../../src/sidebar/UserQuestionService';
 import { makeAskUserTool } from '../../src/tools/uxTools';
+import { unattendedConversations } from '../../src/sidebar/unattendedConversations';
 import { RemoteQuestionBridge } from '../../src/remote/RemoteQuestionBridge';
 import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
 import { RemoteAuth } from '../../src/remote/RemoteAuth';
@@ -643,5 +644,24 @@ describe('ask_user tool', () => {
     const id = asked.mock.calls[0]?.[0].id as string;
     expect(service.answer(id, 'src/index.ts')).toBe(true);
     await expect(call).resolves.toBe('src/index.ts');
+  });
+
+  it('returns immediately without opening a question when the conversation is unattended', async () => {
+    const service = new UserQuestionService();
+    const ask = vi.spyOn(service, 'ask');
+    const tool = makeAskUserTool(service);
+    const marker = unattendedConversations.mark('unattended-question');
+    try {
+      const started = Date.now();
+      const result = await tool.handler(
+        { prompt: 'Which file?' },
+        { beforeMutate: () => undefined, conversationId: 'unattended-question' },
+      );
+      expect(Date.now() - started).toBeLessThan(1_000);
+      expect(result).toContain('unattended: no user present');
+      expect(ask).not.toHaveBeenCalled();
+    } finally {
+      marker.dispose();
+    }
   });
 });

@@ -8,6 +8,23 @@ import {
   NOTIFY_TURN_LIMIT,
   type UserNotificationService,
 } from '../sidebar/UserNotificationService';
+import {
+  unattendedConversations,
+  type UnattendedConversationRegistry,
+} from '../sidebar/unattendedConversations';
+import { defaultOutboxDir, writeOutboxItem } from '../jobs/JobOutbox';
+
+type UnattendedOutboxWriter = (conversationId: string, message: string) => Promise<void>;
+
+const writeUnattendedNotification: UnattendedOutboxWriter = async (conversationId, message) => {
+  await writeOutboxItem(
+    defaultOutboxDir(),
+    conversationId,
+    `Unattended conversation ${conversationId}`,
+    message,
+    Date.now(),
+  );
+};
 
 // ── show_diff ─────────────────────────────────────────────────────────────────
 
@@ -127,7 +144,10 @@ export function makeOpenFileTool(): RegisteredTool {
 
 // ── ask_user ──────────────────────────────────────────────────────────────────
 
-export function makeAskUserTool(questions: UserQuestionService): RegisteredTool {
+export function makeAskUserTool(
+  questions: UserQuestionService,
+  unattended: UnattendedConversationRegistry = unattendedConversations,
+): RegisteredTool {
   return {
     definition: {
       type: 'function',
@@ -189,6 +209,12 @@ export function makeAskUserTool(questions: UserQuestionService): RegisteredTool 
     },
     permission: 'read',
     handler: async (args, context) => {
+      if (context?.conversationId && unattended.has(context.conversationId)) {
+        return (
+          'unattended: no user present — Nobody is attending this job run, so no answer will come. ' +
+          'Make the safest assumption and continue, or stop and report RESULT: failed with the question.'
+        );
+      }
       // A malformed `questions` falls back to the flat shape rather than
       // failing the call: the question still reaches the user, which is the
       // point of the tool, and a half-built array must not cost a round.
@@ -217,7 +243,11 @@ export function makeAskUserTool(questions: UserQuestionService): RegisteredTool 
 
 // ── notify_user ───────────────────────────────────────────────────────────────
 
-export function makeNotifyUserTool(notifications: UserNotificationService): RegisteredTool {
+export function makeNotifyUserTool(
+  notifications: UserNotificationService,
+  unattended: UnattendedConversationRegistry = unattendedConversations,
+  writeOutbox: UnattendedOutboxWriter = writeUnattendedNotification,
+): RegisteredTool {
   return {
     definition: {
       type: 'function',
@@ -245,6 +275,8 @@ export function makeNotifyUserTool(notifications: UserNotificationService): Regi
     permission: 'read',
     handler: async (args, context) => {
       const message = args['message'] as string;
+      const conversationId = context?.conversationId;
+      const isUnattended = conversationId !== undefined && unattended.has(conversationId);
       if (notifications.remaining(context?.conversationId) <= 0) {
         // Say that the budget refills, and when. The old string ended at "put
         // it in your final reply", which on a long unattended run means hours
@@ -263,10 +295,16 @@ export function makeNotifyUserTool(notifications: UserNotificationService): Regi
       // The desktop toast is unconditional: it has to work with remote disabled,
       // and a user sitting at the machine should see what the phone was sent.
       void vscode.window.showInformationMessage(message);
+      if (isUnattended && conversationId) await writeOutbox(conversationId, message);
       const chats = await notifications.notify({
         text: message,
-        ...(context?.conversationId ? { conversationId: context.conversationId } : {}),
+        ...(conversationId ? { conversationId } : {}),
       });
+      if (isUnattended) {
+        return chats > 0
+          ? `Message queued to the job outbox and delivered to the VS Code window and ${chats} remote chat(s).`
+          : 'Message queued to the job outbox for Telegram and shown in the VS Code window.';
+      }
       // Say where it actually landed. A "sent" that means nothing left the
       // machine is how ask_user taught the model to trust a lie.
       return chats > 0

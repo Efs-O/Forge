@@ -35,6 +35,7 @@ overlaps with an existing owner, extend the owner instead.
 | Thinking kwargs, strip, template context             | `src/sidebar/turnModelBehavior.ts`       |
 | Collaborator set handed to turn modules              | `src/sidebar/turnServices.ts`            |
 | Confirmation FIFO + clanker bypass policy            | `src/sidebar/ToolApprovalService.ts`     |
+| Unattended conversation registry                      | `src/sidebar/unattendedConversations.ts` |
 | Agent question: local box + remote answer            | `src/sidebar/UserQuestionService.ts`     |
 | Question numbering, reply parsing, answer format     | `src/util/questionAnswers.ts`            |
 | Agent notification: toast + remote fan-out           | `src/sidebar/UserNotificationService.ts` |

@@ -21,9 +21,9 @@ import { describeGitLineForDelete } from '../tools/gitTrackedStatus';
 import { isFailureResult, readPathArg, resultLabel } from './toolResultView';
 import type { PlanItem } from './sessionTypes';
 import { getLogger } from '../util/logger';
+import { ToolApprovalPolicyDenied } from './ToolApprovalService';
 
 const log = getLogger();
-
 /** A directory has no text to diff, and `readFileSync` on one throws EISDIR. */
 function isExistingDirectory(target: string): boolean {
   try {
@@ -32,7 +32,6 @@ function isExistingDirectory(target: string): boolean {
     return false;
   }
 }
-
 const WRITE_PERMISSIONS = new Set<ToolPermission>(['write', 'delete']);
 const DELETE_PREVIEW_LIMIT = 8;
 const DELETE_SCAN_LIMIT = 2_000;
@@ -354,8 +353,9 @@ export class ToolDispatch {
           }
         }
       } catch (err) {
-        this.failureTracker.record();
-        result = `Error: ${(err as Error).message}`;
+        const policyDenied = err instanceof ToolApprovalPolicyDenied;
+        if (!policyDenied) this.failureTracker.record();
+        result = policyDenied ? err.message : `Error: ${(err as Error).message}`;
       }
 
       this.postResult(tc, toolResultText(result), args, convId);
