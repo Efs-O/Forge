@@ -102,9 +102,24 @@ what it observes.
 
 One run:
 
-1. **Wait for idle.** If `busy()` reports a streaming turn, record
-   `task_pending` and return. The next idle tick runs it, the way `summarize`
-   already waits. An agent job never fights a live chat for the GPU.
+1. **Start now if a slot is free, otherwise wait.** A llama-server with
+   `n_parallel: 2` serves two conversations at once on one model load, each
+   with `perSlotContext()` = `num_ctx / n_parallel`. The job therefore does not
+   wait for full idle. It starts now when all three hold:
+   - its model is the resident one, or nothing is loaded;
+   - fewer conversations are streaming on that model than its `n_parallel`
+     (`status().streamingConversationIds`);
+   - its own conversation is not streaming.
+
+   Otherwise it records `task_pending` and the next tick retries. There are two
+   hard waits:
+   - **Its own chat is busy.** Two turns in one conversation would interleave.
+   - **It needs a different model while one is streaming.** A second
+     llama-server spills VRAM on this PC, and unloading would kill the live turn.
+
+   Running beside a live chat splits generation speed between the two slots.
+   That is accepted: at 3 a.m. there is no live chat, and during the day a
+   slower answer beats a job silently skipped.
 2. **Persist the marker** before anything else:
    `state.task_run = { started_at, conversation_id: null }`.
 3. **Model.** If `action.model` differs from the resident model and nothing is
@@ -224,7 +239,7 @@ or fewer itself (MESH_RUN_1 F2). Claude signs off before the next phase starts.
 |---|---|---|---|---|---|---|
 | `jobs/<id>.json` with `agent_task` | `manage_jobs create` | `manage_jobs delete`; must also delete `state/<id>.config.bak` | `enabled:false`; a running task finishes, and no new run starts | Existing atomic write (JobStore) | n/a, on disk | none |
 | `state.task_run` marker | Runner step 2, before anything else | Runner `finally` | Disable does not clear it; the run in flight still owns it | `patchState` is synchronous; worst case a stale marker → recovery reports it | **Recovery on `start()`: report + failed row + clear** (CI-enforced) | none; recovery is the expiry |
-| `state.task_pending` | Step 1 when busy | Next idle tick that runs it | Disable clears it | patchState | Survives; the next start's idle tick runs it | Dropped if older than one schedule period, with a run row "skipped: busy" |
+| `state.task_pending` | Step 1 when no slot is free | Next idle tick that runs it | Disable clears it | patchState | Survives; the next start's idle tick runs it | Dropped if older than one schedule period, with a run row "skipped: busy" |
 | The job's conversation (`state.conversation_id`, shared with discuss) | First run or first discuss, whichever comes first | **Never deleted by Forge**: the session log feeds HalluScribe. `manage_jobs delete` leaves it in place, and the owner may archive it | Stays; the owner can still chat in it | Created before `conversation_id` is patched: worst case one orphan chat, and the next run creates another. Visible, harmless | Survives in state.vscdb and the session log | none. Growth is bounded by auto-compaction for the model and is append-only on disk |
 | Unattended registry entry | Step 4 | `finally` (disposable) | n/a | In-memory | Vanishes with the process. **Correct**: a restored conversation is attended again | per run |
 | `holdAwake` | Step 4 | `finally` | n/a | In-memory | OS releases it with the process | per run |
@@ -261,7 +276,10 @@ listing the keys `agentTask.ts` patches) fails.
 6. `RESTART: yes` with a binary that does not start → `config.yaml` restored,
    the model restarted on the old binary, and the report names both binaries.
 7. Leftover `task_run` on start → the interrupted report (CI test above).
-8. A job never starts while a chat turn is streaming. Tested with a busy stub.
+8. With `n_parallel: 2` and one other chat streaming on the same model, the job
+   starts at once. With both slots streaming, with its own chat streaming, or
+   when it needs a different model while one streams, it waits. Tested with a
+   status stub for each case.
 9. **Live:** the owner leaves the PC asleep with a daily 03:00
    `llamacpp-latest` job (`wake: true`, model Qwen Flash). By morning, Telegram
    holds exactly one message: installed `bNNNN` or `failed — <reason>`. The
