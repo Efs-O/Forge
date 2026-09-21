@@ -16,6 +16,7 @@ import {
   HISTORY_KEY_LEGACY,
   MAX_HISTORY_CONVERSATIONS,
   SESSION_KEY_V1,
+  SESSION_KEY_V1_CORRUPT,
   chatMessagesFromSlim,
   UNTITLED_TITLE,
   deriveTitle,
@@ -320,6 +321,17 @@ export function loadSidebarSession(workspaceState: Memento): SidebarRuntime {
       conversations: d.conversations.map(persistedToRuntime),
       history: (d.history ?? []).map(persistedToRuntime),
     };
+  }
+
+  if (rawV1 !== undefined && !parsedV1.success) {
+    const detail = parsedV1.error.message;
+    log.error(
+      `[sessionPersistence] invalid ${SESSION_KEY_V1}; keeping a quarantine copy: ${detail}`,
+    );
+    persistMemento(workspaceState, SESSION_KEY_V1_CORRUPT, {
+      quarantinedAt: Date.now(),
+      value: rawV1,
+    });
   }
 
   const legacy =

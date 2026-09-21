@@ -32,7 +32,8 @@ export function resolveWorkspacePath(
       : (() => {
           throw new Error('No workspace folder open; use an explicit absolute path.');
         })();
-  if (options.mustBeInsideWorkspace) {
+  const mustBeInsideWorkspace = options.mustBeInsideWorkspace ?? false;
+  if (mustBeInsideWorkspace) {
     if (!root) throw new Error('No workspace folder open');
     if (!isPathInside(root, resolved))
       throw new Error(`Path is outside the workspace: ${filePath}`);

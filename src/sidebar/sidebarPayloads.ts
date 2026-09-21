@@ -8,7 +8,7 @@
  */
 
 import type { ForgeConfig } from '../config/types';
-import { listProfiles, mergeGroupsIntoModel } from '../config/ConfigResolver';
+import { availableProfilesFor, mergeGroupsIntoModel } from '../config/ConfigResolver';
 import type { HostToWebview, ModelResidency, SessionSyncMsg } from './messageBridge';
 import { classifyModelRoute } from '../llm/ModelRouteClassifier';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
@@ -55,11 +55,11 @@ export function buildModelsMessage(
   /** The active tab's pin wins over the config default, just like sending does. */
   activeModel: string | null = config.active_model,
 ): HostToWebview {
-  const profiles = listProfiles(config);
   return {
     type: 'models',
     models: config.models.map((configured) => {
       const model = mergeGroupsIntoModel(config, configured);
+      const profiles = availableProfilesFor(config, model.name);
       const residency = residencyOf(model, pool);
       const picker = describeModelPickerModel(model);
       // Spread rather than assign undefined: exactOptionalPropertyTypes draws a

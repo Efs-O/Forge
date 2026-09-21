@@ -36,7 +36,6 @@ import { handleRemoteSelectionAction } from './RemoteSelectionPager';
 import type { RemoteControllerOptions } from './remoteControllerOptions';
 import type { TelegramContactService } from './TelegramContactService';
 export type { RemoteControllerOptions };
-
 /** Durable transport-independent admission, FIFO execution, and notification. */
 export class RemoteController {
   private readonly abort = new AbortController();
@@ -157,7 +156,6 @@ export class RemoteController {
     }
     this.outbox.start();
   }
-
   updateOptions(options: RemoteControllerOptions): void {
     this.options = options;
     this.rateLimiter = new RemoteRateLimiter(options.rateLimitPerMinute);
@@ -166,7 +164,6 @@ export class RemoteController {
     this.questions.updateMaxMessageChars(options.maxMessageChars);
     this.progress.updateMaxMessageChars(Math.min(options.maxMessageChars, 3_900));
   }
-
   /**
    * Drops anything held for a channel whose owner has just been unpaired.
    * A held prompt outlives session state otherwise, and the next owner to pair
@@ -175,7 +172,6 @@ export class RemoteController {
   forgetChannel(channel: RemoteInboundEvent['channel']): void {
     this.pending.clearChannel(channel);
   }
-
   async stop(): Promise<void> {
     this.accepting = false;
     this.commandCleanup.dispose();
@@ -195,7 +191,6 @@ export class RemoteController {
     await this.progress.dispose();
     await this.outbox.stop();
   }
-
   /**
    * Host-originated delivery. RemoteNotificationFanout owns who hears what and
    * what silences it; the controller keeps the numbers it returns, because
@@ -210,18 +205,15 @@ export class RemoteController {
   reachForConversation(conversationId: string): number {
     return this.fanout.countOn(conversationId);
   }
-
   async broadcastHostNotification(text: string): Promise<number> {
     return this.fanout.toWorkspace(text);
   }
   async mirrorTurn(conversationId: string, text: string): Promise<number> {
     return this.fanout.mirrorTurn(conversationId, text);
   }
-
   async reportTurnFailure(conversationId: string, text: string): Promise<number> {
     return this.fanout.failureNotice(conversationId, text);
   }
-
   setMirror(chatId: string, on: boolean): void {
     this.fanout.setMirror(chatId, on);
   }
@@ -243,7 +235,10 @@ export class RemoteController {
     if (!parsed.success) return { kind: 'rejected', reason: 'invalid remote event' };
     const event = parsed.data;
     await this.audit?.record(event, 'inbound').catch(() => undefined);
-    if (event.chatType !== 'private') return { kind: 'rejected', reason: 'private chats only' };
+    if (event.chatType !== 'private') {
+      const groupResult = await this.contactService?.handleGroup(event);
+      return groupResult ?? { kind: 'rejected', reason: 'private chats only' };
+    }
 
     if (!(await this.auth.isOwner(event))) {
       const contactResult = await this.contactService?.handleNonOwner(event);
@@ -343,6 +338,12 @@ export class RemoteController {
         },
         remoteDedupKey(event.channel, event.chatId, event.providerMessageId),
       );
+      if (result.kind !== 'rejected' && result.kind !== 'retry') this.auth.touch(event);
+      return result;
+    }
+    if (event.kind === 'help_action') return this.channel.handleHelpAction(event);
+    if (event.kind === 'question_action') {
+      const result = await this.questions.handleAction(event);
       if (result.kind !== 'rejected' && result.kind !== 'retry') this.auth.touch(event);
       return result;
     }
@@ -466,7 +467,6 @@ export class RemoteController {
     if (result.kind !== 'rejected' && result.kind !== 'retry') this.auth.touch(event);
     return result;
   }
-
   private isBusy(conversationId: string): boolean {
     const status = this.host.status();
     return (

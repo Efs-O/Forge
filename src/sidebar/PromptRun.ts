@@ -11,7 +11,7 @@
 import * as vscode from 'vscode';
 import type { BackendController } from '../backend/BackendController';
 import type { ForgeConfig } from '../config/types';
-import type { ChatCompletionRequest } from '../llm/types';
+import type { ChatCompletionRequest, ChatMessage, ToolCall, ToolDefinition } from '../llm/types';
 import type { IBackendPool } from '../backend/BackendPool';
 import type { TemplateEngine } from '../llm/TemplateEngine';
 import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
@@ -67,6 +67,12 @@ export interface PromptRunOptions {
   alwaysStripThinking?: boolean;
   /** Already-held backend for host-owned non-evicting runs. */
   backend?: BackendController;
+  /** Narrow, caller-owned tools for an isolated prompt. */
+  contactTools?: readonly ToolDefinition[];
+  /** Dispatches only the narrow tools advertised in `contactTools`. */
+  dispatchContactTool?: (name: string, args: Record<string, unknown>) => Promise<string>;
+  /** Maximum tool rounds for an isolated prompt. Defaults to three. */
+  maxContactToolRounds?: number;
 }
 
 /**
@@ -118,7 +124,7 @@ export async function runPromptToMarkdown(
 
   const activeFile = vscode.window.activeTextEditor?.document.uri.fsPath;
   const replacement = replacementPrompt(ctx, options);
-  const messages = replacement
+  let messages: ChatMessage[] = replacement
     ? injectSystemPrompt(
         [{ role: 'user', content: text }],
         undefined,
@@ -133,54 +139,89 @@ export async function runPromptToMarkdown(
         selectedModel.system_prompt,
         selectedModel.system_prompt_mode,
       );
-  const base: ChatCompletionRequest = {
-    model: selectedModel.name,
-    messages,
-    stream: true,
-    // Set BEFORE mergeSampling, which never overwrites a field already on the
-    // request. The reserve is added rather than subtracted: the model spends
-    // its thinking out of max_tokens, so a bare 2048 leaves a thinking model
-    // nothing to answer with.
-    ...(options.outputTokens !== undefined
-      ? { max_tokens: reasoningReserve(selectedModel) + options.outputTokens }
-      : {}),
-  };
-  const request = normalizeRequestForModel(
-    mergeSampling(base, selectedModel, { allowPreserveThinking: false }),
-    selectedModel,
-  );
-
-  ctx.events.onGenerationStarted?.(selectedModel.name);
   const ctrl = new AbortController();
   ctx.setController(ctrl, conversationId);
-  let content = '';
+  const maxToolRounds = Math.max(0, Math.min(options.maxContactToolRounds ?? 3, 3));
   try {
-    await new Promise<void>((resolve, reject) => {
-      streamModelChatCompletion(
-        backend.baseUrl(),
-        request,
+    for (let toolRound = 0; ; toolRound += 1) {
+      const base: ChatCompletionRequest = {
+        model: selectedModel.name,
+        messages,
+        stream: true,
+        // Set BEFORE mergeSampling, which never overwrites a field already on the
+        // request. The reserve is added rather than subtracted: the model spends
+        // its thinking out of max_tokens, so a bare 2048 leaves a thinking model
+        // nothing to answer with.
+        ...(options.outputTokens !== undefined
+          ? { max_tokens: reasoningReserve(selectedModel) + options.outputTokens }
+          : {}),
+        ...(options.contactTools && options.dispatchContactTool
+          ? { tools: [...options.contactTools] }
+          : {}),
+      };
+      const request = normalizeRequestForModel(
+        mergeSampling(base, selectedModel, { allowPreserveThinking: false }),
         selectedModel,
-        {
-          onToken: (token) => {
-            content += token;
-          },
-          onReasoning: () => {},
-          onDone: () => resolve(),
-          onError: reject,
-          onToolCalls: () => {},
-        },
-        ctrl.signal,
       );
-    });
-    return sanitizeText(
-      content,
-      options.alwaysStripThinking === true || shouldStripThinking(selectedModel, config),
-    );
+
+      ctx.events.onGenerationStarted?.(selectedModel.name);
+      let content = '';
+      let toolCalls: ToolCall[] = [];
+      await new Promise<void>((resolve, reject) => {
+        streamModelChatCompletion(
+          backend.baseUrl(),
+          request,
+          selectedModel,
+          {
+            onToken: (token) => {
+              content += token;
+            },
+            onReasoning: () => {},
+            onDone: () => resolve(),
+            onError: reject,
+            onToolCalls: (calls) => {
+              toolCalls = calls;
+            },
+          },
+          ctrl.signal,
+        );
+      });
+      ctx.events.onGenerationFinished?.(backend.loadedModel());
+      if (
+        toolCalls.length === 0 ||
+        !options.contactTools ||
+        !options.dispatchContactTool ||
+        toolRound >= maxToolRounds
+      ) {
+        return sanitizeText(
+          content,
+          options.alwaysStripThinking === true || shouldStripThinking(selectedModel, config),
+        );
+      }
+      messages = [
+        ...messages,
+        { role: 'assistant', content: content || null, tool_calls: toolCalls },
+      ];
+      for (const call of toolCalls) {
+        let result: string;
+        try {
+          const args = JSON.parse(call.function.arguments) as Record<string, unknown>;
+          result = await options.dispatchContactTool(call.function.name, args);
+        } catch (error) {
+          result = `Contact web tool failed: ${error instanceof Error ? error.message : String(error)}`;
+        }
+        messages.push({
+          role: 'tool',
+          tool_call_id: call.id,
+          name: call.function.name,
+          content: result,
+        });
+      }
+    }
   } catch (err) {
     ctx.events.onBackendError?.((err as Error).message);
     throw err;
   } finally {
     ctx.releaseController(ctrl);
-    ctx.events.onGenerationFinished?.(backend.loadedModel());
   }
 }

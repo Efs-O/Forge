@@ -13,6 +13,7 @@ import type { RemoteInboundEvent } from '../../src/remote/types';
 import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
 
 const tempDirs: string[] = [];
+const GROUP_ID = '-100200';
 
 class MemorySecrets {
   readonly values = new Map<string, string>();
@@ -49,7 +50,7 @@ async function fixture(): Promise<{
   const secrets = new MemorySecrets();
   await secrets.store('forge.remote.telegram.ownerId', '1');
   const auth = new RemoteAuth(secrets as unknown as vscode.SecretStorage);
-  const channel = new FakeRemoteChannel();
+  const channel = new FakeRemoteChannel('telegram');
   const contacts = new RemoteContactStore(state);
   const host = { runContactPrompt: vi.fn(async () => 'Γεια σου!') };
   const service = new TelegramContactService(
@@ -65,26 +66,35 @@ async function fixture(): Promise<{
   return { service, channel, contacts, host };
 }
 
-function textEvent(senderId: string, text: string): Extract<RemoteInboundEvent, { kind: 'text' }> {
+function textEvent(
+  senderId: string,
+  text: string,
+  chatId = senderId,
+): Extract<RemoteInboundEvent, { kind: 'text' }> {
   return {
     channel: 'telegram',
     kind: 'text',
-    providerMessageId: `${senderId}-${text}`,
+    providerMessageId: `${senderId}-${text}-${chatId}`,
     senderId,
-    chatId: senderId,
-    chatType: 'private',
+    chatId,
+    chatType: chatId === GROUP_ID ? 'group' : 'private',
+    ...(chatId === GROUP_ID ? { chatTitle: 'Chara and Forge' } : {}),
     receivedAt: Date.now(),
     text,
   };
 }
 
-async function approveContact(fixtureValue: Awaited<ReturnType<typeof fixture>>): Promise<string> {
-  await fixtureValue.service.handleNonOwner(textEvent('20', '/start'));
-  const pending = fixtureValue.contacts.pending()[0]!;
-  await fixtureValue.service.handleOwnerCommand(
-    textEvent('1', `/contact approve ${pending.id} Chara`),
-  );
-  return fixtureValue.contacts.contacts(true)[0]!.id;
+async function approveAndBind(value: Awaited<ReturnType<typeof fixture>>): Promise<string> {
+  await value.service.handleNonOwner(textEvent('20', '/start'));
+  const pending = value.contacts.pending()[0]!;
+  await value.service.handleOwnerCommand(textEvent('1', `/contact approve ${pending.id} Chara`));
+  const contactId = value.contacts.contacts(true)[0]!.id;
+  await value.service.handleGroup(textEvent('1', '/contact link Chara', GROUP_ID));
+  const link = value.contacts.pendingGroupLink(GROUP_ID);
+  expect(link).toBeDefined();
+  await value.service.handleOwnerCommand(textEvent('1', `/contact bind ${link!.id}`));
+  expect(value.contacts.byId(contactId)?.groupStatus).toBe('bound');
+  return contactId;
 }
 
 describe('Telegram contact service', () => {
@@ -99,42 +109,66 @@ describe('Telegram contact service', () => {
     expect(value.channel.sent.some((item) => item.chatId === '20')).toBe(true);
   });
 
-  it('coalesces a contact request, previews the exact answer, and sends once after confirmation', async () => {
+  it('links one private group and answers the approved contact in that group', async () => {
     const value = await fixture();
-    await approveContact(value);
-    const result = await value.service.handleNonOwner(textEvent('20', 'Πώς είσαι;'));
+    await approveAndBind(value);
+    const result = await value.service.handleGroup(textEvent('20', 'Πώς είσαι;', GROUP_ID));
     expect(result).toEqual({ kind: 'handled' });
-    expect(value.host.runContactPrompt).not.toHaveBeenCalled();
 
     await new Promise<void>((resolve) => setTimeout(resolve, 50));
     expect(value.host.runContactPrompt).toHaveBeenCalledOnce();
-    expect(value.channel.inlineKeyboards).toHaveLength(1);
-    const keyboard = value.channel.inlineKeyboards[0]!;
-    const callbackData = keyboard.buttons[0]![0]!.callbackData;
-    const correlationId = callbackData.slice(2, -2);
-    const callback: Extract<RemoteInboundEvent, { kind: 'contact_action' }> = {
-      channel: 'telegram',
-      kind: 'contact_action',
-      providerMessageId: 'callback-1',
-      senderId: '1',
-      chatId: '1',
-      chatType: 'private',
-      receivedAt: Date.now(),
-      action: 'send',
-      correlationId,
-      messageId: 'keyboard-1',
-    };
-    await expect(value.service.handleAction(callback)).resolves.toEqual({ kind: 'handled' });
-    expect(value.channel.sent.filter((item) => item.chatId === '20')).toHaveLength(3);
-    await expect(value.service.handleAction(callback)).resolves.toMatchObject({ kind: 'rejected' });
-    expect(value.channel.sent.filter((item) => item.chatId === '20')).toHaveLength(3);
+    expect(value.host.runContactPrompt).toHaveBeenCalledWith(
+      expect.stringContaining('Πώς είσαι;'),
+      expect.stringContaining('shared private Telegram group'),
+      { web: false },
+    );
+    expect(value.channel.inlineKeyboards).toHaveLength(0);
+    expect(value.channel.sent.filter((item) => item.chatId === GROUP_ID).at(-1)?.text).toBe(
+      'Γεια σου!',
+    );
+    expect(value.contacts.thread(value.contacts.contacts(true)[0]!.id).at(-1)?.role).toBe(
+      'assistant',
+    );
   });
 
-  it('does not run owner commands or generation for an approved contact', async () => {
+  it('answers ordinary owner group messages and escalates explicit /owner requests privately', async () => {
     const value = await fixture();
-    await approveContact(value);
-    await value.service.handleNonOwner(textEvent('20', '/contacts list'));
+    await approveAndBind(value);
+    await expect(
+      value.service.handleGroup(textEvent('1', 'Owner answer in the group', GROUP_ID)),
+    ).resolves.toEqual({
+      kind: 'handled',
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    expect(value.host.runContactPrompt).toHaveBeenCalledOnce();
+    expect(value.host.runContactPrompt).toHaveBeenCalledWith(
+      expect.stringContaining('Owner answer in the group'),
+      expect.stringContaining('shared private Telegram group'),
+      { web: false },
+    );
+
+    await expect(
+      value.service.handleGroup(textEvent('20', '/owner I need help', GROUP_ID)),
+    ).resolves.toEqual({
+      kind: 'handled',
+    });
+    expect(
+      value.channel.sent.some((item) => item.chatId === '1' && item.text.includes('I need help')),
+    ).toBe(true);
+    expect(value.channel.sent.at(-1)?.text).toBe(
+      'I notified the Forge owner. They can reply here.',
+    );
+  });
+
+  it('does not allow an approved contact to use the private chat as a second channel', async () => {
+    const value = await fixture();
+    await approveAndBind(value);
+    await expect(
+      value.service.handleNonOwner(textEvent('20', 'private question')),
+    ).resolves.toMatchObject({
+      kind: 'rejected',
+    });
     expect(value.host.runContactPrompt).not.toHaveBeenCalled();
-    expect(value.channel.sent.at(-1)?.text).toContain('private');
+    expect(value.channel.sent.at(-1)?.text).toContain('private group');
   });
 });

@@ -2,6 +2,8 @@ import { z } from 'zod';
 import * as path from 'path';
 import type { RemoteInboundEvent } from './types';
 import { parseTelegramSelectionCallback } from './TelegramSelectionPagination';
+import { parseTelegramQuestionCallback } from './TelegramQuestionButtons';
+import { parseTelegramHelpCallback } from './TelegramHelpButtons';
 
 /**
  * Bot API update -> `RemoteInboundEvent`, and the media-type guesses that go
@@ -57,7 +59,11 @@ export const TelegramUpdateSchema = z.object({
         .optional(),
       /** An explicit reply always wins over the recording-window heuristic. */
       reply_to_message: z.object({ message_id: z.number().int() }).optional(),
-      chat: z.object({ id: z.union([z.number(), z.string()]), type: z.string() }),
+      chat: z.object({
+        id: z.union([z.number(), z.string()]),
+        type: z.string(),
+        title: z.string().optional(),
+      }),
       from: z.object({ id: z.union([z.number(), z.string()]) }).optional(),
     })
     .optional(),
@@ -69,7 +75,11 @@ export const TelegramUpdateSchema = z.object({
       message: z
         .object({
           message_id: z.number().int(),
-          chat: z.object({ id: z.union([z.number(), z.string()]), type: z.string() }),
+          chat: z.object({
+            id: z.union([z.number(), z.string()]),
+            type: z.string(),
+            title: z.string().optional(),
+          }),
         })
         .optional(),
     })
@@ -146,6 +156,7 @@ export function telegramUpdateToEvent(
       chatId: String(message.chat.id),
       chatType: telegramChatType(message.chat.type),
       receivedAt: message.date * 1000,
+      ...(message.chat.title ? { chatTitle: message.chat.title } : {}),
       providerFileId: message.voice.file_id,
       mediaType: message.voice.mime_type ?? 'audio/ogg',
       durationMs: message.voice.duration * 1000,
@@ -178,6 +189,7 @@ export function telegramUpdateToEvent(
       chatId: String(message.chat.id),
       chatType: telegramChatType(message.chat.type),
       receivedAt: message.date * 1000,
+      ...(message.chat.title ? { chatTitle: message.chat.title } : {}),
       text: message.text ?? message.caption ?? '',
       ...(attachment ? { attachments: [attachment] } : {}),
     };
@@ -199,6 +211,37 @@ export function telegramUpdateToEvent(
       action: selection.action,
       ...(selection.page === undefined ? {} : { page: selection.page }),
       ...(selection.choice === undefined ? {} : { choice: selection.choice }),
+      messageId: String(callback.message.message_id),
+    };
+  }
+  const question = parseTelegramQuestionCallback(callback.data);
+  if (question) {
+    return {
+      channel: 'telegram',
+      kind: 'question_action',
+      providerMessageId: callback.id,
+      senderId: String(callback.from.id),
+      chatId: String(callback.message.chat.id),
+      chatType: telegramChatType(callback.message.chat.type),
+      receivedAt: Date.now(),
+      questionId: question.questionId,
+      action: question.action,
+      ...(question.choice === undefined ? {} : { choice: question.choice }),
+      messageId: String(callback.message.message_id),
+    };
+  }
+  const help = parseTelegramHelpCallback(callback.data);
+  if (help) {
+    return {
+      channel: 'telegram',
+      kind: 'help_action',
+      providerMessageId: callback.id,
+      senderId: String(callback.from.id),
+      chatId: String(callback.message.chat.id),
+      chatType: telegramChatType(callback.message.chat.type),
+      receivedAt: Date.now(),
+      action: 'close',
+      helpToken: help.token,
       messageId: String(callback.message.message_id),
     };
   }

@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveWorkspacePath } from '../util/WorkspacePaths';
+import { writeFileAtomicSync } from '../util/atomicWrite';
 
 const MAX_EDIT_OPERATIONS = 20;
 const MAX_LINES_PER_OPERATION = 500;
@@ -122,15 +123,26 @@ export function makeApplyLineEditsTool(): RegisteredTool {
     handler: async (args) => {
       const suppliedPath = requireString(args['path'], 'path');
       const operations = parseOperations(args['operations']);
-      const filePath = resolveWorkspacePath(suppliedPath);
+      const filePath = resolveWorkspacePath(suppliedPath, { mustBeInsideWorkspace: true });
       let content: string;
+      let fileState: { size: number; mtimeMs: number; ctimeMs: number };
       try {
+        const stat = fs.statSync(filePath);
+        fileState = { size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs };
         content = fs.readFileSync(filePath, 'utf8');
+        const afterRead = fs.statSync(filePath);
+        if (
+          afterRead.size !== fileState.size ||
+          afterRead.mtimeMs !== fileState.mtimeMs ||
+          afterRead.ctimeMs !== fileState.ctimeMs
+        ) {
+          throw new Error('file changed while it was being read; re-read and retry');
+        }
       } catch (error) {
         throw new Error(`apply_line_edits: cannot read file — ${(error as Error).message}`);
       }
       const result = applyLineEditsToContent(content, operations);
-      fs.writeFileSync(filePath, result.content, 'utf8');
+      writeFileAtomicSync(filePath, result.content, fileState);
       return JSON.stringify({
         path: suppliedPath,
         operationsApplied: operations.length,

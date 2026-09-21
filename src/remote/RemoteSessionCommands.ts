@@ -1,6 +1,11 @@
 import type { RemoteCommandContext } from './RemoteCommandHandler';
 import { HELP_TEXT, decorateHelpLine } from './remoteHelpText';
-import { boldLeadingNumber, boldLineLabel, sendRichText } from './telegramHtml';
+import {
+  boldLeadingNumber,
+  boldLineLabel,
+  markupTelegramLines,
+  sendRichText,
+} from './telegramHtml';
 import type { RemoteInboundDisposition, RemoteInboundEvent } from './types';
 import { MAX_VIEW_COUNT, parseViewCount, sendTranscriptView } from './RemoteTranscriptView';
 import { getBoardContext, getMeshOrchestrator } from '../agentMesh/meshContext';
@@ -74,9 +79,17 @@ export async function handleRemoteSessionCommand(
     // so repeating them here only doubled the length of the message. What is
     // left is a map, and a map is only useful if it is scannable: one group per
     // paragraph, one note per paragraph, nothing wrapping into its neighbour.
-    await sendRichText(context.channel, event.chatId, HELP_TEXT, decorateHelpLine, {
-      signal: context.signal,
-    });
+    if (context.channel.sendHelp) {
+      await context.channel.sendHelp(
+        event.chatId,
+        markupTelegramLines(HELP_TEXT, decorateHelpLine),
+        { signal: context.signal, parseMode: 'HTML' },
+      );
+    } else {
+      await sendRichText(context.channel, event.chatId, HELP_TEXT, decorateHelpLine, {
+        signal: context.signal,
+      });
+    }
     return { kind: 'handled' };
   }
   if (command === '/status') {

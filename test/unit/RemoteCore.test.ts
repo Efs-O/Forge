@@ -143,6 +143,15 @@ describe('remote configuration and lease', () => {
       delete_command_replies_after: 10,
       auth: { inactivity_timeout_minutes: 30 },
       attachments: { enabled: false, retain_days: 30, accept_pdf: true },
+      contacts: {
+        enabled: false,
+        web: {
+          enabled: false,
+          max_results: 5,
+          max_fetch_bytes: 200_000,
+          timeout_ms: 15_000,
+        },
+      },
       workspace_aliases: {},
       telegram: { enabled: true },
       whatsapp: { enabled: false },

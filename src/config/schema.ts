@@ -92,6 +92,8 @@ const ModelConfigSchema = z.object({
   strip_thinking_channels: z.boolean().optional(),
   api_key_secret: z.string().min(1).optional(),
   // F6 additions
+  /** Request-time profiles exposed for this model; [] disables them. */
+  profiles: z.array(z.string().min(1)).optional(),
   spawn: SpawnSchema.optional(),
   spawn_profiles: z.record(z.string(), SpawnSchema.partial()).optional(),
   // F7 additions (groups + fuzzy resolution + model manager identity fields)
@@ -244,6 +246,33 @@ const ExecConfigSchema = z
   })
   .optional();
 
+const RemoteContactsConfigSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    web: z
+      .object({
+        enabled: z.boolean().default(false),
+        max_results: z.number().int().min(1).max(5).default(5),
+        max_fetch_bytes: z.number().int().min(10_000).max(200_000).default(200_000),
+        timeout_ms: z.number().int().min(1_000).max(30_000).default(15_000),
+      })
+      .default({
+        enabled: false,
+        max_results: 5,
+        max_fetch_bytes: 200_000,
+        timeout_ms: 15_000,
+      }),
+  })
+  .default({
+    enabled: false,
+    web: {
+      enabled: false,
+      max_results: 5,
+      max_fetch_bytes: 200_000,
+      timeout_ms: 15_000,
+    },
+  });
+
 const RemoteConfigSchema = z
   .object({
     enabled: z.boolean().default(false),
@@ -266,6 +295,7 @@ const RemoteConfigSchema = z
         accept_pdf: z.boolean().default(true),
       })
       .default({ enabled: false, retain_days: 30, accept_pdf: true }),
+    contacts: RemoteContactsConfigSchema,
     workspace_aliases: z
       .record(
         z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/),

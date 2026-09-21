@@ -1,4 +1,4 @@
-import { randomUUID, randomBytes } from 'crypto';
+import { randomUUID } from 'crypto';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import { ContactInstructionsLoader } from './ContactInstructionsLoader';
 import {
@@ -6,44 +6,51 @@ import {
   CONTACT_BURST_WINDOW_MS,
   CONTACT_HISTORY_LIMIT,
   CONTACT_SYSTEM_POLICY,
+  MAX_CONTACT_TEXT,
   contactBusyText,
-  contactThrottleText,
+  contactGroupRequiredText,
   contactNameMatches,
+  contactOwnerNotifiedText,
   contactPrivateText,
   contactThinkingText,
+  contactThrottleText,
   containsSensitiveContactOutput,
   renderContactHistory,
 } from './ContactPolicy';
 import type { RemoteAuditLog } from './RemoteAuditLog';
 import type { RemoteAuth } from './RemoteAuth';
 import { RemoteContactStore } from './RemoteContactStore';
+import { TelegramContactCommands } from './TelegramContactCommands';
 import type {
   RemoteChannel,
-  RemoteContactOutboundRecord,
   RemoteContactRecord,
   RemoteInboundDisposition,
   RemoteInboundEvent,
 } from './types';
 
-const DRAFT_TTL_MS = 10 * 60_000;
-const MAX_CONTACT_TEXT = 12_000;
+const OWNER_ALERT_COOLDOWN_MS = 60_000;
 
 type ContactTextEvent = Extract<RemoteInboundEvent, { kind: 'text' }>;
-type ContactActionEvent = Extract<RemoteInboundEvent, { kind: 'contact_action' }>;
 
 interface Burst {
   startedAt: number;
   count: number;
-  messages: string[];
+  messages: Array<{ role: 'contact' | 'owner'; text: string }>;
   messageIds: string[];
   timer?: ReturnType<typeof setTimeout>;
 }
 
-/** Telegram-only contact workflow; persistence remains owned by RemoteContactStore. */
+export interface TelegramContactRuntimeOptions {
+  webEnabled: boolean;
+}
+
+/** Telegram group contact workflow; persistence remains owned by RemoteContactStore. */
 export class TelegramContactService {
   private readonly abort = new AbortController();
   private readonly bursts = new Map<string, Burst>();
   private readonly activeGenerations = new Set<string>();
+  private readonly ownerAlerts = new Map<string, number>();
+  private readonly commands: TelegramContactCommands;
 
   constructor(
     private readonly channel: RemoteChannel,
@@ -54,10 +61,21 @@ export class TelegramContactService {
     private readonly audit?: RemoteAuditLog,
     private readonly onError?: (message: string) => void,
     private readonly burstWindowMs = CONTACT_BURST_WINDOW_MS,
-  ) {}
+    private readonly runtime: TelegramContactRuntimeOptions = { webEnabled: false },
+  ) {
+    this.commands = new TelegramContactCommands(
+      channel,
+      auth,
+      store,
+      audit,
+      onError,
+      this.abort.signal,
+      (contactId) => this.cancelContactGeneration(contactId),
+    );
+  }
 
   async handleNonOwner(event: RemoteInboundEvent): Promise<RemoteInboundDisposition | undefined> {
-    if (event.channel !== 'telegram') return undefined;
+    if (event.channel !== 'telegram' || event.chatType !== 'private') return undefined;
     if (event.kind === 'contact_action') {
       await this.audit?.record(event, 'contact_foreign_callback').catch(() => undefined);
       await this.answerCallback(event, contactPrivateText());
@@ -72,165 +90,51 @@ export class TelegramContactService {
       await this.channel.send(event.chatId, contactPrivateText(), { signal: this.abort.signal });
       return { kind: 'rejected', reason: 'sender is not an approved contact' };
     }
-    if (event.text.startsWith('/')) {
-      await this.audit?.record(event, 'contact_command_rejected').catch(() => undefined);
-      await this.channel.send(event.chatId, contactPrivateText(), { signal: this.abort.signal });
-      return { kind: 'rejected', reason: 'contact commands are not available' };
+    await this.audit?.record(event, 'contact_private_rejected').catch(() => undefined);
+    await this.channel.send(event.chatId, contactGroupRequiredText(), {
+      signal: this.abort.signal,
+    });
+    return { kind: 'rejected', reason: 'contact requests must use the linked group' };
+  }
+
+  async handleGroup(event: RemoteInboundEvent): Promise<RemoteInboundDisposition | undefined> {
+    if (event.channel !== 'telegram' || event.chatType === 'private') return undefined;
+    if (event.kind !== 'text') {
+      await this.audit?.record(event, 'contact_group_event_rejected').catch(() => undefined);
+      return { kind: 'rejected', reason: 'only text is supported in contact groups' };
+    }
+    const ownerId = await this.auth.getOwner('telegram');
+    if (ownerId && event.senderId === ownerId) return this.handleOwnerGroupMessage(event);
+    const contact = this.store.groupContact(event.chatId);
+    if (!contact || contact.telegramUserId !== event.senderId) {
+      await this.audit?.record(event, 'contact_group_sender_rejected').catch(() => undefined);
+      await this.channel
+        .send(event.chatId, 'Forge does not accept requests from this sender or group.', {
+          signal: this.abort.signal,
+        })
+        .catch(() => undefined);
+      return { kind: 'rejected', reason: 'sender is not the contact bound to this group' };
+    }
+    await this.store.markGroupVerified(contact.id, event.chatId);
+    if (isCommand(event.text)) {
+      if (commandName(event.text) === 'owner') return this.escalateToOwner(event, contact);
+      await this.audit?.record(event, 'contact_group_command_rejected').catch(() => undefined);
+      await this.channel.send(event.chatId, 'Only /owner is available to contacts.', {
+        signal: this.abort.signal,
+      });
+      return { kind: 'rejected', reason: 'contact command is not available' };
     }
     return this.acceptContactMessage(event, contact);
   }
 
-  async handleAction(event: ContactActionEvent): Promise<RemoteInboundDisposition> {
-    const ownerId = await this.auth.getOwner('telegram');
-    const draft = this.store.outboundById(event.correlationId);
-    if (!ownerId || !draft || event.senderId !== ownerId || event.chatId !== draft.ownerChatId) {
-      await this.audit?.record(event, 'contact_foreign_callback').catch(() => undefined);
-      await this.answerCallback(event, 'This approval is not yours.');
-      return { kind: 'rejected', reason: 'contact callback is not owned by this chat' };
-    }
-    this.auth.touch(event);
-    if (event.action === 'cancel') {
-      const result = await this.store.cancel(draft.id, ownerId);
-      await this.finishCallback(event, result === 'cancelled' ? 'Cancelled.' : 'Already handled.');
-      await this.audit
-        ?.record(event, result === 'cancelled' ? 'contact_cancelled' : 'contact_duplicate_callback')
-        .catch(() => undefined);
-      return result === 'cancelled'
-        ? { kind: 'handled' }
-        : { kind: 'rejected', reason: 'contact draft is no longer pending' };
-    }
-    const result = await this.store.claim(draft.id, ownerId);
-    if (result !== 'claimed') {
-      await this.finishCallback(event, result === 'expired' ? 'Expired.' : 'Already handled.');
-      await this.audit
-        ?.record(
-          event,
-          result === 'not_owned' ? 'contact_foreign_callback' : 'contact_duplicate_callback',
-        )
-        .catch(() => undefined);
-      return { kind: 'rejected', reason: 'contact draft is no longer pending' };
-    }
-    await this.finishCallback(event, 'Sending.');
-    try {
-      await this.channel.send(draft.recipientChatId, draft.text, { signal: this.abort.signal });
-      await this.store.setState(draft.id, 'sent');
-      await this.store.appendThread({
-        id: randomUUID(),
-        contactId: draft.contactId,
-        role: 'assistant',
-        text: draft.text,
-        createdAt: Date.now(),
-      });
-      await this.audit?.record(event, 'contact_sent', draft.id).catch(() => undefined);
-      return { kind: 'handled' };
-    } catch (error) {
-      await this.store.setState(draft.id, 'failed');
-      await this.audit?.record(event, 'contact_send_failed', draft.id).catch(() => undefined);
-      await this.notifyOwner(
-        ownerId,
-        `Forge: the approved message to ${draft.recipientDisplayName} could not be delivered.`,
-      ).catch(() => undefined);
-      this.onError?.(
-        `Forge contact delivery failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      return { kind: 'handled' };
-    }
+  handleAction(
+    event: Extract<RemoteInboundEvent, { kind: 'contact_action' }>,
+  ): Promise<RemoteInboundDisposition> {
+    return this.commands.handleAction(event);
   }
 
-  async handleOwnerCommand(event: ContactTextEvent): Promise<RemoteInboundDisposition | undefined> {
-    const text = event.text.trim();
-    if (!/^\/(?:contacts?|send)(?:\s|$)/i.test(text)) return undefined;
-    if (/^\/contacts?\s+pending$/i.test(text)) {
-      const pending = this.store.pending();
-      await this.channel.send(
-        event.chatId,
-        pending.length === 0
-          ? 'Forge: no pending contact requests.'
-          : `Forge: pending contacts:\n${pending.map((item) => `- ${item.id.slice(0, 8)}`).join('\n')}`,
-        { signal: this.abort.signal },
-      );
-      return { kind: 'handled' };
-    }
-    if (/^\/contacts?\s+list$/i.test(text)) {
-      const contacts = this.store.contacts(true);
-      await this.channel.send(
-        event.chatId,
-        contacts.length === 0
-          ? 'Forge: no active contacts.'
-          : `Forge: active contacts:\n${contacts.map((item) => `- ${item.displayName} (${item.id.slice(0, 8)})`).join('\n')}`,
-        { signal: this.abort.signal },
-      );
-      return { kind: 'handled' };
-    }
-    const approval = /^\/contact\s+approve\s+(\S+)\s+(.+)$/is.exec(text);
-    if (approval) {
-      const displayName = approval[2]!.trim();
-      if (!displayName || displayName.length > 80) {
-        return this.sendOwnerUsage(event, 'usage: /contact approve <pending-id> <display-name>');
-      }
-      const pending = this.findByShortId(
-        approval[1]!,
-        this.store.pending().map((item) => item.id),
-      );
-      if (!pending || pending.length !== 1)
-        return this.sendOwnerUsage(event, 'usage: /contact approve <pending-id> <display-name>');
-      const contact = await this.store.approve(pending[0]!, displayName);
-      await this.channel.send(
-        event.chatId,
-        contact
-          ? `Forge: contact approved as ${contact.displayName}.`
-          : 'Forge: contact request is no longer pending.',
-        { signal: this.abort.signal },
-      );
-      await this.audit
-        ?.record(event, contact ? 'contact_approved' : 'contact_duplicate_rejected')
-        .catch(() => undefined);
-      return { kind: 'handled' };
-    }
-    const disable = /^\/contact\s+disable\s+(.+)$/is.exec(text);
-    if (disable) {
-      const matches = this.resolveContacts(disable[1]!.trim());
-      if (matches.length !== 1) {
-        return this.sendOwnerUsage(
-          event,
-          matches.length > 1
-            ? 'Forge: multiple contacts match; use the short contact id.'
-            : 'Forge: contact not found.',
-        );
-      }
-      const disabled = await this.store.disable(matches[0]!.id);
-      await this.channel.send(
-        event.chatId,
-        disabled ? 'Forge: contact disabled.' : 'Forge: contact was already disabled.',
-        { signal: this.abort.signal },
-      );
-      await this.audit
-        ?.record(event, disabled ? 'contact_disabled' : 'contact_disable_duplicate')
-        .catch(() => undefined);
-      return { kind: 'handled' };
-    }
-    const direct = /^\/send\s+([^:]+):\s*([\s\S]+)$/i.exec(text);
-    if (direct) {
-      const message = direct[2]!.trim();
-      if (!message || message.length > MAX_CONTACT_TEXT) {
-        return this.sendOwnerUsage(event, 'usage: /send <name>: <message up to 12000 characters>');
-      }
-      const matches = this.resolveContacts(direct[1]!.trim());
-      if (matches.length !== 1) {
-        return this.sendOwnerUsage(
-          event,
-          matches.length > 1
-            ? 'Forge: multiple contacts match; use the short contact id.'
-            : 'Forge: contact not found.',
-        );
-      }
-      await this.createAndPreview(matches[0]!, event.senderId, message, event);
-      return { kind: 'handled' };
-    }
-    return this.sendOwnerUsage(
-      event,
-      'usage: /contacts pending|list, /contact approve|disable, or /send <name>: <message>',
-    );
+  handleOwnerCommand(event: ContactTextEvent): Promise<RemoteInboundDisposition | undefined> {
+    return this.commands.handleOwnerCommand(event);
   }
 
   dispose(): void {
@@ -238,6 +142,68 @@ export class TelegramContactService {
     for (const burst of this.bursts.values()) if (burst.timer) clearTimeout(burst.timer);
     this.bursts.clear();
     this.host.cancelContactPrompts?.();
+  }
+
+  private async handleOwnerGroupMessage(
+    event: ContactTextEvent,
+  ): Promise<RemoteInboundDisposition> {
+    if (
+      commandName(event.text) === 'contact' &&
+      /^\/contact(?:@\S+)?\s+link\s+/i.test(event.text)
+    ) {
+      return this.requestGroupLink(event);
+    }
+    const contact = this.store.groupContact(event.chatId);
+    if (!contact || isCommand(event.text)) {
+      await this.audit?.record(event, 'contact_owner_group_message').catch(() => undefined);
+      return { kind: 'handled' };
+    }
+    return this.acceptContactMessage(event, contact, 'owner');
+  }
+
+  private async requestGroupLink(event: ContactTextEvent): Promise<RemoteInboundDisposition> {
+    if (!(await this.auth.ownerSessionAuthenticated('telegram'))) {
+      await this.channel.send(event.chatId, 'Forge: authenticate with the owner privately first.', {
+        signal: this.abort.signal,
+      });
+      return { kind: 'rejected', reason: 'owner session is not authenticated' };
+    }
+    const match = /^\/contact(?:@\S+)?\s+link\s+(.+)$/i.exec(event.text.trim());
+    const name = match?.[1]?.trim();
+    const contacts = name ? this.resolveContacts(name) : [];
+    if (contacts.length !== 1) {
+      await this.channel.send(
+        event.chatId,
+        contacts.length > 1
+          ? 'Forge: multiple contacts match; use the short contact id.'
+          : 'Forge: contact not found or not active.',
+        { signal: this.abort.signal },
+      );
+      return { kind: 'rejected', reason: 'contact group link target is ambiguous' };
+    }
+    const link = await this.store.createGroupLink(
+      contacts[0]!.id,
+      event.chatId,
+      event.senderId,
+      event.chatTitle,
+    );
+    if (!link) {
+      await this.channel.send(event.chatId, 'Forge: this contact or group already has a link.', {
+        signal: this.abort.signal,
+      });
+      return { kind: 'rejected', reason: 'contact group link already exists' };
+    }
+    await this.channel.send(
+      event.chatId,
+      `Forge: group link created for ${contacts[0]!.displayName}. Confirm privately with /contact bind ${link.id}.`,
+      { signal: this.abort.signal },
+    );
+    await this.notifyOwner(
+      event.senderId,
+      `Forge: confirm the Telegram group for ${contacts[0]!.displayName} with /contact bind ${link.id}. It expires in 10 minutes.`,
+    );
+    await this.audit?.record(event, 'contact_group_link_created', link.id).catch(() => undefined);
+    return { kind: 'handled' };
   }
 
   private async startRequest(event: ContactTextEvent): Promise<RemoteInboundDisposition> {
@@ -251,17 +217,18 @@ export class TelegramContactService {
     await this.channel.send(
       event.chatId,
       result === 'contact'
-        ? 'Forge: contact access is already enabled.'
+        ? contactGroupRequiredText()
         : 'Forge: your request was sent to the owner for review.',
       { signal: this.abort.signal },
     );
     if (result === 'created') {
       const ownerId = await this.auth.getOwner('telegram');
-      if (ownerId)
+      if (ownerId) {
         await this.notifyOwner(
           ownerId,
           'Forge: a new contact request is waiting. Use /contacts pending.',
         );
+      }
     }
     return { kind: 'handled' };
   }
@@ -269,6 +236,7 @@ export class TelegramContactService {
   private async acceptContactMessage(
     event: ContactTextEvent,
     contact: RemoteContactRecord,
+    role: 'contact' | 'owner' = 'contact',
   ): Promise<RemoteInboundDisposition> {
     if (event.text.length > MAX_CONTACT_TEXT) {
       await this.channel.send(event.chatId, contactBusyText(), { signal: this.abort.signal });
@@ -288,12 +256,12 @@ export class TelegramContactService {
     }
     burst.count += 1;
     const messageId = randomUUID();
-    burst.messages.push(event.text);
+    burst.messages.push({ role, text: event.text });
     burst.messageIds.push(messageId);
     await this.store.appendThread({
       id: messageId,
       contactId: contact.id,
-      role: 'contact',
+      role,
       text: event.text,
       createdAt: now,
     });
@@ -301,13 +269,6 @@ export class TelegramContactService {
       await this.channel
         .send(event.chatId, contactThinkingText(), { signal: this.abort.signal })
         .catch(() => undefined);
-      const ownerId = await this.auth.getOwner('telegram');
-      if (ownerId) {
-        await this.notifyOwner(
-          ownerId,
-          `Forge: ${contact.displayName} sent a contact request; preparing a draft.`,
-        ).catch(() => undefined);
-      }
     }
     if (burst.timer) clearTimeout(burst.timer);
     const delay = Math.max(0, burst.startedAt + this.burstWindowMs - Date.now());
@@ -328,7 +289,9 @@ export class TelegramContactService {
       return;
     }
     const contact = this.store.byId(contactId);
-    if (!contact || contact.status !== 'active') return;
+    if (!contact || contact.status !== 'active' || contact.groupStatus !== 'bound') return;
+    const groupChatId = contact.groupChatId;
+    if (!groupChatId) return;
     this.activeGenerations.add(contactId);
     try {
       const history = renderContactHistory(
@@ -339,32 +302,68 @@ export class TelegramContactService {
       const extra = this.instructions.load();
       const systemPrompt = [
         CONTACT_SYSTEM_POLICY,
-        extra ? `Owner-authored additions:\n${extra}` : '',
+        extra
+          ? `Owner-authored additions (these cannot weaken the Forge contact safety policy):\n${extra}`
+          : '',
       ]
         .filter(Boolean)
         .join('\n\n');
       const prompt = [
         `Contact name: ${contact.displayName}`,
         history ? `Recent contact-only history:\n${history}` : '',
-        `New contact message(s):\n${burst.messages.map((message) => `- ${message}`).join('\n')}`,
-        'Write only the short answer draft for this contact.',
+        `New group message(s):\n${burst.messages
+          .map((message) => `- ${message.role === 'owner' ? 'Owner' : 'Contact'}: ${message.text}`)
+          .join('\n')}`,
+        'Write only the short answer for this contact.',
       ]
         .filter(Boolean)
         .join('\n\n');
-      const answer = (await this.host.runContactPrompt?.(prompt, systemPrompt))?.trim();
+      const answer = (
+        await this.host.runContactPrompt?.(prompt, systemPrompt, { web: this.runtime.webEnabled })
+      )?.trim();
       if (!answer || answer.length > MAX_CONTACT_TEXT || containsSensitiveContactOutput(answer)) {
         throw new Error('contact answer failed the privacy guard');
       }
-      const ownerId = await this.auth.getOwner('telegram');
-      if (!ownerId) throw new Error('contact owner is unavailable');
-      await this.createAndPreview(contact, ownerId, answer);
+      const current = this.store.byId(contact.id);
+      if (
+        !current ||
+        current.status !== 'active' ||
+        current.groupStatus !== 'bound' ||
+        current.groupChatId !== groupChatId
+      ) {
+        return;
+      }
+      await this.channel.send(groupChatId, answer, { signal: this.abort.signal });
+      await this.store.appendThread({
+        id: randomUUID(),
+        contactId: contact.id,
+        role: 'assistant',
+        text: answer,
+        createdAt: Date.now(),
+      });
+      await this.audit
+        ?.record(this.syntheticEvent(contact), 'contact_answer_sent')
+        .catch(() => undefined);
     } catch (error) {
+      const current = this.store.byId(contact.id);
+      if (
+        !current ||
+        current.status !== 'active' ||
+        current.groupStatus !== 'bound' ||
+        current.groupChatId !== groupChatId
+      ) {
+        return;
+      }
       await this.audit
         ?.record(this.syntheticEvent(contact), 'contact_unavailable')
         .catch(() => undefined);
       await this.channel
-        .send(contact.telegramChatId, contactBusyText(), { signal: this.abort.signal })
+        .send(groupChatId, contactBusyText(), { signal: this.abort.signal })
         .catch(() => undefined);
+      await this.notifyOwnerRateLimited(
+        contact.id,
+        `Forge: contact service could not answer ${contact.displayName}; Forge may be offline or busy.`,
+      );
       this.onError?.(
         `Forge contact request failed: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -374,54 +373,25 @@ export class TelegramContactService {
     }
   }
 
-  private async createAndPreview(
+  private async escalateToOwner(
+    event: ContactTextEvent,
     contact: RemoteContactRecord,
-    ownerId: string,
-    text: string,
-    source?: ContactTextEvent,
-  ): Promise<void> {
-    if (!text || text.length > MAX_CONTACT_TEXT)
-      throw new Error('contact message exceeds the limit');
-    const sendInlineKeyboard = this.channel.sendInlineKeyboard;
-    if (!sendInlineKeyboard) throw new Error('contact approval transport is unavailable');
-    const now = Date.now();
-    const draft: RemoteContactOutboundRecord = {
-      id: randomBytes(18).toString('base64url'),
-      contactId: contact.id,
-      ownerId,
-      ownerChatId: ownerId,
-      recipientChatId: contact.telegramChatId,
-      recipientDisplayName: contact.displayName,
-      text,
-      createdAt: now,
-      expiresAt: now + DRAFT_TTL_MS,
-      updatedAt: now,
-      state: 'pending',
-    };
-    await this.store.createOutbound(draft);
-    await this.audit
-      ?.record(source ?? this.syntheticEvent(contact), 'contact_draft_created', draft.id)
-      .catch(() => undefined);
-    try {
-      await sendInlineKeyboard.call(
-        this.channel,
-        ownerId,
-        `Ready to send to ${contact.displayName}:\n\n${text}`,
-        [
-          [
-            { text: 'Send', callbackData: `c:${draft.id}:s` },
-            { text: 'Cancel', callbackData: `c:${draft.id}:c` },
-          ],
-        ],
-        { signal: this.abort.signal },
-      );
-      await this.audit
-        ?.record(source ?? this.syntheticEvent(contact), 'contact_owner_previewed', draft.id)
-        .catch(() => undefined);
-    } catch (error) {
-      await this.store.setState(draft.id, 'failed');
-      throw error;
+  ): Promise<RemoteInboundDisposition> {
+    const request = ownerCommandText(event.text);
+    if (!request) {
+      await this.channel.send(event.chatId, 'Use /owner followed by your question or request.', {
+        signal: this.abort.signal,
+      });
+      return { kind: 'rejected', reason: 'owner request is empty' };
     }
+    const ownerId = await this.auth.getOwner('telegram');
+    if (!ownerId) return { kind: 'rejected', reason: 'owner is unavailable' };
+    await this.notifyOwner(ownerId, `Forge: ${contact.displayName} asks:\n${request}`);
+    await this.channel.send(event.chatId, contactOwnerNotifiedText(), {
+      signal: this.abort.signal,
+    });
+    await this.audit?.record(event, 'contact_owner_escalated').catch(() => undefined);
+    return { kind: 'handled' };
   }
 
   private resolveContacts(query: string): RemoteContactRecord[] {
@@ -430,30 +400,33 @@ export class TelegramContactService {
     return byId.length > 0 ? byId : contactNameMatches(contacts, query);
   }
 
-  private findByShortId(query: string, ids: string[]): string[] {
-    return ids.filter((id) => id === query || id.startsWith(query));
-  }
-
-  private sendOwnerUsage(event: ContactTextEvent, text: string): Promise<RemoteInboundDisposition> {
-    return this.channel
-      .send(event.chatId, text, { signal: this.abort.signal })
-      .then(() => ({ kind: 'rejected', reason: text }));
+  private cancelContactGeneration(contactId: string): void {
+    const burst = this.bursts.get(contactId);
+    if (burst?.timer) clearTimeout(burst.timer);
+    this.bursts.delete(contactId);
+    if (this.activeGenerations.has(contactId)) this.host.cancelContactPrompts?.();
   }
 
   private notifyOwner(ownerId: string, text: string): Promise<void> {
     return this.channel.send(ownerId, text, { signal: this.abort.signal }).then(() => undefined);
   }
 
-  private async answerCallback(event: ContactActionEvent, text: string): Promise<void> {
-    await this.channel
-      .answerCallbackQuery?.(event.providerMessageId, text, { signal: this.abort.signal })
-      .catch(() => undefined);
+  private async notifyOwnerRateLimited(key: string, text: string): Promise<void> {
+    const now = Date.now();
+    const previous = this.ownerAlerts.get(key) ?? 0;
+    if (now - previous < OWNER_ALERT_COOLDOWN_MS) return;
+    const ownerId = await this.auth.getOwner('telegram');
+    if (!ownerId) return;
+    this.ownerAlerts.set(key, now);
+    await this.notifyOwner(ownerId, text).catch(() => undefined);
   }
 
-  private async finishCallback(event: ContactActionEvent, text: string): Promise<void> {
-    await this.answerCallback(event, text);
+  private async answerCallback(
+    event: Extract<RemoteInboundEvent, { kind: 'contact_action' }>,
+    text: string,
+  ): Promise<void> {
     await this.channel
-      .clearInlineKeyboard?.(event.chatId, event.messageId, { signal: this.abort.signal })
+      .answerCallbackQuery?.(event.providerMessageId, text, { signal: this.abort.signal })
       .catch(() => undefined);
   }
 
@@ -463,10 +436,29 @@ export class TelegramContactService {
       kind: 'text',
       providerMessageId: `contact-${contact.id}`,
       senderId: contact.telegramUserId,
-      chatId: contact.telegramChatId,
-      chatType: 'private',
+      chatId: contact.groupChatId ?? contact.telegramChatId,
+      chatType: contact.groupChatId ? 'group' : 'private',
       receivedAt: Date.now(),
       text: '',
     };
   }
+}
+
+function stripBotUsername(text: string): string {
+  return text.replace(/^\/([A-Za-z0-9_]+)(?:@[A-Za-z0-9_]+)?/, '/$1');
+}
+
+function commandName(text: string): string | undefined {
+  const match = /^\/([A-Za-z0-9_]+)(?:@\S+)?/.exec(text.trim());
+  return match?.[1]?.toLocaleLowerCase();
+}
+
+function isCommand(text: string): boolean {
+  return /^\//.test(text.trim());
+}
+
+function ownerCommandText(text: string): string {
+  return stripBotUsername(text)
+    .replace(/^\/owner(?:\s+|$)/i, '')
+    .trim();
 }

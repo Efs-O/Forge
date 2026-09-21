@@ -88,7 +88,7 @@ export const SHARED_PHRASES = [
   'I am a natural…',
   'I ll do it for a caravan…',
   'Anytime, anywhere!',
-  'Malfunctioned"?',
+  'Malfunctioned ?',
   'Not bad for a human.',
   "We're in the pipe, five by five.",
   'What was the question?',

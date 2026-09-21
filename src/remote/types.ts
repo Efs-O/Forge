@@ -10,6 +10,7 @@ const InboundBaseSchema = z.object({
   chatId: z.string().min(1).max(256),
   chatType: z.enum(['private', 'group', 'channel']),
   receivedAt: z.number().int().nonnegative(),
+  chatTitle: z.string().trim().max(256).optional(),
 });
 
 export const RemoteInboundAttachmentSchema = z.object({
@@ -62,6 +63,19 @@ export const RemoteInboundEventSchema = z.discriminatedUnion('kind', [
     kind: z.literal('contact_action'),
     action: z.enum(['send', 'cancel']),
     correlationId: z.string().regex(/^[A-Za-z0-9_-]{16,48}$/),
+    messageId: z.string().min(1).max(256),
+  }),
+  InboundBaseSchema.extend({
+    kind: z.literal('question_action'),
+    action: z.enum(['select', 'other']),
+    questionId: z.string().regex(/^[A-Za-z0-9_-]{1,48}$/),
+    choice: z.number().int().min(0).max(99).optional(),
+    messageId: z.string().min(1).max(256),
+  }),
+  InboundBaseSchema.extend({
+    kind: z.literal('help_action'),
+    action: z.literal('close'),
+    helpToken: z.literal('x'),
     messageId: z.string().min(1).max(256),
   }),
   InboundBaseSchema.extend({
@@ -130,6 +144,7 @@ export interface RemoteAttachmentReference {
 }
 
 export type RemoteContactStatus = 'active' | 'disabled';
+export type RemoteContactGroupStatus = 'unbound' | 'link_pending' | 'bound';
 
 export interface RemoteContactRecord {
   id: string;
@@ -138,8 +153,25 @@ export interface RemoteContactRecord {
   telegramUserId: string;
   role: 'contact_only';
   status: RemoteContactStatus;
+  groupStatus: RemoteContactGroupStatus;
+  groupChatId?: string | undefined;
+  groupTitle?: string | undefined;
+  groupBoundAt?: number | undefined;
+  groupVerifiedAt?: number | undefined;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface RemoteContactGroupLinkRecord {
+  id: string;
+  contactId: string;
+  groupChatId: string;
+  groupTitle?: string | undefined;
+  ownerId: string;
+  createdAt: number;
+  expiresAt: number;
+  updatedAt: number;
+  state: 'pending' | 'confirmed' | 'cancelled' | 'expired';
 }
 
 export interface RemoteContactPendingRecord {
@@ -154,7 +186,7 @@ export interface RemoteContactPendingRecord {
 export interface RemoteContactThreadMessage {
   id: string;
   contactId: string;
-  role: 'contact' | 'assistant';
+  role: 'contact' | 'owner' | 'assistant';
   text: string;
   createdAt: number;
 }
@@ -254,8 +286,18 @@ export interface RemoteChannel {
     chatId: string,
     text: string,
     buttons: readonly RemoteContactButton[][],
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal; parseMode?: 'HTML' },
   ): Promise<string | undefined>;
+  /** Telegram-only help message with a user-controlled close button. */
+  sendHelp?(
+    chatId: string,
+    text: string,
+    options?: { signal?: AbortSignal; parseMode?: 'HTML' },
+  ): Promise<void>;
+  /** Handles the close callback for a help message owned by this channel. */
+  handleHelpAction(
+    event: Extract<RemoteInboundEvent, { kind: 'help_action' }>,
+  ): Promise<RemoteInboundDisposition>;
   answerCallbackQuery?(
     callbackId: string,
     text?: string,

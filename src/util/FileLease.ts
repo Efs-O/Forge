@@ -1,4 +1,5 @@
 import * as fs from 'fs/promises';
+import { renameSync } from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
 import { z } from 'zod';
@@ -133,31 +134,48 @@ export class FileLease {
   }
 
   private async heartbeat(): Promise<void> {
-    let handle: fs.FileHandle | undefined;
+    let temporary: string | undefined;
     try {
-      handle = await fs.open(this.filePath, 'r+');
-      const previous = Buffer.from(await handle.readFile('utf8'));
-      const current = LeaseSchema.parse(JSON.parse(previous.toString('utf8')));
+      const current = await FileLease.read(this.filePath);
       if (current.token !== this.record.token) {
         this.lose('Forge lease was lost; this window has stopped holding it.');
         return;
       }
       this.record.heartbeatAt = Date.now();
-      // Never truncate before writing: another heartbeat, verifier, or process
-      // could observe the empty interval and mistake this live lease for stale
-      // garbage. Write one complete buffer at offset zero. Padding preserves the
-      // previous file length if a field ever becomes shorter; JSON permits the
-      // trailing spaces. The normal heartbeat timestamp has fixed width.
-      const serialized = Buffer.from(JSON.stringify(this.record), 'utf8');
-      const next =
-        serialized.length < previous.length
-          ? Buffer.concat([serialized, Buffer.alloc(previous.length - serialized.length, 0x20)])
-          : serialized;
-      await handle.write(next, 0, next.length, 0);
+      temporary = `${this.filePath}.${this.record.token}.heartbeat-${Date.now()}.tmp`;
+      const handle = await fs.open(temporary, 'wx', 0o600);
+      try {
+        await handle.writeFile(JSON.stringify(this.record), 'utf8');
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      // Replacement is atomic within the lease directory, so readers see either
+      // complete JSON record rather than a mixed old/new buffer.
+      // Node's async Windows rename can return EPERM when a concurrent reader
+      // briefly still has the destination open. The synchronous call maps to
+      // the same atomic replacement but avoids that transient sharing race;
+      // the critical section is only the directory-entry swap.
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          renameSync(temporary, this.filePath);
+          break;
+        } catch (err) {
+          const code = (err as NodeJS.ErrnoException).code;
+          if (code !== 'EPERM' && code !== 'EBUSY') throw err;
+          if (attempt >= 5) throw err;
+          await new Promise<void>((resolve) => setTimeout(resolve, 5));
+        }
+      }
+      temporary = undefined;
+      const after = await FileLease.read(this.filePath);
+      if (after.token !== this.record.token) {
+        this.lose('Forge lease was lost; this window has stopped holding it.');
+      }
     } catch (err) {
       this.lose(`Forge lease heartbeat failed: ${(err as Error).message}`);
     } finally {
-      await handle?.close();
+      if (temporary) await fs.unlink(temporary).catch(() => undefined);
     }
   }
 

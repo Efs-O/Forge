@@ -30,6 +30,8 @@ export const MAX_HISTORY_CONVERSATIONS = 40;
 export const HISTORY_KEY_LEGACY = 'forge.conversation.history';
 
 export const SESSION_KEY_V1 = 'forge.conversations.v1';
+/** Latest invalid session blob, retained so a later version can recover it. */
+export const SESSION_KEY_V1_CORRUPT = 'forge.conversations.v1.corrupt';
 
 /**
  * Which conversation is active, stored apart from the transcript blob so a tab

@@ -4,7 +4,7 @@ import * as yaml from 'js-yaml';
 import * as vscode from 'vscode';
 import { ForgeConfigSchema } from './schema';
 import type { ForgeConfig } from './types';
-import { splitModelProfile } from './ConfigResolver';
+import { availableProfilesFor, splitModelProfile } from './ConfigResolver';
 import { permissionsSuppressedByBlock } from '../tools/PermissionResolver';
 
 const CONFIG_FILENAME = 'config.yaml';
@@ -41,6 +41,15 @@ export function loadConfig(storagePath: string): ForgeConfig {
   }
   const modelNames = new Set(config.models.map((m) => m.name));
   const profileNames = new Set(Object.keys(config.profiles ?? {}));
+  for (const model of config.models) {
+    for (const profile of model.profiles ?? []) {
+      if (!profileNames.has(profile)) {
+        throw new Error(
+          `Forge: model "${model.name}" references unknown profile "${profile}" (available: ${[...profileNames].join(', ') || 'none'})`,
+        );
+      }
+    }
+  }
 
   // active_model may carry a trailing @profile (F6). Aliases are resolved at use
   // time, so an active_model that is an alias key is valid too.
@@ -57,6 +66,11 @@ export function loadConfig(storagePath: string): ForgeConfig {
         `Forge: active_model "${config.active_model}" references unknown profile "${profile}" (available: ${[...profileNames].join(', ') || 'none'})`,
       );
     }
+    if (!isAlias && profile && !availableProfilesFor(config, base).includes(profile)) {
+      throw new Error(
+        `Forge: active_model "${config.active_model}" uses a profile unavailable for model "${base}"`,
+      );
+    }
   }
 
   // Every alias target must resolve to a known base (+ known profile if present).
@@ -69,6 +83,9 @@ export function loadConfig(storagePath: string): ForgeConfig {
       throw new Error(
         `Forge: alias "${key}" → "${target}" references unknown profile "${profile}"`,
       );
+    }
+    if (profile && !availableProfilesFor(config, base).includes(profile)) {
+      throw new Error(`Forge: alias "${key}" uses a profile unavailable for model "${base}"`);
     }
   }
 

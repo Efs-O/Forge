@@ -36,8 +36,8 @@ export function createSidebarHostFacade(deps: SidebarFacadeDeps): ForgeHostFacad
     // unless the pipeline draws one.
     send: (conversationId, text, attachments, options) =>
       send.send(text, attachments, conversationId, undefined, { ...options, echoPrompt: true }),
-    runContactPrompt: (text, systemPromptText) =>
-      agentLoop.runContactPrompt(text, systemPromptText),
+    runContactPrompt: (text, systemPromptText, options) =>
+      agentLoop.runContactPrompt(text, systemPromptText, options),
     cancelContactPrompts: () => agentLoop.cancelContactPrompts(),
     cancel: async (conversationId) => {
       requestChains.markCancelling(conversationId);
@@ -49,6 +49,7 @@ export function createSidebarHostFacade(deps: SidebarFacadeDeps): ForgeHostFacad
     resolveApproval: (id, approved) => agentLoop.resolveConfirmation(id, approved),
     addQuestionSink: (sink) => questions.addSink(sink),
     answerQuestion: (id, text) => questions.answer(id, text),
+    dismissQuestion: (id) => questions.dismiss(id),
     getPendingApproval: () => agentLoop.pendingApproval(),
     getActiveConversationId: () => deps.getSidebar().activeConversationId,
     getOpenConversations: () => deps.getSidebar().conversations,

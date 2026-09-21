@@ -59,6 +59,8 @@ export function totpSecretKey(channel: RemoteInboundEvent['channel']): string {
 const ACTIONABLE_WHEN_AUTHENTICATED = new Set<RemoteInboundEvent['kind']>([
   'action',
   'contact_action',
+  'question_action',
+  'help_action',
   'selection',
   'text',
   'voice',
@@ -205,6 +207,17 @@ export class RemoteSessionAuth {
   ): boolean {
     const session = this.sessions.get(sessionKey(channel, ownerId));
     if (!session || session.chatId !== chatId) return false;
+    this.expire(session, now);
+    return session.state === 'authenticated';
+  }
+
+  isAuthenticated(
+    channel: RemoteInboundEvent['channel'],
+    ownerId: string,
+    now = Date.now(),
+  ): boolean {
+    const session = this.sessions.get(sessionKey(channel, ownerId));
+    if (!session) return false;
     this.expire(session, now);
     return session.state === 'authenticated';
   }

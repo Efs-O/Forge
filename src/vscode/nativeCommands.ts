@@ -7,7 +7,7 @@ import { registerEditorCommands } from './editorCommands';
 import { registerAgentBusCommands } from './agentBusCommands';
 import { runAddModelWizard } from '../sidebar/AddModelWizard';
 import { migrateConfig } from '../config/ConfigMigrator';
-import { mergeGroupsIntoModel } from '../config/ConfigResolver';
+import { availableProfilesFor, mergeGroupsIntoModel } from '../config/ConfigResolver';
 
 export function registerNativeCommands(
   context: vscode.ExtensionContext,
@@ -80,7 +80,7 @@ export function registerNativeCommands(
       if (!pick) return;
       // F6: when request-time profiles exist, offer them as a second step. The
       // chosen base@profile becomes active_model; loading still keys on the base.
-      const profileNames = Object.keys(config.profiles ?? {});
+      const profileNames = availableProfilesFor(config, pick.modelName);
       let selectedId = pick.modelName;
       if (profileNames.length > 0) {
         const profilePick = await vscode.window.showQuickPick(

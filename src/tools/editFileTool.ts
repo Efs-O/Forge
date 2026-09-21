@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveWorkspacePath } from '../util/WorkspacePaths';
 import { applyEol, describeEditMiss, dominantEol, findEditMatch } from './editMatch';
-import { writeFileAtomicSync } from '../util/atomicWrite';
+import { writeFileAtomicSync, type ExpectedFileState } from '../util/atomicWrite';
 
 // ── edit_file ──────────────────────────────────────────────────────────────────
 
@@ -106,12 +106,27 @@ export function makeEditFileTool(): RegisteredTool {
     permission: 'write',
     mutation: { paths: (args) => [args['filepath'] as string], showDiff: true },
     handler: async (args) => {
-      const filepath = resolveWorkspacePath(args['filepath'] as string);
+      const filepath = resolveWorkspacePath(args['filepath'] as string, {
+        mustBeInsideWorkspace: true,
+      });
       const edits = parseEdits(args);
 
       let content: string;
+      let fileState: ExpectedFileState;
       try {
+        fileState = (() => {
+          const stat = fs.statSync(filepath);
+          return { size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs };
+        })();
         content = fs.readFileSync(filepath, 'utf8');
+        const afterRead = fs.statSync(filepath);
+        if (
+          afterRead.size !== fileState.size ||
+          afterRead.mtimeMs !== fileState.mtimeMs ||
+          afterRead.ctimeMs !== fileState.ctimeMs
+        ) {
+          throw new Error('file changed while it was being read; re-read and retry');
+        }
       } catch (err) {
         throw new Error(`edit_file: cannot read file — ${(err as Error).message}`);
       }
@@ -137,7 +152,7 @@ export function makeEditFileTool(): RegisteredTool {
           applyEol(edit.newStr, eol) +
           updated.slice(match.index + match.length);
       }
-      writeFileAtomicSync(filepath, updated);
+      writeFileAtomicSync(filepath, updated, fileState);
       const suppliedPath = args['filepath'] as string;
       return edits.length === 1
         ? `Replaced in ${suppliedPath}`

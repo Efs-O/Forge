@@ -1,7 +1,8 @@
 # Telegram Contacts and Approved Contact Messages — Implementation Plan
 
-Status: implemented 2026-09-21. Source, focused tests, and the starter contact
-instructions template are included; live Telegram verification remains manual.
+Status: implemented 2026-09-21. Source, focused tests, the starter contact
+instructions template, and owner previews containing the original contact
+message are included; live Telegram verification remains manual.
 
 ## Goal
 
@@ -219,12 +220,19 @@ Telegram presentation
 Add a typed Telegram send method for the contact preview:
 
 ```text
-Ready to send to <contact>:
+<contact> asked:
 
-<exact text>
+<exact contact question>
+
+Forge drafted:
+
+<exact answer>
 
 [Send] [Cancel]
 ```
+
+For a coalesced burst, include each exact contact message in order before the
+draft. Direct owner `/send` previews keep the existing recipient/message form.
 
 Only the first message chunk may carry the buttons. Clear the keyboard and
 answer the callback after a decision. Use the existing per-chat send queue and
@@ -400,7 +408,8 @@ this first version.
 5. If admitted, the contact gets a generic thinking status while an isolated,
    no-tools prompt runs on a free `n_parallel` slot of the configured model.
 6. Forge creates an owner-bound pending outbound draft containing the exact
-   recipient and generated text, then sends the owner a preview.
+   recipient and generated text, then sends the owner a preview containing the
+   exact contact message(s) followed by the generated draft.
 7. Only the owner’s `[Send]` callback atomically claims and sends the text.
 8. The contact thread records the assistant reply only after successful send.
 9. Cancel, expiry, failure, stale callback, foreign callback, and duplicate
@@ -421,7 +430,7 @@ this first version.
 - `test/unit/TelegramContacts.test.ts` (new): pending `/start`, duplicate IDs,
   approval/name assignment, case-insensitive lookup, ambiguity, disable,
   contact-only isolation, burst coalescing, throttling, language prompt,
-  deny-list checks, and status wording.
+  deny-list checks, exact owner question/draft preview, and status wording.
 - `test/unit/RemoteCore.test.ts`: owner/contact routing, isolated contact
   history, busy/unavailable behavior, draft creation, send/cancel/expiry, and
   duplicate-confirm prevention.
@@ -457,8 +466,8 @@ After implementation:
 1. Have a new Telegram account press `/start`; verify it receives no owner
    access and the owner sees a pending requester.
 2. Approve it as `Chara`; verify `/contacts list` and duplicate prevention.
-3. Send a Greek message; verify the draft is Greek, the owner sees the exact
-   preview, and nothing reaches Chara before confirmation.
+3. Send a Greek message; verify the owner sees the exact question followed by
+   the Greek draft, and nothing reaches Chara before confirmation.
 4. Confirm once, press the button again, and press it from another Telegram
    account; verify exactly one delivery.
 5. Cancel and allow a draft to expire; verify no delivery.
@@ -485,6 +494,8 @@ After implementation:
 - [x] Same-model contact work uses only a free `n_parallel` slot.
 - [x] Different-model loading/eviction is refused.
 - [x] Every substantive contact-facing message requires owner confirmation.
+- [x] Owner previews include the exact contact message(s) before the generated
+  draft.
 - [x] Duplicate and foreign callbacks cannot send.
 - [x] Logging is metadata-only and privacy-safe.
 - [x] `npm run ci`, `npm run package`, `git diff --check`, and `git status` pass

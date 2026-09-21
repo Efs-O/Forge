@@ -84,6 +84,10 @@ export class BaileysWhatsAppChannel implements RemoteChannel {
     }
   }
 
+  async handleHelpAction(): Promise<RemoteInboundDisposition> {
+    return { kind: 'rejected', reason: 'help close is unavailable' };
+  }
+
   async requestPairingCode(phoneNumber: string): Promise<string> {
     if (!/^\d{7,15}$/.test(phoneNumber)) {
       throw new Error('WhatsApp phone number must contain 7-15 digits including country code.');

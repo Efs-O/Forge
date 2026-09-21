@@ -122,6 +122,13 @@ export class RemoteAuth {
     return this.sessionAuth.canUse(channel, owner, chatId);
   }
 
+  async ownerSessionAuthenticated(channel: RemoteInboundEvent['channel']): Promise<boolean> {
+    const owner = await this.secrets.get(ownerSecretKey(channel));
+    if (!owner) return false;
+    if (!(await this.sessionAuth.isEnrolled(channel, owner))) return true;
+    return this.sessionAuth.isAuthenticated(channel, owner);
+  }
+
   async approvalNonce(
     channel: RemoteInboundEvent['channel'],
     chatId: string,

@@ -39,19 +39,32 @@ remote:
     enabled: true
   whatsapp:
     enabled: false
+  contacts:
+    enabled: true
+    web:
+      enabled: false
+      max_results: 5
+      max_fetch_bytes: 200000
+      timeout_ms: 15000
 ```
+
+Set `remote.contacts.enabled` to `true` only if you want the existing Forge
+Telegram bot to serve approved contacts in dedicated groups. Keep
+`remote.contacts.web.enabled` false unless current-information lookups are
+needed and the existing Forge search/fetch providers are configured.
 
 Save the configuration. Forge normally reloads it automatically; reload the VS
 Code window if the transport does not become active.
 
 ## 2. Create a Telegram bot and store its token
 
-1. In Telegram, open the verified `@BotFather` account.
-2. Send `/newbot` and follow Telegram's prompts.
-3. Copy the resulting token only long enough to store it locally.
-4. In VS Code, run **Forge: Set Telegram Bot Token**.
-5. Paste the token into the hidden input.
-6. Run **Forge: Validate Remote Control**.
+1. If you already have a dedicated Forge bot, reuse it. Otherwise, open the
+   verified `@BotFather` account and send `/newbot`.
+2. Copy the existing or newly created token only long enough to store it
+   locally.
+3. In VS Code, run **Forge: Set Telegram Bot Token**.
+4. Paste the token into the hidden input.
+5. Run **Forge: Validate Remote Control**.
 
 The Telegram row should eventually report `configured=true`, `active=true`,
 `lease=true`, and `provider=true`. `owner=false` and `totp=false` are expected
@@ -74,11 +87,59 @@ TOTP authentication.
    the new bot and send that command exactly.
 4. Run **Forge: Validate Remote Control** again and require `owner=true`.
 
-Group chats and other Telegram accounts cannot pair or control Forge. Pairing
-alone has no second factor; once an authenticator is enrolled, its session
-starts locked and pairing does not bypass it.
+Group chats and other Telegram accounts cannot pair or control the Forge owner
+session. Pairing alone has no second factor; once an authenticator is enrolled,
+its session starts locked and pairing does not bypass it.
 
-## 4. Enroll an authenticator locally
+## 4. Configure BotFather for contact groups (optional)
+
+Use the existing Forge bot. Do not create one bot per contact.
+
+1. Open the verified `@BotFather` account.
+2. Send `/setprivacy`.
+3. Select the existing Forge bot.
+4. Choose **Disable**.
+
+This lets Forge receive ordinary, non-command messages in its dedicated
+contact groups. It also means the bot can read all messages in any group where
+it is a member, so add it only to private groups containing the owner, Forge,
+and one approved contact. This setting does not expose private chats or groups
+where the bot is not a member.
+
+## 5. Connect an approved contact to a private group
+
+The contact first opens the existing Forge bot privately and sends `/start`.
+The owner approves the pending request from the authenticated private owner
+chat. Then:
+
+1. Create a new private Telegram group.
+2. Add the existing Forge bot and the approved contact. Keep the group limited
+   to those three participants.
+3. In that group, the owner sends `/contact link <contact-name>`.
+4. Forge posts a short link notice in the group and sends the one-time token to
+   the owner's private bot chat.
+5. In the private owner chat, send `/contact bind <token>`.
+6. The contact can now ask ordinary questions in the group without mentioning
+   the bot. Forge replies in the same group, and the owner can reply directly.
+
+The contact's old private bot chat is an onboarding/status surface after
+approval; ordinary contact questions there are rejected with a group notice.
+Only `/owner <message>` escalates a contact request privately to the owner.
+Forge never impersonates the owner. If Forge is offline, busy, using a
+different active model, or has no free same-model capacity, the group receives
+a generic unavailable message and the owner receives a rate-limited runtime
+alert.
+
+## 6. Optional contact web access
+
+When both contact flags are enabled, the contact assistant may use only the
+existing configured read-only web search/fetch providers. It cannot use Forge
+files, shell, workspace tools, credentials, or messaging tools. Search and
+fetch are bounded, HTTPS-only at the contact seam, and webpage text is treated
+as untrusted data. If web access is disabled or unavailable, Forge must say so
+instead of inventing current information.
+
+## 7. Enroll an authenticator locally
 
 Enrollment is deliberately a local VS Code action. Forge never sends the QR
 code or Base32 secret through Telegram.
@@ -100,7 +161,7 @@ The secret is stored in VS Code SecretStorage and bound to the paired Telegram
 owner. It is never stored in `config.yaml`, remote durable state, or Forge
 transcripts.
 
-## 5. Authenticate from Telegram
+## 8. Authenticate from Telegram
 
 After an extension restart, a `/lock`, inactivity expiry, or a new pairing,
 the remote session is locked.
@@ -116,32 +177,32 @@ While locked, Forge consumes a six-digit code strictly as authentication input.
 It never passes that message to a model, command handler, queue, approval
 handler, or conversation binding.
 
-## 6. Normal remote use
+## 9. Normal remote use
 
 After authenticating, the paired owner can use normal remote control. Useful
 commands include:
 
-| Command                   | Behavior                                                                                                        |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `/status`                 | Shows bounded runtime, queue, notification, context, and approval state.                                        |
-| `/new`                    | Binds the chat to a new non-active Forge conversation.                                                          |
-| `/list [page]`            | Lists conversations ten at a time with Previous/Next/Close buttons and short-lived absolute numeric selections. |
-| `/resume`                 | Continues the conversation currently bound to this chat, loading its model if needed.                          |
-| `/select <number-or-id>`  | Selects and binds an existing conversation without starting a turn. `/resume <number-or-id>` remains an alias. |
-| `/models [page]`          | Lists configured models ten at a time with Previous/Next/Close buttons and absolute numeric selections.         |
-| `/model <number-or-name>` | Pins a model while the bound conversation is idle.                                                              |
-| `/queue`                  | Lists durable prompts waiting for the bound conversation.                                                       |
-| `/compact`                | Compacts the bound conversation.                                                                                |
-| `/stop`                   | Cancels the active request only; queued requests remain queued.                                                 |
-| `/unload`                 | Releases loaded backends while Forge is globally idle.                                                          |
-| `/restart`                | Restarts the bound conversation's explicitly pinned model while idle.                                           |
-| `/workspace list [page]`  | Lists workspace aliases ten at a time, numbered, marking the one this chat is in.                                |
+| Command                        | Behavior                                                                                                                                         |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `/status`                      | Shows bounded runtime, queue, notification, context, and approval state.                                                                         |
+| `/new`                         | Binds the chat to a new non-active Forge conversation.                                                                                           |
+| `/list [page]`                 | Lists conversations ten at a time with Previous/Next/Close buttons and short-lived absolute numeric selections.                                  |
+| `/resume`                      | Continues the conversation currently bound to this chat, loading its model if needed.                                                            |
+| `/select <number-or-id>`       | Selects and binds an existing conversation without starting a turn. `/resume <number-or-id>` remains an alias.                                   |
+| `/models [page]`               | Lists configured models ten at a time with Previous/Next/Close buttons and absolute numeric selections.                                          |
+| `/model <number-or-name>`      | Pins a model while the bound conversation is idle.                                                                                               |
+| `/queue`                       | Lists durable prompts waiting for the bound conversation.                                                                                        |
+| `/compact`                     | Compacts the bound conversation.                                                                                                                 |
+| `/stop`                        | Cancels the active request only; queued requests remain queued.                                                                                  |
+| `/unload`                      | Releases loaded backends while Forge is globally idle.                                                                                           |
+| `/restart`                     | Restarts the bound conversation's explicitly pinned model while idle.                                                                            |
+| `/workspace list [page]`       | Lists workspace aliases ten at a time, numbered, marking the one this chat is in.                                                                |
 | `/workspace <number-or-alias>` | Hands the chat off to a configured workspace, by list number or alias, and continues its most recent conversation. `/new <n>` is a silent alias. |
-| `/clanker on\|off`         | Changes the normal non-dangerous tool confirmation gate for this window.                                         |
-| `/lock`                   | Immediately locks the remote session.                                                                           |
-| `/timeout`                | Shows the inactivity timeout.                                                                                   |
-| `/timeout 30`             | Sets a 30-minute timeout. Valid range is 1–1440.                                                                |
-| `/timeout off`            | Disables only inactivity expiry. Restart and `/lock` still require TOTP.                                        |
+| `/clanker on\|off`             | Changes the normal non-dangerous tool confirmation gate for this window.                                                                         |
+| `/lock`                        | Immediately locks the remote session.                                                                                                            |
+| `/timeout`                     | Shows the inactivity timeout.                                                                                                                    |
+| `/timeout 30`                  | Sets a 30-minute timeout. Valid range is 1–1440.                                                                                                 |
+| `/timeout off`                 | Disables only inactivity expiry. Restart and `/lock` still require TOTP.                                                                         |
 
 `/timeout` is accepted only after TOTP authentication. It updates the same
 configuration value used by the local extension and does not restart the
@@ -152,7 +213,7 @@ After `/lock`, expiry, re-authentication, or restart, an old approval button is
 stale and cannot resolve an approval. Forge may leave an old Telegram button
 visible, but pressing it fails closed.
 
-## 7. Inactivity, queues, and notifications
+## 10. Inactivity, queues, and notifications
 
 Every valid authenticated owner action refreshes the inactivity timer. Invalid
 codes, messages from other users, provider noise, background model output, and
@@ -172,7 +233,7 @@ Restarting VS Code also starts locked. A request that was already running at a
 host crash remains crash-unknown and is never replayed. Previously queued work
 waits for the paired owner to authenticate again.
 
-## 8. Reset, disable, and unpair
+## 11. Reset, disable, and unpair
 
 All recovery operations are local-only:
 
@@ -187,7 +248,7 @@ All recovery operations are local-only:
 If the authenticator device is lost, use the local reset command. Do not try to
 recover through Telegram; that path intentionally does not exist.
 
-## 9. Validation checklist
+## 12. Validation checklist
 
 Before relying on remote control, confirm all of the following:
 

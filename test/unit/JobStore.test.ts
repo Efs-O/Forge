@@ -63,10 +63,16 @@ describe('JobStore', () => {
     expect((await store.load('disk'))!.state.consecutive_failures).toBe(2);
   });
 
-  it('a malformed job file is reported, not skipped silently', async () => {
+  it('quarantines a malformed job file and keeps the scheduler loadable', async () => {
     await store.ensureDirs();
-    await fs.promises.writeFile(path.join(root, 'bad.json'), '{not json');
-    await expect(store.loadAll()).rejects.toThrow(/bad\.json/);
+    const bad = path.join(root, 'bad.json');
+    await fs.promises.writeFile(bad, '{not json');
+    await expect(store.loadAll()).resolves.toEqual([]);
+    await expect(fs.promises.access(bad)).rejects.toThrow();
+    const quarantined = (await fs.promises.readdir(root)).find((name) =>
+      name.startsWith('bad.json.corrupt-'),
+    );
+    expect(quarantined).toBeDefined();
   });
 
   it('a corrupt state file falls back to the default state', async () => {
@@ -169,6 +175,18 @@ describe('JobStore run log', () => {
     await expect(
       store.appendRun('disk', { at: 1, outcome: 'bogus', summary: 'x' } as never),
     ).rejects.toThrow();
+  });
+
+  it('skips a malformed run row without hiding later valid rows', async () => {
+    await store.ensureDirs();
+    await fs.promises.writeFile(
+      path.join(root, 'runs', 'disk.jsonl'),
+      '{"at":1,"outcome":"ok","changed":false,"summary":"first","delivered":0}\n' +
+        '{torn row}\n' +
+        '{"at":3,"outcome":"ok","changed":false,"summary":"third","delivered":0}\n',
+      'utf8',
+    );
+    expect((await store.readRuns('disk')).map((row) => row.at)).toEqual([1, 3]);
   });
 });
 

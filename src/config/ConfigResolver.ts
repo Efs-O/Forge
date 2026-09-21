@@ -245,6 +245,9 @@ export function resolveRequestModel(
   const d: ProfileConfig = config.defaults ?? {};
   let p: ProfileConfig = {};
   if (profile !== undefined) {
+    if (model.profiles && !model.profiles.includes(profile)) {
+      throw new Error(`Forge: profile "${profile}" is not available for model "${base}"`);
+    }
     const found = config.profiles?.[profile];
     if (!found) {
       throw new Error(
@@ -336,6 +339,7 @@ export function listProfiles(config: ForgeConfig): string[] {
 /** Profiles applicable to a base model. Profiles are generic presets, so every
  *  defined profile applies; the base must exist. */
 export function availableProfilesFor(config: ForgeConfig, base: string): string[] {
-  findBase(config, base);
-  return listProfiles(config);
+  const model = findBase(config, base);
+  const allowed = model.profiles ?? listProfiles(config);
+  return allowed.filter((profile) => config.profiles?.[profile] !== undefined);
 }

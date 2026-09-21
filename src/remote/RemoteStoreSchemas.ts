@@ -102,14 +102,34 @@ const ContactSchema = z.object({
   telegramUserId: z.string().regex(/^[0-9]{1,32}$/),
   role: z.literal('contact_only'),
   status: z.enum(['active', 'disabled']),
+  groupStatus: z.enum(['unbound', 'link_pending', 'bound']).default('unbound'),
+  groupChatId: z
+    .string()
+    .regex(/^-?[0-9]{1,32}$/)
+    .optional(),
+  groupTitle: z.string().trim().min(1).max(256).optional(),
+  groupBoundAt: z.number().int().nonnegative().optional(),
+  groupVerifiedAt: z.number().int().nonnegative().optional(),
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
+});
+
+const ContactGroupLinkSchema = z.object({
+  id: z.string().regex(/^[A-Za-z0-9_-]{16,48}$/),
+  contactId: z.string().min(1).max(128),
+  groupChatId: z.string().regex(/^-?[0-9]{1,32}$/),
+  groupTitle: z.string().trim().min(1).max(256).optional(),
+  ownerId: z.string().regex(/^[0-9]{1,32}$/),
+  createdAt: z.number().int().nonnegative(),
+  expiresAt: z.number().int().nonnegative(),
+  updatedAt: z.number().int().nonnegative(),
+  state: z.enum(['pending', 'confirmed', 'cancelled', 'expired']),
 });
 
 const ContactThreadMessageSchema = z.object({
   id: z.string().min(1).max(128),
   contactId: z.string().min(1).max(128),
-  role: z.enum(['contact', 'assistant']),
+  role: z.enum(['contact', 'owner', 'assistant']),
   text: z.string().min(1).max(12_000),
   createdAt: z.number().int().nonnegative(),
 });
@@ -148,6 +168,7 @@ export const RemoteStateSchema = z.object({
   workspaceHandoffs: z.array(WorkspaceHandoffSchema).default([]),
   contactPending: z.array(ContactPendingSchema).default([]),
   contacts: z.array(ContactSchema).default([]),
+  contactGroupLinks: z.array(ContactGroupLinkSchema).default([]),
   contactThread: z.array(ContactThreadMessageSchema).default([]),
   contactOutbound: z.array(ContactOutboundSchema).default([]),
 });
@@ -167,6 +188,7 @@ export const EMPTY_REMOTE_STATE: RemoteStoreState = {
   workspaceHandoffs: [],
   contactPending: [],
   contacts: [],
+  contactGroupLinks: [],
   contactThread: [],
   contactOutbound: [],
 };
@@ -193,6 +215,7 @@ export function migrateLegacyState(
     workspaceHandoffs: [],
     contactPending: [],
     contacts: [],
+    contactGroupLinks: [],
     contactThread: [],
     contactOutbound: [],
   };

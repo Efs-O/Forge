@@ -84,6 +84,24 @@ describe('disk-backed workspace checkpoints', () => {
     expect(fs.readFileSync(target, 'utf8')).toBe('aaaa');
   });
 
+  it('verifies every blob before deleting any workspace content', async () => {
+    const { root, storage, stack } = fixture();
+    const target = path.join(root, 'protected.txt');
+    fs.writeFileSync(target, 'before');
+    const checkpoint = stack.beginTurn('turn-corrupt', 'corrupt-conversation');
+    const capture = await checkpoint.prepareWorkspace(root, new AbortController().signal);
+    fs.writeFileSync(target, 'after');
+    await capture.finish();
+    stack.commitTurn(checkpoint);
+
+    const turn = fs.readdirSync(storage).find((name) => name.startsWith('turn-'))!;
+    const blob = path.join(storage, turn, 'blobs', fs.readdirSync(path.join(storage, turn, 'blobs'))[0]!);
+    fs.writeFileSync(blob, 'corrupted');
+
+    await expect(stack.undo('corrupt-conversation')).rejects.toThrow(/Undo was incomplete/i);
+    expect(fs.readFileSync(target, 'utf8')).toBe('after');
+  });
+
   it('restores directory symlink targets without following them into the checkpoint', async () => {
     const { root, stack } = fixture();
     const firstTarget = path.join(root, 'target-one');

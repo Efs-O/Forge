@@ -5,6 +5,7 @@ import type { RegisteredTool } from './ToolRegistry';
 class ToolError extends Error {}
 
 const BLOCKED_SCHEMES = ['file://', 'data:', 'javascript:'];
+const MAX_REDIRECT_HOPS = 3;
 
 /**
  * Reject private/loopback/link-local hostnames and IP ranges.
@@ -77,6 +78,10 @@ export function makeWebFetchTool(): RegisteredTool {
               type: 'integer',
               description: 'Maximum characters of content to return. Defaults to 30000.',
             },
+            https_only: {
+              type: 'boolean',
+              description: 'Reject non-HTTPS redirect targets. Used by restricted capabilities.',
+            },
           },
           required: ['url'],
           additionalProperties: false,
@@ -87,18 +92,19 @@ export function makeWebFetchTool(): RegisteredTool {
     handler: async (args) => {
       const url = args['url'] as string;
       const maxChars = (args['max_chars'] as number | undefined) ?? 30000;
+      const httpsOnly = args['https_only'] === true;
 
       const blocked = ssrfCheck(url);
       if (blocked) {
         throw new ToolError(`web_fetch: ${blocked}`);
       }
+      if (httpsOnly && !url.toLowerCase().startsWith('https://')) {
+        throw new ToolError('web_fetch: HTTPS is required for this capability.');
+      }
 
       let response: Response;
       try {
-        response = await fetch(url, {
-          signal: AbortSignal.timeout(10_000),
-          headers: { 'User-Agent': 'Forge-VSCode-Extension/0.5 (local-llm assistant)' },
-        });
+        response = await fetchPublicPage(url, httpsOnly);
       } catch (err) {
         throw new ToolError(`web_fetch: network error — ${(err as Error).message}`);
       }
@@ -122,4 +128,27 @@ export function makeWebFetchTool(): RegisteredTool {
       return `<UNTRUSTED_CONTENT>\n${truncated}\n</UNTRUSTED_CONTENT>`;
     },
   };
+}
+
+async function fetchPublicPage(url: string, httpsOnly: boolean): Promise<Response> {
+  let currentUrl = url;
+  for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop += 1) {
+    const blocked = ssrfCheck(currentUrl);
+    if (blocked) throw new ToolError(`web_fetch: redirect target rejected — ${blocked}`);
+    if (httpsOnly && !currentUrl.toLowerCase().startsWith('https://')) {
+      throw new ToolError('web_fetch: HTTPS is required for every redirect target.');
+    }
+    const response = await fetch(currentUrl, {
+      redirect: 'manual',
+      signal: AbortSignal.timeout(10_000),
+      headers: { 'User-Agent': 'Forge-VSCode/0.16 (local-llm assistant)' },
+    });
+    if (response.status < 300 || response.status >= 400 || response.status === 304) {
+      return response;
+    }
+    const location = response.headers.get('location');
+    if (!location) throw new ToolError('web_fetch: redirect had no Location header.');
+    currentUrl = new URL(location, currentUrl).toString();
+  }
+  throw new ToolError(`web_fetch: exceeded ${MAX_REDIRECT_HOPS} redirects.`);
 }

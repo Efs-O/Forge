@@ -16,6 +16,7 @@ import type {
 } from './types';
 import { createTelegramSelectionPages } from './TelegramSelectionPagination';
 import { postTelegram, TelegramChatQueue } from './telegramSendQueue';
+import { TelegramHelpMessages } from './TelegramHelpMessages';
 
 type Fetch = typeof fetch;
 const TelegramSentMessageSchema = z.object({ message_id: z.number().int() });
@@ -31,7 +32,7 @@ export const TELEGRAM_BOT_COMMANDS = [
   { command: 'chats', description: 'List recent conversations' },
   { command: 'clanker', description: 'Set approval-gate mode' },
   { command: 'compact', description: 'Compact the conversation' },
-  { command: 'contact', description: 'Approve or disable a contact' },
+  { command: 'contact', description: 'Approve, link, or disable a contact' },
   { command: 'contacts', description: 'List pending or active contacts' },
   { command: 'context', description: 'Context usage and tokens' },
   { command: 'drop', description: 'Drop queued prompt or all' },
@@ -89,12 +90,14 @@ export class TelegramChannel implements RemoteChannel {
    * an entry per prompt for the life of the window.
    */
   private readonly promptMessages = new Map<string, number>();
+  private readonly helpMessages: TelegramHelpMessages;
   /** Serializes every chat-addressed call so sends cannot overtake each other. */
   private readonly sendQueue = new TelegramChatQueue();
   private readonly albumCoordinator: TelegramAlbumCoordinator;
 
   constructor(private readonly options: TelegramChannelOptions) {
     this.fetchImpl = options.fetch ?? fetch;
+    this.helpMessages = new TelegramHelpMessages(this, options.onError);
     this.albumCoordinator = new TelegramAlbumCoordinator({
       handle: async (event) => {
         if (!this.handler) return { kind: 'retry', reason: 'remote event handler is unavailable' };
@@ -232,7 +235,7 @@ export class TelegramChannel implements RemoteChannel {
     chatId: string,
     text: string,
     buttons: readonly RemoteContactButton[][],
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal; parseMode?: 'HTML' },
   ): Promise<string | undefined> {
     const chunks = splitTelegramText(text);
     const keyboard = buttons.map((row) =>
@@ -250,6 +253,7 @@ export class TelegramChannel implements RemoteChannel {
         {
           chat_id: chatId,
           text: chunks[index],
+          ...(options?.parseMode ? { parse_mode: options.parseMode } : {}),
           ...(index === 0 ? { reply_markup: { inline_keyboard: keyboard } } : {}),
         },
         options?.signal,
@@ -260,6 +264,16 @@ export class TelegramChannel implements RemoteChannel {
       }
     }
     return firstMessageId;
+  }
+  sendHelp(
+    ...args: Parameters<TelegramHelpMessages['send']>
+  ): ReturnType<TelegramHelpMessages['send']> {
+    return this.helpMessages.send(...args);
+  }
+  handleHelpAction(
+    ...args: Parameters<TelegramHelpMessages['handleAction']>
+  ): ReturnType<TelegramHelpMessages['handleAction']> {
+    return this.helpMessages.handleAction(...args);
   }
 
   async answerCallbackQuery(

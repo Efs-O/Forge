@@ -45,7 +45,11 @@ export interface ForgeHostFacade {
     options?: { remoteRequestId?: string },
   ): Promise<ForgeRequestOutcome>;
   /** Isolated, no-tools contact generation on a currently ready model slot. */
-  runContactPrompt?(text: string, systemPromptText: string): Promise<string>;
+  runContactPrompt?(
+    text: string,
+    systemPromptText: string,
+    options?: { web?: boolean },
+  ): Promise<string>;
   cancelContactPrompts?(): void;
   cancel(conversationId: string): Promise<void>;
   /** Interrupt only the active turn so a durable steering prompt can run next. */
@@ -56,6 +60,8 @@ export interface ForgeHostFacade {
   addQuestionSink(sink: UserQuestionSink): { dispose(): void };
   /** Answers an outstanding agent question from a non-local surface. */
   answerQuestion(id: string, text: string): boolean;
+  /** Cancels an outstanding agent question when its remote presentation fails. */
+  dismissQuestion(id: string): boolean;
   status(): ForgeHostStatus;
   /**
    * Clanker mode auto-approves every non-dangerous tool. It is deliberately NOT
@@ -139,7 +145,11 @@ export interface SidebarHostFacadeDeps {
     attachments?: AttachmentData[],
     options?: { remoteRequestId?: string },
   ) => Promise<ForgeRequestOutcome>;
-  runContactPrompt?: (text: string, systemPromptText: string) => Promise<string>;
+  runContactPrompt?: (
+    text: string,
+    systemPromptText: string,
+    options?: { web?: boolean },
+  ) => Promise<string>;
   cancelContactPrompts?: () => void;
   cancel: (conversationId: string) => Promise<void>;
   interrupt: (conversationId: string) => Promise<void>;
@@ -148,6 +158,7 @@ export interface SidebarHostFacadeDeps {
   resolveApproval: (id: string, approved: boolean) => void;
   addQuestionSink: (sink: UserQuestionSink) => { dispose(): void };
   answerQuestion: (id: string, text: string) => boolean;
+  dismissQuestion: (id: string) => boolean;
   getPendingApproval: () => ToolApprovalRequestEvent | undefined;
   getActiveConversationId: () => string;
   getOpenConversations: () => ConversationRuntime[];
@@ -222,9 +233,13 @@ export class SidebarHostFacade implements ForgeHostFacade {
     return this.deps.send(conversationId, text, attachments, options);
   }
 
-  runContactPrompt(text: string, systemPromptText: string): Promise<string> {
+  runContactPrompt(
+    text: string,
+    systemPromptText: string,
+    options?: { web?: boolean },
+  ): Promise<string> {
     if (!this.deps.runContactPrompt) throw new Error('Forge contact generation is unavailable.');
-    return this.deps.runContactPrompt(text, systemPromptText);
+    return this.deps.runContactPrompt(text, systemPromptText, options);
   }
 
   cancelContactPrompts(): void {
@@ -257,6 +272,10 @@ export class SidebarHostFacade implements ForgeHostFacade {
 
   answerQuestion(id: string, text: string): boolean {
     return this.deps.answerQuestion(id, text);
+  }
+
+  dismissQuestion(id: string): boolean {
+    return this.deps.dismissQuestion(id);
   }
 
   clankerMode(): boolean {

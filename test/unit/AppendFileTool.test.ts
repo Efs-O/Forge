@@ -3,7 +3,11 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-vi.mock('vscode', () => ({ workspace: { workspaceFolders: undefined } }));
+vi.mock('vscode', () => ({
+  workspace: {
+    workspaceFolders: [{ uri: { fsPath: require('os').tmpdir() } }],
+  },
+}));
 
 import { makeAppendFileTool, makeWriteFileTool } from '../../src/tools/builtinTools';
 

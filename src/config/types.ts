@@ -1,6 +1,7 @@
 import type { ToolPermission } from '../tools/ToolRegistry';
 import type { EmbeddingPromptStyle } from '../search/embeddingPrompts';
 import type { AgentBusConfig } from './agentBusSchema';
+import type { RemoteContactsConfig } from './RemoteContactsConfig';
 /** Sampling parameter overrides shared by models, profiles, and defaults. */
 export interface SamplingConfig {
   temperature?: number;
@@ -17,7 +18,6 @@ export interface SamplingConfig {
   stop?: string | string[];
   preserve_thinking?: boolean;
 }
-
 /** Spawn-time facts for a llama.cpp model — fed to LlamaServerArgs. */
 export interface SpawnConfig {
   num_ctx?: number;
@@ -29,7 +29,6 @@ export interface SpawnConfig {
   n_gpu_layers?: number;
   extra_llama_server_args?: string[];
 }
-
 /**
  * How a `system_prompt` combines with Forge's own template.
  * - `append` (default): template first, then the prompt beneath it.
@@ -38,7 +37,6 @@ export interface SpawnConfig {
  *   that would otherwise answer as a codebase assistant.
  */
 export type SystemPromptMode = 'append' | 'replace';
-
 /** Runtime provider for a model or group entry. */
 export type ModelProvider =
   | 'llama.cpp'
@@ -48,7 +46,6 @@ export type ModelProvider =
   | 'openai'
   | 'openai-compatible'
   | 'cli';
-
 /**
  * A named bundle of shared config ("board") that models opt into via
  * `group`/`groups`. Purely additive — precedence is
@@ -171,6 +168,8 @@ export interface ModelConfig {
   chat_template_thinking?: boolean;
   /** Ollama reasoning effort level when think is enabled. */
   reasoning_effort?: 'high' | 'medium' | 'low' | 'none';
+  /** Request-time profiles exposed for this model; [] disables them. */
+  profiles?: string[];
   /** When true, strip visible thinking/channel markup when think is explicitly false. */
   strip_thinking_channels?: boolean;
   /** SecretStorage key holding the bearer token for OpenAI-compatible cloud providers (for example xAI, OpenAI, or OpenRouter). */
@@ -458,6 +457,7 @@ export interface ForgeConfig {
       retain_days: number | null;
       accept_pdf: boolean;
     };
+    contacts: RemoteContactsConfig;
     workspace_aliases: Record<string, { path: string; display_name: string }>;
     /** Private-LAN receiver for a paired always-on WakeSleep relay. */
     wake_relay?: { enabled: boolean; host: string; port: number; relay_ip: string };

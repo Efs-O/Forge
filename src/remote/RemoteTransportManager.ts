@@ -120,7 +120,7 @@ export class RemoteTransportManager {
       });
       const speech = buildSpeechDelivery(channel, config, undefined, this.options.notifyLocal);
       const contactService =
-        channelName === 'telegram'
+        channelName === 'telegram' && config.remote?.contacts.enabled === true
           ? new TelegramContactService(
               channel,
               this.auth,
@@ -129,6 +129,8 @@ export class RemoteTransportManager {
               new ContactInstructionsLoader(this.deps.workspaceRoot),
               this.audit,
               this.options.notifyLocal,
+              undefined,
+              { webEnabled: config.remote.contacts.web.enabled },
             )
           : undefined;
       const controller = new RemoteController(

@@ -33,6 +33,7 @@ import type { ToolApprovalSink, ToolApprovalRequestEvent } from './ToolApprovalS
 import { recordModelUsage } from './modelManager/usageTracker';
 import type { AgentProgressEvent, AgentProgressListener } from './AgentProgress';
 import { CliAgentDriver } from '../agents/CliAgentDriver';
+import { createContactWebTools } from '../tools/contactWebTools';
 import { resolveRequestModel } from '../config/ConfigResolver';
 import {
   CliSessionRegistry,
@@ -431,7 +432,11 @@ export class AgentLoop {
    * evict a model. The reservation is synchronous with the capacity decision,
    * so two contact batches cannot both observe the same free slot.
    */
-  async runContactPrompt(text: string, systemPromptText: string): Promise<string> {
+  async runContactPrompt(
+    text: string,
+    systemPromptText: string,
+    options?: { web?: boolean },
+  ): Promise<string> {
     const config = this.services.getConfig();
     if (!config.active_model) throw new Error('Forge contact model is unavailable.');
     const fallbackModel = config.active_model;
@@ -457,12 +462,22 @@ export class AgentLoop {
     try {
       hold = await this.services.pool.acquireForDelegation(target, target);
       if (!hold.backend.isReady()) throw new Error('Forge contact model is unavailable.');
+      const web = options?.web
+        ? createContactWebTools(this.services.toolRegistry, config)
+        : undefined;
       return await runPromptToMarkdown(this.services, text, '__forge_contact__', {
         modelName: target,
         systemPromptText,
         outputTokens: 1_024,
         alwaysStripThinking: true,
         backend: hold.backend,
+        ...(web
+          ? {
+              contactTools: web.definitions,
+              dispatchContactTool: web.dispatch,
+              maxContactToolRounds: 3,
+            }
+          : {}),
       });
     } finally {
       hold?.release();

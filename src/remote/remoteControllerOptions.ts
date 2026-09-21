@@ -1,7 +1,7 @@
 import * as path from 'path';
 import type { ForgeConfig } from '../config/types';
 import type { JobStore } from '../jobs/JobStore';
-import { listProfiles, mergeGroupsIntoModel } from '../config/ConfigResolver';
+import { availableProfilesFor, mergeGroupsIntoModel } from '../config/ConfigResolver';
 import { describeModelPickerModel } from '../sidebar/ModelPickerGroups';
 import { RemoteAttachmentStore } from './RemoteAttachmentStore';
 import type { ModelPickerDescriptor } from '../sidebar/ModelPickerGroups';
@@ -138,7 +138,6 @@ export function buildRemoteControllerOptions(
   const remote = config.remote;
   if (!remote) throw new Error('Forge remote configuration is unavailable.');
   const aliases = workspaceAliases(config, deps.workspaceRoot);
-  const profiles = listProfiles(config);
   return {
     workspaceId: deps.workspaceId,
     queueLimit: remote.queue_limit,
@@ -146,7 +145,10 @@ export function buildRemoteControllerOptions(
     rateLimitPerMinute: remote.rate_limit_per_minute,
     modelEntries: config.models.map((model) => ({
       ...describeModelPickerModel(mergeGroupsIntoModel(config, model)),
-      ...(profiles.length > 0 ? { profiles } : {}),
+      ...(() => {
+        const profiles = availableProfilesFor(config, model.name);
+        return profiles.length > 0 ? { profiles } : {};
+      })(),
     })),
     ...(deps.workspaceRoot
       ? { attachmentStore: new RemoteAttachmentStore(deps.workspaceRoot) }

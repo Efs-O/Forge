@@ -12,6 +12,7 @@ import { RemoteAuth } from '../../src/remote/RemoteAuth';
 import { RemoteController } from '../../src/remote/RemoteController';
 import { RemoteRequestStore } from '../../src/remote/RemoteRequestStore';
 import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
+import type { RemoteInboundEvent } from '../../src/remote/types';
 
 beforeEach(() => {
   openQuickInputs.length = 0;
@@ -227,16 +228,25 @@ function bridgeRig(
     remoteRequestId?: string | undefined;
     /** Chat bound to c1, standing in for a paired phone. */
     boundChatId?: string;
+    channelName?: 'fake' | 'telegram';
   } = {},
 ) {
-  const channel = new FakeRemoteChannel();
+  const channel = new FakeRemoteChannel(options.channelName ?? 'fake');
   const service = new UserQuestionService();
+  const channelName = options.channelName ?? 'fake';
   const store = {
     getRequest: (id: string) =>
-      id === 'req-1' ? { id: 'req-1', channel: 'fake', chatId: 'chat-1' } : undefined,
+      id === 'req-1' ? { id: 'req-1', channel: channelName, chatId: 'chat-1' } : undefined,
     bindingsForConversation: () =>
       options.boundChatId
-        ? [{ channel: 'fake', chatId: options.boundChatId, workspaceId: 'w', conversationId: 'c1' }]
+        ? [
+            {
+              channel: channelName,
+              chatId: options.boundChatId,
+              workspaceId: 'w',
+              conversationId: 'c1',
+            },
+          ]
         : [],
   } as unknown as RemoteRequestStore;
   const auth = {
@@ -246,6 +256,7 @@ function bridgeRig(
     addQuestionSink: (sink: Parameters<ForgeHostFacade['addQuestionSink']>[0]) =>
       service.addSink(sink),
     answerQuestion: (id: string, text: string) => service.answer(id, text),
+    dismissQuestion: (id: string) => service.dismiss(id),
     status: () => ({
       activeConversationId: 'c1',
       conversations: [],
@@ -272,6 +283,27 @@ function bridgeRig(
   return { bridge, channel, service };
 }
 
+function questionAction(
+  questionId: string,
+  action: 'select' | 'other',
+  messageId: string,
+  choice?: number,
+): Extract<RemoteInboundEvent, { kind: 'question_action' }> {
+  return {
+    channel: 'telegram',
+    kind: 'question_action',
+    providerMessageId: `callback-${questionId}-${action}`,
+    senderId: 'owner-1',
+    chatId: 'chat-1',
+    chatType: 'private',
+    receivedAt: Date.now(),
+    questionId,
+    action,
+    ...(choice === undefined ? {} : { choice }),
+    messageId,
+  };
+}
+
 describe('RemoteQuestionBridge', () => {
   it('sends the question to the chat that started the turn and answers from its reply', async () => {
     const { bridge, channel, service } = bridgeRig();
@@ -294,6 +326,87 @@ describe('RemoteQuestionBridge', () => {
     await vi.waitFor(() => expect(channel.sent).toHaveLength(1));
     expect(channel.sent[0]?.text).toContain('1. llama.cpp');
     expect(channel.sent[0]?.text).toContain('2. ollama');
+  });
+
+  it('presents flat Telegram choices as buttons and answers the exact option', async () => {
+    const { bridge, channel, service } = bridgeRig({ channelName: 'telegram' });
+    const asked = vi.fn();
+    service.addSink({ asked, answered: () => undefined });
+    const pending = service.ask({
+      prompt: 'Which backend?',
+      options: ['llama.cpp', 'ollama'],
+      conversationId: 'c1',
+    });
+    await vi.waitFor(() => expect(channel.inlineKeyboards).toHaveLength(1));
+    const questionId = asked.mock.calls[0]?.[0].id as string;
+    const buttons = channel.inlineKeyboards[0]?.buttons.flat() ?? [];
+    expect(buttons.map((button) => button.text)).toEqual(['llama.cpp', 'ollama', 'Other…']);
+    expect(buttons[1]?.callbackData).toBe(`q:${questionId}:1`);
+
+    await expect(
+      bridge.handleAction(questionAction(questionId, 'select', 'keyboard-1', 1)),
+    ).resolves.toEqual({ kind: 'handled' });
+    await expect(pending).resolves.toBe('ollama');
+    expect(channel.clearedKeyboards).toEqual([{ chatId: 'chat-1', messageId: 'keyboard-1' }]);
+  });
+
+  it('makes Other an explicit free-text state and rejects stale or duplicate buttons', async () => {
+    const { bridge, channel, service } = bridgeRig({ channelName: 'telegram' });
+    const asked = vi.fn();
+    service.addSink({ asked, answered: () => undefined });
+    const pending = service.ask({
+      prompt: 'Which backend?',
+      options: ['llama.cpp', 'ollama'],
+      conversationId: 'c1',
+    });
+    await vi.waitFor(() => expect(channel.inlineKeyboards).toHaveLength(1));
+    const questionId = asked.mock.calls[0]?.[0].id as string;
+    const other = questionAction(questionId, 'other', 'keyboard-1');
+    await expect(bridge.handleAction(other)).resolves.toEqual({ kind: 'handled' });
+    expect(service.hasPending('c1')).toBe(true);
+    expect(channel.sent.at(-1)?.text).toContain('send your answer as text');
+    expect(bridge.answerText('chat-1', 'use vllm')).toBe(true);
+    await expect(pending).resolves.toBe('use vllm');
+
+    await expect(bridge.handleAction(other)).resolves.toEqual({
+      kind: 'rejected',
+      reason: 'question is stale or not owned by this chat',
+    });
+  });
+
+  it('cancels the host question and reports a strict Telegram delivery failure', async () => {
+    const { bridge, channel, service } = bridgeRig({ channelName: 'telegram' });
+    const pending = service.ask({
+      prompt: 'Which backend?',
+      options: ['llama.cpp', 'ollama'],
+      conversationId: 'c1',
+    });
+    vi.spyOn(channel, 'sendInlineKeyboard').mockRejectedValue(new Error('Telegram unavailable'));
+    await vi.waitFor(() =>
+      expect(channel.sent.some((item) => item.text.includes('question was cancelled'))).toBe(true),
+    );
+    await expect(pending).resolves.toBeUndefined();
+    expect(service.hasPending('c1')).toBe(false);
+  });
+
+  it('does not report cancellation when another surface wins during button delivery', async () => {
+    const { bridge, channel, service } = bridgeRig({ channelName: 'telegram' });
+    const asked = vi.fn();
+    service.addSink({ asked, answered: () => undefined });
+    const pending = service.ask({
+      prompt: 'Which backend?',
+      options: ['llama.cpp', 'ollama'],
+      conversationId: 'c1',
+    });
+    const questionId = asked.mock.calls[0]?.[0].id as string;
+    vi.spyOn(channel, 'sendInlineKeyboard').mockImplementation(async () => {
+      service.answer(questionId, 'sidebar choice');
+      throw new Error('Telegram unavailable');
+    });
+    await expect(pending).resolves.toBe('sidebar choice');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(channel.sent.some((item) => item.text.includes('question was cancelled'))).toBe(false);
+    expect(bridge.hasPending('chat-1')).toBe(false);
   });
 
   it('numbers each sub-question separately and says how to reply', async () => {

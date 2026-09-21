@@ -4,6 +4,7 @@ import * as path from 'path';
 import { writeFileAtomicSync } from '../util/atomicWrite';
 import { clearStaged } from './actions/stagedBuild';
 import { deleteOutboxItem } from './JobOutbox';
+import { getLogger } from '../util/logger';
 import {
   JobSchema,
   JobStateSchema,
@@ -106,13 +107,17 @@ export class JobStore {
       try {
         parsed = JSON.parse(raw);
       } catch (err) {
-        throw new Error(
-          `Forge: job file ${file.name} is not valid JSON: ${(err as Error).message}`,
-        );
+        await this.quarantineDefinition(full, file.name, `invalid JSON: ${(err as Error).message}`);
+        continue;
       }
       const result = JobSchema.safeParse(parsed);
       if (!result.success) {
-        throw new Error(`Forge: job file ${file.name} is malformed: ${result.error.message}`);
+        await this.quarantineDefinition(
+          full,
+          file.name,
+          `schema mismatch: ${result.error.message}`,
+        );
+        continue;
       }
       const state = await this.readState(result.data.id);
       jobs.push({ job: result.data, state });
@@ -138,9 +143,25 @@ export class JobStore {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
       throw err;
     }
-    const result = JobSchema.safeParse(JSON.parse(raw));
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      await this.quarantineDefinition(
+        full,
+        `${id}.json`,
+        `invalid JSON: ${(err as Error).message}`,
+      );
+      return undefined;
+    }
+    const result = JobSchema.safeParse(parsed);
     if (!result.success) {
-      throw new Error(`Forge: job file ${id}.json is malformed: ${result.error.message}`);
+      await this.quarantineDefinition(
+        full,
+        `${id}.json`,
+        `schema mismatch: ${result.error.message}`,
+      );
+      return undefined;
     }
     const state = await this.readState(id);
     return { job: result.data, state };
@@ -265,6 +286,7 @@ export class JobStore {
     const handle = await fs.promises.open(full, 'a');
     try {
       await handle.writeFile(line, 'utf8');
+      await handle.sync();
     } finally {
       await handle.close();
     }
@@ -280,10 +302,20 @@ export class JobStore {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
       throw err;
     }
-    return raw
-      .split('\n')
-      .filter((line) => line.trim().length > 0)
-      .map((line) => RunRowSchema.parse(JSON.parse(line)));
+    const rows: RunRow[] = [];
+    for (const [index, line] of raw.split('\n').entries()) {
+      if (!line.trim()) continue;
+      try {
+        rows.push(RunRowSchema.parse(JSON.parse(line)));
+      } catch (err) {
+        getLogger().warn(
+          `[JobStore] skipped malformed run row ${id}.jsonl:${index + 1}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+    return rows;
   }
 
   /**
@@ -341,7 +373,8 @@ export class JobStore {
   watch(onChange: () => void): void {
     this.onChangeCallback = onChange;
     void this.ensureDirs();
-    this.watcher = fs.watch(this.jobsDir, () => {
+    this.watcher = fs.watch(this.jobsDir, (_eventType, filename) => {
+      if (filename?.toString().endsWith('.lease.json')) return;
       if (this.watchDebounce) return;
       this.watchDebounce = setTimeout(() => {
         this.watchDebounce = undefined;
@@ -359,5 +392,17 @@ export class JobStore {
     this.watcher?.close();
     this.watcher = undefined;
     this.onChangeCallback = undefined;
+  }
+
+  private async quarantineDefinition(full: string, name: string, reason: string): Promise<void> {
+    const quarantine = `${full}.corrupt-${Date.now()}`;
+    try {
+      await fs.promises.rename(full, quarantine);
+      getLogger().error(`[JobStore] quarantined ${name}: ${reason}`);
+    } catch (err) {
+      getLogger().error(
+        `[JobStore] could not quarantine ${name}: ${reason}; ${(err as Error).message}`,
+      );
+    }
   }
 }

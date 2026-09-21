@@ -1,5 +1,6 @@
-import { randomUUID } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import type {
+  RemoteContactGroupLinkRecord,
   RemoteContactOutboundRecord,
   RemoteContactOutboundState,
   RemoteContactPendingRecord,
@@ -7,6 +8,8 @@ import type {
   RemoteContactThreadMessage,
 } from './types';
 import type { RemoteRequestStore } from './RemoteRequestStore';
+
+const GROUP_LINK_TTL_MS = 10 * 60_000;
 
 /** Contact-domain facade over the shared RemoteRequestStore document. */
 export class RemoteContactStore {
@@ -34,6 +37,31 @@ export class RemoteContactStore {
     return this.store.contactRead((state) =>
       state.contacts.find(
         (item) => item.telegramUserId === userId && item.telegramChatId === chatId,
+      ),
+    );
+  }
+
+  groupContact(groupChatId: string): RemoteContactRecord | undefined {
+    return this.store.contactRead((state) =>
+      state.contacts.find(
+        (item) =>
+          item.status === 'active' &&
+          item.groupStatus === 'bound' &&
+          item.groupChatId === groupChatId,
+      ),
+    );
+  }
+
+  groupLink(id: string): RemoteContactGroupLinkRecord | undefined {
+    return this.store.contactRead((state) =>
+      state.contactGroupLinks.find((item) => item.id === id),
+    );
+  }
+
+  pendingGroupLink(groupChatId: string): RemoteContactGroupLinkRecord | undefined {
+    return this.store.contactRead((state) =>
+      state.contactGroupLinks.find(
+        (item) => item.groupChatId === groupChatId && item.state === 'pending',
       ),
     );
   }
@@ -111,6 +139,7 @@ export class RemoteContactStore {
         telegramUserId: pending.telegramUserId,
         role: 'contact_only',
         status: 'active',
+        groupStatus: 'unbound',
         createdAt: now,
         updatedAt: now,
       };
@@ -126,7 +155,18 @@ export class RemoteContactStore {
       const contact = draft.contacts.find((item) => item.id === id);
       if (!contact || contact.status !== 'active') return false;
       contact.status = 'disabled';
+      contact.groupStatus = 'unbound';
+      delete contact.groupChatId;
+      delete contact.groupTitle;
+      delete contact.groupBoundAt;
+      delete contact.groupVerifiedAt;
       contact.updatedAt = Date.now();
+      for (const link of draft.contactGroupLinks) {
+        if (link.contactId === id && link.state === 'pending') {
+          link.state = 'cancelled';
+          link.updatedAt = Date.now();
+        }
+      }
       for (const outbound of draft.contactOutbound) {
         if (outbound.contactId === id && outbound.state === 'pending') {
           outbound.state = 'cancelled';
@@ -135,6 +175,149 @@ export class RemoteContactStore {
       }
       return true;
     });
+  }
+
+  async createGroupLink(
+    contactId: string,
+    groupChatId: string,
+    ownerId: string,
+    groupTitle?: string,
+  ): Promise<RemoteContactGroupLinkRecord | undefined> {
+    let result: RemoteContactGroupLinkRecord | undefined;
+    await this.store.contactMutate((draft) => {
+      const contact = draft.contacts.find((item) => item.id === contactId);
+      if (!contact || contact.status !== 'active' || contact.groupStatus === 'bound') return;
+      if (
+        draft.contacts.some(
+          (item) =>
+            item.id !== contactId && item.status === 'active' && item.groupChatId === groupChatId,
+        ) ||
+        draft.contactGroupLinks.some(
+          (item) => item.state === 'pending' && item.groupChatId === groupChatId,
+        )
+      ) {
+        return;
+      }
+      const now = Date.now();
+      const link: RemoteContactGroupLinkRecord = {
+        id: randomBytes(18).toString('base64url'),
+        contactId,
+        groupChatId,
+        ...(groupTitle ? { groupTitle } : {}),
+        ownerId,
+        createdAt: now,
+        expiresAt: now + GROUP_LINK_TTL_MS,
+        updatedAt: now,
+        state: 'pending',
+      };
+      for (const previous of draft.contactGroupLinks) {
+        if (previous.contactId === contactId && previous.state === 'pending') {
+          previous.state = 'cancelled';
+          previous.updatedAt = now;
+        }
+      }
+      contact.groupStatus = 'link_pending';
+      contact.updatedAt = now;
+      draft.contactGroupLinks.push(link);
+      result = link;
+    });
+    return result;
+  }
+
+  async confirmGroupLink(
+    linkId: string,
+    ownerId: string,
+  ): Promise<'confirmed' | 'missing' | 'not_owned' | 'not_pending' | 'expired' | 'conflict'> {
+    let result: 'confirmed' | 'missing' | 'not_owned' | 'not_pending' | 'expired' | 'conflict' =
+      'missing';
+    await this.store.contactMutate((draft) => {
+      const link = draft.contactGroupLinks.find((item) => item.id === linkId);
+      if (!link) return;
+      if (link.ownerId !== ownerId) {
+        result = 'not_owned';
+        return;
+      }
+      if (link.state !== 'pending') {
+        result = 'not_pending';
+        return;
+      }
+      const now = Date.now();
+      if (now >= link.expiresAt) {
+        link.state = 'expired';
+        link.updatedAt = now;
+        result = 'expired';
+        return;
+      }
+      const contact = draft.contacts.find((item) => item.id === link.contactId);
+      if (!contact || contact.status !== 'active') {
+        link.state = 'cancelled';
+        link.updatedAt = now;
+        result = 'conflict';
+        return;
+      }
+      if (
+        draft.contacts.some(
+          (item) =>
+            item.id !== contact.id &&
+            item.status === 'active' &&
+            item.groupStatus === 'bound' &&
+            item.groupChatId === link.groupChatId,
+        )
+      ) {
+        result = 'conflict';
+        return;
+      }
+      contact.groupStatus = 'bound';
+      contact.groupChatId = link.groupChatId;
+      if (link.groupTitle) contact.groupTitle = link.groupTitle;
+      contact.groupBoundAt = now;
+      contact.groupVerifiedAt = undefined;
+      contact.updatedAt = now;
+      link.state = 'confirmed';
+      link.updatedAt = now;
+      result = 'confirmed';
+    });
+    return result;
+  }
+
+  async markGroupVerified(contactId: string, groupChatId: string): Promise<boolean> {
+    let verified = false;
+    await this.store.contactMutate((draft) => {
+      const contact = draft.contacts.find(
+        (item) =>
+          item.id === contactId &&
+          item.status === 'active' &&
+          item.groupStatus === 'bound' &&
+          item.groupChatId === groupChatId,
+      );
+      if (!contact) return;
+      contact.groupVerifiedAt = Date.now();
+      contact.updatedAt = Date.now();
+      verified = true;
+    });
+    return verified;
+  }
+
+  async unbind(id: string): Promise<boolean> {
+    let changed = false;
+    await this.store.contactMutate((draft) => {
+      const contact = draft.contacts.find((item) => item.id === id);
+      if (!contact) return;
+      contact.groupStatus = 'unbound';
+      delete contact.groupChatId;
+      delete contact.groupTitle;
+      delete contact.groupBoundAt;
+      delete contact.groupVerifiedAt;
+      contact.updatedAt = Date.now();
+      for (const link of draft.contactGroupLinks) {
+        if (link.contactId === id && link.state === 'pending') {
+          link.state = 'cancelled';
+          link.updatedAt = Date.now();
+        }
+      }
+      changed = true;
+    });
+    return changed;
   }
 
   async appendThread(message: RemoteContactThreadMessage): Promise<void> {

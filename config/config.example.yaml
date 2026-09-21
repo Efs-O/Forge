@@ -974,6 +974,13 @@ remote:
     enabled: true
     accept_pdf: true
     retain_days: null
+  contacts:
+    enabled: false
+    web:
+      enabled: false
+      max_results: 5
+      max_fetch_bytes: 200000
+      timeout_ms: 15000
 
 # Agent bus: ask_live_session writes straight into a running Claude Code / Codex session.
 agent_bus:

@@ -55,7 +55,7 @@ export function makeCreateDirectoryTool(): RegisteredTool {
     mutation: { paths: (args) => [args['path'] as string] },
     handler: async (args) => {
       const dirPath = args['path'] as string;
-      const resolvedPath = resolveWorkspacePath(dirPath);
+      const resolvedPath = resolveWorkspacePath(dirPath, { mustBeInsideWorkspace: true });
       fs.mkdirSync(resolvedPath, { recursive: true });
       return `Created: ${dirPath}`;
     },
@@ -96,8 +96,12 @@ export function makeMoveFileTool(): RegisteredTool {
       showDiff: true,
     },
     handler: async (args) => {
-      const src = resolveWorkspacePath(args['source'] as string);
-      const dst = resolveWorkspacePath(args['destination'] as string);
+      const src = resolveWorkspacePath(args['source'] as string, {
+        mustBeInsideWorkspace: true,
+      });
+      const dst = resolveWorkspacePath(args['destination'] as string, {
+        mustBeInsideWorkspace: true,
+      });
       fs.mkdirSync(path.dirname(dst), { recursive: true });
       fs.renameSync(src, dst);
       return `Moved to ${args['destination'] as string}`;
@@ -145,7 +149,7 @@ export function makeDeleteFileTool(): RegisteredTool {
     mutation: { paths: (args) => [args['path'] as string], showDiff: true },
     handler: async (args) => {
       const filePath = args['path'] as string;
-      const resolved = resolveWorkspacePath(filePath);
+      const resolved = resolveWorkspacePath(filePath, { mustBeInsideWorkspace: true });
       const recursive = args['recursive'] === true;
       // Asked before the delete: afterwards the path is gone from the working
       // tree and `ls-files` can no longer distinguish "was never tracked" from
@@ -236,7 +240,7 @@ export function makeFormatFileTool(): RegisteredTool {
     mutation: { paths: (args) => [args['path'] as string], showDiff: true },
     handler: async (args, context) => {
       const filePath = args['path'] as string;
-      const uri = vscode.Uri.file(resolveWorkspacePath(filePath));
+      const uri = vscode.Uri.file(resolveWorkspacePath(filePath, { mustBeInsideWorkspace: true }));
       // Load the document only. Never show, activate or close an editor: a tool
       // call must not move the user's focus, and the close command acted on
       // whatever was active by the time it ran, not necessarily on this file.
@@ -320,7 +324,7 @@ export function makeRenameSymbolTool(): RegisteredTool {
     handler: async (args, context) => {
       const filePath = args['path'] as string;
       const newName = args['new_name'] as string;
-      const uri = vscode.Uri.file(resolveWorkspacePath(filePath));
+      const uri = vscode.Uri.file(resolveWorkspacePath(filePath, { mustBeInsideWorkspace: true }));
       const position = new vscode.Position(args['line'] as number, args['character'] as number);
 
       const edit = await vscode.commands.executeCommand<vscode.WorkspaceEdit>(

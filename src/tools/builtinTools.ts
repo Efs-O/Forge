@@ -86,7 +86,9 @@ export function makeReadFileTool(): RegisteredTool {
     },
     permission: 'read',
     handler: async (args) => {
-      const filePath = resolveWorkspacePath(args['path'] as string);
+      const filePath = resolveWorkspacePath(args['path'] as string, {
+        mustBeInsideWorkspace: true,
+      });
       let bytes: Buffer;
       try {
         bytes = fs.readFileSync(filePath);
@@ -163,7 +165,9 @@ export function makeWriteFileTool(): RegisteredTool {
     permission: 'write',
     mutation: { paths: (args) => [args['path'] as string], showDiff: true },
     handler: async (args) => {
-      const filePath = resolveWorkspacePath(args['path'] as string);
+      const filePath = resolveWorkspacePath(args['path'] as string, {
+        mustBeInsideWorkspace: true,
+      });
       const content = args['content'] as string;
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
       writeFileAtomicSync(filePath, content);
@@ -202,7 +206,9 @@ export function makeAppendFileTool(): RegisteredTool {
     permission: 'write',
     mutation: { paths: (args) => [args['path'] as string], showDiff: true },
     handler: async (args) => {
-      const filePath = resolveWorkspacePath(args['path'] as string);
+      const filePath = resolveWorkspacePath(args['path'] as string, {
+        mustBeInsideWorkspace: true,
+      });
       const content = args['content'] as string;
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
       // appendFileSync creates the file when absent, so a chunked write can

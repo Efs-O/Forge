@@ -8,7 +8,7 @@ import type {
 } from './types';
 
 export class FakeRemoteChannel implements RemoteChannel {
-  readonly name = 'fake' as const;
+  readonly name: RemoteChannel['name'];
   readonly sent: Array<{ chatId: string; text: string; correlationId?: string }> = [];
   readonly retracted: Array<{ chatId: string; correlationId: string }> = [];
   /** Records command auto-cleanup deletes so tests can assert they fired. */
@@ -19,6 +19,7 @@ export class FakeRemoteChannel implements RemoteChannel {
     chatId: string;
     text: string;
     buttons: readonly RemoteContactButton[][];
+    parseMode?: 'HTML';
   }> = [];
   readonly callbackAnswers: Array<{ callbackId: string; text?: string }> = [];
   readonly clearedKeyboards: Array<{ chatId: string; messageId: string }> = [];
@@ -42,6 +43,9 @@ export class FakeRemoteChannel implements RemoteChannel {
     choices: readonly RemoteSelectionChoice[];
     controls: RemoteSelectionControls;
   }> = [];
+  constructor(name: RemoteChannel['name'] = 'fake') {
+    this.name = name;
+  }
   /**
    * Opt-in, because its presence is what the pager reads as "this transport
    * parses HTML". Declaring it unconditionally would make every existing test's
@@ -120,6 +124,10 @@ export class FakeRemoteChannel implements RemoteChannel {
     this.deleted.push({ chatId, messageId });
   }
 
+  async handleHelpAction(): Promise<RemoteInboundDisposition> {
+    return { kind: 'rejected', reason: 'help close is unavailable' };
+  }
+
   async sendPhoto(chatId: string, filePath: string, caption: string): Promise<void> {
     this.photos.push({ chatId, filePath, caption });
   }
@@ -133,8 +141,9 @@ export class FakeRemoteChannel implements RemoteChannel {
     chatId: string,
     text: string,
     buttons: readonly RemoteContactButton[][],
+    options?: { parseMode?: 'HTML' },
   ): Promise<string> {
-    this.inlineKeyboards.push({ chatId, text, buttons });
+    this.inlineKeyboards.push({ chatId, text, buttons, ...pageMode(options) });
     return `keyboard-${this.inlineKeyboards.length}`;
   }
 
