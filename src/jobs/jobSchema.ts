@@ -217,6 +217,8 @@ export const RunRowSchema = z.object({
   changed: z.boolean().default(false),
   /** One-line summary of what the run did. */
   summary: z.string(),
+  /** Error detail when a run failed. */
+  error: z.string().optional(),
   /** How many outbox items were delivered for this run. */
   delivered: z.number().int().nonnegative().default(0),
 });

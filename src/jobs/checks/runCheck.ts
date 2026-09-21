@@ -5,9 +5,6 @@ import type { CheckContext } from './checkTypes';
 import type { CheckResult } from './checkTypes';
 import type { JobFile } from '../jobSchema';
 
-/** The shared ETag cache, keyed per job id. */
-const etagCache = new Map<string, string>();
-
 /**
  * The check dispatch: given a job and its state, run the right check and
  * return the result. Extracted from JobScheduler to keep that file under the
@@ -30,8 +27,16 @@ export async function runCheck(job: JobFile, ctx: CheckContext): Promise<CheckRe
   }
 }
 
-/** Build a CheckContext for a job run. */
-export function buildCheckContext(allowedHosts: readonly string[], jobId: string): CheckContext {
+/**
+ * Build a CheckContext for a job run. The ETag cache is keyed PER JOB, not per
+ * URL alone; the scheduler owns this cache so separate scheduler instances do
+ * not share in-memory state.
+ */
+export function buildCheckContext(
+  allowedHosts: readonly string[],
+  jobId: string,
+  etagCache: Map<string, string>,
+): CheckContext {
   return {
     fetch: (url) => jobsFetch(url, { allowedHosts, etagCache, cacheKeyPrefix: jobId }),
     etagCache,

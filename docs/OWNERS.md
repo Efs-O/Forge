@@ -451,7 +451,8 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Outbox write, local toast, summarize-waits-for-idle        | `src/jobs/JobDelivery.ts`                                      |
 | Coalescing outbox (one pending message per job)            | `src/jobs/JobOutbox.ts`                                        |
 | Gated jobs network fetch (release API, binary download)    | `src/jobs/jobsFetch.ts`                                        |
-| Check kinds (github_release, github_issue, disk_space)     | `src/jobs/checks/github.ts`, `src/jobs/checks/diskSpace.ts`    |
+| Check kinds (github_release, github_issue, disk_space, none) | `src/jobs/checks/github.ts`, `src/jobs/checks/diskSpace.ts`  |
+| Check dispatch + check context                             | `src/jobs/checks/runCheck.ts`                                |
 | Check context + result types                               | `src/jobs/checks/checkTypes.ts`                                |
 | Human-readable job description (for `/jobs`)               | `src/jobs/jobDescribe.ts`                                      |
 | Discuss chat seeding (`manage_jobs` + `/job chat`)         | `src/jobs/jobDiscuss.ts`                                       |

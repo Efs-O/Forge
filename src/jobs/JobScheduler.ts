@@ -1,5 +1,4 @@
 import { FileLease } from '../util/FileLease';
-
 import { defaultOutboxDir } from './JobOutbox';
 import { JobDelivery } from './JobDelivery';
 import { runCheck, buildCheckContext } from './checks/runCheck';
@@ -77,18 +76,17 @@ export class JobScheduler {
   private readonly summarize: ((prompt: string) => Promise<string>) | undefined;
   private readonly tickMs: number;
   private readonly llamacpp: LlamacppAction | undefined;
+  private readonly etagCache = new Map<string, string>();
   /** User-facing delivery: the outbox, the toast, and the summarize timing (B.4). */
   private readonly delivery: JobDelivery;
   /** The single writer of `ForgeScheduledWake` while this window holds the lease. */
   private readonly wakes: WakeReconciler;
-
   private lease: FileLease | undefined;
   private timer: ReturnType<typeof setInterval> | undefined;
   private running = false;
   private disposed = false;
   /** The wall-clock time of the last tick, for resume detection. */
   private lastTickAt: number | undefined;
-
   /** Job ids with a run in progress, so the same job is not double-run. */
   private readonly runningJobs = new Set<string>();
 
@@ -313,6 +311,20 @@ export class JobScheduler {
     const hold = job.wake ? this.power.holdAwake(`job ${job.id}`) : undefined;
     try {
       const result = await this.runCheck(jobFile);
+      if (result.changed && job.action?.kind === 'agent_task') {
+        const error = 'agent_task runner not wired yet (AGENT_TASK_JOBS_PLAN phase 3)';
+        await this.store.appendRun(job.id, {
+          at: now.getTime(),
+          late: wasLate,
+          outcome: 'failed',
+          changed: true,
+          summary: error,
+          error,
+          delivered: 0,
+        });
+        await this.applyBackoff(jobFile, error);
+        return;
+      }
       const change = await this.delivery.deliverForChange(job, result);
       let delivered = change.delivered;
       if (state.consecutive_failures >= BACKOFF_THRESHOLD) {
@@ -352,6 +364,7 @@ export class JobScheduler {
           outcome: 'failed',
           changed: false,
           summary: 'run failed',
+          error: message,
           delivered: 0,
         })
         .catch(() => undefined);
@@ -395,13 +408,7 @@ export class JobScheduler {
   }> {
     const { job } = jobFile;
     const { allowedHosts } = this.getConfig();
-    // The ETag cache is keyed PER JOB, not per URL alone. Two jobs watching the
-    // same repo share a URL, and a cache keyed on the URL alone hands job B a
-    // 304 on its very first run — leaving it with no baseline while the server
-    // says "nothing new", a state the check cannot tell apart from a real
-    // no-change. The same happens to one job whose state file was lost while
-    // the process kept its cache.
-    const ctx = buildCheckContext(allowedHosts, job.id);
+    const ctx = buildCheckContext(allowedHosts, job.id, this.etagCache);
     let checkResult = await runCheck(jobFile, ctx);
 
     // A mutating action (llamacpp_update) runs when the check reports a change
