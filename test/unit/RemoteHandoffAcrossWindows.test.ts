@@ -133,7 +133,10 @@ function runtime(
   });
 }
 
-describe('workspace handoff between two live windows', () => {
+// Real timers and file polling: under a loaded full-suite run (the 2026-09-21
+// audit validation) a 2 s deadline missed a handoff that did arrive. A lost
+// handoff never arrives at all, so a longer deadline hides no race.
+describe('workspace handoff between two live windows', { timeout: 15_000 }, () => {
   it('claims a chat handed to a window that is already running', async () => {
     const directory = await storageDirectory();
     const channel = new FakeRemoteChannel();
@@ -145,7 +148,7 @@ describe('workspace handoff between two live windows', () => {
     await vi.waitFor(
       () =>
         expect(channel.sent.some((message) => message.text.startsWith('Forge: now in'))).toBe(true),
-      { timeout: 2_000 },
+      { timeout: 10_000 },
     );
     const reader = new RemoteRequestStore(statePath(directory));
     await reader.load();
@@ -181,8 +184,9 @@ describe('workspace handoff between two live windows', () => {
     // (takeOverTransports -> claim -> announce), so poll for it rather than
     // checking the array synchronously.
     await vi.waitFor(
-      () => expect(channel.sent.some((message) => message.text.startsWith('Forge: now in'))).toBe(true),
-      { timeout: 2_000 },
+      () =>
+        expect(channel.sent.some((message) => message.text.startsWith('Forge: now in'))).toBe(true),
+      { timeout: 10_000 },
     );
     await target.dispose();
   });
@@ -208,7 +212,7 @@ describe('workspace handoff between two live windows', () => {
         expect(channel.sent.some((message) => message.text.includes('could not switch'))).toBe(
           true,
         ),
-      { timeout: 2_000 },
+      { timeout: 10_000 },
     );
     expect(source.activeTransports()).toEqual(['telegram']);
     const reader = new RemoteRequestStore(statePath(directory));

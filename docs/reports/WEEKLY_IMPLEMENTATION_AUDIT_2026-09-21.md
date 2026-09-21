@@ -26,6 +26,12 @@ All eleven findings were fixed the same day. Each behavioural fix has a regressi
 | A10 | Dead `hostWait.ts` removed; the plan and handoff now say no empty-turn cost guard is enforced. The other unused exports listed are left as cleanup candidates | — |
 | A11 | `publish.yml` checks tag = version, runs `npm run package`, and publishes that one VSIX to every registry | `PublishWorkflowContract.test.ts` |
 
+**Validation-run failures** (`_VALIDATION.txt`) were fixed separately, and neither was a product defect:
+
+- *`forge.sh` bash syntax test:* on a Windows PATH without Git's bash, `bash` is the WSL launcher. With no usable distro it exits 1 and writes its error to stdout, which looked like a `forge.sh` syntax failure. The test now probes for a bash that actually runs (skipping otherwise) and passes the script on stdin.
+- *`RemoteHandoffAcrossWindows` "claims a chat handed…":* a 2 s deadline was too short under a loaded full-suite run (1 failure in 12 local stress runs; 0 in 15 once the deadline was 10 s). A lost handoff never arrives at all, so the longer deadline hides no race.
+- *`npm run package` exit 1:* the intended `check-vsix-version.mjs` refusal, because `forge-llm-0.16.19.vsix` already existed.
+
 ## Scope and method
 
 - Window: September 14–21, 2026, through the HEAD observed when the audit began. All of September 14 is included to avoid cutting the first implementation day in half.

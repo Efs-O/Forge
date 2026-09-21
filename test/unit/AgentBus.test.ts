@@ -105,10 +105,13 @@ describe('ensureBus', () => {
     expect(CLIENT_SCRIPT).toContain('"Authorization: Bearer $TOKEN" \\\n');
     expect(CLIENT_SCRIPT).toContain('VERB="${1:-}"');
     expect(CLIENT_SCRIPT).not.toContain('\r');
-    const script = path.join(home, 'syntax-check.sh');
-    fs.writeFileSync(script, CLIENT_SCRIPT);
-    const check = spawnSync('bash', ['-n', script], { encoding: 'utf8' });
-    if (check.error) ctx.skip(); // No bash on this runner.
+    // On a Windows PATH without Git's bash, `bash` is the WSL launcher: with no
+    // usable distro it exits 1 and prints a UTF-16 error to stdout, which read
+    // as a syntax failure of forge.sh. Only a bash that runs can judge syntax.
+    const probe = spawnSync('bash', ['-c', 'echo ok'], { encoding: 'utf8' });
+    if (probe.error || probe.stdout.trim() !== 'ok') ctx.skip();
+    // Script on stdin: no Windows path for a bash to translate.
+    const check = spawnSync('bash', ['-n'], { input: CLIENT_SCRIPT, encoding: 'utf8' });
     expect(check.stderr).toBe('');
     expect(check.status).toBe(0);
   });

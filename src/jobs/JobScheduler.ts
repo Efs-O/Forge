@@ -228,14 +228,16 @@ export class JobScheduler {
    */
   async tick(): Promise<void> {
     if (this.running || this.disposed) return;
-    // No lease: try to take it. A window that lost its lease (or whose holder
-    // went away) picks the scheduler back up here rather than staying dead.
-    if (!this.lease) {
-      if (!(await this.acquireLease())) return;
-      await this.reconcileWakes();
-    }
+    // Claimed before the lease attempt: two interval ticks racing through the
+    // acquisition await both ran every due job (seen under load, 2026-09-21).
     this.running = true;
     try {
+      // No lease: try to take it. A window that lost its lease (or whose holder
+      // went away) picks the scheduler back up here rather than staying dead.
+      if (!this.lease) {
+        if (!(await this.acquireLease())) return;
+        await this.reconcileWakes();
+      }
       const now = this.now();
       const jobs = await this.store.loadAll();
       const gap = this.lastTickAt === undefined ? 0 : now.getTime() - this.lastTickAt;

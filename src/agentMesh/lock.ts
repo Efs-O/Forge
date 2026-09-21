@@ -41,7 +41,7 @@ function unlinkQuiet(file: string): void {
   try {
     fs.unlinkSync(file);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    if (!isTransient(err)) throw err;
   }
 }
 
@@ -61,8 +61,8 @@ function tryPublish(lockPath: string, holder: HostId): boolean {
     fs.linkSync(tmp, lockPath);
     return true;
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-    return false;
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST' || isTransient(err)) return false;
+    throw err;
   } finally {
     unlinkQuiet(tmp);
   }
@@ -79,23 +79,47 @@ function reclaim(lockPath: string, seen: string): void {
   try {
     fs.renameSync(lockPath, aside);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return; // another recoverer won
+    if (isTransient(err)) return; // another recoverer won, or is mid-delete
     throw err;
   }
   try {
-    if (fs.readFileSync(aside, 'utf8') !== seen) fs.linkSync(aside, lockPath);
+    // Gone already: what was moved was mid-delete (its holder released it
+    // while another process had it open), so there is nothing to restore.
+    const moved = readIfPresent(aside);
+    if (moved !== undefined && moved !== seen) fs.linkSync(aside, lockPath);
   } finally {
     unlinkQuiet(aside);
   }
 }
 
-/** The lock's raw content and its age, or undefined if it vanished meanwhile. */
+/**
+ * The lock's raw content and its age, or undefined if it is going away. On
+ * Windows a file another process is deleting or renaming is "delete pending"
+ * for a moment and opens with EPERM rather than ENOENT; that is the same
+ * transient state, and the caller simply retries.
+ */
 function inspect(lockPath: string): { raw: string; ageMs: number } | undefined {
   try {
     const raw = fs.readFileSync(lockPath, 'utf8');
     return { raw, ageMs: Date.now() - fs.statSync(lockPath).mtimeMs };
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    if (isTransient(err)) return undefined;
+    throw err;
+  }
+}
+
+function isTransient(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException).code;
+  return (
+    code === 'ENOENT' || (process.platform === 'win32' && (code === 'EPERM' || code === 'EBUSY'))
+  );
+}
+
+function readIfPresent(file: string): string | undefined {
+  try {
+    return fs.readFileSync(file, 'utf8');
+  } catch (err) {
+    if (isTransient(err)) return undefined;
     throw err;
   }
 }
@@ -128,20 +152,26 @@ export function acquireLock(
   for (;;) {
     if (tryPublish(lockPath, holder)) return;
     const seen = inspect(lockPath);
-    if (!seen) continue;
-    const holderId = parseHolder(seen.raw);
-    const orphan = holderId
-      ? holderId.pid === holder.pid || !alive(holderId)
-      : seen.ageMs >= UNREADABLE_LOCK_GRACE_MS;
-    if (orphan) {
-      reclaim(lockPath, seen.raw);
-      continue;
+    const holderId = seen && parseHolder(seen.raw);
+    if (seen) {
+      const orphan = holderId
+        ? holderId.pid === holder.pid || !alive(holderId)
+        : seen.ageMs >= UNREADABLE_LOCK_GRACE_MS;
+      if (orphan) {
+        reclaim(lockPath, seen.raw);
+        continue;
+      }
     }
     if (Date.now() >= deadline) {
-      const who = holderId ? `live host pid ${holderId.pid}` : 'an unreadable record';
+      const who = holderId
+        ? `live host pid ${holderId.pid}`
+        : seen
+          ? 'an unreadable record'
+          : 'a lock that never finished going away';
       throw new Error(`lock ${lockPath} held by ${who}; giving up after deadline`);
     }
-    sleepSync(20);
+    // A lock mid-delete clears in moments; a live holder takes one write.
+    sleepSync(seen ? 20 : 2);
   }
 }
 
