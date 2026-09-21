@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { busPaths } from '../agentBus/agentBus';
 import { AgentInbox } from '../agentBus/agentInbox';
 import { AgentRoutes } from '../backend/agentRoutes';
+import { joinClaude } from '../agentMesh/claudeJoin';
 import type { ForgeConfig } from '../config/types';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import { parseMeshCommand } from '../agentMesh/meshCommands';
@@ -73,6 +74,8 @@ export function setupAgentMessaging(
     // F-06: a `priority=steer` message interrupts the recipient's active turn.
     steer: mesh.steer,
     validateFrom: mesh.validateFrom,
+    // §10: an open Claude session joins as the `claude` alias by its pid.
+    join: (alias, pid) => joinClaude(busPaths().root, alias, pid),
     // §8/P3: a `to: forge` message that parses as a typed lifecycle command is
     // dispatched (standby/wake/close/steer/say/handoff) and the reply returned
     // to the caller's `forge.sh cmd` call. Ordinary text falls through to the inbox.

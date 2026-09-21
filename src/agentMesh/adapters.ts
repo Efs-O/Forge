@@ -19,6 +19,7 @@ import type { MeshAdapter, MeshSendOptions, TurnResult } from './meshAdapter';
 export class CodexOwnedAdapter implements MeshAdapter {
   readonly kind = 'codex' as const;
   readonly observesTurns = true;
+  readonly key = 'codex-owned';
 
   constructor(private readonly session: CodexAppServerSession) {}
 
@@ -47,6 +48,7 @@ export class CodexOwnedAdapter implements MeshAdapter {
 export class ClaudeOwnedAdapter implements MeshAdapter {
   readonly kind = 'claude' as const;
   readonly observesTurns = true;
+  readonly key = 'claude-owned';
 
   constructor(private readonly session: ClaudeOwnedSession) {}
 
@@ -71,6 +73,9 @@ export class ClaudeOwnedAdapter implements MeshAdapter {
 export class ClaudePeerAdapter implements MeshAdapter {
   readonly kind = 'claude' as const;
   readonly observesTurns = false;
+  get key(): string {
+    return `claude-peer:${this.session.pid}`;
+  }
 
   constructor(
     private readonly session: ClaudeSession,
@@ -93,6 +98,9 @@ export class ClaudePeerAdapter implements MeshAdapter {
 export class CodexQueueAdapter implements MeshAdapter {
   readonly kind = 'codex' as const;
   readonly observesTurns = false;
+  get key(): string {
+    return `codex-queue:${this.thread}`;
+  }
 
   constructor(
     private readonly cli: string,

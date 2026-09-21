@@ -105,7 +105,8 @@ function normalizeDir(p: string): string {
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
 }
 
-function inRoots(cwd: string, roots: string[]): boolean {
+/** True when `cwd` is one of `roots` or inside one. */
+export function inRoots(cwd: string, roots: string[]): boolean {
   if (!cwd) return false;
   const c = normalizeDir(cwd);
   return roots.some((r) => {
@@ -160,6 +161,33 @@ export function pickClaudeSession(
       'Several Claude Code sessions are open in this workspace, so nothing was sent. Ask the ' +
       `user which one (ask_user), then call again with \`session\`:\n${local.map(describe).join('\n')}\n\n${PIN_HINT}`,
   };
+}
+
+/**
+ * {@link pickClaudeSession} with the mesh's preferences. An explicit name is
+ * strict (the caller named it). Otherwise: the session that joined itself
+ * (`forge.sh join`, by pid), then the config pin, then the only open session
+ * in this workspace. A joined pid that died or a pin naming a session that no
+ * longer exists (names change on restart) is skipped rather than refused:
+ * both are hints, and refusing on them is what made the user rename sessions.
+ */
+export function pickClaudePeer(
+  sessions: ClaudeSession[],
+  prefs: {
+    explicit?: string | undefined;
+    joinedPid?: number | undefined;
+    pin?: string | undefined;
+  },
+  roots: string[],
+): { session: ClaudeSession } | { error: string } {
+  if (prefs.explicit) return pickClaudeSession(sessions, prefs.explicit, roots);
+  const joined = sessions.find((s) => s.pid === prefs.joinedPid);
+  if (joined) return { session: joined };
+  if (prefs.pin) {
+    const pinned = pickClaudeSession(sessions, prefs.pin, roots);
+    if ('session' in pinned) return pinned;
+  }
+  return pickClaudeSession(sessions, undefined, roots);
 }
 
 /** Claude Code names the key file after the SHA-256 of the pipe path, which it

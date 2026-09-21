@@ -160,12 +160,16 @@ describe('routes', () => {
 
 /** Run the shipped client the way another agent would. Async: the routes
  *  answer from this same process, so a blocking spawn would deadlock. */
-function runClient(args: string[], input: string): Promise<{ code: number; out: string }> {
+function runClient(
+  args: string[],
+  input: string,
+  env: Record<string, string> = {},
+): Promise<{ code: number; out: string }> {
   return new Promise((resolve) => {
     const child = execFile(
       'bash',
       [paths.script.replace(/\\/g, '/'), ...args],
-      { timeout: 20_000 },
+      { timeout: 20_000, env: { ...process.env, ...env } },
       (err, stdout, stderr) => {
         const code = err ? ((err as { code?: number }).code ?? 1) : 0;
         resolve({ code: typeof code === 'number' ? code : 1, out: stdout + stderr });
@@ -216,6 +220,32 @@ describe('forge.sh against the routes', () => {
     const said = await runClient(['say', 'x'], 'hi');
     expect(said.code).toBe(1);
     expect(said.out).toContain('not reachable');
+  }, 30_000);
+
+  it('join sends CLAUDE_PID to /agent/join; send relays with a `to` (§10)', async (ctx) => {
+    if (!usable) ctx.skip();
+    const joins: [string, number][] = [];
+    const relays: [string, string, string][] = [];
+    routes = new AgentRoutes({
+      paths: () => paths,
+      inbox: { accept: () => 1 },
+      token: TOKEN,
+      join: (alias, pid) => (joins.push([alias, pid]), { ok: true, reply: 'joined' }),
+      relay: async (from, to, text) => (
+        relays.push([from, to, text]),
+        { ok: true, exchangeId: 'x1' }
+      ),
+    });
+    routes.setEnabled(true);
+    routes.onListening(base);
+    const noPid = await runClient(['join', 'claude'], '', { CLAUDE_PID: '' });
+    expect(noPid.code).toBe(2);
+    const joined = await runClient(['join', 'claude'], '', { CLAUDE_PID: '4242' });
+    expect(joined.out).toContain('"joined":true');
+    expect(joins).toEqual([['claude', 4242]]);
+    const sent = await runClient(['send', 'claude', 'codex'], 'plan ready\n');
+    expect(sent.out).toContain('"relayed":true');
+    expect(relays).toEqual([['claude', 'codex', 'plan ready\n']]);
   }, 30_000);
 
   it('refuses a bad id or name before sending anything', async (ctx) => {

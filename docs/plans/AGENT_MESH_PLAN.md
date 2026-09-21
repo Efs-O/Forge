@@ -429,6 +429,52 @@ before sending a proposal. No new route.
 - **`tell_live_session` description:** a notification — no expected answer, no
   blocking; use it for progress/finished/stop, not for questions.
 
+### 11. Zero-config participation (added 2026-09-21)
+
+The live test failed on setup rather than on messaging. A stale
+`claude_session` pin (session names change on restart) made Forge refuse
+`claude` as a sender. `codex queue` delivered to a pinned thread that no
+terminal had open, so Qwen → Codex hung until the wait limit. The user's
+requirement is that they open VS Code, say "brainstorm X with Claude and Codex,
+then split plan/review/implement/commit", and nobody renames a session, edits a
+pin or opens a window. Local Qwen (Forge's own model) is a full participant.
+
+- **Claude joins itself.** `forge.sh join claude` posts `$CLAUDE_PID` (Claude
+  Code exports it) to `POST /agent/join`. `claudeJoin.ts` checks that the pid is
+  a live interactive session with a protocol-1 peer pipe, then registers the
+  `claude` alias with `peer_pid`. A joined record is reached through its pipe
+  and **never** resumed headless (it is the user's session).
+- **Resolution order, Claude** (`sessionProvider.claudeAdapterAsync`):
+  1. The joined pid while it is live.
+  2. The in-memory owned session.
+  3. The peer of a foreign live owner.
+  4. A resume of a prior owned session.
+  5. The only open session in the workspace. A pin is a *soft* hint via
+     `pickClaudePeer`: a stale pin is skipped, not refused.
+  6. A new Forge-owned session (one-time consent).
+- **Resolution order, Codex:**
+  1. The in-memory owned session.
+  2. A foreign live owner's session.
+  3. A Forge-owned app-server session (one-time consent; resumes its thread).
+
+  The `codex_thread` pin is no longer the default route, because
+  `codex queue` only reaches a TUI-open thread.
+- **Every ask goes through the alias FIFO.** `MeshOrchestrator.ask()` enqueues
+  with `onResult` and resolves at turn end. A direct `adapter.send()` (Qwen's
+  first fix) collided with queued messages (M5). On abort, a queued ask is
+  withdrawn and never sent.
+- **FIFO rebuild.** An idle FIFO whose adapter `key` differs from a fresh
+  resolution is rebuilt, so a joined, dead or replaced session is not written
+  to forever. A busy FIFO is kept.
+- **Sender check.** `claude` is a valid sender whenever a Claude session is open
+  in the workspace. The endpoint token is the authentication; the pin name never
+  was.
+- **Inbound hint.** A message from `claude`/`codex` tells Forge to answer with
+  `target: "<alias>"`, not `session: "claude"`, which the strict name pick
+  refused.
+- `forge.sh send <me> <to>` relays agent→agent through the host (M6), with no
+  Forge model turn.
+
 ## What is NOT in scope
 - **Direct Claude↔Codex transport** (a real peer envelope with its own ack/retry).
   Hub-and-spoke through Forge is the v1 transport; the board shows the relayed
@@ -449,6 +495,7 @@ before sending a proposal. No new route.
 |---|---|---|---|---|---|---|
 | `aliases.json` | one-time explicit registration (user consent) or first owned-session creation | user removes the alias (command); the alias record survives session death | not read; doors report "agent bus disabled" | tmp + rename → previous file intact | survives (it is the recovery input) | permanent until removed |
 | `ownership/<alias>.json` (Forge-owned sessions; per alias, M2) | written atomically at spawn, after the creation lease is claimed; carries `owner_host` + `thread_id` | entry removed on `close` / idle TTL (not parked) / process death; on owner-host-death recovery the process is reaped but `thread_id` is **kept** for resume (M3). **Never at turn end** (M4) | not written; existing entries are not reaped while disabled (re-enabled later) | tmp + rename → previous file intact | **recovery on next start** (see §0): pid dead → board `crashed` + best-effort notice; pid alive and **`owner_host` dead** → reap + `recovered: reaped` (M2). Owner host alive (another window) → untouched. No notice is sent during the crash (no code is running). **Known limitation (tracked):** recovery nulls the dead owner's `owner_host` and keeps `thread_id` for resume, but it does NOT kill the dead window's orphaned CLI child process — a cross-process kill of another window's process tree is not implemented, so a crashed window's Claude/Codex process can leak until it exits on its own. The M3 primary guarantee (thread/context survives for resume) is met; the process leak is a secondary crash-edge concern, accepted for now | idle TTL (e.g. 30 min) from last activity, paused while `parked`; a parked session is exempt from the TTL |
+| `aliases.json` `claude` record with `peer_pid` (§11) | `forge.sh join claude` → `/agent/join` after the pid is proven a live, pipe-capable session | overwritten by the next join, or by an owned-session registration; user removes the alias | not read; `/agent/join` 404 | tmp + rename under the alias lock → previous table intact | the joined **session** dying makes the record inert: resolution skips a dead pid and falls through (never resumes it headless, never refuses on it) | permanent until re-joined/removed; inert while the pid is dead |
 | creation lease `ownership/<alias>.claim` | atomic claim before spawn | removed when the alias ownership entry is written (or the claimant dies) | not taken | claim file without a matching ownership entry is stale **only if the claimant host is dead** (M2) → next claimant reclaims | a dead claimant host's claim is stale → reclaim; a live-but-slow claimant is waited on, never raced — this is what prevents concurrent double-spawn | waiter's bounded wait (e.g. 2 min) then reports "creation in progress" — it does not reclaim a live claim |
 | `exchanges.jsonl` (event log) | any window's host appends one event per transition, under the in-process queue **and** the interprocess `exchanges.lock` (M1) | **compaction removes whole terminal exchanges** (all events leave together), never a lone transition, never a non-terminal exchange (M8); tmp + rename under the lock | not written; board shows "agent bus disabled" | torn last line dropped on read (tolerant parse); the append is a single `appendFile` call | writer is the backend; a crash between append and ack → the event is on disk, recovery re-derives state; `event_id` dedupe makes replay safe | last N=200 **terminal** exchanges (all their events); 24 h TTL only as a backstop when < N exist. Last-N wins. Non-terminal exchanges are exempt (M8) |
 | `status/<turn>.json` | written while a bus-started turn runs (tmp + rename each update) | deleted when the turn ends (finished notice already sent, or recovery marks `crashed` then deletes) | not written | tmp only → previous snapshot intact | turn dies → recovery marks `state: crashed` then deletes | one per live turn |
@@ -591,3 +638,12 @@ numbering differs.
     `ask_local_agent` is the cold-session fallback; `tell_live_session` is a
     notification, not an ask. (Manual: diff FORGE.md + the three descriptions.)
 16. **`npm run ci` green; no file over 500 lines; OWNERS rows present.**
+17. **Zero-config (§11):** `forge.sh join claude` registers `peer_pid` and a
+    bad pid / pipe-less session is refused; a joined pid wins over several open
+    sessions; a stale pin is skipped; `ask` returns the turn result through the
+    FIFO, queues a second ask behind the first, and withdraws an aborted queued
+    ask; an idle FIFO is rebuilt on a new adapter key; `ask_live_session` asks an
+    owned session through `orchestrator.ask`. (Unit:
+    `AgentMeshZeroConfig.test.ts`, `AgentRoutes.test.ts`,
+    `LiveSessionTool.test.ts`.) **Manual:** a three-way live run — Qwen in
+    Forge, Codex Forge-owned, Claude joined — with no rename, pin or new window.

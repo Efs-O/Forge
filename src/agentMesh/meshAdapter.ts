@@ -36,6 +36,12 @@ export interface MeshAdapter {
   /** True when the adapter observes turn start/end (an owned session). */
   observesTurns: boolean;
   /**
+   * Which session this adapter reaches (e.g. `claude-peer:<pid>`). When a later
+   * resolution yields a different key, an idle FIFO is rebuilt on the new one,
+   * so a session that joined, died or was replaced is not written to forever.
+   */
+  readonly key?: string;
+  /**
    * Deliver a message. Observing: starts a turn, resolves at turn end.
    * Non-observing: resolves once the transport accepts it. The FIFO (the only
    * caller) owns the started/completed timing from `observesTurns`.

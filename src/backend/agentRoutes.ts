@@ -60,6 +60,11 @@ export interface AgentRoutesDeps {
   handleCommand?: (
     text: string,
   ) => Promise<{ ok: true; reply: string } | { ok: false; error: string }>;
+  /**
+   * §10: `forge.sh join claude` — a user-opened session registers itself as an
+   * alias by its pid. Absent ⇒ `/agent/join` is 404.
+   */
+  join?: (alias: string, pid: number) => { ok: true; reply: string } | { ok: false; error: string };
 }
 
 interface Fields {
@@ -125,6 +130,7 @@ function requireText(fields: Fields, max: number): string {
  * the control server:
  *   POST /agent/message {from, text}  → 202 {queued}  (a visible Forge turn)
  *   POST /agent/reply   {id, text}    → 200 {delivered} (answers ask_live_session)
+ *   POST /agent/join    {alias, pid}  → 200 {joined}    (AGENT_MESH_PLAN §10)
  * These are the first control routes that put text in front of the model, so
  * they need the bearer token from endpoint.json; the model routes do not.
  */
@@ -167,7 +173,11 @@ export class AgentRoutes {
   async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     const route = url.pathname;
-    if (!this.enabled || (route !== '/agent/message' && route !== '/agent/reply')) {
+    const known =
+      route === '/agent/message' ||
+      route === '/agent/reply' ||
+      (route === '/agent/join' && !!this.deps.join);
+    if (!this.enabled || !known) {
       return sendJson(res, 404, { error: `no route for ${req.method ?? 'GET'} ${route}` });
     }
     if (req.method !== 'POST') return sendJson(res, 405, { error: 'POST only' });
@@ -179,6 +189,13 @@ export class AgentRoutes {
     }
     try {
       const fields = await readFields(req, url);
+      if (route === '/agent/join' && this.deps.join) {
+        const alias = (fields['alias'] ?? '').trim().toLowerCase();
+        const pid = Number(fields['pid'] ?? '');
+        const joined = this.deps.join(alias, pid);
+        if (!joined.ok) throw new HttpError(400, joined.error);
+        return sendJson(res, 200, { joined: true, reply: joined.reply });
+      }
       if (route === '/agent/reply') {
         const id = fields['id'] ?? '';
         if (!BUS_ID_PATTERN.test(id)) throw new HttpError(400, 'id must be the question id');

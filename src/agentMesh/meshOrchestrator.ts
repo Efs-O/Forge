@@ -7,7 +7,7 @@ import {
 import { AliasFifo, type FifoEvent } from './aliasFifo';
 import type { ExchangeState } from './deliveryState';
 import { newEventId } from './exchangeLog';
-import type { MeshAdapter } from './meshAdapter';
+import type { MeshAdapter, TurnResult } from './meshAdapter';
 import type { HostLivenessDeps } from './hostIdentity';
 import type { MeshCommand } from './meshCommands';
 
@@ -127,6 +127,52 @@ export class MeshOrchestrator {
 
   constructor(private readonly deps: OrchestratorDeps) {}
 
+  /** Resolve an alias's adapter (whether it observes turns decides how to ask). */
+  resolveAdapter(alias: string): Promise<MeshAdapter | undefined> {
+    return this.deps.provider.resolveAdapter(alias);
+  }
+
+  /**
+   * Ask an agent and wait for the turn to end (`ask_live_session`). Through the
+   * alias FIFO like every other send (M5): a direct `send()` throws while a
+   * queued message runs, or makes that message fail. Wakes a parked session and
+   * refreshes the idle clock at both ends of what may be a long turn.
+   */
+  async ask(
+    to: string,
+    message: string,
+    signal?: AbortSignal,
+  ): Promise<TurnResult | { error: string }> {
+    const alias = to.trim().toLowerCase();
+    if (this.deps.provider.isParked(alias)) this.deps.provider.wake(alias);
+    const fifo = await this.fifoFor(alias);
+    if (!fifo) return { error: `no live session for "${to}"` };
+    const exchangeId = newEventId();
+    let settle: (r: TurnResult) => void = () => undefined;
+    const done = new Promise<TurnResult>((resolve) => (settle = resolve));
+    let res;
+    try {
+      res = await fifo.enqueue({
+        exchangeId,
+        message,
+        onResult: settle,
+        ...(signal ? { signal } : {}),
+      });
+    } catch (err) {
+      return { error: `could not durably record the send to "${to}": ${String(err)}` };
+    }
+    if (!res.accepted) return { error: `queue full for "${to}" (${res.queueLength}); not sent` };
+    this.deps.provider.touchActivity(alias);
+    const onAbort = (): void => void fifo.withdraw(exchangeId);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    try {
+      return await done;
+    } finally {
+      signal?.removeEventListener('abort', onAbort);
+      this.deps.provider.touchActivity(alias);
+    }
+  }
+
   /**
    * The in-memory FIFO for an alias, created on first use (M5). Single-flight:
    * two concurrent first-use calls for the same alias must install ONE FIFO,
@@ -136,16 +182,21 @@ export class MeshOrchestrator {
   private readonly creating = new Map<string, Promise<AliasFifo | undefined>>();
 
   private async fifoFor(alias: string): Promise<AliasFifo | undefined> {
+    // A busy FIFO is kept (M5: one active turn per alias). An idle one is
+    // re-resolved, so a session that joined, died or was replaced since the
+    // FIFO was built is not written to forever (§10).
     const existing = this.fifos.get(alias);
-    if (existing) return existing;
+    if (existing && !existing.idle) return existing;
     const inflight = this.creating.get(alias);
     if (inflight) return inflight;
     const promise = (async () => {
       const adapter = await this.deps.provider.resolveAdapter(alias);
-      if (!adapter) return undefined;
-      // Re-check: a concurrent call may have installed it while we resolved.
+      // Re-check: a concurrent call may have installed or used it meanwhile.
       const installed = this.fifos.get(alias);
-      if (installed) return installed;
+      if (installed && !installed.idle) return installed;
+      if (!adapter) return undefined;
+      if (installed && installed.adapterKey === adapter.key) return installed;
+      installed?.dispose(); // idle: nothing queued, nothing running
       const fifo = new AliasFifo(adapter, {
         // F-03: propagate the promise so the FIFO's `await` on the durable
         // `accepted` is real — the event is on disk before the caller is told

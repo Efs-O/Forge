@@ -1,5 +1,5 @@
 import type { ExchangeState } from './deliveryState';
-import type { MeshAdapter } from './meshAdapter';
+import type { MeshAdapter, TurnResult } from './meshAdapter';
 
 /**
  * The per-alias host-side FIFO (AGENT_MESH_PLAN M5).
@@ -24,6 +24,14 @@ import type { MeshAdapter } from './meshAdapter';
 export interface FifoMessage {
   exchangeId: string;
   message: string;
+  /** Stops the turn when this message is the one running (`ask`). */
+  signal?: AbortSignal;
+  /**
+   * Called exactly once with how this message ended — the turn's result, or a
+   * `failed`/`cancelled` one when it never ran. This is how `ask` waits its
+   * turn in the FIFO instead of sending past it (M5).
+   */
+  onResult?: (result: TurnResult) => void;
 }
 
 export interface FifoEvent {
@@ -91,6 +99,31 @@ export class AliasFifo {
     return this.queue.length;
   }
 
+  /** Which session this FIFO delivers to (the adapter's key). */
+  get adapterKey(): string | undefined {
+    return this.adapter.key;
+  }
+
+  /** Nothing queued and no turn running: safe to replace (a new session key). */
+  get idle(): boolean {
+    return !this.running && this.queue.length === 0;
+  }
+
+  /**
+   * Take a still-queued message back (its caller stopped waiting). True when
+   * it was queued; false once it has started, where its signal stops it.
+   */
+  withdraw(exchangeId: string): boolean {
+    const index = this.queue.findIndex((m) => m.exchangeId === exchangeId);
+    if (index < 0) return false;
+    const [msg] = this.queue.splice(index, 1);
+    void Promise.resolve(
+      this.deps.onEvent({ exchangeId, state: 'rejected', detail: 'the asker stopped waiting' }),
+    ).catch(() => undefined);
+    msg?.onResult?.({ status: 'cancelled' });
+    return true;
+  }
+
   /** A read-only snapshot for the Telegram queue view (F-09). */
   get pendingMessages(): readonly FifoMessage[] {
     return this.queue.map((message) => ({ ...message }));
@@ -142,6 +175,7 @@ export class AliasFifo {
         state: 'timeout',
         detail: 'window shutting down; queued message not sent',
       });
+      msg.onResult?.({ status: 'failed', finalText: 'window shutting down; message not sent' });
     }
   }
 
@@ -185,7 +219,8 @@ export class AliasFifo {
       }
     }
     try {
-      const result = await this.adapter.send(msg.message);
+      const result = await this.adapter.send(msg.message, msg.signal ? { signal: msg.signal } : {});
+      msg.onResult?.(result);
       if (this.adapter.observesTurns) {
         try {
           await this.deps.onEvent({
@@ -203,6 +238,7 @@ export class AliasFifo {
       // non-terminal deadline) moves it. Nothing to write here.
     } catch (err) {
       const why = err instanceof Error ? err.message : String(err);
+      msg.onResult?.({ status: 'failed', finalText: why });
       // A turn that already started cannot become `rejected` (that state means
       // "never accepted"); it ends `cancelled`. A turn that never started (a
       // non-observing send that threw, or an observing send that threw before

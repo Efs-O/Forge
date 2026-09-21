@@ -1,4 +1,4 @@
-import { pickClaudeSession, readClaudeSessions } from '../agentBus/claudePeer';
+import { inRoots, pickClaudePeer, readClaudeSessions } from '../agentBus/claudePeer';
 import type { ForgeConfig } from '../config/types';
 import { getAlias } from './aliasRegistry';
 import { codexPinIsLive } from './codexPinLiveness';
@@ -34,13 +34,16 @@ export async function validateInboundSender(
       ? { ok: true }
       : { ok: false, error: `unknown sender "${from}"; live aliases: ${liveList()}` };
   }
-  if (alias === 'claude' && bus?.claude_session && !getAlias(root, 'claude')) {
-    const picked = pickClaudeSession(
-      readClaudeSessions(),
-      bus.claude_session,
-      workspaceRoot ? [workspaceRoot] : [],
-    );
-    return !('error' in picked)
+  // §10: "claude" is a live sender whenever a Claude Code session is open in
+  // this workspace (the endpoint token already proves a local caller). A stale
+  // pin name no longer refuses it; that refusal is what made users rename.
+  if (alias === 'claude' && !getAlias(root, 'claude')) {
+    const roots = workspaceRoot ? [workspaceRoot] : [];
+    const sessions = readClaudeSessions();
+    const live =
+      !('error' in pickClaudePeer(sessions, { pin: bus?.claude_session }, roots)) ||
+      sessions.some((s) => !s.sdk && inRoots(s.cwd, roots));
+    return live
       ? { ok: true }
       : { ok: false, error: `unknown sender "${from}"; live aliases: ${liveList()}` };
   }

@@ -35,6 +35,12 @@ export interface AliasRecord {
   registered_at: number;
   /** Who registered it: 'user' (consented) or 'forge' (first owned creation). */
   by: 'user' | 'forge';
+  /**
+   * A user-opened Claude Code session that joined itself (`forge.sh join`):
+   * its pid in `~/.claude/sessions`. Delivery goes to its peer pipe while that
+   * pid is live; such a record is never resumed as a Forge-owned session.
+   */
+  peer_pid?: number;
 }
 
 export type AliasTable = Record<string, AliasRecord>;
@@ -74,6 +80,7 @@ export function readAliases(root: string): AliasTable {
         session_id: r.session_id,
         registered_at: typeof r.registered_at === 'number' ? r.registered_at : 0,
         by: r.by === 'user' ? 'user' : 'forge',
+        ...(typeof r.peer_pid === 'number' && r.peer_pid > 0 ? { peer_pid: r.peer_pid } : {}),
       };
     }
   }

@@ -16,8 +16,11 @@ import {
 } from '../agentBus/agentBus';
 import { claudeQuestion } from '../agentBus/busContent';
 import { codexMessage, queueToCodex } from '../agentBus/codexDelivery';
+import { getBoardContext, getMeshOrchestrator } from '../agentMesh/meshContext';
+import { getAlias } from '../agentMesh/aliasRegistry';
+import type { TurnResult } from '../agentMesh/meshAdapter';
 import {
-  pickClaudeSession,
+  pickClaudePeer,
   readClaudeSessions,
   sendPeerMessage,
   type ClaudeSession,
@@ -45,10 +48,11 @@ export interface LiveSessionDeps {
 }
 
 const NO_CODEX_THREAD =
-  'No Codex session is configured, so the question was NOT sent. Tell the user. To use one, ' +
-  'the user opens it in a terminal with `codex resume <thread> --sandbox workspace-write ' +
-  '--add-dir "<the agent-bus folder>"` and sets `agent_bus.codex_thread: <thread>` in ' +
-  'config.yaml. Do not fall back to ask_local_agent on your own.';
+  'No Codex session is available through the agent mesh or configured live pin, so the question ' +
+  'was NOT sent. Tell the user. To use a user-opened one, open it in a terminal with `codex ' +
+  'resume <thread> --sandbox workspace-write --add-dir "<the agent-bus folder>"` and set ' +
+  '`agent_bus.codex_thread: <thread>` in config.yaml. Do not fall back to ask_local_agent on ' +
+  'your own.';
 
 const NOT_SENT_SUFFIX =
   '\n\nTell the user. Do not fall back to ask_local_agent on your own: it starts a new, ' +
@@ -84,6 +88,31 @@ function optionalString(
 
 function reason(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/** An observed turn (a Forge-owned session) formatted for the user. */
+function formatTurn(
+  who: string,
+  subject: string,
+  result: TurnResult | { error: string },
+  aborted: boolean,
+): string {
+  if ('error' in result)
+    return `Could not deliver to ${who}, so the question was NOT sent: ${result.error}${NOT_SENT_SUFFIX}`;
+  if (result.status === 'cancelled') {
+    return aborted
+      ? `Stopped before ${who} answered. The turn is stopping; do not start further work.`
+      : `${who} cancelled the answer (interrupted or withdrawn). Tell the user.`;
+  }
+  const text = result.finalText?.trim();
+  if (result.status === 'failed')
+    return `${who} could not answer: ${text || 'its session failed'}. Tell the user.`;
+  if (!text) return `${who} completed without returning an answer. Tell the user.`;
+  return `**Asked ${who}:** ${subject}
+
+**${who} says:**
+
+${text}`;
 }
 
 /**
@@ -205,6 +234,24 @@ export function makeLiveSessionTool(deps: LiveSessionDeps): RegisteredTool {
       const signal = context?.abortSignal;
       const id = newBusId();
 
+      // A Forge-owned session observes its turn: ask through the mesh FIFO
+      // (never a direct send, which collides with a queued message) and take
+      // the answer from the turn itself. A user-opened session cannot be
+      // observed, so it gets the question plus a `forge.sh reply` command.
+      // An explicit Claude session name bypasses the alias (§10).
+      const orchestrator = getMeshOrchestrator();
+      const byAlias = target === 'codex' || !sessionArg || sessionArg.toLowerCase() === 'claude';
+      const adapter =
+        orchestrator && byAlias ? await orchestrator.resolveAdapter(target) : undefined;
+      if (orchestrator && adapter?.observesTurns) {
+        const who = target === 'codex' ? 'Codex' : 'Claude';
+        const message = `[Forge agent bus, question ${id}] ${subject}
+
+${question}`;
+        const result = await orchestrator.ask(target, message, signal);
+        return late + formatTurn(who, subject, result, signal?.aborted === true);
+      }
+
       let deliver: () => Promise<void>;
       let who: string;
       if (target === 'codex') {
@@ -216,9 +263,14 @@ export function makeLiveSessionTool(deps: LiveSessionDeps): RegisteredTool {
           (deps.queueCodex ?? queueToCodex)(bus?.codex_cli ?? 'codex', thread, message, signal);
       } else {
         const sessions = deps.claudeSessions ? deps.claudeSessions() : readClaudeSessions();
-        const picked = pickClaudeSession(
+        const board = getBoardContext();
+        const picked = pickClaudePeer(
           sessions,
-          sessionArg ?? bus?.claude_session,
+          {
+            explicit: byAlias ? undefined : sessionArg,
+            joinedPid: board ? getAlias(board.root, 'claude')?.peer_pid : undefined,
+            pin: bus?.claude_session,
+          },
           deps.workspaceRoots(),
         );
         if ('error' in picked) return late + picked.error + NOT_SENT_SUFFIX;

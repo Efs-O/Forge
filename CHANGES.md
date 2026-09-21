@@ -1,5 +1,29 @@
 # Forge — Recent Changes
 
+## 0.16.15
+
+### Agent mesh: zero-config participation (AGENT_MESH_PLAN §11)
+
+Talking to Claude and Codex no longer needs renamed sessions, config pins or a
+Codex window left open.
+
+- **`forge.sh join claude`.** An open Claude Code session registers itself as
+  the `claude` alias by its pid (`POST /agent/join`). If no session has joined,
+  Forge uses the only Claude session open in the workspace, and otherwise
+  starts its own (one-time consent). A stale `claude_session` pin is now
+  skipped rather than refused.
+- **Codex defaults to a Forge-owned session.** Previously the default was the
+  `codex queue` pin, which reaches only a thread that is open in a terminal. A
+  closed pinned thread made Qwen → Codex hang until the wait limit.
+- **Every `ask_live_session` to an owned session goes through the alias
+  queue.** Before, a direct send could collide with a queued message. A queued
+  ask that is aborted is withdrawn. An idle queue follows the session when it
+  changes.
+- **`forge.sh send <me> <to>`** relays a message from one agent to another
+  through Forge without a Forge model turn.
+- An agent-bus message from `claude`/`codex` now tells the model to answer with
+  `target:`. The old `session: "claude"` hint could not resolve.
+
 ## 0.16.14
 
 ### Fix: CLI delivery (codex queue, claude) breaks on spaced profile paths

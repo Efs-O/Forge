@@ -4,6 +4,9 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { busPaths, ensureBus, type BusPaths } from '../../src/agentBus/agentBus';
 import type { ClaudeSession } from '../../src/agentBus/claudePeer';
+import { setMeshOrchestrator } from '../../src/agentMesh/meshContext';
+import type { MeshAdapter } from '../../src/agentMesh/meshAdapter';
+import type { MeshOrchestrator } from '../../src/agentMesh/meshOrchestrator';
 import { makeLiveSessionTool } from '../../src/tools/liveSessionTool';
 import type { ForgeConfig } from '../../src/config/types';
 
@@ -74,10 +77,12 @@ beforeEach(async () => {
   sendFails = false;
   queued = [];
   queueFails = false;
+  setMeshOrchestrator(undefined);
   ensureBus(paths);
 });
 
 afterEach(async () => {
+  setMeshOrchestrator(undefined);
   await fs.promises.rm(home, { recursive: true, force: true });
 });
 
@@ -94,6 +99,21 @@ function answerNextQuestion(text: string): void {
 }
 
 const ask = { subject: 'Does X hold?', question: 'Check X.', wait_minutes: 1 };
+
+/** A fake orchestrator whose `ask` runs the adapter, as the alias FIFO does. */
+let asked: string[] = [];
+function installMeshAdapter(adapter: MeshAdapter, alias = 'codex'): void {
+  setMeshOrchestrator({
+    resolveAdapter: async (a: string) => {
+      if (a !== alias) throw new Error(`unexpected alias: ${a}`);
+      return adapter;
+    },
+    ask: async (to: string, message: string) => {
+      asked.push(to);
+      return adapter.send(message);
+    },
+  } as unknown as MeshOrchestrator);
+}
 
 describe('ask_live_session', () => {
   it('is not advertised, and refuses, while agent_bus is disabled', async () => {
@@ -217,6 +237,11 @@ describe('ask_live_session', () => {
 
     it('queues into the thread, never touches Claude, and labels the answer', async () => {
       codexThread = 'thread-1';
+      installMeshAdapter({
+        kind: 'codex',
+        observesTurns: false,
+        send: async () => ({ status: 'completed' }),
+      });
       answerNextQuestion('Yes from Codex.');
       const result = await tool().handler(askCodex);
       expect(sent).toEqual([]);
@@ -233,10 +258,61 @@ describe('ask_live_session', () => {
     it('a failed queue call withdraws the question and reports the reason', async () => {
       codexThread = 'thread-1';
       queueFails = true;
+      installMeshAdapter({
+        kind: 'codex',
+        observesTurns: false,
+        send: async () => ({ status: 'completed' }),
+      });
       const result = await tool().handler(askCodex);
       expect(result).toContain('NOT sent');
       expect(result).toContain('thread not found');
       expect(fs.readdirSync(paths.inbox)).toEqual([]);
+    });
+
+    it('uses an owned mesh session and returns its answer without a reply file', async () => {
+      const messages: string[] = [];
+      installMeshAdapter({
+        kind: 'codex',
+        observesTurns: true,
+        send: async (message) => {
+          messages.push(message);
+          return { status: 'completed', finalText: 'Owned Codex answer.' };
+        },
+      });
+      const result = await tool().handler(askCodex);
+      expect(messages).toHaveLength(1);
+      expect(messages[0]).toMatch(/^\[Forge agent bus, question .+\] Does X hold\?\n\nCheck X\.$/);
+      expect(messages[0]).not.toContain('reply.md');
+      expect(result).toContain('**Asked Codex:** Does X hold?');
+      expect(result).toContain('**Codex says:**\n\nOwned Codex answer.');
+      expect(queued).toEqual([]);
+      expect(fs.readdirSync(paths.inbox)).toEqual([]);
+      expect(fs.readdirSync(paths.outbox)).toEqual([]);
+    });
+
+    it('reports an owned-session failure without waiting for an outbox reply', async () => {
+      installMeshAdapter({
+        kind: 'codex',
+        observesTurns: true,
+        send: async () => ({ status: 'failed' }),
+      });
+      const result = await tool().handler(askCodex);
+      expect(result).toContain('Codex could not answer: its session failed');
+      expect(queued).toEqual([]);
+      expect(fs.readdirSync(paths.inbox)).toEqual([]);
+      expect(fs.readdirSync(paths.outbox)).toEqual([]);
+    });
+
+    it('asks an owned session through the orchestrator FIFO, never a direct send', async () => {
+      asked = [];
+      installMeshAdapter({
+        kind: 'codex',
+        observesTurns: true,
+        send: async () => ({ status: 'completed', finalText: 'via fifo' }),
+      });
+      const result = await tool().handler(askCodex);
+      expect(asked).toEqual(['codex']);
+      expect(result).toContain('via fifo');
     });
 
     it('rejects an unknown target', async () => {

@@ -4,7 +4,7 @@ import { resolveCliExecutable } from '../agents/resolveCliExecutable';
 import type { CodexAppServerSession } from '../agents/CodexAppServerSession';
 import type { ClaudeOwnedSession } from '../agents/ClaudeOwnedSession';
 import { queueToCodex } from '../agentBus/codexDelivery';
-import { pickClaudeSession, readClaudeSessions, type ClaudeSession } from '../agentBus/claudePeer';
+import { pickClaudePeer, readClaudeSessions, type ClaudeSession } from '../agentBus/claudePeer';
 import { getAlias, registerAlias } from './aliasRegistry';
 import { ClaudeOwnedAdapter, ClaudePeerAdapter, CodexOwnedAdapter } from './adapters';
 import { codexQueueAdapterIfLive } from './codexPinLiveness';
@@ -29,21 +29,16 @@ import {
 import type { SessionProvider } from './meshOrchestrator';
 
 /**
- * The session provider (AGENT_MESH_PLAN §0, M2, M3). The window that owns a
- * Forge-owned session holds it in memory here, keyed by alias, and is the only
- * window that may reap it.
- *
- * - **Detect:** a live owned session (in memory) is used directly. A
- *   registered alias with a `thread_id` resumes that thread in a new
- *   app-server (M3: warm survives a restart through the thread, not the
- *   process). A config pin with no alias uses the user-opened session
- *   (non-observing).
- * - **Create:** the first owned creation for an alias is consented
- *   (`requestConsent`), claims the creation lease (M2, no double-spawn),
- *   spawns the app-server, and records ownership with `owner_host` = this
- *   window. Subsequent reuse is automatic.
- * - **Reap:** `reap(alias)` disposes the in-memory session. Called by startup
- *   recovery when this window's owned session's owner host is dead (M2/M3).
+ * The session provider (AGENT_MESH_PLAN §0, M2, M3, §10). The window that owns
+ * a Forge-owned session holds it in memory here, keyed by alias, and is the
+ * only window that may reap it.
+ * - **Detect:** a joined Claude session (`forge.sh join`) while live; a live
+ *   owned session; a registered alias or thread resumes (M3); an open Claude
+ *   session in this workspace (non-observing).
+ * - **Create:** otherwise Forge creates its own — consented once
+ *   (`requestConsent`), under the creation lease (M2), ownership recorded with
+ *   `owner_host` = this window. Subsequent reuse is automatic.
+ * - **Reap:** `reap(alias)` disposes the in-memory session (recovery, M2/M3).
  */
 
 export interface SessionProviderDeps extends HostLivenessDeps {
@@ -109,9 +104,9 @@ export class MeshSessionProvider implements SessionProvider {
   }
 
   /**
-   * Resolve the adapter for an alias. codex/claude: an in-memory owned session
-   * → owned adapter; a registered alias or prior identity → resume owned (M3,
-   * async); a config pin with no alias → the user-opened adapter (non-observing).
+   * Resolve the adapter for an alias, in the order the class comment gives.
+   * Undefined when none can be reached or created (e.g. consent declined).
+   * May create a Forge-owned session, so it is async.
    */
   async resolveAdapter(alias: string): Promise<MeshAdapter | undefined> {
     const a = alias.trim().toLowerCase();
@@ -123,13 +118,12 @@ export class MeshSessionProvider implements SessionProvider {
 
   /**
    * The async Codex path: an in-memory owned session, else a resume/creation
-   * (M3). A config pin with no alias is the non-observing user-opened queue.
+   * (M3). The config pin is used only when another window owns the session.
    */
   private async codexAdapterAsync(): Promise<MeshAdapter | undefined> {
     const existing = this.owned.get('codex');
     if (existing) return new CodexOwnedAdapter(existing);
     const rec = readOwnership(this.deps.busRoot, 'codex');
-    const aliasRec = getAlias(this.deps.busRoot, 'codex');
     // M2: a session another LIVE window owns is never re-spawned here. This
     // window does not hold its stdio pipe, so it cannot drive it; spawning a
     // second app-server for the same thread would leave two live pipes on one
@@ -137,14 +131,12 @@ export class MeshSessionProvider implements SessionProvider {
     if (rec?.owner_host && this.isForeignLiveOwner(rec.owner_host)) {
       return this.codexAdapterIfLive();
     }
-    // A registered alias or a prior thread_id → resume owned (M3).
-    if (rec?.thread_id || aliasRec) {
-      const result = await this.ensureOwnedCodex('codex');
-      return 'error' in result ? undefined : result;
-    }
-    // No alias and no thread: the user-opened pin (non-observing). F-05: only
-    // when its thread is actually live on the app-server.
-    return this.codexAdapterIfLive();
+    // A registered alias or prior thread resumes (M3); with neither, Forge
+    // creates its own (consented once). Not the config pin: `codex queue` only
+    // reaches a thread open in a Codex window, and "live" there only proves the
+    // thread exists on disk, so a question queued to it waited unread.
+    const result = await this.ensureOwnedCodex('codex');
+    return 'error' in result ? undefined : result;
   }
 
   /**
@@ -170,15 +162,18 @@ export class MeshSessionProvider implements SessionProvider {
   }
 
   /**
-   * The async Claude path (P4): an in-memory owned stdio session, else a
-   * resume/creation (M3). A config pin with no alias and no owned session is
-   * the non-observing user-opened peer/relay (the sync `claudeAdapter`).
+   * The async Claude path (P4, §10): a joined session, an owned stdio session,
+   * a resume (M3), an open session in this workspace (the sync
+   * `claudeAdapter`), else a new Forge-owned one.
    */
   private async claudeAdapterAsync(): Promise<MeshAdapter | undefined> {
+    const aliasRec = getAlias(this.deps.busRoot, 'claude');
+    // A session that joined itself (`forge.sh join`) wins while it is live.
+    const joined = aliasRec?.peer_pid !== undefined ? this.claudeAdapter() : undefined;
+    if (joined) return joined;
     const existing = this.claudeOwned.get('claude');
     if (existing) return new ClaudeOwnedAdapter(existing);
     const rec = readOwnership(this.deps.busRoot, 'claude');
-    const aliasRec = getAlias(this.deps.busRoot, 'claude');
     // M2: a session another LIVE window owns is never re-spawned here. This
     // window does not hold its stdio pipe, so it cannot drive it; spawning a
     // second owned Claude for the same session would leave two live pipes on
@@ -186,22 +181,25 @@ export class MeshSessionProvider implements SessionProvider {
     if (rec?.owner_host && this.isForeignLiveOwner(rec.owner_host)) {
       return this.claudeAdapter();
     }
-    // A registered alias or a prior session_id → resume owned (M3).
-    if (rec?.session_id || aliasRec?.session_id) {
+    // A prior owned session resumes (M3). Otherwise an open session in this
+    // workspace (non-observing), else Forge creates its own (consented once).
+    if (rec?.session_id || (aliasRec && aliasRec.peer_pid === undefined)) {
       const result = await this.ensureOwnedClaude('claude');
       return 'error' in result ? undefined : result;
     }
-    // No alias and no session: the user-opened peer/relay (non-observing).
-    return this.claudeAdapter();
+    const peer = this.claudeAdapter();
+    if (peer) return peer;
+    const created = await this.ensureOwnedClaude('claude');
+    return 'error' in created ? undefined : created;
   }
 
   private claudeAdapter(): MeshAdapter | undefined {
     const bus = this.deps.getConfig().agent_bus;
     const sessions = this.deps.claudeSessions ? this.deps.claudeSessions() : readClaudeSessions();
-    const pin = this.deps.busRoot ? getAlias(this.deps.busRoot, 'claude')?.session_id : undefined;
-    const picked = pickClaudeSession(
+    const joinedPid = getAlias(this.deps.busRoot, 'claude')?.peer_pid;
+    const picked = pickClaudePeer(
       sessions,
-      pin ?? bus?.claude_session,
+      { joinedPid, pin: bus?.claude_session },
       this.deps.workspaceRoots(),
     );
     if ('error' in picked) return undefined;
@@ -344,7 +342,9 @@ export class MeshSessionProvider implements SessionProvider {
     if (start.kind === 'join')
       return this.claudeAdapter() ?? { error: `another window owns the ${alias} session` };
     if (start.kind === 'refuse') return { error: start.error };
-    const { host, rec, aliasRec } = start;
+    const { host, rec } = start;
+    // A joined (user-opened) record is not an owned identity: never resumed here.
+    const aliasRec = start.aliasRec?.peer_pid === undefined ? start.aliasRec : undefined;
     const sessionId = rec?.session_id || aliasRec?.session_id || undefined;
     try {
       const bus = this.deps.getConfig().agent_bus;
