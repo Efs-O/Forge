@@ -170,7 +170,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     () => config,
     () => pool.backendProcesses(),
     (relativePath) => chatAttachments.resolve(relativePath),
-    { store: jobsStore, hostFacade: jobsHostFacade },
+    { store: jobsStore, hostFacade: jobsHostFacade, configPath: activeConfigPath },
   );
 
   // External MCP stdio servers (e.g. halluscribe-mcp). Bridged as a

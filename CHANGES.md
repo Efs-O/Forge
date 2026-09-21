@@ -1,5 +1,34 @@
 # Forge — Recent Changes
 
+## 0.16.20
+
+### Installing llama.cpp: one tool call instead of ~45 rounds
+
+An audit of the agent session that installed llama.cpp b11077 found that the
+tools, not the model, cost most of its rounds. Fixes:
+
+- **`install_llamacpp` tool.** It downloads, checks digests, extracts,
+  smoke-tests, deletes the zips and switches `llama_server.binary` in one
+  approved call. It never restarts the backend, because the turn's own model
+  is that backend. It uses the same pipeline as the `llamacpp_update` job,
+  which now lives in `src/jobs/actions/llamacppInstall.ts`. The tool is
+  advertised only when `llama_server.binary` is set. Procedure:
+  `docs/LLAMACPP_INSTALL.md`.
+- **The smoke test accepted no real build.** It looked for the tag in
+  `--version` stdout, but real builds print `version: … (build 11077, …)` to
+  stderr. It now reads both streams and accepts `build NNNN`.
+- **`extra_file_roots` in config.yaml.** This lists absolute folders outside
+  the workspace that `read_file`, `create_directory` and `delete_file` may
+  reach. Approval still applies. Before this, the agent used `robocopy` to
+  create a folder and left 550 MB of zips it had no tool to delete.
+- **`query_powershell`'s outside-workspace refusal pointed to `read_file`**,
+  which also refuses outside the workspace. It now points to `list_directory`,
+  or to `certutil` for hashes.
+- **Glob misses explain gitignore.** When `search_code` or `find_files` finds
+  nothing, the message now says that globs skip gitignored files such as
+  `.forge/config.yaml`, and to pass the exact path. The agent had searched its
+  own config three times with no result.
+
 ## 0.16.19
 
 ### Agent mesh: fixes from the first mesh run

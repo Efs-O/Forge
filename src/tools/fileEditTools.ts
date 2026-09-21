@@ -31,7 +31,11 @@ async function trackedWarningFor(filePath: string): Promise<string> {
 
 // ── create_directory ───────────────────────────────────────────────────────────
 
-export function makeCreateDirectoryTool(): RegisteredTool {
+/** `extraRoots` (here and in `delete_file`) is config.yaml `extra_file_roots`:
+ *  folders outside the workspace the tool may also change. */
+export function makeCreateDirectoryTool(
+  extraRoots: () => readonly string[] = () => [],
+): RegisteredTool {
   return {
     definition: {
       type: 'function',
@@ -43,7 +47,9 @@ export function makeCreateDirectoryTool(): RegisteredTool {
           properties: {
             path: {
               type: 'string',
-              description: 'Directory path (absolute or workspace-relative).',
+              description:
+                'Directory path (absolute or workspace-relative). Outside the workspace only ' +
+                'inside a folder listed under extra_file_roots in config.yaml.',
             },
           },
           required: ['path'],
@@ -55,7 +61,10 @@ export function makeCreateDirectoryTool(): RegisteredTool {
     mutation: { paths: (args) => [args['path'] as string] },
     handler: async (args) => {
       const dirPath = args['path'] as string;
-      const resolvedPath = resolveWorkspacePath(dirPath, { mustBeInsideWorkspace: true });
+      const resolvedPath = resolveWorkspacePath(dirPath, {
+        mustBeInsideWorkspace: true,
+        extraRoots: extraRoots(),
+      });
       fs.mkdirSync(resolvedPath, { recursive: true });
       return `Created: ${dirPath}`;
     },
@@ -111,7 +120,7 @@ export function makeMoveFileTool(): RegisteredTool {
 
 // ── delete_file ────────────────────────────────────────────────────────────────
 
-export function makeDeleteFileTool(): RegisteredTool {
+export function makeDeleteFileTool(extraRoots: () => readonly string[] = () => []): RegisteredTool {
   return {
     definition: {
       type: 'function',
@@ -126,7 +135,9 @@ export function makeDeleteFileTool(): RegisteredTool {
           properties: {
             path: {
               type: 'string',
-              description: 'Path to delete (absolute or workspace-relative).',
+              description:
+                'Path to delete (absolute or workspace-relative). Outside the workspace only ' +
+                'inside a folder listed under extra_file_roots in config.yaml.',
             },
             recursive: {
               type: 'boolean',
@@ -149,7 +160,10 @@ export function makeDeleteFileTool(): RegisteredTool {
     mutation: { paths: (args) => [args['path'] as string], showDiff: true },
     handler: async (args) => {
       const filePath = args['path'] as string;
-      const resolved = resolveWorkspacePath(filePath, { mustBeInsideWorkspace: true });
+      const resolved = resolveWorkspacePath(filePath, {
+        mustBeInsideWorkspace: true,
+        extraRoots: extraRoots(),
+      });
       const recursive = args['recursive'] === true;
       // Asked before the delete: afterwards the path is gone from the working
       // tree and `ls-files` can no longer distinguish "was never tracked" from

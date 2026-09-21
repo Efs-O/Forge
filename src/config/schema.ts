@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isAbsolute } from 'path';
 import {
   CacheTypeSchema,
   CapabilitiesSchema,
@@ -338,6 +339,7 @@ export const ForgeConfigSchema = z
     log_level: z.enum(['trace', 'debug', 'info', 'warn', 'error']).optional(),
     // v0.3 additions
     model_dirs: z.array(z.string()).optional(),
+    extra_file_roots: z.array(z.string().refine(isAbsolute, 'must be an absolute path')).optional(),
     templates_dir: z.string().optional(),
     custom_instructions: z.string().optional(),
     forge_instructions: z

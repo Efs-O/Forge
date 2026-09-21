@@ -58,6 +58,7 @@ import { makeSafePowerShellTool } from './safePowerShellTool';
 import { makeSystemStatusTool } from './systemStatusTool';
 import type { BackendProcess } from '../system/SystemReport';
 import { makeLoadToolGroupTool } from './toolGroupTools';
+import { makeInstallLlamacppTool } from './llamacppInstallTool';
 import { makeManageJobsTool } from './jobTools';
 import { makeLiveSessionTool } from './liveSessionTool';
 import { makeTellLiveSessionTool } from './tellLiveSessionTool';
@@ -108,10 +109,19 @@ export function registerAllTools(
   getConfig?: () => ForgeConfig,
   backendProcesses?: () => readonly BackendProcess[],
   resolveChatAttachment?: (relativePath: string) => string,
-  jobs?: { store: JobStore; hostFacade: () => ForgeHostFacade | undefined },
+  jobs?: {
+    store: JobStore;
+    hostFacade: () => ForgeHostFacade | undefined;
+    /** The active config.yaml, for install_llamacpp's binary switch. */
+    configPath?: string;
+  },
 ): void {
+  // config.yaml `extra_file_roots`: absolute folders outside the workspace that
+  // read_file / create_directory / delete_file may also reach. A getter, so a
+  // config reload applies without re-registering the tools.
+  const extraRoots = (): readonly string[] => getConfig?.().extra_file_roots ?? [];
   // v0.1 builtins
-  registry.register(makeReadFileTool());
+  registry.register(makeReadFileTool(extraRoots));
   registry.register(makeViewImageTool());
   // Registered unconditionally: getConfig is optional on this signature, and
   // gating on it would silently drop the tool wherever it is not supplied.
@@ -166,9 +176,9 @@ export function registerAllTools(
   // v0.6 write tools
   registry.register(makeEditFileTool());
   registry.register(makeApplyLineEditsTool());
-  registry.register(makeCreateDirectoryTool());
+  registry.register(makeCreateDirectoryTool(extraRoots));
   registry.register(makeMoveFileTool());
-  registry.register(makeDeleteFileTool());
+  registry.register(makeDeleteFileTool(extraRoots));
   registry.register(makeFormatFileTool());
   registry.register(makeRenameSymbolTool());
   registry.register(makeApplyCodeActionTool());
@@ -229,6 +239,11 @@ export function registerAllTools(
         ...(jobs.hostFacade ? { hostFacade: jobs.hostFacade } : {}),
       }),
     );
+  }
+
+  // On-demand llama.cpp install: the jobs action's pipeline without a job.
+  if (getConfig) {
+    registry.register(makeInstallLlamacppTool({ getConfig, configPath: jobs?.configPath }));
   }
 
   // Agent messaging. Self-suppressing until `agent_bus.enabled`, so a config

@@ -102,11 +102,8 @@ export interface ModelConfig {
   /** Optional path to the vision projector .gguf (mmproj). Enables multimodal image input. */
   mmproj_path?: string;
   /**
-   * Per-model override of the llama-server executable. When set, this model
-   * spawns with THIS binary instead of the global `llama_server.binary`. For
-   * models that need a patched llama.cpp fork (e.g. Qwen3.8-Flash-Next MTP via
-   * the Unsloth fork) without changing the shared default for everyone else.
-   * Absent = use the global binary (current behavior, unchanged).
+   * Per-model override of the llama-server executable, for a patched fork (e.g.
+   * the Unsloth MTP fork). Absent = use the global `llama_server.binary`.
    */
   llama_server_binary?: string;
   /** Maximum time to wait for this model's llama-server health endpoint at startup. */
@@ -391,6 +388,8 @@ export interface ForgeConfig {
   log_level?: 'trace' | 'debug' | 'info' | 'warn' | 'error';
   /** Extra directories to scan for GGUF files (used by first-run wizard). */
   model_dirs?: string[];
+  /** Absolute folders outside the workspace that read_file / create_directory / delete_file may reach. */
+  extra_file_roots?: string[];
   /** Path to a directory containing user-defined Nunjucks template overrides. */
   templates_dir?: string;
   /** Text injected into every system prompt via the template engine. */

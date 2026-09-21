@@ -61,6 +61,21 @@ function isContextEvent(
 }
 
 /**
+ * A glob search skips files the workspace's `.gitignore` excludes; only an
+ * exact existing path gets `--no-ignore-vcs` (see `namedExistingPath`). That is
+ * how `.forge/config.yaml` — gitignored, and the file edited most — came back
+ * "no matches" three times in one session for text it plainly held, and the
+ * agent fell back to eight blind `read_file` pages. Say so on the miss.
+ */
+export function gitignoredNote(glob: string): string {
+  if (!/[*?[\]{}!]/u.test(glob)) return '';
+  return (
+    ' Globs skip gitignored files (for example everything under .forge/); ' +
+    'pass the exact file or folder path, such as ".forge/config.yaml", to search it.'
+  );
+}
+
+/**
  * Lists workspace files matching a glob, via the same ripgrep `search_code` uses.
  *
  * Previously `vscode.workspace.findFiles`, which routes through VS Code's
@@ -200,7 +215,8 @@ export function makeFindFilesTool(
       if (matches.length === 0) {
         return (
           `No files match "${pattern}". The glob is anchored at the workspace root — ` +
-          `prefix a nested repository's directory, or lead with "**/" to match at any depth.`
+          `prefix a nested repository's directory, or lead with "**/" to match at any depth.` +
+          gitignoredNote(pattern)
         );
       }
       return matches.join('\n');
@@ -261,7 +277,8 @@ export function makeSearchCodeTool(
         return (
           `No matches found for "${query}" in ${include} ` +
           `(literal text search — regular-expression syntax is not interpreted, ` +
-          `and the include glob is anchored at the workspace root).`
+          `and the include glob is anchored at the workspace root).` +
+          gitignoredNote(include)
         );
       }
 

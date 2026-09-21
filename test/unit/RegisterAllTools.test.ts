@@ -58,6 +58,7 @@ const EXPECTED_NATIVE_NAMES = [
   'go_to_definition',
   'image_search',
   'insert_code',
+  'install_llamacpp',
   'list_delegation_targets',
   'list_directory',
   'list_executions',
@@ -151,12 +152,13 @@ function makeRegistry(
 }
 
 describe('registerAllTools canonical coordinator catalog', () => {
-  it('exposes the exact 77-tool native catalog when all optional wiring is present', () => {
+  it('exposes the exact 78-tool native catalog when all optional wiring is present', () => {
     const registry = makeRegistry({ search: true, delegation: true });
     expect(registry.names().sort()).toEqual(EXPECTED_NATIVE_NAMES);
     // load_tool_group is registered but suppresses its own advertisement while
     // no lazy MCP group has been bridged in, and generate_image while config.yaml
-    // has no image_generation block, and ask_live_session while it has no
+    // has no image_generation block, install_llamacpp while it sets no
+    // llama_server.binary, and ask_live_session while it has no
     // enabled agent_bus block, so the tools the model actually sees are
     // unchanged for a config that uses neither.
     expect(
@@ -170,6 +172,7 @@ describe('registerAllTools canonical coordinator catalog', () => {
           name !== 'load_tool_group' &&
           name !== 'generate_image' &&
           name !== 'image_search' &&
+          name !== 'install_llamacpp' &&
           name !== 'ask_live_session' &&
           name !== 'tell_live_session',
       ),

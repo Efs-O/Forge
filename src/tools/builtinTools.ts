@@ -41,7 +41,10 @@ function capRead(text: string): string {
   );
 }
 
-export function makeReadFileTool(): RegisteredTool {
+/** `read_file`. `extraRoots` is config.yaml `extra_file_roots`: folders
+ *  outside the workspace it may also read (read through a getter so a config
+ *  reload applies without re-registering). */
+export function makeReadFileTool(extraRoots: () => readonly string[] = () => []): RegisteredTool {
   return {
     definition: {
       type: 'function',
@@ -55,7 +58,9 @@ export function makeReadFileTool(): RegisteredTool {
             path: {
               type: 'string',
               description:
-                'Workspace-relative or absolute path. Include a nested repository directory prefix.',
+                'Workspace-relative or absolute path. Include a nested repository directory prefix. ' +
+                'An absolute path outside the workspace works only inside a folder listed under ' +
+                'extra_file_roots in config.yaml.',
             },
             start_line: {
               type: 'integer',
@@ -88,6 +93,7 @@ export function makeReadFileTool(): RegisteredTool {
     handler: async (args) => {
       const filePath = resolveWorkspacePath(args['path'] as string, {
         mustBeInsideWorkspace: true,
+        extraRoots: extraRoots(),
       });
       let bytes: Buffer;
       try {

@@ -58,6 +58,8 @@ docs/*
 !docs/DELEGATION.md
 !docs/SAFE_WORKER_TOOL_UPGRADE_PLAN.md
 !docs/DELEGATION_UNBLOCK_PLAN.md
+# install_llamacpp procedure; FORGE.md and CHANGES.md point at it.
+!docs/LLAMACPP_INSTALL.md
 AUDIT_REPORT.md
 FORGE_REPORT.md
 AGENTS.md

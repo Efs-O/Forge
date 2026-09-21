@@ -11,6 +11,14 @@ export interface ResolveWorkspacePathOptions {
   workspaceRoot?: string;
   allowAbsolute?: boolean;
   mustBeInsideWorkspace?: boolean;
+  /**
+   * Absolute folders outside the workspace that also satisfy
+   * `mustBeInsideWorkspace` — config.yaml `extra_file_roots`. Tasks such as a
+   * llama.cpp install live in `%LOCALAPPDATA%\Forge`, which no workspace
+   * contains; without a sanctioned root the agent improvised `robocopy` to
+   * make a folder and left 550 MB of zips it could not delete.
+   */
+  extraRoots?: readonly string[];
 }
 
 function defaultWorkspaceRoot(): string | undefined {
@@ -34,9 +42,18 @@ export function resolveWorkspacePath(
         })();
   const mustBeInsideWorkspace = options.mustBeInsideWorkspace ?? false;
   if (mustBeInsideWorkspace) {
-    if (!root) throw new Error('No workspace folder open');
-    if (!isPathInside(root, resolved))
-      throw new Error(`Path is outside the workspace: ${filePath}`);
+    const extra = options.extraRoots ?? [];
+    const inExtra = extra.some((r) => isPathInside(path.normalize(r), resolved));
+    if (!inExtra) {
+      if (!root) throw new Error('No workspace folder open');
+      if (!isPathInside(root, resolved))
+        throw new Error(
+          `Path is outside the workspace: ${filePath}` +
+            (extra.length > 0
+              ? ` (and outside extra_file_roots: ${extra.join(', ')})`
+              : ' (add its folder to extra_file_roots in config.yaml to allow it)'),
+        );
+    }
   }
   return resolved;
 }

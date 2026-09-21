@@ -76,14 +76,18 @@ function requireListLimit(value: unknown): number {
  * because nothing in the message pointed anywhere.
  */
 function outsideWorkspaceError(operation: SafePowerShellOperation, pathValue: string): Error {
+  // Name only tools that really reach the path. This used to offer `read_file`
+  // and `find_files` as "accepting absolute paths anywhere on disk"; both are
+  // workspace-scoped, so the agent followed the advice into a second refusal.
   const alternative =
     operation === 'get_file_hash'
-      ? 'the `exec_command` tool'
-      : 'the `list_directory` tool (or `read_file` / `find_files`)';
+      ? 'Use `exec_command` with `certutil -hashfile <path> SHA256` instead.'
+      : 'Use `list_directory` instead — it accepts an absolute path anywhere on disk. ' +
+        '`read_file`, `create_directory` and `delete_file` reach outside the workspace only ' +
+        'inside the folders listed under `extra_file_roots` in config.yaml.';
   return new Error(
     `query_powershell: ${pathValue} is outside the workspace. This tool is workspace-relative ` +
-      `only, because it is the one tool that runs without asking you first. Use ${alternative} ` +
-      `instead — those accept absolute paths anywhere on disk.`,
+      `only, because it is the one tool that runs without asking you first. ${alternative}`,
   );
 }
 
@@ -215,8 +219,8 @@ export function makeSafePowerShellTool(): RegisteredTool {
               type: 'string',
               description:
                 'Workspace-relative existing path (never absolute). Required for list_directory ' +
-                'and get_file_hash. For anything outside the workspace root, use list_directory / ' +
-                'read_file / find_files instead — this tool cannot reach it.',
+                'and get_file_hash. For anything outside the workspace root, use the list_directory ' +
+                'tool instead — this tool cannot reach it.',
             },
             name: {
               type: 'string',

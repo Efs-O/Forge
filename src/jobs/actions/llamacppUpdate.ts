@@ -1,19 +1,12 @@
-import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import { pickAssets } from './llamacppAssets';
-import { jobsDownloadBinary, jobsFetchReleaseByTag, type JobsFetchOptions } from '../jobsFetch';
 import type { Action } from '../jobSchema';
 import {
-  buildDirForTag,
-  clearStaged,
-  isStale,
-  newBinaryPath,
-  readStaged,
-  stagingDir,
-  writeStaged,
-  type StagedBuild,
-} from './stagedBuild';
+  installLlamacppBuild,
+  type InstalledBuild,
+  type LlamacppInstallEnv,
+} from './llamacppInstall';
+import { clearStaged, isStale, readStaged, writeStaged, type StagedBuild } from './stagedBuild';
 
 /**
  * The `llamacpp_update` action (B5) — the only mutating job action. Fixed
@@ -33,44 +26,21 @@ import {
  *   8. Post-check the backend; on failure restore the previous binary, restart,
  *      and report.
  *
- * Stages 2-5 are `stageLlamacppUpdate`; stages 7-8 are `performSwitch`, driven
+ * Stages 2-5 are `installLlamacppBuild` (llamacppInstall.ts, shared with the
+ * `install_llamacpp` tool); stage 6 is `stageLlamacppUpdate`; stages 7-8 are `performSwitch`, driven
  * by `processPendingSwitches` on the scheduler's idle tick. Old build folders
  * are never deleted.
  */
 
-export interface LlamacppUpdateEnv {
+export interface LlamacppUpdateEnv extends LlamacppInstallEnv {
   /** The jobs root (holds `staged/`). */
   jobsRoot: string;
-  /** The `%LOCALAPPDATA%\Forge` root the builds live under. */
-  localRoot: string;
   /**
    * Whether the job still exists. A delete can land while its check is in
    * flight (after `delete` cleaned `staged/`), so staging and switching both
    * ask, and a build whose job is gone is never staged or switched.
    */
   jobExists: (jobId: string) => Promise<boolean>;
-  /** The `jobs:` fetch options (allowed hosts + ETag cache). */
-  fetchOptions: () => JobsFetchOptions;
-  /** The current config, for the old binary and the embeddings smoke test. */
-  getConfig: () => {
-    currentBinary: string | undefined;
-    embeddings: { enabled?: boolean; model_path?: string } | undefined;
-    llama_server: { host?: string; port?: number } | undefined;
-  };
-  /** Run a command, returning {code, stdout, stderr}. */
-  runCommand: (
-    binary: string,
-    args: string[],
-    timeoutMs?: number,
-  ) => Promise<{
-    code: number | null;
-    stdout: string;
-    stderr: string;
-  }>;
-  /** SHA-256 (lowercase hex) of a file. */
-  sha256File: (filePath: string) => Promise<string>;
-  /** Extract a zip into a directory. */
-  extractZip: (zipPath: string, destDir: string) => Promise<void>;
   /**
    * Set `llama_server.binary` in config.yaml, preserving comments. Passing
    * `undefined` deletes the field (the post-check restore when there was no
@@ -112,82 +82,13 @@ export async function stageLlamacppUpdate(
   if (!(await env.jobExists(jobId))) {
     return { summary: `job ${jobId} was deleted during its check; nothing staged` };
   }
-  const downloaded: { name: string; path: string; digest: string }[] = [];
-  let newBinary: string;
-  // Whether THIS run created the build dir. A pre-existing `llama.cpp-<tag>\`
-  // is never ours to delete (old builds are kept on purpose); a partial one we
-  // created and then failed to fill must be removed, or it blocks every retry
-  // of the tag at the "already exists" guard below (audit F3).
-  let createdBuildDir = false;
-  let staging: string;
+  let installed: InstalledBuild;
   try {
-    const release = await jobsFetchReleaseByTag(repo, tag, env.fetchOptions());
-    const assets = pickAssets(release, tag, action.asset_pattern);
-    staging = stagingDir(env.localRoot);
-    fs.mkdirSync(staging, { recursive: true });
-
-    // Stage 2: download each asset to the staging dir (gated, redirect-safe).
-    for (const asset of assets) {
-      const dest = path.join(staging, asset.name);
-      await jobsDownloadBinary(asset.downloadUrl, dest, {
-        allowedHosts: env.fetchOptions().allowedHosts,
-      });
-      downloaded.push({ name: asset.name, path: dest, digest: asset.digest });
-    }
-
-    // Stage 3: verify every asset's SHA-256 against the release digest.
-    for (const asset of downloaded) {
-      const actual = await env.sha256File(asset.path);
-      if (!asset.digest.startsWith('sha256:')) {
-        throw new Error(
-          `Forge: release ${tag} has no digest for ${asset.name}; refusing to install`,
-        );
-      }
-      if (actual !== asset.digest.slice('sha256:'.length)) {
-        throw new Error(
-          `Forge: digest mismatch for ${asset.name}: expected ${asset.digest}, got sha256:${actual}`,
-        );
-      }
-    }
-
-    // Stage 4: extract into llama.cpp-<tag>\; stop if the folder already exists.
-    const buildDir = buildDirForTag(env.localRoot, tag);
-    if (fs.existsSync(buildDir)) {
-      throw new Error(`Forge: build folder ${buildDir} already exists; not overwriting`);
-    }
-    fs.mkdirSync(buildDir, { recursive: true });
-    createdBuildDir = true;
-    for (const asset of downloaded) {
-      await env.extractZip(asset.path, buildDir);
-    }
-    newBinary = newBinaryPath(env.localRoot, tag);
-    if (!fs.existsSync(newBinary)) {
-      throw new Error(`Forge: ${newBinary} not found after extraction`);
-    }
-
-    // Stage 5: smoke test the new binary.
-    await smokeTest(newBinary, tag, env);
-
-    // The zips have served their purpose (verified + extracted). Delete them
-    // before the switch so a successful stage does not leak ~1 GB per release
-    // (audit F3). A failure path does the same in the catch below.
-    for (const asset of downloaded) {
-      fs.rmSync(asset.path, { force: true });
-    }
+    installed = await installLlamacppBuild(repo, tag, action.asset_pattern, env);
   } catch (err) {
     // A failure before the switch must not leave a pre-existing staged build
     // (e.g. a previous switch_pending) switchable. Clear this job's stage.
     clearStaged(env.jobsRoot, jobId);
-    // Remove the partial build dir ONLY if this run created it — never a
-    // pre-existing build — so a half-extracted tag does not permanently block
-    // the next retry at the "already exists" guard (audit F3). Delete the
-    // downloaded zips too; they are per-run and never reused across attempts.
-    if (createdBuildDir) {
-      fs.rmSync(buildDirForTag(env.localRoot, tag), { recursive: true, force: true });
-    }
-    for (const asset of downloaded) {
-      fs.rmSync(asset.path, { force: true });
-    }
     throw err;
   }
 
@@ -196,9 +97,9 @@ export async function stageLlamacppUpdate(
   const staged: StagedBuild = {
     job_id: jobId,
     tag,
-    new_binary: newBinary,
+    new_binary: installed.newBinary,
     old_binary: env.getConfig().currentBinary,
-    assets: downloaded.map((a) => ({ name: a.name, digest: a.digest })),
+    assets: installed.assets,
     staged_at: env.now(),
     switch_pending: action.mode === 'apply',
     mode: action.mode,
@@ -340,111 +241,4 @@ export function approveStaged(jobsRoot: string, jobId: string, now: number): str
   if (staged.switch_pending) return `${staged.tag} is already switching`;
   writeStaged(jobsRoot, { ...staged, switch_pending: true });
   return `${staged.tag} approved; switching when idle`;
-}
-
-/** Stage 5: `--version` reports the tag, `--list-devices` runs, and (when
- *  embeddings are configured) one embedding round-trip succeeds. */
-async function smokeTest(newBinary: string, tag: string, env: LlamacppUpdateEnv): Promise<void> {
-  const version = await env.runCommand(newBinary, ['--version'], 30_000);
-  if (version.code !== 0 || !version.stdout.includes(tag)) {
-    throw new Error(
-      `Forge: smoke test failed: --version did not report ${tag} (code ${version.code}): ${version.stdout.slice(0, 200)}`,
-    );
-  }
-  const devices = await env.runCommand(newBinary, ['--list-devices'], 30_000);
-  if (devices.code !== 0) {
-    throw new Error(`Forge: smoke test failed: --list-devices exited ${devices.code}`);
-  }
-  const embeddings = env.getConfig().embeddings;
-  if (embeddings?.enabled && embeddings.model_path) {
-    await embeddingsRoundTrip(newBinary, embeddings.model_path, env);
-  }
-}
-
-/** One embedding round-trip on a free port, to prove the build serves. */
-async function embeddingsRoundTrip(
-  newBinary: string,
-  modelPath: string,
-  env: LlamacppUpdateEnv,
-): Promise<void> {
-  const host = env.getConfig().llama_server?.host ?? '127.0.0.1';
-  const port = await findFreePort(host);
-  const proc = spawn(
-    newBinary,
-    ['-m', modelPath, '--host', host, '--port', String(port), '--embedding'],
-    {
-      shell: false,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    },
-  );
-  try {
-    const healthy = await waitHealthy(`http://${host}:${port}`, 30_000);
-    if (!healthy)
-      throw new Error('Forge: smoke test failed: embedding server did not become healthy');
-    const res = await fetch(`http://${host}:${port}/v1/embeddings`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: path.basename(modelPath), input: 'forge smoke test' }),
-      signal: AbortSignal.timeout(30_000),
-    });
-    if (!res.ok)
-      throw new Error(`Forge: smoke test failed: embedding request returned ${res.status}`);
-    await res.text();
-  } finally {
-    await kill(proc);
-  }
-}
-
-/** A free TCP port on the host. */
-async function findFreePort(host: string): Promise<number> {
-  const net = await import('net');
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.once('error', reject);
-    server.listen(0, host, () => {
-      const address = server.address();
-      const port = typeof address === 'object' && address ? address.port : 0;
-      server.close(() => resolve(port));
-    });
-  });
-}
-
-/** Poll a server's `/v1/models` until it answers 200 or the deadline passes. */
-async function waitHealthy(baseUrl: string, timeoutMs: number): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    try {
-      const res = await fetch(`${baseUrl}/v1/models`, { signal: AbortSignal.timeout(2000) });
-      if (res.ok) return true;
-    } catch {
-      // not ready yet
-    }
-    if (Date.now() >= deadline) return false;
-    await new Promise((r) => setTimeout(r, 500));
-  }
-}
-
-/** Kill a child process (best-effort, for the smoke-test embedding server). */
-function kill(proc: ReturnType<typeof spawn>): Promise<void> {
-  return new Promise((resolve) => {
-    if (proc.exitCode !== null || proc.signalCode !== null) return resolve();
-    const timeout = setTimeout(() => resolve(), 5000);
-    proc.once('exit', () => {
-      clearTimeout(timeout);
-      resolve();
-    });
-    try {
-      if (process.platform === 'win32' && proc.pid) {
-        spawn('taskkill', ['/PID', String(proc.pid), '/T', '/F'], {
-          stdio: 'ignore',
-          windowsHide: true,
-        });
-      } else {
-        proc.kill('SIGTERM');
-      }
-    } catch {
-      clearTimeout(timeout);
-      resolve();
-    }
-  });
 }

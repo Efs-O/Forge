@@ -63,7 +63,7 @@ const ALL_PERMISSIONS = new Set<ToolPermission>([
 function maximalConfig(): ForgeConfig {
   return {
     active_model: 'primary',
-    llama_server: {},
+    llama_server: { binary: 'llama-server' },
     models: [
       { name: 'primary', gguf_path: '/primary.gguf' },
       { name: 'worker', gguf_path: '/worker.gguf' },
@@ -128,13 +128,19 @@ function advertisedChars(registry: ToolRegistry): number {
 }
 
 describe('tool schema CI budget (TOOL_SCHEMA_GROWTH_PLAN.md Step 1)', () => {
-  it('advertises the full 77-tool set under the maximal config', () => {
+  it('advertises the full 78-tool set under the maximal config', () => {
     const registry = makeMaximalRegistry();
     const names = registry.definitions(ALL_PERMISSIONS).map((d) => d.function.name).sort();
-    expect(names).toHaveLength(77);
-    // Spot-check the four self-suppressing tools that only appear when their
+    expect(names).toHaveLength(78);
+    // Spot-check the five self-suppressing tools that only appear when their
     // config block is present — these are the ones a bare config would drop.
-    for (const name of ['generate_image', 'image_search', 'manage_jobs', 'ask_live_session']) {
+    for (const name of [
+      'generate_image',
+      'image_search',
+      'manage_jobs',
+      'ask_live_session',
+      'install_llamacpp',
+    ]) {
       expect(names).toContain(name);
     }
   });
