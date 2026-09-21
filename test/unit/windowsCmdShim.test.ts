@@ -45,6 +45,19 @@ describe('buildWindowsCmdShellInvocation', () => {
     expect(args[0]).toBe('/d');
     expect(args[1]).toBe('/s');
     expect(args[2]).toBe('/c');
-    expect(args[3]).toBe('C:\\npm\\claude.cmd -p "multi word task"');
+    expect(args[3]).toBe('"C:\\npm\\claude.cmd -p "multi word task""');
+  });
+
+  it('keeps a spaced executable path quoted so cmd /s does not strip its quotes', () => {
+    const { args } = buildWindowsCmdShellInvocation(
+      'C:\\Users\\efso office\\AppData\\Roaming\\npm\\codex.cmd',
+      ['queue', '--thread', 'abc-123', '--message', 'hello world'],
+    );
+    const line = args[3];
+    // The line is wrapped in an outer pair; the executable keeps its own pair.
+    expect(line.startsWith('"')).toBe(true);
+    expect(line.endsWith('"')).toBe(true);
+    expect(line).toContain('"C:\\Users\\efso office\\AppData\\Roaming\\npm\\codex.cmd"');
+    expect(line).toContain('"hello world"');
   });
 });

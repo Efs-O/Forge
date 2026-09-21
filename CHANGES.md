@@ -1,5 +1,25 @@
 # Forge — Recent Changes
 
+## 0.16.14
+
+### Fix: CLI delivery (codex queue, claude) breaks on spaced profile paths
+
+- **`cmd /s /c` stripped the quotes off spaced executable paths.** Forge wraps
+  npm `.cmd` shims in `cmd.exe /d /s /c <line>`; the `/s` switch strips the
+  first and last quote of the whole line. When the shim path contains a space
+  (`C:\Users\efso office\AppData\Roaming\npm\codex.cmd`), those outer quotes
+  were the executable's own — so cmd ran `C:\Users\efso` as a command and
+  `ask_live_session` / delegation to Codex failed with
+  `'C:\Users\efso' is not recognized`. The command line is now wrapped in an
+  outer quote pair (the documented `/s /c` contract), so the executable's
+  quotes survive. Same fix covers every CLI spawn that goes through the shim
+  (`claude`, `codex`, `npm` shims).
+- **Jobs template: full GitHub asset host chain.** `config.example.yaml`
+  `jobs.allowed_hosts` now lists `github.com` and
+  `release-assets.githubusercontent.com` alongside the API and
+  `objects.githubusercontent.com` hosts — a `llamacpp_update` download
+  redirects through all of them and the gate checks every hop.
+
 ## 0.16.13
 
 ### Jobs: fix llamacpp_update asset picking + opt-in default

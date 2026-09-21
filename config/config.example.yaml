@@ -62,7 +62,12 @@ jobs:
   # Hosts a job may fetch from.
   allowed_hosts:
     - api.github.com
+    # Asset downloads start on github.com and 302 to a CDN; the host gate checks
+    # every hop, and GitHub serves assets from BOTH of these CDNs depending on
+    # the asset, so all four are required for llamacpp_update.
+    - github.com
     - objects.githubusercontent.com
+    - release-assets.githubusercontent.com
   max_concurrent: 2
 
 # ===========================================================================
