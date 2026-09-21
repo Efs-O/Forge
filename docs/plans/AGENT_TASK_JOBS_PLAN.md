@@ -1,7 +1,24 @@
 # Agent-task jobs — a job that runs an agent turn, unattended (impl plan)
 
-Status: plan, not started. Owner of the final call: Claude. Implementer: Forge
-(Qwen Flash), phase by phase; Codex reviews and fixes each phase.
+Status: plan, not started. Owner of the final call: Claude. Implementer: Forge,
+phase by phase; Codex reviews and fixes each phase.
+
+**Phase 1 is a trial of Qwopus** (`qwopus38-27b-flash-mtp-q5km-no-vision`,
+thinking off, first real coding run). Claude scores it against this card, then
+decides who writes phase 3:
+
+| Check | Pass |
+|---|---|
+| `npm run ci` green on its own commit | without Codex fixing a failure |
+| Codex review | no high-severity findings; at most 2 small fixes |
+| Scope | only the phase 1 files; nothing invented |
+| Tests | `check.none`, `agent_task`, the 4000-char cap, a rejected bad task, the new state fields' defaults |
+| Commit message | says what the commit does |
+| `ask_user` calls | 0 |
+| Tool loop | no repeated read/search after it already had the answer; did not stop at a description instead of editing |
+
+Claude audits the session log (`~/.forge/sessions`, deduped, by `forge_version`)
+for rounds, tool failures and repeats, and writes the verdict here.
 
 ## Why
 
@@ -105,7 +122,9 @@ One run:
    `n_parallel: 2` serves two conversations at once on one model load, each
    with `perSlotContext()` = `num_ctx / n_parallel`. The job therefore does not
    wait for full idle. It starts now when all three hold:
-   - its model is the resident one, or nothing is loaded;
+   - its model is the resident one, nothing is loaded, or the resident model
+     is a different one with **nothing streaming** (step 3 unloads it; an idle
+     model is not a reason to wait);
    - fewer conversations are streaming on that model than its `n_parallel`
      (`status().streamingConversationIds`);
    - its own conversation is not streaming.
@@ -127,6 +146,11 @@ One run:
    `state.conversation_id`, the same chat `/job <n> chat` and
    `manage_jobs discuss` already open (B.6). It is created on the first run if
    missing, with the same restore-or-create fallback `openDiscussChat` uses.
+   Extract that fallback into a helper both call. The runner must **not** send
+   the discuss seed: its own prompt (step 5) is the only message.
+   `openDiscussChat` refuses while `task_run` is set ("the job is running; its
+   chat shows the turn live"): a seed sent mid-run would be a second turn in the
+   same conversation.
    Then call `setConversationModel`. Record the id in
    `task_run.conversation_id`.
    - **One chat per job, for its whole life.** A run can see what earlier runs
@@ -157,11 +181,17 @@ One run:
      > `RESULT: ok | no_change | failed — <one sentence>`
      > If you changed llama_server.binary, add a line `RESTART: yes`. Do not
      > restart the backend yourself: you are running on it.
+   Config hot-reload does **not** restart the backend (`src/vscode/configReload.ts`
+   only reloads and says "restart backend if you changed spawn settings").
+   So the agent editing `llama_server.binary` mid-turn is safe. The switch
+   happens only in step 7.
 6. **Caps: reuse the model's own.** The round and budget caps are the model's
    existing `max_tool_rounds` and budget settings. They were tuned after an
    18-hour Qwen run and are not duplicated per job. The one job-level knob is
    the optional `max_minutes`. Once it elapses, the runner calls
-   `cancel(conversationId)` and the outcome is `timeout`. It exists so an
+   `cancel(conversationId)`, **awaits the `send` promise settling** (so
+   `finally` never runs while the turn is still unwinding), and the outcome is
+   `timeout`. It exists so an
    overnight run always has an answer on Telegram by morning, instead of still
    running. There is no default: omitted means no clock cap (CLAUDE.md: no
    hardcoded fallbacks for user-configurable params).
@@ -197,6 +227,28 @@ One run:
    - clear `task_run`;
    - append the run row.
 
+### How it fits the scheduler (three existing behaviours that would break)
+
+- **The tick awaits every job** (`tick()` → `await Promise.all(workers)` →
+  `runJob`, with `this.running = true` for the whole tick). A 4-hour agent turn
+  would freeze every other job and tick for 4 hours. The agent task is
+  therefore **started from `runJob` and not awaited by the tick**. `runJob`
+  records it in `runningJobs` (the existing guard, which already stops a second
+  run of the same job) and returns. The runner writes its own run row and state
+  when it ends.
+- **`maybeSleepIfIdle`** (D6) must treat a running agent task as busy. Checking
+  `busy()` alone is not enough: a turn waiting on a 10-minute download is
+  executing a tool, and the machine must not suspend under it. Check
+  `runningJobs` too.
+- **`on_change` and backoff double-report.** For an `agent_task` job:
+  - `on_change` is **not delivered**; the agent's report replaces it. Otherwise
+    the owner gets "new release b1300" and then the agent's result: two
+    messages for one run.
+  - `applyBackoff` keeps its delay, but **skips its own "failing:" message**,
+    because the runner already reported every failure.
+  - The "recovered after N failures" message stays; it is the one extra line
+    worth having.
+
 ### Crash / reload recovery
 
 If Forge dies mid-run (window reload, extension-host crash, power loss), the
@@ -230,9 +282,9 @@ or fewer itself (MESH_RUN_1 F2). Claude signs off before the next phase starts.
 
 | # | Scope | Files | Suggested writer |
 |---|---|---|---|
-| 1 | Schema: `check.none`, `action.agent_task`; `manage_jobs` `task` field; `jobDescribe` renders it | `jobSchema.ts`, `checks/`, `tools/jobTools.ts`, `jobDescribe.ts` | Forge (Qwen Flash) |
+| 1 | Schema: `check.none`, `action.agent_task`; the state fields `task_run` and `task_pending` (nullable, default null/false, so existing state files still parse); `manage_jobs` `task` field; `jobDescribe` renders it. No runtime behaviour yet | `jobSchema.ts`, `checks/`, `tools/jobTools.ts`, `jobDescribe.ts` | Forge (**Qwopus trial**, see the scorecard) |
 | 2 | Unattended registry, plus the approval, `ask_user` and `notify_user` branches | new `sidebar/unattendedConversations.ts`, `ToolApprovalService.ts`, `tools/uxTools.ts` | **Codex**: this is the approval gate, and a subtle bug is an agent with auto-approval |
-| 3 | Runner steps 1–6, 8, 9 and crash recovery; wire into the scheduler | new `jobs/agentTask.ts`, `JobScheduler.ts` (+ `runCheck` extraction if needed), `extension.ts` wiring | Forge (Qwen Flash) |
+| 3 | Runner steps 1–6, 8, 9 and crash recovery; wire into the scheduler, including the three scheduler behaviours above | new `jobs/agentTask.ts`, `JobScheduler.ts` (+ `runCheck` extraction if needed), `extension.ts` wiring | Forge (Qwopus if phase 1 passes, else Qwen Flash) |
 | 4 | Step 7: restart after turn, config backup and rollback | `agentTask.ts` | **Codex**: touches the live binary |
 | 5 | The llama job plus `docs/LLAMACPP_UPDATE.md` (the "how", for the agent); live overnight test; then retire `llamacpp_update` | config/job file, docs, removal | Forge writes the doc; the owner runs the test |
 
@@ -284,11 +336,24 @@ listing the keys `agentTask.ts` patches) fails.
    when it needs a different model while one streams, it waits. Tested with a
    status stub for each case.
 9. **Live:** the owner leaves the PC asleep with a daily 03:00
-   `llamacpp-latest` job (`wake: true`, model Qwen Flash). By morning, Telegram
+   `llamacpp-latest` job (`wake: true`, the model chosen after phase 3). By morning, Telegram
    holds exactly one message: installed `bNNNN` or `failed — <reason>`. The
    run's conversation shows the full turn.
-10. `npm run ci` and `npm run package` green; `docs/OWNERS.md` has rows for
+10. An `agent_task` run delivers exactly one outbox item, whatever
+    `on_change` says, and a failure past the backoff threshold still delivers
+    one, not two.
+11. While an agent task runs, the tick keeps running other due jobs, and
+    `maybeSleepIfIdle` does not suspend. Both tested with a never-resolving
+    `send` stub.
+12. `openDiscussChat` on a job with `task_run` set refuses and sends nothing.
+13. `npm run ci` and `npm run package` green; `docs/OWNERS.md` has rows for
     `unattendedConversations.ts` and `agentTask.ts`.
+
+## Before phase 1 starts
+
+The live `~/.forge/jobs/llama-updates.json` (every 15 min, `llamacpp_update`
+in `prepare` mode) is still enabled. It keeps firing during implementation and
+will ask for approvals mid-run. Set `enabled: false` until phase 5 replaces it.
 
 ## Out of scope
 
