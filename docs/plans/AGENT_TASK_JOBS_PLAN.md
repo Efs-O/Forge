@@ -24,7 +24,7 @@ for rounds, tool failures and repeats, and writes the verdict here.
 
 **Phase 3, first attempt:** stopped by Forge's loop guard ("alternating tool-call cycle produced no progress") after 43 calls. 26 good reads, then the same two `holdAwake` searches 16 times with identical results, no edit. Thinking is off, so no reasoning was logged. Restarted with a nudge naming the loop and plan step 4 (runner takes its own hold, releases in `finally`). Counts against the "Tool loop" check.
 
-**Phase 3, attempt 2:** stopped by Claude after 84+ calls and no edit (F5). The chat had grown to ~92K prompt tokens per request; the model config notes Qwen degrades past ~100K. Both attempts ran in the phase 1 chat, so neither is a fair read of Qwopus. **Rule from here: every phase starts in a fresh chat.**
+**Phase 3, attempt 2:** stopped by Claude after 84+ calls and no edit (F5). The chat had grown to ~92K prompt tokens per request; the model config notes Qwen degrades past ~100K. Both attempts ran in the phase 1 chat, so neither is a fair read of Qwopus. **Owner, 2026-09-22: Qwopus is evaluated (and fixed, if fixable) separately, outside this run. Phase 3 onward is written by Qwen Q6 (`qwen38-27b-dflash2-ud-q6k-vision`, thinking on) in the same, compacted chat.** Qwopus's ctx was cut to 75K in `.forge/config.yaml` for that separate evaluation.
 
 **Verdict (2026-09-21): pass; Qwopus writes phase 3.** `c7ee5a1`, 18 min,
 66 tool rounds: CI green on its own commit, in scope (the `runCheck.ts`
@@ -320,7 +320,7 @@ on its own, which is the right shape anyway.
 | 2 | Unattended registry, plus the approval, `ask_user` and `notify_user` branches | new `sidebar/unattendedConversations.ts`, `ToolApprovalService.ts`, `ToolDispatch.ts` (policy-denial result), `tools/uxTools.ts` | **Codex**, Claude signs off: this is the approval gate, and a subtle bug is an agent with auto-approval — **done** by `d66c9af`, signed off. Carried into phase 3: notify_user keys its outbox item by conversation id and names it "Unattended conversation <uuid>"; the marker must carry the job id and name |
 | 2b | ~~Audit fixes F2/F3~~ **done** by `50d0f3f` (weekly audit A2: a window that lost the lease keeps ticking and takes over; A4: the watcher ignores lease heartbeats) | — | — |
 | 3 | Runner steps 1–6, 8, 9 and crash recovery; wire into the scheduler, including the three scheduler behaviours above | new `jobs/agentTask.ts`, `JobScheduler.ts` (+ `runCheck` extraction if needed), `extension.ts` wiring | Forge (Qwopus if phase 1 passes, else Qwen Flash) |
-| 4 | Step 7: restart after turn, config backup and rollback | `agentTask.ts` | ~~Codex~~ **Qwopus** (owner, 2026-09-21: Qwopus writes every remaining phase so its coding can be judged); Codex reviews; Claude signs off: touches the live binary |
+| 4 | Step 7: restart after turn, config backup and rollback | `agentTask.ts` | ~~Codex~~ **Qwen Q6** (owner, 2026-09-22; Qwopus is evaluated separately); Codex reviews; Claude signs off: touches the live binary |
 | 5 | The llama job plus `docs/LLAMACPP_UPDATE.md` (the "how", for the agent; it points at the `install_llamacpp` tool shipped in 0.16.20, which installs into `%LOCALAPPDATA%\Forge` without UAC); live overnight test; then retire `llamacpp_update` | config/job file, docs, removal | Forge writes the doc; the owner runs the test |
 
 ### Phase 2 tool inventory for the unattended llama install
