@@ -71,6 +71,13 @@ export interface AgentRoutesDeps {
    */
   interruptForge?: () => Promise<void>;
   join?: (alias: string, pid: number) => { ok: true; reply: string } | { ok: false; error: string };
+  /**
+   * §11: `forge.sh who` — read-only projection of every mesh participant and
+   * its state (attachment × activity). The host owns the truth (it reads the
+   * alias table, ownership records and the in-memory FIFO); the client only
+   * formats. Absent ⇒ `GET /agent/who` is 404.
+   */
+  who?: () => Promise<unknown> | unknown;
 }
 
 interface Fields {
@@ -182,17 +189,25 @@ export class AgentRoutes {
     const known =
       route === '/agent/message' ||
       route === '/agent/reply' ||
-      (route === '/agent/join' && !!this.deps.join);
+      (route === '/agent/join' && !!this.deps.join) ||
+      (route === '/agent/who' && !!this.deps.who);
     if (!this.enabled || !known) {
       return sendJson(res, 404, { error: `no route for ${req.method ?? 'GET'} ${route}` });
     }
-    if (req.method !== 'POST') return sendJson(res, 405, { error: 'POST only' });
     if (!this.authorized(req.headers.authorization)) {
       return sendJson(res, 401, {
         error:
           'missing or stale token: read it from endpoint.json (it changes when Forge restarts)',
       });
     }
+    // §11: the one GET route. Read-only: it returns the participant projection
+    // and touches no other route's state.
+    if (route === '/agent/who') {
+      if (req.method !== 'GET') return sendJson(res, 405, { error: 'GET only' });
+      const participants = await this.deps.who?.();
+      return sendJson(res, 200, { participants });
+    }
+    if (req.method !== 'POST') return sendJson(res, 405, { error: 'POST only' });
     try {
       const fields = await readFields(req, url);
       if (route === '/agent/join' && this.deps.join) {

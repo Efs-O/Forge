@@ -487,6 +487,132 @@ pin or opens a window. Local Qwen (Forge's own model) is a full participant.
 - `forge.sh send <me> <to>` relays agent→agent through the host (M6), with no
   Forge model turn.
 
+## §11 `forge.sh who` — list every mesh participant and its state
+
+A read-only verb that prints one line per participant (forge, claude, codex, and
+any other registered alias) with its state. It answers the question a sender
+actually asks before messaging: *"if I say something to X now, what happens?"*
+
+### Model: two axes, not one enum
+
+The task named four states (joined / owned / parked / busy), but they are two
+independent axes — a session can be **owned and parked**, or **owned and busy** —
+so a flat enum is lossy (Codex's take). One line per participant:
+
+```
+alias  attachment  activity  detail
+forge  hub         busy      turn 3m12s  inbox 1
+claude joined      unknown   pid 33396
+codex  owned       busy      turn 0m40s  queue 1
+codex  owned       parked    warm (thread resumable)
+```
+
+- **attachment** — *how this host reaches the participant*: `hub` (Forge
+  itself), `joined` (a user-opened session that ran `forge.sh join`, i.e. the
+  alias record carries `peer_pid`), `owned` (a Forge-owned session whose
+  ownership record THIS host drives — it holds the pipe), `peer` (we can write
+  to it but not watch it: a session another live window owns, or a pinned
+  thread with no owned record this host drives), `none` (no record at all).
+  `owned` is reserved for the pipe holder: a foreign live owner is `peer`, not
+  `owned` (Codex's review point).
+- **activity** — *what the participant is doing*: `busy` (a turn is running),
+  `idle` (owned and quiescent), `parked` (park-but-warm, §2b), `unknown`
+  (we cannot observe it), `dead` (owner host proven dead).
+
+The two axes keep `owned+parked` and `owned+busy` representable, which a single
+`state` word cannot.
+
+### The honesty rule (Claude's take)
+
+**Only an adapter that observes turns may report `busy` or `idle`.** For a
+non-observing participant (a user-opened Codex thread, a peer we only write to,
+or a session another live window owns) the activity is **`unknown`, never
+`idle`**. Guessing `idle` is the dangerous lie: a sender then expects a fast
+answer and escalates. `AliasFifo.running` is in-memory and belongs to the
+window that owns the session (Codex's gotcha): another window can own the alias
+and be busy while this host's FIFO is idle, so a foreign owner is `unknown`, not
+`idle`.
+
+### Sources (all read-only, no new durable state)
+
+| field | source |
+| --- | --- |
+| attachment `joined` | `aliases.json` `peer_pid` present (`aliasRegistry`) |
+| attachment `owned` | `ownership/<alias>.json` present, `owner_host` not null, and this host is the owner (`isOwner`) |
+| attachment `peer` | an ownership record whose live owner is a foreign window, or an alias/pin with no owned record this host drives |
+| activity `parked` | ownership record `parked: true` |
+| activity `dead` | ownership `owner_host` genuinely null (a clean close), or the recorded host is proven dead (`isHostAlive`). A present-but-malformed `owner_host` (normalized to null by `readOwnership`) is `unknown`, not `dead`: unprovable death is not proven death |
+| activity `busy`/`idle` | the owning window's `AliasFifo.running` — **only** when this host owns the session |
+| forge `busy` | `status().streamingConversationIds` includes the active conversation (same test `AgentInbox.isBusy` uses) |
+
+`projectLiveSessions()` (`boardView.ts`) is a presentation projection, not the
+truth source for `who` — it cannot see `busy` (in-memory) or `joined` vs `owned`
+distinctions. `who` composes the raw sources directly.
+
+### Surface
+
+- **Route:** `GET /agent/who` on the control server (the first GET route; the
+  others are POST). Returns JSON: `{ participants: [ { alias, attachment,
+  activity, detail? } ] }`. Bearer token required like the other routes; 404
+  while `agent_bus.enabled` is false. The host owns the truth; the script only
+  formats.
+- **Client:** `forge.sh who` (no arguments). `forge.sh` does **not** read
+  `aliases.json` or `ownership/*.json` itself — it reads the JSON the route
+  returns and prints the aligned table above. When the endpoint is unreachable
+  it says so (there is no offline fallback for a *live* state: a dead Forge
+  cannot report the states of things it no longer supervises).
+- **`forge.sh` usage block** gains a `who` line; the bus README documents it.
+
+### State × lifecycle ledger
+
+`who` writes **no durable state**: it reads the alias table, ownership records,
+the exchange log and the in-memory FIFO, and returns a projection. There is no
+create / delete / pause / crash-mid-write / owner-death / TTL row to fill — the
+ledger is empty by construction, which is the point (a read-only verb cannot
+leak a file). The only new artifact is the `GET /agent/who` route, which is
+stateless and is gated on `agent_bus.enabled` exactly like the other routes.
+
+### Acceptance criteria
+
+- [ ] **A1 — every participant is listed.** With a joined `claude`, an owned
+  `codex`, and Forge always present, `GET /agent/who` returns all three, plus
+  any other registered alias. *Test: `AgentRoutes.test.ts` — install a `who`
+  dep returning a known participant list; assert the JSON shape and that all
+  aliases appear.*
+- [ ] **A2 — two axes, not one enum.** A parked owned session reports
+  `attachment: owned, activity: parked` (not a merged `parked` word); a busy
+  owned session reports `owned, busy`. *Test: same suite, two fixtures.*
+- [ ] **A3 — the honesty rule.** A non-observing participant (foreign live
+  owner, or a pinned thread with no owned record this host drives) reports
+  `activity: unknown`, **never** `idle` and never `busy`. *Test: fixture with a
+  foreign `owner_host`; assert `unknown`.*
+- [ ] **A3b — attachment honesty.** A session another live window owns reports
+  `attachment: peer` (we can write, not watch), **not** `owned`; a malformed
+  `owner_host` reports `owned` + `unknown`, **not** `dead`. *Test: `meshWho.test.ts` —
+  foreign-live-owner fixture and a malformed-`owner_host` fixture.*
+- [ ] **A4 — Forge is always present and reports its own truth.** Forge's line
+  is `attachment: hub`; `activity: busy` exactly when the active conversation is
+  streaming, else `idle`. *Test: stub the busy check true/false; assert the
+  line.*
+- [ ] **A5 — dead is only after proven death.** An owned record whose
+  `owner_host` is genuinely null, or whose host is proven dead, reports `dead`;
+  a record whose host is merely "not this window but alive" reports `unknown`,
+  not `dead`. *Test: two fixtures — null owner vs foreign-live owner.*
+- [ ] **A6 — auth and gating.** `GET /agent/who` is 401 without a token, 404
+  while disabled, and 200 with the token when enabled. *Test: same `post`/`fetch`
+  harness as the existing route tests.*
+- [ ] **A7 — the client formats the route's JSON.** `forge.sh who` prints the
+  aligned table from the route's response (one line per participant) and exits
+  0; with no endpoint it prints "not reachable" and exits 1 (no offline
+  fallback). *Test: `forge.sh against the routes` suite, bash-gated like the
+  other client tests.*
+- [ ] **A8 — no new durable state.** After a `who` call the bus folder still
+  contains only the pre-existing artifacts (the "leaves nothing behind"
+  assertion in `AgentRoutes.test.ts` still holds: `README.md, endpoint.json,
+  forge.sh, inbox, outbox`). *Test: extend the existing folder-listing test.*
+- [ ] **A9 — `who` takes no arguments.** `forge.sh who extra` is a usage error
+  (exit 2), matching the observational-verb grammar. *Test: client suite.*
+
 ## What is NOT in scope
 - **Direct Claude↔Codex transport** (a real peer envelope with its own ack/retry).
   Hub-and-spoke through Forge is the v1 transport; the board shows the relayed

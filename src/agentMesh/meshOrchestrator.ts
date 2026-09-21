@@ -429,6 +429,12 @@ export class MeshOrchestrator {
     return this.fifos.get(alias.trim().toLowerCase())?.pending ?? 0;
   }
 
+  /** §11: this host's FIFO for the alias is running a turn (in-memory; a
+   *  foreign owner's session is invisible here, so `who` reports `unknown`). */
+  isBusy(alias: string): boolean {
+    return this.fifos.get(alias.trim().toLowerCase())?.isRunning ?? false;
+  }
+
   /** Pending unsent bus messages for the Telegram queue view (F-09). */
   pendingMessages(): PendingMeshMessage[] {
     const messages: PendingMeshMessage[] = [];

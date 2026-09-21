@@ -382,3 +382,129 @@ describe('typed lifecycle command dispatch (§8, P3)', () => {
     expect(accepted).toEqual([]);
   });
 });
+
+describe('GET /agent/who (§11)', () => {
+  function install(deps: ConstructorParameters<typeof AgentRoutes>[0]): void {
+    routes = new AgentRoutes(deps);
+    routes.setEnabled(true);
+    routes.onListening(base);
+  }
+  const get = (route: string, token: string | null = TOKEN): Promise<Response> =>
+    fetch(`${base}${route}`, {
+      headers: token === null ? {} : { Authorization: `Bearer ${token}` },
+    });
+
+  it('A6: 401 without a token, 404 while disabled, 200 with the token', async () => {
+    install({
+      paths: () => paths,
+      inbox: { accept: (p) => (accepted.push(p), accepted.length) },
+      token: TOKEN,
+      who: () => [
+        { alias: 'forge', attachment: 'hub', activity: 'idle' },
+        { alias: 'codex', attachment: 'owned', activity: 'parked', detail: 'warm' },
+      ],
+    });
+    expect((await get('/agent/who', null)).status).toBe(401);
+    expect((await get('/agent/who', 'e'.repeat(64))).status).toBe(401);
+    routes.setEnabled(false);
+    expect((await get('/agent/who')).status).toBe(404);
+    routes.setEnabled(true);
+    const ok = await get('/agent/who');
+    expect(ok.status).toBe(200);
+    const body = (await ok.json()) as { participants: unknown[] };
+    expect(body.participants).toHaveLength(2);
+    expect((body.participants[1] as { alias: string }).alias).toBe('codex');
+  });
+
+  it('is a GET-only route: a POST to /agent/who is 405', async () => {
+    install({
+      paths: () => paths,
+      inbox: { accept: (p) => (accepted.push(p), accepted.length) },
+      token: TOKEN,
+      who: () => [],
+    });
+    const res = await fetch(`${base}/agent/who`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${TOKEN}` },
+      body: 'x',
+    });
+    expect(res.status).toBe(405);
+  });
+
+  it('A8: a who call leaves only the pre-existing bus artifacts behind', async () => {
+    install({
+      paths: () => paths,
+      inbox: { accept: (p) => (accepted.push(p), accepted.length) },
+      token: TOKEN,
+      who: () => [{ alias: 'forge', attachment: 'hub', activity: 'idle' }],
+    });
+    expect((await get('/agent/who')).status).toBe(200);
+    expect(fs.readdirSync(paths.root).sort()).toEqual([
+      'README.md',
+      'endpoint.json',
+      'forge.sh',
+      'inbox',
+      'outbox',
+    ]);
+  });
+});
+
+// A7 + A9: the client formats the route's JSON and takes no arguments. Bash-gated
+// like the other forge.sh client tests (skipped where there is no usable bash+curl).
+describe('forge.sh who against the routes (§11)', () => {
+  let usable = false;
+  beforeAll(async () => {
+    const probe = path.join(os.tmpdir(), `forge-bash-who-${process.pid}`);
+    fs.writeFileSync(probe, '');
+    usable = await new Promise((resolve) =>
+      execFile(
+        'bash',
+        ['-c', 'test -f "$1" && command -v curl >/dev/null', '_', probe.replace(/\\/g, '/')],
+        { timeout: 10_000 },
+        (err) => resolve(!err),
+      ),
+    );
+    fs.rmSync(probe, { force: true });
+  });
+
+  function install(deps: ConstructorParameters<typeof AgentRoutes>[0]): void {
+    routes = new AgentRoutes(deps);
+    routes.setEnabled(true);
+    routes.onListening(base);
+  }
+
+  it('A7: prints one line per participant from the route\'s JSON', async (ctx) => {
+    if (!usable) ctx.skip();
+    install({
+      paths: () => paths,
+      inbox: { accept: (p) => (accepted.push(p), accepted.length) },
+      token: TOKEN,
+      who: () => [
+        { alias: 'forge', attachment: 'hub', activity: 'busy', detail: 'inbox 1' },
+        { alias: 'claude', attachment: 'joined', activity: 'unknown', detail: 'pid 33396' },
+        { alias: 'codex', attachment: 'owned', activity: 'parked', detail: 'warm' },
+      ],
+    });
+    const res = await runClient(['who'], '');
+    expect(res.code).toBe(0);
+    expect(res.out).toContain('forge');
+    expect(res.out).toContain('hub');
+    expect(res.out).toContain('claude');
+    expect(res.out).toContain('joined');
+    expect(res.out).toContain('codex');
+    expect(res.out).toContain('parked');
+    expect(res.out).toContain('33396');
+  }, 30_000);
+
+  it('A9: who takes no arguments (an extra arg is a usage error)', async (ctx) => {
+    if (!usable) ctx.skip();
+    install({
+      paths: () => paths,
+      inbox: { accept: (p) => (accepted.push(p), accepted.length) },
+      token: TOKEN,
+      who: () => [],
+    });
+    const res = await runClient(['who', 'extra'], '');
+    expect(res.code).toBe(2);
+  }, 30_000);
+});

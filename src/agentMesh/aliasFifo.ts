@@ -109,6 +109,11 @@ export class AliasFifo {
     return !this.running && this.queue.length === 0;
   }
 
+  /** True while a turn is running (a message shifted off and in flight). */
+  get isRunning(): boolean {
+    return this.running;
+  }
+
   /**
    * Take a still-queued message back (its caller stopped waiting). True when
    * it was queued; false once it has started, where its signal stops it.

@@ -6,6 +6,7 @@ import { joinClaude } from '../agentMesh/claudeJoin';
 import type { ForgeConfig } from '../config/types';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import { parseMeshCommand } from '../agentMesh/meshCommands';
+import { projectWho } from '../agentMesh/meshWho';
 import { setupAgentMesh } from './agentMeshSetup';
 
 /**
@@ -85,6 +86,22 @@ export function setupAgentMessaging(
     validateFrom: mesh.validateFrom,
     // §10: an open Claude session joins as the `claude` alias by its pid.
     join: (alias, pid) => joinClaude(busPaths().root, alias, pid),
+    // §11: `forge.sh who` — read-only projection of every participant and its
+    // state. The host owns the truth: it reads the alias table, ownership
+    // records and its own in-memory FIFO, plus the sidebar's streaming state
+    // and the inbox depth. The client only formats the returned JSON.
+    who: () =>
+      projectWho({
+        busRoot: busPaths().root,
+        knownAliases: () => mesh.orchestrator.aliases(),
+        isOwner: (alias) => mesh.provider.isOwner(alias),
+        isBusy: (alias) => mesh.orchestrator.isBusy(alias),
+        forgeBusy: () => {
+          const status = getSidebar().getHostFacade().status();
+          return status.streamingConversationIds.includes(status.activeConversationId);
+        },
+        forgeInboxDepth: () => inbox.pending,
+      }),
     // §8/P3: a `to: forge` message that parses as a typed lifecycle command is
     // dispatched (standby/wake/close/steer/say/handoff) and the reply returned
     // to the caller's `forge.sh cmd` call. Ordinary text falls through to the inbox.

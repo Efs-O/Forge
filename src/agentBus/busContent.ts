@@ -22,11 +22,31 @@ export const CLIENT_SCRIPT = String.raw`#!/usr/bin/env bash
 #   forge.sh send <your-name> <to> [file]  relay a message to another agent (claude/codex)
 #   forge.sh steer <your-name> <to> [file] interrupt <to>'s running turn (forge/claude/codex); runs next
 #   forge.sh join claude              this Claude Code session becomes the "claude" alias
+#   forge.sh who                      who is in the mesh, and what each is doing
 # The text comes from the file, or from stdin when no file is given.
 # Written by Forge on every start; edits are overwritten.
 usage() { sed -n '2,7p' "$0" >&2; exit 2; }
+# VERB is $1 (not the default-value form): a dollar-brace sequence would be
+# read as a template interpolation by the String.raw literal this script lives in.
+VERB="$1"; [ -n "$VERB" ] || usage
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+EP="$ROOT/endpoint.json"
+# who is a GET with no body: it prints the mesh and exits before the body logic.
+if [ "$VERB" = "who" ]; then
+  [ $# -le 1 ] || usage
+  [ -f "$EP" ] || { echo "forge.sh: not reachable: open Forge with control_server and agent_bus enabled" >&2; exit 1; }
+  URL="$(grep '"url"' "$EP" | cut -d'"' -f4)"
+  TOKEN="$(grep '"token"' "$EP" | cut -d'"' -f4)"
+  BODY="$(curl -sS --fail-with-body -X GET -H "Authorization: Bearer $TOKEN" "$URL/agent/who")" || { echo "forge.sh: Forge's endpoint did not accept it." >&2; exit 1; }
+  printf '%s\n' "$BODY" | sed 's/.*\[/[/;s/\].*//' | sed 's/},{/}\n{/g' | awk -F'"' '{
+    a="";att="";act="";det=""
+    for(i=1;i<=NF;i++){ if($i=="alias")a=$(i+2); else if($i=="attachment")att=$(i+2); else if($i=="activity")act=$(i+2); else if($i=="detail")det=$(i+2) }
+    printf "%-8s  %-9s  %-9s  %s\n", a, att, act, det
+  }'
+  exit 0
+fi
 [ $# -ge 2 ] || usage
-VERB="$1"; ARG="$2"; SRC="-"
+ARG="$2"; SRC="-"
 if [ "$VERB" = "send" ] || [ "$VERB" = "steer" ]; then
   [ $# -ge 3 ] || usage
   TO="$3"; [ $# -ge 4 ] && SRC="$4"
@@ -46,8 +66,6 @@ case "$VERB" in
          ROUTE=join; QUERY="alias=$ARG&pid=$CLAUDE_PID"; SRC=/dev/null ;;
   *) usage ;;
 esac
-ROOT="$(cd "$(dirname "$0")" && pwd)"
-EP="$ROOT/endpoint.json"
 TMP="$(mktemp)"; trap 'rm -f "$TMP"' EXIT
 if [ "$SRC" = "-" ]; then cat > "$TMP"; else cp "$SRC" "$TMP" || exit 2; fi
 if [ -f "$EP" ]; then
@@ -99,6 +117,16 @@ once. Forge then reaches it as \`claude\` through its peer pipe while it stays
 open. With no joined session, Forge uses the only Claude session open in the
 workspace, else starts its own (one-time consent). Relay to another agent with
 \`forge.sh send <your-name> <to>\`.
+
+## Who is in the mesh
+
+\`bash ~/.forge/agent-bus/forge.sh who\` prints one line per participant —
+\`forge\`, \`claude\`, \`codex\` and any other registered alias — with two
+columns: **attachment** (how Forge reaches it: \`hub\`, \`joined\`, \`owned\`,
+\`peer\`, \`none\`) and **activity** (\`busy\`, \`idle\`, \`parked\`, \`unknown\`,
+\`dead\`). A session is \`unknown\` when Forge can write to it but cannot watch
+its turns (a joined session, a pinned thread, or one another window owns) — it
+never says \`idle\` for something it cannot see.
 
 ## Steering (interrupt a running turn)
 
