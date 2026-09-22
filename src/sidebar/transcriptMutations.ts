@@ -10,6 +10,7 @@ import type { ChatAttachmentRef } from '../llm/types';
 import type { ConversationRuntime } from './sessionTypes';
 import { buildUserContent } from './ConversationOps';
 import { deriveTitle } from './sessionTypes';
+import { parseForgeInboundPrompt } from '../agentBus/busContent';
 
 /** Presentation metadata for a prompt injected by Forge rather than authored by the user. */
 export interface UserPromptOptions {
@@ -36,7 +37,18 @@ export function appendUserPrompt(
     ...(options?.internal ? { internal: true } : {}),
     ...(options?.attachmentRefs?.length ? { attachments: options.attachmentRefs } : {}),
   });
-  if (priorUserCount === 0) conv.title = deriveTitle(text.split('\n')[0] ?? text);
+  if (priorUserCount === 0) conv.title = deriveTitle(titleLine(text));
+}
+
+/**
+ * The line a conversation is named from. A bus prompt's first line is its
+ * `**codex says:**` header, which named every agent-started chat the same.
+ */
+function titleLine(text: string): string {
+  const bus = parseForgeInboundPrompt(text);
+  if (!bus) return text.split('\n')[0] ?? text;
+  const first = bus.text.split('\n').find((line) => line.trim()) ?? '';
+  return `${bus.from}: ${first}`;
 }
 
 /** Fold one model request's token usage into the running totals. */

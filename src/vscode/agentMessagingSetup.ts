@@ -9,11 +9,20 @@ import { parseMeshCommand } from '../agentMesh/meshCommands';
 import { projectWho } from '../agentMesh/meshWho';
 import { readClaudeSessions } from '../agentBus/claudePeer';
 import { setupAgentMesh } from './agentMeshSetup';
+import { BUS_TARGET_SCAN, busTargetConversation } from '../agentBus/busTarget';
+
+/** The conversation a bus message from `from` belongs in. */
+function busTarget(facade: ForgeHostFacade, from: string | undefined): string {
+  return busTargetConversation(from, facade.status(), (id) =>
+    facade.recentExchanges(id, BUS_TARGET_SCAN),
+  );
+}
 
 /**
  * Agent messaging, inbound (docs/plans/AGENT_MESSAGING_PLAN.md): the
  * `/agent/*` routes the control server mounts, and the inbox that turns each
- * message into a visible turn in the active chat, one at a time.
+ * message into a visible turn, one at a time, in the chat its sender last
+ * wrote in (the active one for a first message).
  *
  * It also sets up the agent mesh (AGENT_MESH_PLAN P0): the orchestrator the
  * `tell_live_session` tool and the host-side relay (M6) both use. Creating it
@@ -35,15 +44,19 @@ export function setupAgentMessaging(
   const inbox = new AgentInbox({
     isBusy: (options?: InboxMessageOptions) => {
       if (options?.newChat) return false;
-      const status = getSidebar().getHostFacade().status();
-      return status.streamingConversationIds.includes(status.activeConversationId);
+      const facade = getSidebar().getHostFacade();
+      return facade.status().streamingConversationIds.includes(busTarget(facade, options?.from));
     },
     submit: async (prompt, options?: InboxMessageOptions) => {
       const facade = getSidebar().getHostFacade();
       await vscode.commands.executeCommand('workbench.view.extension.forge-sidebar');
-      let conversationId = facade.status().activeConversationId;
+      // Not the active tab: the chat this sender last wrote in, shown so the
+      // user sees the turn (AGENT_BUS_CHAT_AFFINITY_PLAN).
+      let conversationId = busTarget(facade, options?.from);
       if (options?.newChat) {
         conversationId = (await facade.createConversation({ activate: true })).id;
+      } else if (conversationId !== facade.status().activeConversationId) {
+        await facade.restoreConversation(conversationId, { activate: true });
       }
       if (options?.model) await facade.setConversationModel(conversationId, options.model);
       const outcome = await facade.send(conversationId, prompt);

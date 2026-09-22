@@ -2,6 +2,19 @@
 
 ## 0.16.34
 
+### Agent messages stay in their sender's chat (2026-09-22)
+
+- **A `forge.sh say` without `--new` now goes to the chat that sender last
+  wrote in**, not to whichever tab happens to be active. After a reload, a tab
+  switch, or another agent's `--new`, Codex's follow-up used to land in a
+  different chat. Forge now picks the most recently updated open chat that
+  already holds a message from that sender, switches to it, and falls back to
+  the active tab only for a sender's first message. Closing a tab stops
+  routing there. Nothing new is stored; the choice is derived from the chats.
+- A message now waits only for a turn in its own chat, not the active one.
+- **Chats started by an agent are titled `codex: <message>`**, not
+  `**codex says:**`, so two of them can be told apart.
+
 ### The chat archive no longer slows the whole VS Code window (2026-09-22)
 
 - **Archived chats moved out of VS Code's workspace storage into their own

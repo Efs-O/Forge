@@ -9,6 +9,8 @@ const BUSY_POLL_MS = 2_000;
 export interface InboxMessageOptions {
   model?: string;
   newChat?: boolean;
+  /** The bus sender; the host routes its message to the chat it last wrote in. */
+  from?: string;
 }
 
 /**
@@ -72,6 +74,12 @@ interface QueuedMessage {
   /** The bus sender alias, when the message came through the agent bus. */
   from?: string;
   options?: InboxMessageOptions;
+}
+
+/** A queued message's options as the host sees them: with its sender. */
+function hostOptions(item: QueuedMessage | undefined): InboxMessageOptions | undefined {
+  if (!item?.from) return item?.options;
+  return { ...item.options, from: item.from };
 }
 
 /**
@@ -150,7 +158,7 @@ export class AgentInbox {
     this.draining = true;
     try {
       while (!this.disposed && this.queue.length > 0) {
-        if (this.busy(this.queue[0]?.options)) {
+        if (this.busy(hostOptions(this.queue[0]))) {
           await new Promise((r) => setTimeout(r, this.pollMs));
           continue;
         }
@@ -168,7 +176,7 @@ export class AgentInbox {
           }
         }
         try {
-          const end = await this.host.submit(item.prompt, item.options);
+          const end = await this.host.submit(item.prompt, hostOptions(item));
           // §9: a bus-started turn just ended — the sender gets one line saying
           // how (finished, failed, cancelled) + a board event. A user-typed turn
           // has no `from`, so this fires only for agent messages.
@@ -180,7 +188,7 @@ export class AgentInbox {
             }
           }
         } catch (err) {
-          if (this.busy(item.options)) {
+          if (this.busy(hostOptions(item))) {
             // Lost a race with a prompt the user typed: keep its place.
             this.queue.unshift(item);
           } else {

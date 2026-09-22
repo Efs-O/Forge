@@ -477,6 +477,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Claude session registry + peer-pipe delivery               | `src/agentBus/claudePeer.ts`                                   |
 | Claude delivery via a `claude -p` relay (opt-in)           | `src/agentBus/claudeRelay.ts`                                  |
 | Inbound agent messages → Forge turns (queue)               | `src/agentBus/agentInbox.ts`                                   |
+| Which chat an inbound bus message lands in (sender affinity) | `src/agentBus/busTarget.ts`                                    |
 | `/agent/message` + `/agent/reply` routes, endpoint.json    | `src/backend/agentRoutes.ts`                                   |
 | Agent-messaging activation wiring (routes + inbox)         | `src/vscode/agentMessagingSetup.ts`                            |
 | Agent-bus delivery to an open Codex (`codex queue`)        | `src/agentBus/codexDelivery.ts`                                |
