@@ -130,8 +130,14 @@ describe('notify_user tool', () => {
       const tool = makeNotifyUserTool(
         service,
         unattendedConversations,
-        (conversationId, message) =>
-          writeOutboxItem(outboxDir, conversationId, 'Llama job', message, 123),
+        (conversationId, jobMeta, message) =>
+          writeOutboxItem(
+            outboxDir,
+            jobMeta?.jobId ?? conversationId,
+            jobMeta?.jobName ?? 'Llama job',
+            message,
+            123,
+          ),
       );
       const result = await tool.handler(
         { message: 'the install needs attention' },
@@ -140,6 +146,43 @@ describe('notify_user tool', () => {
       const item = await readOutboxItem(outboxDir, 'unattended-notification');
       expect(item?.text).toBe('the install needs attention');
       expect(result).toContain('job outbox');
+    } finally {
+      marker.dispose();
+    }
+  });
+
+  // AC10: a job run's notify_user writes under the job id with the job name,
+  // not the conversation id — one coalesced outbox item per job.
+  it('writes an unattended job notification under the job id with the job name', async () => {
+    const service = new UserNotificationService();
+    const outboxDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'forge-unattended-'));
+    unattendedOutboxDirs.push(outboxDir);
+    const marker = unattendedConversations.mark('job-conv-1', {
+      jobId: 'llama-updates',
+      jobName: 'Keep llama.cpp current',
+    });
+    try {
+      const tool = makeNotifyUserTool(
+        service,
+        unattendedConversations,
+        (conversationId, jobMeta, message) =>
+          writeOutboxItem(
+            outboxDir,
+            jobMeta?.jobId ?? conversationId,
+            jobMeta?.jobName ?? 'Unattended conversation',
+            message,
+            123,
+          ),
+      );
+      await tool.handler(
+        { message: 'install in progress' },
+        { beforeMutate: () => undefined, conversationId: 'job-conv-1' },
+      );
+      // Under the job id, not the conversation id.
+      const item = await readOutboxItem(outboxDir, 'llama-updates');
+      expect(item?.text).toBe('install in progress');
+      expect(item?.name).toBe('Keep llama.cpp current');
+      expect(await readOutboxItem(outboxDir, 'job-conv-1')).toBeUndefined();
     } finally {
       marker.dispose();
     }

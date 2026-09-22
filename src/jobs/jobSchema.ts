@@ -203,6 +203,12 @@ export const JobStateSchema = z.object({
    * start immediately; the next idle tick retries. Default false.
    */
   task_pending: z.boolean().default(false),
+  /**
+   * Epoch ms the pending task first became pending, so a pending older than one
+   * schedule period can be dropped with a "skipped: busy" run row. Null when
+   * not pending.
+   */
+  task_pending_since: z.number().int().nonnegative().nullable().default(null),
 });
 export type JobState = z.infer<typeof JobStateSchema>;
 

@@ -301,7 +301,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     : createHash('sha256').update(`no-workspace:${activeConfigPath}`).digest('hex');
   // Persistent agent jobs (B1). Runs in whichever window wins the
   // `jobs-scheduler` lease; a no-op when `jobs.enabled` is false.
-  const jobsSetup = setupJobs(context, () => config, workspaceId, sidebarProvider, jobsStore);
+  const jobsSetup = setupJobs(context, () => config, workspaceId, sidebarProvider, jobsStore, pool);
   const remoteRuntime = new RemoteRuntime({
     storageDirectory: context.globalStorageUri.fsPath,
     ...(workspaceRoot ? { workspaceRoot } : {}),

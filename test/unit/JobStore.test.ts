@@ -132,6 +132,7 @@ describe('JobStore', () => {
       summary_retry_at: null,
       task_run: null,
       task_pending: false,
+      task_pending_since: null,
     });
   });
 

@@ -14,16 +14,23 @@ import {
 } from '../sidebar/unattendedConversations';
 import { defaultOutboxDir, writeOutboxItem } from '../jobs/JobOutbox';
 
-type UnattendedOutboxWriter = (conversationId: string, message: string) => Promise<void>;
+type UnattendedOutboxWriter = (
+  conversationId: string,
+  jobMeta: { jobId: string; jobName: string } | undefined,
+  message: string,
+) => Promise<void>;
 
-const writeUnattendedNotification: UnattendedOutboxWriter = async (conversationId, message) => {
-  await writeOutboxItem(
-    defaultOutboxDir(),
-    conversationId,
-    `Unattended conversation ${conversationId}`,
-    message,
-    Date.now(),
-  );
+const writeUnattendedNotification: UnattendedOutboxWriter = async (
+  conversationId,
+  jobMeta,
+  message,
+) => {
+  // A job run writes under the job id with the job name, so a run yields one
+  // coalesced outbox item per job (AC10). A marker with no job (none today)
+  // falls back to the conversation id.
+  const key = jobMeta?.jobId ?? conversationId;
+  const name = jobMeta?.jobName ?? `Unattended conversation ${conversationId}`;
+  await writeOutboxItem(defaultOutboxDir(), key, name, message, Date.now());
 };
 
 // ── show_diff ─────────────────────────────────────────────────────────────────
@@ -295,7 +302,9 @@ export function makeNotifyUserTool(
       // The desktop toast is unconditional: it has to work with remote disabled,
       // and a user sitting at the machine should see what the phone was sent.
       void vscode.window.showInformationMessage(message);
-      if (isUnattended && conversationId) await writeOutbox(conversationId, message);
+      if (isUnattended && conversationId) {
+        await writeOutbox(conversationId, unattended.jobMeta(conversationId), message);
+      }
       const chats = await notifications.notify({
         text: message,
         ...(conversationId ? { conversationId } : {}),

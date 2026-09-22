@@ -115,7 +115,7 @@ describe('agent task phase 1 check and scheduler guard', () => {
     expect(runs[0]).toMatchObject({
       outcome: 'failed',
       changed: true,
-      error: 'agent_task runner not wired yet (AGENT_TASK_JOBS_PLAN phase 3)',
+      error: 'agent_task runner not wired (no host facade or backend pool)',
       delivered: 0,
     });
     expect(toasts).toEqual([]);

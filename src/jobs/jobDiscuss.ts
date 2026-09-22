@@ -24,12 +24,12 @@ export interface DiscussResult {
 }
 
 /**
- * Open (or reuse) the job's discuss chat and seed it. `activate` controls
- * whether the conversation is brought to the foreground: the sidebar entry
- * point activates it, the Telegram entry point does not (opening a chat should
- * not steal the foreground from whatever the user is doing in the window).
+ * Restore the job's existing conversation, or create a new one when the stored
+ * id no longer resolves. Shared by {@link openDiscussChat} and the agent-task
+ * runner (phase 3) so the restore-or-create fallback can never diverge between
+ * the two entry points. Persists the id so the next entry point reuses the chat.
  */
-export async function openDiscussChat(
+export async function resolveJobConversation(
   host: ForgeHostFacade,
   store: JobStore,
   jobFile: JobFile,
@@ -56,6 +56,32 @@ export async function openDiscussChat(
   // finishes in the meantime is not clobbered (the lost-update race a
   // load-then-saveState pair has).
   store.patchState(job.id, { conversation_id: conversationId });
+  return { conversationId, created };
+}
+
+/**
+ * Open (or reuse) the job's discuss chat and seed it. `activate` controls
+ * whether the conversation is brought to the foreground: the sidebar entry
+ * point activates it, the Telegram entry point does not (opening a chat should
+ * not steal the foreground from whatever the user is doing in the window).
+ *
+ * Refuses while a task run is in flight (`task_run` set): a seed sent mid-run
+ * would be a second turn in the same conversation (AC12).
+ */
+export async function openDiscussChat(
+  host: ForgeHostFacade,
+  store: JobStore,
+  jobFile: JobFile,
+  activate: boolean,
+): Promise<DiscussResult> {
+  const { job, state } = jobFile;
+  if (state.task_run) {
+    throw new Error(
+      `Job "${job.name}" is running; its chat shows the turn live. ` +
+        'Try again once it finishes.',
+    );
+  }
+  const { conversationId, created } = await resolveJobConversation(host, store, jobFile, activate);
   const seed = buildDiscussSeed(jobFile, await store.readRuns(job.id));
   await host.send(conversationId, seed);
   return { conversationId, created };

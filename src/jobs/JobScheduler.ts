@@ -8,17 +8,12 @@ import type { JobStore } from './JobStore';
 import type { PowerControl, SleepIfIdleInput } from '../system/PowerControl';
 import { shouldSleepIfIdle } from '../system/PowerControl';
 import { LlamacppAction, type LlamacppActionDeps } from './actions/llamacppAction';
+import { AgentTaskRunner, recoverInterruptedRuns, type AgentTaskDeps } from './agentTask';
 import { SCHEDULER_LEASE_KEY, WakeReconciler } from './schedulerWakes';
 
-/**
- * The job scheduler: the tick loop that runs due jobs, holds the
- * `jobs-scheduler` lease, reconciles the recurring wake task, applies backoff
- * on repeated failures, and delivers changes through the coalescing outbox.
- *
- * Every dependency is injected so the tick is testable with a fake clock and a
- * fake store — no real lease, no real power task, no real network. The
- * production wiring in `jobsSetup.ts` supplies the real ones.
- */
+/** The tick loop that runs due jobs, holds the `jobs-scheduler` lease, and
+ * delivers changes through the coalescing outbox. Deps are injected so the
+ * tick is testable with a fake clock and store; `jobsSetup.ts` wires prod. */
 
 export interface JobSchedulerDeps {
   store: JobStore;
@@ -52,6 +47,8 @@ export interface JobSchedulerDeps {
    * machine). Production wires it in `jobsSetup.ts`.
    */
   llamacpp?: LlamacppActionDeps;
+  /** The `agent_task` runner deps (phase 3); absent = the action records a failed run. */
+  agentTask?: AgentTaskDeps;
 }
 
 const DEFAULT_TICK_MS = 30_000;
@@ -76,6 +73,7 @@ export class JobScheduler {
   private readonly summarize: ((prompt: string) => Promise<string>) | undefined;
   private readonly tickMs: number;
   private readonly llamacpp: LlamacppAction | undefined;
+  private readonly agentTask: AgentTaskRunner | undefined;
   private readonly etagCache = new Map<string, string>();
   /** User-facing delivery: the outbox, the toast, and the summarize timing (B.4). */
   private readonly delivery: JobDelivery;
@@ -122,6 +120,7 @@ export class JobScheduler {
           notifyLocal: this.notifyLocal,
         })
       : undefined;
+    this.agentTask = deps.agentTask ? new AgentTaskRunner(deps.agentTask) : undefined;
   }
 
   /**
@@ -136,6 +135,10 @@ export class JobScheduler {
     const immediate = options.immediate ?? true;
     const owner = await this.acquireLease();
     if (owner) await this.reconcileWakes();
+    // Crash / reload recovery (CI-enforced): a job whose state still holds a
+    // `task_run` was running when Forge died. Report it, record a failed row,
+    // and clear it. It is not retried automatically; the next tick runs it.
+    await recoverInterruptedRuns(this.store, this.outboxDir, () => this.now().getTime());
     this.timer = setInterval(() => void this.tick(), this.tickMs);
     if (owner && immediate) await this.tick();
     return owner;
@@ -309,10 +312,18 @@ export class JobScheduler {
     // off when it was due). A first-ever run (no next_due_at) is not late.
     const wasLate = isResume && state.next_due_at !== null && state.next_due_at < now.getTime();
     const hold = job.wake ? this.power.holdAwake(`job ${job.id}`) : undefined;
+    let detached = false;
     try {
       const result = await this.runCheck(jobFile);
       if (result.changed && job.action?.kind === 'agent_task') {
-        const error = 'agent_task runner not wired yet (AGENT_TASK_JOBS_PLAN phase 3)';
+        if (this.agentTask) {
+          // Started, not awaited: the runner owns the `runningJobs` guard until
+          // it ends, so the next tick cannot start a second run (AC11).
+          detached = true;
+          void this.agentTask.run(jobFile, wasLate).finally(() => this.runningJobs.delete(job.id));
+          return;
+        }
+        const error = 'agent_task runner not wired (no host facade or backend pool)';
         await this.store.appendRun(job.id, {
           at: now.getTime(),
           late: wasLate,
@@ -327,7 +338,9 @@ export class JobScheduler {
       }
       const change = await this.delivery.deliverForChange(job, result);
       let delivered = change.delivered;
-      if (state.consecutive_failures >= BACKOFF_THRESHOLD) {
+      // Skip the "recovered" line for an agent task: it already reports every
+      // failure, so one run must not yield two messages (AC10).
+      if (state.consecutive_failures >= BACKOFF_THRESHOLD && job.action?.kind !== 'agent_task') {
         await this.delivery.deliver(
           job,
           `recovered after ${state.consecutive_failures} consecutive failures`,
@@ -368,21 +381,23 @@ export class JobScheduler {
           delivered: 0,
         })
         .catch(() => undefined);
-      // The failure is REPORTED by applyBackoff, once, when the job crosses the
-      // threshold (B.3: "After 3 consecutive failures, report once"). Reporting
-      // every failed run instead turned a GitHub outage into a toast on every
-      // tick and inflated the coalesced outbox count for what was one
-      // continuous fault.
+      // applyBackoff reports the failure once, when the job crosses the
+      // threshold (B.3); reporting every run would toast on every tick.
       await this.applyBackoff(jobFile, message).catch(() => undefined);
     } finally {
       hold?.dispose();
-      this.runningJobs.delete(job.id);
+      if (!detached) this.runningJobs.delete(job.id);
     }
   }
 
   /** D6: suspend again after a wake if a job asked to and nothing is busy. */
   private async maybeSleepIfIdle(jobs: readonly JobFile[]): Promise<void> {
     if (this.busy() !== undefined) return;
+    // A running agent task is busy even when no turn is streaming: a turn
+    // waiting on a long download is executing a tool, and the machine must not
+    // suspend under it (AC11). `runningJobs` stays set for the whole detached
+    // run, so a live agent task is always counted here.
+    if (this.runningJobs.size > 0) return;
     const anySleepIfIdle = jobs.some((jf) => jf.job.enabled && jf.job.after === 'sleep_if_idle');
     if (!anySleepIfIdle) return;
     const msSinceInput = await this.power.idleSinceResume();

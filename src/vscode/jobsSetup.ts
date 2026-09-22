@@ -4,6 +4,7 @@ import { findConfigPath } from '../config/ConfigLoader';
 import type { ForgeConfig } from '../config/types';
 import { JobStore } from '../jobs/JobStore';
 import { JobScheduler } from '../jobs/JobScheduler';
+import type { IBackendPool } from '../backend/poolTypes';
 import { clearWakesIfUnowned } from '../jobs/schedulerWakes';
 import { PowerControl } from '../system/PowerControl';
 import type { SidebarProvider } from '../sidebar/SidebarProvider';
@@ -43,6 +44,7 @@ export function setupJobs(
   workspaceId: string,
   sidebar: SidebarProvider,
   store: JobStore = new JobStore(),
+  pool?: IBackendPool,
 ): JobsSetup {
   // The config path the `llamacpp_update` action switches. Derived the same
   // way `extension.ts` derives it (workspace `.forge/`, then global storage),
@@ -82,6 +84,25 @@ export function setupJobs(
         return streamingConversationIds.length > 0 ? 'a turn is streaming' : undefined;
       },
       summarize: async (prompt) => sidebar.runPromptToMarkdown(prompt),
+      // The agent-task runner (AGENT_TASK_JOBS_PLAN phase 3). Wired whenever a
+      // host facade is available; the runner records a failed run when the
+      // backend pool is absent. The config path is optional: without it the
+      // step-7 rollback simply has nothing to restore.
+      agentTask: {
+        store,
+        power,
+        host: () => sidebar.getHostFacade(),
+        pool: () => pool,
+        defaultModel: () => getConfig().active_model ?? undefined,
+        outboxDir: store.outboxDir,
+        notifyLocal: (message) => void vscode.window.showInformationMessage(message),
+        busy: () => {
+          const { streamingConversationIds } = sidebar.getHostFacade().status();
+          return streamingConversationIds.length > 0 ? 'a turn is streaming' : undefined;
+        },
+        now: () => Date.now(),
+        ...(configPath ? { configPath } : {}),
+      },
       // The only mutating action (B5). Wired only when a config path is known:
       // without it there is no `llama_server.binary` to switch, so a
       // llamacpp_update job records the change but does not mutate the machine.
