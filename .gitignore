@@ -47,6 +47,8 @@ docs/*
 !docs/live-reports/*.json
 !docs/OWNERS.md
 !docs/WORKSPACE_FORENSICS.md
+# The agent-task llama job reads this at run time (AGENT_TASK_JOBS_PLAN phase 5).
+!docs/LLAMACPP_UPDATE.md
 # Reference lifted out of README.md in 0.15.4 so the store page stops being
 # contributor documentation. README links to all four, and vsce rewrites those
 # links to absolute GitHub URLs at package time -- untracked here means a 404
