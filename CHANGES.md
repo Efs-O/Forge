@@ -17,6 +17,10 @@
   lost. If the file cannot be written, that save keeps the archive in
   workspace storage as before and logs the error. An unreadable file is moved
   aside (`conversation-history.corrupt-<ms>.json`), never deleted.
+- **Ordinary release pushes now pass through the terminal approval gate.** The
+  denylist still blocks force, delete, mirror, prune, and destructive refspec
+  pushes, while a fast-forward `git push` can complete an explicitly approved
+  release workflow.
 - Plan: `docs/plans/SESSION_HISTORY_FILE_PLAN.md`.
 
 ## 0.16.33
