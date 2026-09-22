@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { checkDenyList, getBuiltinDenyList, isRecursiveForceDelete } from '../../src/tools/DenyList';
+import {
+  checkDenyList,
+  getBuiltinDenyList,
+  isRecursiveForceDelete,
+} from '../../src/tools/DenyList';
 
 const denied = (command: string, args: string[] = []): string | null =>
   checkDenyList(command, args, getBuiltinDenyList())?.description ?? null;
@@ -29,9 +33,9 @@ describe('recursive force delete', () => {
     // `-?[rR]` matched the bare "r" in README.
     expect(isRecursiveForceDelete('git rm -f README.md')).toBe(false);
     expect(isRecursiveForceDelete('git rm -f notes.txt')).toBe(false);
-    expect(
-      isRecursiveForceDelete('git rm -f threejs-game-prompt/_check.js tests/_probe.mjs'),
-    ).toBe(false);
+    expect(isRecursiveForceDelete('git rm -f threejs-game-prompt/_check.js tests/_probe.mjs')).toBe(
+      false,
+    );
   });
 
   it('does not fire on an unrelated command that merely mentions a path', () => {
@@ -49,15 +53,14 @@ describe('recursive force delete', () => {
   it('leaves the other destructive rules intact', () => {
     expect(denied('git', ['clean', '-fd'])).toBe('git clean -f');
     expect(denied('git', ['reset', '--hard'])).toBe('git reset (hard/mixed/soft)');
-    // Now covered by the broader rule: every push is outward-facing.
-    expect(denied('git', ['push', '--force'])).toContain('publishes to a remote');
+    expect(denied('git', ['push', '--force'])).toContain('overwrites remote history');
     expect(denied('shutdown', ['/s'])).toBe('system power command');
     expect(denied('diskpart', [])).toBe('diskpart');
   });
 });
 
 describe('destructive git', () => {
-  it('blocks the commands that destroy work or reach a remote', () => {
+  it('blocks the commands that destroy work or remote history', () => {
     // `git checkout -- .` is the one genuinely unrecoverable everyday git
     // command — no reflog entry, no confirmation. It was allowed while
     // `git reset --hard`, which IS recoverable, was blocked.
@@ -65,7 +68,14 @@ describe('destructive git', () => {
     expect(denied('git', ['checkout', '--', 'src/'])).toContain('discarding working-tree');
     expect(denied('git', ['checkout', '.'])).toContain('discarding working-tree');
     expect(denied('git', ['restore', '.'])).toContain('discarding working-tree');
-    expect(denied('git', ['push', 'origin', 'main'])).toContain('publishes to a remote');
+    expect(denied('git', ['push', '-f', 'origin', 'main'])).toContain('overwrites remote history');
+    expect(denied('git', ['push', '--force-with-lease'])).toContain('overwrites remote history');
+    expect(denied('git', ['push', 'origin', '+main'])).toContain('overwrites remote history');
+    expect(denied('git', ['push', 'origin', '--delete', 'old'])).toContain(
+      'overwrites remote history',
+    );
+    expect(denied('git', ['push', 'origin', ':old'])).toContain('overwrites remote history');
+    expect(denied('git', ['push', '--mirror'])).toContain('overwrites remote history');
     expect(denied('git', ['rebase', 'main'])).toContain('rewrites history');
     expect(denied('git', ['branch', '-D', 'feature'])).toContain('deletes a branch');
     expect(denied('git', ['stash', 'clear'])).toBe('git stash drop/clear');
@@ -78,6 +88,10 @@ describe('destructive git', () => {
     // not the hazard — and refusing it would push the agent to hand-rolled
     // workarounds, which is how the rm regex caused trouble.
     expect(denied('git', ['checkout', 'my-branch'])).toBeNull();
+    // A fast-forward push is allowed; the terminal approval gate covers it.
+    expect(denied('git', ['push', 'origin', 'main'])).toBeNull();
+    expect(denied('git', ['push', '-u', 'origin', 'feature'])).toBeNull();
+    expect(denied('git', ['push', 'origin', 'v0.16.34'])).toBeNull();
     expect(denied('git', ['checkout', '-b', 'new-branch'])).toBeNull();
     expect(denied('git', ['restore', '--staged', 'src/a.ts'])).toBeNull();
     expect(denied('git', ['status'])).toBeNull();

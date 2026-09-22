@@ -92,6 +92,27 @@ export function isDestructiveGitCheckout(fullCommand: string): boolean {
   return rest.some((t) => t === '.' || t.endsWith('/'));
 }
 
+/**
+ * True for a `git push` that can destroy commits on the remote: force
+ * (`-f`, `--force`, `--force-with-lease`, `--force-if-includes`, a `+refspec`),
+ * deletion (`-d`, `--delete`, a `:ref` refspec), `--mirror` or `--prune`.
+ * A fast-forward push is allowed. Matches whole tokens, never substrings.
+ */
+export function isDestructiveGitPush(fullCommand: string): boolean {
+  const tokens = fullCommand.split(/\s+/u).filter(Boolean);
+  const git = tokens.indexOf('git');
+  if (git === -1 || tokens[git + 1] !== 'push') return false;
+  return tokens
+    .slice(git + 2)
+    .some(
+      (t) =>
+        /^--(force|force-with-lease|force-if-includes|delete|mirror|prune)(=|$)/u.test(t) ||
+        /^-[a-zA-Z]*[fd][a-zA-Z]*$/u.test(t) ||
+        t.startsWith('+') ||
+        (t.startsWith(':') && t.length > 1),
+    );
+}
+
 /** Returns the built-in denylist covering common destructive commands. */
 export function getBuiltinDenyList(): DenyListEntry[] {
   return [
@@ -119,11 +140,14 @@ export function getBuiltinDenyList(): DenyListEntry[] {
         'tool, which asks first: restore_file({"paths": ["<path>"], "ref": "HEAD~1"}). ' +
         'To move between branches use switch_branch; to inspect a file at a ref use git_show.',
     },
-    // Every push is outward-facing, not just a forced one.
+    // A plain push is allowed — exec_command's terminal approval gate is the
+    // check on it. Only pushes that overwrite or delete remote history stay out.
     {
-      pattern: /\bgit\s+push\b/,
-      description: 'git push (publishes to a remote)',
-      alternative: "Publishing is the user's call — commit locally and let them push.",
+      match: isDestructiveGitPush,
+      description: 'git push --force/--delete/--mirror (overwrites remote history)',
+      alternative:
+        'Push without force — if the remote has diverged, fetch and merge first. ' +
+        "Rewriting or deleting remote refs is the user's call.",
     },
     { pattern: /\bgit\s+rebase\b/, description: 'git rebase (rewrites history)' },
     { pattern: /\bgit\s+branch\s+-[dD]\b/, description: 'git branch -d/-D (deletes a branch)' },
