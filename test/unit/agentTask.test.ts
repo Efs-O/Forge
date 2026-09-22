@@ -14,6 +14,7 @@ import { JobStore } from '../../src/jobs/JobStore';
 import { JobScheduler } from '../../src/jobs/JobScheduler';
 import { FileLease } from '../../src/util/FileLease';
 import {
+  AgentTaskOutcome,
   AgentTaskRunner,
   canStartNow,
   parseResult,
@@ -22,7 +23,6 @@ import {
 } from '../../src/jobs/agentTask';
 import {
   restartAfterTurn,
-  RESTART_CAP_MS,
   type RestartAfterTurnDeps,
 } from '../../src/jobs/agentTaskRestart';
 import { JobSchema, JobStateSchema, type Job, type JobFile } from '../../src/jobs/jobSchema';
@@ -685,7 +685,7 @@ describe('AgentTaskRunner', () => {
 
   it('max_minutes cap cancels the turn and records a timeout', async () => {
     const job = baseJob({
-      action: { kind: 'agent_task', task: 'install', max_minutes: 1 },
+      action: { kind: 'agent_task', task: 'install', max_minutes: 1, report: 'failures_and_changes' },
     });
     await store.saveJob(job);
     // The send stays pending until the cap fires and cancels it; cancel
@@ -718,7 +718,7 @@ describe('AgentTaskRunner', () => {
   });
 
   it('normal completion cancels the cap without waiting for its sleep', async () => {
-    const job = baseJob({ action: { kind: 'agent_task', task: 'install', max_minutes: 1 } });
+    const job = baseJob({ action: { kind: 'agent_task', task: 'install', max_minutes: 1, report: 'failures_and_changes' } });
     await store.saveJob(job);
     let aborted = false;
     host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — done' });
@@ -743,7 +743,7 @@ describe('AgentTaskRunner', () => {
   });
 
   it('waits for an already-fired cap cancellation to settle', async () => {
-    const job = baseJob({ action: { kind: 'agent_task', task: 'install', max_minutes: 1 } });
+    const job = baseJob({ action: { kind: 'agent_task', task: 'install', max_minutes: 1, report: 'failures_and_changes' } });
     await store.saveJob(job);
     let resolveSend: (o: ForgeRequestOutcome) => void = () => undefined;
     let resolveCancel: () => void = () => undefined;
@@ -822,6 +822,11 @@ describe('restartAfterTurn (step 7, phase 4)', () => {
     await fs.promises.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   });
 
+  /** A parsed outcome as runTurn builds it: parseResult plus the text it came from. */
+  function outcomeOf(finalText: string): AgentTaskOutcome {
+    return { ...parseResult(finalText), finalText };
+  }
+
   function restartDeps(overrides: Partial<RestartAfterTurnDeps> = {}): RestartAfterTurnDeps {
     const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — done' });
     return {
@@ -834,7 +839,7 @@ describe('restartAfterTurn (step 7, phase 4)', () => {
     };
   }
   it('restarts on RESTART: yes AND RESULT: ok and keeps the ok outcome', async () => {
-    const ok = parseResult('RESULT: ok — installed b1234\nRESTART: yes');
+    const ok = outcomeOf('RESULT: ok — installed b1234\nRESTART: yes');
     const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — installed b1234\nRESTART: yes' });
     const out = await restartAfterTurn({ ...restartDeps(), host }, 'qwen', ok);
     expect(out.kind).toBe('ok');
@@ -842,7 +847,7 @@ describe('restartAfterTurn (step 7, phase 4)', () => {
   });
 
   it('does not restart when RESULT is not ok', async () => {
-    const failed = parseResult('RESULT: failed — something broke');
+    const failed = outcomeOf('RESULT: failed — something broke');
     const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: failed — something broke' });
     const out = await restartAfterTurn({ ...restartDeps(), host }, 'qwen', failed);
     expect(out.kind).toBe('failed');
@@ -850,7 +855,7 @@ describe('restartAfterTurn (step 7, phase 4)', () => {
   });
 
   it('does not restart when RESTART is not yes', async () => {
-    const ok = parseResult('RESULT: ok — done');
+    const ok = outcomeOf('RESULT: ok — done');
     const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — done' });
     const out = await restartAfterTurn({ ...restartDeps(), host }, 'qwen', ok);
     expect(out.kind).toBe('ok');
@@ -858,7 +863,7 @@ describe('restartAfterTurn (step 7, phase 4)', () => {
   });
 
   it('notes the new binary takes effect on next load when no model is loaded', async () => {
-    const ok = parseResult('RESULT: ok — installed b1234\nRESTART: yes');
+    const ok = outcomeOf('RESULT: ok — installed b1234\nRESTART: yes');
     const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — installed b1234\nRESTART: yes' });
     const out = await restartAfterTurn({ ...restartDeps(), host, pool: fakePool([], 1) }, 'qwen', ok);
     expect(out.kind).toBe('ok');
@@ -867,7 +872,7 @@ describe('restartAfterTurn (step 7, phase 4)', () => {
   });
 
   it('rolls back and restarts when the first restart throws', async () => {
-    const ok = parseResult('RESULT: ok — installed b1234\nRESTART: yes');
+    const ok = outcomeOf('RESULT: ok — installed b1234\nRESTART: yes');
     const backupPath = path.join(dir, 'config.bak');
     const configPath = path.join(dir, 'config.yaml');
     await fs.promises.writeFile(backupPath, 'llama_server:\n  binary: /old/binary\n');
@@ -894,7 +899,7 @@ describe('restartAfterTurn (step 7, phase 4)', () => {
   });
 
   it('reports a manual fix when the rollback restart also fails', async () => {
-    const ok = parseResult('RESULT: ok — installed b1234\nRESTART: yes');
+    const ok = outcomeOf('RESULT: ok — installed b1234\nRESTART: yes');
     const backupPath = path.join(dir, 'config.bak');
     const configPath = path.join(dir, 'config.yaml');
     await fs.promises.writeFile(backupPath, 'llama_server:\n  binary: /old/binary\n');
@@ -916,7 +921,7 @@ describe('restartAfterTurn (step 7, phase 4)', () => {
   });
 
   it('counts a cap hit as a failed restart and rolls back', async () => {
-    const ok = parseResult('RESULT: ok — installed b1234\nRESTART: yes');
+    const ok = outcomeOf('RESULT: ok — installed b1234\nRESTART: yes');
     const backupPath = path.join(dir, 'config.bak');
     const configPath = path.join(dir, 'config.yaml');
     await fs.promises.writeFile(backupPath, 'llama_server:\n  binary: /old/binary\n');
@@ -930,7 +935,7 @@ describe('restartAfterTurn (step 7, phase 4)', () => {
     });
     // The cap fires quickly (50 ms) regardless of the requested duration, so the
     // hanging first restart loses the race to the cap.
-    const sleep = (ms: number, signal?: AbortSignal) =>
+    const sleep = (_ms: number, signal?: AbortSignal) =>
       new Promise<void>((resolve, reject) => {
         if (signal?.aborted) return reject(new Error('aborted'));
         const t = setTimeout(resolve, 50);
@@ -952,7 +957,7 @@ describe('restartAfterTurn (step 7, phase 4)', () => {
   });
 
   it('returns a failed outcome (never throws) when the first restart throws synchronously', async () => {
-    const ok = parseResult('RESULT: ok — installed b1234\nRESTART: yes');
+    const ok = outcomeOf('RESULT: ok — installed b1234\nRESTART: yes');
     const backupPath = path.join(dir, 'config.bak');
     const configPath = path.join(dir, 'config.yaml');
     await fs.promises.writeFile(backupPath, 'llama_server:\n  binary: /old/binary\n');
@@ -978,7 +983,7 @@ describe('restartAfterTurn (step 7, phase 4)', () => {
   });
 
   it('cancels the cap timer on a normal finish so it never outlives the call', async () => {
-    const ok = parseResult('RESULT: ok — installed b1234\nRESTART: yes');
+    const ok = outcomeOf('RESULT: ok — installed b1234\nRESTART: yes');
     let aborted = false;
     const sleep = (ms: number, signal?: AbortSignal) =>
       new Promise<void>((resolve, reject) => {
@@ -996,7 +1001,7 @@ describe('restartAfterTurn (step 7, phase 4)', () => {
   });
 
   it('reports ok when the retry loads the new binary and there is no snapshot to roll back to', async () => {
-    const ok = parseResult('RESULT: ok — installed b1234\nRESTART: yes');
+    const ok = outcomeOf('RESULT: ok — installed b1234\nRESTART: yes');
     const configPath = path.join(dir, 'config.yaml');
     await fs.promises.writeFile(configPath, 'llama_server:\n  binary: /new/binary\n');
     const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — installed b1234\nRESTART: yes' });
@@ -1019,7 +1024,7 @@ describe('restartAfterTurn (step 7, phase 4)', () => {
   });
 
   it('does not claim a rollback when a snapshot exists but the live config path is unknown', async () => {
-    const ok = parseResult('RESULT: ok — installed b1234\nRESTART: yes');
+    const ok = outcomeOf('RESULT: ok — installed b1234\nRESTART: yes');
     const backupPath = path.join(dir, 'config.bak');
     await fs.promises.writeFile(backupPath, 'llama_server:\n  binary: /old/binary\n');
     const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — installed b1234\nRESTART: yes' });
@@ -1039,7 +1044,7 @@ describe('restartAfterTurn (step 7, phase 4)', () => {
   });
 
   it('reports a manual fix when the retry fails and there is no snapshot to roll back to', async () => {
-    const ok = parseResult('RESULT: ok — installed b1234\nRESTART: yes');
+    const ok = outcomeOf('RESULT: ok — installed b1234\nRESTART: yes');
     const configPath = path.join(dir, 'config.yaml');
     await fs.promises.writeFile(configPath, 'llama_server:\n  binary: /new/binary\n');
     const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — installed b1234\nRESTART: yes' });
