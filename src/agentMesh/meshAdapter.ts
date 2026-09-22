@@ -41,6 +41,8 @@ export interface MeshAdapter {
    * so a session that joined, died or was replaced is not written to forever.
    */
   readonly key?: string;
+  /** Shown to the user with the result: set on a stand-in for a dead joined session. */
+  note?: string;
   /**
    * Deliver a message. Observing: starts a turn, resolves at turn end.
    * Non-observing: resolves once the transport accepts it. The FIFO (the only

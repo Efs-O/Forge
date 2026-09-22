@@ -4,7 +4,8 @@ import { resolveCliExecutable } from '../agents/resolveCliExecutable';
 import type { CodexAppServerSession } from '../agents/CodexAppServerSession';
 import type { ClaudeOwnedSession } from '../agents/ClaudeOwnedSession';
 import { queueToCodex } from '../agentBus/codexDelivery';
-import { pickClaudePeer, readClaudeSessions, type ClaudeSession } from '../agentBus/claudePeer';
+import { CLAUDE_STAND_IN_NOTE, pickClaudePeer, readClaudeSessions } from '../agentBus/claudePeer';
+import type { ClaudeSession } from '../agentBus/claudePeer';
 import { getAlias, joinedPeer, registerAlias } from './aliasRegistry';
 import { ClaudeOwnedAdapter, ClaudePeerAdapter, CodexOwnedAdapter } from './adapters';
 import { codexQueueAdapterIfLive } from './codexPinLiveness';
@@ -172,11 +173,14 @@ export class MeshSessionProvider implements SessionProvider {
    */
   private async claudeAdapterAsync(): Promise<MeshAdapter | undefined> {
     const aliasRec = getAlias(this.deps.busRoot, 'claude');
-    // A session that joined itself (`forge.sh join`) wins while it is live.
-    // A joined session that is not running (a reload stops it until its panel
-    // reopens) resolves to nothing: a Forge-owned stand-in would answer in the
-    // user's place without their context.
-    if (aliasRec?.peer_pid !== undefined) return this.claudeAdapter();
+    // A joined session (`forge.sh join`) wins while live. A dead one (a reload
+    // stops it) gets a Forge-owned stand-in, never silently: the note says so.
+    if (aliasRec?.peer_pid !== undefined) {
+      const live = this.claudeAdapter();
+      if (live) return live;
+      const r = await this.ensureOwnedClaude('claude');
+      return 'error' in r ? undefined : Object.assign(r, { note: CLAUDE_STAND_IN_NOTE });
+    }
     const existing = this.claudeOwned.get('claude');
     if (existing) return this.claudeOwnedAdapter('claude', existing);
     const rec = readOwnership(this.deps.busRoot, 'claude');
@@ -372,7 +376,7 @@ export class MeshSessionProvider implements SessionProvider {
         created_at: Date.now(),
         parked: false,
       });
-      if (!aliasRec) {
+      if (!start.aliasRec) {
         registerAlias(this.deps.busRoot, alias, {
           agent: 'claude',
           session_id: newSessionId ?? '',

@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MeshSessionProvider } from '../../src/agentMesh/sessionProvider';
+import { CLAUDE_STAND_IN_NOTE } from '../../src/agentBus/claudePeer';
 import {
   claimCreation,
   readOwnership,
@@ -99,9 +100,9 @@ describe('MeshSessionProvider: owned Claude path (P4)', () => {
     await p.dispose();
   });
 
-  it('a joined session that is not running resolves to nothing, not an owned stand-in', async () => {
-    // The user's joined panel session is stopped by a VS Code reload until the
-    // panel reopens. A stand-in would answer in the user's place.
+  it('a joined session that is not running falls through to an owned stand-in, visibly', async () => {
+    // A VS Code reload stops the joined panel session until the panel reopens.
+    // Refusing left Qwen stuck; the stand-in answers, and the note tells the user.
     registerAlias(root, 'claude', {
       agent: 'claude',
       session_id: 'forge-4e',
@@ -110,15 +111,28 @@ describe('MeshSessionProvider: owned Claude path (P4)', () => {
       peer_pid: 99,
       claude_session_id: 'conv-1',
     });
-    let spawned = 0;
+    const ids: (string | undefined)[] = [];
     const p = makeProvider({
-      factory: () => {
-        spawned++;
+      factory: (sessionId) => {
+        ids.push(sessionId);
         return new FakeClaudeSession('owned-id');
       },
     });
-    expect(await p.resolveAdapter('claude')).toBeUndefined();
-    expect(spawned).toBe(0);
+    const adapter = await p.resolveAdapter('claude');
+    expect(adapter?.observesTurns).toBe(true);
+    // The joined peer id is not an owned identity: never resumed.
+    expect(ids).toEqual([undefined]);
+    expect(adapter?.note).toBe(CLAUDE_STAND_IN_NOTE);
+    // The join survives, so a re-opened panel wins again.
+    expect(getAlias(root, 'claude')?.peer_pid).toBe(99);
+    await p.dispose();
+  });
+
+  it('no stand-in note when nothing was joined', async () => {
+    const p = makeProvider();
+    const adapter = await p.resolveAdapter('claude');
+    expect(adapter?.observesTurns).toBe(true);
+    expect(adapter?.note).toBeUndefined();
     await p.dispose();
   });
 

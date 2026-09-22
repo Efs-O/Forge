@@ -208,6 +208,13 @@ export function pickClaudePeer(
   return pickClaudeSession(sessions, undefined, roots);
 }
 
+/** Shown to the user whenever a Forge-owned stand-in answers for a dead joined session. */
+export const CLAUDE_STAND_IN_NOTE =
+  '⚠️ The Claude session the user joined is not running (a VS Code reload stops it until ' +
+  'its panel is opened again), so a Forge-owned Claude session answered instead. It does ' +
+  'NOT have the context of the joined conversation. Tell the user, and that opening that ' +
+  'panel and running `forge.sh join claude` there reconnects their own session.';
+
 /** Claude Code names the key file after the SHA-256 of the pipe path, which it
  *  lower-cases on Windows (pipe names are case-insensitive there). */
 export function peerKeyFile(dir: string, pid: number, pipe: string): string {

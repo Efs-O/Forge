@@ -109,7 +109,13 @@ export function makeTellLiveSessionTool(deps: TellLiveSessionDeps): RegisteredTo
         return `tell_live_session: ${outcome.error}`;
       }
       const state = outcome.observing ? 'started (owned session)' : 'accepted (queued)';
+      const note = (await orchestrator.resolveAdapter(alias))?.note;
       return (
+        (note
+          ? `${note}
+
+`
+          : '') +
         `Notified ${outcome.to}: ${message.trim()}\n` +
         `Delivery: ${state} (exchange ${outcome.exchangeId}). ` +
         'This is a notification, not a question — it was accepted, not answered. ' +

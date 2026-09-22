@@ -253,8 +253,17 @@ export function makeLiveSessionTool(deps: LiveSessionDeps): RegisteredTool {
 ${question}
 
 (Your final message in this turn is the answer; Forge reads it directly. Do not run forge.sh reply or write an outbox file.)`;
+        const note = adapter.note;
         const result = await orchestrator.ask(target, message, signal);
-        return late + formatTurn(who, subject, result, signal?.aborted === true);
+        const turn = formatTurn(who, subject, result, signal?.aborted === true);
+        return (
+          late +
+          (note
+            ? `${note}
+
+${turn}`
+            : turn)
+        );
       }
 
       let deliver: () => Promise<void>;
