@@ -7,21 +7,23 @@ vi.mock('vscode', () => ({ workspace: { workspaceFolders: undefined } }));
 import { resolveWorkspacePath } from '../../src/util/WorkspacePaths';
 
 describe('workspace path containment', () => {
+  // Platform-native paths: a hard-coded `C:/` is relative on the Linux and
+  // macOS CI runners, so these passed only on Windows.
+  const base = path.resolve(os.tmpdir(), 'forge-containment');
+  const workspace = path.join(base, 'workspace');
+
   it('rejects absolute paths outside an active workspace when requested', () => {
     expect(() =>
-      resolveWorkspacePath('C:/outside/secret.txt', {
-        workspaceRoot: 'C:/workspace',
+      resolveWorkspacePath(path.join(base, 'outside', 'secret.txt'), {
+        workspaceRoot: workspace,
         mustBeInsideWorkspace: true,
       }),
     ).toThrow(/outside the workspace/i);
   });
 
   it('allows absolute paths that are inside the active workspace', () => {
-    expect(
-      resolveWorkspacePath('C:/workspace/src/index.ts', {
-        workspaceRoot: 'C:/workspace',
-      }),
-    ).toBe('C:\\workspace\\src\\index.ts');
+    const target = path.join(workspace, 'src', 'index.ts');
+    expect(resolveWorkspacePath(target, { workspaceRoot: workspace })).toBe(target);
   });
 });
 

@@ -297,11 +297,14 @@ export class PowerControl {
    * cannot leave a stale task that wakes the machine (G4).
    */
   async setScheduledWakes(wakes: readonly RecurringWake[]): Promise<void> {
-    this.assertWindows();
     if (wakes.length === 0) {
-      await this.deleteScheduledWakes();
+      // Nothing to register, and off Windows no task can exist to delete. The
+      // scheduler reconciles on every start, so throwing here stopped the job
+      // scheduler on macOS/Linux even with no wake job configured.
+      if (process.platform === 'win32') await this.deleteScheduledWakes();
       return;
     }
+    this.assertWindows();
     if ((await this.wakeTimersAllowed()) === false) throw new WakeTimersDisabledError();
     const xml = scheduledWakeTaskXml(wakes);
     const script = [
