@@ -79,7 +79,10 @@ function makeScheduler(options: { maxConcurrent?: number } = {}) {
 }
 
 beforeEach(async () => {
-  jobsRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'forge-jobs-'));
+  // Long form: libuv's Windows dir watcher asserts on an 8.3 short path.
+  jobsRoot = fs.realpathSync.native(
+    await fs.promises.mkdtemp(path.join(os.tmpdir(), 'forge-jobs-')),
+  );
   outboxDir = path.join(jobsRoot, 'outbox');
   store = new JobStore(jobsRoot);
   power = new PowerControl();

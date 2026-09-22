@@ -55,7 +55,11 @@ const holdLease = (instanceId: string): Promise<FileLease> =>
   });
 
 beforeEach(async () => {
-  jobsRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'forge-jobs-own-'));
+  // Long form: libuv's Windows dir watcher asserts on an 8.3 short path
+  // (CI's TEMP is C:\Users\RUNNER~1\...), crashing the worker.
+  jobsRoot = fs.realpathSync.native(
+    await fs.promises.mkdtemp(path.join(os.tmpdir(), 'forge-jobs-own-')),
+  );
   store = new JobStore(jobsRoot);
   spawnAndWait.mockReset();
   spawnAndWait.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
