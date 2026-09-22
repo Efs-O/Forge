@@ -107,7 +107,10 @@ describe('wake reconciliation churn (audit A4)', () => {
     const onChange = vi.fn();
     await store.saveJob(makeJob());
     store.watch(onChange);
-    await new Promise((r) => setTimeout(r, 50));
+    // macOS FSEvents can hand a new watcher the saveJob write from just before
+    // it started; let that (debounced) event land before counting.
+    await new Promise((r) => setTimeout(r, 1300));
+    onChange.mockClear();
     const tmp = path.join(jobsRoot, 'jobs-scheduler.lease.json.tok.heartbeat-1.tmp');
     await fs.promises.writeFile(tmp, '{}');
     await fs.promises.unlink(tmp);
