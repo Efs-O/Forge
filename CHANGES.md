@@ -1,5 +1,17 @@
 # Forge — Recent Changes
 
+## 0.16.31
+
+### Delegation: a reply cut off at its token cap says so (2026-09-22)
+
+- **`ask_local_agent` marks a reply that hit `max_output_tokens`.** A
+  delegated reply that ran out of room came back looking complete. With a
+  40-token cap, all three cloud Qwen pings returned only the start of their
+  reasoning (`We need answer user: ...`), and the calling agent had to guess
+  that the answer was missing. A `finish_reason: "length"` reply now ends with
+  `[cut off: the reply hit max_output_tokens=N ...]` and tells the caller to
+  retry with a larger cap.
+
 ## 0.16.30
 
 ### Jobs: an agent task keeps the model it was created with (2026-09-22)

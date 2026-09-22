@@ -395,7 +395,14 @@ export class LocalDelegationService {
             reject(signal.reason ?? new DOMException('Delegation cancelled', 'AbortError'));
             return;
           }
-          resolve(text);
+          // A reply cut off at the cap reads like a finished one; the caller
+          // (often a model) would take a half-thought for the answer.
+          resolve(
+            finishReason === 'length'
+              ? `${text}\n\n[cut off: the reply hit max_output_tokens=${request.max_tokens ?? 'default'} ` +
+                  'before it finished. Retry with a larger max_output_tokens for the full answer.]'
+              : text,
+          );
         },
         onError: (err) => reject(new DelegationError(`Delegation provider error: ${err.message}`)),
       };

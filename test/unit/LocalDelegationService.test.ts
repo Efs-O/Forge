@@ -69,6 +69,7 @@ function makeHarness(
     streamNever: boolean;
     streamIgnoresAbort: boolean;
     streamText: string;
+    finishReason: string;
     realPath: (filePath: string) => Promise<string>;
   }> = {},
 ): Harness {
@@ -104,7 +105,7 @@ function makeHarness(
       }
       if (!opts.streamNever) {
         handlers.onToken(opts.streamText ?? 'analysis');
-        handlers.onDone('stop');
+        handlers.onDone(opts.finishReason ?? 'stop');
         resolve();
       }
     });
@@ -145,14 +146,12 @@ describe('delegation eligibility', () => {
     expect(resolveDelegationTarget(config(), 'ollama-local').provider).toBe('ollama');
   });
 
-  it.each([
-    ['xai-model'],
-    ['openai-model'],
-    ['openrouter-model'],
-    ['compat-model'],
-  ])('classifies configured cloud provider %s as a cloud target', (target) => {
-    expect(resolveDelegationTarget(config(), target).provider).toBe('cloud');
-  });
+  it.each([['xai-model'], ['openai-model'], ['openrouter-model'], ['compat-model']])(
+    'classifies configured cloud provider %s as a cloud target',
+    (target) => {
+      expect(resolveDelegationTarget(config(), target).provider).toBe('cloud');
+    },
+  );
 
   it('accepts an Ollama cloud-routed model (local daemon, no local slot cost)', () => {
     expect(resolveDelegationTarget(config(), 'gpt-oss:20b-cloud').provider).toBe('ollama');
@@ -199,6 +198,29 @@ describe('delegation eligibility', () => {
 });
 
 describe('LocalDelegationService limits and dispatch', () => {
+  it('says when the reply was cut off at max_output_tokens', async () => {
+    const h = makeHarness({ streamText: 'We need answer user', finishReason: 'length' });
+    const result = await h.service.ask({
+      primaryModel: 'primary',
+      targetModel: 'llama',
+      task: 'Ping',
+      maxOutputTokens: 40,
+    });
+    expect(result.text).toMatch(
+      /^We need answer user\n\n\[cut off: the reply hit max_output_tokens=40 /,
+    );
+  });
+
+  it('leaves a reply that stopped on its own untouched', async () => {
+    const h = makeHarness({ streamText: 'Qwen3.8-27B' });
+    const result = await h.service.ask({
+      primaryModel: 'primary',
+      targetModel: 'llama',
+      task: 'Ping',
+    });
+    expect(result.text).toBe('Qwen3.8-27B');
+  });
+
   it('rejects too many context files', async () => {
     const h = makeHarness();
     await expect(
@@ -256,9 +278,7 @@ describe('LocalDelegationService limits and dispatch', () => {
   it('rejects context paths whose symlink target resolves outside the workspace', async () => {
     const h = makeHarness({
       realPath: (filePath) =>
-        Promise.resolve(
-          filePath === root ? filePath : path.resolve('/outside/secret.ts'),
-        ),
+        Promise.resolve(filePath === root ? filePath : path.resolve('/outside/secret.ts')),
     });
     await expect(
       h.service.ask({
