@@ -2,6 +2,26 @@
 
 ## 0.16.35
 
+### CLI agents in scheduled jobs need your consent once (2026-09-22)
+
+- **A new setting, `jobs.allow_cli_agents`, is off by default.** It controls
+  whether a scheduled job may run Claude Code or Codex unattended on your own
+  subscription. While it is off:
+  - creating such a job shows an approval card that explains what the job will
+    use from your plan, and approving it turns the setting on for you;
+  - a run of such a job is recorded as skipped;
+  - a job's turn cannot hand work to a CLI agent.
+
+  Chats you are in are not affected.
+
+### A dead joined Claude gets a visible stand-in (2026-09-22)
+
+- **When the Claude session you joined with `forge.sh join claude` is no
+  longer running** (a window reload stops it), Forge now starts its own
+  Claude session instead of refusing. The reply says so: the stand-in does not
+  have your joined conversation, and running `forge.sh join claude` again in
+  your panel reconnects your own session.
+
 ### Agent messages stay in their sender's chat (2026-09-22)
 
 - **A `forge.sh say` without `--new` now goes to the chat that sender last

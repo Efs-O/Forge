@@ -26,6 +26,7 @@ import {
   type ClaudeSession,
 } from '../agentBus/claudePeer';
 import { relayToClaude } from '../agentBus/claudeRelay';
+import { unattendedCliRefusal } from '../jobs/cliAgentGate';
 
 export const MAX_SUBJECT_CHARS = 120;
 export const MAX_QUESTION_CHARS = 4000;
@@ -226,6 +227,8 @@ export function makeLiveSessionTool(deps: LiveSessionDeps): RegisteredTool {
         throw new Error('ask_live_session: "target" must be "claude" or "codex".');
       }
 
+      const refusal = unattendedCliRefusal(deps.getConfig(), context?.conversationId);
+      if (refusal) return `ask_live_session: ${refusal}`;
       const paths = deps.paths ? deps.paths() : busPaths();
       ensureBus(paths);
       sweepStale(paths);

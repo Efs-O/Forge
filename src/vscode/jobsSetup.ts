@@ -9,6 +9,7 @@ import { clearWakesIfUnowned } from '../jobs/schedulerWakes';
 import { PowerControl } from '../system/PowerControl';
 import type { SidebarProvider } from '../sidebar/SidebarProvider';
 import { forgeLocalRoot } from '../jobs/actions/stagedBuild';
+import { cliAgentSkip } from '../jobs/cliAgentGate';
 import { extractZip, makeSetBinary, runCommand, sha256File } from '../jobs/actions/llamacppIo';
 
 /**
@@ -94,6 +95,7 @@ export function setupJobs(
         host: () => sidebar.getHostFacade(),
         pool: () => pool,
         defaultModel: () => getConfig().active_model ?? undefined,
+        cliAgentSkip: (model, at, late) => cliAgentSkip(getConfig(), model, at, late),
         outboxDir: store.outboxDir,
         notifyLocal: (message) => void vscode.window.showInformationMessage(message),
         busy: () => {

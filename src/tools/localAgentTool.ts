@@ -9,6 +9,7 @@ import {
   MAX_DELEGATION_CONTEXT_FILES,
   HARD_MAX_DELEGATION_OUTPUT_TOKENS,
 } from '../delegation/limits';
+import { unattendedCliRefusal } from '../jobs/cliAgentGate';
 
 const FOCUS_VALUES = [
   'correctness',
@@ -256,6 +257,11 @@ export function makeLocalAgentTool(
         );
       }
       const config = getConfig();
+      const cliTarget = listEligibleDelegationTargets(config).find(
+        (item) => item.name === args['model'] && item.provider === 'cli',
+      );
+      const refusal = cliTarget && unattendedCliRefusal(config, context?.conversationId);
+      if (refusal) return `ask_local_agent: ${refusal}`;
       const primaryModel = config.active_model ?? '';
       const contextFiles = args['context_files'] as string[] | undefined;
       const focus = args['focus'] as string | undefined;

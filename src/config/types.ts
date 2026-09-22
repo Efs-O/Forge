@@ -286,6 +286,7 @@ export interface JobsConfig {
   allowed_hosts: string[];
   /** How many jobs may run at once. */
   max_concurrent: number;
+  allow_cli_agents: boolean; // unattended jobs may drive Claude Code / Codex (cliAgentGate)
 }
 
 /** `image_search:` block (validated by imageSearchSchema.ts). */

@@ -28,6 +28,9 @@ jobs:
     - objects.githubusercontent.com
   # How many jobs may run at once. 1 is safe for a single GPU.
   max_concurrent: 2
+  # May a job drive a CLI agent (Claude Code / Codex) on your subscription?
+  # Off by default; approving the card on a CLI-agent job sets it.
+  allow_cli_agents: false
 ```
 
 - `enabled: false` (or the block absent) → no scheduler, no lease, no
@@ -37,6 +40,15 @@ jobs:
   `objects.githubusercontent.com` (the CDN the asset download 302-redirects
   to — the gate is re-checked at every redirect hop).
 - `max_concurrent` 1–8. The scheduler runs at most this many jobs per tick.
+- `allow_cli_agents` (default `false`) controls whether a job may run a CLI
+  agent (Claude Code / Codex) unattended, on your own subscription and its
+  usage limits. While it is off:
+  - creating or updating such a job shows a **dangerous** approval card, and
+    approving it sets the flag for you;
+  - a run of such a job is recorded as `skipped`;
+  - a job's turn cannot delegate to a CLI agent.
+
+  Attended chat is never gated. See `docs/plans/CLI_AGENT_JOBS_GATE_PLAN.md`.
 
 After editing, **Reload Window** so the scheduler picks up the change (a config
 hot-reload also reconciles it, but a reload is the clean way to start).

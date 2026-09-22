@@ -1,6 +1,7 @@
 import type { RegisteredTool } from './ToolRegistry';
 import type { ForgeConfig } from '../config/types';
 import { getMeshOrchestrator } from '../agentMesh/meshContext';
+import { unattendedCliRefusal } from '../jobs/cliAgentGate';
 
 /**
  * `tell_live_session` (AGENT_MESH_PLAN §1): a **one-way** push to a live
@@ -73,7 +74,9 @@ export function makeTellLiveSessionTool(deps: TellLiveSessionDeps): RegisteredTo
     },
     permission: 'delegate',
     advertise: () => enabled() && getMeshOrchestrator() !== undefined,
-    handler: async (args) => {
+    handler: async (args, context) => {
+      const refusal = unattendedCliRefusal(deps.getConfig(), context?.conversationId);
+      if (refusal) return `tell_live_session: ${refusal}`;
       if (!enabled()) {
         throw new Error(
           'tell_live_session is disabled. Set `agent_bus: { enabled: true }` in config.yaml.',

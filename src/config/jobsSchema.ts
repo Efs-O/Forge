@@ -16,5 +16,7 @@ export const JobsConfigSchema = z
     allowed_hosts: z.array(z.string().min(1)).default([]),
     /** How many jobs may run at once. 1 is safe for a single GPU. */
     max_concurrent: z.number().int().min(1).max(8).default(2),
+    /** Let an unattended job drive a CLI agent (Claude Code / Codex) on the user's seat. */
+    allow_cli_agents: z.boolean().default(false),
   })
   .optional();

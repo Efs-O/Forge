@@ -95,6 +95,7 @@ import {
 } from './backgroundExecutionTools';
 
 import type { UserQuestionService } from '../sidebar/UserQuestionService';
+import { makeAllowCliAgents } from '../jobs/cliAgentGate';
 import type { UserNotificationService } from '../sidebar/UserNotificationService';
 
 export function registerAllTools(
@@ -237,6 +238,7 @@ export function registerAllTools(
         store: jobs.store,
         getConfig,
         ...(jobs.hostFacade ? { hostFacade: jobs.hostFacade } : {}),
+        ...(jobs.configPath ? { allowCliAgents: makeAllowCliAgents(jobs.configPath) } : {}),
       }),
     );
   }

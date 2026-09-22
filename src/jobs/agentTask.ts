@@ -31,6 +31,8 @@ export interface AgentTaskDeps {
   pool: () => IBackendPool | undefined;
   /** The default chat model (config active_model), when the action names none. */
   defaultModel: () => string | undefined;
+  /** A skipped row when this model is a CLI agent jobs may not use (cliAgentGate). */
+  cliAgentSkip?: (model: string, at: number, late: boolean) => RunRow | undefined;
   outboxDir: string;
   notifyLocal: (text: string) => void;
   busy: () => string | undefined;
@@ -142,6 +144,8 @@ export class AgentTaskRunner {
     }
 
     const jobModel = action.model ?? this.deps.defaultModel() ?? '';
+    const blocked = this.deps.cliAgentSkip?.(jobModel, startedAt, wasLate);
+    if (blocked) return this.deps.store.appendRun(job.id, blocked);
     const slot = canStartNow(
       jobModel,
       state.conversation_id,

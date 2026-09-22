@@ -25,6 +25,7 @@ import {
 } from '../jobs/jobDescribe';
 import { openDiscussChat } from '../jobs/jobDiscuss';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
+import { CLI_AGENT_CONSENT_DETAIL, needsCliConsent } from '../jobs/cliAgentGate';
 import type { RegisteredTool } from './ToolRegistry';
 
 /** The actions `manage_jobs` can perform. */
@@ -50,6 +51,8 @@ export interface ManageJobsDeps {
   hostFacade?: () => ForgeHostFacade | undefined;
   /** Injectable for tests. */
   now?: () => Date;
+  /** Writes `jobs.allow_cli_agents: true` (the user approved the consent card). */
+  allowCliAgents?: () => void;
 }
 
 /** The actions that mutate a job (need `write`). */
@@ -163,15 +166,39 @@ export function makeManageJobsTool(deps: ManageJobsDeps): RegisteredTool {
     // `delete` always asks, even under /clanker: `dangerous` is what keeps
     // clanker from removing a job without anyone being asked.
     approval: (args) => {
+      // Dangerous so /clanker cannot consent for the user, and a job turn
+      // (unattended policy) cannot consent for itself.
+      if (needsCliConsent(deps.getConfig(), jobModelOf(deps, args))) {
+        return { dangerous: true, detail: CLI_AGENT_CONSENT_DETAIL };
+      }
       if (args['action'] !== DELETE_ACTION) return undefined;
       return {
         dangerous: true,
         detail: `Delete job "${String(args['job'] ?? '')}". Its definition, state, and run log are removed.`,
       };
     },
-    handler: (args) => runManageJobs(deps, args),
+    handler: (args) => {
+      // Reached only past the approval card above, so a CLI model here was consented to.
+      if (needsCliConsent(deps.getConfig(), jobModelOf(deps, args))) {
+        if (!deps.allowCliAgents) {
+          throw new Error('manage_jobs: set `jobs.allow_cli_agents: true` in config.yaml first.');
+        }
+        deps.allowCliAgents();
+      }
+      return runManageJobs(deps, args);
+    },
   };
   return tool;
+}
+
+/** The agent_task model a create/update would run on (an unset model pins active_model). */
+function jobModelOf(deps: ManageJobsDeps, args: Record<string, unknown>): string | undefined {
+  if (args['action'] !== 'create' && args['action'] !== 'update') return undefined;
+  const def = args['definition'] as Record<string, unknown> | undefined;
+  const action = def?.['action'] as Record<string, unknown> | null | undefined;
+  if (action?.['kind'] !== 'agent_task') return undefined;
+  const model = action['model'];
+  return typeof model === 'string' ? model : (deps.getConfig().active_model ?? undefined);
 }
 
 async function runManageJobs(deps: ManageJobsDeps, args: Record<string, unknown>): Promise<string> {

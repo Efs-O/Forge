@@ -450,6 +450,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Schedule math (`nextDue`, `isDue`, `wakeTimesFor`)         | `src/jobs/schedule.ts`                                         |
 | Tick loop, lease, concurrency                               | `src/jobs/JobScheduler.ts`                                     |
 | Failure threshold and next-due backoff math                 | `src/jobs/backoff.ts`                                          |
+| CLI-agent consent gate for jobs (`jobs.allow_cli_agents`)  | `src/jobs/cliAgentGate.ts`                                     |
 | Wake-task ownership (dedupe, lease-guarded delete)         | `src/jobs/schedulerWakes.ts`                                   |
 | Outbox write, local toast, summarize-waits-for-idle        | `src/jobs/JobDelivery.ts`                                      |
 | Coalescing outbox (one pending message per job)            | `src/jobs/JobOutbox.ts`                                        |
