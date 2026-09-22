@@ -1,5 +1,19 @@
 # Forge — Recent Changes
 
+## 0.16.32
+
+### Compaction: a cloud chat can be compacted (2026-09-22)
+
+- **`/compact`, auto-compact and `/review` send a cloud model's run to its
+  provider.** The one-shot prompt path took a local server from the backend
+  pool for every model, so compacting a Cerebras chat tried to spawn
+  llama-server for it and failed with `Model "qwen-3.8-27b" is missing
+  gguf_path for llama.cpp`. The chat then ran into Cerebras' 131,072-token
+  limit (`context_length_exceeded`) with no way to shrink it.
+- **Config:** the Cerebras `qwen-3.8-27b` and `gemma-4-31b` entries now carry
+  `num_ctx: 131072`. Without it the context bar hid and auto-compact never
+  fired for them.
+
 ## 0.16.31
 
 ### Delegation: a reply cut off at its token cap says so (2026-09-22)

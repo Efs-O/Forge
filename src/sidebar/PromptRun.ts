@@ -21,6 +21,8 @@ import { injectSystemPrompt } from '../llm/SystemPromptInjector';
 import { mergeSampling } from '../llm/SamplingMerge';
 import { normalizeRequestForModel } from '../llm/RequestNormalizer';
 import { resolveRequestModel } from '../config/ConfigResolver';
+import { isCloudProvider } from '../llm/CloudProviders';
+import { resolveCloudRequestTarget } from '../llm/CloudRequestResolver';
 import { buildTemplateContext, sanitizeText, shouldStripThinking } from './turnModelBehavior';
 import { reasoningReserve } from '../util/contextBudget';
 import { getLogger } from '../util/logger';
@@ -31,6 +33,8 @@ export interface PromptRunContext {
   getConfig: () => ForgeConfig;
   pool: IBackendPool;
   events: SidebarProviderEvents;
+  /** Holds cloud provider tokens; a cloud model's run needs one. */
+  secrets?: vscode.SecretStorage;
   templateEngine?: TemplateEngine;
   forgeLoader?: ForgeInstructionsLoader;
   /** Publishes the controller so a global or owning-conversation cancel can abort this run. */
@@ -103,6 +107,34 @@ function replacementPrompt(ctx: PromptRunContext, options: PromptRunOptions): st
     : undefined;
 }
 
+interface RunTarget {
+  baseUrl: string;
+  loadedModel: string | null;
+  apiKey?: string;
+}
+
+/**
+ * Where the run's request goes. A cloud model has no local server: acquiring
+ * one from the pool tried to spawn llama-server for it, so `/compact` on a
+ * Cerebras chat failed with "missing gguf_path for llama.cpp".
+ */
+async function resolveRunTarget(
+  ctx: PromptRunContext,
+  model: ReturnType<typeof resolveRequestModel>,
+  reserved: BackendController | undefined,
+): Promise<RunTarget> {
+  if (!reserved && isCloudProvider(model.provider)) {
+    const { baseUrl, apiKey } = await resolveCloudRequestTarget(model, ctx.secrets);
+    return { baseUrl, apiKey, loadedModel: model.name };
+  }
+  const backend = reserved ?? (await ctx.pool.acquire(model.name));
+  if (!backend.isReady()) {
+    if (reserved) throw new Error('Forge: reserved contact backend is not ready.');
+    await backend.start();
+  }
+  return { baseUrl: backend.baseUrl(), loadedModel: backend.loadedModel() };
+}
+
 export async function runPromptToMarkdown(
   ctx: PromptRunContext,
   text: string,
@@ -115,12 +147,8 @@ export async function runPromptToMarkdown(
   // Request-time resolution (defaults + base + @profile, F6).
   const selectedModel = resolveRequestModel(config, requested, (m) => log.info(m));
 
-  const backend = options.backend ?? (await ctx.pool.acquire(selectedModel.name));
-  if (!backend.isReady()) {
-    if (options.backend) throw new Error('Forge: reserved contact backend is not ready.');
-    await backend.start();
-  }
-  ctx.events.onBackendReady?.(backend.loadedModel());
+  const target = await resolveRunTarget(ctx, selectedModel, options.backend);
+  ctx.events.onBackendReady?.(target.loadedModel);
 
   const activeFile = vscode.window.activeTextEditor?.document.uri.fsPath;
   const replacement = replacementPrompt(ctx, options);
@@ -169,7 +197,7 @@ export async function runPromptToMarkdown(
       let toolCalls: ToolCall[] = [];
       await new Promise<void>((resolve, reject) => {
         streamModelChatCompletion(
-          backend.baseUrl(),
+          target.baseUrl,
           request,
           selectedModel,
           {
@@ -184,9 +212,10 @@ export async function runPromptToMarkdown(
             },
           },
           ctrl.signal,
+          target.apiKey,
         );
       });
-      ctx.events.onGenerationFinished?.(backend.loadedModel());
+      ctx.events.onGenerationFinished?.(target.loadedModel);
       if (
         toolCalls.length === 0 ||
         !options.contactTools ||

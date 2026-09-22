@@ -46,7 +46,17 @@ const config = (): ForgeConfig =>
         provider: 'llama.cpp',
         extra_llama_server_args: ['--reasoning-budget', '3072'],
       },
-      { name: 'pinned', provider: 'llama.cpp', extra_llama_server_args: ['--reasoning-budget', '1024'] },
+      {
+        name: 'pinned',
+        provider: 'llama.cpp',
+        extra_llama_server_args: ['--reasoning-budget', '1024'],
+      },
+      {
+        name: 'cerebras-qwen',
+        provider: 'openai-compatible',
+        endpoint: 'https://api.cerebras.ai',
+        api_key_secret: 'cerebras',
+      },
     ],
   }) as unknown as ForgeConfig;
 
@@ -86,6 +96,43 @@ beforeEach(() => {
 });
 
 describe('runPromptToMarkdown options', () => {
+  it('sends a cloud model to its provider with its key, never through the local pool', async () => {
+    const acquire = vi.fn();
+    let url = '';
+    let key: string | undefined;
+    streamModelChatCompletion.mockImplementation(
+      (
+        u: string,
+        request: ChatCompletionRequest,
+        _m: unknown,
+        handlers: any,
+        _s: unknown,
+        k?: string,
+      ) => {
+        url = u;
+        key = k;
+        sent = request;
+        handlers.onToken('summary');
+        handlers.onDone();
+      },
+    );
+    const cloud: PromptRunContext = {
+      ...ctx(),
+      pool: { acquire } as unknown as IBackendPool,
+      secrets: {
+        get: async (name: string) => (name === 'cerebras' ? 'sk-test' : undefined),
+      } as never,
+    };
+
+    await expect(
+      runPromptToMarkdown(cloud, 'summarize', 'c1', { modelName: 'cerebras-qwen' }),
+    ).resolves.toBe('summary');
+    expect(acquire).not.toHaveBeenCalled();
+    expect(url).toContain('api.cerebras.ai');
+    expect(key).toBe('sk-test');
+    expect(sent.model).toBe('cerebras-qwen');
+  });
+
   it('leaves existing callers untouched: default model, persona, 4096 max_tokens', async () => {
     await runPromptToMarkdown(ctx(), 'review this');
 
