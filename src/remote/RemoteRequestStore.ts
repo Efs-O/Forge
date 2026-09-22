@@ -9,17 +9,15 @@ import type {
 import {
   EMPTY_REMOTE_STATE,
   LegacyRemoteStateSchema,
-  MAX_OUTBOX_RECORDS,
   MAX_RECORDS,
   migrateLegacyState,
   RemoteStateSchema,
-  RETENTION_MS,
   type RemoteSelection,
   type RemoteStoreState,
   type WorkspaceHandoff,
 } from './RemoteStoreSchemas';
 import { bindingsForConversation, bindingsForWorkspace } from './remoteBindingQueries';
-import { writeRemoteStateFile } from './remoteStateFile';
+import { withRemoteStateLock, writeRemoteStateFile } from './remoteStateFile';
 import {
   claimHandoffs,
   completeHandoff,
@@ -40,7 +38,7 @@ import {
   removeSelection,
   replaceSelection,
 } from './RemoteSelectionState';
-import { pruneContactState } from './RemoteContactRetention';
+import { pruneRemoteState } from './remoteStateRetention';
 
 export function remoteDedupKey(channel: string, chatId: string, messageId: string): string {
   return `${channel}\u0000${chatId}\u0000${messageId}`;
@@ -450,48 +448,41 @@ export class RemoteRequestStore {
 
   private mutate(mutator: (draft: RemoteStoreState) => void, reloadFirst = false): Promise<void> {
     const operation = this.mutationTail.then(async () => {
-      if (reloadFirst) await this.reload();
-      const draft = structuredClone(this.state);
-      mutator(draft);
-      const cutoff = Date.now() - RETENTION_MS;
-      draft.requests = draft.requests.filter(
-        (item) => item.updatedAt >= cutoff || item.state === 'queued' || item.state === 'running',
-      );
-      draft.outbox = draft.outbox
-        .filter(
-          (item) =>
-            item.updatedAt >= cutoff || item.state === 'pending' || item.state === 'sending',
-        )
-        .slice(-MAX_OUTBOX_RECORDS);
-      draft.controlReceipts = draft.controlReceipts
-        .filter((item) => item.updatedAt >= cutoff || item.state === 'pending')
-        .slice(-MAX_RECORDS);
-      draft.selections = draft.selections.filter((item) => item.expiresAt >= Date.now());
-      draft.workspaceHandoffs = draft.workspaceHandoffs.filter(
-        (item) => item.expiresAt >= Date.now(),
-      );
-      pruneContactState(draft, cutoff, Date.now());
-      RemoteStateSchema.parse(draft);
-      await this.persist(draft);
-      this.state = draft;
+      await withRemoteStateLock(this.filePath, async () => {
+        if (reloadFirst) await this.reload();
+        const draft = structuredClone(this.state);
+        mutator(draft);
+        pruneRemoteState(draft);
+        RemoteStateSchema.parse(draft);
+        await this.persist(draft);
+        this.state = draft;
+      });
     });
     this.mutationTail = operation.catch(() => undefined);
     return operation;
   }
 
   private async importLegacyOrCreate(): Promise<void> {
-    if (!this.legacyFilePath) {
+    await withRemoteStateLock(this.filePath, async () => {
+      try {
+        this.state = RemoteStateSchema.parse(JSON.parse(await fs.readFile(this.filePath, 'utf8')));
+        return;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      }
+      if (this.legacyFilePath) {
+        try {
+          this.state = migrateLegacyState(
+            LegacyRemoteStateSchema.parse(
+              JSON.parse(await fs.readFile(this.legacyFilePath, 'utf8')),
+            ),
+          );
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+        }
+      }
       await this.persist(this.state);
-      return;
-    }
-    try {
-      this.state = migrateLegacyState(
-        LegacyRemoteStateSchema.parse(JSON.parse(await fs.readFile(this.legacyFilePath, 'utf8'))),
-      );
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-    }
-    await this.persist(this.state);
+    });
   }
 
   private persist(state: RemoteStoreState): Promise<void> {

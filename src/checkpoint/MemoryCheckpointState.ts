@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { createHash } from 'crypto';
 import { assertCheckpointWithinLimits, type CheckpointLimits } from './CheckpointPolicy';
 import { writeFileAtomicSync } from '../util/atomicWrite';
 
@@ -61,6 +62,41 @@ export function captureMemoryState(target: string, limits?: CheckpointLimits): M
   };
   walk(target, '');
   return { kind: 'directory', entries };
+}
+
+/** Stable content/type fingerprint used to reject stale destructive restores. */
+export function fingerprintMemoryState(target: string): string {
+  const hash = createHash('sha256');
+  const visit = (absolute: string, relative: string): void => {
+    let stat: fs.Stats;
+    try {
+      stat = fs.lstatSync(absolute);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        hash.update(`missing:${relative}\0`);
+        return;
+      }
+      throw error;
+    }
+    const mode = stat.mode & 0o7777;
+    if (stat.isSymbolicLink()) {
+      hash.update(`symlink:${relative}:${mode}:${fs.readlinkSync(absolute)}\0`);
+      return;
+    }
+    if (stat.isFile()) {
+      hash.update(`file:${relative}:${mode}:`);
+      hash.update(fs.readFileSync(absolute));
+      hash.update('\0');
+      return;
+    }
+    if (!stat.isDirectory()) throw new Error(`CheckpointStack: unsupported path type ${absolute}`);
+    hash.update(`directory:${relative}:${mode}\0`);
+    for (const name of fs.readdirSync(absolute).sort()) {
+      visit(path.join(absolute, name), relative ? `${relative}/${name}` : name);
+    }
+  };
+  visit(path.resolve(target), '');
+  return hash.digest('hex');
 }
 
 export function restoreMemoryState(target: string, state: MemorySnapshotState): void {

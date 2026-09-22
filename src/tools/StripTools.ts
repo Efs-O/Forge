@@ -16,18 +16,18 @@ export function stripTools(request: ChatCompletionRequest): ChatCompletionReques
  * After THRESHOLD failures, recommends strip mode.
  */
 export class ToolFailureTracker {
-  private failures = 0;
+  private readonly failures = new Map<string, number>();
   static readonly THRESHOLD = 3;
 
-  record(): void {
-    this.failures++;
+  record(conversationId = '__default__'): void {
+    this.failures.set(conversationId, (this.failures.get(conversationId) ?? 0) + 1);
   }
 
-  reset(): void {
-    this.failures = 0;
+  reset(conversationId = '__default__'): void {
+    this.failures.delete(conversationId);
   }
 
-  shouldStrip(): boolean {
-    return this.failures >= ToolFailureTracker.THRESHOLD;
+  shouldStrip(conversationId = '__default__'): boolean {
+    return (this.failures.get(conversationId) ?? 0) >= ToolFailureTracker.THRESHOLD;
   }
 }

@@ -64,6 +64,7 @@ export class JobStore {
   private watcher: fs.FSWatcher | undefined;
   private watchDebounce: ReturnType<typeof setTimeout> | undefined;
   private onChangeCallback: (() => void) | undefined;
+  private readonly deletedJobs = new Set<string>();
 
   constructor(jobsRoot?: string) {
     const root = jobsRoot ?? path.join(os.homedir(), '.forge', 'jobs');
@@ -181,11 +182,13 @@ export class JobStore {
   /** Save a job's definition atomically. */
   async saveJob(job: Job): Promise<void> {
     await this.ensureDirs();
+    this.deletedJobs.delete(job.id);
     writeFileAtomicSync(path.join(this.jobsDir, `${job.id}.json`), JSON.stringify(job, null, 2));
   }
 
   /** Save a job's state atomically. */
   async saveState(id: string, state: JobState): Promise<void> {
+    if (this.deletedJobs.has(id)) return;
     await this.ensureDirs();
     JobStateSchema.parse(state);
     writeFileAtomicSync(path.join(this.stateDir, `${id}.json`), JSON.stringify(state, null, 2));
@@ -201,6 +204,7 @@ export class JobStore {
    * finished in the meantime.
    */
   patchState(id: string, patch: Partial<JobState>): void {
+    if (this.deletedJobs.has(id)) return;
     const full = path.join(this.stateDir, `${id}.json`);
     let raw: string;
     try {
@@ -271,6 +275,7 @@ export class JobStore {
    * `deleteOutboxItem`) rather than by re-deriving its path here.
    */
   async delete(id: string): Promise<void> {
+    this.deletedJobs.add(id);
     for (const full of [
       path.join(this.jobsDir, `${id}.json`),
       path.join(this.stateDir, `${id}.json`),
@@ -290,6 +295,7 @@ export class JobStore {
    * never rewritten, so a crash mid-run cannot lose the previous row.
    */
   async appendRun(id: string, row: RunRow): Promise<void> {
+    if (this.deletedJobs.has(id)) return;
     await this.ensureDirs();
     RunRowSchema.parse(row);
     const full = path.join(this.runsDir, `${id}.jsonl`);

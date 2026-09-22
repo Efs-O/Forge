@@ -80,6 +80,7 @@ export interface ToolCallingLoopOptions {
   canUseThinkingKwargs?: boolean;
   stripThinkingChannels?: boolean;
   failureTracker?: ToolFailureTracker;
+  failureTrackerKey?: string;
   onToken?: (text: string) => void;
   onReasoning?: (text: string) => void;
   onDone?: (finishReason: string | null) => void;
@@ -333,7 +334,7 @@ export async function runToolCallingLoop(
         continue;
       }
       if (!isNativeToolJsonParseError(err) || nativeDefinitions.length === 0) throw err;
-      options.failureTracker?.record();
+      options.failureTracker?.record(options.failureTrackerKey);
       options.onNativeFallback?.();
       rawAssistant = '';
       rawReasoning = '';
@@ -371,7 +372,7 @@ export async function runToolCallingLoop(
         options.onRepeatedCall?.();
         throw error;
       }
-      options.failureTracker?.reset();
+      options.failureTracker?.reset(options.failureTrackerKey);
       // The retry produced real work, so the next round may think again.
       reasoningStopRetries = 0;
       // Carry this round's reasoning on the tool-call turn. rawReasoning resets

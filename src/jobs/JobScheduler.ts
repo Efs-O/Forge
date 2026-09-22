@@ -322,6 +322,7 @@ export class JobScheduler {
             }
           : await this.runCheck(jobFile);
       if (result.changed && job.action?.kind === 'agent_task') {
+        if (!(await this.store.load(job.id))) return;
         if (this.agentTask) {
           // Started, not awaited: the runner owns the `runningJobs` guard until
           // it ends, so the next tick cannot start a second run (AC11).
@@ -344,6 +345,7 @@ export class JobScheduler {
         await this.applyBackoff(jobFile, error);
         return;
       }
+      if (!(await this.store.load(job.id))) return;
       const change = await this.delivery.deliverForChange(job, result);
       let delivered = change.delivered;
       // Skip the "recovered" line for an agent task: it already reports every
@@ -355,7 +357,6 @@ export class JobScheduler {
         );
         delivered++;
       }
-      // When the check did not change, a previously pending summary must
       // survive this run so JobDelivery.processPendingSummaries can deliver it once
       // idle. A no-change run must not clobber a pending summarize.
       const nextSummaryPending = result.changed ? change.summaryPending : state.summary_pending;
@@ -461,7 +462,6 @@ export class JobScheduler {
       summary: checkResult.summary,
     };
   }
-
   /** Apply backoff after a failure: double the interval up to 24 h (B.3). */
   private async applyBackoff(jobFile: JobFile, message: string): Promise<void> {
     const { job, state } = jobFile;
@@ -482,7 +482,7 @@ export class JobScheduler {
       next_due_at: nextDueAt,
       consecutive_failures: count,
     });
-    // Report exactly once, on the run that crosses the threshold. Later
+    // Report once, on the run that crosses the threshold. Later
     // failures keep extending the backoff silently; the recovery (a success
     // after backoff) is reported by the next successful run.
     if (count === BACKOFF_THRESHOLD) {

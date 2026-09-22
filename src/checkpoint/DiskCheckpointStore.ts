@@ -33,8 +33,13 @@ import {
   type CheckpointLimits,
 } from './CheckpointPolicy';
 import { getLogger } from '../util/logger';
-import { discardDiskCheckpoint, restoreDiskCheckpoint } from './DiskCheckpointRestore';
+import {
+  assertDiskCheckpointCurrent,
+  discardDiskCheckpoint,
+  restoreDiskCheckpoint,
+} from './DiskCheckpointRestore';
 import { reportExistingCheckpointRecoveryData } from './CheckpointRecovery';
+import { fingerprintMemoryState } from './MemoryCheckpointState';
 
 const log = getLogger();
 
@@ -192,6 +197,10 @@ export class DiskCheckpointStore {
     return restoreDiskCheckpoint(reference);
   }
 
+  assertCurrent(reference: DiskCheckpointReference): Promise<void> {
+    return assertDiskCheckpointCurrent(reference);
+  }
+
   discard(reference: DiskCheckpointReference): Promise<void> {
     return discardDiskCheckpoint(reference);
   }
@@ -234,8 +243,7 @@ export class DiskCheckpointStore {
     let completedFiles = 0;
     let completedBytes = 0;
     for (const entry of current.entries) {
-      const original = baselineByPath.get(entry.relativePath);
-      if (entry.kind !== 'file' || original?.kind !== 'file') continue;
+      if (entry.kind !== 'file') continue;
       currentHashes.set(
         entry.relativePath,
         await readAndHashCheckpointFile(entry.absolutePath, undefined, entry, neverAborted),
@@ -296,6 +304,12 @@ export class DiskCheckpointStore {
       createdAt: Date.now(),
       originalEntries,
       createdPaths,
+      postconditions: [...new Set([...changedSet, ...createdPaths])].map((relativePath) => ({
+        relativePath,
+        fingerprint: fingerprintMemoryState(
+          this.resolveWorkspaceTarget(state.workspaceRoot, relativePath),
+        ),
+      })),
     };
     const manifestPath = path.join(state.checkpointDir, 'manifest.committed.json');
     await writeCheckpointJsonAtomic(manifestPath, manifest);

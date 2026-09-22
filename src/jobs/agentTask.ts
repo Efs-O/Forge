@@ -379,6 +379,7 @@ export class AgentTaskRunner {
     backupPath: string | undefined,
   ): Promise<void> {
     const { job } = jobFile;
+    if (!(await this.deps.store.load(job.id))) return;
     const now = this.deps.now();
     const durationMs = now - startedAt;
     const failed = outcome.kind === 'failed' || outcome.kind === 'timeout';
@@ -490,7 +491,6 @@ export function parseResult(finalText: string): {
   else kind = 'failed';
   return { kind, sentence, restart };
 }
-
 function formatDuration(ms: number): string {
   const totalSeconds = Math.round(ms / 1000);
   const minutes = Math.floor(totalSeconds / 60);

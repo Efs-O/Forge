@@ -11,6 +11,7 @@ import type { ModelConfig } from '../config/types';
 import type { AttachmentData, HostToWebview } from './messageBridge';
 import type { ConversationRuntime } from './sessionTypes';
 import type { BackendController } from '../backend/BackendController';
+import type { BackendTurnLease } from '../backend/poolTypes';
 import type { CheckpointStack, CheckpointSession } from '../checkpoint/CheckpointStack';
 import type { IBackendPool } from '../backend/BackendPool';
 import type { TurnLifecycle } from './TurnLifecycle';
@@ -179,6 +180,7 @@ export async function runLocalProviderTurn(
 ): Promise<ForgeTurnOutcome> {
   const convId = conv.id;
   let backend: BackendController;
+  let turnLease: BackendTurnLease | undefined;
   let announcedStart = false;
   const notice = setTimeout(() => {
     announcedStart = true;
@@ -187,7 +189,13 @@ export async function runLocalProviderTurn(
   }, BACKEND_START_NOTICE_MS);
   try {
     try {
-      backend = await ctx.pool.acquire(model.name);
+      if (typeof ctx.pool.acquireForTurn === 'function') {
+        turnLease = await ctx.pool.acquireForTurn(model.name);
+      } else {
+        const legacyBackend = await ctx.pool.acquire(model.name);
+        turnLease = { backend: legacyBackend, release: async () => undefined };
+      }
+      backend = turnLease.backend;
     } finally {
       // Cleared on the failure path too: a spawn that fails inside the window
       // reports its own error, and the notice would arrive after it.
@@ -208,6 +216,7 @@ export async function runLocalProviderTurn(
     ctx.commitUserPrompt(conv, text, attachments, promptOptions);
     postC({ type: 'ready' });
   } catch (err) {
+    await turnLease?.release();
     const msg = ctrl.signal.aborted
       ? 'Backend start cancelled.'
       : `Backend failed to start: ${describeError(err)}`;
@@ -266,7 +275,11 @@ export async function runLocalProviderTurn(
       outcome = { kind: 'failed', error: message, finalText: '' };
     }
   } finally {
-    finishTurn(ctx, conv, model, checkpoint, postC, true, finalText);
+    try {
+      finishTurn(ctx, conv, model, checkpoint, postC, true, finalText);
+    } finally {
+      await turnLease?.release();
+    }
   }
   return outcome;
 }

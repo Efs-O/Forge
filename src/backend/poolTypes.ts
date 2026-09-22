@@ -11,6 +11,8 @@ import type { BackendProcess } from '../system/SystemReport';
 
 export interface IBackendPool {
   acquire(modelName: string): Promise<BackendController>;
+  /** Acquire a backend for an active turn and pin its slot until release. */
+  acquireForTurn?(modelName: string): Promise<BackendTurnLease>;
   /** Read-only capacity query: would delegating from `primaryModel` to
    *  `targetModel` be possible without evicting any loaded backend? Never
    *  mutates pool state and never triggers the LRU eviction in acquire(). */
@@ -49,4 +51,9 @@ export interface IBackendPool {
    *  can skip a repost; see docs/plans/MODEL_READINESS_DOT_PLAN.md for why this is polled
    *  rather than emitted. */
   residencySignature(): string;
+}
+
+export interface BackendTurnLease {
+  readonly backend: BackendController;
+  release(): Promise<void>;
 }

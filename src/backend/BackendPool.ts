@@ -22,7 +22,7 @@ import {
 } from './poolStructuralConfig';
 import type { StructuralSettings } from './poolStructuralConfig';
 import type { PortClaim, PoolSlot, SlotTable } from './poolSlots';
-import type { IBackendPool } from './poolTypes';
+import type { BackendTurnLease, IBackendPool } from './poolTypes';
 import type { BackendProcess } from '../system/SystemReport';
 import { reconcileDeadSlot, restartSlot, startSlot, type SlotStartContext } from './poolStart';
 
@@ -47,6 +47,8 @@ export class BackendPool implements IBackendPool {
   private readonly ollamaStarting = new Map<string, Promise<BackendController>>();
   /** Model releases in progress; every later acquire waits for teardown. */
   private readonly releasing = new Map<string, Promise<void>>();
+  /** Active sidebar turns pin their model before any asynchronous acquire work. */
+  private readonly turnPins = new Map<string, number>();
   private readonly freePorts: number[];
   private readonly gate: DelegationGate;
   /** Settings baked into the physical slot/port inventory at construction. */
@@ -95,6 +97,26 @@ export class BackendPool implements IBackendPool {
 
   acquire(modelName: string): Promise<BackendController> {
     return this.acquireByKey(this.poolKey(modelName), true);
+  }
+
+  acquireForTurn(modelName: string): Promise<BackendTurnLease> {
+    const key = this.poolKey(modelName);
+    this.turnPins.set(key, (this.turnPins.get(key) ?? 0) + 1);
+    let released = false;
+    return this.acquireByKey(key, true).then(
+      (backend) => ({
+        backend,
+        release: async () => {
+          if (released) return;
+          released = true;
+          this.unpinTurn(key);
+        },
+      }),
+      (error: unknown) => {
+        this.unpinTurn(key);
+        throw error;
+      },
+    );
   }
 
   /** `key` must already be a pool key. `allowEvict: false` never evicts —
@@ -372,8 +394,14 @@ export class BackendPool implements IBackendPool {
     return {
       slots: this.slots,
       freePorts: this.freePorts,
-      isPinned: (model) => this.gate.isPinned(model),
+      isPinned: (model) => this.gate.isPinned(model) || (this.turnPins.get(model) ?? 0) > 0,
     };
+  }
+
+  private unpinTurn(key: string): void {
+    const count = this.turnPins.get(key) ?? 0;
+    if (count <= 1) this.turnPins.delete(key);
+    else this.turnPins.set(key, count - 1);
   }
 
   /** Group-resolved, never raw: `provider` is routinely inherited from a

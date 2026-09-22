@@ -42,6 +42,13 @@ const storedSymlinkSchema = z
   })
   .strict();
 
+const checkpointPostconditionSchema = z
+  .object({
+    relativePath: relativePathSchema,
+    fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+  })
+  .strict();
+
 export const storedCheckpointEntrySchema = z.discriminatedUnion('kind', [
   storedFileSchema,
   storedDirectorySchema,
@@ -59,6 +66,7 @@ export const committedCheckpointManifestSchema = z
     createdAt: z.number().int().nonnegative(),
     originalEntries: z.array(storedCheckpointEntrySchema),
     createdPaths: z.array(relativePathSchema),
+    postconditions: z.array(checkpointPostconditionSchema).optional(),
   })
   .strict();
 

@@ -8,6 +8,7 @@ import {
   fromManifestPath,
   parseCommittedManifest,
 } from './CheckpointManifest';
+import { fingerprintMemoryState } from './MemoryCheckpointState';
 
 function resolveWorkspaceTarget(root: string, relativePath: string): string {
   const target = path.resolve(root, fromManifestPath(relativePath));
@@ -89,6 +90,7 @@ export async function restoreDiskCheckpoint(reference: DiskCheckpointReference):
     await fs.promises.readFile(reference.manifestPath, 'utf8'),
   );
   const root = path.resolve(reference.workspaceRoot);
+  await assertDiskCheckpointCurrent(reference, manifest);
   if (path.resolve(manifest.workspaceRoot) !== root)
     throw new Error('Checkpoint workspace mismatch');
   const staged = await stageCheckpointBlobs(reference, root, manifest.originalEntries);
@@ -122,6 +124,29 @@ export async function restoreDiskCheckpoint(reference: DiskCheckpointReference):
     await fs.promises.rm(staged.directory, { recursive: true, force: true });
   }
   return [...reference.changedPaths];
+}
+
+export async function assertDiskCheckpointCurrent(
+  reference: DiskCheckpointReference,
+  parsedManifest?: ReturnType<typeof parseCommittedManifest>,
+): Promise<void> {
+  const manifest =
+    parsedManifest ??
+    parseCommittedManifest(await fs.promises.readFile(reference.manifestPath, 'utf8'));
+  if (!manifest.postconditions) {
+    throw new Error('Checkpoint has no conflict metadata; Undo refused for safety.');
+  }
+  const root = path.resolve(reference.workspaceRoot);
+  if (path.resolve(manifest.workspaceRoot) !== root)
+    throw new Error('Checkpoint workspace mismatch');
+  for (const postcondition of manifest.postconditions) {
+    const target = resolveWorkspaceTarget(root, postcondition.relativePath);
+    if (fingerprintMemoryState(target) !== postcondition.fingerprint) {
+      throw new Error(
+        `Workspace changed after checkpoint ${manifest.turnId}: ${postcondition.relativePath}. Undo refused.`,
+      );
+    }
+  }
 }
 
 export async function discardDiskCheckpoint(reference: DiskCheckpointReference): Promise<void> {

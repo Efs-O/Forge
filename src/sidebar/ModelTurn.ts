@@ -290,6 +290,7 @@ export async function runModelTurn(
       canUseThinkingKwargs: thinkingKwargs,
       stripThinkingChannels,
       failureTracker: ctx.failureTracker,
+      failureTrackerKey: conv.id,
       ...(apiKey ? { apiKey } : {}),
       prepareMessages: (messages) => {
         // Compaction shrinks what the MODEL sees, never the stored transcript.

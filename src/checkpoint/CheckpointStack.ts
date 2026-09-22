@@ -12,6 +12,7 @@ import { DEFAULT_CHECKPOINT_LIMITS, type CheckpointLimits } from './CheckpointPo
 import { evictBeyondDepth, snapshotContents } from './checkpointHistory';
 import {
   captureMemoryState,
+  fingerprintMemoryState,
   restoreMemoryState,
   type MemorySnapshotState,
 } from './MemoryCheckpointState';
@@ -21,6 +22,7 @@ const log = getLogger();
 export interface FileSnapshot {
   filePath: string;
   originalState: MemorySnapshotState;
+  afterFingerprint?: string;
 }
 
 export interface Checkpoint {
@@ -120,6 +122,9 @@ export class CheckpointSession {
 
   commit(): void {
     if (this.committed) return;
+    for (const snapshot of this.pendingSnapshots) {
+      snapshot.afterFingerprint = fingerprintMemoryState(snapshot.filePath);
+    }
     this.committed = true;
     this.onCommit(this);
   }
@@ -220,6 +225,29 @@ export class CheckpointStack {
 
     const restored: string[] = [];
     const failures: Error[] = [];
+    for (const snapshot of checkpoint.snapshots) {
+      if (!snapshot.afterFingerprint) {
+        failures.push(
+          new Error(`Checkpoint for ${snapshot.filePath} has no conflict metadata; Undo refused.`),
+        );
+      } else if (fingerprintMemoryState(snapshot.filePath) !== snapshot.afterFingerprint) {
+        failures.push(
+          new Error(
+            `Workspace changed after checkpoint ${checkpoint.turnId}: ${snapshot.filePath}. Undo refused.`,
+          ),
+        );
+      }
+    }
+    for (const reference of checkpoint.diskSnapshots) {
+      try {
+        await this.diskStore.assertCurrent(reference);
+      } catch (err) {
+        failures.push(err instanceof Error ? err : new Error(String(err)));
+      }
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(failures, 'CheckpointStack: Undo refused because workspace changed');
+    }
     for (const snapshot of checkpoint.snapshots) {
       try {
         restoreMemoryState(snapshot.filePath, snapshot.originalState);

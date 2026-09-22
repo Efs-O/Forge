@@ -261,6 +261,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     postSessionSync: host.postSessionSync,
     pool,
     agentLoop,
+    requestChains,
     checkpoints,
     failureTracker,
     events,

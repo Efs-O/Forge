@@ -14,6 +14,7 @@ import type { CheckpointStack } from '../checkpoint/CheckpointStack';
 import type { IBackendPool } from '../backend/BackendPool';
 import type { ToolFailureTracker } from '../tools/StripTools';
 import type { AgentLoop, SidebarProviderEvents } from './AgentLoop';
+import type { RequestChainLifecycle } from './RequestChainLifecycle';
 import { isLocalModel } from '../backend/ModelHeuristics';
 import {
   opClearMessages,
@@ -48,6 +49,7 @@ export interface ConversationTabsDeps {
   postSessionSync: () => void;
   pool: IBackendPool;
   agentLoop: AgentLoop;
+  requestChains: RequestChainLifecycle;
   checkpoints: CheckpointStack;
   failureTracker: ToolFailureTracker;
   events: SidebarProviderEvents;
@@ -200,6 +202,7 @@ export class ConversationTabs {
 
     const modelName = conversation?.active_model;
     if (conversation) {
+      this.deps.requestChains.invalidateConversation(id);
       await this.deps.agentLoop.stopStreamingIfNeeded(id);
       await this.deps.agentLoop.disposeConversation(id);
       await this.deps.checkpoints.disposeConversation(id);

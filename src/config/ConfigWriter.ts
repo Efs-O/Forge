@@ -36,24 +36,49 @@ export {
  * that leaves the config schema-invalid, or an atomic-write failure.
  */
 export function updateConfigFile(configPath: string, mutate: (doc: YAML.Document) => void): void {
-  const raw = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : '';
-  const doc = raw.trim().length > 0 ? YAML.parseDocument(raw) : new YAML.Document({});
-  if (doc.errors.length > 0) {
-    throw new Error(
-      `Forge: config.yaml parse failed, refusing to write:\n${doc.errors
-        .map((e) => `  • ${e.message}`)
-        .join('\n')}`,
-    );
+  withConfigFileLock(configPath, () => {
+    const raw = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : '';
+    const doc = raw.trim().length > 0 ? YAML.parseDocument(raw) : new YAML.Document({});
+    if (doc.errors.length > 0) {
+      throw new Error(
+        `Forge: config.yaml parse failed, refusing to write:\n${doc.errors
+          .map((e) => `  • ${e.message}`)
+          .join('\n')}`,
+      );
+    }
+    mutate(doc);
+    ForgeConfigSchema.parse(doc.toJS() ?? {});
+    atomicWrite(configPath, doc.toString({ lineWidth: 0 }));
+  });
+}
+
+function withConfigFileLock(configPath: string, operation: () => void): void {
+  const lockPath = `${configPath}.lock`;
+  const started = Date.now();
+  const sleeper = new Int32Array(new SharedArrayBuffer(4));
+  let handle: number | undefined;
+  while (handle === undefined) {
+    try {
+      handle = fs.openSync(lockPath, 'wx');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+      try {
+        if (Date.now() - fs.statSync(lockPath).mtimeMs > 60_000)
+          fs.rmSync(lockPath, { force: true });
+      } catch (statError) {
+        if ((statError as NodeJS.ErrnoException).code !== 'ENOENT') throw statError;
+      }
+      if (Date.now() - started >= 15_000)
+        throw new Error(`Forge config lock timed out: ${lockPath}`);
+      Atomics.wait(sleeper, 0, 0, 25);
+    }
   }
-
-  mutate(doc);
-
-  // Validate the mutated document before anything touches disk — a mutation
-  // that produces an invalid config throws here and nothing is written.
-  ForgeConfigSchema.parse(doc.toJS() ?? {});
-
-  const output = doc.toString({ lineWidth: 0 });
-  atomicWrite(configPath, output);
+  try {
+    operation();
+  } finally {
+    fs.closeSync(handle);
+    fs.rmSync(lockPath, { force: true });
+  }
 }
 
 /**

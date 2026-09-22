@@ -234,7 +234,7 @@ export class SendPipeline {
             nextOptions,
           );
         } finally {
-          deps.failureTracker.reset();
+          deps.failureTracker.reset(conv.id);
           deps.persistSession();
           deps.postSessionSync();
           this.flushSessionLog(conv.id);

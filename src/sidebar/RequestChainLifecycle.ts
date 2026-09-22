@@ -137,6 +137,13 @@ export class RequestChainLifecycle {
     this.chains.delete(reservation.conversationId);
   }
 
+  /** Invalidate a conversation before its runtime object is removed. */
+  invalidateConversation(conversationId: string): void {
+    const reservation = this.reservations.get(conversationId);
+    if (reservation) this.release(reservation);
+    this.epochs.set(conversationId, (this.epochs.get(conversationId) ?? 0) + 1);
+  }
+
   currentEpoch(conversationId: string): number {
     return this.epochs.get(conversationId) ?? 0;
   }

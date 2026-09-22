@@ -13,6 +13,45 @@ import * as path from 'path';
 import { randomUUID } from 'crypto';
 
 const CONTENDED = new Set(['EPERM', 'EBUSY', 'EACCES']);
+const LOCK_WAIT_MS = 25;
+const LOCK_TIMEOUT_MS = 15_000;
+const LOCK_STALE_MS = 60_000;
+
+export async function withRemoteStateLock<T>(
+  filePath: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const lockPath = `${filePath}.lock`;
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const started = Date.now();
+  let handle: fs.FileHandle | undefined;
+  while (!handle) {
+    try {
+      handle = await fs.open(lockPath, 'wx', 0o600);
+      await handle.writeFile(`${process.pid}:${Date.now()}\n`, 'utf8');
+    } catch (err) {
+      await handle?.close().catch(() => undefined);
+      handle = undefined;
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+      try {
+        const stat = await fs.stat(lockPath);
+        if (Date.now() - stat.mtimeMs > LOCK_STALE_MS) await fs.unlink(lockPath);
+      } catch (statError) {
+        if ((statError as NodeJS.ErrnoException).code !== 'ENOENT') throw statError;
+      }
+      if (Date.now() - started >= LOCK_TIMEOUT_MS) {
+        throw new Error(`Forge remote state lock timed out: ${lockPath}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_MS));
+    }
+  }
+  try {
+    return await operation();
+  } finally {
+    await handle.close();
+    await fs.unlink(lockPath).catch(() => undefined);
+  }
+}
 
 export async function writeRemoteStateFile(filePath: string, contents: string): Promise<void> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });

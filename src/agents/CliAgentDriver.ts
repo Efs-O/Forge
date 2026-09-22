@@ -43,6 +43,7 @@ export class CliAgentDriver {
     let errorText: string | undefined;
     let sessionId: string | undefined;
     const stderrChunks: string[] = [];
+    let protocolError: string | undefined;
 
     const ctx: CliParseContext = {
       emitText: (text) => options.onEvent?.({ kind: 'text', text }),
@@ -86,8 +87,9 @@ export class CliAgentDriver {
       options.onStdoutLine?.(line);
       try {
         adapter.handleLine(line, ctx);
-      } catch {
-        // a malformed line from the CLI must never kill the run
+      } catch (error) {
+        protocolError = error instanceof Error ? error.message : String(error);
+        void terminateCliProcessTree(child);
       }
     });
 
@@ -155,6 +157,14 @@ export class CliAgentDriver {
         status: 'failed',
         finalText: finalText ?? '',
         error: errorText,
+        ...(sessionId ? { sessionId } : {}),
+      });
+    }
+    if (protocolError) {
+      return outcome({
+        status: 'failed',
+        finalText: finalText ?? '',
+        error: `${options.cliName} CLI emitted an invalid protocol message: ${protocolError}`,
         ...(sessionId ? { sessionId } : {}),
       });
     }

@@ -40,6 +40,7 @@ export class CliSessionCapacityError extends Error {
 export class CliSessionRegistry {
   private readonly conversations = new Map<string, Map<string, RegistryEntry>>();
   private sequence = 0;
+  private creationTail: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly maxSessions: number,
@@ -79,6 +80,7 @@ export class CliSessionRegistry {
   }
 
   async disposeConversation(conversationId: string): Promise<void> {
+    await this.creationTail;
     const models = this.conversations.get(conversationId);
     if (!models) return;
     this.conversations.delete(conversationId);
@@ -86,12 +88,26 @@ export class CliSessionRegistry {
   }
 
   async dispose(): Promise<void> {
+    await this.creationTail;
     const entries = [...this.entries()].map(([, entry]) => entry);
     this.conversations.clear();
     await Promise.all(entries.map((entry) => this.disposeEntry(entry)));
   }
 
   private async getOrCreate(
+    key: CliSessionKey,
+    options: CliAgentSessionOptions,
+  ): Promise<RegistryEntry> {
+    let result!: RegistryEntry;
+    const operation = this.creationTail.then(async () => {
+      result = await this.getOrCreateExclusive(key, options);
+    });
+    this.creationTail = operation.catch(() => undefined);
+    await operation;
+    return result;
+  }
+
+  private async getOrCreateExclusive(
     key: CliSessionKey,
     options: CliAgentSessionOptions,
   ): Promise<RegistryEntry> {
