@@ -1,5 +1,17 @@
 # Forge — Recent Changes
 
+## 0.16.25
+
+### Agent-task jobs: a successful change is reported again (2026-09-22)
+
+- **An agent-task job now reports a successful change under the default
+  `failures_and_changes` setting.** Before, `ok` was delivered only under
+  `always`, so the default silently swallowed every successful run — the
+  nightly llama.cpp install would have told you nothing. `always` now also
+  reports `no_change` runs.
+- **`docs/LLAMACPP_UPDATE.md`** is the procedure the `llama-updates` job's
+  agent follows. The job itself is now an `agent_task`.
+
 ## 0.16.24
 
 ### Mesh: a reload no longer swaps in a stranger (2026-09-22)

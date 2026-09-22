@@ -232,8 +232,11 @@ One run:
      "report once after 3 failures" rule for this action kind. That rule was
      written for a flapping GitHub check. Each agent failure is a distinct,
      expensive event that the owner wants to hear about.
-   - `ok` is reported when `report` allows it. `no_change` only goes to the run
-     log.
+   - `ok` is a change and is reported under both settings. `no_change` is
+     reported only under `always`; otherwise it goes to the run log alone.
+     (Until 0.16.25 `ok` was reported only under `always`, so the
+     `failures_and_changes` default swallowed every successful install —
+     found by Codex's phase 5a review.)
    - The message is the `RESULT` sentence, the outcome, the duration, and the
      last 800 characters of `finalText`, with the conversation id so the owner
      can open it.
@@ -321,7 +324,7 @@ on its own, which is the right shape anyway.
 | 2b | ~~Audit fixes F2/F3~~ **done** by `50d0f3f` (weekly audit A2: a window that lost the lease keeps ticking and takes over; A4: the watcher ignores lease heartbeats) | — | — |
 | 3 | Runner steps 1–6, 8, 9 and crash recovery; wire into the scheduler, including the three scheduler behaviours above | new `jobs/agentTask.ts`, `JobScheduler.ts` (+ `runCheck` extraction if needed), `extension.ts` wiring | Qwen Q6 — **signed off 2026-09-22.** Q6 wrote `1588cdf` in one turn, after two Qwopus attempts looped. Codex fixed 5 review findings in `afb2f92`: a pending task was never retried, the `max_minutes` timer outlived the turn, recovery ran in non-owner windows and cleared live runs, backoff had two owners, and `no_change` was logged as changed. Claude split out `agentTaskState.ts` in `6993f1f`, because the runner was at 499 lines with phase 4 still to land |
 | 4 | Step 7: restart after turn, config backup and rollback | `agentTask.ts` | ~~Codex~~ **Qwen Q6** (owner, 2026-09-22; Qwopus is evaluated separately); Codex reviews; Claude signs off: touches the live binary — **signed off 2026-09-22.** Q6 wrote `7928b91` (new `agentTaskRestart.ts`, no `llamacpp*` imports), with Codex's four review findings folded in. Claude fixed two more in the sign-off commit: a thrown step 7 was swallowed and left the report at `ok`, and a snapshot with no live config path claimed a rollback that restored nothing. Known limit, not fixed: after a cap hit the first `release`+`acquire` is not cancelled, so it can overlap the rollback restart; the phase 5 overnight test is the check |
-| 5 | The llama job plus `docs/LLAMACPP_UPDATE.md` (the "how", for the agent; it points at the `install_llamacpp` tool shipped in 0.16.20, which installs into `%LOCALAPPDATA%\Forge` without UAC); live overnight test; then retire `llamacpp_update` | config/job file, docs, removal | Forge writes the doc; the owner runs the test |
+| 5 | The llama job plus `docs/LLAMACPP_UPDATE.md` (the "how", for the agent; it points at the `install_llamacpp` tool shipped in 0.16.20, which installs into `%LOCALAPPDATA%\Forge` without UAC); live overnight test; then retire `llamacpp_update` | config/job file, docs, removal | Forge writes the doc; the owner runs the test — **5a (doc + job file) signed off 2026-09-22.** Qwen Q6 wrote the doc and converted the job; committed `a224794`. Codex's review found `ok` was never delivered under the default `failures_and_changes`, so a successful install would have been silent; fixed in 0.16.25. Pending: the overnight run, then retire `llamacpp_update` after two green runs |
 
 ### Phase 2 tool inventory for the unattended llama install
 

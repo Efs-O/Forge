@@ -380,10 +380,11 @@ export class AgentTaskRunner {
     const failed = outcome.kind === 'failed' || outcome.kind === 'timeout';
     const report = action.report;
 
-    // Deliver: every failure immediately; ok when `report` allows it;
-    // no_change only goes to the run log.
+    // Deliver: every failure immediately and every change (`ok`) under either
+    // setting; `no_change` only under `always`, else the run log alone.
     let delivered = 0;
-    const shouldReport = failed || (outcome.kind === 'ok' && report === 'always');
+    const shouldReport =
+      failed || outcome.kind === 'ok' || (outcome.kind === 'no_change' && report === 'always');
     if (shouldReport) {
       const message = this.reportMessage(outcome, durationMs, conversationId);
       await this.delivery.deliver(job, message).catch(() => undefined);

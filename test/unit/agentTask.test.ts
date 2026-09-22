@@ -455,9 +455,36 @@ describe('AgentTaskRunner', () => {
     expect(runs[0]!.summary).toContain('RESULT');
   });
 
-  it('no_change outcome does not deliver (only run log)', async () => {
+  it('an ok outcome is delivered under failures_and_changes (a change IS a change)', async () => {
+    const job = baseJob({
+      action: { kind: 'agent_task', task: 'install', report: 'failures_and_changes' },
+    });
+    await store.saveJob(job);
+    host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — installed b9999' });
+
+    const runner = new AgentTaskRunner(makeDeps());
+    await runner.run({ job, state: JobStateSchema.parse({}) }, false);
+
+    const item = await readOutboxItem(outboxDir, 'agent-task');
+    expect(item).toBeDefined();
+  });
+
+  it('no_change is delivered under always', async () => {
     const job = baseJob({
       action: { kind: 'agent_task', task: 'check', report: 'always' },
+    });
+    await store.saveJob(job);
+    host = fakeHost([], { kind: 'completed', finalText: 'RESULT: no_change — nothing new' });
+
+    const runner = new AgentTaskRunner(makeDeps());
+    await runner.run({ job, state: JobStateSchema.parse({}) }, false);
+
+    expect(await readOutboxItem(outboxDir, 'agent-task')).toBeDefined();
+  });
+
+  it('no_change outcome does not deliver under failures_and_changes (only run log)', async () => {
+    const job = baseJob({
+      action: { kind: 'agent_task', task: 'check', report: 'failures_and_changes' },
     });
     await store.saveJob(job);
     host = fakeHost([], { kind: 'completed', finalText: 'RESULT: no_change — nothing new' });
@@ -469,7 +496,7 @@ describe('AgentTaskRunner', () => {
     const runs = await store.readRuns('agent-task');
     expect(runs[0]!.outcome).toBe('ok');
     expect(runs[0]!.changed).toBe(false);
-    // no_change is not delivered even with report: always.
+    // no_change is not delivered under failures_and_changes.
     const item = await readOutboxItem(outboxDir, 'agent-task');
     expect(item).toBeUndefined();
   });
