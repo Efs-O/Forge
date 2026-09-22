@@ -962,6 +962,26 @@ describe('restartAfterTurn (step 7, phase 4)', () => {
     expect(host.restartModel).toHaveBeenCalledTimes(2);
   });
 
+  it('does not claim a rollback when a snapshot exists but the live config path is unknown', async () => {
+    const ok = parseResult('RESULT: ok — installed b1234\nRESTART: yes');
+    const backupPath = path.join(dir, 'config.bak');
+    await fs.promises.writeFile(backupPath, 'llama_server:\n  binary: /old/binary\n');
+    const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — installed b1234\nRESTART: yes' });
+    let calls = 0;
+    host.restartModel = vi.fn().mockImplementation(async () => {
+      calls++;
+      if (calls === 1) throw new Error('new binary did not start');
+    });
+    // Nothing can be restored without the live path, so the retry is what loaded.
+    const out = await restartAfterTurn(
+      { ...restartDeps(), host, backupPath, configPath: undefined },
+      'qwen',
+      ok,
+    );
+    expect(out.kind).toBe('ok');
+    expect(out.sentence).not.toContain('rolled back');
+  });
+
   it('reports a manual fix when the retry fails and there is no snapshot to roll back to', async () => {
     const ok = parseResult('RESULT: ok — installed b1234\nRESTART: yes');
     const configPath = path.join(dir, 'config.yaml');

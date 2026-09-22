@@ -268,8 +268,15 @@ export class AgentTaskRunner {
           jobModel,
           outcome,
         );
-      } catch {
-        // Leave the pre-restart outcome in place; the report still goes out.
+      } catch (err) {
+        // A bug in step 7 must not report the pre-restart "ok": the binary's
+        // state after a thrown restart is unknown.
+        outcome = {
+          kind: 'failed',
+          sentence: `restart after the turn failed unexpectedly (${String(err)})`,
+          restart: false,
+          finalText: outcome.finalText,
+        };
       }
       // Step 9: clean up on every exit path.
       marker?.dispose();

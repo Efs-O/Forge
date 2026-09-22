@@ -1,5 +1,23 @@
 # Forge — Recent Changes
 
+## 0.16.23
+
+### Agent-task jobs, phase 4 (2026-09-22)
+
+- **A job that installs a new llama.cpp can restart onto it.** When the agent
+  ends with `RESULT: ok` and `RESTART: yes`, the runner restarts the backend
+  after the turn, capped at 5 minutes. If the new binary does not load, it
+  restores `config.yaml` from the pre-turn snapshot and restarts again. The
+  report names both binaries. A failed rollback is reported as needing a
+  manual fix, never swallowed. With no model loaded, nothing restarts; the
+  new binary is used on the next load.
+
+### Mesh fix
+
+- `forge.sh send <you> codex` no longer says "not delivered" for a message
+  Codex received and answered. An idle recipient started before the relay
+  recorded its own hop, and the exchange log refused the late write.
+
 ## 0.16.22
 
 ### Agent-task jobs, phase 3 (2026-09-22)

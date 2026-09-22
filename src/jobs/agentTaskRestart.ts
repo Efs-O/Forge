@@ -61,7 +61,8 @@ export async function restartAfterTurn(
   // the live config (what the agent pointed it at), the old in the snapshot.
   const old = readBinaryFrom(deps.backupPath) ?? 'the previous';
   const newBin = readBinaryFrom(deps.configPath) ?? 'the new';
-  const hadBackup = deps.backupPath !== undefined;
+  // Both paths are needed for a restore; without either nothing is put back.
+  const hadBackup = deps.backupPath !== undefined && deps.configPath !== undefined;
   let result: { ok: boolean; error?: string | undefined };
   try {
     result = await restartWithCap(deps.host, jobModel, deps.sleep);
