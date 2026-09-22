@@ -83,6 +83,7 @@ const slimMsgSchema = z.object({
   tool_call_id: z.string().optional(),
   name: z.string().optional(),
   internal: z.boolean().optional(),
+  midTurn: z.boolean().optional(),
   attachments: z.array(attachmentRefSchema).optional(),
 });
 export type SlimPersistMessage = z.infer<typeof slimMsgSchema>;
@@ -94,6 +95,7 @@ export type DisplayPersistMessage =
       content: string;
       reasoning?: string;
       reasoningMs?: number;
+      midTurn?: boolean;
       attachments?: ChatAttachmentRef[];
     }
   | {
@@ -339,6 +341,7 @@ export function slimPersistMessages(messages: ChatMessage[]): SlimPersistMessage
       ...(typeof m.tool_call_id === 'string' ? { tool_call_id: m.tool_call_id } : {}),
       ...(typeof m.name === 'string' ? { name: m.name } : {}),
       ...(m.internal ? { internal: true } : {}),
+      ...(m.midTurn ? { midTurn: true } : {}),
       ...(m.attachments?.length ? { attachments: m.attachments } : {}),
     });
   }
@@ -358,6 +361,7 @@ export function chatMessagesFromSlim(slim: SlimPersistMessage[]): ChatMessage[] 
     ...(typeof m.tool_call_id === 'string' ? { tool_call_id: m.tool_call_id } : {}),
     ...(typeof m.name === 'string' ? { name: m.name } : {}),
     ...(m.internal ? { internal: true } : {}),
+    ...(m.midTurn ? { midTurn: true } : {}),
     ...(m.attachments?.length ? { attachments: m.attachments } : {}),
   }));
 }

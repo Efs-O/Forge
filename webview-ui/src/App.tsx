@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useReducer, useCallback, useRef, useState } from 'react';
 import { splitModelProfile } from '../../src/config/ConfigResolver';
 import type {
-  AttachmentData,
   ForgeSlashCommandId,
   HostToWebview,
   SessionHistoryMeta,
@@ -23,7 +22,6 @@ import { TranscriptPanes } from './components/TranscriptPanes';
 import { CheckpointBar } from './components/CheckpointBar';
 import { diffStats } from './components/DiffBlock';
 import { InputRow } from './components/InputRow';
-import { attachmentBytes } from './components/useAttachments';
 import { ConfirmationDialog } from './components/ConfirmationDialog';
 import { QuestionDialog } from './components/QuestionDialog';
 import { useAgentDialogs } from './useAgentDialogs';
@@ -35,13 +33,8 @@ import { StreamingStatus } from './components/StreamingStatus';
 import { SLASH_COMMANDS } from './slashCommands';
 import { webviewDiagnostics } from './WebviewDiagnostics';
 import { useHostCommands } from './hostCommands';
-
-export interface QueuedPrompt {
-  id: string;
-  conversationId: string;
-  text: string;
-  attachments: AttachmentData[];
-}
+import { usePendingPrompts } from './usePendingPrompts';
+export type { QueuedPrompt } from './usePendingPrompts';
 
 export function App(): React.ReactElement {
   webviewDiagnostics.recordRender();
@@ -60,11 +53,35 @@ export function App(): React.ReactElement {
   // render and must schedule another one.
   const [resumedIds, setResumedIds] = useState<ReadonlySet<string>>(() => new Set<string>());
   const resumedCaptured = useRef(false);
+
+  /** Sending in a tab settles it: the marker never returns for that tab. */
+  const clearResumed = useCallback((convId: string) => {
+    setResumedIds((current) => {
+      if (!current.has(convId)) return current;
+      const next = new Set(current);
+      next.delete(convId);
+      return next;
+    });
+  }, []);
+
   // Queued prompts belong in state so the user can see and cancel them before
-  // Forge submits them to the extension host.
-  const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
-  /** Prevent ordinary queue draining while a selected prompt is taking over. */
-  const steeringConversationIds = useRef(new Set<string>());
+  // Forge submits them to the extension host. Text-only entries become tells;
+  // attachment entries retain the end-of-turn queue.
+  const {
+    queuedPrompts,
+    handleSend,
+    cancelQueuedPrompt,
+    steerQueuedPrompt,
+    clearTellPrompts,
+    reconcileSessionSync,
+    clearSteering,
+    isSteering,
+  } = usePendingPrompts({
+    dispatch,
+    activeConversationId: state.activeConversationId,
+    streamingIds: state.streamingIds,
+    clearResumed,
+  });
 
   useEffect(() => {
     function handler(event: MessageEvent): void {
@@ -75,14 +92,15 @@ export function App(): React.ReactElement {
       if (dialogs.handleHostMessage(msg)) return;
       switch (msg.type) {
         case 'generationStarted':
-          if (msg.conversationId) steeringConversationIds.current.delete(msg.conversationId);
+          if (msg.conversationId) clearSteering(msg.conversationId);
           dispatch({ type: 'GENERATION_STARTED', convId: msg.conversationId });
           break;
-        // A prompt sent from a paired chat or a VS Code command. Reuses
-        // USER_SEND rather than adding a reducer case, so a remote prompt
-        // performs the same stale-diff and stale-error stripping a typed one
-        // does -- the bubble is identical because the action is.
         case 'userPrompt':
+          // A prompt sent from a paired chat or a VS Code command. Reuses
+          // USER_SEND rather than adding a reducer case, so a remote prompt
+          // performs the same stale-diff and stale-error stripping a typed one
+          // does -- the bubble is identical because the action is.
+          clearTellPrompts(msg.conversationId);
           dispatch({ type: 'USER_SEND', text: msg.text, convId: msg.conversationId });
           break;
         case 'token':
@@ -104,13 +122,13 @@ export function App(): React.ReactElement {
           // starts the redirected one. Keep the optimistic steered prompt and
           // the conversation's live state through that intermediate DONE;
           // generationStarted clears the handoff marker for the new request.
-          if (msg.conversationId && steeringConversationIds.current.has(msg.conversationId)) {
+          if (msg.conversationId && isSteering(msg.conversationId)) {
             break;
           }
           dispatch({ type: 'DONE', convId: msg.conversationId });
           break;
         case 'error':
-          if (msg.conversationId) steeringConversationIds.current.delete(msg.conversationId);
+          if (msg.conversationId) clearSteering(msg.conversationId);
           dispatch({ type: 'ERROR', message: msg.message, convId: msg.conversationId });
           break;
         case 'ready':
@@ -129,7 +147,7 @@ export function App(): React.ReactElement {
           dispatch({ type: 'BACKEND_STARTING', message: msg.message, convId: msg.conversationId });
           break;
         case 'backendDown':
-          if (msg.conversationId) steeringConversationIds.current.delete(msg.conversationId);
+          if (msg.conversationId) clearSteering(msg.conversationId);
           dispatch({ type: 'BACKEND_DOWN', message: msg.message, convId: msg.conversationId });
           break;
         case 'models':
@@ -174,6 +192,7 @@ export function App(): React.ReactElement {
           });
           break;
         case 'sessionSync':
+          reconcileSessionSync(msg.messagesById);
           dispatch({
             type: 'SESSION_SYNC',
             activeId: msg.activeId,
@@ -188,6 +207,7 @@ export function App(): React.ReactElement {
           setTokenMax(msg.max);
           break;
         case 'setInput':
+          clearTellPrompts(msg.conversationId);
           setPrefillText(msg.text);
           break;
         case 'clankerChanged':
@@ -214,89 +234,6 @@ export function App(): React.ReactElement {
     resumedCaptured.current = true;
     setResumedIds(resumedTabIds(state.tabs, Date.now()));
   }, [state.sessionHydrated, state.tabs]);
-
-  /** Sending in a tab settles it: the marker never returns for that tab. */
-  const clearResumed = useCallback((convId: string) => {
-    setResumedIds((current) => {
-      if (!current.has(convId)) return current;
-      const next = new Set(current);
-      next.delete(convId);
-      return next;
-    });
-  }, []);
-
-  const postPrompt = useCallback((prompt: QueuedPrompt) => {
-    dispatch({
-      type: 'USER_SEND',
-      text: prompt.text,
-      convId: prompt.conversationId,
-      // The bytes are in hand right now, so the thumbnail appears with the
-      // bubble rather than after the host has written the file and synced back.
-      attachments: prompt.attachments.map((attachment) => ({
-        name: attachment.name,
-        mediaType: attachment.mediaType,
-        bytes: attachmentBytes(attachment),
-        src: `data:${attachment.mediaType};base64,${attachment.data}`,
-      })),
-    });
-    vscode.postMessage({
-      type: 'send',
-      text: prompt.text,
-      attachments: prompt.attachments.length ? prompt.attachments : undefined,
-      conversationId: prompt.conversationId,
-    });
-  }, []);
-
-  const handleSend = useCallback(
-    (text: string, attachments: AttachmentData[]) => {
-      const prompt = { conversationId: state.activeConversationId, text, attachments };
-      clearResumed(prompt.conversationId);
-      if (state.streamingIds.has(prompt.conversationId)) {
-        setQueuedPrompts((current) => [...current, { ...prompt, id: crypto.randomUUID() }]);
-        return;
-      }
-      postPrompt({ ...prompt, id: crypto.randomUUID() });
-    },
-    [clearResumed, postPrompt, state.activeConversationId, state.streamingIds],
-  );
-
-  useEffect(() => {
-    const nextIndex = queuedPrompts.findIndex(
-      (prompt) =>
-        !state.streamingIds.has(prompt.conversationId) &&
-        !steeringConversationIds.current.has(prompt.conversationId),
-    );
-    if (nextIndex < 0) return;
-    const next = queuedPrompts[nextIndex];
-    if (!next) return;
-    setQueuedPrompts((current) => current.filter((prompt) => prompt.id !== next.id));
-    postPrompt(next);
-  }, [postPrompt, queuedPrompts, state.streamingIds]);
-
-  const cancelQueuedPrompt = useCallback((id: string) => {
-    setQueuedPrompts((current) => current.filter((prompt) => prompt.id !== id));
-  }, []);
-
-  const steerQueuedPrompt = useCallback(
-    (id: string) => {
-      const prompt = queuedPrompts.find((candidate) => candidate.id === id);
-      if (!prompt) return;
-      clearResumed(prompt.conversationId);
-      steeringConversationIds.current.add(prompt.conversationId);
-      setQueuedPrompts((current) => current.filter((candidate) => candidate.id !== id));
-      // Replace the queued presentation with the same optimistic user row used
-      // by an ordinary send. The host persists and reconciles it once the
-      // interrupted request has released the conversation.
-      dispatch({ type: 'USER_SEND', text: prompt.text, convId: prompt.conversationId });
-      vscode.postMessage({
-        type: 'steer',
-        text: prompt.text,
-        attachments: prompt.attachments.length ? prompt.attachments : undefined,
-        conversationId: prompt.conversationId,
-      });
-    },
-    [clearResumed, queuedPrompts],
-  );
 
   const {
     handleCancel,
@@ -363,7 +300,10 @@ export function App(): React.ReactElement {
   const activeModelIsLocal = activeModelEntry?.residency !== undefined;
 
   const queuedIds = useMemo(
-    () => new Set(queuedPrompts.map((prompt) => prompt.conversationId)),
+    () =>
+      new Set(
+        queuedPrompts.filter((prompt) => !prompt.tell).map((prompt) => prompt.conversationId),
+      ),
     [queuedPrompts],
   );
 

@@ -2,6 +2,14 @@
 
 ## 0.16.35
 
+### Mid-turn messages reach Forge at the next safe gap (2026-09-22)
+
+- **Send while Forge is working now reaches it at the next gap between tool
+  calls.** If the turn ends first, the message runs as the next turn; Stop
+  returns an undelivered message to the input box.
+- Steer and the queue UI are unchanged for now; they are planned for a later
+  phase.
+
 ### Remembered notes survive a compaction you can find them after (2026-09-22)
 
 - **After a compaction, the agent is told which keys it stored with

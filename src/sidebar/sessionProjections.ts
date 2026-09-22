@@ -109,6 +109,7 @@ export function displayPersistMessages(
       // A reasoning-only turn has content: null; the webview contract is string.
       content,
       ...(reasoning ? { reasoning, ...reasoningMs } : {}),
+      ...(m.role === 'user' && m.midTurn ? { midTurn: true } : {}),
       ...(m.attachments?.length ? { attachments: m.attachments } : {}),
     });
   }

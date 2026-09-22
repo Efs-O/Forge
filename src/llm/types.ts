@@ -50,6 +50,8 @@ export interface ChatMessage {
   tool_calls?: ToolCall[];
   /** Retained for model context and persistence, but not rendered in the sidebar. */
   internal?: boolean;
+  /** A user message delivered at a tool-round gap, labelled only on the wire. */
+  midTurn?: boolean;
 }
 
 export interface ToolCall {

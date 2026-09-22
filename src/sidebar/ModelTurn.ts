@@ -16,7 +16,7 @@ import type { RuntimeModelCapabilities } from '../backend/ModelCapabilities';
 import type { TemplateEngine } from '../llm/TemplateEngine';
 import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
 import type { ToolRegistry } from '../tools/ToolRegistry';
-import type { ToolDefinition } from '../llm/types';
+import type { ChatMessage, ToolDefinition } from '../llm/types';
 import type { ToolDispatch } from './ToolDispatch';
 import type { ToolFailureTracker } from '../tools/StripTools';
 import type { TurnLifecycle } from './TurnLifecycle';
@@ -107,6 +107,7 @@ export interface ModelTurnContext {
   /** Remote chats bound to a conversation. Absent when no transport is live. */
   remoteReach?: (conversationId: string) => number;
   compactMidTurn?: (conv: ConversationRuntime, request: { exhausted: boolean }) => Promise<boolean>;
+  drainTells?: (conversationId: string) => ChatMessage[];
 }
 
 export interface ModelTurnRequest {
@@ -381,6 +382,7 @@ export async function runModelTurn(
         // Token bar ticks in `onUsage`: a tool result moves no measured context.
       },
       onMessagesChanged: () => ctx.onTranscriptChanged?.(conv),
+      ...(ctx.drainTells ? { drainTells: () => ctx.drainTells!(conv.id) } : {}),
       onToken: (text) => {
         postC({ type: 'token', text });
         ctx.emitAgentProgress({ conversationId: conv.id, kind: 'commentary', text });

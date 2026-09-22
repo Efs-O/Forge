@@ -1,7 +1,7 @@
 import type { ModelConfig } from '../config/types';
 import { getLogger } from '../util/logger';
 import type { ChatCompletionRequest, ChatMessage, ContentPart, ToolCall } from './types';
-import type { StreamHandlers } from './OpenAIClient';
+import { wireMessageContent, type StreamHandlers } from './OpenAIClient';
 import { withDescribedCause } from '../util/describeError';
 
 interface OllamaToolCallChunk {
@@ -120,10 +120,11 @@ function parseToolArguments(argumentsJson: string): Record<string, unknown> {
 }
 
 function toOllamaMessage(message: ChatMessage): OllamaChatMessage {
+  const wireContent = wireMessageContent(message);
   if (message.tool_calls?.length) {
     return {
       role: message.role,
-      content: typeof message.content === 'string' ? message.content : '',
+      content: typeof wireContent === 'string' ? wireContent : '',
       tool_calls: message.tool_calls.map((call) => ({
         function: {
           name: call.function.name,
@@ -151,7 +152,7 @@ function toOllamaMessage(message: ChatMessage): OllamaChatMessage {
   }
   return {
     role: message.role,
-    content: typeof message.content === 'string' ? message.content : '',
+    content: typeof wireContent === 'string' ? wireContent : '',
   };
 }
 

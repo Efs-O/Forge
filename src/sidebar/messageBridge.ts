@@ -268,10 +268,7 @@ export interface FileDiffMsg {
   conversationId?: string;
 }
 
-export interface SetInputMsg {
-  type: 'setInput';
-  text: string;
-}
+export type SetInputMsg = { type: 'setInput'; text: string; conversationId?: string };
 /** @deprecated Replaced by sessionSync on load. */
 export interface HistoryRestoreMsg {
   type: 'historyRestore';
@@ -298,6 +295,7 @@ export interface SessionSyncMsg {
           content: string;
           reasoning?: string | undefined;
           reasoningMs?: number | undefined;
+          midTurn?: boolean | undefined;
           attachments?: ChatAttachmentRef[] | undefined;
         }
       | {

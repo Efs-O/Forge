@@ -31,6 +31,27 @@ function handlers() {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('OpenAI-compat wire messages', () => {
+  it('labels a mid-turn user message without persisting the marker upstream', async () => {
+    const fetchMock = vi.fn(async () => doneResponse());
+    vi.stubGlobal('fetch', fetchMock);
+    const request = {
+      model: 'qwen3.8-27b',
+      stream: true,
+      messages: [{ role: 'user', content: 'also update the changelog', midTurn: true }],
+    } as unknown as ChatCompletionRequest;
+
+    await streamChatCompletion('http://localhost:0', request, handlers());
+
+    const body = JSON.parse((fetchMock.mock.calls[0]?.[1] as RequestInit).body as string);
+    expect(body.messages[0]).toEqual({
+      role: 'user',
+      content:
+        '[Sent by the user while you were working. If it changes the task, adjust; otherwise acknowledge it in one line and continue.]\n\nalso update the changelog',
+    });
+    expect((body.messages[0] as { midTurn?: boolean }).midTurn).toBeUndefined();
+    expect((request.messages[0] as { midTurn?: boolean }).midTurn).toBe(true);
+  });
+
   it('strips sidebar-only fields that strict validators (Cerebras) reject', async () => {
     // Regression: Cerebras answered HTTP 400 wrong_api_format —
     // `messages.2.assistant.reasoningMs: property ... is unsupported` — because

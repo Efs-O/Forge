@@ -53,7 +53,7 @@ function toRows(messages: AppMessage[]): Row[] {
 
 interface Props {
   messages: AppMessage[];
-  queuedPrompts: Array<{ id: string; text: string; attachments: unknown[] }>;
+  queuedPrompts: Array<{ id: string; text: string; attachments: unknown[]; tell?: boolean }>;
   onCancelQueuedPrompt: (id: string) => void;
   onSteerQueuedPrompt: (id: string) => void;
   streaming: boolean;
@@ -319,6 +319,7 @@ export function MessageList({
           key={prompt.id}
           text={prompt.text}
           attachmentCount={prompt.attachments.length}
+          tell={prompt.tell}
           waitingOn={queuedModelName ?? null}
           onSteer={() => onSteerQueuedPrompt(prompt.id)}
           onCancel={() => onCancelQueuedPrompt(prompt.id)}

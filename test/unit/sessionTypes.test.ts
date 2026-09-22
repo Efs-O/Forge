@@ -178,6 +178,23 @@ describe('sessionTypes', () => {
     expect(chatMessagesFromSlim(slimPersistMessages(messages))).toEqual(messages);
   });
 
+  it('round-trips the mid-turn marker through persistence', () => {
+    const message: ChatMessage = { role: 'user', content: 'adjust the task', midTurn: true };
+    const persisted = slimPersistMessages([message]);
+
+    expect(sidebarSessionPersistedSchema.safeParse({
+      activeConversationId: 'c1',
+      conversations: [{
+        id: 'c1',
+        title: 'Chat',
+        createdAt: 1,
+        updatedAt: 1,
+        messages: persisted,
+      }],
+    }).success).toBe(true);
+    expect(chatMessagesFromSlim(persisted)).toEqual([message]);
+  });
+
   it('restores a completed tool row and its file preview after session sync or reload', () => {
     const messages: ChatMessage[] = [
       { role: 'user', content: 'update the file' },

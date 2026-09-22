@@ -85,6 +85,7 @@ overlaps with an existing owner, extend the owner instead.
 | ----------------------------------------------- | ----------------------------------------------- |
 | Streamed assistant turn finalization            | `src/agent/StreamedAssistantTurn.ts`            |
 | Webview state reducer (per-conversation keying) | `webview-ui/src/reducer.ts`                     |
+| Pending prompts, queue flush, and mid-turn tells | `webview-ui/src/usePendingPrompts.ts`           |
 | Fire-and-forget webview→host commands           | `webview-ui/src/hostCommands.ts`                |
 | Approval + agent-question modal state           | `webview-ui/src/useAgentDialogs.ts`             |
 | Agent question dialog (ask_user in the sidebar) | `webview-ui/src/components/QuestionDialog.tsx`  |
@@ -248,6 +249,8 @@ overlaps with an existing owner, extend the owner instead.
 | Cloud request URL + secret resolution        | `src/llm/CloudRequestResolver.ts`            |
 | Local/cloud route classification             | `src/llm/ModelRouteClassifier.ts`            |
 | Shared native/fallback tool-calling loop     | `src/agent/ToolCallingLoop.ts`               |
+| Mid-turn tell inbox                          | `src/agent/MidTurnInbox.ts`                  |
+| Tool-calling stream helpers                  | `src/agent/toolCallingStream.ts`             |
 | Truncated tool call: detection + recovery    | `src/agent/truncationRecovery.ts`            |
 | Repeated identical tool call detection       | `src/agent/ToolLoopGuard.ts`                 |
 | Fit-only tool-result excerpting (model copy) | `src/agent/toolResultContext.ts`             |

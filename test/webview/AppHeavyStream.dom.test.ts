@@ -115,39 +115,26 @@ describe('App heavy streaming load', () => {
     60_000,
   );
 
-  it('keeps a steered prompt visible through the interrupted turn shutdown', () => {
+  it('sends a text tell while the turn continues', () => {
     const textarea = container.querySelector<HTMLTextAreaElement>('#prompt')!;
     act(() => setNativeTextareaValue(textarea, 'redirect the active turn'));
-    // Enter is the only way to queue during a turn: the composer's action slot
-    // holds Stop alone while streaming, because a second "Queue" button fired
-    // this same submit and the QueuedPromptRow below is what confirms it.
+    // Text-only prompts go to the host inbox immediately; attachments retain
+    // the old end-of-turn queue.
     act(() => {
       textarea.dispatchEvent(
         new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
       );
     });
 
-    const steer = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find(
-      (button) => button.textContent === 'Steer',
-    );
-    expect(steer).toBeDefined();
-    act(() => steer!.click());
-
     expect(posted).toContainEqual({
-      type: 'steer',
+      type: 'send',
       text: 'redirect the active turn',
       conversationId: 'stress-conversation',
     });
     expect(container.textContent).toContain('redirect the active turn');
 
-    // The interrupted request completes and publishes its older persisted
-    // transcript before the redirected request announces its start.
+    // The running turn publishes the injected message at the next sync.
     act(() => {
-      hostMessage({
-        type: 'done',
-        finishReason: 'cancelled',
-        conversationId: 'stress-conversation',
-      });
       hostMessage({
         type: 'sessionSync',
         activeId: 'stress-conversation',
@@ -160,16 +147,71 @@ describe('App heavy streaming load', () => {
           },
         ],
         history: [],
-        messagesById: { 'stress-conversation': [] },
+        messagesById: {
+          'stress-conversation': [
+            { role: 'user', content: 'redirect the active turn', midTurn: true },
+          ],
+        },
       });
     });
 
     expect(container.textContent).toContain('redirect the active turn');
     expect(streamingPhrase()).not.toBe('');
+  });
 
-    act(() =>
-      hostMessage({ type: 'generationStarted', conversationId: 'stress-conversation' }),
-    );
-    expect(container.textContent).toContain('redirect the active turn');
+  it('replaces the pending tell row when the host starts its fallback turn', () => {
+    const textarea = container.querySelector<HTMLTextAreaElement>('#prompt')!;
+    act(() => setNativeTextareaValue(textarea, 'run this after the current turn'));
+    act(() => {
+      textarea.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+      );
+    });
+
+    expect(container.querySelector('.msg-queued')).not.toBeNull();
+    act(() => {
+      hostMessage({
+        type: 'userPrompt',
+        text: 'run this after the current turn',
+        conversationId: 'stress-conversation',
+      });
+      hostMessage({ type: 'generationStarted', conversationId: 'stress-conversation' });
+    });
+
+    expect(container.querySelector('.msg-queued')).toBeNull();
+    const tell = 'run this after the current turn';
+    expect(
+      [...container.querySelectorAll<HTMLElement>('.msg.user')].filter(
+        (element) => element.textContent === tell,
+      ),
+    ).toHaveLength(1);
+
+    // The persisted row arriving on the next sync must reconcile with the
+    // optimistic bubble, not append a second copy.
+    act(() => {
+      hostMessage({
+        type: 'sessionSync',
+        activeId: 'stress-conversation',
+        tabs: [
+          {
+            id: 'stress-conversation',
+            title: 'Stress test',
+            createdAt: 1,
+            updatedAt: 3,
+          },
+        ],
+        history: [],
+        messagesById: {
+          'stress-conversation': [{ role: 'user', content: tell, midTurn: true }],
+        },
+      });
+    });
+
+    expect(container.querySelector('.msg-queued')).toBeNull();
+    expect(
+      [...container.querySelectorAll<HTMLElement>('.msg.user')].filter(
+        (element) => element.textContent === tell,
+      ),
+    ).toHaveLength(1);
   });
 });

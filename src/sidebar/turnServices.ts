@@ -11,6 +11,7 @@ import type * as vscode from 'vscode';
 import type { ForgeConfig, ModelConfig } from '../config/types';
 import type { AttachmentData, HostToWebview } from './messageBridge';
 import type { ConversationRuntime } from './sessionTypes';
+import type { ChatMessage } from '../llm/types';
 import type { ModelTurnRequest } from './ModelTurn';
 import type { ToolCallingLoopResult } from '../agent/ToolCallingLoop';
 import type { IBackendPool } from '../backend/BackendPool';
@@ -58,6 +59,8 @@ export interface TurnServices {
   remoteReach?: (conversationId: string) => number;
   /** Compacts between two rounds of a running turn; true when it did. */
   compactMidTurn?: (conv: ConversationRuntime, request: { exhausted: boolean }) => Promise<boolean>;
+  /** Drains text tells at the next safe tool-round gap. */
+  drainTells?: (conversationId: string) => ChatMessage[];
   commitUserPrompt: (
     conv: ConversationRuntime,
     text: string,

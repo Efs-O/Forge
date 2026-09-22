@@ -13,6 +13,16 @@ const log = getLogger();
 let requestSequence = 0;
 const STREAM_STALL_TIMEOUT_MS = 45_000;
 
+export const MID_TURN_WIRE_LABEL =
+  '[Sent by the user while you were working. If it changes the task, adjust; otherwise acknowledge it in one line and continue.]';
+
+export function wireMessageContent(
+  message: Pick<ChatMessage, 'content' | 'midTurn'>,
+): ChatMessage['content'] {
+  if (!message.midTurn || typeof message.content !== 'string') return message.content;
+  return `${MID_TURN_WIRE_LABEL}\n\n${message.content}`;
+}
+
 function requestTarget(baseUrl: string): string {
   try {
     return new URL(baseUrl).host;
@@ -53,7 +63,7 @@ function messageStats(request: ChatCompletionRequest): {
  * is unsupported`. Whitelisting the wire fields keeps every provider happy.
  */
 function toWireMessage(message: ChatMessage): ChatMessage {
-  const wire: ChatMessage = { role: message.role, content: message.content };
+  const wire: ChatMessage = { role: message.role, content: wireMessageContent(message) };
   if (message.tool_call_id !== undefined) wire.tool_call_id = message.tool_call_id;
   if (message.name !== undefined) wire.name = message.name;
   if (message.tool_calls !== undefined) wire.tool_calls = message.tool_calls;

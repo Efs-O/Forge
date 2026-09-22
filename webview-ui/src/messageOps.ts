@@ -29,6 +29,8 @@ export interface AppMessage {
   reasoningMs?: number;
   /** Set while reasoning is still streaming into this row. */
   reasoningStartedAt?: number;
+  /** Host marker for a user tell injected between tool rounds. */
+  midTurn?: boolean;
   /** System rows only: render verbatim in a monospace block rather than as a
    *  centred one-line status row. Set by reports whose columns carry meaning. */
   preformatted?: boolean;
@@ -56,6 +58,7 @@ export type PersistedRow =
       content: string;
       reasoning?: string | undefined;
       reasoningMs?: number | undefined;
+      midTurn?: boolean | undefined;
       attachments?: ChatAttachmentRef[] | undefined;
     }
   | {
@@ -123,6 +126,7 @@ export function mergeSyncedMessages(
     ...((m.role === 'user' || m.role === 'assistant') && m.reasoningMs !== undefined
       ? { reasoningMs: m.reasoningMs }
       : {}),
+    ...((m.role === 'user' || m.role === 'assistant') && m.midTurn ? { midTurn: true } : {}),
     ...((m.role === 'user' || m.role === 'assistant') && m.attachments?.length
       ? { attachments: m.attachments.map((ref) => restoredAttachment(ref, attachmentsRoot)) }
       : {}),

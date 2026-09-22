@@ -39,6 +39,7 @@ import { opResetReportedContext } from './ConversationOps';
 import { snapshotRepoState } from './repoSnapshot';
 import { listMemoryKeys } from '../tools/memoryTools';
 import { RequestChainLifecycle } from './RequestChainLifecycle';
+import { MidTurnInbox } from '../agent/MidTurnInbox';
 
 /** What the provider lends its collaborators. */
 export interface SidebarHost {
@@ -98,11 +99,13 @@ export interface SidebarRuntimeParts {
   tabs: ConversationTabs;
   send: SendPipeline;
   requestChains: RequestChainLifecycle;
+  midTurnInbox: MidTurnInbox;
 }
 
 export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRuntimeParts {
   const { pool, checkpoints, toolRegistry, failureTracker, events, workspaceState } = parts;
   const requestChains = new RequestChainLifecycle();
+  const midTurnInbox = new MidTurnInbox();
 
   const agentLoop = new AgentLoop(
     pool,
@@ -124,6 +127,13 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     parts.cliSessions,
   );
   if (workspaceState.get<boolean>('forge.clankerMode', false)) agentLoop.setClankerMode(true);
+  agentLoop.setMidTurnTellDrainer((conversationId) =>
+    midTurnInbox.drain(conversationId).map((tell) => ({
+      role: 'user',
+      content: tell.text,
+      midTurn: true,
+    })),
+  );
 
   const budget = new ContextBudgetPublisher({
     getConfig: host.getConfig,
@@ -250,6 +260,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     evaluateAfterTurn: (conv, chain) => budget.evaluateAfterTurn(conv, chain),
     resetContextWarning: (conversationId) => budget.resetWarning(conversationId),
     attachmentStore: parts.attachmentStore,
+    midTurnInbox,
   });
 
   const tabs = new ConversationTabs({
@@ -308,5 +319,5 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     presentsLocally: () => host.getView() !== undefined,
   });
 
-  return { agentLoop, slashHandler, budget, tabs, send, requestChains };
+  return { agentLoop, slashHandler, budget, tabs, send, requestChains, midTurnInbox };
 }

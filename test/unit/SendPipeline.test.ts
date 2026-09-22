@@ -17,6 +17,7 @@ import type { ConversationRuntime, SidebarRuntime } from '../../src/sidebar/sess
 import type { HostToWebview } from '../../src/sidebar/messageBridge';
 import { RequestChainLifecycle } from '../../src/sidebar/RequestChainLifecycle';
 import { CONTEXT_EXHAUSTED_MESSAGE } from '../../src/agent/truncationRecovery';
+import { MidTurnInbox } from '../../src/agent/MidTurnInbox';
 
 function conversation(overrides: Partial<ConversationRuntime> = {}): ConversationRuntime {
   return {
@@ -38,6 +39,7 @@ interface Harness {
   deps: SendPipelineDeps;
   conv: ConversationRuntime;
   requestChains: RequestChainLifecycle;
+  midTurnInbox: MidTurnInbox;
 }
 
 function harness(
@@ -66,6 +68,7 @@ function harness(
 
   const sidebar = { activeConversationId: conv.id, conversations: [conv] } as SidebarRuntime;
   const requestChains = new RequestChainLifecycle();
+  const midTurnInbox = new MidTurnInbox();
 
   const deps: SendPipelineDeps = {
     getConfig: () => config,
@@ -88,9 +91,10 @@ function harness(
     postSessionSync: vi.fn(),
     evaluateAfterTurn: vi.fn(async () => undefined),
     resetContextWarning: vi.fn(),
+    midTurnInbox,
   };
 
-  return { pipeline: new SendPipeline(deps), posted, runTurn, deps, conv, requestChains };
+  return { pipeline: new SendPipeline(deps), posted, runTurn, deps, conv, requestChains, midTurnInbox };
 }
 
 function errors(posted: HostToWebview[]): string[] {
@@ -308,6 +312,61 @@ describe('SendPipeline.send', () => {
     await h.pipeline.send('start');
 
     expect(logTurnError).not.toHaveBeenCalled();
+  });
+
+  it('runs tells left at a normal turn end as the next turn', async () => {
+    const h = harness();
+    h.midTurnInbox.add('conv-1', { id: 'tell-1', text: 'follow-up one' });
+    h.midTurnInbox.add('conv-1', { id: 'tell-2', text: 'follow-up two' });
+
+    await h.pipeline.send('start');
+
+    expect(h.runTurn).toHaveBeenCalledTimes(2);
+    expect(h.runTurn.mock.calls[1]?.[2]).toBe('follow-up one\n\nfollow-up two');
+    const echoes = h.posted.filter(
+      (msg) => msg.type === 'userPrompt' && msg.text === 'follow-up one\n\nfollow-up two',
+    );
+    expect(echoes).toHaveLength(1);
+    const echoIndex = h.posted.indexOf(echoes[0]!);
+    const started = h.posted
+      .map((msg, index) => (msg.type === 'generationStarted' ? index : -1))
+      .filter((index) => index >= 0);
+    expect(echoIndex).toBeLessThan(started[1]!);
+  });
+
+  it('runs a tell added during evaluation when there is no continuation', async () => {
+    const h = harness();
+    h.deps.evaluateAfterTurn.mockImplementationOnce(async () => {
+      h.midTurnInbox.add('conv-1', { id: 'tell-during-evaluation', text: 'finish this too' });
+      return undefined;
+    });
+
+    await h.pipeline.send('start');
+
+    expect(h.runTurn).toHaveBeenCalledTimes(2);
+    expect(h.runTurn.mock.calls[1]?.[2]).toBe('finish this too');
+    expect(h.posted).toContainEqual({
+      type: 'userPrompt',
+      text: 'finish this too',
+      conversationId: 'conv-1',
+    });
+    expect(h.midTurnInbox.takeUndelivered('conv-1')).toEqual([]);
+  });
+
+  it('returns undelivered tells to the composer when the turn is stopped', async () => {
+    const h = harness();
+    h.runTurn.mockResolvedValueOnce({ kind: 'cancelled', finalText: '' });
+    h.midTurnInbox.add('conv-1', { id: 'tell-1', text: 'do this after all' });
+
+    await h.pipeline.send('start');
+
+    expect(h.runTurn).toHaveBeenCalledOnce();
+    expect(h.posted).toContainEqual({
+      type: 'setInput',
+      text: 'do this after all',
+      conversationId: 'conv-1',
+    });
+    expect(h.midTurnInbox.takeUndelivered('conv-1')).toEqual([]);
   });
 
   it('pins the full selection including @profile on the conversation', async () => {

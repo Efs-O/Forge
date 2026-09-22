@@ -418,19 +418,18 @@ export function InputRow({
           />
 
           <span className="input-actions-right">
-            {streaming ? (
+            {streaming && (
               // The labels are wrapped so the narrow-panel rule can drop the
               // word and keep the glyph. A bare text node cannot be targeted.
               <button id="btn-stop" type="button" onClick={onCancel} title="Stop">
                 <StopIcon />
                 <span>Stop</span>
               </button>
-            ) : (
-              <button id="btn-send" type="button" onClick={submit} disabled={!canSend} title="Send">
-                <SendIcon />
-                <span>Send</span>
-              </button>
             )}
+            <button id="btn-send" type="button" onClick={submit} disabled={!canSend} title="Send">
+              <SendIcon />
+              <span>Send</span>
+            </button>
           </span>
         </div>
 
@@ -442,7 +441,7 @@ export function InputRow({
           {clankerMode
             ? '⏵⏵ Clanker — no confirmations · /clanker to stop'
             : streaming
-              ? 'Enter queues this for the next turn'
+              ? 'Enter tells Forge at its next step'
               : 'Enter to send · Shift+Enter for a newline'}
         </p>
       </div>

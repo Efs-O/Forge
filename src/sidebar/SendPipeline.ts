@@ -27,6 +27,7 @@ import type { ContextThresholdAction } from './ContextBudgetPublisher';
 import { isContextExhaustionReason } from '../agent/truncationRecovery';
 import type { ChatAttachmentStore } from './ChatAttachmentStore';
 import type { ChatAttachmentRef } from '../llm/types';
+import type { MidTurnInbox } from '../agent/MidTurnInbox';
 
 const log = getLogger();
 export const CONVERSATION_BUSY_ERROR = 'Forge: this conversation is still generating.';
@@ -57,6 +58,7 @@ export interface SendPipelineDeps {
   /** Absent in tests and in a host with no globalStorage; attachments then
    *  behave exactly as before, minus the transcript thumbnails. */
   attachmentStore?: ChatAttachmentStore | undefined;
+  midTurnInbox: MidTurnInbox;
 }
 
 export class SendPipeline {
@@ -215,65 +217,107 @@ export class SendPipeline {
         log.warn(`[SendPipeline] chat attachments were not saved: ${(err as Error).message}`);
       }
     }
-    return deps.requestChains.run(chain, async () => {
-      let nextText = text;
-      let nextAttachments = attachments;
-      // Only the FIRST request of a chain carries the files the user sent; a
-      // continuation re-sends neither the bytes nor their references.
-      let nextOptions = attachmentRefs.length
-        ? { ...(promptOptions ?? {}), attachmentRefs }
-        : promptOptions;
-      for (;;) {
-        let turn: ForgeTurnOutcome;
-        try {
-          turn = await deps.agentLoop.runTurn(
-            conv,
-            selectedModel,
-            nextText,
-            nextAttachments,
-            nextOptions,
-          );
-        } finally {
-          deps.failureTracker.reset(conv.id);
-          deps.persistSession();
-          deps.postSessionSync();
-          this.flushSessionLog(conv.id);
-        }
-        // After the flush, so the error lands beneath the rows it followed. A
-        // failed turn writes no messages of its own, so without this the file
-        // ends on the last successful tool row and reads as a healthy turn.
-        if (turn.kind === 'failed') this.logTurnError(conv.id, turn.error);
-        if (turn.kind === 'cancelled' || turn.kind === 'interrupted') {
-          this.logTurnStopped(conv.id, turn.kind);
-        }
-        // Context exhaustion is a failed provider turn, but it is also the one
-        // failure auto-compaction can repair. Returning here used to bypass the
-        // compaction policy entirely (most visible in background Telegram
-        // conversations). Let that failure reach the addressed post-turn
-        // policy; all other failures still retain their original outcome.
-        const recoverableContextFailure =
-          turn.kind === 'failed' && isContextExhaustionReason(turn.error);
-        if (turn.kind !== 'completed' && !recoverableContextFailure) return toRequestOutcome(turn);
-        if (deps.requestChains.isContinuationSuppressed(chain)) return toRequestOutcome(turn);
-        deps.requestChains.setStage(chain, 'evaluating');
-        const action = await deps.evaluateAfterTurn(conv, chain, turn);
-        const terminationKind = deps.requestChains.terminationKind(chain);
-        if (terminationKind) {
-          const incompleteReason = turn.kind === 'completed' ? turn.incompleteReason : undefined;
-          return {
-            kind: terminationKind,
-            ...(turn.finalText ? { finalText: turn.finalText } : {}),
-            ...(incompleteReason ? { incompleteReason } : {}),
-          };
-        }
-        if (!action) return toRequestOutcome(turn);
+    let outcome: ForgeRequestOutcome;
+    try {
+      outcome = await deps.requestChains.run(chain, async () => {
+        let nextText = text;
+        let nextAttachments = attachments;
+        // Only the FIRST request of a chain carries the files the user sent; a
+        // continuation re-sends neither the bytes nor their references.
+        let nextOptions = attachmentRefs.length
+          ? { ...(promptOptions ?? {}), attachmentRefs }
+          : promptOptions;
+        for (;;) {
+          let turn: ForgeTurnOutcome;
+          try {
+            turn = await deps.agentLoop.runTurn(
+              conv,
+              selectedModel,
+              nextText,
+              nextAttachments,
+              nextOptions,
+            );
+          } finally {
+            deps.failureTracker.reset(conv.id);
+            deps.persistSession();
+            deps.postSessionSync();
+            this.flushSessionLog(conv.id);
+          }
+          // After the flush, so the error lands beneath the rows it followed. A
+          // failed turn writes no messages of its own, so without this the file
+          // ends on the last successful tool row and reads as a healthy turn.
+          if (turn.kind === 'failed') this.logTurnError(conv.id, turn.error);
+          if (turn.kind === 'cancelled' || turn.kind === 'interrupted') {
+            this.logTurnStopped(conv.id, turn.kind);
+          }
+          const undelivered = deps.midTurnInbox.takeUndelivered(conv.id);
+          if (undelivered.length > 0) {
+            const tellText = undelivered.map((tell) => tell.text).join('\n\n');
+            if (turn.kind === 'cancelled' || turn.kind === 'interrupted') {
+              deps.post({ type: 'setInput', text: tellText, conversationId: conv.id });
+              return toRequestOutcome(turn);
+            }
+            deps.post({ type: 'userPrompt', text: tellText, conversationId: conv.id });
+            deps.post({ type: 'generationStarted', conversationId: conv.id });
+            nextText = tellText;
+            nextAttachments = undefined;
+            nextOptions = undefined;
+            continue;
+          }
+          // Context exhaustion is a failed provider turn, but it is also the one
+          // failure auto-compaction can repair. Returning here used to bypass the
+          // compaction policy entirely (most visible in background Telegram
+          // conversations). Let that failure reach the addressed post-turn
+          // policy; all other failures still retain their original outcome.
+          const recoverableContextFailure =
+            turn.kind === 'failed' && isContextExhaustionReason(turn.error);
+          if (turn.kind !== 'completed' && !recoverableContextFailure)
+            return toRequestOutcome(turn);
+          if (deps.requestChains.isContinuationSuppressed(chain)) return toRequestOutcome(turn);
+          deps.requestChains.setStage(chain, 'evaluating');
+          const action = await deps.evaluateAfterTurn(conv, chain, turn);
+          const terminationKind = deps.requestChains.terminationKind(chain);
+          if (terminationKind) {
+            const incompleteReason = turn.kind === 'completed' ? turn.incompleteReason : undefined;
+            return {
+              kind: terminationKind,
+              ...(turn.finalText ? { finalText: turn.finalText } : {}),
+              ...(incompleteReason ? { incompleteReason } : {}),
+            };
+          }
+          if (!action) return toRequestOutcome(turn);
 
-        deps.requestChains.setStage(chain, 'continuing');
-        deps.post({ type: 'generationStarted', conversationId: conv.id });
-        nextText = action.text;
-        nextAttachments = undefined;
-        nextOptions = action.options;
-      }
+          deps.requestChains.setStage(chain, 'continuing');
+          deps.post({ type: 'generationStarted', conversationId: conv.id });
+          nextText = action.text;
+          nextAttachments = undefined;
+          nextOptions = action.options;
+        }
+      });
+    } catch (error) {
+      this.returnUndeliveredTells(conv.id);
+      throw error;
+    }
+    const undeliveredAfterRelease = deps.midTurnInbox.takeUndelivered(conv.id);
+    if (undeliveredAfterRelease.length === 0) return outcome;
+    const tellText = undeliveredAfterRelease.map((tell) => tell.text).join('\n\n');
+    if (outcome.kind === 'cancelled' || outcome.kind === 'interrupted') {
+      deps.post({ type: 'setInput', text: tellText, conversationId: conv.id });
+      return outcome;
+    }
+    // The chain has released here. A tell that arrived during evaluation or
+    // compaction becomes a new addressed send, so it cannot be stranded in the
+    // inbox after the original request has settled.
+    return this.send(tellText, undefined, conv.id, undefined, { echoPrompt: true });
+  }
+
+  private returnUndeliveredTells(conversationId: string): void {
+    const undelivered = this.deps.midTurnInbox.takeUndelivered(conversationId);
+    if (undelivered.length === 0) return;
+    this.deps.post({
+      type: 'setInput',
+      text: undelivered.map((tell) => tell.text).join('\n\n'),
+      conversationId,
     });
   }
 

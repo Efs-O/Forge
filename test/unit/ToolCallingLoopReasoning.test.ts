@@ -123,6 +123,61 @@ describe('ToolCallingLoop reasoning retention', () => {
     ]);
   });
 
+  it('drains tells after tool results and before the next request', async () => {
+    let round = 0;
+    const requests: ChatMessage[][] = [];
+    const drain = vi.fn().mockReturnValueOnce([
+      { role: 'user', content: 'also update the changelog', midTurn: true },
+    ]);
+    streamModelChatCompletion.mockImplementation(
+      async (_url: string, request: { messages: ChatMessage[] }, _model: unknown, h: Handlers) => {
+        requests.push(request.messages.map((message) => ({ ...message })));
+        round += 1;
+        if (round === 1) {
+          h.onToolCalls([CALL]);
+          h.onDone('tool_calls');
+        } else {
+          h.onToken('Done.');
+          h.onDone('stop');
+        }
+      },
+    );
+    const messages: ChatMessage[] = [{ role: 'user', content: 'go' }];
+
+    await runToolCallingLoop({ ...runOptions(messages), drainTells: drain } as never);
+
+    expect(drain).toHaveBeenCalledOnce();
+    expect(messages.map((message) => message.role)).toEqual([
+      'user',
+      'assistant',
+      'tool',
+      'user',
+      'assistant',
+    ]);
+    expect(requests[1]?.[3]).toMatchObject({
+      role: 'user',
+      content: 'also update the changelog',
+      midTurn: true,
+    });
+  });
+
+  it('does not drain tells on a no-tool turn', async () => {
+    const drain = vi.fn();
+    streamModelChatCompletion.mockImplementation(
+      async (_url: string, _request: unknown, _model: unknown, h: Handlers) => {
+        h.onToken('Done.');
+        h.onDone('stop');
+      },
+    );
+
+    await runToolCallingLoop({
+      ...runOptions([{ role: 'user', content: 'go' }]),
+      drainTells: drain,
+    } as never);
+
+    expect(drain).not.toHaveBeenCalled();
+  });
+
   it('does not narrate before an ask_user question to remote surfaces', async () => {
     const askUser: ToolCall = {
       id: 'question_1',

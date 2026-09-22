@@ -1,24 +1,18 @@
 import type { ModelConfig } from '../config/types';
-import { streamModelChatCompletion } from '../llm/ChatClient';
 import type { UsageHandler } from '../llm/OpenAIClient';
-import {
-  HtmlDocumentBoilerplateStripper,
-  stripHtmlDocumentBoilerplateFromFullText,
-} from '../llm/HtmlDocumentBoilerplateStripper';
+import { HtmlDocumentBoilerplateStripper } from '../llm/HtmlDocumentBoilerplateStripper';
 import { normalizeRequestForModel } from '../llm/RequestNormalizer';
 import { mergeSampling } from '../llm/SamplingMerge';
-import { ThinkingChannelStripper, stripThinkingFromFullText } from '../llm/ThinkingChannelStripper';
+import { ThinkingChannelStripper } from '../llm/ThinkingChannelStripper';
 import type { ChatCompletionRequest, ChatMessage, ToolCall, ToolDefinition } from '../llm/types';
 import { buildFallbackToolInstructions } from '../tools/FallbackToolPrompt';
 import { ToolFailureTracker, stripTools } from '../tools/StripTools';
-import {
-  StructuredOutputStripper,
-  stripStructuredOutputFromFullText,
-} from '../tools/StructuredOutputParser';
+import { StructuredOutputStripper } from '../tools/StructuredOutputParser';
 import { extractFallbackToolCalls } from '../tools/ToolCallFallback';
 import { MIN_ROUND_HEADROOM_TOKENS, reasoningReserve } from '../util/contextBudget';
 import { ToolLoopDetectedError, ToolLoopGuard } from './ToolLoopGuard';
 import { StreamedAssistantTurn } from './StreamedAssistantTurn';
+import { sanitizeText, streamOnce } from './toolCallingStream';
 import {
   applyOutputCap,
   asTruncation,
@@ -102,6 +96,8 @@ export interface ToolCallingLoopOptions {
   /** Request the provider's exact execution-side usage in the final stream frame. */
   includeUsage?: boolean;
   onUsage?: UsageHandler;
+  /** Messages waiting for the next safe gap after a completed tool round. */
+  drainTells?: () => ChatMessage[];
   /** Fired when a tool call was cut off and the loop is asking for it in chunks. */
   onTruncatedToolCall?: (info: { toolName: string | undefined; approxBytes: number }) => void;
   /**
@@ -137,41 +133,6 @@ export interface ToolCallingLoopResult {
    * thinking block: no answer, no tool call. The turn is unfinished.
    */
   stoppedWhileReasoning?: boolean;
-}
-
-function sanitizeText(text: string, stripThinking: boolean): string {
-  const withoutThinking = stripThinking ? stripThinkingFromFullText(text) : text;
-  const withoutStructured = stripStructuredOutputFromFullText(withoutThinking);
-  return stripHtmlDocumentBoilerplateFromFullText(withoutStructured);
-}
-
-async function streamOnce(
-  options: ToolCallingLoopOptions,
-  request: ChatCompletionRequest,
-  onToken: (token: string) => void,
-  onReasoning: (token: string) => void,
-): Promise<{ finishReason: string | null; toolCalls: ToolCall[] | null }> {
-  const baseUrl = await options.resolveBaseUrl();
-  return new Promise((resolve, reject) => {
-    let capturedToolCalls: ToolCall[] | null = null;
-    void streamModelChatCompletion(
-      baseUrl,
-      request,
-      options.model,
-      {
-        onToken,
-        onReasoning,
-        onDone: (finishReason) => resolve({ finishReason, toolCalls: capturedToolCalls }),
-        onError: reject,
-        onToolCalls: (calls) => {
-          capturedToolCalls = calls;
-        },
-        ...(options.onUsage ? { onUsage: options.onUsage } : {}),
-      },
-      options.signal,
-      options.apiKey,
-    ).catch(reject);
-  });
 }
 
 export async function runToolCallingLoop(
@@ -407,6 +368,11 @@ export async function runToolCallingLoop(
       } catch (error) {
         if (error instanceof ToolLoopDetectedError) options.onRepeatedCall?.();
         throw error;
+      }
+      const tells = options.drainTells?.() ?? [];
+      if (tells.length > 0) {
+        options.messages.push(...tells);
+        options.onMessagesChanged?.();
       }
       continue;
     }

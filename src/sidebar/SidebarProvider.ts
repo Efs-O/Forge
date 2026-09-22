@@ -54,6 +54,8 @@ import { statusRowProgress } from './turnMirrorWiring';
 import { ResidencyPoller } from './ResidencyPoller';
 import type { UserQuestionService } from './UserQuestionService';
 import type { UserNotificationService } from './UserNotificationService';
+import { randomUUID } from 'crypto';
+import type { MidTurnInbox } from '../agent/MidTurnInbox';
 
 export type { SidebarProviderEvents };
 /** Residency refresh while visible: cheap, but fast enough to avoid a stale dot. */
@@ -73,6 +75,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly tabs: ConversationTabs;
   private readonly send: SendPipeline;
   private readonly requestChains: RequestChainLifecycle;
+  private readonly midTurnInbox: MidTurnInbox;
   private readonly hostFacade: ForgeHostFacade;
   private readonly residency = new ResidencyPoller(
     () => this.pool.residencySignature(),
@@ -169,6 +172,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.tabs = runtime.tabs;
     this.send = runtime.send;
     this.requestChains = runtime.requestChains;
+    this.midTurnInbox = runtime.midTurnInbox;
     this.hostFacade = createSidebarHostFacade({
       runtime,
       getSidebar: () => this.sidebar,
@@ -440,6 +444,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         getClankerMode: () => this.agentLoop.getClankerMode(),
         getRemoteStatus: () => this.remoteStatus,
         send: (text, attachments, conversationId) => {
+          const targetId = conversationId ?? this.sidebar.activeConversationId;
+          if (!attachments?.length && this.requestChains.isReserved(targetId)) {
+            this.midTurnInbox.add(targetId, { id: randomUUID(), text });
+            return;
+          }
           void this.send.send(text, attachments, conversationId);
         },
         steer: async (text, attachments, conversationId) => {
