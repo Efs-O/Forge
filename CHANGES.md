@@ -1,5 +1,33 @@
 # Forge — Recent Changes
 
+## 0.16.22
+
+### Agent-task jobs, phase 3 (2026-09-22)
+
+- **A scheduled job can now run an agent turn unattended.** The `agent_task`
+  runner starts the turn in the job's own chat once a slot is free. It holds
+  the machine awake for the run and snapshots `config.yaml` first. It reports
+  the `RESULT:` line through the outbox, so it reaches Telegram. Nobody is
+  asked anything during the run: dangerous tools are denied, and `ask_user`
+  says so.
+- **A run cut short by a reload or crash is reported as interrupted** when the
+  scheduler next starts, and the config backup is kept.
+- `notify_user` during a job run is filed under the job's name, not a
+  conversation id.
+- The job's discuss chat will not open while its run is in flight.
+
+### Agent-loop and mesh fixes found during the run
+
+- **Repeat warnings reach the model.** When a read-only call repeats with the
+  same result, or the same tool fails three times in a row on one file, the
+  result now starts with a warning. Before, the loop guard only killed the
+  turn, with no warning first.
+- `forge.sh say --model <name> --new` starts a message in a fresh chat on a
+  chosen model. An unknown model name is refused and the valid names are
+  listed.
+- The owned Codex is reachable with `forge.sh send`/`steer` before its first
+  thread starts.
+
 ## 0.16.21
 
 ### Weekly audit fixes (2026-09-21)
