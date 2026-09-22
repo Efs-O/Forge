@@ -337,13 +337,8 @@ export class MeshOrchestrator {
       const outbound = this.deps.provider.isObserving(recipient)
         ? message
         : `${message}\n\n[forge: when you finish this, write your verdict to outbox/${exchangeId}.verdict.md]`;
-      const res = await fifo.enqueue({ exchangeId, message: outbound });
-      if (!res.accepted) {
-        return { error: `queue full for "${to}" (${res.queueLength}); relay rejected` };
-      }
-      // F-07: a relayed message just reached this session; refresh its TTL clock.
-      this.deps.provider.touchActivity(recipient);
-      // Hop 2: the host's forward to the recipient (idempotent `accepted`).
+      // Hop 2 (idempotent `accepted`), BEFORE the enqueue: an idle recipient
+      // starts at once, and a late accepted after `started` is illegal.
       await this.deps.onEvent({
         exchangeId,
         from: this.host,
@@ -352,6 +347,12 @@ export class MeshOrchestrator {
         state: 'accepted',
         detail: 'host relay',
       });
+      const res = await fifo.enqueue({ exchangeId, message: outbound });
+      if (!res.accepted) {
+        return { error: `queue full for "${to}" (${res.queueLength}); relay rejected` };
+      }
+      // F-07: a relayed message just reached this session; refresh its TTL clock.
+      this.deps.provider.touchActivity(recipient);
     } catch (err) {
       return { error: `could not durably record the relay to "${to}": ${String(err)}` };
     }

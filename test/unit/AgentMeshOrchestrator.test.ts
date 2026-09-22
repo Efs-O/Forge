@@ -317,6 +317,39 @@ describe('orchestrator: host-side relay (M6)', () => {
     expect(adapter.sends).toEqual(['pass this on']);
   });
 
+  it('records every relay hop before an idle recipient starts (no late accepted)', async () => {
+    // An idle FIFO drains at once, so the recipient's `started` can be written
+    // while enqueue is still returning. The real exchange log refuses
+    // started -> accepted; mirror that rule so a late hop fails the relay.
+    const adapter = new FakeAdapter(true);
+    const seen = new Map<string, ExchangeState>();
+    const orch = new MeshOrchestrator({
+      busRoot: root,
+      knownAliases: () => ['codex'],
+      scope: () => ({ workspace: '/ws' }),
+      onEvent: (e) => {
+        if (e.state === 'accepted' && seen.get(e.exchangeId) === 'started') {
+          throw new Error('illegal exchange transition started -> accepted');
+        }
+        seen.set(e.exchangeId, e.state);
+      },
+      provider: {
+        resolveAdapter: async () => adapter,
+        isOwned: () => true,
+        isObserving: () => true,
+        touchActivity: () => undefined,
+        isParked: () => false,
+        wake: () => false,
+      },
+    });
+    const out = await orch.relay('claude', 'codex', 'are you there');
+    expect('error' in out).toBe(false);
+    await flush();
+    expect(adapter.sends).toEqual(['are you there']);
+    adapter.complete();
+    orch.dispose();
+  });
+
   it('binds a verdict id when relaying to a non-observing session', async () => {
     const adapter = new FakeAdapter(false);
     const orch = makeOrchestrator({ adapters: { claude: adapter } });
