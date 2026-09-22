@@ -4,10 +4,19 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Package version to publish (for a recovery run)'
+        required: true
+        type: string
 
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
     # `contents: write` is what lets the release step create a release with the
     # default GITHUB_TOKEN; the default for this repo is read-only.
     permissions:
@@ -18,6 +27,7 @@ jobs:
     # IS available there, so the guard reads the secret through this.
     env:
       OVSX_PAT: ${{ secrets.OVSX_PAT }}
+      REQUESTED_VERSION: ${{ inputs.version }}
 
     steps:
       - uses: actions/checkout@v5
@@ -42,15 +52,22 @@ jobs:
       - name: Package the VSIX
         run: |
           VERSION="$(node -p "require('./package.json').version")"
-          if [ "v$VERSION" != "$GITHUB_REF_NAME" ]; then
-            echo "Tag $GITHUB_REF_NAME does not match package.json version $VERSION" >&2
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            if [ "v$VERSION" != "$GITHUB_REF_NAME" ]; then
+              echo "Tag $GITHUB_REF_NAME does not match package.json version $VERSION" >&2
+              exit 1
+            fi
+          elif [ -n "$REQUESTED_VERSION" ] && [ "$REQUESTED_VERSION" != "$VERSION" ]; then
+            echo "Requested version $REQUESTED_VERSION does not match package.json version $VERSION" >&2
             exit 1
           fi
           npm run package
           test -f "forge-llm-$VERSION.vsix"
 
       - name: Publish to VS Code Marketplace
-        run: npx vsce publish --packagePath "forge-llm-${GITHUB_REF_NAME#v}.vsix"
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          npx vsce publish --packagePath "forge-llm-$VERSION.vsix"
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
@@ -62,7 +79,9 @@ jobs:
       # with `gh secret set OVSX_PAT` and this starts running on the next tag.
       - name: Publish to Open VSX
         if: env.OVSX_PAT != ''
-        run: npx ovsx publish "forge-llm-${GITHUB_REF_NAME#v}.vsix" -p "$OVSX_PAT"
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          npx ovsx publish "forge-llm-$VERSION.vsix" -p "$OVSX_PAT"
 
       # The releases page stopped at v0.12.29 while 0.13, 0.14 and 0.15 shipped
       # to both registries: nothing here ever created one. Notes are cut from
@@ -74,8 +93,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="$(node -p "require('./package.json').version")"
+          TAG="v$VERSION"
           node scripts/release-notes.mjs "$VERSION" release-notes.md
-          gh release create "$GITHUB_REF_NAME" "forge-llm-$VERSION.vsix" \
-            --title "Forge LLM $GITHUB_REF_NAME" \
-            --notes-file release-notes.md
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "forge-llm-$VERSION.vsix" --clobber
+            gh release edit "$TAG" \
+              --title "Forge LLM $TAG" \
+              --notes-file release-notes.md
+          else
+            gh release create "$TAG" "forge-llm-$VERSION.vsix" \
+              --title "Forge LLM $TAG" \
+              --notes-file release-notes.md
+          fi
