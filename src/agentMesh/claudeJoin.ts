@@ -34,6 +34,7 @@ export function joinClaude(
     agent: 'claude',
     session_id: session.name,
     peer_pid: pid,
+    ...(session.sessionId ? { claude_session_id: session.sessionId } : {}),
     registered_at: Date.now(),
     by: 'user',
   });

@@ -5,7 +5,7 @@ import type { CodexAppServerSession } from '../agents/CodexAppServerSession';
 import type { ClaudeOwnedSession } from '../agents/ClaudeOwnedSession';
 import { queueToCodex } from '../agentBus/codexDelivery';
 import { pickClaudePeer, readClaudeSessions, type ClaudeSession } from '../agentBus/claudePeer';
-import { getAlias, registerAlias } from './aliasRegistry';
+import { getAlias, joinedPeer, registerAlias } from './aliasRegistry';
 import { ClaudeOwnedAdapter, ClaudePeerAdapter, CodexOwnedAdapter } from './adapters';
 import { codexQueueAdapterIfLive } from './codexPinLiveness';
 import {
@@ -22,6 +22,7 @@ import {
   isForeignLiveOwner,
   isOwnerOf,
   readOwnership,
+  recordConfirmedId,
   releaseClaim,
   writeOwnership,
 } from './ownership';
@@ -89,6 +90,18 @@ export class MeshSessionProvider implements SessionProvider {
     writeOwnership(this.deps.busRoot, { ...rec, last_activity: Date.now() });
   }
 
+  private codexOwnedAdapter(alias: string, s: CodexAppServerSession): CodexOwnedAdapter {
+    return new CodexOwnedAdapter(s, () =>
+      recordConfirmedId(this.deps.busRoot, alias, s.confirmedSessionId),
+    );
+  }
+
+  private claudeOwnedAdapter(alias: string, s: ClaudeOwnedSession): ClaudeOwnedAdapter {
+    return new ClaudeOwnedAdapter(s, () =>
+      recordConfirmedId(this.deps.busRoot, alias, s.confirmedSessionId),
+    );
+  }
+
   /** True only when this window holds the adapter and can observe its turns. */
   isObserving(alias: string): boolean {
     return this.isOwned(alias);
@@ -113,7 +126,7 @@ export class MeshSessionProvider implements SessionProvider {
    */
   private async codexAdapterAsync(): Promise<MeshAdapter | undefined> {
     const existing = this.owned.get('codex');
-    if (existing) return new CodexOwnedAdapter(existing);
+    if (existing) return this.codexOwnedAdapter('codex', existing);
     const rec = readOwnership(this.deps.busRoot, 'codex');
     // M2: a session another LIVE window owns is never re-spawned here. This
     // window does not hold its stdio pipe, so it cannot drive it; spawning a
@@ -160,10 +173,12 @@ export class MeshSessionProvider implements SessionProvider {
   private async claudeAdapterAsync(): Promise<MeshAdapter | undefined> {
     const aliasRec = getAlias(this.deps.busRoot, 'claude');
     // A session that joined itself (`forge.sh join`) wins while it is live.
-    const joined = aliasRec?.peer_pid !== undefined ? this.claudeAdapter() : undefined;
-    if (joined) return joined;
+    // A joined session that is not running (a reload stops it until its panel
+    // reopens) resolves to nothing: a Forge-owned stand-in would answer in the
+    // user's place without their context.
+    if (aliasRec?.peer_pid !== undefined) return this.claudeAdapter();
     const existing = this.claudeOwned.get('claude');
-    if (existing) return new ClaudeOwnedAdapter(existing);
+    if (existing) return this.claudeOwnedAdapter('claude', existing);
     const rec = readOwnership(this.deps.busRoot, 'claude');
     // M2: a session another LIVE window owns is never re-spawned here. This
     // window does not hold its stdio pipe, so it cannot drive it; spawning a
@@ -187,10 +202,10 @@ export class MeshSessionProvider implements SessionProvider {
   private claudeAdapter(): MeshAdapter | undefined {
     const bus = this.deps.getConfig().agent_bus;
     const sessions = this.deps.claudeSessions ? this.deps.claudeSessions() : readClaudeSessions();
-    const joinedPid = getAlias(this.deps.busRoot, 'claude')?.peer_pid;
+    const joined = joinedPeer(getAlias(this.deps.busRoot, 'claude'));
     const picked = pickClaudePeer(
       sessions,
-      { joinedPid, pin: bus?.claude_session },
+      { joined, pin: bus?.claude_session },
       this.deps.workspaceRoots(),
     );
     if ('error' in picked) return undefined;
@@ -227,7 +242,7 @@ export class MeshSessionProvider implements SessionProvider {
     if (this.reaping.has(a))
       return Promise.resolve({ error: `owned ${a} session is being reaped; try again shortly` });
     const existing = this.owned.get(a);
-    if (existing) return Promise.resolve(new CodexOwnedAdapter(existing));
+    if (existing) return Promise.resolve(this.codexOwnedAdapter(a, existing));
     const inflight = this.creating.get(a);
     if (inflight) return inflight;
     const promise = this.createOwnedCodex(a).finally(() => this.creating.delete(a));
@@ -280,7 +295,7 @@ export class MeshSessionProvider implements SessionProvider {
           by: 'forge',
         });
       }
-      return new CodexOwnedAdapter(session);
+      return this.codexOwnedAdapter(alias, session);
     } catch (err) {
       const why = err instanceof Error ? err.message : String(err);
       // M3: a failed RESUME (a prior thread existed) is a visible context loss —
@@ -307,7 +322,7 @@ export class MeshSessionProvider implements SessionProvider {
     if (this.reaping.has(a))
       return Promise.resolve({ error: `owned ${a} session is being reaped; try again shortly` });
     const existing = this.claudeOwned.get(a);
-    if (existing) return Promise.resolve(new ClaudeOwnedAdapter(existing));
+    if (existing) return Promise.resolve(this.claudeOwnedAdapter(a, existing));
     const inflight = this.creating.get(a);
     if (inflight) return inflight;
     const promise = this.createOwnedClaude(a).finally(() => this.creating.delete(a));
@@ -359,7 +374,7 @@ export class MeshSessionProvider implements SessionProvider {
           by: 'forge',
         });
       }
-      return new ClaudeOwnedAdapter(session);
+      return this.claudeOwnedAdapter(alias, session);
     } catch (err) {
       const why = err instanceof Error ? err.message : String(err);
       // M3: a failed RESUME (a prior session existed) is a visible context loss

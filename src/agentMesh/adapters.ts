@@ -21,13 +21,17 @@ export class CodexOwnedAdapter implements MeshAdapter {
   readonly observesTurns = true;
   readonly key = 'codex-owned';
 
-  constructor(private readonly session: CodexAppServerSession) {}
+  /** `onTurnEnd`: a fresh thread's id exists only after its first turn; the
+   *  provider records it then, or a reload has nothing to resume. */
+  constructor(
+    private readonly session: CodexAppServerSession,
+    private readonly onTurnEnd?: () => void,
+  ) {}
 
   async send(message: string, options?: MeshSendOptions): Promise<TurnResult> {
-    const result = await this.session.send(
-      message,
-      options?.signal ? { signal: options.signal } : {},
-    );
+    const result = await this.session
+      .send(message, options?.signal ? { signal: options.signal } : {})
+      .finally(() => this.onTurnEnd?.());
     return {
       status: result.status === 'timed_out' ? 'failed' : result.status,
       finalText: result.finalText,
@@ -50,13 +54,16 @@ export class ClaudeOwnedAdapter implements MeshAdapter {
   readonly observesTurns = true;
   readonly key = 'claude-owned';
 
-  constructor(private readonly session: ClaudeOwnedSession) {}
+  /** `onTurnEnd`: see `CodexOwnedAdapter`. */
+  constructor(
+    private readonly session: ClaudeOwnedSession,
+    private readonly onTurnEnd?: () => void,
+  ) {}
 
   async send(message: string, options?: MeshSendOptions): Promise<TurnResult> {
-    const result = await this.session.send(
-      message,
-      options?.signal ? { signal: options.signal } : {},
-    );
+    const result = await this.session
+      .send(message, options?.signal ? { signal: options.signal } : {})
+      .finally(() => this.onTurnEnd?.());
     return {
       status: result.status === 'timed_out' ? 'failed' : result.status,
       finalText: result.finalText,

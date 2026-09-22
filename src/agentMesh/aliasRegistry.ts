@@ -41,6 +41,16 @@ export interface AliasRecord {
    * pid is live; such a record is never resumed as a Forge-owned session.
    */
   peer_pid?: number;
+  /** The joined session's conversation id: survives the pid change of a resume. */
+  claude_session_id?: string;
+}
+
+/** The joined-session identity `pickClaudePeer` matches, or undefined if not joined. */
+export function joinedPeer(
+  rec: AliasRecord | undefined,
+): { pid: number; sessionId?: string | undefined } | undefined {
+  if (rec?.peer_pid === undefined) return undefined;
+  return { pid: rec.peer_pid, sessionId: rec.claude_session_id };
 }
 
 export type AliasTable = Record<string, AliasRecord>;
@@ -81,6 +91,9 @@ export function readAliases(root: string): AliasTable {
         registered_at: typeof r.registered_at === 'number' ? r.registered_at : 0,
         by: r.by === 'user' ? 'user' : 'forge',
         ...(typeof r.peer_pid === 'number' && r.peer_pid > 0 ? { peer_pid: r.peer_pid } : {}),
+        ...(typeof r.claude_session_id === 'string' && r.claude_session_id.length > 0
+          ? { claude_session_id: r.claude_session_id }
+          : {}),
       };
     }
   }

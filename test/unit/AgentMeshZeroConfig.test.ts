@@ -161,7 +161,7 @@ describe('pickClaudePeer (§10)', () => {
   const many = [session(1, 'a'), session(2, 'b'), session(3, 'c')];
 
   it('a joined pid wins even when several sessions share the workspace', () => {
-    const r = pickClaudePeer(many, { joinedPid: 2 }, roots);
+    const r = pickClaudePeer(many, { joined: { pid: 2 } }, roots);
     expect('session' in r && r.session.name).toBe('b');
   });
 
@@ -170,25 +170,41 @@ describe('pickClaudePeer (§10)', () => {
     expect('session' in r && r.session.name).toBe('only');
   });
 
-  it('a dead joined pid falls back to the only open session', () => {
-    const r = pickClaudePeer([session(5, 'only')], { joinedPid: 99 }, roots);
-    expect('session' in r && r.session.name).toBe('only');
+  it('a joined session resumed under a new pid is still found by its sessionId', () => {
+    // A VS Code reload restarts the panel's session: same sessionId, new pid.
+    const resumed = session(8, 'forge-4e', '/ws', { sessionId: 'conv-1' });
+    const r = pickClaudePeer(
+      [session(5, 'other'), resumed],
+      { joined: { pid: 99, sessionId: 'conv-1' } },
+      roots,
+    );
+    expect('session' in r && r.session.pid).toBe(8);
+  });
+
+  it('a joined session that is not running is refused, never replaced by another', () => {
+    const r = pickClaudePeer(
+      [session(5, 'other')],
+      { joined: { pid: 99, sessionId: 'conv-1' } },
+      roots,
+    );
+    expect('error' in r && r.error).toMatch(/not running/);
   });
 
   it('an explicit name stays strict', () => {
-    const r = pickClaudePeer(many, { explicit: 'zzz', joinedPid: 1 }, roots);
+    const r = pickClaudePeer(many, { explicit: 'zzz', joined: { pid: 1 } }, roots);
     expect('error' in r).toBe(true);
   });
 });
 
 describe('joinClaude (§10)', () => {
   it('registers the claude alias with peer_pid', () => {
-    const r = joinClaude(root, 'claude', 7, [session(7, 'forge-93')]);
+    const r = joinClaude(root, 'claude', 7, [session(7, 'forge-93', '/ws', { sessionId: 'conv-7' })]);
     expect(r.ok).toBe(true);
     expect(getAlias(root, 'claude')).toMatchObject({
       agent: 'claude',
       session_id: 'forge-93',
       peer_pid: 7,
+      claude_session_id: 'conv-7',
     });
   });
 

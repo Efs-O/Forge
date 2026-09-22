@@ -17,7 +17,7 @@ import {
 import { claudeQuestion } from '../agentBus/busContent';
 import { codexMessage, queueToCodex } from '../agentBus/codexDelivery';
 import { getBoardContext, getMeshOrchestrator } from '../agentMesh/meshContext';
-import { getAlias } from '../agentMesh/aliasRegistry';
+import { getAlias, joinedPeer } from '../agentMesh/aliasRegistry';
 import type { TurnResult } from '../agentMesh/meshAdapter';
 import {
   pickClaudePeer,
@@ -268,7 +268,7 @@ ${question}`;
           sessions,
           {
             explicit: byAlias ? undefined : sessionArg,
-            joinedPid: board ? getAlias(board.root, 'claude')?.peer_pid : undefined,
+            joined: board ? joinedPeer(getAlias(board.root, 'claude')) : undefined,
             pin: bus?.claude_session,
           },
           deps.workspaceRoots(),

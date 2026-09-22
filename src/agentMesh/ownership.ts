@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
 import { getHostIdentity, isHostAlive, type HostId, type HostLivenessDeps } from './hostIdentity';
-import type { AgentKind } from './aliasRegistry';
+import { getAlias, registerAlias, type AgentKind } from './aliasRegistry';
 
 /**
  * Per-alias ownership of Forge-owned sessions (AGENT_MESH_PLAN §0, M2, M3).
@@ -403,4 +403,27 @@ export function clearTornClaimWithRecord(root: string, alias: string): boolean {
   if (!readOwnership(root, alias)) return false; // no record: a live creator may be mid-spawn
   unlinkQuiet(file);
   return true;
+}
+
+/**
+ * Save an owned session's id once its first turn has confirmed it. Creation
+ * writes the record before a fresh session has an id, so without this the
+ * record kept `""` and every reload "resumed" into a new, empty thread.
+ */
+export function recordConfirmedId(root: string, alias: string, id: string | undefined): void {
+  if (!id) return;
+  const rec = readOwnership(root, alias);
+  if (rec && rec.session_id !== id) {
+    const thread = rec.agent === 'codex' ? { thread_id: id } : {};
+    writeOwnership(root, { ...rec, session_id: id, ...thread });
+  }
+  const aliasRec = getAlias(root, alias);
+  if (aliasRec?.peer_pid !== undefined || aliasRec?.session_id === id) return;
+  if (aliasRec?.by === 'user') return; // a user's pin is theirs to change
+  registerAlias(root, alias, {
+    agent: rec?.agent ?? (alias === 'codex' ? 'codex' : 'claude'),
+    session_id: id,
+    registered_at: Date.now(),
+    by: 'forge',
+  });
 }

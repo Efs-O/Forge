@@ -3,15 +3,22 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MeshSessionProvider } from '../../src/agentMesh/sessionProvider';
-import { claimCreation, readOwnership, writeOwnership } from '../../src/agentMesh/ownership';
+import {
+  claimCreation,
+  readOwnership,
+  recordConfirmedId,
+  writeOwnership,
+} from '../../src/agentMesh/ownership';
 import { getAlias, registerAlias } from '../../src/agentMesh/aliasRegistry';
 import type { ForgeConfig } from '../../src/config/types';
 
 /** A controllable fake owned Claude session (no real process). */
 class FakeClaudeSession {
   disposed = false;
+  /** Set by a test to model an id the CLI confirms only on the first turn. */
+  confirmOnSend: string | undefined;
   constructor(
-    private readonly confirmed: string | undefined,
+    private confirmed: string | undefined,
     private readonly disposeWait?: Promise<void>,
   ) {}
   get confirmedSessionId(): string | undefined {
@@ -21,6 +28,7 @@ class FakeClaudeSession {
     return 4242;
   }
   async send(): Promise<{ status: string; finalText: string }> {
+    if (this.confirmOnSend) this.confirmed = this.confirmOnSend;
     return { status: 'completed', finalText: 'done' };
   }
   async dispose(): Promise<void> {
@@ -88,6 +96,29 @@ describe('MeshSessionProvider: owned Claude path (P4)', () => {
     expect(rec?.owner_host?.pid).toBeTypeOf('number');
     // A first owned creation registers the alias as by: 'forge'.
     expect(getAlias(root, 'claude')?.by).toBe('forge');
+    await p.dispose();
+  });
+
+  it('a joined session that is not running resolves to nothing, not an owned stand-in', async () => {
+    // The user's joined panel session is stopped by a VS Code reload until the
+    // panel reopens. A stand-in would answer in the user's place.
+    registerAlias(root, 'claude', {
+      agent: 'claude',
+      session_id: 'forge-4e',
+      registered_at: 1,
+      by: 'user',
+      peer_pid: 99,
+      claude_session_id: 'conv-1',
+    });
+    let spawned = 0;
+    const p = makeProvider({
+      factory: () => {
+        spawned++;
+        return new FakeClaudeSession('owned-id');
+      },
+    });
+    expect(await p.resolveAdapter('claude')).toBeUndefined();
+    expect(spawned).toBe(0);
     await p.dispose();
   });
 
@@ -198,5 +229,51 @@ describe('MeshSessionProvider: owned Claude path (P4)', () => {
     const rec = readOwnership(root, 'claude');
     expect(rec?.owner_host).toBeNull();
     expect(rec?.session_id).toBe('owned-id');
+  });
+});
+
+describe('owned session id is saved once the first turn confirms it', () => {
+  it('a fresh session with no id at creation records it after its first turn', async () => {
+    const fresh = new FakeClaudeSession(undefined);
+    fresh.confirmOnSend = 'confirmed-later';
+    const p = makeProvider({ factory: () => fresh });
+    const created = await p.ensureOwnedClaude('claude');
+    expect('error' in created).toBe(false);
+    expect(readOwnership(root, 'claude')?.session_id).toBe('');
+    if (!('error' in created)) await created.send('hi');
+    // A reload now resumes this conversation instead of an empty one.
+    expect(readOwnership(root, 'claude')?.session_id).toBe('confirmed-later');
+    expect(getAlias(root, 'claude')?.session_id).toBe('confirmed-later');
+    await p.dispose();
+  });
+
+  it('records a Codex thread as both session_id and thread_id', () => {
+    writeOwnership(root, {
+      alias: 'codex',
+      agent: 'codex',
+      session_id: '',
+      owner_host: null,
+      workspace: '/ws',
+      created_at: 1,
+      parked: false,
+    });
+    recordConfirmedId(root, 'codex', 'thread-9');
+    expect(readOwnership(root, 'codex')).toMatchObject({
+      session_id: 'thread-9',
+      thread_id: 'thread-9',
+    });
+    expect(getAlias(root, 'codex')).toMatchObject({ session_id: 'thread-9', by: 'forge' });
+  });
+
+  it('never overwrites a joined user session alias', () => {
+    registerAlias(root, 'claude', {
+      agent: 'claude',
+      session_id: 'forge-4e',
+      registered_at: 1,
+      by: 'user',
+      peer_pid: 7,
+    });
+    recordConfirmedId(root, 'claude', 'owned-x');
+    expect(getAlias(root, 'claude')?.session_id).toBe('forge-4e');
   });
 });

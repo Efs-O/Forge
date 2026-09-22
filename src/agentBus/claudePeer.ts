@@ -22,6 +22,7 @@ const TAG = 'cross-session-message';
 const RegistryEntrySchema = z
   .object({
     pid: z.number().int().positive(),
+    sessionId: z.string().optional(),
     name: z.string().optional(),
     cwd: z.string().optional(),
     status: z.string().optional(),
@@ -35,6 +36,8 @@ const RegistryEntrySchema = z
 
 export interface ClaudeSession {
   pid: number;
+  /** The conversation id: stable across a resume, which gets a new pid. */
+  sessionId?: string | undefined;
   name: string;
   cwd: string;
   status: string;
@@ -88,6 +91,7 @@ export function readClaudeSessions(
     if (!isAlive(e.pid)) continue;
     sessions.push({
       pid: e.pid,
+      sessionId: e.sessionId,
       name: e.name ?? `pid-${e.pid}`,
       cwd: e.cwd ?? '',
       status: e.status ?? 'unknown',
@@ -175,14 +179,28 @@ export function pickClaudePeer(
   sessions: ClaudeSession[],
   prefs: {
     explicit?: string | undefined;
-    joinedPid?: number | undefined;
+    /** The `forge.sh join` record. A VS Code reload restarts the session under
+     *  a new pid with the same sessionId, so either identifies it. */
+    joined?: { pid: number; sessionId?: string | undefined } | undefined;
     pin?: string | undefined;
   },
   roots: string[],
 ): { session: ClaudeSession } | { error: string } {
   if (prefs.explicit) return pickClaudeSession(sessions, prefs.explicit, roots);
-  const joined = sessions.find((s) => s.pid === prefs.joinedPid);
-  if (joined) return { session: joined };
+  const j = prefs.joined;
+  if (j) {
+    const joined =
+      sessions.find((s) => s.pid === j.pid) ??
+      (j.sessionId ? sessions.find((s) => s.sessionId === j.sessionId) : undefined);
+    if (joined) return { session: joined };
+    // Never hand a joined user's question to some other session: the user
+    // chose this one, and a stand-in answers without their context.
+    return {
+      error:
+        'the Claude session that joined as "claude" is not running (a VS Code reload ' +
+        'stops it until its panel is opened again). Ask the user to open it, then retry',
+    };
+  }
   if (prefs.pin) {
     const pinned = pickClaudeSession(sessions, prefs.pin, roots);
     if ('session' in pinned) return pinned;
