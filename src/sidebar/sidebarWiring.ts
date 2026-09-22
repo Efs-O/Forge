@@ -251,7 +251,6 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
   });
 
   const tabs = new ConversationTabs({
-    workspaceState,
     isStreaming: () => agentLoop.streaming,
     getConfig: host.getConfig,
     getSidebar: host.getSidebar,

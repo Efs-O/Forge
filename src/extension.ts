@@ -5,6 +5,7 @@ import { UserQuestionService } from './sidebar/UserQuestionService';
 import { UserNotificationService } from './sidebar/UserNotificationService';
 import { SidebarProvider } from './sidebar/SidebarProvider';
 import { ChatAttachmentStore } from './sidebar/ChatAttachmentStore';
+import { HistoryArchive } from './sidebar/HistoryArchive';
 import { watchWorkspaceFolders } from './sidebar/workspaceInfo';
 import { BackendPool } from './backend/BackendPool';
 import { disposeServerChannel } from './backend/DirectBackend';
@@ -292,6 +293,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     () => activeConfigPath,
     cliSessions,
     chatAttachments,
+    HistoryArchive.inStorageDir(context.storageUri?.fsPath),
   );
   // Best-effort, after the session is loaded: an attachment whose conversation
   // is gone is unreachable, and nothing else ever deletes it.
@@ -477,14 +479,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     getConfigPath: () => activeConfigPath,
   });
 
-  context.subscriptions.push({
-    dispose: () => {
-      void pool.stopAll();
-    },
-  });
-  context.subscriptions.push({
-    dispose: () => backgroundExecutionManager.dispose(),
-  });
+  context.subscriptions.push(
+    { dispose: () => void pool.stopAll() },
+    { dispose: () => backgroundExecutionManager.dispose() },
+  );
 
   log.info('Forge activated');
 }

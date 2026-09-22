@@ -11,6 +11,7 @@ import type { Memento } from 'vscode';
 import { getLogger } from '../util/logger';
 import type { ChatMessage } from '../llm/types';
 import type { CompactionState } from './compactionTypes';
+import type { HistoryArchive } from './HistoryArchive';
 import {
   ACTIVE_ID_KEY,
   HISTORY_KEY_LEGACY,
@@ -183,61 +184,41 @@ function repairInterruptedToolCalls(messages: ChatMessage[]): ChatMessage[] {
   return repaired;
 }
 
-export function runtimeToPersisted(session: SidebarRuntime): SidebarSessionPersisted {
+function conversationToPersisted(c: ConversationRuntime): ConversationPersisted {
+  return {
+    id: c.id,
+    title: c.title,
+    createdAt: c.createdAt,
+    updatedAt: c.updatedAt,
+    messages: slimPersistMessages(c.messages),
+    ...(c.active_model !== undefined ? { active_model: c.active_model } : {}),
+    ...(c.cli_sessions !== undefined ? { cli_sessions: { ...c.cli_sessions } } : {}),
+    ...(c.compaction !== undefined ? { compaction: copyCompaction(c.compaction) } : {}),
+    ...(c.plan !== undefined
+      ? { plan: { ...c.plan, items: c.plan.items.map((i) => ({ ...i })) } }
+      : {}),
+    ...(c.displayDiffs !== undefined
+      ? { display_diffs: c.displayDiffs.map((diff) => ({ ...diff })) }
+      : {}),
+    ...(c.active_time_ms !== undefined ? { active_time_ms: c.active_time_ms } : {}),
+    ...(c.active_started_at !== undefined ? { active_started_at: c.active_started_at } : {}),
+    ...(c.input_tokens !== undefined ? { input_tokens: c.input_tokens } : {}),
+    ...(c.output_tokens !== undefined ? { output_tokens: c.output_tokens } : {}),
+    ...(c.last_input_tokens !== undefined ? { last_input_tokens: c.last_input_tokens } : {}),
+    ...(c.last_output_tokens !== undefined ? { last_output_tokens: c.last_output_tokens } : {}),
+    ...(c.model_request_count !== undefined ? { model_request_count: c.model_request_count } : {}),
+    ...(c.tool_call_count !== undefined ? { tool_call_count: c.tool_call_count } : {}),
+  };
+}
+
+export function runtimeToPersisted(
+  session: SidebarRuntime,
+  options: { withHistory: boolean } = { withHistory: true },
+): SidebarSessionPersisted {
   return {
     activeConversationId: session.activeConversationId,
-    conversations: session.conversations.map((c) => ({
-      id: c.id,
-      title: c.title,
-      createdAt: c.createdAt,
-      updatedAt: c.updatedAt,
-      messages: slimPersistMessages(c.messages),
-      ...(c.active_model !== undefined ? { active_model: c.active_model } : {}),
-      ...(c.cli_sessions !== undefined ? { cli_sessions: { ...c.cli_sessions } } : {}),
-      ...(c.compaction !== undefined ? { compaction: copyCompaction(c.compaction) } : {}),
-      ...(c.plan !== undefined
-        ? { plan: { ...c.plan, items: c.plan.items.map((i) => ({ ...i })) } }
-        : {}),
-      ...(c.displayDiffs !== undefined
-        ? { display_diffs: c.displayDiffs.map((diff) => ({ ...diff })) }
-        : {}),
-      ...(c.active_time_ms !== undefined ? { active_time_ms: c.active_time_ms } : {}),
-      ...(c.active_started_at !== undefined ? { active_started_at: c.active_started_at } : {}),
-      ...(c.input_tokens !== undefined ? { input_tokens: c.input_tokens } : {}),
-      ...(c.output_tokens !== undefined ? { output_tokens: c.output_tokens } : {}),
-      ...(c.last_input_tokens !== undefined ? { last_input_tokens: c.last_input_tokens } : {}),
-      ...(c.last_output_tokens !== undefined ? { last_output_tokens: c.last_output_tokens } : {}),
-      ...(c.model_request_count !== undefined
-        ? { model_request_count: c.model_request_count }
-        : {}),
-      ...(c.tool_call_count !== undefined ? { tool_call_count: c.tool_call_count } : {}),
-    })),
-    history: session.history.map((c) => ({
-      id: c.id,
-      title: c.title,
-      createdAt: c.createdAt,
-      updatedAt: c.updatedAt,
-      messages: slimPersistMessages(c.messages),
-      ...(c.active_model !== undefined ? { active_model: c.active_model } : {}),
-      ...(c.cli_sessions !== undefined ? { cli_sessions: { ...c.cli_sessions } } : {}),
-      ...(c.compaction !== undefined ? { compaction: copyCompaction(c.compaction) } : {}),
-      ...(c.plan !== undefined
-        ? { plan: { ...c.plan, items: c.plan.items.map((i) => ({ ...i })) } }
-        : {}),
-      ...(c.displayDiffs !== undefined
-        ? { display_diffs: c.displayDiffs.map((diff) => ({ ...diff })) }
-        : {}),
-      ...(c.active_time_ms !== undefined ? { active_time_ms: c.active_time_ms } : {}),
-      ...(c.active_started_at !== undefined ? { active_started_at: c.active_started_at } : {}),
-      ...(c.input_tokens !== undefined ? { input_tokens: c.input_tokens } : {}),
-      ...(c.output_tokens !== undefined ? { output_tokens: c.output_tokens } : {}),
-      ...(c.last_input_tokens !== undefined ? { last_input_tokens: c.last_input_tokens } : {}),
-      ...(c.last_output_tokens !== undefined ? { last_output_tokens: c.last_output_tokens } : {}),
-      ...(c.model_request_count !== undefined
-        ? { model_request_count: c.model_request_count }
-        : {}),
-      ...(c.tool_call_count !== undefined ? { tool_call_count: c.tool_call_count } : {}),
-    })),
+    conversations: session.conversations.map(conversationToPersisted),
+    ...(options.withHistory ? { history: session.history.map(conversationToPersisted) } : {}),
   };
 }
 
@@ -294,9 +275,13 @@ function migrateLegacyHistory(
 
 /**
  * Load session from workspace state: v1 blob, else legacy single history, else default.
+ * Archived history comes from `archive` unless the blob still carries its own.
  * After successful migration from legacy, removes legacy key.
  */
-export function loadSidebarSession(workspaceState: Memento): SidebarRuntime {
+export function loadSidebarSession(
+  workspaceState: Memento,
+  archive?: HistoryArchive,
+): SidebarRuntime {
   const rawV1 = workspaceState.get<unknown>(SESSION_KEY_V1);
   const parsedV1 = sidebarSessionPersistedSchema.safeParse(rawV1);
   if (parsedV1.success && parsedV1.data.conversations.length > 0) {
@@ -319,7 +304,7 @@ export function loadSidebarSession(workspaceState: Memento): SidebarRuntime {
     return {
       activeConversationId: activeId,
       conversations: d.conversations.map(persistedToRuntime),
-      history: (d.history ?? []).map(persistedToRuntime),
+      history: loadHistory(d, archive).map(persistedToRuntime),
     };
   }
 
@@ -347,8 +332,37 @@ export function loadSidebarSession(workspaceState: Memento): SidebarRuntime {
   return createDefaultSession();
 }
 
-export function saveSidebarSession(workspaceState: Memento, session: SidebarRuntime): void {
-  persistMemento(workspaceState, SESSION_KEY_V1, runtimeToPersisted(session));
+/**
+ * A non-empty memento `history` wins: only a pre-file build, a downgrade, or a
+ * save whose file write failed puts one there, and each is newer than the
+ * file. An EMPTY one does not — a session whose file was unreadable saves `[]`
+ * there, and letting that win would erase the file's archive on the next
+ * start. The next save moves a winning memento copy into the file.
+ */
+function loadHistory(
+  persisted: SidebarSessionPersisted,
+  archive: HistoryArchive | undefined,
+): ConversationPersisted[] {
+  if (!archive || (persisted.history?.length ?? 0) > 0) return persisted.history ?? [];
+  return archive.load() ?? persisted.history ?? [];
+}
+
+/**
+ * With an `archive`, history goes to its file and the memento record carries
+ * only the open tabs — see `HistoryArchive` for why. A failed file write keeps
+ * history in the memento for that save, so it is never dropped.
+ */
+export function saveSidebarSession(
+  workspaceState: Memento,
+  session: SidebarRuntime,
+  archive?: HistoryArchive,
+): void {
+  const inFile = archive?.save(session.history, () => session.history.map(conversationToPersisted));
+  persistMemento(
+    workspaceState,
+    SESSION_KEY_V1,
+    runtimeToPersisted(session, { withHistory: inFile !== true }),
+  );
   // Keep the pointer in step so it is always the authoritative answer on load,
   // rather than a value that may be older than the blob beside it.
   persistMemento(workspaceState, ACTIVE_ID_KEY, session.activeConversationId);

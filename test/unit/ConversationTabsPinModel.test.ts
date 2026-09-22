@@ -50,7 +50,6 @@ function harness(
   const loaded = new Set(options.loaded ?? ['12b']);
   const streamingIds = new Set(options.streamingIds ?? []);
   const deps = {
-    workspaceState: { get: () => undefined, update: async () => {} },
     isStreaming: () => streamingIds.size > 0,
     forgetBudget: () => {},
     getConfig: config,

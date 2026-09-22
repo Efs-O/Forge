@@ -17,6 +17,7 @@ import { expandAlias, splitModelProfile } from '../config/ConfigResolver';
 import type { HostToWebview, WebviewToHost, AttachmentData } from './messageBridge';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
 import type { CliSessionRegistry } from '../agents/CliSessionRegistry';
+import type { HistoryArchive } from './HistoryArchive';
 import { loadSidebarSession, saveActiveConversationId, saveSidebarSession } from './sessionTypes';
 import { CheckpointStack } from '../checkpoint/CheckpointStack';
 import { ToolRegistry } from '../tools/ToolRegistry';
@@ -108,8 +109,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     // Absent in tests and in any host without globalStorage; prompts then send
     // exactly as before, minus the transcript thumbnails.
     private readonly attachmentStore?: ChatAttachmentStore,
+    // Archived conversations live in a file, not workspaceState; absent (no
+    // folder open, or tests), they stay in the memento as before.
+    private readonly historyArchive?: HistoryArchive,
   ) {
-    this.sidebar = loadSidebarSession(workspaceState);
+    this.sidebar = loadSidebarSession(workspaceState, historyArchive);
     const runtime = wireSidebar(
       {
         getConfig: () => this.config,
@@ -391,7 +395,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private persistSession(): void {
-    saveSidebarSession(this.workspaceState, this.sidebar);
+    saveSidebarSession(this.workspaceState, this.sidebar, this.historyArchive);
   }
 
   /** Tab-switch persistence: one string, not the whole transcript blob. */

@@ -1,5 +1,24 @@
 # Forge — Recent Changes
 
+## 0.16.34
+
+### The chat archive no longer slows the whole VS Code window (2026-09-22)
+
+- **Archived chats moved out of VS Code's workspace storage into their own
+  file.** VS Code sends an extension's *entire* workspace storage to the
+  window on every change, and Forge saves after every tool round, so the 40
+  archived conversations (45 MB in the workspace this was measured in) were
+  re-sent and re-serialized by the window on each round. A profile showed the
+  window 25.6% busy doing only that, and VS Code logged "large extension state
+  detected (Efsoo.forge-llm) 44375kb". The archive now lives in
+  `conversation-history.json` under the workspace's storage folder and is
+  rewritten only when it changes — closing or clearing a tab — not per round.
+- Existing archives move over on the first save after the update; nothing is
+  lost. If the file cannot be written, that save keeps the archive in
+  workspace storage as before and logs the error. An unreadable file is moved
+  aside (`conversation-history.corrupt-<ms>.json`), never deleted.
+- Plan: `docs/plans/SESSION_HISTORY_FILE_PLAN.md`.
+
 ## 0.16.33
 
 ### Compaction: a thinking cloud model writes its summary, and a failure no longer loops (2026-09-22)

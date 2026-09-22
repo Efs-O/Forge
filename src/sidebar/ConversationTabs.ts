@@ -30,7 +30,6 @@ import {
   createDefaultSession,
   deriveTitle,
   MAX_CONVERSATIONS,
-  saveSidebarSession,
   type ConversationRuntime,
 } from './sessionTypes';
 import { getLogger } from '../util/logger';
@@ -38,7 +37,6 @@ import { getLogger } from '../util/logger';
 const log = getLogger();
 
 export interface ConversationTabsDeps {
-  workspaceState: vscode.Memento;
   /** True while any conversation is streaming — clearing then would race it. */
   isStreaming: () => boolean;
   getConfig: () => ForgeConfig;
@@ -79,7 +77,7 @@ export class ConversationTabs {
     if (!conv) {
       const fresh = createDefaultSession();
       this.deps.setSidebar(fresh);
-      saveSidebarSession(this.deps.workspaceState, fresh);
+      this.deps.persistSession();
       conv = fresh.conversations[0];
     }
     return conv;
