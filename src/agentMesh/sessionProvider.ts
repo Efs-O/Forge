@@ -346,8 +346,14 @@ export class MeshSessionProvider implements SessionProvider {
     const sessionId = rec?.session_id || aliasRec?.session_id || undefined;
     try {
       const bus = this.deps.getConfig().agent_bus;
-      const executable = await resolveCliExecutable(bus?.claude_cli ?? 'claude', 'claude');
       const factory = this.deps.claudeFactory ?? defaultClaudeFactory();
+      // Injected factories are already test doubles; resolving a real CLI
+      // before calling them makes the deterministic mesh tests depend on the
+      // host having Claude installed. Production still resolves the configured
+      // executable through the default factory path.
+      const executable = this.deps.claudeFactory
+        ? (bus?.claude_cli ?? 'claude')
+        : await resolveCliExecutable(bus?.claude_cli ?? 'claude', 'claude');
       const session = await factory.create({
         alias,
         sessionId,

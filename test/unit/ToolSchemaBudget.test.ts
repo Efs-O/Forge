@@ -152,6 +152,7 @@ describe('tool schema CI budget (TOOL_SCHEMA_GROWTH_PLAN.md Step 1)', () => {
     // eslint-disable-next-line no-console
     console.log('MEASURED CHARS =', chars);
     // TEMP: dump for one-off tokenization; removed before commit.
+    fs.mkdirSync('.forge', { recursive: true });
     fs.writeFileSync('.forge/_budget_defs.json', JSON.stringify(defs));
     expect(
       {
