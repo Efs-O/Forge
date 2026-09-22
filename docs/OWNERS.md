@@ -458,7 +458,8 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Check context + result types                               | `src/jobs/checks/checkTypes.ts`                                |
 | Human-readable job description (for `/jobs`)               | `src/jobs/jobDescribe.ts`                                      |
 | Discuss chat seeding (`manage_jobs` + `/job chat`)         | `src/jobs/jobDiscuss.ts`                                       |
-| `agent_task` runner (unattended agent turn, crash recovery) | `src/jobs/agentTask.ts`                                        |
+| `agent_task` runner (unattended agent turn)                 | `src/jobs/agentTask.ts`                                        |
+| `agent_task` durable run state (config backup path, crash recovery) | `src/jobs/agentTaskState.ts`                                   |
 | `llamacpp_update` action (stages 6-8, switch, rollback)    | `src/jobs/actions/llamacppUpdate.ts`                           |
 | llama.cpp install pipeline (download, verify, smoke test)  | `src/jobs/actions/llamacppInstall.ts`                          |
 | `install_llamacpp` tool (on-demand install + switch)       | `src/tools/llamacppInstallTool.ts`                             |

@@ -8,7 +8,8 @@ import type { JobStore } from './JobStore';
 import type { PowerControl, SleepIfIdleInput } from '../system/PowerControl';
 import { shouldSleepIfIdle } from '../system/PowerControl';
 import { LlamacppAction, type LlamacppActionDeps } from './actions/llamacppAction';
-import { AgentTaskRunner, recoverInterruptedRuns, type AgentTaskDeps } from './agentTask';
+import { AgentTaskRunner, type AgentTaskDeps } from './agentTask';
+import { recoverInterruptedRuns } from './agentTaskState';
 import { SCHEDULER_LEASE_KEY, WakeReconciler } from './schedulerWakes';
 import { BACKOFF_THRESHOLD, nextDueWithBackoff } from './backoff';
 

@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { JobStore } from './JobStore';
-import { writeOutboxItem } from './JobOutbox';
+import { configBackupPath } from './agentTaskState';
 import type { PowerControl } from '../system/PowerControl';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import type { IBackendPool } from '../backend/poolTypes';
@@ -15,7 +15,13 @@ import type { Action, JobFile, RunRow, Schedule } from './jobSchema';
 /** The `agent_task` action, narrowed from the discriminated union. */
 export type AgentTaskAction = Extract<Action, { kind: 'agent_task' }>;
 
-/** Runs an unattended agent turn and reports its outcome through the outbox. */
+/**
+ * The agent-task runner (phase 3): runs an agent turn in the job's own
+ * conversation, unattended, and reports the outcome through the outbox.
+ * Started from `JobScheduler.runJob` and not awaited by the tick (AC11); the
+ * runner writes its own run row and disposes its marker and hold in `finally`.
+ * Durable run state (the config backup, crash recovery) is `agentTaskState.ts`.
+ */
 
 export interface AgentTaskDeps {
   store: JobStore;
@@ -254,7 +260,7 @@ export class AgentTaskRunner {
   /** Snapshot config.yaml's bytes to `state/<id>.config.bak`. */
   private async snapshotConfig(jobId: string): Promise<string | undefined> {
     if (!this.deps.configPath) return undefined;
-    const backupPath = path.join(this.deps.store.root, 'state', `${jobId}.config.bak`);
+    const backupPath = configBackupPath(this.deps.store, jobId);
     try {
       const bytes = await fs.promises.readFile(this.deps.configPath);
       await fs.promises.mkdir(path.dirname(backupPath), { recursive: true });
@@ -456,44 +462,4 @@ function formatDuration(ms: number): string {
   const seconds = totalSeconds % 60;
   if (minutes === 0) return `${seconds}s`;
   return `${minutes}m ${seconds}s`;
-}
-
-/**
- * Crash / reload recovery (CI-enforced). On `start()`, any job whose state
- * still holds a `task_run` was running when Forge died: report it through the
- * outbox, record a `failed` run row, and clear the marker. Not retried
- * automatically — the next tick runs it. Idempotent.
- */
-export async function recoverInterruptedRuns(
-  store: JobStore,
-  outboxDir: string,
-  now: () => number,
-): Promise<void> {
-  const jobs = await store.loadAll();
-  for (const { job, state } of jobs) {
-    if (!state.task_run) continue;
-    const started = new Date(state.task_run.started_at);
-    const hhmm = `${String(started.getHours()).padStart(2, '0')}:${String(started.getMinutes()).padStart(2, '0')}`;
-    const backupPath = path.join(store.root, 'state', `${job.id}.config.bak`);
-    await writeOutboxItem(
-      outboxDir,
-      job.id,
-      job.name,
-      `interrupted — Forge restarted during the run (started ${hhmm}); ` +
-        `config.yaml backup kept at ${backupPath}`,
-      now(),
-    ).catch(() => undefined);
-    await store
-      .appendRun(job.id, {
-        at: now(),
-        late: false,
-        outcome: 'failed',
-        changed: false,
-        summary: 'interrupted — Forge restarted during the run',
-        error: 'interrupted — Forge restarted during the run',
-        delivered: 1,
-      })
-      .catch(() => undefined);
-    store.patchState(job.id, { task_run: null });
-  }
 }
