@@ -240,6 +240,30 @@ describe('manage_jobs — update', () => {
     expect(loaded?.job.check).toEqual({ kind: 'disk_space', path: 'C:\\', min_free_gb: 10 });
   });
 
+  it('a new schedule moves the next run; other state is kept', async () => {
+    await store.saveJob(job({ schedule: { kind: 'daily', at: '03:00' } }));
+    const old = new Date(2026, 8, 23, 3, 0).getTime();
+    const loaded0 = await store.load('disk');
+    await store.saveState('disk', { ...loaded0!.state, next_due_at: old, consecutive_failures: 2 });
+
+    const now = new Date(2026, 8, 22, 10, 0);
+    await call(
+      { action: 'update', job: 'disk', definition: { schedule: { kind: 'daily', at: '09:00' } } },
+      { now: () => now },
+    );
+    const state = (await store.load('disk'))!.state;
+    expect(state.next_due_at).toBe(new Date(2026, 8, 23, 9, 0).getTime());
+    expect(state.consecutive_failures).toBe(2);
+  });
+
+  it('an update without a schedule leaves the next run alone', async () => {
+    await store.saveJob(job());
+    const loaded0 = await store.load('disk');
+    await store.saveState('disk', { ...loaded0!.state, next_due_at: 12345 });
+    await call({ action: 'update', job: 'disk', definition: { enabled: false } });
+    expect((await store.load('disk'))!.state.next_due_at).toBe(12345);
+  });
+
   it('never edits the id', async () => {
     await store.saveJob(job());
     await call({

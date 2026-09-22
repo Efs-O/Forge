@@ -14,6 +14,7 @@ import * as path from 'path';
 import type { ForgeConfig } from '../config/types';
 import type { JobStore } from '../jobs/JobStore';
 import { JobSchema, type JobFile } from '../jobs/jobSchema';
+import { nextDue } from '../jobs/schedule';
 import {
   describeAction,
   describeCheck,
@@ -352,6 +353,18 @@ async function updateJob(
     throw new Error(`manage_jobs: update rejected: ${result.error.message}`);
   }
   await deps.store.saveJob(result.data);
+  // A new schedule must move the next run too: the scheduler only reads
+  // `next_due_at`, so "run at 09:00 instead" otherwise fired once more at the
+  // old time first. Re-read the state so a field the scheduler just wrote wins.
+  if (partial['schedule'] !== undefined) {
+    const fresh = await deps.store.load(id);
+    const state = fresh?.state ?? jobFile.state;
+    const now = (deps.now ?? (() => new Date()))();
+    await deps.store.saveState(id, {
+      ...state,
+      next_due_at: nextDue(result.data.schedule, now).getTime(),
+    });
+  }
   return `Updated job "${result.data.name}" [${id}].`;
 }
 

@@ -1,5 +1,14 @@
 # Forge — Recent Changes
 
+## 0.16.27
+
+### Jobs: changing a schedule moves the next run (2026-09-22)
+
+- **"Run it at 09:00 instead" now takes effect on the next run.** A
+  `manage_jobs` update saved the new schedule but left the next run at the
+  old time, so a daily 03:00 job moved to 09:00 still fired once more at
+  03:00. The update now recomputes the next run from the new schedule.
+
 ## 0.16.26
 
 ### Mesh: `who` follows a reload, owned Codex answers without bash (2026-09-22)
