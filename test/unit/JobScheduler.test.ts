@@ -147,7 +147,9 @@ describe('JobScheduler tick', () => {
 
   it('a failed check is backed off after 3 consecutive failures', async () => {
     // A disk_space check on a path that does not exist throws.
-    await store.saveJob(makeJob({ check: { kind: 'disk_space', path: path.join(jobsRoot, 'nope'), min_free_gb: 1 } }));
+    await store.saveJob(
+      makeJob({ check: { kind: 'disk_space', path: path.join(jobsRoot, 'nope'), min_free_gb: 1 } }),
+    );
     makeScheduler();
     await scheduler.start({ immediate: false });
     for (let i = 0; i < 3; i++) {
@@ -256,23 +258,27 @@ describe('JobScheduler tick', () => {
     expect(runs[1]!.late).toBe(true);
   });
 
-  it('disabling a wake job deletes its scheduled wake', async () => {
-    await store.saveJob(makeJob({ wake: true, schedule: { kind: 'daily', at: '06:00' } }));
-    makeScheduler();
-    await scheduler.start({ immediate: false });
-    // On lease acquisition the wake task is registered for the enabled job.
-    expect(spawnAndWait).toHaveBeenCalled();
-    spawnAndWait.mockClear();
-    // Disable the job and reconcile: the task is deleted, not left stale.
-    const job = (await store.load('disk'))!.job;
-    await store.saveJob({ ...job, enabled: false });
-    await scheduler.reconcileWakes();
-    // deleteScheduledWakes calls spawnAndWait(schtasks, ['/delete', ...]).
-    const deleteCalls = spawnAndWait.mock.calls.filter((c) =>
-      Array.isArray(c[1]) && (c[1] as string[]).includes('/delete'),
-    );
-    expect(deleteCalls.length).toBeGreaterThan(0);
-  });
+  // schtasks is Windows-only; off Windows a real wake request is refused.
+  it.skipIf(process.platform !== 'win32')(
+    'disabling a wake job deletes its scheduled wake',
+    async () => {
+      await store.saveJob(makeJob({ wake: true, schedule: { kind: 'daily', at: '06:00' } }));
+      makeScheduler();
+      await scheduler.start({ immediate: false });
+      // On lease acquisition the wake task is registered for the enabled job.
+      expect(spawnAndWait).toHaveBeenCalled();
+      spawnAndWait.mockClear();
+      // Disable the job and reconcile: the task is deleted, not left stale.
+      const job = (await store.load('disk'))!.job;
+      await store.saveJob({ ...job, enabled: false });
+      await scheduler.reconcileWakes();
+      // deleteScheduledWakes calls spawnAndWait(schtasks, ['/delete', ...]).
+      const deleteCalls = spawnAndWait.mock.calls.filter(
+        (c) => Array.isArray(c[1]) && (c[1] as string[]).includes('/delete'),
+      );
+      expect(deleteCalls.length).toBeGreaterThan(0);
+    },
+  );
 });
 
 describe('JobScheduler run_now markers (AC5)', () => {
