@@ -419,6 +419,35 @@ describe('AgentTaskRunner', () => {
     expect(item!.text).toContain('ok');
   });
 
+  it('the prompt carries the observation it was handed, and success saves it', async () => {
+    const job = baseJob();
+    await store.saveJob(job);
+    store.patchState('agent-task', { last_observation: '{"tag":"b1"}' });
+    host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — installed b2' });
+
+    const runner = new AgentTaskRunner(makeDeps());
+    const saved = (await store.load('agent-task'))!.state;
+    await runner.run({ job, state: { ...saved, last_observation: '{"tag":"b2"}' } }, false);
+
+    const prompt = JSON.stringify(vi.mocked(host.send).mock.calls);
+    expect(prompt).toContain('b2');
+    expect(prompt).not.toContain('b1');
+    expect((await store.load('agent-task'))!.state.last_observation).toBe('{"tag":"b2"}');
+  });
+
+  it('a failed run keeps the old observation, so the next check retries', async () => {
+    const job = baseJob();
+    await store.saveJob(job);
+    store.patchState('agent-task', { last_observation: '{"tag":"b1"}' });
+    host = fakeHost([], { kind: 'failed', error: 'download failed' });
+
+    const runner = new AgentTaskRunner(makeDeps());
+    const saved = (await store.load('agent-task'))!.state;
+    await runner.run({ job, state: { ...saved, last_observation: '{"tag":"b2"}' } }, false);
+
+    expect((await store.load('agent-task'))!.state.last_observation).toBe('{"tag":"b1"}');
+  });
+
   it('a failed turn records a failed run row and delivers immediately', async () => {
     const job = baseJob({
       action: { kind: 'agent_task', task: 'install', report: 'failures_and_changes' },

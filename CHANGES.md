@@ -1,5 +1,18 @@
 # Forge — Recent Changes
 
+## 0.16.28
+
+### Agent-task jobs: the agent sees the release the check just found (2026-09-22)
+
+- **The prompt's "Check observation" is the release this check fetched.**
+  It used to show the previously saved observation, the release being
+  replaced: the llama job's agent was told the newest build was b11065 while
+  b11095 was out, and had to look it up itself.
+- **A successful run saves that observation**, so the next check compares
+  against it. Before, it was never saved, and every later check reported the
+  same release as new again. A failed run keeps the old one, so the next
+  check retries.
+
 ## 0.16.27
 
 ### Jobs: changing a schedule moves the next run (2026-09-22)

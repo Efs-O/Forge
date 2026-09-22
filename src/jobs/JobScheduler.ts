@@ -326,7 +326,9 @@ export class JobScheduler {
           // Started, not awaited: the runner owns the `runningJobs` guard until
           // it ends, so the next tick cannot start a second run (AC11).
           detached = true;
-          void this.agentTask.run(jobFile, wasLate).finally(() => this.runningJobs.delete(job.id));
+          // Hand over THIS check's observation; the runner saves it on success only.
+          const runFile = { job, state: { ...state, last_observation: result.observation } };
+          void this.agentTask.run(runFile, wasLate).finally(() => this.runningJobs.delete(job.id));
           return;
         }
         const error = 'agent_task runner not wired (no host facade or backend pool)';

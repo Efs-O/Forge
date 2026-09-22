@@ -404,7 +404,9 @@ export class AgentTaskRunner {
       task_pending: false,
       task_pending_since: null,
       last_run_at: now,
-      ...(failed ? {} : { last_ok_at: now }),
+      // Success records the observation the agent acted on, so the next check
+      // compares against it; a failure keeps the old one and is retried.
+      ...(failed ? {} : { last_ok_at: now, last_observation: jobFile.state.last_observation }),
       next_due_at: nextDueAt,
       consecutive_failures: consecutive,
     });
