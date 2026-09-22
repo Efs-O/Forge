@@ -136,6 +136,36 @@ describe('manage_jobs — create', () => {
     expect(loaded?.job.enabled).toBe(true);
   });
 
+  it('writes the current model into an agent_task created without one', async () => {
+    const out = await call({
+      action: 'create',
+      definition: {
+        name: 'Watch',
+        schedule: { kind: 'daily', at: '08:00' },
+        check: { kind: 'none' },
+        on_change: { kind: 'notify' },
+        action: { kind: 'agent_task', task: 'look' },
+      },
+    });
+    expect(out).toContain('Its agent runs on primary.');
+    const loaded = await store.load('watch');
+    expect(loaded?.job.action).toMatchObject({ kind: 'agent_task', model: 'primary' });
+  });
+
+  it('keeps the model an agent_task names', async () => {
+    await call({
+      action: 'create',
+      definition: {
+        name: 'Watch',
+        schedule: { kind: 'daily', at: '08:00' },
+        check: { kind: 'none' },
+        on_change: { kind: 'notify' },
+        action: { kind: 'agent_task', task: 'look', model: 'other' },
+      },
+    });
+    expect((await store.load('watch'))?.job.action).toMatchObject({ model: 'other' });
+  });
+
   it('suffixes the id when the name already exists', async () => {
     await call({
       action: 'create',

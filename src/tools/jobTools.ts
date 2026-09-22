@@ -302,7 +302,7 @@ async function createJob(deps: ManageJobsDeps, args: Record<string, unknown>): P
     schedule: partial['schedule'],
     check: partial['check'],
     on_change: partial['on_change'],
-    action: partial['action'] ?? null,
+    action: pinAgentTaskModel(partial['action'] ?? null, deps.getConfig().active_model),
     created_at: nowMs,
     updated_at: nowMs,
   };
@@ -311,7 +311,24 @@ async function createJob(deps: ManageJobsDeps, args: Record<string, unknown>): P
     throw new Error(`manage_jobs: invalid job definition: ${result.error.message}`);
   }
   await deps.store.saveJob(result.data);
-  return `Created job "${result.data.name}" [${id}]. It will run on the next scheduler tick when due.`;
+  const action = result.data.action;
+  const runsOn =
+    action?.kind === 'agent_task' && action.model ? ` Its agent runs on ${action.model}.` : '';
+  return `Created job "${result.data.name}" [${id}]. It will run on the next scheduler tick when due.${runsOn}`;
+}
+
+/**
+ * An agent_task created without a `model` gets the current model written in.
+ * Left empty, the runner fell back to the in-memory active model, which every
+ * chat-tab model switch overwrites: an unattended job ran on a paid cloud model
+ * because a tab had been switched to it two minutes earlier.
+ */
+function pinAgentTaskModel(action: unknown, activeModel: string | null | undefined): unknown {
+  if (typeof action !== 'object' || action === null || Array.isArray(action)) return action;
+  const fields = action as Record<string, unknown>;
+  if (fields['kind'] !== 'agent_task' || fields['model'] !== undefined || !activeModel)
+    return action;
+  return { ...fields, model: activeModel };
 }
 
 /** Build a stable id from the name: a slug, suffixed if taken (so two "llama.cpp" jobs can coexist). */

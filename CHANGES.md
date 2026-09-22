@@ -1,5 +1,16 @@
 # Forge — Recent Changes
 
+## 0.16.30
+
+### Jobs: an agent task keeps the model it was created with (2026-09-22)
+
+- **`manage_jobs create` writes the model into an `agent_task` that names
+  none**, and says so in its reply. Without one, each run used the in-memory
+  active model, which every chat-tab model switch overwrites: the first run
+  of the new `llama-sglang-watch` job went to OpenRouter's
+  `qwen/qwen3.8-flash`, because a tab had been switched to it two minutes
+  earlier, instead of the local Qwen the job was built for.
+
 ## 0.16.29
 
 ### Agent messages: a turn that did not answer no longer reports "finished" (2026-09-22)
