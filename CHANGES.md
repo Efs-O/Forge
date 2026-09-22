@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## 0.16.34
+## 0.16.35
 
 ### Agent messages stay in their sender's chat (2026-09-22)
 

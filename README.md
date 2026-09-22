@@ -87,7 +87,7 @@ telemetry, analytics, or auto-update pings.
 ## What's New
 
 Forge ships a **Changelog** tab next to this one — that is the full account,
-every release. The short version of the latest releases: 0.16.34 moved
+every release. The short version of the latest releases: 0.16.35 moved
 archived chats out of VS Code workspace storage so saving a tool round no
 longer reserializes the whole archive; 0.16.33 and 0.16.32 made compaction
 work for thinking and cloud models and made failures stop cleanly; 0.16 added
