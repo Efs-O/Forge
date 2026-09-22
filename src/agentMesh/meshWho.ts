@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import { listAliases } from './aliasRegistry';
 import { listOwnedAliases, ownershipPath, readOwnership } from './ownership';
 import { isHostAlive, type HostLivenessDeps } from './hostIdentity';
+import type { ClaudeSession } from '../agentBus/claudePeer';
 
 /**
  * The `forge.sh who` projection (AGENT_MESH_PLAN §11). A read-only list of every
@@ -51,6 +52,9 @@ export interface WhoDeps {
   forgeInboxDepth: () => number;
   /** Host liveness (injectable for tests; production reads the OS). */
   hostLiveness?: HostLivenessDeps;
+  /** Live Claude sessions, to resolve a joined alias after a reload changed its
+   *  pid. Omitted: the joined row shows the pid recorded at join time. */
+  claudeSessions?: () => ClaudeSession[];
 }
 
 /** The full participant set: forge + every registered, owned, or known alias. */
@@ -115,7 +119,31 @@ function projectOne(
   if (aliasRec?.peer_pid !== undefined) {
     // Non-observing: we can write to it but not watch it. Never busy, never
     // idle — only unknown (the honesty rule).
-    return { alias, attachment: 'joined', activity: 'unknown', detail: `pid ${aliasRec.peer_pid}` };
+    if (!deps.claudeSessions) {
+      return {
+        alias,
+        attachment: 'joined',
+        activity: 'unknown',
+        detail: `pid ${aliasRec.peer_pid}`,
+      };
+    }
+    // A reload restarts the session under a new pid with the same sessionId —
+    // the same match routing uses (pickClaudePeer), so `who` agrees with it.
+    const sessions = deps.claudeSessions();
+    const live =
+      sessions.find((s) => s.pid === aliasRec.peer_pid) ??
+      (aliasRec.claude_session_id
+        ? sessions.find((s) => s.sessionId === aliasRec.claude_session_id)
+        : undefined);
+    if (!live) {
+      return {
+        alias,
+        attachment: 'joined',
+        activity: 'dead',
+        detail: 'not running — open its panel',
+      };
+    }
+    return { alias, attachment: 'joined', activity: 'unknown', detail: `pid ${live.pid}` };
   }
 
   if (rec) {

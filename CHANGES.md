@@ -1,5 +1,19 @@
 # Forge — Recent Changes
 
+## 0.16.26
+
+### Mesh: `who` follows a reload, owned Codex answers without bash (2026-09-22)
+
+- **`forge.sh who` shows the joined Claude session's current pid.** A reload
+  restarts it under a new pid; `who` still showed the pid from join time. It
+  now matches by conversation id, the same way messages are routed, and shows
+  `dead — not running, open its panel` when the session is closed.
+- **A Codex that Forge started no longer runs `forge.sh` to answer.** Its final
+  message already is the answer, but it was told to reply with
+  `forge.sh reply`. In PowerShell a bare `bash` is WSL, which fails on a
+  machine without virtualization, so it fell back to the outbox. The question
+  now says the final message is the answer.
+
 ## 0.16.25
 
 ### Agent-task jobs: a successful change is reported again (2026-09-22)

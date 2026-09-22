@@ -245,9 +245,14 @@ export function makeLiveSessionTool(deps: LiveSessionDeps): RegisteredTool {
         orchestrator && byAlias ? await orchestrator.resolveAdapter(target) : undefined;
       if (orchestrator && adapter?.observesTurns) {
         const who = target === 'codex' ? 'Codex' : 'Claude';
+        // Forge reads this turn's final message as the answer. Say so: told by
+        // AGENTS.md to run `forge.sh reply`, Codex reached for a bare `bash`,
+        // which in PowerShell is WSL, and failed on a machine without it.
         const message = `[Forge agent bus, question ${id}] ${subject}
 
-${question}`;
+${question}
+
+(Your final message in this turn is the answer; Forge reads it directly. Do not run forge.sh reply or write an outbox file.)`;
         const result = await orchestrator.ask(target, message, signal);
         return late + formatTurn(who, subject, result, signal?.aborted === true);
       }

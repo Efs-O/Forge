@@ -98,6 +98,30 @@ describe('forge.sh who projection (§11)', () => {
     expect(byAlias('claude')?.activity).toBe('unknown');
   });
 
+  it('A3b: a joined session resumed under a new pid shows the live pid (matched by sessionId)', () => {
+    writeAliases(root, {
+      claude: {
+        agent: 'claude', session_id: 'c1', registered_at: 1, by: 'user',
+        peer_pid: 40252, claude_session_id: 'sess-1',
+      },
+    });
+    const live = { pid: 28664, sessionId: 'sess-1', name: 'forge-0a', cwd: '', status: 'idle', sdk: false };
+    deps.claudeSessions = () => [live];
+    expect(byAlias('claude')).toMatchObject({ attachment: 'joined', activity: 'unknown', detail: 'pid 28664' });
+  });
+
+  it('A3c: a joined session that is not running is reported dead, not unknown', () => {
+    writeAliases(root, {
+      claude: {
+        agent: 'claude', session_id: 'c1', registered_at: 1, by: 'user',
+        peer_pid: 40252, claude_session_id: 'sess-1',
+      },
+    });
+    deps.claudeSessions = () => [];
+    expect(byAlias('claude')).toMatchObject({ attachment: 'joined', activity: 'dead' });
+    expect(byAlias('claude')?.detail).toContain('open its panel');
+  });
+
   it('A4: forge reports hub, and busy exactly when the active conversation streams', () => {
     deps.forgeBusy = () => false;
     deps.forgeInboxDepth = () => 2;

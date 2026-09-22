@@ -7,6 +7,7 @@ import type { ForgeConfig } from '../config/types';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import { parseMeshCommand } from '../agentMesh/meshCommands';
 import { projectWho } from '../agentMesh/meshWho';
+import { readClaudeSessions } from '../agentBus/claudePeer';
 import { setupAgentMesh } from './agentMeshSetup';
 
 /**
@@ -108,6 +109,7 @@ export function setupAgentMessaging(
           return status.streamingConversationIds.includes(status.activeConversationId);
         },
         forgeInboxDepth: () => inbox.pending,
+        claudeSessions: () => readClaudeSessions(),
       }),
     // §8/P3: a `to: forge` message that parses as a typed lifecycle command is
     // dispatched (standby/wake/close/steer/say/handoff) and the reply returned

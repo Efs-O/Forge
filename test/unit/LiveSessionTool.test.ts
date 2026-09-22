@@ -281,7 +281,9 @@ describe('ask_live_session', () => {
       });
       const result = await tool().handler(askCodex);
       expect(messages).toHaveLength(1);
-      expect(messages[0]).toMatch(/^\[Forge agent bus, question .+\] Does X hold\?\n\nCheck X\.$/);
+      expect(messages[0]).toMatch(/^\[Forge agent bus, question .+\] Does X hold\?\n\nCheck X\.\n\n/);
+      // Its final message IS the answer: no forge.sh (a bare bash is WSL on Windows).
+      expect(messages[0]).toContain('Your final message in this turn is the answer');
       expect(messages[0]).not.toContain('reply.md');
       expect(result).toContain('**Asked Codex:** Does X hold?');
       expect(result).toContain('**Codex says:**\n\nOwned Codex answer.');
