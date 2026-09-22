@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { busPaths } from '../agentBus/agentBus';
-import { AgentInbox, type InboxMessageOptions } from '../agentBus/agentInbox';
+import { AgentInbox, busTurnEndLine, type InboxMessageOptions } from '../agentBus/agentInbox';
 import { AgentRoutes } from '../backend/agentRoutes';
 import { joinClaude } from '../agentMesh/claudeJoin';
 import type { ForgeConfig } from '../config/types';
@@ -46,7 +46,10 @@ export function setupAgentMessaging(
         conversationId = (await facade.createConversation({ activate: true })).id;
       }
       if (options?.model) await facade.setConversationModel(conversationId, options.model);
-      await facade.send(conversationId, prompt);
+      const outcome = await facade.send(conversationId, prompt);
+      return outcome.kind === 'failed'
+        ? { kind: 'failed', error: outcome.error }
+        : { kind: outcome.kind };
     },
     warn: (message) => void vscode.window.showWarningMessage(message),
     // F-08: a bus-started turn began — write its durable status file so a
@@ -65,10 +68,10 @@ export function setupAgentMessaging(
     // `finished` line via tell (which writes the board event), so there are no
     // silent stalls. A user-typed turn has no bus sender, so this never fires
     // for it.
-    onBusTurnFinished: (from, durationMs) => {
+    onBusTurnFinished: (from, durationMs, end) => {
       const minutes = Math.max(1, Math.round(durationMs / 60_000));
       void mesh.orchestrator
-        .tell(from, `finished · ${minutes} min · the turn you started has ended`)
+        .tell(from, busTurnEndLine(end, minutes))
         .catch((err) =>
           vscode.window.showWarningMessage(`[agent mesh] finished notice failed: ${String(err)}`),
         );

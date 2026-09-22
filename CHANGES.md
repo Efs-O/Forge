@@ -1,5 +1,21 @@
 # Forge — Recent Changes
 
+## 0.16.29
+
+### Agent messages: a turn that did not answer no longer reports "finished" (2026-09-22)
+
+- **The sender is told how the turn ended.** A `forge.sh say` turn that was
+  cancelled, interrupted or failed used to reach the sender as `finished ·
+  1 min · the turn you started has ended`: the inbox dropped the turn's
+  outcome. A ping to the local model, queued behind a five-minute turn on the
+  same llama-server, was cancelled after 87 s with no reply and still read
+  as finished. The line now says `cancelled`, `interrupted`, or `failed`
+  with the error.
+- **The session log records a stopped turn.** A cancelled or interrupted
+  turn writes no messages, so its log ended on the bare prompt. It now ends
+  with a `turn_stopped` row naming the kind, next to the existing
+  `turn_error` for failures.
+
 ## 0.16.28
 
 ### Agent-task jobs: the agent sees the release the check just found (2026-09-22)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AgentInbox, INBOX_CAP, type InboxHost } from '../../src/agentBus/agentInbox';
+import { AgentInbox, busTurnEndLine, INBOX_CAP, type BusTurnEnd, type InboxHost } from '../../src/agentBus/agentInbox';
 
 const tick = (ms = 20): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -7,15 +7,17 @@ function host(overrides: Partial<InboxHost> = {}): InboxHost & {
   submitted: string[];
   warnings: string[];
   busy: boolean;
-  finish: () => void;
+  finish: (end?: BusTurnEnd) => void;
   finished: { from: string; durationMs: number }[];
+  ends: BusTurnEnd[];
 } {
   const state = {
     submitted: [] as string[],
     warnings: [] as string[],
     busy: false,
-    release: [] as (() => void)[],
+    release: [] as ((end: BusTurnEnd) => void)[],
     finished: [] as { from: string; durationMs: number }[],
+    ends: [] as BusTurnEnd[],
   };
   return {
     get submitted() {
@@ -33,14 +35,20 @@ function host(overrides: Partial<InboxHost> = {}): InboxHost & {
     get finished() {
       return state.finished;
     },
-    finish: () => state.release.shift()?.(),
+    get ends() {
+      return state.ends;
+    },
+    finish: (end: BusTurnEnd = { kind: 'completed' }) => state.release.shift()?.(end),
     isBusy: () => state.busy,
     submit: (prompt) => {
       state.submitted.push(prompt);
-      return new Promise<void>((r) => state.release.push(r));
+      return new Promise<BusTurnEnd>((r) => state.release.push(r));
     },
     warn: (m) => state.warnings.push(m),
-    onBusTurnFinished: (from, durationMs) => state.finished.push({ from, durationMs }),
+    onBusTurnFinished: (from, durationMs, end) => {
+      state.finished.push({ from, durationMs });
+      state.ends.push(end);
+    },
     ...overrides,
   };
 }
@@ -157,6 +165,17 @@ describe('AgentInbox', () => {
     inbox.dispose();
   });
 
+  it('passes a cancelled turn through, so the sender is not told it finished', async () => {
+    const h = host();
+    const inbox = new AgentInbox(h, 5);
+    inbox.accept('ping', 'claude');
+    await tick();
+    h.finish({ kind: 'cancelled' });
+    await tick();
+    expect(h.ends).toEqual([{ kind: 'cancelled' }]);
+    inbox.dispose();
+  });
+
   it('does not fire a finished notice for a turn with no bus sender', async () => {
     const h = host();
     const inbox = new AgentInbox(h, 5);
@@ -225,5 +244,16 @@ describe('AgentInbox', () => {
     expect(cleared).toEqual(started);
     expect(h.finished).toHaveLength(1); // notice fires on success
     inbox.dispose();
+  });
+});
+
+describe('busTurnEndLine', () => {
+  it('only a completed turn says finished; the others say what happened', () => {
+    expect(busTurnEndLine({ kind: 'completed' }, 1)).toMatch(/^finished · 1 min/);
+    expect(busTurnEndLine({ kind: 'failed', error: 'fetch failed' }, 2)).toBe(
+      'failed · 2 min · the turn you started ended with an error: fetch failed',
+    );
+    expect(busTurnEndLine({ kind: 'cancelled' }, 1)).toMatch(/^cancelled · 1 min · .*before it answered/);
+    expect(busTurnEndLine({ kind: 'interrupted' }, 1)).toMatch(/^interrupted · /);
   });
 });

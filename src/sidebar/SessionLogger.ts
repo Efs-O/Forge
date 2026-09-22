@@ -229,6 +229,16 @@ export class SessionLogger {
     });
   }
 
+  /**
+   * Records a turn that was cancelled or interrupted. Like a failed turn it
+   * writes no messages of its own, so without this row the file ends on the
+   * prompt and reads as a turn that is still running, or never ran.
+   */
+  logTurnStopped(kind: 'cancelled' | 'interrupted', model: string): void {
+    this.ensureHeader(model);
+    this.append({ type: 'turn_stopped', kind, timestamp_ms: Date.now(), model });
+  }
+
   flush(messages: ChatMessage[], model: string, usage?: SessionUsage): void {
     const startedAt = this.writtenCount;
     this.ensureHeader(model);

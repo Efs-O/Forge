@@ -11,20 +11,45 @@ export interface InboxMessageOptions {
   newChat?: boolean;
 }
 
+/**
+ * How a bus-started turn ended. `submit` resolving used to mean "finished",
+ * so a turn that was cancelled while queued behind a busy local server, or
+ * that failed, reached its sender as `finished` with no answer and no reason.
+ */
+export interface BusTurnEnd {
+  kind: 'completed' | 'failed' | 'cancelled' | 'interrupted';
+  /** The failure, for `failed`. */
+  error?: string;
+}
+
+/** The sender's one line for how its turn ended. Only `completed` says finished. */
+export function busTurnEndLine(end: BusTurnEnd, minutes: number): string {
+  switch (end.kind) {
+    case 'completed':
+      return `finished · ${minutes} min · the turn you started has ended`;
+    case 'failed':
+      return `failed · ${minutes} min · the turn you started ended with an error: ${end.error ?? 'unknown error'}`;
+    case 'cancelled':
+      return `cancelled · ${minutes} min · the turn you started was stopped before it answered`;
+    case 'interrupted':
+      return `interrupted · ${minutes} min · the turn you started was interrupted before it answered`;
+  }
+}
+
 /** What the inbox needs from Forge's chat. */
 export interface InboxHost {
   /** True while the chat a message would land in is mid-turn, or not ready. */
   isBusy(options?: InboxMessageOptions): boolean;
-  /** Start a visible turn with this prompt; resolves when the turn ends. */
-  submit(prompt: string, options?: InboxMessageOptions): Promise<void>;
+  /** Start a visible turn with this prompt; resolves with how the turn ended. */
+  submit(prompt: string, options?: InboxMessageOptions): Promise<BusTurnEnd>;
   /** Tell the user a message could not be delivered. */
   warn(message: string): void;
   /**
    * Called when a bus-started turn ends (AGENT_MESH_PLAN §9, P1). The sender
-   * gets one `finished · …` line and a board event is written. Absent ⇒ no
-   * finished notice (a user-typed turn has no bus sender).
+   * gets one line saying how it ended and a board event is written. Absent ⇒
+   * no notice (a user-typed turn has no bus sender).
    */
-  onBusTurnFinished?(from: string, durationMs: number): void;
+  onBusTurnFinished?(from: string, durationMs: number, end: BusTurnEnd): void;
   /**
    * Called when a bus-started turn BEGINS (F-08). The wiring writes a durable
    * status file so a crashed turn can be detected at the next window's startup.
@@ -143,13 +168,13 @@ export class AgentInbox {
           }
         }
         try {
-          await this.host.submit(item.prompt, item.options);
-          // §9: a bus-started turn just ended — the sender gets one finished
-          // line + a board event. A user-typed turn has no `from`, so this
-          // fires only for agent messages, and only on success.
+          const end = await this.host.submit(item.prompt, item.options);
+          // §9: a bus-started turn just ended — the sender gets one line saying
+          // how (finished, failed, cancelled) + a board event. A user-typed turn
+          // has no `from`, so this fires only for agent messages.
           if (item.from && this.host.onBusTurnFinished) {
             try {
-              this.host.onBusTurnFinished(item.from, Date.now() - startedAt);
+              this.host.onBusTurnFinished(item.from, Date.now() - startedAt, end);
             } catch (notifyErr) {
               log.error(`[agentInbox] finished notice failed: ${String(notifyErr)}`);
             }
