@@ -20,6 +20,11 @@ import {
   schedulePeriodMs,
   type AgentTaskDeps,
 } from '../../src/jobs/agentTask';
+import {
+  restartAfterTurn,
+  RESTART_CAP_MS,
+  type RestartAfterTurnDeps,
+} from '../../src/jobs/agentTaskRestart';
 import { JobSchema, JobStateSchema, type Job, type JobFile } from '../../src/jobs/jobSchema';
 import type { PowerControl } from '../../src/system/PowerControl';
 import type { IBackendPool } from '../../src/backend/poolTypes';
@@ -745,5 +750,232 @@ describe('openDiscussChat refusal (AC12)', () => {
     await expect(openDiscussChat(host, store, jobFile, false)).rejects.toThrow(/running/);
     // No seed was sent.
     expect(host.send).not.toHaveBeenCalled();
+  });
+});
+
+// ── Step 7: restart after the turn (phase 4) ────────────────────────────────
+
+describe('restartAfterTurn (step 7, phase 4)', () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'forge-agent-task-restart-'));
+  });
+
+  afterEach(async () => {
+    await fs.promises.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  });
+
+  function restartDeps(overrides: Partial<RestartAfterTurnDeps> = {}): RestartAfterTurnDeps {
+    const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — done' });
+    return {
+      host,
+      pool: fakePool(['qwen'], 1),
+      configPath: path.join(dir, 'config.yaml'),
+      backupPath: path.join(dir, 'config.bak'),
+      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      ...overrides,
+    };
+  }
+  it('restarts on RESTART: yes AND RESULT: ok and keeps the ok outcome', async () => {
+    const ok = parseResult('RESULT: ok — installed b1234\nRESTART: yes');
+    const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — installed b1234\nRESTART: yes' });
+    const out = await restartAfterTurn({ ...restartDeps(), host }, 'qwen', ok);
+    expect(out.kind).toBe('ok');
+    expect(host.restartModel).toHaveBeenCalledWith('qwen');
+  });
+
+  it('does not restart when RESULT is not ok', async () => {
+    const failed = parseResult('RESULT: failed — something broke');
+    const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: failed — something broke' });
+    const out = await restartAfterTurn({ ...restartDeps(), host }, 'qwen', failed);
+    expect(out.kind).toBe('failed');
+    expect(host.restartModel).not.toHaveBeenCalled();
+  });
+
+  it('does not restart when RESTART is not yes', async () => {
+    const ok = parseResult('RESULT: ok — done');
+    const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — done' });
+    const out = await restartAfterTurn({ ...restartDeps(), host }, 'qwen', ok);
+    expect(out.kind).toBe('ok');
+    expect(host.restartModel).not.toHaveBeenCalled();
+  });
+
+  it('notes the new binary takes effect on next load when no model is loaded', async () => {
+    const ok = parseResult('RESULT: ok — installed b1234\nRESTART: yes');
+    const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — installed b1234\nRESTART: yes' });
+    const out = await restartAfterTurn({ ...restartDeps(), host, pool: fakePool([], 1) }, 'qwen', ok);
+    expect(out.kind).toBe('ok');
+    expect(out.sentence).toContain('no model loaded');
+    expect(host.restartModel).not.toHaveBeenCalled();
+  });
+
+  it('rolls back and restarts when the first restart throws', async () => {
+    const ok = parseResult('RESULT: ok — installed b1234\nRESTART: yes');
+    const backupPath = path.join(dir, 'config.bak');
+    const configPath = path.join(dir, 'config.yaml');
+    await fs.promises.writeFile(backupPath, 'llama_server:\n  binary: /old/binary\n');
+    await fs.promises.writeFile(configPath, 'llama_server:\n  binary: /new/binary\n');
+    const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — installed b1234\nRESTART: yes' });
+    let calls = 0;
+    host.restartModel = vi.fn().mockImplementation(async () => {
+      calls++;
+      if (calls === 1) throw new Error('new binary did not start');
+    });
+    const out = await restartAfterTurn(
+      { ...restartDeps(), host, backupPath, configPath },
+      'qwen',
+      ok,
+    );
+    expect(out.kind).toBe('failed');
+    // Acceptance #6: the report names BOTH binaries.
+    expect(out.sentence).toContain('/new/binary');
+    expect(out.sentence).toContain('/old/binary');
+    expect(out.sentence).toContain('rolled back to /old/binary');
+    expect(host.restartModel).toHaveBeenCalledTimes(2);
+    const restored = await fs.promises.readFile(configPath, 'utf8');
+    expect(restored).toContain('/old/binary');
+  });
+
+  it('reports a manual fix when the rollback restart also fails', async () => {
+    const ok = parseResult('RESULT: ok — installed b1234\nRESTART: yes');
+    const backupPath = path.join(dir, 'config.bak');
+    const configPath = path.join(dir, 'config.yaml');
+    await fs.promises.writeFile(backupPath, 'llama_server:\n  binary: /old/binary\n');
+    await fs.promises.writeFile(configPath, 'llama_server:\n  binary: /new/binary\n');
+    const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — installed b1234\nRESTART: yes' });
+    host.restartModel = vi.fn().mockRejectedValue(new Error('no binary works'));
+    const out = await restartAfterTurn(
+      { ...restartDeps(), host, backupPath, configPath },
+      'qwen',
+      ok,
+    );
+    expect(out.kind).toBe('failed');
+    expect(out.sentence).toContain('also failed to start');
+    expect(out.sentence).toContain('fix llama_server.binary manually');
+    // Acceptance #6: the report names BOTH binaries.
+    expect(out.sentence).toContain('/new/binary');
+    expect(out.sentence).toContain('/old/binary');
+    expect(host.restartModel).toHaveBeenCalledTimes(2);
+  });
+
+  it('counts a cap hit as a failed restart and rolls back', async () => {
+    const ok = parseResult('RESULT: ok — installed b1234\nRESTART: yes');
+    const backupPath = path.join(dir, 'config.bak');
+    const configPath = path.join(dir, 'config.yaml');
+    await fs.promises.writeFile(backupPath, 'llama_server:\n  binary: /old/binary\n');
+    await fs.promises.writeFile(configPath, 'llama_server:\n  binary: /new/binary\n');
+    const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — installed b1234\nRESTART: yes' });
+    let calls = 0;
+    host.restartModel = vi.fn().mockImplementation(() => {
+      calls++;
+      if (calls === 1) return new Promise<void>(() => {}); // hangs → cap
+      return Promise.resolve();
+    });
+    // The cap fires quickly (50 ms) regardless of the requested duration, so the
+    // hanging first restart loses the race to the cap.
+    const sleep = (ms: number, signal?: AbortSignal) =>
+      new Promise<void>((resolve, reject) => {
+        if (signal?.aborted) return reject(new Error('aborted'));
+        const t = setTimeout(resolve, 50);
+        signal?.addEventListener('abort', () => {
+          clearTimeout(t);
+          reject(new Error('aborted'));
+        }, { once: true });
+      });
+    const out = await restartAfterTurn(
+      { ...restartDeps(), host, backupPath, configPath, sleep },
+      'qwen',
+      ok,
+    );
+    // The cap hit counts as a failed restart: the first (hanging) restart loses
+    // the race to the cap, so the runner rolls back and restarts once more.
+    expect(out.kind).toBe('failed');
+    expect(out.sentence).toContain('rolled back to /old/binary');
+    expect(host.restartModel).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns a failed outcome (never throws) when the first restart throws synchronously', async () => {
+    const ok = parseResult('RESULT: ok — installed b1234\nRESTART: yes');
+    const backupPath = path.join(dir, 'config.bak');
+    const configPath = path.join(dir, 'config.yaml');
+    await fs.promises.writeFile(backupPath, 'llama_server:\n  binary: /old/binary\n');
+    await fs.promises.writeFile(configPath, 'llama_server:\n  binary: /new/binary\n');
+    const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — installed b1234\nRESTART: yes' });
+    // Synchronous throw (not a rejected promise) on the first restart: the
+    // "never throws" contract must still hold, and the rollback still runs.
+    // Call 2 returns a real promise (a conforming restartModel is async).
+    let calls = 0;
+    host.restartModel = vi.fn().mockImplementation(() => {
+      calls++;
+      if (calls === 1) throw new Error('sync failure');
+      return Promise.resolve();
+    });
+    const out = await restartAfterTurn(
+      { ...restartDeps(), host, backupPath, configPath },
+      'qwen',
+      ok,
+    );
+    expect(out.kind).toBe('failed');
+    expect(out.sentence).toContain('rolled back to /old/binary');
+    expect(host.restartModel).toHaveBeenCalledTimes(2);
+  });
+
+  it('cancels the cap timer on a normal finish so it never outlives the call', async () => {
+    const ok = parseResult('RESULT: ok — installed b1234\nRESTART: yes');
+    let aborted = false;
+    const sleep = (ms: number, signal?: AbortSignal) =>
+      new Promise<void>((resolve, reject) => {
+        const t = setTimeout(resolve, ms);
+        signal?.addEventListener('abort', () => {
+          aborted = true;
+          clearTimeout(t);
+          reject(new Error('aborted'));
+        }, { once: true });
+      });
+    const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — installed b1234\nRESTART: yes' });
+    await restartAfterTurn({ ...restartDeps(), host, sleep }, 'qwen', ok);
+    expect(host.restartModel).toHaveBeenCalledTimes(1);
+    expect(aborted).toBe(true);
+  });
+
+  it('reports ok when the retry loads the new binary and there is no snapshot to roll back to', async () => {
+    const ok = parseResult('RESULT: ok — installed b1234\nRESTART: yes');
+    const configPath = path.join(dir, 'config.yaml');
+    await fs.promises.writeFile(configPath, 'llama_server:\n  binary: /new/binary\n');
+    const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — installed b1234\nRESTART: yes' });
+    let calls = 0;
+    host.restartModel = vi.fn().mockImplementation(async () => {
+      calls++;
+      if (calls === 1) throw new Error('new binary did not start');
+    });
+    // No backup snapshot: restoreConfig is a no-op, so the retry is what loads
+    // the new binary. It must NOT report a rollback that never happened.
+    const out = await restartAfterTurn(
+      { ...restartDeps(), host, backupPath: undefined, configPath },
+      'qwen',
+      ok,
+    );
+    expect(out.kind).toBe('ok');
+    expect(out.sentence).toContain('loaded on retry');
+    expect(out.sentence).not.toContain('rolled back');
+    expect(host.restartModel).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports a manual fix when the retry fails and there is no snapshot to roll back to', async () => {
+    const ok = parseResult('RESULT: ok — installed b1234\nRESTART: yes');
+    const configPath = path.join(dir, 'config.yaml');
+    await fs.promises.writeFile(configPath, 'llama_server:\n  binary: /new/binary\n');
+    const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — installed b1234\nRESTART: yes' });
+    host.restartModel = vi.fn().mockRejectedValue(new Error('no binary works'));
+    const out = await restartAfterTurn(
+      { ...restartDeps(), host, backupPath: undefined, configPath },
+      'qwen',
+      ok,
+    );
+    expect(out.kind).toBe('failed');
+    expect(out.sentence).toContain('no snapshot to roll back to');
+    expect(out.sentence).toContain('fix llama_server.binary manually');
+    expect(host.restartModel).toHaveBeenCalledTimes(2);
   });
 });

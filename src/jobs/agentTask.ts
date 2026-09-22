@@ -10,6 +10,7 @@ import { JobDelivery } from './JobDelivery';
 import { nextDue } from './schedule';
 import { resolveJobConversation } from './jobDiscuss';
 import { nextDueWithBackoff } from './backoff';
+import { restartAfterTurn } from './agentTaskRestart';
 import type { Action, JobFile, RunRow, Schedule } from './jobSchema';
 
 /** The `agent_task` action, narrowed from the discriminated union. */
@@ -250,6 +251,26 @@ export class AgentTaskRunner {
         finalText: '',
       };
     } finally {
+      // Step 7: restart after the turn (RESTART: yes AND RESULT: ok), before the
+      // report, so the report reflects the restart outcome. It runs while the
+      // marker and hold are still active, so the machine stays awake through the
+      // restart. Never throws: a restart failure is folded into the outcome, and
+      // a bug here must not break the cleanup below.
+      try {
+        outcome = await restartAfterTurn(
+          {
+            host,
+            pool,
+            configPath: this.deps.configPath,
+            backupPath,
+            ...(this.deps.sleep !== undefined ? { sleep: this.deps.sleep } : {}),
+          },
+          jobModel,
+          outcome,
+        );
+      } catch {
+        // Leave the pre-restart outcome in place; the report still goes out.
+      }
       // Step 9: clean up on every exit path.
       marker?.dispose();
       hold?.dispose();
