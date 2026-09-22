@@ -847,13 +847,13 @@ models:
 
   - name: claude-code
     provider: cli
-    cli: 'xxxx/claude.exe'
+    cli: claude   # bare name, looked up on PATH at spawn (an absolute path also works)
     comment: "Claude Code CLI — external agent, uses existing Claude subscription"
 
 
   - name: codex
     provider: cli
-    cli: 'xxxx/codex.exe'
+    cli: codex
     comment: "Codex CLI — external agent, uses existing OpenAI subscription"
 
 

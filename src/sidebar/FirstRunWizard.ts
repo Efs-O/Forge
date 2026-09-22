@@ -3,9 +3,53 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { scanForGgufs } from '../backend/GgufScanner';
 import { deriveModelSuggestion } from '../backend/ModelHeuristics';
-import { makeLlamaCppStarterConfig, makeOllamaStarterConfig } from '../config/StarterConfig';
+import {
+  makeLlamaCppStarterConfig,
+  makeOllamaStarterConfig,
+  withCliAgents,
+  type FoundCliAgents,
+} from '../config/StarterConfig';
 import { writeConfigSafely } from '../config/ConfigWriter';
+import { resolveCliExecutable } from '../agents/resolveCliExecutable';
 import type { GgufCandidate } from '../backend/GgufScanner';
+import type { ForgeConfig } from '../config/types';
+
+/** True when the CLI resolves on PATH. A miss is an answer here, not an error:
+ *  the wizard only decides whether to add the entry. */
+async function onPath(name: 'claude' | 'codex'): Promise<boolean> {
+  return resolveCliExecutable(name, name).then(
+    () => true,
+    () => false,
+  );
+}
+
+async function findCliAgents(): Promise<FoundCliAgents> {
+  const [claude, codex] = await Promise.all([onPath('claude'), onPath('codex')]);
+  return { claude, codex };
+}
+
+/** One line for the reload toast: what was added, or how to add it later. */
+function describeCliAgents(found: FoundCliAgents): string {
+  const added = [found.claude && 'Claude Code', found.codex && 'Codex'].filter(Boolean);
+  if (added.length) {
+    return ` Added ${added.join(' and ')} (found on PATH) — log in to each CLI yourself; Forge holds no keys.`;
+  }
+  return (
+    ' Claude Code / Codex were not found on PATH — install and log in, then add ' +
+    '`{ name: claude-code, provider: cli, cli: claude }` to models (same for codex).'
+  );
+}
+
+/** Adds the CLI agents on PATH, writes the config, and finishes the wizard. */
+async function writeStarterConfig(
+  context: vscode.ExtensionContext,
+  target: ConfigTarget,
+  config: ForgeConfig,
+): Promise<void> {
+  const found = await findCliAgents();
+  writeConfigSafely(target.path, withCliAgents(config, found));
+  await finishWizard(context, target.path, target.isGlobal, describeCliAgents(found));
+}
 
 async function promptGlobalPin(configPath: string): Promise<void> {
   const choice = await vscode.window.showInformationMessage(
@@ -20,9 +64,9 @@ async function promptGlobalPin(configPath: string): Promise<void> {
   }
 }
 
-async function promptReload(configPath: string): Promise<boolean> {
+async function promptReload(configPath: string, note: string): Promise<boolean> {
   const choice = await vscode.window.showInformationMessage(
-    `Forge: config.yaml written to ${configPath}. Reload window to start.`,
+    `Forge: config.yaml written to ${configPath}.${note} Reload window to start.`,
     'Reload',
   );
   if (choice === 'Reload') {
@@ -36,10 +80,11 @@ async function finishWizard(
   context: vscode.ExtensionContext,
   configPath: string,
   offerGlobalPin: boolean,
+  note: string,
 ): Promise<void> {
   await context.globalState.update('forge.firstRun.shown', true);
   if (offerGlobalPin) await promptGlobalPin(configPath);
-  await promptReload(configPath);
+  await promptReload(configPath, note);
 }
 
 interface ConfigTarget {
@@ -163,8 +208,7 @@ async function runLlamaCppFlow(context: vscode.ExtensionContext): Promise<boolea
     binResult || 'llama-server',
   );
 
-  writeConfigSafely(target.path, starterConfig);
-  await finishWizard(context, target.path, target.isGlobal);
+  await writeStarterConfig(context, target, starterConfig);
   return true;
 }
 
@@ -223,8 +267,7 @@ async function runOllamaFlow(context: vscode.ExtensionContext): Promise<boolean>
 
   const target = await chooseConfigTarget(context);
   if (!target) return false;
-  writeConfigSafely(target.path, makeOllamaStarterConfig(endpoint, modelNames));
-  await finishWizard(context, target.path, target.isGlobal);
+  await writeStarterConfig(context, target, makeOllamaStarterConfig(endpoint, modelNames));
   return true;
 }
 

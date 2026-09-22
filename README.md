@@ -255,6 +255,36 @@ Frames cost prompt tokens — an unscaled 1080p clip can exceed a 16k context on
 its own. `video.frame_max_dimension` (default 640) is the knob; see the measured
 table in `config/config.example.yaml`.
 
+### Optional: Claude Code and Codex
+
+Forge runs the `claude` and `codex` **CLIs** directly, not their VS Code
+extensions, so:
+
+1. **Install each CLI and log in with it**: run `claude` once and sign in, and run `codex login`. Forge
+   never holds their keys; each uses its own login.
+2. **Have them in `config.yaml`.** The setup wizard adds them when it finds
+   them on `PATH`. To add them by hand:
+   ```yaml
+   models:
+     - name: claude-code
+       provider: cli
+       cli: claude   # bare name, looked up on PATH; an absolute path also works
+     - name: codex
+       provider: cli
+       cli: codex
+   ```
+   For `ask_local_agent` delegation, also set `permissions.agents.delegate: true`.
+3. **If you run Claude Code in bypass-permissions mode**, add
+   `"crossSessionInbound": "accept"` to `~/.claude/settings.json`. Otherwise a
+   message Forge sends to your open Claude session waits for your approval there.
+4. **Windows:** Codex needs PowerShell 7 installed from the **MSI** (the
+   Microsoft Store package does not work), and the `~/.forge/agent-bus/forge.sh`
+   client needs **Git Bash** — in PowerShell a bare `bash` is WSL.
+
+Nothing needs to go into Claude's memory or an `AGENTS.md`: Forge writes its own
+agent-bus notes to `~/.forge/agent-bus/`, and every message it sends carries its
+own reply instructions.
+
 ## Backend Modes
 
 ### 1. Direct GGUF mode
@@ -512,11 +542,12 @@ Tool results are capped at `max_result_chars` (default 24000) before entering th
 ## Local Delegation
 
 Set `permissions.agents.delegate: true` and the primary agent can use
-`ask_local_agent` for a bounded, read-only consultation with another configured
-model. A llama.cpp or Ollama delegate receives only the task and the workspace
-files you allow, and has no tools; a `provider: cli` delegate uses the
-authenticated CLI's own read-only tools, so it can investigate but not edit.
-Either way the answer comes back as advisory analysis. Delegation is capped at
+`ask_local_agent` to hand a task to another configured model. A llama.cpp or
+Ollama delegate receives only the task and the workspace files you allow, has no
+tools, and its answer comes back as advisory analysis. A `provider: cli`
+delegate (Claude Code, Codex) runs unrestricted with the CLI's own tools and can
+edit the workspace itself; Forge checkpoints the workspace before it starts, so
+Keep/Undo can roll the run back. Delegation is capped at
 120 seconds and 24,000 characters, and a target that would load weights into
 local VRAM asks you first.
 

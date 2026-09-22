@@ -23,6 +23,36 @@ function appendDiagnosticTail(previous: string, chunk: string): string {
   return `${previous} ${normalized}`.slice(-MAX_DIAGNOSTIC_TAIL_CHARS);
 }
 
+/** Out-of-memory signatures from llama.cpp / CUDA / Vulkan, matched as whole
+ *  phrases — never a bare word that a path or model name could contain. */
+const OOM_SIGNATURES = [
+  /\bout of memory\b/i,
+  /\bcudaMalloc failed\b/i,
+  /\bfailed to allocate\b/i,
+  /\bunable to allocate\b/i,
+];
+
+const STARTUP_TAIL_CHARS = 300;
+
+/**
+ * The cause to append to "llama-server failed to start". Before this, a model
+ * that did not fit said only `exited with code N` — the reason sat in the
+ * output channel. With `n_gpu_layers: 999` a model too big for VRAM is a hard
+ * load failure rather than a silent CPU spill, so the message names the knobs.
+ */
+export function describeStartupFailure(stderrTail: string): string {
+  const tail = stderrTail.trim();
+  if (!tail) return '';
+  if (OOM_SIGNATURES.some((signature) => signature.test(tail))) {
+    return (
+      ' — out of GPU memory: the model does not fit. In config.yaml lower ' +
+      '`n_gpu_layers` (per model, or `llama_server.n_gpu_layers`; 999 = every ' +
+      'layer on the GPU) to offload fewer layers, or lower `num_ctx`.'
+    );
+  }
+  return ` — ${tail.slice(-STARTUP_TAIL_CHARS)}`;
+}
+
 export interface ServerDiagnosticsSink {
   append(text: string): void;
   appendLine(text: string): void;
@@ -42,12 +72,18 @@ export interface ServerDiagnosticsOptions {
   onUnexpectedExit: (detail: string) => void;
 }
 
-/** Attach stdout/stderr/error/exit/close listeners. Returns the start time so
- *  the caller can report total startup duration. */
+export interface ServerDiagnostics {
+  /** For the caller's total startup duration. */
+  startedAt: number;
+  /** The bounded stderr tail so far — the cause of a failed start. */
+  stderrTail: () => string;
+}
+
+/** Attach stdout/stderr/error/exit/close listeners. */
 export function attachServerDiagnostics(
   proc: ChildProcess,
   options: ServerDiagnosticsOptions,
-): number {
+): ServerDiagnostics {
   const { modelName, channel, isCurrent, onUnexpectedExit } = options;
   const startedAt = Date.now();
   let stdoutBytes = 0;
@@ -95,5 +131,5 @@ export function attachServerDiagnostics(
         `model=${modelName} code=${code ?? '?'} signal=${signal ?? '?'}`,
     );
   });
-  return startedAt;
+  return { startedAt, stderrTail: () => stderrTail };
 }

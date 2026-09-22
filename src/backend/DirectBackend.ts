@@ -6,7 +6,7 @@ import { composeLlamaServerArgs } from './LlamaServerArgs';
 import { spawnLlamaServer, killLlamaProcess } from './llamaProcess';
 import { waitForHealthy, probeHttp, probeHealthy, probeServedModel } from './HealthCheck';
 import { startAdoptedServerMonitor } from './adoptedServerMonitor';
-import { attachServerDiagnostics } from './serverDiagnostics';
+import { attachServerDiagnostics, describeStartupFailure } from './serverDiagnostics';
 import { assertModelFilesExist, servedModelMatches } from './modelFileChecks';
 import { ensureOllamaReady, normalizeOllamaEndpoint, releaseOllamaModel } from './OllamaAdapter';
 import { isCloudProvider } from '../llm/CloudProviders';
@@ -282,7 +282,7 @@ export class DirectBackend implements BackendController {
     this.proc = spawnLlamaServer(binary, args);
     this.adoptedServer = false;
     const proc = this.proc;
-    const startedAt = attachServerDiagnostics(proc, {
+    const diagnostics = attachServerDiagnostics(proc, {
       modelName: model.name,
       channel: () => serverChannel(),
       isCurrent: () => this.proc === proc,
@@ -313,12 +313,15 @@ export class DirectBackend implements BackendController {
           `reason=${result.reason} message=${result.message}`,
       );
       await this.stopLlamaServer();
-      throw new Error(`llama-server failed to start: ${result.message}`);
+      throw new Error(
+        `llama-server failed to start: ${result.message}` +
+          describeStartupFailure(diagnostics.stderrTail()),
+      );
     }
 
     log.info(
       `[DirectBackend] llama-server health check passed model=${model.name} ` +
-        `pid=${proc.pid ?? '?'} startup_ms=${Date.now() - startedAt}`,
+        `pid=${proc.pid ?? '?'} startup_ms=${Date.now() - diagnostics.startedAt}`,
     );
     log.info('[DirectBackend] ready');
   }
