@@ -10,7 +10,11 @@ import type { ChatMessage } from '../llm/types';
 import { renderLastReplyBlock } from './compactionLastReply';
 import { renderRecordedActionsBlock } from './compactionRecordedState';
 import { renderCompactionUserMessages } from './compactionUserContext';
-import type { CompactionState } from './compactionTypes';
+import {
+  COMPACTION_MEMORY_KEY_MAX_CHARS,
+  COMPACTION_MEMORY_KEYS_MAX,
+  type CompactionState,
+} from './compactionTypes';
 
 /**
  * Where the resume guidance lives.
@@ -40,11 +44,32 @@ function replacementUserContext(compaction: CompactionState): string {
   return [SUMMARY_PREAMBLE, generation, userContext].filter(Boolean).join('\n\n');
 }
 
+/**
+ * The stored `remember` keys a compaction carries: the newest ones, within the
+ * persisted schema's bounds. A key too long to persist is left to
+ * `list_memories` rather than failing the whole record's parse on reload.
+ */
+export function boundMemoryKeys(keys: readonly string[]): string[] {
+  return keys
+    .filter((key) => key.length > 0 && key.length <= COMPACTION_MEMORY_KEY_MAX_CHARS)
+    .slice(-COMPACTION_MEMORY_KEYS_MAX);
+}
+
+function renderMemoryKeysBlock(keys: readonly string[] | undefined): string {
+  if (!keys || keys.length === 0) return '';
+  return (
+    '\n\n**Stored memories (keys saved with `remember`, recorded by Forge):** ' +
+    keys.join(', ') +
+    '\nCall `recall` with a key for its value; `list_memories` shows every key.'
+  );
+}
+
 function replacementAssistantContext(compaction: CompactionState): string {
   return (
     compaction.summary +
     renderRecordedActionsBlock(compaction.recordedActions ?? [], compaction.omittedActions) +
     (compaction.repoState ?? '') +
+    renderMemoryKeysBlock(compaction.memoryKeys) +
     // Last, so it is the closest thing to the resumed turn: it is the one fact
     // here that says where the conversation actually stopped.
     renderLastReplyBlock(compaction.lastReply, compaction.lastReplyFollowedByTools === true)

@@ -302,6 +302,31 @@ describe('runCompaction repo snapshot', () => {
     expect(c.compaction?.summary).not.toContain('WORKING TREE: 2 files changed');
   });
 
+  it('lists stored memory keys after the cut, newest first kept, so recall has a key', async () => {
+    const c = conv([...messages]);
+    const h = harness(c, async () => long('summary'));
+    const keys = Array.from({ length: 45 }, (_, i) => `key-${i}`);
+    h.deps.listMemoryKeys = () => [...keys, 'x'.repeat(201)];
+
+    await expect(runCompaction(h.deps, c.id, { auto: true })).resolves.toBe('compacted');
+    // The newest 40 that fit the persisted schema; an over-long key is left to list_memories.
+    expect(c.compaction?.memoryKeys).toEqual(keys.slice(5));
+    const window = applyCompactionWindow(c.messages, c.compaction);
+    const context = window.map((m) => (typeof m.content === 'string' ? m.content : '')).join('\n');
+    expect(context).toContain('key-44');
+    expect(context).toContain('`list_memories` shows every key');
+    expect(context).not.toContain('key-4,');
+  });
+
+  it('carries no memory block when nothing was remembered', async () => {
+    const c = conv([...messages]);
+    const h = harness(c, async () => long('summary'));
+    h.deps.listMemoryKeys = () => [];
+
+    await expect(runCompaction(h.deps, c.id, { auto: true })).resolves.toBe('compacted');
+    expect(c.compaction?.memoryKeys).toBeUndefined();
+  });
+
   it('captures the snapshot before the summarization request, not after', async () => {
     const order: string[] = [];
     const c = conv([...messages]);

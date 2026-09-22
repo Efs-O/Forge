@@ -363,6 +363,7 @@ describe('sessionTypes', () => {
         },
       ],
       repoState: '\n\nWORKING TREE: clean',
+      memoryKeys: ['release-plan', 'pending-migration'],
     };
 
     const persisted = runtimeToPersisted(session);

@@ -69,6 +69,7 @@ function copyCompaction(compaction: {
       }>
     | undefined;
   repoState?: string | undefined;
+  memoryKeys?: string[] | undefined;
   omittedActions?: { file: number; command: number } | undefined;
   lastReplyFollowedByTools?: boolean | undefined;
 }): CompactionState {
@@ -91,6 +92,7 @@ function copyCompaction(compaction: {
         }
       : {}),
     ...(compaction.repoState !== undefined ? { repoState: compaction.repoState } : {}),
+    ...(compaction.memoryKeys ? { memoryKeys: [...compaction.memoryKeys] } : {}),
     ...(compaction.omittedActions
       ? {
           omittedActions: {

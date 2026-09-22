@@ -2,6 +2,17 @@
 
 ## 0.16.35
 
+### Remembered notes survive a compaction you can find them after (2026-09-22)
+
+- **After a compaction, the agent is told which keys it stored with
+  `remember`.** `recall` needs a key, and the agent had no way to know which
+  keys existed once the conversation was compacted, so the tool built to
+  survive compaction went unused. The replacement context now lists the
+  newest 40 keys and points at `list_memories` for the rest.
+- **`remember`, `recall` and `list_memories` now say when to use them.** The
+  old descriptions only said "store a key-value pair". They never mentioned
+  compaction, which is the only reason to use the tools.
+
 ### CLI agents in scheduled jobs need your consent once (2026-09-22)
 
 - **A new setting, `jobs.allow_cli_agents`, is off by default.** It controls

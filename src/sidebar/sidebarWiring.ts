@@ -37,6 +37,7 @@ import type { ChatAttachmentStore } from './ChatAttachmentStore';
 import { SendPipeline } from './SendPipeline';
 import { opResetReportedContext } from './ConversationOps';
 import { snapshotRepoState } from './repoSnapshot';
+import { listMemoryKeys } from '../tools/memoryTools';
 import { RequestChainLifecycle } from './RequestChainLifecycle';
 
 /** What the provider lends its collaborators. */
@@ -169,6 +170,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     isStreaming: (conversationId) => agentLoop.isStreamingConv(conversationId),
     beginCompaction: (convId) => agentLoop.beginBackgroundWork(convId),
     snapshotRepoState,
+    listMemoryKeys: () => listMemoryKeys(workspaceState),
     emitCompactionEvent: (event) => {
       for (const listener of slashHandler.compactionListeners) listener(event);
     },

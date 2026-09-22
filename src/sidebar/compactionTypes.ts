@@ -3,6 +3,8 @@ export const RECORDED_ACTION_MAX_ITEMS = RECORDED_ACTION_MAX_PER_KIND * 2;
 export const RECORDED_ACTION_KEY_MAX_CHARS = 300;
 export const RECORDED_ACTION_LINE_MAX_CHARS = 800;
 export const COMPACTION_REPO_STATE_MAX_CHARS = 2000;
+export const COMPACTION_MEMORY_KEYS_MAX = 40;
+export const COMPACTION_MEMORY_KEY_MAX_CHARS = 200;
 
 /** Persisted, host-authored action carried outside the model summary. */
 export interface RecordedCompactionAction {
@@ -45,4 +47,13 @@ export interface CompactionState {
    * a dropped entry from an action that never happened.
    */
   omittedActions?: { file: number; command: number };
+  /**
+   * Keys stored with `remember` when this compaction ran.
+   *
+   * `recall` needs a key, and after a compaction the agent no longer knows which
+   * ones it stored — so the store it uses to survive compaction went unread.
+   * The newest `COMPACTION_MEMORY_KEYS_MAX` only; the rendered block points at
+   * `list_memories` for the rest.
+   */
+  memoryKeys?: string[];
 }

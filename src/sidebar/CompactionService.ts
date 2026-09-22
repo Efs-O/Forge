@@ -30,7 +30,7 @@ import { collectLastReply, toolActivityFollowedLastReply } from './compactionLas
 import { selectCompactionSplit } from './compactionSplit';
 import type { CompactionLogEntry } from './SessionLogger';
 import { reportedContextTokens } from '../util/contextBudget';
-import { compactionWindowChars } from './compactionWindow';
+import { boundMemoryKeys, compactionWindowChars } from './compactionWindow';
 import type { CompactionState } from './compactionTypes';
 
 const log = getLogger();
@@ -71,6 +71,8 @@ export interface CompactionDeps {
    * compacts — the block is evidence, never a precondition.
    */
   snapshotRepoState?: () => Promise<string>;
+  /** Keys stored with `remember`, listed after the cut so `recall` has one to ask for. */
+  listMemoryKeys?: () => readonly string[];
   /**
    * Host-originated compaction progress, consumed by the remote layer so a
    * Telegram/WhatsApp user sees "compacting…" for work they did not start.
@@ -268,6 +270,8 @@ async function compactOnce(
     ? toolActivityFollowedLastReply(split.summarize)
     : false;
 
+  const memoryKeys = boundMemoryKeys(deps.listMemoryKeys?.() ?? []);
+
   // Everything the candidate state will carry except the summary itself. Built
   // here so the floor check below can run BEFORE the summarization request.
   const candidateWithSummary = (summaryText: string): CompactionState => ({
@@ -278,6 +282,7 @@ async function compactOnce(
     ...(recordedActions.length > 0 ? { recordedActions } : {}),
     ...(omittedActions.file > 0 || omittedActions.command > 0 ? { omittedActions } : {}),
     ...(repoState ? { repoState } : {}),
+    ...(memoryKeys.length > 0 ? { memoryKeys } : {}),
     ...(lastReply ? { lastReply } : {}),
     ...(lastReply && lastReplyFollowedByTools ? { lastReplyFollowedByTools } : {}),
   });

@@ -10,6 +10,8 @@
 
 import { z } from 'zod';
 import {
+  COMPACTION_MEMORY_KEY_MAX_CHARS,
+  COMPACTION_MEMORY_KEYS_MAX,
   COMPACTION_REPO_STATE_MAX_CHARS,
   RECORDED_ACTION_KEY_MAX_CHARS,
   RECORDED_ACTION_LINE_MAX_CHARS,
@@ -54,6 +56,10 @@ export const compactionPersistedSchema = z
       .optional(),
     recordedActions: z.array(recordedActionSchema).max(RECORDED_ACTION_MAX_ITEMS).optional(),
     repoState: z.string().max(COMPACTION_REPO_STATE_MAX_CHARS).optional(),
+    memoryKeys: z
+      .array(z.string().min(1).max(COMPACTION_MEMORY_KEY_MAX_CHARS))
+      .max(COMPACTION_MEMORY_KEYS_MAX)
+      .optional(),
     // Optional, so conversations saved before these fields still parse.
     omittedActions: omittedActionsSchema.optional(),
     lastReplyFollowedByTools: z.boolean().optional(),
