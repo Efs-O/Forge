@@ -10,6 +10,7 @@ import { shouldSleepIfIdle } from '../system/PowerControl';
 import { LlamacppAction, type LlamacppActionDeps } from './actions/llamacppAction';
 import { AgentTaskRunner, recoverInterruptedRuns, type AgentTaskDeps } from './agentTask';
 import { SCHEDULER_LEASE_KEY, WakeReconciler } from './schedulerWakes';
+import { BACKOFF_THRESHOLD, nextDueWithBackoff } from './backoff';
 
 /** The tick loop that runs due jobs, holds the `jobs-scheduler` lease, and
  * delivers changes through the coalescing outbox. Deps are injected so the
@@ -52,10 +53,6 @@ export interface JobSchedulerDeps {
 }
 
 const DEFAULT_TICK_MS = 30_000;
-/** Consecutive failures before a job is backed off (B.3). */
-const BACKOFF_THRESHOLD = 3;
-/** The maximum backoff interval (B.3). */
-const MAX_BACKOFF_MS = 24 * 60 * 60_000;
 /** A tick arriving more than this late counts as a resume from sleep (B.3). */
 const RESUME_GAP_MS = 90_000;
 
@@ -138,7 +135,7 @@ export class JobScheduler {
     // Crash / reload recovery (CI-enforced): a job whose state still holds a
     // `task_run` was running when Forge died. Report it, record a failed row,
     // and clear it. It is not retried automatically; the next tick runs it.
-    await recoverInterruptedRuns(this.store, this.outboxDir, () => this.now().getTime());
+    if (owner) await recoverInterruptedRuns(this.store, this.outboxDir, () => this.now().getTime());
     this.timer = setInterval(() => void this.tick(), this.tickMs);
     if (owner && immediate) await this.tick();
     return owner;
@@ -268,10 +265,10 @@ export class JobScheduler {
         seen.add(id);
         toRun.push(jobFile);
       }
-      // Then the jobs that fell due normally. A job already queued by a marker
-      // is not run twice in the same tick.
       for (const jf of jobs) {
-        if (!jf.job.enabled || seen.has(jf.job.id) || !isDue(jf.state, now)) continue;
+        const pendingAgentTask = jf.state.task_pending && jf.job.action?.kind === 'agent_task';
+        if (!jf.job.enabled || seen.has(jf.job.id) || (!pendingAgentTask && !isDue(jf.state, now)))
+          continue;
         seen.add(jf.job.id);
         toRun.push(jf);
       }
@@ -287,8 +284,6 @@ export class JobScheduler {
       });
       await Promise.all(workers);
 
-      // A change recorded while a turn was streaming is summarized now that the
-      // tick has reached it (the summary waits for idle, B.4).
       await this.delivery.processPendingSummaries();
 
       // A llamacpp_update that staged a build (apply, or an approved prepare)
@@ -314,7 +309,17 @@ export class JobScheduler {
     const hold = job.wake ? this.power.holdAwake(`job ${job.id}`) : undefined;
     let detached = false;
     try {
-      const result = await this.runCheck(jobFile);
+      // A pending agent task is a retry of the already-observed change. The
+      // etag cache may quite correctly report the same observation again, so
+      // do not make the pending task pass through the check a second time.
+      const result =
+        state.task_pending && job.action?.kind === 'agent_task'
+          ? {
+              observation: state.last_observation,
+              changed: true,
+              summary: 'retrying pending agent task',
+            }
+          : await this.runCheck(jobFile);
       if (result.changed && job.action?.kind === 'agent_task') {
         if (this.agentTask) {
           // Started, not awaited: the runner owns the `runningJobs` guard until
@@ -381,8 +386,9 @@ export class JobScheduler {
           delivered: 0,
         })
         .catch(() => undefined);
-      // applyBackoff reports the failure once, when the job crosses the
-      // threshold (B.3); reporting every run would toast on every tick.
+      // Reporting every failed run instead turned a GitHub outage into a toast on
+      // every tick and inflated the coalesced outbox count for what was one
+      // continuous fault.
       await this.applyBackoff(jobFile, message).catch(() => undefined);
     } finally {
       hold?.dispose();
@@ -458,25 +464,16 @@ export class JobScheduler {
     const { job, state } = jobFile;
     const count = state.consecutive_failures + 1;
     const now = this.now();
+    const nextDueAt = nextDueWithBackoff(job.schedule, now, count);
     if (count < BACKOFF_THRESHOLD) {
       // Not yet backed off: just reschedule normally.
       this.store.patchState(job.id, {
         last_run_at: now.getTime(),
-        next_due_at: nextDue(job.schedule, now).getTime(),
+        next_due_at: nextDueAt,
         consecutive_failures: count,
       });
       return;
     }
-    // Back off: push the next due out by a doubling interval, capped at 24 h.
-    const scheduledIntervalMs = Math.max(
-      60_000,
-      nextDue(job.schedule, now).getTime() - now.getTime(),
-    );
-    const backoffMs = Math.min(
-      MAX_BACKOFF_MS,
-      scheduledIntervalMs * 2 ** (count - BACKOFF_THRESHOLD + 1),
-    );
-    const nextDueAt = now.getTime() + backoffMs;
     this.store.patchState(job.id, {
       last_run_at: now.getTime(),
       next_due_at: nextDueAt,

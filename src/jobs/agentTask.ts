@@ -9,20 +9,13 @@ import { unattendedConversations } from '../sidebar/unattendedConversations';
 import { JobDelivery } from './JobDelivery';
 import { nextDue } from './schedule';
 import { resolveJobConversation } from './jobDiscuss';
-import { BACKOFF_THRESHOLD, MAX_BACKOFF_MS } from './backoff';
+import { nextDueWithBackoff } from './backoff';
 import type { Action, JobFile, RunRow, Schedule } from './jobSchema';
 
 /** The `agent_task` action, narrowed from the discriminated union. */
 export type AgentTaskAction = Extract<Action, { kind: 'agent_task' }>;
 
-/**
- * The agent-task runner (phase 3): runs an agent turn in the job's own
- * conversation, unattended, and reports the outcome through the outbox.
- * Started from `JobScheduler.runJob` and not awaited by the tick (AC11); the
- * runner writes its own run row and disposes its marker and hold in `finally`.
- * Step 7 (restart + rollback) is phase 4; this snapshots the config backup
- * (step 4) and parses `RESTART:` (step 8) but does not restart yet.
- */
+/** Runs an unattended agent turn and reports its outcome through the outbox. */
 
 export interface AgentTaskDeps {
   store: JobStore;
@@ -37,8 +30,8 @@ export interface AgentTaskDeps {
   now: () => number;
   /** The config.yaml path to snapshot before the turn (rollback for step 7). */
   configPath?: string;
-  /** Injectable clock timer for the `max_minutes` cap. Defaults to setTimeout. */
-  sleep?: (ms: number) => Promise<void>;
+  /** Injectable abortable timer for the `max_minutes` cap. Defaults to setTimeout. */
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
 }
 
 /** The parsed outcome of an agent turn's final message. */
@@ -114,10 +107,7 @@ export class AgentTaskRunner {
     });
   }
 
-  /**
-   * Run one agent task (steps 1-6, 8, 9). Never throws to the caller: every
-   * failure is recorded as a `failed` run row and reported through the outbox.
-   */
+  /** Run one agent task (steps 1-6, 8, 9), recording every failure. */
   async run(jobFile: JobFile, wasLate: boolean): Promise<void> {
     const { job, state } = jobFile;
     const action = job.action;
@@ -144,7 +134,6 @@ export class AgentTaskRunner {
       return;
     }
 
-    // Step 1: start now if a slot is free, otherwise wait (record pending).
     const jobModel = action.model ?? this.deps.defaultModel() ?? '';
     const slot = canStartNow(
       jobModel,
@@ -153,9 +142,7 @@ export class AgentTaskRunner {
       host.status().streamingConversationIds,
     );
     if (!slot.start) {
-      // A pending task older than one schedule period is dropped with a
-      // "skipped: busy" run row (the ledger's `task_pending` TTL): a box that
-      // is always busy must not accumulate pending tasks forever.
+      // Drop a pending task older than one schedule period (the task_pending TTL).
       if (state.task_pending && state.task_pending_since !== null) {
         const period = schedulePeriodMs(job.schedule, startedAt);
         if (startedAt - state.task_pending_since >= period) {
@@ -180,7 +167,6 @@ export class AgentTaskRunner {
     // A previously-pending task that can now start: clear the pending flag.
     this.deps.store.patchState(job.id, { task_pending: false, task_pending_since: null });
 
-    // Step 2: persist the marker before anything else.
     this.deps.store.patchState(job.id, {
       task_run: { started_at: startedAt, conversation_id: null },
     });
@@ -196,8 +182,7 @@ export class AgentTaskRunner {
       finalText: '',
     };
     try {
-      // Step 3: model. Unload a different resident model (nothing streaming),
-      // then open the job's own conversation (not activated) and set its model.
+      // Step 3: unload a different idle resident model, then open this job's chat.
       const resident =
         pool.loadedModelNames().length === 1 ? pool.loadedModelNames()[0] : undefined;
       if (
@@ -214,32 +199,41 @@ export class AgentTaskRunner {
       });
       if (jobModel) await host.setConversationModel(conversationId, jobModel);
 
-      // Step 4: mark unattended (carrying the job id/name), take the power
-      // hold, and snapshot config.yaml for the step-7 rollback.
+      // Step 4: mark unattended, hold awake, and snapshot config.yaml.
       marker = unattendedConversations.mark(conversationId, { jobId: job.id, jobName: job.name });
       hold = this.deps.power.holdAwake(`agent task ${job.id}`);
       backupPath = await this.snapshotConfig(job.id);
 
-      // Steps 5+6: send the prompt and await it, with the optional max_minutes
-      // cap. The cap cancels and awaits the send settling, so `finally` never
-      // runs while the turn is still unwinding.
+      // Steps 5+6: send the prompt with the optional max_minutes cap.
       const prompt = await this.buildPrompt(jobFile, action);
       let timedOut = false;
       const capMs = action.max_minutes !== undefined ? action.max_minutes * 60_000 : undefined;
-      const sleep = this.deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
+      const sleep = this.deps.sleep ?? sleepWithAbort;
+      const capController = capMs !== undefined ? new AbortController() : undefined;
+      let capCancelled = false;
       const cap =
         capMs !== undefined
-          ? sleep(capMs).then(() => {
-              timedOut = true;
-              void host.cancel(conversationId!);
-            })
+          ? sleep(capMs, capController!.signal)
+              .then(async () => {
+                if (capCancelled) return;
+                timedOut = true;
+                await host.cancel(conversationId!);
+              })
+              .catch(() => undefined)
           : undefined;
       let result;
       try {
         result = await host.send(conversationId, prompt);
       } finally {
-        // Let the cap timer settle so it cannot fire after the turn is done.
-        if (cap) await cap.catch(() => undefined);
+        if (cap) {
+          if (timedOut) {
+            // Do not clear the marker or awake hold until cancellation settles.
+            await cap;
+          } else {
+            capCancelled = true;
+            capController!.abort();
+          }
+        }
       }
       outcome = this.outcomeOf(result, timedOut);
     } catch (err) {
@@ -250,14 +244,14 @@ export class AgentTaskRunner {
         finalText: '',
       };
     } finally {
-      // Step 9: clean up on every exit path, including abort and error.
+      // Step 9: clean up on every exit path.
       marker?.dispose();
       hold?.dispose();
       await this.finish(jobFile, action, wasLate, startedAt, outcome, conversationId, backupPath);
     }
   }
 
-  /** Step 4: snapshot config.yaml's bytes to `state/<id>.config.bak`. */
+  /** Snapshot config.yaml's bytes to `state/<id>.config.bak`. */
   private async snapshotConfig(jobId: string): Promise<string | undefined> {
     if (!this.deps.configPath) return undefined;
     const backupPath = path.join(this.deps.store.root, 'state', `${jobId}.config.bak`);
@@ -267,14 +261,12 @@ export class AgentTaskRunner {
       await fs.promises.writeFile(backupPath, bytes);
       return backupPath;
     } catch {
-      // A missing config is not fatal to the turn; the step-7 rollback simply
-      // has nothing to restore.
+      // A missing config is not fatal; rollback simply has nothing to restore.
       return undefined;
     }
   }
 
-  /** Step 5: build the prompt from the task, observation, last 3 runs, and the
-   * unattended instructions. */
+  /** Build the prompt from the task, observation, last 3 runs, and instructions. */
   private async buildPrompt(jobFile: JobFile, action: AgentTaskAction): Promise<string> {
     const { job, state } = jobFile;
     const runs = await this.deps.store.readRuns(job.id);
@@ -339,7 +331,6 @@ export class AgentTaskRunner {
     };
   }
 
-  /** Step 8 (report) + step 9 (cleanup): deliver, clear state, append run row. */
   private async finish(
     jobFile: JobFile,
     action: AgentTaskAction,
@@ -365,21 +356,14 @@ export class AgentTaskRunner {
       delivered = 1;
     }
 
-    // Backoff on failure (the runner already reported it, so no extra message).
+    // Backoff on failure; the runner already reported it.
     const fresh = (await this.deps.store.load(job.id)) ?? jobFile;
     const consecutive = failed ? fresh.state.consecutive_failures + 1 : 0;
     const nextDueAt = failed
-      ? (() => {
-          const interval = Math.max(60_000, nextDue(job.schedule, new Date(now)).getTime() - now);
-          const backoff =
-            consecutive < BACKOFF_THRESHOLD
-              ? 0
-              : Math.min(MAX_BACKOFF_MS, interval * 2 ** (consecutive - BACKOFF_THRESHOLD + 1));
-          return backoff > 0 ? now + backoff : nextDue(job.schedule, new Date(now)).getTime();
-        })()
+      ? nextDueWithBackoff(job.schedule, new Date(now), consecutive)
       : nextDue(job.schedule, new Date(now)).getTime();
 
-    // Step 9: clear the state fields this runner writes (task_run, task_pending).
+    // Clear the state fields this runner writes.
     this.deps.store.patchState(job.id, {
       task_run: null,
       task_pending: false,
@@ -390,7 +374,6 @@ export class AgentTaskRunner {
       consecutive_failures: consecutive,
     });
 
-    // Delete the config backup on success; keep it on failure for the owner.
     if (backupPath && !failed) {
       await fs.promises.unlink(backupPath).catch(() => undefined);
     }
@@ -399,7 +382,7 @@ export class AgentTaskRunner {
       at: startedAt,
       late: wasLate,
       outcome: failed ? 'failed' : 'ok',
-      changed: true,
+      changed: outcome.kind === 'ok',
       summary: outcome.sentence,
       ...(failed ? { error: outcome.sentence } : {}),
       delivered,
@@ -420,6 +403,22 @@ export class AgentTaskRunner {
       (tail ? `\n\n${tail}` : '')
     );
   }
+}
+
+function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new Error('timer aborted'));
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      reject(new Error('timer aborted'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 /** Parse the `RESULT:` line (and an optional `RESTART:` line) from final text. */

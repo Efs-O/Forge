@@ -447,7 +447,8 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Job definition + state + run-log store (disk layout)       | `src/jobs/JobStore.ts`                                         |
 | Job schema (Zod) + state / run-row types                   | `src/jobs/jobSchema.ts`                                        |
 | Schedule math (`nextDue`, `isDue`, `wakeTimesFor`)         | `src/jobs/schedule.ts`                                         |
-| Tick loop, lease, backoff, concurrency                     | `src/jobs/JobScheduler.ts`                                     |
+| Tick loop, lease, concurrency                               | `src/jobs/JobScheduler.ts`                                     |
+| Failure threshold and next-due backoff math                 | `src/jobs/backoff.ts`                                          |
 | Wake-task ownership (dedupe, lease-guarded delete)         | `src/jobs/schedulerWakes.ts`                                   |
 | Outbox write, local toast, summarize-waits-for-idle        | `src/jobs/JobDelivery.ts`                                      |
 | Coalescing outbox (one pending message per job)            | `src/jobs/JobOutbox.ts`                                        |

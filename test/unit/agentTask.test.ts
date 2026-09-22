@@ -3,11 +3,16 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { spawnAndWait } = vi.hoisted(() => ({ spawnAndWait: vi.fn() }));
+const { spawnAndWait, jobsFetch } = vi.hoisted(() => ({
+  spawnAndWait: vi.fn(),
+  jobsFetch: vi.fn(),
+}));
 vi.mock('../../src/util/processSpawn', () => ({ spawnAndWait }));
+vi.mock('../../src/jobs/jobsFetch', () => ({ jobsFetch }));
 
 import { JobStore } from '../../src/jobs/JobStore';
 import { JobScheduler } from '../../src/jobs/JobScheduler';
+import { FileLease } from '../../src/util/FileLease';
 import {
   AgentTaskRunner,
   canStartNow,
@@ -22,6 +27,7 @@ import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
 import type { ForgeRequestOutcome } from '../../src/sidebar/turnOutcome';
 import { readOutboxItem } from '../../src/jobs/JobOutbox';
 import { openDiscussChat } from '../../src/jobs/jobDiscuss';
+import { nextDueWithBackoff } from '../../src/jobs/backoff';
 
 // ── Fakes ────────────────────────────────────────────────────────────────────
 
@@ -211,6 +217,17 @@ describe('schedulePeriodMs', () => {
   });
 });
 
+describe('shared job backoff', () => {
+  const now = new Date('2026-01-01T12:00:00');
+
+  it('computes normal, doubled, and capped due times from one helper', () => {
+    const schedule = { kind: 'interval' as const, minutes: 15 };
+    expect(nextDueWithBackoff(schedule, now, 2)).toBe(now.getTime() + 15 * 60_000);
+    expect(nextDueWithBackoff(schedule, now, 3)).toBe(now.getTime() + 30 * 60_000);
+    expect(nextDueWithBackoff(schedule, now, 20)).toBe(now.getTime() + 24 * 60 * 60_000);
+  });
+});
+
 // ── Crash / reload recovery (AC7) ────────────────────────────────────────────
 
 describe('crash recovery (AC7)', () => {
@@ -296,6 +313,42 @@ describe('crash recovery (AC7)', () => {
       await scheduler.stop();
     }
   });
+
+  it('a non-owner window does not recover the owner window\'s live task', async () => {
+    const job = baseJob();
+    await store.saveJob(job);
+    store.patchState('agent-task', {
+      task_run: { started_at: Date.parse('2026-01-01T03:00:00'), conversation_id: 'conv-1' },
+    });
+    const ownerLease = await FileLease.acquire({
+      directory: jobsRoot,
+      key: 'jobs-scheduler',
+      workspaceId: 'ws-owner',
+      instanceId: 'owner',
+      onLost: () => undefined,
+    });
+    const scheduler = new JobScheduler({
+      store,
+      power: fakePower(),
+      getConfig: () => ({ allowedHosts: [], maxConcurrent: 1 }),
+      workspaceId: 'ws',
+      instanceId: 'non-owner',
+      leaseDirectory: jobsRoot,
+      outboxDir: path.join(jobsRoot, 'outbox'),
+      now: () => new Date('2026-01-01T04:00:00'),
+      notifyLocal: () => undefined,
+      tickMs: 30_000,
+    });
+    try {
+      expect(await scheduler.start({ immediate: false })).toBe(false);
+      expect((await store.load('agent-task'))!.state.task_run).not.toBeNull();
+      expect(await store.readRuns('agent-task')).toEqual([]);
+      expect(await readOutboxItem(path.join(jobsRoot, 'outbox'), 'agent-task')).toBeUndefined();
+    } finally {
+      await scheduler.stop();
+      await ownerLease.release();
+    }
+  });
 });
 
 // ── Runner full run ──────────────────────────────────────────────────────────
@@ -328,6 +381,7 @@ describe('AgentTaskRunner', () => {
     store = new JobStore(jobsRoot);
     outboxDir = path.join(jobsRoot, 'outbox');
     toasts = [];
+    jobsFetch.mockReset();
     pool = fakePool(['qwen'], 1);
     host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — installed b1300' });
   });
@@ -409,6 +463,7 @@ describe('AgentTaskRunner', () => {
 
     const runs = await store.readRuns('agent-task');
     expect(runs[0]!.outcome).toBe('ok');
+    expect(runs[0]!.changed).toBe(false);
     // no_change is not delivered even with report: always.
     const item = await readOutboxItem(outboxDir, 'agent-task');
     expect(item).toBeUndefined();
@@ -440,6 +495,85 @@ describe('AgentTaskRunner', () => {
     expect(state2.task_pending).toBe(false);
     expect(state2.task_pending_since).toBeNull();
     expect(state2.task_run).toBeNull();
+  });
+
+  it('retries a pending task without rerunning an unchanged check', async () => {
+    const job = baseJob({
+      check: { kind: 'github_issue', repo: 'ggml-org/llama.cpp', issue_number: 1 },
+    });
+    await store.saveJob(job);
+    jobsFetch
+      .mockResolvedValueOnce({
+        notModified: false,
+        body: JSON.stringify({ updated_at: '2026-01-01T03:00:00Z' }),
+        etag: 'e1',
+      })
+      .mockResolvedValueOnce({ notModified: false, body: '[]', etag: 'e1-comments' })
+      .mockResolvedValueOnce({
+        notModified: false,
+        body: JSON.stringify({ updated_at: '2026-01-01T03:15:00Z' }),
+        etag: 'e2',
+      })
+      .mockResolvedValueOnce({ notModified: false, body: '[]', etag: 'e2-comments' })
+      .mockResolvedValue({ notModified: true, body: '', etag: 'e2' });
+
+    let nowMs = Date.parse('2026-01-01T03:00:00');
+    pool = fakePool(['qwen'], 1);
+    host = fakeHost(['other-chat'], { kind: 'completed', finalText: 'RESULT: ok — done' });
+    let resolveRunnerFinished: () => void = () => undefined;
+    const runnerFinished = new Promise<void>((resolve) => {
+      resolveRunnerFinished = resolve;
+    });
+    const appendRun = store.appendRun.bind(store);
+    vi.spyOn(store, 'appendRun').mockImplementation(async (id, row) => {
+      await appendRun(id, row);
+      if (id === 'agent-task' && row.changed) resolveRunnerFinished();
+    });
+    const scheduler = new JobScheduler({
+      store,
+      power: fakePower(),
+      getConfig: () => ({ allowedHosts: [], maxConcurrent: 1 }),
+      workspaceId: 'ws',
+      instanceId: 'scheduler',
+      leaseDirectory: jobsRoot,
+      outboxDir,
+      now: () => new Date(nowMs),
+      notifyLocal: () => undefined,
+      tickMs: 30_000,
+      agentTask: makeDeps({ now: () => nowMs }),
+    });
+    try {
+      await scheduler.start({ immediate: false });
+      await scheduler.tick(); // establish the check baseline
+
+      nowMs += 15 * 60_000;
+      await scheduler.tick(); // changed check, but the only slot is busy
+      expect((await store.load('agent-task'))!.state.task_pending).toBe(true);
+      expect(host.send).not.toHaveBeenCalled();
+
+      let resolveSend: (o: ForgeRequestOutcome) => void = () => undefined;
+      host = {
+        ...fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — retried' }),
+        send: vi.fn().mockImplementation(
+          () => new Promise<ForgeRequestOutcome>((resolve) => (resolveSend = resolve)),
+        ),
+      } as unknown as ForgeHostFacade;
+      nowMs += 1_000;
+      await scheduler.tick();
+      expect(host.send).toHaveBeenCalledOnce();
+      expect(jobsFetch).toHaveBeenCalledTimes(4);
+      resolveSend({ kind: 'completed', finalText: 'RESULT: ok — retried' });
+      await Promise.race([
+        runnerFinished,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('pending runner did not finish')), 1_000),
+        ),
+      ]);
+      expect((await store.load('agent-task'))!.state.task_run).toBeNull();
+      expect((await store.load('agent-task'))!.state.task_pending).toBe(false);
+    } finally {
+      await scheduler.stop();
+    }
   });
 
   it('drops a pending task older than one schedule period with a skipped run row', async () => {
@@ -520,6 +654,66 @@ describe('AgentTaskRunner', () => {
     const runs = await store.readRuns('agent-task');
     expect(runs[0]!.outcome).toBe('failed');
     expect(runs[0]!.summary).toContain('timed out');
+  });
+
+  it('normal completion cancels the cap without waiting for its sleep', async () => {
+    const job = baseJob({ action: { kind: 'agent_task', task: 'install', max_minutes: 1 } });
+    await store.saveJob(job);
+    let aborted = false;
+    host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — done' });
+    const runner = new AgentTaskRunner(
+      makeDeps({
+        sleep: (_ms, signal) =>
+          new Promise<void>((_resolve, reject) => {
+            signal?.addEventListener('abort', () => {
+              aborted = true;
+              reject(new Error('timer aborted'));
+            });
+          }),
+      }),
+    );
+
+    const jobFile: JobFile = { job, state: JobStateSchema.parse({}) };
+    await runner.run(jobFile, false);
+
+    expect(aborted).toBe(true);
+    expect(host.cancel).not.toHaveBeenCalled();
+    expect((await store.load('agent-task'))!.state.task_run).toBeNull();
+  });
+
+  it('waits for an already-fired cap cancellation to settle', async () => {
+    const job = baseJob({ action: { kind: 'agent_task', task: 'install', max_minutes: 1 } });
+    await store.saveJob(job);
+    let resolveSend: (o: ForgeRequestOutcome) => void = () => undefined;
+    let resolveCancel: () => void = () => undefined;
+    const sendPromise = new Promise<ForgeRequestOutcome>((resolve) => {
+      resolveSend = resolve;
+    });
+    const cancelPromise = new Promise<void>((resolve) => {
+      resolveCancel = resolve;
+    });
+    let cancelCalled = false;
+    host = {
+      ...fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — done' }),
+      send: vi.fn().mockImplementation(() => sendPromise),
+      cancel: vi.fn().mockImplementation(async () => {
+        cancelCalled = true;
+        resolveSend({ kind: 'cancelled', finalText: '' });
+        await cancelPromise;
+      }),
+    } as unknown as ForgeHostFacade;
+    const runner = new AgentTaskRunner(makeDeps({ sleep: async () => undefined }));
+    const jobFile: JobFile = { job, state: JobStateSchema.parse({}) };
+    const run = runner.run(jobFile, false);
+    await vi.waitFor(() => expect(cancelCalled).toBe(true));
+    let settled = false;
+    void run.then(() => {
+      settled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(settled).toBe(false);
+    resolveCancel();
+    await run;
   });
 });
 
