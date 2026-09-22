@@ -141,26 +141,67 @@ function refusalNotice(afterChars: number, beforeChars: number): string {
 }
 
 /**
+ * The conversation's user-message count at its last failed AUTOMATIC compaction.
+ *
+ * A failure that is caused by config (an output budget too small for the
+ * model's thinking, a window no summary can shrink) repeats identically, and
+ * both triggers re-fire on every check: mid-turn every round, then post-turn
+ * as soon as the turn ends. On 2026-09-22 that was seven summarizations in two
+ * minutes, each one a warning and a paid cloud call. After a failure, automatic
+ * compaction waits for the user's next message; /compact is never held back.
+ */
+const failedAutoAt = new WeakMap<ConversationRuntime, number>();
+
+function userMessageCount(conv: ConversationRuntime): number {
+  return conv.messages.filter((m) => m.role === 'user' && m.internal !== true).length;
+}
+
+/**
  * Runs one compaction against the active conversation.
  *
- * `auto` only changes the messaging: an automatic compaction the user did not
- * ask for should not pop modal-ish information toasts.
+ * `auto` changes the messaging (an automatic compaction the user did not ask
+ * for should not pop modal-ish information toasts) and applies the
+ * retry-after-failure hold described at `failedAutoAt`.
  */
 export async function runCompaction(
   deps: CompactionDeps,
   conversationId: string,
-  options: {
-    auto: boolean;
-    trigger?: CompactionTrigger;
-    remoteOrigin?: { channel: string; chatId: string };
-    /**
-     * Called by the tool loop between two rounds of a turn that is still
-     * running. The turn owns the streaming state, so this skips the streaming
-     * guard, `beginCompaction` (whose release would clear the TURN's streaming
-     * flag) and the generationStarted/done posts (which would end its bubble).
-     */
-    midTurn?: boolean;
-  } = { auto: false },
+  options: CompactionOptions = { auto: false },
+): Promise<CompactionOutcome> {
+  const conv = deps.getConversation(conversationId);
+  if (!options.auto || !conv) return compactOnce(deps, conversationId, options);
+  const at = userMessageCount(conv);
+  if (failedAutoAt.get(conv) === at) {
+    log.info('[auto-compact] skipped — the last attempt failed and no new user message since');
+    return 'skipped';
+  }
+  let outcome: CompactionOutcome = 'failed';
+  try {
+    outcome = await compactOnce(deps, conversationId, options);
+    return outcome;
+  } finally {
+    if (outcome === 'failed') failedAutoAt.set(conv, at);
+    else failedAutoAt.delete(conv);
+  }
+}
+
+interface CompactionOptions {
+  auto: boolean;
+  trigger?: CompactionTrigger;
+  remoteOrigin?: { channel: string; chatId: string };
+  /**
+   * Called by the tool loop between two rounds of a turn that is still
+   * running. The turn owns the streaming state, so this skips the streaming
+   * guard, `beginCompaction` (whose release would clear the TURN's streaming
+   * flag) and the generationStarted/done posts (which would end its bubble).
+   */
+  midTurn?: boolean;
+}
+
+async function compactOnce(
+  deps: CompactionDeps,
+  conversationId: string,
+  options: CompactionOptions,
 ): Promise<CompactionOutcome> {
   const trigger: CompactionTrigger = options.trigger ?? 'sidebar';
   const remoteOrigin = options.trigger === 'remote' ? options.remoteOrigin : undefined;

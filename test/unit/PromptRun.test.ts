@@ -56,6 +56,7 @@ const config = (): ForgeConfig =>
         provider: 'openai-compatible',
         endpoint: 'https://api.cerebras.ai',
         api_key_secret: 'cerebras',
+        sampling: { max_tokens: 32768 },
       },
     ],
   }) as unknown as ForgeConfig;
@@ -147,6 +148,41 @@ describe('runPromptToMarkdown options', () => {
     // 3072 reserve + 2048 prose. Subtracting instead would shrink the answer
     // twice and is what produced empty summaries on thinking models.
     expect(sent.max_tokens).toBe(5120);
+  });
+
+  it('gives a thinking model with no reasoning reserve its own output cap', async () => {
+    streamModelChatCompletion.mockImplementation(
+      (_u: string, request: ChatCompletionRequest, _m: unknown, handlers: any) => {
+        sent = request;
+        handlers.onToken('summary');
+        handlers.onDone('stop');
+      },
+    );
+    const cloud: PromptRunContext = {
+      ...ctx(),
+      secrets: { get: async () => 'sk-test' } as never,
+    };
+    await runPromptToMarkdown(cloud, 'summarize', 'c1', {
+      modelName: 'cerebras-qwen',
+      outputTokens: 3072,
+    });
+
+    // A cloud model has no --reasoning-budget; 3072 alone was all spent thinking.
+    expect(sent.max_tokens).toBe(32768);
+  });
+
+  it('names the budget when a reply is all thinking and no answer', async () => {
+    streamModelChatCompletion.mockImplementation(
+      (_u: string, request: ChatCompletionRequest, _m: unknown, handlers: any) => {
+        sent = request;
+        handlers.onReasoning('thinking '.repeat(100));
+        handlers.onDone('length');
+      },
+    );
+
+    await expect(
+      runPromptToMarkdown(ctx(), 'summarize', 'c1', { outputTokens: 2048 }),
+    ).rejects.toThrow(/spent its whole 5120-token output budget thinking/);
   });
 
   it('serves the run from the requested model, not the picker default', async () => {

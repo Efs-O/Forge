@@ -1,5 +1,23 @@
 # Forge — Recent Changes
 
+## 0.16.33
+
+### Compaction: a thinking cloud model writes its summary, and a failure no longer loops (2026-09-22)
+
+- **The summary request leaves a cloud model room to think.** Its budget was
+  3,072 tokens plus the reasoning reserve read from `--reasoning-budget`, and a
+  cloud model has no such flag, so the reserve was 0. Cerebras Qwen spent all
+  3,072 tokens thinking (`text_chars=0 reasoning_chars≈12,500
+  finish_reason=length`), and every compaction ended in "compaction returned
+  no summary". A thinking model with no reserve now gets its own configured
+  `sampling.max_tokens` (32,768 for the Cerebras group).
+- **An answer that is all thinking now fails with a reason.** It names the
+  budget it ran out of and the config key to raise, not "no summary".
+- **A failed auto-compaction waits for your next message.** The mid-turn
+  trigger re-fired every tool round and the post-turn trigger straight after,
+  which made seven paid summarizations and seven warnings in two minutes.
+  `/compact` is never held back.
+
 ## 0.16.32
 
 ### Compaction: a cloud chat can be compacted (2026-09-22)

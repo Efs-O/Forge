@@ -348,6 +348,49 @@ describe('runCompaction repo snapshot', () => {
   });
 });
 
+describe('runCompaction after an automatic failure', () => {
+  const history = (): ChatMessage[] => [
+    { role: 'user', content: 'first task' },
+    { role: 'assistant', content: 'did the first task' },
+    { role: 'user', content: 'second task' },
+  ];
+
+  it('does not retry automatically until the user sends another message', async () => {
+    const c = conv(history());
+    let calls = 0;
+    const h = harness(c, async () => {
+      calls++;
+      return '';
+    });
+
+    await expect(runCompaction(h.deps, c.id, { auto: true })).resolves.toBe('failed');
+    // Mid-turn rounds and the post-turn check all land here; none may re-summarize.
+    await expect(runCompaction(h.deps, c.id, { auto: true, midTurn: true })).resolves.toBe(
+      'skipped',
+    );
+    c.messages.push({ role: 'user', content: 'nudge', internal: true } as ChatMessage);
+    await expect(runCompaction(h.deps, c.id, { auto: true })).resolves.toBe('skipped');
+    expect(calls).toBe(1);
+
+    c.messages.push({ role: 'assistant', content: 'ok' }, { role: 'user', content: 'go on' });
+    await runCompaction(h.deps, c.id, { auto: true });
+    expect(calls).toBe(2);
+  });
+
+  it('never holds back an explicit /compact', async () => {
+    const c = conv(history());
+    let calls = 0;
+    const h = harness(c, async () => {
+      calls++;
+      return calls === 1 ? '' : long('summary');
+    });
+
+    await runCompaction(h.deps, c.id, { auto: true });
+    await expect(runCompaction(h.deps, c.id, { auto: false })).resolves.toBe('compacted');
+    expect(calls).toBe(2);
+  });
+});
+
 describe('runCompaction', () => {
   it('pins a completed download in both the summary request and compacted context', async () => {
     const c = conv([

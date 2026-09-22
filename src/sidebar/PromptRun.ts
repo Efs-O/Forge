@@ -107,6 +107,22 @@ function replacementPrompt(ctx: PromptRunContext, options: PromptRunOptions): st
     : undefined;
 }
 
+/**
+ * `max_tokens` for a run that asked for `outputTokens` of prose.
+ *
+ * Thinking spends from the same budget, so the model's reasoning reserve is
+ * added on top. A cloud model has no `--reasoning-budget` to read that reserve
+ * from, and its thinking is unbounded: on 2026-09-22 Cerebras Qwen spent all
+ * 3,072 tokens of every compaction summary thinking, wrote nothing, and
+ * auto-compaction retried it every round. A thinking model with no reserve gets
+ * its own configured output cap instead, when that is larger.
+ */
+function outputBudget(model: ReturnType<typeof resolveRequestModel>, outputTokens: number): number {
+  const reserve = reasoningReserve(model);
+  if (reserve > 0 || model.think === false) return reserve + outputTokens;
+  return Math.max(model.sampling?.max_tokens ?? 0, outputTokens);
+}
+
 interface RunTarget {
   baseUrl: string;
   loadedModel: string | null;
@@ -181,7 +197,7 @@ export async function runPromptToMarkdown(
         // its thinking out of max_tokens, so a bare 2048 leaves a thinking model
         // nothing to answer with.
         ...(options.outputTokens !== undefined
-          ? { max_tokens: reasoningReserve(selectedModel) + options.outputTokens }
+          ? { max_tokens: outputBudget(selectedModel, options.outputTokens) }
           : {}),
         ...(options.contactTools && options.dispatchContactTool
           ? { tools: [...options.contactTools] }
@@ -194,6 +210,8 @@ export async function runPromptToMarkdown(
 
       ctx.events.onGenerationStarted?.(selectedModel.name);
       let content = '';
+      let reasoningChars = 0;
+      let finishReason: string | null = null;
       let toolCalls: ToolCall[] = [];
       await new Promise<void>((resolve, reject) => {
         streamModelChatCompletion(
@@ -204,8 +222,13 @@ export async function runPromptToMarkdown(
             onToken: (token) => {
               content += token;
             },
-            onReasoning: () => {},
-            onDone: () => resolve(),
+            onReasoning: (token) => {
+              reasoningChars += token.length;
+            },
+            onDone: (reason) => {
+              finishReason = reason;
+              resolve();
+            },
             onError: reject,
             onToolCalls: (calls) => {
               toolCalls = calls;
@@ -216,6 +239,14 @@ export async function runPromptToMarkdown(
         );
       });
       ctx.events.onGenerationFinished?.(target.loadedModel);
+      if (!content.trim() && reasoningChars > 0 && finishReason === 'length') {
+        // An empty answer otherwise reaches the caller as "no summary", which
+        // names neither the cause nor the fix; retrying just repeats it.
+        throw new Error(
+          `"${selectedModel.name}" spent its whole ${request.max_tokens ?? 'default'}-token output ` +
+            'budget thinking and wrote no answer. Raise its sampling.max_tokens in config.yaml.',
+        );
+      }
       if (
         toolCalls.length === 0 ||
         !options.contactTools ||
