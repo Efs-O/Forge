@@ -1,5 +1,18 @@
 # Forge — Recent Changes
 
+## 0.16.24
+
+### Mesh: a reload no longer swaps in a stranger (2026-09-22)
+
+- **A question to `claude` reaches the Claude session you joined, even after a
+  reload.** The reload restarts that session under a new pid. Forge used to
+  treat the join as gone and start its own Claude, which answered in your
+  place without your context. The join now also matches Claude's conversation
+  id. If the joined session is not open yet, the asker is told to open it.
+- **Owned Codex and Claude resume their conversation after a reload.** Their
+  saved id was always empty, so a reload silently started a new, empty
+  thread. The id is now saved once the first turn confirms it.
+
 ## 0.16.23
 
 ### Agent-task jobs, phase 4 (2026-09-22)
