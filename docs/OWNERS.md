@@ -46,6 +46,7 @@ overlaps with an existing owner, extend the owner instead.
 | Timed pause for the agent loop                       | `src/tools/waitTool.ts`                  |
 | Filesystem-miss error text for tools                 | `src/tools/pathErrorHint.ts`             |
 | Tool call execution + result formatting              | `src/sidebar/ToolDispatch.ts`            |
+| Delete approval preview and bounded inventory        | `src/sidebar/deletePreview.ts`           |
 | Conversation CRUD pure ops                           | `src/sidebar/ConversationOps.ts`         |
 | Slash command dispatch                               | `src/sidebar/SlashCommandHandler.ts`     |
 | `/initForge` workspace scan and instruction generation | `src/sidebar/initForgeCommand.ts`      |
