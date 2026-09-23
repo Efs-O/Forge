@@ -24,13 +24,14 @@ export class HiddenChatAlerts implements vscode.Disposable {
     this.disposables.push(
       deps.addApprovalSink({
         requested: (event) =>
-          this.notify('Forge is waiting for tool approval.', event.conversationId),
+          this.notify('Forge is waiting for tool approval.', event.conversationId, true),
         resolved: (event) => this.resolve(event.conversationId),
       }),
     );
     this.disposables.push(
       deps.addQuestionSink({
-        asked: (event) => this.notify('Forge is waiting for your answer.', event.conversationId),
+        asked: (event) =>
+          this.notify('Forge is waiting for your answer.', event.conversationId, true),
         answered: (event) => this.resolve(event.conversationId),
       }),
     );
@@ -75,11 +76,18 @@ export class HiddenChatAlerts implements vscode.Disposable {
     this.started.clear();
   }
 
-  private notify(message: string, conversationId?: string): void {
+  /**
+   * `waiting` marks a request that blocks the chat (approval, ask_user): one alert
+   * per chat until it resolves. Finish and failure alerts are one-shot and never
+   * tracked, so they cannot silence a later request from the same chat.
+   */
+  private notify(message: string, conversationId?: string, waiting = false): void {
     if (conversationId && this.isOnScreen(conversationId)) return;
-    const key = conversationId ?? 'unattributed';
-    if (this.waiting.has(key)) return;
-    this.waiting.set(key, message);
+    if (waiting) {
+      const key = conversationId ?? 'unattributed';
+      if (this.waiting.has(key)) return;
+      this.waiting.set(key, message);
+    }
     const actions = conversationId ? ['Open chat'] : [];
     void vscode.window.showInformationMessage(message, ...actions).then((action) => {
       if (action !== 'Open chat' || !conversationId) return;

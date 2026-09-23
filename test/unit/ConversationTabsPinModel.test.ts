@@ -87,32 +87,79 @@ function harness(
 }
 
 describe('ConversationTabs capacity', () => {
-  it.each(['create', 'restore'] as const)('%s archives the least-recently-active eligible chat at cap', async (action) => {
-    const entries = Array.from({ length: MAX_CONVERSATIONS }, (_, i) => `tab${i}`);
-    const { tabs } = harness({ tabs: entries, evictable: true });
+  it.each(['create', 'restore'] as const)(
+    '%s archives the least-recently-active eligible chat at cap',
+    async (action) => {
+      const entries = Array.from({ length: MAX_CONVERSATIONS }, (_, i) => `tab${i}`);
+      const { tabs } = harness({ tabs: entries, evictable: true });
+      const deps = (tabs as unknown as { deps: ConversationTabsDeps }).deps;
+      const state = deps.getSidebar();
+      state.conversations.forEach((conversation, i) => {
+        conversation.updatedAt = i;
+        conversation.messages = [{ role: 'user', content: `chat ${i}` }];
+      });
+      if (action === 'restore')
+        state.history.push({
+          id: 'restored',
+          title: 'Restored',
+          createdAt: 0,
+          updatedAt: 50,
+          messages: [],
+        });
+      const disposeLoop = vi.spyOn(deps.agentLoop, 'disposeConversation');
+      const disposeCheckpoints = vi.spyOn(deps.checkpoints, 'disposeConversation');
+      const result = action === 'create' ? tabs.create() : tabs.restore('restored');
+      expect(result).toBeDefined();
+      const updated = deps.getSidebar();
+      expect(updated.conversations).toHaveLength(MAX_CONVERSATIONS);
+      expect(updated.history.some((conversation) => conversation.id === 'tab0')).toBe(true);
+      expect(updated.conversations.some((conversation) => conversation.id === 'tab0')).toBe(false);
+      // Eviction is a close: the archived chat's loop and checkpoint state go too.
+      await flush();
+      expect(disposeLoop).toHaveBeenCalledWith('tab0');
+      expect(disposeCheckpoints).toHaveBeenCalledWith('tab0');
+    },
+  );
+
+  it('surfaces a failed cleanup of the evicted chat instead of swallowing it', async () => {
+    const { tabs, posted } = harness({
+      tabs: Array.from({ length: MAX_CONVERSATIONS }, (_, i) => `tab${i}`),
+      evictable: true,
+    });
     const deps = (tabs as unknown as { deps: ConversationTabsDeps }).deps;
-    const state = deps.getSidebar();
-    state.conversations.forEach((conversation, i) => {
+    deps.getSidebar().conversations.forEach((conversation, i) => {
       conversation.updatedAt = i;
       conversation.messages = [{ role: 'user', content: `chat ${i}` }];
     });
-    if (action === 'restore') state.history.push({ id: 'restored', title: 'Restored', createdAt: 0, updatedAt: 50, messages: [] });
-    const result = action === 'create' ? tabs.create() : tabs.restore('restored');
-    expect(result).toBeDefined();
-    const updated = deps.getSidebar();
-    expect(updated.conversations).toHaveLength(MAX_CONVERSATIONS);
-    expect(updated.history.some((conversation) => conversation.id === 'tab0')).toBe(true);
-    expect(updated.conversations.some((conversation) => conversation.id === 'tab0')).toBe(false);
+    vi.spyOn(deps.checkpoints, 'disposeConversation').mockRejectedValue(new Error('locked'));
+    expect(tabs.create()).toBeDefined();
+    await flush();
+    expect(posted).toContainEqual({
+      type: 'error',
+      message: 'Could not fully clean up archived chat: locked',
+    });
   });
 
-  it.each(['create', 'restore'] as const)('%s refuses at cap when no chat is eligible', (action) => {
-    const { tabs } = harness({ tabs: Array.from({ length: MAX_CONVERSATIONS }, (_, i) => `tab${i}`) });
-    const deps = (tabs as unknown as { deps: ConversationTabsDeps }).deps;
-    const state = deps.getSidebar();
-    if (action === 'restore') state.history.push({ id: 'restored', title: 'Restored', createdAt: 0, updatedAt: 50, messages: [] });
-    const result = action === 'create' ? tabs.create() : tabs.restore('restored');
-    expect(result).toBeUndefined();
-  });
+  it.each(['create', 'restore'] as const)(
+    '%s refuses at cap when no chat is eligible',
+    (action) => {
+      const { tabs } = harness({
+        tabs: Array.from({ length: MAX_CONVERSATIONS }, (_, i) => `tab${i}`),
+      });
+      const deps = (tabs as unknown as { deps: ConversationTabsDeps }).deps;
+      const state = deps.getSidebar();
+      if (action === 'restore')
+        state.history.push({
+          id: 'restored',
+          title: 'Restored',
+          createdAt: 0,
+          updatedAt: 50,
+          messages: [],
+        });
+      const result = action === 'create' ? tabs.create() : tabs.restore('restored');
+      expect(result).toBeUndefined();
+    },
+  );
 });
 
 describe('ConversationTabs.pinModel VRAM release', () => {

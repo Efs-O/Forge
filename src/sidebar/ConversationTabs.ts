@@ -100,8 +100,12 @@ export class ConversationTabs {
         this.deps.isConversationEvictable(conversation.id),
       );
       if (archived) {
+        const evictedId = sidebar.conversations.find(
+          (conversation) => !archived.conversations.some((open) => open.id === conversation.id),
+        )?.id;
         sidebar = archived;
         this.deps.setSidebar(sidebar);
+        if (evictedId) this.disposeEvictedConversation(evictedId);
         result = opNewConversation(sidebar, this.deps.getConfig().active_model, options);
       }
     }
@@ -195,6 +199,21 @@ export class ConversationTabs {
     if (modelName) this.offerUnload(modelName);
   }
 
+  /** Eviction keeps create/restore synchronous; begin scoped cleanup immediately. */
+  private disposeEvictedConversation(id: string): void {
+    void (async () => {
+      await this.deps.agentLoop.stopStreamingIfNeeded(id);
+      await this.deps.agentLoop.disposeConversation(id);
+      await this.deps.checkpoints.disposeConversation(id);
+      this.deps.failureTracker.reset(id);
+    })().catch((err: unknown) => {
+      const detail = err instanceof Error ? err.message : String(err);
+      this.deps.post({
+        type: 'error',
+        message: `Could not fully clean up archived chat: ${detail}`,
+      });
+    });
+  }
   async deleteConversation(id: string): Promise<void> {
     const sidebar = this.deps.getSidebar();
     const conversation = sidebar.conversations.find((c) => c.id === id);
@@ -250,8 +269,12 @@ export class ConversationTabs {
         this.deps.isConversationEvictable(conversation.id),
       );
       if (archived) {
+        const evictedId = sidebar.conversations.find(
+          (conversation) => !archived.conversations.some((open) => open.id === conversation.id),
+        )?.id;
         sidebar = archived;
         this.deps.setSidebar(sidebar);
+        if (evictedId) this.disposeEvictedConversation(evictedId);
         result = opRestoreConversation(sidebar, id, options);
       }
     }

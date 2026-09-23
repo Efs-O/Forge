@@ -5,21 +5,53 @@ import { HiddenChatAlerts } from '../../src/sidebar/hiddenChatAlerts';
 afterEach(() => vi.restoreAllMocks());
 
 function fixture() {
-  let approval: { requested: (event: { conversationId?: string }) => void; resolved: (event: { conversationId?: string }) => void } | undefined;
-  let question: { asked: (event: { conversationId?: string }) => void; answered: (event: { conversationId?: string }) => void } | undefined;
-  const events: { onGenerationStarted?: (model: string | null, id?: string) => void; onGenerationFinished?: (model: string | null, id?: string) => void; onTurnFailed?: (id: string | undefined, message: string) => void } = {};
+  let approval:
+    | {
+        requested: (event: { conversationId?: string }) => void;
+        resolved: (event: { conversationId?: string }) => void;
+      }
+    | undefined;
+  let question:
+    | {
+        asked: (event: { conversationId?: string }) => void;
+        answered: (event: { conversationId?: string }) => void;
+      }
+    | undefined;
+  const events: {
+    onGenerationStarted?: (model: string | null, id?: string) => void;
+    onGenerationFinished?: (model: string | null, id?: string) => void;
+    onTurnFailed?: (id: string | undefined, message: string) => void;
+  } = {};
   let active = 'visible';
   let visible = true;
   const switchChat = vi.fn();
   const alerts = new HiddenChatAlerts({
     events,
-    addApprovalSink: (sink) => { approval = sink; return { dispose: vi.fn() }; },
-    addQuestionSink: (sink) => { question = sink; return { dispose: vi.fn() }; },
+    addApprovalSink: (sink) => {
+      approval = sink;
+      return { dispose: vi.fn() };
+    },
+    addQuestionSink: (sink) => {
+      question = sink;
+      return { dispose: vi.fn() };
+    },
     activeConversationId: () => active,
-    view: () => ({ visible } as vscode.WebviewView),
+    view: () => ({ visible }) as vscode.WebviewView,
     switchConversation: switchChat,
   });
-  return { alerts, events, switchChat, approval: () => approval!, question: () => question!, setActive: (id: string) => { active = id; }, setVisible: (value: boolean) => { visible = value; } };
+  return {
+    alerts,
+    events,
+    switchChat,
+    approval: () => approval!,
+    question: () => question!,
+    setActive: (id: string) => {
+      active = id;
+    },
+    setVisible: (value: boolean) => {
+      visible = value;
+    },
+  };
 }
 
 describe('HiddenChatAlerts', () => {
@@ -32,6 +64,19 @@ describe('HiddenChatAlerts', () => {
     state.approval().resolved({ conversationId: 'background' });
     state.question().asked({ conversationId: 'background' });
     expect(toast).toHaveBeenCalledTimes(2);
+    state.alerts.dispose();
+  });
+
+  it('a finish or failure alert does not silence a later approval from the same chat', () => {
+    const state = fixture();
+    const toast = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
+    const now = vi.spyOn(Date, 'now').mockReturnValue(10_000);
+    state.events.onGenerationStarted?.('model', 'background');
+    now.mockReturnValue(70_000);
+    state.events.onGenerationFinished?.('model', 'background');
+    state.events.onTurnFailed?.('background', 'backend stopped');
+    state.approval().requested({ conversationId: 'background' });
+    expect(toast).toHaveBeenCalledTimes(3);
     state.alerts.dispose();
   });
 
