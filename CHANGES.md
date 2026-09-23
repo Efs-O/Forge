@@ -1,5 +1,15 @@
 # Forge — Recent Changes
 
+## 0.16.41
+
+### A tool call written as text no longer ends the turn (2026-09-23)
+
+- Some Qwen fine-tunes (seen on Qwopus) start writing tool calls as
+  `<tool_call>{"name": ..., "arguments": ...}</tool_call>` text after a few
+  normal calls. llama-server does not recognise that form, so the turn just
+  stopped with the raw tag in the chat. Forge now reads it as the tool call
+  it is and keeps going.
+
 ## 0.16.40
 
 ### No false "orphan verdict" warning after a stand-in answers (2026-09-23)

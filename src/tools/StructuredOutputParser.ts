@@ -10,6 +10,12 @@
  *
  * Supported marker syntax used by some Ollama-hosted/cloud models:
  *   <｜tool▁call▁begin｜>tool_name<｜tool▁sep｜>{"arg":"value"}<｜tool▁call▁end｜>
+ *
+ * Hermes-style JSON inside <tool_call> tags, as plain content:
+ *   <tool_call>{"name":"tool_name","arguments":{...}}</tool_call>
+ * Qwen-family fine-tunes drift into this after a few native calls; llama-server
+ * only parses the template's own `<function=...>` form, so without this the
+ * call arrives as text and the turn ends.
  */
 
 export interface ParsedToolCall {
@@ -32,6 +38,7 @@ const OLLAMA_TOOL_MARKERS = [
 
 // Matches ```json ... ``` blocks (non-greedy, case-insensitive fence)
 const JSON_FENCE_RE = /```json\s*([\s\S]*?)```/gi;
+const HERMES_TOOL_CALL_RE = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/g;
 const OLLAMA_TOOL_CALL_RE = new RegExp(
   `${escapeRegExp(OLLAMA_TOOL_CALL_BEGIN)}\\s*([\\w.-]+)\\s*${escapeRegExp(OLLAMA_TOOL_CALL_SEP)}\\s*([\\s\\S]*?)\\s*${escapeRegExp(OLLAMA_TOOL_CALL_END)}`,
   'gu',
@@ -49,6 +56,7 @@ export function parseStructuredOutput(text: string): ParsedToolCall[] {
   const results: ParsedToolCall[] = [];
   collectJsonFenceToolCalls(text, results);
   collectOllamaMarkerToolCalls(text, results);
+  collectHermesToolCalls(text, results);
   return results;
 }
 
@@ -104,9 +112,9 @@ export class StructuredOutputStripper {
 export function stripStructuredOutputFromFullText(text: string): string {
   const withoutMarkers = text.replace(OLLAMA_TOOL_CALL_RE, '').replace(OLLAMA_TOOL_WRAPPER_RE, '');
 
-  return withoutMarkers.replace(JSON_FENCE_RE, (match, body: string) =>
-    parseJsonToolObject(body.trim()) ? '' : match,
-  );
+  const isCall = (match: string, body: string): string =>
+    parseJsonToolObject(body.trim()) ? '' : match;
+  return withoutMarkers.replace(JSON_FENCE_RE, isCall).replace(HERMES_TOOL_CALL_RE, isCall);
 }
 
 function collectJsonFenceToolCalls(text: string, results: ParsedToolCall[]): void {
@@ -131,6 +139,13 @@ function collectOllamaMarkerToolCalls(text: string, results: ParsedToolCall[]): 
     const parsedArgs = parseJsonArguments(match[2]?.trim() ?? '');
     if (!parsedArgs) continue;
     results.push({ name, arguments: parsedArgs });
+  }
+}
+
+function collectHermesToolCalls(text: string, results: ParsedToolCall[]): void {
+  for (const match of text.matchAll(HERMES_TOOL_CALL_RE)) {
+    const candidate = parseJsonToolObject(match[1] ?? '');
+    if (candidate) results.push(candidate);
   }
 }
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   StructuredOutputStripper,
+  parseStructuredOutput,
   stripStructuredOutputFromFullText,
 } from '../../src/tools/StructuredOutputParser';
 
@@ -36,5 +37,31 @@ describe('StructuredOutputStripper', () => {
     ].join('\n');
 
     expect(stripStructuredOutputFromFullText(text)).toBe('Plan:\n\nDone.');
+  });
+});
+
+describe('Hermes <tool_call> JSON in content', () => {
+  // Qwopus emitted exactly this as text after its first native call.
+  const text = [
+    'Reading it.',
+    '<tool_call>',
+    '{"name": "read_file", "arguments": {"path": "src/a.ts"}}',
+    '</tool_call>',
+  ].join('\n');
+
+  it('parses it as a tool call', () => {
+    expect(parseStructuredOutput(text)).toEqual([
+      { name: 'read_file', arguments: { path: 'src/a.ts' } },
+    ]);
+  });
+
+  it('strips it from persisted text', () => {
+    expect(stripStructuredOutputFromFullText(text)).toBe('Reading it.\n');
+  });
+
+  it('leaves the XML <function=...> form and non-call bodies alone', () => {
+    const xml = '<tool_call>\n<function=read_file>\n</function>\n</tool_call>';
+    expect(parseStructuredOutput(xml)).toEqual([]);
+    expect(stripStructuredOutputFromFullText(xml)).toBe(xml);
   });
 });
