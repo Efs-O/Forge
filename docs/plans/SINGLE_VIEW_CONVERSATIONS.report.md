@@ -46,7 +46,8 @@ The `hiddenChatAlerts.ts` references at lines 39, 43 and 51 are decorators forwa
 - Closed: the eviction predicate now queries `RemoteRuntime`/`RemoteRequestStore` through an explicit public seam. It fails closed until remote state loads and blocks conversations with a binding or queued remote request.
 - Closed: added CI fixtures for every listed eviction signal and the clear-signal LRU case.
 - Closed: added unattributed approval, short finish, unattributed finish, and running-turn alert cases.
-- Still open: caller-level cap coverage for local create/restore, facade create, remote `/new`, first-prompt admission and workspace handoff; the test proving agent-bus `say` and `say --new` preserve active conversation; a green full CI run. These remain required follow-up work.
+- Closed: caller-level local create and restore cap tests cover LRU archive success and refusal with no eligible chat. Facade create coverage checks successful creation and the busy exception. Agent bus dispatch tests cover the `say` restore and `say --new` create paths while preserving the active id.
+- Still open: caller-level cap coverage for remote `/new`, first-prompt admission and workspace handoff, including eligible LRU eviction and refusal when none are eligible. The full CI run after commit `0f21cda` passed type-check and lint but had three test failures: two timeouts in `AgentMeshCommands.test.ts` and one failure in `RemoteHardening.test.ts` (`outboxHealth().abandoned` remained 0). The test step stopped the CI script before build and bundle checks; rerun CI after the remaining caller tests.
 - README has no remaining Forge conversation-tab wording to change. Its `README.md:89` “Changelog tab” and `README.md:576` editor-context “tabs” refer to separate VS Code UI concepts, so neither was changed. Screenshots were left untouched.
 
 ## Phase 4 entries for merge-time docs
