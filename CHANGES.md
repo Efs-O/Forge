@@ -1,5 +1,17 @@
 # Forge — Recent Changes
 
+## 0.16.37
+
+### A chat in tool-fallback mode no longer breaks for good on Qwen (2026-09-23)
+
+- **The fallback tool catalog now joins the leading system message instead of
+  trailing the history as a second one.** After repeated tool failures a chat
+  switches to fenced-JSON tool calls, and the catalog for that mode was sent as
+  a system message at the end. Qwen's chat template rejects any system message
+  after the first ("System message must be at the beginning", HTTP 500), and
+  the failure count is kept per chat, so every later turn in that chat failed
+  the same way until a new chat was started.
+
 ## 0.16.36
 
 ### Mid-turn messages reach Forge at the next safe gap (2026-09-22)

@@ -5,7 +5,7 @@ import { normalizeRequestForModel } from '../llm/RequestNormalizer';
 import { mergeSampling } from '../llm/SamplingMerge';
 import { ThinkingChannelStripper } from '../llm/ThinkingChannelStripper';
 import type { ChatCompletionRequest, ChatMessage, ToolCall, ToolDefinition } from '../llm/types';
-import { buildFallbackToolInstructions } from '../tools/FallbackToolPrompt';
+import { withFallbackToolInstructions } from '../tools/FallbackToolPrompt';
 import { ToolFailureTracker, stripTools } from '../tools/StripTools';
 import { StructuredOutputStripper } from '../tools/StructuredOutputParser';
 import { extractFallbackToolCalls } from '../tools/ToolCallFallback';
@@ -204,13 +204,7 @@ export async function runToolCallingLoop(
     const toolDefinitions = options.getToolDefinitions();
     const fallbackMessages =
       toolDefinitions.length > 0
-        ? [
-            ...prepared,
-            {
-              role: 'system' as const,
-              content: buildFallbackToolInstructions(toolDefinitions),
-            },
-          ]
+        ? withFallbackToolInstructions(prepared, toolDefinitions)
         : prepared;
     const nativeDefinitions = options.nativeTools && !options.stripAllTools ? toolDefinitions : [];
     const base: ChatCompletionRequest = {
