@@ -1,6 +1,6 @@
 # `image_search` — reverse image search via SerpApi Google Lens (impl plan)
 
-> **Status 2026-09-15: implemented incl. thumbnails (sidebar + Telegram); live smoke pending.**
+> **Status: DONE. Implemented 2026-09-15 incl. thumbnails (sidebar + Telegram); live smoke passed 2026-09-23.**
 > "As built" notes below record where the implementation departs from the
 > first draft of this plan, and why.
 
