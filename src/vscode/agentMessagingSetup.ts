@@ -9,7 +9,10 @@ import { parseMeshCommand } from '../agentMesh/meshCommands';
 import { projectWho } from '../agentMesh/meshWho';
 import { readClaudeSessions } from '../agentBus/claudePeer';
 import { setupAgentMesh } from './agentMeshSetup';
-import { BUS_TARGET_SCAN, busTargetConversation } from '../agentBus/busTarget';
+import { BUS_TARGET_SCAN, busTargetConversation, senderConversation } from '../agentBus/busTarget';
+import { BusTurnWatch } from '../agentBus/busTurnWatch';
+import { renderBusStatus, renderBusView } from '../agentBus/busStatusView';
+import { MAX_VIEW_COUNT, parseViewCount } from '../remote/RemoteTranscriptView';
 
 /** The conversation a bus message from `from` belongs in. */
 function busTarget(facade: ForgeHostFacade, from: string | undefined): string {
@@ -41,6 +44,7 @@ export function setupAgentMessaging(
   workspaceRoot: string,
 ): AgentRoutes {
   const mesh = setupAgentMesh(context, getSidebar, getConfig, workspaceRoot);
+  const watch = new BusTurnWatch();
   const inbox = new AgentInbox({
     isBusy: (options?: InboxMessageOptions) => {
       if (options?.newChat) return false;
@@ -49,6 +53,7 @@ export function setupAgentMessaging(
     },
     submit: async (prompt, options?: InboxMessageOptions) => {
       const facade = getSidebar().getHostFacade();
+      watch.attach(facade);
       await vscode.commands.executeCommand('workbench.view.extension.forge-sidebar');
       // Not the active tab: the chat this sender last wrote in, shown so the
       // user sees the turn (AGENT_BUS_CHAT_AFFINITY_PLAN).
@@ -91,6 +96,31 @@ export function setupAgentMessaging(
     },
   });
   context.subscriptions.push(inbox);
+  context.subscriptions.push(watch);
+  const readTarget = (from: string) => {
+    const facade = getSidebar().getHostFacade();
+    watch.attach(facade);
+    const status = facade.status();
+    const id = senderConversation(from, status, (cid) =>
+      facade.recentExchanges(cid, BUS_TARGET_SCAN),
+    );
+    if (id === undefined) {
+      return {
+        ok: false as const,
+        status: 404 as const,
+        error: `no chat holds a message from "${from}": send one with forge.sh say first`,
+      };
+    }
+    const conversation = status.conversations.find((item) => item.id === id);
+    if (conversation === undefined) {
+      return {
+        ok: false as const,
+        status: 404 as const,
+        error: `the chat for "${from}" is no longer open`,
+      };
+    }
+    return { ok: true as const, facade, status, id, conversation };
+  };
   return new AgentRoutes({
     paths: () => busPaths(),
     inbox,
@@ -127,6 +157,37 @@ export function setupAgentMessaging(
         forgeInboxDepth: () => inbox.pending,
         claudeSessions: () => readClaudeSessions(),
       }),
+    status: (from) => {
+      const target = readTarget(from);
+      if (!target.ok) return target;
+      return {
+        ok: true,
+        text: renderBusStatus({
+          conversation: target.conversation,
+          streaming: target.status.streamingConversationIds.includes(target.id),
+          queuedFromSender: inbox.pendingFrom(from),
+          budget: target.facade.contextBudget(target.id),
+          turn: watch.snapshot(target.id),
+          watchAttached: watch.attached,
+          now: Date.now(),
+        }),
+      };
+    },
+    view: (from, count) => {
+      const target = readTarget(from);
+      if (!target.ok) return target;
+      const requested = parseViewCount(count);
+      if (requested.kind === 'invalid') {
+        return { ok: false, status: 400, error: `count must be 1-${MAX_VIEW_COUNT}` };
+      }
+      return {
+        ok: true,
+        text: renderBusView(target.facade.recentExchanges(target.id, requested.count), {
+          clamped: requested.clamped,
+          streaming: target.status.streamingConversationIds.includes(target.id),
+        }),
+      };
+    },
     // §8/P3: a `to: forge` message that parses as a typed lifecycle command is
     // dispatched (standby/wake/close/steer/say/handoff) and the reply returned
     // to the caller's `forge.sh cmd` call. Ordinary text falls through to the inbox.

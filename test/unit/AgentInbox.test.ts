@@ -141,6 +141,19 @@ describe('AgentInbox', () => {
     expect(inbox.pending).toBe(0);
   });
 
+  it('counts queued messages for each sender', () => {
+    const h = host();
+    h.busy = true;
+    const inbox = new AgentInbox(h, 1_000);
+    inbox.accept('one', 'claude');
+    inbox.accept('two', 'codex');
+    inbox.accept('three', 'claude');
+    expect(inbox.pendingFrom('claude')).toBe(2);
+    expect(inbox.pendingFrom('codex')).toBe(1);
+    expect(inbox.pendingFrom('unknown')).toBe(0);
+    inbox.dispose();
+  });
+
   it('warns the user when a submit fails, then moves on', async () => {
     const h = host({ submit: () => Promise.reject(new Error('no model')) });
     const inbox = new AgentInbox(h, 5);

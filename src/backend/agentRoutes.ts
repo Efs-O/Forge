@@ -6,7 +6,7 @@ import { BUS_ID_PATTERN, ensureBus, writeReply, type BusPaths } from '../agentBu
 import { MAX_INBOUND_CHARS, forgeInboundPrompt } from '../agentBus/busContent';
 import { parseMeshCommand } from '../agentMesh/meshCommands';
 import type { AgentInbox, InboxMessageOptions } from '../agentBus/agentInbox';
-import { sendJson } from './controlHttp';
+import { sendJson, sendText } from './controlHttp';
 import { getLogger } from '../util/logger';
 
 const log = getLogger();
@@ -15,6 +15,10 @@ const log = getLogger();
 export const MAX_REPLY_CHARS = 32_000;
 const MAX_BODY_BYTES = 256 * 1024;
 const FROM_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,39}$/;
+
+export type BusReadResult =
+  | { ok: true; text: string }
+  | { ok: false; status: 400 | 404; error: string };
 
 export interface AgentRoutesDeps {
   paths: () => BusPaths;
@@ -79,6 +83,9 @@ export interface AgentRoutesDeps {
    * formats. Absent ⇒ `GET /agent/who` is 404.
    */
   who?: () => Promise<unknown> | unknown;
+  /** Read-only view of the sender's chat; absent means the route is 404. */
+  status?: (from: string) => BusReadResult | Promise<BusReadResult>;
+  view?: (from: string, count: string | undefined) => BusReadResult | Promise<BusReadResult>;
   /** Configured model names used to validate an inbound message's model. */
   configuredModels?: () => readonly string[];
 }
@@ -160,6 +167,8 @@ function zodMessage(error: z.ZodError): string {
  *   POST /agent/cancel  {from, id}    → 200 {cancelled} (withdraw a queued message)
  *   POST /agent/reply   {id, text}    → 200 {delivered} (answers ask_live_session)
  *   POST /agent/join    {alias, pid}  → 200 {joined}    (AGENT_MESH_PLAN §10)
+ *   GET /agent/status   ?from         → 200 text (the sender's chat, now)
+ *   GET /agent/view     ?from&count   → 200 text (its last answers)
  * These are the first control routes that put text in front of the model, so
  * they need the bearer token from endpoint.json; the model routes do not.
  */
@@ -207,7 +216,9 @@ export class AgentRoutes {
       route === '/agent/reply' ||
       route === '/agent/cancel' ||
       (route === '/agent/join' && !!this.deps.join) ||
-      (route === '/agent/who' && !!this.deps.who);
+      (route === '/agent/who' && !!this.deps.who) ||
+      (route === '/agent/status' && !!this.deps.status) ||
+      (route === '/agent/view' && !!this.deps.view);
     if (!this.enabled || !known) {
       return sendJson(res, 404, { error: `no route for ${req.method ?? 'GET'} ${route}` });
     }
@@ -223,6 +234,24 @@ export class AgentRoutes {
       if (req.method !== 'GET') return sendJson(res, 405, { error: 'GET only' });
       const participants = await this.deps.who?.();
       return sendJson(res, 200, { participants });
+    }
+    if (route === '/agent/status' || route === '/agent/view') {
+      if (req.method !== 'GET') return sendJson(res, 405, { error: 'GET only' });
+      const from = (url.searchParams.get('from') ?? '').trim();
+      if (!FROM_PATTERN.test(from)) {
+        return sendJson(res, 400, {
+          error: 'from must be 1-40 chars: letters, digits, space . _ -',
+        });
+      }
+      const sender = await this.deps.validateFrom?.(from);
+      if (sender && !sender.ok) return sendJson(res, 400, { error: sender.error });
+      const result =
+        route === '/agent/status'
+          ? await this.deps.status?.(from)
+          : await this.deps.view?.(from, url.searchParams.get('count') ?? undefined);
+      if (!result) return sendJson(res, 404, { error: `no route for GET ${route}` });
+      if (result.ok) return sendText(res, 200, result.text);
+      return sendJson(res, result.status, { error: result.error });
     }
     if (req.method !== 'POST') return sendJson(res, 405, { error: 'POST only' });
     try {

@@ -538,6 +538,77 @@ describe('GET /agent/who (§11)', () => {
   });
 });
 
+describe('GET /agent/status and /agent/view', () => {
+  function install(deps: ConstructorParameters<typeof AgentRoutes>[0]): void {
+    routes = new AgentRoutes(deps);
+    routes.setEnabled(true);
+    routes.onListening(base);
+  }
+  const get = (route: string, token: string | null = TOKEN): Promise<Response> =>
+    fetch(`${base}${route}`, {
+      headers: token === null ? {} : { Authorization: `Bearer ${token}` },
+    });
+
+  it('returns 404 when the read dependencies are absent', async () => {
+    expect((await get('/agent/status?from=claude')).status).toBe(404);
+    expect((await get('/agent/view?from=claude')).status).toBe(404);
+  });
+
+  it('requires a token and GET', async () => {
+    install({ paths: () => paths, inbox: stubInbox(), token: TOKEN, status: () => ({ ok: true, text: 'status' }) });
+    expect((await get('/agent/status?from=claude', null)).status).toBe(401);
+    const res = await fetch(`${base}/agent/status?from=claude`, {
+      method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: 'x',
+    });
+    expect(res.status).toBe(405);
+  });
+
+  it('validates sender shape and the configured sender', async () => {
+    install({
+      paths: () => paths, inbox: stubInbox(), token: TOKEN,
+      status: () => ({ ok: true, text: 'status' }),
+      validateFrom: (from) => from === 'claude'
+        ? { ok: true }
+        : { ok: false, error: 'unknown sender' },
+    });
+    const shape = await get('/agent/status?from=bad%21name');
+    expect(shape.status).toBe(400);
+    expect((await shape.json()).error).toBe('from must be 1-40 chars: letters, digits, space . _ -');
+    const sender = await get('/agent/status?from=ghost');
+    expect(sender.status).toBe(400);
+    expect((await sender.json()).error).toBe('unknown sender');
+  });
+
+  it('returns dependency errors as JSON with their status', async () => {
+    install({
+      paths: () => paths, inbox: stubInbox(), token: TOKEN,
+      status: () => ({ ok: false, status: 404, error: 'x' }),
+    });
+    const res = await get('/agent/status?from=claude');
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'x' });
+  });
+
+  it('serves plain text and passes the view count through, including when absent', async () => {
+    const received: Array<string | undefined> = [];
+    install({
+      paths: () => paths, inbox: stubInbox(), token: TOKEN,
+      status: () => ({ ok: true, text: 'hello' }),
+      view: (_from, count) => {
+        received.push(count);
+        return { ok: true, text: 'answers' };
+      },
+    });
+    const status = await get('/agent/status?from=claude');
+    expect(status.status).toBe(200);
+    expect(status.headers.get('content-type')).toMatch(/^text\/plain/);
+    expect(await status.text()).toBe('hello\n');
+    expect(await (await get('/agent/view?from=claude&count=2')).text()).toBe('answers\n');
+    expect(await (await get('/agent/view?from=claude')).text()).toBe('answers\n');
+    expect(received).toEqual(['2', undefined]);
+  });
+});
+
 // A7 + A9: the client formats the route's JSON and takes no arguments. Bash-gated
 // like the other forge.sh client tests (skipped where there is no usable bash+curl).
 describe('forge.sh who against the routes (§11)', () => {

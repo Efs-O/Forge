@@ -12,6 +12,11 @@ export function sendJson(res: http.ServerResponse, status: number, body: unknown
   res.end(JSON.stringify(body));
 }
 
+export function sendText(res: http.ServerResponse, status: number, text: string): void {
+  res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8' });
+  res.end(text.endsWith('\n') ? text : `${text}\n`);
+}
+
 export function requireModel(body: Record<string, unknown>): string | null {
   const model = typeof body['model'] === 'string' ? body['model'].trim() : '';
   return model || null;

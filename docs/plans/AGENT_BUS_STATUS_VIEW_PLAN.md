@@ -1,6 +1,6 @@
 # Agent bus: `status` and `view` — see what Forge is doing mid-turn
 
-Status: PROPOSED 2026-09-22 (written by Claude Code from the HalluScribe session). Not started.
+Status: DONE 2026-09-23 (Phase 1 `fc6ecc8`; Phase 2 is the commit containing this status).
 Closes the last open item of `docs/TODO-agent-bus-steer-and-queue-visibility.md` §6 (`/status`, `/view` over the bus).
 Implementer: Forge (local Qwen). Reviewer: Claude or Codex.
 
@@ -470,15 +470,15 @@ Paste the output of 1, 3 (one of the three), 4 and 5 into the report.
 
 ## 9. Acceptance checklist
 
-- [ ] `senderConversation` exists; `busTargetConversation` delegates to it; the old busTarget tests pass unedited.
-- [ ] `reduceTurn` is pure; `commentary` text is never stored; warnings are capped at 4; the map is capped at 20.
-- [ ] `renderBusStatus` follows the five `State:` rules in order; `renderBusView` reuses `renderExchange`.
-- [ ] `GET /agent/status` and `GET /agent/view` need the token, GET only, validate `from`, answer `text/plain`.
-- [ ] A sender with no chat gets 404; the active chat is never used as a fallback.
-- [ ] `forge.sh status|view` are in the usage block, validate their args, and print errors to stderr with exit 1.
-- [ ] The README section exists; the TODO §6 is marked done.
-- [ ] `src/extension.ts` untouched; no file over 500 lines; no new dependency.
-- [ ] Live check §7 done and pasted into the report.
+- [x] `senderConversation` exists; `busTargetConversation` delegates to it; the old busTarget tests pass unedited.
+- [x] `reduceTurn` is pure; `commentary` text is never stored; warnings are capped at 4; the map is capped at 20.
+- [x] `renderBusStatus` follows the five `State:` rules in order; `renderBusView` reuses `renderExchange`.
+- [x] `GET /agent/status` and `GET /agent/view` need the token, GET only, validate `from`, answer `text/plain`.
+- [x] A sender with no chat gets 404; the active chat is never used as a fallback.
+- [x] `forge.sh status|view` are in the usage block, validate their args, and print errors to stderr with exit 1.
+- [x] The README section exists; the TODO §6 is marked done.
+- [x] `src/extension.ts` untouched; no file over 500 lines; no new dependency.
+- [ ] Live check §7 intentionally skipped per user instruction; no live-system behavior is claimed.
 
 ## 10. State × lifecycle ledger
 

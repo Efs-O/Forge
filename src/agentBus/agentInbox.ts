@@ -140,6 +140,11 @@ export class AgentInbox {
     return this.queue.length;
   }
 
+  /** How many of `from`'s messages are queued and not yet started. */
+  pendingFrom(from: string): number {
+    return this.queue.filter((item) => item.from === from).length;
+  }
+
   dispose(): void {
     this.disposed = true;
     this.queue.length = 0;

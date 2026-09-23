@@ -70,6 +70,15 @@ columns: **attachment** (how Forge reaches it: \`hub\`, \`joined\`, \`owned\`,
 its turns (a joined session, a pinned thread, or one another window owns) — it
 never says \`idle\` for something it cannot see.
 
+## Watching a running turn
+
+\`bash ~/.forge/agent-bus/forge.sh status <your-name>\` shows what YOUR chat with Forge is doing:
+busy or idle, how long the turn has run, seconds since its last activity, the tool it is on, how
+many tool calls so far, the last thing it said, any warnings, and context use. \`view <your-name> [n]\`
+replays the last n answers (default 3, max 10). Both read only the chat your own messages went to;
+if you have not sent Forge anything yet there is nothing to show. Each is one small request and
+costs Forge no model tokens, so use it instead of messaging Forge to ask how it is going.
+
 ## Steering (interrupt a running turn)
 
 \`forge.sh steer <your-name> <to>\` stops \`<to>\`'s running turn and runs your

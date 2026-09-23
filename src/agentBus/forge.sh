@@ -6,6 +6,8 @@
 #   forge.sh cancel <your-name> <id|all>  withdraw your queued message(s) to Forge not yet started
 #   forge.sh join claude              this Claude Code session becomes the "claude" alias
 #   forge.sh who                      who is in the mesh, and what each is doing
+#   forge.sh status <your-name>       what your chat with Forge is doing now (tool, last words, context)
+#   forge.sh view <your-name> [n]     the last n answers in your chat (default 3, max 10)
 # The text comes from the file, or from stdin when no file is given.
 # Written by Forge on every start; edits are overwritten.
 
@@ -29,6 +31,22 @@ if [ "$VERB" = "who" ]; then
     for(i=1;i<=NF;i++){ if($i=="alias")a=$(i+2); else if($i=="attachment")att=$(i+2); else if($i=="activity")act=$(i+2); else if($i=="detail")det=$(i+2) }
     printf "%-8s  %-9s  %-9s  %s\n", a, att, act, det
   }'
+  exit 0
+fi
+if [ "$VERB" = "status" ] || [ "$VERB" = "view" ]; then
+  NAME="${2:-}"; COUNT="${3:-}"
+  { [ "$VERB" = "status" ] && [ $# -eq 2 ]; } || { [ "$VERB" = "view" ] && [ $# -ge 2 ] && [ $# -le 3 ]; } || usage
+  case "$NAME" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
+  QUERY="from=$NAME"
+  if [ -n "$COUNT" ]; then
+    case "$COUNT" in *[!0-9]*) echo "forge.sh: n is a number (1-10)" >&2; exit 2;; esac
+    QUERY="$QUERY&count=$COUNT"
+  fi
+  [ -f "$EP" ] || { echo "forge.sh: not reachable: open Forge with control_server and agent_bus enabled" >&2; exit 1; }
+  URL="$(grep '"url"' "$EP" | cut -d'"' -f4)"
+  TOKEN="$(grep '"token"' "$EP" | cut -d'"' -f4)"
+  curl -sS --fail-with-body -X GET -H "Authorization: Bearer $TOKEN" "$URL/agent/$VERB?$QUERY" \
+    || { echo "forge.sh: Forge's endpoint did not accept it (see above)." >&2; exit 1; }
   exit 0
 fi
 [ $# -ge 2 ] || usage

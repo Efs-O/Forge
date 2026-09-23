@@ -9,7 +9,7 @@ export interface BusStatusInput {
   conversation: {
     id: string;
     title: string;
-    activeModel?: string | undefined;
+    activeModel?: string | null | undefined;
     requestCount?: number | undefined;
     toolCallCount?: number | undefined;
   };
