@@ -1,6 +1,6 @@
 # Mid-Turn Compaction Plan
 
-Status: implementing (2026-09-15)
+Status: implemented 2026-09-15 (`0c07237`, first released in 0.16.34).
 
 ## Problem
 
