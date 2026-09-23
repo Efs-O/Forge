@@ -1,6 +1,11 @@
 import * as vscode from 'vscode';
 import { busPaths } from '../agentBus/agentBus';
-import { AgentInbox, busTurnEndLine, type InboxMessageOptions } from '../agentBus/agentInbox';
+import {
+  AgentInbox,
+  busTurnEndLine,
+  type BusTurnEnd,
+  type InboxMessageOptions,
+} from '../agentBus/agentInbox';
 import { AgentRoutes } from '../backend/agentRoutes';
 import { joinClaude } from '../agentMesh/claudeJoin';
 import type { ForgeConfig } from '../config/types';
@@ -19,6 +24,25 @@ function busTarget(facade: ForgeHostFacade, from: string | undefined): string {
   return busTargetConversation(from, facade.status(), (id) =>
     facade.recentExchanges(id, BUS_TARGET_SCAN),
   );
+}
+
+/** Keep bus restore/create delivery in its addressed chat without moving the visible chat. */
+export async function submitBusMessage(
+  facade: ForgeHostFacade,
+  prompt: string,
+  options: InboxMessageOptions | undefined,
+): Promise<BusTurnEnd> {
+  let conversationId = busTarget(facade, options?.from);
+  if (options?.newChat) {
+    conversationId = (await facade.createConversation({ activate: false })).id;
+  } else if (conversationId !== facade.status().activeConversationId) {
+    await facade.restoreConversation(conversationId, { activate: false });
+  }
+  if (options?.model) await facade.setConversationModel(conversationId, options.model);
+  const outcome = await facade.send(conversationId, prompt);
+  return outcome.kind === 'failed'
+    ? { kind: 'failed', error: outcome.error }
+    : { kind: outcome.kind };
 }
 
 /**
@@ -55,19 +79,7 @@ export function setupAgentMessaging(
       const facade = getSidebar().getHostFacade();
       watch.attach(facade);
       await vscode.commands.executeCommand('workbench.view.extension.forge-sidebar');
-      // Keep the sender's chat in the background; bus delivery must not steal
-      // the single visible conversation.
-      let conversationId = busTarget(facade, options?.from);
-      if (options?.newChat) {
-        conversationId = (await facade.createConversation({ activate: false })).id;
-      } else if (conversationId !== facade.status().activeConversationId) {
-        await facade.restoreConversation(conversationId, { activate: false });
-      }
-      if (options?.model) await facade.setConversationModel(conversationId, options.model);
-      const outcome = await facade.send(conversationId, prompt);
-      return outcome.kind === 'failed'
-        ? { kind: 'failed', error: outcome.error }
-        : { kind: outcome.kind };
+      return submitBusMessage(facade, prompt, options);
     },
     warn: (message) => void vscode.window.showWarningMessage(message),
     // F-08: a bus-started turn began — write its durable status file so a

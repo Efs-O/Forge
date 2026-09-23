@@ -3,6 +3,7 @@ import { ConversationTabs, type ConversationTabsDeps } from '../../src/sidebar/C
 import type { ForgeConfig } from '../../src/config/types';
 import type { HostToWebview } from '../../src/sidebar/messageBridge';
 import type { SidebarRuntime } from '../../src/sidebar/sessionTypes';
+import { MAX_CONVERSATIONS } from '../../src/sidebar/sessionTypes';
 
 const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -42,6 +43,7 @@ function harness(
     /** Whether awaiting cancellation clears them (a Stop still unwinding). */
     cancelClearsStreaming?: boolean;
     loaded?: string[];
+    evictable?: boolean;
   } = {},
 ) {
   let state = sidebar(options.tabs ?? ['12b']);
@@ -79,9 +81,39 @@ function harness(
     // Base of "name@profile"; every fixture model here is already a base.
     baseOf: (id: string | null | undefined) => (id ? id.split('@')[0] : null),
     refreshUi: () => {},
+    isConversationEvictable: () => options.evictable ?? false,
   } as unknown as ConversationTabsDeps;
   return { tabs: new ConversationTabs(deps), release, posted };
 }
+
+describe('ConversationTabs capacity', () => {
+  it.each(['create', 'restore'] as const)('%s archives the least-recently-active eligible chat at cap', async (action) => {
+    const entries = Array.from({ length: MAX_CONVERSATIONS }, (_, i) => `tab${i}`);
+    const { tabs } = harness({ tabs: entries, evictable: true });
+    const deps = (tabs as unknown as { deps: ConversationTabsDeps }).deps;
+    const state = deps.getSidebar();
+    state.conversations.forEach((conversation, i) => {
+      conversation.updatedAt = i;
+      conversation.messages = [{ role: 'user', content: `chat ${i}` }];
+    });
+    if (action === 'restore') state.history.push({ id: 'restored', title: 'Restored', createdAt: 0, updatedAt: 50, messages: [] });
+    const result = action === 'create' ? tabs.create() : tabs.restore('restored');
+    expect(result).toBeDefined();
+    const updated = deps.getSidebar();
+    expect(updated.conversations).toHaveLength(MAX_CONVERSATIONS);
+    expect(updated.history.some((conversation) => conversation.id === 'tab0')).toBe(true);
+    expect(updated.conversations.some((conversation) => conversation.id === 'tab0')).toBe(false);
+  });
+
+  it.each(['create', 'restore'] as const)('%s refuses at cap when no chat is eligible', (action) => {
+    const { tabs } = harness({ tabs: Array.from({ length: MAX_CONVERSATIONS }, (_, i) => `tab${i}`) });
+    const deps = (tabs as unknown as { deps: ConversationTabsDeps }).deps;
+    const state = deps.getSidebar();
+    if (action === 'restore') state.history.push({ id: 'restored', title: 'Restored', createdAt: 0, updatedAt: 50, messages: [] });
+    const result = action === 'create' ? tabs.create() : tabs.restore('restored');
+    expect(result).toBeUndefined();
+  });
+});
 
 describe('ConversationTabs.pinModel VRAM release', () => {
   it('frees the outgoing local model when the tab switches away from it', async () => {

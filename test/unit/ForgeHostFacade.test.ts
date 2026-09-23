@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { SidebarHostFacade } from '../../src/sidebar/ForgeHostFacade';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
+import { MAX_CONVERSATIONS } from '../../src/sidebar/sessionTypes';
 
 function conversation(id: string): ConversationRuntime {
   return {
@@ -14,6 +15,21 @@ function conversation(id: string): ConversationRuntime {
 }
 
 describe('SidebarHostFacade', () => {
+  it('create succeeds after eligible eviction and reports the busy explanation when all are protected', async () => {
+    const open = Array.from({ length: MAX_CONVERSATIONS }, (_, i) => conversation(`c${i}`));
+    const created = conversation('created');
+    const createConversation = vi.fn().mockReturnValueOnce(created).mockReturnValueOnce(undefined);
+    const facade = new SidebarHostFacade({
+      createConversation, restoreConversation: () => created, send: vi.fn(), cancel: vi.fn(),
+      queueIntent: vi.fn(), addApprovalSink: vi.fn(() => ({ dispose: vi.fn() })),
+      addQuestionSink: () => ({ dispose: () => undefined }), answerQuestion: () => false,
+      dismissQuestion: () => false, resolveApproval: vi.fn(), getPendingApproval: () => undefined,
+      getActiveConversationId: () => 'c0', getOpenConversations: () => open,
+      getRequestChains: () => [], getStreamingConversationIds: () => new Set(),
+    });
+    await expect(facade.createConversation()).resolves.toMatchObject({ id: 'created' });
+    await expect(facade.createConversation()).rejects.toThrow(`Forge: all ${MAX_CONVERSATIONS} open chats are busy.`);
+  });
   it('creates and restores without activation by default', async () => {
     const created = conversation('created');
     const restored = conversation('restored');
