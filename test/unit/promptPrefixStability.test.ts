@@ -117,6 +117,28 @@ describe('D - plan changed', () => {
   });
 });
 
+describe('mid-turn tell', () => {
+  it('leaves the turn-opening request untouched and appends only at the tail', () => {
+    const round = [
+      ...conversation(),
+      { role: 'assistant', content: null, tool_calls: [] },
+      { role: 'tool', content: 'search result', tool_call_id: 'b' },
+    ] satisfies ChatMessage[];
+    const before = injectTurnContext(round, { activeFile: '/repo/a.ts', plan: PLAN });
+    const withTell = injectTurnContext(
+      [...round, { role: 'user', content: 'also update CHANGES.md', midTurn: true }],
+      { activeFile: '/repo/a.ts', plan: PLAN },
+    );
+
+    expect(firstDivergence(before, withTell)).toBe(before.length);
+    expect(withTell.at(-1)).toEqual({
+      role: 'user',
+      content: 'also update CHANGES.md',
+      midTurn: true,
+    });
+  });
+});
+
 describe('E/F/G/H - documented invalidation cases', () => {
   it('E: a changed system prompt legitimately changes the prefix', () => {
     const a = injectTurnContext(conversation(), { plan: PLAN });

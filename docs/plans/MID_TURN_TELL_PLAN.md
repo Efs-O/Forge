@@ -236,6 +236,54 @@ Pass means all of:
 Record the results here under **Phase 2 result**. **If it fails, revert
 Phase 1 and stop:** the queue and steer stay.
 
+## Phase 2 result
+
+Run 2026-09-23. Model: Qwopus3.8-27B-Flash-V2 (MTP Q5_K_M), llama.cpp b11095,
+131K ctx. Build 0.16.37. Session `0f5ea2e1`. The task was the Phase 4
+inventory below, 53 tool calls in one turn. Tells were sent from Telegram.
+
+| Case | Tell | Row | Verdict |
+|---|---|---|---|
+| (a) addition | "also update CHANGES.md" | 95 | **Pass.** It acknowledged the tell in the next round, kept searching and listed CHANGES.md as a Phase 4 follow-up. It did not restart. |
+| (d) during `ask_user` | "quick note: keep the table short" | 108 | **Pass, with a design note.** The tell became the `ask_user` answer through the existing remote routing. The model saw that no filename had been chosen, took the default and kept the table short. The user's real answer then arrived as a tell (row 115), and the model acknowledged it. |
+| (b) irrelevant | "fyi I'll be away for a bit" | 122 | **Pass.** Not treated as a task. |
+| (c) contradiction | "don't create a new file — put it in MID_TURN_TELL_PLAN.md instead" | 123 | **Pass.** It dropped the earlier filename decision, appended the inventory here and deleted `docs/mid-turn-phase4-inventory.md`. |
+
+Behaviour passes on all four cases. **Prefix reuse failed, and the cause was
+Forge's, not the template's.**
+
+The rounds after each injection re-evaluated:
+
+- 45815 tokens (51 s) after (a);
+- 3770 after row 115;
+- 909 after (b) and (c).
+
+An ordinary round re-evaluates about 1000.
+
+`/apply-template` on the running server shows the template is not the cause:
+it keeps the earlier reasoning after a tell, and the rendered prompt diverges
+only at the tail. The cause is `injectTurnContext` (`src/sidebar/turnContext.ts`),
+which folds the turn-context block into the *last* user message. A tell is a
+user message, so the block moved off the request that opened the turn, and
+llama-server re-evaluated everything from that request onward. Each later tell
+moved it again, at a smaller cost.
+
+**Fixed** in the same commit as this result: the fold target skips `midTurn`
+messages. A regression test in `test/unit/promptPrefixStability.test.ts` fails
+without the fix.
+
+Not explained: one later round, with no tell, re-evaluated from about 31K
+tokens (llama-server `f_keep = 0.627`). Watch for it in the Phase 4 run.
+
+Design notes for Phase 4:
+
+- **During `ask_user`, a tell and an answer look the same.** Telegram text
+  sent while `ask_user` waits is taken as the answer. The model coped, but the
+  user cannot choose which one they are sending.
+- **Telegram's reply is still the old wording:** "queued at position 1 … Send
+  /steer 1". It tells the user to steer a message that will arrive mid-turn
+  anyway. Phase 4 replaces it.
+
 **Phase 3: Telegram.**
 
 - `drainTells` claims queued remote requests as described above.
@@ -357,3 +405,97 @@ the cheapest row, and its failure mode is silent.
 - After Phase 4: no steer button, no `steer` webview message and no Telegram
   `/steer`. `forge.sh steer` still interrupts a CLI agent.
 - No source file exceeds 500 lines. `npm run ci` is green after every phase.
+
+## Phase 4 inventory: removing steer and the queue UI
+
+Read-only research for Phase 4. No source changed. Each row: what it is, where
+it lives, what calls it, and the tests that cover it.
+
+### Items to remove
+
+| Item | File(s) | Lines | What it does | Called by | Tests |
+|---|---|---|---|---|---|
+| `SteerMsg` webview→host member | `src/sidebar/messageBridge.ts` | 410–414, 479 | The `{type:'steer'}` message type and its slot in the `WebviewToHost` union | `webviewMessageRouter.ts` `case 'steer'`; `usePendingPrompts.ts` posts it | — |
+| `steer` route in the router | `src/sidebar/webviewMessageRouter.ts` | 28–30, 77–79 | `actions.steer` callback + the `case 'steer'` dispatch | `SidebarProvider.handleMessage` supplies `actions.steer` | — |
+| `steer` action + `interruptForSteering` | `src/sidebar/SidebarProvider.ts` | 425–428, 456–461 | `interruptForSteering` marks the chain cancelling and interrupts; the `steer` action calls it then `send.send` | Router `case 'steer'` | — |
+| `steerQueuedPrompt` hook | `webview-ui/src/usePendingPrompts.ts` | 27, 112–129 | Finds the queued prompt, dispatches `USER_SEND`, posts `{type:'steer'}` | `App.tsx` → `TranscriptPanes` → `MessageList` → `QueuedPromptRow` `onSteer` | — |
+| `steeringConversationIds` ref | `webview-ui/src/usePendingPrompts.ts` | 42, 99, 118, 141–148 | Tracks which conversations are mid-steer; gates the flush effect; `clearSteering`/`isSteering` | `usePendingPrompts` internal | — |
+| `QueuedPromptRow` steer action | `webview-ui/src/components/QueuedPromptRow.tsx` | 8, 17, 33–36 | `onSteer` prop + the **Steer** button (hidden for `tell` rows) | `MessageList.tsx` passes `onSteer` | `test/webview/QueuedPromptRow.dom.test.ts` (asserts `['Steer','Cancel']` buttons) |
+| `onSteerQueuedPrompt` prop chain | `webview-ui/src/App.tsx`, `TranscriptPanes.tsx`, `MessageList.tsx` | App 74, 386; TranscriptPanes 12, 38; MessageList 58, 89 | Threads the steer callback down to the row | `App.tsx` wires `steerQueuedPrompt` | — |
+| Telegram `/steer` parser | `src/remote/RemotePromptAdmission.ts` | 44–66 | `parseSteerCommand` recognises `/steer <n-or-prompt>` | `admitRemoteText` (line 190); `isRemoteCommand` (line 71) | `test/unit/RemoteCommandCleanup.test.ts:361`, `RemoteHeldPrompt.test.ts:208`, `RemoteCore.test.ts:100`, `RemoteMidTurnTells.test.ts:130`, `RemoteRichText.test.ts:101` |
+| `/steer` promotion + priority | `src/remote/RemotePromptAdmission.ts` | 186–260 | `admitRemoteText` routes `/steer`; `promoteQueuedPrompt` runs a queued prompt now; `admitRemotePrompt` sets `priority:'steer'` and interrupts | `admitRemoteText` → `promoteQueuedPrompt` / `admitRemotePrompt` | `RemoteCore.test.ts:100`, `RemoteMidTurnTells.test.ts:130` |
+| `/steer` help text | `src/remote/remoteHelpText.ts` | 28, 44 | The `Queue:` line lists `/steer`; the note explains it is the only way to cut a turn | `/help` command | `RemoteRichText.test.ts:101,116` (asserts `/steer` is implemented) |
+
+### Items to keep (do NOT remove)
+
+| Item | File | Why it stays |
+|---|---|---|
+| `forge.sh steer` + `priority=steer` | `src/agentMesh/agentRoutes.ts` | CLI agents (Claude, Codex) still interrupt each other |
+| `AgentLoop.interrupt` | `src/agent/AgentLoop.ts` | The mesh uses it |
+| `AgentMesh` steer verb | `src/agentMesh/meshCommands.ts`, `meshOrchestrator.ts` | Bus steer, separate from remote `/steer` |
+| `AgentInbox` steer | `src/agentMesh/agentInbox.ts` | Bus queue priority, separate concern |
+
+### Risks Phase 4 could break (not in the plan)
+
+1. **`isRemoteCommand` depends on `parseSteerCommand`.** Removing
+   `parseSteerCommand` without updating `isRemoteCommand` (line 71) would make
+   `/steer` text fall through to the command handler and be rejected.
+2. **`RemoteMidTurnTells` claim rules skip `priority === 'steer'`.** The Phase 3
+   drain (`RemoteMidTurnTells.ts`) deliberately skips steer-priority requests.
+   After Phase 4 no new steer-priority requests are created, but existing queued
+   steer records (from before the removal) would still be skipped by the drain
+   and run as the next turn — a behaviour change worth a test.
+3. **`RemoteRichText.test.ts` asserts `/steer` is in the implemented set.**
+   Removing `/steer` from `remoteHelpText.ts` without updating this test will
+   fail CI.
+4. **`QueuedPromptRow.dom.test.ts` asserts `['Steer','Cancel']` buttons.**
+   Removing the Steer button without updating this test will fail CI.
+5. **`steeringConversationIds` gates the flush effect.** The flush effect
+   (line 97–99) skips flushing when a conversation is steering. Removing the ref
+   without removing the guard would let attachment prompts flush during a steer
+   interrupt — a race the ref was protecting against.
+6. **`CHANGES.md` and `docs/OWNERS.md` need updating** (already in the plan's
+   Phase 4 list, but easy to forget).
+
+### Verified risks (1, 2, 5)
+
+**Risk 1 — CONFIRMED.** `src/remote/RemotePromptAdmission.ts:70-71`:
+
+```ts
+export function isRemoteCommand(text: string): boolean {
+  return text.trim().startsWith('/') && !parseSteerCommand(text).matched;
+}
+```
+
+`isRemoteCommand` calls `parseSteerCommand` directly. Removing the parser
+without a replacement breaks this function — `/steer`-prefixed text would no
+longer be excluded from the command path.
+
+**Risk 2 — CONFIRMED.** `src/remote/RemoteMidTurnTells.ts` (claim loop):
+
+```ts
+for (const candidate of candidates) {
+  if (candidate.priority === 'steer') continue;
+  if (candidate.attachments?.length) continue;
+  if (!(await canDeliver(candidate.channel, candidate.chatId))) continue;
+```
+
+The drain skips `priority === 'steer'`. After Phase 4 no new steer records are
+created, but any steer record already queued before the removal is still skipped
+here and runs as the next turn instead of being injected mid-turn.
+
+**Risk 5 — CONFIRMED.** `webview-ui/src/usePendingPrompts.ts:94-100`:
+
+```ts
+useEffect(() => {
+  const nextIndex = queuedPrompts.findIndex(
+    (prompt) =>
+      !prompt.tell &&
+      !streamingIds.has(prompt.conversationId) &&
+      !steeringConversationIds.current.has(prompt.conversationId),
+  );
+```
+
+The flush effect reads `steeringConversationIds.current`. Removing the ref
+without removing this guard reintroduces the flush-during-steer race the ref
+was protecting against.

@@ -218,9 +218,14 @@ export function injectTurnContext(messages: ChatMessage[], state: TurnContextSta
   const block = renderTurnContext(state);
   if (!block) return messages;
 
+  // A mid-turn tell is a user message, but never the fold target: moving the
+  // block onto it rewrites the request that opened the turn, and the next round
+  // re-evaluates everything after that request. Measured on Qwopus, 2026-09-23:
+  // the first tell cost a 45815-token re-prefill (51 s) against ~1000 for an
+  // ordinary round.
   let last = -1;
   for (let i = messages.length - 1; i >= 0; i -= 1) {
-    if (messages[i]?.role === 'user') {
+    if (messages[i]?.role === 'user' && !messages[i]?.midTurn) {
       last = i;
       break;
     }

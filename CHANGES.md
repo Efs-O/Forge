@@ -1,5 +1,16 @@
 # Forge — Recent Changes
 
+## 0.16.38
+
+### A mid-turn message no longer re-reads the whole turn (2026-09-23)
+
+- **A message sent during a turn now adds only its own tokens to the next
+  round.** The editor and plan context was attached to the latest user
+  message. A mid-turn message is a user message, so the context moved onto it
+  and changed the request that opened the turn. llama-server then re-read
+  everything after that request: 45,815 tokens (51 s) on a local 27B model for
+  a one-line note. The context now stays on the opening request.
+
 ## 0.16.37
 
 ### A chat in tool-fallback mode no longer breaks for good on Qwen (2026-09-23)
