@@ -2,6 +2,12 @@
 
 ## 0.16.45
 
+### Click the chat title to rename it (2026-09-23)
+
+- The title at the top of the sidebar is now clickable: click it, type the new
+  name, and press Enter (Escape cancels). Renaming from the history panel's ⋮
+  menu still works.
+
 ### Agent bus accepts model aliases (2026-09-23)
 
 - `forge.sh say --model <alias>` was refused as an unknown model, even for a

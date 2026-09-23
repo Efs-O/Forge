@@ -23,11 +23,43 @@
 }
 
 #chat-header-title {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
   font-weight: 600;
+}
+
+button#chat-header-title {
+  padding: 2px 4px;
+  margin-left: -4px;
+  font-family: inherit;
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--forge-radius-sm);
+  cursor: text;
+}
+
+button#chat-header-title:hover {
+  border-color: var(--forge-border);
+}
+
+#chat-header-title-input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 4px;
+  margin-left: -4px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--vscode-input-foreground, #fff);
+  background: var(--vscode-input-background, #3c3c3c);
+  border: 1px solid var(--forge-accent);
+  border-radius: 3px;
+  outline: none;
 }
 
 #chats-toolbar-actions {

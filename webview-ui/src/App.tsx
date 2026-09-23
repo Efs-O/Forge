@@ -366,12 +366,19 @@ export function App(): React.ReactElement {
           {state.sessionHydrated && (
             <>
               <ChatHeader
+                // Remounting on a chat switch drops a half-typed rename of the previous chat.
+                key={state.activeConversationId}
                 title={
                   state.tabs.find((tab) => tab.id === state.activeConversationId)?.title ?? 'Chat'
                 }
                 historyExpanded={historyExpanded}
                 onNew={handleNewConversation}
                 onToggleHistory={() => setHistoryExpanded((expanded) => !expanded)}
+                onRename={
+                  state.activeConversationId
+                    ? (title) => handleRenameConversation(state.activeConversationId, title)
+                    : undefined
+                }
               />
               <HistoryList
                 items={state.history}
