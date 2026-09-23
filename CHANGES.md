@@ -1,5 +1,20 @@
 # Forge — Recent Changes
 
+## 0.16.46
+
+### Telegram follows only the chat it is switched to (2026-09-23)
+
+- With two Forge chats running, switching the Telegram chat to the second one
+  kept streaming progress from the first until its turn ended, so the phone
+  showed both. The old progress message now closes with a note as soon as the
+  chat moves, and only the conversation it follows keeps reporting.
+
+### Scheduled jobs: stopping waits for a running check (2026-09-23)
+
+- Stopping the job scheduler (closing or reloading the window) no longer
+  returns while a check is still running, and a check that fails between runs
+  is now shown as a notification instead of disappearing silently.
+
 ## 0.16.45
 
 ### Click the chat title to rename it (2026-09-23)
