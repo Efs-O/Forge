@@ -51,6 +51,9 @@ function makeProvider(
     busRoot: root,
     getConfig: () => config,
     workspaceRoots: () => ['/ws'],
+    // Injected: the real reader spawns PowerShell on Windows, slow enough on a
+    // loaded CI runner to time these tests out.
+    processStartMs: () => 1_700_000_000_000,
     // No user-opened sessions: the peer/relay fallback is never available, so
     // the owned path is the only Claude door under test.
     claudeSessions: () => [],

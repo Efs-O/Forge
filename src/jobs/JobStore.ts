@@ -392,7 +392,11 @@ export class JobStore {
    */
   watch(onChange: () => void): void {
     this.onChangeCallback = onChange;
-    void this.ensureDirs();
+    // Synchronous, and only the watched directory: fs.watch below needs it to
+    // exist now. This was a fire-and-forget ensureDirs(), which both raced the
+    // watch and left its rejection unhandled (a CI failure when a test removed
+    // the directory mid-mkdir). The writers still ensure the rest.
+    fs.mkdirSync(this.jobsDir, { recursive: true });
     this.watcher = fs.watch(this.jobsDir, (_eventType, filename) => {
       if (filename && !isJobDefinitionName(filename.toString())) return;
       if (this.watchDebounce) return;

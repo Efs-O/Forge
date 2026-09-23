@@ -104,19 +104,20 @@ describe('contact request recovery (audit A3)', () => {
     const first = await boot(directory, never);
     await approveAndBind(first);
     await first.service.handleGroup(textEvent('20', 'Τι ώρα είναι;', GROUP_ID));
-    await settle();
-    expect(first.host.runContactPrompt).toHaveBeenCalledOnce();
+    // Polled, not a fixed sleep: 50 ms was too short under a loaded full suite.
+    await vi.waitFor(() => expect(first.host.runContactPrompt).toHaveBeenCalledOnce());
     first.service.dispose(); // the window reloads mid-generation
 
     const second = await boot(directory);
     await second.service.recoverInterrupted();
-    await settle();
+    await vi.waitFor(() =>
+      expect(second.channel.sent.at(-1)).toMatchObject({ chatId: GROUP_ID, text: 'Γεια σου!' }),
+    );
     expect(second.host.runContactPrompt).toHaveBeenCalledWith(
       expect.stringContaining('Τι ώρα είναι;'),
       expect.any(String),
       { web: false },
     );
-    expect(second.channel.sent.at(-1)).toMatchObject({ chatId: GROUP_ID, text: 'Γεια σου!' });
     expect((await second.contacts.reclaimUnfinished()).size).toBe(0);
   });
 

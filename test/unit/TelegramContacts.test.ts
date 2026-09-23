@@ -115,7 +115,15 @@ describe('Telegram contact service', () => {
     const result = await value.service.handleGroup(textEvent('20', 'Πώς είσαι;', GROUP_ID));
     expect(result).toEqual({ kind: 'handled' });
 
-    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    // Polled, not a fixed 50 ms sleep: that flaked under a loaded full suite.
+    await vi.waitFor(() => {
+      expect(value.channel.sent.filter((item) => item.chatId === GROUP_ID).at(-1)?.text).toBe(
+        'Γεια σου!',
+      );
+      expect(value.contacts.thread(value.contacts.contacts(true)[0]!.id).at(-1)?.role).toBe(
+        'assistant',
+      );
+    });
     expect(value.host.runContactPrompt).toHaveBeenCalledOnce();
     expect(value.host.runContactPrompt).toHaveBeenCalledWith(
       expect.stringContaining('Πώς είσαι;'),
@@ -123,12 +131,6 @@ describe('Telegram contact service', () => {
       { web: false },
     );
     expect(value.channel.inlineKeyboards).toHaveLength(0);
-    expect(value.channel.sent.filter((item) => item.chatId === GROUP_ID).at(-1)?.text).toBe(
-      'Γεια σου!',
-    );
-    expect(value.contacts.thread(value.contacts.contacts(true)[0]!.id).at(-1)?.role).toBe(
-      'assistant',
-    );
   });
 
   it('answers ordinary owner group messages and acknowledges explicit /owner requests in-group', async () => {
@@ -139,8 +141,7 @@ describe('Telegram contact service', () => {
     ).resolves.toEqual({
       kind: 'handled',
     });
-    await new Promise<void>((resolve) => setTimeout(resolve, 50));
-    expect(value.host.runContactPrompt).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(value.host.runContactPrompt).toHaveBeenCalledOnce());
     expect(value.host.runContactPrompt).toHaveBeenCalledWith(
       expect.stringContaining('Owner answer in the group'),
       expect.stringContaining('shared private Telegram group'),

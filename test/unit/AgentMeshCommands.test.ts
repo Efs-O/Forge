@@ -73,12 +73,19 @@ describe('parseMeshCommand (§8, P3)', () => {
 // ── Standby state machine (§2b, P3) ──────────────────────────────────────────
 
 let root: string;
+/**
+ * This window's start time, injected. The real reader spawns PowerShell on
+ * Windows (~0.7 s locally, several on a loaded CI runner), which is what
+ * pushed these tests past vitest's 5 s timeout.
+ */
+const selfStart = { processStartMs: () => 1_700_000_000_000 };
 function makeProvider(): MeshSessionProvider {
   const config: ForgeConfig = { agent_bus: { claude_session: '', codex_thread: '' } } as ForgeConfig;
   return new MeshSessionProvider({
     busRoot: root,
     getConfig: () => config,
     workspaceRoots: () => ['/ws'],
+    ...selfStart,
   });
 }
 
@@ -91,7 +98,7 @@ function seedRecord(alias: string, patch: Partial<OwnershipRecord> = {}): void {
     agent: 'codex',
     session_id: 'thread-1',
     thread_id: 'thread-1',
-    owner_host: getHostIdentity(),
+    owner_host: getHostIdentity(selfStart),
     workspace: '/ws',
     created_at: 1,
     parked: false,

@@ -79,7 +79,8 @@ export class JobScheduler {
   private readonly wakes: WakeReconciler;
   private lease: FileLease | undefined;
   private timer: ReturnType<typeof setInterval> | undefined;
-  private running = false;
+  /** The tick in flight, so a second one skips it and stop() can wait it out. */
+  private running: Promise<void> | undefined;
   private disposed = false;
   /** The wall-clock time of the last tick, for resume detection. */
   private lastTickAt: number | undefined;
@@ -137,7 +138,14 @@ export class JobScheduler {
     // `task_run` was running when Forge died. Report it, record a failed row,
     // and clear it. It is not retried automatically; the next tick runs it.
     if (owner) await recoverInterruptedRuns(this.store, this.outboxDir, () => this.now().getTime());
-    this.timer = setInterval(() => void this.tick(), this.tickMs);
+    // A tick's failure is shown, not left as an unhandled rejection.
+    this.timer = setInterval(
+      () =>
+        void this.tick().catch((err: Error) =>
+          this.notifyLocal(`Forge jobs: tick failed: ${err.message}`),
+        ),
+      this.tickMs,
+    );
     if (owner && immediate) await this.tick();
     return owner;
   }
@@ -177,6 +185,8 @@ export class JobScheduler {
     this.disposed = true;
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
+    // Its failure was already reported to whoever started it.
+    await this.running?.catch(() => undefined);
     await this.lease?.release();
     this.lease = undefined;
   }
@@ -226,77 +236,77 @@ export class JobScheduler {
     if (this.running || this.disposed) return;
     // Claimed before the lease attempt: two interval ticks racing through the
     // acquisition await both ran every due job (seen under load, 2026-09-21).
-    this.running = true;
-    try {
-      // No lease: try to take it. A window that lost its lease (or whose holder
-      // went away) picks the scheduler back up here rather than staying dead.
-      if (!this.lease) {
-        if (!(await this.acquireLease())) return;
-        await this.reconcileWakes();
-      }
-      const now = this.now();
-      const jobs = await this.store.loadAll();
-      const gap = this.lastTickAt === undefined ? 0 : now.getTime() - this.lastTickAt;
-      const firstTick = this.lastTickAt === undefined;
-      this.lastTickAt = now.getTime();
-      // A tick arriving long after the last one is a resume from sleep. The
-      // FIRST tick of a process has no previous tick to measure against, but it
-      // is the same situation in disguise — VS Code was closed while jobs fell
-      // due (D7) — so detect it from the job states instead, or D7's `late`
-      // flag never gets set on the one path it was written for.
-      const isResume = firstTick
-        ? jobs.some(
-            (jf) =>
-              jf.job.enabled &&
-              jf.state.next_due_at !== null &&
-              now.getTime() - jf.state.next_due_at > RESUME_GAP_MS,
-          )
-        : gap > RESUME_GAP_MS;
+    this.running = this.runTick().finally(() => (this.running = undefined));
+    return this.running;
+  }
 
-      const byId = new Map(jobs.map((jf) => [jf.job.id, jf]));
-      const toRun: JobFile[] = [];
-      const seen = new Set<string>();
-      // A `run_now` marker (B2) runs the job on this tick even if it is not due
-      // or paused — an explicit request overrides the schedule. The marker is
-      // consumed before the run, so a crash mid-run does not leave a stale
-      // request that fires again on the next tick.
-      for (const id of await this.store.consumeRunRequests()) {
-        const jobFile = byId.get(id);
-        if (!jobFile || seen.has(id)) continue;
-        seen.add(id);
-        toRun.push(jobFile);
-      }
-      for (const jf of jobs) {
-        const pendingAgentTask = jf.state.task_pending && jf.job.action?.kind === 'agent_task';
-        if (!jf.job.enabled || seen.has(jf.job.id) || (!pendingAgentTask && !isDue(jf.state, now)))
-          continue;
-        seen.add(jf.job.id);
-        toRun.push(jf);
-      }
-      const limit = this.getConfig().maxConcurrent;
-      let cursor = 0;
-      const workers = Array.from({ length: Math.min(limit, toRun.length) }, async () => {
-        while (cursor < toRun.length) {
-          const index = cursor++;
-          const jobFile = toRun[index]!;
-          if (this.runningJobs.has(jobFile.job.id)) continue;
-          await this.runJob(jobFile, isResume);
-        }
-      });
-      await Promise.all(workers);
-
-      await this.delivery.processPendingSummaries();
-
-      // A llamacpp_update that staged a build (apply, or an approved prepare)
-      // switches now that the tick has reached it, only when idle (B5).
-      await this.llamacpp?.processPendingSwitches();
-
-      // D6: a job that woke the machine and found nothing to do may suspend
-      // again, but only on a resume, only if no input and nothing is busy.
-      if (isResume) await this.maybeSleepIfIdle(jobs);
-    } finally {
-      this.running = false;
+  private async runTick(): Promise<void> {
+    // No lease: try to take it. A window that lost its lease (or whose holder
+    // went away) picks the scheduler back up here rather than staying dead.
+    if (!this.lease) {
+      if (!(await this.acquireLease())) return;
+      await this.reconcileWakes();
     }
+    const now = this.now();
+    const jobs = await this.store.loadAll();
+    const gap = this.lastTickAt === undefined ? 0 : now.getTime() - this.lastTickAt;
+    const firstTick = this.lastTickAt === undefined;
+    this.lastTickAt = now.getTime();
+    // A tick arriving long after the last one is a resume from sleep. The
+    // FIRST tick of a process has no previous tick to measure against, but it
+    // is the same situation in disguise — VS Code was closed while jobs fell
+    // due (D7) — so detect it from the job states instead, or D7's `late`
+    // flag never gets set on the one path it was written for.
+    const isResume = firstTick
+      ? jobs.some(
+          (jf) =>
+            jf.job.enabled &&
+            jf.state.next_due_at !== null &&
+            now.getTime() - jf.state.next_due_at > RESUME_GAP_MS,
+        )
+      : gap > RESUME_GAP_MS;
+
+    const byId = new Map(jobs.map((jf) => [jf.job.id, jf]));
+    const toRun: JobFile[] = [];
+    const seen = new Set<string>();
+    // A `run_now` marker (B2) runs the job on this tick even if it is not due
+    // or paused — an explicit request overrides the schedule. The marker is
+    // consumed before the run, so a crash mid-run does not leave a stale
+    // request that fires again on the next tick.
+    for (const id of await this.store.consumeRunRequests()) {
+      const jobFile = byId.get(id);
+      if (!jobFile || seen.has(id)) continue;
+      seen.add(id);
+      toRun.push(jobFile);
+    }
+    for (const jf of jobs) {
+      const pendingAgentTask = jf.state.task_pending && jf.job.action?.kind === 'agent_task';
+      if (!jf.job.enabled || seen.has(jf.job.id) || (!pendingAgentTask && !isDue(jf.state, now)))
+        continue;
+      seen.add(jf.job.id);
+      toRun.push(jf);
+    }
+    const limit = this.getConfig().maxConcurrent;
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(limit, toRun.length) }, async () => {
+      while (cursor < toRun.length) {
+        const index = cursor++;
+        const jobFile = toRun[index]!;
+        if (this.runningJobs.has(jobFile.job.id)) continue;
+        await this.runJob(jobFile, isResume);
+      }
+    });
+    await Promise.all(workers);
+
+    await this.delivery.processPendingSummaries();
+
+    // A llamacpp_update that staged a build (apply, or an approved prepare)
+    // switches now that the tick has reached it, only when idle (B5).
+    await this.llamacpp?.processPendingSwitches();
+
+    // D6: a job that woke the machine and found nothing to do may suspend
+    // again, but only on a resume, only if no input and nothing is busy.
+    if (isResume) await this.maybeSleepIfIdle(jobs);
   }
 
   /** Run one job: check, act, record. Updates state and the run log. */
@@ -456,32 +466,22 @@ export class JobScheduler {
       }
     }
 
-    return {
-      observation: checkResult.observation,
-      changed: checkResult.changed,
-      summary: checkResult.summary,
-    };
+    return checkResult;
   }
+
   /** Apply backoff after a failure: double the interval up to 24 h (B.3). */
   private async applyBackoff(jobFile: JobFile, message: string): Promise<void> {
     const { job, state } = jobFile;
     const count = state.consecutive_failures + 1;
     const now = this.now();
     const nextDueAt = nextDueWithBackoff(job.schedule, now, count);
-    if (count < BACKOFF_THRESHOLD) {
-      // Not yet backed off: just reschedule normally.
-      this.store.patchState(job.id, {
-        last_run_at: now.getTime(),
-        next_due_at: nextDueAt,
-        consecutive_failures: count,
-      });
-      return;
-    }
     this.store.patchState(job.id, {
       last_run_at: now.getTime(),
       next_due_at: nextDueAt,
       consecutive_failures: count,
     });
+    // Not yet backed off: that was just a normal reschedule.
+    if (count < BACKOFF_THRESHOLD) return;
     // Report once, on the run that crosses the threshold. Later
     // failures keep extending the backoff silently; the recovery (a success
     // after backoff) is reported by the next successful run.

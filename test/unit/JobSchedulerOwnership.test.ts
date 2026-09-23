@@ -98,6 +98,36 @@ describe('scheduler takeover (audit A2)', () => {
   });
 });
 
+describe('scheduler stop', () => {
+  it('waits for a tick still in flight, so nothing writes after stop() returns', async () => {
+    const scheduler = new JobScheduler({
+      store,
+      power: fakePower().power,
+      getConfig: () => ({ allowedHosts: [], maxConcurrent: 1 }),
+      workspaceId: 'ws',
+      instanceId: 'window-a',
+      leaseDirectory: jobsRoot,
+      outboxDir: path.join(jobsRoot, 'outbox'),
+    });
+    expect(await scheduler.start({ immediate: false })).toBe(true);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    vi.spyOn(store, 'loadAll').mockImplementationOnce(async () => {
+      await gate;
+      return [];
+    });
+    const tick = scheduler.tick();
+    let stopped = false;
+    const stop = scheduler.stop().then(() => (stopped = true));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // CI failure 2026-09-23: the test removed the directory under a live tick.
+    expect(stopped).toBe(false);
+    release();
+    await Promise.all([tick, stop]);
+    expect(stopped).toBe(true);
+  });
+});
+
 describe('wake reconciliation churn (audit A4)', () => {
   it('does not treat the lease heartbeat temporary as a job definition', () => {
     const heartbeat = `jobs-scheduler.lease.json.${'a'.repeat(8)}.heartbeat-1758480000000.tmp`;
