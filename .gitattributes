@@ -1,4 +1,7 @@
-* text=auto
+# eol=lf on the catch-all, not just per extension: Git for Windows ships
+# core.autocrlf=true, which checked every unlisted text type (.svg, .py, .njk,
+# .mts, NOTICE) out as CRLF.
+* text=auto eol=lf
 *.ts text eol=lf
 *.tsx text eol=lf
 *.js text eol=lf
