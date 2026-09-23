@@ -36,6 +36,28 @@
 - **Gate:** `npm run ci` exited 0. Summary: 318 test files passed, 5 skipped; 3,064 tests passed, 18 skipped. Type-check, lint, production build, and bundle-load check passed. `git diff --check` was clean. `FORGE_ALLOW_VSIX_OVERWRITE=1 npm run package` exited 0 and packaged `forge-llm-0.16.36.vsix`; it was not installed.
 - **Deviations:** `ForgeConversationSummary.activeModel` is `string | null` in the repository type, so the renderer accepts `null` as well as `undefined` and displays `default` for either. Live check §7 was skipped as explicitly instructed. No live-system output or behavior is claimed.
 
+## Why Qwopus stopped — root cause (Claude, 2026-09-23)
+
+The takeover above was right to fire, but the 30 read-only rounds were not a
+model loop. From session `30b44107`:
+
+1. **Config rejected.** `.forge/config.yaml` set `reasoning_effort: xhigh` for
+   Qwopus, and the schema only allowed `high|medium|low|none`. One bad value
+   fails the whole file, so Forge kept the last valid config: ctx **76,800**
+   instead of the intended 131K, and the old model path (a hard link to the V2
+   GGUF stood in for it). Fixed in `26b0449`.
+2. **Compaction.** Qwopus was on track: it read the plan and 14 files, edited
+   `busTarget.ts` and wrote `busTurnWatch.ts` in about 4 minutes. Those reads
+   filled 65,530 of 76,800 tokens, and auto-compaction fired at 05:30:55.
+3. **Re-reading.** The compaction summary was accurate: it listed the files
+   read, both edits, and "next: write the Phase 1 tests". The file contents
+   were gone, though, so Qwopus re-read the same files in the same order, which
+   filled the small context again, and it then drifted into `agentMesh/`.
+
+**Verdict:** not evidence that Qwopus V2 loops. Its second chance runs at 131K
+after the reload that loads `26b0449`. Check the loaded context in `GET /models`
+before judging the result.
+
 ## State × lifecycle ledger
 
 This feature adds no durable state. The watcher's bounded map is in memory only and clears on disposal or window reload. Route calls read existing conversation, queue, budget, and transcript state; they do not advance cursors or acknowledge bus messages.

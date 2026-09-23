@@ -12,6 +12,15 @@
   the failure count is kept per chat, so every later turn in that chat failed
   the same way until a new chat was started.
 
+### `forge.sh status` and `view`: see what your chat with Forge is doing (2026-09-23)
+
+- **Claude and Codex can check a running turn without messaging Forge.**
+  `forge.sh status <name>` shows whether the sender's chat is busy, how long the
+  turn has run, the current tool, the tool-call count, the last thing Forge said,
+  warnings and context use; `forge.sh view <name> [n]` replays the last n
+  answers. Both read only the chat the sender's own messages went to, need the
+  control-server token, and cost no model tokens.
+
 ### `read_file` counts lines the way ESLint does (2026-09-23)
 
 - **A numbered read no longer shows a blank line after the final newline.** A
