@@ -136,6 +136,25 @@ describe('manage_jobs — create', () => {
     expect(loaded?.job.enabled).toBe(true);
   });
 
+  it('schedules a new daily job for its time instead of running it on the next tick', async () => {
+    const before = Date.now();
+    const out = await call({
+      action: 'create',
+      definition: {
+        name: 'Thread Watch',
+        schedule: { kind: 'daily', at: '08:20' },
+        check: { kind: 'none' },
+        on_change: { kind: 'notify' },
+      },
+    });
+    expect(out).toContain('First run:');
+    const loaded = await store.load('thread-watch');
+    const due = loaded!.state.next_due_at!;
+    expect(due).toBeGreaterThan(before);
+    expect(new Date(due).getHours()).toBe(8);
+    expect(new Date(due).getMinutes()).toBe(20);
+  });
+
   it('writes the current model into an agent_task created without one', async () => {
     const out = await call({
       action: 'create',

@@ -42,6 +42,9 @@ class FakePool implements IBackendPool {
   loadedModelNames(): string[] {
     return [...this.loaded.keys()];
   }
+  loadedModelsExcept(name: string): string[] {
+    return this.loadedModelNames().filter((loaded) => loaded !== name);
+  }
   isLoaded(name: string): boolean {
     return this.loaded.has(name);
   }

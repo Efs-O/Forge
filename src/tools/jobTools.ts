@@ -12,7 +12,7 @@
 
 import * as path from 'path';
 import type { ForgeConfig } from '../config/types';
-import type { JobStore } from '../jobs/JobStore';
+import { defaultState, type JobStore } from '../jobs/JobStore';
 import { JobSchema, type JobFile } from '../jobs/jobSchema';
 import { nextDue } from '../jobs/schedule';
 import {
@@ -318,7 +318,8 @@ async function createJob(deps: ManageJobsDeps, args: Record<string, unknown>): P
   const existing = await deps.store.loadAll();
   const taken = new Set(existing.map((jf) => jf.job.id));
   const id = uniqueId(partial['name'] as string, taken);
-  const nowMs = Date.now();
+  const now = (deps.now ?? (() => new Date()))();
+  const nowMs = now.getTime();
   const candidate: Record<string, unknown> = {
     version: 1,
     id,
@@ -338,10 +339,14 @@ async function createJob(deps: ManageJobsDeps, args: Record<string, unknown>): P
     throw new Error(`manage_jobs: invalid job definition: ${result.error.message}`);
   }
   await deps.store.saveJob(result.data);
+  // A state with no `next_due_at` is due at once, so a new "daily at 08:20"
+  // job fired on the next tick (2026-09-23, 15:53). Seed its first run time.
+  const firstRun = nextDue(result.data.schedule, now);
+  await deps.store.saveState(id, { ...defaultState(), next_due_at: firstRun.getTime() });
   const action = result.data.action;
   const runsOn =
     action?.kind === 'agent_task' && action.model ? ` Its agent runs on ${action.model}.` : '';
-  return `Created job "${result.data.name}" [${id}]. It will run on the next scheduler tick when due.${runsOn}`;
+  return `Created job "${result.data.name}" [${id}]. First run: ${firstRun.toLocaleString()}.${runsOn}`;
 }
 
 /**

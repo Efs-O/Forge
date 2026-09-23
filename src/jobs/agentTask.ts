@@ -8,6 +8,7 @@ import type { IBackendPool } from '../backend/poolTypes';
 import { unattendedConversations } from '../sidebar/unattendedConversations';
 import { JobDelivery } from './JobDelivery';
 import { nextDue } from './schedule';
+import { getLogger } from '../util/logger';
 import { resolveJobConversation } from './jobDiscuss';
 import { nextDueWithBackoff } from './backoff';
 import { restartAfterTurn } from './agentTaskRestart';
@@ -68,22 +69,20 @@ export function canStartNow(
   pool: IBackendPool,
   streamingConversationIds: readonly string[],
 ): { start: boolean; reason: string } {
-  const loaded = pool.loadedModelNames();
-  const resident = loaded.length === 1 ? loaded[0] : undefined;
   const streaming = streamingConversationIds.length;
+  const others = pool.loadedModelsExcept(jobModel);
 
   // Hard wait: its own chat is busy (two turns in one conversation interleave).
   if (ownConversationId !== null && streamingConversationIds.includes(ownConversationId)) {
     return { start: false, reason: 'its own conversation is streaming' };
   }
-  // Hard wait: a different model is streaming (a 2nd server spills VRAM).
-  if (resident !== undefined && resident !== jobModel && streaming > 0) {
-    return { start: false, reason: `a different model (${resident}) is streaming` };
+  // Hard wait: another model is loaded and a chat is streaming. The job may not
+  // unload it mid-turn, and loading beside it spills VRAM (2026-09-23: two
+  // resident models plus a job's third server took every GPU down).
+  if (others.length > 0 && streaming > 0) {
+    return { start: false, reason: `another model (${others.join(', ')}) is in use` };
   }
-  // Its model is usable: resident, nothing loaded, or a different resident with nothing streaming.
-  const modelUsable =
-    loaded.length === 0 || resident === jobModel || (resident !== jobModel && streaming === 0);
-  if (!modelUsable) return { start: false, reason: `its model (${jobModel}) is not resident` };
+  // Nothing else streams: step 3 unloads every other model before the turn.
   const capacity = pool.parallelCapacity(jobModel);
   if (streaming >= capacity) {
     return { start: false, reason: `all ${capacity} parallel slot(s) are streaming` };
@@ -105,6 +104,8 @@ export function schedulePeriodMs(schedule: Schedule, now: number): number {
 export class AgentTaskRunner {
   private readonly deps: AgentTaskDeps;
   private readonly delivery: JobDelivery;
+  /** Models a job loaded (not resident at its start); released when jobs finish. */
+  private readonly loadedByJobs = new Set<string>();
 
   constructor(deps: AgentTaskDeps) {
     this.deps = deps;
@@ -195,16 +196,15 @@ export class AgentTaskRunner {
       finalText: '',
     };
     try {
-      // Step 3: unload a different idle resident model, then open this job's chat.
-      const resident =
-        pool.loadedModelNames().length === 1 ? pool.loadedModelNames()[0] : undefined;
+      // Step 3: unload every other idle model, then open this job's chat. The
+      // job runs on one server; a model it had to load is released afterwards.
       if (
-        resident &&
-        resident !== jobModel &&
+        pool.loadedModelsExcept(jobModel).length > 0 &&
         host.status().streamingConversationIds.length === 0
       ) {
         await host.unloadModels();
       }
+      if (jobModel && !pool.isLoaded(jobModel)) this.loadedByJobs.add(jobModel);
       const resolved = await resolveJobConversation(host, this.deps.store, jobFile, false);
       conversationId = resolved.conversationId;
       this.deps.store.patchState(job.id, {
@@ -287,7 +287,30 @@ export class AgentTaskRunner {
       // Step 9: clean up on every exit path.
       marker?.dispose();
       hold?.dispose();
+      await this.releaseJobModel(jobModel, host, pool);
       await this.finish(jobFile, action, wasLate, startedAt, outcome, conversationId, backupPath);
+    }
+  }
+
+  /**
+   * Release a model that a job loaded, once no conversation streams. Jobs
+   * sharing it (same tick, same model) leave it for the last one out. A model
+   * that was already resident when the job started is never released.
+   */
+  private async releaseJobModel(
+    jobModel: string,
+    host: ForgeHostFacade,
+    pool: IBackendPool,
+  ): Promise<void> {
+    if (!this.loadedByJobs.has(jobModel)) return;
+    if (host.status().streamingConversationIds.length > 0) return;
+    this.loadedByJobs.delete(jobModel);
+    if (!pool.isLoaded(jobModel)) return;
+    try {
+      await pool.release(jobModel);
+    } catch (err) {
+      // The job's result stands; a model left loaded is reported, not fatal.
+      getLogger().warn(`[AgentTask] could not release ${jobModel} after the job: ${String(err)}`);
     }
   }
 

@@ -150,6 +150,9 @@ export class BackendPool implements IBackendPool {
     if (this.config.shared_runtime?.enabled) {
       const borrowedBackend = await this.borrowSharedRuntime(key);
       if (borrowedBackend) return borrowedBackend;
+      // A concurrent acquire of this key may have started its slot while this
+      // one awaited the borrow; join it rather than spawn a second server.
+      if (this.slots.has(key)) return this.acquireByKey(key, allowEvict);
     }
 
     // Need a new slot
@@ -297,6 +300,11 @@ export class BackendPool implements IBackendPool {
    *  are irrelevant to the capacity decisions this feeds. */
   loadedModelNames(): string[] {
     return [...this.slots.keys(), ...this.sharedSlots.keys()];
+  }
+
+  loadedModelsExcept(modelName: string): string[] {
+    const key = this.poolKey(modelName);
+    return this.loadedModelNames().filter((name) => name !== key);
   }
 
   /**

@@ -46,6 +46,8 @@ function fakePower(): PowerControl {
 function fakePool(loaded: string[], capacity = 1): IBackendPool {
   return {
     loadedModelNames: () => loaded,
+    loadedModelsExcept: (model: string) => loaded.filter((name) => name !== model.split('@')[0]),
+    isLoaded: (model: string) => loaded.includes(model.split('@')[0]),
     parallelCapacity: () => capacity,
   } as unknown as IBackendPool;
 }
@@ -148,6 +150,21 @@ describe('canStartNow', () => {
   it('waits when it needs a different model while one is streaming', () => {
     const pool = fakePool(['other'], 1);
     expect(canStartNow('qwen', null, pool, ['other-chat'])).toMatchObject({ start: false });
+  });
+
+  it('treats its own model as resident when the job names a profile', () => {
+    const pool = fakePool(['qwen'], 2);
+    expect(canStartNow('qwen@main', null, pool, ['other-chat'])).toMatchObject({ start: true });
+  });
+
+  it('waits when two other models are loaded and one is streaming (2026-09-23)', () => {
+    const pool = fakePool(['qwopus', 'q6'], 4);
+    expect(canStartNow('qwen@main', null, pool, ['user-chat'])).toMatchObject({ start: false });
+  });
+
+  it('waits when its model and another are loaded and something streams', () => {
+    const pool = fakePool(['qwen', 'q6'], 4);
+    expect(canStartNow('qwen', null, pool, ['user-chat'])).toMatchObject({ start: false });
   });
 
   it('waits when all parallel slots are streaming', () => {
@@ -417,6 +434,39 @@ describe('AgentTaskRunner', () => {
     const item = await readOutboxItem(outboxDir, 'agent-task');
     expect(item).toBeDefined();
     expect(item!.text).toContain('ok');
+  });
+
+  it('releases a model the job had to load once nothing streams', async () => {
+    const job = baseJob({ action: { kind: 'agent_task', task: 't', model: 'qwen@main' } });
+    await store.saveJob(job);
+    const loaded: string[] = ['q6'];
+    pool = fakePool(loaded, 1);
+    const release = vi.fn(async () => undefined);
+    Object.assign(pool, { release });
+    vi.mocked(host.unloadModels).mockImplementation(async () => {
+      loaded.splice(0, loaded.length);
+    });
+    vi.mocked(host.send).mockImplementation(async () => {
+      loaded.push('qwen');
+      return { kind: 'completed', finalText: 'RESULT: ok' };
+    });
+
+    await new AgentTaskRunner(makeDeps()).run({ job, state: JobStateSchema.parse({}) }, false);
+
+    expect(host.unloadModels).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledWith('qwen@main');
+  });
+
+  it('leaves a model that was already resident when the job started', async () => {
+    const job = baseJob({ action: { kind: 'agent_task', task: 't', model: 'qwen@main' } });
+    await store.saveJob(job);
+    const release = vi.fn(async () => undefined);
+    Object.assign(pool, { release });
+
+    await new AgentTaskRunner(makeDeps()).run({ job, state: JobStateSchema.parse({}) }, false);
+
+    expect(host.unloadModels).not.toHaveBeenCalled();
+    expect(release).not.toHaveBeenCalled();
   });
 
   it('the prompt carries the observation it was handed, and success saves it', async () => {

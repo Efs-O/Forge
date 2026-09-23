@@ -34,6 +34,9 @@ export interface IBackendPool {
    *  the control server to make capacity/eviction decisions. Excludes Ollama,
    *  which is daemon-backed and does not consume a slot. */
   loadedModelNames(): string[];
+  /** `loadedModelNames()` minus `modelName`, resolved through alias and
+   *  `@profile` to its pool key — what a scheduled job would have to unload. */
+  loadedModelsExcept(modelName: string): string[];
   /** Whether the model currently has a live backend (llama.cpp slot OR ollama).
    *  Residency, not readiness — see `isAnyReady`. */
   isLoaded(modelName: string): boolean;

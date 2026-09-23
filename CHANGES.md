@@ -2,6 +2,27 @@
 
 ## 0.16.42
 
+### Scheduled jobs run on one server and fire at their time (2026-09-23)
+
+- A job created with `manage_jobs` ran on the very next scheduler tick instead
+  of at its schedule: two HF-thread jobs set for 08:20 and 08:25 fired at
+  15:53. A new job now gets its first run time when it is created, and the
+  reply names it.
+- An agent-task job started beside two already-loaded models and spawned a
+  third llama-server, which ran every GPU out of memory. A job now waits while
+  another model is loaded and a chat is streaming, and otherwise unloads the
+  idle models first. Its own `model@profile` counts as its resident model.
+- A model a job had to load is released when the job finishes and no chat is
+  streaming, so jobs that share a model on one tick leave it to the last one.
+- Two acquires of the same model at once could each start a server when a
+  shared runtime is enabled; the second now joins the first.
+
+### Telegram mid-turn acknowledgement (2026-09-23)
+
+- A message sent while a turn runs was answered "queued at position N", which
+  read as though it waited for the turn to end. It now says Forge reads it
+  after its current step (attachments still wait for the turn to end).
+
 ### Telegram's profile picker lists only profiles (2026-09-23)
 
 - Picking a model that has profiles with `/model` on Telegram offered a
