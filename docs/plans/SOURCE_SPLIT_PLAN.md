@@ -1,5 +1,8 @@
 # Source Split Plan
 
+Status: Phase 0 done 2026-09-23 (watchlist deleted, CLAUDE.md CSS rule fixed);
+phases 1–3 handed to Qwopus.
+
 ## Scope and baseline
 
 This plan supersedes `docs/plans/FILE_SIZE_WATCHLIST.md`. Phase 0 deletes that watchlist so there is one size-planning source of truth. Repository evidence is committed `main` HEAD `4bdea5e04cbdc25a6d450735fa619ba6da9081a8`; watchlist commit is `9ab7cc6fcbd42ffcd6fa8bdbad6b204520e7eb02`. At initial inspection, Qwopus had working-tree edits in `src/llm/types.ts`, `ModelTurn.ts`, `SessionLogger.ts`, `sessionTypes.ts`, and `turnContext.ts`; they were not counted as the committed main baseline. The untracked `docs/plans/CLAUDE_STAND_IN_RESUME_PLAN.md` was read as the upcoming-work specification. No repo changes are part of this plan edit.
