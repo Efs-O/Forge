@@ -38,6 +38,23 @@ describe('reduceTurn', () => {
     expect(result.lastNarration).not.toContain('\n');
   });
 
+  it('sets the phase and clears it on an undefined phase', () => {
+    const set = reduceTurn(undefined, event('phase', { text: 'Thinking' }), 10);
+    expect(set.phase).toBe('Thinking');
+    expect(reduceTurn(set, event('phase', {}), 20)).not.toHaveProperty('phase');
+  });
+
+  it('records an info notice only as activity', () => {
+    const before = reduceTurn(undefined, event('tool', { toolName: 'read_file' }), 10);
+    const after = reduceTurn(before, event('notice', { text: 'fyi', severity: 'info' }), 20);
+    expect(after).toEqual({ ...before, lastEventAt: 20 });
+  });
+
+  it('keeps the previous narration when the new one is blank', () => {
+    const said = reduceTurn(undefined, event('narration', { text: 'reading the plan' }), 10);
+    expect(reduceTurn(said, event('narration', { text: ' \n\t ' }), 20).lastNarration).toBe('reading the plan');
+  });
+
   it('keeps only the latest four warnings in order', () => {
     let result = reduceTurn(undefined, event('status', { text: 'start' }), 0);
     for (let i = 0; i < 6; i++) result = reduceTurn(result, event('notice', { text: `warning ${i}`, severity: 'warning' }), i + 1);
