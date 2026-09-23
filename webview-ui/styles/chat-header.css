@@ -1,0 +1,70 @@
+/* Single conversation header; retained filename for CSS bundle compatibility. */
+#chats-panel {
+  position: relative;
+  z-index: 20;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #333);
+  padding: 0 8px 4px;
+  background: var(--vscode-sideBar-background);
+}
+
+#chats-loading {
+  padding: 4px 0;
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+}
+
+#chat-header {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+#chat-header-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+#chats-toolbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+#history-toolbar-btn,
+#tab-new-btn {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 1px solid transparent;
+  border-radius: var(--forge-radius-sm);
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+#history-toolbar-btn:hover:not(:disabled),
+#tab-new-btn:hover:not(:disabled) {
+  background: var(--vscode-toolbar-hoverBackground, rgba(90, 90, 90, 0.2));
+  color: var(--vscode-foreground);
+  border-color: var(--forge-accent);
+}
+
+#history-toolbar-btn[aria-expanded='true'] {
+  color: var(--forge-accent);
+  border-color: var(--forge-accent);
+}
+
+#tab-new-btn {
+  border-color: var(--forge-border);
+}

@@ -83,6 +83,15 @@ export class UserQuestionService {
     return false;
   }
 
+  pendingConversationIds(): Set<string> {
+    const ids = new Set<string>();
+    for (const question of this.pending.values()) {
+      if (question.conversationId) ids.add(question.conversationId);
+      else ids.add('');
+    }
+    return ids;
+  }
+
   ask(request: UserQuestion): Promise<string | undefined> {
     if (request.signal?.aborted) return Promise.resolve(undefined);
     const id = `ask-${Date.now()}-${Math.random().toString(36).slice(2)}`;

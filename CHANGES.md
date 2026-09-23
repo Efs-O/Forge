@@ -2,6 +2,24 @@
 
 ## 0.16.38
 
+### One chat on screen; the rest live in history (2026-09-23)
+
+- **The conversation tab strip is gone.** A single-chat header replaces it, and
+  every other chat, open or archived, is in the history panel. Open chats list
+  first, with running, waiting and queued markers.
+- **Creating or restoring a chat at capacity archives the least-recently-active
+  eligible chat.** A chat is never archived while it is streaming, waiting on an
+  approval or question, bound to a remote chat, holding a pending remote
+  request, or holding undecided Keep/Undo changes. The archived chat's agent,
+  checkpoint and failure state are released; a cleanup failure is shown.
+- **Hidden chats raise VS Code notifications** when they wait on an approval or
+  a question, when a turn longer than about a minute finishes, and when a turn
+  fails. "Open chat" makes that chat the one on screen.
+- **The agent bus no longer changes which chat is on screen**; it finds its chat
+  by sender.
+- **A workspace handoff to a window with no free chat slot** now tells the
+  remote chat why no chat opened, instead of retrying and going silent.
+
 ### A new turn no longer re-reads the previous one (2026-09-23)
 
 - **Each request's turn-context block (active file, plan) is frozen onto that

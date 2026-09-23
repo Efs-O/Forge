@@ -287,6 +287,7 @@ export interface SessionSyncMsg {
   activeId: string;
   tabs: SessionTabMeta[];
   history: SessionHistoryMeta[];
+  waitingIds: string[];
   messagesById: Record<
     string,
     Array<
@@ -417,6 +418,10 @@ export interface SwitchModelMsg {
 export interface WebviewReadyMsg {
   type: 'webviewReady';
 }
+export interface QueuedConversationIdsMsg {
+  type: 'queuedConversationIds';
+  ids: string[];
+}
 export interface UndoMsg {
   type: 'undo';
 }
@@ -473,6 +478,7 @@ export type WebviewToHost =
   | CancelMsg
   | SwitchModelMsg
   | WebviewReadyMsg
+  | QueuedConversationIdsMsg
   | UndoMsg
   | KeepMsg
   | ReviewCheckpointMsg

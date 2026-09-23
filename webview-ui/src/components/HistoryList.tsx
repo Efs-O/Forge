@@ -1,14 +1,22 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { SessionHistoryMeta } from '../../../src/sidebar/messageBridge';
+import type { SessionTabMeta } from '../../../src/sidebar/messageBridge';
 
 interface Props {
   items: SessionHistoryMeta[];
+  openItems?: SessionTabMeta[];
+  activeId?: string;
+  streamingIds?: ReadonlySet<string>;
+  queuedIds?: ReadonlySet<string>;
+  waitingIds?: ReadonlySet<string>;
   expanded: boolean;
   /** Escape or a click outside the panel. */
   onDismiss: () => void;
   onRestore: (id: string) => void;
   onDelete: (id: string) => void;
   onRename: (id: string, title: string) => void;
+  onClose?: (id: string) => void;
+  onSwitchOpen?: (id: string) => void;
 }
 
 /** Shared with the resumed marker in App; single owner for this wording. */
@@ -220,6 +228,13 @@ export function HistoryList({
   onRestore,
   onDelete,
   onRename,
+  openItems = [],
+  activeId = '',
+  streamingIds = new Set<string>(),
+  queuedIds = new Set<string>(),
+  waitingIds = new Set<string>(),
+  onClose = () => undefined,
+  onSwitchOpen,
 }: Props): React.ReactElement {
   // Only one row may be open or editing at a time, so both live here as an id
   // rather than as per-row state that would survive the row being re-keyed.
@@ -251,15 +266,50 @@ export function HistoryList({
     };
   }, [expanded, onDismiss]);
 
-  // Open tabs are deliberately absent: the tab strip directly above lists every
-  // one of them, with the same spinner and queued dot, so an "Open" group here
-  // rendered the active session a second time under its own chip.
   return (
-    <section id="history-panel" ref={panelRef} aria-label="Closed sessions" hidden={!expanded}>
-      {items.length === 0 ? (
-        <p id="history-empty">Closed chats appear here.</p>
-      ) : (
+    <section id="history-panel" ref={panelRef} aria-label="Conversation history" hidden={!expanded}>
+      {openItems.length > 0 && <h3 className="history-section-heading">Open</h3>}
+      {openItems.length > 0 && (
         <div className="history-list-wrap">
+          <div id="history-open-list">
+            {openItems.map((item) => (
+              <div className="history-item-row" key={item.id}>
+                <button
+                  type="button"
+                  className="history-item"
+                  aria-current={item.id === activeId ? 'page' : undefined}
+                  onClick={() => (onSwitchOpen ?? onRestore)(item.id)}
+                >
+                  <span className="history-item-title">{item.title}</span>
+                  <span className="history-item-meta">
+                    {streamingIds.has(item.id)
+                      ? '◌ Running'
+                      : waitingIds.has(item.id)
+                        ? 'Waiting'
+                        : queuedIds.has(item.id)
+                          ? 'Queued'
+                          : 'Open'}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="history-item-kebab"
+                  aria-label={`Close ${item.title}`}
+                  title="Close"
+                  onClick={() => onClose(item.id)}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {items.length === 0 && openItems.length === 0 ? (
+        <p id="history-empty">No conversations yet.</p>
+      ) : items.length > 0 ? (
+        <div className="history-list-wrap">
+          {openItems.length > 0 && <h3 className="history-section-heading">Archived</h3>}
           <div id="history-list">
             {items.map((item) => (
               <HistoryRow
@@ -276,7 +326,7 @@ export function HistoryList({
             ))}
           </div>
         </div>
-      )}
+      ) : null}
     </section>
   );
 }

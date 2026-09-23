@@ -104,6 +104,18 @@ export function opCloseConversation(
   return { sidebar: updated, newActiveId: updated.activeConversationId };
 }
 
+/** Archives the least recently active conversation the caller proves idle. */
+export function opArchiveLeastRecent(
+  sidebar: SidebarRuntime,
+  evictable: (conversation: ConversationRuntime) => boolean,
+): SidebarRuntime | undefined {
+  const candidate = [...sidebar.conversations]
+    .filter(evictable)
+    .sort((a, b) => a.updatedAt - b.updatedAt)[0];
+  if (!candidate) return undefined;
+  return opCloseConversation(sidebar, candidate.id)?.sidebar;
+}
+
 /** Permanently remove an open or archived conversation. */
 export function opDeleteConversation(sidebar: SidebarRuntime, id: string): DeleteConvResult {
   const conversationIndex = sidebar.conversations.findIndex((c) => c.id === id);

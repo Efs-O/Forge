@@ -41,6 +41,7 @@ import { listMemoryKeys } from '../tools/memoryTools';
 import { RequestChainLifecycle } from './RequestChainLifecycle';
 import { MidTurnInbox } from '../agent/MidTurnInbox';
 import { MidTurnTellDrain } from '../agent/MidTurnTellDrain';
+import { unattendedConversations } from './unattendedConversations';
 
 /** What the provider lends its collaborators. */
 export interface SidebarHost {
@@ -68,6 +69,8 @@ export interface SidebarHost {
   /** Sole owner of the unload sequence; the slash command routes through it. */
   unloadModels: () => Promise<void>;
   unloadActiveModel: () => Promise<{ model: string; wasLoaded: boolean }>;
+  isConversationQueued: (id: string) => boolean | undefined;
+  isRemoteEvictionClear: (id: string) => boolean;
 }
 
 /** The construction-time collaborators, straight from the provider's ctor. */
@@ -103,6 +106,28 @@ export interface SidebarRuntimeParts {
   midTurnInbox: MidTurnInbox;
   /** Composes the sidebar inbox and the remote queue into one mid-turn drain. */
   tellDrain: MidTurnTellDrain;
+}
+
+export interface ConversationEvictionSignals {
+  streaming: boolean;
+  activeRequestChain: boolean;
+  unattended: boolean;
+  pendingApprovalActive: boolean;
+  pendingApprovalQueued: boolean;
+  pendingQuestion: boolean;
+  unattributedRequest: boolean;
+  hostQueue: boolean | undefined;
+  webviewQueue: boolean;
+  beforeWebviewQueueReport: boolean;
+  remoteRuntimeUnavailable: boolean;
+  remoteBinding: boolean;
+  remoteIntakeQueue: boolean;
+  /** Keep/Undo still undecided: archiving would hide the only way to undo. */
+  undecidedChanges: boolean;
+}
+
+export function isConversationEvictable(signals: ConversationEvictionSignals): boolean {
+  return !Object.values(signals).some((signal) => signal === true || signal === undefined);
 }
 
 export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRuntimeParts {
@@ -297,6 +322,29 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
       host.postSessionSync();
       host.postTokenBudget();
     },
+    isConversationEvictable: (id) => {
+      const queued = host.isConversationQueued(id);
+      const approvals = agentLoop.pendingApprovalConversationIds();
+      const questions = parts.questions.pendingConversationIds();
+      const remote = host.isRemoteEvictionClear(id);
+      const chains = requestChains.status();
+      return isConversationEvictable({
+        streaming: agentLoop.isStreamingConv(id),
+        activeRequestChain: chains.some((chain) => chain.conversationId === id),
+        unattended: unattendedConversations.has(id),
+        pendingApprovalActive: approvals.has(id),
+        pendingApprovalQueued: approvals.has(id),
+        pendingQuestion: parts.questions.hasPending(id),
+        unattributedRequest: approvals.has('') || questions.has(''),
+        hostQueue: queued,
+        webviewQueue: queued === true,
+        beforeWebviewQueueReport: queued === undefined,
+        remoteRuntimeUnavailable: remote === undefined,
+        remoteBinding: remote,
+        remoteIntakeQueue: remote,
+        undecidedChanges: checkpoints.canUndo(id),
+      });
+    },
   });
 
   // Last, because it needs both halves: the events object AgentLoop decorates
@@ -324,9 +372,19 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
   // turn; `presentsLocally` is what makes it conditional, so a window whose view
   // has never been resolved still falls back to the VS Code input box.
   parts.questions.addSink({
-    asked: (event) => host.post(buildQuestionMessage(event)),
-    answered: (event) => host.post({ type: 'questionResolved', id: event.id }),
+    asked: (event) => {
+      host.post(buildQuestionMessage(event));
+      host.postSessionSync();
+    },
+    answered: (event) => {
+      host.post({ type: 'questionResolved', id: event.id });
+      host.postSessionSync();
+    },
     presentsLocally: () => host.getView() !== undefined,
+  });
+  agentLoop.addApprovalSink({
+    requested: () => host.postSessionSync(),
+    resolved: () => host.postSessionSync(),
   });
 
   return { agentLoop, slashHandler, budget, tabs, send, requestChains, midTurnInbox, tellDrain };

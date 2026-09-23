@@ -23,7 +23,8 @@ overlaps with an existing owner, extend the owner instead.
 | Sidebar collaborator construction                    | `src/sidebar/sidebarWiring.ts`           |
 | Host facade construction (remote/extension seam)     | `src/sidebar/sidebarFacadeWiring.ts`     |
 | Ctx bar, HalluMeter bridge, thresholds               | `src/sidebar/ContextBudgetPublisher.ts`  |
-| Tab create/switch/close/restore + VRAM               | `src/sidebar/ConversationTabs.ts`        |
+| Chat create/switch/close/restore, auto-archive, VRAM | `src/sidebar/ConversationTabs.ts`        |
+| Hidden conversation notifications                    | `src/sidebar/hiddenChatAlerts.ts`        |
 | Send guards, model resolution, turn logs             | `src/sidebar/SendPipeline.ts`            |
 | /reindex progress interaction                        | `src/sidebar/reindexCommand.ts`          |
 | Primary turn + streaming lifecycle                   | `src/sidebar/AgentLoop.ts`               |
@@ -96,7 +97,8 @@ overlaps with an existing owner, extend the owner instead.
 | Compact per-round reasoning rows                | `webview-ui/src/components/ThinkingGroup.tsx`   |
 | Tool call rows + expandable results             | `webview-ui/src/components/ToolRow.tsx`         |
 | Model picker dropdown (grouped, opens upward)   | `webview-ui/src/components/ModelSelector.tsx`   |
-| Sessions panel: open tabs + closed-chat rows    | `webview-ui/src/components/HistoryList.tsx`     |
+| History panel: open + archived chats, markers   | `webview-ui/src/components/HistoryList.tsx`     |
+| Single-chat header (title, history, new chat)   | `webview-ui/src/components/ChatHeader.tsx`      |
 | Empty-tab backend state (mark + residency line) | `webview-ui/src/components/EmptyState.tsx`      |
 | Resumed-tab rule + marker wording               | `webview-ui/src/resumedTabs.ts`                 |
 | Relative timestamp wording (`relativeTime`)     | `webview-ui/src/components/HistoryList.tsx`     |
@@ -111,7 +113,8 @@ overlaps with an existing owner, extend the owner instead.
 | Diff card styles                                | `webview-ui/styles/diff.css`                    |
 | Tool + thinking row styles                      | `webview-ui/styles/tool-rows.css`               |
 | Empty-tab styles                                | `webview-ui/styles/empty-state.css`             |
-| Sessions panel styles (split from `tabs.css`)   | `webview-ui/styles/sessions-panel.css`          |
+| Sessions panel styles                           | `webview-ui/styles/sessions-panel.css`          |
+| Chat header styles                              | `webview-ui/styles/chat-header.css`             |
 | Residency dot colours (reused by the empty tab) | `webview-ui/styles/model-selector.css`          |
 
 ## Model Manager (F7/§2.3)

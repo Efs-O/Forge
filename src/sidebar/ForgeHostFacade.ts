@@ -1,5 +1,5 @@
 import type { AttachmentData } from './messageBridge';
-import type { ConversationRuntime } from './sessionTypes';
+import { MAX_CONVERSATIONS, type ConversationRuntime } from './sessionTypes';
 import type { ForgeRequestOutcome } from './turnOutcome';
 import type { CompactionEvent, CompactionOutcome, CompactionTrigger } from './CompactionService';
 import type { HostActivityListener } from './HostActivity';
@@ -209,7 +209,7 @@ export class SidebarHostFacade implements ForgeHostFacade {
     options: { activate?: boolean } = { activate: false },
   ): Promise<ForgeConversationSummary> {
     const conv = this.deps.createConversation({ activate: options.activate ?? false });
-    if (!conv) throw new Error('Forge: maximum open conversations reached.');
+    if (!conv) throw new Error(`Forge: all ${MAX_CONVERSATIONS} open chats are busy.`);
     return summarize(conv, false);
   }
 
@@ -220,7 +220,12 @@ export class SidebarHostFacade implements ForgeHostFacade {
     const conv = this.deps.restoreConversation(conversationId, {
       activate: options.activate ?? false,
     });
-    if (!conv) throw new Error('Forge: conversation could not be restored.');
+    if (!conv) {
+      if (this.deps.getOpenConversations().length >= MAX_CONVERSATIONS) {
+        throw new Error(`Forge: all ${MAX_CONVERSATIONS} open chats are busy.`);
+      }
+      throw new Error('Forge: conversation could not be restored.');
+    }
     return summarize(conv, false);
   }
 

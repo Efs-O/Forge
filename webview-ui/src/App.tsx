@@ -25,7 +25,7 @@ import { InputRow } from './components/InputRow';
 import { ConfirmationDialog } from './components/ConfirmationDialog';
 import { QuestionDialog } from './components/QuestionDialog';
 import { useAgentDialogs } from './useAgentDialogs';
-import { TabStrip } from './components/TabStrip';
+import { ChatHeader } from './components/ChatHeader';
 import { HistoryList } from './components/HistoryList';
 import { EmptyState } from './components/EmptyState';
 import { resumedTabIds } from './resumedTabs';
@@ -48,6 +48,7 @@ export function App(): React.ReactElement {
   const [workspace, setWorkspace] = useState<WorkspaceInfo | undefined>(undefined);
   const [prefillText, setPrefillText] = useState<string | null>(null);
   const [historyExpanded, setHistoryExpanded] = useState(false);
+  const [waitingIds, setWaitingIds] = useState<ReadonlySet<string>>(() => new Set());
   // Conversations restored from an earlier window session, snapshotted once at
   // hydration. State rather than a ref: the snapshot lands after the first
   // render and must schedule another one.
@@ -174,6 +175,7 @@ export function App(): React.ReactElement {
           });
           break;
         case 'sessionSync':
+          setWaitingIds(new Set(msg.waitingIds));
           reconcileSessionSync(msg.messagesById);
           dispatch({
             type: 'SESSION_SYNC',
@@ -253,14 +255,17 @@ export function App(): React.ReactElement {
     },
     [handleRestoreConversation, collapseHistory],
   );
+  const handleSwitchFromPanel = useCallback(
+    (id: string) => {
+      handleSwitchTab(id);
+      collapseHistory();
+    },
+    [handleSwitchTab, collapseHistory],
+  );
 
-  // The panel lists closed sessions only - open tabs are the strip's job - so an
-  // empty history is once again an empty panel. Restoring or deleting the last
-  // closed chat while it is open would otherwise leave an empty overlay
-  // covering the transcript.
   useEffect(() => {
-    if (state.history.length === 0) setHistoryExpanded(false);
-  }, [state.history.length]);
+    if (state.history.length === 0 && state.tabs.length === 0) setHistoryExpanded(false);
+  }, [state.history.length, state.tabs.length]);
 
   const handleRunSlashCommand = useCallback((commandId: ForgeSlashCommandId) => {
     vscode.postMessage({ type: 'runSlashCommand', commandId });
@@ -288,6 +293,10 @@ export function App(): React.ReactElement {
       ),
     [queuedPrompts],
   );
+
+  useEffect(() => {
+    vscode.postMessage({ type: 'queuedConversationIds', ids: [...queuedIds] });
+  }, [queuedIds]);
 
   const emptyState = useMemo(
     () => (
@@ -339,24 +348,28 @@ export function App(): React.ReactElement {
           )}
           {state.sessionHydrated && (
             <>
-              <TabStrip
-                tabs={state.tabs}
-                activeId={state.activeConversationId}
-                streamingIds={state.streamingIds}
-                queuedIds={queuedIds}
+              <ChatHeader
+                title={
+                  state.tabs.find((tab) => tab.id === state.activeConversationId)?.title ?? 'Chat'
+                }
                 historyExpanded={historyExpanded}
-                onSwitch={handleSwitchTab}
                 onNew={handleNewConversation}
-                onClose={handleCloseTab}
                 onToggleHistory={() => setHistoryExpanded((expanded) => !expanded)}
               />
               <HistoryList
                 items={state.history}
+                openItems={[...state.tabs].sort((a, b) => b.updatedAt - a.updatedAt)}
+                activeId={state.activeConversationId}
+                streamingIds={state.streamingIds}
+                queuedIds={queuedIds}
+                waitingIds={waitingIds}
                 expanded={historyExpanded}
                 onDismiss={collapseHistory}
                 onRestore={handleRestoreFromPanel}
                 onDelete={handleDeleteConversation}
                 onRename={handleRenameConversation}
+                onClose={handleCloseTab}
+                onSwitchOpen={handleSwitchFromPanel}
               />
             </>
           )}

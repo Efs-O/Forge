@@ -106,8 +106,14 @@ export class RemoteRuntime {
     });
   }
 
-  /** One owner for the lifecycle chain: every operation that touches the
-   *  active transport map queues here rather than interleaving. */
+  /** Undefined until the remote store has loaded; callers must fail closed. */
+  blocksConversationEviction(conversationId: string): boolean | undefined {
+    return this.store.isLoaded()
+      ? this.store.blocksConversationEviction(conversationId)
+      : undefined;
+  }
+
+  /** Serializes operations that touch the active transport map. */
   private enqueue(task: () => Promise<void>): Promise<void> {
     const operation = this.lifecycleTail.then(task);
     this.lifecycleTail = operation.catch(() => undefined);
@@ -445,9 +451,7 @@ export class RemoteRuntime {
           this.options.workspaceRoot,
         ).name ?? 'this workspace',
     };
-    // Armed before the folder opens: if this window reloads, the process dies
-    // with the timer and the target window's claim is the only thing that
-    // happens. If it does not reload, this is what breaks the silence.
+    // The target window's claim handles a reload; otherwise this timer does.
     this.coordinator.armRollback(rollback);
     try {
       await this.options.openWorkspace(target.path);

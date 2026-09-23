@@ -149,10 +149,8 @@ describe('HistoryList row actions', () => {
 });
 
 describe('sessions panel — overlay contract', () => {
-  it('lists closed sessions only — open tabs belong to the strip above', () => {
+  it('lists archived sessions when there are no open sessions', () => {
     render();
-    // The panel used to repeat every open tab under an "Open" heading, so the
-    // active session rendered twice: once as its own chip, once directly below.
     expect(container.querySelectorAll('.session-section-label')).toHaveLength(0);
     expect(container.querySelectorAll('.history-item')).toHaveLength(ITEMS.length);
   });
