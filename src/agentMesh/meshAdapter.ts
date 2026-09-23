@@ -55,6 +55,11 @@ export interface MeshAdapter {
    * steer. Absent for non-observing adapters (no turn to interrupt).
    */
   interrupt?(): void;
+  /**
+   * Called by the FIFO when its queue drains. A one-shot stand-in disposes
+   * itself here, so its process never outlives the exchanges it answered.
+   */
+  onIdle?(): void;
 }
 
 /** A factory for an adapter bound to one alias's resolved session. */

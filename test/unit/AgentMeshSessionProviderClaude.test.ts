@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MeshSessionProvider } from '../../src/agentMesh/sessionProvider';
-import { CLAUDE_STAND_IN_NOTE } from '../../src/agentBus/claudePeer';
+import { claudeStandInNote } from '../../src/agentMesh/claudeStandIn';
 import {
   claimCreation,
   readOwnership,
@@ -100,9 +100,9 @@ describe('MeshSessionProvider: owned Claude path (P4)', () => {
     await p.dispose();
   });
 
-  it('a joined session that is not running falls through to an owned stand-in, visibly', async () => {
+  it('a joined session that is not running gets a stand-in that resumes it, visibly', async () => {
     // A VS Code reload stops the joined panel session until the panel reopens.
-    // Refusing left Qwen stuck; the stand-in answers, and the note tells the user.
+    // Refusing left Qwen stuck; the stand-in resumes the joined conversation.
     registerAlias(root, 'claude', {
       agent: 'claude',
       session_id: 'forge-4e',
@@ -120,9 +120,8 @@ describe('MeshSessionProvider: owned Claude path (P4)', () => {
     });
     const adapter = await p.resolveAdapter('claude');
     expect(adapter?.observesTurns).toBe(true);
-    // The joined peer id is not an owned identity: never resumed.
-    expect(ids).toEqual([undefined]);
-    expect(adapter?.note).toBe(CLAUDE_STAND_IN_NOTE);
+    expect(ids).toEqual(['conv-1']);
+    expect(adapter?.note).toBe(claudeStandInNote('conv-1'));
     // The join survives, so a re-opened panel wins again.
     expect(getAlias(root, 'claude')?.peer_pid).toBe(99);
     await p.dispose();

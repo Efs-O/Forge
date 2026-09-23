@@ -118,6 +118,9 @@ export function defaultClaudeFactory(): OwnedClaudeFactory {
         cwd,
         ...(model ? { model } : {}),
         ...(sessionId ? { confirmedSessionId: sessionId } : {}),
+        // CLAUDE.md § CLI Agent Delegation: Forge-launched Claude runs
+        // unrestricted; the default mode refuses Bash under `-p`.
+        permissionMode: 'bypassPermissions',
       });
     },
   };

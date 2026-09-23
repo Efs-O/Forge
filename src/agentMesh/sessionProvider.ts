@@ -4,17 +4,14 @@ import { resolveCliExecutable } from '../agents/resolveCliExecutable';
 import type { CodexAppServerSession } from '../agents/CodexAppServerSession';
 import type { ClaudeOwnedSession } from '../agents/ClaudeOwnedSession';
 import { queueToCodex } from '../agentBus/codexDelivery';
-import { CLAUDE_STAND_IN_NOTE, pickClaudePeer, readClaudeSessions } from '../agentBus/claudePeer';
-import type { ClaudeSession } from '../agentBus/claudePeer';
-import { getAlias, joinedPeer, registerAlias } from './aliasRegistry';
-import { ClaudeOwnedAdapter, ClaudePeerAdapter, CodexOwnedAdapter } from './adapters';
+import { getAlias, registerAlias } from './aliasRegistry';
+import { ClaudeOwnedAdapter, CodexOwnedAdapter } from './adapters';
+import { JoinedClaude, type JoinedClaudeDeps } from './claudeStandIn';
 import { codexQueueAdapterIfLive } from './codexPinLiveness';
 import {
   beginCreation,
   defaultClaudeFactory,
   defaultCodexFactory,
-  defaultSendClaude,
-  type OwnedClaudeFactory,
   type OwnedCodexFactory,
 } from './creationPreamble';
 import type { MeshAdapter } from './meshAdapter';
@@ -41,20 +38,14 @@ import type { SessionProvider } from './meshOrchestrator';
  * - **Reap:** `reap(alias)` disposes the in-memory session (recovery, M2/M3).
  */
 
-export interface SessionProviderDeps extends HostLivenessDeps {
+export interface SessionProviderDeps extends HostLivenessDeps, JoinedClaudeDeps {
   busRoot: string;
   getConfig: () => ForgeConfig;
   workspaceRoots: () => string[];
-  /** Injectable for tests; production reads ~/.claude/sessions. */
-  claudeSessions?: () => ClaudeSession[];
-  /** Injectable for tests; production uses the configured transport. */
-  sendClaude?: (session: ClaudeSession, message: string, signal?: AbortSignal) => Promise<void>;
   /** Injectable for tests; production runs `codex queue`. */
   queueCodex?: typeof queueToCodex;
   /** Injectable for tests; production spawns a real app-server. */
   codexFactory?: OwnedCodexFactory;
-  /** Injectable for tests; production spawns a real owned Claude stdio session. */
-  claudeFactory?: OwnedClaudeFactory;
   /**
    * Called when a thread RESUME fails (M3): a failed resume is a visible
    * `context_lost` board event (a fresh creation failing is not a context loss).
@@ -68,7 +59,11 @@ export class MeshSessionProvider implements SessionProvider {
   private readonly creating = new Map<string, Promise<MeshAdapter | { error: string }>>();
   /** Aliases currently being disposed by TTL/recovery. */
   private readonly reaping = new Set<string>();
-  constructor(private readonly deps: SessionProviderDeps) {}
+  /** The joined peer and its stand-in (never an owned session). */
+  private readonly joined: JoinedClaude;
+  constructor(private readonly deps: SessionProviderDeps) {
+    this.joined = new JoinedClaude(deps);
+  }
   /** The in-memory owned session for an alias, if this window holds it. */
   getOwned(alias: string): CodexAppServerSession | undefined {
     return this.owned.get(alias);
@@ -174,13 +169,8 @@ export class MeshSessionProvider implements SessionProvider {
   private async claudeAdapterAsync(): Promise<MeshAdapter | undefined> {
     const aliasRec = getAlias(this.deps.busRoot, 'claude');
     // A joined session (`forge.sh join`) wins while live. A dead one (a reload
-    // stops it) gets a Forge-owned stand-in, never silently: the note says so.
-    if (aliasRec?.peer_pid !== undefined) {
-      const live = this.claudeAdapter();
-      if (live) return live;
-      const r = await this.ensureOwnedClaude('claude');
-      return 'error' in r ? undefined : Object.assign(r, { note: CLAUDE_STAND_IN_NOTE });
-    }
+    // stops it) gets a stand-in that resumes its conversation, never silently.
+    if (aliasRec?.peer_pid !== undefined) return this.joined.resolve(aliasRec);
     const existing = this.claudeOwned.get('claude');
     if (existing) return this.claudeOwnedAdapter('claude', existing);
     const rec = readOwnership(this.deps.busRoot, 'claude');
@@ -189,7 +179,7 @@ export class MeshSessionProvider implements SessionProvider {
     // second owned Claude for the same session would leave two live pipes on
     // one alias. Fall back to the user-opened peer/relay (non-observing).
     if (rec?.owner_host && this.isForeignLiveOwner(rec.owner_host)) {
-      return this.claudeAdapter();
+      return this.joined.peerAdapter();
     }
     // A prior owned session resumes (M3). Otherwise an open session in this
     // workspace (non-observing), else Forge creates its own .
@@ -197,24 +187,10 @@ export class MeshSessionProvider implements SessionProvider {
       const result = await this.ensureOwnedClaude('claude');
       return 'error' in result ? undefined : result;
     }
-    const peer = this.claudeAdapter();
+    const peer = this.joined.peerAdapter();
     if (peer) return peer;
     const created = await this.ensureOwnedClaude('claude');
     return 'error' in created ? undefined : created;
-  }
-
-  private claudeAdapter(): MeshAdapter | undefined {
-    const bus = this.deps.getConfig().agent_bus;
-    const sessions = this.deps.claudeSessions ? this.deps.claudeSessions() : readClaudeSessions();
-    const joined = joinedPeer(getAlias(this.deps.busRoot, 'claude'));
-    const picked = pickClaudePeer(
-      sessions,
-      { joined, pin: bus?.claude_session },
-      this.deps.workspaceRoots(),
-    );
-    if ('error' in picked) return undefined;
-    const send = this.deps.sendClaude ?? defaultSendClaude(this.deps.getConfig().agent_bus);
-    return new ClaudePeerAdapter(picked.session, send);
   }
 
   private codexAdapterCtx() {
@@ -342,7 +318,7 @@ export class MeshSessionProvider implements SessionProvider {
       this.deps,
     );
     if (start.kind === 'join')
-      return this.claudeAdapter() ?? { error: `another window owns the ${alias} session` };
+      return this.joined.peerAdapter() ?? { error: `another window owns the ${alias} session` };
     if (start.kind === 'refuse') return { error: start.error };
     const { host, rec } = start;
     // A joined (user-opened) record is not an owned identity: never resumed here.
@@ -495,6 +471,6 @@ export class MeshSessionProvider implements SessionProvider {
     const sessions = [...this.owned.values(), ...this.claudeOwned.values()];
     this.owned.clear();
     this.claudeOwned.clear();
-    await Promise.all(sessions.map((s) => s.dispose()));
+    await Promise.all([...sessions.map((s) => s.dispose()), this.joined.dispose()]);
   }
 }

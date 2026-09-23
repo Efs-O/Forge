@@ -213,6 +213,20 @@ export function setupAgentMesh(
         detail: `thread resume failed: ${reason}`,
       });
     },
+    // A stand-in answering for a dead joined Claude is never silent: the
+    // window, every paired chat, and the board all say so.
+    onStandIn: (alias, note) => {
+      void vscode.window.showWarningMessage(note);
+      getSidebar().getHostFacade().emitHostActivity?.({ text: note });
+      void onEvent({
+        exchangeId: `stand-in-${alias}-${Date.now()}`,
+        from: 'forge',
+        to: alias,
+        type: 'notice',
+        state: 'recovered',
+        detail: note,
+      });
+    },
   });
 
   const knownAliases = (): string[] => {

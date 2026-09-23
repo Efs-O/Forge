@@ -2,7 +2,7 @@ import type { AttachmentData } from './messageBridge';
 import { MAX_CONVERSATIONS, type ConversationRuntime } from './sessionTypes';
 import type { ForgeRequestOutcome } from './turnOutcome';
 import type { CompactionEvent, CompactionOutcome, CompactionTrigger } from './CompactionService';
-import type { HostActivityListener } from './HostActivity';
+import type { HostActivityEvent, HostActivityListener } from './HostActivity';
 import type { RequestChainStatus } from './RequestChainLifecycle';
 import type { ToolApprovalRequestEvent, ToolApprovalSink } from './ToolApprovalService';
 import type { AgentProgressEvent } from './AgentProgress';
@@ -103,6 +103,8 @@ export interface ForgeHostFacade {
    * chat did not ask for. Optional on the same terms as the hook above.
    */
   onHostActivity?(listener: HostActivityListener): { dispose(): void };
+  /** Publish host news from outside the sidebar (the agent mesh's stand-in notice). */
+  emitHostActivity?(event: HostActivityEvent): void;
   /**
    * Subscribe to agent-authored notify_user messages.
    *
@@ -184,6 +186,7 @@ export interface SidebarHostFacadeDeps {
   backendProcesses?: () => readonly BackendProcess[];
   onCompactionEvent?: (listener: (event: CompactionEvent) => void) => { dispose(): void };
   onHostActivity?: (listener: HostActivityListener) => { dispose(): void };
+  emitHostActivity?: (event: HostActivityEvent) => void;
   onUserNotification?: (sink: UserNotificationSink) => { dispose(): void };
   setReachProbe?: (probe: (conversationId: string) => number) => { dispose(): void };
   onAgentProgress: (listener: (event: AgentProgressEvent) => void) => { dispose(): void };
@@ -333,6 +336,10 @@ export class SidebarHostFacade implements ForgeHostFacade {
 
   onHostActivity(listener: HostActivityListener): { dispose(): void } {
     return this.deps.onHostActivity!(listener);
+  }
+
+  emitHostActivity(event: HostActivityEvent): void {
+    this.deps.emitHostActivity?.(event);
   }
 
   onUserNotification(sink: UserNotificationSink): { dispose(): void } {

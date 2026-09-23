@@ -201,6 +201,7 @@ export class AliasFifo {
           // jam on one bad write.
         }
       }
+      if (!this.disposed) this.adapter.onIdle?.();
     } finally {
       this.running = false;
     }

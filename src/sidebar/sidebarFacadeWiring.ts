@@ -77,6 +77,7 @@ export function createSidebarHostFacade(deps: SidebarFacadeDeps): ForgeHostFacad
     },
     onCompactionEvent: (listener) => slashHandler.onCompactionEvent(listener),
     onHostActivity: (listener) => slashHandler.onHostActivity(listener),
+    emitHostActivity: (event) => slashHandler.emitActivity(event),
     onUserNotification: (sink) => notifications.addSink(sink),
     setReachProbe: (probe) => notifications.setReachProbe(probe),
     onAgentProgress: (listener) => agentLoop.onAgentProgress(listener),

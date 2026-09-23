@@ -10,6 +10,19 @@
 - **The agent bus reports short turns in seconds.** A 14-second turn used to be
   reported as "finished · 1 min".
 
+### A stand-in Claude continues your conversation, and says so (2026-09-23)
+
+- **When the Claude session you joined is not running** (a window reload stops
+  it until its panel opens), the stand-in that answers for it now resumes that
+  same conversation. The answer lands in the session's own history, so reopening
+  the panel shows it. It used to start a blank session with none of the context.
+- **You are told when it happens.** VS Code shows a warning, paired Telegram
+  chats get the notice, and the agent board records it. It used to be visible
+  only to the agent that sent the message.
+- **Forge-launched Claude can run shell commands again.** It now starts with
+  `bypassPermissions`, as delegation always intended; it had been refusing Bash.
+- The stand-in stops once it has answered, or as soon as your session is back.
+
 ## 0.16.38
 
 ### One chat on screen; the rest live in history (2026-09-23)

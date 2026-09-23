@@ -506,6 +506,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Per-alias host-side FIFO (M5)                            | `src/agentMesh/aliasFifo.ts`                |
 | Delivery adapters (owned Codex / Claude peer / Codex queue) | `src/agentMesh/adapters.ts`            |
 | Session provider (owned-session lifecycle, M2/M3)        | `src/agentMesh/sessionProvider.ts`          |
+| Joined Claude peer + dead-join stand-in (resume, notice) | `src/agentMesh/claudeStandIn.ts`            |
 | Mesh orchestrator (tell + host-side relay M6)            | `src/agentMesh/meshOrchestrator.ts`         |
 | Claude self-join as the `claude` alias (§11)             | `src/agentMesh/claudeJoin.ts`               |
 | Process-wide orchestrator handle                         | `src/agentMesh/meshContext.ts`              |
