@@ -198,7 +198,7 @@ describe('TelegramChannel', () => {
     await channel.start(abort.signal);
     // The acknowledgement names the position it just assigned, so dropping it
     // needs no second lookup — and no retyping of the prompt.
-    await vi.waitFor(() => expect(acknowledgements[0]).toContain('position 2'));
+    await vi.waitFor(() => expect(acknowledgements[0]).toContain('after its current step'));
     expect(acknowledgements[0]).toContain('/drop 2');
   });
 
@@ -245,9 +245,9 @@ describe('TelegramChannel', () => {
     channel.onEvent(async () => ({ kind: 'queued', requestId: 'r1', position: 1 }));
 
     await channel.start(abort.signal);
-    await vi.waitFor(() => expect(acknowledgements[0]).toContain('position 1'));
+    await vi.waitFor(() => expect(acknowledgements[0]).toContain('/drop 1'));
     expect(acknowledgements[0]).toContain('runs when the current turn ends');
-    expect(acknowledgements[0]).not.toContain('next step');
+    expect(acknowledgements[0]).not.toContain('current step');
   });
 
   it('splits long messages and attaches approval callbacks only to the first chunk', async () => {

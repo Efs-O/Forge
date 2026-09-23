@@ -20,8 +20,8 @@ export async function acknowledgeTelegramDisposition(
   if (disposition.kind === 'queued') {
     const hasAttachments = event.kind === 'text' && (event.attachments?.length ?? 0) > 0;
     text = hasAttachments
-      ? `Forge: queued at position ${disposition.position} — it runs when the current turn ends. /queue to review, /drop ${disposition.position} to cancel.`
-      : `Forge: queued at position ${disposition.position} — it will reach Forge at the next step of the running turn. /queue to review, /drop ${disposition.position} to cancel.`;
+      ? `Forge: got it — attachments wait, so this runs when the current turn ends. /drop ${disposition.position} to cancel.`
+      : `Forge: got it — Forge reads this after its current step. /drop ${disposition.position} to cancel.`;
   } else if (disposition.kind === 'rejected') {
     text = disposition.reason.startsWith('Forge:')
       ? disposition.reason
