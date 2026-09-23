@@ -1,5 +1,13 @@
 # Forge — Recent Changes
 
+## 0.16.42
+
+### Telegram's profile picker lists only profiles (2026-09-23)
+
+- Picking a model that has profiles with `/model` on Telegram offered a
+  **No profile** button before the profiles, which ran the model without any of
+  them. The picker now lists only the model's profiles.
+
 ## 0.16.41
 
 ### A tool call written as text no longer ends the turn (2026-09-23)

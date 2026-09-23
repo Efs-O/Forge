@@ -19,12 +19,13 @@ export async function sendModelProfileSelection(
   if (!sendChoices) {
     await context.channel.send(
       event.chatId,
-      `Forge: choose a profile for ${modelName}: ${['(none)', ...profiles.map((p) => `@${p}`)].join(', ')}`,
+      `Forge: choose a profile for ${modelName}: ${profiles.map((p) => `@${p}`).join(', ')}`,
       { signal: context.signal },
     );
     return { kind: 'handled' };
   }
-  const values = [modelName, ...profiles.map((profile) => `${modelName}@${profile}`)];
+  // Every choice is a profile: a model that has profiles is always run through one.
+  const values = profiles.map((profile) => `${modelName}@${profile}`);
   const token = await context.store.issueSelection(
     event.channel,
     event.chatId,
@@ -35,10 +36,7 @@ export async function sendModelProfileSelection(
   await sendChoices(
     event.chatId,
     `Forge: choose a profile for ${modelName}.`,
-    [
-      { label: 'No profile', value: 0 },
-      ...profiles.map((profile, index) => ({ label: `@${profile}`, value: index + 1 })),
-    ],
+    profiles.map((profile, index) => ({ label: `@${profile}`, value: index })),
     { kind: 'models', token, page: 0, pageCount: 1 },
     { signal: context.signal },
   );

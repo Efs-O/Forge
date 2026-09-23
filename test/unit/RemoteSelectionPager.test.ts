@@ -509,7 +509,6 @@ describe('remote selection pagination', () => {
     );
     expect(setConversationModel).not.toHaveBeenCalled();
     expect(channel.selectionChoiceSends[0]?.choices.map((choice) => choice.label)).toEqual([
-      'No profile',
       '@main',
       '@audit',
     ]);
@@ -521,7 +520,7 @@ describe('remote selection pagination', () => {
           selectionKind: 'models',
           action: 'select',
           page: undefined,
-          choice: 2,
+          choice: 1,
           messageId: '42',
         }),
         ctx,
