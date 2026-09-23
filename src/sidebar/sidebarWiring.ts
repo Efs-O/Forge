@@ -170,7 +170,16 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
       })),
     }),
   );
-  agentLoop.setMidTurnTellDrainer((conversationId) => tellDrain.drain(conversationId));
+  agentLoop.setMidTurnTellDrainer(async (conversationId) => {
+    const drained = await tellDrain.drain(conversationId);
+    // A streaming chat ignores host syncs, so a tell (a Telegram one above
+    // all) was invisible in the sidebar until the turn ended. Show it now.
+    for (const tell of drained.messages) {
+      if (typeof tell.content !== 'string') continue;
+      host.post({ type: 'userPrompt', text: tell.content, conversationId, midTurn: true });
+    }
+    return drained;
+  });
 
   const budget = new ContextBudgetPublisher({
     getConfig: host.getConfig,

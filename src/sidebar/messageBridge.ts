@@ -88,6 +88,8 @@ export interface UserPromptMsg {
   type: 'userPrompt';
   text: string;
   conversationId?: string;
+  /** A tell the running turn just took in: shown inline, it opens no turn. */
+  midTurn?: boolean;
 }
 export interface DoneMsg {
   type: 'done';

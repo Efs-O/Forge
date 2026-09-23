@@ -88,6 +88,16 @@ export function App(): React.ReactElement {
           dispatch({ type: 'GENERATION_STARTED', convId: msg.conversationId });
           break;
         case 'userPrompt':
+          if (msg.midTurn) {
+            // Retire the matching queued chip: the bubble below replaces it.
+            if (msg.conversationId) {
+              reconcileSessionSync({
+                [msg.conversationId]: [{ role: 'user', content: msg.text, midTurn: true }],
+              });
+            }
+            dispatch({ type: 'MID_TURN_TELL', text: msg.text, convId: msg.conversationId });
+            break;
+          }
           // A prompt sent from a paired chat or a VS Code command. Reuses
           // USER_SEND rather than adding a reducer case, so a remote prompt
           // performs the same stale-diff and stale-error stripping a typed one

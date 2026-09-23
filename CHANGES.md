@@ -22,6 +22,9 @@
 - A message sent while a turn runs was answered "queued at position N", which
   read as though it waited for the turn to end. It now says Forge reads it
   after its current step (attachments still wait for the turn to end).
+- That message now appears in the sidebar chat, inline in the running turn,
+  the moment the turn takes it in. Before, it was delivered to the model but
+  invisible in the sidebar until the turn ended.
 
 ### Telegram's profile picker lists only profiles (2026-09-23)
 

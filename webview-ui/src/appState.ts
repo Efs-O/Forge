@@ -94,6 +94,7 @@ export type Action =
        *  them with the host's stored references. */
       attachments?: MessageAttachment[];
     }
+  | { type: 'MID_TURN_TELL'; text: string; convId?: string }
   | { type: 'SET_MODEL'; name: string | null }
   | { type: 'CHECKPOINT_READY'; convId?: string }
   | { type: 'CHECKPOINT_DISMISSED'; convId?: string }

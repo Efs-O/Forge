@@ -36,6 +36,8 @@ interface AppModule {
           convId?: string;
         }
       | { type: 'USER_SEND'; text: string; convId?: string }
+      | { type: 'MID_TURN_TELL'; text: string; convId?: string }
+      | { type: 'TOKEN'; text: string; convId?: string }
       | { type: 'DONE'; convId?: string }
       | { type: 'ERROR'; message: string; convId?: string }
       | { type: 'READY'; convId?: string }
@@ -166,6 +168,26 @@ describe('webview App reducer — transcript rows', () => {
       expect(rows).toHaveLength(2);
       expect(rows[0]!.toolResult).toBeUndefined();
     });
+  });
+
+  it('shows a mid-turn tell inline and opens a new bubble for the next round', () => {
+    const first = appModule.reducer(appModule.initialState, {
+      type: 'TOKEN',
+      text: 'Reading files.',
+      convId: 'tab-1',
+    });
+    const told = appModule.reducer(first, {
+      type: 'MID_TURN_TELL',
+      text: 'also check the jobs',
+      convId: 'tab-1',
+    });
+    const next = appModule.reducer(told, { type: 'TOKEN', text: 'Checking jobs.', convId: 'tab-1' });
+
+    expect(next.messagesById['tab-1']).toMatchObject([
+      { role: 'assistant', content: 'Reading files.' },
+      { role: 'user', content: 'also check the jobs', midTurn: true },
+      { role: 'assistant', content: 'Checking jobs.' },
+    ]);
   });
 
   it('keeps streamed reasoning separate when final answer tokens arrive', () => {
