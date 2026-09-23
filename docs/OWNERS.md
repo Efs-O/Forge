@@ -476,6 +476,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Human-readable job description (for `/jobs`)               | `src/jobs/jobDescribe.ts`                                      |
 | Discuss chat seeding (`manage_jobs` + `/job chat`)         | `src/jobs/jobDiscuss.ts`                                       |
 | `agent_task` runner (unattended agent turn)                 | `src/jobs/agentTask.ts`                                        |
+| Agent task prompt and final result parsing                  | `src/jobs/agentTaskPrompt.ts`                                  |
 | `agent_task` durable run state (config backup path, crash recovery) | `src/jobs/agentTaskState.ts`                                   |
 | `agent_task` step 7 (restart after turn, config rollback)          | `src/jobs/agentTaskRestart.ts`                                   |
 | `llamacpp_update` action (stages 6-8, switch, rollback)    | `src/jobs/actions/llamacppUpdate.ts`                           |
