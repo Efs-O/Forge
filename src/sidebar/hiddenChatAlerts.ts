@@ -51,6 +51,16 @@ export class HiddenChatAlerts implements vscode.Disposable {
       onTurnFailed?.(id, message);
       this.notify(id ? `Forge chat failed: ${message}` : `Forge turn failed: ${message}`, id);
     };
+    this.disposables.push({
+      dispose: () => {
+        if (onGenerationStarted) deps.events.onGenerationStarted = onGenerationStarted;
+        else delete deps.events.onGenerationStarted;
+        if (onGenerationFinished) deps.events.onGenerationFinished = onGenerationFinished;
+        else delete deps.events.onGenerationFinished;
+        if (onTurnFailed) deps.events.onTurnFailed = onTurnFailed;
+        else delete deps.events.onTurnFailed;
+      },
+    });
   }
 
   /** Clear waiting notices once the chat is visible on screen. */
