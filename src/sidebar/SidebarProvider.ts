@@ -1,15 +1,4 @@
-/*
- * The sidebar's VS Code surface: webview lifecycle, the public API extension.ts
- * calls, and the `post*`/`persist` helpers every collaborator borrows.
- *
- * Collaborators are built elsewhere — `wireSidebar` (turn, compaction, tabs,
- * send) and `createSidebarHostFacade` (the remote/extension seam). Keep it that
- * way: construction wiring added here is what pushed this file past 500 before.
- * What stays is deliberate: the helpers close over `sidebar`, `config`, `pool`,
- * `agentLoop`, `workspaceRoot` and `budget`, and the `handleMessage` actions
- * literal over eight fields — extracting either means threading a context
- * object purely to shed lines.
- */
+/* Sidebar lifecycle, public extension API, and post/persist helpers. */
 import * as vscode from 'vscode';
 import type { IBackendPool } from '../backend/BackendPool';
 import type { ForgeConfig } from '../config/types';
@@ -170,6 +159,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         getConfigPath,
         cliSessions,
         attachmentStore,
+        ...(this.historyArchive ? { archivedSessions: this.historyArchive.overflow } : {}),
         questions,
         notifications,
       },
@@ -408,7 +398,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private persistSession(): void {
-    saveSidebarSession(this.workspaceState, this.sidebar, this.historyArchive);
+    saveSidebarSession(
+      this.workspaceState,
+      this.sidebar,
+      this.historyArchive,
+      this.historyArchive?.overflow,
+    );
   }
 
   /** Tab-switch persistence: one string, not the whole transcript blob. */

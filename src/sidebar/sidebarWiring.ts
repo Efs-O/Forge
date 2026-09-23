@@ -42,6 +42,7 @@ import { RequestChainLifecycle } from './RequestChainLifecycle';
 import { MidTurnInbox } from '../agent/MidTurnInbox';
 import { MidTurnTellDrain } from '../agent/MidTurnTellDrain';
 import { unattendedConversations } from './unattendedConversations';
+import type { ArchivedSessions } from './ArchivedSessions';
 
 /** What the provider lends its collaborators. */
 export interface SidebarHost {
@@ -94,6 +95,7 @@ export interface SidebarParts {
   attachmentStore: ChatAttachmentStore | undefined;
   questions: UserQuestionService;
   notifications: UserNotificationService;
+  archivedSessions?: ArchivedSessions;
 }
 
 export interface SidebarRuntimeParts {
@@ -345,6 +347,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
         undecidedChanges: checkpoints.canUndo(id),
       });
     },
+    ...(parts.archivedSessions ? { archivedSessions: parts.archivedSessions } : {}),
   });
 
   // Last, because it needs both halves: the events object AgentLoop decorates

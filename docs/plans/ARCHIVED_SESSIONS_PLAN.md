@@ -2,6 +2,18 @@
 
 Status: plan, for review — 2026-09-23. Owner: Claude.
 
+## Implementation notes
+
+- `HistoryArchive` currently owns `conversation-history.json` and stores up to
+  40 complete history bodies. `upsertHistoryConversation` is a pure in-memory
+  transition; persistence happens through `saveSidebarSession`.
+- Restore, rename, and delete are also pure `ConversationOps` transitions.
+  File-backed archive reads and writes must be coordinated by their caller in
+  `ConversationTabs` / `sessionPersistence`, then reflected in those transitions.
+- The requested new `ArchivedSessions.ts` module will own only the overflow
+  archive index and body files; the existing `HistoryArchive.ts` remains the
+  owner of recent history.
+
 ## Problem
 
 The history panel shows at most 40 chats per workspace, and the 41st archive

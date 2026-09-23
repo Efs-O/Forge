@@ -66,6 +66,7 @@ overlaps with an existing owner, extend the owner instead.
 | Missing-image notices to the user                    | `src/sidebar/imageNotices.ts`            |
 | Session load/save/migrate (workspaceState)           | `src/sidebar/sessionPersistence.ts`      |
 | Archived-conversation file (history out of memento)  | `src/sidebar/HistoryArchive.ts`          |
+| Overflow archived-session bodies and index           | `src/sidebar/ArchivedSessions.ts`        |
 | Session -> webview projections (rows, metas, counts) | `src/sidebar/sessionProjections.ts`      |
 | First-run setup wizard                               | `src/sidebar/FirstRunWizard.ts`          |
 | Add-model setup wizard                               | `src/sidebar/AddModelWizard.ts`          |

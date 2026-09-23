@@ -35,6 +35,8 @@ import {
   type ConversationRuntime,
 } from './sessionTypes';
 import { getLogger } from '../util/logger';
+import type { ArchivedSessions } from './ArchivedSessions';
+import { persistedToRuntime } from './sessionPersistence';
 
 const log = getLogger();
 
@@ -65,6 +67,7 @@ export interface ConversationTabsDeps {
    */
   refreshUi: (options?: { pointerOnly?: boolean }) => void;
   isConversationEvictable: (id: string) => boolean;
+  archivedSessions?: ArchivedSessions;
 }
 
 export class ConversationTabs {
@@ -215,7 +218,25 @@ export class ConversationTabs {
     });
   }
   async deleteConversation(id: string): Promise<void> {
-    const sidebar = this.deps.getSidebar();
+    let sidebar = this.deps.getSidebar();
+    if (!sidebar.history.some((item) => item.id === id)) {
+      const row = this.deps.archivedSessions?.list().find((item) => item.id === id);
+      if (row)
+        sidebar = {
+          ...sidebar,
+          history: [
+            ...sidebar.history,
+            {
+              id: row.id,
+              title: row.title,
+              createdAt: row.createdAt,
+              updatedAt: row.updatedAt,
+              messages: [],
+              ...(row.active_model ? { active_model: row.active_model } : {}),
+            },
+          ],
+        };
+    }
     const conversation = sidebar.conversations.find((c) => c.id === id);
     const archived = sidebar.history.find((c) => c.id === id);
     const target = conversation ?? archived;
@@ -235,8 +256,9 @@ export class ConversationTabs {
       await this.deps.agentLoop.disposeConversation(id);
       await this.deps.checkpoints.disposeConversation(id);
     }
-    const result = opDeleteConversation(this.deps.getSidebar(), id);
+    const result = opDeleteConversation(sidebar, id);
     if (!('ok' in result)) return;
+    this.deps.archivedSessions?.delete(id);
     this.deps.setSidebar(result.sidebar);
     this.deps.failureTracker.reset();
     const nextActive = this.deps
@@ -255,14 +277,29 @@ export class ConversationTabs {
    */
   rename(id: string, title: string): void {
     if (!title.trim()) return;
-    const result = opRenameConversation(this.deps.getSidebar(), id, deriveTitle(title));
+    const sidebar = this.deps.getSidebar();
+    if (!sidebar.history.some((item) => item.id === id)) {
+      const row = this.deps.archivedSessions?.list().find((item) => item.id === id);
+      if (row) {
+        this.deps.archivedSessions?.rename(id, deriveTitle(title));
+        this.deps.postSessionSync();
+        return;
+      }
+    }
+    const result = opRenameConversation(sidebar, id, deriveTitle(title));
     if (!('ok' in result)) return;
+    this.deps.archivedSessions?.rename(id, deriveTitle(title));
     this.deps.setSidebar(result.sidebar);
     this.deps.refreshUi();
   }
 
   restore(id: string, options: { activate?: boolean } = {}): ConversationRuntime | undefined {
     let sidebar = this.deps.getSidebar();
+    if (!sidebar.history.some((item) => item.id === id)) {
+      const stored = this.deps.archivedSessions?.read(id);
+      if (stored)
+        sidebar = { ...sidebar, history: [...sidebar.history, persistedToRuntime(stored)] };
+    }
     let result = opRestoreConversation(sidebar, id, options);
     if ('atCap' in result && result.atCap) {
       const archived = opArchiveLeastRecent(sidebar, (conversation) =>
@@ -285,6 +322,7 @@ export class ConversationTabs {
     if ('notFound' in result) return undefined;
     if (!('ok' in result)) return undefined;
     this.deps.setSidebar(result.sidebar);
+    this.deps.archivedSessions?.delete(id);
     if (options.activate === false) {
       this.deps.persistSession();
       this.deps.postSessionSync();

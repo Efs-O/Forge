@@ -12,6 +12,7 @@ import { getLogger } from '../util/logger';
 import type { ChatMessage } from '../llm/types';
 import type { CompactionState } from './compactionTypes';
 import type { HistoryArchive } from './HistoryArchive';
+import type { ArchivedSessions } from './ArchivedSessions';
 import {
   ACTIVE_ID_KEY,
   HISTORY_KEY_LEGACY,
@@ -117,7 +118,7 @@ export function createDefaultSession(): SidebarRuntime {
   };
 }
 
-function persistedToRuntime(p: ConversationPersisted): ConversationRuntime {
+export function persistedToRuntime(p: ConversationPersisted): ConversationRuntime {
   return {
     id: p.id,
     title: p.title,
@@ -248,9 +249,7 @@ export function upsertHistoryConversation(
     archived,
     ...session.history.filter((item) => item.id !== archived.id),
   ]);
-  session.history = merged
-    .sort((a, b) => b.updatedAt - a.updatedAt)
-    .slice(0, MAX_HISTORY_CONVERSATIONS);
+  session.history = merged.sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 function migrateLegacyHistory(
@@ -363,7 +362,21 @@ export function saveSidebarSession(
   workspaceState: Memento,
   session: SidebarRuntime,
   archive?: HistoryArchive,
+  overflow?: ArchivedSessions,
 ): void {
+  session.history.sort((a, b) => b.updatedAt - a.updatedAt);
+  if (overflow && session.history.length > MAX_HISTORY_CONVERSATIONS) {
+    const evicted = session.history.slice(MAX_HISTORY_CONVERSATIONS);
+    for (const conversation of evicted)
+      overflow.put(
+        runtimeToPersisted({
+          activeConversationId: conversation.id,
+          conversations: [conversation],
+          history: [],
+        }).conversations[0]!,
+      );
+    session.history = session.history.slice(0, MAX_HISTORY_CONVERSATIONS);
+  }
   const inFile = archive?.save(session.history, () => session.history.map(conversationToPersisted));
   persistMemento(
     workspaceState,

@@ -10,6 +10,11 @@
   stopped with the raw tag in the chat. Forge now reads it as the tool call
   it is and keeps going.
 
+### Archived conversations are preserved
+
+- Chats beyond the recent history window are stored as individual archive
+  records so they can be recovered without rewriting the recent history file.
+
 ## 0.16.40
 
 ### No false "orphan verdict" warning after a stand-in answers (2026-09-23)

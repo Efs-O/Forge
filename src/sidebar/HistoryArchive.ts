@@ -14,6 +14,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { z } from 'zod';
 import { writeFileAtomicSync } from '../util/atomicWrite';
+import { ArchivedSessions } from './ArchivedSessions';
 import { getLogger } from '../util/logger';
 import {
   conversationPersistedSchema,
@@ -40,7 +41,11 @@ export class HistoryArchive {
    */
   private blocked = false;
 
-  constructor(readonly filePath: string) {}
+  readonly overflow: ArchivedSessions;
+
+  constructor(readonly filePath: string) {
+    this.overflow = new ArchivedSessions(path.dirname(filePath));
+  }
 
   /** The archive for a workspace storage folder; none without one (no folder open). */
   static inStorageDir(storageDir: string | undefined): HistoryArchive | undefined {
