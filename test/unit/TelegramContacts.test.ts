@@ -121,11 +121,39 @@ describe('Telegram contact service', () => {
 
   it('tells a refused stranger how to ask for access, privately and in a group', async () => {
     const value = await fixture();
-    await value.service.handleNonOwner(textEvent('20', 'hello'));
+    // Private: the reason is the one message (acknowledgeTelegramDisposition sends it).
+    const privately = await value.service.handleNonOwner(textEvent('20', 'hello'));
+    expect(privately).toMatchObject({
+      kind: 'rejected',
+      reason: expect.stringContaining('send /start'),
+    });
     expect(value.contacts.pending()).toHaveLength(0);
-    expect(value.channel.sent.at(-1)?.text).toContain('send /start');
+    expect(value.channel.sent).toHaveLength(0);
     await value.service.handleGroup(textEvent('20', 'hello', GROUP_ID));
     expect(value.channel.sent.at(-1)?.text).toContain('send /start');
+  });
+
+  it('finds a contact approved with a trailing period, with or without accents', async () => {
+    const value = await fixture();
+    await value.service.handleNonOwner(textEvent('20', '/start'));
+    const pending = value.contacts.pending()[0]!;
+    await value.service.handleOwnerCommand(textEvent('1', `/contact approve ${pending.id} Χαρά.`));
+    expect(value.contacts.contacts(true)[0]!.displayName).toBe('Χαρά');
+    for (const name of ['Χαρά', 'χαρα', 'ΧΑΡΑ.']) {
+      await value.service.handleGroup(textEvent('1', `/contact link ${name}`, GROUP_ID));
+      expect(value.contacts.pendingGroupLink(GROUP_ID)).toBeDefined();
+    }
+  });
+
+  it('refuses a private owner command once, with the id to use', async () => {
+    const value = await fixture();
+    const before = value.channel.sent.length;
+    const result = await value.service.handleOwnerCommand(textEvent('1', '/contact bind 737154da'));
+    expect(result).toMatchObject({
+      kind: 'rejected',
+      reason: expect.stringContaining('/contact link'),
+    });
+    expect(value.channel.sent).toHaveLength(before);
   });
 
   it('links one private group and answers the approved contact in that group', async () => {

@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'crypto';
-import { MAX_CONTACT_TEXT, contactNameMatches } from './ContactPolicy';
+import { MAX_CONTACT_TEXT, cleanContactDisplayName, contactNameMatches } from './ContactPolicy';
 import type { RemoteAuditLog } from './RemoteAuditLog';
 import type { RemoteAuth } from './RemoteAuth';
 import { RemoteContactStore } from './RemoteContactStore';
@@ -123,7 +123,7 @@ export class TelegramContactCommands {
     }
     const approval = /^\/contact\s+approve\s+(\S+)\s+(.+)$/is.exec(text);
     if (approval) {
-      const displayName = approval[2]!.trim();
+      const displayName = cleanContactDisplayName(approval[2]!);
       const pending = this.findByShortId(
         approval[1]!,
         this.store.pending().map((item) => item.id),
@@ -147,11 +147,12 @@ export class TelegramContactCommands {
     const bind = /^\/contact\s+bind\s+(\S+)$/i.exec(text);
     if (bind) {
       const result = await this.store.confirmGroupLink(bind[1]!, event.senderId);
+      await this.audit?.record(event, `contact_group_bind_${result}`).catch(() => undefined);
+      if (result !== 'confirmed') return this.sendOwnerUsage(event, this.groupLinkResult(result));
       await this.channel.send(event.chatId, this.groupLinkResult(result), {
         signal: this.signal,
       });
-      await this.audit?.record(event, `contact_group_bind_${result}`).catch(() => undefined);
-      return { kind: result === 'confirmed' ? 'handled' : 'rejected', reason: result };
+      return { kind: 'handled' };
     }
     const disable = /^\/contact\s+disable\s+(.+)$/is.exec(text);
     if (disable) return this.changeGroupState(event, disable[1]!.trim(), 'disable');
@@ -276,13 +277,22 @@ export class TelegramContactCommands {
   private groupLinkResult(result: string): string {
     return result === 'confirmed'
       ? 'Forge: group linked. The approved contact can now chat in this private group.'
-      : `Forge: group link could not be confirmed (${result}).`;
+      : result === 'missing'
+        ? 'Forge: no group link with that id. Send /contact link <name> in the group first, then use the id it replies with (not the pending-request id).'
+        : `Forge: group link could not be confirmed (${result}).`;
   }
 
+  /**
+   * A private chat's rejection reason is already sent by
+   * acknowledgeTelegramDisposition; sending it here too showed every refusal
+   * twice. Only a group needs the explicit send.
+   */
   private sendOwnerUsage(event: ContactTextEvent, text: string): Promise<RemoteInboundDisposition> {
-    return this.channel
-      .send(event.chatId, text, { signal: this.signal })
-      .then(() => ({ kind: 'rejected', reason: text }));
+    const sent =
+      event.chatType === 'private'
+        ? Promise.resolve()
+        : this.channel.send(event.chatId, text, { signal: this.signal });
+    return sent.then(() => ({ kind: 'rejected', reason: text }));
   }
 
   private notifyOwner(ownerId: string, text: string): Promise<void> {

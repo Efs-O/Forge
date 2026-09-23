@@ -88,15 +88,12 @@ export class TelegramContactService {
     if (/^\/start(?:@\S+)?(?:\s|$)/i.test(event.text.trim())) return this.startRequest(event);
     const contact = this.store.byTelegram(event.senderId, event.chatId);
     if (!contact || contact.status !== 'active') {
+      // Private chat: acknowledgeTelegramDisposition sends the reason, once.
       await this.audit?.record(event, 'contact_unknown_rejected').catch(() => undefined);
-      await this.channel.send(event.chatId, contactPrivateText(), { signal: this.abort.signal });
-      return { kind: 'rejected', reason: 'sender is not an approved contact' };
+      return { kind: 'rejected', reason: contactPrivateText() };
     }
     await this.audit?.record(event, 'contact_private_rejected').catch(() => undefined);
-    await this.channel.send(event.chatId, contactGroupRequiredText(), {
-      signal: this.abort.signal,
-    });
-    return { kind: 'rejected', reason: 'contact requests must use the linked group' };
+    return { kind: 'rejected', reason: contactGroupRequiredText() };
   }
 
   async handleGroup(event: RemoteInboundEvent): Promise<RemoteInboundDisposition | undefined> {

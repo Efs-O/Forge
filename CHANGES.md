@@ -10,6 +10,17 @@
   accepted with `@botname` or extra text after it; before, only the bare
   command created a request.
 
+### Telegram contacts: names match loosely, refusals arrive once (2026-09-23)
+
+- A phone keyboard's automatic period saved a contact as "Χαρά.", so
+  `/contact link Χαρά` said "contact not found". Approval now drops trailing
+  punctuation, and contact names match regardless of accents, case and
+  trailing punctuation.
+- Contact refusals and usage messages in a private chat were sent twice
+  ("usage: …" then "Forge: usage: …"). They now arrive once.
+- `/contact bind` with an unknown id now explains that it needs the id from
+  the group's `/contact link` reply, not the pending-request id.
+
 ## 0.16.48
 
 ### Telegram follows only the chat it is switched to (2026-09-23)
