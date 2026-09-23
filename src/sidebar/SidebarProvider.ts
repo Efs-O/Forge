@@ -367,7 +367,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           ...this.agentLoop.pendingApprovalConversationIds(),
           ...this.questions.pendingConversationIds(),
         ]),
-        this.historyArchive?.overflow.list() ?? [],
+        (this.historyArchive?.overflow.list() ?? []).filter(
+          (row) =>
+            !this.sidebar.conversations.some((conversation) => conversation.id === row.id) &&
+            !this.sidebar.history.some((conversation) => conversation.id === row.id),
+        ),
       ),
     );
   }

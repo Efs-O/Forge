@@ -16,6 +16,8 @@
   records so they can be recovered without rewriting the recent history file.
 - A collapsed **Archived sessions** section lists older chats and lets you open,
   rename, or delete them.
+- Older chats with a matching workspace in Forge's session logs can be brought
+  into the archive and reopened with their user, assistant, and tool turns.
 
 ## 0.16.40
 

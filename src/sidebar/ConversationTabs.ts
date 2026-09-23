@@ -322,7 +322,6 @@ export class ConversationTabs {
     if ('notFound' in result) return undefined;
     if (!('ok' in result)) return undefined;
     this.deps.setSidebar(result.sidebar);
-    this.deps.archivedSessions?.delete(id);
     if (options.activate === false) {
       this.deps.persistSession();
       this.deps.postSessionSync();
@@ -331,6 +330,7 @@ export class ConversationTabs {
       this.deps.failureTracker.reset();
       this.deps.refreshUi();
     }
+    this.deps.archivedSessions?.delete(id);
     return result.sidebar.conversations.find((conv) => conv.id === id);
   }
 

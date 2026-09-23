@@ -43,13 +43,21 @@ export class HistoryArchive {
 
   readonly overflow: ArchivedSessions;
 
-  constructor(readonly filePath: string) {
-    this.overflow = new ArchivedSessions(path.dirname(filePath));
+  constructor(
+    readonly filePath: string,
+    workspacePath?: string,
+  ) {
+    this.overflow = new ArchivedSessions(path.dirname(filePath), workspacePath);
   }
 
   /** The archive for a workspace storage folder; none without one (no folder open). */
-  static inStorageDir(storageDir: string | undefined): HistoryArchive | undefined {
-    return storageDir ? new HistoryArchive(path.join(storageDir, HISTORY_ARCHIVE_FILE)) : undefined;
+  static inStorageDir(
+    storageDir: string | undefined,
+    workspacePath?: string,
+  ): HistoryArchive | undefined {
+    return storageDir
+      ? new HistoryArchive(path.join(storageDir, HISTORY_ARCHIVE_FILE), workspacePath)
+      : undefined;
   }
 
   /**

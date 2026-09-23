@@ -1,6 +1,6 @@
 # Archived sessions: keep every chat, list them like Claude Code
 
-Status: plan, for review — 2026-09-23. Owner: Claude.
+Status: implemented in three phases — 2026-09-23.
 
 ## Implementation notes
 

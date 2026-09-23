@@ -49,6 +49,8 @@
   overflow-y: auto;
 }
 
+#history-archive-list { max-height: 316px; overflow-y: auto; }
+
 .history-item-row {
   display: flex;
   align-items: stretch;

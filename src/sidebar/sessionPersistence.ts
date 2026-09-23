@@ -302,6 +302,10 @@ export function loadSidebarSession(
     }
 
     persistMemento(workspaceState, HISTORY_KEY_LEGACY, undefined);
+    archive?.overflow.list([
+      ...d.conversations.map((conversation) => conversation.id),
+      ...(d.history ?? []).map((conversation) => conversation.id),
+    ]);
     return {
       activeConversationId: activeId,
       conversations: d.conversations.map(persistedToRuntime),
@@ -332,9 +336,11 @@ export function loadSidebarSession(
     // Preserve the legacy record until a later successful cleanup. Clearing it
     // here could erase the only durable copy when the replacement hits quota.
     persistMemento(workspaceState, SESSION_KEY_V1, runtimeToPersisted(migrated));
+    archive?.overflow.list(migrated.conversations.map((conversation) => conversation.id));
     return migrated;
   }
 
+  archive?.overflow.list();
   return createDefaultSession();
 }
 
@@ -375,6 +381,8 @@ export function saveSidebarSession(
           history: [],
         }).conversations[0]!,
       );
+    session.history = session.history.slice(0, MAX_HISTORY_CONVERSATIONS);
+  } else if (!overflow) {
     session.history = session.history.slice(0, MAX_HISTORY_CONVERSATIONS);
   }
   const inFile = archive?.save(session.history, () => session.history.map(conversationToPersisted));

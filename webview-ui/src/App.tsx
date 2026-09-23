@@ -265,8 +265,14 @@ export function App(): React.ReactElement {
   );
 
   useEffect(() => {
-    if (state.history.length === 0 && state.tabs.length === 0) setHistoryExpanded(false);
-  }, [state.history.length, state.tabs.length]);
+    if (
+      state.history.length === 0 &&
+      (state.archived?.length ?? 0) === 0 &&
+      state.tabs.length === 0
+    ) {
+      setHistoryExpanded(false);
+    }
+  }, [state.archived?.length, state.history.length, state.tabs.length]);
 
   const handleRunSlashCommand = useCallback((commandId: ForgeSlashCommandId) => {
     vscode.postMessage({ type: 'runSlashCommand', commandId });

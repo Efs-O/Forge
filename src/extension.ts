@@ -293,7 +293,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     () => activeConfigPath,
     cliSessions,
     chatAttachments,
-    HistoryArchive.inStorageDir(context.storageUri?.fsPath),
+    HistoryArchive.inStorageDir(context.storageUri?.fsPath, workspaceRoot),
   );
   // Best-effort, after the session is loaded: an attachment whose conversation
   // is gone is unreachable, and nothing else ever deletes it.
