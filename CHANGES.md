@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## 0.16.35
+## 0.16.36
 
 ### Mid-turn messages reach Forge at the next safe gap (2026-09-22)
 
@@ -17,6 +17,18 @@
   turn to end. The chat is told the message was seen by the running turn.
 - A message with attachments, or one from a chat that cannot be reached, is
   left in the queue and runs as the next turn, exactly as before.
+
+### A failing mid-turn tell source is surfaced, and every eligible tell is claimed (2026-09-23)
+
+- **A mid-turn tell source that fails is no longer silently dropped.** The
+  drain's settle step always runs, so a source that throws — and therefore
+  yields no messages — still surfaces its error instead of vanishing. Messages
+  an earlier source already drained still reach the turn.
+- **Every eligible queued Telegram message is claimed, not just the first.**
+  Three quick messages sent while a turn runs now reach it in one tool round
+  instead of one per round; each is finished as seen by the running turn.
+
+## 0.16.35
 
 ### Remembered notes survive a compaction you can find them after (2026-09-22)
 
