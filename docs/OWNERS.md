@@ -256,7 +256,7 @@ overlaps with an existing owner, extend the owner instead.
 | Truncated tool call: detection + recovery    | `src/agent/truncationRecovery.ts`            |
 | Repeated identical tool call detection       | `src/agent/ToolLoopGuard.ts`                 |
 | Fit-only tool-result excerpting (model copy) | `src/agent/toolResultContext.ts`             |
-| Superseded read_file elision (model copy)    | `src/agent/staleReadSupersede.ts`            |
+| Re-read annotation (model copy)              | `src/agent/staleReadSupersede.ts`            |
 | Chat message / tool call wire types          | `src/llm/types.ts`                           |
 | Buffered in-host chat for POST /chat         | `src/llm/ControlChatProxy.ts`                |
 | xAI token resolution (SecretStorage/OAuth)   | `src/llm/XaiAuth.ts`                         |

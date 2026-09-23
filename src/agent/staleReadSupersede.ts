@@ -2,7 +2,8 @@ import type { ChatMessage } from '../llm/types';
 import { isCapTruncated } from '../tools/resultCap';
 
 /**
- * Model-facing elision of `read_file` results that a later read replaced.
+ * Model-facing annotation of `read_file` results that re-read a path already
+ * read earlier in the same conversation.
  *
  * `read_file` is 70% of Forge's whole tool-result token bill — not because any
  * one result is large (the median is ~1,000 tokens) but because a file read at
@@ -14,30 +15,30 @@ import { isCapTruncated } from '../tools/resultCap';
  * shown two versions of one file with nothing marking which is current — and
  * after an `edit_file`, the stale copy is the one it read first.
  *
- * THE SAFETY RULE: elide an earlier result ONLY when a strictly later,
- * complete `read_file` result for the same path is present in the same array.
- * The authoritative content is then provably still in context, so nothing is
- * lost. A read whose file was later edited but NOT re-read is deliberately
- * left alone — stale, but the only copy the model has.
+ * THE SAFETY RULE: annotate result *i* ONLY when a strictly earlier, complete
+ * `read_file` result for the same path is present in the same array. The
+ * condition looks backwards only, which is what makes it append-only: the
+ * earlier result is never touched, so the prompt stays a byte prefix of the
+ * next round's prompt.
  *
  * Operates on the model-facing copy built in `ModelTurn.prepareMessages`.
  * `conv.messages` — sidebar, persistence, and the exact bytes
  * `read_tool_result` recovers — is never touched.
  *
- * See docs/plans/TOKEN_EFFICIENCY_PLAN.md §3.
+ * See docs/plans/PREFIX_REWRITES_PLAN.md §3.
  */
 
-/** Marker text left in place of a superseded result. */
-function supersededNotice(path: string): string {
+/** Marker text appended to the later result. */
+function rereadNotice(path: string): string {
   return (
-    `[Forge: superseded — this file was read again later in this conversation. ` +
-    `The current contents of ${path} are in that later result.]`
+    `\n\n[Forge: this replaces your earlier read of ${path}. ` +
+    `That earlier copy is stale; use this one.]`
   );
 }
 
 /**
  * A result that is not a complete copy of the file must never stand in as the
- * authoritative later read, and must never be elided itself: for an error or a
+ * authoritative later read, and must never be annotated: for an error or a
  * truncation notice, the text IS the information (it tells the model to retry
  * or to page through `read_tool_result`).
  */
@@ -52,7 +53,7 @@ function readFilePath(argumentsJson: string): string | undefined {
   try {
     parsed = JSON.parse(argumentsJson);
   } catch {
-    // Malformed args mean no reliable key. No key, no supersede.
+    // Malformed args mean no reliable key. No key, no annotation.
     return undefined;
   }
   if (typeof parsed !== 'object' || parsed === null) return undefined;
@@ -62,7 +63,7 @@ function readFilePath(argumentsJson: string): string | undefined {
   return path.replace(/\\/g, '/');
 }
 
-export function supersedeStaleReads(messages: ChatMessage[]): ChatMessage[] {
+export function annotateRereads(messages: ChatMessage[]): ChatMessage[] {
   // Pair by tool_call_id, never positionally: in-process every tool row
   // carries its id, so the mapping is exact. (The session LOG drops tool
   // names, which is why the offline analyzer must pair by position — that
@@ -78,23 +79,23 @@ export function supersedeStaleReads(messages: ChatMessage[]): ChatMessage[] {
   }
   if (readPathById.size === 0) return messages;
 
-  // Last complete read of each path wins.
-  const latestIndexByPath = new Map<string, number>();
-  messages.forEach((message, index) => {
-    if (message.role !== 'tool' || message.tool_call_id === undefined) return;
-    if (typeof message.content !== 'string' || !isCompleteRead(message.content)) return;
-    const path = readPathById.get(message.tool_call_id);
-    if (path !== undefined) latestIndexByPath.set(path, index);
-  });
+  // Track which paths have already been completely read.
+  const seenPaths = new Set<string>();
 
   let changed = false;
-  const result = messages.map((message, index) => {
+  const result = messages.map((message) => {
     if (message.role !== 'tool' || message.tool_call_id === undefined) return message;
     if (typeof message.content !== 'string' || !isCompleteRead(message.content)) return message;
     const path = readPathById.get(message.tool_call_id);
-    if (path === undefined || latestIndexByPath.get(path) === index) return message;
+    if (path === undefined) return message;
+    if (!seenPaths.has(path)) {
+      // First complete read of this path — record it and move on.
+      seenPaths.add(path);
+      return message;
+    }
+    // A later complete read of a path already seen — append the note.
     changed = true;
-    return { ...message, content: supersededNotice(path) };
+    return { ...message, content: message.content + rereadNotice(path) };
   });
   return changed ? result : messages;
 }

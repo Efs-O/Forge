@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { supersedeStaleReads } from '../../src/agent/staleReadSupersede';
+import { annotateRereads } from '../../src/agent/staleReadSupersede';
 import type { ChatMessage } from '../../src/llm/types';
 
 function read(id: string, path: string): ChatMessage {
@@ -16,8 +16,8 @@ function result(id: string, content: string): ChatMessage {
   return { role: 'tool', tool_call_id: id, name: 'read_file', content };
 }
 
-describe('supersedeStaleReads', () => {
-  it('elides an earlier read once the same path is read again', () => {
+describe('annotateRereads', () => {
+  it('appends a note to the later read, leaving the earlier copy byte-identical', () => {
     const messages: ChatMessage[] = [
       { role: 'user', content: 'Fix the bug.' },
       read('a', 'src/app.ts'),
@@ -26,21 +26,23 @@ describe('supersedeStaleReads', () => {
       result('b', 'export const version = 2;'),
     ];
 
-    const out = supersedeStaleReads(messages);
+    const out = annotateRereads(messages);
 
-    expect(out[2]?.content).toContain('superseded');
-    expect(out[2]?.content).toContain('src/app.ts');
-    expect(out[4]?.content).toBe('export const version = 2;');
+    // The earlier copy is untouched.
+    expect(out[2]?.content).toBe('export const version = 1;');
+    // The later copy carries the note.
+    expect(out[4]?.content).toContain('export const version = 2;');
+    expect(out[4]?.content).toContain('[Forge: this replaces your earlier read of src/app.ts.');
+    expect(out[4]?.content).toContain('That earlier copy is stale; use this one.');
   });
 
   it('leaves a single read untouched', () => {
     const messages: ChatMessage[] = [read('a', 'src/app.ts'), result('a', 'contents')];
-    expect(supersedeStaleReads(messages)).toBe(messages);
+    expect(annotateRereads(messages)).toBe(messages);
   });
 
   it('keeps a stale read that was never re-read, even after an edit', () => {
-    // The whole safety rule: without a later copy, eliding destroys the only
-    // version of the file the model has.
+    // The whole safety rule: without a later copy, there is nothing to annotate.
     const messages: ChatMessage[] = [
       read('a', 'src/app.ts'),
       result('a', 'export const version = 1;'),
@@ -57,7 +59,7 @@ describe('supersedeStaleReads', () => {
       },
       { role: 'tool', tool_call_id: 'e', name: 'edit_file', content: 'ok' },
     ];
-    expect(supersedeStaleReads(messages)).toBe(messages);
+    expect(annotateRereads(messages)).toBe(messages);
   });
 
   it('treats different paths independently', () => {
@@ -70,11 +72,13 @@ describe('supersedeStaleReads', () => {
       result('c', 'A2'),
     ];
 
-    const out = supersedeStaleReads(messages);
+    const out = annotateRereads(messages);
 
-    expect(out[1]?.content).toContain('superseded');
+    // 'a' is untouched; 'b' is untouched; 'c' (re-read of a.ts) gets the note.
+    expect(out[1]?.content).toBe('A1');
     expect(out[3]?.content).toBe('B1');
-    expect(out[5]?.content).toBe('A2');
+    expect(out[5]?.content).toContain('A2');
+    expect(out[5]?.content).toContain('[Forge: this replaces your earlier read of src/a.ts.');
   });
 
   it('normalizes separators so one file is not treated as two', () => {
@@ -84,10 +88,15 @@ describe('supersedeStaleReads', () => {
       read('b', 'src/app.ts'),
       result('b', 'new'),
     ];
-    expect(supersedeStaleReads(messages)[1]?.content).toContain('superseded');
+    const out = annotateRereads(messages);
+    // The earlier copy is untouched.
+    expect(out[1]?.content).toBe('old');
+    // The later copy gets the note with the normalized path.
+    expect(out[3]?.content).toContain('new');
+    expect(out[3]?.content).toContain('[Forge: this replaces your earlier read of src/app.ts.');
   });
 
-  it('never elides or trusts an errored or truncated result', () => {
+  it('does not annotate or trust an errored or truncated result', () => {
     const messages: ChatMessage[] = [
       read('a', 'src/app.ts'),
       result('a', 'export const version = 1;'),
@@ -97,12 +106,15 @@ describe('supersedeStaleReads', () => {
       result('c', 'partial\n\n[truncated by read_file — showing 10 of 99 chars]'),
     ];
 
-    const out = supersedeStaleReads(messages);
+    const out = annotateRereads(messages);
 
-    // 'a' is the last COMPLETE read, so it stays; the incomplete ones stay too.
+    // 'a' is the only complete read, so it stays as the baseline.
     expect(out[1]?.content).toBe('export const version = 1;');
+    // 'b' is an error — neither triggers nor receives the note.
     expect(out[3]?.content).toBe('Error: ENOENT');
+    // 'c' is truncated — neither triggers nor receives the note.
     expect(out[5]?.content).toContain('[truncated by');
+    expect(out[5]?.content).not.toContain('[Forge: this replaces');
   });
 
   it('ignores calls whose arguments do not parse', () => {
@@ -118,7 +130,7 @@ describe('supersedeStaleReads', () => {
       read('b', 'src/app.ts'),
       result('b', 'other'),
     ];
-    expect(supersedeStaleReads(messages)[1]?.content).toBe('contents');
+    expect(annotateRereads(messages)[1]?.content).toBe('contents');
   });
 
   it('does not mutate the input array or its messages', () => {
@@ -130,9 +142,28 @@ describe('supersedeStaleReads', () => {
       result('b', 'export const version = 2;'),
     ];
 
-    const out = supersedeStaleReads(messages);
+    const out = annotateRereads(messages);
 
     expect(out).not.toBe(messages);
     expect(original.content).toBe('export const version = 1;');
+  });
+
+  it('annotates the third read of a path too', () => {
+    const messages: ChatMessage[] = [
+      read('a', 'src/app.ts'),
+      result('a', 'v1'),
+      read('b', 'src/app.ts'),
+      result('b', 'v2'),
+      read('c', 'src/app.ts'),
+      result('c', 'v3'),
+    ];
+
+    const out = annotateRereads(messages);
+
+    expect(out[1]?.content).toBe('v1');
+    expect(out[3]?.content).toContain('v2');
+    expect(out[3]?.content).toContain('[Forge: this replaces');
+    expect(out[5]?.content).toContain('v3');
+    expect(out[5]?.content).toContain('[Forge: this replaces');
   });
 });

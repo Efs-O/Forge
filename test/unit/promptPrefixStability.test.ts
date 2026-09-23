@@ -18,8 +18,15 @@
 import { describe, expect, it } from 'vitest';
 import { injectTurnContext } from '../../src/sidebar/turnContext';
 import { PLAN_GUIDANCE, renderPlan } from '../../src/tools/planTools';
+import { annotateRereads } from '../../src/agent/staleReadSupersede';
+import { nudgeTruncatedResults } from '../../src/agent/truncatedResultNudge';
+import { stampToolResultClocks } from '../../src/agent/toolResultClock';
+import { prepareToolResultContext } from '../../src/agent/toolResultContext';
 import { applyCompactionWindow } from '../../src/sidebar/compactionWindow';
+import { ageOutImageParts } from '../../src/sidebar/imageParts';
+import { injectSystemPrompt } from '../../src/llm/SystemPromptInjector';
 import type { ChatMessage } from '../../src/llm/types';
+import type { ModelConfig, LlamaServerConfig } from '../../src/config/types';
 import type { ConversationPlan, PlanItem } from '../../src/sidebar/sessionTypes';
 
 const ITEMS: PlanItem[] = [
@@ -310,5 +317,109 @@ describe('the stored transcript', () => {
     const messages = injectTurnContext(conversation(), { plan: PLAN });
     const system = messages.filter((message) => message.role === 'system');
     expect(JSON.stringify(system)).not.toContain('authoritative specification');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix A: annotateRereads — prefix property test (PREFIX_REWRITES_PLAN.md §8)
+// ---------------------------------------------------------------------------
+
+describe('Fix A: annotateRereads prefix property', () => {
+  /**
+   * Runs the model-facing chain from `applyCompactionWindow` through
+   * `stampToolResultClocks` (image aging included, `prepareToolResultContext`
+   * with room to spare) and returns the model-facing messages.
+   */
+  function runChain(messages: ChatMessage[]): ChatMessage[] {
+    const windowed = applyCompactionWindow(messages, undefined);
+    const visible = ageOutImageParts(windowed, undefined);
+    const injected = injectSystemPrompt(visible);
+    const withTurnContext = injectTurnContext(injected, { activeFile: '/repo/a.ts' });
+    const annotated = annotateRereads(withTurnContext);
+    const nudged = nudgeTruncatedResults(annotated);
+    const stamped = stampToolResultClocks(nudged);
+    const prepared = prepareToolResultContext({
+      messages: stamped,
+      toolTokens: 0,
+      model: { name: 'test', num_ctx: 128_000 } as ModelConfig,
+      server: { default_num_ctx: 128_000 } as LlamaServerConfig,
+    });
+    return prepared.messages;
+  }
+
+  it('output(messages[0..k]) is a byte prefix of output(messages[0..k+n]) when the extension re-reads an early file', () => {
+    // Build a base conversation: user asks, assistant reads a file, gets result.
+    const base: ChatMessage[] = [
+      { role: 'user', content: 'Fix the bug in app.ts.' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          { id: 'r1', type: 'function', function: { name: 'read_file', arguments: JSON.stringify({ path: 'src/app.ts' }) } },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'r1', name: 'read_file', content: 'export const version = 1;', stampedAt: 1000 },
+      { role: 'assistant', content: 'I see the bug.' },
+    ];
+
+    // The extension re-reads the same file later in the turn.
+    const extended: ChatMessage[] = [
+      ...base,
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          { id: 'r2', type: 'function', function: { name: 'read_file', arguments: JSON.stringify({ path: 'src/app.ts' }) } },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'r2', name: 'read_file', content: 'export const version = 2;', stampedAt: 2000 },
+      { role: 'assistant', content: 'Fixed.' },
+    ];
+
+    const short = runChain(base);
+    const long = runChain(extended);
+
+    // The first output must be a byte prefix of the second.
+    const divergence = firstDivergence(short, long);
+    expect(divergence === -1 || divergence >= short.length).toBe(true);
+  });
+
+  it('the earlier read_file result is byte-identical before and after the re-read', () => {
+    const base: ChatMessage[] = [
+      { role: 'user', content: 'Read the file.' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          { id: 'r1', type: 'function', function: { name: 'read_file', arguments: JSON.stringify({ path: 'src/app.ts' }) } },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'r1', name: 'read_file', content: 'export const version = 1;', stampedAt: 1000 },
+    ];
+
+    const extended: ChatMessage[] = [
+      ...base,
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          { id: 'r2', type: 'function', function: { name: 'read_file', arguments: JSON.stringify({ path: 'src/app.ts' }) } },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'r2', name: 'read_file', content: 'export const version = 2;', stampedAt: 2000 },
+    ];
+
+    const short = runChain(base);
+    const long = runChain(extended);
+
+    // The earlier result is the same bytes in both outputs.
+    const earlier = (out: ChatMessage[]) => out.find((m) => m.tool_call_id === 'r1');
+    expect(earlier(short)).toBeDefined();
+    expect(JSON.stringify(earlier(long))).toBe(JSON.stringify(earlier(short)));
+
+    // Only the later result carries the note.
+    const later = long.find((m) => m.tool_call_id === 'r2');
+    expect(later?.content).toContain('[Forge: this replaces your earlier read of src/app.ts.');
+    expect(earlier(long)?.content).not.toContain('[Forge:');
   });
 });

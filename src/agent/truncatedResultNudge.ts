@@ -14,7 +14,7 @@ import { isCapTruncated } from '../tools/resultCap';
  * instead of re-running a call that will cut at the same point.
  *
  * Operates on the model-facing copy built in `ModelTurn.prepareMessages`,
- * alongside `supersedeStaleReads`. `conv.messages` is never touched, so the
+ * alongside `annotateRereads`. `conv.messages` is never touched, so the
  * nudge is rebuilt fresh each round and never accumulates.
  */
 

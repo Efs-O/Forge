@@ -2,6 +2,16 @@
 
 ## 0.16.38
 
+### Re-reads no longer rewrite history (2026-09-23)
+
+- **`supersedeStaleReads` is now `annotateRereads`.** It no longer replaces an
+  earlier `read_file` result with a one-line notice. Instead it appends a note
+  to the LATER result: `[Forge: this replaces your earlier read of <path>. That
+  earlier copy is stale; use this one.]`. The earlier result is never touched,
+  so the prompt stays append-only and the KV cache stays warm. Previously a
+  re-read of an early file forced llama-server to re-evaluate the entire prompt
+  from token 0 (measured: 10 of 49 minutes on a 100K-token turn).
+
 ### Steer and the queue UI removed (2026-09-23)
 
 - **The sidebar steer button, `steerQueuedPrompt`, `steeringConversationIds`,
