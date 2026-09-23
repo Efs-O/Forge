@@ -57,6 +57,7 @@ import type { UserNotificationService } from './UserNotificationService';
 import { randomUUID } from 'crypto';
 import type { MidTurnInbox } from '../agent/MidTurnInbox';
 import type { MidTurnTellDrain } from '../agent/MidTurnTellDrain';
+import { HiddenChatAlerts } from './hiddenChatAlerts';
 
 export type { SidebarProviderEvents };
 /** Residency refresh while visible: cheap, but fast enough to avoid a stale dot. */
@@ -80,6 +81,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   /** The mid-turn tell composer; the remote queue registers as a source. */
   public readonly tellDrain: MidTurnTellDrain;
   private readonly hostFacade: ForgeHostFacade;
+  private readonly hiddenChatAlerts: HiddenChatAlerts;
   private readonly residency = new ResidencyPoller(
     () => this.pool.residencySignature(),
     () => this.postModels(),
@@ -148,6 +150,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         rememberClankerMode: (on) => void this.workspaceState.update('forge.clankerMode', on),
         unloadModels: () => this.unloadModels(),
         unloadActiveModel: () => this.unloadConversationModel(),
+        isConversationQueued: (id) => this.queuedConversationIds?.has(id),
       },
       {
         pool,
@@ -177,6 +180,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.requestChains = runtime.requestChains;
     this.midTurnInbox = runtime.midTurnInbox;
     this.tellDrain = runtime.tellDrain;
+    this.hiddenChatAlerts = new HiddenChatAlerts({
+      events,
+      addApprovalSink: (sink) => this.agentLoop.addApprovalSink(sink),
+      addQuestionSink: (sink) => this.questions.addSink(sink),
+      activeConversationId: () => this.sidebar.activeConversationId,
+      view: () => this.view,
+      switchConversation: (id) => this.tabs.switch(id),
+    });
     this.hostFacade = createSidebarHostFacade({
       runtime,
       getSidebar: () => this.sidebar,
@@ -208,12 +219,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     webviewView.webview.onDidReceiveMessage((raw: unknown) => {
       this.handleMessage(raw as WebviewToHost);
     });
-    webviewView.onDidChangeVisibility(() => this.residency.sync(this.view?.visible ?? false));
+    webviewView.onDidChangeVisibility(() => {
+      this.residency.sync(this.view?.visible ?? false);
+      this.hiddenChatAlerts.seen();
+    });
     webviewView.onDidDispose(() => {
-      // Cleared, not just stopped: `presentsLocally` reads this to decide
-      // whether the sidebar is showing agent questions. A stale reference would
-      // claim a dead webview is presenting them, and ask_user would fall
-      // through to nothing at all rather than to the VS Code input box.
       if (this.view === webviewView) this.view = undefined;
       this.residency.stop();
     });
@@ -222,12 +232,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   // ── Public API ────────────────────────────────────────────────────────────
 
-  /**
-   * Remote-control state, pushed in by `extension.ts` as `RemoteRuntime`
-   * lifecycle moves. Held here as well as posted because the webview asks for it
-   * on every `webviewReady`, and a reload must not have to wait for the next
-   * transport change to learn whether anything can reach this window.
-   */
   setRemoteStatus(status: { transports: string[]; paired: boolean }): void {
     this.remoteStatus = { transports: [...status.transports], paired: status.paired };
     this.post({ type: 'remoteStatus', ...this.remoteStatus });
@@ -332,8 +336,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const active = this.sidebar.conversations.find(
       (conversation) => conversation.id === this.sidebar.activeConversationId,
     );
-    // A conversation pin is the model SendPipeline will use. The picker must
-    // show that same selection, including after a restored session.
     this.post(
       buildModelsMessage(this.config, this.pool, active?.active_model ?? this.config.active_model),
     );
@@ -343,8 +345,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     transports: [],
     paired: false,
   };
+  private queuedConversationIds?: Set<string>;
 
-  /** Posts to the webview and mirrors status rows to paired chats (see `statusRowProgress`). */
   private post(msg: HostToWebview): void {
     this.view?.webview.postMessage(msg);
     const row = statusRowProgress(msg, (id) => this.agentLoop.isStreamingConv(id));
@@ -362,16 +364,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private postSessionSync(): void {
-    // The attachments prefix is resolved here rather than in the projection:
-    // `asWebviewUri` needs the live webview, and the projections are pure reads
-    // with no VS Code in them. It ships once per sync; rows carry only their
-    // relative path.
+    this.hiddenChatAlerts.seen();
     this.post(
       buildSessionSyncMessage(
         this.sidebar,
         this.agentLoop.getStreamingIds(),
         (conversation) => this.agentLoop.getSessionActiveMs(conversation),
         this.attachmentsRootUri(),
+        new Set([
+          ...this.agentLoop.pendingApprovalConversationIds(),
+          ...this.questions.pendingConversationIds(),
+        ]),
       ),
     );
   }
@@ -478,12 +481,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         openAttachment: (relativePath) => this.openAttachment(relativePath),
         resolveConfirmation: (id, approved) => this.agentLoop.resolveConfirmation(id, approved),
         recordWebviewDiagnostic: (message) => logWebviewDiagnostic(message),
+        queuedConversationIds: (ids) => (this.queuedConversationIds = new Set(ids)),
       },
       msg,
     );
   }
 
   async dispose(): Promise<void> {
+    this.hiddenChatAlerts.dispose();
     this.residency.stop();
     this.budget.dispose();
     this.review.dispose();

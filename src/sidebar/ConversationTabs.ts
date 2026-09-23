@@ -18,6 +18,7 @@ import type { RequestChainLifecycle } from './RequestChainLifecycle';
 import { isLocalModel } from '../backend/ModelHeuristics';
 import {
   opClearMessages,
+  opArchiveLeastRecent,
   opCloseConversation,
   opDeleteConversation,
   opNewConversation,
@@ -63,6 +64,7 @@ export interface ConversationTabsDeps {
    * full 16 MB rebuild on the extension host.
    */
   refreshUi: (options?: { pointerOnly?: boolean }) => void;
+  isConversationEvictable: (id: string) => boolean;
 }
 
 export class ConversationTabs {
@@ -89,15 +91,22 @@ export class ConversationTabs {
     // Pin the current selection onto the new tab. Left unpinned it tracked the
     // global default, so switching to another tab and back silently re-pointed
     // this one at that tab's model.
-    const result = opNewConversation(
-      this.deps.getSidebar(),
-      this.deps.getConfig().active_model,
-      options,
-    );
+    let sidebar = this.deps.getSidebar();
+    let result = opNewConversation(sidebar, this.deps.getConfig().active_model, options);
     if (result.atCap) {
-      void vscode.window.showWarningMessage(
-        `Forge: maximum ${MAX_CONVERSATIONS} conversations. Close one to add another.`,
+      // Archive first, then persist the updated open set. Load-time dedupe in
+      // sessionPersistence keeps the open copy if a crash splits those writes.
+      const archived = opArchiveLeastRecent(sidebar, (conversation) =>
+        this.deps.isConversationEvictable(conversation.id),
       );
+      if (archived) {
+        sidebar = archived;
+        this.deps.setSidebar(sidebar);
+        result = opNewConversation(sidebar, this.deps.getConfig().active_model, options);
+      }
+    }
+    if (result.atCap) {
+      void vscode.window.showWarningMessage(`Forge: all ${MAX_CONVERSATIONS} open chats are busy.`);
       return undefined;
     }
     this.deps.setSidebar(result.sidebar);
@@ -234,11 +243,20 @@ export class ConversationTabs {
   }
 
   restore(id: string, options: { activate?: boolean } = {}): ConversationRuntime | undefined {
-    const result = opRestoreConversation(this.deps.getSidebar(), id, options);
+    let sidebar = this.deps.getSidebar();
+    let result = opRestoreConversation(sidebar, id, options);
     if ('atCap' in result && result.atCap) {
-      void vscode.window.showWarningMessage(
-        'Forge: maximum open conversations. Close one tab before reopening history.',
+      const archived = opArchiveLeastRecent(sidebar, (conversation) =>
+        this.deps.isConversationEvictable(conversation.id),
       );
+      if (archived) {
+        sidebar = archived;
+        this.deps.setSidebar(sidebar);
+        result = opRestoreConversation(sidebar, id, options);
+      }
+    }
+    if ('atCap' in result && result.atCap) {
+      void vscode.window.showWarningMessage(`Forge: all ${MAX_CONVERSATIONS} open chats are busy.`);
       return undefined;
     }
     if ('notFound' in result) return undefined;

@@ -92,6 +92,7 @@ export function buildSessionSyncMessage(
   streamingIds: ReadonlySet<string>,
   sessionActiveMs: (conversation: ConversationRuntime) => number,
   attachmentsRoot?: string,
+  waitingIds: ReadonlySet<string> = new Set<string>(),
 ): SessionSyncMsg {
   const wanted = new Set<string>([sidebar.activeConversationId, ...streamingIds]);
   return {
@@ -99,6 +100,7 @@ export function buildSessionSyncMessage(
     activeId: sidebar.activeConversationId,
     tabs: tabMetasFromSession(sidebar, streamingIds, sessionActiveMs),
     history: historyMetasFromSession(sidebar),
+    waitingIds: [...waitingIds].filter(Boolean),
     messagesById: slimMessagesById(sidebar, wanted),
     ...(attachmentsRoot ? { attachmentsRoot } : {}),
   };

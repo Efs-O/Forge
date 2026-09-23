@@ -67,6 +67,16 @@ export class ToolApprovalService {
     return this.active ? this.eventOf(this.active) : undefined;
   }
 
+  /** All attributed approvals, including requests queued behind the active gate. */
+  pendingConversationIds(): Set<string> {
+    const ids = new Set<string>();
+    for (const item of [...(this.active ? [this.active] : []), ...this.queue]) {
+      if (item.conversationId) ids.add(item.conversationId);
+      else ids.add('');
+    }
+    return ids;
+  }
+
   /** Register callbacks fired when an approval request is shown / resolved. */
   setApprovalLifecycle(
     onStart: (conversationId: string) => void,

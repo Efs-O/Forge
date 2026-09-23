@@ -8,6 +8,7 @@ interface Props {
   activeId?: string;
   streamingIds?: ReadonlySet<string>;
   queuedIds?: ReadonlySet<string>;
+  waitingIds?: ReadonlySet<string>;
   expanded: boolean;
   /** Escape or a click outside the panel. */
   onDismiss: () => void;
@@ -231,6 +232,7 @@ export function HistoryList({
   activeId = '',
   streamingIds = new Set<string>(),
   queuedIds = new Set<string>(),
+  waitingIds = new Set<string>(),
   onClose = () => undefined,
   onSwitchOpen,
 }: Props): React.ReactElement {
@@ -282,9 +284,11 @@ export function HistoryList({
                   <span className="history-item-meta">
                     {streamingIds.has(item.id)
                       ? '◌ Running'
-                      : queuedIds.has(item.id)
-                        ? 'Queued'
-                        : 'Open'}
+                      : waitingIds.has(item.id)
+                        ? 'Waiting'
+                        : queuedIds.has(item.id)
+                          ? 'Queued'
+                          : 'Open'}
                   </span>
                 </button>
                 <button

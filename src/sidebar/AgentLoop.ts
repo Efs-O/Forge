@@ -285,8 +285,6 @@ export class AgentLoop {
     }
   }
 
-  /** Wait for cancelled turns to release their backend/delegation resources.
-   * Active, non-cancelled conversations remain independent and do not block. */
   async waitForCancelledTurns(): Promise<void> {
     return this.lifecycle.waitForCancelledTurns();
   }
@@ -314,6 +312,8 @@ export class AgentLoop {
   pendingApproval(): ToolApprovalRequestEvent | undefined {
     return this.approvals.pending();
   }
+
+  pendingApprovalConversationIds = (): Set<string> => this.approvals.pendingConversationIds();
 
   clearCapabilityCache(): void {
     this.capabilities.clear();

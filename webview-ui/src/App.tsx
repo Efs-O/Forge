@@ -48,6 +48,7 @@ export function App(): React.ReactElement {
   const [workspace, setWorkspace] = useState<WorkspaceInfo | undefined>(undefined);
   const [prefillText, setPrefillText] = useState<string | null>(null);
   const [historyExpanded, setHistoryExpanded] = useState(false);
+  const [waitingIds, setWaitingIds] = useState<ReadonlySet<string>>(() => new Set());
   // Conversations restored from an earlier window session, snapshotted once at
   // hydration. State rather than a ref: the snapshot lands after the first
   // render and must schedule another one.
@@ -174,6 +175,7 @@ export function App(): React.ReactElement {
           });
           break;
         case 'sessionSync':
+          setWaitingIds(new Set(msg.waitingIds));
           reconcileSessionSync(msg.messagesById);
           dispatch({
             type: 'SESSION_SYNC',
@@ -292,6 +294,10 @@ export function App(): React.ReactElement {
     [queuedPrompts],
   );
 
+  useEffect(() => {
+    vscode.postMessage({ type: 'queuedConversationIds', ids: [...queuedIds] });
+  }, [queuedIds]);
+
   const emptyState = useMemo(
     () => (
       <EmptyState
@@ -356,6 +362,7 @@ export function App(): React.ReactElement {
                 activeId={state.activeConversationId}
                 streamingIds={state.streamingIds}
                 queuedIds={queuedIds}
+                waitingIds={waitingIds}
                 expanded={historyExpanded}
                 onDismiss={collapseHistory}
                 onRestore={handleRestoreFromPanel}

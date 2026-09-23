@@ -40,6 +40,17 @@ function makeMemento(store: Record<string, unknown>): Memento {
 }
 
 describe('sessionTypes', () => {
+  it('keeps the open copy when a crash leaves the id in history too', () => {
+    const session = createDefaultSession();
+    const open = session.conversations[0]!;
+    session.history = [{ ...open, title: 'stale archive' }];
+    const loaded = loadSidebarSession(
+      makeMemento({ [SESSION_KEY_V1]: runtimeToPersisted(session) }),
+    );
+    expect(loaded.conversations.map((item) => item.id)).toEqual([open.id]);
+    expect(loaded.history).toEqual([]);
+  });
+
   it('deriveTitle truncates long first lines', () => {
     expect(deriveTitle('hello')).toBe('hello');
     const long = 'x'.repeat(60);

@@ -43,6 +43,7 @@ export interface WebviewActions {
   /** `text: undefined` is a dismissal, which the tool reports as no answer. */
   answerQuestion: (id: string, text: string | undefined) => void;
   recordWebviewDiagnostic: (message: WebviewDiagnosticMsg) => void;
+  queuedConversationIds: (ids: string[]) => void;
 }
 
 export function routeWebviewMessage(actions: WebviewActions, msg: WebviewToHost): void {
@@ -63,6 +64,10 @@ export function routeWebviewMessage(actions: WebviewActions, msg: WebviewToHost)
       // shows no chip until the next transport or pairing change, which on a
       // stable setup is never.
       actions.post({ type: 'remoteStatus', ...actions.getRemoteStatus() });
+      break;
+
+    case 'queuedConversationIds':
+      actions.queuedConversationIds(msg.ids);
       break;
 
     case 'send':

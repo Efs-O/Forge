@@ -55,13 +55,13 @@ export function setupAgentMessaging(
       const facade = getSidebar().getHostFacade();
       watch.attach(facade);
       await vscode.commands.executeCommand('workbench.view.extension.forge-sidebar');
-      // Not the active tab: the chat this sender last wrote in, shown so the
-      // user sees the turn (AGENT_BUS_CHAT_AFFINITY_PLAN).
+      // Keep the sender's chat in the background; bus delivery must not steal
+      // the single visible conversation.
       let conversationId = busTarget(facade, options?.from);
       if (options?.newChat) {
-        conversationId = (await facade.createConversation({ activate: true })).id;
+        conversationId = (await facade.createConversation({ activate: false })).id;
       } else if (conversationId !== facade.status().activeConversationId) {
-        await facade.restoreConversation(conversationId, { activate: true });
+        await facade.restoreConversation(conversationId, { activate: false });
       }
       if (options?.model) await facade.setConversationModel(conversationId, options.model);
       const outcome = await facade.send(conversationId, prompt);

@@ -68,6 +68,7 @@ export interface SidebarHost {
   /** Sole owner of the unload sequence; the slash command routes through it. */
   unloadModels: () => Promise<void>;
   unloadActiveModel: () => Promise<{ model: string; wasLoaded: boolean }>;
+  isConversationQueued: (id: string) => boolean | undefined;
 }
 
 /** The construction-time collaborators, straight from the provider's ctor. */
@@ -297,6 +298,18 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
       host.postSessionSync();
       host.postTokenBudget();
     },
+    isConversationEvictable: (id) => {
+      const queued = host.isConversationQueued(id);
+      return (
+        queued === false &&
+        !agentLoop.pendingApprovalConversationIds().has('') &&
+        !parts.questions.pendingConversationIds().has('') &&
+        !agentLoop.isStreamingConv(id) &&
+        !requestChains.status().some((chain) => chain.conversationId === id) &&
+        !agentLoop.pendingApprovalConversationIds().has(id) &&
+        !parts.questions.hasPending(id)
+      );
+    },
   });
 
   // Last, because it needs both halves: the events object AgentLoop decorates
@@ -324,9 +337,19 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
   // turn; `presentsLocally` is what makes it conditional, so a window whose view
   // has never been resolved still falls back to the VS Code input box.
   parts.questions.addSink({
-    asked: (event) => host.post(buildQuestionMessage(event)),
-    answered: (event) => host.post({ type: 'questionResolved', id: event.id }),
+    asked: (event) => {
+      host.post(buildQuestionMessage(event));
+      host.postSessionSync();
+    },
+    answered: (event) => {
+      host.post({ type: 'questionResolved', id: event.id });
+      host.postSessionSync();
+    },
     presentsLocally: () => host.getView() !== undefined,
+  });
+  agentLoop.addApprovalSink({
+    requested: () => host.postSessionSync(),
+    resolved: () => host.postSessionSync(),
   });
 
   return { agentLoop, slashHandler, budget, tabs, send, requestChains, midTurnInbox, tellDrain };

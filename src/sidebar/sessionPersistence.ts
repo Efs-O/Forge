@@ -306,7 +306,12 @@ export function loadSidebarSession(
     return {
       activeConversationId: activeId,
       conversations: d.conversations.map(persistedToRuntime),
-      history: loadHistory(d, archive).map(persistedToRuntime),
+      // A close can persist the archive file before the open-session memento.
+      // If the host crashes between those writes, the open copy is authoritative
+      // and the duplicate archive entry must not be shown or restored twice.
+      history: loadHistory(d, archive)
+        .filter((entry) => !d.conversations.some((open) => open.id === entry.id))
+        .map(persistedToRuntime),
     };
   }
 
