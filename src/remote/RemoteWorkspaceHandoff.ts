@@ -66,6 +66,9 @@ export interface WorkspaceArrival {
   conversationTitle: string;
   /** True when nothing was here to continue and a chat had to be created. */
   created: boolean;
+  /** Set when no chat could be opened (every open chat busy at the cap). The
+   *  handoff still completes: this window serves the chat now, just unbound. */
+  failure?: string;
 }
 
 /**
@@ -87,7 +90,17 @@ export async function resumeWorkspaceHandoffs(
   const arrivals: WorkspaceArrival[] = [];
   for (const handoff of handoffs) {
     const resumed = await resumeNewestConversation(host);
-    const conversation = resumed ?? (await host.createConversation({ activate: false }));
+    let conversation: Awaited<ReturnType<ForgeHostFacade['createConversation']>>;
+    try {
+      conversation = resumed ?? (await host.createConversation({ activate: false }));
+    } catch (err) {
+      // One claimed handoff that cannot open a chat must not strand the rest
+      // of the batch, or abort the transport start it runs ahead of.
+      await store.completeWorkspaceHandoff(handoff.id);
+      const failure = err instanceof Error ? err.message : String(err);
+      arrivals.push({ handoff, conversationTitle: '', created: false, failure });
+      continue;
+    }
     await store.setBinding({
       channel: handoff.channel,
       chatId: handoff.chatId,
@@ -153,25 +166,45 @@ export async function announceWorkspaceArrivals(
     // "did it put me somewhere useful?": the receipt used to say "a new chat
     // is bound here" whatever it bound, so there was no way to tell a resumed
     // conversation from a blank one without running /view.
+    if (arrival.failure) {
+      await sendReceipt(
+        channel,
+        handoff,
+        `Forge: now in ${name}, but no chat could be opened: ${arrival.failure.replace(/^Forge: /, '')} Finish or close a chat here, then /chats to pick one.`,
+        deps,
+      );
+      continue;
+    }
     const where = arrival.created
       ? 'nothing was here to continue, so a new chat is bound'
       : `continuing “${clipTitle(arrival.conversationTitle)}” — /chats to pick another`;
-    try {
-      await channel.send(
-        handoff.chatId,
-        locked
-          ? `Forge: now in ${name} — ${where}. Your session did not carry over, so this chat is locked: send your 6-digit code to unlock it.`
-          : `Forge: now in ${name} — ${where}.`,
-      );
-    } catch (err) {
-      // The switch itself succeeded; a failed receipt is worth surfacing
-      // locally but must not tear down a transport that just came up.
-      deps.notifyLocal(
-        `Forge remote: could not confirm the workspace switch in ${handoff.channel} — ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-    }
+    await sendReceipt(
+      channel,
+      handoff,
+      locked
+        ? `Forge: now in ${name} — ${where}. Your session did not carry over, so this chat is locked: send your 6-digit code to unlock it.`
+        : `Forge: now in ${name} — ${where}.`,
+      deps,
+    );
+  }
+}
+
+async function sendReceipt(
+  channel: RemoteChannel,
+  handoff: WorkspaceHandoff,
+  text: string,
+  deps: ArrivalAnnouncement,
+): Promise<void> {
+  try {
+    await channel.send(handoff.chatId, text);
+  } catch (err) {
+    // The switch itself succeeded; a failed receipt is worth surfacing
+    // locally but must not tear down a transport that just came up.
+    deps.notifyLocal(
+      `Forge remote: could not confirm the workspace switch in ${handoff.channel} — ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
   }
 }
 

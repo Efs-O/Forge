@@ -47,7 +47,10 @@ The `hiddenChatAlerts.ts` references at lines 39, 43 and 51 are decorators forwa
 - Closed: added CI fixtures for every listed eviction signal and the clear-signal LRU case.
 - Closed: added unattributed approval, short finish, unattributed finish, and running-turn alert cases.
 - Closed: caller-level local create and restore cap tests cover LRU archive success and refusal with no eligible chat. Facade create coverage checks successful creation and the busy exception. Agent bus dispatch tests cover the `say` restore and `say --new` create paths while preserving the active id.
-- Still open: caller-level cap coverage for remote `/new`, first-prompt admission and workspace handoff, including eligible LRU eviction and refusal when none are eligible. The full CI run after commit `0f21cda` passed type-check and lint but had three test failures: two timeouts in `AgentMeshCommands.test.ts` and one failure in `RemoteHardening.test.ts` (`outboxHealth().abandoned` remained 0). The test step stopped the CI script before build and bundle checks; rerun CI after the remaining caller tests.
+- Closed (Claude, 5c052ee): auto-archive now runs the same agent-loop and checkpoint disposal as a manual close and posts any failure; finish/failure alerts are no longer tracked in `waiting`, so they cannot silence a later approval or question from the same hidden chat.
+- Closed (Claude): a chat with undecided Keep/Undo changes (`checkpoints.canUndo`) is not evictable (`undecidedChanges` signal, user decision 2026-09-23).
+- Closed (Claude): a workspace handoff whose chat cannot be opened at the cap now completes, keeps the rest of the batch going, leaves the chat unbound and tells the phone why. It used to throw after the claim: the handoff never completed, later handoffs were dropped, and at window startup the transports never started.
+- Remote `/new` and first-prompt admission need no change: a thrown busy error is retried by the channel, then acknowledged as a rejection whose text ("Forge: all N open chats are busy.") reaches the chat. Full CI green (320 files / 3102 tests).
 - README has no remaining Forge conversation-tab wording to change. Its `README.md:89` “Changelog tab” and `README.md:576` editor-context “tabs” refer to separate VS Code UI concepts, so neither was changed. Screenshots were left untouched.
 
 ## Phase 4 entries for merge-time docs

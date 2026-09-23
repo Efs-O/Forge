@@ -10,7 +10,10 @@ import {
 } from '../../src/sidebar/ConversationOps';
 import type { SidebarRuntime } from '../../src/sidebar/sessionTypes';
 import { UNTITLED_TITLE } from '../../src/sidebar/sessionTypes';
-import { isConversationEvictable, type ConversationEvictionSignals } from '../../src/sidebar/sidebarWiring';
+import {
+  isConversationEvictable,
+  type ConversationEvictionSignals,
+} from '../../src/sidebar/sidebarWiring';
 
 function sidebar(): SidebarRuntime {
   return {
@@ -112,22 +115,43 @@ describe('opRestoreConversation', () => {
 
 describe('conversation eviction ledger', () => {
   const clear: ConversationEvictionSignals = {
-    streaming: false, activeRequestChain: false, unattended: false,
-    pendingApprovalActive: false, pendingApprovalQueued: false, pendingQuestion: false,
-    unattributedRequest: false, hostQueue: false, webviewQueue: false,
-    beforeWebviewQueueReport: false, remoteRuntimeUnavailable: false, remoteBinding: false,
+    streaming: false,
+    activeRequestChain: false,
+    unattended: false,
+    pendingApprovalActive: false,
+    pendingApprovalQueued: false,
+    pendingQuestion: false,
+    unattributedRequest: false,
+    hostQueue: false,
+    webviewQueue: false,
+    beforeWebviewQueueReport: false,
+    remoteRuntimeUnavailable: false,
+    remoteBinding: false,
     remoteIntakeQueue: false,
+    undecidedChanges: false,
   };
   const signals: (keyof ConversationEvictionSignals)[] = [
-    'streaming', 'activeRequestChain', 'unattended', 'pendingApprovalActive',
-    'pendingApprovalQueued', 'pendingQuestion', 'unattributedRequest', 'hostQueue',
-    'webviewQueue', 'beforeWebviewQueueReport', 'remoteBinding', 'remoteIntakeQueue',
+    'streaming',
+    'activeRequestChain',
+    'unattended',
+    'pendingApprovalActive',
+    'pendingApprovalQueued',
+    'pendingQuestion',
+    'unattributedRequest',
+    'hostQueue',
+    'webviewQueue',
+    'beforeWebviewQueueReport',
+    'remoteBinding',
+    'remoteIntakeQueue',
+    'undecidedChanges',
   ];
 
   it.each(signals)('%s blocks eviction and selects the next eligible chat', (signal) => {
     const state = sidebar();
     state.conversations = state.conversations.map((conversation, index) => ({
-      ...conversation, id: `candidate-${index}`, updatedAt: index,
+      ...conversation,
+      id: `candidate-${index}`,
+      updatedAt: index,
     }));
     const blocked = { ...clear, [signal]: true } as ConversationEvictionSignals;
     const archived = opArchiveLeastRecent(state, (conversation) =>

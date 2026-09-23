@@ -29,10 +29,9 @@ describe('workspaceIdFor', () => {
   it.runIf(process.platform === 'win32')(
     'preserves the existing VS Code lowercase-drive workspace identity',
     () => {
-      const actual = realpathSync.native(process.cwd()).replace(
-        /^([A-Z]):/,
-        (_, drive: string) => `${drive.toLowerCase()}:`,
-      );
+      const actual = realpathSync
+        .native(process.cwd())
+        .replace(/^([A-Z]):/, (_, drive: string) => `${drive.toLowerCase()}:`);
       const legacyId = createHash('sha256').update(actual).digest('hex');
       expect(workspaceIdFor(actual)).toBe(legacyId);
     },
@@ -180,5 +179,41 @@ describe('workspace arrival', () => {
 
     expect(channel.sent[0]?.text).toContain('nothing was here to continue');
     expect(channel.sent[0]?.text).toContain('6-digit code');
+  });
+
+  // At the conversation cap with nothing evictable, the create throws. That
+  // used to escape after the claim: the handoff never completed, the rest of
+  // the batch was dropped, and at startup the transports never came up.
+  it('completes a handoff that cannot open a chat, keeps the batch going, and says why', async () => {
+    const store = await storeWithPendingHandoff('target');
+    await store.beginWorkspaceHandoff({
+      channel: 'fake',
+      chatId: 'second',
+      sourceWorkspaceId: 'source',
+      targetWorkspaceId: 'target',
+      targetAlias: 'qwen',
+    });
+    const { host, createConversation } = arrivalHost([]);
+    createConversation.mockRejectedValueOnce(new Error('Forge: all 10 open chats are busy.'));
+
+    const arrivals = await resumeWorkspaceHandoffs(store, 'target', host);
+
+    expect(arrivals).toHaveLength(2);
+    expect(arrivals.filter((arrival) => arrival.failure)).toHaveLength(1);
+    const failed = arrivals.find((arrival) => arrival.failure)!;
+    expect(store.binding('fake', failed.handoff.chatId)).toBeUndefined();
+    const bound = arrivals.find((arrival) => !arrival.failure)!;
+    expect(store.binding('fake', bound.handoff.chatId)?.conversationId).toBe('created');
+    expect(await resumeWorkspaceHandoffs(store, 'target', host)).toEqual([]);
+
+    const channel = new FakeRemoteChannel();
+    await announceWorkspaceArrivals([failed], {
+      channelFor: () => channel,
+      displayNameFor: () => 'Qwen testing',
+      totpEnrolled: async () => false,
+      notifyLocal: () => undefined,
+    });
+    expect(channel.sent[0]?.text).toContain('all 10 open chats are busy');
+    expect(channel.sent[0]?.text).toContain('/chats');
   });
 });

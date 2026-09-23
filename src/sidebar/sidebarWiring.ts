@@ -122,6 +122,8 @@ export interface ConversationEvictionSignals {
   remoteRuntimeUnavailable: boolean;
   remoteBinding: boolean;
   remoteIntakeQueue: boolean;
+  /** Keep/Undo still undecided: archiving would hide the only way to undo. */
+  undecidedChanges: boolean;
 }
 
 export function isConversationEvictable(signals: ConversationEvictionSignals): boolean {
@@ -340,6 +342,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
         remoteRuntimeUnavailable: remote === undefined,
         remoteBinding: remote,
         remoteIntakeQueue: remote,
+        undecidedChanges: checkpoints.canUndo(id),
       });
     },
   });
