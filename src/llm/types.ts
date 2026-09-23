@@ -105,7 +105,7 @@ export interface ChatCompletionRequest {
   repeat_penalty?: number;
   repeat_last_n?: number;
   stop?: string | string[];
-  reasoning_effort?: 'high' | 'medium' | 'low' | 'none';
+  reasoning_effort?: 'xhigh' | 'high' | 'medium' | 'low' | 'none';
   tools?: ToolDefinition[];
   chat_template_kwargs?: Record<string, unknown>;
   stream_options?: { include_usage?: boolean };

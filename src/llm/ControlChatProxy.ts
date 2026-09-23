@@ -17,7 +17,7 @@ export interface ChatProxyRequest {
   temperature?: number;
   top_p?: number;
   max_tokens?: number;
-  reasoning_effort?: 'high' | 'medium' | 'low' | 'none';
+  reasoning_effort?: 'xhigh' | 'high' | 'medium' | 'low' | 'none';
   stop?: string | string[];
   /** When set, the model may emit tool_calls — Relay reuses this for full agentic cloud workers. */
   tools?: ToolDefinition[];

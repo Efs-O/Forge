@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeRequestForModel } from '../../src/llm/RequestNormalizer';
 import type { ModelConfig } from '../../src/config/types';
+import { ReasoningEffortSchema } from '../../src/config/schemaShared';
 import type { ChatCompletionRequest } from '../../src/llm/types';
 
 const baseRequest: ChatCompletionRequest = {
@@ -71,6 +72,21 @@ describe('normalizeRequestForModel', () => {
     expect(normalizeRequestForModel(baseRequest, model).chat_template_kwargs).toEqual({
       enable_thinking: true,
       reasoning_effort: 'medium',
+    });
+  });
+
+  it('accepts xhigh in config and forwards it to the llama.cpp template', () => {
+    expect(ReasoningEffortSchema.parse('xhigh')).toBe('xhigh');
+    const model: ModelConfig = {
+      name: 'qwopus',
+      provider: 'llama.cpp',
+      gguf_path: 'C:/models/qwopus.gguf',
+      think: true,
+      reasoning_effort: 'xhigh',
+    };
+
+    expect(normalizeRequestForModel(baseRequest, model).chat_template_kwargs).toMatchObject({
+      reasoning_effort: 'xhigh',
     });
   });
 

@@ -44,12 +44,12 @@ export interface ParsedChatRequest {
   temperature?: number;
   top_p?: number;
   max_tokens?: number;
-  reasoning_effort?: 'high' | 'medium' | 'low' | 'none';
+  reasoning_effort?: 'xhigh' | 'high' | 'medium' | 'low' | 'none';
   stop?: string | string[];
   tools?: ToolDefinition[];
 }
 
-const REASONING_EFFORTS = ['high', 'medium', 'low', 'none'] as const;
+const REASONING_EFFORTS = ['xhigh', 'high', 'medium', 'low', 'none'] as const;
 
 /** Minimal structural check — tools must be function-typed with a name, never a
  *  free-form blob (CLAUDE.md hard stop). Unknown-shaped entries reject the body. */
@@ -84,7 +84,7 @@ export function parseChatRequest(body: Record<string, unknown>): ParsedChatReque
   }
   const effort = body['reasoning_effort'];
   if (typeof effort === 'string' && (REASONING_EFFORTS as readonly string[]).includes(effort)) {
-    out.reasoning_effort = effort as 'high' | 'medium' | 'low' | 'none';
+    out.reasoning_effort = effort as 'xhigh' | 'high' | 'medium' | 'low' | 'none';
   }
   const stop = body['stop'];
   if (

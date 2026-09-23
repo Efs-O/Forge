@@ -37,7 +37,7 @@ export function RequestTab({ model, onEdit, errorField }: Props): React.ReactEle
         inherited={!overridden('reasoning_effort')}
         onCommit={onEdit}
         errored={errorField === 'reasoning_effort'}
-        placeholder="high / medium / low / none"
+        placeholder="xhigh / high / medium / low / none"
       />
       <FieldEditor
         label="strip_tools"

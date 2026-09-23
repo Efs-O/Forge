@@ -8,7 +8,7 @@ import { z } from 'zod';
 
 export const CacheTypeSchema = z.union([z.number().int().min(0).max(8), z.string().min(1)]);
 
-export const ReasoningEffortSchema = z.enum(['high', 'medium', 'low', 'none']);
+export const ReasoningEffortSchema = z.enum(['xhigh', 'high', 'medium', 'low', 'none']);
 
 export const SamplingSchema = z.object({
   temperature: z.number().optional(),

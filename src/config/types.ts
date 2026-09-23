@@ -59,7 +59,7 @@ export interface GroupConfig {
   sampling?: SamplingConfig;
   num_ctx?: number;
   think?: boolean;
-  reasoning_effort?: 'high' | 'medium' | 'low' | 'none';
+  reasoning_effort?: 'xhigh' | 'high' | 'medium' | 'low' | 'none';
   strip_tools?: boolean;
   strip_thinking_channels?: boolean;
   system_prompt?: string;
@@ -80,7 +80,7 @@ export interface ProfileConfig {
   system_prompt_mode?: SystemPromptMode;
   sampling?: SamplingConfig;
   think?: boolean;
-  reasoning_effort?: 'high' | 'medium' | 'low' | 'none';
+  reasoning_effort?: 'xhigh' | 'high' | 'medium' | 'low' | 'none';
   strip_tools?: boolean;
   strip_thinking_channels?: boolean;
   capabilities?: ('tool-call' | 'vision' | 'long-context')[];
@@ -164,7 +164,7 @@ export interface ModelConfig {
   think?: boolean;
   chat_template_thinking?: boolean;
   /** Ollama reasoning effort level when think is enabled. */
-  reasoning_effort?: 'high' | 'medium' | 'low' | 'none';
+  reasoning_effort?: 'xhigh' | 'high' | 'medium' | 'low' | 'none';
   /** Request-time profiles exposed for this model; [] disables them. */
   profiles?: string[];
   /** When true, strip visible thinking/channel markup when think is explicitly false. */
