@@ -9,15 +9,15 @@
 
 ## CI
 
-Final successful `npm run ci` before the latest Phase 2 follow-up commit:
+Latest successful `npm run ci` after the continuation code commit:
 
 ```text
 Test Files  319 passed | 5 skipped (324)
-Tests       3076 passed | 18 skipped (3094)
+Tests       3091 passed | 18 skipped (3109)
 bundle-load: module scope OK, activate/deactivate exported, deactivate() clean
 ```
 
-The run also completed `type-check`, ESLint, `npm run build` (extension and webview), and `check:bundle`. Earlier runs intermittently failed unrelated Telegram/remote timing tests; the final complete run was green.
+The run also passed type-check, ESLint, production extension/webview build and `check:bundle`.
 
 ## Implemented
 
@@ -43,9 +43,10 @@ The `hiddenChatAlerts.ts` references at lines 39, 43 and 51 are decorators forwa
 
 ## Deviations and remaining gaps
 
-- The `ConversationTabs` eligibility predicate has no remote-binding or remote-intake-queue query. `RemoteRuntime` owns its `RemoteRequestStore` privately (`src/remote/RemoteRuntime.ts:51`), while `ForgeHostFacade` exposes neither binding state nor pending remote queue ids. As a result, an otherwise idle bound chat or chat with a remote prompt waiting outside a request chain may still be selected for auto-archive. This needs a small remote-to-sidebar query seam.
-- The plan's CI-enforced fixture matrix for each individual evictable signal, and caller-level cap tests for remote `/new`, first-prompt admission and workspace handoff, were not added. Existing caller paths share `ConversationTabs.create/restore`, but those caller contracts are not independently asserted here. A dedicated bus test for active-conversation stability is also absent.
-- The alert tests cover deduplication/resolution, hidden-view behavior, long finish, unattributed failure/question, seen clearing and Open chat. They do not individually exercise every §4 event/policy permutation (notably unattributed approval and short-turn suppression).
+- Closed: the eviction predicate now queries `RemoteRuntime`/`RemoteRequestStore` through an explicit public seam. It fails closed until remote state loads and blocks conversations with a binding or queued remote request.
+- Closed: added CI fixtures for every listed eviction signal and the clear-signal LRU case.
+- Closed: added unattributed approval, short finish, unattributed finish, and running-turn alert cases.
+- Still open: caller-level cap coverage for local create/restore, facade create, remote `/new`, first-prompt admission and workspace handoff; the test proving agent-bus `say` and `say --new` preserve active conversation; a green full CI run. These remain required follow-up work.
 - README has no remaining Forge conversation-tab wording to change. Its `README.md:89` “Changelog tab” and `README.md:576` editor-context “tabs” refer to separate VS Code UI concepts, so neither was changed. Screenshots were left untouched.
 
 ## Phase 4 entries for merge-time docs
@@ -61,3 +62,10 @@ Proposed `docs/OWNERS.md` entry:
 > | Hidden conversation notifications | `src/sidebar/hiddenChatAlerts.ts` |
 
 Also remove any existing `TabStrip` ownership row if present when Claude updates the ownership map.
+
+## State × lifecycle ledger
+
+| Artifact | Create | Delete | Pause/disable | Crash mid-write | Owner-process death | TTL/expiry |
+|---|---|---|---|---|---|---|
+| Remote eviction query seam (derived from remote store) | Query becomes available after `RemoteRequestStore.load()` | No independent state to delete | Unavailable query blocks eviction | The store's atomic state write governs the result | Runtime restart makes query unavailable until reload, so eviction fails closed | No independent expiry; queued request state follows the remote store |
+| Eviction fixture matrix (test-only) | Test source added | Remove test source | Not applicable | Not applicable | Not applicable | Not applicable |
