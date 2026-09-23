@@ -1,5 +1,13 @@
 # Forge — Recent Changes
 
+## 0.16.45
+
+### Agent bus accepts model aliases (2026-09-23)
+
+- `forge.sh say --model <alias>` was refused as an unknown model, even for a
+  name listed under `aliases:` in config.yaml. The bus now accepts alias keys
+  and switches the chat to the model the alias points at.
+
 ## 0.16.44
 
 ### Command-palette profile picker lists only profiles (2026-09-23)

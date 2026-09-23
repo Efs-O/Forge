@@ -38,4 +38,13 @@ describe('busModelIds', () => {
       'gemma@fast',
     ]);
   });
+
+  it('accepts alias keys', () => {
+    const config = {
+      models: [{ name: 'qwen-vision' }],
+      profiles: {},
+      aliases: { qwen: 'qwen-vision' },
+    } as unknown as ForgeConfig;
+    expect(busModelIds(config)).toEqual(['qwen-vision', 'qwen']);
+  });
 });

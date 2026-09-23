@@ -8,7 +8,7 @@ import {
 } from '../agentBus/agentInbox';
 import { AgentRoutes } from '../backend/agentRoutes';
 import { joinClaude } from '../agentMesh/claudeJoin';
-import { availableProfilesFor } from '../config/ConfigResolver';
+import { availableProfilesFor, expandAlias } from '../config/ConfigResolver';
 import type { ForgeConfig } from '../config/types';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import { parseMeshCommand } from '../agentMesh/meshCommands';
@@ -27,14 +27,18 @@ function busTarget(facade: ForgeHostFacade, from: string | undefined): string {
   );
 }
 
-/** Keep bus restore/create delivery in its addressed chat without moving the visible chat. */
-/** Every model plus each `model@profile` it offers: the ids the model pickers write. */
+/** Every model, each `model@profile` it offers, and every alias key: the ids a bus sender may name. */
 export function busModelIds(config: ForgeConfig): string[] {
-  return config.models.flatMap((model) => [
-    model.name,
-    ...availableProfilesFor(config, model.name).map((profile) => `${model.name}@${profile}`),
-  ]);
+  return [
+    ...config.models.flatMap((model) => [
+      model.name,
+      ...availableProfilesFor(config, model.name).map((profile) => `${model.name}@${profile}`),
+    ]),
+    ...Object.keys(config.aliases ?? {}),
+  ];
 }
+
+/** Keep bus restore/create delivery in its addressed chat without moving the visible chat. */
 
 export async function submitBusMessage(
   facade: ForgeHostFacade,
@@ -88,7 +92,9 @@ export function setupAgentMessaging(
       const facade = getSidebar().getHostFacade();
       watch.attach(facade);
       await vscode.commands.executeCommand('workbench.view.extension.forge-sidebar');
-      return submitBusMessage(facade, prompt, options);
+      // An alias is resolved here so the chat stores the model id its picker shows.
+      const model = options?.model && expandAlias(getConfig(), options.model);
+      return submitBusMessage(facade, prompt, model ? { ...options, model } : options);
     },
     warn: (message) => void vscode.window.showWarningMessage(message),
     // F-08: a bus-started turn began — write its durable status file so a
