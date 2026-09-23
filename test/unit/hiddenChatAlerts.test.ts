@@ -35,7 +35,10 @@ function fixture() {
       question = sink;
       return { dispose: vi.fn() };
     },
-    activeConversationId: () => active,
+    sidebar: () => ({
+      activeConversationId: active,
+      conversations: [{ id: 'background', title: 'Fix the lease' }],
+    }),
     view: () => ({ visible }) as vscode.WebviewView,
     switchConversation: switchChat,
   });
@@ -119,6 +122,18 @@ describe('HiddenChatAlerts', () => {
     state.setVisible(false);
     state.approval().requested({ conversationId: 'background' });
     expect(toast).toHaveBeenCalledTimes(2);
+    state.alerts.dispose();
+  });
+
+  it('names the chat in the alert, and falls back when the title is unknown', () => {
+    const state = fixture();
+    const toast = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
+    state.approval().requested({ conversationId: 'background' });
+    state.events.onTurnFailed?.('gone', 'backend stopped');
+    expect(toast.mock.calls[0]?.[0]).toBe(
+      'Forge chat "Fix the lease" is waiting for tool approval.',
+    );
+    expect(toast.mock.calls[1]?.[0]).toBe('A Forge chat failed: backend stopped');
     state.alerts.dispose();
   });
 

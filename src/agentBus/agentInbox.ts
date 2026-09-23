@@ -25,16 +25,20 @@ export interface BusTurnEnd {
 }
 
 /** The sender's one line for how its turn ended. Only `completed` says finished. */
-export function busTurnEndLine(end: BusTurnEnd, minutes: number): string {
+export function busTurnEndLine(end: BusTurnEnd, durationMs: number): string {
+  const took =
+    durationMs < 60_000
+      ? `${Math.max(1, Math.round(durationMs / 1000))} s`
+      : `${Math.round(durationMs / 60_000)} min`;
   switch (end.kind) {
     case 'completed':
-      return `finished · ${minutes} min · the turn you started has ended`;
+      return `finished · ${took} · the turn you started has ended`;
     case 'failed':
-      return `failed · ${minutes} min · the turn you started ended with an error: ${end.error ?? 'unknown error'}`;
+      return `failed · ${took} · the turn you started ended with an error: ${end.error ?? 'unknown error'}`;
     case 'cancelled':
-      return `cancelled · ${minutes} min · the turn you started was stopped before it answered`;
+      return `cancelled · ${took} · the turn you started was stopped before it answered`;
     case 'interrupted':
-      return `interrupted · ${minutes} min · the turn you started was interrupted before it answered`;
+      return `interrupted · ${took} · the turn you started was interrupted before it answered`;
   }
 }
 

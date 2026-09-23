@@ -1,5 +1,15 @@
 # Forge — Recent Changes
 
+## 0.16.39
+
+### Alerts say which chat (2026-09-23)
+
+- **Hidden-chat notifications name the chat**, for example `Forge chat "Fix the
+  lease" is waiting for tool approval.` They used to say only "A Forge chat", so
+  with several chats hidden you could not tell which one needed you.
+- **The agent bus reports short turns in seconds.** A 14-second turn used to be
+  reported as "finished · 1 min".
+
 ## 0.16.38
 
 ### One chat on screen; the rest live in history (2026-09-23)

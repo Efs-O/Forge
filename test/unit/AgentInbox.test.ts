@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { AgentInbox, busTurnEndLine, INBOX_CAP, type BusTurnEnd, type InboxHost } from '../../src/agentBus/agentInbox';
+import {
+  AgentInbox,
+  busTurnEndLine,
+  INBOX_CAP,
+  type BusTurnEnd,
+  type InboxHost,
+} from '../../src/agentBus/agentInbox';
 
 const tick = (ms = 20): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -262,11 +268,14 @@ describe('AgentInbox', () => {
 
 describe('busTurnEndLine', () => {
   it('only a completed turn says finished; the others say what happened', () => {
-    expect(busTurnEndLine({ kind: 'completed' }, 1)).toMatch(/^finished · 1 min/);
-    expect(busTurnEndLine({ kind: 'failed', error: 'fetch failed' }, 2)).toBe(
+    expect(busTurnEndLine({ kind: 'completed' }, 60_000)).toMatch(/^finished · 1 min/);
+    expect(busTurnEndLine({ kind: 'completed' }, 14_200)).toMatch(/^finished · 14 s ·/);
+    expect(busTurnEndLine({ kind: 'failed', error: 'fetch failed' }, 120_000)).toBe(
       'failed · 2 min · the turn you started ended with an error: fetch failed',
     );
-    expect(busTurnEndLine({ kind: 'cancelled' }, 1)).toMatch(/^cancelled · 1 min · .*before it answered/);
-    expect(busTurnEndLine({ kind: 'interrupted' }, 1)).toMatch(/^interrupted · /);
+    expect(busTurnEndLine({ kind: 'cancelled' }, 60_000)).toMatch(
+      /^cancelled · 1 min · .*before it answered/,
+    );
+    expect(busTurnEndLine({ kind: 'interrupted' }, 60_000)).toMatch(/^interrupted · /);
   });
 });

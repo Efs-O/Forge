@@ -186,7 +186,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       events,
       addApprovalSink: (sink) => this.agentLoop.addApprovalSink(sink),
       addQuestionSink: (sink) => this.questions.addSink(sink),
-      activeConversationId: () => this.sidebar.activeConversationId,
+      sidebar: () => this.sidebar,
       view: () => this.view,
       switchConversation: (id) => this.tabs.switch(id),
     });

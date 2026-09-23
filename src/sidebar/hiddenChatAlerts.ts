@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import type { SidebarProviderEvents } from './providerEvents';
 import type { ToolApprovalSink } from './ToolApprovalService';
 import type { UserQuestionSink } from './UserQuestionService';
+import { displayTitle } from './conversationTitle';
 
 export const HIDDEN_TURN_ALERT_MS = 60_000;
 
@@ -9,7 +10,11 @@ export interface HiddenChatAlertDeps {
   events: SidebarProviderEvents;
   addApprovalSink(sink: ToolApprovalSink): { dispose(): void };
   addQuestionSink(sink: UserQuestionSink): { dispose(): void };
-  activeConversationId(): string;
+  /** Active chat plus open chats' titles, so an alert can say WHICH chat. */
+  sidebar(): {
+    activeConversationId: string;
+    conversations: readonly { id: string; title: string }[];
+  };
   view(): vscode.WebviewView | undefined;
   switchConversation(id: string): void;
 }
@@ -24,14 +29,13 @@ export class HiddenChatAlerts implements vscode.Disposable {
     this.disposables.push(
       deps.addApprovalSink({
         requested: (event) =>
-          this.notify('Forge is waiting for tool approval.', event.conversationId, true),
+          this.notify('is waiting for tool approval.', event.conversationId, true),
         resolved: (event) => this.resolve(event.conversationId),
       }),
     );
     this.disposables.push(
       deps.addQuestionSink({
-        asked: (event) =>
-          this.notify('Forge is waiting for your answer.', event.conversationId, true),
+        asked: (event) => this.notify('is waiting for your answer.', event.conversationId, true),
         answered: (event) => this.resolve(event.conversationId),
       }),
     );
@@ -45,12 +49,12 @@ export class HiddenChatAlerts implements vscode.Disposable {
       const startedAt = id ? this.started.get(id) : undefined;
       if (id) this.started.delete(id);
       if (startedAt !== undefined && Date.now() - startedAt >= HIDDEN_TURN_ALERT_MS) {
-        this.notify('A Forge chat finished a long-running turn.', id);
+        this.notify('finished a long-running turn.', id);
       }
     };
     deps.events.onTurnFailed = (id, message) => {
       onTurnFailed?.(id, message);
-      this.notify(id ? `Forge chat failed: ${message}` : `Forge turn failed: ${message}`, id);
+      this.notify(`failed: ${message}`, id);
     };
     this.disposables.push({
       dispose: () => {
@@ -67,7 +71,7 @@ export class HiddenChatAlerts implements vscode.Disposable {
   /** Clear waiting notices once the chat is visible on screen. */
   seen(): void {
     if (!this.deps.view()?.visible) return;
-    this.resolve(this.deps.activeConversationId());
+    this.resolve(this.deps.sidebar().activeConversationId);
   }
 
   dispose(): void {
@@ -81,8 +85,9 @@ export class HiddenChatAlerts implements vscode.Disposable {
    * per chat until it resolves. Finish and failure alerts are one-shot and never
    * tracked, so they cannot silence a later request from the same chat.
    */
-  private notify(message: string, conversationId?: string, waiting = false): void {
+  private notify(what: string, conversationId?: string, waiting = false): void {
     if (conversationId && this.isOnScreen(conversationId)) return;
+    const message = `${this.subject(conversationId)} ${what}`;
     if (waiting) {
       const key = conversationId ?? 'unattributed';
       if (this.waiting.has(key)) return;
@@ -97,6 +102,12 @@ export class HiddenChatAlerts implements vscode.Disposable {
     });
   }
 
+  private subject(conversationId?: string): string {
+    if (!conversationId) return 'Forge';
+    const chat = this.deps.sidebar().conversations.find((c) => c.id === conversationId);
+    return chat ? `Forge chat "${displayTitle(chat.title)}"` : 'A Forge chat';
+  }
+
   private resolve(conversationId?: string): void {
     if (conversationId) this.waiting.delete(conversationId);
     else this.waiting.delete('unattributed');
@@ -104,7 +115,8 @@ export class HiddenChatAlerts implements vscode.Disposable {
 
   private isOnScreen(conversationId: string): boolean {
     return (
-      this.deps.view()?.visible === true && this.deps.activeConversationId() === conversationId
+      this.deps.view()?.visible === true &&
+      this.deps.sidebar().activeConversationId === conversationId
     );
   }
 }

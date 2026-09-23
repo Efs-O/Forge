@@ -99,9 +99,8 @@ export function setupAgentMessaging(
     // silent stalls. A user-typed turn has no bus sender, so this never fires
     // for it.
     onBusTurnFinished: (from, durationMs, end) => {
-      const minutes = Math.max(1, Math.round(durationMs / 60_000));
       void mesh.orchestrator
-        .tell(from, busTurnEndLine(end, minutes))
+        .tell(from, busTurnEndLine(end, durationMs))
         .catch((err) =>
           vscode.window.showWarningMessage(`[agent mesh] finished notice failed: ${String(err)}`),
         );
