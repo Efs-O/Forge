@@ -133,5 +133,16 @@ created or changed; `RemoteRequestStore`'s persisted shape is explicitly out of 
 
 ## Outcome
 
-(Codex fills this in: one line per file: new line count, commit hash, or LEAVE + reason +
-growth destination.)
+- `src/sidebar/SlashCommandHandler.ts`: 299 lines; `/initForge` moved to `initForgeCommand.ts` in `2c09978`.
+- `src/sidebar/ToolDispatch.ts`: 383 lines; delete preview moved to `deletePreview.ts` in `8985698`.
+- `src/jobs/agentTask.ts`: 442 lines; prompt and result parsing moved to `agentTaskPrompt.ts` in `fb5bc9b`.
+- `src/jobs/JobScheduler.ts`: **LEAVE**; `runCheck` and `applyBackoff` use scheduler-owned config, action, clock, store, and delivery state, while `maybeSleepIfIdle` is too small to create headroom. Keep scheduling/backoff growth in `schedule.ts`, `backoff.ts`, and `schedulerWakes.ts`; commit `c7155c1`.
+- `src/sidebar/AgentLoop.ts`: **LEAVE**; `emitAgentProgress` is only a small listener fan-out and moving it would not give the file meaningful headroom. New lifecycle collaborators go in `TurnLifecycle.ts`; provider work stays in `ModelTurn.ts`, `ProviderTurn.ts`, or `CliTurn.ts`; commit `c7bc81d`.
+- `src/sidebar/SidebarProvider.ts`: **LEAVE**; `handleMessage` already delegates to `webviewMessageRouter.ts`, and its adapter object closes over provider state across many collaborators. Keep message routing in that router and composition in `sidebarWiring.ts` / `sidebarFacadeWiring.ts`; commit `e8c2bf8`.
+- `src/extension.ts`: **LEAVE**; this inspection did not identify 2–3 self-contained setup blocks that can move without changing composition ownership and registration order. Future subsystem setup belongs in the corresponding existing `src/vscode/*Setup.ts`; commit `56c8585`.
+- `src/config/types.ts`: 428 lines; media config interfaces moved to `mediaTypes.ts` and re-exported in `4e68a84`.
+- `src/remote/RemoteController.ts`: **LEAVE**; every branch in `handle` participates in inbound admission, queue execution, or delivery, so extracting one would split the canonical flow. Channel policy belongs in the channel implementations and command workflows in the established command/job/session owners; commit `5658eb1`.
+- `src/remote/RemoteRuntime.ts`: **LEAVE**; `validationStatus` is a small projection over the runtime manager, auth, and request store, and moving it would not bring this file below 450 lines. Keep transport lifecycle and validation composition here; admission remains in `RemoteController.ts`; commit `b011f49`.
+- `src/remote/RemoteRequestStore.ts`: **LEAVE**; mutators share the private `mutate()` transaction, and the pure projections are not enough to reach 450 lines. Keep durable state and queries here; queue ordering policy stays in `remoteQueueOrdering.ts`; commit `a26eb79`.
+
+Full CI passed before the four code-move commits. Intermittent suite-level timeouts occurred in untouched agent-mesh, Telegram contact, model-manager, and heavy-stream tests; the failed AgentMesh and Telegram contact files passed on direct rerun. Final `npm run ci` passed after this outcome update: 322 test files passed, 5 skipped; 3,134 tests passed, 18 skipped; build and bundle-load check passed.
