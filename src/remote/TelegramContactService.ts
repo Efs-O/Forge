@@ -132,8 +132,11 @@ export class TelegramContactService {
     return this.commands.handleAction(event);
   }
 
-  handleOwnerCommand(event: ContactTextEvent): Promise<RemoteInboundDisposition | undefined> {
-    return this.commands.handleOwnerCommand(event);
+  handleOwnerCommand(
+    event: ContactTextEvent,
+    reply: RemoteChannel,
+  ): Promise<RemoteInboundDisposition | undefined> {
+    return this.commands.handleOwnerCommand(event, reply);
   }
 
   /**

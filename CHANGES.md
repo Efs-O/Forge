@@ -2,6 +2,14 @@
 
 ## 0.16.49
 
+### Telegram contacts: command replies are cleaned up (2026-09-23)
+
+- Replies to `/contacts` and `/contact …` owner commands stayed in the chat
+  forever, unlike every other command's reply. They are now deleted after
+  `remote.delete_command_replies_after` seconds, like the rest. A refused
+  contact command in the private chat is sent once and deleted too; before, it
+  was sent by a separate path that nothing cleaned up.
+
 ### Telegram contacts: a refused person is told how to ask (2026-09-23)
 
 - Someone writing to the bot without access got only "access has not been

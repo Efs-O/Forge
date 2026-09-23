@@ -88,12 +88,18 @@ function textEvent(
 async function approveAndBind(value: Awaited<ReturnType<typeof fixture>>): Promise<string> {
   await value.service.handleNonOwner(textEvent('20', '/start'));
   const pending = value.contacts.pending()[0]!;
-  await value.service.handleOwnerCommand(textEvent('1', `/contact approve ${pending.id} Chara`));
+  await value.service.handleOwnerCommand(
+    textEvent('1', `/contact approve ${pending.id} Chara`),
+    value.channel,
+  );
   const contactId = value.contacts.contacts(true)[0]!.id;
   await value.service.handleGroup(textEvent('1', '/contact link Chara', GROUP_ID));
   const link = value.contacts.pendingGroupLink(GROUP_ID);
   expect(link).toBeDefined();
-  await value.service.handleOwnerCommand(textEvent('1', `/contact bind ${link!.id}`));
+  await value.service.handleOwnerCommand(
+    textEvent('1', `/contact bind ${link!.id}`),
+    value.channel,
+  );
   expect(value.contacts.byId(contactId)?.groupStatus).toBe('bound');
   return contactId;
 }
@@ -137,7 +143,10 @@ describe('Telegram contact service', () => {
     const value = await fixture();
     await value.service.handleNonOwner(textEvent('20', '/start'));
     const pending = value.contacts.pending()[0]!;
-    await value.service.handleOwnerCommand(textEvent('1', `/contact approve ${pending.id} Χαρά.`));
+    await value.service.handleOwnerCommand(
+      textEvent('1', `/contact approve ${pending.id} Χαρά.`),
+      value.channel,
+    );
     expect(value.contacts.contacts(true)[0]!.displayName).toBe('Χαρά');
     for (const name of ['Χαρά', 'χαρα', 'ΧΑΡΑ.']) {
       await value.service.handleGroup(textEvent('1', `/contact link ${name}`, GROUP_ID));
@@ -145,14 +154,19 @@ describe('Telegram contact service', () => {
     }
   });
 
-  it('refuses a private owner command once, with the id to use', async () => {
+  it('refuses a private owner command once, on the reply channel, with the id to use', async () => {
     const value = await fixture();
+    const reply = new FakeRemoteChannel('telegram');
     const before = value.channel.sent.length;
-    const result = await value.service.handleOwnerCommand(textEvent('1', '/contact bind 737154da'));
-    expect(result).toMatchObject({
-      kind: 'rejected',
-      reason: expect.stringContaining('/contact link'),
-    });
+    const result = await value.service.handleOwnerCommand(
+      textEvent('1', '/contact bind 737154da'),
+      reply,
+    );
+    // Handled, not rejected: a rejected reason is re-sent by the acknowledgement
+    // layer, outside the reply channel whose messages are deleted after a delay.
+    expect(result).toEqual({ kind: 'handled' });
+    expect(reply.sent).toHaveLength(1);
+    expect(reply.sent[0]!.text).toContain('/contact link');
     expect(value.channel.sent).toHaveLength(before);
   });
 

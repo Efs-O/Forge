@@ -94,12 +94,15 @@ export class TelegramContactCommands {
     }
   }
 
-  async handleOwnerCommand(event: ContactTextEvent): Promise<RemoteInboundDisposition | undefined> {
+  async handleOwnerCommand(
+    event: ContactTextEvent,
+    reply: RemoteChannel,
+  ): Promise<RemoteInboundDisposition | undefined> {
     const text = event.text.trim();
     if (!/^\/(?:contacts?|send)(?:\s|$)/i.test(text)) return undefined;
     if (/^\/contacts?\s+pending$/i.test(text)) {
       const pending = this.store.pending();
-      await this.channel.send(
+      await reply.send(
         event.chatId,
         pending.length === 0
           ? 'Forge: no pending contact requests.'
@@ -110,7 +113,7 @@ export class TelegramContactCommands {
     }
     if (/^\/contacts?\s+list$/i.test(text)) {
       const contacts = this.store.contacts(true);
-      await this.channel.send(
+      await reply.send(
         event.chatId,
         contacts.length === 0
           ? 'Forge: no active contacts.'
@@ -129,10 +132,14 @@ export class TelegramContactCommands {
         this.store.pending().map((item) => item.id),
       );
       if (!displayName || displayName.length > 80 || pending.length !== 1) {
-        return this.sendOwnerUsage(event, 'usage: /contact approve <pending-id> <display-name>');
+        return this.sendOwnerUsage(
+          event,
+          reply,
+          'usage: /contact approve <pending-id> <display-name>',
+        );
       }
       const contact = await this.store.approve(pending[0]!, displayName);
-      await this.channel.send(
+      await reply.send(
         event.chatId,
         contact
           ? `Forge: contact approved as ${contact.displayName}; now link a private group with /contact link ${contact.displayName}.`
@@ -148,39 +155,46 @@ export class TelegramContactCommands {
     if (bind) {
       const result = await this.store.confirmGroupLink(bind[1]!, event.senderId);
       await this.audit?.record(event, `contact_group_bind_${result}`).catch(() => undefined);
-      if (result !== 'confirmed') return this.sendOwnerUsage(event, this.groupLinkResult(result));
-      await this.channel.send(event.chatId, this.groupLinkResult(result), {
+      if (result !== 'confirmed')
+        return this.sendOwnerUsage(event, reply, this.groupLinkResult(result));
+      await reply.send(event.chatId, this.groupLinkResult(result), {
         signal: this.signal,
       });
       return { kind: 'handled' };
     }
     const disable = /^\/contact\s+disable\s+(.+)$/is.exec(text);
-    if (disable) return this.changeGroupState(event, disable[1]!.trim(), 'disable');
+    if (disable) return this.changeGroupState(event, reply, disable[1]!.trim(), 'disable');
     const unbind = /^\/contact\s+unbind\s+(.+)$/is.exec(text);
-    if (unbind) return this.changeGroupState(event, unbind[1]!.trim(), 'unbind');
+    if (unbind) return this.changeGroupState(event, reply, unbind[1]!.trim(), 'unbind');
     const direct = /^\/send\s+([^:]+):\s*([\s\S]+)$/i.exec(text);
     if (direct) {
       const message = direct[2]!.trim();
       if (!message || message.length > MAX_CONTACT_TEXT) {
-        return this.sendOwnerUsage(event, 'usage: /send <name>: <message up to 12000 characters>');
+        return this.sendOwnerUsage(
+          event,
+          reply,
+          'usage: /send <name>: <message up to 12000 characters>',
+        );
       }
       const matches = this.resolveContacts(direct[1]!.trim());
       if (matches.length !== 1) {
         return this.sendOwnerUsage(
           event,
+          reply,
           matches.length > 1
             ? 'Forge: multiple contacts match; use the short contact id.'
             : 'Forge: contact not found.',
         );
       }
       if (matches[0]!.groupStatus !== 'bound') {
-        return this.sendOwnerUsage(event, 'Forge: link this contact to a group first.');
+        return this.sendOwnerUsage(event, reply, 'Forge: link this contact to a group first.');
       }
       await this.createAndPreview(matches[0]!, event.senderId, message, event);
       return { kind: 'handled' };
     }
     return this.sendOwnerUsage(
       event,
+      reply,
       'usage: /contacts pending|list, /contact approve|bind|link|disable|unbind, or /send <name>: <message>',
     );
   }
@@ -239,6 +253,7 @@ export class TelegramContactCommands {
 
   private async changeGroupState(
     event: ContactTextEvent,
+    reply: RemoteChannel,
     query: string,
     action: 'disable' | 'unbind',
   ): Promise<RemoteInboundDisposition> {
@@ -246,6 +261,7 @@ export class TelegramContactCommands {
     if (matches.length !== 1) {
       return this.sendOwnerUsage(
         event,
+        reply,
         matches.length > 1
           ? 'Forge: multiple contacts match; use the short contact id.'
           : 'Forge: contact not found.',
@@ -255,7 +271,7 @@ export class TelegramContactCommands {
       action === 'disable'
         ? await this.store.disable(matches[0]!.id)
         : await this.store.unbind(matches[0]!.id);
-    await this.channel.send(
+    await reply.send(
       event.chatId,
       changed ? `Forge: contact ${action}d.` : 'Forge: contact was not changed.',
       { signal: this.signal },
@@ -283,16 +299,17 @@ export class TelegramContactCommands {
   }
 
   /**
-   * A private chat's rejection reason is already sent by
-   * acknowledgeTelegramDisposition; sending it here too showed every refusal
-   * twice. Only a group needs the explicit send.
+   * Sent here, through the reply channel, and reported as handled: a
+   * `rejected` reason is sent by acknowledgeTelegramDisposition instead, which
+   * showed private refusals twice and never deleted them.
    */
-  private sendOwnerUsage(event: ContactTextEvent, text: string): Promise<RemoteInboundDisposition> {
-    const sent =
-      event.chatType === 'private'
-        ? Promise.resolve()
-        : this.channel.send(event.chatId, text, { signal: this.signal });
-    return sent.then(() => ({ kind: 'rejected', reason: text }));
+  private async sendOwnerUsage(
+    event: ContactTextEvent,
+    reply: RemoteChannel,
+    text: string,
+  ): Promise<RemoteInboundDisposition> {
+    await reply.send(event.chatId, text, { signal: this.signal });
+    return { kind: 'handled' };
   }
 
   private notifyOwner(ownerId: string, text: string): Promise<void> {

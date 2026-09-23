@@ -89,10 +89,13 @@ function textEvent(senderId: string, text: string, chatId = senderId, id?: strin
 async function approveAndBind(value: Awaited<ReturnType<typeof boot>>): Promise<string> {
   await value.service.handleNonOwner(textEvent('20', '/start'));
   const pending = value.contacts.pending()[0]!;
-  await value.service.handleOwnerCommand(textEvent('1', `/contact approve ${pending.id} Chara`));
+  await value.service.handleOwnerCommand(
+    textEvent('1', `/contact approve ${pending.id} Chara`),
+    value.channel,
+  );
   await value.service.handleGroup(textEvent('1', '/contact link Chara', GROUP_ID));
   const link = value.contacts.pendingGroupLink(GROUP_ID)!;
-  await value.service.handleOwnerCommand(textEvent('1', `/contact bind ${link.id}`));
+  await value.service.handleOwnerCommand(textEvent('1', `/contact bind ${link.id}`), value.channel);
   return value.contacts.contacts(true)[0]!.id;
 }
 

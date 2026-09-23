@@ -76,9 +76,13 @@ export interface RemoteCommandContext {
    * store's full surface for a config read.
    */
   jobs?: { store: JobStore; enabled: boolean } | undefined;
-  /** Telegram contact-management commands, kept out of the normal command list. */
+  /**
+   * Telegram contact-management commands, kept out of the normal command list.
+   * Given `channel` so their replies are cleaned up like every other command's.
+   */
   contactCommands?: (
     event: Extract<RemoteInboundEvent, { kind: 'text' }>,
+    channel: RemoteChannel,
   ) => Promise<RemoteInboundDisposition | undefined>;
 }
 
@@ -113,7 +117,7 @@ async function executeRemoteCommand(
   context: RemoteCommandContext,
   dedupKey: string,
 ): Promise<RemoteInboundDisposition> {
-  const contactCommand = await context.contactCommands?.(event);
+  const contactCommand = await context.contactCommands?.(event, context.channel);
   if (contactCommand) return contactCommand;
   // Split whole: `/workspace list 2` needs two operands, and a limit of 2 threw
   // the page number away, so the documented page fallback never paged.
