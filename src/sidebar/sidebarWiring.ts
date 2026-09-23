@@ -41,6 +41,7 @@ import { listMemoryKeys } from '../tools/memoryTools';
 import { RequestChainLifecycle } from './RequestChainLifecycle';
 import { MidTurnInbox } from '../agent/MidTurnInbox';
 import { MidTurnTellDrain } from '../agent/MidTurnTellDrain';
+import { unattendedConversations } from './unattendedConversations';
 
 /** What the provider lends its collaborators. */
 export interface SidebarHost {
@@ -302,6 +303,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
       const queued = host.isConversationQueued(id);
       return (
         queued === false &&
+        !unattendedConversations.has(id) &&
         !agentLoop.pendingApprovalConversationIds().has('') &&
         !parts.questions.pendingConversationIds().has('') &&
         !agentLoop.isStreamingConv(id) &&
