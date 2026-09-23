@@ -5,6 +5,8 @@ import { setNestedField } from '../config/ConfigWriterHelpers';
 import type { ForgeConfig } from '../config/types';
 import { RemoteAuth } from './RemoteAuth';
 import { RemoteRequestStore } from './RemoteRequestStore';
+import { claimRemoteMidTurnTell } from './RemoteMidTurnTells';
+import type { MidTurnDrainResult } from '../agent/MidTurnInbox';
 import { RemoteLeaseError } from './RemoteTransportLease';
 import { RemoteAuditLog } from './RemoteAuditLog';
 import { RemoteAttachmentStore } from './RemoteAttachmentStore';
@@ -187,6 +189,19 @@ export class RemoteRuntime {
 
   activeTransports(): string[] {
     return this.manager.names();
+  }
+
+  /**
+   * Claim this conversation's next queued, text-only, normal-priority request as
+   * a mid-turn tell (Phase 3). Keeps `store` and `auth` private; the caller only
+   * gets the claim and its settle step.
+   */
+  claimMidTurnTell(conversationId: string): Promise<MidTurnDrainResult> {
+    return claimRemoteMidTurnTell(
+      this.store,
+      (channel, chatId) => this.auth.canDeliver(channel, chatId),
+      conversationId,
+    );
   }
 
   async validationStatus(config: ForgeConfig): Promise<RemoteValidationStatus> {

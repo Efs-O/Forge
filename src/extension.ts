@@ -373,6 +373,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     onStatusChanged: () => void publishRemoteStatus(),
   });
   activeRemoteRuntime = remoteRuntime;
+  // Phase 3: let the remote queue feed the running turn (atomic, canDeliver-gated).
+  sidebarProvider.tellDrain.registerSource('remote', (id) => remoteRuntime.claimMidTurnTell(id));
   await startWakeRelay(context, config, sidebarProvider.getHostFacade());
   const publishRemoteStatus = async (): Promise<void> => {
     sidebarProvider.setRemoteStatus(await remoteRuntime.status());

@@ -4,9 +4,23 @@
  * second copy of a tell that could be delivered out of order.
  */
 
+import type { ChatMessage } from '../llm/types';
+
 export interface MidTurnTell {
   id: string;
   text: string;
+}
+
+/**
+ * What a drain at a tool-round gap returns: the messages to inject into the
+ * transcript, plus an optional settle step that runs only after they have been
+ * pushed and persisted. The remote transport settles the claimed request here
+ * so the record is finished once the session is durable; the sidebar tells
+ * carry no settle.
+ */
+export interface MidTurnDrainResult {
+  messages: ChatMessage[];
+  settle?: () => Promise<void>;
 }
 
 export class MidTurnInbox {

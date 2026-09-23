@@ -6,7 +6,6 @@
  * which backend, which lifecycle transitions). This file owns what is actually
  * sent and what comes back.
  */
-
 import * as vscode from 'vscode';
 import type { ForgeConfig, ModelConfig } from '../config/types';
 import type { HostToWebview } from './messageBridge';
@@ -16,7 +15,8 @@ import type { RuntimeModelCapabilities } from '../backend/ModelCapabilities';
 import type { TemplateEngine } from '../llm/TemplateEngine';
 import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
 import type { ToolRegistry } from '../tools/ToolRegistry';
-import type { ChatMessage, ToolDefinition } from '../llm/types';
+import type { ToolDefinition } from '../llm/types';
+import type { MidTurnDrainResult } from '../agent/MidTurnInbox';
 import type { ToolDispatch } from './ToolDispatch';
 import type { ToolFailureTracker } from '../tools/StripTools';
 import type { TurnLifecycle } from './TurnLifecycle';
@@ -107,7 +107,7 @@ export interface ModelTurnContext {
   /** Remote chats bound to a conversation. Absent when no transport is live. */
   remoteReach?: (conversationId: string) => number;
   compactMidTurn?: (conv: ConversationRuntime, request: { exhausted: boolean }) => Promise<boolean>;
-  drainTells?: (conversationId: string) => ChatMessage[];
+  drainTells?: (conversationId: string) => Promise<MidTurnDrainResult>;
 }
 
 export interface ModelTurnRequest {

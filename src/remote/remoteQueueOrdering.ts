@@ -82,3 +82,22 @@ export function claimNextInDraft(
   next.updatedAt = Date.now();
   return next.id;
 }
+
+/**
+ * Atomically claim one queued request as a mid-turn tell, or nothing.
+ *
+ * Unlike `claimNextInDraft` this does not stop at a running conversation: the
+ * tell is injected into the turn that is already running, so the guard would
+ * reject every claim. It still re-checks the record is `queued` so a request
+ * `RemoteQueueDrain` already took is skipped rather than double-injected.
+ */
+export function claimMidTurnTellInDraft(
+  requests: RemoteRequestRecord[],
+  requestId: string,
+): RemoteRequestRecord | undefined {
+  const request = requests.find((item) => item.id === requestId);
+  if (!request || request.state !== 'queued') return undefined;
+  request.state = 'running';
+  request.updatedAt = Date.now();
+  return structuredClone(request);
+}

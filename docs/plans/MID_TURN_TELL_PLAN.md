@@ -285,6 +285,42 @@ Phase 1 and stop:** the queue and steer stay.
   `docs/OWNERS.md`. This keeps the restored App comments beside the host-message
   bridge and leaves attachment prompts and steering on their existing path.
 
+### Phase 3 notes
+
+- **One composer, two doors.** `MidTurnTellDrain` (new, `src/agent/MidTurnTellDrain.ts`)
+  composes the sidebar inbox and the remote queue into a single drain at each
+  tool-round gap. The sidebar inbox registers first (`'sidebar'`), so its tells
+  drain ahead of any remote claim; the remote source registers in `extension.ts`
+  (`'remote'`) once the `RemoteRuntime`'s store and auth exist. This keeps the
+  plan's "single owner of the sidebar tells" rule — `MidTurnInbox` is unchanged
+  and still owns the sidebar tells — while letting the remote queue feed the
+  running turn through a provider callback into the existing drain, not a
+  second inbox.
+- **`drainTells` is now async and returns `{ messages, settle? }`.** The loop
+  pushes the messages, calls `onMessagesChanged` (persist), and only then runs
+  `settle`. The remote transport uses `settle` to finish the claimed request
+  `completed` once the injected message is durable; the sidebar tells carry no
+  settle. If the persist throws, `settle` is never reached, so the record stays
+  `running` and the store's restart recovery handles it.
+- **The claim is atomic against `RemoteQueueDrain`.** `claimMidTurnTell`
+  (new, `RemoteRequestStore`) re-checks that the record is still `queued` inside
+  the store's serialized mutation, so a request the drain already took is
+  skipped rather than double-injected. The draft helper
+  `claimMidTurnTellInDraft` (new, `remoteQueueOrdering.ts`) deliberately does
+  not stop at a running conversation — the tell is injected into the turn that
+  is already running, so the drain's guard would reject every claim.
+- **Claim rules (new, `src/remote/RemoteMidTurnTells.ts`).** The claim walks the
+  conversation's queued requests in `compareQueuedRequests` order and takes the
+  first that is normal-priority (not `steer`), text-only (no attachments), and
+  whose chat `canDeliver`. Anything else is left `queued` for the next turn, as
+  today. `RemoteRuntime.claimMidTurnTell` keeps `store` and `auth` private and
+  hands the caller only the claim and its settle step.
+- **Test note.** The loop's "settles after persist" unit test drives a tool
+  round (a no-tool turn never reaches the drain branch) and asserts the
+  invariant directly — by the time `settle` runs, the injected message is on
+  the transcript — rather than hardcoding the exact persist sequence, which
+  also includes the loop's own assistant/tool-result persists.
+
 ## State × lifecycle ledger
 
 | Artifact | Create | Delete | Pause/disable | Crash mid-write | Owner-process death | TTL/expiry |

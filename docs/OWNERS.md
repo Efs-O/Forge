@@ -150,6 +150,7 @@ overlaps with an existing owner, extend the owner instead.
 | `/workspace <n>` switch preflight             | `src/remote/remoteWorkspaceCommand.ts`          |
 | /sleep, /wake, sleep confirmation state       | `src/remote/RemotePowerCommands.ts`             |
 | Queue order, promote/cancel/claim rules       | `src/remote/remoteQueueOrdering.ts`             |
+| Claim a queued request as a mid-turn tell     | `src/remote/RemoteMidTurnTells.ts`              |
 | Turn outcome echoed to bound chats            | `src/sidebar/turnMirrorWiring.ts`               |
 | Live progress message for a sidebar turn      | `src/remote/remoteHostProgress.ts`              |
 | `/view` transcript replay rendering           | `src/remote/RemoteTranscriptView.ts`            |
@@ -250,6 +251,7 @@ overlaps with an existing owner, extend the owner instead.
 | Local/cloud route classification             | `src/llm/ModelRouteClassifier.ts`            |
 | Shared native/fallback tool-calling loop     | `src/agent/ToolCallingLoop.ts`               |
 | Mid-turn tell inbox                          | `src/agent/MidTurnInbox.ts`                  |
+| Mid-turn tell composer (sidebar + remote)    | `src/agent/MidTurnTellDrain.ts`              |
 | Tool-calling stream helpers                  | `src/agent/toolCallingStream.ts`             |
 | Truncated tool call: detection + recovery    | `src/agent/truncationRecovery.ts`            |
 | Repeated identical tool call detection       | `src/agent/ToolLoopGuard.ts`                 |

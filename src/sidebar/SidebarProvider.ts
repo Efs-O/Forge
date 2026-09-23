@@ -56,6 +56,7 @@ import type { UserQuestionService } from './UserQuestionService';
 import type { UserNotificationService } from './UserNotificationService';
 import { randomUUID } from 'crypto';
 import type { MidTurnInbox } from '../agent/MidTurnInbox';
+import type { MidTurnTellDrain } from '../agent/MidTurnTellDrain';
 
 export type { SidebarProviderEvents };
 /** Residency refresh while visible: cheap, but fast enough to avoid a stale dot. */
@@ -76,6 +77,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly send: SendPipeline;
   private readonly requestChains: RequestChainLifecycle;
   private readonly midTurnInbox: MidTurnInbox;
+  /** The mid-turn tell composer; the remote queue registers as a source. */
+  public readonly tellDrain: MidTurnTellDrain;
   private readonly hostFacade: ForgeHostFacade;
   private readonly residency = new ResidencyPoller(
     () => this.pool.residencySignature(),
@@ -173,6 +176,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.send = runtime.send;
     this.requestChains = runtime.requestChains;
     this.midTurnInbox = runtime.midTurnInbox;
+    this.tellDrain = runtime.tellDrain;
     this.hostFacade = createSidebarHostFacade({
       runtime,
       getSidebar: () => this.sidebar,

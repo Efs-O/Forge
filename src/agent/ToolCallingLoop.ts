@@ -96,8 +96,16 @@ export interface ToolCallingLoopOptions {
   /** Request the provider's exact execution-side usage in the final stream frame. */
   includeUsage?: boolean;
   onUsage?: UsageHandler;
-  /** Messages waiting for the next safe gap after a completed tool round. */
-  drainTells?: () => ChatMessage[];
+  /**
+   * Claims messages waiting for the next safe gap after a completed tool round.
+   * Returns the messages to inject plus an optional settle step that runs only
+   * after they have been pushed and persisted — the remote transport uses it to
+   * finish the claimed request once the session is durable.
+   */
+  drainTells?: () => Promise<{
+    messages: ChatMessage[];
+    settle?: () => Promise<void>;
+  }>;
   /** Fired when a tool call was cut off and the loop is asking for it in chunks. */
   onTruncatedToolCall?: (info: { toolName: string | undefined; approxBytes: number }) => void;
   /**
@@ -369,10 +377,14 @@ export async function runToolCallingLoop(
         if (error instanceof ToolLoopDetectedError) options.onRepeatedCall?.();
         throw error;
       }
-      const tells = options.drainTells?.() ?? [];
-      if (tells.length > 0) {
-        options.messages.push(...tells);
+      const drained = await options.drainTells?.();
+      if (drained && drained.messages.length > 0) {
+        options.messages.push(...drained.messages);
         options.onMessagesChanged?.();
+        // Persisted above; only now may the claim be settled. If the persist
+        // threw we never reach this line, so the record stays `running` and the
+        // store's restart recovery handles it.
+        await drained.settle?.();
       }
       continue;
     }

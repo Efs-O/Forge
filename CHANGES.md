@@ -10,6 +10,14 @@
 - Steer and the queue UI are unchanged for now; they are planned for a later
   phase.
 
+### A Telegram text message reaches the running turn (2026-09-23)
+
+- **A plain text message you send over Telegram while a turn is running now
+  reaches it at the next gap between tool calls**, instead of waiting for the
+  turn to end. The chat is told the message was seen by the running turn.
+- A message with attachments, or one from a chat that cannot be reached, is
+  left in the queue and runs as the next turn, exactly as before.
+
 ### Remembered notes survive a compaction you can find them after (2026-09-22)
 
 - **After a compaction, the agent is told which keys it stored with

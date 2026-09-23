@@ -227,7 +227,7 @@ export class AgentLoop {
       remoteReach: (conversationId) => this.remoteReach?.(conversationId) ?? 0,
       compactMidTurn: (conv, request) =>
         this.midTurnCompactor?.(conv, request) ?? Promise.resolve(false),
-      drainTells: (conversationId) => this.midTurnTellDrainer?.(conversationId) ?? [],
+      drainTells: (id) => this.midTurnTellDrainer?.(id) ?? Promise.resolve({ messages: [] }),
       // `options` is load-bearing and was missing here: a narrower function is
       // assignable, so dropping the 4th parameter type-checked while silently
       // discarding `internal: true`. Every Forge-authored prompt — the

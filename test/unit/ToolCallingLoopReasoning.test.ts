@@ -126,9 +126,9 @@ describe('ToolCallingLoop reasoning retention', () => {
   it('drains tells after tool results and before the next request', async () => {
     let round = 0;
     const requests: ChatMessage[][] = [];
-    const drain = vi.fn().mockReturnValueOnce([
-      { role: 'user', content: 'also update the changelog', midTurn: true },
-    ]);
+    const drain = vi.fn().mockResolvedValueOnce({
+      messages: [{ role: 'user', content: 'also update the changelog', midTurn: true }],
+    });
     streamModelChatCompletion.mockImplementation(
       async (_url: string, request: { messages: ChatMessage[] }, _model: unknown, h: Handlers) => {
         requests.push(request.messages.map((message) => ({ ...message })));
@@ -176,6 +176,47 @@ describe('ToolCallingLoop reasoning retention', () => {
     } as never);
 
     expect(drain).not.toHaveBeenCalled();
+  });
+
+  it('settles a claim only after the injected message is persisted', async () => {
+    // The real invariant: by the time settle runs, the injected mid-turn message
+    // is already on the transcript. A crash in between leaves the record
+    // `running` for restart recovery. We assert that directly rather than the
+    // exact persist sequence (the loop persists the assistant tool-call turn and
+    // tool result before draining tells, so the count is an implementation detail).
+    let injectedOnTranscriptAtSettle = false;
+    const settle = vi.fn(async () => {
+      injectedOnTranscriptAtSettle = messages.some(
+        (m) => m.role === 'user' && m.content === 'seen' && m.midTurn === true,
+      );
+    });
+    const drain = vi.fn().mockResolvedValueOnce({
+      messages: [{ role: 'user', content: 'seen', midTurn: true }],
+      settle,
+    });
+    let round = 0;
+    streamModelChatCompletion.mockImplementation(
+      async (_url: string, _request: unknown, _model: unknown, h: Handlers) => {
+        round += 1;
+        if (round === 1) {
+          h.onToolCalls([CALL]);
+          h.onDone('tool_calls');
+        } else {
+          h.onToken('Done.');
+          h.onDone('stop');
+        }
+      },
+    );
+    const messages: ChatMessage[] = [{ role: 'user', content: 'go' }];
+
+    await runToolCallingLoop({
+      ...runOptions(messages),
+      drainTells: drain,
+      onMessagesChanged: () => undefined,
+    } as never);
+
+    expect(settle).toHaveBeenCalledOnce();
+    expect(injectedOnTranscriptAtSettle).toBe(true);
   });
 
   it('does not narrate before an ask_user question to remote surfaces', async () => {

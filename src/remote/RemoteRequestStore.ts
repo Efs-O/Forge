@@ -28,6 +28,7 @@ import {
 } from './RemoteHandoffState';
 import {
   cancelQueuedInDraft,
+  claimMidTurnTellInDraft,
   claimNextInDraft,
   compareQueuedRequests,
   promoteQueuedInDraft,
@@ -317,6 +318,13 @@ export class RemoteRequestStore {
 
   async requeue(id: string): Promise<void> {
     await this.setRequestState(id, 'queued');
+  }
+
+  /** Atomically claim one queued request as a mid-turn tell (Phase 3); see `claimMidTurnTellInDraft`. */
+  async claimMidTurnTell(id: string): Promise<RemoteRequestRecord | undefined> {
+    let claimed: RemoteRequestRecord | undefined;
+    await this.mutate((draft) => (claimed = claimMidTurnTellInDraft(draft.requests, id)));
+    return claimed;
   }
 
   /** `/steer <n>`: run an already-queued prompt next. */
