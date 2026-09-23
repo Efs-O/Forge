@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { submitBusMessage } from '../../src/vscode/agentMessagingSetup';
+import { busModelIds, submitBusMessage } from '../../src/vscode/agentMessagingSetup';
+import type { ForgeConfig } from '../../src/config/types';
 import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
 
 describe('agent bus conversation targeting', () => {
@@ -20,5 +21,21 @@ describe('agent bus conversation targeting', () => {
     expect(restoreConversation).toHaveBeenCalledTimes(restores);
     expect(send).toHaveBeenCalledWith(conversationId, 'hello');
     expect(facade.status().activeConversationId).toBe('visible');
+  });
+});
+
+describe('busModelIds', () => {
+  it('accepts each model and every model@profile it offers', () => {
+    const config = {
+      models: [{ name: 'qwen', profiles: ['main'] }, { name: 'gemma' }],
+      profiles: { main: {}, fast: {} },
+    } as unknown as ForgeConfig;
+    expect(busModelIds(config)).toEqual([
+      'qwen',
+      'qwen@main',
+      'gemma',
+      'gemma@main',
+      'gemma@fast',
+    ]);
   });
 });

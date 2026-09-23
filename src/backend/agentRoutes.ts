@@ -86,7 +86,7 @@ export interface AgentRoutesDeps {
   /** Read-only view of the sender's chat; absent means the route is 404. */
   status?: (from: string) => BusReadResult | Promise<BusReadResult>;
   view?: (from: string, count: string | undefined) => BusReadResult | Promise<BusReadResult>;
-  /** Configured model names used to validate an inbound message's model. */
+  /** Valid model ids for an inbound message, `model@profile` forms included. */
   configuredModels?: () => readonly string[];
 }
 

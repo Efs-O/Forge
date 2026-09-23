@@ -8,6 +8,7 @@ import {
 } from '../agentBus/agentInbox';
 import { AgentRoutes } from '../backend/agentRoutes';
 import { joinClaude } from '../agentMesh/claudeJoin';
+import { availableProfilesFor } from '../config/ConfigResolver';
 import type { ForgeConfig } from '../config/types';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import { parseMeshCommand } from '../agentMesh/meshCommands';
@@ -27,6 +28,14 @@ function busTarget(facade: ForgeHostFacade, from: string | undefined): string {
 }
 
 /** Keep bus restore/create delivery in its addressed chat without moving the visible chat. */
+/** Every model plus each `model@profile` it offers: the ids the model pickers write. */
+export function busModelIds(config: ForgeConfig): string[] {
+  return config.models.flatMap((model) => [
+    model.name,
+    ...availableProfilesFor(config, model.name).map((profile) => `${model.name}@${profile}`),
+  ]);
+}
+
 export async function submitBusMessage(
   facade: ForgeHostFacade,
   prompt: string,
@@ -135,7 +144,7 @@ export function setupAgentMessaging(
   return new AgentRoutes({
     paths: () => busPaths(),
     inbox,
-    configuredModels: () => getConfig().models.map((model) => model.name),
+    configuredModels: () => busModelIds(getConfig()),
     relay: mesh.relay,
     // F-06: a `priority=steer` message interrupts the recipient's active turn.
     steer: mesh.steer,
