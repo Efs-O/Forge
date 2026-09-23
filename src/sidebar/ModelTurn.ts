@@ -21,14 +21,8 @@ import type { ToolDispatch } from './ToolDispatch';
 import type { ToolFailureTracker } from '../tools/StripTools';
 import type { TurnLifecycle } from './TurnLifecycle';
 import { computeContextBudget, estimateToolTokens, perSlotContext } from '../util/contextBudget';
-import { stampToolResultClocks } from '../agent/toolResultClock';
-import { prepareToolResultContext } from '../agent/toolResultContext';
-import { annotateRereads } from '../agent/staleReadSupersede';
-import { nudgeTruncatedResults } from '../agent/truncatedResultNudge';
-import { applyCompactionWindow } from './compactionWindow';
-import { ageOutImageParts, stripImageParts } from './imageParts';
 import { announceMissingImages } from './imageNotices';
-import { injectSystemPrompt } from '../llm/SystemPromptInjector';
+import { prepareModelTurnMessages } from './prepareModelTurnMessages';
 import { resolveToolPermissions } from '../tools/PermissionResolver';
 import { ToolBudget } from '../tools/ToolBudget';
 import { hiddenLazyToolNames } from '../tools/lazyToolGroups';
@@ -36,7 +30,7 @@ import { deriveStaticCapabilities } from '../config/ConfigResolver';
 import { applyToolCalls } from './transcriptMutations';
 import { mirrorLiveSessionAnswers } from './liveSessionMirror';
 import { extractToolDetail } from './toolSummary';
-import { injectTurnContext, freezeTurnContext, type TurnContextState } from './turnContext';
+import { freezeTurnContext, type TurnContextState } from './turnContext';
 import { latestPastedTerminalCommand } from './compactionLedger';
 import { terminalCommandTracker } from '../tools/TerminalCommandTracker';
 import { formatPromptCacheStats, readPromptCacheStats } from '../llm/promptCacheStats';
@@ -49,11 +43,7 @@ import {
   runToolCallingLoop,
   type ToolCallingLoopResult,
 } from '../agent/ToolCallingLoop';
-import {
-  buildTemplateContext,
-  canUseThinkingKwargs,
-  shouldStripThinking,
-} from './turnModelBehavior';
+import { canUseThinkingKwargs, shouldStripThinking } from './turnModelBehavior';
 import type { AgentProgressEvent } from './AgentProgress';
 
 const log = getLogger();
@@ -294,51 +284,18 @@ export async function runModelTurn(
       failureTracker: ctx.failureTracker,
       failureTrackerKey: conv.id,
       ...(apiKey ? { apiKey } : {}),
-      prepareMessages: (messages) => {
-        // Compaction shrinks what the MODEL sees, never the stored transcript.
-        // The loop hands us a copy and re-runs this every round, so the window
-        // holds for the whole turn without touching conv.messages.
-        const windowed = applyCompactionWindow(messages, conv.compaction);
-        // The one place images ever leave the model-facing copy. Aging and the
-        // no-vision strip are mutually exclusive: on a projector-less model the
-        // `no-vision` note wins, because it explains why the image is missing
-        // now rather than implying it can be recovered by re-calling view_image.
-        //
-        // Runs AFTER the window (no point rewriting messages it drops) and
-        // BEFORE injection/excerpting, so the freed tokens reach the budget math.
-        const visible = isVisionModel
-          ? ageOutImageParts(windowed, model.image_retention_turns)
-          : stripImageParts(windowed, {
-              reason: 'no-vision',
-              modelName: model.name,
-            });
-        const injected = injectSystemPrompt(
-          visible,
-          ctx.templateEngine,
-          buildTemplateContext(config, ctx.forgeLoader, activeFile),
-          model.system_prompt,
-          model.system_prompt_mode,
-        );
-        // Only the model-facing copy is reduced. `conv.messages` remains the
-        // full raw transcript for sidebar, persistence, and exact recovery via
-        // read_tool_result when an excerpt calls for more detail.
-        // Runs BEFORE the excerpting below so the budget sees the freed room:
-        // on a turn that would not otherwise fit, the surviving results get
-        // excerpted less aggressively.
-        // Layer C last, so the volatile block lands as close to the tail as a
-        // strict chat template allows. Everything above it -- system prompt and
-        // the whole conversation -- stays byte-identical while the active file
-        // or the plan changes, which is what keeps the KV cache warm. The state
-        // is the turn-start snapshot above, so it is byte-identical across the
-        // rounds WITHIN this turn too.
-        const withTurnContext = injectTurnContext(injected, turnContext);
-        return prepareToolResultContext({
-          messages: stampToolResultClocks(nudgeTruncatedResults(annotateRereads(withTurnContext))),
-          toolTokens: estimateToolTokens(buildToolDefinitions()),
+      prepareMessages: (messages) =>
+        prepareModelTurnMessages(messages, {
+          compaction: conv.compaction,
+          isVisionModel,
           model,
-          server: config.llama_server,
-        }).messages;
-      },
+          templateEngine: ctx.templateEngine,
+          config,
+          forgeLoader: ctx.forgeLoader,
+          activeFile,
+          turnContext,
+          getToolDefinitions: buildToolDefinitions,
+        }),
       dispatchToolCalls: async (toolCalls, messages) => {
         applyToolCalls(conv, toolCalls.length);
         for (const call of toolCalls) {

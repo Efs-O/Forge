@@ -30,6 +30,7 @@ overlaps with an existing owner, extend the owner instead.
 | Primary turn + streaming lifecycle                   | `src/sidebar/AgentLoop.ts`               |
 | Per-conversation streaming/cancel state              | `src/sidebar/TurnLifecycle.ts`           |
 | Model-endpoint turn: preflight + request             | `src/sidebar/ModelTurn.ts`               |
+| Model-facing message preparation for a turn (window, images, system prompt, turn context, tool-result excerpts) | `src/sidebar/prepareModelTurnMessages.ts` |
 | Cloud target / local backend startup                 | `src/sidebar/ProviderTurn.ts`            |
 | Turn served by a local CLI agent                     | `src/sidebar/CliTurn.ts`                 |
 | One-shot prompt (compaction, /review)                | `src/sidebar/PromptRun.ts`               |
