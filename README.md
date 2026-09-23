@@ -59,7 +59,7 @@ telemetry, analytics, or auto-update pings.
 ## Highlights
 
 - Single execute-style workflow with no mode switching
-- Multi-tab chat with independent streaming per tab
+- Multiple conversations with independent streaming, all available from history
 - Per-action confirmation gate, plus `/clanker` full-auto mode
 - Per-turn checkpoints with Keep and Undo
 - Inline chat diffs after write tools
@@ -342,7 +342,7 @@ the weights in VRAM. The borrowing window takes a lease; the owner will not shut
 down while a lease is outstanding, and a lease left behind by a crashed window
 is reclaimed once its process is confirmed gone.
 
-Conversations are not shared — each window keeps its own tabs, messages and
+Conversations are not shared — each window keeps its own open chats, messages and
 checkpoints. **KV cache slots are**, and that is the part that surprises people:
 alternating windows evict each other's cached prefix and each pays full prompt
 re-processing. Answers stay correct; you lose the cache speedup.
@@ -571,12 +571,12 @@ Type `/` in chat to open the built-in command list. Forge also contributes comma
 | `/unloadall`  | Stop all backends and release every loaded model |
 | `/restart`    | Restart or reconnect the backend                 |
 | `/reindex`    | Rebuild the local semantic search index          |
-| `/new`        | Open a new conversation tab                      |
+| `/new`        | Open a new conversation                          |
 | `/rename`     | Rename the active conversation                   |
 | `/context`    | Add a file, selection, tabs, or files as context |
 | `/config`     | Open the active Forge config                     |
 | `/logs`       | Show the Forge backend output                    |
-| `/clear`      | Clear the active tab only                        |
+| `/clear`      | Clear the current conversation                   |
 | `/review`     | Run an immediate review prompt                   |
 | `/compact`    | Summarize and compress the current chat          |
 | `/undo`       | Restore files from the last checkpoint           |

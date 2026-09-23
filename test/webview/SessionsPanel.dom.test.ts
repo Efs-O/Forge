@@ -7,8 +7,9 @@ import type { HostToWebview } from '../../src/sidebar/messageBridge';
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const posted: unknown[] = [];
-(globalThis as unknown as { acquireVsCodeApi: () => { postMessage: (msg: unknown) => void } })
-  .acquireVsCodeApi = () => ({
+(
+  globalThis as unknown as { acquireVsCodeApi: () => { postMessage: (msg: unknown) => void } }
+).acquireVsCodeApi = () => ({
   postMessage: (msg: unknown) => posted.push(msg),
 });
 
@@ -76,16 +77,14 @@ afterEach(() => {
 });
 
 describe('sessions panel dismissal', () => {
-  it('switches sessions from the strip, not from the panel', () => {
-    // The panel lists closed sessions only now. Open tabs were listed in both
-    // places, so the active session rendered twice - once as its chip above,
-    // once as a row below it.
+  it('lists open sessions before archived and switches from the panel', () => {
     openPanel();
-    expect(panel().querySelectorAll('.session-list')).toHaveLength(0);
-
-    const chips = container.querySelectorAll<HTMLButtonElement>('.tab-chip-label');
-    expect(chips.length).toBe(2);
-    click(chips[1]!);
+    const rows = panel().querySelectorAll<HTMLButtonElement>('#history-open-list .history-item');
+    expect(rows.length).toBe(2);
+    expect(panel().querySelector('.history-section-heading')?.textContent).toBe('Open');
+    const archived = panel().querySelector<HTMLButtonElement>('#history-list .history-item');
+    expect(archived?.textContent).toContain('archived');
+    click(rows[1]!);
     expect(posted).toContainEqual({ type: 'switchConversation', id: 'tab-2' });
   });
 
