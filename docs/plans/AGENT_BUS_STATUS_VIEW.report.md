@@ -127,7 +127,9 @@ Generation is roughly double the Q6's, as the user observed. Quality at this
 scale looks comparable, but the Q6 has not run this exact task, so this table
 compares speed, not quality head to head. Tuning levers for the next run:
 
-- `reasoning_effort: xhigh → high` (config change between turns only).
+- `reasoning_effort` below xhigh. The Qwopus template accepts only `xhigh`,
+  `medium` (its default) and `low`; `high` fails every request with HTTP 400
+  (tried 2026-09-23 and reverted). The next step down is `medium`.
 - The prompt re-read finding below, which is a Forge bug and not a model one.
 
 **Where 10 minutes of the 49 went: full-prompt re-reads, caused by Forge.**
