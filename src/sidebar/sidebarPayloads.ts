@@ -102,14 +102,21 @@ export function buildSessionSyncMessage(
     activeId: sidebar.activeConversationId,
     tabs: tabMetasFromSession(sidebar, streamingIds, sessionActiveMs),
     history: historyMetasFromSession(sidebar),
-    archived: archived.map(({ id, title, createdAt, updatedAt, messageCount, active_model }) => ({
-      id,
-      title,
-      createdAt,
-      updatedAt,
-      messageCount,
-      ...(active_model ? { active_model } : {}),
-    })),
+    // A row can briefly duplicate a chat that was just restored; the open/recent copy wins.
+    archived: archived
+      .filter(
+        (row) =>
+          !sidebar.conversations.some((c) => c.id === row.id) &&
+          !sidebar.history.some((c) => c.id === row.id),
+      )
+      .map(({ id, title, createdAt, updatedAt, messageCount, active_model }) => ({
+        id,
+        title,
+        createdAt,
+        updatedAt,
+        messageCount,
+        ...(active_model ? { active_model } : {}),
+      })),
     waitingIds: [...waitingIds].filter(Boolean),
     messagesById: slimMessagesById(sidebar, wanted),
     ...(attachmentsRoot ? { attachmentsRoot } : {}),

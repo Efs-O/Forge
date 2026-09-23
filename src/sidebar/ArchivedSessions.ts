@@ -6,6 +6,7 @@ import { createHash } from 'crypto';
 import { z } from 'zod';
 import { writeFileAtomicSync } from '../util/atomicWrite';
 import { getLogger } from '../util/logger';
+import { deriveTitle } from './conversationTitle';
 import { conversationPersistedSchema, type ConversationPersisted } from './sessionTypes';
 
 const indexSchema = z.array(
@@ -140,10 +141,15 @@ export class ArchivedSessions {
           if (recentIds.has(id)) continue;
           const sessionRows = this.readLogRows(path.join(this.logsDirectory, filename));
           const start = sessionRows.find((row) => row['type'] === 'session_start');
-          if (!start || start['workspace_path'] !== this.workspacePath) continue;
+          if (!start || !samePath(this.stringField(start, 'workspace_path'), this.workspacePath))
+            continue;
+          // session_start is written before the chat is named ("Untitled chat").
+          const firstUser = sessionRows.find(
+            (row) => row['role'] === 'user' && typeof row['content'] === 'string',
+          );
           rows.push({
             id,
-            title: this.stringField(start, 'title') ?? 'Untitled',
+            title: deriveTitle(firstUser ? String(firstUser['content']) : ''),
             createdAt: this.numberField(start, 'timestamp_ms') ?? 0,
             updatedAt: this.numberField(sessionRows.at(-1) ?? start, 'timestamp_ms') ?? 0,
             messageCount: sessionRows.filter((row) =>
@@ -209,9 +215,17 @@ export class ArchivedSessions {
   private readLogRows(file: string): Array<Record<string, unknown>> {
     const seen = new Set<string>();
     const rows: Array<Record<string, unknown>> = [];
+    let unreadable = 0;
     for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
       if (!line.trim()) continue;
-      const value: unknown = JSON.parse(line);
+      let value: unknown;
+      try {
+        value = JSON.parse(line);
+      } catch {
+        // A crash mid-append leaves a torn last line; it must not hide the log.
+        unreadable += 1;
+        continue;
+      }
       if (typeof value !== 'object' || value === null || Array.isArray(value)) continue;
       const row = value as Record<string, unknown>;
       const canonical = { ...row };
@@ -220,6 +234,9 @@ export class ArchivedSessions {
       if (seen.has(hash)) continue;
       seen.add(hash);
       rows.push(row);
+    }
+    if (unreadable > 0) {
+      log.warn(`[ArchivedSessions] ${file}: skipped ${unreadable} unreadable line(s)`);
     }
     return rows;
   }
@@ -231,4 +248,12 @@ export class ArchivedSessions {
   private numberField(row: Record<string, unknown>, key: string): number | undefined {
     return typeof row[key] === 'number' ? (row[key] as number) : undefined;
   }
+}
+
+/** Session logs store the path as VS Code's fsPath gave it (drive letter lower-cased). */
+function samePath(logged: string | undefined, workspace: string): boolean {
+  if (logged === undefined) return false;
+  const a = path.resolve(logged);
+  const b = path.resolve(workspace);
+  return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
 }

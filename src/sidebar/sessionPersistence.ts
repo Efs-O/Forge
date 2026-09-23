@@ -12,7 +12,6 @@ import { getLogger } from '../util/logger';
 import type { ChatMessage } from '../llm/types';
 import type { CompactionState } from './compactionTypes';
 import type { HistoryArchive } from './HistoryArchive';
-import type { ArchivedSessions } from './ArchivedSessions';
 import {
   ACTIVE_ID_KEY,
   HISTORY_KEY_LEGACY,
@@ -368,23 +367,14 @@ export function saveSidebarSession(
   workspaceState: Memento,
   session: SidebarRuntime,
   archive?: HistoryArchive,
-  overflow?: ArchivedSessions,
 ): void {
   session.history.sort((a, b) => b.updatedAt - a.updatedAt);
-  if (overflow && session.history.length > MAX_HISTORY_CONVERSATIONS) {
-    const evicted = session.history.slice(MAX_HISTORY_CONVERSATIONS);
-    for (const conversation of evicted)
-      overflow.put(
-        runtimeToPersisted({
-          activeConversationId: conversation.id,
-          conversations: [conversation],
-          history: [],
-        }).conversations[0]!,
-      );
-    session.history = session.history.slice(0, MAX_HISTORY_CONVERSATIONS);
-  } else if (!overflow) {
-    session.history = session.history.slice(0, MAX_HISTORY_CONVERSATIONS);
+  // Past the cap, chats are evicted to the archive, not dropped. Without a
+  // folder (no archive) they are dropped, as they always were.
+  for (const conversation of session.history.slice(MAX_HISTORY_CONVERSATIONS)) {
+    archive?.overflow.put(conversationToPersisted(conversation));
   }
+  session.history = session.history.slice(0, MAX_HISTORY_CONVERSATIONS);
   const inFile = archive?.save(session.history, () => session.history.map(conversationToPersisted));
   persistMemento(
     workspaceState,

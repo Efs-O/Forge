@@ -83,6 +83,18 @@ describe('HistoryArchive', () => {
     expect(reloaded.history[0]!.messages[0]!.content).toBe('archived');
   });
 
+  // ARCHIVED_SESSIONS_PLAN's CI row: the 41st chat used to delete the oldest.
+  it('evicts the oldest of 41 chats to the archive instead of deleting it', () => {
+    const archive = new HistoryArchive(file);
+    const history = Array.from({ length: 41 }, (_, i) => conv(`c${i}`, `text ${i}`, i + 1));
+    const s = session(history);
+    saveSidebarSession(makeMemento({}), s, archive);
+    expect(s.history).toHaveLength(40);
+    expect(s.history.some((c) => c.id === 'c0')).toBe(false);
+    expect(archive.overflow.list().map((row) => row.id)).toEqual(['c0']);
+    expect(archive.overflow.read('c0')?.messages[0]?.content).toBe('text 0');
+  });
+
   it('does not rewrite the file while the history is unchanged', () => {
     const memento = makeMemento({});
     const archive = new HistoryArchive(file);

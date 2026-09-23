@@ -50,19 +50,29 @@ describe('ArchivedSessions', () => {
     const logs = path.join(root, 'logs');
     fs.mkdirSync(logs);
     const rows = [
-      { type: 'session_start', session_id: 'from-log', title: 'Recovered', timestamp_ms: 10, workspace_path: 'C:/repo', model: 'm' },
+      { type: 'session_start', session_id: 'from-log', title: 'Untitled chat', timestamp_ms: 10, workspace_path: 'C:/repo', model: 'm' },
       { role: 'user', content: 'question', timestamp_ms: 11 },
       { role: 'assistant', content: 'answer', timestamp_ms: 12 },
       { role: 'tool', content: 'tool result', timestamp_ms: 13 },
     ];
-    fs.writeFileSync(path.join(logs, 'from-log.jsonl'), [...rows, ...rows.map((row) => ({ ...row, timestamp_ms: Number(row.timestamp_ms) + 100 }))].map((row) => JSON.stringify(row)).join('\n'));
+    fs.writeFileSync(path.join(logs, 'from-log.jsonl'), [...rows, ...rows.map((row) => ({ ...row, timestamp_ms: Number(row.timestamp_ms) + 100 }))].map((row) => JSON.stringify(row)).join('\n') + '\n{"role":"assist');
     fs.writeFileSync(path.join(logs, 'other.jsonl'), JSON.stringify({ type: 'session_start', title: 'Other', timestamp_ms: 1, workspace_path: 'C:/elsewhere' }));
     fs.writeFileSync(path.join(logs, 'current.jsonl'), JSON.stringify({ ...rows[0], session_id: 'current' }));
     fs.writeFileSync(path.join(logs, 'unknown.jsonl'), JSON.stringify({ type: 'session_start', title: 'Unknown', timestamp_ms: 1 }));
     const archive = new ArchivedSessions(path.join(root, 'storage'), 'C:/repo', logs);
     expect(archive.list(['current']).map((row) => row.id)).toEqual(['from-log']);
     const restored = archive.read('from-log');
-    expect(restored?.title).toBe('Recovered');
+    // Named from the first user message, not session_start's placeholder; the torn last line is skipped.
+    expect(restored?.title).toBe('question');
     expect(restored?.messages.map((message) => message.role)).toEqual(['user', 'assistant', 'tool']);
+  });
+
+  it.runIf(process.platform === 'win32')('matches a log whose drive letter is lower-cased', () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-archived-'));
+    const logs = path.join(root, 'logs');
+    fs.mkdirSync(logs);
+    fs.writeFileSync(path.join(logs, 'lower.jsonl'), JSON.stringify({ type: 'session_start', timestamp_ms: 1, workspace_path: 'n:\\repo' }));
+    const archive = new ArchivedSessions(path.join(root, 'storage'), 'N:\\repo', logs);
+    expect(archive.list().map((row) => row.id)).toEqual(['lower']);
   });
 });
