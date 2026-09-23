@@ -12,6 +12,9 @@ import type { RemoteChannel } from './types';
  */
 const MAX_BUFFERED_EVENTS = 500;
 
+const STOPPED_TEXT =
+  'Forge: stopped following this turn — the chat now follows another conversation.';
+
 export interface HostProgressOpenerDeps {
   channel: RemoteChannel;
   signal: AbortSignal;
@@ -58,6 +61,14 @@ export class HostProgressOpener {
 
   handle(event: AgentProgressEvent): void {
     const { conversationId } = event;
+    const claimed = this.deps.progress.hostChat(conversationId);
+    if (claimed !== undefined && claimed !== this.deps.target(conversationId)) {
+      // The chat was switched to another conversation (or unpaired) mid-turn.
+      // The message used to keep streaming until the turn ended, so a phone
+      // following one chat heard two. Close it; if another chat now watches
+      // this conversation, the code below opens a message there.
+      void this.deps.progress.finish(conversationId, STOPPED_TEXT);
+    }
     if (this.deps.progress.has(conversationId)) {
       this.deps.progress.handle(event);
       return;

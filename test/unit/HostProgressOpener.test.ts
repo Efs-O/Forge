@@ -138,4 +138,42 @@ describe('HostProgressOpener', () => {
     await settle();
     expect(progress.owns('c1')).toBe(true);
   });
+  it('stops streaming to a chat switched to another conversation mid-turn', async () => {
+    const channel = new FakeRemoteChannel();
+    const signal = new AbortController().signal;
+    const progress = new RemoteAgentProgress(channel, signal, () => true, 3_900, 0);
+    let chatId: string | undefined = 'chat-1';
+    const opener = new HostProgressOpener({ channel, signal, progress, target: () => chatId });
+    opener.handle(status('Running tests…'));
+    await settle();
+    expect(channel.progress).toHaveLength(1);
+
+    chatId = undefined; // the chat now follows a different conversation
+    opener.handle(status('Running build…'));
+    await settle();
+    expect(channel.edits.at(-1)?.text).toContain('stopped following this turn');
+    const editsAfterStop = channel.edits.length;
+    opener.handle(status('Still running…'));
+    opener.handle({ conversationId: 'c1', kind: 'end', ok: true });
+    await settle();
+    expect(channel.edits).toHaveLength(editsAfterStop);
+    expect(channel.progress).toHaveLength(1);
+  });
+
+  it('moves to the chat that now follows the conversation', async () => {
+    const channel = new FakeRemoteChannel();
+    const signal = new AbortController().signal;
+    const progress = new RemoteAgentProgress(channel, signal, () => true, 3_900, 0);
+    let chatId = 'chat-1';
+    const opener = new HostProgressOpener({ channel, signal, progress, target: () => chatId });
+    opener.handle(status('Running tests…'));
+    await settle();
+
+    chatId = 'chat-2';
+    opener.handle(status('Running build…'));
+    await settle();
+    expect(channel.progress.map((sent) => sent.chatId)).toEqual(['chat-1', 'chat-2']);
+    expect(channel.edits.at(-1)?.chatId).toBe('chat-2');
+    expect(channel.edits.at(-1)?.text).toContain('Running build…');
+  });
 });

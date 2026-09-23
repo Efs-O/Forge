@@ -148,6 +148,18 @@ export class RemoteAgentProgress {
     return state !== undefined && !state.closed;
   }
 
+  /**
+   * The chat a live sidebar-started ('host') message reports to, if any.
+   * HostProgressOpener re-checks it against the current pairing on every
+   * event, so a chat switched to another conversation mid-turn stops hearing
+   * this one. Chat-queued ('remote') messages belong to the chat that sent the
+   * prompt and are not asked about.
+   */
+  hostChat(conversationId: string): string | undefined {
+    const state = this.active.get(conversationId);
+    return state && !state.closed && state.origin === 'host' ? state.chatId : undefined;
+  }
+
   handle(event: AgentProgressEvent): void {
     const state = this.active.get(event.conversationId);
     if (!state || state.closed || !this.channel.editMessage) return;
@@ -233,7 +245,9 @@ export class RemoteAgentProgress {
     if (state.timer) clearTimeout(state.timer);
     delete state.timer;
     await state.tail;
-    this.active.delete(conversationId);
+    // Only this state: a new message may have begun for the conversation
+    // while the tail settled, and it is not this call's to delete.
+    if (this.active.get(conversationId) === state) this.active.delete(conversationId);
     if (this.signal.aborted || !this.channel.editMessage) return;
     if (!(await this.safeCanDeliver(state.chatId))) return;
     await this.channel
