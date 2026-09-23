@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## Unreleased
+## 0.16.49
 
 ### Telegram contacts: a refused person is told how to ask (2026-09-23)
 
