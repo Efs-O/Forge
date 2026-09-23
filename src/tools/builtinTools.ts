@@ -110,7 +110,11 @@ export function makeReadFileTool(extraRoots: () => readonly string[] = () => [])
       const numbered = args['numbered'] === true;
       if (startLine === undefined && endLine === undefined && !numbered) return capRead(content);
 
+      // A final newline ends the last line; it does not start another. Counting
+      // the empty tail showed a phantom line 501 on a 500-line file, which is
+      // exactly the off-by-one that sent Qwen splitting files ESLint accepted.
       const lines = content.split('\n');
+      if (lines.length > 1 && lines[lines.length - 1] === '') lines.pop();
       const start = Math.max(1, startLine ?? 1);
       const end = Math.min(lines.length, endLine ?? lines.length);
       if (start > end) {

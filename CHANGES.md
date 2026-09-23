@@ -12,6 +12,20 @@
   the failure count is kept per chat, so every later turn in that chat failed
   the same way until a new chat was started.
 
+### `read_file` counts lines the way ESLint does (2026-09-23)
+
+- **A numbered read no longer shows a blank line after the final newline.** A
+  500-line file used to end in an empty line numbered 501, and a range past the
+  end reported "file has 501 lines". Qwen took that count at its word and began
+  splitting files the 500-line lint gate had already accepted.
+
+### `reasoning_effort: xhigh` is accepted (2026-09-23)
+
+- **Qwen 3.8-family templates such as Qwopus take `xhigh`, and config
+  validation rejected it.** One rejected value failed the whole `config.yaml`,
+  so Forge kept running the last valid version — the old model path and
+  context size — without that being obvious from the chat.
+
 ## 0.16.36
 
 ### Mid-turn messages reach Forge at the next safe gap (2026-09-22)
