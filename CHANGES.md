@@ -9,6 +9,10 @@
   without running anything. Forge now reads that form and runs the calls, typing
   each value from the tool's schema (numbers stay numbers, text stays text).
 
+### Larger header buttons
+
+- The new-chat (+) and history buttons in the sidebar header are bigger and easier to hit.
+
 ## 0.16.42
 
 ### Scheduled jobs run on one server and fire at their time (2026-09-23)
