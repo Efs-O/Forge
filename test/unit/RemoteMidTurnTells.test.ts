@@ -70,6 +70,37 @@ describe('claimRemoteMidTurnTell', () => {
     expect(store.records[0]?.notification).toBe('Seen by the running turn.');
   });
 
+  it('claims every eligible request in queue order and finishes each after settle', async () => {
+    const store = makeStore([
+      makeRecord({ id: 'req-a', receivedAt: 1, text: 'first' }),
+      makeRecord({
+        id: 'req-attach',
+        receivedAt: 2,
+        attachments: [{ name: 'a.png', mediaType: 'image/png', relativePath: 'a.png', bytes: 1 }],
+      }),
+      makeRecord({ id: 'req-b', receivedAt: 3, text: 'second' }),
+    ]);
+
+    const result = await claimRemoteMidTurnTell(store, deliverAll, 'conv-1');
+
+    // Two eligible claims, in queue order; the attachment stays queued.
+    expect(result.messages).toEqual([
+      { role: 'user', content: 'first', midTurn: true },
+      { role: 'user', content: 'second', midTurn: true },
+    ]);
+    expect(store.records[0]?.state).toBe('running');
+    expect(store.records[1]?.state).toBe('queued');
+    expect(store.records[2]?.state).toBe('running');
+    expect(result.settle).toBeDefined();
+
+    await result.settle?.();
+    expect(store.records[0]?.state).toBe('completed');
+    expect(store.records[1]?.state).toBe('queued');
+    expect(store.records[2]?.state).toBe('completed');
+    expect(store.records[0]?.notification).toBe('Seen by the running turn.');
+    expect(store.records[2]?.notification).toBe('Seen by the running turn.');
+  });
+
   it('leaves an attachment-carrying request queued', async () => {
     const store = makeStore([
       makeRecord({

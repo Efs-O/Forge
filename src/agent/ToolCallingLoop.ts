@@ -381,11 +381,14 @@ export async function runToolCallingLoop(
       if (drained && drained.messages.length > 0) {
         options.messages.push(...drained.messages);
         options.onMessagesChanged?.();
-        // Persisted above; only now may the claim be settled. If the persist
-        // threw we never reach this line, so the record stays `running` and the
-        // store's restart recovery handles it.
-        await drained.settle?.();
       }
+      // Settle always runs when present, even with no messages: a failing tell
+      // source yields no messages but still must surface its error, so the
+      // rethrow from settle cannot be skipped by an empty drain. When messages
+      // were pushed, persist ran above, so the claim is settled only once the
+      // injected turn is durable; if that persist threw we never reach here and
+      // the record stays `running` for the store's restart recovery.
+      await drained?.settle?.();
       continue;
     }
 

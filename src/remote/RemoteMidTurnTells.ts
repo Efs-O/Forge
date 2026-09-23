@@ -20,9 +20,11 @@ export type CanDeliver = (
 ) => Promise<boolean>;
 
 /**
- * Claim the first queued, text-only, normal-priority request for a conversation
- * whose chat can be reached, or nothing. A record the drain already claimed (or
- * that carries an attachment, or is a steer) is left `queued` for the next turn.
+ * Claim every queued, text-only, normal-priority request for a conversation
+ * whose chat can be reached, in queue order, or nothing. A record the drain
+ * already claimed (or that carries an attachment, or is a steer) is left
+ * `queued` for the next turn. The returned `settle` finishes each claimed
+ * record, in order, only after the injected messages have been persisted.
  */
 export async function claimRemoteMidTurnTell(
   store: RemoteRequestStore,
@@ -30,19 +32,27 @@ export async function claimRemoteMidTurnTell(
   conversationId: string,
 ): Promise<MidTurnDrainResult> {
   const candidates = store.queued(conversationId).sort(compareQueuedRequests);
+  const claimed: RemoteRequestRecord[] = [];
   for (const candidate of candidates) {
     if (candidate.priority === 'steer') continue;
     if (candidate.attachments?.length) continue;
     if (!(await canDeliver(candidate.channel, candidate.chatId))) continue;
-    const claimed = await store.claimMidTurnTell(candidate.id);
-    if (!claimed) continue;
-    return {
-      messages: [{ role: 'user', content: candidate.text, midTurn: true }],
-      settle: () =>
-        store.finish(claimed.id, 'completed', {
-          notification: 'Seen by the running turn.',
-        }),
-    };
+    const taken = await store.claimMidTurnTell(candidate.id);
+    if (taken) claimed.push(taken);
   }
-  return { messages: [] };
+  if (claimed.length === 0) return { messages: [] };
+  return {
+    messages: claimed.map((record) => ({
+      role: 'user',
+      content: record.text,
+      midTurn: true,
+    })),
+    settle: async () => {
+      for (const record of claimed) {
+        await store.finish(record.id, 'completed', {
+          notification: 'Seen by the running turn.',
+        });
+      }
+    },
+  };
 }

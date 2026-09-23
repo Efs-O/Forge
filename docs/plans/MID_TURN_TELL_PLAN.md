@@ -310,11 +310,18 @@ Phase 1 and stop:** the queue and steer stay.
   not stop at a running conversation — the tell is injected into the turn that
   is already running, so the drain's guard would reject every claim.
 - **Claim rules (new, `src/remote/RemoteMidTurnTells.ts`).** The claim walks the
-  conversation's queued requests in `compareQueuedRequests` order and takes the
-  first that is normal-priority (not `steer`), text-only (no attachments), and
-  whose chat `canDeliver`. Anything else is left `queued` for the next turn, as
-  today. `RemoteRuntime.claimMidTurnTell` keeps `store` and `auth` private and
-  hands the caller only the claim and its settle step.
+  conversation's queued requests in `compareQueuedRequests` order and claims
+  **every** one that is normal-priority (not `steer`), text-only (no
+  attachments), and whose chat `canDeliver` — so three quick Telegram messages
+  reach the running turn in one tool round, not three. Anything else is left
+  `queued` for the next turn, as today. The returned `settle` finishes each
+  claimed record, in order. `RemoteRuntime.claimMidTurnTell` keeps `store` and
+  `auth` private and hands the caller only the claim and its settle step.
+- **A failing source cannot be silenced.** The loop runs `settle` unconditionally
+  (not only when messages were drained), so a tell source that throws — and
+  therefore yields no messages — still rethrows its error from `settle` instead
+  of swallowing it. A source that fails mid-drain contributes no messages, but
+  the messages an earlier source already drained still reach the turn.
 - **Test note.** The loop's "settles after persist" unit test drives a tool
   round (a no-tool turn never reaches the drain branch) and asserts the
   invariant directly — by the time `settle` runs, the injected message is on

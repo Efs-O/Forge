@@ -219,6 +219,40 @@ describe('ToolCallingLoop reasoning retention', () => {
     expect(injectedOnTranscriptAtSettle).toBe(true);
   });
 
+  it('surfaces a failing tell source even when no messages are drained', async () => {
+    // A failing source yields no messages, but its error must still surface:
+    // the loop runs settle unconditionally, and settle rethrows the source error.
+    const boom = new Error('remote tell source failed');
+    const drain = vi.fn().mockResolvedValue({
+      messages: [],
+      settle: async () => {
+        throw boom;
+      },
+    });
+    let round = 0;
+    streamModelChatCompletion.mockImplementation(
+      async (_url: string, _request: unknown, _model: unknown, h: Handlers) => {
+        round += 1;
+        if (round === 1) {
+          h.onToolCalls([CALL]);
+          h.onDone('tool_calls');
+        } else {
+          h.onToken('Done.');
+          h.onDone('stop');
+        }
+      },
+    );
+    const messages: ChatMessage[] = [{ role: 'user', content: 'go' }];
+
+    await expect(
+      runToolCallingLoop({
+        ...runOptions(messages),
+        drainTells: drain,
+      } as never),
+    ).rejects.toThrow('remote tell source failed');
+    expect(drain).toHaveBeenCalledOnce();
+  });
+
   it('does not narrate before an ask_user question to remote surfaces', async () => {
     const askUser: ToolCall = {
       id: 'question_1',
