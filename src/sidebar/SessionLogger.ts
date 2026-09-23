@@ -297,6 +297,9 @@ export class SessionLogger {
         model,
       };
       if (msg.reasoning) line['reasoning'] = msg.reasoning;
+      if (msg.role === 'user' && typeof msg.turnContext === 'string') {
+        line['turn_context'] = msg.turnContext;
+      }
       this.append(line);
     }
 

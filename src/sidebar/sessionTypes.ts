@@ -85,6 +85,7 @@ const slimMsgSchema = z.object({
   internal: z.boolean().optional(),
   midTurn: z.boolean().optional(),
   attachments: z.array(attachmentRefSchema).optional(),
+  turnContext: z.string().optional(),
 });
 export type SlimPersistMessage = z.infer<typeof slimMsgSchema>;
 
@@ -336,7 +337,7 @@ export function slimPersistMessages(messages: ChatMessage[]): SlimPersistMessage
       ...(typeof m.reasoningMs === 'number' ? { reasoningMs: m.reasoningMs } : {}),
       ...(typeof m.toolMs === 'number' ? { toolMs: m.toolMs } : {}),
       ...(typeof m.stampedAt === 'number' ? { stampedAt: m.stampedAt } : {}),
-      ...(typeof m.stampedAt === 'number' ? { stampedAt: m.stampedAt } : {}),
+      ...(typeof m.turnContext === 'string' ? { turnContext: m.turnContext } : {}),
       ...(hasToolCalls ? { tool_calls: m.tool_calls } : {}),
       ...(typeof m.tool_call_id === 'string' ? { tool_call_id: m.tool_call_id } : {}),
       ...(typeof m.name === 'string' ? { name: m.name } : {}),
@@ -357,6 +358,7 @@ export function chatMessagesFromSlim(slim: SlimPersistMessage[]): ChatMessage[] 
       : {}),
     ...(typeof m.reasoningMs === 'number' ? { reasoningMs: m.reasoningMs } : {}),
     ...(typeof m.toolMs === 'number' ? { toolMs: m.toolMs } : {}),
+    ...(typeof m.turnContext === 'string' ? { turnContext: m.turnContext } : {}),
     ...(m.tool_calls ? { tool_calls: m.tool_calls } : {}),
     ...(typeof m.tool_call_id === 'string' ? { tool_call_id: m.tool_call_id } : {}),
     ...(typeof m.name === 'string' ? { name: m.name } : {}),

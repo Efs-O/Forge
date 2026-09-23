@@ -32,7 +32,7 @@ import type {
   UserTerminalCommand,
 } from '../tools/TerminalCommandTracker';
 
-const OPEN = '[Forge turn context]';
+const OPEN = '[Forge turn context, as of this message]';
 const CLOSE = '[/Forge turn context]';
 
 export interface TurnContextState {
@@ -214,32 +214,86 @@ function foldInto(messages: ChatMessage[], index: number, block: string): ChatMe
  * is the request that opened the turn, so re-rendering it mid-turn rewrites the
  * prompt near the head and invalidates that turn's own rounds.
  */
+/**
+ * Freeze the turn-start Layer C block onto the turn-opening user message.
+ *
+ * Called once per turn from `ModelTurn`, right after the snapshot is taken.
+ * Idempotent: if the target already has `turnContext`, freezing leaves it
+ * alone. A retry that reuses the same user message is byte-identical to the
+ * first attempt.
+ */
+export function freezeTurnContext(messages: ChatMessage[], state: TurnContextState): void {
+  const block = renderTurnContext(state);
+  if (!block) return;
+
+  // Find the last non-midTurn user message — the turn-opening request.
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (msg?.role === 'user' && !msg?.midTurn) {
+      if (msg.turnContext === undefined) {
+        msg.turnContext = block;
+      }
+      return;
+    }
+  }
+}
+
+/**
+ * Inject the Layer C block into the model-facing copy.
+ *
+ * Two steps, in order:
+ * 1. Every visible user message that carries `turnContext` gets that frozen
+ *    block folded into itself, in place. Nothing moves.
+ * 2. If the last non-midTurn user message in the view has **no** frozen block,
+ *    `current` folds into it exactly as today, or stands alone when there is
+ *    no user message at all (the existing fallback).
+ *
+ * Step 2 fires in three cases only:
+ * - a CLI turn;
+ * - a conversation from before this change;
+ * - compaction has windowed the turn-opening message out, so the last user
+ *   message in view is the compaction preamble.
+ */
 export function injectTurnContext(messages: ChatMessage[], state: TurnContextState): ChatMessage[] {
   const block = renderTurnContext(state);
   if (!block) return messages;
 
-  // A mid-turn tell is a user message, but never the fold target: moving the
-  // block onto it rewrites the request that opened the turn, and the next round
-  // re-evaluates everything after that request. Measured on Qwopus, 2026-09-23:
-  // the first tell cost a 45815-token re-prefill (51 s) against ~1000 for an
-  // ordinary round.
+  // Step 1: fold every frozen block into its own message, in place.
+  let out = messages;
+  for (let i = 0; i < out.length; i++) {
+    const m = out[i];
+    if (m.role === 'user' && m.turnContext) {
+      out = foldInto(out, i, m.turnContext);
+    }
+  }
+
+  // Step 2: if the last non-midTurn user message has no frozen block, fold
+  // `current` into it (or standalone fallback).
   let last = -1;
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    if (messages[i]?.role === 'user' && !messages[i]?.midTurn) {
+  for (let i = out.length - 1; i >= 0; i -= 1) {
+    if (out[i]?.role === 'user' && !out[i]?.midTurn) {
       last = i;
       break;
     }
   }
-  if (last !== -1) return foldInto(messages, last, block);
+  if (last !== -1) {
+    // Only fold if this message does NOT already have a frozen block.
+    // (Step 1 already handled frozen messages.)
+    const msg = out[last];
+    if (msg && !msg.turnContext) {
+      return foldInto(out, last, block);
+    }
+    return out;
+  }
 
   // Nothing to fold into — a resumed conversation whose window holds only
   // system and assistant turns. A standalone message is the only option left;
   // it goes after the system messages, where the old plan block went, because
   // appending it after an assistant turn is the alternation failure again.
-  const head = messages.findIndex((m) => m.role !== 'system');
+  const head = out.findIndex((m) => m.role !== 'system');
   const standalone: ChatMessage = { role: 'user', content: block, internal: true };
-  if (head === -1) return [...messages, standalone];
-  return [...messages.slice(0, head), standalone, ...messages.slice(head)];
+  if (head === -1) return [...out, standalone];
+  return [...out.slice(0, head), standalone, ...out.slice(head)];
 }
 
 export { OPEN as TURN_CONTEXT_OPEN, CLOSE as TURN_CONTEXT_CLOSE };

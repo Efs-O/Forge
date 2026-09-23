@@ -36,7 +36,7 @@ import { deriveStaticCapabilities } from '../config/ConfigResolver';
 import { applyToolCalls } from './transcriptMutations';
 import { mirrorLiveSessionAnswers } from './liveSessionMirror';
 import { extractToolDetail } from './toolSummary';
-import { injectTurnContext, type TurnContextState } from './turnContext';
+import { injectTurnContext, freezeTurnContext, type TurnContextState } from './turnContext';
 import { latestPastedTerminalCommand } from './compactionLedger';
 import { terminalCommandTracker } from '../tools/TerminalCommandTracker';
 import { formatPromptCacheStats, readPromptCacheStats } from '../llm/promptCacheStats';
@@ -275,6 +275,7 @@ export async function runModelTurn(
     // own tool rounds.
     ...(remoteChats > 0 ? { remoteChats } : {}),
   };
+  freezeTurnContext(conv.messages, turnContext);
 
   const compactor = ctx.compactMidTurn;
   const result = await trackTurnCompletion(ctx.lifecycle, conv.id, () =>

@@ -52,6 +52,8 @@ export interface ChatMessage {
   internal?: boolean;
   /** A user message delivered at a tool-round gap, labelled only on the wire. */
   midTurn?: boolean;
+  /** The Layer C block this user turn was sent with, rendered once at turn start. */
+  turnContext?: string;
 }
 
 export interface ToolCall {

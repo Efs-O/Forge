@@ -16,7 +16,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { injectTurnContext } from '../../src/sidebar/turnContext';
+import { injectTurnContext, freezeTurnContext } from '../../src/sidebar/turnContext';
+import { slimPersistMessages, chatMessagesFromSlim } from '../../src/sidebar/sessionTypes';
 import { PLAN_GUIDANCE, renderPlan } from '../../src/tools/planTools';
 import { annotateRereads } from '../../src/agent/staleReadSupersede';
 import { nudgeTruncatedResults } from '../../src/agent/truncatedResultNudge';
@@ -250,9 +251,11 @@ describe('a turn held across tool rounds', () => {
     expect(r3.slice(0, r1.length)).toEqual(r1);
   });
 
-  it('diverges near the HEAD when the plan is re-read mid-turn', () => {
+  it('diverges near the HEAD when the plan is re-read mid-turn (no frozen block)', () => {
     // This is the failure the snapshot prevents, asserted so a regression is
     // visible as a divergence index rather than as a slow agent.
+    // Without a frozen block, the live state is folded in, so a plan change
+    // rewrites the prompt near the head.
     const before = injectTurnContext(round(3), { plan: PLAN });
     const after = injectTurnContext(round(3), {
       plan: { items: [...ITEMS, { text: 'and this', status: 'pending' }], updatedAt: 2_000 },
@@ -264,6 +267,18 @@ describe('a turn held across tool rounds', () => {
     // And everything from there to the tail is this turn's rounds, all of which
     // the server would have to re-evaluate. That is the cost being avoided.
     expect(before.length - idx).toBeGreaterThan(6);
+  });
+
+  it('diverges nowhere when the plan changes but the message has a frozen block', () => {
+    // With a frozen block, the frozen text is used and the live state is
+    // ignored for that message. A plan change does not rewrite the prompt.
+    const msgs = round(3);
+    freezeTurnContext(msgs, { plan: PLAN });
+    const before = injectTurnContext(msgs, { plan: PLAN });
+    const after = injectTurnContext(msgs, {
+      plan: { items: [...ITEMS, { text: 'and this', status: 'pending' }], updatedAt: 2_000 },
+    });
+    expect(firstDivergence(before, after)).toBe(-1);
   });
 });
 
@@ -281,12 +296,20 @@ describe('the stored transcript', () => {
     expect(injectTurnContext(messages, { plan: { items: [], updatedAt: 0 } })).toBe(messages);
   });
 
-  it('emits exactly one context block however often it runs', () => {
+  it('emits one block per frozen message plus at most one live block', () => {
+    // No frozen messages: exactly one live block.
     const once = injectTurnContext(conversation(), { activeFile: '/a.ts', plan: PLAN });
     const twice = injectTurnContext(conversation(), { activeFile: '/a.ts', plan: PLAN });
     expect(twice).toEqual(once);
-    const blocks = JSON.stringify(once).split('[Forge turn context]').length - 1;
+    const blocks = JSON.stringify(once).split('[Forge turn context, as of this message]').length - 1;
     expect(blocks).toBe(1);
+
+    // With a frozen message: one frozen block + one live block.
+    const msgs = conversation();
+    freezeTurnContext(msgs, { activeFile: '/a.ts', plan: PLAN });
+    const withFrozen = injectTurnContext(msgs, { activeFile: '/b.ts', plan: PLAN });
+    const frozenBlocks = JSON.stringify(withFrozen).split('[Forge turn context, as of this message]').length - 1;
+    expect(frozenBlocks).toBe(2);
   });
 
   it('carries both the active file and the plan in one block', () => {
@@ -421,5 +444,86 @@ describe('Fix A: annotateRereads prefix property', () => {
     const later = long.find((m) => m.tool_call_id === 'r2');
     expect(later?.content).toContain('[Forge: this replaces your earlier read of src/app.ts.');
     expect(earlier(long)?.content).not.toContain('[Forge:');
+  });
+});
+
+describe('freezeTurnContext', () => {
+  it('is idempotent: a second freeze leaves the block unchanged', () => {
+    const msgs = conversation();
+    freezeTurnContext(msgs, { activeFile: '/a.ts', plan: PLAN });
+    // freezeTurnContext targets the LAST non-midTurn user message.
+    const lastUser = [...msgs].reverse().find((m) => m.role === 'user' && !m.midTurn)!;
+    expect(lastUser.turnContext).toBeDefined();
+    const snapshot = lastUser.turnContext!;
+
+    // A retry with a different state must not overwrite the frozen block.
+    freezeTurnContext(msgs, { activeFile: '/b.ts', plan: { items: [], updatedAt: 9999 } });
+    expect(lastUser.turnContext).toBe(snapshot);
+  });
+
+  it('does not freeze midTurn messages', () => {
+    const msgs: ChatMessage[] = [
+      { role: 'user', content: 'original request' },
+      { role: 'assistant', content: 'ok' },
+      { role: 'user', content: 'mid-turn tell', midTurn: true },
+    ];
+    freezeTurnContext(msgs, { activeFile: '/a.ts' });
+    expect(msgs[0]?.turnContext).toBeDefined();
+    expect(msgs[2]?.turnContext).toBeUndefined();
+  });
+
+  it('does nothing when there is no user message', () => {
+    const msgs: ChatMessage[] = [{ role: 'assistant', content: 'hello' }];
+    freezeTurnContext(msgs, { activeFile: '/a.ts' });
+    expect(msgs[0]?.turnContext).toBeUndefined();
+  });
+});
+
+describe('injectTurnContext with frozen blocks', () => {
+  it('folds frozen blocks in place and does not move them', () => {
+    const msgs = conversation();
+    freezeTurnContext(msgs, { activeFile: '/a.ts', plan: PLAN });
+    // freezeTurnContext targets the LAST non-midTurn user message.
+    const lastUser = [...msgs].reverse().find((m) => m.role === 'user' && !m.midTurn)!;
+    const frozen = lastUser.turnContext!;
+
+    const out = injectTurnContext(msgs, { activeFile: '/b.ts', plan: PLAN });
+    // The frozen block is folded into the same message, not moved.
+    const target = [...out].reverse().find((m) => m.role === 'user' && !m.midTurn)!;
+    expect(target.content).toContain(frozen);
+    // The live block is NOT folded into the same message (it already has a frozen one).
+    // Step 2 should not fire because the message has turnContext.
+    expect(target.content).not.toContain('[Forge turn context, as of this message]\n\n[Forge turn context, as of this message]');
+  });
+
+  it('pre-change conversations (no turnContext anywhere) behave exactly as today', () => {
+    const msgs = conversation();
+    // No freezeTurnContext call — simulates a conversation from before this change.
+    const out = injectTurnContext(msgs, { activeFile: '/a.ts', plan: PLAN });
+    const blocks = JSON.stringify(out).split('[Forge turn context, as of this message]').length - 1;
+    expect(blocks).toBe(1);
+  });
+
+  it('standalone fallback when no user message exists', () => {
+    const msgs: ChatMessage[] = [
+      { role: 'system', content: 'sys' },
+      { role: 'assistant', content: 'hello' },
+    ];
+    const out = injectTurnContext(msgs, { activeFile: '/a.ts' });
+    // A standalone user message should appear after the system message.
+    expect(out[1]?.role).toBe('user');
+    expect(out[1]?.content).toContain('[Forge turn context, as of this message]');
+  });
+});
+
+describe('persistence round-trip', () => {
+  it('slimPersistMessages + chatMessagesFromSlim round-trips turnContext byte-identically', () => {
+    const msgs: ChatMessage[] = [
+      { role: 'user', content: 'hello', turnContext: '[Forge turn context, as of this message]\n- Active file: /a.ts\n[/Forge turn context, as of this message]' },
+      { role: 'assistant', content: 'hi' },
+    ];
+    const slim = slimPersistMessages(msgs);
+    const restored = chatMessagesFromSlim(slim);
+    expect(restored[0]?.turnContext).toBe(msgs[0].turnContext);
   });
 });
