@@ -110,6 +110,24 @@ describe('Telegram contact service', () => {
     expect(value.channel.sent.some((item) => item.chatId === '20')).toBe(true);
   });
 
+  it.each(['/start@forgellm_bot', '/start hello', '/START'])(
+    'accepts %j as a request for access',
+    async (text) => {
+      const value = await fixture();
+      await value.service.handleNonOwner(textEvent('20', text));
+      expect(value.contacts.pending()).toHaveLength(1);
+    },
+  );
+
+  it('tells a refused stranger how to ask for access, privately and in a group', async () => {
+    const value = await fixture();
+    await value.service.handleNonOwner(textEvent('20', 'hello'));
+    expect(value.contacts.pending()).toHaveLength(0);
+    expect(value.channel.sent.at(-1)?.text).toContain('send /start');
+    await value.service.handleGroup(textEvent('20', 'hello', GROUP_ID));
+    expect(value.channel.sent.at(-1)?.text).toContain('send /start');
+  });
+
   it('links one private group and answers the approved contact in that group', async () => {
     const value = await fixture();
     await approveAndBind(value);

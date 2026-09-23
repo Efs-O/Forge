@@ -9,6 +9,7 @@ import {
   buildContactPrompt,
   contactBusyText,
   contactGroupRequiredText,
+  contactGroupStrangerText,
   contactNameMatches,
   contactOwnerVisibleText,
   contactPrivateText,
@@ -82,7 +83,9 @@ export class TelegramContactService {
     }
     if (event.kind !== 'text') return undefined;
     if (/^\/pair(?:\s|$)/i.test(event.text)) return undefined;
-    if (event.text.trim() === '/start') return this.startRequest(event);
+    // Also `/start@bot` and a deep-link `/start <payload>`: an exact match turned
+    // those away with nothing recorded for the owner to approve.
+    if (/^\/start(?:@\S+)?(?:\s|$)/i.test(event.text.trim())) return this.startRequest(event);
     const contact = this.store.byTelegram(event.senderId, event.chatId);
     if (!contact || contact.status !== 'active') {
       await this.audit?.record(event, 'contact_unknown_rejected').catch(() => undefined);
@@ -108,7 +111,7 @@ export class TelegramContactService {
     if (!contact || contact.telegramUserId !== event.senderId) {
       await this.audit?.record(event, 'contact_group_sender_rejected').catch(() => undefined);
       await this.channel
-        .send(event.chatId, 'Forge does not accept requests from this sender or group.', {
+        .send(event.chatId, contactGroupStrangerText(), {
           signal: this.abort.signal,
         })
         .catch(() => undefined);

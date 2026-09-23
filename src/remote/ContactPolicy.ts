@@ -89,8 +89,14 @@ export function contactThrottleText(): string {
   return 'Forge received several messages at once; please wait for the current request.';
 }
 
+// Both refusals name /start: the bare "access has not been granted" left a
+// would-be contact with no way to ask, and nothing was recorded for the owner.
 export function contactPrivateText(): string {
-  return 'This bot is private; access has not been granted.';
+  return 'This bot is private; access has not been granted. To ask the owner for access, send /start here.';
+}
+
+export function contactGroupStrangerText(): string {
+  return 'Forge does not accept requests from this sender or group. To ask the owner for access, open a private chat with the bot and send /start.';
 }
 
 export function contactGroupRequiredText(): string {

@@ -1,5 +1,15 @@
 # Forge — Recent Changes
 
+## Unreleased
+
+### Telegram contacts: a refused person is told how to ask (2026-09-23)
+
+- Someone writing to the bot without access got only "access has not been
+  granted", with no way to ask, and nothing reached the owner. Both refusals
+  (private chat and group) now say to send /start privately. `/start` is also
+  accepted with `@botname` or extra text after it; before, only the bare
+  command created a request.
+
 ## 0.16.48
 
 ### Telegram follows only the chat it is switched to (2026-09-23)
