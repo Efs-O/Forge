@@ -46,7 +46,7 @@ const DEAD =
   '⚠️ The Claude session the user joined is not running (a VS Code reload stops it until ' +
   'its panel is opened again)';
 
-/** Shown to the agent and the user whenever a stand-in answers for a dead joined session. */
+/** Shown to the agent with the result whenever a stand-in answers for a dead joined session. */
 export function claudeStandInNote(resumeId: string | undefined): string {
   return resumeId
     ? `${DEAD}, so Forge resumed that conversation headless to answer; the answer is in ` +
@@ -55,6 +55,15 @@ export function claudeStandInNote(resumeId: string | undefined): string {
         `context of the joined conversation (the join recorded no Claude session id). ` +
         `Tell the user, and that opening that panel and running \`forge.sh join claude\` ` +
         `there reconnects their own session.`;
+}
+
+/** The same event, addressed to the user (VS Code, Telegram) rather than to the agent. */
+export function claudeStandInUserNote(resumeId: string | undefined): string {
+  return resumeId
+    ? `⚠️ Your Claude session was closed, so Forge answered for it headless. The answer is ` +
+        `in that session's history; reopening its panel continues it.`
+    : `⚠️ Your Claude session was closed, so a separate Forge-owned Claude answered without ` +
+        `its context. Reopen that panel and run \`forge.sh join claude\` there to reconnect it.`;
 }
 
 export class JoinedClaude {
@@ -105,7 +114,6 @@ export class JoinedClaude {
 
   private async createStandIn(resumeId: string | undefined): Promise<MeshAdapter | undefined> {
     const bus = this.deps.getConfig().agent_bus;
-    const note = claudeStandInNote(resumeId);
     let session: ClaudeOwnedSession;
     try {
       // Injected factories are test doubles; see createOwnedClaude.
@@ -139,7 +147,7 @@ export class JoinedClaude {
       kind: 'claude',
       observesTurns: true,
       key: `claude-stand-in:${resumeId ?? 'blank'}:${++this.seq}`,
-      note,
+      note: claudeStandInNote(resumeId),
       send: (message, options) => inner.send(message, options),
       interrupt: () => inner.interrupt(),
       onIdle: () =>
@@ -151,7 +159,7 @@ export class JoinedClaude {
         ),
     };
     this.standIn = { session, adapter };
-    this.deps.onStandIn?.('claude', note);
+    this.deps.onStandIn?.('claude', claudeStandInUserNote(resumeId));
     return adapter;
   }
 

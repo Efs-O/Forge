@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MeshSessionProvider } from '../../src/agentMesh/sessionProvider';
-import { claudeStandInNote } from '../../src/agentMesh/claudeStandIn';
+import { claudeStandInNote, claudeStandInUserNote } from '../../src/agentMesh/claudeStandIn';
 import { defaultClaudeFactory } from '../../src/agentMesh/creationPreamble';
 import { AliasFifo } from '../../src/agentMesh/aliasFifo';
 import { ownershipPath } from '../../src/agentMesh/ownership';
@@ -113,7 +113,9 @@ describe('Claude stand-in for a dead joined session', () => {
     const a = await p.resolveAdapter('claude');
     const b = await p.resolveAdapter('claude');
     expect(b).toBe(a);
-    expect(notices).toEqual([claudeStandInNote('conv-1')]);
+    // The user gets their own wording; the agent's note says "tell the user".
+    expect(notices).toEqual([claudeStandInUserNote('conv-1')]);
+    expect(notices[0]).not.toContain('Tell the user');
     a?.onIdle?.();
     await Promise.resolve();
     expect(created[0]?.session.disposed).toBe(true);

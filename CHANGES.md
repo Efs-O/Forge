@@ -9,6 +9,13 @@
   itself, but still asked it to write a verdict file; that file arrived after
   the exchange had already completed.
 
+### The stand-in notice speaks to you, not to the agent (2026-09-23)
+
+- When a stand-in answers for your closed Claude session, the VS Code warning
+  and the Telegram message now say so in plain words ("Your Claude session was
+  closed, so Forge answered for it headless…"). They used to show the note
+  written for the agent, including "Tell the user: …".
+
 ## 0.16.39
 
 ### Alerts say which chat (2026-09-23)

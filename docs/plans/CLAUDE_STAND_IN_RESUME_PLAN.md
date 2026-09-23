@@ -1,7 +1,8 @@
 # Claude stand-in: resume the joined conversation, and tell the user
 
-Status: Phase 1 implemented 2026-09-23 (`src/agentMesh/claudeStandIn.ts`); Phase 2
-(live) pending. Owner: Claude (Opus) writes it, Codex reviews it.
+Status: DONE 2026-09-23. Phase 1 `ed7c969` (`src/agentMesh/claudeStandIn.ts`);
+Phase 2 passed live (test 5: resumed headless, answered from context, ran shell,
+VS Code + Telegram notices, answer in panel history, stand-in exited). Owner: Claude (Opus) writes it, Codex reviews it.
 
 Implementation notes against §3: the stand-in key carries a per-instance
 counter (`claude-stand-in:<id>:<n>`), because the orchestrator reuses an idle
