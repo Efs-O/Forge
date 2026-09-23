@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   getHostIdentity,
+  osProcessStartMs,
   isHostAlive,
   START_TIME_TOLERANCE_MS,
   type HostId,
@@ -60,5 +61,17 @@ describe('host identity (M1/M2 staleness primitive)', () => {
     const id: HostId = getHostIdentity(d);
     expect(id.pid).toBe(42);
     expect(id.startedAt).toBe(777);
+  });
+});
+
+// macOS has no /proc, so the reader reports unknown there by design.
+describe.skipIf(process.platform === 'darwin')('osProcessStartMs (real OS)', () => {
+  it('reads this process start time in any locale', { timeout: 15_000 }, () => {
+    // Windows once returned the locale-formatted date (Greek on the dev box),
+    // which Date.parse could not read — the PID-reuse guard was silently off.
+    const started = Date.now() - process.uptime() * 1000;
+    const ms = osProcessStartMs(process.pid);
+    expect(ms).toBeTypeOf('number');
+    expect(Math.abs((ms as number) - started)).toBeLessThan(10_000);
   });
 });

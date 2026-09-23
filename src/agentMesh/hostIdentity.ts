@@ -100,12 +100,14 @@ function windowsProcessStartMs(pid: number): number | undefined {
         '-NoProfile',
         '-NonInteractive',
         '-Command',
-        `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CreationDate`,
+        // Epoch ms, not the DateTime's string form: that is rendered in the
+        // user's locale (Greek here), which Date.parse cannot read.
+        `([DateTimeOffset](Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CreationDate).ToUnixTimeMilliseconds()`,
       ],
       { timeout: 5_000, encoding: 'utf8', windowsHide: true },
     ).trim();
-    const ms = Date.parse(out);
-    return Number.isFinite(ms) ? ms : undefined;
+    const ms = Number(out);
+    return out !== '' && Number.isFinite(ms) && ms > 0 ? ms : undefined;
   } catch {
     return undefined;
   }

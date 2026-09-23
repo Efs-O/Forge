@@ -11,6 +11,10 @@ import {
   writeOwnership,
 } from '../../src/agentMesh/ownership';
 import { getAlias, registerAlias } from '../../src/agentMesh/aliasRegistry';
+
+// The real start-time reader spawns PowerShell on Windows, slow enough on a
+// loaded CI runner to time these tests out.
+const selfStart = { processStartMs: () => 1_700_000_000_000 };
 import type { ForgeConfig } from '../../src/config/types';
 
 /** A controllable fake owned Claude session (no real process). */
@@ -51,9 +55,7 @@ function makeProvider(
     busRoot: root,
     getConfig: () => config,
     workspaceRoots: () => ['/ws'],
-    // Injected: the real reader spawns PowerShell on Windows, slow enough on a
-    // loaded CI runner to time these tests out.
-    processStartMs: () => 1_700_000_000_000,
+    ...selfStart,
     // No user-opened sessions: the peer/relay fallback is never available, so
     // the owned path is the only Claude door under test.
     claudeSessions: () => [],
@@ -106,14 +108,19 @@ describe('MeshSessionProvider: owned Claude path (P4)', () => {
   it('a joined session that is not running gets a stand-in that resumes it, visibly', async () => {
     // A VS Code reload stops the joined panel session until the panel reopens.
     // Refusing left Qwen stuck; the stand-in resumes the joined conversation.
-    registerAlias(root, 'claude', {
-      agent: 'claude',
-      session_id: 'forge-4e',
-      registered_at: 1,
-      by: 'user',
-      peer_pid: 99,
-      claude_session_id: 'conv-1',
-    });
+    registerAlias(
+      root,
+      'claude',
+      {
+        agent: 'claude',
+        session_id: 'forge-4e',
+        registered_at: 1,
+        by: 'user',
+        peer_pid: 99,
+        claude_session_id: 'conv-1',
+      },
+      selfStart,
+    );
     const ids: (string | undefined)[] = [];
     const p = makeProvider({
       factory: (sessionId) => {
@@ -139,12 +146,17 @@ describe('MeshSessionProvider: owned Claude path (P4)', () => {
   });
 
   it('a prior alias session_id resumes owned (M3): the factory gets the id', async () => {
-    registerAlias(root, 'claude', {
-      agent: 'claude',
-      session_id: 'prior-id',
-      registered_at: 1,
-      by: 'user',
-    });
+    registerAlias(
+      root,
+      'claude',
+      {
+        agent: 'claude',
+        session_id: 'prior-id',
+        registered_at: 1,
+        by: 'user',
+      },
+      selfStart,
+    );
     const p = makeProvider({ factory: () => new FakeClaudeSession('prior-id') });
     const res = await p.ensureOwnedClaude('claude');
     expect('error' in res).toBe(false);
@@ -273,7 +285,7 @@ describe('owned session id is saved once the first turn confirms it', () => {
       created_at: 1,
       parked: false,
     });
-    recordConfirmedId(root, 'codex', 'thread-9');
+    recordConfirmedId(root, 'codex', 'thread-9', selfStart);
     expect(readOwnership(root, 'codex')).toMatchObject({
       session_id: 'thread-9',
       thread_id: 'thread-9',
@@ -282,14 +294,19 @@ describe('owned session id is saved once the first turn confirms it', () => {
   });
 
   it('never overwrites a joined user session alias', () => {
-    registerAlias(root, 'claude', {
-      agent: 'claude',
-      session_id: 'forge-4e',
-      registered_at: 1,
-      by: 'user',
-      peer_pid: 7,
-    });
-    recordConfirmedId(root, 'claude', 'owned-x');
+    registerAlias(
+      root,
+      'claude',
+      {
+        agent: 'claude',
+        session_id: 'forge-4e',
+        registered_at: 1,
+        by: 'user',
+        peer_pid: 7,
+      },
+      selfStart,
+    );
+    recordConfirmedId(root, 'claude', 'owned-x', selfStart);
     expect(getAlias(root, 'claude')?.session_id).toBe('forge-4e');
   });
 });
