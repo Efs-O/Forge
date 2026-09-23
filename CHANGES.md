@@ -2,6 +2,16 @@
 
 ## 0.16.38
 
+### A new turn no longer re-reads the previous one (2026-09-23)
+
+- **Each request's turn-context block (active file, plan) is frozen onto that
+  request** and saved with it (`ChatMessage.turnContext`). Before, the block
+  moved to the newest user message every turn, so the previous request changed
+  and llama-server re-evaluated everything from there. Now a new turn only
+  appends. Session logs record the frozen block on the user row.
+- Frozen blocks still reach the model when there is no live active file or
+  plan. The first cut dropped them in that case.
+
 ### Re-reads no longer rewrite history (2026-09-23)
 
 - **`supersedeStaleReads` is now `annotateRereads`.** It no longer replaces an

@@ -86,9 +86,13 @@ Unchanged by this work:
 
 These break the prefix on purpose and are documented exceptions, not bugs:
 
-- **`supersedeStaleReads`** — replaces a superseded `read_file` result with a
-  short marker. Removes a competing stale copy of a file and reclaims tokens;
-  worth the invalidation.
+- ~~**`supersedeStaleReads`**~~ — retired by `PREFIX_REWRITES_PLAN.md`. Priced
+  at 10 of 49 minutes on a 100K-token turn, it was not worth the invalidation.
+  `annotateRereads` now notes on the LATER result that it replaces the earlier
+  read, and never touches the earlier copy.
+- ~~**Turn-context move at turn start**~~ — also retired there. Each request's
+  Layer C block is frozen onto that request (`freezeTurnContext`) and stays put;
+  a new turn appends its own block rather than moving the old one.
 - **`prepareToolResultContext` excerpting** — head/tail excerpting of large
   historical tool results under context pressure. Correctness and output room
   beat a warm prefix at the ceiling.
@@ -235,8 +239,8 @@ transcript untouched, empty context adds nothing.
   on b10621 for both SWA and hybrid/recurrent architectures, because it needs
   `can_shift`. Nothing to configure; see
   `SLOT_AFFINITY_AND_CHECKPOINTS_PLAN.md` §4.
-- Measure the `supersedeStaleReads` tradeoff — it is a deliberate invalidation,
-  but nobody has priced it.
+- ~~Measure the `supersedeStaleReads` tradeoff~~ — priced and removed; see
+  `PREFIX_REWRITES_PLAN.md` §1.1.
 - **`--checkpoint-min-step` is the follow-on.** Prefix stability keeps the
   common prefix long; checkpoint spacing decides how much of it llama.cpp can
   actually rewind to. At the default 8192 the first edit at a new position still

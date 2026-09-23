@@ -203,18 +203,6 @@ function foldInto(messages: ChatMessage[], index: number, block: string): ChatMe
 }
 
 /**
- * Returns the model-facing copy with current editor and task state folded in.
- * `messages` is never mutated — `conv.messages` stays the raw transcript for
- * the sidebar, persistence, and exact recovery.
- *
- * Deterministic in its inputs and free of duplicates however often it runs.
- * Callers in a tool loop should pass the SAME state object for every round of a
- * turn rather than re-reading live state -- see the snapshot in
- * `ModelTurn.ts`. The block folds into the last user message, which on round N
- * is the request that opened the turn, so re-rendering it mid-turn rewrites the
- * prompt near the head and invalidates that turn's own rounds.
- */
-/**
  * Freeze the turn-start Layer C block onto the turn-opening user message.
  *
  * Called once per turn from `ModelTurn`, right after the snapshot is taken.
@@ -239,14 +227,20 @@ export function freezeTurnContext(messages: ChatMessage[], state: TurnContextSta
 }
 
 /**
- * Inject the Layer C block into the model-facing copy.
+ * Inject the Layer C block into the model-facing copy. `messages` is never
+ * mutated — `conv.messages` stays the raw transcript for the sidebar,
+ * persistence, and exact recovery. Deterministic in its inputs and free of
+ * duplicates however often it runs; callers in a tool loop pass the SAME state
+ * object for every round of a turn (see the snapshot in `ModelTurn.ts`).
  *
  * Two steps, in order:
  * 1. Every visible user message that carries `turnContext` gets that frozen
  *    block folded into itself, in place. Nothing moves.
  * 2. If the last non-midTurn user message in the view has **no** frozen block,
  *    `current` folds into it exactly as today, or stands alone when there is
- *    no user message at all (the existing fallback).
+ *    no user message at all (the existing fallback). Skipped when `current`
+ *    renders empty — step 1 still runs, so frozen blocks never depend on
+ *    live state.
  *
  * Step 2 fires in three cases only:
  * - a CLI turn;
@@ -256,7 +250,6 @@ export function freezeTurnContext(messages: ChatMessage[], state: TurnContextSta
  */
 export function injectTurnContext(messages: ChatMessage[], state: TurnContextState): ChatMessage[] {
   const block = renderTurnContext(state);
-  if (!block) return messages;
 
   // Step 1: fold every frozen block into its own message, in place.
   let out = messages;
@@ -266,6 +259,7 @@ export function injectTurnContext(messages: ChatMessage[], state: TurnContextSta
       out = foldInto(out, i, m.turnContext);
     }
   }
+  if (!block) return out;
 
   // Step 2: if the last non-midTurn user message has no frozen block, fold
   // `current` into it (or standalone fallback).

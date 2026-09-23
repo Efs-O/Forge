@@ -461,6 +461,17 @@ describe('freezeTurnContext', () => {
     expect(lastUser.turnContext).toBe(snapshot);
   });
 
+  it('keeps frozen blocks when the live state renders empty', () => {
+    const msgs = conversation();
+    freezeTurnContext(msgs, { activeFile: '/a.ts', plan: PLAN });
+    // No active file and no plan now: nothing live to add, but the frozen
+    // block is history and must still reach the model byte-for-byte.
+    const withLive = injectTurnContext(msgs, { activeFile: '/a.ts', plan: PLAN });
+    const empty = injectTurnContext(msgs, {});
+    expect(firstDivergence(withLive, empty)).toBe(-1);
+    expect(String(empty.at(-1)?.content)).toContain('Active file: /a.ts');
+  });
+
   it('does not freeze midTurn messages', () => {
     const msgs: ChatMessage[] = [
       { role: 'user', content: 'original request' },
