@@ -48,6 +48,7 @@ overlaps with an existing owner, extend the owner instead.
 | Tool call execution + result formatting              | `src/sidebar/ToolDispatch.ts`            |
 | Conversation CRUD pure ops                           | `src/sidebar/ConversationOps.ts`         |
 | Slash command dispatch                               | `src/sidebar/SlashCommandHandler.ts`     |
+| `/initForge` workspace scan and instruction generation | `src/sidebar/initForgeCommand.ts`      |
 | Compaction: cut point, run, resume                   | `src/sidebar/CompactionService.ts`       |
 | Compaction between rounds of a running turn (policy) | `src/sidebar/midTurnCompaction.ts`       |
 | Summary prompt text + summary validation             | `src/sidebar/compactionPrompt.ts`        |
