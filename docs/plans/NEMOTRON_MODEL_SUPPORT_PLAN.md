@@ -1,5 +1,7 @@
 # Nemotron model support plan
 
+> **Superseded (2026-09-23):** The Greek evaluation portion is retired. The benchmark now requires an explicit `--greek-eval` file.
+
 Status: implemented
 
 ## Goal
@@ -41,9 +43,9 @@ template, forwards Forge's existing thinking selection as the template's
    It neither starts nor stops a server.
 4. Unit-test request normalization and the script's argument validation/help
    path. Run repository CI and inspect the final diff.
-5. Freeze a validation-only Greek-language evaluation set outside Forge and
-   extend the endpoint-only benchmark with aggregate-only QA, Greek-script,
-   and Greek strict-schema tool-call measurements in both thinking modes.
+5. Freeze an external held-out Greek set and extend the endpoint-only benchmark
+   with aggregate-only QA, Greek-script, and Greek strict-schema tool-call
+   measurements in both thinking modes.
 
 ## State × lifecycle ledger
 
@@ -52,8 +54,7 @@ template, forwards Forge's existing thinking selection as the template's
 | `.forge/config.yaml` model entry | Manual, comment-preserving edit | User removes entry; no runtime deletion | Select another model/profile | YAML remains valid because it is edited atomically as source | No process owns it | Persistent until user changes config |
 | `docs/benchmarks/nemotron-raw-*.json` | Benchmark creates a dated raw result | User may delete old runs | No benchmark runs when command is not invoked | Raw JSON uses temp file then rename | Partial temp is ignored; next run creates a new dated file | No automatic expiry; results are audit evidence |
 | `docs/benchmarks/nemotron.md` | Benchmark atomically replaces the latest human report | User may delete it | No update when benchmark is not invoked | Existing report remains until rename | Existing report remains valid for its recorded date | Replaced by next successful report; raw file remains |
-| `Gemma4GR/data/nemotron_greek_eval/eval.jsonl` (local, uncommitted) | Deterministic builder filters `persona_val.jsonl` | User may remove local set | No benchmark runs when absent | Builder rewrites set and manifest together | No Forge process owns it | Persistent until the dataset/rule is intentionally rebuilt |
-| `Gemma4GR/data/nemotron_greek_eval/SHA256SUMS` (local, uncommitted) | Builder writes SHA-256 alongside the set | User may remove it with set | No benchmark runs when absent | Rebuilt with set | No Forge process owns it | Persistent until rebuild |
+| External held-out Greek set | Prepared outside Forge | Owner may remove the set | Benchmark requires an explicit file | Preparation process owns writes | No Forge process owns it | Retained according to its owner policy |
 
 The script's atomic raw/report writes are the CI-enforceable lifecycle guard:
 unit coverage verifies it rejects missing endpoint/model inputs before creating
@@ -76,12 +77,11 @@ an output artifact.
 - [x] `npm run ci` and `git diff --check` pass after the final change. The
   package guard was invoked but correctly refused to overwrite the existing
   `forge-llm-0.16.8.vsix`; no version change or overwrite is authorized.
-- [x] A local-only held-out set is frozen from `persona_val.jsonl` under the
-  documented Greek/NFC/decontamination rule: 39 rows, SHA-256
-  `c9dee5253ff44ca5fa743f7fc41c81e416ee7e32428db1c5d9530c2277f34c70`.
-  The exact-pair exclusion rule is in its local README for future training.
-- [x] The endpoint-only benchmark accepts `--greek-eval` (defaulting to that
-  local path), reports aggregate character 3-gram F1, token F1, Greek-script
+- [x] An external held-out Greek set was frozen under the documented
+  Greek/NFC/decontamination rule. The exact-pair exclusion rule is documented
+  with the set for future training.
+- [x] The endpoint-only benchmark accepts an explicit `--greek-eval` file,
+  reports aggregate character 3-gram F1, token F1, Greek-script
   share, and eight Greek strict-schema tool cases with thinking both off and
   on. It does not emit QA rows or answers into Forge artifacts. (Unit help
   coverage; live run remains required.)

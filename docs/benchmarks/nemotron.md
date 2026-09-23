@@ -27,15 +27,7 @@ Tool-call success: 10/12 (83.3%). Coding checks: 2/4.
 
 ## Greek-language evaluation
 
-Held-out set: N:\vs code apps\Gemma4GR\data\nemotron_greek_eval\eval.jsonl (39 rows; SHA-256 838e592f4268e6f21805423c69d6d9b8b4409bc75f5931d29f198232741ede9e).
-Quality is character 3-gram F1 and whitespace/token F1 against each held-out reference; language fidelity is the mean Greek-Unicode-letter share. Greek QA rows and model answers are deliberately not written into Forge artifacts.
-
-| Thinking | QA char-F1 | QA token-F1 | Greek-script share | Greek tools |
-| --- | ---: | ---: | ---: | ---: |
-| off | 7.2% | 8.6% | 76.8% | 3/8 |
-| on | 7.8% | 9.5% | 58.1% | 3/8 |
-
-Gemma 4 E4B reference: base 3/4 (75.0%), fine-tuned 3/4 (75.0%) from Gemma4GR `tests/benchmark_results`. Those were a four-question `must_contain` smoke run, not this validation-only F1 evaluation, so they are not directly comparable.
+Greek-language results from the earlier pilot set were withdrawn; that set is retired. New Greek results will be published once a replacement held-out set is ready.
 
 Raw result: nemotron-raw-2026-09-17T19-04-30-561Z.json
 
@@ -43,14 +35,9 @@ The benchmark validates tool name plus required JSON fields. It does not execute
 
 ## Q8_0 control (2026-09-17)
 
-Same frozen 39-row Greek pilot and strict-schema tool benchmark, served locally on port 8092. The Q4_K_M baseline above is unchanged. Q8 run context was 16384, versus Q4's 65,536.
+Same strict-schema tool benchmark, served locally on port 8092. The Q4_K_M baseline above is unchanged. Q8 run context was 16384, versus Q4's 65,536.
 
 | Measure | Q4_K_M | Q8_0 | Delta |
 | --- | ---: | ---: | ---: |
-| Greek QA char-F1, thinking off | 7.2% | 7,0% | -0,2 pp |
-| Greek QA char-F1, thinking on | 7.8% | 6,9% | -0,9 pp |
-| Greek-script share, off | 76.8% | 77,7% | +0,9 pp |
-| Greek-script share, on | 58.1% | 53,3% | -4,8 pp |
-| Greek tools | 3/8 | 4/8 | 1 |
 | English tool calling | 10/12 | 10/12 | 0 |
 | Generation tok/s | 78–99 | 63.8–71.2 | n/a |

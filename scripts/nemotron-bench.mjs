@@ -13,7 +13,6 @@ import { pathToFileURL } from 'node:url';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const DEFAULT_OUTPUT = resolve(ROOT, 'docs', 'benchmarks');
-const DEFAULT_GREEK_EVAL = 'N:/vs code apps/Gemma4GR/data/nemotron_greek_eval/eval.jsonl';
 const GREEK_TOOL_SCENARIOS = resolve(ROOT, 'benchmarks', 'nemotron-greek-tool-calls.json');
 const HARDWARE = '2x RTX 5060 Ti 16 GB (PCIe Gen3 x8) + RTX 3060 12 GB (x4); i7-8700K DDR4';
 
@@ -24,7 +23,7 @@ function value(args, flag) {
 
 function usage() {
   return [
-    'Usage: node scripts/nemotron-bench.mjs --base-url http://127.0.0.1:PORT --model MODEL_ID [--greek-eval PATH] [--out docs/benchmarks]',
+    'Usage: node scripts/nemotron-bench.mjs --base-url http://127.0.0.1:PORT --model MODEL_ID --greek-eval PATH [--out docs/benchmarks]',
     '',
     'The server must already be running. This command never starts, stops, unloads, or downloads a model.',
   ].join('\n');
@@ -37,7 +36,10 @@ function options(args) {
   if (!baseUrl || !/^https?:\/\//u.test(baseUrl)) throw new Error('--base-url must be an HTTP(S) URL.');
   if (!model) throw new Error('--model is required; refuse to guess a served model.');
   const output = resolve(ROOT, value(args, '--out') ?? DEFAULT_OUTPUT);
-  const greekEval = resolve(value(args, '--greek-eval') ?? DEFAULT_GREEK_EVAL);
+  const greekEvalValue = value(args, '--greek-eval');
+  if (!greekEvalValue) throw new Error('--greek-eval PATH is required.\n' + usage());
+  const greekEval = resolve(greekEvalValue);
+  if (!existsSync(greekEval)) throw new Error(`Greek evaluation file not found: ${greekEval}`);
   return { baseUrl, model, output, greekEval };
 }
 

@@ -20,4 +20,21 @@ describe('nemotron benchmark script', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('--base-url must be an HTTP(S) URL.');
   });
+
+  it('requires an explicit Greek evaluation file before network access', () => {
+    const result = spawnSync(process.execPath, [script, '--base-url', 'http://127.0.0.1:1', '--model', 'test-model'], { encoding: 'utf8' });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('--greek-eval PATH is required.');
+    expect(result.stderr).toContain('Usage:');
+    expect(result.stderr).not.toContain('ECONNREFUSED');
+  });
+
+  it('rejects a nonexistent Greek evaluation file before network access', () => {
+    const result = spawnSync(process.execPath, [script, '--base-url', 'http://127.0.0.1:1', '--model', 'test-model', '--greek-eval', 'missing-greek-eval.jsonl'], { encoding: 'utf8' });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Greek evaluation file not found:');
+    expect(result.stderr).not.toContain('ECONNREFUSED');
+  });
 });
