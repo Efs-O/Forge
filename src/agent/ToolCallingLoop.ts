@@ -300,7 +300,7 @@ export async function runToolCallingLoop(
     const calls = streamed.toolCalls?.length
       ? streamed.toolCalls
       : toolDefinitions.length > 0 && rawAssistant
-        ? extractFallbackToolCalls(rawAssistant)
+        ? extractFallbackToolCalls(rawAssistant, toolDefinitions)
         : null;
     if (calls?.length) {
       try {

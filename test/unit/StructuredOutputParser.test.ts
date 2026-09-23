@@ -59,9 +59,45 @@ describe('Hermes <tool_call> JSON in content', () => {
     expect(stripStructuredOutputFromFullText(text)).toBe('Reading it.\n');
   });
 
-  it('leaves the XML <function=...> form and non-call bodies alone', () => {
-    const xml = '<tool_call>\n<function=read_file>\n</function>\n</tool_call>';
-    expect(parseStructuredOutput(xml)).toEqual([]);
-    expect(stripStructuredOutputFromFullText(xml)).toBe(xml);
+  it('leaves non-call bodies alone', () => {
+    const prose = '<tool_call>\nnot a call\n</tool_call>';
+    expect(parseStructuredOutput(prose)).toEqual([]);
+    expect(stripStructuredOutputFromFullText(prose)).toBe(prose);
+  });
+});
+
+describe('XML <function=...> tool calls in content', () => {
+  // Qwen3.8 Q6 on 0.16.41 answered with exactly this as text; nothing ran.
+  const call = (query: string) =>
+    [
+      '<tool_call>',
+      '<function=search_code>',
+      '<parameter=query>',
+      query,
+      '</parameter>',
+      '<parameter=max_results>',
+      '20',
+      '</parameter>',
+      '</function>',
+      '</tool_call>',
+    ].join('\n');
+  const text = `${call('(no profile)')}\n${call('no profile')}`;
+
+  it('parses each block, values as raw strings', () => {
+    expect(parseStructuredOutput(text)).toEqual([
+      { name: 'search_code', arguments: { query: '(no profile)', max_results: '20' } },
+      { name: 'search_code', arguments: { query: 'no profile', max_results: '20' } },
+    ]);
+  });
+
+  it('keeps multi-line values intact', () => {
+    const body = '<tool_call>\n<function=write_file>\n<parameter=content>\na\n\nb\n</parameter>\n</function>\n</tool_call>';
+    expect(parseStructuredOutput(body)).toEqual([
+      { name: 'write_file', arguments: { content: 'a\n\nb' } },
+    ]);
+  });
+
+  it('strips them from persisted text', () => {
+    expect(stripStructuredOutputFromFullText(`Searching.\n${text}`)).toBe('Searching.\n\n');
   });
 });

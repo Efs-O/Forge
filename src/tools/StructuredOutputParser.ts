@@ -16,6 +16,11 @@
  * Qwen-family fine-tunes drift into this after a few native calls; llama-server
  * only parses the template's own `<function=...>` form, so without this the
  * call arrives as text and the turn ends.
+ *
+ * The template's own XML form, when llama-server's parser lets it through as
+ * content (seen 2026-09-23 on Qwen3.8 Q6: two calls back to back):
+ *   <tool_call><function=tool_name><parameter=key>value</parameter></function></tool_call>
+ * Values arrive as raw strings; ToolCallFallback types them from the schema.
  */
 
 export interface ParsedToolCall {
@@ -39,6 +44,8 @@ const OLLAMA_TOOL_MARKERS = [
 // Matches ```json ... ``` blocks (non-greedy, case-insensitive fence)
 const JSON_FENCE_RE = /```json\s*([\s\S]*?)```/gi;
 const HERMES_TOOL_CALL_RE = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/g;
+const XML_FUNCTION_RE = /^<function=([\w.-]+)>([\s\S]*?)<\/function>$/;
+const XML_PARAMETER_RE = /<parameter=([\w.-]+)>\n?([\s\S]*?)\n?<\/parameter>/g;
 const OLLAMA_TOOL_CALL_RE = new RegExp(
   `${escapeRegExp(OLLAMA_TOOL_CALL_BEGIN)}\\s*([\\w.-]+)\\s*${escapeRegExp(OLLAMA_TOOL_CALL_SEP)}\\s*([\\s\\S]*?)\\s*${escapeRegExp(OLLAMA_TOOL_CALL_END)}`,
   'gu',
@@ -113,7 +120,7 @@ export function stripStructuredOutputFromFullText(text: string): string {
   const withoutMarkers = text.replace(OLLAMA_TOOL_CALL_RE, '').replace(OLLAMA_TOOL_WRAPPER_RE, '');
 
   const isCall = (match: string, body: string): string =>
-    parseJsonToolObject(body.trim()) ? '' : match;
+    (parseJsonToolObject(body.trim()) ?? parseXmlFunction(body)) ? '' : match;
   return withoutMarkers.replace(JSON_FENCE_RE, isCall).replace(HERMES_TOOL_CALL_RE, isCall);
 }
 
@@ -144,9 +151,18 @@ function collectOllamaMarkerToolCalls(text: string, results: ParsedToolCall[]): 
 
 function collectHermesToolCalls(text: string, results: ParsedToolCall[]): void {
   for (const match of text.matchAll(HERMES_TOOL_CALL_RE)) {
-    const candidate = parseJsonToolObject(match[1] ?? '');
+    const body = match[1] ?? '';
+    const candidate = parseJsonToolObject(body) ?? parseXmlFunction(body);
     if (candidate) results.push(candidate);
   }
+}
+
+function parseXmlFunction(body: string): ParsedToolCall | null {
+  const fn = XML_FUNCTION_RE.exec(body.trim());
+  if (!fn) return null;
+  const args: Record<string, unknown> = {};
+  for (const param of fn[2].matchAll(XML_PARAMETER_RE)) args[param[1]] = param[2];
+  return { name: fn[1], arguments: args };
 }
 
 function parseJsonToolObject(raw: string): ParsedToolCall | null {

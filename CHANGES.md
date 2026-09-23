@@ -1,5 +1,14 @@
 # Forge — Recent Changes
 
+## 0.16.43
+
+### Qwen's XML tool calls run even when the server returns them as text (2026-09-23)
+
+- When llama-server passed Qwen's `<tool_call><function=...><parameter=...>` calls
+  through as plain text, Forge showed the raw tags in the chat and the turn ended
+  without running anything. Forge now reads that form and runs the calls, typing
+  each value from the tool's schema (numbers stay numbers, text stays text).
+
 ## 0.16.42
 
 ### Scheduled jobs run on one server and fire at their time (2026-09-23)

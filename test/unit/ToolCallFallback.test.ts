@@ -68,4 +68,28 @@ describe('extractFallbackToolCalls', () => {
     expect(calls).toHaveLength(2);
     expect(calls?.map((call) => call.function.name)).toEqual(['read_file', 'ask_user']);
   });
+
+  it('types XML parameter strings from the tool schema', () => {
+    const definitions = [
+      {
+        type: 'function' as const,
+        function: {
+          name: 'search_code',
+          description: '',
+          parameters: {
+            type: 'object',
+            properties: { query: { type: 'string' }, max_results: { type: 'integer' } },
+          },
+        },
+      },
+    ];
+    const calls = extractFallbackToolCalls(
+      '<tool_call>\n<function=search_code>\n<parameter=query>\n20\n</parameter>\n<parameter=max_results>\n20\n</parameter>\n</function>\n</tool_call>',
+      definitions,
+    );
+    expect(JSON.parse(calls?.[0]?.function.arguments ?? '{}')).toEqual({
+      query: '20',
+      max_results: 20,
+    });
+  });
 });
