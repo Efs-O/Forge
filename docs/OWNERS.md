@@ -113,6 +113,7 @@ overlaps with an existing owner, extend the owner instead.
 | Tool result labelling for the transcript        | `src/sidebar/toolResultView.ts`                 |
 | Checkpoint review (virtual pre-turn documents)  | `src/sidebar/CheckpointReview.ts`               |
 | Undo-history depth cap + review snapshots       | `src/checkpoint/checkpointHistory.ts`           |
+| Attachment tray/tile styles (composer)          | `webview-ui/styles/attachments.css`             |
 | Diff card styles                                | `webview-ui/styles/diff.css`                    |
 | Tool + thinking row styles                      | `webview-ui/styles/tool-rows.css`               |
 | Empty-tab styles                                | `webview-ui/styles/empty-state.css`             |
