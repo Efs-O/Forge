@@ -10,14 +10,16 @@
   stopped with the raw tag in the chat. Forge now reads it as the tool call
   it is and keeps going.
 
-### Archived conversations are preserved
+### Every chat is kept: "Archived sessions" in the history panel (2026-09-23)
 
-- Chats beyond the recent history window are stored as individual archive
-  records so they can be recovered without rewriting the recent history file.
-- A collapsed **Archived sessions** section lists older chats and lets you open,
-  rename, or delete them.
-- Older chats with a matching workspace in Forge's session logs can be brought
-  into the archive and reopened with their user, assistant, and tool turns.
+- The history panel used to hold 40 chats per workspace, and the 41st
+  **deleted** the oldest for good. Older chats now move to a collapsed
+  **Archived sessions (N)** section at the bottom of the panel; open, rename or
+  delete them like any other. Opening one moves it back to the recent list.
+- Chats already lost to the old limit come back too: the first time the new
+  version loads, Forge lists this workspace's older chats from its session logs
+  (`~/.forge/sessions`). Opening one rebuilds its messages and tool calls from
+  the log. Logs too old to record a workspace are not guessed at.
 
 ## 0.16.40
 
