@@ -38,12 +38,6 @@ export interface SessionProvider {
   resolveAdapter(alias: string): Promise<MeshAdapter | undefined>;
   /** Whether this alias has a live, owned session this window holds. */
   isOwned(alias: string): boolean;
-  /**
-   * Whether the alias's adapter observes turns (F-03). A non-observing alias
-   * stays `accepted` until a verdict appears, so the exchange id is bound into
-   * the message so the agent's verdict can be correlated.
-   */
-  isObserving(alias: string): boolean;
   /** F-07: record activity on the alias's owned session (the idle-TTL clock). */
   touchActivity(alias: string): void;
   /** Standby: park-but-warm (§2b). True when a record was parked. */
@@ -242,7 +236,7 @@ export class MeshOrchestrator {
     // agent's verdict file is named `<exchangeId>.verdict.md`, which the
     // wiring polls to complete the exchange (an exchange-correlated verdict,
     // not a transport exit code).
-    const outbound = this.deps.provider.isObserving(alias)
+    const outbound = fifo.observesTurns
       ? message
       : `${message}\n\n[forge: when you finish this, write your verdict to outbox/${exchangeId}.verdict.md]`;
     // F-03: the FIFO's `accepted` is the durable acknowledgement — awaited so
@@ -334,7 +328,7 @@ export class MeshOrchestrator {
         state: 'accepted',
         detail: 'inbound bus message',
       });
-      const outbound = this.deps.provider.isObserving(recipient)
+      const outbound = fifo.observesTurns
         ? message
         : `${message}\n\n[forge: when you finish this, write your verdict to outbox/${exchangeId}.verdict.md]`;
       // Hop 2 (idempotent `accepted`), BEFORE the enqueue: an idle recipient

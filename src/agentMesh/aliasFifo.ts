@@ -104,6 +104,16 @@ export class AliasFifo {
     return this.adapter.key;
   }
 
+  /**
+   * F-03: whether this queue's adapter observes turns. A non-observing one
+   * stays `accepted` until a verdict appears, so the sender binds the exchange
+   * id into the message. Asked of the adapter itself, not of ownership: a
+   * Claude stand-in observes its turns without being an owned session.
+   */
+  get observesTurns(): boolean {
+    return this.adapter.observesTurns;
+  }
+
   /** Nothing queued and no turn running: safe to replace (a new session key). */
   get idle(): boolean {
     return !this.running && this.queue.length === 0;

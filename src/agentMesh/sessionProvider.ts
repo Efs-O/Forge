@@ -98,11 +98,6 @@ export class MeshSessionProvider implements SessionProvider {
     );
   }
 
-  /** True only when this window holds the adapter and can observe its turns. */
-  isObserving(alias: string): boolean {
-    return this.isOwned(alias);
-  }
-
   /**
    * Resolve the adapter for an alias, in the order the class comment gives.
    * Undefined when none can be reached or created .

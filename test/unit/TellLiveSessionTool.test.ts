@@ -38,7 +38,6 @@ function makeTool(enabled = true) {
     provider: {
       resolveAdapter: async () => adapter,
       isOwned: () => true,
-      isObserving: () => true,
       touchActivity: () => {},
       park: () => true,
       wake: () => true,

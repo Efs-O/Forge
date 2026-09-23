@@ -1,5 +1,14 @@
 # Forge — Recent Changes
 
+## 0.16.40
+
+### No false "orphan verdict" warning after a stand-in answers (2026-09-23)
+
+- A message answered by a Claude stand-in no longer ends with an
+  `[agent mesh] ignored orphan verdict` warning. Forge watches a stand-in's turn
+  itself, but still asked it to write a verdict file; that file arrived after
+  the exchange had already completed.
+
 ## 0.16.39
 
 ### Alerts say which chat (2026-09-23)

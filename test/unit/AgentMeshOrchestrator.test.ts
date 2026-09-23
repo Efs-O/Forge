@@ -68,7 +68,6 @@ function makeOrchestrator(opts: {
     provider: {
       resolveAdapter: async (alias) => opts.adapters[alias.trim().toLowerCase()],
       isOwned: (alias) => owned.has(alias.trim().toLowerCase()),
-      isObserving: (alias) => owned.has(alias.trim().toLowerCase()),
       touchActivity: () => undefined,
       isParked: () => false,
       wake: () => false,
@@ -204,7 +203,6 @@ describe('orchestrator: FIFO single-flight + failure states (M5/§2)', () => {
           return adapter;
         },
         isOwned: () => true,
-        isObserving: () => true,
         touchActivity: () => undefined,
         isParked: () => false,
         wake: () => false,
@@ -247,7 +245,6 @@ describe('orchestrator: FIFO single-flight + failure states (M5/§2)', () => {
       provider: {
         resolveAdapter: async () => throwingAdapter,
         isOwned: () => true,
-        isObserving: () => true,
         touchActivity: () => undefined,
         isParked: () => false,
         wake: () => false,
@@ -274,7 +271,6 @@ describe('orchestrator: FIFO single-flight + failure states (M5/§2)', () => {
       provider: {
         resolveAdapter: async () => adapter,
         isOwned: () => true,
-        isObserving: () => true,
         touchActivity: () => undefined,
         isParked: () => false,
         wake: () => false,
@@ -336,7 +332,6 @@ describe('orchestrator: host-side relay (M6)', () => {
       provider: {
         resolveAdapter: async () => adapter,
         isOwned: () => true,
-        isObserving: () => true,
         touchActivity: () => undefined,
         isParked: () => false,
         wake: () => false,
@@ -360,6 +355,19 @@ describe('orchestrator: host-side relay (M6)', () => {
 
     expect(adapter.sends[0]).toContain('pass this on');
     expect(adapter.sends[0]).toContain('.verdict.md');
+  });
+
+  it('binds no verdict id when the adapter observes turns without being owned', async () => {
+    // A Claude stand-in: observing, but not an owned session. Asking it for a
+    // verdict made the verdict land after `completed`, as an "orphan".
+    const adapter = new FakeAdapter(true);
+    const orch = makeOrchestrator({ adapters: { claude: adapter } });
+
+    const out = await orch.relay('codex', 'claude', 'pass this on');
+    expect('error' in out).toBe(false);
+    await flush();
+
+    expect(adapter.sends[0]).toBe('pass this on');
   });
 
   it('refuses to relay a relay (hop count ≤ 2)', async () => {
@@ -412,7 +420,6 @@ describe('orchestrator: typed lifecycle commands (§8, P3)', () => {
         },
         isParked: (a) => parked.has(a),
         close: async () => true,
-        isObserving: () => true,
         touchActivity: () => undefined,
       },
     });
@@ -438,7 +445,6 @@ describe('orchestrator: typed lifecycle commands (§8, P3)', () => {
         wake: (a) => (parked.delete(a), true),
         isParked: (a) => parked.has(a),
         close: async () => true,
-        isObserving: () => true,
         touchActivity: () => undefined,
       },
     });

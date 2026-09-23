@@ -48,7 +48,6 @@ function orch(
     provider: {
       resolveAdapter: async () => resolve(),
       isOwned: () => true,
-      isObserving: () => true,
       touchActivity: () => undefined,
       isParked: () => false,
       wake: () => false,
