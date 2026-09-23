@@ -1,20 +1,17 @@
 import type { ModelConfig } from '../config/types';
 import type { UsageHandler } from '../llm/OpenAIClient';
 import { HtmlDocumentBoilerplateStripper } from '../llm/HtmlDocumentBoilerplateStripper';
-import { normalizeRequestForModel } from '../llm/RequestNormalizer';
-import { mergeSampling } from '../llm/SamplingMerge';
 import { ThinkingChannelStripper } from '../llm/ThinkingChannelStripper';
-import type { ChatCompletionRequest, ChatMessage, ToolCall, ToolDefinition } from '../llm/types';
-import { withFallbackToolInstructions } from '../tools/FallbackToolPrompt';
-import { ToolFailureTracker, stripTools } from '../tools/StripTools';
+import type { ChatMessage, ToolCall, ToolDefinition } from '../llm/types';
+import { ToolFailureTracker } from '../tools/StripTools';
 import { StructuredOutputStripper } from '../tools/StructuredOutputParser';
 import { extractFallbackToolCalls } from '../tools/ToolCallFallback';
 import { MIN_ROUND_HEADROOM_TOKENS, reasoningReserve } from '../util/contextBudget';
 import { ToolLoopDetectedError, ToolLoopGuard } from './ToolLoopGuard';
 import { StreamedAssistantTurn } from './StreamedAssistantTurn';
+import { buildRoundRequest } from './buildRoundRequest';
 import { sanitizeText, streamOnce } from './toolCallingStream';
 import {
-  applyOutputCap,
   asTruncation,
   CONTEXT_INPUT_EXHAUSTED_MESSAGE,
   CONTEXT_EXHAUSTED_MESSAGE,
@@ -202,39 +199,19 @@ export async function runToolCallingLoop(
     // byte. Spending the whole budget on the write is the point of the retry.
     const suppressThinking = suppressesThinking;
     const toolDefinitions = options.getToolDefinitions();
-    const fallbackMessages =
-      toolDefinitions.length > 0
-        ? withFallbackToolInstructions(prepared, toolDefinitions)
-        : prepared;
-    const nativeDefinitions = options.nativeTools && !options.stripAllTools ? toolDefinitions : [];
-    const base: ChatCompletionRequest = {
-      model: options.model.name,
-      messages: nativeDefinitions.length > 0 ? prepared : fallbackMessages,
-      stream: true,
-      ...(options.includeUsage ? { stream_options: { include_usage: true } } : {}),
-      ...(options.maxOutputTokens !== undefined ? { max_tokens: options.maxOutputTokens } : {}),
-      ...(nativeDefinitions.length > 0 ? { tools: nativeDefinitions } : {}),
-      ...(options.canUseThinkingKwargs && (options.model.think !== undefined || suppressThinking)
-        ? {
-            chat_template_kwargs: {
-              ...(options.model.sampling?.preserve_thinking !== undefined
-                ? { preserve_thinking: options.model.sampling.preserve_thinking }
-                : {}),
-              enable_thinking: suppressThinking ? false : options.model.think,
-            },
-          }
-        : {}),
-    };
-    const merged = applyOutputCap(
-      mergeSampling(base, options.model, {
-        allowPreserveThinking: options.canUseThinkingKwargs ?? false,
-      }),
+    const built = buildRoundRequest({
+      model: options.model,
+      prepared,
+      toolDefinitions,
+      nativeTools: options.nativeTools,
+      stripAllTools: options.stripAllTools,
+      includeUsage: options.includeUsage,
+      maxOutputTokens: options.maxOutputTokens,
+      canUseThinkingKwargs: options.canUseThinkingKwargs,
+      suppressThinking,
       outputRoom,
-    );
-    const request = normalizeRequestForModel(
-      options.stripAllTools ? stripTools(merged) : merged,
-      options.model,
-    );
+    });
+    const request = built.request;
     let rawAssistant = '';
     let rawReasoning = '';
     const streamedAssistant = new StreamedAssistantTurn(options.messages);
@@ -296,7 +273,7 @@ export async function runToolCallingLoop(
         options.onMessagesChanged?.();
         continue;
       }
-      if (!isNativeToolJsonParseError(err) || nativeDefinitions.length === 0) throw err;
+      if (!isNativeToolJsonParseError(err) || !built.usesNativeTools) throw err;
       options.failureTracker?.record(options.failureTrackerKey);
       options.onNativeFallback?.();
       rawAssistant = '';
@@ -304,10 +281,7 @@ export async function runToolCallingLoop(
       thinking = options.stripThinkingChannels ? new ThinkingChannelStripper() : null;
       structured = new StructuredOutputStripper();
       html = new HtmlDocumentBoilerplateStripper();
-      const fallbackRequest = normalizeRequestForModel(
-        stripTools({ ...base, messages: fallbackMessages }),
-        options.model,
-      );
+      const fallbackRequest = built.fallbackRequest;
       streamed = await streamOnce(options, fallbackRequest, tokenHandler, reasoningHandler);
     }
     // Only reached when the round streamed to completion — the truncation path

@@ -31,6 +31,7 @@ overlaps with an existing owner, extend the owner instead.
 | Per-conversation streaming/cancel state              | `src/sidebar/TurnLifecycle.ts`           |
 | Model-endpoint turn: preflight + request             | `src/sidebar/ModelTurn.ts`               |
 | Model-facing message preparation for a turn (window, images, system prompt, turn context, tool-result excerpts) | `src/sidebar/prepareModelTurnMessages.ts` |
+| Per-round chat request assembly (native vs fallback tools, thinking kwargs, sampling, output cap) | `src/agent/buildRoundRequest.ts` |
 | Cloud target / local backend startup                 | `src/sidebar/ProviderTurn.ts`            |
 | Turn served by a local CLI agent                     | `src/sidebar/CliTurn.ts`                 |
 | One-shot prompt (compaction, /review)                | `src/sidebar/PromptRun.ts`               |
