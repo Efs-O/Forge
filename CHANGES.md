@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## 0.16.46
+## 0.16.47
 
 ### Telegram follows only the chat it is switched to (2026-09-23)
 
