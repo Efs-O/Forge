@@ -33,7 +33,8 @@ class MemorySecrets {
 
 afterEach(async () => {
   for (const directory of tempDirs.splice(0)) {
-    await fs.rm(directory, { recursive: true, force: true });
+    // Retried: Windows can still hold a just-closed file (EBUSY).
+    await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 

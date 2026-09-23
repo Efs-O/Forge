@@ -111,11 +111,20 @@ function windowsProcessStartMs(pid: number): number | undefined {
   }
 }
 
+/**
+ * This process's OS start time, once read. It cannot change while the process
+ * lives, and on Windows each read spawns PowerShell — once per lock taken,
+ * before this cache. Only a successful read is kept.
+ */
+let ownStartMs: number | undefined;
+
 /** The calling host's own identity. `startedAt` is its OS start time. */
 export function getHostIdentity(deps: HostLivenessDeps = {}): HostId {
   const pid = deps.selfPid ?? process.pid;
-  const startedAt = (deps.processStartMs ?? osProcessStartMs)(pid) ?? Date.now();
-  return { pid, startedAt };
+  if (deps.processStartMs) return { pid, startedAt: deps.processStartMs(pid) ?? Date.now() };
+  if (pid !== process.pid) return { pid, startedAt: osProcessStartMs(pid) ?? Date.now() };
+  ownStartMs ??= osProcessStartMs(pid);
+  return { pid, startedAt: ownStartMs ?? Date.now() };
 }
 
 /**

@@ -410,7 +410,12 @@ export function clearTornClaimWithRecord(root: string, alias: string): boolean {
  * writes the record before a fresh session has an id, so without this the
  * record kept `""` and every reload "resumed" into a new, empty thread.
  */
-export function recordConfirmedId(root: string, alias: string, id: string | undefined): void {
+export function recordConfirmedId(
+  root: string,
+  alias: string,
+  id: string | undefined,
+  deps: HostLivenessDeps = {},
+): void {
   if (!id) return;
   const rec = readOwnership(root, alias);
   if (rec && rec.session_id !== id) {
@@ -420,10 +425,15 @@ export function recordConfirmedId(root: string, alias: string, id: string | unde
   const aliasRec = getAlias(root, alias);
   if (aliasRec?.peer_pid !== undefined || aliasRec?.session_id === id) return;
   if (aliasRec?.by === 'user') return; // a user's pin is theirs to change
-  registerAlias(root, alias, {
-    agent: rec?.agent ?? (alias === 'codex' ? 'codex' : 'claude'),
-    session_id: id,
-    registered_at: Date.now(),
-    by: 'forge',
-  });
+  registerAlias(
+    root,
+    alias,
+    {
+      agent: rec?.agent ?? (alias === 'codex' ? 'codex' : 'claude'),
+      session_id: id,
+      registered_at: Date.now(),
+      by: 'forge',
+    },
+    deps,
+  );
 }

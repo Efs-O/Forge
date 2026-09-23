@@ -88,13 +88,13 @@ export class MeshSessionProvider implements SessionProvider {
 
   private codexOwnedAdapter(alias: string, s: CodexAppServerSession): CodexOwnedAdapter {
     return new CodexOwnedAdapter(s, () =>
-      recordConfirmedId(this.deps.busRoot, alias, s.confirmedSessionId),
+      recordConfirmedId(this.deps.busRoot, alias, s.confirmedSessionId, this.deps),
     );
   }
 
   private claudeOwnedAdapter(alias: string, s: ClaudeOwnedSession): ClaudeOwnedAdapter {
     return new ClaudeOwnedAdapter(s, () =>
-      recordConfirmedId(this.deps.busRoot, alias, s.confirmedSessionId),
+      recordConfirmedId(this.deps.busRoot, alias, s.confirmedSessionId, this.deps),
     );
   }
 
@@ -263,12 +263,17 @@ export class MeshSessionProvider implements SessionProvider {
         parked: false,
       });
       if (!aliasRec) {
-        registerAlias(this.deps.busRoot, alias, {
-          agent: 'codex',
-          session_id: newThreadId ?? '',
-          registered_at: Date.now(),
-          by: 'forge',
-        });
+        registerAlias(
+          this.deps.busRoot,
+          alias,
+          {
+            agent: 'codex',
+            session_id: newThreadId ?? '',
+            registered_at: Date.now(),
+            by: 'forge',
+          },
+          this.deps,
+        );
       }
       return this.codexOwnedAdapter(alias, session);
     } catch (err) {
@@ -348,12 +353,17 @@ export class MeshSessionProvider implements SessionProvider {
         parked: false,
       });
       if (!start.aliasRec) {
-        registerAlias(this.deps.busRoot, alias, {
-          agent: 'claude',
-          session_id: newSessionId ?? '',
-          registered_at: Date.now(),
-          by: 'forge',
-        });
+        registerAlias(
+          this.deps.busRoot,
+          alias,
+          {
+            agent: 'claude',
+            session_id: newSessionId ?? '',
+            registered_at: Date.now(),
+            by: 'forge',
+          },
+          this.deps,
+        );
       }
       return this.claudeOwnedAdapter(alias, session);
     } catch (err) {
