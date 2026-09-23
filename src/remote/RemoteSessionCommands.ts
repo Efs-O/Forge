@@ -284,7 +284,7 @@ export async function handleRemoteSessionCommand(
     const notes = [
       ...(queued.length > 0
         ? [
-            'These run in order once the current turn ends. Use /steer <number> to run one now, or /drop <number|all> to cancel.',
+            'Text reaches Forge at the next step of the running turn; items with attachments run in order once it ends. Use /drop <number|all> to cancel.',
           ]
         : []),
       ...(busQueued.length > 0

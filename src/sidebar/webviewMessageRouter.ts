@@ -25,11 +25,6 @@ export interface WebviewActions {
   getClankerMode: () => boolean;
   getRemoteStatus: () => { transports: string[]; paired: boolean };
   send: (text: string, attachments?: AttachmentData[], conversationId?: string) => void;
-  steer: (
-    text: string,
-    attachments: AttachmentData[] | undefined,
-    conversationId: string,
-  ) => Promise<void>;
   cancel: () => void;
   switchModel: (name: string | null) => Promise<void>;
   undo: () => Promise<string[]>;
@@ -72,10 +67,6 @@ export function routeWebviewMessage(actions: WebviewActions, msg: WebviewToHost)
 
     case 'send':
       actions.send(msg.text, msg.attachments, msg.conversationId);
-      break;
-
-    case 'steer':
-      void actions.steer(msg.text, msg.attachments, msg.conversationId).catch(reportError);
       break;
 
     case 'cancel':

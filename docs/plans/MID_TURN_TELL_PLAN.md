@@ -499,3 +499,31 @@ useEffect(() => {
 The flush effect reads `steeringConversationIds.current`. Removing the ref
 without removing this guard reintroduces the flush-during-steer race the ref
 was protecting against.
+
+## Phase 4 result (Claude, 2026-09-23)
+
+Implemented by Qwopus V2 in chat `c095313c`: one 49-minute turn, 142 tool calls,
+no thinking loop (largest round 12,958 reasoning characters, under the 8192-token
+cap). Audited by Codex; Claude made the final check.
+
+- **Qwopus's first review request had four defects**, all fixed by Qwopus
+  before commit:
+  1. It put "Sends when this turn ends" on the text-only (`tell`) row. That is
+     the same `tell` question it looped on in the first attempt; this time it
+     guessed wrong instead of looping.
+  2. The Telegram acknowledgement had the same split missing.
+  3. The unreachable steer code was left in: the admission `priority`
+     parameter and `promoteQueued`.
+  4. It cited a skip-only test as risk-2 coverage.
+- **Codex found three stale `/steer` mentions**, fixed by Claude:
+  - the `/queue` note in `RemoteSessionCommands.ts`;
+  - a comment in `agentMessagingSetup.ts`;
+  - two mesh plan docs.
+- **Claude's changes:**
+  - The risk-2 test now admits the legacy steer record *after* the normal one,
+    so passing proves the priority ordering.
+  - Fixed a stale "promoted prompt" comment in `remoteQueueOrdering.ts`.
+- **Kept** (verified): `forge.sh steer`, `priority=steer` in `agentRoutes.ts`,
+  `AgentLoop.interrupt`, `interruptForSteering`, steer-first ordering, and the
+  schema field for records already on disk.
+- **Gate:** `npm run ci` exit 0; 3,073 tests passed.

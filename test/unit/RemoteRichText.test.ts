@@ -98,7 +98,7 @@ describe('remote command map', () => {
     // Contact onboarding is intentionally not an owner command/menu entry.
     '/start',
   ]);
-  const EXTRA_IMPLEMENTED = ['/contact', '/contacts', '/send', '/steer'];
+  const EXTRA_IMPLEMENTED = ['/contact', '/contacts', '/send'];
 
   const implemented = new Set(
     SOURCES.flatMap((file) =>
@@ -113,7 +113,6 @@ describe('remote command map', () => {
   it('finds the handlers it is meant to be checking', () => {
     // A regex that silently matched nothing would make both tests below pass.
     expect(implemented.size).toBeGreaterThan(20);
-    expect(implemented.has('/steer')).toBe(true);
     expect(implemented.has('/mirror')).toBe(true);
   });
 

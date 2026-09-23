@@ -2,6 +2,20 @@
 
 ## 0.16.38
 
+### Steer and the queue UI removed (2026-09-23)
+
+- **The sidebar steer button, `steerQueuedPrompt`, `steeringConversationIds`,
+  and the `steer` webview→host message are gone.** The webview no longer posts
+  `{type:'steer'}`; the router no longer has a `steer` case; and the
+  `SidebarProvider` no longer exposes a `steer` action. The `QueuedPromptRow`
+  now shows only a Cancel button. Text-only pending rows read "Will reach
+  Forge at its next step"; attachment rows read "Sends when this turn ends".
+- **Telegram `/steer` is removed.** `parseSteerCommand`, `promoteQueuedPrompt`,
+  and the `/steer` help text are gone. `isRemoteCommand` now simply checks for
+  a leading `/`. The Telegram acknowledgement no longer mentions `/steer`.
+- **Kept:** `forge.sh steer` and `priority=steer` in `agentRoutes.ts`, and
+  `AgentLoop.interrupt` — CLI agents still need to interrupt each other.
+
 ### A mid-turn message no longer re-reads the whole turn (2026-09-23)
 
 - **A message sent during a turn now adds only its own tokens to the next

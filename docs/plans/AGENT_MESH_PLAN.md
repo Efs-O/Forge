@@ -372,7 +372,10 @@ an authoritative idempotent receipt (Codex, gap G). v2 contract:
 
 ### 6. Bus `/steer` (interrupt allowed) — P3
 - `POST /agent/message?from=<alias>&priority=steer`, recognised via the existing
-  `parseSteerCommand` (single owner — reuse, don't copy).
+  `parseSteerCommand` (single owner — reuse, don't copy). *(2026-09-23:
+  `parseSteerCommand` was removed with Telegram `/steer` in MID_TURN_TELL
+  Phase 4; bus steer is the `priority=steer` query parameter in
+  `agentRoutes.ts`.)*
 - **Decision (user, 2026-09-19): a bus steer MAY interrupt a running turn**, same
   as remote steer. A steer to a **parked** session wakes it (§2b state machine).
   `forge.sh steer <alias> [file]` verb + README.

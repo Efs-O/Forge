@@ -55,7 +55,6 @@ export const TELEGRAM_BOT_COMMANDS = [
   { command: 'send', description: 'Prepare a confirmed message to a contact' },
   { command: 'sleep', description: 'Suspend this machine (needs /sleep confirm)' },
   { command: 'status', description: 'Session, model, queue' },
-  { command: 'steer', description: 'Run queued <n> or new text now' },
   { command: 'stop', description: 'Stop the current request' },
   { command: 'system', description: 'GPU, VRAM by process, RAM, drives' },
   { command: 'timeout', description: 'Show/set session timeout' },

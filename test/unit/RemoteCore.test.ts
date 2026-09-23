@@ -110,21 +110,69 @@ describe('RemoteRequestStore', () => {
     expect(state.getRequest('normal')?.state).toBe('cancelled');
   });
 
-  it('promotes a queued prompt ahead of an existing steer', async () => {
+  it('delivers a steer-priority record already queued before the removal', async () => {
     const state = await store();
-    await state.enqueue(request({ id: 'first', dedupKey: 'first', admittedAt: 1 }));
-    await state.enqueue(request({ id: 'second', dedupKey: 'second', admittedAt: 2 }));
+    // A record saved before Phase 4 still carries priority: 'steer'. It is
+    // admitted AFTER the normal one, so running first proves the priority.
     await state.enqueue(
-      request({ id: 'steered', dedupKey: 'steered', admittedAt: 3, priority: 'steer' }),
+      request({ id: 'normal', dedupKey: 'normal', admittedAt: 1, text: 'normal text' }),
     );
-    expect(state.queued('c1').map((item) => item.id)).toEqual(['steered', 'first', 'second']);
+    await state.enqueue(
+      request({
+        id: 'steer-legacy',
+        dedupKey: 'steer-legacy',
+        admittedAt: 2,
+        priority: 'steer',
+        text: 'steer-legacy text',
+      }),
+    );
 
-    // Flagging it a steer is not enough on its own: ordering is priority THEN
-    // admittedAt, so without the re-dating it would land behind `steered`.
-    await expect(state.promoteQueued('c1', 'second')).resolves.toBe(true);
-    expect(state.queued('c1').map((item) => item.id)).toEqual(['second', 'steered', 'first']);
+    const secrets = new MemorySecrets();
+    secrets.values.set('forge.remote.fake.ownerId', 'owner');
+    const auth = new RemoteAuth(secrets as unknown as vscode.SecretStorage);
+    const channel = new FakeRemoteChannel();
+    const send = vi.fn(async () => ({ kind: 'completed' as const, finalText: 'done' }));
+    const host = {
+      createConversation: vi.fn(),
+      restoreConversation: vi.fn(),
+      send,
+      cancel: vi.fn(),
+      interrupt: vi.fn(),
+      queueIntent: vi.fn(),
+      addApprovalSink: () => ({ dispose: () => undefined }),
+      addQuestionSink: () => ({ dispose: () => undefined }),
+      answerQuestion: () => false,
+      resolveApproval: vi.fn(),
+      status: () => ({
+        activeConversationId: 'c1',
+        conversations: [],
+        requestChains: [],
+        streamingConversationIds: [],
+      }),
+      contextBudget: () => ({ used: 10, max: 100 }),
+      clankerMode: () => false,
+      setClankerMode: vi.fn(),
+    } as unknown as ForgeHostFacade;
+    const controller = new RemoteController(channel, state, auth, host, {
+      workspaceId: 'workspace',
+      queueLimit: 5,
+      maxMessageChars: 12_000,
+      rateLimitPerMinute: 30,
+      modelEntries: [],
+      attachmentsEnabled: false,
+      acceptPdfAttachments: false,
+      workspaceAliases: {},
+    });
+    await controller.start();
 
-    await expect(state.promoteQueued('c1', 'missing')).resolves.toBe(false);
+    // The drain should pick up the steer-priority record and deliver it.
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    // The steer record runs first (priority ordering), then the normal one.
+    expect(send.mock.calls.map((call) => call[1])).toEqual([
+      'steer-legacy text',
+      'normal text',
+    ]);
+    await controller.stop();
   });
 });
 
@@ -433,14 +481,14 @@ describe('RemoteController with fake channel', () => {
       text: '/steer change direction now',
     });
 
-    expect(disposition).toMatchObject({ kind: 'queued', position: 1 });
-    expect(interrupt).toHaveBeenCalledWith('c1');
-    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
-    expect(send.mock.calls.map((call) => call[1])).toEqual(['change direction now', 'hello']);
+    // /steer is now a command, not a prompt: it is rejected as unknown.
+    expect(disposition).toMatchObject({ kind: 'rejected' });
+    expect(interrupt).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
     await controller.stop();
   });
 
-  it('reads a bare number after /steer as a queue position, not as prompt text', async () => {
+  it('rejects /steer 2 as an unknown command', async () => {
     const state = await store();
     await state.setBinding({
       channel: 'fake',
@@ -509,14 +557,10 @@ describe('RemoteController with fake channel', () => {
       text: '/steer 2',
     });
 
-    // The old parser enqueued the literal prompt "2" and cancelled the turn to
-    // run it. Nothing new is admitted now, and the reply names what it ran.
-    expect(disposition).toMatchObject({ kind: 'handled' });
-    expect(state.queued('c1').map((item) => item.id)).toEqual(['second', 'first']);
-    expect(interrupt).toHaveBeenCalledWith('c1');
-    expect(channel.sent.some((item) => item.text.includes('queued #2 next'))).toBe(true);
-    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
-    expect(send.mock.calls.map((call) => call[1])).toEqual(['second task', 'first task']);
+    // /steer is now a command, not a prompt: it is rejected as unknown.
+    expect(disposition).toMatchObject({ kind: 'rejected' });
+    expect(interrupt).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
     await controller.stop();
   });
 

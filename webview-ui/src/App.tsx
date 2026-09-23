@@ -67,21 +67,13 @@ export function App(): React.ReactElement {
   // Queued prompts belong in state so the user can see and cancel them before
   // Forge submits them to the extension host. Text-only entries become tells;
   // attachment entries retain the end-of-turn queue.
-  const {
-    queuedPrompts,
-    handleSend,
-    cancelQueuedPrompt,
-    steerQueuedPrompt,
-    clearTellPrompts,
-    reconcileSessionSync,
-    clearSteering,
-    isSteering,
-  } = usePendingPrompts({
-    dispatch,
-    activeConversationId: state.activeConversationId,
-    streamingIds: state.streamingIds,
-    clearResumed,
-  });
+  const { queuedPrompts, handleSend, cancelQueuedPrompt, clearTellPrompts, reconcileSessionSync } =
+    usePendingPrompts({
+      dispatch,
+      activeConversationId: state.activeConversationId,
+      streamingIds: state.streamingIds,
+      clearResumed,
+    });
 
   useEffect(() => {
     function handler(event: MessageEvent): void {
@@ -92,7 +84,6 @@ export function App(): React.ReactElement {
       if (dialogs.handleHostMessage(msg)) return;
       switch (msg.type) {
         case 'generationStarted':
-          if (msg.conversationId) clearSteering(msg.conversationId);
           dispatch({ type: 'GENERATION_STARTED', convId: msg.conversationId });
           break;
         case 'userPrompt':
@@ -118,17 +109,9 @@ export function App(): React.ReactElement {
           dispatch({ type: 'REASONING_TOKEN', text: msg.text, convId: msg.conversationId });
           break;
         case 'done':
-          // A steering handoff first finishes the interrupted request, then
-          // starts the redirected one. Keep the optimistic steered prompt and
-          // the conversation's live state through that intermediate DONE;
-          // generationStarted clears the handoff marker for the new request.
-          if (msg.conversationId && isSteering(msg.conversationId)) {
-            break;
-          }
           dispatch({ type: 'DONE', convId: msg.conversationId });
           break;
         case 'error':
-          if (msg.conversationId) clearSteering(msg.conversationId);
           dispatch({ type: 'ERROR', message: msg.message, convId: msg.conversationId });
           break;
         case 'ready':
@@ -147,7 +130,6 @@ export function App(): React.ReactElement {
           dispatch({ type: 'BACKEND_STARTING', message: msg.message, convId: msg.conversationId });
           break;
         case 'backendDown':
-          if (msg.conversationId) clearSteering(msg.conversationId);
           dispatch({ type: 'BACKEND_DOWN', message: msg.message, convId: msg.conversationId });
           break;
         case 'models':
@@ -383,7 +365,6 @@ export function App(): React.ReactElement {
           state={state}
           queuedPrompts={queuedPrompts}
           onCancelQueuedPrompt={cancelQueuedPrompt}
-          onSteerQueuedPrompt={steerQueuedPrompt}
           resumedIds={resumedIds}
           emptyState={emptyState}
         />

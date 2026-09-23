@@ -31,7 +31,6 @@ import {
   claimMidTurnTellInDraft,
   claimNextInDraft,
   compareQueuedRequests,
-  promoteQueuedInDraft,
 } from './remoteQueueOrdering';
 import {
   findSelection,
@@ -325,15 +324,6 @@ export class RemoteRequestStore {
     let claimed: RemoteRequestRecord | undefined;
     await this.mutate((draft) => (claimed = claimMidTurnTellInDraft(draft.requests, id)));
     return claimed;
-  }
-
-  /** `/steer <n>`: run an already-queued prompt next. */
-  async promoteQueued(conversationId: string, requestId: string): Promise<boolean> {
-    let promoted = false;
-    await this.mutate((draft) => {
-      promoted = promoteQueuedInDraft(draft.requests, conversationId, requestId);
-    });
-    return promoted;
   }
 
   /** `/drop`: cancel queued prompts without deleting their audit record. */

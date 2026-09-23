@@ -55,7 +55,6 @@ interface Props {
   messages: AppMessage[];
   queuedPrompts: Array<{ id: string; text: string; attachments: unknown[]; tell?: boolean }>;
   onCancelQueuedPrompt: (id: string) => void;
-  onSteerQueuedPrompt: (id: string) => void;
   streaming: boolean;
   /** Active conversation/tab id. A change means the user switched sessions, which
    *  must jump to the bottom instantly instead of smooth-scrolling the whole
@@ -65,8 +64,6 @@ interface Props {
   emptyState?: React.ReactNode;
   /** "resumed · 3 days ago · 12 msgs" hairline, or null when this is not a resumed tab. */
   resumedNote?: string | null;
-  /** Names the model a queued prompt is waiting on; absent when none is selected. */
-  queuedModelName?: string | null;
   /**
    * Whether this pane is the one on screen.
    *
@@ -86,12 +83,10 @@ export function MessageList({
   messages,
   queuedPrompts,
   onCancelQueuedPrompt,
-  onSteerQueuedPrompt,
   streaming,
   conversationId,
   emptyState,
   resumedNote,
-  queuedModelName,
   active,
 }: Props): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -320,8 +315,6 @@ export function MessageList({
           text={prompt.text}
           attachmentCount={prompt.attachments.length}
           tell={prompt.tell}
-          waitingOn={queuedModelName ?? null}
-          onSteer={() => onSteerQueuedPrompt(prompt.id)}
           onCancel={() => onCancelQueuedPrompt(prompt.id)}
         />
       ))}

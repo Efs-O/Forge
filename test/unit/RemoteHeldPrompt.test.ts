@@ -205,20 +205,12 @@ describe('held remote prompt', () => {
     await controller.stop();
   });
 
-  it('still holds /steer, which carries a prompt', async () => {
-    const { controller, channel, forgeHost, code } = await enrolledRig();
+  it('rejects /steer, which is no longer a prompt', async () => {
+    const { controller, channel, forgeHost } = await enrolledRig();
 
     await channel.emit(event({ providerMessageId: 'p1', text: '/steer rewrite the loop' }));
-    expect(channel.sent.some((item) => item.text.includes('Your prompt is held'))).toBe(true);
-    await channel.emit(event({ providerMessageId: 'auth', text: code }));
-    await vi.waitFor(() =>
-      expect(forgeHost.send).toHaveBeenCalledWith(
-        'c1',
-        'rewrite the loop',
-        undefined,
-        expect.objectContaining({ remoteRequestId: expect.any(String) }),
-      ),
-    );
+    expect(channel.sent.some((item) => item.text.includes('Your prompt is held'))).toBe(false);
+    expect(forgeHost.send).not.toHaveBeenCalled();
     await controller.stop();
   });
 

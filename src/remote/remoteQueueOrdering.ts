@@ -8,7 +8,7 @@ import type { RemoteRequestRecord } from './types';
  * keeps sole ownership of loading, serializing and persisting state while the
  * ordering rules live where they can be read in one sitting. Every caller must
  * go through `compareQueuedRequests` — a second sort written inline is how a
- * promoted prompt silently stops being next.
+ * steer record saved before `/steer` was removed silently stops being next.
  */
 export function compareQueuedRequests(
   left: RemoteRequestRecord,
@@ -22,28 +22,6 @@ function queuedFor(requests: RemoteRequestRecord[], conversationId: string): Rem
   return requests.filter(
     (item) => item.conversationId === conversationId && item.state === 'queued',
   );
-}
-
-/**
- * Move one queued prompt to the front of its conversation's queue.
- *
- * Order is priority THEN `admittedAt`, so promotion has to do both: flag it as
- * a steer AND date it before every other queued row, or it merely joins the
- * back of an existing steer run.
- */
-export function promoteQueuedInDraft(
-  requests: RemoteRequestRecord[],
-  conversationId: string,
-  requestId: string,
-): boolean {
-  const queued = queuedFor(requests, conversationId);
-  const target = queued.find((item) => item.id === requestId);
-  if (!target) return false;
-  const earliest = Math.min(...queued.map((item) => item.admittedAt ?? item.receivedAt));
-  target.priority = 'steer';
-  target.admittedAt = earliest - 1;
-  target.updatedAt = Date.now();
-  return true;
 }
 
 /** Mark selected queued prompts cancelled without deleting their audit record. */

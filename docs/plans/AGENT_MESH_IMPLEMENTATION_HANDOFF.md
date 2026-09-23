@@ -200,7 +200,8 @@ same "continue and write the file" prompt.
   running→unknown; `requestHealth()` counts globally; add per-conversation scope
   (P1). `unknown` stays `unknown` (no auto-resolve).
 - **Steer:** `src/remote/RemotePromptAdmission.ts` `parseSteerCommand` (single
-  owner — reuse for bus `/steer`, P3).
+  owner — reuse for bus `/steer`, P3). *(Removed 2026-09-23 with Telegram
+  `/steer`, MID_TURN_TELL Phase 4; bus steer lives in `agentRoutes.ts`.)*
 - **Bus folder (real):** `C:/Users/efso office/.forge/agent-bus/` (endpoint.json,
   forge.sh, README.md, inbox/, outbox/). New: aliases.json, ownership/, exchanges.jsonl,
   exchanges.lock, status/.

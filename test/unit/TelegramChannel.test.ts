@@ -196,10 +196,58 @@ describe('TelegramChannel', () => {
     channel.onEvent(async () => ({ kind: 'queued', requestId: 'r1', position: 2 }));
 
     await channel.start(abort.signal);
-    // The acknowledgement names the position it just assigned, so steering or
-    // dropping it needs no second lookup — and no retyping of the prompt.
-    await vi.waitFor(() => expect(acknowledgements[0]).toContain('/steer 2'));
+    // The acknowledgement names the position it just assigned, so dropping it
+    // needs no second lookup — and no retyping of the prompt.
+    await vi.waitFor(() => expect(acknowledgements[0]).toContain('position 2'));
     expect(acknowledgements[0]).toContain('/drop 2');
+  });
+
+  it('tells a queued Telegram attachment that it runs when the turn ends', async () => {
+    const abort = new AbortController();
+    let firstPoll = true;
+    const acknowledgements: string[] = [];
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor: async () => undefined,
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        const method = String(url).split('/').at(-1);
+        if (method === 'setMyCommands') return response(true);
+        if (method === 'getUpdates' && firstPoll) {
+          firstPoll = false;
+          return response([
+            {
+              update_id: 9,
+              message: {
+                message_id: 4,
+                date: 1,
+                text: 'look at this',
+                chat: { id: 2, type: 'private' },
+                from: { id: 3 },
+                photo: [{ file_id: 'photo1', file_unique_id: 'u1' }],
+              },
+            },
+          ]);
+        }
+        if (method === 'sendMessage') {
+          const body = JSON.parse(String(init?.body)) as { text: string };
+          acknowledgements.push(body.text);
+          abort.abort();
+          return response({ message_id: 10 });
+        }
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+            once: true,
+          });
+        });
+      }) as typeof fetch,
+    });
+    channel.onEvent(async () => ({ kind: 'queued', requestId: 'r1', position: 1 }));
+
+    await channel.start(abort.signal);
+    await vi.waitFor(() => expect(acknowledgements[0]).toContain('position 1'));
+    expect(acknowledgements[0]).toContain('runs when the current turn ends');
+    expect(acknowledgements[0]).not.toContain('next step');
   });
 
   it('splits long messages and attaches approval callbacks only to the first chunk', async () => {

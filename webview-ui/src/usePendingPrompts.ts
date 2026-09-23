@@ -24,11 +24,8 @@ export interface PendingPrompts {
   queuedPrompts: QueuedPrompt[];
   handleSend: (text: string, attachments: AttachmentData[]) => void;
   cancelQueuedPrompt: (id: string) => void;
-  steerQueuedPrompt: (id: string) => void;
   clearTellPrompts: (conversationId?: string) => void;
   reconcileSessionSync: (messagesById: SessionSyncMsg['messagesById']) => void;
-  clearSteering: (conversationId: string) => void;
-  isSteering: (conversationId: string) => boolean;
 }
 
 /** Owns the local queue and the inbox-backed text tells shown by the sidebar. */
@@ -39,7 +36,6 @@ export function usePendingPrompts({
   clearResumed,
 }: UsePendingPromptsOptions): PendingPrompts {
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
-  const steeringConversationIds = useRef(new Set<string>());
   const activeConversationIdRef = useRef(activeConversationId);
   activeConversationIdRef.current = activeConversationId;
 
@@ -93,10 +89,7 @@ export function usePendingPrompts({
   // Flush attachment prompts as soon as their conversation releases the turn.
   useEffect(() => {
     const nextIndex = queuedPrompts.findIndex(
-      (prompt) =>
-        !prompt.tell &&
-        !streamingIds.has(prompt.conversationId) &&
-        !steeringConversationIds.current.has(prompt.conversationId),
+      (prompt) => !prompt.tell && !streamingIds.has(prompt.conversationId),
     );
     if (nextIndex < 0) return;
     const next = queuedPrompts[nextIndex];
@@ -109,42 +102,12 @@ export function usePendingPrompts({
     setQueuedPrompts((current) => current.filter((prompt) => prompt.id !== id));
   }, []);
 
-  const steerQueuedPrompt = useCallback(
-    (id: string) => {
-      const prompt = queuedPrompts.find((candidate) => candidate.id === id);
-      if (!prompt) return;
-      clearResumed(prompt.conversationId);
-      steeringConversationIds.current.add(prompt.conversationId);
-      setQueuedPrompts((current) => current.filter((candidate) => candidate.id !== id));
-      // Replace the queued presentation with the same optimistic user row used
-      // by an ordinary send. The host persists and reconciles it once the
-      // interrupted request has released the conversation.
-      dispatch({ type: 'USER_SEND', text: prompt.text, convId: prompt.conversationId });
-      vscode.postMessage({
-        type: 'steer',
-        text: prompt.text,
-        attachments: prompt.attachments.length ? prompt.attachments : undefined,
-        conversationId: prompt.conversationId,
-      });
-    },
-    [clearResumed, dispatch, queuedPrompts],
-  );
-
   const clearTellPrompts = useCallback((conversationId?: string) => {
     const targetId = conversationId ?? activeConversationIdRef.current;
     setQueuedPrompts((current) =>
       current.filter((prompt) => !prompt.tell || prompt.conversationId !== targetId),
     );
   }, []);
-
-  const clearSteering = useCallback((conversationId: string) => {
-    steeringConversationIds.current.delete(conversationId);
-  }, []);
-
-  const isSteering = useCallback(
-    (conversationId: string) => steeringConversationIds.current.has(conversationId),
-    [],
-  );
 
   const reconcileSessionSync = useCallback((messagesById: SessionSyncMsg['messagesById']) => {
     setQueuedPrompts((current) =>
@@ -162,10 +125,7 @@ export function usePendingPrompts({
     queuedPrompts,
     handleSend,
     cancelQueuedPrompt,
-    steerQueuedPrompt,
     clearTellPrompts,
     reconcileSessionSync,
-    clearSteering,
-    isSteering,
   };
 }

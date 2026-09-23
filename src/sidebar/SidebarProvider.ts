@@ -455,13 +455,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           }
           void this.send.send(text, attachments, conversationId);
         },
-        steer: async (text, attachments, conversationId) => {
-          // Steering ends only the request/turn. Unlike Stop, it deliberately
-          // leaves the backend loaded so the redirected turn starts without a
-          // llama-server model reload.
-          await this.interruptForSteering(conversationId);
-          await this.send.send(text, attachments, conversationId);
-        },
         cancel: () => {
           this.requestChains.markCancelling(this.sidebar.activeConversationId);
           void this.agentLoop.cancel(this.sidebar.activeConversationId);

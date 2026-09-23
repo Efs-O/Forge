@@ -3,10 +3,7 @@ import React from 'react';
 interface Props {
   text: string;
   attachmentCount: number;
-  /** The model this prompt is waiting on; null when none is selected anywhere. */
-  waitingOn: string | null;
   tell?: boolean;
-  onSteer: () => void;
   onCancel: () => void;
 }
 
@@ -14,9 +11,7 @@ interface Props {
 export function QueuedPromptRow({
   text,
   attachmentCount,
-  waitingOn,
   tell = false,
-  onSteer,
   onCancel,
 }: Props): React.ReactElement {
   const attachmentLabel = attachmentCount
@@ -29,17 +24,12 @@ export function QueuedPromptRow({
         <span className="queued-prompt-status">
           {tell
             ? 'Will reach Forge at its next step'
-            : `${waitingOn ? `Queued — waiting on ${waitingOn}` : 'Queued'}${attachmentLabel}`}
+            : `Sends when this turn ends${attachmentLabel}`}
         </span>
         {!tell && (
-          <>
-            <button className="btn-action" type="button" onClick={onSteer}>
-              Steer
-            </button>
-            <button className="btn-action" type="button" onClick={onCancel}>
-              Cancel
-            </button>
-          </>
+          <button className="btn-action" type="button" onClick={onCancel}>
+            Cancel
+          </button>
         )}
       </div>
     </div>

@@ -9,7 +9,6 @@ interface Props {
   state: State;
   queuedPrompts: QueuedPrompt[];
   onCancelQueuedPrompt: (id: string) => void;
-  onSteerQueuedPrompt: (id: string) => void;
   resumedIds: ReadonlySet<string>;
   /** Shown in whichever pane has nothing in it; identical for all of them. */
   emptyState: React.ReactNode;
@@ -35,7 +34,6 @@ export function TranscriptPanes({
   state,
   queuedPrompts,
   onCancelQueuedPrompt,
-  onSteerQueuedPrompt,
   resumedIds,
   emptyState,
 }: Props): React.ReactElement {
@@ -75,7 +73,6 @@ export function TranscriptPanes({
             messages={state.messagesById[id] ?? []}
             queuedPrompts={queuedPrompts.filter((prompt) => prompt.conversationId === id)}
             onCancelQueuedPrompt={onCancelQueuedPrompt}
-            onSteerQueuedPrompt={onSteerQueuedPrompt}
             streaming={state.streamingIds.has(id)}
             conversationId={id}
             emptyState={emptyState}
@@ -83,7 +80,6 @@ export function TranscriptPanes({
             // A background tab may be on a different model than the picker
             // shows, and `active_model` is only set once a conversation picks
             // one explicitly.
-            queuedModelName={tab?.active_model ?? state.activeModel}
           />
         );
       })}

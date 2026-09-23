@@ -18,10 +18,10 @@ export async function acknowledgeTelegramDisposition(
   if (event.chatType !== 'private') return;
   let text: string | undefined;
   if (disposition.kind === 'queued') {
-    text =
-      event.kind === 'text' && event.text.trim().toLowerCase().startsWith('/steer')
-        ? `Forge: interrupting the turn; your steering prompt runs next (position ${disposition.position}).`
-        : `Forge: queued at position ${disposition.position} — it runs when the current turn ends. Send /steer ${disposition.position} to cut the turn short and run it now, /queue to review, /drop ${disposition.position} to cancel.`;
+    const hasAttachments = event.kind === 'text' && (event.attachments?.length ?? 0) > 0;
+    text = hasAttachments
+      ? `Forge: queued at position ${disposition.position} — it runs when the current turn ends. /queue to review, /drop ${disposition.position} to cancel.`
+      : `Forge: queued at position ${disposition.position} — it will reach Forge at the next step of the running turn. /queue to review, /drop ${disposition.position} to cancel.`;
   } else if (disposition.kind === 'rejected') {
     text = disposition.reason.startsWith('Forge:')
       ? disposition.reason

@@ -358,17 +358,16 @@ describe('RemoteController command auto-cleanup', () => {
     }
   });
 
-  it('does not schedule a delete for a /steer prompt', async () => {
+  it('schedules a delete for a /steer command', async () => {
     vi.useFakeTimers();
     const { channel, controller } = await buildController(5);
     try {
-      // /steer is prompt admission, not a command: isRemoteCommand is false for
-      // it, so it takes the admitRemoteText path and never reaches the cleanup
-      // scheduler. Its disposition is accepted/queued, not handled/rejected.
+      // /steer is now a command: isRemoteCommand is true for it, so it takes
+      // the command handler path and is rejected as an unknown command.
       const disposition = await controller.handle(textEvent('/steer do the thing'));
-      expect(['accepted', 'queued']).toContain(disposition.kind);
+      expect(disposition.kind).toBe('rejected');
       await vi.advanceTimersByTimeAsync(60_000);
-      expect(channel.deleted).toEqual([]);
+      expect(channel.deleted).toHaveLength(1);
     } finally {
       await controller.stop();
     }

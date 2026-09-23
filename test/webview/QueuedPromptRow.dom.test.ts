@@ -23,46 +23,38 @@ afterEach(() => {
 });
 
 describe('QueuedPromptRow', () => {
-  it('shows Steer and Cancel actions beside the queued message', () => {
-    const onSteer = vi.fn();
+  it('shows Cancel action beside the queued message', () => {
     const onCancel = vi.fn();
     act(() => {
       root.render(
         React.createElement(QueuedPromptRow, {
           text: 'Run the tests after this task.',
           attachmentCount: 1,
-          waitingOn: null,
-          onSteer,
           onCancel,
         }),
       );
     });
 
     expect(container.textContent).toContain('Run the tests after this task.');
-    expect(container.textContent).toContain('Queued · 1 attachment');
+    expect(container.textContent).toContain('Sends when this turn ends · 1 attachment');
     const buttons = container.querySelectorAll<HTMLButtonElement>('button');
-    expect(Array.from(buttons, (button) => button.textContent)).toEqual(['Steer', 'Cancel']);
+    expect(Array.from(buttons, (button) => button.textContent)).toEqual(['Cancel']);
     act(() => buttons[0]!.click());
-    expect(onSteer).toHaveBeenCalledOnce();
-    expect(onCancel).not.toHaveBeenCalled();
-    act(() => buttons[1]!.click());
     expect(onCancel).toHaveBeenCalledOnce();
   });
 
-  it('names the model the prompt is waiting on', () => {
+  it('shows the tell label for text-only prompts', () => {
     act(() => {
       root.render(
         React.createElement(QueuedPromptRow, {
           text: 'add a test for perSlotContext',
           attachmentCount: 0,
-          waitingOn: 'qwen3.8-27b',
-          onSteer: vi.fn(),
+          tell: true,
           onCancel: vi.fn(),
         }),
       );
     });
 
-    // Without the model name a queued tab is indistinguishable from a hung one.
-    expect(container.textContent).toContain('Queued — waiting on qwen3.8-27b');
+    expect(container.textContent).toContain('Will reach Forge at its next step');
   });
 });

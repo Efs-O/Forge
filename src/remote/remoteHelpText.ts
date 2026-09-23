@@ -25,7 +25,7 @@ Session: /chat <n-or-name> · /chats [page] · /context · /help · /mirror on|o
 
 Workspace: /workspace · /workspace <n-or-alias>
 
-Queue: /drop <n|all> · /queue · /steer <n-or-prompt>
+Queue: /drop <n|all> · /queue
 
 Models: /model [n-or-name] · /restart · /unload · /unloadall
 
@@ -40,8 +40,6 @@ Machine: /sleep [8h|07:00] · /system · /wake [8h|07:00|off]
 How work is queued:
 
 • Anything you send while a turn is running waits its turn — it never interrupts. /queue numbers what is waiting.
-
-• /steer is the only way to cut a running turn short. /steer 2 runs queued prompt 2 now; /steer with no number runs prompt 1; /steer <text> runs new text now. A bare number is always a queue position, never prompt text — the reply says which one it did.
 
 • /stop cancels only the running request; everything queued stays queued. /drop <n|all> is what clears the queue.
 

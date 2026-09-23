@@ -58,6 +58,93 @@ model loop. From session `30b44107`:
 after the reload that loads `26b0449`. Check the loaded context in `GET /models`
 before judging the result.
 
+## Qwopus V2 second chance — observations (Claude, 2026-09-23)
+
+The run used the 131K context and the fixed config. Two tasks were given.
+
+**MID_TURN_TELL Phase 2 (research task): good.** It made 53 tool calls in one
+turn with no loop. All four mid-turn tell cases passed (see
+`MID_TURN_TELL_PLAN.md` § "Phase 2 result"), and its Phase 4 inventory was
+accurate and verified.
+
+**MID_TURN_TELL Phase 4 (coding task), first attempt: a thinking loop. This is
+a bad sign.**
+
+- **What happened.** Chat `bcf86347` made 41 reads plus two line counts, then
+  spent a single round thinking. It ran to the 16,384-token output limit
+  (8.4 min, 84K characters) and ended with no tool call and no edit.
+- **What it repeated.** Two sentences cycled 223 times:
+  - "The plan's instruction to replace the list with a single pending row
+    applies to the attachment-only case…"
+  - "I'm realizing the `tell` prop is still necessary…"
+- **What triggered it.** The model could not settle one open design question
+  (whether task item 6 removes the `tell` flag). It neither decided nor asked,
+  even though the task said "ask me instead of guessing".
+- **Why it ran so long.** The V2 config entry had no `--reasoning-budget`. The
+  Q6 entry has 8192 plus the budget message, and V2 was set up without them.
+  This is now fixed: the entry has 8192 and `*reasoning_budget_message`, and
+  the respawn was verified on the command line.
+- **The cap contains the loop; it does not cure it.** A budget cuts the round
+  off at 8K. It does not make the model resolve an ambiguity. This is a second
+  failure shape, next to the overnight read loop: that one was context
+  pressure, while this one is a genuine loop inside a single thought. Neither
+  cause is reachable by prompting.
+
+**Retry:** chat `c095313c`, with the cap live. The task is split into sidebar
+first, then Telegram, and says "decide one item at a time". If it loops again
+on a coding task, the verdict is that Qwopus V2 is fit for research and not for
+unattended coding.
+
+**Retry result: done, no loop.** One 49-minute turn produced the whole phase:
+142 tool calls (54 reads, 42 edits, 10 CI runs), 23 files changed, CI green.
+The largest single round was 12,958 reasoning characters, and it never reached
+the cap.
+
+- **Quality.** The removals were correct, and it kept everything the plan said
+  to keep.
+- **Not independent yet.** Its first review request had four defects, and
+  Claude sent them back:
+  - It resolved the same `tell` ambiguity it looped on, but the wrong way round.
+  - It missed the matching Telegram split.
+  - It left unreachable steer code in place.
+  - It cited a skip-only test as proof of delivery.
+- **Recovery.** Given the list, it fixed all four in one pass without looping.
+- **Verdict.** It is a capable implementer under review, not an unattended one.
+
+### Speed and quality compared with the Q6 (Claude, 2026-09-23)
+
+| | Qwopus V2 Q5_K_M | Qwen3.8 Q6_K |
+|---|---|---|
+| Generation, short context | ~44 t/s | 21–25 t/s |
+| Generation, 45–50K | 31–33 t/s | — |
+| Generation, ~100K (this run, median) | 27 t/s | — |
+| Prefill | 700–1,100 t/s | not measured here |
+| Context | 131K | 198K |
+| Research task (Phase 2) | clean, 53 calls | — |
+| Coding task | one thinking loop (uncapped); retry clean, four review defects | — |
+
+Generation is roughly double the Q6's, as the user observed. Quality at this
+scale looks comparable, but the Q6 has not run this exact task, so this table
+compares speed, not quality head to head. Tuning levers for the next run:
+
+- `reasoning_effort: xhigh → high` (config change between turns only).
+- The prompt re-read finding below, which is a Forge bug and not a model one.
+
+**Where 10 minutes of the 49 went: full-prompt re-reads, caused by Forge.**
+The llama-server log shows four rounds that re-evaluated the *entire*
+~100K-token prompt, at 142–150 s each. Every one follows a `read_file` of a path
+first read about 40 minutes earlier (`RemotePromptAdmission.ts`,
+`RemoteCore.test.ts`).
+
+- **The mechanism.** `supersedeStaleReads` (`src/agent/staleReadSupersede.ts`)
+  replaces the earlier copy of the file with a notice. That rewrites the prompt
+  at the first read (`f_keep = 0.425`).
+- **Why it re-reads from zero.** On this hybrid model llama-server can only
+  resume from a saved context checkpoint. The checkpoints all sat near the end
+  of the prompt, so it reprocessed from token 0 rather than from the change.
+- **Status.** This is the same family as the open turn-start re-read. It is to
+  be planned together with it before 0.16.38.
+
 ## State × lifecycle ledger
 
 This feature adds no durable state. The watcher's bounded map is in memory only and clears on disposal or window reload. Route calls read existing conversation, queue, budget, and transcript state; they do not advance cursors or acknowledge bus messages.

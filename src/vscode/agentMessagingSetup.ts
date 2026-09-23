@@ -128,8 +128,9 @@ export function setupAgentMessaging(
     relay: mesh.relay,
     // F-06: a `priority=steer` message interrupts the recipient's active turn.
     steer: mesh.steer,
-    // §6: a steer to Forge itself interrupts Forge's running turn, like
-    // Telegram `/steer`. An idle chat has nothing to interrupt.
+    // §6: a steer to Forge itself interrupts Forge's running turn. It is the
+    // last steer left since Telegram `/steer` was removed (MID_TURN_TELL
+    // Phase 4). An idle chat has nothing to interrupt.
     interruptForge: async () => {
       const facade = getSidebar().getHostFacade();
       const status = facade.status();
