@@ -1,7 +1,8 @@
 # Source Split Plan
 
-Status: Phase 0 done 2026-09-23 (watchlist deleted, CLAUDE.md CSS rule fixed);
-phases 1–3 handed to Qwopus.
+Status: DONE 2026-09-23. Phase 0 (watchlist deleted, CLAUDE.md CSS rule fixed);
+Phase 1 `0239162`; Phase 2 `85aee0f` (Claude took over after Qwopus tool-call
+drift, fixed in `bb6d19c`); Phase 3 `4dc7490` (Qwopus, on 0.16.41).
 
 ## Scope and baseline
 
