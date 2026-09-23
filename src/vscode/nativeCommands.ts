@@ -83,15 +83,16 @@ export function registerNativeCommands(
       const profileNames = availableProfilesFor(config, pick.modelName);
       let selectedId = pick.modelName;
       if (profileNames.length > 0) {
+        // Every choice is a profile: a model that has profiles is always run
+        // through one, so the second quick pick lists only the real profiles
+        // and the chosen one always becomes `<model>@<profile>` (matching the
+        // Telegram picker). Cancelling the pick still aborts.
         const profilePick = await vscode.window.showQuickPick(
-          [
-            { label: '(no profile)', profile: '' },
-            ...profileNames.map((p) => ({ label: p, profile: p })),
-          ],
+          profileNames.map((p) => ({ label: p, profile: p })),
           { placeHolder: `Pick a profile for ${pick.modelName}` },
         );
         if (!profilePick) return;
-        if (profilePick.profile) selectedId = `${pick.modelName}@${profilePick.profile}`;
+        selectedId = `${pick.modelName}@${profilePick.profile}`;
       }
       const rawSelected = config.models.find((m) => m.name === pick.modelName);
       const selectedModel = rawSelected ? mergeGroupsIntoModel(config, rawSelected) : undefined;

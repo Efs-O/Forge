@@ -88,4 +88,19 @@ describe('forge.pickModel provider classification', () => {
     expect(acquired).toEqual([]);
     expect(infoMessages[0]).toContain('external CLI agent');
   });
+
+  it('lists only the real profiles in the second pick (no "(no profile)")', async () => {
+    const config = makeConfig();
+    config.models = [{ name: 'local-profiled' }];
+    config.profiles = { fast: {}, careful: {} };
+    const { acquired } = register(config);
+
+    await commands.get('forge.pickModel')!();
+
+    // The first pick is the model list; the second is the profile list.
+    expect(quickPicks[1]?.map((p) => p.label)).toEqual(['fast', 'careful']);
+    // A profiled model is always run through a profile: the chosen one becomes
+    // `<model>@<profile>` (the mock returns the first item, "fast").
+    expect(acquired).toEqual(['local-profiled@fast']);
+  });
 });

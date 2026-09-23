@@ -1,5 +1,18 @@
 # Forge — Recent Changes
 
+## 0.16.44
+
+### Command-palette profile picker lists only profiles (2026-09-23)
+
+- Picking a model that has profiles with "Forge: Select Model" in the VS Code
+  command palette offered a **No profile** option before the profiles. The
+  picker now lists only the model's profiles, matching the Telegram picker.
+
+### Agent bus accepts profiled model names (2026-09-23)
+
+- `forge.sh say --model <model>@<profile>` was refused as an unknown model. It
+  now accepts every `model@profile` the model picker offers.
+
 ## 0.16.43
 
 ### Qwen's XML tool calls run even when the server returns them as text (2026-09-23)
