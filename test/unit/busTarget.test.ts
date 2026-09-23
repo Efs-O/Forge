@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { forgeInboundPrompt } from '../../src/agentBus/busContent';
-import { busTargetConversation } from '../../src/agentBus/busTarget';
+import { busTargetConversation, senderConversation } from '../../src/agentBus/busTarget';
 import type { ForgeConversationSummary } from '../../src/sidebar/ForgeHostFacade';
 import type { ForgeExchange } from '../../src/sidebar/sessionProjections';
 import { appendUserPrompt } from '../../src/sidebar/transcriptMutations';
@@ -64,6 +64,32 @@ describe('busTargetConversation', () => {
       conversations: [...status.conversations, conv('compacted', 4, { title: 'codex: push' })],
     };
     expect(busTargetConversation('codex', compacted, exchanges)).toBe('compacted');
+  });
+});
+
+describe('senderConversation', () => {
+  const status = {
+    activeConversationId: 'mine',
+    conversations: [conv('mine', 5), conv('closed', 9, { archived: true })],
+  };
+  const exchanges = (id: string) => (id === 'closed' ? [said('claude')] : []);
+
+  it('returns undefined instead of the active chat when the sender has no chat', () => {
+    expect(senderConversation('claude', status, () => [])).toBeUndefined();
+  });
+
+  it('skips an archived chat that holds the sender prompt', () => {
+    expect(senderConversation('claude', status, exchanges)).toBeUndefined();
+  });
+
+  it('matches the sender title prefix', () => {
+    const titled = { ...status, conversations: [...status.conversations, conv('title', 10, { title: 'claude: task' })] };
+    expect(senderConversation('claude', titled, () => [])).toBe('title');
+  });
+
+  it('matches case-insensitively', () => {
+    const titled = { ...status, conversations: [conv('title', 10, { title: 'Claude: task' })] };
+    expect(senderConversation('cLaUdE', titled, () => [])).toBe('title');
   });
 });
 
