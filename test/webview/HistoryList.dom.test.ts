@@ -66,6 +66,15 @@ const input = (): HTMLInputElement | null =>
   container.querySelector<HTMLInputElement>('.history-rename-input');
 
 describe('HistoryList row actions', () => {
+  it('shows overflow sessions under a collapsed count row', () => {
+    render({}, { archived: [{ id: 'old', title: 'old chat', createdAt: 1, updatedAt: 1 }] });
+    const toggle = container.querySelector<HTMLButtonElement>('.history-archive-toggle');
+    expect(toggle?.textContent).toContain('1');
+    expect(container.querySelector('#history-archive-list')).toBeNull();
+    click(toggle!);
+    expect(container.querySelector('#history-archive-list')?.textContent).toContain('old chat');
+  });
+
   it('keeps the kebab in the DOM without hover so delete is never hover-only', () => {
     render();
     expect(kebabs()).toHaveLength(2);

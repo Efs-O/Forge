@@ -14,6 +14,8 @@
 
 - Chats beyond the recent history window are stored as individual archive
   records so they can be recovered without rewriting the recent history file.
+- A collapsed **Archived sessions** section lists older chats and lets you open,
+  rename, or delete them.
 
 ## 0.16.40
 

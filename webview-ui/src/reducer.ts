@@ -419,6 +419,7 @@ export function reducer(state: State, action: Action): State {
           pending.size === state.checkpointPendingIds.size ? state.checkpointPendingIds : pending,
         tabs: action.tabs,
         history: action.history,
+        archived: action.archived,
         activeConversationId: action.activeId,
         messagesById,
       };

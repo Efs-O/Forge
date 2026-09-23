@@ -182,6 +182,7 @@ export function App(): React.ReactElement {
             activeId: msg.activeId,
             tabs: msg.tabs,
             history: msg.history,
+            archived: msg.archived,
             messagesById: msg.messagesById,
             attachmentsRoot: msg.attachmentsRoot,
           });
@@ -358,6 +359,7 @@ export function App(): React.ReactElement {
               />
               <HistoryList
                 items={state.history}
+                archived={state.archived}
                 openItems={[...state.tabs].sort((a, b) => b.updatedAt - a.updatedAt)}
                 activeId={state.activeConversationId}
                 streamingIds={state.streamingIds}

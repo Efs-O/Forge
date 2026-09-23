@@ -287,6 +287,7 @@ export interface SessionSyncMsg {
   activeId: string;
   tabs: SessionTabMeta[];
   history: SessionHistoryMeta[];
+  archived: SessionHistoryMeta[];
   waitingIds: string[];
   messagesById: Record<
     string,

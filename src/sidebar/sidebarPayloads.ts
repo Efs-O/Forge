@@ -8,6 +8,7 @@
  */
 
 import type { ForgeConfig } from '../config/types';
+import type { ArchivedSessionMeta } from './ArchivedSessions';
 import { availableProfilesFor, mergeGroupsIntoModel } from '../config/ConfigResolver';
 import type { HostToWebview, ModelResidency, SessionSyncMsg } from './messageBridge';
 import { classifyModelRoute } from '../llm/ModelRouteClassifier';
@@ -93,6 +94,7 @@ export function buildSessionSyncMessage(
   sessionActiveMs: (conversation: ConversationRuntime) => number,
   attachmentsRoot?: string,
   waitingIds: ReadonlySet<string> = new Set<string>(),
+  archived: ArchivedSessionMeta[] = [],
 ): SessionSyncMsg {
   const wanted = new Set<string>([sidebar.activeConversationId, ...streamingIds]);
   return {
@@ -100,6 +102,14 @@ export function buildSessionSyncMessage(
     activeId: sidebar.activeConversationId,
     tabs: tabMetasFromSession(sidebar, streamingIds, sessionActiveMs),
     history: historyMetasFromSession(sidebar),
+    archived: archived.map(({ id, title, createdAt, updatedAt, messageCount, active_model }) => ({
+      id,
+      title,
+      createdAt,
+      updatedAt,
+      messageCount,
+      ...(active_model ? { active_model } : {}),
+    })),
     waitingIds: [...waitingIds].filter(Boolean),
     messagesById: slimMessagesById(sidebar, wanted),
     ...(attachmentsRoot ? { attachmentsRoot } : {}),

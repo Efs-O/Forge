@@ -4,6 +4,7 @@ import type { SessionTabMeta } from '../../../src/sidebar/messageBridge';
 
 interface Props {
   items: SessionHistoryMeta[];
+  archived?: SessionHistoryMeta[];
   openItems?: SessionTabMeta[];
   activeId?: string;
   streamingIds?: ReadonlySet<string>;
@@ -223,6 +224,7 @@ function HistoryRow({
 
 export function HistoryList({
   items,
+  archived = [],
   expanded,
   onDismiss,
   onRestore,
@@ -240,6 +242,7 @@ export function HistoryList({
   // rather than as per-row state that would survive the row being re-keyed.
   const [menuId, setMenuId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [archiveExpanded, setArchiveExpanded] = useState(false);
   const panelRef = useRef<HTMLElement>(null);
 
   // The panel floats over the transcript now, so it needs the dismissal
@@ -305,26 +308,60 @@ export function HistoryList({
           </div>
         </div>
       )}
-      {items.length === 0 && openItems.length === 0 ? (
+      {items.length === 0 && archived.length === 0 && openItems.length === 0 ? (
         <p id="history-empty">No conversations yet.</p>
-      ) : items.length > 0 ? (
+      ) : items.length > 0 || archived.length > 0 ? (
         <div className="history-list-wrap">
-          {openItems.length > 0 && <h3 className="history-section-heading">Archived</h3>}
-          <div id="history-list">
-            {items.map((item) => (
-              <HistoryRow
-                key={item.id}
-                item={item}
-                renaming={renamingId === item.id}
-                menuOpen={menuId === item.id}
-                onOpenMenu={setMenuId}
-                onStartRename={setRenamingId}
-                onRestore={onRestore}
-                onDelete={onDelete}
-                onRename={onRename}
-              />
-            ))}
-          </div>
+          {items.length > 0 && <h3 className="history-section-heading">Recent history</h3>}
+          {items.length > 0 && (
+            <div id="history-list">
+              {items.map((item) => (
+                <HistoryRow
+                  key={item.id}
+                  item={item}
+                  renaming={renamingId === item.id}
+                  menuOpen={menuId === item.id}
+                  onOpenMenu={setMenuId}
+                  onStartRename={setRenamingId}
+                  onRestore={onRestore}
+                  onDelete={onDelete}
+                  onRename={onRename}
+                />
+              ))}
+            </div>
+          )}
+          {archived.length > 0 && (
+            <>
+              <button
+                type="button"
+                className="history-section-heading history-archive-toggle"
+                aria-expanded={archiveExpanded}
+                onClick={() => setArchiveExpanded((value) => !value)}
+              >
+                <span>{archiveExpanded ? '▾' : '▸'} Archived sessions</span>
+                <span className="history-archive-count">{archived.length}</span>
+              </button>
+              {archiveExpanded && (
+                <div id="history-archive-list">
+                  {[...archived]
+                    .sort((a, b) => b.updatedAt - a.updatedAt)
+                    .map((item) => (
+                      <HistoryRow
+                        key={item.id}
+                        item={item}
+                        renaming={renamingId === item.id}
+                        menuOpen={menuId === item.id}
+                        onOpenMenu={setMenuId}
+                        onStartRename={setRenamingId}
+                        onRestore={onRestore}
+                        onDelete={onDelete}
+                        onRename={onRename}
+                      />
+                    ))}
+                </div>
+              )}
+            </>
+          )}
         </div>
       ) : null}
     </section>

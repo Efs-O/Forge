@@ -36,6 +36,7 @@ export interface State {
   sessionHydrated: boolean;
   tabs: SessionTabMeta[];
   history: SessionHistoryMeta[];
+  archived: SessionHistoryMeta[];
   activeConversationId: string;
   clankerMode: boolean;
   /** Whether anything outside this window can drive it. Host-owned. */
@@ -54,6 +55,7 @@ export const initialState: State = {
   sessionHydrated: false,
   tabs: [],
   history: [],
+  archived: [],
   activeConversationId: '',
   clankerMode: false,
   remote: { transports: [], paired: false },
@@ -128,6 +130,7 @@ export type Action =
       activeId: string;
       tabs: SessionTabMeta[];
       history: SessionHistoryMeta[];
+      archived: SessionHistoryMeta[];
       messagesById: Record<string, PersistedRow[]>;
       attachmentsRoot?: string | undefined;
     };
