@@ -378,6 +378,7 @@ overlaps with an existing owner, extend the owner instead.
 | Config load + validation                                | `src/config/ConfigLoader.ts`         |
 | Two-flavor model/profile/alias resolver                 | `src/config/ConfigResolver.ts`       |
 | Config + model types                                    | `src/config/types.ts`                |
+| Image, video and voice configuration types              | `src/config/mediaTypes.ts`           |
 | Comment-preserving config writer (entry point)          | `src/config/ConfigWriter.ts`         |
 | YAML Document mutation helpers (set/add/remove)         | `src/config/ConfigWriterHelpers.ts`  |
 | Groups migration orchestration + resolved-diff verifier | `src/config/ConfigMigrator.ts`       |
