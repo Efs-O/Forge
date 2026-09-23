@@ -80,6 +80,17 @@ export class RemoteRequestStore {
     this.loaded = true;
   }
 
+  isLoaded(): boolean {
+    return this.loaded;
+  }
+
+  blocksConversationEviction(conversationId: string): boolean {
+    return (
+      this.bindingsForConversation(conversationId).length > 0 ||
+      this.queued(conversationId).length > 0
+    );
+  }
+
   getByDedupKey(key: string): RemoteRequestRecord | undefined {
     return this.state.requests.find((request) => request.dedupKey === key);
   }

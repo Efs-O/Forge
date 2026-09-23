@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   opClearMessages,
+  opArchiveLeastRecent,
   opDeleteConversation,
   opNewConversation,
   opRenameConversation,
@@ -9,6 +10,7 @@ import {
 } from '../../src/sidebar/ConversationOps';
 import type { SidebarRuntime } from '../../src/sidebar/sessionTypes';
 import { UNTITLED_TITLE } from '../../src/sidebar/sessionTypes';
+import { isConversationEvictable, type ConversationEvictionSignals } from '../../src/sidebar/sidebarWiring';
 
 function sidebar(): SidebarRuntime {
   return {
@@ -105,6 +107,42 @@ describe('opRestoreConversation', () => {
     expect(result.sidebar.activeConversationId).toBe('active');
     expect(result.sidebar.conversations.some((conv) => conv.id === 'archived')).toBe(true);
     expect(result.sidebar.history.some((conv) => conv.id === 'archived')).toBe(false);
+  });
+});
+
+describe('conversation eviction ledger', () => {
+  const clear: ConversationEvictionSignals = {
+    streaming: false, activeRequestChain: false, unattended: false,
+    pendingApprovalActive: false, pendingApprovalQueued: false, pendingQuestion: false,
+    unattributedRequest: false, hostQueue: false, webviewQueue: false,
+    beforeWebviewQueueReport: false, remoteRuntimeUnavailable: false, remoteBinding: false,
+    remoteIntakeQueue: false,
+  };
+  const signals: (keyof ConversationEvictionSignals)[] = [
+    'streaming', 'activeRequestChain', 'unattended', 'pendingApprovalActive',
+    'pendingApprovalQueued', 'pendingQuestion', 'unattributedRequest', 'hostQueue',
+    'webviewQueue', 'beforeWebviewQueueReport', 'remoteBinding', 'remoteIntakeQueue',
+  ];
+
+  it.each(signals)('%s blocks eviction and selects the next eligible chat', (signal) => {
+    const state = sidebar();
+    state.conversations = state.conversations.map((conversation, index) => ({
+      ...conversation, id: `candidate-${index}`, updatedAt: index,
+    }));
+    const blocked = { ...clear, [signal]: true } as ConversationEvictionSignals;
+    const archived = opArchiveLeastRecent(state, (conversation) =>
+      conversation.id === 'candidate-0'
+        ? isConversationEvictable(blocked)
+        : isConversationEvictable(clear),
+    );
+    expect(archived?.conversations.map((conversation) => conversation.id)).toEqual(['candidate-0']);
+  });
+
+  it('evicts the least recently active chat when every signal is clear', () => {
+    expect(isConversationEvictable(clear)).toBe(true);
+    const state = sidebar();
+    const archived = opArchiveLeastRecent(state, () => isConversationEvictable(clear));
+    expect(archived?.conversations.map((conversation) => conversation.id)).toEqual(['other']);
   });
 });
 

@@ -84,4 +84,28 @@ describe('HiddenChatAlerts', () => {
     expect(toast).toHaveBeenCalledWith('Forge is waiting for your answer.');
     state.alerts.dispose();
   });
+
+  it('alerts for an unattributed approval without offering Open chat', () => {
+    const state = fixture();
+    const toast = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
+    state.approval().requested({});
+    expect(toast).toHaveBeenCalledOnce();
+    expect(toast.mock.calls[0]?.[0]).toMatch(/waiting/i);
+    expect(toast.mock.calls[0]?.[1]).toBeUndefined();
+    state.alerts.dispose();
+  });
+
+  it('suppresses short and unattributed finished turns and never alerts when a chat starts running', () => {
+    const state = fixture();
+    state.setVisible(false);
+    const toast = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
+    const now = vi.spyOn(Date, 'now').mockReturnValue(10_000);
+    state.events.onGenerationStarted?.('model', 'short');
+    now.mockReturnValue(69_999);
+    state.events.onGenerationFinished?.('model', 'short');
+    state.events.onGenerationFinished?.('model');
+    state.events.onGenerationStarted?.('model', 'running');
+    expect(toast).not.toHaveBeenCalled();
+    state.alerts.dispose();
+  });
 });

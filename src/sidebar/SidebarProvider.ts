@@ -82,6 +82,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   public readonly tellDrain: MidTurnTellDrain;
   private readonly hostFacade: ForgeHostFacade;
   private readonly hiddenChatAlerts: HiddenChatAlerts;
+  remoteEvictionQuery: ((conversationId: string) => boolean | undefined) | undefined;
   private readonly residency = new ResidencyPoller(
     () => this.pool.residencySignature(),
     () => this.postModels(),
@@ -151,6 +152,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         unloadModels: () => this.unloadModels(),
         unloadActiveModel: () => this.unloadConversationModel(),
         isConversationQueued: (id) => this.queuedConversationIds?.has(id),
+        isRemoteEvictionClear: (id) => this.remoteEvictionQuery?.(id) === false,
       },
       {
         pool,
