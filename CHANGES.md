@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### A deleted chat stays deleted (2026-09-24)
+
+- Permanently deleting a chat left its session log in `~/.forge/sessions`.
+  When the archive index was later rebuilt from those logs (after it went
+  missing or was damaged), the deleted chat reappeared in history. Delete
+  now removes the log as well.
+
 ### Switching a remote chat to another open window no longer undoes itself (2026-09-24)
 
 - All Forge windows share one remote-state file, but most saves wrote back

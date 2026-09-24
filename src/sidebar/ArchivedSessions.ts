@@ -159,6 +159,20 @@ export class ArchivedSessions {
     writeFileAtomicSync(this.indexPath, JSON.stringify(rows));
   }
 
+  /**
+   * A permanent delete. The session log goes too: the index is rebuilt from the
+   * logs whenever it is missing or damaged, and a log left behind brought the
+   * deleted chat back into the archive.
+   */
+  purge(id: string): void {
+    this.delete(id);
+    try {
+      fs.unlinkSync(path.join(this.logsDirectory, `${id}.jsonl`));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+
   private bodyPath(id: string): string {
     if (!isSafeId(id)) throw new Error('Invalid archived session id');
     return path.join(this.directory, `${id}.json`);

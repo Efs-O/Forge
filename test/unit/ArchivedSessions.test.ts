@@ -96,6 +96,21 @@ describe('ArchivedSessions', () => {
     expect(restored?.messages.map((message) => message.role)).toEqual(['user', 'assistant', 'tool']);
   });
 
+  it('a permanent delete removes the log so a rebuilt index cannot bring the chat back', () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-archived-'));
+    const logs = path.join(root, 'logs');
+    fs.mkdirSync(logs);
+    const start = { type: 'session_start', timestamp_ms: 1, workspace_path: 'C:/repo' };
+    fs.writeFileSync(path.join(logs, 'gone.jsonl'), JSON.stringify(start));
+    const storage = path.join(root, 'storage');
+    const archive = new ArchivedSessions(storage, 'C:/repo', logs);
+    expect(archive.list().map((row) => row.id)).toEqual(['gone']);
+    archive.purge('gone');
+    fs.rmSync(path.join(storage, 'archive', 'index.json'));
+    expect(new ArchivedSessions(storage, 'C:/repo', logs).list()).toEqual([]);
+    expect(fs.existsSync(path.join(logs, 'gone.jsonl'))).toBe(false);
+  });
+
   it.runIf(process.platform === 'win32')('matches a log whose drive letter is lower-cased', () => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-archived-'));
     const logs = path.join(root, 'logs');

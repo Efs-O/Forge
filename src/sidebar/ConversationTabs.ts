@@ -256,7 +256,7 @@ export class ConversationTabs {
     }
     const result = opDeleteConversation(sidebar, id);
     if (!('ok' in result)) return;
-    this.deps.archivedSessions?.delete(id);
+    this.deps.archivedSessions?.purge(id);
     this.deps.setSidebar(result.sidebar);
     this.deps.failureTracker.reset();
     const nextActive = this.deps
