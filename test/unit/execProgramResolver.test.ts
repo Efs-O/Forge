@@ -209,6 +209,14 @@ describe('describeWrongPlatformProgram', () => {
     ).toBeUndefined();
   });
 
+  it('trusts a Unix find named by its full path', () => {
+    const gitFind = 'C:\\Program Files\\Git\\usr\\bin\\find.exe';
+    expect(describeWrongPlatformProgram(gitFind, ['.', '-name', '*.ts'], 'win32')).toBeUndefined();
+    expect(
+      describeWrongPlatformProgram('C:\\Windows\\System32\\find.exe', ['.', '-name', 'x'], 'win32'),
+    ).toContain('find_files');
+  });
+
   it('says nothing about other programs', () => {
     expect(describeWrongPlatformProgram('git', ['-name', 'x'], 'win32')).toBeUndefined();
     expect(describeWrongPlatformProgram('findstr', ['-name', 'x'], 'win32')).toBeUndefined();
