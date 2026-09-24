@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+**Compaction no longer says no tool ran after your last reply when one did (2026-09-24).** When the retained tail was a tool run with no text of its own, the carried-over last reply was labelled as followed by no tool activity, contradicting the tail shown right after it. The tail now counts.
+
 **Non-ASCII output no longer turns into `�` (2026-09-24).** Output from child processes, and control-API request bodies, were decoded chunk by chunk, so a multi-byte character split across two chunks came out as U+FFFD. That affected Greek or accented text, CJK, and a test runner's `✓`. The fix covers `exec_command`, whisper-cli voice-note transcripts, the control HTTP API's JSON bodies, and CLI-agent stderr: output is now decoded as a stream, and request bodies as whole bytes.
 
 **`git_show` refuses a ref that is an option (2026-09-24).** `git_show` runs as an unconfirmed read, but passed the model's `ref` straight to `git show`, so a ref of `--output=<path>` made git write the diff to any file it named. A ref starting with `-` or carrying a control character is now refused, as `git_log` already did. `git_blame` also puts `--` before its path.
