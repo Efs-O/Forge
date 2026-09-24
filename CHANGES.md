@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.16.50
+
+**Cloud chat proxy no longer sends `chat_template_kwargs` (2026-09-24).** The control `/chat` route serves only cloud providers, but it merged sampling with `preserve_thinking` allowed, so a profile that set it sent the llama.cpp-only `chat_template_kwargs` field to OpenRouter/xAI, which strict APIs can reject. It now merges with `allowPreserveThinking: false`, like the other cloud paths.
+
 ## 0.16.49
 
 **A Unix `find` named by its full path is no longer redirected on Windows (2026-09-24).** The Windows `find` redirect keyed on the program's name alone, so Git for Windows' own `usr\bin\find.exe`, named in full, was refused as if it were System32's text search. Only a bare `find`, or one under System32, is redirected now.
