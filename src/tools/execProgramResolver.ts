@@ -225,6 +225,9 @@ export function describeWrongPlatformProgram(
   platform: NodeJS.Platform = process.platform,
 ): string | undefined {
   if (platform !== 'win32') return undefined;
+  // A path the caller spelled out (Git for Windows' usr\bin\find.exe) is the
+  // program they meant; only a bare name resolves to System32's find.exe.
+  if (/[\\/]/u.test(command) && !/[\\/]system32[\\/]/iu.test(command)) return undefined;
   const base = programBaseName(command);
   if (base !== 'find') return undefined;
   if (!args.some((arg) => UNIX_FIND_PREDICATES.has(arg.toLowerCase()))) return undefined;

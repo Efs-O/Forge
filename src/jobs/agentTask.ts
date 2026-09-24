@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { JobStore } from './JobStore';
-import { configBackupPath } from './agentTaskState';
+import { configBackupPath, startTaskRunHeartbeat } from './agentTaskState';
 import type { PowerControl } from '../system/PowerControl';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import type { IBackendPool } from '../backend/poolTypes';
@@ -101,6 +101,12 @@ export function schedulePeriodMs(schedule: Schedule, now: number): number {
   }
 }
 
+const CLEAR_PENDING = {
+  task_pending: false,
+  task_pending_since: null,
+  task_pending_observation: null,
+} as const;
+
 export class AgentTaskRunner {
   private readonly deps: AgentTaskDeps;
   private readonly delivery: JobDelivery;
@@ -148,7 +154,15 @@ export class AgentTaskRunner {
 
     const jobModel = action.model ?? this.deps.defaultModel() ?? '';
     const blocked = this.deps.cliAgentSkip?.(jobModel, startedAt, wasLate);
-    if (blocked) return this.deps.store.appendRun(job.id, blocked);
+    if (blocked) {
+      // Wait for the next scheduled time: without it the job stays due (or
+      // pending) and every 30 s tick re-runs the check and logs another skip.
+      this.deps.store.patchState(job.id, {
+        ...CLEAR_PENDING,
+        next_due_at: nextDue(job.schedule, new Date(startedAt)).getTime(),
+      });
+      return this.deps.store.appendRun(job.id, blocked);
+    }
     const slot = canStartNow(
       jobModel,
       state.conversation_id,
@@ -160,7 +174,12 @@ export class AgentTaskRunner {
       if (state.task_pending && state.task_pending_since !== null) {
         const period = schedulePeriodMs(job.schedule, startedAt);
         if (startedAt - state.task_pending_since >= period) {
-          this.deps.store.patchState(job.id, { task_pending: false, task_pending_since: null });
+          // Advance to the next scheduled time, or the very next tick re-checks,
+          // pends again and the TTL never takes effect.
+          this.deps.store.patchState(job.id, {
+            ...CLEAR_PENDING,
+            next_due_at: nextDue(job.schedule, new Date(startedAt)).getTime(),
+          });
           await this.deps.store.appendRun(job.id, {
             at: startedAt,
             late: wasLate,
@@ -175,17 +194,27 @@ export class AgentTaskRunner {
       this.deps.store.patchState(job.id, {
         task_pending: true,
         task_pending_since: state.task_pending ? state.task_pending_since : startedAt,
+        // The observation handed over by this tick: the fresh check's, or on a
+        // retry the one saved here when the task was first deferred.
+        task_pending_observation: state.last_observation,
       });
       return;
     }
     // A previously-pending task that can now start: clear the pending flag.
-    this.deps.store.patchState(job.id, { task_pending: false, task_pending_since: null });
+    this.deps.store.patchState(job.id, CLEAR_PENDING);
 
     this.deps.store.patchState(job.id, {
-      task_run: { started_at: startedAt, conversation_id: null },
+      task_run: { started_at: startedAt, conversation_id: null, heartbeat_at: startedAt },
     });
 
     let conversationId: string | null = null;
+    const stopHeartbeat = startTaskRunHeartbeat(
+      this.deps.store,
+      job.id,
+      startedAt,
+      () => conversationId,
+      this.deps.now,
+    );
     let marker: { dispose(): void } | undefined;
     let hold: { dispose(): void } | undefined;
     let backupPath: string | undefined;
@@ -208,7 +237,11 @@ export class AgentTaskRunner {
       const resolved = await resolveJobConversation(host, this.deps.store, jobFile, false);
       conversationId = resolved.conversationId;
       this.deps.store.patchState(job.id, {
-        task_run: { started_at: startedAt, conversation_id: conversationId },
+        task_run: {
+          started_at: startedAt,
+          conversation_id: conversationId,
+          heartbeat_at: this.deps.now(),
+        },
       });
       if (jobModel) await host.setConversationModel(conversationId, jobModel);
 
@@ -285,6 +318,7 @@ export class AgentTaskRunner {
         };
       }
       // Step 9: clean up on every exit path.
+      stopHeartbeat();
       marker?.dispose();
       hold?.dispose();
       await this.releaseJobModel(jobModel, host, pool);
@@ -399,8 +433,7 @@ export class AgentTaskRunner {
     // Clear the state fields this runner writes.
     this.deps.store.patchState(job.id, {
       task_run: null,
-      task_pending: false,
-      task_pending_since: null,
+      ...CLEAR_PENDING,
       last_run_at: now,
       // Success records the observation the agent acted on, so the next check
       // compares against it; a failure keeps the old one and is retried.

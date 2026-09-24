@@ -11,7 +11,11 @@ export function extractFallbackToolCalls(
   text: string,
   definitions: readonly ToolDefinition[] = [],
 ): ToolCall[] | null {
-  const parsed = parseStructuredOutput(text);
+  // No definitions (tests, legacy callers): any ```json block may be a call.
+  const toolNames = definitions.length
+    ? new Set(definitions.map((d) => d.function.name))
+    : undefined;
+  const parsed = parseStructuredOutput(text, toolNames);
   if (!parsed.length) return null;
 
   return parsed.map((call, index) => ({

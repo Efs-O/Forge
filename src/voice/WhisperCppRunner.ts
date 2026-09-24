@@ -167,8 +167,12 @@ export class WhisperCppRunner implements WhisperRunner {
       if (signal?.aborted) return onAbort();
       signal?.addEventListener('abort', onAbort, { once: true });
 
-      child.stdout.on('data', (chunk: Buffer) => {
-        stdout += chunk.toString('utf8');
+      // Decoded by the stream, not per chunk: a chunk boundary can fall inside
+      // a multi-byte character, and decoding each half alone turns a Greek or
+      // accented letter into U+FFFD in the transcript.
+      child.stdout.setEncoding('utf8');
+      child.stdout.on('data', (chunk: string) => {
+        stdout += chunk;
       });
       child.stderr.on('data', (chunk: Buffer) => {
         // Bounded: whisper-cli prints per-segment diagnostics on some builds.

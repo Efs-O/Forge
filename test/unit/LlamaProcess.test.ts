@@ -43,6 +43,21 @@ describe('llama process teardown', () => {
     await result;
   });
 
+  it('treats taskkill "not found" as stopped once the server’s own exit is seen', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    const proc = child();
+    const killer = child();
+    mocks.spawn.mockReturnValue(killer);
+    let complete = false;
+    const stopping = killLlamaProcess(proc).then(() => { complete = true; });
+    killer.emit('exit', 128);
+    await Promise.resolve();
+    expect(complete).toBe(false);
+    proc.emit('exit', 1);
+    await stopping;
+    expect(complete).toBe(true);
+  });
+
   it('rejects a wedged POSIX process and clears escalation after normal exit', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
     vi.useFakeTimers();

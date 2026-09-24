@@ -35,26 +35,15 @@ export function makeWaitTool(): RegisteredTool {
       function: {
         name: 'wait',
         description:
-          'Pause for a number of seconds before your next step -- the equivalent of ' +
-          'Start-Sleep or "timeout /t", but built in, so it needs no shell and works ' +
-          'when those are unavailable. Use it to space work out over time, such as ' +
-          'pinging the user on an interval, to back off before retrying something ' +
-          'rate-limited, or -- while coding -- to give something you just started ' +
-          'or changed time to become observable: a dev server or file watcher you ' +
-          'launched in the background needs a moment before it will answer a ' +
-          'request, and a file you just wrote may need one before an index, a ' +
-          'watcher, or another process reflects it. Waiting once beats retrying a ' +
-          'check that cannot succeed yet. Maximum ' +
-          `${MAX_WAIT_SECONDS} seconds (${MAX_WAIT_SECONDS / 60} minutes) per call; ` +
-          'prefer one wait of the length you need over several short ones, which ' +
-          'spend your tool-call budget on sleeping. To wait for a specific ' +
-          'background command rather than a fixed delay, use monitor_execution ' +
-          'instead -- it returns as soon as that command finishes, which is quicker ' +
-          'and more precise than guessing a duration here. Each return reports the ' +
-          'local wall-clock time it finished at: for a task on an interval, work out ' +
-          'the next deadline from that clock rather than from how many waits you have ' +
-          'called, and chain waits until the clock reaches it -- an hour is four calls ' +
-          `of ${MAX_WAIT_SECONDS}s, not one. Use notify_on_exit to be told when a background job exits. Ends early when a message arrives.`,
+          'Pause before your next step, built in (no shell needed): to space work ' +
+          'out, back off a rate limit, or let a server or watcher you just started ' +
+          `catch up. Maximum ${MAX_WAIT_SECONDS} seconds per call; prefer one wait of ` +
+          'the length you need over several short ones. To wait for a background ' +
+          'command, use monitor_execution instead. Each return reports the local ' +
+          'wall-clock time: time an interval against that clock, not by counting ' +
+          `waits -- an hour is four calls of ${MAX_WAIT_SECONDS}s, not one. ` +
+          'Use notify_on_exit with a background command to hear when it finishes. ' +
+          'Ends early when a new message arrives.',
         parameters: {
           type: 'object',
           properties: {

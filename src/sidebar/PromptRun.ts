@@ -256,6 +256,8 @@ export async function runPromptToMarkdown(
         return sanitizeText(
           content,
           options.alwaysStripThinking === true || shouldStripThinking(selectedModel, config),
+          // Tools here are native only, so no ```json block in the answer is a call.
+          new Set(),
         );
       }
       messages = [

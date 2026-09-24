@@ -66,7 +66,7 @@ export function makeInstallLlamacppTool(deps: LlamacppInstallDeps): RegisteredTo
       function: {
         name: 'install_llamacpp',
         description:
-          'Install a llama.cpp Windows CUDA build from github.com/ggml-org/llama.cpp releases in one call: downloads the main zip and its cudart, verifies both SHA-256 digests against the release API, extracts into %LOCALAPPDATA%\\Forge\\llama.cpp-<tag>\\, smoke-tests llama-server (--version, --list-devices, embeddings round-trip when configured), deletes the downloaded zips, and by default points llama_server.binary in config.yaml at the new build. Old build folders are kept. It does NOT restart the backend: tell the user the new build takes effect on the next model load or /restartBackend. Use this instead of downloading, hashing and extracting by hand.',
+          'Install a llama.cpp Windows CUDA release in one call: downloads the zip and its cudart, verifies SHA-256, extracts to %LOCALAPPDATA%\\Forge\\llama.cpp-<tag>\\, smoke-tests llama-server, and by default points llama_server.binary at it. It does NOT restart the backend: the build takes effect on the next model load or /restartBackend.',
         parameters: {
           type: 'object',
           properties: {
@@ -93,9 +93,10 @@ export function makeInstallLlamacppTool(deps: LlamacppInstallDeps): RegisteredTo
     permission: 'write',
     additionalPermissions: ['fetch'],
     mutation: { paths: () => (deps.configPath ? [deps.configPath] : []), showDiff: true },
-    // Only for configs that run llama.cpp at all: an Ollama-only user never
-    // pays this schema's prefill.
-    advertise: () => deps.getConfig().llama_server?.binary !== undefined,
+    // Only on Windows (the only platform it installs for) and only for configs
+    // that run llama.cpp at all: anyone else never pays this schema's prefill.
+    advertise: () =>
+      process.platform === 'win32' && deps.getConfig().llama_server?.binary !== undefined,
     approval: (args) => ({
       detail: `Install llama.cpp ${typeof args['tag'] === 'string' ? args['tag'] : '(newest prerelease)'} into ${localRoot()}${args['switch_config'] === false ? '' : ' and switch llama_server.binary'}`,
     }),

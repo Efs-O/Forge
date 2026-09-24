@@ -124,6 +124,20 @@ describe('buildControlChatProxy', () => {
     expect(request.temperature).toBe(0.2);
   });
 
+  it('never sends the llama.cpp-only chat_template_kwargs to a cloud provider', async () => {
+    streamMock.mockImplementation(async (...args: unknown[]) => handlersOf(args).onDone('stop'));
+    const cfg = (): ForgeConfig =>
+      ({
+        ...config(),
+        profiles: { worker: { sampling: { temperature: 0.2, preserve_thinking: true } } },
+      }) as ForgeConfig;
+    const proxy = buildControlChatProxy(cfg, secrets);
+    await proxy({ model: 'router@worker', messages: [{ role: 'user', content: 'hi' }] });
+    const request = streamMock.mock.calls[0][1] as Record<string, unknown>;
+    expect(request.temperature).toBe(0.2);
+    expect(request).not.toHaveProperty('chat_template_kwargs');
+  });
+
   it('404s an unknown profile on a known base (F6)', async () => {
     const proxy = buildControlChatProxy(config, secrets);
     await expect(proxy({ model: 'router@nope', messages: [] })).rejects.toMatchObject({

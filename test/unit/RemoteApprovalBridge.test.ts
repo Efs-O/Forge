@@ -5,6 +5,7 @@ import type { RemoteAuth } from '../../src/remote/RemoteAuth';
 import type { RemoteRequestStore } from '../../src/remote/RemoteRequestStore';
 import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
 import type { ToolApprovalSink } from '../../src/sidebar/ToolApprovalService';
+import { correlateGate, recordingWindow } from '../../src/voice/VoiceGrammar';
 
 function rig(options: { remoteRequestId?: string | undefined; boundChatId?: string } = {}) {
   const channel = new FakeRemoteChannel();
@@ -97,6 +98,21 @@ describe('RemoteApprovalBridge', () => {
       ),
     ).toBe(true);
     expect(resolveApproval).toHaveBeenCalledWith('gate-1', true);
+  });
+
+  it('lets a spoken reply to the approval message name its gate', async () => {
+    const { bridge, channel, request } = rig();
+    request();
+    await vi.waitFor(() => expect(channel.sent).toHaveLength(1));
+    const gates = bridge.pendingGates('chat-1');
+    const window = recordingWindow(Date.now() + 10_000, 1_000);
+    // A second gate makes the timing rule refuse; the reply still names one.
+    const both = [...gates, { id: 'other', chatId: 'chat-1', openedAt: 0 }];
+    expect(correlateGate(both, 'chat-1', window)).toMatchObject({ kind: 'refuse' });
+    expect(correlateGate(both, 'chat-1', window, 'sent-1')).toMatchObject({
+      kind: 'resolve',
+      gate: { id: 'gate-1' },
+    });
   });
 
   it('stays silent when no chat is queued and none is bound', async () => {

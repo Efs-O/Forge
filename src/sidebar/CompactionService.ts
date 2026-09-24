@@ -265,9 +265,10 @@ async function compactOnce(
     ? undefined
     : collectLastReply(split.summarize);
   // Recorded with the reply, because the transcript it was derived from is not
-  // available when the block is rendered on a later turn.
+  // available when the block is rendered on a later turn. The retained tail
+  // counts too: a tail of tool calls with no text of its own ran after the reply.
   const lastReplyFollowedByTools = lastReply
-    ? toolActivityFollowedLastReply(split.summarize)
+    ? toolActivityFollowedLastReply([...split.summarize, ...pending.slice(split.tailStart)])
     : false;
 
   const memoryKeys = boundMemoryKeys(deps.listMemoryKeys?.() ?? []);

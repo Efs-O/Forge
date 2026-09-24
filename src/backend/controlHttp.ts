@@ -143,7 +143,9 @@ export function readJson(
   maxBytes: number = MAX_BODY_BYTES,
 ): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
-    let data = '';
+    // Joined as bytes and decoded once: a chunk boundary can split a
+    // multi-byte character, which per-chunk decoding turns into U+FFFD.
+    const chunks: Buffer[] = [];
     let size = 0;
     req.on('data', (chunk: Buffer) => {
       size += chunk.length;
@@ -152,9 +154,10 @@ export function readJson(
         reject(new Error('request body too large'));
         return;
       }
-      data += chunk.toString();
+      chunks.push(chunk);
     });
     req.on('end', () => {
+      const data = Buffer.concat(chunks).toString('utf8');
       if (!data.trim()) return resolve({});
       try {
         resolve(JSON.parse(data) as Record<string, unknown>);

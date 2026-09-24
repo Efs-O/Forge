@@ -173,6 +173,8 @@ describe('registerAllTools canonical coordinator catalog', () => {
           name !== 'generate_image' &&
           name !== 'image_search' &&
           name !== 'install_llamacpp' &&
+          // query_powershell spawns powershell.exe, so it is advertised on Windows only.
+          (process.platform === 'win32' || name !== 'query_powershell') &&
           name !== 'ask_live_session' &&
           name !== 'tell_live_session',
       ),

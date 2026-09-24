@@ -26,3 +26,16 @@ describe('normalizeSpawnCwd', () => {
     expect(normalizeSpawnCwd('/home/user/proj')).toBe('/home/user/proj');
   });
 });
+
+describe('spawnAndWait output decoding', () => {
+  // A chunk boundary inside a multi-byte character used to decode as U+FFFD.
+  it('keeps a character split across two stdout chunks', async () => {
+    const { spawnAndWait } = await import('../../src/util/processSpawn');
+    const script =
+      "const b = Buffer.from('✓ Καλημέρα', 'utf8');" +
+      'process.stdout.write(b.subarray(0, 1));' +
+      'setTimeout(() => process.stdout.write(b.subarray(1)), 50);';
+    const result = await spawnAndWait(process.execPath, ['-e', script], process.cwd(), 10_000);
+    expect(result.stdout).toBe('✓ Καλημέρα');
+  });
+});

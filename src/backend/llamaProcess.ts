@@ -1,5 +1,8 @@
 import { spawn, type ChildProcess } from 'child_process';
 
+/** taskkill's exit code for "no such process". */
+const TASKKILL_NOT_FOUND = 128;
+
 /** Teardown failed: the caller must retain the process and its reserved port. */
 export class LlamaTerminationError extends Error {}
 
@@ -38,9 +41,13 @@ export function killLlamaProcess(proc: ChildProcess): Promise<void> {
       if (err) reject(new LlamaTerminationError(err.message));
       else resolve();
     };
+    let parentExited = false;
+    let notFound = false;
     const onExit = (): void => {
-      // On Windows the parent exiting alone does not confirm tree teardown.
-      if (!killer) finish();
+      parentExited = true;
+      // On Windows the parent exiting alone does not confirm tree teardown —
+      // unless taskkill already reported the PID gone (see TASKKILL_NOT_FOUND).
+      if (!killer || notFound) finish();
     };
     const onError = (err: Error): void => finish(err);
     const deadline = setTimeout(
@@ -62,6 +69,15 @@ export function killLlamaProcess(proc: ChildProcess): Promise<void> {
         return;
       }
       killer.once('exit', (code) => {
+        // A server that exited on its own (a crash) between the check above and
+        // taskkill is "not found". That is a stopped server, not a failed
+        // teardown — but only once its own exit is seen, so a reused PID or a
+        // parent still running is never mistaken for one.
+        if (code === TASKKILL_NOT_FOUND) {
+          notFound = true;
+          if (parentExited) finish();
+          return;
+        }
         finish(
           code === 0
             ? undefined

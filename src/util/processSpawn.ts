@@ -101,11 +101,15 @@ export function spawnAndWait(
       return;
     }
 
-    proc.stdout.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString();
+    // Stream-decoded, not per chunk: a chunk boundary inside a multi-byte
+    // character (Greek, CJK, a test runner's ✓) decodes as U+FFFD otherwise.
+    proc.stdout.setEncoding('utf8');
+    proc.stderr.setEncoding('utf8');
+    proc.stdout.on('data', (chunk: string) => {
+      stdout += chunk;
     });
-    proc.stderr.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString();
+    proc.stderr.on('data', (chunk: string) => {
+      stderr += chunk;
     });
 
     proc.on('error', (err: NodeJS.ErrnoException) => {

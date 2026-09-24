@@ -110,12 +110,12 @@ export function estimateTokens(messages: ChatMessage[]): number {
     } else if (m.content === null && m.tool_calls?.length) {
       chars += JSON.stringify(m.tool_calls).length;
     }
-    // `reasoning` is deliberately NOT counted. It is retained on the message for
-    // the sidebar's thinking pane, but `ChatMessage.reasoning` is never sent
-    // back to the model, so it occupies no prompt tokens. Counting it inflated
-    // the bar by the whole turn's thinking — and ToolCallingLoop attaches
-    // reasoning to EVERY tool-call round, so on an agentic turn under
-    // `--reasoning-budget 6144` that was thousands of phantom tokens per round.
+    // `reasoning` is deliberately NOT counted: it is kept on the message for the
+    // sidebar's thinking pane and is not what gets sent. Counting it inflated
+    // the estimate by the whole turn's thinking, since ToolCallingLoop attaches
+    // reasoning to EVERY tool-call round. What IS sent under preserve_thinking
+    // is `reasoning_content`, set only on the model-facing copy, so that counts.
+    if (m.reasoning_content) chars += m.reasoning_content.length;
     const rate = m.role === 'tool' ? TOOL_RESULT_CHARS_PER_TOKEN : CHARS_PER_TOKEN;
     return sum + Math.ceil(chars / rate);
   }, 0);
@@ -170,6 +170,19 @@ export function minimumOutputReserve(model: ModelConfig): number {
 }
 
 /**
+ * True when the spawn args end up with `--kv-unified` on. The last flag wins,
+ * as it does in llama.cpp's own argument parser.
+ */
+function kvUnified(model: ModelConfig): boolean {
+  let unified = false;
+  for (const arg of spawnArgs(model)) {
+    if (arg === '--kv-unified' || arg === '-kvu') unified = true;
+    else if (arg === '--no-kv-unified' || arg === '-no-kvu') unified = false;
+  }
+  return unified;
+}
+
+/**
  * Context available to ONE conversation.
  *
  * `--ctx-size` is the total across slots and `--parallel` divides it
@@ -177,12 +190,17 @@ export function minimumOutputReserve(model: ModelConfig): number {
  * 32768, not 131072. Reading num_ctx alone reported every multi-slot model at
  * several times its real window.
  *
+ * The exception is `--kv-unified`: the slots share one KV buffer and llama.cpp
+ * gives each sequence the whole `--ctx-size` (`n_ctx_seq = n_ctx`), so dividing
+ * would make Forge compact and trim tool results at a quarter of the real room.
+ *
  * Returns 0 when the model has no configured window (cloud providers), which
  * callers treat as "budget unknown, do not gate on it".
  */
 export function perSlotContext(model: ModelConfig, server?: LlamaServerConfig): number {
   const total = model.spawn?.num_ctx ?? model.num_ctx ?? server?.default_num_ctx ?? 0;
   if (total <= 0) return 0;
+  if (kvUnified(model)) return total;
   const parallel = model.spawn?.n_parallel ?? model.n_parallel ?? server?.n_parallel ?? 1;
   return Math.floor(total / Math.max(1, parallel));
 }

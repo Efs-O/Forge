@@ -102,9 +102,9 @@ export class RemoteRequestStore {
     return reader(this.state);
   }
 
-  contactMutate<T>(mutator: (draft: RemoteStoreState) => T, reloadFirst = true): Promise<T> {
+  contactMutate<T>(mutator: (draft: RemoteStoreState) => T): Promise<T> {
     let result!: T;
-    return this.mutate((draft) => (result = mutator(draft)), reloadFirst).then(() => result);
+    return this.mutate((draft) => (result = mutator(draft))).then(() => result);
   }
 
   queued(conversationId?: string, channel?: RemoteRequestRecord['channel']): RemoteRequestRecord[] {
@@ -174,11 +174,8 @@ export class RemoteRequestStore {
     return bindingsForWorkspace(this.state.bindings, workspaceId, channel);
   }
 
-  /**
-   * Enqueue a host-originated notification that has no backing request (e.g. a
-   * compaction progress line). Durable write only — it does NOT wake the
-   * delivery loop; the caller (RemoteController) must kick delivery after this.
-   */
+  /** A host notification with no backing request (e.g. compaction progress).
+   *  Durable write only: the caller (RemoteController) must kick delivery. */
   async notifyOutbox(
     channel: RemoteOutboxRecord['channel'],
     chatId: string,
@@ -270,12 +267,12 @@ export class RemoteRequestStore {
     return hasPendingHandoff(this.state.workspaceHandoffs, workspaceId, Date.now());
   }
 
-  /** Rereads first: two windows on one folder must not both claim. */
+  /** Two windows on one folder must not both claim (mutate rereads). */
   async claimWorkspaceHandoffs(workspaceId: string): Promise<WorkspaceHandoff[]> {
     let claimed: WorkspaceHandoff[] = [];
     await this.mutate((draft) => {
       claimed = claimHandoffs(draft.workspaceHandoffs, workspaceId, Date.now());
-    }, true);
+    });
     return claimed;
   }
 
@@ -289,7 +286,7 @@ export class RemoteRequestStore {
     let outcome: 'failed' | 'claimed' | 'gone' = 'gone';
     await this.mutate((draft) => {
       outcome = failUnclaimedHandoff(draft.workspaceHandoffs, id, Date.now());
-    }, true);
+    });
     return outcome;
   }
 
@@ -455,10 +452,12 @@ export class RemoteRequestStore {
     }
   }
 
-  private mutate(mutator: (draft: RemoteStoreState) => void, reloadFirst = false): Promise<void> {
+  /** Windows share the file: each write starts from disk, or a cursor save
+   *  would erase another window's writes (a handoff it claimed). */
+  private mutate(mutator: (draft: RemoteStoreState) => void): Promise<void> {
     const operation = this.mutationTail.then(async () => {
       await withRemoteStateLock(this.filePath, async () => {
-        if (reloadFirst) await this.reload();
+        await this.reload();
         const draft = structuredClone(this.state);
         mutator(draft);
         pruneRemoteState(draft);

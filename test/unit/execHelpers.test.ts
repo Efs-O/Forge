@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ExecCommandError,
   formatExecCommandOutput,
+  checkPowerShellBan,
   formatOutput,
   MAX_EXEC_STORED_CHARS,
   MAX_OUTPUT_CHARS,
@@ -36,6 +37,16 @@ describe('formatOutput', () => {
     });
     expect(out).toBe('ok\n[stderr]\nwarn\n[exit code: 0]');
     expect(out.includes(ESC)).toBe(false);
+  });
+
+  it('keeps the summary at the end of over-long test output', () => {
+    const out = formatOutput({
+      stdout: 'x'.repeat(200_000) + '\nTests  3 failed | 12 passed',
+      stderr: '',
+      exitCode: 1,
+    });
+    expect(out).toContain('Tests  3 failed | 12 passed');
+    expect(out).toContain('characters dropped');
   });
 });
 
@@ -121,6 +132,16 @@ describe('structured exec_command outcomes', () => {
       expect(output.stdout_note).toContain('5000 characters');
     });
 
+    // A build puts its error and summary last; a head-only cut dropped them.
+    it('keeps the end of an over-long stream, where the failure is', () => {
+      const stdout = `START\n${'progress\n'.repeat(MAX_EXEC_STORED_CHARS / 4)}error TS2322: boom\n`;
+      const output = JSON.parse(formatExecCommandOutput('tsc', { stdout, stderr: '', exitCode: 2 }));
+      expect(output.stdout).toHaveLength(MAX_EXEC_STORED_CHARS);
+      expect(output.stdout.startsWith('START')).toBe(true);
+      expect(output.stdout.endsWith('error TS2322: boom\n')).toBe(true);
+      expect(output.stdout).toContain('characters dropped');
+    });
+
     // The bound is the real worst case one exec_command can add to a round:
     // the excerptor downstream only cuts when the window is already tight.
     it('bounds a both-streams result to twice the retention bound', () => {
@@ -150,5 +171,18 @@ describe('structured exec_command outcomes', () => {
       expect(output.stdout).toBe('short');
       expect(output).not.toHaveProperty('stdout_truncated');
     });
+  });
+});
+
+describe('checkPowerShellBan', () => {
+  it('recognises a launcher named by its full path', () => {
+    expect(() => checkPowerShellBan('/bin/bash', ['-c', 'rm -rf x'])).toThrow('Shell script flags');
+    expect(() => checkPowerShellBan('C:\\Windows\\System32\\cmd.exe', ['/C', 'del x'])).toThrow(
+      'Shell script flags',
+    );
+    expect(() =>
+      checkPowerShellBan('C:\\Program Files\\PowerShell\\7\\pwsh.exe', ['-Command', 'x']),
+    ).toThrow();
+    expect(() => checkPowerShellBan('/usr/bin/git', ['-c', 'x=y', 'status'])).not.toThrow();
   });
 });

@@ -195,6 +195,8 @@ export const JobStateSchema = z.object({
     .object({
       started_at: z.number().int().nonnegative(),
       conversation_id: z.string().nullable().default(null),
+      /** Refreshed by the running window; a stale one means that window died. */
+      heartbeat_at: z.number().int().nonnegative().nullable().default(null),
     })
     .nullable()
     .default(null),
@@ -209,6 +211,12 @@ export const JobStateSchema = z.object({
    * not pending.
    */
   task_pending_since: z.number().int().nonnegative().nullable().default(null),
+  /**
+   * The observation the pending task was deferred on. The retry acts on (and
+   * on success saves) this one, not the stale `last_observation`, or the next
+   * check would see the same change again and run the task a second time.
+   */
+  task_pending_observation: z.string().nullable().default(null),
 });
 export type JobState = z.infer<typeof JobStateSchema>;
 

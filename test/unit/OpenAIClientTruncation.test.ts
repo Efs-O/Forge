@@ -51,6 +51,33 @@ afterEach(() => {
 });
 
 describe('OpenAIClient truncation handling', () => {
+  it('waits out a silent first byte longer than an idle stream', async () => {
+    vi.useFakeTimers();
+    const encoder = new TextEncoder();
+    let push: ((line: string) => void) | undefined;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        push = (line) => controller.enqueue(encoder.encode(`${line}\n`));
+      },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })),
+    );
+    const h = handlers();
+    const done = streamChatCompletion('http://127.0.0.1:8080', request, h);
+    // A reasoning provider can be silent for minutes after its headers.
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(h.onError).not.toHaveBeenCalled();
+    push?.(chunk({ content: 'thinking done' }));
+    await vi.advanceTimersByTimeAsync(135_000);
+    expect(h.onError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'Stream stalled after 120s idle' }),
+    );
+    await done;
+    vi.useRealTimers();
+  });
+
   it('logs request metrics and incomplete streams without logging prompt text', async () => {
     vi.stubGlobal(
       'fetch',

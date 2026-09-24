@@ -21,6 +21,7 @@ import { ageOutImageParts, stripImageParts } from './imageParts';
 import { injectSystemPrompt } from '../llm/SystemPromptInjector';
 import { injectTurnContext, type TurnContextState } from './turnContext';
 import { buildTemplateContext } from './turnModelBehavior';
+import { attachCurrentTaskReasoning, preservesThinking } from '../agent/preserveThinking';
 
 export interface PrepareModelTurnMessagesInput {
   compaction: ConversationRuntime['compaction'];
@@ -75,8 +76,14 @@ export function prepareModelTurnMessages(
   // is the turn-start snapshot above, so it is byte-identical across the
   // rounds WITHIN this turn too.
   const withTurnContext = injectTurnContext(injected, input.turnContext);
+  // After the window and injection, so the task boundary is read from what the
+  // model actually sees; before excerpting, so the budget counts the thinking
+  // and drops it oldest-first ahead of cutting any tool result.
+  const withThinking = preservesThinking(input.model)
+    ? attachCurrentTaskReasoning(withTurnContext)
+    : withTurnContext;
   return prepareToolResultContext({
-    messages: stampToolResultClocks(nudgeTruncatedResults(annotateRereads(withTurnContext))),
+    messages: stampToolResultClocks(nudgeTruncatedResults(annotateRereads(withThinking))),
     toolTokens: estimateToolTokens(input.getToolDefinitions()),
     model: input.model,
     server: input.config.llama_server,

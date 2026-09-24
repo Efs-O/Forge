@@ -124,9 +124,8 @@ export class JobScheduler {
 
   /**
    * Try for the lease and start the tick. Returns whether this window owns the
-   * scheduler now. A non-owner still ticks — every tick without the lease only
-   * retries acquisition — so it takes over when the owner's window closes.
-   * Returning before the interval existed left the loser passive forever.
+   * scheduler now. A non-owner still ticks (each tick retries acquisition), so
+   * it takes over when the owner's window closes.
    */
   async start(options: { immediate?: boolean } = {}): Promise<boolean> {
     // `immediate` defaults to true: production wants the first tick on
@@ -134,10 +133,7 @@ export class JobScheduler {
     const immediate = options.immediate ?? true;
     const owner = await this.acquireLease();
     if (owner) await this.reconcileWakes();
-    // Crash / reload recovery (CI-enforced): a job whose state still holds a
-    // `task_run` was running when Forge died. Report it, record a failed row,
-    // and clear it. It is not retried automatically; the next tick runs it.
-    if (owner) await recoverInterruptedRuns(this.store, this.outboxDir, () => this.now().getTime());
+    if (owner) await this.recoverRuns();
     // A tick's failure is shown, not left as an unhandled rejection.
     this.timer = setInterval(
       () =>
@@ -148,6 +144,15 @@ export class JobScheduler {
     );
     if (owner && immediate) await this.tick();
     return owner;
+  }
+
+  /** Crash recovery (CI-enforced): report and clear `task_run` markers nobody refreshes. */
+  private recoverRuns(jobs?: JobFile[]): Promise<Set<string>> {
+    const isOwn = (id: string): boolean => this.runningJobs.has(id);
+    return recoverInterruptedRuns(this.store, this.outboxDir, () => this.now().getTime(), {
+      ...(jobs ? { jobs } : {}),
+      isOwn,
+    });
   }
 
   /**
@@ -196,10 +201,8 @@ export class JobScheduler {
    * it and go passive, but **stay alive and keep ticking**: the next tick tries
    * to re-acquire, and picks the scheduler back up if it succeeds.
    *
-   * This must never be `stop()`. Disposing here made a transient lease loss
-   * permanent for the lifetime of the window — silently, with no toast, no run
-   * row and no outbox item, while `ForgeScheduledWake` stayed armed and kept
-   * waking the machine for jobs that nobody was running any more.
+   * Never `stop()`: that made a transient loss permanent for the window's
+   * lifetime, silently, while the scheduled wake kept waking the machine.
    */
   private handleLeaseLost(): void {
     this.lease = undefined;
@@ -249,14 +252,19 @@ export class JobScheduler {
     }
     const now = this.now();
     const jobs = await this.store.loadAll();
+    // Every tick, not just at start: a lease taken over from a dead window
+    // inherits its stale `task_run` markers.
+    const cleared = await this.recoverRuns(jobs);
+    for (const jf of jobs) if (cleared.has(jf.job.id)) jf.state.task_run = null;
+    // A live marker this window does not own is a run in another window.
+    const isOwn = (id: string): boolean => this.runningJobs.has(id);
+    const busy = (jf: JobFile | undefined): boolean => !!jf?.state.task_run && !isOwn(jf.job.id);
     const gap = this.lastTickAt === undefined ? 0 : now.getTime() - this.lastTickAt;
     const firstTick = this.lastTickAt === undefined;
     this.lastTickAt = now.getTime();
-    // A tick arriving long after the last one is a resume from sleep. The
-    // FIRST tick of a process has no previous tick to measure against, but it
-    // is the same situation in disguise — VS Code was closed while jobs fell
-    // due (D7) — so detect it from the job states instead, or D7's `late`
-    // flag never gets set on the one path it was written for.
+    // A tick arriving long after the last one is a resume from sleep. A
+    // process's first tick detects it from the job states instead (D7: VS Code
+    // was closed while jobs fell due).
     const isResume = firstTick
       ? jobs.some(
           (jf) =>
@@ -269,11 +277,10 @@ export class JobScheduler {
     const byId = new Map(jobs.map((jf) => [jf.job.id, jf]));
     const toRun: JobFile[] = [];
     const seen = new Set<string>();
-    // A `run_now` marker (B2) runs the job on this tick even if it is not due
-    // or paused — an explicit request overrides the schedule. The marker is
-    // consumed before the run, so a crash mid-run does not leave a stale
-    // request that fires again on the next tick.
-    for (const id of await this.store.consumeRunRequests()) {
+    // A `run_now` marker (B2) runs the job even if not due or paused. It is
+    // consumed before the run (no replay after a crash); a busy job keeps it.
+    const keep = (id: string): boolean => isOwn(id) || busy(byId.get(id));
+    for (const id of await this.store.consumeRunRequests(keep)) {
       const jobFile = byId.get(id);
       if (!jobFile || seen.has(id)) continue;
       seen.add(id);
@@ -281,8 +288,8 @@ export class JobScheduler {
     }
     for (const jf of jobs) {
       const pendingAgentTask = jf.state.task_pending && jf.job.action?.kind === 'agent_task';
-      if (!jf.job.enabled || seen.has(jf.job.id) || (!pendingAgentTask && !isDue(jf.state, now)))
-        continue;
+      if (!jf.job.enabled || seen.has(jf.job.id) || busy(jf)) continue;
+      if (!pendingAgentTask && !isDue(jf.state, now)) continue;
       seen.add(jf.job.id);
       toRun.push(jf);
     }
@@ -326,7 +333,7 @@ export class JobScheduler {
       const result =
         state.task_pending && job.action?.kind === 'agent_task'
           ? {
-              observation: state.last_observation,
+              observation: state.task_pending_observation ?? state.last_observation,
               changed: true,
               summary: 'retrying pending agent task',
             }
@@ -400,9 +407,7 @@ export class JobScheduler {
           delivered: 0,
         })
         .catch(() => undefined);
-      // Reporting every failed run instead turned a GitHub outage into a toast on
-      // every tick and inflated the coalesced outbox count for what was one
-      // continuous fault.
+      // Reporting every failed run turned one GitHub outage into a toast a tick.
       await this.applyBackoff(jobFile, message).catch(() => undefined);
     } finally {
       hold?.dispose();
@@ -413,18 +418,14 @@ export class JobScheduler {
   /** D6: suspend again after a wake if a job asked to and nothing is busy. */
   private async maybeSleepIfIdle(jobs: readonly JobFile[]): Promise<void> {
     if (this.busy() !== undefined) return;
-    // A running agent task is busy even when no turn is streaming: a turn
-    // waiting on a long download is executing a tool, and the machine must not
-    // suspend under it (AC11). `runningJobs` stays set for the whole detached
-    // run, so a live agent task is always counted here.
+    // A running agent task is busy even when no turn streams (a tool may be
+    // mid-download); `runningJobs` holds it for the whole detached run (AC11).
     if (this.runningJobs.size > 0) return;
     const anySleepIfIdle = jobs.some((jf) => jf.job.enabled && jf.job.after === 'sleep_if_idle');
     if (!anySleepIfIdle) return;
     const msSinceInput = await this.power.idleSinceResume();
     if (msSinceInput === null) return;
-    // The resume is "now" minus nothing measurable here; use the last input as
-    // the anchor. If the user has not touched the box since the resume, the
-    // machine may go back to sleep.
+    // Anchor on the last input: untouched since the resume, the machine may sleep again.
     const input: SleepIfIdleInput = {
       msSinceResume: 0,
       msSinceInput,
@@ -452,9 +453,7 @@ export class JobScheduler {
     // (the tag comes from the observation) and the action to be wired.
     if (checkResult.changed && job.action?.kind === 'llamacpp_update') {
       if (job.check.kind === 'github_release' && this.llamacpp) {
-        // `changed` is only ever true with a real observation, but the type is
-        // nullable now and a silent `JSON.parse(null)` is not the failure mode
-        // to pick for the one action that mutates the machine.
+        // The type is nullable; never `JSON.parse(null)` before a machine mutation.
         const tag =
           checkResult.observation === null
             ? undefined

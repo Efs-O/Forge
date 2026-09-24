@@ -476,7 +476,7 @@ describe('list_delegation_targets', () => {
   });
 });
 
-describe('ask_local_agent local-VRAM approval', () => {
+describe('ask_local_agent approval', () => {
   const approvalFor = (target: string) => {
     const { service } = makeMockService();
     return makeLocalAgentTool(service, () => mixedConfig).approval!({ model: target });
@@ -487,9 +487,13 @@ describe('ask_local_agent local-VRAM approval', () => {
     expect(approvalFor('ollama-local')?.detail).toContain('local VRAM');
   });
 
-  it('does not ask for cli or cloud targets, which take no slot', () => {
-    expect(approvalFor('claude-code')).toBeUndefined();
+  it('does not ask for cloud targets, which take no slot and cannot touch the machine', () => {
     expect(approvalFor('openrouter-model')).toBeUndefined();
+  });
+
+  // A CLI agent runs with full access and none of its edits pass Forge's gate.
+  it('asks before a cli target, naming its full access', () => {
+    expect(approvalFor('claude-code')?.detail).toContain('full access');
   });
 
   // A fuzzy alias or `model@profile` still resolves in the handler, so an

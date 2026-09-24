@@ -147,18 +147,13 @@ export function makeLiveSessionTool(deps: LiveSessionDeps): RegisteredTool {
       function: {
         name: 'ask_live_session',
         description:
-          'Ask a Claude Code (or Codex) session that is ALREADY RUNNING on this machine, and ' +
-          'already knows the current work, a question, and wait for its answer. Use this, NOT ' +
-          'ask_local_agent, whenever the user means "the live session", "the other Claude", ' +
-          '"the open Codex", or the session that owns the other half of a task, and to answer ' +
-          'a message another session sent you: ask_local_agent always starts a NEW, empty ' +
-          'session that knows nothing. The target is resolved by its mesh alias (claude / ' +
-          'codex); a Forge-owned session is created on first use, and ' +
-          'the config thread/session value is a deprecated pin (the alias wins). The question ' +
-          "appears in that session's own window. " +
-          'Returns the exchange formatted for the user, so you do not need to quote it. If ' +
-          'the session cannot be reached, it returns at once without sending and says why. ' +
-          'One question per call; blocks until the answer, the wait limit, or /stop.',
+          'Ask a Claude Code (or Codex) session ALREADY RUNNING on this machine, which ' +
+          'knows the current work, and wait for its answer. Use it for "the live session", ' +
+          '"the other Claude", "the open Codex", or to answer a message another session sent ' +
+          'you (ask_local_agent starts a NEW, empty session instead). The target is resolved ' +
+          'by alias (claude / codex). Returns the exchange formatted for the user; an ' +
+          'unreachable session returns at once, saying why. One question per call; blocks ' +
+          'until the answer, the wait limit, or /stop.',
         parameters: {
           type: 'object',
           properties: {

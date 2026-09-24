@@ -1,46 +1,134 @@
 # Forge — Recent Changes
 
-## 0.16.50
+## 0.16.52
 
 ### Background jobs report their exit in chat (2026-09-24)
 
 - `exec_command` and `run_build` accept `notify_on_exit` with `background: true`.
   When the job exits, its status and last output lines arrive in the chat that
   started it—as a new turn if that chat is idle, or at the next tool round if
-  it is busy. The agent can start a watcher or long build and end its turn
-  instead of polling.
-- `wait` now ends early when a message arrives.
-- No notice is sent after a window reload, a `stop_execution`, or when
+  it is busy. `wait` also ends early when a new message arrives.
+- No notice is sent after a window reload, `stop_execution`, or when
   `monitor_execution` already showed the exit.
 
-## 0.16.49
+### Telegram contacts (2026-09-23)
 
-### Telegram contacts: command replies are cleaned up (2026-09-23)
+- Contact names now match despite accents, case and trailing punctuation. A
+  refused sender is told to ask privately with `/start`, including when the
+  command is addressed to the bot by name.
+- Contact command replies are cleaned up with other remote-command replies.
+  Private refusals and usage messages appear once, and an unknown bind id now
+  explains which id to use.
 
-- Replies to `/contacts` and `/contact …` owner commands stayed in the chat
-  forever, unlike every other command's reply. They are now deleted after
-  `remote.delete_command_replies_after` seconds, like the rest. A refused
-  contact command in the private chat is sent once and deleted too; before, it
-  was sent by a separate path that nothing cleaned up.
+**`preserve_thinking` now sends the thinking back (2026-09-24).** The flag only set the chat-template kwarg; Forge itself never put reasoning on the wire, so the template had nothing to keep. Every tool round the prompt therefore diverged where the previous round's `<think>` block had been, and on a hybrid model like Qwen3.8 llama-server logged "restored context checkpoint" and re-processed everything after it. The model also lost the reasoning behind the call it had just made. A llama.cpp model with `sampling.preserve_thinking: true` now gets `reasoning_content` on its assistant turns since the last message the user typed (mid-turn messages and Forge's own nudges do not end the task), sent unmodified so the prefix matches the KV cache. Earlier tasks' thinking stays out, and cloud providers never get it. The prompt estimate counts what is sent, and when the prompt would not fit, the oldest thinking is dropped before any tool result is excerpted. Set the flag to `false` to get the old behaviour.
 
-### Telegram contacts: a refused person is told how to ask (2026-09-23)
+### 0.16.51 changes included in the combined release
 
-- Someone writing to the bot without access got only "access has not been
-  granted", with no way to ask, and nothing reached the owner. Both refusals
-  (private chat and group) now say to send /start privately. `/start` is also
-  accepted with `@botname` or extra text after it; before, only the bare
-  command created a request.
+**Tool descriptions trimmed by ~3.6k chars (2026-09-24).** The longest descriptions (`wait`, `ask_local_agent`, `ask_live_session`, `ask_user`, `notify_user`, `show_notification`, `install_llamacpp`, `query_powershell`, and the `read_file` `numbered` and `exec_command` `env`/`max_output_chars` parameters) repeated guidance or cross-explained each other. They now say it once. The maximal schema drops from 56,179 to 52,550 chars, roughly 1.2k tokens off every request. `query_powershell` (which spawns powershell.exe) and `install_llamacpp` (which refuses to run off Windows) are now advertised on Windows only, saving another ~2k chars on other platforms.
 
-### Telegram contacts: names match loosely, refusals arrive once (2026-09-23)
+### 0.16.50 changes included in the combined release
 
-- A phone keyboard's automatic period saved a contact as "Χαρά.", so
-  `/contact link Χαρά` said "contact not found". Approval now drops trailing
-  punctuation, and contact names match regardless of accents, case and
-  trailing punctuation.
-- Contact refusals and usage messages in a private chat were sent twice
-  ("usage: …" then "Forge: usage: …"). They now arrive once.
-- `/contact bind` with an unknown id now explains that it needs the id from
-  the group's `/contact link` reply, not the pending-request id.
+**Cloud chat proxy no longer sends `chat_template_kwargs` (2026-09-24).** The control `/chat` route serves only cloud providers, but it merged sampling with `preserve_thinking` allowed, so a profile that set it sent the llama.cpp-only `chat_template_kwargs` field to OpenRouter/xAI, which strict APIs can reject. It now merges with `allowPreserveThinking: false`, like the other cloud paths.
+
+### 0.16.49 changes included in the combined release
+
+**A Unix `find` named by its full path is no longer redirected on Windows (2026-09-24).** The Windows `find` redirect keyed on the program's name alone, so Git for Windows' own `usr\bin\find.exe`, named in full, was refused as if it were System32's text search. Only a bare `find`, or one under System32, is redirected now.
+
+**The script-flag ban also catches a launcher named by its path (2026-09-24).** `exec_command` refuses `bash -c`, `cmd /c` and PowerShell `-Command`, but it matched only the bare name, so `/bin/bash -c` or a full `cmd.exe` path went through. The launcher is now matched by its file name.
+
+**A reasoning model's silent start is no longer aborted as a stall (2026-09-24).** The stalled-stream guard abandoned any stream idle for 45 seconds, counting from the response headers. A provider that sends headers straight away and then thinks with nothing to stream (OpenAI and xAI reasoning models, or a long prefill on a server that does not hold its headers back) was cut off mid-turn as "stalled". The first byte now gets 10 minutes; once bytes flow, a 2-minute gap is a stall.
+
+**A crashed llama-server no longer blocks its slot on Windows (2026-09-24).** Shutdown treated taskkill's "process not found" (exit 128) as a failed teardown, so a server that had already exited on its own kept its port and slot reserved as if still running. "Not found" now counts as stopped once the server's own exit has been seen.
+
+**Compaction records `exec_command` outcomes again (2026-09-24).** `exec_command` and `query_powershell` answer with a JSON object carrying `exitCode`, but the compaction ledger only read the older `[exit code: N]` suffix, so every such command was recorded as "outcome unknown (no exit code)" and a resumed agent had no trusted record of what it had run — the kind of gap that sends it to re-run a build or a download. The ledger now reads the structured exit code and takes its output evidence from the command's stdout and stderr.
+
+**Compaction no longer says no tool ran after your last reply when one did (2026-09-24).** When the retained tail was a tool run with no text of its own, the carried-over last reply was labelled as followed by no tool activity, contradicting the tail shown right after it. The tail now counts.
+
+**Non-ASCII output no longer turns into `�` (2026-09-24).** Output from child processes, and control-API request bodies, were decoded chunk by chunk, so a multi-byte character split across two chunks came out as U+FFFD. That affected Greek or accented text, CJK, and a test runner's `✓`. The fix covers `exec_command`, whisper-cli voice-note transcripts, the control HTTP API's JSON bodies, and CLI-agent stderr: output is now decoded as a stream, and request bodies as whole bytes.
+
+**`git_show` refuses a ref that is an option (2026-09-24).** `git_show` runs as an unconfirmed read, but passed the model's `ref` straight to `git show`, so a ref of `--output=<path>` made git write the diff to any file it named. A ref starting with `-` or carrying a control character is now refused, as `git_log` already did. `git_blame` also puts `--` before its path.
+
+**Long command output keeps its end (2026-09-24).** An `exec_command`, `run_tests` or `run_build` stream past its bound kept only its first characters, so a long build or test run returned progress lines and dropped the error and summary printed last — costing a second run with `tail_lines`. An over-long stream now keeps its first quarter and its end, with a marker naming how much of the middle was dropped. The bound and the returned size are unchanged.
+
+**Reasoning-stop retry sees what it had decided (2026-09-24).** When a round ended inside its thinking block, the thinking-off retry told the model "your reasoning above is preserved" — but `ChatMessage.reasoning` is never sent upstream, so the retry started from nothing and re-derived the decision the budget had cut off. The retry nudge now quotes the last 4000 characters of that reasoning.
+
+**Models started with `--kv-unified` get their whole context window (2026-09-24).** With `--kv-unified`, llama.cpp gives every slot the full `--ctx-size`. Forge still divided it by `n_parallel`, so a 131,072-token model with four slots was treated as a 32,768-token one. Forge compacted chats, trimmed tool results and capped answers at a quarter of the room the server really had, which cost extra rounds and re-reads. The context bar and all of those limits now use the full window when `--kv-unified` (or `-kvu`) is in the model's extra args.
+
+**`/sleep confirm` checks again for running work (2026-09-24).** A `/sleep` sent while Forge was idle could be confirmed after a job or a queued request had started, and the machine went down in the middle of it. The confirmation now refuses if work began in the meantime and keeps the request pending, so you can confirm again once the work ends, or send `/sleep confirm force` to suspend anyway.
+
+- **Delegating to Claude or Codex asks first (2026-09-24).** Since the CLI agents started running with full access, a local model could hand a task to Claude or Codex with `ask_local_agent`, and they would edit files and run commands without any Forge approval, even though writing the same file directly needs a click. Delegating to a CLI agent now shows an approval that names the task and says the agent has full access. Clanker mode approves it like any other write, and unattended jobs keep their existing CLI-agent rule.
+
+- **Replying by voice to a Telegram approval now resolves that approval (2026-09-24).** When more than one approval was open, Forge refused a spoken "approve" and told you to reply to the request directly. A voice reply to the request never matched it, though, and "approve" was taken as an ordinary prompt. Forge now remembers which Telegram messages showed each approval, so a spoken approve or deny sent as a reply to one of them resolves that approval.
+
+- **Saving a chat no longer rescans the archive every time (2026-09-24).** Each session save listed the archived chats by checking every archived file and reading the archive folder. The listing is now cached and only rebuilt when the archive index, the archive folder or the session-log folder changes. With 300 archived chats a listing drops from about 1 ms to 0.02 ms, and more on slower Windows disks.
+
+- **Scheduled agent tasks no longer run twice after a scheduler handover (2026-09-24).** When one VS Code window stalled long enough to lose the jobs lease, the window that took over treated its still-running agent task as crashed only at startup, and otherwise started the same task again beside it. A running task now refreshes a heartbeat every 30 seconds; the scheduler leaves a heartbeating task alone, and reports a task as interrupted only after its heartbeat has been silent for two minutes. That check now runs on every tick, not just at startup, so a window that dies mid-task is reported even when another window takes over later.
+
+### A deleted chat stays deleted (2026-09-24)
+
+- Permanently deleting a chat left its session log in `~/.forge/sessions`.
+  When the archive index was later rebuilt from those logs (after it went
+  missing or was damaged), the deleted chat reappeared in history. Delete
+  now removes the log as well.
+
+### Switching a remote chat to another open window no longer undoes itself (2026-09-24)
+
+- All Forge windows share one remote-state file, but most saves wrote back
+  the window's own copy without re-reading it. The window serving Telegram
+  saves its polling position constantly, so it erased the other window's
+  "I've taken this chat" mark and then rolled the `/new <workspace>` switch
+  back as if nobody had claimed it. Every save now starts from the file on
+  disk.
+
+### A remote chat no longer closes the chat you are viewing (2026-09-24)
+
+- With all open chats in use, a chat started from the phone or by another
+  agent archived the least recently used idle chat, even when that was the
+  one on screen, so the view jumped away (and an unsent draft with it). A
+  background chat now picks another idle chat, or is refused.
+
+### A partial file read is no longer marked as replacing the whole file (2026-09-24)
+
+- After the agent read a whole file, a later read of only some of its lines
+  (lines 51-100, say) was tagged "this replaces your earlier read… that
+  earlier copy is stale; use this one", so the model set aside the rest of
+  the file. Only whole-file re-reads get that note now.
+
+### JSON examples in an answer are shown, not run as tool calls (2026-09-24)
+
+- A ```json block in a model's answer whose JSON had a single top-level key
+  (a tsconfig's `{"compilerOptions": {...}}`, for example) was taken as a
+  text tool call to a tool named after that key. The block vanished from the
+  answer and the agent ran a tool that does not exist. A ```json block now
+  counts as a tool call only when it names one of the chat's tools.
+- An answer ending in `<` lost that last character in the live stream.
+
+### Scheduled jobs: "run now" is not lost while the job is still running (2026-09-24)
+
+- Asking to run a job (from the sidebar or a remote command) while that job's
+  agent task was still running consumed the request and did nothing. The
+  request is now kept until the running task ends, and then the job runs.
+
+### Archived chats survive a damaged archive file (2026-09-24)
+
+- One damaged file in the archived-chats folder (a torn `index.json`, a
+  half-written chat, or a copied file with a space in its name) made every
+  archive read throw. That stopped the sidebar from saving its chats at all
+  once history overflowed, and broke the history list. A damaged index is now
+  moved aside and rebuilt from the chats on disk, and a damaged chat file is
+  skipped and logged.
+
+### Scheduled agent tasks: a deferred run acts on the change it was deferred on (2026-09-24)
+
+- An agent task whose change arrived while every slot was busy ran later with
+  the observation from before the change, and on success saved that old one,
+  so the next check saw the same change again and ran the task a second time.
+  The deferred observation is now kept with the pending task and used by the
+  retry.
+- A job whose model is a CLI agent blocked by `jobs.allow_cli_agents` re-ran
+  its check and logged another "skipped" row on every 30-second tick. It now
+  waits for its next scheduled time, and so does a pending task dropped as too
+  old, which previously pended again on the very next tick.
 
 ## 0.16.48
 

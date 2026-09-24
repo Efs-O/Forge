@@ -99,9 +99,7 @@ export class ConversationTabs {
     if (result.atCap) {
       // Archive first, then persist the updated open set. Load-time dedupe in
       // sessionPersistence keeps the open copy if a crash splits those writes.
-      const archived = opArchiveLeastRecent(sidebar, (conversation) =>
-        this.deps.isConversationEvictable(conversation.id),
-      );
+      const archived = this.archiveLeastRecent(sidebar, options);
       if (archived) {
         const evictedId = sidebar.conversations.find(
           (conversation) => !archived.conversations.some((open) => open.id === conversation.id),
@@ -258,7 +256,7 @@ export class ConversationTabs {
     }
     const result = opDeleteConversation(sidebar, id);
     if (!('ok' in result)) return;
-    this.deps.archivedSessions?.delete(id);
+    this.deps.archivedSessions?.purge(id);
     this.deps.setSidebar(result.sidebar);
     this.deps.failureTracker.reset();
     const nextActive = this.deps
@@ -293,6 +291,22 @@ export class ConversationTabs {
     this.deps.refreshUi();
   }
 
+  /**
+   * Frees a slot at cap. A background open (remote, agent messaging) must not
+   * archive the chat the user is looking at, which may hold an unsent draft.
+   */
+  private archiveLeastRecent(
+    sidebar: SidebarRuntime,
+    options: { activate?: boolean },
+  ): SidebarRuntime | undefined {
+    return opArchiveLeastRecent(
+      sidebar,
+      (conversation) =>
+        !(options.activate === false && conversation.id === sidebar.activeConversationId) &&
+        this.deps.isConversationEvictable(conversation.id),
+    );
+  }
+
   restore(id: string, options: { activate?: boolean } = {}): ConversationRuntime | undefined {
     let sidebar = this.deps.getSidebar();
     if (!sidebar.history.some((item) => item.id === id)) {
@@ -302,9 +316,7 @@ export class ConversationTabs {
     }
     let result = opRestoreConversation(sidebar, id, options);
     if ('atCap' in result && result.atCap) {
-      const archived = opArchiveLeastRecent(sidebar, (conversation) =>
-        this.deps.isConversationEvictable(conversation.id),
-      );
+      const archived = this.archiveLeastRecent(sidebar, options);
       if (archived) {
         const evictedId = sidebar.conversations.find(
           (conversation) => !archived.conversations.some((open) => open.id === conversation.id),

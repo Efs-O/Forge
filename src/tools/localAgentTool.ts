@@ -184,7 +184,7 @@ export function makeLocalAgentTool(
       function: {
         name: 'ask_local_agent',
         description:
-          'Delegate a task to a configured model or CLI agent. This is the COLD-session route: it always starts a NEW, empty session that knows nothing about the current work. Use ask_live_session instead to reach a session that is ALREADY running and already knows the current work — that is the primary door; this is the fallback when no live session exists. Local/cloud targets get only the task and optional context files; CLI targets (claude, codex) run unrestricted with their own tools and can edit files themselves. Use for independent correctness, security, test, or architecture review, or to hand an implementation to a CLI agent. A CLI target is told to keep its reply short and to write any long detail to a file, ending with a `REPORT: <path>` line — read that file yourself rather than asking it to repeat the content. Because it edits the workspace directly, a run that errors or times out may still have done the work: check `git status` before retrying. Requires only the delegate permission.',
+          'Delegate a task to a configured model or CLI agent in a NEW, empty session that knows nothing of the current work (for a session already running, use ask_live_session). Local/cloud targets get only the task and context files; CLI targets (claude, codex) run unrestricted and can edit files. Use for independent review or to hand off an implementation. A CLI target ends with a `REPORT: <path>` line for long detail: read that file. A run that errors or times out may still have edited files: check `git status` before retrying. Requires only the delegate permission.',
         parameters: {
           type: 'object',
           properties: {
@@ -230,13 +230,25 @@ export function makeLocalAgentTool(
     // large GGUF passes every check Forge makes and then thrashes WDDM instead
     // of failing, which is the worst shape a failure can take — silent. The
     // person who knows what is already resident is the user, so ask them. Cloud
-    // and CLI targets take no slot and are not gated.
+    // targets take no slot and are not gated; CLI targets are, for their access.
     approval: (args) => {
       const requested = args['model'];
       if (typeof requested !== 'string') return undefined;
       const target = listEligibleDelegationTargets(getConfig()).find(
         (item) => item.name === requested,
       );
+      // A CLI agent runs with full access and its own tools: none of its edits
+      // or commands pass Forge's approval, so the delegation itself is the gate
+      // (a write_file needs a click; "have codex write it" must too).
+      if (target?.provider === 'cli') {
+        const task = typeof args['task'] === 'string' ? args['task'] : '';
+        return {
+          detail:
+            `Delegate to the "${requested}" CLI agent. It runs with full access to ` +
+            "this machine's files and commands, and Forge cannot approve its " +
+            `individual edits.\n\nTask: ${task.length > 400 ? `${task.slice(0, 400)}…` : task}`,
+        };
+      }
       // An unmatched name is a fuzzy alias/short_name/`model@profile` the
       // handler still resolves. Confirm it: unknown-to-us must not mean ungated.
       if (target && !target.localWeights) return undefined;

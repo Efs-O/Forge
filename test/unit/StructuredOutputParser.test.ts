@@ -101,3 +101,28 @@ describe('XML <function=...> tool calls in content', () => {
     expect(stripStructuredOutputFromFullText(`Searching.\n${text}`)).toBe('Searching.\n\n');
   });
 });
+
+describe('```json blocks limited to known tools', () => {
+  const tools = new Set(['write_file']);
+  const example = 'Use this tsconfig:\n```json\n{"compilerOptions": {"strict": true}}\n```\nDone.';
+
+  it('does not read an ordinary JSON example as a call', () => {
+    expect(parseStructuredOutput(example, tools)).toEqual([]);
+    expect(stripStructuredOutputFromFullText(example, tools)).toBe(example);
+  });
+
+  it('still reads and strips a block that calls a known tool', () => {
+    const call = 'Writing.\n```json\n{"tool": "write_file", "arguments": {"path": "a"}}\n```';
+    expect(parseStructuredOutput(call, tools)).toEqual([
+      { name: 'write_file', arguments: { path: 'a' } },
+    ]);
+    expect(stripStructuredOutputFromFullText(call, tools)).toBe('Writing.\n');
+  });
+});
+
+describe('StructuredOutputStripper.flush', () => {
+  it('returns a held tail that never became a marker', () => {
+    const stripper = new StructuredOutputStripper();
+    expect(stripper.push('use a <') + stripper.flush()).toBe('use a <');
+  });
+});

@@ -100,7 +100,8 @@ export function buildControlChatProxy(
       ...(req.stop !== undefined ? { stop: req.stop } : {}),
       ...(req.tools !== undefined ? { tools: req.tools } : {}),
     };
-    const request = mergeSampling(base, model);
+    // Cloud-only route: chat_template_kwargs is a llama.cpp field that strict APIs reject.
+    const request = mergeSampling(base, model, { allowPreserveThinking: false });
 
     let content = '';
     let reasoning = '';

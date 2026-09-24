@@ -12,6 +12,8 @@ import {
   OUTPUT_BUDGET_EXHAUSTED_NOTICE,
   REASONING_ONLY_STOP_NOTICE,
   REASONING_STOP_RETRY_NUDGE,
+  RETRY_REASONING_TAIL_CHARS,
+  reasoningStopRetryNudge,
 } from '../../src/agent/truncationRecovery';
 
 interface Handlers {
@@ -97,11 +99,22 @@ describe('a round that spends its whole budget thinking', () => {
     expect(result.stoppedWhileReasoning).toBeUndefined();
     expect(streamModelChatCompletion).toHaveBeenCalledTimes(2);
     expect(requests[1]?.chat_template_kwargs?.enable_thinking).toBe(false);
-    expect(messages).toContainEqual({
-      role: 'user',
-      content: REASONING_STOP_RETRY_NUDGE,
-      internal: true,
+    // Reasoning never reaches the wire, so the nudge itself carries it.
+    const nudge = messages.find((m) => m.internal === true);
+    expect(nudge?.role).toBe('user');
+    expect(nudge?.content).toContain(REASONING_STOP_RETRY_NUDGE);
+    expect(nudge?.content).toContain('weighing the options.');
+    expect(requests[1]).toMatchObject({
+      messages: expect.arrayContaining([expect.objectContaining({ content: nudge?.content })]),
     });
+  });
+
+  it('quotes only the tail of a long stopped reasoning into the retry nudge', () => {
+    const reasoning = `${'x'.repeat(RETRY_REASONING_TAIL_CHARS)}DECIDED: edit foo.ts`;
+    const nudge = reasoningStopRetryNudge(reasoning);
+    expect(nudge).toContain('DECIDED: edit foo.ts');
+    expect(nudge.length).toBeLessThan(REASONING_STOP_RETRY_NUDGE.length + RETRY_REASONING_TAIL_CHARS + 100);
+    expect(reasoningStopRetryNudge('  ')).toBe(REASONING_STOP_RETRY_NUDGE);
   });
 
   it('surfaces the stop when the retry also ends inside the thinking block', async () => {

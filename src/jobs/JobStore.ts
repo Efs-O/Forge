@@ -40,6 +40,7 @@ export function defaultState(): JobState {
     task_run: null,
     task_pending: false,
     task_pending_since: null,
+    task_pending_observation: null,
   };
 }
 
@@ -356,9 +357,10 @@ export class JobStore {
    * Consume every pending `run_now` marker, returning the job ids (deduplicated,
    * in the order the markers were written). The markers are deleted as they are
    * consumed, so a job is run at most once per marker. An unreadable or
-   * malformed marker is skipped, not fatal.
+   * malformed marker is skipped, not fatal. A marker for which `keep` returns
+   * true stays on disk for a later tick (its job is still running).
    */
-  async consumeRunRequests(): Promise<string[]> {
+  async consumeRunRequests(keep: (id: string) => boolean = () => false): Promise<string[]> {
     let entries: fs.Dirent[];
     try {
       entries = await fs.promises.readdir(this.runRequests, { withFileTypes: true });
@@ -368,7 +370,7 @@ export class JobStore {
     }
     const ids: string[] = [];
     for (const entry of entries) {
-      if (!entry.isFile() || !entry.name) continue;
+      if (!entry.isFile() || !entry.name || keep(entry.name)) continue;
       // The marker file name is the job id verbatim (requestRun writes it with no
       // extension), so use it directly — job ids may contain a dot, so any
       // extension-stripping would corrupt them.

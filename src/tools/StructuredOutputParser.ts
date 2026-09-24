@@ -58,10 +58,18 @@ const OLLAMA_TOOL_WRAPPER_RE = new RegExp(
 /**
  * Scan `text` for ```json ... ``` blocks and attempt to parse each as a tool call.
  * Returns all valid tool calls found; silently skips malformed blocks.
+ *
+ * `toolNames`, when given, limits ```json blocks to calls of those tools. A
+ * fence is also how a model shows ordinary JSON, and the single-key shorthand
+ * reads `{"compilerOptions": {...}}` as a call to a tool named compilerOptions.
+ * The marker and `<tool_call>` forms are unambiguous and are not limited.
  */
-export function parseStructuredOutput(text: string): ParsedToolCall[] {
+export function parseStructuredOutput(
+  text: string,
+  toolNames?: ReadonlySet<string>,
+): ParsedToolCall[] {
   const results: ParsedToolCall[] = [];
-  collectJsonFenceToolCalls(text, results);
+  collectJsonFenceToolCalls(text, results, toolNames);
   collectOllamaMarkerToolCalls(text, results);
   collectHermesToolCalls(text, results);
   return results;
@@ -83,9 +91,11 @@ export class StructuredOutputStripper {
     return this.consume(processed);
   }
 
+  /** The held tail was only the start of a marker if more text followed; it is text. */
   flush(): string {
+    const tail = this.hiddenDepth === 0 ? this.carry : '';
     this.carry = '';
-    return '';
+    return tail;
   }
 
   private consume(content: string): string {
@@ -116,20 +126,35 @@ export class StructuredOutputStripper {
   }
 }
 
-export function stripStructuredOutputFromFullText(text: string): string {
+/** `toolNames` as for parseStructuredOutput: a ```json block that is not a call stays visible. */
+export function stripStructuredOutputFromFullText(
+  text: string,
+  toolNames?: ReadonlySet<string>,
+): string {
   const withoutMarkers = text.replace(OLLAMA_TOOL_CALL_RE, '').replace(OLLAMA_TOOL_WRAPPER_RE, '');
 
+  const isFenceCall = (match: string, body: string): string =>
+    fenceCall(body, toolNames) ? '' : match;
   const isCall = (match: string, body: string): string =>
     (parseJsonToolObject(body.trim()) ?? parseXmlFunction(body)) ? '' : match;
-  return withoutMarkers.replace(JSON_FENCE_RE, isCall).replace(HERMES_TOOL_CALL_RE, isCall);
+  return withoutMarkers.replace(JSON_FENCE_RE, isFenceCall).replace(HERMES_TOOL_CALL_RE, isCall);
 }
 
-function collectJsonFenceToolCalls(text: string, results: ParsedToolCall[]): void {
+function fenceCall(body: string, toolNames?: ReadonlySet<string>): ParsedToolCall | null {
+  const candidate = parseJsonToolObject(body.trim());
+  return candidate && (!toolNames || toolNames.has(candidate.name)) ? candidate : null;
+}
+
+function collectJsonFenceToolCalls(
+  text: string,
+  results: ParsedToolCall[],
+  toolNames?: ReadonlySet<string>,
+): void {
   let match: RegExpExecArray | null;
   JSON_FENCE_RE.lastIndex = 0;
 
   while ((match = JSON_FENCE_RE.exec(text)) !== null) {
-    const candidate = parseJsonToolObject(match[1].trim());
+    const candidate = fenceCall(match[1], toolNames);
     if (candidate) {
       results.push(candidate);
     }

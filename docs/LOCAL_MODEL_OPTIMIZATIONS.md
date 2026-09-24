@@ -121,6 +121,10 @@ are assembled root-to-leaf with a single total byte budget — see
 conversation actually gets is `num_ctx / n_parallel`, which `perSlotContext()`
 owns. Reading `num_ctx` alone over-reports every multi-slot model.
 
+The exception is `--kv-unified` in the model's extra args: the slots share one
+KV buffer and llama.cpp gives every sequence the full `--ctx-size`, so the
+window is `num_ctx`, not a quarter of it.
+
 Two consequences worth stating because both were once bugs: the reasoning
 reserve is **not** subtracted from the `max_tokens` sent (that would shrink the
 answer twice — the reserve only decides whether a large write will be tight),

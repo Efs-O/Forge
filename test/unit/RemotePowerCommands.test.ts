@@ -1,9 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
-import {
-  handleRemotePowerCommand,
-  resetPendingSleeps,
-} from '../../src/remote/RemotePowerCommands';
+import { handleRemotePowerCommand, resetPendingSleeps } from '../../src/remote/RemotePowerCommands';
 import type { PowerControl } from '../../src/system/PowerControl';
 import type { WakeInfo } from '../../src/system/wakeInfo';
 import type { ForgeHostFacade, ForgeHostStatus } from '../../src/sidebar/ForgeHostFacade';
@@ -105,6 +102,24 @@ describe('/sleep', () => {
     expect(h.suspended).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(8_000);
     expect(h.suspended).toEqual([{ hibernate: false }]);
+  });
+
+  it('re-checks for work that started between /sleep and the confirmation', async () => {
+    vi.useFakeTimers();
+    let status = IDLE;
+    const h = context();
+    (h.ctx as { host: ForgeHostFacade }).host = {
+      status: () => status,
+    } as unknown as ForgeHostFacade;
+    await run(h, '/sleep');
+    status = { ...IDLE, streamingConversationIds: ['job'] };
+    expect(await run(h, '/sleep confirm')).toMatchObject({ kind: 'rejected' });
+    await vi.advanceTimersByTimeAsync(8_000);
+    expect(h.suspended).toHaveLength(0);
+    // Still pending, and a forced confirm goes through.
+    await run(h, '/sleep confirm force');
+    await vi.advanceTimersByTimeAsync(8_000);
+    expect(h.suspended).toHaveLength(1);
   });
 
   it('refuses a confirmation with nothing pending', async () => {

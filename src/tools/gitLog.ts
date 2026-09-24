@@ -1,5 +1,5 @@
 /**
- * `git log` argument construction and output framing.
+ * `git log` (and `git show`) argument construction, and log output framing.
  *
  * `git_log` used to go through the VS Code Git extension's `repo.log()`, which
  * meant the tool did nothing at all in a workspace where that extension was
@@ -52,6 +52,21 @@ export function gitLogArgs(maxEntries: number, ref?: string): string[] {
   // filename would be read as a pathspec and silently log the wrong thing.
   args.push('--');
   return args;
+}
+
+/**
+ * `git show <ref>` arguments. The model supplies `ref`, and `git_show` runs
+ * unconfirmed as a read, so a ref git would parse as an option must never reach
+ * it: `--output=<file>` makes `git show` write the diff to any path it names.
+ */
+export function gitShowArgs(ref: unknown): string[] {
+  if (typeof ref !== 'string' || ref.trim() === '' || /[\0\n\r]/.test(ref)) {
+    throw new Error('git_show: ref must be a non-empty ref without control characters');
+  }
+  if (ref.startsWith('-')) {
+    throw new Error(`git_show: ref "${ref}" is not a valid ref (it looks like an option)`);
+  }
+  return ['show', ref];
 }
 
 function parseGitLog(stdout: string): GitLogEntry[] {

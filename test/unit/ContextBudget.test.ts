@@ -28,6 +28,18 @@ describe('perSlotContext', () => {
     expect(perSlotContext(model, { default_num_ctx: 65536, n_parallel: 2 } as never)).toBe(32768);
   });
 
+  it('gives every slot the whole window under --kv-unified, last flag winning', () => {
+    const args = (extra: string[]) =>
+      ({
+        name: 'm',
+        num_ctx: 131072,
+        spawn: { n_parallel: 4, extra_llama_server_args: extra },
+      }) as ModelConfig;
+    expect(perSlotContext(args(['--kv-unified']))).toBe(131072);
+    expect(perSlotContext(args(['-kvu', '--checkpoint-min-step', '1024']))).toBe(131072);
+    expect(perSlotContext(args(['--kv-unified', '--no-kv-unified']))).toBe(32768);
+  });
+
   it('reports 0 for a model with no configured window', () => {
     expect(perSlotContext({ name: 'gpt', provider: 'openai' } as ModelConfig)).toBe(0);
   });

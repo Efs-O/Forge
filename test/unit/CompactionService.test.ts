@@ -850,6 +850,26 @@ describe('runCompaction', () => {
     expect(c.compaction?.fromIndex).toBeLessThan(c.messages.length);
     expect(c.compaction?.lastReply).toBeUndefined();
   });
+
+  it('counts tool calls in the retained tail as running after the last reply', async () => {
+    const c = conv([
+      { role: 'user', content: 'first task' },
+      { role: 'assistant', content: 'Done with the first task.' },
+      { role: 'user', content: 'second task' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [{ id: 't1', type: 'function', function: { name: 'read_file', arguments: '{}' } }],
+      },
+      { role: 'tool', tool_call_id: 't1', content: 'file text' },
+    ]);
+    const h = harness(c, async () => long('summary'));
+
+    await expect(runCompaction(h.deps, c.id, { auto: true })).resolves.toBe('compacted');
+    expect(c.compaction?.fromIndex).toBe(2);
+    expect(c.compaction?.lastReply).toBe('Done with the first task.');
+    expect(c.compaction?.lastReplyFollowedByTools).toBe(true);
+  });
 });
 
 describe('compaction fit guard', () => {

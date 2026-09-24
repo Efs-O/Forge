@@ -149,7 +149,8 @@ const SCRIPT_LAUNCHERS = ['bash', 'sh', 'zsh', 'dash', 'cmd', 'cmd.exe', 'busybo
 const SCRIPT_FLAGS = ['-c', '/c'];
 
 export function checkPowerShellBan(command: string, args: string[]): void {
-  const cmd = command.toLowerCase();
+  // By basename: `/bin/bash` and a full `...\System32\cmd.exe` path are the same launchers.
+  const cmd = (command.split(/[\\/]/).pop() ?? command).toLowerCase();
   if (
     SCRIPT_LAUNCHERS.includes(cmd) &&
     args.some((arg) => SCRIPT_FLAGS.includes(arg.toLowerCase()))
@@ -215,12 +216,13 @@ export function stripAnsi(s: string): string {
 
 // ── Output formatter ───────────────────────────────────────────────────────────
 
+/** `run_tests` / `run_build` output: each stream bounded, keeping its end (see `storedStream`). */
 export function formatOutput(result: SpawnResult): string {
   // Strip ANSI BEFORE slicing: codes inflate the char count and a mid-escape
   // slice would leave dangling garbage.
-  let out = stripAnsi(result.stdout).slice(0, MAX_OUTPUT_CHARS);
+  let out = storedStream(result.stdout, MAX_OUTPUT_CHARS).text;
   if (result.stderr) {
-    out += `\n[stderr]\n${stripAnsi(result.stderr).slice(0, MAX_OUTPUT_CHARS)}`;
+    out += `\n[stderr]\n${storedStream(result.stderr, MAX_OUTPUT_CHARS).text}`;
   }
   out += `\n[exit code: ${result.exitCode ?? 'null'}]`;
   return out;
@@ -246,18 +248,31 @@ function filterExecOutput(
   return { text: clipped, truncated: shaped.length > limit || selected.length < lines.length };
 }
 
+/** Share of an over-long stream kept from its start; the rest comes from its end. */
+const STORED_HEAD_SHARE = 0.25;
+
 /**
  * The returned copy of one stream: the full output, capped at `limit`.
  *
  * `limit` is the caller's `max_output_chars` when it gave one, otherwise the
- * retention bound. Everything past it is dropped and unrecoverable — it is
- * never stored anywhere — so the note says so rather than implying the rest
- * can be paged back.
+ * retention bound. An over-long stream keeps its first quarter and its end,
+ * with a marker where the middle was: a build or test run puts the failure
+ * and the summary last, so a head-only cut returned the progress lines and
+ * dropped the one part the model needed — which cost a re-run with
+ * `tail_lines`. The dropped middle is unrecoverable — it is never stored
+ * anywhere — so the note says so rather than implying it can be paged back.
  */
 function storedStream(text: string, limit: number): { text: string; dropped: number } {
   const normalized = stripAnsi(text);
   if (normalized.length <= limit) return { text: normalized, dropped: 0 };
-  return { text: normalized.slice(0, limit), dropped: normalized.length - limit };
+  const head = Math.floor(limit * STORED_HEAD_SHARE);
+  const marker = `\n[… ${String(normalized.length - limit)} characters dropped …]\n`;
+  const tail = limit - head - marker.length;
+  if (tail < head) return { text: normalized.slice(0, limit), dropped: normalized.length - limit };
+  return {
+    text: normalized.slice(0, head) + marker + normalized.slice(-tail),
+    dropped: normalized.length - limit,
+  };
 }
 
 /** The note attached to a stream cut by the returned-character bound. */
@@ -266,7 +281,7 @@ function dropNote(dropped: number, limit: number, explicit: boolean): string {
     ? `the max_output_chars value you passed (${String(limit)})`
     : `the ${String(limit)}-char default bound`;
   return (
-    `${String(dropped)} characters past ${bound} were dropped and cannot be recovered. ` +
+    `${String(dropped)} characters from the middle, past ${bound}, were dropped and cannot be recovered. ` +
     `Re-run with head_lines or tail_lines to select the part you need, or redirect the ` +
     `command's output to a file and read it.`
   );
