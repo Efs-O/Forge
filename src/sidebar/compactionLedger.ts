@@ -247,7 +247,26 @@ function commandLabel(tool: string, args: Record<string, unknown>): string {
   return truncate(`${tool}${operation}`, 120);
 }
 
+/**
+ * `exec_command` and `query_powershell` answer with `formatExecCommandOutput`'s
+ * JSON object, which carries `exitCode` as a field rather than the bracketed
+ * suffix. Reading only the suffix recorded every one of them as "no exit code".
+ */
+function structuredExec(result: string): { exit: string; text: string } | undefined {
+  if (!result.trimStart().startsWith('{')) return undefined;
+  const parsed = parseArgs(result);
+  if (!parsed || !('exitCode' in parsed)) return undefined;
+  const code = parsed['exitCode'];
+  if (code !== null && !Number.isInteger(code)) return undefined;
+  const streams = ['stdout', 'stderr']
+    .map((key) => parsed[key])
+    .filter((value): value is string => typeof value === 'string');
+  return { exit: code === null ? 'null' : String(code), text: streams.join('\n') };
+}
+
 function lastExitCode(result: string): string | undefined {
+  const structured = structuredExec(result);
+  if (structured) return structured.exit;
   EXIT_CODE.lastIndex = 0;
   let match: RegExpExecArray | null;
   let last: string | undefined;
@@ -375,7 +394,7 @@ function commandAction(
     };
   }
   if (exit === '0') {
-    const evidence = commandEvidence(result);
+    const evidence = commandEvidence(structuredExec(result)?.text ?? result);
     return {
       kind: 'command',
       key,

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+**Compaction records `exec_command` outcomes again (2026-09-24).** `exec_command` and `query_powershell` answer with a JSON object carrying `exitCode`, but the compaction ledger only read the older `[exit code: N]` suffix, so every such command was recorded as "outcome unknown (no exit code)" and a resumed agent had no trusted record of what it had run — the kind of gap that sends it to re-run a build or a download. The ledger now reads the structured exit code and takes its output evidence from the command's stdout and stderr.
+
 **Compaction no longer says no tool ran after your last reply when one did (2026-09-24).** When the retained tail was a tool run with no text of its own, the carried-over last reply was labelled as followed by no tool activity, contradicting the tail shown right after it. The tail now counts.
 
 **Non-ASCII output no longer turns into `�` (2026-09-24).** Output from child processes, and control-API request bodies, were decoded chunk by chunk, so a multi-byte character split across two chunks came out as U+FFFD. That affected Greek or accented text, CJK, and a test runner's `✓`. The fix covers `exec_command`, whisper-cli voice-note transcripts, the control HTTP API's JSON bodies, and CLI-agent stderr: output is now decoded as a stream, and request bodies as whole bytes.

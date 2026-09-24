@@ -10,6 +10,7 @@ import {
   renderRecordedActionsBlock,
 } from '../../src/sidebar/compactionLedger';
 import { TOOL_INTERRUPTED_RESULT } from '../../src/sidebar/sessionPersistence';
+import { formatExecCommandOutput } from '../../src/tools/execHelpers';
 import type { ChatMessage } from '../../src/llm/types';
 
 function call(id: string, name: string, args: Record<string, unknown>): ChatMessage {
@@ -139,6 +140,30 @@ describe('collectCommandActions', () => {
         line: '- ran `npm run ci` → exit 0',
       },
     ]);
+  });
+
+  it('reads the exit code from exec_command’s structured result', () => {
+    const ok = formatExecCommandOutput('npm', {
+      stdout: 'Downloaded model.bin\nSaved to /models/model.bin',
+      stderr: '',
+      exitCode: 0,
+    });
+    const failed = formatExecCommandOutput('npm', { stdout: '', stderr: 'boom', exitCode: 2 });
+    const killed = formatExecCommandOutput('npm', { stdout: '', stderr: '', exitCode: null });
+    const actions = collectCommandActions([
+      call('a', 'exec_command', { command: 'npm', args: ['ci'] }),
+      result('a', ok),
+      call('b', 'exec_command', { command: 'npm', args: ['test'] }),
+      result('b', failed),
+      call('c', 'query_powershell', { operation: 'list' }),
+      result('c', killed),
+    ]);
+    expect(actions.map((action) => action.outcome)).toEqual(['ok', 'failed', 'unknown']);
+    expect(actions[0]?.line).toBe(
+      '- ran `npm ci` → exit 0; output evidence: Downloaded model.bin | Saved to /models/model.bin',
+    );
+    expect(actions[1]?.line).toBe('- ran `npm test` → exit 2 (FAILED)');
+    expect(actions[2]?.line).toContain('did not complete (exit null)');
   });
 
   it('pins concrete download evidence from a successful command', () => {
