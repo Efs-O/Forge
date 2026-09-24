@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### JSON examples in an answer are shown, not run as tool calls (2026-09-24)
+
+- A ```json block in a model's answer whose JSON had a single top-level key
+  (a tsconfig's `{"compilerOptions": {...}}`, for example) was taken as a
+  text tool call to a tool named after that key. The block vanished from the
+  answer and the agent ran a tool that does not exist. A ```json block now
+  counts as a tool call only when it names one of the chat's tools.
+
 ### Scheduled jobs: "run now" is not lost while the job is still running (2026-09-24)
 
 - Asking to run a job (from the sidebar or a remote command) while that job's

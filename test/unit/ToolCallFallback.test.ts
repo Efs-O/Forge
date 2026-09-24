@@ -92,4 +92,15 @@ describe('extractFallbackToolCalls', () => {
       max_results: 20,
     });
   });
+
+  it('ignores a JSON example that names no defined tool', () => {
+    const definitions = [
+      {
+        type: 'function' as const,
+        function: { name: 'read_file', description: '', parameters: { type: 'object' } },
+      },
+    ];
+    const text = '```json\n{"compilerOptions": {"strict": true}}\n```';
+    expect(extractFallbackToolCalls(text, definitions)).toBeNull();
+  });
 });

@@ -5,9 +5,13 @@ import { stripThinkingFromFullText } from '../llm/ThinkingChannelStripper';
 import { stripStructuredOutputFromFullText } from '../tools/StructuredOutputParser';
 import type { ToolCallingLoopOptions } from './ToolCallingLoop';
 
-export function sanitizeText(text: string, stripThinking: boolean): string {
+export function sanitizeText(
+  text: string,
+  stripThinking: boolean,
+  toolNames?: ReadonlySet<string>,
+): string {
   const withoutThinking = stripThinking ? stripThinkingFromFullText(text) : text;
-  const withoutStructured = stripStructuredOutputFromFullText(withoutThinking);
+  const withoutStructured = stripStructuredOutputFromFullText(withoutThinking, toolNames);
   return stripHtmlDocumentBoilerplateFromFullText(withoutStructured);
 }
 

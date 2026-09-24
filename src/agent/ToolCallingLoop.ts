@@ -293,10 +293,13 @@ export async function runToolCallingLoop(
     const trailing = thinking ? thinking.push(trailingHtml) : trailingHtml;
     if (trailing) options.onToken?.(trailing);
 
-    const assistantContent = sanitizeText(rawAssistant, options.stripThinkingChannels ?? false);
+    // Only a ```json block naming a real tool is a call; any other is shown.
+    const toolNames = new Set(toolDefinitions.map((d) => d.function.name));
+    const strip = options.stripThinkingChannels ?? false;
+    const assistantContent = sanitizeText(rawAssistant, strip, toolNames);
     const assistantReasoning = options.stripThinkingChannels
       ? ''
-      : sanitizeText(rawReasoning, false);
+      : sanitizeText(rawReasoning, false, toolNames);
     const calls = streamed.toolCalls?.length
       ? streamed.toolCalls
       : toolDefinitions.length > 0 && rawAssistant

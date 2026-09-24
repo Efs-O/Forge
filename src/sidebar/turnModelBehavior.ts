@@ -26,9 +26,13 @@ export function shouldStripThinking(model: ModelConfig | undefined, config: Forg
 }
 
 /** Strips everything the user should never see from a completed response. */
-export function sanitizeText(text: string, stripThinking: boolean): string {
+export function sanitizeText(
+  text: string,
+  stripThinking: boolean,
+  toolNames?: ReadonlySet<string>,
+): string {
   const withoutThinking = stripThinking ? stripThinkingFromFullText(text) : text;
-  const withoutStructured = stripStructuredOutputFromFullText(withoutThinking);
+  const withoutStructured = stripStructuredOutputFromFullText(withoutThinking, toolNames);
   return stripHtmlDocumentBoilerplateFromFullText(withoutStructured);
 }
 
