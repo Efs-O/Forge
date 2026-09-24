@@ -23,8 +23,17 @@ export interface ChatMessage {
   role: Role;
   /** May be null on assistant messages that carry tool_calls without text. */
   content: string | ContentPart[] | null;
-  /** Optional reasoning/thinking text shown in the sidebar but never sent back to the model. */
+  /**
+   * Reasoning/thinking text shown in the sidebar. Not sent back to the model
+   * except as `reasoning_content` under `preserve_thinking` (see preserveThinking.ts).
+   */
   reasoning?: string;
+  /**
+   * Wire-only copy of `reasoning`, set on a model-facing copy for the current
+   * task's assistant turns when a llama.cpp model has `preserve_thinking: true`.
+   * Never set on the stored transcript.
+   */
+  reasoning_content?: string;
   /**
    * How long the reasoning stream ran, and how long a tool call took. Measured
    * by the host, which is the only side that sees both ends: the webview's own

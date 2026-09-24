@@ -195,7 +195,10 @@ also preserved it; `preserve_thinking: false` removed it. Therefore this live
 Qwen template does not reproduce the plan's warning that the default drops the
 reasoning, and the message shape is viable. Forge already carries this kwarg
 through `SamplingMerge` when configured, and `RequestNormalizer` forwards it
-for llama.cpp; the running template's default is currently sufficient.
+for llama.cpp. Note that the probe hand-built `reasoning_content`: until
+0.16.52 Forge never sent it, so the kwarg alone preserved nothing. Since
+0.16.52 a `preserve_thinking: true` llama.cpp model gets the current task's
+reasoning back (`src/agent/preserveThinking.ts`).
 
 **Phase 1: host inbox and loop hook, sidebar.**
 

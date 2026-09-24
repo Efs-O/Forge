@@ -77,6 +77,7 @@ function toWireMessage(message: ChatMessage): ChatMessage {
   if (message.tool_call_id !== undefined) wire.tool_call_id = message.tool_call_id;
   if (message.name !== undefined) wire.name = message.name;
   if (message.tool_calls !== undefined) wire.tool_calls = message.tool_calls;
+  if (message.reasoning_content !== undefined) wire.reasoning_content = message.reasoning_content;
   return wire;
 }
 

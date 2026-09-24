@@ -1,6 +1,7 @@
 import type { ChatMessage } from '../llm/types';
 import { CHARS_PER_TOKEN, computeContextBudget, minimumOutputReserve } from '../util/contextBudget';
 import type { LlamaServerConfig, ModelConfig } from '../config/types';
+import { dropOldestReasoning } from './preserveThinking';
 
 /**
  * Normal upper bound for a tool result retained verbatim in a tight prompt.
@@ -69,16 +70,25 @@ export function prepareToolResultContext(input: {
   // makes a long-thinking round unable to finish by construction — see
   // `minimumOutputReserve`.
   const responseReserve = input.responseReserve ?? minimumOutputReserve(input.model);
-  const initial = computeContextBudget({
-    messages: input.messages,
-    toolTokens: input.toolTokens,
-    model: input.model,
-    server: input.server,
-  });
-  const inputBudget = Math.max(0, initial.max - responseReserve);
+  const estimate = (messages: ChatMessage[]) =>
+    computeContextBudget({
+      messages,
+      toolTokens: input.toolTokens,
+      model: input.model,
+      server: input.server,
+    });
+  const first = estimate(input.messages);
+  const inputBudget = Math.max(0, first.max - responseReserve);
+  // Preserved thinking goes first, oldest turn first, before any tool result
+  // is cut. A no-op when nothing carries `reasoning_content`.
+  const trimmed =
+    first.max > 0 && first.used > inputBudget
+      ? dropOldestReasoning(input.messages, (m) => estimate(m).used <= inputBudget)
+      : input.messages;
+  const initial = trimmed === input.messages ? first : estimate(trimmed);
   if (initial.max <= 0 || initial.used <= inputBudget) {
     return {
-      messages: input.messages,
+      messages: trimmed,
       used: initial.used,
       inputBudget,
       fits: initial.max <= 0 || initial.used <= inputBudget,
@@ -86,7 +96,7 @@ export function prepareToolResultContext(input: {
     };
   }
 
-  const messages = [...input.messages];
+  const messages = [...trimmed];
   const candidates = messages
     .map((message, index) => ({ message, index, text: textContent(message) }))
     .filter(
@@ -113,12 +123,7 @@ export function prepareToolResultContext(input: {
       content: excerpt(candidate.text, candidate.message.tool_call_id as string, targetChars),
     };
     excerptedToolCallIds.push(candidate.message.tool_call_id as string);
-    used = computeContextBudget({
-      messages,
-      toolTokens: input.toolTokens,
-      model: input.model,
-      server: input.server,
-    }).used;
+    used = estimate(messages).used;
   }
 
   return { messages, used, inputBudget, fits: used <= inputBudget, excerptedToolCallIds };

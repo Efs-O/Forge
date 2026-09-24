@@ -110,12 +110,12 @@ export function estimateTokens(messages: ChatMessage[]): number {
     } else if (m.content === null && m.tool_calls?.length) {
       chars += JSON.stringify(m.tool_calls).length;
     }
-    // `reasoning` is deliberately NOT counted. It is retained on the message for
-    // the sidebar's thinking pane, but `ChatMessage.reasoning` is never sent
-    // back to the model, so it occupies no prompt tokens. Counting it inflated
-    // the bar by the whole turn's thinking — and ToolCallingLoop attaches
-    // reasoning to EVERY tool-call round, so on an agentic turn under
-    // `--reasoning-budget 6144` that was thousands of phantom tokens per round.
+    // `reasoning` is deliberately NOT counted: it is kept on the message for the
+    // sidebar's thinking pane and is not what gets sent. Counting it inflated
+    // the estimate by the whole turn's thinking, since ToolCallingLoop attaches
+    // reasoning to EVERY tool-call round. What IS sent under preserve_thinking
+    // is `reasoning_content`, set only on the model-facing copy, so that counts.
+    if (m.reasoning_content) chars += m.reasoning_content.length;
     const rate = m.role === 'tool' ? TOOL_RESULT_CHARS_PER_TOKEN : CHARS_PER_TOKEN;
     return sum + Math.ceil(chars / rate);
   }, 0);

@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.16.52
+
+**`preserve_thinking` now sends the thinking back (2026-09-24).** The flag only set the chat-template kwarg; Forge itself never put reasoning on the wire, so the template had nothing to keep. Every tool round the prompt therefore diverged where the previous round's `<think>` block had been, and on a hybrid model like Qwen3.8 llama-server logged "restored context checkpoint" and re-processed everything after it. The model also lost the reasoning behind the call it had just made. A llama.cpp model with `sampling.preserve_thinking: true` now gets `reasoning_content` on its assistant turns since the last message the user typed (mid-turn messages and Forge's own nudges do not end the task), sent unmodified so the prefix matches the KV cache. Earlier tasks' thinking stays out, and cloud providers never get it. The prompt estimate counts what is sent, and when the prompt would not fit, the oldest thinking is dropped before any tool result is excerpted. Set the flag to `false` to get the old behaviour.
+
 ## 0.16.51
 
 **Tool descriptions trimmed by ~3.6k chars (2026-09-24).** The longest descriptions (`wait`, `ask_local_agent`, `ask_live_session`, `ask_user`, `notify_user`, `show_notification`, `install_llamacpp`, `query_powershell`, and the `read_file` `numbered` and `exec_command` `env`/`max_output_chars` parameters) repeated guidance or cross-explained each other. They now say it once. The maximal schema drops from 56,179 to 52,550 chars, roughly 1.2k tokens off every request. `query_powershell` (which spawns powershell.exe) and `install_llamacpp` (which refuses to run off Windows) are now advertised on Windows only, saving another ~2k chars on other platforms.
