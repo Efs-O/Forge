@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Replying by voice to a Telegram approval now resolves that approval (2026-09-24).** When more than one approval was open, Forge refused a spoken "approve" and told you to reply to the request directly. A voice reply to the request never matched it, though, and "approve" was taken as an ordinary prompt. Forge now remembers which Telegram messages showed each approval, so a spoken approve or deny sent as a reply to one of them resolves that approval.
+
 - **Saving a chat no longer rescans the archive every time (2026-09-24).** Each session save listed the archived chats by checking every archived file and reading the archive folder. The listing is now cached and only rebuilt when the archive index, the archive folder or the session-log folder changes. With 300 archived chats a listing drops from about 1 ms to 0.02 ms, and more on slower Windows disks.
 
 - **Scheduled agent tasks no longer run twice after a scheduler handover (2026-09-24).** When one VS Code window stalled long enough to lose the jobs lease, the window that took over treated its still-running agent task as crashed only at startup, and otherwise started the same task again beside it. A running task now refreshes a heartbeat every 30 seconds; the scheduler leaves a heartbeating task alone, and reports a task as interrupted only after its heartbeat has been silent for two minutes. That check now runs on every tick, not just at startup, so a window that dies mid-task is reported even when another window takes over later.

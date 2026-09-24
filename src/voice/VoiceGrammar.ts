@@ -69,6 +69,8 @@ export interface PendingGate {
   readonly openedAt: number;
   /** Set once resolved, so a gate that closed mid-recording is detectable. */
   readonly resolvedAt?: number;
+  /** The transport messages that showed this gate, so a reply to one names it. */
+  readonly messageIds?: readonly string[];
 }
 
 export type CorrelationResult =
@@ -111,18 +113,22 @@ export function recordingWindow(sentAtMs: number, durationMs: number): Recording
  * window and is still unresolved. Anything ambiguous refuses and asks for a
  * reply or a tap, which is where strictness belongs.
  *
- * @param replyToGateId An explicit reply always wins over the timing heuristic.
+ * @param replyTo An explicit reply always wins over the timing heuristic. It is
+ *   the transport message id the voice note replied to, matched against the
+ *   messages that showed each gate (or the gate id itself).
  */
 export function correlateGate(
   gates: readonly PendingGate[],
   chatId: string,
   window: RecordingWindow,
-  replyToGateId?: string,
+  replyTo?: string,
 ): CorrelationResult {
   const mine = gates.filter((gate) => gate.chatId === chatId);
-  if (replyToGateId) {
+  if (replyTo) {
     const explicit = mine.find(
-      (gate) => gate.id === replyToGateId && gate.resolvedAt === undefined,
+      (gate) =>
+        (gate.id === replyTo || gate.messageIds?.includes(replyTo)) &&
+        gate.resolvedAt === undefined,
     );
     return explicit ? { kind: 'resolve', gate: explicit } : { kind: 'refuse', reason: 'none-open' };
   }

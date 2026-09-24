@@ -15,6 +15,8 @@ interface RemoteApprovalEntry {
   nonce?: string;
   actionId?: string;
   resolving?: boolean;
+  /** The messages that showed the gate; a voice reply to one resolves it. */
+  messageIds?: string[];
   /** When the gate opened. Half of the §22A R1 recording-window rule. */
   openedAt: number;
 }
@@ -114,7 +116,12 @@ export class RemoteApprovalBridge {
     );
     const open = [...this.approvals.entries()]
       .filter(([, approval]) => approval.chatId === chatId && !approval.resolving)
-      .map(([id, approval]) => ({ id, chatId: approval.chatId, openedAt: approval.openedAt }));
+      .map(([id, approval]) => ({
+        id,
+        chatId: approval.chatId,
+        openedAt: approval.openedAt,
+        ...(approval.messageIds ? { messageIds: approval.messageIds } : {}),
+      }));
     const closed = this.resolvedGates
       .filter((gate) => gate.chatId === chatId)
       .map((gate) => ({ ...gate }));
@@ -203,7 +210,7 @@ export class RemoteApprovalBridge {
     pending.actionId = newActionId();
     const danger = pending.event.dangerous ? ' DANGEROUS' : '';
     try {
-      await this.channel.send(
+      const sent = await this.channel.send(
         pending.chatId,
         `Forge approval${danger}: ${pending.event.toolName}\n${pending.event.detail}`.slice(
           0,
@@ -211,6 +218,8 @@ export class RemoteApprovalBridge {
         ),
         { correlationId: pending.actionId, signal: this.signal },
       );
+      // A republish shows the gate again; a reply to either message names it.
+      if (sent) pending.messageIds = [...(pending.messageIds ?? []), ...sent];
     } catch (err) {
       this.onError?.(
         `Forge remote approval delivery failed: ${err instanceof Error ? err.message : String(err)}`,
