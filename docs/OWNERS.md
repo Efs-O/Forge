@@ -25,6 +25,7 @@ overlaps with an existing owner, extend the owner instead.
 | Ctx bar, HalluMeter bridge, thresholds               | `src/sidebar/ContextBudgetPublisher.ts`  |
 | Chat create/switch/close/restore, auto-archive, VRAM | `src/sidebar/ConversationTabs.ts`        |
 | Hidden conversation notifications                    | `src/sidebar/hiddenChatAlerts.ts`        |
+| Background process exit notice text                  | `src/sidebar/backgroundExitNotice.ts`    |
 | Send guards, model resolution, turn logs             | `src/sidebar/SendPipeline.ts`            |
 | /reindex progress interaction                        | `src/sidebar/reindexCommand.ts`          |
 | Primary turn + streaming lifecycle                   | `src/sidebar/AgentLoop.ts`               |

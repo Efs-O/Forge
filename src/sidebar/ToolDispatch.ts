@@ -119,6 +119,7 @@ export class ToolDispatch {
     recordFileDiff?: (diff: RecordedFileDiff) => void,
     unavailableTools?: ReadonlyMap<string, string>,
     setPlan?: (items: PlanItem[]) => void,
+    tellArrived?: (callback: () => void) => () => void,
   ): Promise<void> {
     for (const tc of toolCalls) {
       // Every exit from this iteration pushes exactly one tool message, so the
@@ -215,6 +216,7 @@ export class ToolDispatch {
           ...(convId !== undefined ? { conversationId: convId } : {}),
           conversationMessages: messages,
           ...(setPlan !== undefined ? { setPlan } : {}),
+          ...(tellArrived !== undefined ? { tellArrived } : {}),
         });
 
         if (reg.mutation) {

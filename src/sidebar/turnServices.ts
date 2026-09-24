@@ -61,6 +61,8 @@ export interface TurnServices {
   compactMidTurn?: (conv: ConversationRuntime, request: { exhausted: boolean }) => Promise<boolean>;
   /** Claims text tells (and queued remote requests) at the next safe tool-round gap. */
   drainTells?: (conversationId: string) => Promise<MidTurnDrainResult>;
+  /** Calls back when a tell reaches this conversation's inbox; returns an unsubscribe. */
+  onTellArrived?: (conversationId: string, callback: () => void) => () => void;
   commitUserPrompt: (
     conv: ConversationRuntime,
     text: string,
@@ -105,3 +107,6 @@ export function makeRunModelTurn(
       checkpoint,
     });
 }
+
+/** The mid-turn tell hooks, registered after construction as one pair. */
+export type MidTurnTellServices = Required<Pick<TurnServices, 'drainTells' | 'onTellArrived'>>;

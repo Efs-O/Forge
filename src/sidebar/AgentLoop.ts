@@ -22,7 +22,7 @@ import { ToolDispatch, type OpenFileOptions } from './ToolDispatch';
 import { TurnLifecycle } from './TurnLifecycle';
 import { runCliTurn } from './CliTurn';
 import { runModelTurn } from './ModelTurn';
-import type { TurnServices } from './turnServices';
+import type { MidTurnTellServices, TurnServices } from './turnServices';
 import { makeRunModelTurn } from './turnServices';
 import { runPromptToMarkdown, type PromptRunOptions } from './PromptRun';
 import { runCloudProviderTurn, runLocalProviderTurn } from './ProviderTurn';
@@ -66,7 +66,7 @@ export class AgentLoop {
   private remoteReach?: (conversationId: string) => number;
   private onContextChanged?: (convId: string) => void;
   private midTurnCompactor?: TurnServices['compactMidTurn'];
-  private midTurnTellDrainer?: TurnServices['drainTells'];
+  private midTurnTells?: MidTurnTellServices;
   private onTranscriptChanged?: (convId: string) => void;
   private readonly progressListeners = new Set<AgentProgressListener>();
 
@@ -84,14 +84,9 @@ export class AgentLoop {
   setMidTurnCompactor(compactor: NonNullable<TurnServices['compactMidTurn']>): void {
     this.midTurnCompactor = compactor;
   }
-  setMidTurnTellDrainer(drainer: NonNullable<TurnServices['drainTells']>): void {
-    this.midTurnTellDrainer = drainer;
+  setMidTurnTells(tells: MidTurnTellServices): void {
+    this.midTurnTells = tells;
   }
-  /**
-   * Registers a conversation lookup so the session timer can resolve
-   * conversation ids to runtime objects. Set by SidebarProvider after
-   * construction.
-   */
   setConversationLookup(lookup: (id: string) => ConversationRuntime | undefined): void {
     this.conversationLookup = lookup;
   }
@@ -227,7 +222,8 @@ export class AgentLoop {
       remoteReach: (conversationId) => this.remoteReach?.(conversationId) ?? 0,
       compactMidTurn: (conv, request) =>
         this.midTurnCompactor?.(conv, request) ?? Promise.resolve(false),
-      drainTells: (id) => this.midTurnTellDrainer?.(id) ?? Promise.resolve({ messages: [] }),
+      drainTells: (id) => this.midTurnTells?.drainTells(id) ?? Promise.resolve({ messages: [] }),
+      onTellArrived: (id, callback) => this.midTurnTells?.onTellArrived(id, callback) ?? (() => {}),
       // `options` is load-bearing and was missing here: a narrower function is
       // assignable, so dropping the 4th parameter type-checked while silently
       // discarding `internal: true`. Every Forge-authored prompt — the

@@ -54,7 +54,7 @@ export function makeWaitTool(): RegisteredTool {
           'local wall-clock time it finished at: for a task on an interval, work out ' +
           'the next deadline from that clock rather than from how many waits you have ' +
           'called, and chain waits until the clock reaches it -- an hour is four calls ' +
-          `of ${MAX_WAIT_SECONDS}s, not one.`,
+          `of ${MAX_WAIT_SECONDS}s, not one. Use notify_on_exit to be told when a background job exits. Ends early when a message arrives.`,
         parameters: {
           type: 'object',
           properties: {
@@ -78,20 +78,25 @@ export function makeWaitTool(): RegisteredTool {
       }
       const signal = context?.abortSignal;
       const startedAt = Date.now();
-      await new Promise<void>((resolve) => {
-        if (signal?.aborted) {
-          resolve();
-          return;
-        }
-        const onAbort = (): void => {
+      const outcome = await new Promise<'timer' | 'abort' | 'message'>((resolve) => {
+        let settled = false;
+        let unsubscribe = (): void => {};
+        const finish = (reason: 'timer' | 'abort' | 'message'): void => {
+          if (settled) return;
+          settled = true;
           clearTimeout(timer);
-          resolve();
-        };
-        const timer = setTimeout(() => {
           signal?.removeEventListener('abort', onAbort);
-          resolve();
-        }, seconds * 1000);
+          unsubscribe();
+          resolve(reason);
+        };
+        const onAbort = (): void => finish('abort');
+        const timer = setTimeout(() => finish('timer'), seconds * 1000);
         signal?.addEventListener('abort', onAbort, { once: true });
+        if (context?.tellArrived && context.conversationId) {
+          unsubscribe = context.tellArrived(() => finish('message'));
+          if (settled) unsubscribe();
+        }
+        if (signal?.aborted) finish('abort');
       });
       // Measured, not requested -- the same rule monitor_execution follows. A
       // cancelled wait that reported the full duration would have the model
@@ -103,8 +108,11 @@ export function makeWaitTool(): RegisteredTool {
       // Safe here in a way it is not in the system prompt: a tool result is
       // appended past everything cached, so a value that ticks costs nothing.
       const clock = `Local time is now ${localTimeOfDay()}.`;
-      if (signal?.aborted) {
+      if (outcome === 'abort') {
         return `Wait cancelled after ${elapsedSeconds}s of the ${seconds}s requested. ${clock} The turn is stopping -- do not start further work.`;
+      }
+      if (outcome === 'message') {
+        return `Wait ended after ${elapsedSeconds}s of the ${seconds}s requested because a new message arrived. ${clock}`;
       }
       return `Waited ${elapsedSeconds}s. ${clock}`;
     },

@@ -27,7 +27,10 @@ import {
 import { validateExecEnv } from './execEnvPolicy';
 import { checkDenyList, getBuiltinDenyList } from './DenyList';
 import { backgroundExecutionManager } from './BackgroundExecutionManager';
-import { formatBackgroundObservation } from './backgroundExecutionTools';
+import {
+  formatBackgroundObservation,
+  NOTIFY_ON_EXIT_DESCRIPTION,
+} from './backgroundExecutionTools';
 import { terminalCommandTracker } from './TerminalCommandTracker';
 
 // ── run_terminal ───────────────────────────────────────────────────────────────
@@ -88,7 +91,7 @@ export function makeExecCommandTool(): RegisteredTool {
       function: {
         name: 'exec_command',
         description:
-          'Run an executable directly without a shell; pass args separately. npm/npx work cross-platform. Shell builtins, operators, and dangerous commands are refused. Use the output options instead of pipes; use background=true with monitor_execution for long jobs.',
+          'Run an executable directly without a shell; pass args separately. npm/npx work cross-platform. Shell builtins, operators, and dangerous commands are refused. Use the output options instead of pipes. Long jobs: background=true + monitor_execution or notify_on_exit.',
         parameters: {
           type: 'object',
           properties: {
@@ -144,6 +147,10 @@ export function makeExecCommandTool(): RegisteredTool {
               description:
                 'Start the process without waiting for it. Returns an execution_id for monitor_execution.',
             },
+            notify_on_exit: {
+              type: 'boolean',
+              description: NOTIFY_ON_EXIT_DESCRIPTION,
+            },
           },
           required: ['command', 'args'],
           additionalProperties: false,
@@ -157,9 +164,16 @@ export function makeExecCommandTool(): RegisteredTool {
       const command = canonicalizeExecCommand(args['command'] as string);
       const cmdArgs = (args['args'] as string[]) ?? [];
       const outputOptions = parseExecOutputOptions(args);
-      const cwd = resolveExecCwd(args['cwd'] as string | undefined);
       const requestedTimeoutMs = args['timeout_ms'] as number | undefined;
       const timeoutMs = requestedTimeoutMs ?? 30_000;
+      const notifyOnExit = args['notify_on_exit'] === true;
+      if (notifyOnExit && args['background'] !== true) {
+        throw new Error('notify_on_exit requires background: true.');
+      }
+      if (notifyOnExit && !context?.conversationId) {
+        throw new Error('notify_on_exit requires a conversation; start this job from a chat.');
+      }
+      const cwd = resolveExecCwd(args['cwd'] as string | undefined);
 
       try {
         checkShellOperators(cmdArgs);
@@ -219,6 +233,7 @@ export function makeExecCommandTool(): RegisteredTool {
             cwd,
             timeoutMs: requestedTimeoutMs,
             env: envCheck.env,
+            ...(notifyOnExit ? { notifyConversationId: context!.conversationId! } : {}),
           });
           // spawn reports a failed launch on the next tick, so observing
           // immediately would report "running" for a process already dead.
@@ -333,7 +348,7 @@ export function makeRunBuildTool(): RegisteredTool {
         description:
           'Run an npm script (default: "build"). Reads package.json to verify the script exists. ' +
           'Foreground runs are capped at 2 minutes — pass background=true for a script that takes ' +
-          'longer (release builds, packaging) and poll it with monitor_execution.',
+          'longer (release builds, packaging) and poll it with monitor_execution or use notify_on_exit.',
         parameters: {
           type: 'object',
           properties: {
@@ -348,6 +363,10 @@ export function makeRunBuildTool(): RegisteredTool {
               description:
                 'Start the script without waiting for it. Returns an execution_id for monitor_execution. Required for anything over 2 minutes.',
             },
+            notify_on_exit: {
+              type: 'boolean',
+              description: "As exec_command's notify_on_exit (background=true only).",
+            },
           },
           required: [],
           additionalProperties: false,
@@ -356,8 +375,15 @@ export function makeRunBuildTool(): RegisteredTool {
     },
     permission: 'headless',
     handler: async (args, context) => {
-      const root = resolveExecCwd(args['cwd'] as string | undefined);
       const script = (args['script'] as string | undefined) ?? 'build';
+      const notifyOnExit = args['notify_on_exit'] === true;
+      if (notifyOnExit && args['background'] !== true) {
+        throw new Error('notify_on_exit requires background: true.');
+      }
+      if (notifyOnExit && !context?.conversationId) {
+        throw new Error('notify_on_exit requires a conversation; start this job from a chat.');
+      }
+      const root = resolveExecCwd(args['cwd'] as string | undefined);
 
       // Verify script exists in package.json
       const pkgPath = path.join(root, 'package.json');
@@ -388,7 +414,12 @@ export function makeRunBuildTool(): RegisteredTool {
       const spawnArgs = [...invocation.argsPrefix, ...cmdArgs];
 
       if (args['background'] === true) {
-        const started = backgroundExecutionManager.start({ command, args: spawnArgs, cwd: root });
+        const started = backgroundExecutionManager.start({
+          command,
+          args: spawnArgs,
+          cwd: root,
+          ...(notifyOnExit ? { notifyConversationId: context!.conversationId! } : {}),
+        });
         // Same reason as exec_command: a failed launch is reported on the next
         // tick, so observing immediately would call a dead process "running".
         await new Promise((resolve) => setImmediate(resolve));

@@ -91,6 +91,7 @@ export function makeManageJobsTool(deps: ManageJobsDeps): RegisteredTool {
         description:
           'Manage persistent agent jobs: list, inspect, create, update, pause, resume, delete, run now, ' +
           "or open a job's discuss chat. Available in every chat when jobs are enabled. " +
+          'For recurring work or work that must survive a restart; for one process exit, notify_on_exit. ' +
           '`update` takes a partial definition (for example only `schedule`), so "check at 08:00 instead" ' +
           'is one call. `delete` always asks for approval. `run_now` runs the job on the next scheduler ' +
           'tick, even from a window that does not hold the lease.',

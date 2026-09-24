@@ -12,6 +12,18 @@ export const DEFAULT_MONITOR_WAIT_MS = 10_000;
 /** Schema ceiling for a single wait, and therefore the backoff ceiling. */
 export const MAX_MONITOR_WAIT_MS = 60_000;
 
+/**
+ * exec_command carries the full text; run_build points to it rather than
+ * repeating it, because the schema budget counts every copy. The negative
+ * cases are the point: a model that expects a notice which never comes waits
+ * forever, so it must know exactly when none is sent.
+ */
+export const NOTIFY_ON_EXIT_DESCRIPTION =
+  'Only with background=true. On exit, Forge posts status and last output into this chat, ' +
+  'starting a new turn if idle. For a job you do not need now, or a watcher script that exits ' +
+  'when what it watches changes: start it, tell the user, end your turn instead of polling. ' +
+  'No notice if the window reloads, you stop the job, or monitor_execution already saw it end.';
+
 export function makeMonitorExecutionTool(): RegisteredTool {
   return {
     definition: {
@@ -19,7 +31,7 @@ export function makeMonitorExecutionTool(): RegisteredTool {
       function: {
         name: 'monitor_execution',
         description:
-          'Wait for a background exec_command and return new output plus status. Reuse the returned cursors and suggested_next_wait_ms; *_dropped_chars means that output is gone. A running job with no output may be silent: inspect its artifact, including nearby or nested .part/.tmp files, instead of polling rapidly.',
+          'Wait for a background exec_command and return new output plus status. Use it when the result is needed in this turn; otherwise prefer notify_on_exit. Reuse the returned cursors and suggested_next_wait_ms; *_dropped_chars means that output is gone. A running job with no output may be silent: inspect its artifact, including nearby or nested .part/.tmp files, instead of polling rapidly.',
         parameters: {
           type: 'object',
           properties: {

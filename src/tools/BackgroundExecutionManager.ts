@@ -30,6 +30,8 @@ interface BackgroundExecution {
   timeoutMs: number | undefined;
   timeoutTimer: NodeJS.Timeout | undefined;
   readonly waiters: Set<() => void>;
+  readonly notifyConversationId: string | undefined;
+  terminalObserved: boolean;
 }
 
 export interface BackgroundExecutionSummary {
@@ -98,10 +100,34 @@ export interface BackgroundExecutionStartOptions {
    * `exec_command` would disagree.
    */
   env?: NodeJS.ProcessEnv;
+  notifyConversationId?: string;
+}
+
+export interface BackgroundExecutionExitNotice {
+  id: string;
+  conversationId: string;
+  command: string;
+  args: readonly string[];
+  status: BackgroundExecutionStatus;
+  exitCode: number | null;
+  error: string | undefined;
+  durationMs: number;
+  stdoutTail: string;
+  stderrTail: string;
 }
 
 export class BackgroundExecutionManager {
   private readonly executions = new Map<string, BackgroundExecution>();
+  private exitListener: ((notice: BackgroundExecutionExitNotice) => void) | undefined;
+
+  onNotifiedExit(listener: (notice: BackgroundExecutionExitNotice) => void): { dispose(): void } {
+    this.exitListener = listener;
+    return {
+      dispose: () => {
+        if (this.exitListener === listener) this.exitListener = undefined;
+      },
+    };
+  }
 
   start(options: BackgroundExecutionStartOptions): BackgroundExecutionStart {
     this.pruneFinished();
@@ -144,6 +170,8 @@ export class BackgroundExecutionManager {
       timeoutMs: options.timeoutMs,
       timeoutTimer: undefined,
       waiters: new Set(),
+      notifyConversationId: options.notifyConversationId,
+      terminalObserved: false,
     };
     this.executions.set(execution.id, execution);
 
@@ -199,7 +227,9 @@ export class BackgroundExecutionManager {
     if (execution.status === 'running' && waitMs > 0) {
       await this.waitForChange(execution, waitMs, signal);
     }
-    return this.snapshot(execution, stdoutCursor, stderrCursor);
+    const observation = this.snapshot(execution, stdoutCursor, stderrCursor);
+    if (observation.status !== 'running') execution.terminalObserved = true;
+    return observation;
   }
 
   /**
@@ -226,6 +256,7 @@ export class BackgroundExecutionManager {
 
   async stop(id: string): Promise<BackgroundExecutionObservation> {
     const execution = this.get(id);
+    execution.terminalObserved = true;
     if (execution.status === 'running') {
       execution.stopRequested = true;
       await terminateCliProcessTree(execution.process);
@@ -236,6 +267,7 @@ export class BackgroundExecutionManager {
 
   dispose(): void {
     for (const execution of this.executions.values()) {
+      execution.terminalObserved = true;
       if (execution.timeoutTimer) {
         clearTimeout(execution.timeoutTimer);
         execution.timeoutTimer = undefined;
@@ -290,6 +322,25 @@ export class BackgroundExecutionManager {
     execution.finishedAt = Date.now();
     for (const waiter of execution.waiters) waiter();
     execution.waiters.clear();
+    if (execution.notifyConversationId) {
+      const notice: BackgroundExecutionExitNotice = {
+        id: execution.id,
+        conversationId: execution.notifyConversationId,
+        command: execution.command,
+        args: [...execution.args],
+        status,
+        exitCode,
+        error: execution.error,
+        durationMs: execution.finishedAt - execution.startedAt,
+        stdoutTail: tailLines(execution.stdout, 20, 2_000),
+        stderrTail: tailLines(execution.stderr, 20, 2_000),
+      };
+      // Let an observe() promise awakened above return its terminal snapshot
+      // first; that call marks the execution seen before delivery is decided.
+      queueMicrotask(() => {
+        if (!execution.terminalObserved) this.exitListener?.(notice);
+      });
+    }
   }
 
   private snapshot(
@@ -346,6 +397,10 @@ export class BackgroundExecutionManager {
     }
     if (oldest) this.executions.delete(oldest.id);
   }
+}
+
+function tailLines(output: string, maxLines: number, maxChars: number): string {
+  return output.split(/\r?\n/u).slice(-maxLines).join('\n').slice(-maxChars);
 }
 
 function retainOutput(current: string, chunk: string, onTrim: (base: number) => void): string {

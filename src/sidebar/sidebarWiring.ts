@@ -41,6 +41,8 @@ import { listMemoryKeys } from '../tools/memoryTools';
 import { RequestChainLifecycle } from './RequestChainLifecycle';
 import { MidTurnInbox } from '../agent/MidTurnInbox';
 import { MidTurnTellDrain } from '../agent/MidTurnTellDrain';
+import { randomUUID } from 'crypto';
+import { createSidebarPromptRouter, type SidebarPromptRouter } from './backgroundExitNotice';
 import { unattendedConversations } from './unattendedConversations';
 import type { ArchivedSessions } from './ArchivedSessions';
 
@@ -108,6 +110,8 @@ export interface SidebarRuntimeParts {
   midTurnInbox: MidTurnInbox;
   /** Composes the sidebar inbox and the remote queue into one mid-turn drain. */
   tellDrain: MidTurnTellDrain;
+  /** The one routing decision for a prompt: a busy chat's inbox, or a new turn. */
+  promptRouter: SidebarPromptRouter;
 }
 
 export interface ConversationEvictionSignals {
@@ -170,15 +174,18 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
       })),
     }),
   );
-  agentLoop.setMidTurnTellDrainer(async (conversationId) => {
-    const drained = await tellDrain.drain(conversationId);
-    // A streaming chat ignores host syncs, so a tell (a Telegram one above
-    // all) was invisible in the sidebar until the turn ended. Show it now.
-    for (const tell of drained.messages) {
-      if (typeof tell.content !== 'string') continue;
-      host.post({ type: 'userPrompt', text: tell.content, conversationId, midTurn: true });
-    }
-    return drained;
+  agentLoop.setMidTurnTells({
+    drainTells: async (conversationId) => {
+      const drained = await tellDrain.drain(conversationId);
+      // A streaming chat ignores host syncs, so a tell (a Telegram one above
+      // all) was invisible in the sidebar until the turn ended. Show it now.
+      for (const tell of drained.messages) {
+        if (typeof tell.content !== 'string') continue;
+        host.post({ type: 'userPrompt', text: tell.content, conversationId, midTurn: true });
+      }
+      return drained;
+    },
+    onTellArrived: (conversationId, callback) => midTurnInbox.onAdded(conversationId, callback),
   });
 
   const budget = new ContextBudgetPublisher({
@@ -399,5 +406,26 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     resolved: () => host.postSessionSync(),
   });
 
-  return { agentLoop, slashHandler, budget, tabs, send, requestChains, midTurnInbox, tellDrain };
+  // Webview sends and background exit notices share this router, so a notice
+  // reaches a busy chat exactly the way a typed message does.
+  const promptRouter = createSidebarPromptRouter({
+    activeId: () => host.getSidebar().activeConversationId,
+    isReserved: (id) => requestChains.isReserved(id),
+    addTell: (id, text) => midTurnInbox.add(id, { id: randomUUID(), text }),
+    send: (text, attachments, id, echo) =>
+      void send.send(text, attachments, id, undefined, echo ? { echoPrompt: true } : undefined),
+    isOpen: (id) => host.getSidebar().conversations.some((conversation) => conversation.id === id),
+  });
+
+  return {
+    agentLoop,
+    slashHandler,
+    budget,
+    tabs,
+    send,
+    requestChains,
+    midTurnInbox,
+    tellDrain,
+    promptRouter,
+  };
 }

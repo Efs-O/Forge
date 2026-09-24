@@ -1,5 +1,18 @@
 # Forge — Recent Changes
 
+## 0.16.50
+
+### Background jobs report their exit in chat (2026-09-24)
+
+- `exec_command` and `run_build` accept `notify_on_exit` with `background: true`.
+  When the job exits, its status and last output lines arrive in the chat that
+  started it—as a new turn if that chat is idle, or at the next tool round if
+  it is busy. The agent can start a watcher or long build and end its turn
+  instead of polling.
+- `wait` now ends early when a message arrives.
+- No notice is sent after a window reload, a `stop_execution`, or when
+  `monitor_execution` already showed the exit.
+
 ## 0.16.49
 
 ### Telegram contacts: command replies are cleaned up (2026-09-23)

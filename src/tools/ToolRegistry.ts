@@ -49,6 +49,7 @@ export interface ToolHandlerContext {
    * the tool supplies items only.
    */
   setPlan?: (items: PlanItem[]) => void;
+  tellArrived?: (callback: () => void) => () => void;
 }
 
 export interface ToolMutation {

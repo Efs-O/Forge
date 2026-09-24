@@ -98,6 +98,7 @@ export interface ModelTurnContext {
   remoteReach?: (conversationId: string) => number;
   compactMidTurn?: (conv: ConversationRuntime, request: { exhausted: boolean }) => Promise<boolean>;
   drainTells?: (conversationId: string) => Promise<MidTurnDrainResult>;
+  onTellArrived?: (conversationId: string, callback: () => void) => () => void;
 }
 
 export interface ModelTurnRequest {
@@ -333,6 +334,7 @@ export async function runModelTurn(
             conv.plan = { items, updatedAt: Date.now() };
             ctx.onTranscriptChanged?.(conv);
           },
+          ctx.onTellArrived ? (callback) => ctx.onTellArrived!(conv.id, callback) : undefined,
         );
         mirrorLiveSessionAnswers(conv.id, toolCalls, messages, ctx.emitAgentProgress);
         // Token bar ticks in `onUsage`: a tool result moves no measured context.
