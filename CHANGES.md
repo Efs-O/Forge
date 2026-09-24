@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+**Models started with `--kv-unified` get their whole context window (2026-09-24).** With `--kv-unified`, llama.cpp gives every slot the full `--ctx-size`. Forge still divided it by `n_parallel`, so a 131,072-token model with four slots was treated as a 32,768-token one. Forge compacted chats, trimmed tool results and capped answers at a quarter of the room the server really had, which cost extra rounds and re-reads. The context bar and all of those limits now use the full window when `--kv-unified` (or `-kvu`) is in the model's extra args.
+
 **`/sleep confirm` checks again for running work (2026-09-24).** A `/sleep` sent while Forge was idle could be confirmed after a job or a queued request had started, and the machine went down in the middle of it. The confirmation now refuses if work began in the meantime and keeps the request pending, so you can confirm again once the work ends, or send `/sleep confirm force` to suspend anyway.
 
 - **Delegating to Claude or Codex asks first (2026-09-24).** Since the CLI agents started running with full access, a local model could hand a task to Claude or Codex with `ask_local_agent`, and they would edit files and run commands without any Forge approval, even though writing the same file directly needs a click. Delegating to a CLI agent now shows an approval that names the task and says the agent has full access. Clanker mode approves it like any other write, and unattended jobs keep their existing CLI-agent rule.
