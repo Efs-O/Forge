@@ -26,6 +26,7 @@ const log = getLogger();
 export class ArchivedSessions {
   readonly directory: string;
   private readonly indexPath: string;
+  private cache: { key: string; rows: ArchivedSessionMeta[] } | undefined;
 
   constructor(
     storageDir: string,
@@ -42,6 +43,37 @@ export class ArchivedSessions {
    * and the bodies on disk), and an unreadable body is skipped.
    */
   list(recentIds: readonly string[] = []): ArchivedSessionMeta[] {
+    // Every session sync lists the archive; stat three paths instead of
+    // checking every row and reading the directory while nothing changed.
+    const key = this.cacheKey();
+    if (key !== undefined && this.cache?.key === key)
+      return this.cache.rows.map((row) => ({ ...row }));
+    const rows = this.scan(recentIds);
+    const after = this.cacheKey();
+    this.cache =
+      after === undefined ? undefined : { key: after, rows: rows.map((row) => ({ ...row })) };
+    return rows;
+  }
+
+  /**
+   * Stamps of the index, the body directory (a body added or removed) and the
+   * logs directory (a log removed). Undefined when the index is missing.
+   */
+  private cacheKey(): string | undefined {
+    const stamp = (file: string): string | undefined => {
+      try {
+        const stat = fs.statSync(file);
+        return `${stat.mtimeMs}/${stat.ino}/${stat.size}`;
+      } catch {
+        return undefined;
+      }
+    };
+    const index = stamp(this.indexPath);
+    if (index === undefined) return undefined;
+    return `${index}:${stamp(this.directory)}:${stamp(this.logsDirectory)}`;
+  }
+
+  private scan(recentIds: readonly string[]): ArchivedSessionMeta[] {
     if (!fs.existsSync(this.indexPath)) this.backfill(new Set(recentIds));
     let parsed: ArchivedSessionMeta[];
     try {

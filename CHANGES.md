@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Saving a chat no longer rescans the archive every time (2026-09-24).** Each session save listed the archived chats by checking every archived file and reading the archive folder. The listing is now cached and only rebuilt when the archive index, the archive folder or the session-log folder changes. With 300 archived chats a listing drops from about 1 ms to 0.02 ms, and more on slower Windows disks.
+
 - **Scheduled agent tasks no longer run twice after a scheduler handover (2026-09-24).** When one VS Code window stalled long enough to lose the jobs lease, the window that took over treated its still-running agent task as crashed only at startup, and otherwise started the same task again beside it. A running task now refreshes a heartbeat every 30 seconds; the scheduler leaves a heartbeating task alone, and reports a task as interrupted only after its heartbeat has been silent for two minutes. That check now runs on every tick, not just at startup, so a window that dies mid-task is reported even when another window takes over later.
 
 ### A deleted chat stays deleted (2026-09-24)

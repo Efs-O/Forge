@@ -111,6 +111,22 @@ describe('ArchivedSessions', () => {
     expect(fs.existsSync(path.join(logs, 'gone.jsonl'))).toBe(false);
   });
 
+  it('a cached listing hands out copies and still sees a removed log', () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-archived-'));
+    const logs = path.join(root, 'logs');
+    fs.mkdirSync(logs);
+    const start = { type: 'session_start', timestamp_ms: 1, workspace_path: 'C:/repo' };
+    fs.writeFileSync(path.join(logs, 'kept.jsonl'), JSON.stringify(start));
+    fs.writeFileSync(path.join(logs, 'lost.jsonl'), JSON.stringify(start));
+    const archive = new ArchivedSessions(path.join(root, 'storage'), 'C:/repo', logs);
+    archive.put({ id: 'body', title: 'Body', createdAt: 1, updatedAt: 1, messages: [] });
+    expect(archive.list().map((row) => row.id).sort()).toEqual(['body', 'kept', 'lost']);
+    archive.list()[0]!.title = 'mutated by a caller';
+    expect(archive.list().map((row) => row.title)).not.toContain('mutated by a caller');
+    fs.rmSync(path.join(logs, 'lost.jsonl'));
+    expect(archive.list().map((row) => row.id).sort()).toEqual(['body', 'kept']);
+  });
+
   it.runIf(process.platform === 'win32')('matches a log whose drive letter is lower-cased', () => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-archived-'));
     const logs = path.join(root, 'logs');
