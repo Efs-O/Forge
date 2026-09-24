@@ -69,3 +69,33 @@ describe('buildWhisperArgs', () => {
     expect(withPrompt).toEqual(expect.arrayContaining(['-l', 'el']));
   });
 });
+
+describe('WhisperCppRunner output decoding', () => {
+  // A chunk boundary inside a two-byte Greek letter used to decode as U+FFFD.
+  it.runIf(process.platform !== 'win32')('keeps a multi-byte character split across chunks', async () => {
+    const fs = await import('fs');
+    const os = await import('os');
+    const path = await import('path');
+    const { WhisperCppRunner } = await import('../../src/voice/WhisperCppRunner');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-whisper-'));
+    try {
+      const binary = path.join(dir, 'whisper-cli');
+      const bytes = [...Buffer.from('Καλημέρα\n', 'utf8')];
+      fs.writeFileSync(
+        binary,
+        `#!${process.execPath}\n` +
+          `const b = Buffer.from(${JSON.stringify(bytes)});\n` +
+          `process.stdout.write(b.subarray(0, 1));\n` +
+          `setTimeout(() => process.stdout.write(b.subarray(1)), 50);\n`,
+        { mode: 0o755 },
+      );
+      const model = path.join(dir, 'ggml.bin');
+      fs.writeFileSync(model, '');
+      const runner = new WhisperCppRunner({ binary, model });
+      const result = await runner.transcribe(path.join(dir, 'a.wav'), { language: 'el' });
+      expect(result.text).toBe('Καλημέρα');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+**Non-ASCII output no longer turns into `�` (2026-09-24).** Output from child processes, and control-API request bodies, were decoded chunk by chunk, so a multi-byte character split across two chunks came out as U+FFFD. That affected Greek or accented text, CJK, and a test runner's `✓`. The fix covers `exec_command`, whisper-cli voice-note transcripts, the control HTTP API's JSON bodies, and CLI-agent stderr: output is now decoded as a stream, and request bodies as whole bytes.
+
 **`git_show` refuses a ref that is an option (2026-09-24).** `git_show` runs as an unconfirmed read, but passed the model's `ref` straight to `git show`, so a ref of `--output=<path>` made git write the diff to any file it named. A ref starting with `-` or carrying a control character is now refused, as `git_log` already did. `git_blame` also puts `--` before its path.
 
 **Long command output keeps its end (2026-09-24).** An `exec_command` stream past its bound kept only its first characters, so a long build or test run returned progress lines and dropped the error and summary printed last — costing a second run with `tail_lines`. An over-long stream now keeps its first quarter and its end, with a marker naming how much of the middle was dropped. The bound and the returned size are unchanged.

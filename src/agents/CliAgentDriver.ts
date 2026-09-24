@@ -74,8 +74,8 @@ export class CliAgentDriver {
       ...(adapter.spawnEnv ? { env: adapter.spawnEnv } : {}),
     });
 
-    child.stderr?.on('data', (chunk: Buffer) => {
-      const text = chunk.toString();
+    child.stderr?.setEncoding('utf8');
+    child.stderr?.on('data', (text: string) => {
       stderrChunks.push(text);
       options.onStderr?.(text);
     });
