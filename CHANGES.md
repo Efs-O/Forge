@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### A partial file read is no longer marked as replacing the whole file (2026-09-24)
+
+- After the agent read a whole file, a later read of only some of its lines
+  (lines 51-100, say) was tagged "this replaces your earlier read… that
+  earlier copy is stale; use this one", so the model set aside the rest of
+  the file. Only whole-file re-reads get that note now.
+
 ### JSON examples in an answer are shown, not run as tool calls (2026-09-24)
 
 - A ```json block in a model's answer whose JSON had a single top-level key

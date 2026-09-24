@@ -166,4 +166,30 @@ describe('annotateRereads', () => {
     expect(out[5]?.content).toContain('v3');
     expect(out[5]?.content).toContain('[Forge: this replaces');
   });
+
+  it('neither annotates nor counts a ranged read', () => {
+    const ranged = (id: string, start: number, end: number): ChatMessage => ({
+      role: 'assistant',
+      content: null,
+      tool_calls: [
+        {
+          id,
+          type: 'function',
+          function: {
+            name: 'read_file',
+            arguments: JSON.stringify({ path: 'src/app.ts', start_line: start, end_line: end }),
+          },
+        },
+      ],
+    });
+    const messages: ChatMessage[] = [
+      read('a', 'src/app.ts'),
+      result('a', 'whole file'),
+      ranged('b', 51, 100),
+      result('b', 'lines 51-100'),
+      ranged('c', 1, 50),
+      result('c', 'lines 1-50'),
+    ];
+    expect(annotateRereads(messages)).toBe(messages);
+  });
 });

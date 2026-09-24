@@ -57,7 +57,11 @@ function readFilePath(argumentsJson: string): string | undefined {
     return undefined;
   }
   if (typeof parsed !== 'object' || parsed === null) return undefined;
-  const path = (parsed as Record<string, unknown>)['path'];
+  const args = parsed as Record<string, unknown>;
+  // A ranged read is part of the file. Counting it as a copy tagged a read of
+  // lines 51-100 as replacing the earlier whole-file read, "stale; use this one".
+  if (args['start_line'] != null || args['end_line'] != null) return undefined;
+  const path = args['path'];
   if (typeof path !== 'string' || path.length === 0) return undefined;
   // Same file reached as "src\\a.ts" and "src/a.ts" is the same file.
   return path.replace(/\\/g, '/');
