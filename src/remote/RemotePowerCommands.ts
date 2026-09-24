@@ -31,6 +31,8 @@ const SLEEP_GRACE_MS = 8_000;
 interface PendingSleep {
   chatId: string;
   hibernate: boolean;
+  /** `/sleep force`: the busy check was waived for this sleep, so confirm skips it too. */
+  forced: boolean;
   wakeAt: Date | undefined;
   expiresAt: number;
 }
@@ -104,6 +106,16 @@ async function handleSleep(
         reason: 'nothing to confirm — send /sleep first (a confirmation expires after 90s)',
       };
     }
+    // Re-checked: a job or a queued request can start inside the 90 s window,
+    // and an idle machine at /sleep is no promise of one at confirm.
+    const busyNow = held.forced || forcing ? undefined : busyReason(context.host);
+    if (busyNow) {
+      pending.set(key, held);
+      return {
+        kind: 'rejected',
+        reason: `${busyNow} since you sent /sleep. Confirm again once it ends, or send \`/sleep confirm force\``,
+      };
+    }
     return performSleep(held, event.chatId, context);
   }
 
@@ -140,6 +152,7 @@ async function handleSleep(
   pending.set(key, {
     chatId: event.chatId,
     hibernate,
+    forced: forcing,
     wakeAt,
     expiresAt: Date.now() + CONFIRM_WINDOW_MS,
   });

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+**`/sleep confirm` checks again for running work (2026-09-24).** A `/sleep` sent while Forge was idle could be confirmed after a job or a queued request had started, and the machine went down in the middle of it. The confirmation now refuses if work began in the meantime and keeps the request pending, so you can confirm again once the work ends, or send `/sleep confirm force` to suspend anyway.
+
 - **Delegating to Claude or Codex asks first (2026-09-24).** Since the CLI agents started running with full access, a local model could hand a task to Claude or Codex with `ask_local_agent`, and they would edit files and run commands without any Forge approval, even though writing the same file directly needs a click. Delegating to a CLI agent now shows an approval that names the task and says the agent has full access. Clanker mode approves it like any other write, and unattended jobs keep their existing CLI-agent rule.
 
 - **Replying by voice to a Telegram approval now resolves that approval (2026-09-24).** When more than one approval was open, Forge refused a spoken "approve" and told you to reply to the request directly. A voice reply to the request never matched it, though, and "approve" was taken as an ordinary prompt. Forge now remembers which Telegram messages showed each approval, so a spoken approve or deny sent as a reply to one of them resolves that approval.
