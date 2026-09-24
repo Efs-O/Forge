@@ -694,6 +694,57 @@ describe('AgentTaskRunner', () => {
     }
   });
 
+  it('keeps a run_now request for a running agent task until the run ends', async () => {
+    const job = baseJob();
+    await store.saveJob(job);
+    let nowMs = Date.parse('2026-01-01T03:00:00');
+    let resolveSend: (o: ForgeRequestOutcome) => void = () => undefined;
+    host = {
+      ...fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — done' }),
+      send: vi.fn().mockImplementation(
+        () => new Promise<ForgeRequestOutcome>((resolve) => (resolveSend = resolve)),
+      ),
+    } as unknown as ForgeHostFacade;
+    const scheduler = new JobScheduler({
+      store,
+      power: fakePower(),
+      getConfig: () => ({ allowedHosts: [], maxConcurrent: 1 }),
+      workspaceId: 'ws',
+      instanceId: 'scheduler',
+      leaseDirectory: jobsRoot,
+      outboxDir,
+      now: () => new Date(nowMs),
+      notifyLocal: () => undefined,
+      tickMs: 30_000,
+      agentTask: makeDeps({ now: () => nowMs }),
+    });
+    try {
+      await scheduler.start({ immediate: false });
+      await scheduler.tick(); // due: the detached run starts and waits on send
+      await vi.waitFor(() => expect(host.send).toHaveBeenCalledOnce());
+
+      await store.requestRun('agent-task');
+      nowMs += 30_000;
+      await scheduler.tick(); // still running: the request must survive
+      const marker = path.join(jobsRoot, 'run_requests', 'agent-task');
+      expect(fs.existsSync(marker)).toBe(true);
+
+      resolveSend({ kind: 'completed', finalText: 'RESULT: ok — done' });
+      await vi.waitFor(async () =>
+        expect((await store.load('agent-task'))!.state.task_run).toBeNull(),
+      );
+      await vi.waitFor(async () => expect(await store.readRuns('agent-task')).toHaveLength(1));
+      nowMs += 30_000;
+      await scheduler.tick(); // the run ended: the request runs now
+      expect(fs.existsSync(marker)).toBe(false);
+      await vi.waitFor(() => expect(host.send).toHaveBeenCalledTimes(2));
+      resolveSend({ kind: 'completed', finalText: 'RESULT: ok — done' });
+      await vi.waitFor(async () => expect(await store.readRuns('agent-task')).toHaveLength(2));
+    } finally {
+      await scheduler.stop();
+    }
+  });
+
   it('drops a pending task older than one schedule period with a skipped run row', async () => {
     const job = baseJob({ schedule: { kind: 'interval', minutes: 15 } });
     await store.saveJob(job);

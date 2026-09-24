@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Scheduled jobs: "run now" is not lost while the job is still running (2026-09-24)
+
+- Asking to run a job (from the sidebar or a remote command) while that job's
+  agent task was still running consumed the request and did nothing. The
+  request is now kept until the running task ends, and then the job runs.
+
 ### Archived chats survive a damaged archive file (2026-09-24)
 
 - One damaged file in the archived-chats folder (a torn `index.json`, a

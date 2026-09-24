@@ -272,8 +272,8 @@ export class JobScheduler {
     // A `run_now` marker (B2) runs the job on this tick even if it is not due
     // or paused — an explicit request overrides the schedule. The marker is
     // consumed before the run, so a crash mid-run does not leave a stale
-    // request that fires again on the next tick.
-    for (const id of await this.store.consumeRunRequests()) {
+    // request that fires again on the next tick. A still-running job keeps it.
+    for (const id of await this.store.consumeRunRequests((id) => this.runningJobs.has(id))) {
       const jobFile = byId.get(id);
       if (!jobFile || seen.has(id)) continue;
       seen.add(id);
