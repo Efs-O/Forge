@@ -260,4 +260,24 @@ describe('handoff rollback', () => {
     expect(sendToChat).not.toHaveBeenCalled();
     coordinator.dispose();
   });
+
+  it("keeps the target window's claim through the source window's later writes", async () => {
+    const directory = await storageDirectory();
+    const source = new RemoteRequestStore(statePath(directory));
+    const target = new RemoteRequestStore(statePath(directory));
+    await source.load();
+    await target.load();
+    const handoffId = await source.beginWorkspaceHandoff({
+      channel: 'telegram',
+      chatId: 'chat-a',
+      sourceWorkspaceId: 'source-workspace',
+      targetWorkspaceId: 'target-workspace',
+      targetAlias: 'other',
+    });
+    expect(await target.claimWorkspaceHandoffs('target-workspace')).toHaveLength(1);
+    // The polling cursor is saved on every poll; it must not write back the
+    // source window's stale copy over the claim.
+    await source.setCursor('telegram', '42');
+    expect(await source.failUnclaimedWorkspaceHandoff(handoffId)).toBe('claimed');
+  });
 });

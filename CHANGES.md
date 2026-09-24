@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Switching a remote chat to another open window no longer undoes itself (2026-09-24)
+
+- All Forge windows share one remote-state file, but most saves wrote back
+  the window's own copy without re-reading it. The window serving Telegram
+  saves its polling position constantly, so it erased the other window's
+  "I've taken this chat" mark and then rolled the `/new <workspace>` switch
+  back as if nobody had claimed it. Every save now starts from the file on
+  disk.
+
 ### A remote chat no longer closes the chat you are viewing (2026-09-24)
 
 - With all open chats in use, a chat started from the phone or by another
