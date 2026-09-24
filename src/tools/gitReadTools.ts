@@ -8,7 +8,7 @@
 import * as child_process from 'child_process';
 import type { RegisteredTool } from './ToolRegistry';
 import { getRepo, gitCwd, readLiveGitStatus, resolveFilePath, runGit } from './gitRepo';
-import { formatGitLog, gitLogArgs, isEmptyHistoryError } from './gitLog';
+import { formatGitLog, gitLogArgs, gitShowArgs, isEmptyHistoryError } from './gitLog';
 
 const cwdParameter = {
   type: 'string',
@@ -160,7 +160,7 @@ export function makeGitBlameTool(): RegisteredTool {
     permission: 'git-read',
     handler: async (args) => {
       const filePath = resolveFilePath(args['path'] as string);
-      const result = child_process.spawnSync('git', ['blame', '--line-porcelain', filePath], {
+      const result = child_process.spawnSync('git', ['blame', '--line-porcelain', '--', filePath], {
         cwd: await gitCwd((args['path'] as string) ?? (args['cwd'] as string | undefined)),
         encoding: 'utf8',
       });
@@ -200,8 +200,7 @@ export function makeGitShowTool(): RegisteredTool {
     },
     permission: 'git-read',
     handler: async (args) => {
-      const ref = args['ref'] as string;
-      const result = child_process.spawnSync('git', ['show', ref], {
+      const result = child_process.spawnSync('git', gitShowArgs(args['ref']), {
         cwd: await gitCwd(args['cwd'] as string | undefined),
         encoding: 'utf8',
       });
