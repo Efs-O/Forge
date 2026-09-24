@@ -373,6 +373,64 @@ describe('crash recovery (AC7)', () => {
   });
 });
 
+describe('lease takeover while the old window is alive', () => {
+  let jobsRoot: string;
+  let store: JobStore;
+
+  beforeEach(async () => {
+    jobsRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'forge-agent-task-takeover-'));
+    store = new JobStore(jobsRoot);
+  });
+
+  afterEach(async () => {
+    await fs.promises.rm(jobsRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  });
+
+  it('leaves a heartbeating run alone and recovers it once the beats stop', async () => {
+    await store.saveJob(baseJob());
+    const startedAt = Date.parse('2026-01-01T03:00:00');
+    let now = startedAt + 60_000;
+    // Another window's run, refreshed 30 s ago: that window is alive.
+    store.patchState('agent-task', {
+      task_run: { started_at: startedAt, conversation_id: 'conv-1', heartbeat_at: now - 30_000 },
+    });
+    const run = vi.fn();
+    const scheduler = new JobScheduler({
+      store,
+      power: fakePower(),
+      getConfig: () => ({ allowedHosts: [], maxConcurrent: 1 }),
+      workspaceId: 'ws',
+      instanceId: 'new-owner',
+      leaseDirectory: jobsRoot,
+      outboxDir: path.join(jobsRoot, 'outbox'),
+      now: () => new Date(now),
+      notifyLocal: () => undefined,
+      tickMs: 30_000,
+      agentTask: { run } as unknown as AgentTaskDeps,
+    });
+    const runSpy = vi.spyOn(AgentTaskRunner.prototype, 'run').mockResolvedValue(undefined);
+    try {
+      await store.requestRun('agent-task');
+      expect(await scheduler.start({ immediate: false })).toBe(true);
+      await scheduler.tick();
+      expect(runSpy).not.toHaveBeenCalled();
+      expect((await store.load('agent-task'))!.state.task_run).not.toBeNull();
+      expect(await store.readRuns('agent-task')).toEqual([]);
+
+      // The old window died: no beat for longer than the stale limit.
+      now += 5 * 60_000;
+      await scheduler.tick();
+      const runs = await store.readRuns('agent-task');
+      expect(runs[0]!.summary).toContain('interrupted');
+      // The kept run_now request and the due schedule run it once, here.
+      expect(runSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      runSpy.mockRestore();
+      await scheduler.stop();
+    }
+  });
+});
+
 // ── Runner full run ──────────────────────────────────────────────────────────
 
 describe('AgentTaskRunner', () => {

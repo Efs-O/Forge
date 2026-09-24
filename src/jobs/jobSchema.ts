@@ -195,6 +195,8 @@ export const JobStateSchema = z.object({
     .object({
       started_at: z.number().int().nonnegative(),
       conversation_id: z.string().nullable().default(null),
+      /** Refreshed by the running window; a stale one means that window died. */
+      heartbeat_at: z.number().int().nonnegative().nullable().default(null),
     })
     .nullable()
     .default(null),

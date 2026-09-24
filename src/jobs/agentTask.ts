@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { JobStore } from './JobStore';
-import { configBackupPath } from './agentTaskState';
+import { configBackupPath, startTaskRunHeartbeat } from './agentTaskState';
 import type { PowerControl } from '../system/PowerControl';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import type { IBackendPool } from '../backend/poolTypes';
@@ -204,10 +204,17 @@ export class AgentTaskRunner {
     this.deps.store.patchState(job.id, CLEAR_PENDING);
 
     this.deps.store.patchState(job.id, {
-      task_run: { started_at: startedAt, conversation_id: null },
+      task_run: { started_at: startedAt, conversation_id: null, heartbeat_at: startedAt },
     });
 
     let conversationId: string | null = null;
+    const stopHeartbeat = startTaskRunHeartbeat(
+      this.deps.store,
+      job.id,
+      startedAt,
+      () => conversationId,
+      this.deps.now,
+    );
     let marker: { dispose(): void } | undefined;
     let hold: { dispose(): void } | undefined;
     let backupPath: string | undefined;
@@ -230,7 +237,11 @@ export class AgentTaskRunner {
       const resolved = await resolveJobConversation(host, this.deps.store, jobFile, false);
       conversationId = resolved.conversationId;
       this.deps.store.patchState(job.id, {
-        task_run: { started_at: startedAt, conversation_id: conversationId },
+        task_run: {
+          started_at: startedAt,
+          conversation_id: conversationId,
+          heartbeat_at: this.deps.now(),
+        },
       });
       if (jobModel) await host.setConversationModel(conversationId, jobModel);
 
@@ -307,6 +318,7 @@ export class AgentTaskRunner {
         };
       }
       // Step 9: clean up on every exit path.
+      stopHeartbeat();
       marker?.dispose();
       hold?.dispose();
       await this.releaseJobModel(jobModel, host, pool);
