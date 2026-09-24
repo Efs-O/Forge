@@ -680,8 +680,15 @@ describe('AgentTaskRunner', () => {
           setTimeout(() => reject(new Error('pending runner did not finish')), 1_000),
         ),
       ]);
-      expect((await store.load('agent-task'))!.state.task_run).toBeNull();
-      expect((await store.load('agent-task'))!.state.task_pending).toBe(false);
+      const done = (await store.load('agent-task'))!.state;
+      expect(done.task_run).toBeNull();
+      expect(done.task_pending).toBe(false);
+      expect(done.task_pending_observation).toBeNull();
+      // The retry acts on and saves the change it was deferred on, not the
+      // pre-change baseline, so the next check does not see it again.
+      const prompt = (host.send as ReturnType<typeof vi.fn>).mock.calls[0]![1] as string;
+      expect(prompt).toContain('03:15:00Z');
+      expect(done.last_observation).toContain('03:15:00Z');
     } finally {
       await scheduler.stop();
     }
@@ -714,6 +721,40 @@ describe('AgentTaskRunner', () => {
     const state2 = (await store.load('agent-task'))!.state;
     expect(state2.task_pending).toBe(false);
     expect(state2.task_pending_since).toBeNull();
+    // The job waits for its next scheduled time instead of re-pending next tick.
+    expect(state2.next_due_at).toBe(Date.parse('2026-01-01T03:15:00'));
+  });
+
+  it('a blocked CLI agent waits for its next scheduled time and clears a pending task', async () => {
+    const job = baseJob({ schedule: { kind: 'interval', minutes: 15 } });
+    await store.saveJob(job);
+    const state = JobStateSchema.parse({
+      task_pending: true,
+      task_pending_since: Date.parse('2026-01-01T02:55:00'),
+      task_pending_observation: '"seen"',
+    });
+    const runner = new AgentTaskRunner(
+      makeDeps({
+        cliAgentSkip: (model, at, late) => ({
+          at,
+          late,
+          outcome: 'skipped',
+          changed: false,
+          summary: `skipped: ${model} is a CLI agent`,
+          delivered: 0,
+        }),
+      }),
+    );
+    await runner.run({ job, state }, false);
+
+    const runs = await store.readRuns('agent-task');
+    expect(runs).toHaveLength(1);
+    expect(runs[0]!.outcome).toBe('skipped');
+    const after = (await store.load('agent-task'))!.state;
+    expect(after.next_due_at).toBe(Date.parse('2026-01-01T03:15:00'));
+    expect(after.task_pending).toBe(false);
+    expect(after.task_pending_observation).toBeNull();
+    expect(host.send).not.toHaveBeenCalled();
   });
 
   it('marks the conversation unattended and disposes the marker in finally', async () => {

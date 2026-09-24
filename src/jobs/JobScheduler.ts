@@ -326,7 +326,7 @@ export class JobScheduler {
       const result =
         state.task_pending && job.action?.kind === 'agent_task'
           ? {
-              observation: state.last_observation,
+              observation: state.task_pending_observation ?? state.last_observation,
               changed: true,
               summary: 'retrying pending agent task',
             }

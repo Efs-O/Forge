@@ -209,6 +209,12 @@ export const JobStateSchema = z.object({
    * not pending.
    */
   task_pending_since: z.number().int().nonnegative().nullable().default(null),
+  /**
+   * The observation the pending task was deferred on. The retry acts on (and
+   * on success saves) this one, not the stale `last_observation`, or the next
+   * check would see the same change again and run the task a second time.
+   */
+  task_pending_observation: z.string().nullable().default(null),
 });
 export type JobState = z.infer<typeof JobStateSchema>;
 

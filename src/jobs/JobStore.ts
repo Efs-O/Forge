@@ -40,6 +40,7 @@ export function defaultState(): JobState {
     task_run: null,
     task_pending: false,
     task_pending_since: null,
+    task_pending_observation: null,
   };
 }
 

@@ -1,5 +1,19 @@
 # Forge — Recent Changes
 
+## Unreleased
+
+### Scheduled agent tasks: a deferred run acts on the change it was deferred on (2026-09-24)
+
+- An agent task whose change arrived while every slot was busy ran later with
+  the observation from before the change, and on success saved that old one,
+  so the next check saw the same change again and ran the task a second time.
+  The deferred observation is now kept with the pending task and used by the
+  retry.
+- A job whose model is a CLI agent blocked by `jobs.allow_cli_agents` re-ran
+  its check and logged another "skipped" row on every 30-second tick. It now
+  waits for its next scheduled time, and so does a pending task dropped as too
+  old, which previously pended again on the very next tick.
+
 ## 0.16.48
 
 ### Telegram follows only the chat it is switched to (2026-09-23)
