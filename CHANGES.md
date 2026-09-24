@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## Unreleased
+## 0.16.49
 
 **A Unix `find` named by its full path is no longer redirected on Windows (2026-09-24).** The Windows `find` redirect keyed on the program's name alone, so Git for Windows' own `usr\bin\find.exe`, named in full, was refused as if it were System32's text search. Only a bare `find`, or one under System32, is redirected now.
 
