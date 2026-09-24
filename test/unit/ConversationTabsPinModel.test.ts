@@ -121,6 +121,32 @@ describe('ConversationTabs capacity', () => {
     },
   );
 
+  it.each(['create', 'restore'] as const)(
+    'a background %s never archives the chat the user is viewing',
+    (action) => {
+      const { tabs } = harness({
+        tabs: Array.from({ length: MAX_CONVERSATIONS }, (_, i) => `tab${i}`),
+        evictable: true,
+      });
+      const deps = (tabs as unknown as { deps: ConversationTabsDeps }).deps;
+      const state = deps.getSidebar();
+      state.conversations.forEach((conversation, i) => {
+        conversation.updatedAt = i;
+        conversation.messages = [{ role: 'user', content: `chat ${i}` }];
+      });
+      state.history.push({ id: 'restored', title: 'R', createdAt: 0, updatedAt: 50, messages: [] });
+      const result =
+        action === 'create'
+          ? tabs.create({ activate: false })
+          : tabs.restore('restored', { activate: false });
+      expect(result).toBeDefined();
+      const updated = deps.getSidebar();
+      expect(updated.activeConversationId).toBe('tab0');
+      expect(updated.conversations.some((conversation) => conversation.id === 'tab0')).toBe(true);
+      expect(updated.history.some((conversation) => conversation.id === 'tab1')).toBe(true);
+    },
+  );
+
   it('surfaces a failed cleanup of the evicted chat instead of swallowing it', async () => {
     const { tabs, posted } = harness({
       tabs: Array.from({ length: MAX_CONVERSATIONS }, (_, i) => `tab${i}`),

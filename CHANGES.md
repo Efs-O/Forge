@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### A remote chat no longer closes the chat you are viewing (2026-09-24)
+
+- With all open chats in use, a chat started from the phone or by another
+  agent archived the least recently used idle chat, even when that was the
+  one on screen, so the view jumped away (and an unsent draft with it). A
+  background chat now picks another idle chat, or is refused.
+
 ### A partial file read is no longer marked as replacing the whole file (2026-09-24)
 
 - After the agent read a whole file, a later read of only some of its lines
