@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+**A reasoning model's silent start is no longer aborted as a stall (2026-09-24).** The stalled-stream guard abandoned any stream idle for 45 seconds, counting from the response headers. A provider that sends headers straight away and then thinks with nothing to stream (OpenAI and xAI reasoning models, or a long prefill on a server that does not hold its headers back) was cut off mid-turn as "stalled". The first byte now gets 10 minutes; once bytes flow, a 2-minute gap is a stall.
+
 **A crashed llama-server no longer blocks its slot on Windows (2026-09-24).** Shutdown treated taskkill's "process not found" (exit 128) as a failed teardown, so a server that had already exited on its own kept its port and slot reserved as if still running. "Not found" now counts as stopped once the server's own exit has been seen.
 
 **Compaction records `exec_command` outcomes again (2026-09-24).** `exec_command` and `query_powershell` answer with a JSON object carrying `exitCode`, but the compaction ledger only read the older `[exit code: N]` suffix, so every such command was recorded as "outcome unknown (no exit code)" and a resumed agent had no trusted record of what it had run — the kind of gap that sends it to re-run a build or a download. The ledger now reads the structured exit code and takes its output evidence from the command's stdout and stderr.

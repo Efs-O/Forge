@@ -11,7 +11,17 @@ import { withDescribedCause } from '../util/describeError';
 
 const log = getLogger();
 let requestSequence = 0;
-const STREAM_STALL_TIMEOUT_MS = 45_000;
+/**
+ * Idle budget before a stream is abandoned as stalled.
+ *
+ * Two budgets, because silence means different things either side of the first
+ * byte. Before it, a provider that sends headers early (OpenAI, xAI) may be
+ * reasoning with nothing to stream for minutes, and a server without
+ * early-error handling may still be prefilling a long prompt — neither is a
+ * stall. Once bytes flow, a long gap is.
+ */
+const FIRST_BYTE_STALL_TIMEOUT_MS = 600_000;
+const STREAM_STALL_TIMEOUT_MS = 120_000;
 
 export const MID_TURN_WIRE_LABEL =
   '[Sent by the user while you were working. If it changes the task, adjust; otherwise acknowledge it in one line and continue.]';
@@ -227,12 +237,14 @@ export async function streamChatCompletion(
       `idle_ms=${idleMs} reads=${readCount} sse_frames=${sseFrameCount} ` +
       `bytes=${bytesRead} text_chars=${textChars} reasoning_chars=${reasoningChars} ` +
       `tool_deltas=${toolDeltaCount}`;
-    if (idleMs >= STREAM_STALL_TIMEOUT_MS) {
+    const stallAfterMs =
+      firstByteAt === null ? FIRST_BYTE_STALL_TIMEOUT_MS : STREAM_STALL_TIMEOUT_MS;
+    if (idleMs >= stallAfterMs) {
       streamStalled = true;
       clearInterval(heartbeat);
       log.error(`${heartbeatLine} — aborting stalled stream`);
       void reader.cancel().catch(() => undefined);
-      handlers.onError(new Error(`Stream stalled after ${STREAM_STALL_TIMEOUT_MS / 1000}s idle`));
+      handlers.onError(new Error(`Stream stalled after ${stallAfterMs / 1000}s idle`));
     } else if (idleMs >= 15_000 && !streamStallWarned) {
       streamStallWarned = true;
       log.warn(heartbeatLine);
