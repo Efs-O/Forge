@@ -6,7 +6,7 @@
 
 **`git_show` refuses a ref that is an option (2026-09-24).** `git_show` runs as an unconfirmed read, but passed the model's `ref` straight to `git show`, so a ref of `--output=<path>` made git write the diff to any file it named. A ref starting with `-` or carrying a control character is now refused, as `git_log` already did. `git_blame` also puts `--` before its path.
 
-**Long command output keeps its end (2026-09-24).** An `exec_command` stream past its bound kept only its first characters, so a long build or test run returned progress lines and dropped the error and summary printed last — costing a second run with `tail_lines`. An over-long stream now keeps its first quarter and its end, with a marker naming how much of the middle was dropped. The bound and the returned size are unchanged.
+**Long command output keeps its end (2026-09-24).** An `exec_command`, `run_tests` or `run_build` stream past its bound kept only its first characters, so a long build or test run returned progress lines and dropped the error and summary printed last — costing a second run with `tail_lines`. An over-long stream now keeps its first quarter and its end, with a marker naming how much of the middle was dropped. The bound and the returned size are unchanged.
 
 **Reasoning-stop retry sees what it had decided (2026-09-24).** When a round ended inside its thinking block, the thinking-off retry told the model "your reasoning above is preserved" — but `ChatMessage.reasoning` is never sent upstream, so the retry started from nothing and re-derived the decision the budget had cut off. The retry nudge now quotes the last 4000 characters of that reasoning.
 

@@ -37,6 +37,16 @@ describe('formatOutput', () => {
     expect(out).toBe('ok\n[stderr]\nwarn\n[exit code: 0]');
     expect(out.includes(ESC)).toBe(false);
   });
+
+  it('keeps the summary at the end of over-long test output', () => {
+    const out = formatOutput({
+      stdout: 'x'.repeat(200_000) + '\nTests  3 failed | 12 passed',
+      stderr: '',
+      exitCode: 1,
+    });
+    expect(out).toContain('Tests  3 failed | 12 passed');
+    expect(out).toContain('characters dropped');
+  });
 });
 
 describe('structured exec_command outcomes', () => {

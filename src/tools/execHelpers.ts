@@ -215,12 +215,13 @@ export function stripAnsi(s: string): string {
 
 // ── Output formatter ───────────────────────────────────────────────────────────
 
+/** `run_tests` / `run_build` output: each stream bounded, keeping its end (see `storedStream`). */
 export function formatOutput(result: SpawnResult): string {
   // Strip ANSI BEFORE slicing: codes inflate the char count and a mid-escape
   // slice would leave dangling garbage.
-  let out = stripAnsi(result.stdout).slice(0, MAX_OUTPUT_CHARS);
+  let out = storedStream(result.stdout, MAX_OUTPUT_CHARS).text;
   if (result.stderr) {
-    out += `\n[stderr]\n${stripAnsi(result.stderr).slice(0, MAX_OUTPUT_CHARS)}`;
+    out += `\n[stderr]\n${storedStream(result.stderr, MAX_OUTPUT_CHARS).text}`;
   }
   out += `\n[exit code: ${result.exitCode ?? 'null'}]`;
   return out;

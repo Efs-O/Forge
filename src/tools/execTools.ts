@@ -423,11 +423,7 @@ export function makeRunBuildTool(): RegisteredTool {
         }
         throw error;
       }
-      const out = result.stdout.slice(0, MAX_OUTPUT_CHARS);
-      let formatted = out;
-      if (result.stderr) formatted += `\n[stderr]\n${result.stderr.slice(0, MAX_OUTPUT_CHARS)}`;
-      formatted += `\n[exit code: ${result.exitCode ?? 'null'}]`;
-      return formatted;
+      return formatOutput(result);
     },
   };
 }
