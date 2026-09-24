@@ -91,9 +91,11 @@ export class StructuredOutputStripper {
     return this.consume(processed);
   }
 
+  /** The held tail was only the start of a marker if more text followed; it is text. */
   flush(): string {
+    const tail = this.hiddenDepth === 0 ? this.carry : '';
     this.carry = '';
-    return '';
+    return tail;
   }
 
   private consume(content: string): string {

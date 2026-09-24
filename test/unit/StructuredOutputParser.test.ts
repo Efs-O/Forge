@@ -119,3 +119,10 @@ describe('```json blocks limited to known tools', () => {
     expect(stripStructuredOutputFromFullText(call, tools)).toBe('Writing.\n');
   });
 });
+
+describe('StructuredOutputStripper.flush', () => {
+  it('returns a held tail that never became a marker', () => {
+    const stripper = new StructuredOutputStripper();
+    expect(stripper.push('use a <') + stripper.flush()).toBe('use a <');
+  });
+});

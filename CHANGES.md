@@ -9,6 +9,7 @@
   text tool call to a tool named after that key. The block vanished from the
   answer and the agent ran a tool that does not exist. A ```json block now
   counts as a tool call only when it names one of the chat's tools.
+- An answer ending in `<` lost that last character in the live stream.
 
 ### Scheduled jobs: "run now" is not lost while the job is still running (2026-09-24)
 
