@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+**A crashed llama-server no longer blocks its slot on Windows (2026-09-24).** Shutdown treated taskkill's "process not found" (exit 128) as a failed teardown, so a server that had already exited on its own kept its port and slot reserved as if still running. "Not found" now counts as stopped once the server's own exit has been seen.
+
 **Compaction records `exec_command` outcomes again (2026-09-24).** `exec_command` and `query_powershell` answer with a JSON object carrying `exitCode`, but the compaction ledger only read the older `[exit code: N]` suffix, so every such command was recorded as "outcome unknown (no exit code)" and a resumed agent had no trusted record of what it had run — the kind of gap that sends it to re-run a build or a download. The ledger now reads the structured exit code and takes its output evidence from the command's stdout and stderr.
 
 **Compaction no longer says no tool ran after your last reply when one did (2026-09-24).** When the retained tail was a tool run with no text of its own, the carried-over last reply was labelled as followed by no tool activity, contradicting the tail shown right after it. The tail now counts.
