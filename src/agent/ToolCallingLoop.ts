@@ -23,7 +23,7 @@ import {
   OUTPUT_BUDGET_EXHAUSTED_NOTICE,
   MAX_REASONING_STOP_RETRIES,
   REASONING_ONLY_STOP_NOTICE,
-  REASONING_STOP_RETRY_NUDGE,
+  reasoningStopRetryNudge,
   MAX_TRUNCATION_RECOVERIES,
   truncationGuidance,
   truncationRecoveryMessages,
@@ -382,9 +382,9 @@ export async function runToolCallingLoop(
       rawReasoning.trim().length > 0 &&
       streamed.finishReason !== 'cancelled';
     // A normal stop always leaves an answer or a tool call; this one left only
-    // thinking, so retry it once with thinking off. The partial reasoning stays
-    // in the transcript (preserve_thinking), so the retry acts on what was
-    // already decided instead of re-deriving it — which is what hit the budget.
+    // thinking, so retry it once with thinking off. The nudge quotes the tail of
+    // that reasoning (it is not otherwise sent back), so the retry acts on what
+    // was already decided instead of re-deriving it — which is what hit the budget.
     if (
       !assistantContent &&
       stoppedWhileReasoning &&
@@ -395,7 +395,11 @@ export async function runToolCallingLoop(
       streamedAssistant.completeAnswer(assistantContent, assistantReasoning);
       // Internal: the model and the session log need it; the sidebar must not
       // render Forge's nudge as something the user typed.
-      options.messages.push({ role: 'user', content: REASONING_STOP_RETRY_NUDGE, internal: true });
+      options.messages.push({
+        role: 'user',
+        content: reasoningStopRetryNudge(assistantReasoning),
+        internal: true,
+      });
       options.onMessagesChanged?.();
       continue;
     }

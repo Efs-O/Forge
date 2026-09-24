@@ -211,8 +211,27 @@ export const MAX_REASONING_STOP_RETRIES = 1;
  */
 export const REASONING_STOP_RETRY_NUDGE =
   'Forge: your previous response ended while still reasoning — no answer and no tool ' +
-  'call. Your reasoning above is preserved. Do not reason again: take the next concrete ' +
-  'action now, as a tool call or a direct answer.';
+  'call. Do not reason again: take the next concrete action now, as a tool call or a ' +
+  'direct answer.';
+
+/** Tail of the stopped reasoning quoted into the retry nudge (~1k tokens). */
+export const RETRY_REASONING_TAIL_CHARS = 4000;
+
+/**
+ * The retry nudge, carrying the tail of the reasoning the stopped round
+ * produced. `ChatMessage.reasoning` never reaches the wire, so without this the
+ * thinking-off retry starts from nothing and has to re-derive the decision the
+ * budget cut off. The tail is where that decision is.
+ */
+export function reasoningStopRetryNudge(reasoning: string): string {
+  const trimmed = reasoning.trim();
+  if (!trimmed) return REASONING_STOP_RETRY_NUDGE;
+  const tail =
+    trimmed.length > RETRY_REASONING_TAIL_CHARS
+      ? `…${trimmed.slice(-RETRY_REASONING_TAIL_CHARS)}`
+      : trimmed;
+  return `${REASONING_STOP_RETRY_NUDGE}\n\nWhere your reasoning had got to:\n<reasoning>\n${tail}\n</reasoning>`;
+}
 
 /**
  * Prefix of the incomplete-turn reason recorded when the loop runs out of tool
