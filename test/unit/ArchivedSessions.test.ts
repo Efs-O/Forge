@@ -45,6 +45,35 @@ describe('ArchivedSessions', () => {
     expect(archive.read('orphan')?.messages[0]?.content).toBe('kept');
   });
 
+  it('rebuilds a corrupt index from the bodies on disk instead of throwing', () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-archived-'));
+    const archive = new ArchivedSessions(root);
+    archive.put({ id: 'kept', title: 'Kept', createdAt: 1, updatedAt: 1, messages: [] });
+    const directory = path.join(root, 'archive');
+    fs.writeFileSync(path.join(directory, 'index.json'), '[{"id": "kept", "tit');
+
+    expect(archive.list().map((row) => row.id)).toEqual(['kept']);
+    expect(fs.readdirSync(directory).some((name) => name.startsWith('index.json.corrupt-'))).toBe(true);
+    // The save path keeps working on the rebuilt index.
+    archive.put({ id: 'next', title: 'Next', createdAt: 2, updatedAt: 2, messages: [] });
+    expect(archive.list().map((row) => row.id).sort()).toEqual(['kept', 'next']);
+  });
+
+  it('skips an unreadable or badly named body instead of failing every list', () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-archived-'));
+    const directory = path.join(root, 'archive');
+    fs.mkdirSync(directory);
+    fs.writeFileSync(path.join(directory, 'index.json'), '[]');
+    fs.writeFileSync(path.join(directory, 'torn.json'), '{"id": "torn", "mess');
+    const body = { title: 'Copy', createdAt: 1, updatedAt: 1, messages: [] };
+    fs.writeFileSync(path.join(directory, 'chat (copy).json'), JSON.stringify({ id: 'x', ...body }));
+    const archive = new ArchivedSessions(root);
+
+    expect(archive.list()).toEqual([]);
+    archive.put({ id: 'chat', ...body });
+    expect(archive.list().map((row) => row.id)).toEqual(['chat']);
+  });
+
   it('backfills only matching workspaces and rebuilds deduplicated user, assistant, and tool rows', () => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-archived-'));
     const logs = path.join(root, 'logs');

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Archived chats survive a damaged archive file (2026-09-24)
+
+- One damaged file in the archived-chats folder (a torn `index.json`, a
+  half-written chat, or a copied file with a space in its name) made every
+  archive read throw. That stopped the sidebar from saving its chats at all
+  once history overflowed, and broke the history list. A damaged index is now
+  moved aside and rebuilt from the chats on disk, and a damaged chat file is
+  skipped and logged.
+
 ### Scheduled agent tasks: a deferred run acts on the change it was deferred on (2026-09-24)
 
 - An agent task whose change arrived while every slot was busy ran later with

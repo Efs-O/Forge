@@ -36,48 +36,84 @@ export class ArchivedSessions {
     this.indexPath = path.join(this.directory, 'index.json');
   }
 
+  /**
+   * Every archived row. Callers include the session save path, so one bad file
+   * must not throw: a corrupt index is moved aside and rebuilt (from the logs
+   * and the bodies on disk), and an unreadable body is skipped.
+   */
   list(recentIds: readonly string[] = []): ArchivedSessionMeta[] {
     if (!fs.existsSync(this.indexPath)) this.backfill(new Set(recentIds));
+    let parsed: ArchivedSessionMeta[];
     try {
-      const parsed = indexSchema.parse(JSON.parse(fs.readFileSync(this.indexPath, 'utf8')));
-      const valid = parsed.filter(
-        (row) =>
-          (row.source !== 'log' ||
-            fs.existsSync(path.join(this.logsDirectory, `${row.id}.jsonl`))) &&
-          (row.source !== 'body' || fs.existsSync(this.bodyPath(row.id))),
-      );
-      let changed = valid.length !== parsed.length;
-      const known = new Set(valid.map((row) => row.id));
-      for (const filename of fs.readdirSync(this.directory)) {
-        if (!filename.endsWith('.json') || filename === 'index.json') continue;
-        const id = filename.slice(0, -5);
-        if (known.has(id)) continue;
-        const orphan = conversationPersistedSchema.safeParse(
-          JSON.parse(fs.readFileSync(path.join(this.directory, filename), 'utf8')),
-        );
-        if (!orphan.success) {
-          log.error(
-            `[ArchivedSessions] ignoring invalid orphan body ${filename}: ${orphan.error.message}`,
-          );
-          continue;
-        }
-        valid.push({
-          id,
-          title: orphan.data.title,
-          createdAt: orphan.data.createdAt,
-          updatedAt: orphan.data.updatedAt,
-          messageCount: orphan.data.messages.length,
-          ...(orphan.data.active_model ? { active_model: orphan.data.active_model } : {}),
-          source: 'body',
-        });
-        changed = true;
-      }
-      if (changed) writeFileAtomicSync(this.indexPath, JSON.stringify(valid));
-      return valid;
+      parsed = this.readIndex(recentIds);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
       throw error;
     }
+    const valid = parsed.filter(
+      (row) =>
+        (row.source !== 'log' || fs.existsSync(path.join(this.logsDirectory, `${row.id}.jsonl`))) &&
+        (row.source !== 'body' || (isSafeId(row.id) && fs.existsSync(this.bodyPath(row.id)))),
+    );
+    let changed = valid.length !== parsed.length;
+    const known = new Set(valid.map((row) => row.id));
+    for (const filename of fs.readdirSync(this.directory)) {
+      if (!filename.endsWith('.json') || filename === 'index.json') continue;
+      const id = filename.slice(0, -5);
+      // A file whose name is not a body id could never be read or deleted back.
+      if (known.has(id) || !isSafeId(id)) continue;
+      const orphan = this.readBody(filename);
+      if (!orphan) continue;
+      valid.push({
+        id,
+        title: orphan.title,
+        createdAt: orphan.createdAt,
+        updatedAt: orphan.updatedAt,
+        messageCount: orphan.messages.length,
+        ...(orphan.active_model ? { active_model: orphan.active_model } : {}),
+        source: 'body',
+      });
+      changed = true;
+    }
+    if (changed) writeFileAtomicSync(this.indexPath, JSON.stringify(valid));
+    return valid;
+  }
+
+  /** The parsed index; a corrupt one is moved aside and rebuilt by a fresh backfill. */
+  private readIndex(recentIds: readonly string[]): ArchivedSessionMeta[] {
+    const raw = fs.readFileSync(this.indexPath, 'utf8');
+    let detail: string;
+    try {
+      const parsed = indexSchema.safeParse(JSON.parse(raw));
+      if (parsed.success) return parsed.data;
+      detail = parsed.error.message;
+    } catch (error) {
+      detail = error instanceof Error ? error.message : String(error);
+    }
+    // Not `.json`: the orphan scan must not pick the quarantined copy up.
+    const target = `${this.indexPath}.corrupt-${Date.now()}`;
+    fs.renameSync(this.indexPath, target);
+    log.error(`[ArchivedSessions] unreadable index moved to ${target}; rebuilding: ${detail}`);
+    this.backfill(new Set(recentIds));
+    return indexSchema.parse(JSON.parse(fs.readFileSync(this.indexPath, 'utf8')));
+  }
+
+  /** A stored body, or undefined (logged) when it is unreadable or invalid. */
+  private readBody(filename: string): ConversationPersisted | undefined {
+    let json: unknown;
+    try {
+      json = JSON.parse(fs.readFileSync(path.join(this.directory, filename), 'utf8'));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      log.error(`[ArchivedSessions] ignoring unreadable body ${filename}: ${String(error)}`);
+      return undefined;
+    }
+    const parsed = conversationPersistedSchema.safeParse(json);
+    if (!parsed.success) {
+      log.error(`[ArchivedSessions] ignoring invalid body ${filename}: ${parsed.error.message}`);
+      return undefined;
+    }
+    return parsed.data;
   }
 
   put(conversation: ConversationPersisted): void {
@@ -100,10 +136,7 @@ export class ArchivedSessions {
     const row = this.list().find((item) => item.id === id);
     if (!row) return undefined;
     if (row.source === 'log') return this.readLog(id, row);
-    const parsed = conversationPersistedSchema.safeParse(
-      JSON.parse(fs.readFileSync(this.bodyPath(id), 'utf8')),
-    );
-    return parsed.success ? parsed.data : undefined;
+    return this.readBody(path.basename(this.bodyPath(id)));
   }
 
   rename(id: string, title: string): void {
@@ -127,7 +160,7 @@ export class ArchivedSessions {
   }
 
   private bodyPath(id: string): string {
-    if (!/^[\w-]+$/.test(id)) throw new Error('Invalid archived session id');
+    if (!isSafeId(id)) throw new Error('Invalid archived session id');
     return path.join(this.directory, `${id}.json`);
   }
 
@@ -256,4 +289,8 @@ function samePath(logged: string | undefined, workspace: string): boolean {
   const a = path.resolve(logged);
   const b = path.resolve(workspace);
   return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+
+function isSafeId(id: string): boolean {
+  return /^[\w-]+$/.test(id);
 }
