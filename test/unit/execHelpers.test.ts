@@ -121,6 +121,16 @@ describe('structured exec_command outcomes', () => {
       expect(output.stdout_note).toContain('5000 characters');
     });
 
+    // A build puts its error and summary last; a head-only cut dropped them.
+    it('keeps the end of an over-long stream, where the failure is', () => {
+      const stdout = `START\n${'progress\n'.repeat(MAX_EXEC_STORED_CHARS / 4)}error TS2322: boom\n`;
+      const output = JSON.parse(formatExecCommandOutput('tsc', { stdout, stderr: '', exitCode: 2 }));
+      expect(output.stdout).toHaveLength(MAX_EXEC_STORED_CHARS);
+      expect(output.stdout.startsWith('START')).toBe(true);
+      expect(output.stdout.endsWith('error TS2322: boom\n')).toBe(true);
+      expect(output.stdout).toContain('characters dropped');
+    });
+
     // The bound is the real worst case one exec_command can add to a round:
     // the excerptor downstream only cuts when the window is already tight.
     it('bounds a both-streams result to twice the retention bound', () => {
