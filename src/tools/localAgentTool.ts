@@ -230,13 +230,25 @@ export function makeLocalAgentTool(
     // large GGUF passes every check Forge makes and then thrashes WDDM instead
     // of failing, which is the worst shape a failure can take — silent. The
     // person who knows what is already resident is the user, so ask them. Cloud
-    // and CLI targets take no slot and are not gated.
+    // targets take no slot and are not gated; CLI targets are, for their access.
     approval: (args) => {
       const requested = args['model'];
       if (typeof requested !== 'string') return undefined;
       const target = listEligibleDelegationTargets(getConfig()).find(
         (item) => item.name === requested,
       );
+      // A CLI agent runs with full access and its own tools: none of its edits
+      // or commands pass Forge's approval, so the delegation itself is the gate
+      // (a write_file needs a click; "have codex write it" must too).
+      if (target?.provider === 'cli') {
+        const task = typeof args['task'] === 'string' ? args['task'] : '';
+        return {
+          detail:
+            `Delegate to the "${requested}" CLI agent. It runs with full access to ` +
+            "this machine's files and commands, and Forge cannot approve its " +
+            `individual edits.\n\nTask: ${task.length > 400 ? `${task.slice(0, 400)}…` : task}`,
+        };
+      }
       // An unmatched name is a fuzzy alias/short_name/`model@profile` the
       // handler still resolves. Confirm it: unknown-to-us must not mean ungated.
       if (target && !target.localWeights) return undefined;

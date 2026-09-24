@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Delegating to Claude or Codex asks first (2026-09-24).** Since the CLI agents started running with full access, a local model could hand a task to Claude or Codex with `ask_local_agent`, and they would edit files and run commands without any Forge approval, even though writing the same file directly needs a click. Delegating to a CLI agent now shows an approval that names the task and says the agent has full access. Clanker mode approves it like any other write, and unattended jobs keep their existing CLI-agent rule.
+
 - **Replying by voice to a Telegram approval now resolves that approval (2026-09-24).** When more than one approval was open, Forge refused a spoken "approve" and told you to reply to the request directly. A voice reply to the request never matched it, though, and "approve" was taken as an ordinary prompt. Forge now remembers which Telegram messages showed each approval, so a spoken approve or deny sent as a reply to one of them resolves that approval.
 
 - **Saving a chat no longer rescans the archive every time (2026-09-24).** Each session save listed the archived chats by checking every archived file and reading the archive folder. The listing is now cached and only rebuilt when the archive index, the archive folder or the session-log folder changes. With 300 archived chats a listing drops from about 1 ms to 0.02 ms, and more on slower Windows disks.
