@@ -6,9 +6,10 @@
  * ToolRegistry, so this cannot silently drift to an ad-hoc schema.
  */
 import { build } from 'esbuild';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
-import { resolve } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -23,7 +24,7 @@ function value(args, flag) {
 
 function usage() {
   return [
-    'Usage: node scripts/nemotron-bench.mjs --base-url http://127.0.0.1:PORT --model MODEL_ID --greek-eval PATH [--out docs/benchmarks]',
+    'Usage: node scripts/nemotron-bench.mjs --base-url URL --model ID --greek-eval PATH --quant NAME [--gguf PATH] [--greek-no-system] [--greek-max-tokens N] [--determinism N] [--rows-out PATH] [--force-rows-out] [--out DIR]',
     '',
     'The server must already be running. This command never starts, stops, unloads, or downloads a model.',
   ].join('\n');
@@ -35,12 +36,44 @@ function options(args) {
   const model = value(args, '--model');
   if (!baseUrl || !/^https?:\/\//u.test(baseUrl)) throw new Error('--base-url must be an HTTP(S) URL.');
   if (!model) throw new Error('--model is required; refuse to guess a served model.');
+  const quant = value(args, '--quant');
+  if (!quant) throw new Error('--quant NAME is required.');
+  const greekMaxTokens = Number(value(args, '--greek-max-tokens') ?? 512);
+  if (!Number.isInteger(greekMaxTokens) || greekMaxTokens <= 0) throw new Error('--greek-max-tokens must be a positive integer.');
+  const determinism = Number(value(args, '--determinism') ?? 0);
+  if (!Number.isInteger(determinism) || determinism < 0) throw new Error('--determinism must be an integer greater than or equal to 0.');
   const output = resolve(ROOT, value(args, '--out') ?? DEFAULT_OUTPUT);
   const greekEvalValue = value(args, '--greek-eval');
   if (!greekEvalValue) throw new Error('--greek-eval PATH is required.\n' + usage());
   const greekEval = resolve(greekEvalValue);
   if (!existsSync(greekEval)) throw new Error(`Greek evaluation file not found: ${greekEval}`);
-  return { baseUrl, model, output, greekEval };
+  const rowsOutValue = value(args, '--rows-out');
+  const rowsOut = rowsOutValue ? resolve(rowsOutValue) : undefined;
+  if (rowsOut) {
+    const rel = relative(ROOT, rowsOut);
+    if (rel === '' || (!rel.startsWith(`..${sep}`) && rel !== '..' && !isAbsolute(rel))) throw new Error('--rows-out must be outside the Forge repository root.');
+    if (existsSync(rowsOut) && !args.includes('--force-rows-out')) throw new Error('--rows-out already exists; pass --force-rows-out to overwrite it.');
+  }
+  const gguf = value(args, '--gguf');
+  if (gguf && !existsSync(resolve(gguf))) throw new Error(`GGUF file not found: ${resolve(gguf)}`);
+  return { baseUrl, model, quant, output, greekEval, greekMaxTokens, determinism, rowsOut, forceRowsOut: args.includes('--force-rows-out'), greekNoSystem: args.includes('--greek-no-system'), gguf: gguf ? resolve(gguf) : undefined };
+}
+
+async function sha256File(file) {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(file)) hash.update(chunk);
+  return hash.digest('hex');
+}
+
+function greekSystemInfo(rows, disabled) {
+  const systems = [...new Set(rows.map((row) => row.system).filter((item) => typeof item === 'string' && item.length > 0))];
+  if (systems.length > 1) throw new Error('Greek evaluation rows contain more than one distinct system prompt.');
+  return { mode: disabled || systems.length === 0 ? 'none' : 'row', prompt: disabled ? undefined : systems[0], sha256: disabled || !systems[0] ? null : createHash('sha256').update(systems[0], 'utf8').digest('hex') };
+}
+
+function insideRoot(path) {
+  const rel = relative(ROOT, path);
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
 async function loadForgeToolDefinitions() {
@@ -218,7 +251,10 @@ function markdown(result) {
     `Endpoint: ${result.base_url}`,
     `Model: ${result.model}`,
     `llama.cpp: ${result.llama_cpp_build ?? 'not reported by endpoint'}`,
-    `Quant: Nemotron-3-Nano-30B-A3B-Q4_K_M (24,574,373,664 bytes; SHA-256 0e7f6e51fdd9039928749d07eed9e846dbfd97681646544c5406bcdd788e5940)`,
+    `Quant: ${result.quant} (GGUF SHA-256 ${result.gguf_sha256 ?? 'not supplied'})`,
+    `Greek settings: max_tokens=${result.settings.greek_max_tokens}, temperature=${result.settings.greek_temperature}, top_k=${result.settings.greek_top_k}, seed=${result.settings.greek_seed}, cache_prompt=${result.settings.cache_prompt}; tool temperature=${result.settings.tool_temperature}, top_p=${result.settings.tool_top_p}`,
+    `Greek system prompt: mode=${result.greek.system_prompt_mode}, SHA-256=${result.greek.system_prompt_sha256 ?? 'none'}`,
+    `Determinism check: n=${result.determinism.n}, matched=${result.determinism.matched}`,
     `Context: ${result.context ?? 'not reported by endpoint'}`,
     '',
     `Tool-call success: ${result.tool_successes}/${result.scenarios.length} (${result.tool_success_rate}%). Coding checks: ${result.coding_successes}/4.`,
@@ -248,6 +284,14 @@ function markdown(result) {
 async function main() {
   const input = options(process.argv.slice(2));
   if (input.help) return console.log(usage());
+  const greekRows = greekEvaluation(input.greekEval);
+  if (input.determinism > greekRows.length) throw new Error(`--determinism (${input.determinism}) exceeds Greek evaluation row count (${greekRows.length}).`);
+  const system = greekSystemInfo(greekRows, input.greekNoSystem);
+  const greekHash = createHash('sha256').update(readFileSync(input.greekEval)).digest('hex');
+  const ggufHash = input.gguf ? await sha256File(input.gguf) : null;
+  const settings = { cache_prompt: false, greek_temperature: 0, greek_top_k: 1, greek_seed: 3407, greek_max_tokens: input.greekMaxTokens, tool_temperature: 0.6, tool_top_p: 0.95, tool_max_tokens: 512 };
+  if (input.rowsOut && insideRoot(input.rowsOut)) throw new Error('--rows-out must be outside the Forge repository root.');
+  if (input.rowsOut && existsSync(input.rowsOut) && !input.forceRowsOut) throw new Error('--rows-out already exists; pass --force-rows-out to overwrite it.');
   const { definitions, workspace, cleanup } = await loadForgeToolDefinitions();
   try {
     writeFileSync(resolve(workspace, 'seed.txt'), 'seed\n', 'utf8');
@@ -256,10 +300,17 @@ async function main() {
     const props = await jsonRequest(`${input.baseUrl}/props`, {});
     const models = await jsonRequest(`${input.baseUrl}/v1/models`, {});
     const definitionsByName = new Map(definitions.map((definition) => [definition.function.name, definition]));
-    const greekRows = greekEvaluation(input.greekEval);
-    const greekHash = (await import('node:crypto')).createHash('sha256').update(readFileSync(input.greekEval)).digest('hex');
+    let determinismMatched = 0;
+    for (const row of greekRows.slice(0, input.determinism)) {
+      const request = { model: input.model, messages: [...(system.prompt ? [{ role: 'system', content: system.prompt }] : []), { role: 'user', content: row.q }], temperature: 0, top_k: 1, seed: 3407, max_tokens: input.greekMaxTokens, cache_prompt: false, stream: false, chat_template_kwargs: { enable_thinking: false } };
+      const a = await jsonRequest(`${input.baseUrl}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(request) });
+      const b = await jsonRequest(`${input.baseUrl}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(request) });
+      if ((a?.choices?.[0]?.message?.content ?? '') !== (b?.choices?.[0]?.message?.content ?? '')) throw new Error(`Determinism check failed for Greek row ${row.id ?? '(no id)'}; main benchmark was not started.`);
+      determinismMatched += 1;
+    }
     const results = [];
     const greekModes = [];
+    const rowResults = [];
     for (const thinking of [false, true]) {
       const greekTools = [];
       for (const test of greekToolScenarios()) {
@@ -269,6 +320,7 @@ async function main() {
         body: JSON.stringify({
           model: input.model,
           messages: [{ role: 'user', content: test.prompt }],
+          cache_prompt: false,
           tools: definitions,
           tool_choice: 'required',
           temperature: 0.6,
@@ -294,15 +346,22 @@ async function main() {
       });
       }
       const qa = [];
+      const finishReasons = {};
+      let emptyAnswers = 0;
       for (const row of greekRows) {
-        const response = await jsonRequest(`${input.baseUrl}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: input.model, messages: [{ role: 'user', content: row.q }], temperature: 0.1, max_tokens: 512, stream: false, chat_template_kwargs: { enable_thinking: thinking } }) });
-        const answer = response?.choices?.[0]?.message?.content ?? '';
+        const response = await jsonRequest(`${input.baseUrl}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: input.model, messages: [...(system.prompt ? [{ role: 'system', content: system.prompt }] : []), { role: 'user', content: row.q }], temperature: 0, top_k: 1, seed: 3407, max_tokens: input.greekMaxTokens, cache_prompt: false, stream: false, chat_template_kwargs: { enable_thinking: thinking } }) });
+        const message = response?.choices?.[0]?.message ?? {};
+        const answer = typeof message.content === 'string' ? message.content : '';
+        const finishReason = response?.choices?.[0]?.finish_reason ?? null;
+        if (answer.length === 0) emptyAnswers += 1;
+        if (finishReason !== null) finishReasons[finishReason] = (finishReasons[finishReason] ?? 0) + 1;
+        rowResults.push({ type: 'row', id: row.id, thinking, answer, reasoning_content: typeof message.reasoning_content === 'string' ? message.reasoning_content : '', finish_reason: finishReason, char_f1: charF1(row.a, answer), token_f1: tokenF1(row.a, answer), greek_share: greekRatio(answer), timing: timing(response) });
         qa.push({ char: charF1(row.a, answer), token: tokenF1(row.a, answer), greek: greekRatio(answer) });
       }
-      greekModes.push({ thinking, char_f1: qa.reduce((sum, item) => sum + item.char, 0) / qa.length, token_f1: qa.reduce((sum, item) => sum + item.token, 0) / qa.length, greek_script_share: qa.reduce((sum, item) => sum + item.greek, 0) / qa.length, tool_successes: greekTools.filter((entry) => entry.pass).length, tool_total: greekTools.length, tool_scenarios: greekTools });
+      greekModes.push({ thinking, char_f1: qa.reduce((sum, item) => sum + item.char, 0) / qa.length, token_f1: qa.reduce((sum, item) => sum + item.token, 0) / qa.length, greek_script_share: qa.reduce((sum, item) => sum + item.greek, 0) / qa.length, finish_reasons: finishReasons, empty_answers: emptyAnswers, tool_successes: greekTools.filter((entry) => entry.pass).length, tool_total: greekTools.length, tool_scenarios: greekTools });
     }
     for (const test of scenarios()) {
-      const response = await jsonRequest(`${input.baseUrl}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: input.model, messages: [{ role: 'user', content: test.prompt }], tools: definitions, tool_choice: 'required', temperature: 0.6, top_p: 0.95, max_tokens: 512, stream: false, chat_template_kwargs: { enable_thinking: false } }) });
+      const response = await jsonRequest(`${input.baseUrl}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: input.model, messages: [{ role: 'user', content: test.prompt }], tools: definitions, tool_choice: 'required', temperature: 0.6, top_p: 0.95, max_tokens: 512, cache_prompt: false, stream: false, chat_template_kwargs: { enable_thinking: false } }) });
       const call = callFor(response); const definition = call ? definitionsByName.get(call.name) : undefined; const valid = Boolean(call && definition && requires(definition, call.args)); const correct = valid && call.name === test.expectedTool; results.push({ id: test.id, expected_tool: test.expectedTool, actual_tool: call?.name, valid_required_args: valid, pass: Boolean(correct && (!test.codingCheck || test.codingCheck(call.args))), timing: timing(response), response });
     }
     const toolSuccesses = results.filter((entry) => entry.pass).length;
@@ -315,8 +374,8 @@ async function main() {
       base_url: input.baseUrl,
       model: input.model,
       hardware: HARDWARE,
-      quant: 'Nemotron-3-Nano-30B-A3B-Q4_K_M',
-      gguf_sha256: '0e7f6e51fdd9039928749d07eed9e846dbfd97681646544c5406bcdd788e5940',
+      quant: input.quant,
+      gguf_sha256: ggufHash,
       context: props?.default_generation_settings?.n_ctx ?? props?.n_ctx ?? null,
       llama_cpp_build: props?.build_info?.build ?? props?.build ?? null,
       server_props: props,
@@ -325,12 +384,19 @@ async function main() {
       tool_success_rate: Number(((toolSuccesses / results.length) * 100).toFixed(1)),
       coding_successes: coding.filter((entry) => entry.pass).length,
       scenarios: results,
-      greek: { evaluation_file: input.greekEval, sha256: greekHash, examples: greekRows.length, modes: greekModes },
+      settings,
+      determinism: { n: input.determinism, matched: determinismMatched },
+      greek: { evaluation_file: input.greekEval, sha256: greekHash, examples: greekRows.length, system_prompt_mode: system.mode, system_prompt_sha256: system.sha256, modes: greekModes },
       raw_file: rawName,
     };
     if (!existsSync(input.output)) mkdirSync(input.output, { recursive: true });
     atomicWrite(rawFile, `${JSON.stringify(result, null, 2)}\n`);
     atomicWrite(resolve(input.output, 'nemotron.md'), markdown(result));
+    if (input.rowsOut) {
+      const header = { type: 'header', model: input.model, quant: input.quant, gguf_sha256: ggufHash, llama_cpp_build: result.llama_cpp_build, greek_eval_sha256: greekHash, settings, system_prompt_mode: system.mode, system_prompt_sha256: system.sha256, date };
+      if (input.forceRowsOut && existsSync(input.rowsOut)) rmSync(input.rowsOut);
+      atomicWrite(input.rowsOut, `${[header, ...rowResults].map((item) => JSON.stringify(item)).join('\n')}\n`);
+    }
     console.log(`nemotron-bench: ${toolSuccesses}/${results.length} tool/coding scenarios passed; report=${resolve(input.output, 'nemotron.md')}`);
   } finally {
     rmSync(workspace, { recursive: true, force: true });
