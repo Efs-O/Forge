@@ -102,9 +102,7 @@ export function makeExecCommandTool(): RegisteredTool {
               type: 'object',
               additionalProperties: { type: 'string' },
               description:
-                'Optional environment variables for the process. A small, validated set — ' +
-                'dangerous names (NODE_OPTIONS, PATH, LD_PRELOAD, …) are refused. ' +
-                'Use for CLIs that need an env var (e.g. ELECTRON_RUN_AS_NODE).',
+                'Optional env vars for the process; dangerous names (PATH, NODE_OPTIONS, …) are refused.',
             },
             timeout_ms: {
               type: 'integer',
@@ -129,10 +127,8 @@ export function makeExecCommandTool(): RegisteredTool {
               minimum: 1,
               maximum: MAX_OUTPUT_CHARS,
               description:
-                'Maximum returned characters per selected output stream, for asking for LESS ' +
-                'than the default. Omitted: the whole stream is returned, capped at ' +
-                `${String(MAX_EXEC_STORED_CHARS)} characters. Output past the applied bound is ` +
-                'dropped and cannot be recovered.',
+                'Return at most this many characters per stream (default cap ' +
+                `${String(MAX_EXEC_STORED_CHARS)}). Output past the bound is lost.`,
             },
             output_stream: {
               type: 'string',

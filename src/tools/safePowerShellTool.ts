@@ -200,7 +200,7 @@ export function makeSafePowerShellTool(): RegisteredTool {
       function: {
         name: 'query_powershell',
         description:
-          'Run one structured, read-only PowerShell inspection without user confirmation. Supports workspace_overview, get_location, list_directory, get_file_hash, and list_processes (PID, name and command line for processes matching a name pattern -- use this to find a running llama-server). It never accepts a raw PowerShell command or script.',
+          'Run one fixed, read-only PowerShell inspection without confirmation; never a raw script. list_processes gives PID, name and command line for a name pattern (e.g. a running llama-server).',
         parameters: {
           type: 'object',
           properties: {
@@ -243,6 +243,8 @@ export function makeSafePowerShellTool(): RegisteredTool {
     },
     permission: 'headless',
     autoApprove: true,
+    // It spawns powershell.exe: elsewhere the schema is prefill for a tool that cannot run.
+    advertise: () => process.platform === 'win32',
     handler: async (args) => {
       const operation = requireOperation(args['operation']);
       const maxEntries = requireListLimit(args['max_entries']);

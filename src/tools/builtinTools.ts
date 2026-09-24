@@ -76,12 +76,9 @@ export function makeReadFileTool(extraRoots: () => readonly string[] = () => [])
             numbered: {
               type: 'boolean',
               description:
-                'Prefix each line with its 1-based number as "  12|text". Use when you need ' +
-                'line numbers, e.g. to build apply_line_edits operations. The prefix ends at ' +
-                'the "|" and the very next character is column 1 of the real line, so the ' +
-                "line's own indentation is preserved exactly. Strip everything up to and " +
-                'including the first "|" — never copy the prefix into old_str or ' +
-                'expected_lines, and never add or drop a space after it.',
+                'Prefix each line with its number as "  12|text", e.g. for apply_line_edits. ' +
+                'The line starts right after the first "|": never copy the prefix into ' +
+                'old_str or expected_lines.',
             },
           },
           required: ['path'],

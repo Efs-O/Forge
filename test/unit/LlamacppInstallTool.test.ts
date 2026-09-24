@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('vscode', () => ({ workspace: { workspaceFolders: undefined } }));
 
@@ -100,8 +100,20 @@ describe.runIf(process.platform === 'win32')('install_llamacpp', () => {
 });
 
 describe('install_llamacpp advertisement', () => {
+  const realPlatform = process.platform;
+  const setPlatform = (value: string): void => {
+    Object.defineProperty(process, 'platform', { value, configurable: true });
+  };
+  afterEach(() => setPlatform(realPlatform));
+
   it('is advertised only when llama_server.binary is set', () => {
+    setPlatform('win32');
     expect(makeTool(CONFIG).tool.advertise?.()).toBe(true);
     expect(makeTool({ llama_server: {} }).tool.advertise?.()).toBe(false);
+  });
+
+  it('is not advertised off Windows, where it cannot install', () => {
+    setPlatform('linux');
+    expect(makeTool(CONFIG).tool.advertise?.()).toBe(false);
   });
 });

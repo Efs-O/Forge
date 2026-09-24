@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import type * as vscode from 'vscode';
 import type { ForgeConfig } from '../../src/config/types';
@@ -128,6 +128,14 @@ function advertisedChars(registry: ToolRegistry): number {
 }
 
 describe('tool schema CI budget (TOOL_SCHEMA_GROWTH_PLAN.md Step 1)', () => {
+  // Windows advertises the most (query_powershell, install_llamacpp), so the
+  // worst case is measured as Windows whatever the CI host is.
+  const realPlatform = process.platform;
+  beforeEach(() => Object.defineProperty(process, 'platform', { value: 'win32', configurable: true }));
+  afterEach(() =>
+    Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true }),
+  );
+
   it('advertises the full 78-tool set under the maximal config', () => {
     const registry = makeMaximalRegistry();
     const names = registry.definitions(ALL_PERMISSIONS).map((d) => d.function.name).sort();

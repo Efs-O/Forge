@@ -161,18 +161,12 @@ export function makeAskUserTool(
       function: {
         name: 'ask_user',
         description:
-          'Ask the user a question and BLOCK until they answer. The question ' +
-          'reaches whichever surface started the turn -- the VS Code window, or ' +
-          'the chat it was driven from remotely. There is no timeout: if the user ' +
-          'has stepped away the turn stalls until they return, so do not use it ' +
-          'to check in during long unattended work. When work can continue under ' +
-          'a stated assumption, state the assumption, notify_user, and keep going. ' +
-          'Ask one related decision group per call. When using options, keep them ' +
-          'short and mutually exclusive. Ask an unrelated follow-up decision in ' +
-          'the next ask_user call rather than appending it as an "also" question. ' +
-          'To put two related decisions in one round, pass `questions` -- each ' +
-          'entry gets its own choice list and its own answer, which is what to ' +
-          'use instead of crossing two decisions into one combined options list.',
+          'Ask the user a question and BLOCK until they answer, with no timeout -- ' +
+          'do not use it to check in during unattended work; when work can continue ' +
+          'under a stated assumption, state it, notify_user, and keep going. One ' +
+          'decision group per call; keep options short and mutually exclusive. For ' +
+          'two related decisions in one round, pass `questions` rather than one ' +
+          'combined options list.',
         parameters: {
           type: 'object',
           properties: {
@@ -261,14 +255,9 @@ export function makeNotifyUserTool(
       function: {
         name: 'notify_user',
         description:
-          'Ping the user. THIS is the tool when they say "ping me", "notify me", ' +
-          '"let me know", "tell me when", or "message me" -- prefer it over ' +
-          'show_notification, which is only visible at the machine. Sends a short ' +
-          'message that reaches whichever surface started the turn: the VS Code ' +
-          'window, and the chat it was driven from remotely if there is one, so it ' +
-          'still reaches a user who has walked away. Fire-and-forget -- it does NOT ' +
-          'wait for a reply and does NOT pause your work. To ask a question and wait ' +
-          'for an answer, use ask_user instead.',
+          'Ping the user -- THE tool for "ping me", "notify me", "let me know", or ' +
+          '"tell me when". Reaches the VS Code window and the remote chat that started ' +
+          'the turn. Fire-and-forget: does not wait for a reply (use ask_user for that).',
         parameters: {
           type: 'object',
           properties: {
@@ -336,12 +325,8 @@ export function makeShowNotificationTool(): RegisteredTool {
       function: {
         name: 'show_notification',
         description:
-          'Show a notification in the VS Code window ONLY (info, warning, or error). ' +
-          'It is invisible to a user who has stepped away from the machine or is ' +
-          'driving this turn from a phone. If the user asked to be pinged, notified, ' +
-          'told, or messaged, call notify_user instead -- it reaches this window AND ' +
-          'the chat that started the turn. Use this one only for a cue that matters ' +
-          'solely to someone sitting at the editor.',
+          'Show a notification in the VS Code window ONLY (info, warning, or error), ' +
+          'invisible to a user who is away or remote. To ping the user, use notify_user.',
         parameters: {
           type: 'object',
           properties: {

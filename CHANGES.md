@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.16.51
+
+**Tool descriptions trimmed by ~3.6k chars (2026-09-24).** The longest descriptions (`wait`, `ask_local_agent`, `ask_live_session`, `ask_user`, `notify_user`, `show_notification`, `install_llamacpp`, `query_powershell`, and the `read_file` `numbered` and `exec_command` `env`/`max_output_chars` parameters) repeated guidance or cross-explained each other. They now say it once. The maximal schema drops from 56,179 to 52,550 chars, roughly 1.2k tokens off every request. `query_powershell` (which spawns powershell.exe) and `install_llamacpp` (which refuses to run off Windows) are now advertised on Windows only, saving another ~2k chars on other platforms.
+
 ## 0.16.50
 
 **Cloud chat proxy no longer sends `chat_template_kwargs` (2026-09-24).** The control `/chat` route serves only cloud providers, but it merged sampling with `preserve_thinking` allowed, so a profile that set it sent the llama.cpp-only `chat_template_kwargs` field to OpenRouter/xAI, which strict APIs can reject. It now merges with `allowPreserveThinking: false`, like the other cloud paths.
