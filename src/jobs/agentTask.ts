@@ -13,7 +13,7 @@ import { resolveJobConversation } from './jobDiscuss';
 import { nextDueWithBackoff } from './backoff';
 import { restartAfterTurn } from './agentTaskRestart';
 import type { Action, JobFile, RunRow, Schedule } from './jobSchema';
-import { buildAgentTaskPrompt, parseResult } from './agentTaskPrompt';
+import { buildAgentTaskPrompt, formatAthensDateTime, parseResult } from './agentTaskPrompt';
 export { parseResult } from './agentTaskPrompt';
 
 /** The `agent_task` action, narrowed from the discriminated union. */
@@ -384,7 +384,7 @@ export class AgentTaskRunner {
     const shouldReport =
       failed || outcome.kind === 'ok' || (outcome.kind === 'no_change' && report === 'always');
     if (shouldReport) {
-      const message = this.reportMessage(outcome, durationMs, conversationId);
+      const message = this.reportMessage(outcome, startedAt, durationMs, conversationId);
       await this.delivery.deliver(job, message).catch(() => undefined);
       delivered = 1;
     }
@@ -427,11 +427,13 @@ export class AgentTaskRunner {
 
   private reportMessage(
     outcome: AgentTaskOutcome,
+    startedAt: number,
     durationMs: number,
     conversationId: string | null,
   ): string {
     const tail = outcome.finalText.slice(-800);
     return (
+      `Date/time (Europe/Athens, 24-hour): ${formatAthensDateTime(startedAt)}\n` +
       `${outcome.kind}: ${outcome.sentence} ` +
       `(${formatDuration(durationMs)})` +
       (conversationId ? ` — conversation ${conversationId}` : '') +

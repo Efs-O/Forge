@@ -2,12 +2,28 @@ import type { JobStore } from './JobStore';
 import type { JobFile } from './jobSchema';
 import type { AgentTaskAction } from './agentTask';
 
+/** A stable, locale-independent 24-hour timestamp for Athens job reports. */
+export function formatAthensDateTime(epochMs: number): string {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Athens',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date(epochMs));
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${values['year']}-${values['month']}-${values['day']} ${values['hour']}:${values['minute']}`;
+}
+
 export async function buildAgentTaskPrompt(
   store: JobStore,
   jobFile: JobFile,
   action: AgentTaskAction,
 ): Promise<string> {
   const { job, state } = jobFile;
+  const runTime = formatAthensDateTime(Date.now());
   const runs = await store.readRuns(job.id);
   const recent = runs.slice(-3);
   const runLines = recent.length
@@ -15,6 +31,7 @@ export async function buildAgentTaskPrompt(
     : ['(no earlier runs)'];
   const parts = [
     `Scheduled task for job "${job.name}":`,
+    `Scheduled run time: ${runTime} (Europe/Athens, 24-hour format).`,
     '',
     action.task,
     '',
@@ -30,8 +47,6 @@ export async function buildAgentTaskPrompt(
       'questions or approvals. Dangerous actions will be denied. End your final ' +
       'message with exactly one line:',
     '`RESULT: ok | no_change | failed — <one sentence>`',
-    'If you changed llama_server.binary, add a line `RESTART: yes`. Do not ' +
-      'restart the backend yourself: you are running on it.',
   ];
   return parts.join('\n');
 }
