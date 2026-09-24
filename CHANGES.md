@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+**The script-flag ban also catches a launcher named by its path (2026-09-24).** `exec_command` refuses `bash -c`, `cmd /c` and PowerShell `-Command`, but it matched only the bare name, so `/bin/bash -c` or a full `cmd.exe` path went through. The launcher is now matched by its file name.
+
 **A reasoning model's silent start is no longer aborted as a stall (2026-09-24).** The stalled-stream guard abandoned any stream idle for 45 seconds, counting from the response headers. A provider that sends headers straight away and then thinks with nothing to stream (OpenAI and xAI reasoning models, or a long prefill on a server that does not hold its headers back) was cut off mid-turn as "stalled". The first byte now gets 10 minutes; once bytes flow, a 2-minute gap is a stall.
 
 **A crashed llama-server no longer blocks its slot on Windows (2026-09-24).** Shutdown treated taskkill's "process not found" (exit 128) as a failed teardown, so a server that had already exited on its own kept its port and slot reserved as if still running. "Not found" now counts as stopped once the server's own exit has been seen.

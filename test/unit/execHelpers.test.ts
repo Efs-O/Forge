@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ExecCommandError,
   formatExecCommandOutput,
+  checkPowerShellBan,
   formatOutput,
   MAX_EXEC_STORED_CHARS,
   MAX_OUTPUT_CHARS,
@@ -170,5 +171,18 @@ describe('structured exec_command outcomes', () => {
       expect(output.stdout).toBe('short');
       expect(output).not.toHaveProperty('stdout_truncated');
     });
+  });
+});
+
+describe('checkPowerShellBan', () => {
+  it('recognises a launcher named by its full path', () => {
+    expect(() => checkPowerShellBan('/bin/bash', ['-c', 'rm -rf x'])).toThrow('Shell script flags');
+    expect(() => checkPowerShellBan('C:\\Windows\\System32\\cmd.exe', ['/C', 'del x'])).toThrow(
+      'Shell script flags',
+    );
+    expect(() =>
+      checkPowerShellBan('C:\\Program Files\\PowerShell\\7\\pwsh.exe', ['-Command', 'x']),
+    ).toThrow();
+    expect(() => checkPowerShellBan('/usr/bin/git', ['-c', 'x=y', 'status'])).not.toThrow();
   });
 });

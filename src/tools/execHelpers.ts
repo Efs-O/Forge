@@ -149,7 +149,8 @@ const SCRIPT_LAUNCHERS = ['bash', 'sh', 'zsh', 'dash', 'cmd', 'cmd.exe', 'busybo
 const SCRIPT_FLAGS = ['-c', '/c'];
 
 export function checkPowerShellBan(command: string, args: string[]): void {
-  const cmd = command.toLowerCase();
+  // By basename: `/bin/bash` and a full `...\System32\cmd.exe` path are the same launchers.
+  const cmd = (command.split(/[\\/]/).pop() ?? command).toLowerCase();
   if (
     SCRIPT_LAUNCHERS.includes(cmd) &&
     args.some((arg) => SCRIPT_FLAGS.includes(arg.toLowerCase()))
