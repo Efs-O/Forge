@@ -128,9 +128,6 @@ export function loadConfig(storagePath: string): ForgeConfig {
     seenShortNames.set(short, model.name);
   }
 
-  config.models = config.models.sort((a, b) =>
-    a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
-  );
   warnOnSuppressedPermissions(config);
   return config;
 }

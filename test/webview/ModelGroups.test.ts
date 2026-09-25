@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { groupModels } from '../../webview-ui/src/modelGroups';
 
 describe('groupModels', () => {
-  it('uses host categories and alphabetizes each category', () => {
+  it('uses host categories and preserves input order within each category', () => {
     expect(
       groupModels([
         { name: 'zeta-local', provider: 'ollama', group: 'Local — Ollama' },
@@ -16,8 +16,8 @@ describe('groupModels', () => {
       {
         label: 'Local — Ollama',
         entries: [
-          { name: 'alpha-local', provider: 'ollama', group: 'Local — Ollama' },
           { name: 'zeta-local', provider: 'ollama', group: 'Local — Ollama' },
+          { name: 'alpha-local', provider: 'ollama', group: 'Local — Ollama' },
         ],
       },
       { label: 'Ollama Cloud', entries: [{ name: 'qwen:cloud', provider: 'ollama', group: 'Ollama Cloud' }] },

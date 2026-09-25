@@ -1,5 +1,12 @@
 # Forge — Recent Changes
 
+## 0.16.53
+
+### Model selector follows config order within groups (2026-09-25)
+
+- The webview keeps its existing provider-group order and now preserves the
+  order of models in `config.yaml` within each group.
+
 ## 0.16.52
 
 ### Background jobs report their exit in chat (2026-09-24)

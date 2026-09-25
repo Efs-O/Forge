@@ -1,8 +1,5 @@
 import type { ModelEntry } from '../../src/sidebar/messageBridge';
-import {
-  compareModelPickerEntries,
-  MODEL_PICKER_GROUP_ORDER,
-} from '../../src/sidebar/ModelPickerGroups';
+import { MODEL_PICKER_GROUP_ORDER } from '../../src/sidebar/ModelPickerGroups';
 
 export interface ModelGroup {
   label: string;
@@ -25,7 +22,7 @@ function groupLabel(entry: ModelEntry): string {
   return p;
 }
 
-/** Groups models by route/provider and alphabetizes entries within each group. */
+/** Groups models by route/provider, preserving their config order within each group. */
 export function groupModels(models: ModelEntry[]): ModelGroup[] {
   const map = new Map<string, ModelEntry[]>();
   for (const entry of models) {
@@ -42,13 +39,13 @@ export function groupModels(models: ModelEntry[]): ModelGroup[] {
   for (const label of MODEL_PICKER_GROUP_ORDER) {
     const entries = map.get(label);
     if (entries && entries.length > 0) {
-      result.push({ label, entries: entries.sort(compareModelPickerEntries) });
+      result.push({ label, entries });
       map.delete(label);
     }
   }
   // Stale webviews or an added provider may emit an unrecognised group.
   for (const [label, entries] of [...map].sort(([a], [b]) => a.localeCompare(b))) {
-    result.push({ label, entries: entries.sort(compareModelPickerEntries) });
+    result.push({ label, entries });
   }
   return result;
 }

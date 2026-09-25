@@ -28,7 +28,7 @@ describe('loadConfig', () => {
     }
   });
 
-  it('sorts models alphabetically', () => {
+  it('preserves the model order from config.yaml', () => {
     const dir = mkTempDir();
     fs.writeFileSync(
       path.join(dir, 'config.yaml'),
@@ -51,9 +51,9 @@ models:
 
     const config = loadConfig(dir);
     expect(config.models.map((model) => model.name)).toEqual([
+      'z-cloud',
       'alpha-cloud',
       'local-gguf',
-      'z-cloud',
     ]);
     expect(config.active_model).toBe('z-cloud');
   });
