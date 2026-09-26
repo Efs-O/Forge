@@ -119,6 +119,14 @@ describe('buildSessionMetrics', () => {
     });
     expect(snapshot).not.toHaveProperty('currentOutputTokens');
   });
+
+  it('reports the compaction count from the compaction generation', () => {
+    const snapshot = buildSessionMetrics(
+      conv({ compaction: { summary: 's', fromIndex: 1, generation: 2 } }),
+      500,
+    );
+    expect(snapshot).toMatchObject({ compactCount: 2 });
+  });
 });
 
 describe('buildSessionSyncMessage transcript scope', () => {

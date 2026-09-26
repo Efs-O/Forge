@@ -19,6 +19,12 @@ export interface ForgeConversationSummary {
   requestCount: number;
   /** Tool calls dispatched, successes and failures alike. */
   toolCallCount: number;
+  /**
+   * Compactions executed in this conversation (auto or manual), successes only.
+   * Derived from `compaction.generation`, which increments by one per successful
+   * compaction and is never reset — so it is the count, not a second counter.
+   */
+  compactCount: number;
 }
 
 export interface ForgeHostStatus {
@@ -201,6 +207,7 @@ function summarize(conv: ConversationRuntime, archived: boolean): ForgeConversat
     updatedAt: conv.updatedAt,
     requestCount: conv.model_request_count ?? 0,
     toolCallCount: conv.tool_call_count ?? 0,
+    compactCount: conv.compaction?.generation ?? 0,
   };
 }
 

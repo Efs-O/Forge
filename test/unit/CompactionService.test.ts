@@ -549,6 +549,30 @@ describe('runCompaction', () => {
     expect(c.compaction).toBeUndefined();
   });
 
+  it('advances the compaction count only on a successful compaction', async () => {
+    const c = conv([
+      { role: 'user', content: 'first task' },
+      { role: 'assistant', content: 'did the first task' },
+      { role: 'user', content: 'second task' },
+    ]);
+    // A failed compaction (unusable summary) leaves the count untouched.
+    let usable = false;
+    const h = harness(c, async () => (usable ? long('summary') : ''));
+    await expect(runCompaction(h.deps, c.id, { auto: false })).resolves.toBe('failed');
+    expect(c.compaction).toBeUndefined();
+
+    // A skipped compaction (too little history) leaves the count untouched.
+    const short = conv([{ role: 'user', content: 'only one message' }]);
+    const hShort = harness(short, async () => long('summary'));
+    await expect(runCompaction(hShort.deps, short.id, { auto: false })).resolves.toBe('skipped');
+    expect(short.compaction).toBeUndefined();
+
+    // A successful compaction advances the count to one.
+    usable = true;
+    await expect(runCompaction(h.deps, c.id, { auto: false })).resolves.toBe('compacted');
+    expect(c.compaction?.generation).toBe(1);
+  });
+
   it('appends the changed files even when the summarizer never mentions them', async () => {
     const c = conv([
       { role: 'user', content: 'fix the fetch' },

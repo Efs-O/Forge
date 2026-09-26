@@ -124,7 +124,7 @@ export async function handleRemoteSessionCommand(
         // successes alone would understate exactly the turns worth looking at.
         `Work: ${String(conversation?.requestCount ?? 0)} model request(s), ${String(
           conversation?.toolCallCount ?? 0,
-        )} tool call(s) in this chat\n` +
+        )} tool call(s), ${String(conversation?.compactCount ?? 0)} compaction(s) in this chat\n` +
         (boardLines ? `${boardLines}\n` : '') +
         `Approvals: ${context.host.clankerMode() ? 'CLANKER — non-dangerous tools auto-approved' : 'gated'}`,
       (line) => boldLineLabel(line, STATUS_LABELS),

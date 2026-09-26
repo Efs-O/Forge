@@ -22,8 +22,25 @@ describe('renderBusStatus', () => {
   it('renders an idle chat with no turn in six lines', () => {
     expect(renderBusStatus(base()).split('\n')).toEqual([
       'Chat: Chat · c1', 'State: idle', 'Model: Qwen', 'Context: 59000/100000 tokens (59%)',
-      'Queued from you: 0', 'Work: 2 model request(s), 3 tool call(s) in this chat',
+      'Queued from you: 0', 'Work: 2 model request(s), 3 tool call(s), 0 compaction(s) in this chat',
     ]);
+  });
+
+  it('reports the compaction count on the Work line', () => {
+    expect(
+      renderBusStatus(
+        base({
+          conversation: {
+            id: 'c1',
+            title: 'Chat',
+            activeModel: 'Qwen',
+            requestCount: 2,
+            toolCallCount: 3,
+            compactCount: 2,
+          },
+        }),
+      ),
+    ).toContain('Work: 2 model request(s), 3 tool call(s), 2 compaction(s) in this chat');
   });
 
   it('reports a running turn and its latest details', () => {

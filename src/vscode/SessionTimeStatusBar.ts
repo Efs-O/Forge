@@ -23,6 +23,8 @@ export interface SessionTimeSnapshot {
   requestCount?: number;
   /** Tool calls dispatched in this conversation, successes and failures alike. */
   toolCallCount?: number;
+  /** Compactions executed in this conversation (auto or manual), successes only. */
+  compactCount?: number;
 }
 
 export class SessionTimeStatusBar implements vscode.Disposable {
@@ -50,6 +52,7 @@ export class SessionTimeStatusBar implements vscode.Disposable {
       snapshot.currentOutputTokens ?? '',
       snapshot.requestCount ?? '',
       snapshot.toolCallCount ?? '',
+      snapshot.compactCount ?? '',
     ].join('|');
     if (signature === this.lastSignature) return;
     this.lastSignature = signature;
@@ -63,6 +66,7 @@ export class SessionTimeStatusBar implements vscode.Disposable {
       `Session output generated: ${formatExactTokens(snapshot.outputTokens)}`,
       `Model requests: ${snapshot.requestCount ?? 0}`,
       `Tool calls: ${snapshot.toolCallCount ?? 0}`,
+      `Compactions: ${snapshot.compactCount ?? 0}`,
     ].join('\n');
     this.item.show();
   }

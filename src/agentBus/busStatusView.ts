@@ -12,6 +12,7 @@ export interface BusStatusInput {
     activeModel?: string | null | undefined;
     requestCount?: number | undefined;
     toolCallCount?: number | undefined;
+    compactCount?: number | undefined;
   };
   streaming: boolean;
   queuedFromSender: number;
@@ -48,7 +49,7 @@ export function renderBusStatus(input: BusStatusInput): string {
   lines.push(
     `Context: ${describeBudget(input.budget)}`,
     `Queued from you: ${input.queuedFromSender}`,
-    `Work: ${conversation.requestCount ?? 0} model request(s), ${conversation.toolCallCount ?? 0} tool call(s) in this chat`,
+    `Work: ${conversation.requestCount ?? 0} model request(s), ${conversation.toolCallCount ?? 0} tool call(s), ${conversation.compactCount ?? 0} compaction(s) in this chat`,
   );
   return lines.join('\n');
 }
