@@ -58,7 +58,7 @@ other seams were left open. These amendments are binding:
   Records are per alias: `ownership/<alias>.json`, not one shared
   `ownership.json` that several windows rewrite with tmp + rename (last writer
   wins, and that loses updates). Each record adds
-  `owner_host: {pid, started_at}` (the extension host that holds the stdio pipe)
+  `owner_host: {pid, started_at}` (the extension host responsible for the alias)
   and `thread_id`. **Startup recovery may reap a session only if its
   `owner_host` is dead.** "The pid is alive but *I* don't hold its pipe" is the
   normal state for a session another open window owns, and reaping on that
@@ -76,11 +76,13 @@ other seams were left open. These amendments are binding:
   context. If `thread/resume` fails, the board writes a `context_lost` event and
   the user sees it; the plan never swaps in a fresh thread silently. The same
   path handles `parked → dead`.
-- **M4. Idle TTL never reaps a parked session, and turn end reaps nothing.** The
-  ledger's "entry removed when Forge reaps (turn end / …)" is struck: reaping at
-  turn end contradicts park-but-warm. An owned session leaves only through
-  `close`, the idle TTL (only while **not** parked), owner-host death recovery
-  (M2/M3), or process death.
+- **M4. Idle TTL never reaps a parked session; an idle Codex app-server releases
+  its thread writer after the FIFO drains.** The thread id and ownership record
+  remain, so the next message resumes the same thread. A parked session is
+  already idle and releases the app-server process too; parking preserves the
+  thread, not a warm process. Claude's peer and owned-session lifecycles are
+  unchanged. Idle TTL still removes an unparked ownership record only after its
+  configured interval.
 - **M5. Admission: one host-side FIFO per alias (fills the gap in §1/§2b).**
   `CodexAppServerSession.send()` **throws** when a turn is already active, and
   it resolves only at **turn end**. So `tell_live_session` and relayed messages
@@ -184,9 +186,10 @@ sessions as the default** (Codex, gap B + §4):
     adapter contract + a hermetic compatibility test.
 - **Create (per agent):**
   - **Codex (P0, proven infra):** spawn-and-own via the existing
-    `src/agents/CodexAppServerSession.ts` — a warm, reusable `codex app-server
+    `src/agents/CodexAppServerSession.ts` — a resumable `codex app-server
     --stdio` JSON-RPC session (`send()` per turn, `threadId`, interrupt, dispose;
-    launched via `codexAppServerArgs` with `danger-full-access` +
+    the process is released when the alias FIFO drains and resumed on the next
+    message; launched via `codexAppServerArgs` with `danger-full-access` +
     `approval_policy=never`). **The owned session is what makes real delivery
     states possible** (§2): Forge sees turn start and turn end directly.
   - **Claude (deferred to P4):** a Forge-owned Claude session is a **persistent
@@ -642,7 +645,7 @@ stateless and is gated on `agent_bus.enabled` exactly like the other routes.
 | Artifact | Create | Delete | Disable (`agent_bus.enabled: false`) | Crash mid-write | Owner-process death | TTL / bound |
 |---|---|---|---|---|---|---|
 | `aliases.json` | one-time explicit registration (user consent) or first owned-session creation | user removes the alias (command); the alias record survives session death | not read; doors report "agent bus disabled" | tmp + rename → previous file intact | survives (it is the recovery input) | permanent until removed |
-| `ownership/<alias>.json` (Forge-owned sessions; per alias, M2) | written atomically at spawn, after the creation lease is claimed; carries `owner_host` + `thread_id` | entry removed on `close` / idle TTL (not parked) / process death; on owner-host-death recovery the process is reaped but `thread_id` is **kept** for resume (M3). **Never at turn end** (M4) | not written; existing entries are not reaped while disabled (re-enabled later) | tmp + rename → previous file intact | **recovery on next start** (see §0): pid dead → board `crashed` + best-effort notice; pid alive and **`owner_host` dead** → reap + `recovered: reaped` (M2). Owner host alive (another window) → untouched. No notice is sent during the crash (no code is running). **Known limitation (tracked):** recovery nulls the dead owner's `owner_host` and keeps `thread_id` for resume, but it does NOT kill the dead window's orphaned CLI child process — a cross-process kill of another window's process tree is not implemented, so a crashed window's Claude/Codex process can leak until it exits on its own. The M3 primary guarantee (thread/context survives for resume) is met; the process leak is a secondary crash-edge concern, accepted for now | idle TTL (e.g. 30 min) from last activity, paused while `parked`; a parked session is exempt from the TTL |
+| `ownership/<alias>.json` (Forge-owned sessions; per alias, M2) | written atomically at spawn, after the creation lease is claimed; carries `owner_host` + `thread_id` | entry removed on `close` / idle TTL (not parked) / process death; after each Codex FIFO drain its app-server process is disposed while `owner_host` remains the owning Forge window and `thread_id` is kept for resume; on owner-host-death recovery the process is reaped but `thread_id` is **kept** for resume (M3) | not written; existing entries are not reaped while disabled (re-enabled later) | tmp + rename → previous file intact | **recovery on next start** (see §0): pid dead → board `crashed` + best-effort notice; pid alive and **`owner_host` dead** → reap + `recovered: reaped` (M2). Owner host alive (another window) → untouched. No notice is sent during the crash (no code is running). **Known limitation (tracked):** recovery nulls the dead owner's `owner_host` and keeps `thread_id` for resume, but it does NOT kill the dead window's orphaned CLI child process — a cross-process kill of another window's process tree is not implemented, so a crashed window's Claude/Codex process can leak until it exits on its own. The M3 primary guarantee (thread/context survives for resume) is met; the process leak is a secondary crash-edge concern, accepted for now | idle TTL (e.g. 30 min) from last activity, paused while `parked`; a parked session is exempt from the TTL |
 | `aliases.json` `claude` record with `peer_pid` (§11) | `forge.sh join claude` → `/agent/join` after the pid is proven a live, pipe-capable session | overwritten by the next join, or by an owned-session registration; user removes the alias | not read; `/agent/join` 404 | tmp + rename under the alias lock → previous table intact | the joined **session** dying makes the record inert: resolution skips a dead pid and falls through (never resumes it headless, never refuses on it) | permanent until re-joined/removed; inert while the pid is dead |
 | creation lease `ownership/<alias>.claim` | atomic claim before spawn | removed when the alias ownership entry is written (or the claimant dies) | not taken | claim file without a matching ownership entry is stale **only if the claimant host is dead** (M2) → next claimant reclaims | a dead claimant host's claim is stale → reclaim; a live-but-slow claimant is waited on, never raced — this is what prevents concurrent double-spawn | waiter's bounded wait (e.g. 2 min) then reports "creation in progress" — it does not reclaim a live claim |
 | `exchanges.jsonl` (event log) | any window's host appends one event per transition, under the in-process queue **and** the interprocess `exchanges.lock` (M1) | **compaction removes whole terminal exchanges** (all events leave together), never a lone transition, never a non-terminal exchange (M8); tmp + rename under the lock | not written; board shows "agent bus disabled" | torn last line dropped on read (tolerant parse); the append is a single `appendFile` call | writer is the backend; a crash between append and ack → the event is on disk, recovery re-derives state; `event_id` dedupe makes replay safe | last N=200 **terminal** exchanges (all their events); 24 h TTL only as a backstop when < N exist. Last-N wins. Non-terminal exchanges are exempt (M8) |

@@ -120,7 +120,7 @@ out of scope here.
 
 | Artifact                                      | Create                                                                              | Delete                                               | Disable (`agent_bus.enabled: false`)                   | Crash mid-write                                                                    | Owner death                                       | TTL                                  |
 | --------------------------------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------- | ------------------------------------------------- | ------------------------------------ |
-| `endpoint.json`                               | Forge activation, tmp + rename, 0600                                                | Forge deactivate                                     | not written; routes answer 404                         | tmp only → clients see the old file → 401 → the README says "reload Forge"         | stale token → 401                                 | rotated each activation              |
+| `endpoint.json`                               | Focused Forge window claims it on listen, focus, or enable; tmp + rename, 0600       | Owning window's deactivate                           | owning window withdraws it; routes answer 404          | tmp only → clients see the previous owner; next focus retries                      | stale endpoint fails until a live window gains focus | token rotated each activation       |
 | `outbox/<id>-reply.md`                        | `/agent/reply` (tmp + rename)                                                       | tool after reading (unchanged)                       | route 404                                              | unchanged                                                                          | orphan → next call, once                          | 24 h sweep (unchanged)               |
 | Inbound queue (memory)                        | `/agent/message` while busy                                                         | drained at turn end                                  | 404                                                    | lost with the process; the sender got 202 → documented as "best effort while busy" | lost                                              | cap 20                               |
 | Peer pipe message                             | `PeerPipeTransport`                                                                 | Claude Code                                          | tool not advertised                                    | half frame → receiver rejects the frame                                            | receiver dies → connect fails → tool says so      | Claude Code holds it ~1 week if held |
@@ -132,6 +132,16 @@ out of scope here.
 CI row: `AgentRoutes.test.ts` enumerates the bus folder after a full
 exchange and fails on anything other than `README.md`, `endpoint.json`,
 `forge.sh` and the two (empty) folders.
+
+**Multi-window and Codex API correction (2026-09-25).** The last focused Forge
+window claims `endpoint.json`. If its configured control port is occupied, it
+listens on an OS-assigned localhost port for agent messages without replacing
+the model-control discovery record. This listener has no durable state and
+closes on deactivate. `forge.sh say --reply-in-chat` changes only the inbound
+prompt's reply instruction: Forge answers in that chat, and the sender reads it
+through `status` and `view`. The flag is per message and creates no stored
+state. Ordinary `say` retains the existing `ask_live_session` hint used by
+Claude; a Codex API conversation need not pose as a live CLI session.
 
 ## As built (what changed while implementing)
 

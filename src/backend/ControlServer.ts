@@ -97,6 +97,7 @@ export class ControlServer implements vscode.Disposable {
   private readonly registry?: IControlServerRegistry;
   private readonly version: string;
   private readonly agentRoutes?: AgentRoutes;
+  private listeningPort: number | undefined;
 
   constructor(
     private readonly pool: IBackendPool,
@@ -122,32 +123,52 @@ export class ControlServer implements vscode.Disposable {
 
   start(): void {
     if (this.server) return;
+    this.listenOn(this.port, false);
+  }
+
+  private listenOn(port: number, fallback: boolean): void {
     const server = http.createServer((req, res) => {
       void this.handle(req, res);
     });
     server.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE') {
+      if (this.server !== server) return;
+      this.server = null;
+      this.listeningPort = undefined;
+      if (
+        err.code === 'EADDRINUSE' &&
+        !fallback &&
+        this.agentRoutes &&
+        this.config.agent_bus?.enabled
+      ) {
         log.warn(
-          `[ControlServer] port ${this.port} in use — another Forge window likely owns it; not starting a second.`,
+          `[ControlServer] port ${port} in use — starting this window's agent bus on an available localhost port.`,
         );
+        this.listenOn(0, true);
+      } else if (err.code === 'EADDRINUSE') {
+        log.warn(`[ControlServer] port ${port} in use — could not start.`);
       } else {
         log.error(`[ControlServer] ${err.message}`);
       }
-      this.server = null;
     });
     // 127.0.0.1 only — never expose beyond localhost.
-    server.listen(this.port, '127.0.0.1', () => {
-      const url = `http://127.0.0.1:${this.port}`;
+    server.listen(port, '127.0.0.1', () => {
+      if (this.server !== server) return;
+      const address = server.address();
+      if (!address || typeof address === 'string') return;
+      this.listeningPort = address.port;
+      const url = `http://127.0.0.1:${address.port}`;
       log.info(`[ControlServer] listening on ${url}`);
       this.agentRoutes?.onListening(url);
       try {
-        this.registry?.publish({
-          url,
-          pid: process.pid,
-          startedAt: new Date().toISOString(),
-          version: this.version,
-        });
-        if (this.registry) log.info(`[ControlServer] published discovery record for ${url}`);
+        if (!fallback)
+          this.registry?.publish({
+            url,
+            pid: process.pid,
+            startedAt: new Date().toISOString(),
+            version: this.version,
+          });
+        if (this.registry && !fallback)
+          log.info(`[ControlServer] published discovery record for ${url}`);
       } catch (err) {
         log.error('[ControlServer] failed to publish discovery record', err);
       }
@@ -158,6 +179,7 @@ export class ControlServer implements vscode.Disposable {
   dispose(): void {
     this.server?.close();
     this.server = null;
+    this.listeningPort = undefined;
     this.agentRoutes?.dispose();
     try {
       this.registry?.removeIfOwned(process.pid);
@@ -193,7 +215,7 @@ export class ControlServer implements vscode.Disposable {
     const catalog = this.modelCatalog();
     return {
       listening: this.server !== null,
-      port: this.port,
+      port: this.listeningPort ?? this.port,
       ...catalog,
     };
   }

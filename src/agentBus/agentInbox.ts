@@ -9,6 +9,8 @@ const BUSY_POLL_MS = 2_000;
 export interface InboxMessageOptions {
   model?: string;
   newChat?: boolean;
+  /** Reply in Forge's chat so a sender without a live mesh session can read it. */
+  replyInChat?: boolean;
   /** The bus sender; the host routes its message to the chat it last wrote in. */
   from?: string;
 }

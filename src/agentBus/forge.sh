@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #   forge.sh reply <id> [file]        answer a question Forge is waiting on
-#   forge.sh say <your-name> [--model <name>] [--new] [file]  send Forge a new message (starts a Forge turn)
+#   forge.sh say <your-name> [--model <name>] [--new] [--reply-in-chat] [file]  message Forge; chat reply is read with view
 #   forge.sh send <your-name> <to> [file]  relay a message to another agent (claude/codex)
 #   forge.sh steer <your-name> <to> [file] interrupt <to>'s running turn (forge/claude/codex); runs next
 #   forge.sh cancel <your-name> <id|all>  withdraw your queued message(s) to Forge not yet started
@@ -8,6 +8,7 @@
 #   forge.sh who                      who is in the mesh, and what each is doing
 #   forge.sh status <your-name>       what your chat with Forge is doing now (tool, last words, context)
 #   forge.sh view <your-name> [n]     the last n answers in your chat (default 3, max 10)
+#   API Codex: use say codex --reply-in-chat, then status codex / view codex for Forge's answer
 # The text comes from the file, or from stdin when no file is given.
 # Written by Forge on every start; edits are overwritten.
 
@@ -50,13 +51,14 @@ if [ "$VERB" = "status" ] || [ "$VERB" = "view" ]; then
   exit 0
 fi
 [ $# -ge 2 ] || usage
-ARG=""; SRC="-"; MODEL=""; NEW_CHAT=""
+ARG=""; SRC="-"; MODEL=""; NEW_CHAT=""; REPLY_IN_CHAT=""
 if [ "$VERB" = "say" ]; then
   shift
   while [ $# -gt 0 ]; do
     case "$1" in
       --model) [ $# -ge 2 ] || usage; MODEL="$2"; shift 2;;
       --new) NEW_CHAT=true; shift;;
+      --reply-in-chat) REPLY_IN_CHAT=true; shift;;
       --*) usage;;
       *) if [ -z "$ARG" ]; then ARG="$1"; elif [ "$SRC" = "-" ]; then SRC="$1"; else usage; fi; shift;;
     esac
@@ -75,7 +77,7 @@ case "$VERB" in
   reply) case "$ARG" in ""|*[!A-Za-z0-9_-]*) echo "forge.sh: bad id '$ARG'" >&2; exit 2;; esac
          ROUTE=reply; QUERY="id=$ARG" ;;
   say)   case "$ARG" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
-         ROUTE=message; QUERY="from=$ARG"; [ -n "$MODEL" ] && QUERY="$QUERY&model=$MODEL"; [ -n "$NEW_CHAT" ] && QUERY="$QUERY&new_chat=true" ;;
+         ROUTE=message; QUERY="from=$ARG"; [ -n "$MODEL" ] && QUERY="$QUERY&model=$MODEL"; [ -n "$NEW_CHAT" ] && QUERY="$QUERY&new_chat=true"; [ -n "$REPLY_IN_CHAT" ] && QUERY="$QUERY&reply_in_chat=true" ;;
   send)  case "$ARG" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
          ROUTE=message; QUERY="from=$ARG&to=$TO" ;;
   steer) case "$ARG" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac

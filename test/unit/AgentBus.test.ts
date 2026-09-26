@@ -61,7 +61,17 @@ describe('CLIENT_SCRIPT usage block', () => {
   it('covers every verb and the text-source note (a new verb cannot truncate it)', () => {
     const usage = usageLines(CLIENT_SCRIPT).join('\n');
     // Every verb the client accepts must be documented in the usage block.
-    for (const verb of ['reply', 'say', 'send', 'steer', 'cancel', 'join', 'who', 'status', 'view']) {
+    for (const verb of [
+      'reply',
+      'say',
+      'send',
+      'steer',
+      'cancel',
+      'join',
+      'who',
+      'status',
+      'view',
+    ]) {
       expect(usage).toContain(`forge.sh ${verb}`);
     }
     // The note that was silently cut off when `who` pushed it past the old
@@ -252,6 +262,9 @@ describe('messages', () => {
     const prompt = forgeInboundPrompt('forge-dd', '  hi  ');
     expect(prompt.startsWith('**forge-dd says:**\n\nhi\n')).toBe(true);
     expect(prompt).toContain('session: "forge-dd"');
+    const chatReply = forgeInboundPrompt('codex', 'hi', true);
+    expect(chatReply).toContain('Answer in this Forge chat');
+    expect(chatReply).toContain('Do not call `ask_live_session` for this reply');
   });
 
   it('a Codex question carries the reply contract with a forward-slash path', () => {

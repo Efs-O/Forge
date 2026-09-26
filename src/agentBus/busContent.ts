@@ -30,7 +30,7 @@ export const BUS_README = `# Forge agent bus
 Written by Forge; edits are overwritten. Lets Forge, Claude Code sessions and
 Codex message each other, each message shown in the receiving window.
 
-    endpoint.json   url + token of the running Forge (rotated on every start)
+    endpoint.json   url + token of the last focused Forge window
     forge.sh        the client: answer Forge, or send Forge a message
     inbox/          questions Forge is waiting on   <id>-forge.pending
     outbox/         file answers                    <id>-reply.md
@@ -44,6 +44,10 @@ Codex message each other, each message shown in the receiving window.
 - **Codex**: \`codex queue --thread <id> --message <text>\`.
 - **Forge**: \`forge.sh\`, or HTTP (below). An idle Forge starts a turn at
   once; a busy one queues the message until its turn ends.
+
+When several Forge windows are open, the client reaches the last focused
+Forge window. \`forge.sh say <name> --new\` opens and selects a new chat there;
+ordinary \`say\` follows that sender's previous chat without changing the view.
 
 ## Joining (no renames, no config)
 
@@ -113,6 +117,11 @@ Forge's agent is blocked until the answer lands, then shows it to its user.
     your message
     FORGE_MSG
 
+An API Codex session can use \`say codex --reply-in-chat\`. Forge answers in
+that chat; use \`status codex\` to see when the turn ends and \`view codex\`
+to read its answer. Ordinary \`say\` keeps the live-session reply hint used by
+Claude and other reachable agents.
+
 PowerShell:
 
     $ep = Get-Content "$HOME/.forge/agent-bus/endpoint.json" | ConvertFrom-Json
@@ -165,18 +174,18 @@ export function claudeQuestion(
 }
 
 /** The prompt an inbound message becomes in Forge's chat. */
-/** How to answer a sender: its alias as the target, or a named Claude session. */
+/** Default live-session reply hint: alias target or named Claude session. */
 function inboundHint(from: string): string {
   const alias = from.trim().toLowerCase();
   if (alias === 'claude' || alias === 'codex') return `\`target: "${alias}"\``;
   return `\`session: "${from}"\` (a Claude session)`;
 }
 
-export function forgeInboundPrompt(from: string, text: string): string {
-  return (
-    `**${from} says:**\n\n${text.trim()}\n\n` +
-    `_(Agent-bus message. To answer, call \`ask_live_session\` with ${inboundHint(from)}.)_`
-  );
+export function forgeInboundPrompt(from: string, text: string, replyInChat = false): string {
+  const hint = replyInChat
+    ? 'Answer in this Forge chat. The sender will read your answer with `forge.sh view`. Do not call `ask_live_session` for this reply.'
+    : `To answer, call \`ask_live_session\` with ${inboundHint(from)}.`;
+  return `**${from} says:**\n\n${text.trim()}\n\n` + `_(Agent-bus message. ${hint})_`;
 }
 
 /**

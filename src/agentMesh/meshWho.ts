@@ -15,13 +15,14 @@ import type { ClaudeSession } from '../agentBus/claudePeer';
  * and `activity` (what the participant is doing). A session can be owned AND
  * parked, or owned AND busy, so a single `state` word would be lossy.
  *
- * The honesty rule: only a participant this host OWNS (holds the stdio pipe
- * and can watch its FIFO) may report `busy` or `idle`. A joined session, a
- * pinned thread, or a session another live window owns is `unknown` — never
+ * The honesty rule: only a participant this host OWNS (and can watch its FIFO)
+ * may report `busy` or `idle`; its Codex app-server may be released while idle.
+ * A joined session, a pinned thread, or a session another live window owns is
+ * `unknown` — never
  * `idle`. Guessing `idle` is the dangerous lie: a sender then expects a fast
  * answer and escalates. Likewise a session another live window owns is
  * `attachment: peer` (we can write to it, not watch it), not `owned` — the
- * word `owned` is reserved for the host holding the pipe.
+ * word `owned` is reserved for the host responsible for the alias.
  *
  * Pure: no writes, no posting. The wiring layer supplies the in-memory signals
  * (the owning window's FIFO, the sidebar's streaming state, the inbox depth);

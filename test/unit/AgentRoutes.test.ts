@@ -25,6 +25,7 @@ let full: boolean;
 let routes: AgentRoutes;
 let server: http.Server;
 let base: string;
+let focused: boolean;
 
 beforeEach(async () => {
   home = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'forge-agent-routes-'));
@@ -33,8 +34,10 @@ beforeEach(async () => {
   acceptedOptions = [];
   queuedFrom = new Map();
   full = false;
+  focused = true;
   routes = new AgentRoutes({
     paths: () => paths,
+    isFocused: () => focused,
     inbox: {
       accept: (prompt, from, _front, options) => {
         if (full) return undefined;
@@ -113,6 +116,35 @@ describe('endpoint.json', () => {
     routes.setEnabled(true);
     expect(fs.existsSync(paths.endpoint)).toBe(true);
   });
+
+  it('only lets a focused window claim the shared endpoint', () => {
+    routes.dispose();
+    focused = false;
+    routes = new AgentRoutes({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      isFocused: () => focused,
+    });
+    routes.setEnabled(true);
+    routes.onListening(base);
+    expect(fs.existsSync(paths.endpoint)).toBe(false);
+
+    focused = true;
+    routes.claim();
+    expect(JSON.parse(fs.readFileSync(paths.endpoint, 'utf8'))).toMatchObject({
+      url: base,
+      token: TOKEN,
+    });
+
+    focused = false;
+    fs.writeFileSync(paths.endpoint, JSON.stringify({ url: 'other', token: 'other' }));
+    routes.claim();
+    expect(JSON.parse(fs.readFileSync(paths.endpoint, 'utf8'))).toMatchObject({
+      url: 'other',
+      token: 'other',
+    });
+  });
 });
 
 describe('auth and limits', () => {
@@ -166,6 +198,17 @@ describe('routes', () => {
     expect(acceptedOptions[0]).toEqual({ model: 'alpha', newChat: true });
   });
 
+  it('keeps an explicit chat reply in Forge without changing ordinary Claude replies', async () => {
+    const codex = await post('/agent/message?from=codex&reply_in_chat=true', 'question');
+    expect(codex.status).toBe(202);
+    expect(accepted[0]).toContain('Answer in this Forge chat');
+    expect(acceptedOptions[0]).toEqual({ replyInChat: true });
+
+    const claude = await post('/agent/message?from=claude', 'question');
+    expect(claude.status).toBe(202);
+    expect(accepted[1]).toContain('call `ask_live_session` with `target: "claude"`');
+  });
+
   it('rejects an unknown model with the configured valid names', async () => {
     const response = await post('/agent/message?from=codex&model=missing', 'nope');
     expect(response.status).toBe(400);
@@ -176,6 +219,12 @@ describe('routes', () => {
 
   it('validates new_chat as a boolean', async () => {
     const response = await post('/agent/message?from=codex&new_chat=maybe', 'nope');
+    expect(response.status).toBe(400);
+    expect(accepted).toEqual([]);
+  });
+
+  it('validates reply_in_chat as a boolean', async () => {
+    const response = await post('/agent/message?from=codex&reply_in_chat=maybe', 'nope');
     expect(response.status).toBe(400);
     expect(accepted).toEqual([]);
   });
@@ -290,6 +339,14 @@ describe('forge.sh against the routes', () => {
     const said = await runClient(['say', '--model', 'alpha', '--new', 'claude'], 'new chat\n');
     expect(said.code).toBe(0);
     expect(acceptedOptions[0]).toEqual({ model: 'alpha', newChat: true });
+  }, 30_000);
+
+  it('say parses --reply-in-chat without changing the default', async (ctx) => {
+    if (!usable) ctx.skip();
+    const said = await runClient(['say', 'codex', '--reply-in-chat'], 'question\n');
+    expect(said.code).toBe(0);
+    expect(accepted[0]).toContain('Answer in this Forge chat');
+    expect(acceptedOptions[0]).toEqual({ replyInChat: true });
   }, 30_000);
 
   it('a reply still lands through the outbox file when Forge is gone; a message does not', async (ctx) => {
@@ -555,25 +612,35 @@ describe('GET /agent/status and /agent/view', () => {
   });
 
   it('requires a token and GET', async () => {
-    install({ paths: () => paths, inbox: stubInbox(), token: TOKEN, status: () => ({ ok: true, text: 'status' }) });
+    install({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      status: () => ({ ok: true, text: 'status' }),
+    });
     expect((await get('/agent/status?from=claude', null)).status).toBe(401);
     const res = await fetch(`${base}/agent/status?from=claude`, {
-      method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: 'x',
+      method: 'POST',
+      headers: { Authorization: `Bearer ${TOKEN}` },
+      body: 'x',
     });
     expect(res.status).toBe(405);
   });
 
   it('validates sender shape and the configured sender', async () => {
     install({
-      paths: () => paths, inbox: stubInbox(), token: TOKEN,
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
       status: () => ({ ok: true, text: 'status' }),
-      validateFrom: (from) => from === 'claude'
-        ? { ok: true }
-        : { ok: false, error: 'unknown sender' },
+      validateFrom: (from) =>
+        from === 'claude' ? { ok: true } : { ok: false, error: 'unknown sender' },
     });
     const shape = await get('/agent/status?from=bad%21name');
     expect(shape.status).toBe(400);
-    expect((await shape.json()).error).toBe('from must be 1-40 chars: letters, digits, space . _ -');
+    expect((await shape.json()).error).toBe(
+      'from must be 1-40 chars: letters, digits, space . _ -',
+    );
     const sender = await get('/agent/status?from=ghost');
     expect(sender.status).toBe(400);
     expect((await sender.json()).error).toBe('unknown sender');
@@ -581,7 +648,9 @@ describe('GET /agent/status and /agent/view', () => {
 
   it('returns dependency errors as JSON with their status', async () => {
     install({
-      paths: () => paths, inbox: stubInbox(), token: TOKEN,
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
       status: () => ({ ok: false, status: 404, error: 'x' }),
     });
     const res = await get('/agent/status?from=claude');
@@ -592,7 +661,9 @@ describe('GET /agent/status and /agent/view', () => {
   it('serves plain text and passes the view count through, including when absent', async () => {
     const received: Array<string | undefined> = [];
     install({
-      paths: () => paths, inbox: stubInbox(), token: TOKEN,
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
       status: () => ({ ok: true, text: 'hello' }),
       view: (_from, count) => {
         received.push(count);
@@ -633,7 +704,7 @@ describe('forge.sh who against the routes (§11)', () => {
     routes.onListening(base);
   }
 
-  it('A7: prints one line per participant from the route\'s JSON', async (ctx) => {
+  it("A7: prints one line per participant from the route's JSON", async (ctx) => {
     if (!usable) ctx.skip();
     install({
       paths: () => paths,

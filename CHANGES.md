@@ -1,5 +1,19 @@
 # Forge — Recent Changes
 
+## 0.16.56
+
+### Codex API replies and visible mesh chats (2026-09-25)
+
+- `forge.sh say codex --reply-in-chat` asks Forge to answer in the chat so
+  an API Codex session can read it with `status` and `view`. Ordinary
+  messages retain the live-session reply route used by Claude.
+- A requested `say --new` selects its new chat. The last focused Forge
+  window owns the shared mesh endpoint, and a window whose configured control
+  port is occupied opens an available localhost port for agent messages.
+- Forge releases its Codex app-server when the message queue drains, so the
+  Codex UI can use the thread between Forge turns; the thread is resumed for
+  the next message.
+
 ## 0.16.53
 
 ### Model selector follows config order within groups (2026-09-25)

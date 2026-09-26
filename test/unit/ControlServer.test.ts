@@ -1,5 +1,8 @@
+import * as http from 'http';
+import type { AddressInfo } from 'net';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ControlServer, type ControlServerDeps } from '../../src/backend/ControlServer';
+import type { AgentRoutes } from '../../src/backend/agentRoutes';
 import { ProxyError } from '../../src/llm/ControlChatProxy';
 import type { IBackendPool } from '../../src/backend/BackendPool';
 import type { BackendController } from '../../src/backend/BackendController';
@@ -155,6 +158,37 @@ describe('ControlServer', () => {
     server.dispose();
     expect(registry.removeIfOwned).toHaveBeenCalledWith(process.pid);
     server = undefined;
+  });
+
+  it('gives a second Forge window an agent endpoint when the configured port is busy', async () => {
+    const blocker = http.createServer();
+    await new Promise<void>((resolve) => blocker.listen(0, '127.0.0.1', resolve));
+    try {
+      const port = (blocker.address() as AddressInfo).port;
+      const config = makeConfig(port);
+      config.agent_bus = { enabled: true };
+      const onListening = vi.fn();
+      const registry: IControlServerRegistry = { publish: vi.fn(), removeIfOwned: vi.fn() };
+      const routes = {
+        setEnabled: vi.fn(),
+        onListening,
+        dispose: vi.fn(),
+      } as unknown as AgentRoutes;
+      server = new ControlServer(
+        new FakePool(),
+        config,
+        testDeps({ agentRoutes: routes, registry }),
+      );
+      server.start();
+      await vi.waitFor(() => expect(onListening).toHaveBeenCalledOnce());
+
+      const url = onListening.mock.calls[0]?.[0] as string;
+      expect(server.status().port).not.toBe(port);
+      expect((await fetch(`${url}/healthz`)).ok).toBe(true);
+      expect(registry.publish).not.toHaveBeenCalled();
+    } finally {
+      await new Promise<void>((resolve) => blocker.close(() => resolve()));
+    }
   });
 
   it('ensures a model, ref-counts holders, and guards capacity against in-use eviction', async () => {

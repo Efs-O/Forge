@@ -38,7 +38,7 @@ export function busModelIds(config: ForgeConfig): string[] {
   ];
 }
 
-/** Keep bus restore/create delivery in its addressed chat without moving the visible chat. */
+/** An explicit new chat becomes visible; follow-ups keep their addressed chat. */
 
 export async function submitBusMessage(
   facade: ForgeHostFacade,
@@ -47,7 +47,7 @@ export async function submitBusMessage(
 ): Promise<BusTurnEnd> {
   let conversationId = busTarget(facade, options?.from);
   if (options?.newChat) {
-    conversationId = (await facade.createConversation({ activate: false })).id;
+    conversationId = (await facade.createConversation({ activate: true })).id;
   } else if (conversationId !== facade.status().activeConversationId) {
     await facade.restoreConversation(conversationId, { activate: false });
   }
@@ -147,9 +147,10 @@ export function setupAgentMessaging(
     }
     return { ok: true as const, facade, status, id, conversation };
   };
-  return new AgentRoutes({
+  const routes = new AgentRoutes({
     paths: () => busPaths(),
     inbox,
+    isFocused: () => vscode.window.state.focused,
     configuredModels: () => busModelIds(getConfig()),
     relay: mesh.relay,
     // F-06: a `priority=steer` message interrupts the recipient's active turn.
@@ -229,4 +230,10 @@ export function setupAgentMessaging(
       }
     },
   });
+  context.subscriptions.push(
+    vscode.window.onDidChangeWindowState((state) => {
+      if (state.focused) routes.claim();
+    }),
+  );
+  return routes;
 }

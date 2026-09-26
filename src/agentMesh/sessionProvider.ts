@@ -7,6 +7,7 @@ import { queueToCodex } from '../agentBus/codexDelivery';
 import { getAlias, registerAlias } from './aliasRegistry';
 import { ClaudeOwnedAdapter, CodexOwnedAdapter } from './adapters';
 import { JoinedClaude, type JoinedClaudeDeps } from './claudeStandIn';
+import { CodexIdleRelease } from './codexIdleRelease';
 import { codexQueueAdapterIfLive } from './codexPinLiveness';
 import {
   beginCreation,
@@ -55,6 +56,7 @@ export interface SessionProviderDeps extends HostLivenessDeps, JoinedClaudeDeps 
 
 export class MeshSessionProvider implements SessionProvider {
   private readonly owned = new Map<string, CodexAppServerSession>();
+  private readonly codexIdleRelease = new CodexIdleRelease();
   private readonly claudeOwned = new Map<string, ClaudeOwnedSession>();
   private readonly creating = new Map<string, Promise<MeshAdapter | { error: string }>>();
   /** Aliases currently being disposed by TTL/recovery. */
@@ -87,9 +89,17 @@ export class MeshSessionProvider implements SessionProvider {
   }
 
   private codexOwnedAdapter(alias: string, s: CodexAppServerSession): CodexOwnedAdapter {
-    return new CodexOwnedAdapter(s, () =>
-      recordConfirmedId(this.deps.busRoot, alias, s.confirmedSessionId, this.deps),
+    return new CodexOwnedAdapter(
+      s,
+      () => recordConfirmedId(this.deps.busRoot, alias, s.confirmedSessionId, this.deps),
+      () => this.releaseCodexWhenIdle(alias, s),
     );
+  }
+
+  private releaseCodexWhenIdle(alias: string, session: CodexAppServerSession): void {
+    if (this.owned.get(alias) !== session) return;
+    this.owned.delete(alias);
+    this.codexIdleRelease.release(alias, session);
   }
 
   private claudeOwnedAdapter(alias: string, s: ClaudeOwnedSession): ClaudeOwnedAdapter {
@@ -116,13 +126,14 @@ export class MeshSessionProvider implements SessionProvider {
    * (M3). The config pin is used only when another window owns the session.
    */
   private async codexAdapterAsync(): Promise<MeshAdapter | undefined> {
+    await this.codexIdleRelease.wait('codex');
     const existing = this.owned.get('codex');
     if (existing) return this.codexOwnedAdapter('codex', existing);
     const rec = readOwnership(this.deps.busRoot, 'codex');
-    // M2: a session another LIVE window owns is never re-spawned here. This
-    // window does not hold its stdio pipe, so it cannot drive it; spawning a
-    // second app-server for the same thread would leave two live pipes on one
-    // alias. Fall back to a user-opened queue session (if pinned), else none.
+    // M2: a session another LIVE window owns is never re-spawned here. That
+    // window is responsible for the alias and serializes its turns; spawning a
+    // second app-server for the same thread could race its resume/send path.
+    // Fall back to a user-opened queue session (if pinned), else none.
     if (rec?.owner_host && this.isForeignLiveOwner(rec.owner_host)) {
       return this.codexAdapterIfLive();
     }
@@ -390,6 +401,7 @@ export class MeshSessionProvider implements SessionProvider {
     if (this.reaping.has(a)) return;
     this.reaping.add(a);
     try {
+      await this.codexIdleRelease.wait(a);
       const codex = this.owned.get(a);
       const claude = this.claudeOwned.get(a);
       if (!codex && !claude) return;
@@ -405,8 +417,8 @@ export class MeshSessionProvider implements SessionProvider {
   /**
    * Standby: park-but-warm (§2b, P3). Sets `parked: true` on the ownership
    * record (durable: survives a restart, and exempts the session from the idle
-   * TTL while parked, M4). The in-memory session is NOT disposed — "warm" means
-   * the thread stays resumable. `undefined` when the alias has no ownership
+   * TTL while parked, M4). The thread stays resumable; an idle Codex process is
+   * released after its FIFO drains. `undefined` when the alias has no ownership
    * record (nothing to park).
    */
   park(alias: string): boolean {
@@ -453,6 +465,7 @@ export class MeshSessionProvider implements SessionProvider {
     // running with no owner record, and a later message spawns a second pipe on
     // the same alias). Refuse: the owner window must close its own session.
     if (rec.owner_host && !this.isOwner(a)) return false;
+    await this.codexIdleRelease.wait(a);
     const codex = this.owned.get(a);
     const claude = this.claudeOwned.get(a);
     if (codex) {
@@ -476,6 +489,10 @@ export class MeshSessionProvider implements SessionProvider {
     const sessions = [...this.owned.values(), ...this.claudeOwned.values()];
     this.owned.clear();
     this.claudeOwned.clear();
-    await Promise.all([...sessions.map((s) => s.dispose()), this.joined.dispose()]);
+    await Promise.all([
+      ...sessions.map((s) => s.dispose()),
+      ...this.codexIdleRelease.all(),
+      this.joined.dispose(),
+    ]);
   }
 }

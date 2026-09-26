@@ -9,7 +9,7 @@ import { getAlias, registerAlias, type AgentKind } from './aliasRegistry';
  *
  * Records are **per alias** (`ownership/<alias>.json`), not one shared file
  * several windows rewrite (last-writer-wins loses updates). Each record names
- * the host that holds the stdio pipe as `owner_host: {pid, startedAt}`.
+ * the host responsible for the alias as `owner_host: {pid, startedAt}`.
  *
  * The load-bearing rule (M2): **startup recovery may reap a session only if
  * its `owner_host` is dead.** "The pid is alive but *I* don't hold its pipe"
@@ -32,8 +32,9 @@ export interface OwnershipRecord {
   /** The Codex thread id to resume. Kept across reaps (M3). */
   thread_id?: string;
   /**
-   * The host holding the stdio pipe. `null` means no live owner, but a
-   * `thread_id` (when present) is still resumable by the next creation.
+   * The Forge host responsible for this alias. It may release Codex's stdio
+   * process while idle and resume `thread_id` on its next message. `null`
+   * means no live owner, but the thread remains resumable.
    */
   owner_host: HostId | null;
   workspace: string;

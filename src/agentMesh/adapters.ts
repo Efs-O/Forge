@@ -3,12 +3,25 @@ import type { ClaudeOwnedSession } from '../agents/ClaudeOwnedSession';
 import type { ClaudeSession } from '../agentBus/claudePeer';
 import type { MeshAdapter, MeshSendOptions, TurnResult } from './meshAdapter';
 
+const codexAdapterKeys = new WeakMap<CodexAppServerSession, string>();
+let nextCodexAdapterKey = 1;
+
+function codexAdapterKey(session: CodexAppServerSession): string {
+  let key = codexAdapterKeys.get(session);
+  if (!key) {
+    key = `codex-owned:${nextCodexAdapterKey++}`;
+    codexAdapterKeys.set(session, key);
+  }
+  return key;
+}
+
 /**
  * The agent-mesh delivery adapters (AGENT_MESH_PLAN §1, §2).
  *
- * - {@link CodexOwnedAdapter} wraps the warm owned `CodexAppServerSession`
- *   (observing: Forge sees the turn start and end directly → real
- *   `started`/`completed` states).
+ * - {@link CodexOwnedAdapter} wraps an owned `CodexAppServerSession` while its
+ *   FIFO has work (observing: Forge sees turn start/end directly → real
+ *   `started`/`completed` states). The app-server is released when the FIFO
+ *   drains; the thread id remains resumable.
  * - {@link ClaudePeerAdapter} writes to a user-opened Claude session's peer
  *   pipe (non-observing: the exchange honestly stays `accepted`).
  * - {@link CodexQueueAdapter} hands a message to a user-opened Codex session
@@ -19,14 +32,17 @@ import type { MeshAdapter, MeshSendOptions, TurnResult } from './meshAdapter';
 export class CodexOwnedAdapter implements MeshAdapter {
   readonly kind = 'codex' as const;
   readonly observesTurns = true;
-  readonly key = 'codex-owned';
+  readonly key: string;
 
   /** `onTurnEnd`: a fresh thread's id exists only after its first turn; the
    *  provider records it then, or a reload has nothing to resume. */
   constructor(
     private readonly session: CodexAppServerSession,
     private readonly onTurnEnd?: () => void,
-  ) {}
+    private readonly onFifoIdle?: () => void,
+  ) {
+    this.key = codexAdapterKey(session);
+  }
 
   async send(message: string, options?: MeshSendOptions): Promise<TurnResult> {
     const result = await this.session
@@ -41,6 +57,11 @@ export class CodexOwnedAdapter implements MeshAdapter {
   /** F-06: interrupt the running turn (a `priority=steer` message). */
   interrupt(): void {
     this.session.interrupt();
+  }
+
+  /** Release Codex's thread writer once the FIFO has drained. */
+  onIdle(): void {
+    this.onFifoIdle?.();
   }
 }
 

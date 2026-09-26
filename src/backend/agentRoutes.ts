@@ -23,6 +23,8 @@ export type BusReadResult =
 export interface AgentRoutesDeps {
   paths: () => BusPaths;
   inbox: Pick<AgentInbox, 'accept' | 'cancel'>;
+  /** Only the focused Forge window may claim the shared client endpoint. */
+  isFocused?: () => boolean;
   /** Injected by tests; production mints one per activation. */
   token?: string;
   /**
@@ -97,6 +99,7 @@ interface Fields {
 const AgentMessageOptionsSchema = z.object({
   model: z.string().trim().min(1).optional(),
   new_chat: z.boolean().optional(),
+  reply_in_chat: z.boolean().optional(),
 });
 
 class HttpError extends Error {
@@ -143,6 +146,8 @@ async function readFields(req: http.IncomingMessage, url: URL): Promise<Fields> 
   const fields: Fields = { ...Object.fromEntries(url.searchParams), text: body };
   if (fields['new_chat'] === 'true') fields['new_chat'] = true;
   if (fields['new_chat'] === 'false') fields['new_chat'] = false;
+  if (fields['reply_in_chat'] === 'true') fields['reply_in_chat'] = true;
+  if (fields['reply_in_chat'] === 'false') fields['reply_in_chat'] = false;
   return fields;
 }
 
@@ -194,10 +199,15 @@ export class AgentRoutes {
     this.refresh();
   }
 
+  /** Reclaim the client endpoint when this VS Code window gains focus. */
+  claim(): void {
+    this.refresh();
+  }
+
   private refresh(): void {
     try {
-      if (this.url && this.enabled) this.publish(this.url);
-      else this.withdraw();
+      if (!this.url || !this.enabled) this.withdraw();
+      else if (this.deps.isFocused?.() ?? true) this.publish(this.url);
     } catch (err) {
       log.error('[agentRoutes] could not update endpoint.json', err);
     }
@@ -331,7 +341,7 @@ export class AgentRoutes {
           'steer' && !!this.deps.interruptForge;
       const options = this.messageOptions(fields);
       const accepted = this.deps.inbox.accept(
-        forgeInboundPrompt(from, text),
+        forgeInboundPrompt(from, text, options.replyInChat === true),
         from,
         steerForge,
         options,
@@ -354,6 +364,7 @@ export class AgentRoutes {
     const parsed = AgentMessageOptionsSchema.safeParse({
       model: fields['model'],
       new_chat: fields['new_chat'],
+      reply_in_chat: fields['reply_in_chat'],
     });
     if (!parsed.success) throw new HttpError(400, zodMessage(parsed.error));
 
@@ -367,6 +378,9 @@ export class AgentRoutes {
     return {
       ...(parsed.data.model !== undefined ? { model: parsed.data.model } : {}),
       ...(parsed.data.new_chat !== undefined ? { newChat: parsed.data.new_chat } : {}),
+      ...(parsed.data.reply_in_chat !== undefined
+        ? { replyInChat: parsed.data.reply_in_chat }
+        : {}),
     };
   }
 

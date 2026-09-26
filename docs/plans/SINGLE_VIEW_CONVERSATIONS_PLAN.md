@@ -80,14 +80,11 @@ While any pending request has no conversation id, auto-archive evicts nothing,
 because it cannot prove the request belongs elsewhere. Phase 2 greps every
 emission path and adds the id where the caller has it.
 
-**The bus stops moving the view.** Today `forge.sh say --new` creates the chat
-with `activate: true`, and an ordinary `say` restores the sender's chat with
-`activate: true` whenever it is not the active one (`agentMessagingSetup.ts:61-64`).
-With tabs that was a chip changing colour. With one view it yanks the screen
-away from the user on every agent message. Both paths change to
-`activate: false`. The bus finds its chat by sender (`busTarget.ts`), and
-`facade.send` takes a conversation id, so it does not need the view. Phase 2
-verifies that `send` works on a chat that is not active.
+**Bus view policy (updated 2026-09-25).** An ordinary `forge.sh say` follows
+the sender's chat without moving the view. An explicit `say --new` creates and
+selects its new chat so the user can see the requested conversation. The bus
+finds follow-ups by sender (`busTarget.ts`), and `facade.send` takes a
+conversation id, so a follow-up can run in a background chat.
 
 ## 4. Alerts
 
@@ -167,8 +164,8 @@ Open row, and both markers.
   - restore at cap.
 - Caller-level tests at cap for remote `/new`, first-prompt admission and
   workspace handoff.
-- Bus `activate: false` on both paths, with a test that the active chat does
-  not change on `say` and `say --new`.
+- Bus `activate: false` for follow-ups and `activate: true` for `say --new`,
+  with a test of both paths.
 
 **Phase 3 — alerts.** `hiddenChatAlerts.ts`, wired in the sidebar setup, with
 its disposal in `context.subscriptions`. Unit tests with fake events:
@@ -222,7 +219,7 @@ Otherwise the review sees an evictable signal with no test row.
       nothing evictable, the refusal says why.
 - [ ] Remote `/new`, first-prompt admission and workspace handoff at the cap
       follow the same rule, and none of them throws.
-- [ ] Neither `forge.sh say` nor `forge.sh say --new` changes which chat is on
-      screen, and both still deliver.
+- [ ] Ordinary `forge.sh say` keeps the current chat on screen. Explicit
+      `forge.sh say --new` selects its new chat. Both deliver.
 - [ ] One id both open and archived at load keeps the open copy only.
 - [ ] `npm run ci` green; no file over 500 lines.
