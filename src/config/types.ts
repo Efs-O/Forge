@@ -373,7 +373,11 @@ export interface ForgeConfig {
     rate_limit_per_minute: number;
     /** Seconds to keep a recognized /command before deleting it from Telegram; 0 disables. */
     delete_command_messages_after: number;
-    /** Seconds to keep Forge's reply to a /command before deleting it from Telegram; 0 disables. */
+    /**
+     * Seconds to keep Forge's reply to a /command — and ephemeral host
+     * notifications such as "model unloaded" — before deleting them from
+     * Telegram; 0 disables.
+     */
     delete_command_replies_after: number;
     /** Remote TOTP session policy. Enrollment/secrets remain in SecretStorage. */
     auth: {

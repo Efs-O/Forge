@@ -233,6 +233,12 @@ export interface RemoteOutboxRecord {
   state: 'pending' | 'sending' | 'delivered' | 'abandoned';
   attempts: number;
   updatedAt: number;
+  /**
+   * Transient status (e.g. a model unloaded): once delivered, the transport
+   * deletes the message after `delete_command_replies_after`. Absent on records
+   * written before this field existed — they keep their message.
+   */
+  ephemeral?: boolean | undefined;
 }
 
 export interface RemoteTransportHealth {

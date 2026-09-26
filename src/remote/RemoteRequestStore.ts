@@ -180,6 +180,7 @@ export class RemoteRequestStore {
     channel: RemoteOutboxRecord['channel'],
     chatId: string,
     text: string,
+    options?: { ephemeral?: boolean },
   ): Promise<void> {
     await this.mutate((draft) => {
       draft.outbox.push({
@@ -191,6 +192,9 @@ export class RemoteRequestStore {
         state: 'pending',
         attempts: 0,
         updatedAt: Date.now(),
+        // Only store the flag when set, so a plain notification record is
+        // byte-identical to what was written before this field existed.
+        ...(options?.ephemeral ? { ephemeral: true } : {}),
       });
     });
   }

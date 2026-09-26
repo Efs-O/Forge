@@ -271,7 +271,10 @@ export class SlashCommandHandler {
    *  is window-scoped: a paired chat that did not run it is just as affected. */
   private async runUnload(unload: () => Promise<string>): Promise<void> {
     try {
-      this.emitActivity({ text: await unload() });
+      // Ephemeral: a "model unloaded" line is transient status, not a record
+      // the user needs to keep. The transport deletes it after the same delay
+      // that governs command replies.
+      this.emitActivity({ text: await unload(), ephemeral: true });
     } catch (err) {
       this.deps.post({ type: 'error', message: `Failed to unload: ${(err as Error).message}` });
     }

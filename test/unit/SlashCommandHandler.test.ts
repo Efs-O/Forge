@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
 import { SlashCommandHandler, type SlashCommandDeps } from '../../src/sidebar/SlashCommandHandler';
+import type { HostActivityEvent } from '../../src/sidebar/HostActivity';
 import type { ForgeConfig } from '../../src/config/types';
 import type { IBackendPool } from '../../src/backend/BackendPool';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
@@ -88,6 +89,39 @@ describe('SlashCommandHandler', () => {
 
     expect(conversation).toMatchObject({ title: 'Existing title', updatedAt: 10 });
     expect(persistSession).not.toHaveBeenCalled();
+  });
+
+  // A "model unloaded" line is transient status, not a record: the flag is
+  // what makes the transport delete it after the command-reply delay.
+  it.each([
+    ['unloadModel', 'Forge: qwen unloaded.'],
+    ['unloadAll', 'Forge: all models unloaded.'],
+  ] as const)('marks the /%s broadcast ephemeral so the transport deletes it', async (commandId, text) => {
+    const emitted: HostActivityEvent[] = [];
+    const deps = {
+      unloadActiveModel: vi.fn(async () => ({ model: 'qwen', wasLoaded: true })),
+      unloadModels: vi.fn(async () => undefined),
+      post: vi.fn(),
+    } as unknown as SlashCommandDeps;
+    const handler = new SlashCommandHandler(deps);
+    handler.onHostActivity((event) => emitted.push(event));
+
+    await handler.handle(commandId);
+
+    expect(emitted).toEqual([{ text, ephemeral: true }]);
+  });
+
+  it('leaves other window-scoped broadcasts non-ephemeral', async () => {
+    const emitted: HostActivityEvent[] = [];
+    const deps = {
+      newConversation: vi.fn(async () => undefined),
+    } as unknown as SlashCommandDeps;
+    const handler = new SlashCommandHandler(deps);
+    handler.onHostActivity((event) => emitted.push(event));
+
+    await handler.handle('newChat');
+
+    expect(emitted).toEqual([{ text: 'Forge: started a new chat in this window.' }]);
   });
 
   it('resumes the same conversation after compacting an interrupted turn', async () => {

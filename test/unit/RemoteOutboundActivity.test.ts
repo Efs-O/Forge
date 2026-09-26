@@ -6,6 +6,8 @@ import { RemoteAgentProgress } from '../../src/remote/RemoteAgentProgress';
 import { RemoteRequestStore } from '../../src/remote/RemoteRequestStore';
 import { RemoteNotificationFanout } from '../../src/remote/RemoteNotificationFanout';
 import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
+import { routeHostActivity } from '../../src/remote/remoteActivityRouting';
+import type { RemoteController } from '../../src/remote/RemoteController';
 import { wireTurnMirror } from '../../src/sidebar/turnMirrorWiring';
 import type { HostActivityEvent } from '../../src/sidebar/HostActivity';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
@@ -78,6 +80,89 @@ describe('window-scoped fan-out', () => {
     });
     expect(state.bindingsForWorkspace('ws', 'telegram')).toHaveLength(1);
     expect(state.bindingsForWorkspace('ws')).toHaveLength(2);
+  });
+});
+
+describe('window-scoped ephemeral host notifications', () => {
+  // The flag must land on the durable outbox record: delivery happens later,
+  // possibly after a restart, and only the record can carry it that far.
+  async function makeFanout(): Promise<{ fanout: RemoteNotificationFanout; store: RemoteRequestStore }> {
+    const state = await store();
+    await state.setBinding({
+      channel: 'telegram',
+      chatId: 'chat-a',
+      workspaceId: 'ws',
+      conversationId: 'conv-1',
+    });
+    const fanout = new RemoteNotificationFanout({
+      store: state,
+      channelName: 'telegram',
+      workspaceId: 'ws',
+      kick: vi.fn(),
+      ownsProgress: () => false,
+    });
+    return { fanout, store: state };
+  }
+
+  it('writes ephemeral: true onto the durable outbox record when asked', async () => {
+    const { fanout, store } = await makeFanout();
+    await expect(fanout.toWorkspace('Forge: all models unloaded.', true)).resolves.toBe(1);
+    expect(store.pendingOutbox('telegram')).toEqual([
+      expect.objectContaining({ text: 'Forge: all models unloaded.', ephemeral: true }),
+    ]);
+  });
+
+  it('writes no ephemeral field on a plain notification, byte-identical to before', async () => {
+    const { fanout, store } = await makeFanout();
+    await expect(fanout.toWorkspace('Forge: backend restarted.')).resolves.toBe(1);
+    const [record] = store.pendingOutbox('telegram');
+    expect(record).toBeDefined();
+    expect('ephemeral' in record).toBe(false);
+  });
+});
+
+describe('routeHostActivity ephemeral forwarding', () => {
+  function fakeController() {
+    return {
+      broadcastHostNotification: vi.fn(async () => 1),
+      mirrorTurn: vi.fn(async () => 1),
+      reportTurnFailure: vi.fn(async () => 1),
+      enqueueHostNotification: vi.fn(async () => 1),
+    };
+  }
+
+  it('forwards the ephemeral flag on window-scoped events', async () => {
+    const controller = fakeController();
+    await routeHostActivity(
+      { text: 'Forge: all models unloaded.', ephemeral: true },
+      controller as unknown as RemoteController,
+    );
+    expect(controller.broadcastHostNotification).toHaveBeenCalledWith(
+      'Forge: all models unloaded.',
+      true,
+    );
+  });
+
+  it('forwards undefined, not false, when the flag is absent', async () => {
+    const controller = fakeController();
+    await routeHostActivity(
+      { text: 'Forge: backend restarted.' },
+      controller as unknown as RemoteController,
+    );
+    expect(controller.broadcastHostNotification).toHaveBeenCalledWith(
+      'Forge: backend restarted.',
+      undefined,
+    );
+  });
+
+  it('never forwards the flag on conversation-scoped events', async () => {
+    const controller = fakeController();
+    await routeHostActivity(
+      { text: 'compacted', conversationId: 'c1', ephemeral: true },
+      controller as unknown as RemoteController,
+    );
+    expect(controller.enqueueHostNotification).toHaveBeenCalledWith('c1', 'compacted');
+    expect(controller.broadcastHostNotification).not.toHaveBeenCalled();
   });
 });
 

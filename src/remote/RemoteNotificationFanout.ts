@@ -70,13 +70,13 @@ export class RemoteNotificationFanout {
    * conversation's chats would skip a paired chat bound to a different one and
    * equally affected.
    */
-  async toWorkspace(text: string): Promise<number> {
+  async toWorkspace(text: string, ephemeral?: boolean): Promise<number> {
     const bindings = this.deps.store
       .bindingsForWorkspace(this.deps.workspaceId, this.deps.channelName)
       .filter((binding) => !this.muted.has(binding.chatId));
     // A workspace can hold several chats bound to different conversations; a
     // window-scoped notice is one fact and must not arrive twice in one chat.
-    return this.send([...new Set(bindings.map((binding) => binding.chatId))], text);
+    return this.send([...new Set(bindings.map((binding) => binding.chatId))], text, ephemeral);
   }
 
   /**
@@ -145,10 +145,15 @@ export class RemoteNotificationFanout {
       .map((binding) => binding.chatId);
   }
 
-  private async send(chatIds: string[], text: string): Promise<number> {
+  private async send(chatIds: string[], text: string, ephemeral?: boolean): Promise<number> {
     if (chatIds.length === 0) return 0;
     for (const chatId of chatIds) {
-      await this.deps.store.notifyOutbox(this.deps.channelName, chatId, text);
+      await this.deps.store.notifyOutbox(
+        this.deps.channelName,
+        chatId,
+        text,
+        ephemeral ? { ephemeral: true } : undefined,
+      );
     }
     this.deps.kick();
     return chatIds.length;

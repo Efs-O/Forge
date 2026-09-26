@@ -33,6 +33,14 @@ export interface HostActivityEvent {
    * suppress the news that the work stopped.
    */
   kind?: 'turn' | 'failure';
+  /**
+   * Transient status the user does not need to keep — a model unloaded, the
+   * backend restarted. True means the transport deletes the delivered message
+   * after `delete_command_replies_after`, the same delay that governs command
+   * replies. Absent/false keeps the message, which is what every other
+   * host-activity event does.
+   */
+  ephemeral?: boolean;
 }
 
 export type HostActivityListener = (event: HostActivityEvent) => void;

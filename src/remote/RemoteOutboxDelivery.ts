@@ -24,6 +24,13 @@ export class RemoteOutboxDelivery {
      * message counts as sent, or a Piper failure would drive the retry loop.
      */
     private readonly speak?: (chatId: string, text: string) => Promise<boolean>,
+    /**
+     * Optional best-effort cleanup of a delivered ephemeral message (e.g. a
+     * "model unloaded" broadcast). Called AFTER the item is marked delivered
+     * and OUTSIDE the send/retry path, so a failure here can never requeue an
+     * already-delivered item.
+     */
+    private readonly armEphemeral?: (chatId: string, messageIds: string[]) => void,
   ) {}
 
   start(): void {
@@ -61,8 +68,9 @@ export class RemoteOutboxDelivery {
       if (this.stopped) return;
       if (!(await this.canDeliver(item.chatId))) continue;
       await this.store.markOutbox(item.id, 'sending');
+      let sentIds: string[] | void;
       try {
-        await this.channel.send(item.chatId, item.text.slice(0, this.maxMessageChars), {
+        sentIds = await this.channel.send(item.chatId, item.text.slice(0, this.maxMessageChars), {
           signal: this.signal,
         });
         await this.store.markOutbox(item.id, 'delivered');
@@ -76,6 +84,25 @@ export class RemoteOutboxDelivery {
           item.attempts + 1 >= MAX_ATTEMPTS ? 'abandoned' : 'pending',
         );
         return;
+      }
+      // Best-effort, and OUTSIDE the try that owns delivery state: an
+      // already-delivered item must never be requeued because arming its
+      // ephemeral cleanup failed.
+      if (item.ephemeral && this.armEphemeral) {
+        try {
+          this.armEphemeral(item.chatId, sentIds ?? []);
+        } catch (err) {
+          try {
+            this.onError?.(
+              `Forge remote ephemeral notification cleanup failed: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            );
+          } catch {
+            // Best-effort: the item is already delivered; a broken reporter
+            // must not reject deliver() or disrupt subsequent deliveries.
+          }
+        }
       }
     }
   }

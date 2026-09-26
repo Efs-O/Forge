@@ -506,3 +506,79 @@ describe('CommandCleanupScheduler.trackReplies', () => {
     expect(tracked).toBe(channel);
   });
 });
+
+describe('CommandCleanupScheduler.armEphemeral', () => {
+  // Host-activity messages (a model unloaded) are deleted on the same live
+  // delay as command replies, keyed separately so the two paths never collide.
+  function makeScheduler(
+    replyDelaySeconds: () => number,
+  ): { channel: FakeRemoteChannel; scheduler: CommandCleanupScheduler } {
+    const channel = new FakeRemoteChannel();
+    const scheduler = new CommandCleanupScheduler({
+      channel,
+      signal: new AbortController().signal,
+      delaySeconds: () => 5,
+      replyDelaySeconds,
+    });
+    return { channel, scheduler };
+  }
+
+  it('deletes each delivered id after the live reply delay', async () => {
+    vi.useFakeTimers();
+    const { channel, scheduler } = makeScheduler(() => 10);
+    scheduler.armEphemeral('chat', ['a', 'b']);
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(channel.deleted).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(channel.deleted).toEqual([
+      { chatId: 'chat', messageId: 'a' },
+      { chatId: 'chat', messageId: 'b' },
+    ]);
+  });
+
+  it('is a no-op when the reply delay is 0', async () => {
+    vi.useFakeTimers();
+    const { channel, scheduler } = makeScheduler(() => 0);
+    scheduler.armEphemeral('chat', ['a']);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(channel.deleted).toEqual([]);
+  });
+
+  it('reads the delay at arm time, not construction time', async () => {
+    vi.useFakeTimers();
+    let delay = 0;
+    const { channel, scheduler } = makeScheduler(() => delay);
+    scheduler.armEphemeral('chat', ['a']); // armed while disabled
+    delay = 10; // a config reload changes the live read
+    scheduler.armEphemeral('chat', ['b']);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(channel.deleted).toEqual([{ chatId: 'chat', messageId: 'b' }]);
+  });
+
+  it('issues at most one delete per id across duplicate arming', async () => {
+    vi.useFakeTimers();
+    const { channel, scheduler } = makeScheduler(() => 5);
+    scheduler.armEphemeral('chat', ['a']);
+    scheduler.armEphemeral('chat', ['a']);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(channel.deleted).toEqual([{ chatId: 'chat', messageId: 'a' }]);
+  });
+
+  it('uses keys distinct from trackReplies, so both paths can arm the same id', async () => {
+    vi.useFakeTimers();
+    const channel = new FakeRemoteChannel();
+    const scheduler = new CommandCleanupScheduler({
+      channel,
+      signal: new AbortController().signal,
+      delaySeconds: () => 5,
+      replyDelaySeconds: () => 10,
+    });
+    const tracked = scheduler.trackReplies(channel, '/status');
+    const ids = await tracked.send('chat', 'Forge: status');
+    scheduler.armEphemeral('chat', ids);
+    await vi.advanceTimersByTimeAsync(10_000);
+    // Two deletes of the same id: the ephemeral: and reply: key spaces do not
+    // collide, so a message armed on both paths is cleaned up by each.
+    expect(channel.deleted.filter((entry) => entry.messageId === ids[0])).toHaveLength(2);
+  });
+});

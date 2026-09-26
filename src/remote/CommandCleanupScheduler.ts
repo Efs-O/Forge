@@ -95,6 +95,26 @@ export class CommandCleanupScheduler {
     });
   }
 
+  /**
+   * Arms deletion of host-activity messages the transport delivered (e.g. a
+   * "model unloaded" broadcast) after the same live delay that governs command
+   * replies. Reads `replyDelaySeconds()` at call time, exactly like
+   * `trackReplies`, so a config reload changes the delay for subsequent
+   * deliveries. Distinct `ephemeral:`-prefixed dedup keys keep these from
+   * colliding with the `reply:` keys `trackReplies` arms.
+   */
+  armEphemeral(chatId: string, messageIds: string[]): void {
+    const delaySeconds = this.deps.replyDelaySeconds?.() ?? 0;
+    for (const id of messageIds) {
+      this.arm(
+        remoteDedupKey(this.deps.channel.name, chatId, `ephemeral:${id}`),
+        chatId,
+        id,
+        delaySeconds,
+      );
+    }
+  }
+
   private arm(key: string, chatId: string, messageId: string, delaySeconds: number): void {
     if (delaySeconds <= 0) return;
     if (!this.deps.channel.deleteMessage) return;

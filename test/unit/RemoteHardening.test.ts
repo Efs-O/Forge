@@ -928,3 +928,159 @@ describe('remote runtime lifecycle', () => {
     await runtime.dispose();
   });
 });
+
+describe('ephemeral outbox delivery', () => {
+  // The arm callback is the whole contract: exactly once per delivered
+  // ephemeral item, with every chunk id, and never able to influence delivery
+  // state.
+  async function rig(ephemeral: boolean) {
+    const { store } = await newStore();
+    await store.notifyOutbox(
+      'fake',
+      'chat',
+      'Forge: all models unloaded.',
+      ephemeral ? { ephemeral: true } : undefined,
+    );
+    const recordId = store.pendingOutbox('fake')[0]!.id;
+    const channel = new FakeRemoteChannel();
+    const armEphemeral = vi.fn();
+    const onError = vi.fn();
+    const delivery = new RemoteOutboxDelivery(
+      channel,
+      store,
+      100,
+      new AbortController().signal,
+      1_000,
+      onError,
+      undefined,
+      undefined,
+      armEphemeral,
+    );
+    return { store, channel, armEphemeral, onError, delivery, recordId };
+  }
+
+  it('arms deletion with every chunk id after a successful send', async () => {
+    const { channel, armEphemeral, delivery } = await rig(true);
+    vi.spyOn(channel, 'send').mockResolvedValue(['chunk-1', 'chunk-2']);
+    delivery.start();
+    await vi.waitFor(() =>
+      expect(armEphemeral).toHaveBeenCalledWith('chat', ['chunk-1', 'chunk-2']),
+    );
+    await delivery.stop();
+  });
+
+  it('does not arm deletion for a non-ephemeral item', async () => {
+    const { store, armEphemeral, delivery, recordId } = await rig(false);
+    const markOutbox = vi.spyOn(store, 'markOutbox');
+    delivery.start();
+    // The arm decision is made right after the delivered mark; observing that
+    // mark is what makes the negative assertion below safe.
+    await vi.waitFor(() => expect(markOutbox).toHaveBeenCalledWith(recordId, 'delivered'));
+    expect(armEphemeral).not.toHaveBeenCalled();
+    await delivery.stop();
+  });
+
+  it('does not arm deletion when the send fails, and requeues the item', async () => {
+    const { store, channel, armEphemeral, delivery, recordId } = await rig(true);
+    vi.spyOn(channel, 'send').mockRejectedValue(new Error('offline'));
+    delivery.start();
+    await vi.waitFor(() =>
+      expect(
+        store.pendingOutbox('fake').find((item) => item.id === recordId),
+      ).toMatchObject({ state: 'pending', attempts: 1 }),
+    );
+    expect(armEphemeral).not.toHaveBeenCalled();
+    await delivery.stop();
+  });
+
+  it('arms with an empty id list when the transport cannot address the message', async () => {
+    const { channel, armEphemeral, onError, delivery } = await rig(true);
+    vi.spyOn(channel, 'send').mockResolvedValue(undefined);
+    delivery.start();
+    await vi.waitFor(() => expect(armEphemeral).toHaveBeenCalledWith('chat', []));
+    expect(onError).not.toHaveBeenCalled();
+    await delivery.stop();
+  });
+
+  it('reports a throwing armEphemeral without requeueing the delivered item', async () => {
+    const { store, armEphemeral, onError, delivery, recordId } = await rig(true);
+    armEphemeral.mockImplementation(() => {
+      throw new Error('boom');
+    });
+    delivery.start();
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
+    await delivery.stop();
+    expect(onError.mock.calls[0]?.[0]).toContain('ephemeral notification cleanup failed');
+    // The item stays delivered: a cleanup failure never requeues it.
+    expect(store.pendingOutbox('fake').find((item) => item.id === recordId)).toBeUndefined();
+  });
+
+  it('survives a restart: a pending ephemeral record is delivered and armed after reload', async () => {
+    const { store, directory } = await newStore();
+    await store.notifyOutbox('fake', 'chat', 'Forge: all models unloaded.', {
+      ephemeral: true,
+    });
+    // Simulate a crash before delivery: the record is on disk, nothing ran.
+    const reloaded = new RemoteRequestStore(path.join(directory, 'state.json'));
+    await reloaded.load();
+    const channel = new FakeRemoteChannel();
+    vi.spyOn(channel, 'send').mockResolvedValue(['chunk-1']);
+    const armEphemeral = vi.fn();
+    const delivery = new RemoteOutboxDelivery(
+      channel,
+      reloaded,
+      100,
+      new AbortController().signal,
+      1_000,
+      vi.fn(),
+      undefined,
+      undefined,
+      armEphemeral,
+    );
+    delivery.start();
+    await vi.waitFor(() => expect(armEphemeral).toHaveBeenCalledWith('chat', ['chunk-1']));
+    await delivery.stop();
+  });
+
+  it('a throwing onError cannot reject delivery or requeue the delivered item', async () => {
+    const { store, armEphemeral, onError, delivery, recordId } = await rig(true);
+    armEphemeral.mockImplementation(() => {
+      throw new Error('boom');
+    });
+    onError.mockImplementation(() => {
+      throw new Error('reporter broken');
+    });
+    delivery.start();
+    await vi.waitFor(() =>
+      expect(store.pendingOutbox('fake').find((item) => item.id === recordId)).toBeUndefined(),
+    );
+    // stop() must resolve: the broken reporter did not escape deliver().
+    await expect(delivery.stop()).resolves.toBeUndefined();
+  });
+
+  it('arms once when the delivered mark fails and the item is delivered twice', async () => {
+    const { store, channel, armEphemeral, delivery, recordId } = await rig(true);
+    vi.spyOn(channel, 'send').mockResolvedValue(['chunk-1']);
+    // The first 'delivered' mark fails (e.g. disk full mid-write); the retry
+    // re-sends (at-least-once) and the second mark succeeds.
+    const originalMarkOutbox = store.markOutbox.bind(store);
+    let deliveredMarks = 0;
+    vi.spyOn(store, 'markOutbox').mockImplementation(async (id, state) => {
+      if (state === 'delivered') {
+        deliveredMarks++;
+        if (deliveredMarks === 1) throw new Error('disk full');
+      }
+      return originalMarkOutbox(id, state);
+    });
+    delivery.start();
+    await vi.waitFor(
+      () =>
+        expect(store.pendingOutbox('fake').find((item) => item.id === recordId)).toBeUndefined(),
+      5_000,
+    );
+    await delivery.stop();
+    expect(channel.send).toHaveBeenCalledTimes(2);
+    expect(armEphemeral).toHaveBeenCalledTimes(1);
+    expect(armEphemeral).toHaveBeenCalledWith('chat', ['chunk-1']);
+  });
+});

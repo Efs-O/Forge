@@ -27,7 +27,7 @@ export function routeHostActivity(
   controller: RemoteController,
 ): Promise<number> {
   if (event.conversationId === undefined) {
-    return controller.broadcastHostNotification(event.text);
+    return controller.broadcastHostNotification(event.text, event.ephemeral);
   }
   if (event.kind === 'turn') return controller.mirrorTurn(event.conversationId, event.text);
   if (event.kind === 'failure') {

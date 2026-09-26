@@ -282,7 +282,11 @@ const RemoteConfigSchema = z
     rate_limit_per_minute: z.number().int().min(1).max(600).default(30),
     /** Seconds to keep a recognized /command before deleting it from Telegram; 0 disables. */
     delete_command_messages_after: z.number().int().min(0).max(3600).default(5),
-    /** Seconds to keep Forge's reply to a /command before deleting it from Telegram; 0 disables. */
+    /**
+     * Seconds to keep Forge's reply to a /command — and ephemeral host
+     * notifications such as "model unloaded" — before deleting them from
+     * Telegram; 0 disables.
+     */
     delete_command_replies_after: z.number().int().min(0).max(3600).default(10),
     auth: z
       .object({

@@ -102,3 +102,58 @@ describe('requestHealthForConversation (AGENT_MESH_PLAN §5, P1)', () => {
     });
   });
 });
+
+describe('outbox ephemeral flag', () => {
+  it('parses pre-existing outbox records that have no ephemeral field', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-remote-scope-'));
+    tempDirs.push(directory);
+    const file = path.join(directory, 'state.json');
+    // Hand-written state in the exact shape an older build persisted: no flag.
+    await fs.writeFile(
+      file,
+      JSON.stringify({
+        version: 2,
+        requests: [],
+        outbox: [
+          {
+            id: 'o1',
+            requestId: 'host-o1',
+            channel: 'telegram',
+            chatId: 'chat',
+            text: 'Forge: all models unloaded.',
+            state: 'pending',
+            attempts: 0,
+            updatedAt: Date.now(),
+          },
+        ],
+        bindings: [],
+        cursors: {},
+      }),
+      'utf8',
+    );
+    const store = new RemoteRequestStore(file);
+    await store.load();
+    const [record] = store.pendingOutbox('telegram');
+    expect(record).toMatchObject({ id: 'o1', state: 'pending' });
+    expect('ephemeral' in record).toBe(false);
+  });
+
+  it('round-trips the ephemeral flag through persist and reload', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-remote-scope-'));
+    tempDirs.push(directory);
+    const file = path.join(directory, 'state.json');
+    const store = new RemoteRequestStore(file);
+    await store.load();
+    await store.notifyOutbox('telegram', 'chat', 'Forge: all models unloaded.', {
+      ephemeral: true,
+    });
+    await store.notifyOutbox('telegram', 'chat', 'Forge: backend restarted.');
+    const reloaded = new RemoteRequestStore(file);
+    await reloaded.load();
+    const records = reloaded.pendingOutbox('telegram');
+    expect(records).toHaveLength(2);
+    expect(records[0]).toMatchObject({ ephemeral: true });
+    // The plain notification keeps its pre-flag shape: no field at all.
+    expect('ephemeral' in records[1]!).toBe(false);
+  });
+});

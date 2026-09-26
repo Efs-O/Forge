@@ -95,6 +95,11 @@ export class RemoteController {
       options.onError,
       (chatId) => this.auth.canDeliver(this.channel.name, chatId),
       speech ? (chatId, text) => speech.speak(chatId, text) : undefined,
+      // Ephemeral host notifications (a model unloaded) reuse the command-reply
+      // cleanup: the same live delay, the same best-effort delete. The closure
+      // runs only during deliver() — after the constructor has built
+      // commandCleanup — so the forward reference is safe.
+      (chatId, ids) => this.commandCleanup.armEphemeral(chatId, ids),
     );
     // The two bridges take the same seven dependencies by design -- both turn
     // one host-side prompt into a chat round-trip. Naming that shape once means
@@ -205,8 +210,8 @@ export class RemoteController {
   reachForConversation(conversationId: string): number {
     return this.fanout.countOn(conversationId);
   }
-  async broadcastHostNotification(text: string): Promise<number> {
-    return this.fanout.toWorkspace(text);
+  async broadcastHostNotification(text: string, ephemeral?: boolean): Promise<number> {
+    return this.fanout.toWorkspace(text, ephemeral);
   }
   async mirrorTurn(conversationId: string, text: string): Promise<number> {
     return this.fanout.mirrorTurn(conversationId, text);

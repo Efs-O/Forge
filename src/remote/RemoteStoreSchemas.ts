@@ -43,6 +43,8 @@ export const OutboxSchema = z.object({
   state: z.enum(['pending', 'sending', 'delivered', 'abandoned']),
   attempts: z.number().int().nonnegative(),
   updatedAt: z.number(),
+  /** Optional: records written before this field exist still parse. */
+  ephemeral: z.boolean().optional(),
 });
 
 export const BindingSchema = z.object({
