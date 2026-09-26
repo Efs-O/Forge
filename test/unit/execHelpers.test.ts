@@ -185,4 +185,18 @@ describe('checkPowerShellBan', () => {
     ).toThrow();
     expect(() => checkPowerShellBan('/usr/bin/git', ['-c', 'x=y', 'status'])).not.toThrow();
   });
+
+  it('bans case-insensitive spellings and the documented abbreviations', () => {
+    // The ban was exact-spelling only until the 2026-09-26 audit: 'pwsh -command'
+    // and 'pwsh -c' walked straight past it.
+    expect(() => checkPowerShellBan('pwsh', ['-command', 'Get-Process'])).toThrow('PowerShell flag');
+    expect(() => checkPowerShellBan('pwsh', ['-COMMAND', 'x'])).toThrow('PowerShell flag');
+    expect(() => checkPowerShellBan('pwsh', ['-c', 'x'])).toThrow('PowerShell flag');
+    expect(() => checkPowerShellBan('pwsh', ['-e', 'x'])).toThrow('PowerShell flag');
+    expect(() => checkPowerShellBan('pwsh', ['-ec', 'x'])).toThrow('PowerShell flag');
+    // -w is -WindowStyle, not an evaluation flag: not banned.
+    expect(() => checkPowerShellBan('pwsh', ['-w', 'Hidden', '-File', 'watch.ps1'])).not.toThrow();
+    // The sanctioned -File route stays open (BackgroundExitNotify.test.ts).
+    expect(() => checkPowerShellBan('pwsh', ['-NoProfile', '-File', 'watch.ps1'])).not.toThrow();
+  });
 });

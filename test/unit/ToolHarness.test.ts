@@ -92,7 +92,9 @@ describe('local tool harness canonical inventory', () => {
         'view_image',
       ]),
     );
-  });
+    // 20 s: spawns a child node process; the 5 s default expired under load
+    // (audit 2026-09-26 F1).
+  }, 20_000);
 
   it('generates a canonical coverage matrix with no missing native handler tests', () => {
     const root = path.resolve(__dirname, '../..');
@@ -111,5 +113,6 @@ describe('local tool harness canonical inventory', () => {
     } finally {
       fs.rmSync(temp, { recursive: true, force: true });
     }
-  });
+    // 20 s: same child-process shape as the inventory test above.
+  }, 20_000);
 });

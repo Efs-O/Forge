@@ -1033,10 +1033,10 @@ describe('remote compaction progress notifications', () => {
     await controller.start();
     try {
       await controller.enqueueHostNotification('c1', 'Forge: compacting…');
-      // The delivery loop is async; wait for the outbox to drain.
-      for (let i = 0; i < 50 && state.pendingOutbox().length > 0; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
+      // The delivery loop is async; wait for the outbox to drain. The old
+      // fixed 50×10 ms poll expired under load; a waitFor budget does not
+      // (audit 2026-09-26 F1, correction from Codex review).
+      await vi.waitFor(() => expect(state.pendingOutbox()).toHaveLength(0), { timeout: 15_000 });
       expect(channel.sent).toContainEqual(
         expect.objectContaining({ chatId: 'chat-a', text: 'Forge: compacting…' }),
       );
@@ -1044,7 +1044,8 @@ describe('remote compaction progress notifications', () => {
     } finally {
       await controller.stop();
     }
-  });
+    // Per-test timeout above the 15 s waitFor budget (Codex review).
+  }, 20_000);
 
   it('edits /compact progress from the outcome and still sends the result', async () => {
     const state = await store();

@@ -52,5 +52,7 @@ describe('source hygiene', () => {
       if (FORBIDDEN.test(content)) offenders.push(file);
     }
     expect(offenders).toEqual([]);
-  });
+    // 20 s: scans every tracked source file; the 5 s default expired under
+    // load (audit 2026-09-26 F1).
+  }, 20_000);
 });

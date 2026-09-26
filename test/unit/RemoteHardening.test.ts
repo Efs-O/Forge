@@ -548,10 +548,14 @@ describe('remote durable boundaries', () => {
     vi.spyOn(channel, 'send').mockRejectedValue(new Error('offline'));
     const delivery = new RemoteOutboxDelivery(channel, store, 100, new AbortController().signal, 0);
     delivery.start();
-    await vi.waitFor(() => expect(store.outboxHealth().abandoned).toBe(1));
+    // 10 attempts at retryDelay 0 still do store I/O per attempt; the 1 s
+    // waitFor default expired under load (audit 2026-09-26 F1). The per-test
+    // timeout must sit above the waitFor budget, or the 5 s test default
+    // aborts first (Codex review).
+    await vi.waitFor(() => expect(store.outboxHealth().abandoned).toBe(1), { timeout: 15_000 });
     await delivery.stop();
     expect(channel.send).toHaveBeenCalledTimes(10);
-  });
+  }, 20_000);
 
   it('leaves a locked outbox item pending without retrying until explicitly kicked', async () => {
     const { store } = await newStore();

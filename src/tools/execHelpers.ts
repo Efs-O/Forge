@@ -135,7 +135,12 @@ export function checkShellOperators(args: string[]): void {
 
 // ── PowerShell ban ─────────────────────────────────────────────────────────────
 
-const PS_DANGEROUS_FLAGS = ['-Command', '-EncodedCommand', '-enc'];
+// Lowercase, and compared against a lowercased arg: PowerShell flags are
+// case-insensitive, and the documented abbreviations -c / -e / -ec resolve to
+// -Command / -EncodedCommand just like the full spellings (Codex review,
+// audit 2026-09-26 §3.1). `-w` is NOT banned: it abbreviates -WindowStyle,
+// not a script/evaluation flag.
+const PS_DANGEROUS_FLAGS = ['-command', '-encodedcommand', '-enc', '-ec', '-e', '-c'];
 /**
  * Every shell that runs a model-authored script string.
  *
@@ -162,7 +167,7 @@ export function checkPowerShellBan(command: string, args: string[]): void {
   }
   if (PS_LAUNCHERS.includes(cmd)) {
     for (const arg of args) {
-      if (PS_DANGEROUS_FLAGS.includes(arg)) {
+      if (PS_DANGEROUS_FLAGS.includes(arg.toLowerCase())) {
         // Name the route that works. "Use a non-shell binary instead" told the
         // model what to stop doing and nothing about what to do, so it kept
         // hunting for another shell rather than reaching for the tool that
