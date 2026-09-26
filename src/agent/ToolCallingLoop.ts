@@ -3,7 +3,6 @@ import type { UsageHandler } from '../llm/OpenAIClient';
 import { HtmlDocumentBoilerplateStripper } from '../llm/HtmlDocumentBoilerplateStripper';
 import { ThinkingChannelStripper } from '../llm/ThinkingChannelStripper';
 import type { ChatMessage, ToolCall, ToolDefinition } from '../llm/types';
-import { ToolFailureTracker } from '../tools/StripTools';
 import { StructuredOutputStripper } from '../tools/StructuredOutputParser';
 import { extractFallbackToolCalls } from '../tools/ToolCallFallback';
 import { MIN_ROUND_HEADROOM_TOKENS, reasoningReserve } from '../util/contextBudget';
@@ -70,8 +69,6 @@ export interface ToolCallingLoopOptions {
   stripAllTools?: boolean;
   canUseThinkingKwargs?: boolean;
   stripThinkingChannels?: boolean;
-  failureTracker?: ToolFailureTracker;
-  failureTrackerKey?: string;
   onToken?: (text: string) => void;
   onReasoning?: (text: string) => void;
   onDone?: (finishReason: string | null) => void;
@@ -260,8 +257,8 @@ export async function runToolCallingLoop(
           }
           forceCompaction = true;
         }
-        // Deliberately NOT failureTracker.record(): running out of context is
-        // not the model failing at tool calls, and three of these used to
+        // Deliberately NOT counted as a tool failure: running out of context is
+        // not the model failing at tool calls, and repeated truncations used to
         // disable tool calling for the rest of the chat.
         options.onTruncatedToolCall?.({
           toolName: truncation.toolName,
@@ -274,7 +271,6 @@ export async function runToolCallingLoop(
         continue;
       }
       if (!isNativeToolJsonParseError(err) || !built.usesNativeTools) throw err;
-      options.failureTracker?.record(options.failureTrackerKey);
       options.onNativeFallback?.();
       rawAssistant = '';
       rawReasoning = '';
@@ -312,7 +308,6 @@ export async function runToolCallingLoop(
         options.onRepeatedCall?.();
         throw error;
       }
-      options.failureTracker?.reset(options.failureTrackerKey);
       // The retry produced real work, so the next round may think again.
       reasoningStopRetries = 0;
       // Carry this round's reasoning on the tool-call turn. rawReasoning resets

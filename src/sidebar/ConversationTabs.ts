@@ -206,7 +206,6 @@ export class ConversationTabs {
       await this.deps.agentLoop.stopStreamingIfNeeded(id);
       await this.deps.agentLoop.disposeConversation(id);
       await this.deps.checkpoints.disposeConversation(id);
-      this.deps.failureTracker.reset(id);
     })().catch((err: unknown) => {
       const detail = err instanceof Error ? err.message : String(err);
       this.deps.post({

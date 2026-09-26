@@ -305,7 +305,6 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     getActive: host.getActive,
     agentLoop,
     requestChains,
-    failureTracker,
     events,
     post: host.post,
     persistSession: host.persistSession,

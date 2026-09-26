@@ -282,8 +282,6 @@ export async function runModelTurn(
       includeUsage: true,
       canUseThinkingKwargs: thinkingKwargs,
       stripThinkingChannels,
-      failureTracker: ctx.failureTracker,
-      failureTrackerKey: conv.id,
       ...(apiKey ? { apiKey } : {}),
       prepareMessages: (messages) =>
         prepareModelTurnMessages(messages, {

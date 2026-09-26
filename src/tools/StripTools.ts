@@ -17,7 +17,7 @@ export function stripTools(request: ChatCompletionRequest): ChatCompletionReques
  */
 export class ToolFailureTracker {
   private readonly failures = new Map<string, number>();
-  static readonly THRESHOLD = 3;
+  static readonly THRESHOLD = 10;
 
   record(conversationId = '__default__'): void {
     this.failures.set(conversationId, (this.failures.get(conversationId) ?? 0) + 1);

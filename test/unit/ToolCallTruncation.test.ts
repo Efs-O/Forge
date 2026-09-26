@@ -115,8 +115,7 @@ describe('truncated tool calls', () => {
     expect(messages.some((m) => m.role === 'assistant' && m.tool_calls?.length === 1)).toBe(true);
   });
 
-  it('leaves tool calling enabled after repeated truncations', async () => {
-    const tracker = new ToolFailureTracker();
+  it('recovers from repeated truncations without downgrading the model', async () => {
     let round = 0;
     streamModelChatCompletion.mockImplementation(
       async (_url: string, _req: unknown, _model: unknown, h: Handlers) => {
@@ -137,11 +136,9 @@ describe('truncated tool calls', () => {
       },
     );
 
-    await runToolCallingLoop(
-      runOptions([{ role: 'user', content: 'go' }], { failureTracker: tracker }) as never,
-    );
-    // Running out of context is not the model failing at tool calls.
-    expect(tracker.shouldStrip()).toBe(false);
+    await runToolCallingLoop(runOptions([{ role: 'user', content: 'go' }]) as never);
+    // The turn recovered and produced output rather than failing.
+    expect(round).toBe(3);
   });
 
   it('fails the turn once recoveries are exhausted', async () => {

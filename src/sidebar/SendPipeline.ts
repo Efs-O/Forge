@@ -11,7 +11,6 @@ import * as vscode from 'vscode';
 import type { ForgeConfig } from '../config/types';
 import type { AttachmentData, HostToWebview } from './messageBridge';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
-import type { ToolFailureTracker } from '../tools/StripTools';
 import type { AgentLoop, SidebarProviderEvents } from './AgentLoop';
 import { SessionLogger, type CompactionLogEntry } from './SessionLogger';
 import { resolveRequestModel } from '../config/ConfigResolver';
@@ -44,7 +43,6 @@ export interface SendPipelineDeps {
   getActive: () => ConversationRuntime;
   agentLoop: AgentLoop;
   requestChains: RequestChainLifecycle;
-  failureTracker: ToolFailureTracker;
   events: SidebarProviderEvents;
   post: (msg: HostToWebview) => void;
   persistSession: () => void;
@@ -238,7 +236,6 @@ export class SendPipeline {
               nextOptions,
             );
           } finally {
-            deps.failureTracker.reset(conv.id);
             deps.persistSession();
             deps.postSessionSync();
             this.flushSessionLog(conv.id);

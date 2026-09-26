@@ -84,7 +84,6 @@ function harness(
       runTurn,
     } as unknown as SendPipelineDeps['agentLoop'],
     requestChains,
-    failureTracker: { reset: vi.fn() } as unknown as SendPipelineDeps['failureTracker'],
     events: { onBackendError: vi.fn() },
     post: (msg) => posted.push(msg),
     persistSession: vi.fn(),
@@ -390,7 +389,6 @@ describe('SendPipeline.send', () => {
     await expect(h.pipeline.send('hello')).rejects.toThrow('backend died');
     expect(h.deps.persistSession).toHaveBeenCalledOnce();
     expect(h.deps.postSessionSync).toHaveBeenCalledOnce();
-    expect(h.deps.failureTracker.reset).toHaveBeenCalledOnce();
     expect(h.deps.evaluateAfterTurn).not.toHaveBeenCalled();
   });
 
