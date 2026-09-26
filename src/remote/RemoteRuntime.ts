@@ -207,6 +207,7 @@ export class RemoteRuntime {
       this.store,
       (channel, chatId) => this.auth.canDeliver(channel, chatId),
       conversationId,
+      (channel) => this.manager.get(channel)?.controller.outbox.kick(),
     );
   }
 

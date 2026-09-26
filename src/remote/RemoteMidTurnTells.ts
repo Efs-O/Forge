@@ -18,6 +18,7 @@ export type CanDeliver = (
   channel: RemoteRequestRecord['channel'],
   chatId: string,
 ) => Promise<boolean>;
+export type KickOutbox = (channel: RemoteRequestRecord['channel']) => void;
 
 /**
  * Claim every queued, text-only, normal-priority request for a conversation
@@ -30,6 +31,7 @@ export async function claimRemoteMidTurnTell(
   store: RemoteRequestStore,
   canDeliver: CanDeliver,
   conversationId: string,
+  kickOutbox?: KickOutbox,
 ): Promise<MidTurnDrainResult> {
   const candidates = store.queued(conversationId).sort(compareQueuedRequests);
   const claimed: RemoteRequestRecord[] = [];
@@ -52,6 +54,9 @@ export async function claimRemoteMidTurnTell(
         await store.finish(record.id, 'completed', {
           notification: 'Seen by the running turn.',
         });
+      }
+      for (const channel of new Set(claimed.map((record) => record.channel))) {
+        kickOutbox?.(channel);
       }
     },
   };
