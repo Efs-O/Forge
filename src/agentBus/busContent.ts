@@ -83,6 +83,16 @@ replays the last n answers (default 3, max 10). Both read only the chat your own
 if you have not sent Forge anything yet there is nothing to show. Each is one small request and
 costs Forge no model tokens, so use it instead of messaging Forge to ask how it is going.
 
+## Waiting for a turn to finish
+
+\`forge.sh wait <your-name> [minutes]\` blocks until your chat with Forge is
+idle with nothing of yours queued, then prints the final status and the latest
+answer (the same text \`view <your-name> 1\` shows), so a supervising agent that
+runs it in the background wakes with the result. It polls \`status\` internally
+about every 55 seconds and prints nothing in between; the timeout is in
+minutes (default 60) and a timed-out wait prints the last status to stderr and
+exits 124. Ctrl-C stops it. Use it instead of re-asking Forge how it is going.
+
 ## Steering (interrupt a running turn)
 
 \`forge.sh steer <your-name> <to>\` stops \`<to>\`'s running turn and runs your

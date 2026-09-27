@@ -421,6 +421,125 @@ describe('forge.sh against the routes', () => {
     expect((await runClient(['cancel', 'x'], '')).code).toBe(2);
     expect(accepted).toEqual([]);
   }, 30_000);
+
+  it('wait: refuses bad names, timeouts, arity and env overrides before any request', async (ctx) => {
+    if (!usable) ctx.skip();
+    expect((await runClient(['wait', 'a b'], '')).code).toBe(2);
+    expect((await runClient(['wait', 'x', 'abc'], '')).code).toBe(2);
+    expect((await runClient(['wait', 'x', '0'], '')).code).toBe(2);
+    expect((await runClient(['wait', 'x', '100001'], '')).code).toBe(2);
+    expect((await runClient(['wait', 'x', '1', 'extra'], '')).code).toBe(2);
+    expect((await runClient(['wait', 'x'], '', { FORGE_WAIT_POLL_SECONDS: 'nope' })).code).toBe(2);
+    expect((await runClient(['wait', 'x'], '', { FORGE_WAIT_POLL_SECONDS: '0' })).code).toBe(2);
+    expect((await runClient(['wait', 'x'], '', { FORGE_WAIT_CLOCK: 'rm -rf' })).code).toBe(2);
+    expect((await runClient(['wait', 'x'], '', { FORGE_WAIT_CLOCK: 'not_a_function' })).code).toBe(2);
+    expect(accepted).toEqual([]);
+  }, 30_000);
+
+  it('wait: exits 1 when the endpoint is gone (no endpoint.json)', async (ctx) => {
+    if (!usable) ctx.skip();
+    routes.dispose();
+    const res = await runClient(['wait', 'x'], '');
+    expect(res.code).toBe(1);
+    expect(res.out).toContain('not reachable');
+  }, 30_000);
+
+  it('wait: exits 1 when the endpoint rejects the request', async (ctx) => {
+    if (!usable) ctx.skip();
+    install({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      status: () => ({ ok: false, status: 404, error: 'no chat' }),
+    });
+    const res = await runClient(['wait', 'x'], '', { FORGE_WAIT_POLL_SECONDS: '1' });
+    expect(res.code).toBe(1);
+    expect(res.out).toContain("Forge's endpoint did not accept it");
+  }, 30_000);
+
+  it('wait: busy -> idle/no-queue completes and prints the final status and the latest answer', async (ctx) => {
+    if (!usable) ctx.skip();
+    let polls = 0;
+    install({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      status: () => {
+        polls += 1;
+        const idle = polls >= 2;
+        return {
+          ok: true,
+          text:
+            `Chat: t · c1\n` +
+            `State: ${idle ? 'idle' : 'busy · turn running 1 s · last activity 0 s ago'}\n` +
+            `Model: m\n` +
+            `Context: 1/2\n` +
+            `Queued from you: 0\n` +
+            `Work: 1 model request(s), 0 tool call(s), 0 compaction(s) in this chat`,
+        };
+      },
+      view: () => ({ ok: true, text: 'the answer' }),
+    });
+    const res = await runClient(['wait', 'x'], '', { FORGE_WAIT_POLL_SECONDS: '1' });
+    expect(res.code).toBe(0);
+    expect(res.out).toContain('State: idle');
+    expect(res.out).toContain('Queued from you: 0');
+    expect(res.out).toContain('the answer');
+    expect(polls).toBe(2);
+  }, 30_000);
+
+  it('wait: idle with a queue keeps polling until the queue drains', async (ctx) => {
+    if (!usable) ctx.skip();
+    let polls = 0;
+    install({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      status: () => {
+        polls += 1;
+        const drained = polls >= 3;
+        return {
+          ok: true,
+          text:
+            `Chat: t · c1\n` +
+            `State: idle\n` +
+            `Model: m\n` +
+            `Context: 1/2\n` +
+            `Queued from you: ${drained ? 0 : 2}\n` +
+            `Work: 1 model request(s), 0 tool call(s), 0 compaction(s) in this chat`,
+        };
+      },
+      view: () => ({ ok: true, text: 'the answer' }),
+    });
+    const res = await runClient(['wait', 'x'], '', { FORGE_WAIT_POLL_SECONDS: '1' });
+    expect(res.code).toBe(0);
+    expect(res.out).toContain('Queued from you: 0');
+    expect(res.out).toContain('the answer');
+    expect(polls).toBe(3);
+  }, 30_000);
+
+  it('wait: a timed-out wait prints the last status to stderr and exits 124', async (ctx) => {
+    if (!usable) ctx.skip();
+    install({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      status: () => ({
+        ok: true,
+        text:
+          `Chat: t · c1\n` +
+          `State: busy · turn running 1 s · last activity 0 s ago\n` +
+          `Model: m\n` +
+          `Context: 1/2\n` +
+          `Queued from you: 0\n` +
+          `Work: 1 model request(s), 0 tool call(s), 0 compaction(s) in this chat`,
+      }),
+    });
+    const res = await runClient(['wait', 'x', '1'], '', { FORGE_WAIT_POLL_SECONDS: '1' });
+    expect(res.code).toBe(124);
+    expect(res.out).toContain('still not idle after 1 minute(s); last status:');
+    expect(res.out).toContain('State: busy');
+  }, 30_000);
 });
 
 describe('sender validation and relay gating (M6/§4)', () => {

@@ -8,6 +8,7 @@
 #   forge.sh who                      who is in the mesh, and what each is doing
 #   forge.sh status <your-name>       what your chat with Forge is doing now (tool, last words, context)
 #   forge.sh view <your-name> [n]     the last n answers in your chat (default 3, max 10)
+#   forge.sh wait <your-name> [minutes]  block until your chat is idle with nothing queued (default 60 min, exit 124 on timeout)
 #   API Codex: use say codex --reply-in-chat, then status codex / view codex for Forge's answer
 # The text comes from the file, or from stdin when no file is given.
 # Written by Forge on every start; edits are overwritten.
@@ -49,6 +50,70 @@ if [ "$VERB" = "status" ] || [ "$VERB" = "view" ]; then
   curl -sS --fail-with-body -X GET -H "Authorization: Bearer $TOKEN" "$URL/agent/$VERB?$QUERY" \
     || { echo "forge.sh: Forge's endpoint did not accept it (see above)." >&2; exit 1; }
   exit 0
+fi
+if [ "$VERB" = "wait" ]; then
+  # Block until the sender's chat is idle with nothing of theirs queued, then
+  # print the final status and the latest answer so a supervising agent wakes
+  # with the result. Polls /agent/status silently (no per-poll output); Ctrl-C
+  # stops it. Exit 124 on timeout (last status to stderr), 1 on endpoint/auth
+  # failure, 2 on bad arguments.
+  NAME="${2:-}"; MINUTES="${3:-}"
+  [ $# -le 3 ] || usage
+  case "$NAME" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
+  if [ -n "$MINUTES" ]; then
+    case "$MINUTES" in *[!0-9]*) echo "forge.sh: minutes is a positive whole number" >&2; exit 2;; esac
+    [ "$MINUTES" -ge 1 ] || { echo "forge.sh: minutes is a positive whole number" >&2; exit 2; }
+  fi
+  [ -f "$EP" ] || { echo "forge.sh: not reachable: open Forge with control_server and agent_bus enabled" >&2; exit 1; }
+  URL="$(grep '"url"' "$EP" | cut -d'"' -f4)"
+  TOKEN="$(grep '"token"' "$EP" | cut -d'"' -f4)"
+  # ~55 s between polls: cheap for Forge, and a turn that ends between polls is
+  # picked up on the next one. FORGE_WAIT_POLL_SECONDS is a test-only override
+  # (a positive whole number of seconds) so integration tests do not sleep 55 s.
+  POLL=55
+  if [ -n "${FORGE_WAIT_POLL_SECONDS:-}" ]; then
+    case "$FORGE_WAIT_POLL_SECONDS" in *[!0-9]*) echo "forge.sh: FORGE_WAIT_POLL_SECONDS is a positive whole number of seconds" >&2; exit 2;; esac
+    [ "$FORGE_WAIT_POLL_SECONDS" -ge 1 ] || { echo "forge.sh: FORGE_WAIT_POLL_SECONDS is a positive whole number of seconds" >&2; exit 2; }
+    POLL="$FORGE_WAIT_POLL_SECONDS"
+  fi
+  # FORGE_WAIT_CLOCK is a test-only override (a function returning seconds
+  # since the epoch) so integration tests can advance the clock without
+  # sleeping; it must be a function name, nothing else.
+  if [ -n "${FORGE_WAIT_CLOCK:-}" ]; then
+    case "$FORGE_WAIT_CLOCK" in *[!A-Za-z0-9_]*) echo "forge.sh: FORGE_WAIT_CLOCK is a function name" >&2; exit 2;; esac
+    declare -F "$FORGE_WAIT_CLOCK" >/dev/null || { echo "forge.sh: FORGE_WAIT_CLOCK is a function name" >&2; exit 2; }
+    NOW="$FORGE_WAIT_CLOCK"
+  else
+    NOW="date +%s"
+  fi
+  # Bounded: minutes up to 100000 keeps the deadline within 64-bit range.
+  if [ "${MINUTES:-60}" -gt 100000 ]; then
+    echo "forge.sh: minutes is 1-100000" >&2
+    exit 2
+  fi
+  START=$("$NOW")
+  LIMIT=$((START + ${MINUTES:-60} * 60))
+  LAST=""
+  while :; do
+    if LAST="$(curl -sS --fail-with-body -X GET -H "Authorization: Bearer $TOKEN" "$URL/agent/status?from=$NAME")"; then
+      case "$LAST" in
+        *"State: idle"*"Queued from you: 0"*)
+          printf '%s\n' "$LAST"
+          curl -sS --fail-with-body -X GET -H "Authorization: Bearer $TOKEN" "$URL/agent/view?from=$NAME&count=1" \
+            || { echo "forge.sh: Forge's endpoint did not accept it (see above)." >&2; exit 1; }
+          exit 0;;
+      esac
+    else
+      echo "forge.sh: Forge's endpoint did not accept it (see above)." >&2
+      exit 1
+    fi
+    if [ "$($NOW)" -ge "$LIMIT" ]; then
+      echo "forge.sh: still not idle after ${MINUTES:-60} minute(s); last status:" >&2
+      printf '%s\n' "$LAST" >&2
+      exit 124
+    fi
+    sleep "$POLL"
+  done
 fi
 [ $# -ge 2 ] || usage
 ARG=""; SRC="-"; MODEL=""; NEW_CHAT=""; REPLY_IN_CHAT=""

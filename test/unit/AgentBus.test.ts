@@ -71,6 +71,7 @@ describe('CLIENT_SCRIPT usage block', () => {
       'who',
       'status',
       'view',
+      'wait',
     ]) {
       expect(usage).toContain(`forge.sh ${verb}`);
     }
