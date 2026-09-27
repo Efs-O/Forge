@@ -118,6 +118,8 @@ export interface ChatCompletionRequest {
   stop?: string | string[];
   reasoning_effort?: 'xhigh' | 'high' | 'medium' | 'low' | 'none';
   tools?: ToolDefinition[];
+  /** llama-server extension: reuse the matching prompt prefix from the active slot. */
+  cache_prompt?: boolean;
   chat_template_kwargs?: Record<string, unknown>;
   stream_options?: { include_usage?: boolean };
 }

@@ -49,7 +49,7 @@ describe('normalizeRequestForModel', () => {
     expect(normalized.tools).toHaveLength(1);
   });
 
-  it('leaves llama.cpp requests unchanged', () => {
+  it('enables prompt-prefix caching for llama.cpp requests', () => {
     const model: ModelConfig = {
       name: 'local-gguf',
       provider: 'llama.cpp',
@@ -57,7 +57,22 @@ describe('normalizeRequestForModel', () => {
       think: true,
     };
 
-    expect(normalizeRequestForModel(baseRequest, model)).toEqual(baseRequest);
+    expect(normalizeRequestForModel(baseRequest, model)).toEqual({
+      ...baseRequest,
+      cache_prompt: true,
+    });
+  });
+
+  it('preserves an explicit llama.cpp cache_prompt override', () => {
+    const model: ModelConfig = {
+      name: 'local-gguf',
+      provider: 'llama.cpp',
+      gguf_path: 'C:/models/local.gguf',
+    };
+
+    expect(normalizeRequestForModel({ ...baseRequest, cache_prompt: false }, model).cache_prompt).toBe(
+      false,
+    );
   });
 
   it('passes a direct llama.cpp reasoning effort into template kwargs', () => {

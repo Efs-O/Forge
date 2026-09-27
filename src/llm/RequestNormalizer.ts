@@ -19,23 +19,31 @@ export function normalizeRequestForModel(
 
   const provider = model.provider ?? 'llama.cpp';
   if (provider === 'llama.cpp') {
+    // Be explicit rather than relying on a llama-server build's default. Long
+    // agent turns append a small tool result each round, so their stable
+    // prefix should remain in the slot cache instead of being re-prefilled.
+    const cachedRequest = {
+      ...request,
+      cache_prompt: request.cache_prompt ?? true,
+    };
     // The model flag is only the default: a recovery round sends an explicit
     // `enable_thinking: false`, and overriding it here re-enabled the thinking
     // that ate the budget the retry exists to reclaim.
     const chatTemplateKwargs = model.chat_template_thinking
       ? {
-          ...request.chat_template_kwargs,
-          enable_thinking: request.chat_template_kwargs?.enable_thinking ?? model.think !== false,
+          ...cachedRequest.chat_template_kwargs,
+          enable_thinking:
+            cachedRequest.chat_template_kwargs?.enable_thinking ?? model.think !== false,
         }
-      : request.chat_template_kwargs;
+      : cachedRequest.chat_template_kwargs;
     // Qwen 3.8's GGUF Jinja template defaults to xhigh unless this kwarg is
     // present. llama-server forwards chat_template_kwargs directly to it.
     if (model.think !== true || model.reasoning_effort === undefined) {
-      if (chatTemplateKwargs === undefined) return request;
-      return { ...request, chat_template_kwargs: chatTemplateKwargs };
+      if (chatTemplateKwargs === undefined) return cachedRequest;
+      return { ...cachedRequest, chat_template_kwargs: chatTemplateKwargs };
     }
     return {
-      ...request,
+      ...cachedRequest,
       chat_template_kwargs: {
         ...chatTemplateKwargs,
         reasoning_effort: model.reasoning_effort,
