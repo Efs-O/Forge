@@ -2,6 +2,7 @@ import type { ForgeConfig } from '../config/types';
 import type { CodexAppServerSession } from '../agents/CodexAppServerSession';
 import { queueToCodex } from '../agentBus/codexDelivery';
 import { resolveSessionIdentity } from './aliasRegistry';
+import { getAlias } from './aliasRegistry';
 import { CodexOwnedAdapter, CodexQueueAdapter } from './adapters';
 import type { MeshAdapter } from './meshAdapter';
 import { CodexDiscovery } from './codexDiscovery';
@@ -66,7 +67,8 @@ export function codexQueueAdapter(ctx: CodexPinContext): MeshAdapter | undefined
   }
   const bus = ctx.getConfig().agent_bus;
   const identity = resolveSessionIdentity(ctx.busRoot, 'codex', bus?.codex_thread);
-  if (identity && !identity.fromAlias) {
+  const alias = getAlias(ctx.busRoot, 'codex');
+  if (identity && (!identity.fromAlias || alias?.by === 'user')) {
     return new CodexQueueAdapter(
       bus?.codex_cli ?? 'codex',
       identity.session_id,

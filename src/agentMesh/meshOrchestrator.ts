@@ -10,22 +10,7 @@ import { newEventId } from './exchangeLog';
 import type { MeshAdapter, TurnResult } from './meshAdapter';
 import type { HostLivenessDeps } from './hostIdentity';
 import type { MeshCommand } from './meshCommands';
-
-/**
- * The agent-mesh orchestrator (AGENT_MESH_PLAN §1, §4, M6, M7). The single
- * entry point for sending a message to an agent and for relaying an inbound
- * bus message to its final recipient.
- *
- * It owns: alias resolution (§4), the per-alias FIFOs (M5), the board-event
- * writer (wired to the exchange log), and the host-side relay (M6). It does
- * **not** own the owned-session lifecycle — that is the SessionProvider,
- * supplied by the wiring (the window that owns the stdio pipe, M2).
- *
- * The relay (M6) is host-side and addressed: when an inbound message names a
- * `to` that is not Forge, the host forwards it through the recipient's adapter
- * with **zero Forge model turns**. A relayed message cannot be relayed again
- * (hop count ≤ 2 per exchange).
- */
+import type { MeshMessageAcceptedSink } from './meshMessageAccepted';
 
 export interface SessionProvider {
   /**
@@ -113,6 +98,7 @@ export interface OrchestratorDeps extends HostLivenessDeps {
    * that the host has no board (the placeholder is preserved).
    */
   onObservation?: (verb: 'status' | 'board' | 'peers' | 'queue' | 'context') => string;
+  onMessageAccepted?: MeshMessageAcceptedSink;
 }
 
 export class MeshOrchestrator {
@@ -121,7 +107,6 @@ export class MeshOrchestrator {
 
   constructor(private readonly deps: OrchestratorDeps) {}
 
-  /** Resolve an alias's adapter (whether it observes turns decides how to ask). */
   resolveAdapter(alias: string): Promise<MeshAdapter | undefined> {
     return this.deps.provider.resolveAdapter(alias);
   }
@@ -251,6 +236,13 @@ export class MeshOrchestrator {
     if (!res.accepted) {
       return { error: `queue full for "${to}" (${res.queueLength}); message rejected` };
     }
+    this.deps.onMessageAccepted?.({
+      exchangeId,
+      from: this.host,
+      to: alias,
+      message,
+      priority: 'normal',
+    });
     // F-07: a message just went to this session; refresh its idle-TTL clock.
     this.deps.provider.touchActivity(alias);
     return { exchangeId, to: alias, observing: this.deps.provider.isOwned(alias) };
@@ -284,6 +276,13 @@ export class MeshOrchestrator {
     if (!res.accepted) {
       return { error: `queue full for "${to}" (${res.queueLength}); steer rejected` };
     }
+    this.deps.onMessageAccepted?.({
+      exchangeId,
+      from: this.host,
+      to: alias,
+      message,
+      priority: 'steer',
+    });
     this.deps.provider.touchActivity(alias);
     return { exchangeId, to: alias, observing: this.deps.provider.isOwned(alias) };
   }
@@ -345,6 +344,13 @@ export class MeshOrchestrator {
       if (!res.accepted) {
         return { error: `queue full for "${to}" (${res.queueLength}); relay rejected` };
       }
+      this.deps.onMessageAccepted?.({
+        exchangeId,
+        from,
+        to: recipient,
+        message,
+        priority: 'normal',
+      });
       // F-07: a relayed message just reached this session; refresh its TTL clock.
       this.deps.provider.touchActivity(recipient);
     } catch (err) {

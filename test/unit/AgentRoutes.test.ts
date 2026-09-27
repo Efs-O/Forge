@@ -369,15 +369,18 @@ describe('forge.sh against the routes', () => {
     expect(said.out).toContain('not reachable');
   }, 30_000);
 
-  it('join sends CLAUDE_PID to /agent/join; send relays with a `to` (§10)', async (ctx) => {
+  it('join sends the interactive Claude pid or Codex thread; send relays with a `to` (§10)', async (ctx) => {
     if (!usable) ctx.skip();
-    const joins: [string, number][] = [];
+    const joins: [string, number, string][] = [];
     const relays: [string, string, string][] = [];
     routes = new AgentRoutes({
       paths: () => paths,
       inbox: { accept: () => ({ position: 1, id: 'm1' }), cancel: () => 0 },
       token: TOKEN,
-      join: (alias, pid) => (joins.push([alias, pid]), { ok: true, reply: 'joined' }),
+      join: (alias, pid, thread) => (
+        joins.push([alias, pid, thread]),
+        { ok: true, reply: 'joined' }
+      ),
       relay: async (from, to, text) => (
         relays.push([from, to, text]),
         { ok: true, exchangeId: 'x1' }
@@ -389,7 +392,12 @@ describe('forge.sh against the routes', () => {
     expect(noPid.code).toBe(2);
     const joined = await runClient(['join', 'claude'], '', { CLAUDE_PID: '4242' });
     expect(joined.out).toContain('"joined":true');
-    expect(joins).toEqual([['claude', 4242]]);
+    const joinedCodex = await runClient(['join', 'codex'], '', { CODEX_THREAD_ID: 'thread-7' });
+    expect(joinedCodex.out).toContain('"joined":true');
+    expect(joins).toEqual([
+      ['claude', 4242, ''],
+      ['codex', 0, 'thread-7'],
+    ]);
     const sent = await runClient(['send', 'claude', 'codex'], 'plan ready\n');
     expect(sent.out).toContain('"relayed":true');
     expect(relays).toEqual([['claude', 'codex', 'plan ready\n']]);
@@ -438,9 +446,9 @@ describe('forge.sh against the routes', () => {
     expect((await runClient(['wait', 'x', '1', 'extra'], '')).code).toBe(2);
     expect((await runClient(['wait', 'x'], '', { FORGE_WAIT_POLL_SECONDS: 'nope' })).code).toBe(2);
     expect((await runClient(['wait', 'x'], '', { FORGE_WAIT_POLL_SECONDS: '0' })).code).toBe(2);
-    expect(
-      (await runClient(['wait', 'x'], '', { FORGE_WAIT_TIMEOUT_SECONDS: 'nope' })).code,
-    ).toBe(2);
+    expect((await runClient(['wait', 'x'], '', { FORGE_WAIT_TIMEOUT_SECONDS: 'nope' })).code).toBe(
+      2,
+    );
     expect((await runClient(['wait', 'x'], '', { FORGE_WAIT_TIMEOUT_SECONDS: '0' })).code).toBe(2);
     expect(accepted).toEqual([]);
   }, 30_000);

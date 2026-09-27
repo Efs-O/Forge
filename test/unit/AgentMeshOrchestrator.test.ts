@@ -6,6 +6,7 @@ import { MeshOrchestrator, type MeshScope } from '../../src/agentMesh/meshOrches
 import { AliasFifo } from '../../src/agentMesh/aliasFifo';
 import type { MeshAdapter, TurnResult } from '../../src/agentMesh/meshAdapter';
 import type { ExchangeState } from '../../src/agentMesh/deliveryState';
+import type { MeshMessageAcceptedSink } from '../../src/agentMesh/meshMessageAccepted';
 
 /** A controllable fake adapter: records sends, lets tests resolve them. */
 class FakeAdapter implements MeshAdapter {
@@ -57,6 +58,7 @@ function makeOrchestrator(opts: {
   adapters: Record<string, FakeAdapter>;
   scope?: MeshScope;
   owned?: Set<string>;
+  onMessageAccepted?: MeshMessageAcceptedSink;
 }) {
   const known = opts.known ?? Object.keys(opts.adapters);
   const owned = opts.owned ?? new Set<string>();
@@ -65,6 +67,7 @@ function makeOrchestrator(opts: {
     knownAliases: () => known,
     scope: () => opts.scope ?? { workspace: '/ws' },
     onEvent: (e) => board.push(e),
+    ...(opts.onMessageAccepted ? { onMessageAccepted: opts.onMessageAccepted } : {}),
     provider: {
       resolveAdapter: async (alias) => opts.adapters[alias.trim().toLowerCase()],
       isOwned: (alias) => owned.has(alias.trim().toLowerCase()),
@@ -293,6 +296,29 @@ describe('orchestrator: FIFO single-flight + failure states (M5/§2)', () => {
 });
 
 describe('orchestrator: host-side relay (M6)', () => {
+  it('mirrors an accepted relay with its real sender and exchange', async () => {
+    const adapter = new FakeAdapter(true);
+    const accepted: object[] = [];
+    const orch = makeOrchestrator({
+      adapters: { codex: adapter },
+      owned: new Set(['codex']),
+      onMessageAccepted: (event) => accepted.push(event),
+    });
+    const out = await orch.relay('forge', 'codex', 'phase complete');
+    expect('error' in out).toBe(false);
+    if (!('error' in out)) {
+      expect(accepted).toEqual([
+        {
+          exchangeId: out.exchangeId,
+          from: 'forge',
+          to: 'codex',
+          message: 'phase complete',
+          priority: 'normal',
+        },
+      ]);
+    }
+  });
+
   it('forwards with two hop events sharing one exchange id, zero model turns', async () => {
     const adapter = new FakeAdapter(true);
     const orch = makeOrchestrator({ adapters: { claude: adapter }, owned: new Set(['claude']) });

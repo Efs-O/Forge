@@ -8,12 +8,14 @@ import {
 } from '../agentBus/agentInbox';
 import { AgentRoutes } from '../backend/agentRoutes';
 import { joinClaude } from '../agentMesh/claudeJoin';
+import { joinCodex } from '../agentMesh/codexJoin';
 import { availableProfilesFor, expandAlias } from '../config/ConfigResolver';
 import type { ForgeConfig } from '../config/types';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import { parseMeshCommand } from '../agentMesh/meshCommands';
 import { projectWho } from '../agentMesh/meshWho';
 import { readClaudeSessions } from '../agentBus/claudePeer';
+import { parseForgeInboundPrompt } from '../agentBus/busContent';
 import { setupAgentMesh } from './agentMeshSetup';
 import { BUS_TARGET_SCAN, busTargetConversation, senderConversation } from '../agentBus/busTarget';
 import { BusTurnWatch } from '../agentBus/busTurnWatch';
@@ -52,6 +54,16 @@ export async function submitBusMessage(
     await facade.restoreConversation(conversationId, { activate: false });
   }
   if (options?.model) await facade.setConversationModel(conversationId, options.model);
+  const inbound = parseForgeInboundPrompt(prompt);
+  if (inbound) {
+    // The agent-bus sender cannot see the user's Telegram chat. Reuse the
+    // normal host-activity subscription so the already-addressed conversation
+    // is durably mirrored to its bound remote chats before the Forge turn runs.
+    facade.emitHostActivity?.({
+      conversationId,
+      text: `Forge: ${inbound.from} says:\n\n${inbound.text}`,
+    });
+  }
   const outcome = await facade.send(conversationId, prompt);
   return outcome.kind === 'failed'
     ? { kind: 'failed', error: outcome.error }
@@ -166,8 +178,21 @@ export function setupAgentMessaging(
       }
     },
     validateFrom: mesh.validateFrom,
-    // §10: an open Claude session joins as the `claude` alias by its pid.
-    join: (alias, pid) => joinClaude(busPaths().root, alias, pid),
+    // §10: an interactive Claude/Codex session supersedes a Forge-owned peer.
+    join: async (alias, pid, thread) => {
+      if (alias === 'claude') return joinClaude(busPaths().root, alias, pid);
+      if (alias !== 'codex') return { ok: false, error: `cannot join as "${alias}"` };
+      if (!thread || !/^[A-Za-z0-9._-]+$/.test(thread)) {
+        return { ok: false, error: 'thread must be a non-empty Codex thread id' };
+      }
+      if (mesh.orchestrator.isBusy('codex')) {
+        return { ok: false, error: 'the owned codex turn is busy; join again when it is idle' };
+      }
+      if (!(await mesh.provider.releaseForCodexJoin())) {
+        return { ok: false, error: 'another Forge window owns the codex session' };
+      }
+      return joinCodex(busPaths().root, alias, thread);
+    },
     // §11: `forge.sh who` — read-only projection of every participant and its
     // state. The host owns the truth: it reads the alias table, ownership
     // records and its own in-memory FIFO, plus the sidebar's streaming state

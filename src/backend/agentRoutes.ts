@@ -68,8 +68,8 @@ export interface AgentRoutesDeps {
     text: string,
   ) => Promise<{ ok: true; reply: string } | { ok: false; error: string }>;
   /**
-   * §10: `forge.sh join claude` — a user-opened session registers itself as an
-   * alias by its pid. Absent ⇒ `/agent/join` is 404.
+   * §10: a user-opened Claude/Codex session registers itself as an alias.
+   * Claude identifies by pid; Codex identifies by thread id.
    */
   /**
    * §6: a `priority=steer` message to Forge itself interrupts Forge's active
@@ -77,7 +77,14 @@ export interface AgentRoutesDeps {
    * next. Absent ⇒ a steer to Forge queues like any message.
    */
   interruptForge?: () => Promise<void>;
-  join?: (alias: string, pid: number) => { ok: true; reply: string } | { ok: false; error: string };
+  join?: (
+    alias: string,
+    pid: number,
+    thread: string,
+  ) =>
+    | { ok: true; reply: string }
+    | { ok: false; error: string }
+    | Promise<{ ok: true; reply: string } | { ok: false; error: string }>;
   /**
    * §11: `forge.sh who` — read-only projection of every mesh participant and
    * its state (attachment × activity). The host owns the truth (it reads the
@@ -271,7 +278,8 @@ export class AgentRoutes {
           .trim()
           .toLowerCase();
         const pid = Number(fields['pid'] ?? '');
-        const joined = this.deps.join(alias, pid);
+        const thread = typeof fields['thread'] === 'string' ? fields['thread'].trim() : '';
+        const joined = await this.deps.join(alias, pid, thread);
         if (!joined.ok) throw new HttpError(400, joined.error);
         return sendJson(res, 200, { joined: true, reply: joined.reply });
       }

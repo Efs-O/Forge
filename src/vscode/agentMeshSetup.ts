@@ -277,6 +277,16 @@ export function setupAgentMesh(
     knownAliases,
     verdictDir: outboxDir,
     onObservation: renderObservation,
+    onMessageAccepted: ({ exchangeId, from, to, message, priority }) => {
+      const s = scope();
+      const verb = priority === 'steer' ? 'steers' : 'says to';
+      getSidebar()
+        .getHostFacade()
+        .emitHostActivity?.({
+          ...(s.conversation ? { conversationId: s.conversation } : {}),
+          text: `[agent mesh ${exchangeId}] ${from} ${verb} ${to}:\n\n${message}`,
+        });
+    },
   });
   setMeshOrchestrator(orchestrator);
   // F-08: status files are written while bus turns run and swept after a crash.

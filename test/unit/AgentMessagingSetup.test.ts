@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { busModelIds, submitBusMessage } from '../../src/vscode/agentMessagingSetup';
+import { forgeInboundPrompt } from '../../src/agentBus/busContent';
 import type { ForgeConfig } from '../../src/config/types';
 import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
 
@@ -41,6 +42,29 @@ describe('agent bus conversation targeting', () => {
       expect(send).toHaveBeenCalledWith(conversationId, 'hello');
     },
   );
+
+  it('mirrors an inbound agent message to the addressed host activity chat', async () => {
+    const emitHostActivity = vi.fn();
+    const facade = {
+      status: () => ({
+        activeConversationId: 'visible',
+        conversations: [{ id: 'sender-chat', title: 'Codex: task', updatedAt: 1 }],
+      }),
+      recentExchanges: () => [],
+      restoreConversation: vi.fn(async () => ({}) as never),
+      send: vi.fn(async () => ({ kind: 'completed' as const })),
+      emitHostActivity,
+    } as unknown as ForgeHostFacade;
+
+    await submitBusMessage(facade, forgeInboundPrompt('codex', 'Please review the patch.'), {
+      from: 'codex',
+    });
+
+    expect(emitHostActivity).toHaveBeenCalledWith({
+      conversationId: 'sender-chat',
+      text: 'Forge: codex says:\n\nPlease review the patch.',
+    });
+  });
 });
 
 describe('busModelIds', () => {

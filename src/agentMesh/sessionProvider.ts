@@ -7,7 +7,13 @@ import type { OwnedCodexFactory, OwnedCopilotFactory } from './creationPreamble'
 import { CopilotOwnedSessions } from './copilotOwned';
 import type { MeshAdapter } from './meshAdapter';
 import type { HostLivenessDeps } from './hostIdentity';
-import { isForeignLiveOwner, isOwnerOf, readOwnership, writeOwnership } from './ownership';
+import {
+  isForeignLiveOwner,
+  isOwnerOf,
+  readOwnership,
+  removeOwnership,
+  writeOwnership,
+} from './ownership';
 import { OwnedSessionFactory } from './ownedSessionFactory';
 import type { SessionProvider } from './meshOrchestrator';
 
@@ -262,6 +268,15 @@ export class MeshSessionProvider implements SessionProvider {
       owner_host: null,
       parked: false,
     });
+    return true;
+  }
+
+  /** Yield an idle Forge-owned Codex alias to an interactive Codex join. */
+  async releaseForCodexJoin(): Promise<boolean> {
+    const rec = readOwnership(this.deps.busRoot, 'codex');
+    if (rec?.owner_host && !this.isOwner('codex')) return false;
+    await this.factory.closeInMemory('codex');
+    removeOwnership(this.deps.busRoot, 'codex');
     return true;
   }
 

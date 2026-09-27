@@ -51,10 +51,11 @@ ordinary \`say\` follows that sender's previous chat without changing the view.
 
 ## Joining (no renames, no config)
 
-A Claude Code session that should take part runs \`bash ~/.forge/agent-bus/forge.sh join claude\`
-once. Forge then reaches it as \`claude\` through its peer pipe while it stays
-open. With no joined session, Forge uses the only Claude session open in the
-workspace, else starts its own. Relay to another agent with
+A Claude Code session runs \`forge.sh join claude\`; an interactive API Codex
+session runs \`forge.sh join codex\`. Joining makes that visible session the
+stable alias, so inbound messages wake it instead of starting a separate
+Forge-owned CLI turn. With no joined session, Forge may create its own owned
+peer. Relay to another agent with
 \`forge.sh send <your-name> <to>\`.
 
 ## Small follow-ups
@@ -127,10 +128,10 @@ Forge's agent is blocked until the answer lands, then shows it to its user.
     your message
     FORGE_MSG
 
-An API Codex session can use \`say codex --reply-in-chat\`. Forge answers in
-that chat; use \`status codex\` to see when the turn ends and \`view codex\`
-to read its answer. Ordinary \`say\` keeps the live-session reply hint used by
-Claude and other reachable agents.
+An API Codex session first runs \`join codex\`, then can use
+\`say codex --reply-in-chat\`. Forge answers in that chat; use \`status codex\`
+to see when the turn ends and \`view codex\` to read its answer. Ordinary
+\`say\` keeps the live-session reply hint used by other reachable agents.
 
 PowerShell:
 

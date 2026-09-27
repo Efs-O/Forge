@@ -4,12 +4,12 @@
 #   forge.sh send <your-name> <to> [file]  relay a message to another agent (claude/codex/copilot)
 #   forge.sh steer <your-name> <to> [file] interrupt <to>'s running turn (forge/claude/codex/copilot); runs next
 #   forge.sh cancel <your-name> <id|all>  withdraw your queued message(s) to Forge not yet started
-#   forge.sh join claude              this Claude Code session becomes the "claude" alias
+#   forge.sh join claude|codex        this interactive session becomes that mesh alias
 #   forge.sh who                      who is in the mesh, and what each is doing
 #   forge.sh status <your-name>       what your chat with Forge is doing now (tool, last words, context)
 #   forge.sh view <your-name> [n]     the last n answers in your chat (default 3, max 10)
 #   forge.sh wait <your-name> [minutes]  block until your chat is idle with nothing queued (default 60 min, exit 124 on timeout)
-#   API Codex: use say codex --reply-in-chat, then status codex / view codex for Forge's answer
+#   API Codex: join codex once, then use say codex --reply-in-chat and status/view
 # The text comes from the file, or from stdin when no file is given.
 # Written by Forge on every start; edits are overwritten.
 
@@ -153,9 +153,14 @@ case "$VERB" in
          [ $# -eq 3 ] || usage
          case "$3" in ""|*[!A-Za-z0-9_-]*) echo "forge.sh: bad id '$3' (the id say printed, or all)" >&2; exit 2;; esac
          ROUTE=cancel; QUERY="from=$ARG&id=$3"; SRC=/dev/null ;;
-  join)  [ "$ARG" = "claude" ] || { echo "forge.sh: only 'join claude' exists" >&2; exit 2; }
-         case "$CLAUDE_PID" in ""|*[!0-9]*) echo "forge.sh: CLAUDE_PID is not set: run this from inside a Claude Code session" >&2; exit 2;; esac
-         ROUTE=join; QUERY="alias=$ARG&pid=$CLAUDE_PID"; SRC=/dev/null ;;
+  join)  case "$ARG" in
+           claude) case "$CLAUDE_PID" in ""|*[!0-9]*) echo "forge.sh: CLAUDE_PID is not set: run this from inside a Claude Code session" >&2; exit 2;; esac
+                   QUERY="alias=$ARG&pid=$CLAUDE_PID" ;;
+           codex) case "${CODEX_THREAD_ID:-}" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: CODEX_THREAD_ID is not set: run this from inside a Codex session" >&2; exit 2;; esac
+                  QUERY="alias=$ARG&thread=$CODEX_THREAD_ID" ;;
+           *) echo "forge.sh: join accepts only 'claude' or 'codex'" >&2; exit 2 ;;
+         esac
+         ROUTE=join; SRC=/dev/null ;;
   *) usage ;;
 esac
 TMP="$(mktemp)"; trap 'rm -f "$TMP"' EXIT
