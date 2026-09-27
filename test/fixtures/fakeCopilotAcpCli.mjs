@@ -14,6 +14,10 @@ if (process.argv.includes('TRIGGER_CRASH')) {
   process.exit(3);
 }
 
+if (process.argv.includes('TRIGGER_CLEAN_EXIT')) {
+  process.exit(0);
+}
+
 if (process.argv.includes('--acp')) {
   const input = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
   let sessionId = 'fixture-copilot-session';

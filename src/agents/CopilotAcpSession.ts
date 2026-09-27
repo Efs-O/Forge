@@ -128,8 +128,10 @@ export class CopilotAcpSession {
     } catch (error) {
       if (active.settled) return active.promise;
       // Startup validation failure: the transport is alive but unusable.
-      // Reject the public turn; dispose() tears the child down.
+      // Detach the public turn, tear down our child, then preserve the
+      // startup rejection for the caller.
       this.releaseTurn(active);
+      await this.stop(error instanceof Error ? error.message : String(error));
       throw error;
     }
     // An abort/interrupt that arrived before the prompt went out settles the
@@ -206,15 +208,13 @@ export class CopilotAcpSession {
     this.input?.on('line', (line) => this.handleLine(line));
     void waitForCliProcessExit(child).then((exit) => {
       if (this.child !== child) return;
-      // A clean exit (code 0, no error) after a successful stop is not a
-      // protocol failure — the transport is already torn down.
-      if (exit.error || (exit.code ?? 0) !== 0) {
-        void this.failProtocol(
-          exit.error
-            ? `Copilot ACP transport failed: ${exit.error.message}`
-            : `Copilot ACP exited with code ${exit.code ?? '?'}.`,
-        );
-      }
+      // Deliberate teardown clears this.child before terminating the process,
+      // so any exit that still owns the slot is unexpected, including code 0.
+      void this.failProtocol(
+        exit.error
+          ? `Copilot ACP transport failed: ${exit.error.message}`
+          : `Copilot ACP exited with code ${exit.code ?? '?'}.`,
+      );
     });
     const init = await this.request('initialize', {
       protocolVersion: 1,

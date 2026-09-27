@@ -98,13 +98,22 @@ function makeBackend(): BackendController {
 function makePool(acquireImpl?: (modelName: string) => Promise<BackendController>): IBackendPool {
   return {
     acquire: acquireImpl ?? (async () => makeBackend()),
+    canDelegate: () => ({ ok: false, reason: 'unsupported' }) as never,
+    acquireForDelegation: async () => {
+      throw new Error('acquireForDelegation not supported in this fake');
+    },
+    parallelCapacity: () => 1,
     release: async () => {},
     stopAll: async () => {},
     applyForgeConfig: () => {},
     showConsole: () => {},
     isAnyReady: () => false,
     loadedModelNames: () => [],
+    loadedModelsExcept: () => [],
     isLoaded: () => false,
+    isModelReady: () => false,
+    backendProcesses: () => [],
+    residencySignature: () => '',
   };
 }
 

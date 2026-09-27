@@ -61,6 +61,7 @@ describe('CopilotAcpSession', () => {
   it('fails when session/new returns no session id', async () => {
     const current = session(undefined, ['NO_SESSION_ID']);
     await expect(current.send('first')).rejects.toThrow('returned no session id');
+    expect(current.pid).toBeUndefined();
     await current.dispose();
   });
 
@@ -99,6 +100,14 @@ describe('CopilotAcpSession', () => {
     const result = await current.send('first');
     expect(result.status).toBe('failed');
     expect(result.error).toContain('exited with code 3');
+    await current.dispose();
+  });
+
+  it('fails promptly when the owned child exits unexpectedly with code zero', async () => {
+    const current = session(undefined, ['TRIGGER_CLEAN_EXIT']);
+    const result = await current.send('first');
+    expect(result.status).toBe('failed');
+    expect(result.error).toContain('exited with code 0');
     await current.dispose();
   });
 
