@@ -146,6 +146,7 @@ overlaps with an existing owner, extend the owner instead.
 | Concern                                       | Owner                                           |
 | --------------------------------------------- | ----------------------------------------------- |
 | Extension-scoped transport lifecycle          | `src/remote/RemoteRuntime.ts`                   |
+| Remote transport validation status projection | `src/remote/remoteValidationStatus.ts`          |
 | Inbound admission, queue drain, notifications | `src/remote/RemoteController.ts`                |
 | Durable normal prompt admission               | `src/remote/RemotePromptAdmission.ts`           |
 | Durable queue execution + terminal outcome    | `src/remote/RemoteQueueDrain.ts`                |
@@ -155,6 +156,7 @@ overlaps with an existing owner, extend the owner instead.
 | Agent question presented in the remote chat   | `src/remote/RemoteQuestionBridge.ts`            |
 | RFC 6238 generation/verification              | `src/remote/RemoteTotp.ts`                      |
 | Durable requests, bindings, cursors, outbox   | `src/remote/RemoteRequestStore.ts`              |
+| Pure request and outbox health queries        | `src/remote/remoteStoreQueries.ts`              |
 | Remote owner command behavior                 | `src/remote/RemoteCommandHandler.ts`            |
 | Command argument → id, and miss messages      | `src/remote/remoteCommandSelectors.ts`          |
 | `/workspace <n>` switch preflight             | `src/remote/remoteWorkspaceCommand.ts`          |

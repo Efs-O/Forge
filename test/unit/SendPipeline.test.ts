@@ -333,9 +333,55 @@ describe('SendPipeline.send', () => {
     expect(echoIndex).toBeLessThan(started[1]!);
   });
 
+  it('keeps an internal tell out of the visible prompt when drained after a turn', async () => {
+    const h = harness();
+    h.midTurnInbox.add('conv-1', {
+      id: 'background-exit',
+      text: '[Forge notice] background job finished',
+      internal: true,
+    });
+
+    await h.pipeline.send('start');
+
+    expect(h.runTurn).toHaveBeenCalledTimes(2);
+    expect(h.runTurn.mock.calls[1]?.[2]).toBe('[Forge notice] background job finished');
+    expect(h.runTurn.mock.calls[1]?.[4]).toEqual({ internal: true });
+    expect(h.posted.some((message) => message.type === 'userPrompt')).toBe(false);
+  });
+
+  it('keeps internal notices separate from user tells added during evaluation', async () => {
+    const h = harness();
+    vi.mocked(h.deps.evaluateAfterTurn).mockImplementationOnce(async () => {
+      h.midTurnInbox.add('conv-1', { id: 'user-tell', text: 'also check the logs' });
+      h.midTurnInbox.add('conv-1', {
+        id: 'background-exit',
+        text: '[Forge notice] background job finished',
+        internal: true,
+      });
+      return undefined;
+    });
+
+    await h.pipeline.send('start');
+
+    expect(h.runTurn).toHaveBeenCalledTimes(3);
+    expect(h.runTurn.mock.calls[1]?.[2]).toBe('also check the logs');
+    expect(h.runTurn.mock.calls[2]?.[2]).toBe('[Forge notice] background job finished');
+    expect(h.runTurn.mock.calls[2]?.[4]).toEqual({ internal: true });
+    expect(h.posted).toContainEqual({
+      type: 'userPrompt',
+      text: 'also check the logs',
+      conversationId: 'conv-1',
+    });
+    expect(
+      h.posted.some(
+        (message) => message.type === 'userPrompt' && message.text.includes('[Forge notice]'),
+      ),
+    ).toBe(false);
+  });
+
   it('runs a tell added during evaluation when there is no continuation', async () => {
     const h = harness();
-    h.deps.evaluateAfterTurn.mockImplementationOnce(async () => {
+    vi.mocked(h.deps.evaluateAfterTurn).mockImplementationOnce(async () => {
       h.midTurnInbox.add('conv-1', { id: 'tell-during-evaluation', text: 'finish this too' });
       return undefined;
     });

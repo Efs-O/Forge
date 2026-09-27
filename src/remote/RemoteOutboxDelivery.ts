@@ -1,8 +1,35 @@
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteChannel } from './types';
+import type { RemoteAuth } from './RemoteAuth';
+import type { RemoteSpeechDelivery } from './RemoteSpeechDelivery';
+import type { RemoteControllerOptions } from './remoteControllerOptions';
+import type { CommandCleanupScheduler } from './CommandCleanupScheduler';
 
 const MAX_ATTEMPTS = 10;
 type CanDeliver = (chatId: string) => boolean | Promise<boolean>;
+
+export function createRemoteOutboxDelivery(input: {
+  channel: RemoteChannel;
+  store: RemoteRequestStore;
+  auth: RemoteAuth;
+  signal: AbortSignal;
+  options: RemoteControllerOptions;
+  speech?: RemoteSpeechDelivery | undefined;
+  commandCleanup: CommandCleanupScheduler;
+}): RemoteOutboxDelivery {
+  const { channel, store, auth, signal, options, speech, commandCleanup } = input;
+  return new RemoteOutboxDelivery(
+    channel,
+    store,
+    options.maxMessageChars,
+    signal,
+    1_000,
+    options.onError,
+    (chatId) => auth.canDeliver(channel.name, chatId),
+    speech ? (chatId, text) => speech.speak(chatId, text) : undefined,
+    (chatId, messageIds) => commandCleanup.armEphemeral(chatId, messageIds),
+  );
+}
 
 /** One serialized, channel-scoped at-least-once notification delivery loop. */
 export class RemoteOutboxDelivery {

@@ -868,6 +868,8 @@ mcp_servers:
 
 llama_server:
   binary: "xxxx/llama-server.exe"
+  # Apply verbose llama.cpp logging to every llama-server process.
+  extra_llama_server_args: ["--verbose"]
   host: "127.0.0.1"
   port: 8080
   flash_attn_default: true

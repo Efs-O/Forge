@@ -10,7 +10,7 @@ import {
 } from './types';
 import type { RemoteAuditLog } from './RemoteAuditLog';
 import { RemoteRateLimiter } from './RemoteRateLimiter';
-import { RemoteOutboxDelivery } from './RemoteOutboxDelivery';
+import { createRemoteOutboxDelivery, RemoteOutboxDelivery } from './RemoteOutboxDelivery';
 import { handleRemoteCommand } from './RemoteCommandHandler';
 import { RemoteApprovalBridge } from './RemoteApprovalBridge';
 import { RemoteQuestionBridge } from './RemoteQuestionBridge';
@@ -45,7 +45,7 @@ export class RemoteController {
   private readonly activeConversations = new Set<string>();
   private readonly fanout: RemoteNotificationFanout;
   private rateLimiter: RemoteRateLimiter;
-  /** Public so the jobs outbox watcher (in the transport manager) can kick it. */
+  /** Public so the jobs outbox watcher can kick delivery. */
   readonly outbox: RemoteOutboxDelivery;
   private readonly approvals: RemoteApprovalBridge;
   private readonly questions: RemoteQuestionBridge;
@@ -54,6 +54,8 @@ export class RemoteController {
   private readonly pending = new RemotePendingPrompt();
   /** Best-effort deletion of processed owner commands from Telegram. */
   private readonly commandCleanup: CommandCleanupScheduler;
+  armAcknowledgement = (chatId: string, messageIds: string[], delaySeconds: number): void =>
+    this.commandCleanup.armAfter(chatId, messageIds, delaySeconds);
   private progressSubscription: { dispose(): void } | undefined;
   private get promptDeps(): RemotePromptAdmissionDeps & {
     restoreConversation: (conversationId: string) => Promise<unknown>;
@@ -86,21 +88,22 @@ export class RemoteController {
     private readonly contactService?: TelegramContactService,
   ) {
     this.rateLimiter = new RemoteRateLimiter(options.rateLimitPerMinute);
-    this.outbox = new RemoteOutboxDelivery(
+    this.commandCleanup = new CommandCleanupScheduler({
+      channel,
+      signal: this.abort.signal,
+      delaySeconds: () => this.options.deleteCommandMessagesAfter ?? 0,
+      replyDelaySeconds: () => this.options.deleteCommandRepliesAfter ?? 0,
+      onError: this.options.onError,
+    });
+    this.outbox = createRemoteOutboxDelivery({
       channel,
       store,
-      options.maxMessageChars,
-      this.abort.signal,
-      1_000,
-      options.onError,
-      (chatId) => this.auth.canDeliver(this.channel.name, chatId),
-      speech ? (chatId, text) => speech.speak(chatId, text) : undefined,
-      // Ephemeral host notifications (a model unloaded) reuse the command-reply
-      // cleanup: the same live delay, the same best-effort delete. The closure
-      // runs only during deliver() — after the constructor has built
-      // commandCleanup — so the forward reference is safe.
-      (chatId, ids) => this.commandCleanup.armEphemeral(chatId, ids),
-    );
+      auth,
+      signal: this.abort.signal,
+      options,
+      speech,
+      commandCleanup: this.commandCleanup,
+    });
     // The two bridges take the same seven dependencies by design -- both turn
     // one host-side prompt into a chat round-trip. Naming that shape once means
     // a change to it cannot reach only one of them.
@@ -115,13 +118,6 @@ export class RemoteController {
     ] as const;
     this.approvals = new RemoteApprovalBridge(...bridgeDeps);
     this.questions = new RemoteQuestionBridge(...bridgeDeps);
-    this.commandCleanup = new CommandCleanupScheduler({
-      channel,
-      signal: this.abort.signal,
-      delaySeconds: () => this.options.deleteCommandMessagesAfter ?? 0,
-      replyDelaySeconds: () => this.options.deleteCommandRepliesAfter ?? 0,
-      onError: this.options.onError,
-    });
     this.progress = new RemoteAgentProgress(
       channel,
       this.abort.signal,
@@ -169,11 +165,7 @@ export class RemoteController {
     this.questions.updateMaxMessageChars(options.maxMessageChars);
     this.progress.updateMaxMessageChars(Math.min(options.maxMessageChars, 3_900));
   }
-  /**
-   * Drops anything held for a channel whose owner has just been unpaired.
-   * A held prompt outlives session state otherwise, and the next owner to pair
-   * would inherit the last one's queued work on their first successful code.
-   */
+  /** Drops held prompts on unpair so a new owner cannot inherit the old owner's queued work. */
   forgetChannel(channel: RemoteInboundEvent['channel']): void {
     this.pending.clearChannel(channel);
   }
@@ -212,16 +204,6 @@ export class RemoteController {
   }
   async broadcastHostNotification(text: string, ephemeral?: boolean): Promise<number> {
     return this.fanout.toWorkspace(text, ephemeral);
-  }
-  /**
-   * Arms best-effort deletion of a transport-sent ephemeral acknowledgement
-   * (e.g. Telegram's "got it" queued notice) after a fixed delay. The channel
-   * sends the message and reports its ids here; the controller owns the timer.
-   * The delay is supplied by the transport because it is a per-transport
-   * presentation policy, not the config-driven command-reply delay.
-   */
-  armAcknowledgement(chatId: string, messageIds: string[], delaySeconds: number): void {
-    this.commandCleanup.armAfter(chatId, messageIds, delaySeconds);
   }
   async mirrorTurn(conversationId: string, text: string): Promise<number> {
     return this.fanout.mirrorTurn(conversationId, text);

@@ -1074,8 +1074,7 @@ describe('ephemeral outbox delivery', () => {
     });
     delivery.start();
     await vi.waitFor(
-      () =>
-        expect(store.pendingOutbox('fake').find((item) => item.id === recordId)).toBeUndefined(),
+      () => expect(armEphemeral).toHaveBeenCalledOnce(),
       5_000,
     );
     await delivery.stop();

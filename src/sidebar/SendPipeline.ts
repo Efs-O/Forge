@@ -26,7 +26,7 @@ import type { ContextThresholdAction } from './ContextBudgetPublisher';
 import { isContextExhaustionReason } from '../agent/truncationRecovery';
 import type { ChatAttachmentStore } from './ChatAttachmentStore';
 import type { ChatAttachmentRef } from '../llm/types';
-import type { MidTurnInbox } from '../agent/MidTurnInbox';
+import type { MidTurnInbox, MidTurnTell } from '../agent/MidTurnInbox';
 
 const log = getLogger();
 export const CONVERSATION_BUSY_ERROR = 'Forge: this conversation is still generating.';
@@ -35,6 +35,22 @@ export const CONVERSATION_BUSY_ERROR = 'Forge: this conversation is still genera
 function forgeVersion(): string | undefined {
   const version = vscode.extensions.getExtension('Efsoo.forge-llm')?.packageJSON?.['version'];
   return typeof version === 'string' ? version : undefined;
+}
+
+interface TellBatch {
+  text: string;
+  internal: boolean;
+}
+
+function groupTellBatches(tells: MidTurnTell[]): TellBatch[] {
+  const batches: TellBatch[] = [];
+  for (const tell of tells) {
+    const internal = tell.internal === true;
+    const current = batches[batches.length - 1];
+    if (current?.internal === internal) current.text += `\n\n${tell.text}`;
+    else batches.push({ text: tell.text, internal });
+  }
+  return batches;
 }
 
 export interface SendPipelineDeps {
@@ -216,6 +232,7 @@ export class SendPipeline {
       }
     }
     let outcome: ForgeRequestOutcome;
+    const pendingTellBatches: TellBatch[] = [];
     try {
       outcome = await deps.requestChains.run(chain, async () => {
         let nextText = text;
@@ -248,17 +265,26 @@ export class SendPipeline {
             this.logTurnStopped(conv.id, turn.kind);
           }
           const undelivered = deps.midTurnInbox.takeUndelivered(conv.id);
-          if (undelivered.length > 0) {
-            const tellText = undelivered.map((tell) => tell.text).join('\n\n');
+          pendingTellBatches.push(...groupTellBatches(undelivered));
+          if (pendingTellBatches.length > 0) {
             if (turn.kind === 'cancelled' || turn.kind === 'interrupted') {
-              deps.post({ type: 'setInput', text: tellText, conversationId: conv.id });
+              const userText = pendingTellBatches
+                .filter((batch) => !batch.internal)
+                .map((batch) => batch.text)
+                .join('\n\n');
+              if (userText) {
+                deps.post({ type: 'setInput', text: userText, conversationId: conv.id });
+              }
               return toRequestOutcome(turn);
             }
-            deps.post({ type: 'userPrompt', text: tellText, conversationId: conv.id });
+            const nextBatch = pendingTellBatches.shift()!;
+            if (!nextBatch.internal) {
+              deps.post({ type: 'userPrompt', text: nextBatch.text, conversationId: conv.id });
+            }
             deps.post({ type: 'generationStarted', conversationId: conv.id });
-            nextText = tellText;
+            nextText = nextBatch.text;
             nextAttachments = undefined;
-            nextOptions = undefined;
+            nextOptions = nextBatch.internal ? { internal: true } : undefined;
             continue;
           }
           // Context exhaustion is a failed provider turn, but it is also the one
@@ -296,23 +322,30 @@ export class SendPipeline {
       throw error;
     }
     const undeliveredAfterRelease = deps.midTurnInbox.takeUndelivered(conv.id);
-    if (undeliveredAfterRelease.length === 0) return outcome;
-    const tellText = undeliveredAfterRelease.map((tell) => tell.text).join('\n\n');
-    const internalTell = undeliveredAfterRelease.every((tell) => tell.internal === true);
+    const tellBatches = groupTellBatches(undeliveredAfterRelease);
+    if (tellBatches.length === 0) return outcome;
     if (outcome.kind === 'cancelled' || outcome.kind === 'interrupted') {
-      deps.post({ type: 'setInput', text: tellText, conversationId: conv.id });
+      const userText = tellBatches
+        .filter((batch) => !batch.internal)
+        .map((batch) => batch.text)
+        .join('\n\n');
+      if (userText) deps.post({ type: 'setInput', text: userText, conversationId: conv.id });
       return outcome;
     }
     // The chain has released here. A tell that arrived during evaluation or
     // compaction becomes a new addressed send, so it cannot be stranded in the
     // inbox after the original request has settled.
-    return this.send(
-      tellText,
-      undefined,
-      conv.id,
-      internalTell ? { internal: true } : undefined,
-      internalTell ? undefined : { echoPrompt: true },
-    );
+    let followUpOutcome: ForgeRequestOutcome = outcome;
+    for (const batch of tellBatches) {
+      followUpOutcome = await this.send(
+        batch.text,
+        undefined,
+        conv.id,
+        batch.internal ? { internal: true } : undefined,
+        batch.internal ? undefined : { echoPrompt: true },
+      );
+    }
+    return followUpOutcome;
   }
 
   private returnUndeliveredTells(conversationId: string): void {

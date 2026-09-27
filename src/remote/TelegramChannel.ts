@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { TelegramAlbumCoordinator, MAX_TELEGRAM_IMAGES_PER_MESSAGE } from './TelegramAlbumBuffer';
-import { acknowledgeTelegramDisposition } from './TelegramAcknowledgement';
+import { TelegramAcknowledgement, type EphemeralAckHandler } from './TelegramAcknowledgement';
 import { splitTelegramText } from './TelegramText';
 import { sendTelegramVoice } from './TelegramVoice';
 import { sendTelegramPhoto } from './TelegramPhoto';
@@ -82,6 +82,7 @@ export class TelegramChannel implements RemoteChannel {
   );
   private handler: ((event: RemoteInboundEvent) => Promise<RemoteInboundDisposition>) | undefined;
   private readonly fetchImpl: Fetch;
+  private readonly acknowledgement: TelegramAcknowledgement;
   /**
    * correlationId -> message_id of the prompt that carries its keyboard, so a
    * resolved approval can have its buttons removed. Bounded by
@@ -98,13 +99,13 @@ export class TelegramChannel implements RemoteChannel {
    * exists: reports a sent "got it" queued acknowledgement so it can be armed
    * for deletion after a short fixed window.
    */
-  private ephemeralAckHandler:
-    | ((chatId: string, messageIds: string[], delaySeconds: number) => void)
-    | undefined;
-
   constructor(private readonly options: TelegramChannelOptions) {
     this.fetchImpl = options.fetch ?? fetch;
     this.helpMessages = new TelegramHelpMessages(this, options.onError);
+    this.acknowledgement = new TelegramAcknowledgement(
+      (chatId, text, sendOptions) => this.send(chatId, text, sendOptions),
+      options.onError,
+    );
     this.albumCoordinator = new TelegramAlbumCoordinator({
       handle: async (event) => {
         if (!this.handler) return { kind: 'retry', reason: 'remote event handler is unavailable' };
@@ -115,7 +116,7 @@ export class TelegramChannel implements RemoteChannel {
         }
       },
       acknowledge: (event, disposition, signal) =>
-        this.acknowledgeDisposition(event, disposition, signal),
+        this.acknowledgement.acknowledge(event, disposition, signal),
       commitCursor: (nextOffset) => this.options.setCursor(TELEGRAM_CURSOR_KEY, String(nextOffset)),
       onError: this.options.onError,
       onOverflow: async (event, signal) => {
@@ -145,10 +146,8 @@ export class TelegramChannel implements RemoteChannel {
     return { dispose: () => (this.handler = undefined) };
   }
 
-  setEphemeralAcknowledgementHandler(
-    handler: ((chatId: string, messageIds: string[], delaySeconds: number) => void) | undefined,
-  ): void {
-    this.ephemeralAckHandler = handler;
+  setEphemeralAcknowledgementHandler(handler: EphemeralAckHandler | undefined): void {
+    this.acknowledgement.setEphemeralHandler(handler);
   }
 
   async start(signal: AbortSignal): Promise<void> {
@@ -406,7 +405,7 @@ export class TelegramChannel implements RemoteChannel {
       setCursor: this.options.setCursor,
       getHandler: () => this.handler,
       acknowledge: (event, disposition, eventSignal) =>
-        this.acknowledgeDisposition(event, disposition, eventSignal),
+        this.acknowledgement.acknowledge(event, disposition, eventSignal),
       albumCoordinator: this.albumCoordinator,
       onError: this.options.onError,
     });
@@ -440,32 +439,6 @@ export class TelegramChannel implements RemoteChannel {
       fetchImpl: this.fetchImpl,
       token: this.options.token,
     });
-  }
-
-  /**
-   * Says out loud why an inbound message went nowhere.
-   *
-   * Voice belongs here as much as text: a voice note rejected before
-   * transcription -- voice disabled, over the duration limit, oversize -- had
-   * its reason computed and then dropped, because this only ran for `text`. The
-   * sender saw nothing at all, which is indistinguishable from Forge being
-   * offline and is exactly the silent-failure shape the voice path is most
-   * likely to be blamed for.
-   */
-  private acknowledgeDisposition(
-    event: Extract<RemoteInboundEvent, { kind: 'text' | 'voice' }>,
-    disposition: RemoteInboundDisposition,
-    signal: AbortSignal,
-  ): Promise<void> {
-    return acknowledgeTelegramDisposition(
-      event,
-      disposition,
-      signal,
-      (chatId, text, options) => this.send(chatId, text, options),
-      this.options.onError,
-      (chatId, messageIds, delaySeconds) =>
-        this.ephemeralAckHandler?.(chatId, messageIds, delaySeconds),
-    );
   }
 
   async sendPhoto(

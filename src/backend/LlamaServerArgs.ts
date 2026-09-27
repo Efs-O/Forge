@@ -63,6 +63,10 @@ export function composeLlamaServerArgs(
   const flash = model.flash_attn ?? server.flash_attn_default ?? true;
   args.push('--flash-attn', flash ? 'on' : 'off');
 
+  if (server.extra_llama_server_args) {
+    args.push(...server.extra_llama_server_args);
+  }
+
   if (server.n_threads && server.n_threads > 0) {
     args.push('--threads', String(server.n_threads));
   }

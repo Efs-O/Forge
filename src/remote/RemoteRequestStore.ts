@@ -39,6 +39,12 @@ import {
   replaceSelection,
 } from './RemoteSelectionState';
 import { pruneRemoteState } from './remoteStateRetention';
+import {
+  outboxHealth as queryOutboxHealth,
+  pendingOutbox as queryPendingOutbox,
+  requestHealth as queryRequestHealth,
+  requestHealthForConversation as queryRequestHealthForConversation,
+} from './remoteStoreQueries';
 
 export function remoteDedupKey(channel: string, chatId: string, messageId: string): string {
   return `${channel}\u0000${chatId}\u0000${messageId}`;
@@ -119,25 +125,15 @@ export class RemoteRequestStore {
   }
 
   pendingOutbox(channel?: RemoteOutboxRecord['channel']): RemoteOutboxRecord[] {
-    return this.state.outbox.filter(
-      (item) => item.state === 'pending' && (channel === undefined || item.channel === channel),
-    );
+    return queryPendingOutbox(this.state, channel);
   }
 
   outboxHealth(): { pending: number; sending: number; abandoned: number } {
-    return {
-      pending: this.state.outbox.filter((item) => item.state === 'pending').length,
-      sending: this.state.outbox.filter((item) => item.state === 'sending').length,
-      abandoned: this.state.outbox.filter((item) => item.state === 'abandoned').length,
-    };
+    return queryOutboxHealth(this.state);
   }
 
   requestHealth(): { queued: number; running: number; unknown: number } {
-    return {
-      queued: this.state.requests.filter((item) => item.state === 'queued').length,
-      running: this.state.requests.filter((item) => item.state === 'running').length,
-      unknown: this.state.requests.filter((item) => item.state === 'unknown').length,
-    };
+    return queryRequestHealth(this.state);
   }
 
   /**
@@ -146,15 +142,7 @@ export class RemoteRequestStore {
    * metadata are excluded (`unknown-scope`); `unknown` stays `unknown`.
    */
   requestHealthForConversation(conversationId: string) {
-    const count = (state: string) =>
-      this.state.requests.filter(
-        (item) =>
-          typeof item.conversationId === 'string' &&
-          item.conversationId.length > 0 &&
-          item.conversationId === conversationId &&
-          item.state === state,
-      ).length;
-    return { queued: count('queued'), running: count('running'), unknown: count('unknown') };
+    return queryRequestHealthForConversation(this.state, conversationId);
   }
 
   binding(channel: string, chatId: string): RemoteBinding | undefined {

@@ -6,7 +6,11 @@ type SendTelegramText = (
   text: string,
   options?: { signal?: AbortSignal },
 ) => Promise<string[]>;
-type EphemeralAckHandler = (chatId: string, messageIds: string[], delaySeconds: number) => void;
+export type EphemeralAckHandler = (
+  chatId: string,
+  messageIds: string[],
+  delaySeconds: number,
+) => void;
 
 /**
  * How long a "got it" queued acknowledgement stays in the chat before
@@ -49,5 +53,36 @@ export async function acknowledgeTelegramDisposition(
     }
     return [];
   });
-  if (isQueuedAck && messageIds.length > 0) onEphemeral?.(event.chatId, messageIds, QUEUED_ACK_DELETE_SECONDS);
+  if (isQueuedAck && messageIds.length > 0) {
+    onEphemeral?.(event.chatId, messageIds, QUEUED_ACK_DELETE_SECONDS);
+  }
+}
+
+export class TelegramAcknowledgement {
+  private ephemeralHandler: EphemeralAckHandler | undefined;
+
+  constructor(
+    private readonly send: SendTelegramText,
+    private readonly onError: ((message: string) => void) | undefined,
+  ) {}
+
+  setEphemeralHandler(handler: EphemeralAckHandler | undefined): void {
+    this.ephemeralHandler = handler;
+  }
+
+  acknowledge(
+    event: TelegramTextOrVoiceEvent,
+    disposition: RemoteInboundDisposition,
+    signal: AbortSignal,
+  ): Promise<void> {
+    return acknowledgeTelegramDisposition(
+      event,
+      disposition,
+      signal,
+      this.send,
+      this.onError,
+      (chatId, messageIds, delaySeconds) =>
+        this.ephemeralHandler?.(chatId, messageIds, delaySeconds),
+    );
+  }
 }

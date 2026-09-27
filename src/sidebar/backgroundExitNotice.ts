@@ -82,10 +82,22 @@ export function createSidebarPromptRouter(options: {
   activeId: () => string;
   isReserved: (id: string) => boolean;
   addTell: (id: string, text: string, internal?: boolean) => void;
-  send: (text: string, attachments?: AttachmentData[], id?: string, echoPrompt?: boolean, internal?: boolean) => void;
+  send: (
+    text: string,
+    attachments?: AttachmentData[],
+    id?: string,
+    echoPrompt?: boolean,
+    internal?: boolean,
+  ) => void;
   isOpen: (id: string) => boolean;
 }): SidebarPromptRouter {
-  const route = (text: string, attachments?: AttachmentData[], id?: string, echoPrompt = false, internal = false) =>
+  const route = (
+    text: string,
+    attachments?: AttachmentData[],
+    id?: string,
+    echoPrompt = false,
+    internal = false,
+  ) =>
     routeSidebarPrompt(
       text,
       { ...(id ? { conversationId: id } : {}), ...(attachments ? { attachments } : {}) },
