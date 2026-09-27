@@ -213,6 +213,16 @@ export class RemoteController {
   async broadcastHostNotification(text: string, ephemeral?: boolean): Promise<number> {
     return this.fanout.toWorkspace(text, ephemeral);
   }
+  /**
+   * Arms best-effort deletion of a transport-sent ephemeral acknowledgement
+   * (e.g. Telegram's "got it" queued notice) after a fixed delay. The channel
+   * sends the message and reports its ids here; the controller owns the timer.
+   * The delay is supplied by the transport because it is a per-transport
+   * presentation policy, not the config-driven command-reply delay.
+   */
+  armAcknowledgement(chatId: string, messageIds: string[], delaySeconds: number): void {
+    this.commandCleanup.armAfter(chatId, messageIds, delaySeconds);
+  }
   async mirrorTurn(conversationId: string, text: string): Promise<number> {
     return this.fanout.mirrorTurn(conversationId, text);
   }

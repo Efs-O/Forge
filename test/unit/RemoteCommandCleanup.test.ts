@@ -582,3 +582,50 @@ describe('CommandCleanupScheduler.armEphemeral', () => {
     expect(channel.deleted.filter((entry) => entry.messageId === ids[0])).toHaveLength(2);
   });
 });
+
+describe('CommandCleanupScheduler.armAfter', () => {
+  // The Telegram "got it" queued notice is deleted after a fixed, caller-chosen
+  // window, independent of the config-driven command-reply delay.
+  function makeScheduler(): { channel: FakeRemoteChannel; scheduler: CommandCleanupScheduler } {
+    const channel = new FakeRemoteChannel();
+    const scheduler = new CommandCleanupScheduler({
+      channel,
+      signal: new AbortController().signal,
+      delaySeconds: () => 5,
+      replyDelaySeconds: () => 10,
+    });
+    return { channel, scheduler };
+  }
+
+  it('deletes each id after the caller-chosen delay, not the config reply delay', async () => {
+    vi.useFakeTimers();
+    const { channel, scheduler } = makeScheduler();
+    scheduler.armAfter('chat', ['a', 'b'], 10);
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(channel.deleted).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(channel.deleted).toEqual([
+      { chatId: 'chat', messageId: 'a' },
+      { chatId: 'chat', messageId: 'b' },
+    ]);
+  });
+
+  it('is a no-op for a non-positive delay', async () => {
+    vi.useFakeTimers();
+    const { channel, scheduler } = makeScheduler();
+    scheduler.armAfter('chat', ['a'], 0);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(channel.deleted).toEqual([]);
+  });
+
+  it('uses keys distinct from armEphemeral, so both paths can arm the same id', async () => {
+    vi.useFakeTimers();
+    const { channel, scheduler } = makeScheduler();
+    scheduler.armEphemeral('chat', ['a']);
+    scheduler.armAfter('chat', ['a'], 10);
+    await vi.advanceTimersByTimeAsync(10_000);
+    // Two deletes of the same id: the after: and ephemeral: key spaces do not
+    // collide, so a message armed on both paths is cleaned up by each.
+    expect(channel.deleted.filter((entry) => entry.messageId === 'a')).toHaveLength(2);
+  });
+});

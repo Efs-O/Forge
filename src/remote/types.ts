@@ -355,6 +355,15 @@ export interface RemoteChannel {
     messageId: string,
     options?: { signal?: AbortSignal },
   ): Promise<void>;
+  /**
+   * Sets the handler a transport calls after sending an ephemeral
+   * acknowledgement (a transient "got it" queued notice) so the controller can
+   * arm it for best-effort deletion after a fixed delay. Optional: transports
+   * without such acknowledgements omit it.
+   */
+  setEphemeralAcknowledgementHandler?(
+    handler: ((chatId: string, messageIds: string[], delaySeconds: number) => void) | undefined,
+  ): void;
   /** Optional native pagination surface (Telegram inline keyboard). */
   selectionPages?: RemoteSelectionPages;
   /** Fetches attachment bytes only after the controller has authenticated the sender. */

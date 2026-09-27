@@ -115,6 +115,25 @@ export class CommandCleanupScheduler {
     }
   }
 
+  /**
+   * Arms deletion of a specific set of messages after a caller-chosen delay,
+   * reusing the same timer, dedup, abort and error machinery as the
+   * config-driven cleanup. Used for the Telegram "got it" queued
+   * acknowledgement, which disappears after a short fixed window regardless of
+   * `delete_command_replies_after`. Distinct `after:` dedup keys keep these
+   * from colliding with the `reply:` and `ephemeral:` keys the other arms use.
+   */
+  armAfter(chatId: string, messageIds: string[], delaySeconds: number): void {
+    for (const id of messageIds) {
+      this.arm(
+        remoteDedupKey(this.deps.channel.name, chatId, `after:${id}`),
+        chatId,
+        id,
+        delaySeconds,
+      );
+    }
+  }
+
   private arm(key: string, chatId: string, messageId: string, delaySeconds: number): void {
     if (delaySeconds <= 0) return;
     if (!this.deps.channel.deleteMessage) return;

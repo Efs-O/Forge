@@ -202,6 +202,55 @@ describe('TelegramChannel', () => {
     expect(acknowledgements[0]).toContain('/drop 2');
   });
 
+  it('arms the queued "got it" acknowledgement for deletion after a fixed window', async () => {
+    const abort = new AbortController();
+    let firstPoll = true;
+    const armed: Array<{ chatId: string; messageIds: string[]; delaySeconds: number }> = [];
+    const channel = new TelegramChannel({
+      token: 'secret-token',
+      getCursor: () => undefined,
+      setCursor: async () => undefined,
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        const method = String(url).split('/').at(-1);
+        if (method === 'setMyCommands') return response(true);
+        if (method === 'getUpdates' && firstPoll) {
+          firstPoll = false;
+          return response([
+            {
+              update_id: 9,
+              message: {
+                message_id: 4,
+                date: 1,
+                text: 'follow up',
+                chat: { id: 2, type: 'private' },
+                from: { id: 3 },
+              },
+            },
+          ]);
+        }
+        if (method === 'sendMessage') {
+          return response({ message_id: 77 });
+        }
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+            once: true,
+          });
+        });
+      }) as typeof fetch,
+    });
+    channel.setEphemeralAcknowledgementHandler((chatId, messageIds, delaySeconds) => {
+      armed.push({ chatId, messageIds, delaySeconds });
+    });
+    channel.onEvent(async () => ({ kind: 'queued', requestId: 'r1', position: 2 }));
+
+    await channel.start(abort.signal);
+    // The channel reports the sent ack's ids and a fixed 10s window; the
+    // controller owns the timer, so the channel itself never deletes.
+    await vi.waitFor(() => expect(armed).toHaveLength(1));
+    expect(armed[0]).toEqual({ chatId: '2', messageIds: ['77'], delaySeconds: 10 });
+    abort.abort();
+  });
+
   it('tells a queued Telegram attachment that it runs when the turn ends', async () => {
     const abort = new AbortController();
     let firstPoll = true;

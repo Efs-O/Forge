@@ -93,6 +93,14 @@ export class TelegramChannel implements RemoteChannel {
   /** Serializes every chat-addressed call so sends cannot overtake each other. */
   private readonly sendQueue = new TelegramChatQueue();
   private readonly albumCoordinator: TelegramAlbumCoordinator;
+  /**
+   * Wired by the transport manager once the controller's cleanup scheduler
+   * exists: reports a sent "got it" queued acknowledgement so it can be armed
+   * for deletion after a short fixed window.
+   */
+  private ephemeralAckHandler:
+    | ((chatId: string, messageIds: string[], delaySeconds: number) => void)
+    | undefined;
 
   constructor(private readonly options: TelegramChannelOptions) {
     this.fetchImpl = options.fetch ?? fetch;
@@ -135,6 +143,12 @@ export class TelegramChannel implements RemoteChannel {
   } {
     this.handler = handler;
     return { dispose: () => (this.handler = undefined) };
+  }
+
+  setEphemeralAcknowledgementHandler(
+    handler: ((chatId: string, messageIds: string[], delaySeconds: number) => void) | undefined,
+  ): void {
+    this.ephemeralAckHandler = handler;
   }
 
   async start(signal: AbortSignal): Promise<void> {
@@ -447,8 +461,10 @@ export class TelegramChannel implements RemoteChannel {
       event,
       disposition,
       signal,
-      (chatId, text, options) => this.send(chatId, text, options).then(() => undefined),
+      (chatId, text, options) => this.send(chatId, text, options),
       this.options.onError,
+      (chatId, messageIds, delaySeconds) =>
+        this.ephemeralAckHandler?.(chatId, messageIds, delaySeconds),
     );
   }
 

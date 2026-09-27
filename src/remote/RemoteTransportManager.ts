@@ -144,6 +144,11 @@ export class RemoteTransportManager {
         speech,
         contactService,
       );
+      // The channel sends the Telegram "got it" queued notice; the controller
+      // owns the timer that deletes it after a short fixed window.
+      channel.setEphemeralAcknowledgementHandler?.((chatId, messageIds, delaySeconds) =>
+        controller.armAcknowledgement(chatId, messageIds, delaySeconds),
+      );
       const subscriptions = subscribeHostToRemote(this.options.host, controller, {
         onCompaction: (event) => this.onCompaction(event, controller),
         onActivityError: (message) =>
