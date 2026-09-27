@@ -1,4 +1,4 @@
-import type { RemoteInboundDisposition, RemoteInboundEvent } from './types';
+import type { EphemeralKind, RemoteInboundDisposition, RemoteInboundEvent } from './types';
 
 type TelegramTextOrVoiceEvent = Extract<RemoteInboundEvent, { kind: 'text' | 'voice' }>;
 type SendTelegramText = (
@@ -6,10 +6,10 @@ type SendTelegramText = (
   text: string,
   options?: { signal?: AbortSignal },
 ) => Promise<string[]>;
-export type EphemeralAckHandler = (
+export type EphemeralMessageHandler = (
   chatId: string,
   messageIds: string[],
-  delaySeconds: number,
+  kind: EphemeralKind,
 ) => void;
 
 /**
@@ -27,14 +27,11 @@ export async function acknowledgeTelegramDisposition(
   signal: AbortSignal,
   send: SendTelegramText,
   onError: ((message: string) => void) | undefined,
-  onEphemeral?: EphemeralAckHandler,
+  onEphemeral?: EphemeralMessageHandler,
 ): Promise<void> {
   if (event.chatType !== 'private') return;
   let text: string | undefined;
-  /** Only the queued "got it" notice is transient; a rejection reason is kept. */
-  let isQueuedAck = false;
   if (disposition.kind === 'queued') {
-    isQueuedAck = true;
     const hasAttachments = event.kind === 'text' && (event.attachments?.length ?? 0) > 0;
     text = hasAttachments
       ? `Forge: got it — attachments wait, so this runs when the current turn ends. /drop ${disposition.position} to cancel.`
@@ -53,21 +50,28 @@ export async function acknowledgeTelegramDisposition(
     }
     return [];
   });
-  if (isQueuedAck && messageIds.length > 0) {
-    onEphemeral?.(event.chatId, messageIds, QUEUED_ACK_DELETE_SECONDS);
+  if (messageIds.length > 0) {
+    if (disposition.kind === 'queued') onEphemeral?.(event.chatId, messageIds, 'queued');
+    else if (disposition.kind === 'rejected' && disposition.ephemeral) {
+      onEphemeral?.(event.chatId, messageIds, 'transient');
+    }
   }
 }
 
 export class TelegramAcknowledgement {
-  private ephemeralHandler: EphemeralAckHandler | undefined;
+  private ephemeralHandler: EphemeralMessageHandler | undefined;
 
   constructor(
     private readonly send: SendTelegramText,
     private readonly onError: ((message: string) => void) | undefined,
   ) {}
 
-  setEphemeralHandler(handler: EphemeralAckHandler | undefined): void {
+  setEphemeralHandler(handler: EphemeralMessageHandler | undefined): void {
     this.ephemeralHandler = handler;
+  }
+
+  notifyEphemeral(chatId: string, messageIds: string[], kind: EphemeralKind): void {
+    this.ephemeralHandler?.(chatId, messageIds, kind);
   }
 
   acknowledge(
@@ -81,8 +85,7 @@ export class TelegramAcknowledgement {
       signal,
       this.send,
       this.onError,
-      (chatId, messageIds, delaySeconds) =>
-        this.ephemeralHandler?.(chatId, messageIds, delaySeconds),
+      (chatId, messageIds, kind) => this.notifyEphemeral(chatId, messageIds, kind),
     );
   }
 }

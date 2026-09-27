@@ -130,6 +130,7 @@ describe('RemoteVoiceBridge gates', () => {
     expect(result).toEqual({
       kind: 'rejected',
       reason: 'voice input is disabled (set voice.enabled in config)',
+      ephemeral: true,
     });
     expect(written).toEqual([]);
   });
@@ -143,6 +144,7 @@ describe('RemoteVoiceBridge gates', () => {
     const result = await bridge.handle(voiceEvent({ durationMs: 60_000 }));
     expect(result.kind).toBe('rejected');
     expect(result.kind === 'rejected' && result.reason).toContain('over the 10s limit');
+    expect(result.kind === 'rejected' && result.ephemeral).toBe(true);
     expect(written).toEqual([]);
     // No operation was created, so there is nothing to audit.
     expect(rows).toEqual([]);
@@ -151,7 +153,7 @@ describe('RemoteVoiceBridge gates', () => {
   it('rejects an oversize note after download and audits it', async () => {
     const { bridge, rows } = harness({ maxBytes: 1024 }, 4096);
     const result = await bridge.handle(voiceEvent());
-    expect(result).toEqual({ kind: 'rejected', reason: 'voice note is too large' });
+    expect(result).toEqual({ kind: 'rejected', reason: 'voice note is too large', ephemeral: true });
     const rejected = rows.find((row) => row.type === 'voice_ingress_rejected');
     expect(rejected).toBeDefined();
     expect(rejected?.type === 'voice_ingress_rejected' && rejected.reason).toBe('oversize');
@@ -170,6 +172,7 @@ describe('RemoteVoiceBridge gates', () => {
     expect(result).toEqual({
       kind: 'rejected',
       reason: 'this channel cannot download voice notes',
+      ephemeral: true,
     });
   });
 

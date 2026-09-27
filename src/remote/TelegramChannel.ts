@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { TelegramAlbumCoordinator, MAX_TELEGRAM_IMAGES_PER_MESSAGE } from './TelegramAlbumBuffer';
-import { TelegramAcknowledgement, type EphemeralAckHandler } from './TelegramAcknowledgement';
+import { TelegramAcknowledgement, type EphemeralMessageHandler } from './TelegramAcknowledgement';
 import { splitTelegramText } from './TelegramText';
 import { sendTelegramVoice } from './TelegramVoice';
 import { sendTelegramPhoto } from './TelegramPhoto';
@@ -96,8 +96,7 @@ export class TelegramChannel implements RemoteChannel {
   private readonly albumCoordinator: TelegramAlbumCoordinator;
   /**
    * Wired by the transport manager once the controller's cleanup scheduler
-   * exists: reports a sent "got it" queued acknowledgement so it can be armed
-   * for deletion after a short fixed window.
+   * exists: reports queued acknowledgements and transient notices for deletion.
    */
   constructor(private readonly options: TelegramChannelOptions) {
     this.fetchImpl = options.fetch ?? fetch;
@@ -124,7 +123,7 @@ export class TelegramChannel implements RemoteChannel {
         // notifications are a private-chat convention, so a group/channel album
         // that overflows the 3-image cap is delivered without the notice.
         if (event.chatType !== 'private') return;
-        await this.send(
+        const messageIds = await this.send(
           event.chatId,
           `Forge: albums are limited to ${MAX_TELEGRAM_IMAGES_PER_MESSAGE} images per message — I kept the first ${MAX_TELEGRAM_IMAGES_PER_MESSAGE}. Each image is capped at 10 MiB, 25 MiB total.`,
           { signal },
@@ -134,7 +133,9 @@ export class TelegramChannel implements RemoteChannel {
               `Forge Telegram album notice failed: ${err instanceof Error ? err.message : String(err)}`,
             );
           }
+          return [];
         });
+        this.acknowledgement.notifyEphemeral(event.chatId, messageIds, 'transient');
       },
     });
   }
@@ -146,7 +147,7 @@ export class TelegramChannel implements RemoteChannel {
     return { dispose: () => (this.handler = undefined) };
   }
 
-  setEphemeralAcknowledgementHandler(handler: EphemeralAckHandler | undefined): void {
+  setEphemeralMessageHandler(handler: EphemeralMessageHandler | undefined): void {
     this.acknowledgement.setEphemeralHandler(handler);
   }
 

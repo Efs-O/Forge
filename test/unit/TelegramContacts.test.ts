@@ -133,6 +133,7 @@ describe('Telegram contact service', () => {
       kind: 'rejected',
       reason: expect.stringContaining('send /start'),
     });
+    expect(privately).not.toHaveProperty('ephemeral');
     expect(value.contacts.pending()).toHaveLength(0);
     expect(value.channel.sent).toHaveLength(0);
     await value.service.handleGroup(textEvent('20', 'hello', GROUP_ID));

@@ -305,7 +305,7 @@ describe('RemoteController command auto-cleanup', () => {
       // maxMessageChars is 12_000; an over-long command is rejected before it
       // reaches the command handler, so no cleanup may be armed.
       const disposition = await controller.handle(textEvent('/clanker ' + 'x'.repeat(12_001)));
-      expect(disposition).toMatchObject({ kind: 'rejected' });
+      expect(disposition).toMatchObject({ kind: 'rejected', ephemeral: true });
       await vi.advanceTimersByTimeAsync(60_000);
       expect(channel.deleted).toEqual([]);
     } finally {
@@ -627,5 +627,31 @@ describe('CommandCleanupScheduler.armAfter', () => {
     // Two deletes of the same id: the after: and ephemeral: key spaces do not
     // collide, so a message armed on both paths is cleaned up by each.
     expect(channel.deleted.filter((entry) => entry.messageId === 'a')).toHaveLength(2);
+  });
+});
+
+describe('RemoteController.armEphemeralMessage', () => {
+  it('uses the fixed queued delay and the live transient delay', async () => {
+    vi.useFakeTimers();
+    const { channel, controller } = await buildController(
+      0,
+      {},
+      { deleteCommandRepliesAfter: 5 },
+    );
+    try {
+      controller.armEphemeralMessage('chat', ['queued'], 'queued');
+      controller.armEphemeralMessage('chat', ['transient'], 'transient');
+      controller.armEphemeralMessage('chat', [], 'transient');
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(channel.deleted).toEqual([{ chatId: 'chat', messageId: 'transient' }]);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(channel.deleted).toEqual([
+        { chatId: 'chat', messageId: 'transient' },
+        { chatId: 'chat', messageId: 'queued' },
+      ]);
+    } finally {
+      await controller.stop();
+    }
   });
 });

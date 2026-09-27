@@ -238,16 +238,15 @@ describe('TelegramChannel', () => {
         });
       }) as typeof fetch,
     });
-    channel.setEphemeralAcknowledgementHandler((chatId, messageIds, delaySeconds) => {
-      armed.push({ chatId, messageIds, delaySeconds });
+    channel.setEphemeralMessageHandler((chatId, messageIds, kind) => {
+      armed.push({ chatId, messageIds, kind });
     });
     channel.onEvent(async () => ({ kind: 'queued', requestId: 'r1', position: 2 }));
 
     await channel.start(abort.signal);
-    // The channel reports the sent ack's ids and a fixed 10s window; the
-    // controller owns the timer, so the channel itself never deletes.
+    // The channel reports the acknowledgement kind; the controller owns timing.
     await vi.waitFor(() => expect(armed).toHaveLength(1));
-    expect(armed[0]).toEqual({ chatId: '2', messageIds: ['77'], delaySeconds: 10 });
+    expect(armed[0]).toEqual({ chatId: '2', messageIds: ['77'], kind: 'queued' });
     abort.abort();
   });
 
@@ -636,6 +635,7 @@ describe('TelegramChannel', () => {
     const abort = new AbortController();
     let delivered = false;
     const sent: Array<Record<string, unknown>> = [];
+    const armed: Array<{ chatId: string; messageIds: string[]; kind: string }> = [];
     const channel = new TelegramChannel({
       token: 'secret-token',
       getCursor: () => undefined,
@@ -670,9 +670,13 @@ describe('TelegramChannel', () => {
         });
       }) as typeof fetch,
     });
+    channel.setEphemeralMessageHandler((chatId, messageIds, kind) => {
+      armed.push({ chatId, messageIds, kind });
+    });
     channel.onEvent(async () => ({
       kind: 'rejected',
       reason: 'voice input is disabled (set voice.enabled in config)',
+      ephemeral: true,
     }));
 
     await channel.start(abort.signal);
@@ -681,6 +685,7 @@ describe('TelegramChannel', () => {
       chat_id: '99',
       text: 'Forge: voice input is disabled (set voice.enabled in config)',
     });
+    expect(armed).toEqual([{ chatId: '99', messageIds: ['7'], kind: 'transient' }]);
   });
 
   /**
@@ -887,6 +892,7 @@ describe('TelegramChannel photo albums', () => {
     let returnedEmpty = false;
     const events: RemoteInboundEvent[] = [];
     const sent: Array<Record<string, unknown>> = [];
+    const armed: Array<{ chatId: string; messageIds: string[]; kind: string }> = [];
     const setCursor = vi.fn(async () => undefined);
     const channel = new TelegramChannel({
       token: 'secret-token',
@@ -915,12 +921,15 @@ describe('TelegramChannel photo albums', () => {
         return response(true);
       }) as typeof fetch,
     });
+    channel.setEphemeralMessageHandler((chatId, messageIds, kind) => {
+      armed.push({ chatId, messageIds, kind });
+    });
     channel.onEvent(async (event) => {
       events.push(event);
       return handler(event);
     });
     await channel.start(abort.signal);
-    return { abort, events, sent, setCursor };
+    return { abort, events, sent, setCursor, armed };
   }
 
   it('maps a single non-album photo to one event (existing behaviour)', async () => {
@@ -992,6 +1001,17 @@ describe('TelegramChannel photo albums', () => {
     });
     expect(String(h.sent[0]!.text)).toContain('limited to 3 images');
     expect(String(h.sent[0]!.text)).toContain('10 MiB');
+    expect(h.armed).toEqual([{ chatId: '99', messageIds: ['1'], kind: 'transient' }]);
+  });
+
+  it('does not arm an unmarked rejection acknowledgement', async () => {
+    const h = await runAlbums([[textUpdate(1, 1, 'hello')]], async () => ({
+      kind: 'rejected',
+      reason: 'contact service explanation',
+    }));
+    await vi.waitFor(() => expect(h.sent).toHaveLength(1));
+    h.abort.abort();
+    expect(h.armed).toEqual([]);
   });
 
   it('flushes an album before a following text message in the same batch', async () => {

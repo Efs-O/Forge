@@ -5,11 +5,17 @@ import { remoteDedupKey } from './RemoteRequestStore';
 import {
   RemoteInboundEventSchema,
   type RemoteChannel,
+  type EphemeralKind,
   type RemoteInboundDisposition,
   type RemoteInboundEvent,
 } from './types';
 import type { RemoteAuditLog } from './RemoteAuditLog';
 import { RemoteRateLimiter } from './RemoteRateLimiter';
+import {
+  armRemoteEphemeralMessage,
+  ephemeralRejection,
+  sendRemoteEphemeralMessage,
+} from './RemoteEphemeralMessages';
 import { createRemoteOutboxDelivery, RemoteOutboxDelivery } from './RemoteOutboxDelivery';
 import { handleRemoteCommand } from './RemoteCommandHandler';
 import { RemoteApprovalBridge } from './RemoteApprovalBridge';
@@ -54,8 +60,10 @@ export class RemoteController {
   private readonly pending = new RemotePendingPrompt();
   /** Best-effort deletion of processed owner commands from Telegram. */
   private readonly commandCleanup: CommandCleanupScheduler;
-  armAcknowledgement = (chatId: string, messageIds: string[], delaySeconds: number): void =>
-    this.commandCleanup.armAfter(chatId, messageIds, delaySeconds);
+  private readonly sendTransientMessage: (chatId: string, text: string) => Promise<void>;
+  armEphemeralMessage = (chatId: string, messageIds: string[], kind: EphemeralKind): void => {
+    armRemoteEphemeralMessage(this.commandCleanup, chatId, messageIds, kind);
+  };
   private progressSubscription: { dispose(): void } | undefined;
   private get promptDeps(): RemotePromptAdmissionDeps & {
     restoreConversation: (conversationId: string) => Promise<unknown>;
@@ -95,6 +103,8 @@ export class RemoteController {
       replyDelaySeconds: () => this.options.deleteCommandRepliesAfter ?? 0,
       onError: this.options.onError,
     });
+    this.sendTransientMessage = (chatId, text) =>
+      sendRemoteEphemeralMessage(channel, this.commandCleanup, chatId, text, this.abort.signal);
     this.outbox = createRemoteOutboxDelivery({
       channel,
       store,
@@ -229,12 +239,12 @@ export class RemoteController {
   async handle(raw: RemoteInboundEvent): Promise<RemoteInboundDisposition> {
     if (!this.accepting) return { kind: 'retry', reason: 'remote runtime is stopping' };
     const parsed = RemoteInboundEventSchema.safeParse(raw);
-    if (!parsed.success) return { kind: 'rejected', reason: 'invalid remote event' };
+    if (!parsed.success) return ephemeralRejection('invalid remote event');
     const event = parsed.data;
     await this.audit?.record(event, 'inbound').catch(() => undefined);
     if (event.chatType !== 'private') {
       const groupResult = await this.contactService?.handleGroup(event);
-      return groupResult ?? { kind: 'rejected', reason: 'private chats only' };
+      return groupResult ?? ephemeralRejection('private chats only');
     }
 
     if (!(await this.auth.isOwner(event))) {
@@ -242,12 +252,10 @@ export class RemoteController {
       if (contactResult) return contactResult;
       if ((await this.auth.tryPair(event)) === 'paired') {
         await this.audit?.record(event, 'paired').catch(() => undefined);
-        await this.channel.send(event.chatId, 'Forge remote pairing complete.', {
-          signal: this.abort.signal,
-        });
+        await this.sendTransientMessage(event.chatId, 'Forge remote pairing complete.');
         return { kind: 'handled' };
       }
-      return { kind: 'rejected', reason: 'sender is not paired' };
+      return ephemeralRejection('sender is not paired');
     }
     const gate = await this.auth.gate(event);
     if (gate.kind === 'challenge') {
@@ -259,32 +267,29 @@ export class RemoteController {
         gate.reason === 'expired'
           ? `session expired after ${idleMinutes} min idle`
           : 'authentication required';
-      await this.channel.send(
+      await this.sendTransientMessage(
         event.chatId,
         held
           ? `Forge: ${cause}. Your prompt is held and will run once you verify — ` +
               'send your 6-digit code.'
           : `Forge: ${cause}. Send your 6-digit code, then send the command again — ` +
               'commands are not held.',
-        { signal: this.abort.signal },
       );
       return { kind: 'handled' };
     }
     if (gate.kind === 'failed') {
       await this.audit?.record(event, 'authentication_failed').catch(() => undefined);
-      await this.channel.send(event.chatId, 'Forge: authentication failed.', {
-        signal: this.abort.signal,
-      });
+      await this.sendTransientMessage(event.chatId, 'Forge: authentication failed.');
       return { kind: 'handled' };
     }
     if (gate.kind === 'locked_out') {
       await this.audit?.record(event, 'authentication_locked_out').catch(() => undefined);
       // Repeated wrong codes must not leave a prompt armed to fire later.
       this.pending.clear(event.channel, event.chatId);
-      return { kind: 'rejected', reason: 'remote authentication is temporarily locked' };
+      return ephemeralRejection('remote authentication is temporarily locked');
     }
     if (gate.kind === 'blocked') {
-      return { kind: 'rejected', reason: 'remote authentication is required' };
+      return ephemeralRejection('remote authentication is required');
     }
     if (gate.newlyAuthenticated) {
       await this.audit?.record(event, 'authenticated').catch(() => undefined);
@@ -292,14 +297,13 @@ export class RemoteController {
       const binding = this.store.binding(event.channel, event.chatId);
       if (binding) this.kickDrain(binding.conversationId);
       this.approvals.republish(event.chatId);
-      await this.channel.send(event.chatId, 'Forge: authenticated.', { signal: this.abort.signal });
+      await this.sendTransientMessage(event.chatId, 'Forge: authenticated.');
       const heldPrompt = this.pending.take(event.channel, event.chatId);
       if (!heldPrompt) return { kind: 'handled' };
       await this.audit?.record(heldPrompt, 'held_prompt_replayed').catch(() => undefined);
-      await this.channel.send(
+      await this.sendTransientMessage(
         event.chatId,
         `Forge: running your held prompt — ${previewPrompt(heldPrompt.text)}`,
-        { signal: this.abort.signal },
       );
       return await this.handle(heldPrompt);
     }
@@ -307,14 +311,12 @@ export class RemoteController {
       this.auth.lock(event);
       this.pending.clear(event.channel, event.chatId);
       await this.audit?.record(event, 'session_locked').catch(() => undefined);
-      await this.channel.send(event.chatId, 'Forge: remote session locked.', {
-        signal: this.abort.signal,
-      });
+      await this.sendTransientMessage(event.chatId, 'Forge: remote session locked.');
       this.commandCleanup.schedule(event);
       return { kind: 'handled' };
     }
     if (!this.rateLimiter.allow(`${event.channel}:${event.senderId}:${event.chatId}`)) {
-      return { kind: 'rejected', reason: 'remote rate limit exceeded' };
+      return ephemeralRejection('remote rate limit exceeded');
     }
     if (event.kind === 'selection') {
       const result = await handleRemoteSelectionAction(
@@ -361,10 +363,7 @@ export class RemoteController {
     }
     if (event.kind === 'voice') {
       if (!this.voice) {
-        return {
-          kind: 'rejected',
-          reason: 'voice input is disabled (set voice.enabled in config)',
-        };
+        return ephemeralRejection('voice input is disabled (set voice.enabled in config)');
       }
       const result = await this.voice.bridge.handle(
         event,
@@ -380,7 +379,7 @@ export class RemoteController {
       return result;
     }
     if (event.text.length > this.options.maxMessageChars) {
-      return { kind: 'rejected', reason: 'message exceeds configured limit' };
+      return ephemeralRejection('message exceeds configured limit');
     }
     // An outstanding question owns the chat's next plain text: the agent is
     // blocked on it, so admitting the reply as a new prompt would both strand

@@ -9,13 +9,19 @@ import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
 import { RemoteAuditLog } from '../../src/remote/RemoteAuditLog';
 import { RemoteAuth } from '../../src/remote/RemoteAuth';
 import { RemoteController } from '../../src/remote/RemoteController';
+import { CommandCleanupScheduler } from '../../src/remote/CommandCleanupScheduler';
 import { RemoteOutboxDelivery } from '../../src/remote/RemoteOutboxDelivery';
 import { RemoteRateLimiter } from '../../src/remote/RemoteRateLimiter';
 import { RemoteRequestStore, remoteDedupKey } from '../../src/remote/RemoteRequestStore';
 import { RemoteRuntime } from '../../src/remote/RemoteRuntime';
 import { generateTotp } from '../../src/remote/RemoteTotp';
 import { RemoteTransportLease } from '../../src/remote/RemoteTransportLease';
-import type { RemoteChannel, RemoteInboundEvent, RemoteRequestRecord } from '../../src/remote/types';
+import type {
+  EphemeralKind,
+  RemoteChannel,
+  RemoteInboundEvent,
+  RemoteRequestRecord,
+} from '../../src/remote/types';
 import type { CompactionEvent } from '../../src/sidebar/CompactionService';
 import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
 import { CONVERSATION_BUSY_ERROR } from '../../src/sidebar/SendPipeline';
@@ -663,6 +669,49 @@ describe('remote durable boundaries', () => {
 });
 
 describe('remote runtime lifecycle', () => {
+  it('wires transport ephemeral kinds to the controller cleanup scheduler', async () => {
+    const { directory } = await newStore();
+    class HandlerChannel extends FakeRemoteChannel {
+      ephemeralHandler:
+        | ((chatId: string, messageIds: string[], kind: EphemeralKind) => void)
+        | undefined;
+
+      setEphemeralMessageHandler(
+        handler: ((chatId: string, messageIds: string[], kind: EphemeralKind) => void) | undefined,
+      ): void {
+        this.ephemeralHandler = handler;
+      }
+    }
+    const channel = new HandlerChannel('telegram');
+    const armAfter = vi.spyOn(CommandCleanupScheduler.prototype, 'armAfter');
+    const armEphemeral = vi.spyOn(CommandCleanupScheduler.prototype, 'armEphemeral');
+    const runtime = new RemoteRuntime({
+      storageDirectory: directory,
+      workspaceId: 'workspace',
+      host: host(),
+      secrets: new MemorySecrets() as unknown as vscode.SecretStorage,
+      channelFactories: { telegram: () => channel },
+      notifyLocal: vi.fn(),
+    });
+    try {
+      await runtime.applyConfig(
+        ForgeConfigSchema.parse({
+          models: [{ name: 'm', provider: 'ollama', endpoint: 'http://127.0.0.1:11434' }],
+          remote: { enabled: true, telegram: { enabled: true } },
+        }),
+      );
+      expect(channel.ephemeralHandler).toBeTypeOf('function');
+      channel.ephemeralHandler?.('chat', ['queued-id'], 'queued');
+      channel.ephemeralHandler?.('chat', ['transient-id'], 'transient');
+      expect(armAfter).toHaveBeenCalledWith('chat', ['queued-id'], 10);
+      expect(armEphemeral).toHaveBeenCalledWith('chat', ['transient-id']);
+    } finally {
+      await runtime.dispose();
+      armAfter.mockRestore();
+      armEphemeral.mockRestore();
+    }
+  });
+
   it('serializes configuration changes behind WhatsApp unlink', async () => {
     const { directory } = await newStore();
     let finishUnlink!: () => void;

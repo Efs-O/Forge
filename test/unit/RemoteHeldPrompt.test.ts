@@ -117,6 +117,78 @@ async function enrolledRig(inactivityTimeoutMinutes?: number) {
 }
 
 describe('held remote prompt', () => {
+  it('arms deletion for each auth lifecycle notice after pairing', async () => {
+    const { controller, channel, code } = await enrolledRig();
+    const armEphemeral = vi.spyOn(controller['commandCleanup'], 'armEphemeral');
+    try {
+      await channel.emit(event({ providerMessageId: 'prompt', text: 'hold this prompt' }));
+      const wrongCode = code === '000000' ? '000001' : '000000';
+      await channel.emit(event({ providerMessageId: 'wrong-code', text: wrongCode }));
+      await channel.emit(event({ providerMessageId: 'valid-code', text: code }));
+      await channel.emit(event({ providerMessageId: 'lock', text: '/lock' }));
+
+      expect(armEphemeral.mock.calls.map(([, ids]) => ids[0])).toEqual([
+        'sent-1', // authentication challenge
+        'sent-2', // authentication failed
+        'sent-3', // authenticated
+        'sent-4', // held prompt replay notice
+        'sent-5', // locked session
+      ]);
+    } finally {
+      await controller.stop();
+    }
+  });
+
+  it('arms the pairing-complete notice for deletion', async () => {
+    const { controller, channel } = await enrolledRig();
+    const armEphemeral = vi.spyOn(controller['commandCleanup'], 'armEphemeral');
+    vi.spyOn(controller['auth'], 'isOwner').mockResolvedValue(false);
+    vi.spyOn(controller['auth'], 'tryPair').mockResolvedValue('paired');
+    try {
+      await channel.emit(event({ senderId: 'new-owner', text: '/pair 12345678' }));
+      expect(armEphemeral).toHaveBeenCalledWith('chat-raw-id', ['sent-1']);
+    } finally {
+      await controller.stop();
+    }
+  });
+
+  it('handles a channel send that has no addressable message ids', async () => {
+    const { controller, channel } = await enrolledRig();
+    const armEphemeral = vi.spyOn(controller['commandCleanup'], 'armEphemeral');
+    vi.spyOn(controller['auth'], 'isOwner').mockResolvedValue(false);
+    vi.spyOn(controller['auth'], 'tryPair').mockResolvedValue('paired');
+    vi.spyOn(channel, 'send').mockResolvedValueOnce(undefined);
+    try {
+      await channel.emit(event({ senderId: 'new-owner', text: '/pair 12345678' }));
+      expect(armEphemeral).toHaveBeenCalledWith('chat-raw-id', []);
+    } finally {
+      await controller.stop();
+    }
+  });
+
+  it('marks the no-bridge voice-disabled rejection as ephemeral', async () => {
+    const { controller, channel, code } = await enrolledRig();
+    try {
+      await channel.emit(event({ providerMessageId: 'auth', text: code }));
+      const disposition = await channel.emit(
+        event({
+          providerMessageId: 'voice',
+          kind: 'voice',
+          providerFileId: 'voice-file',
+          mediaType: 'audio/ogg',
+          durationMs: 1_000,
+        }),
+      );
+      expect(disposition).toEqual({
+        kind: 'rejected',
+        reason: 'voice input is disabled (set voice.enabled in config)',
+        ephemeral: true,
+      });
+    } finally {
+      await controller.stop();
+    }
+  });
+
   it('holds a prompt through the challenge and runs it after the code', async () => {
     const { controller, channel, forgeHost, code } = await enrolledRig();
 

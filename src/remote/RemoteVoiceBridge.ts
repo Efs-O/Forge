@@ -110,13 +110,18 @@ export class RemoteVoiceBridge {
   ): Promise<RemoteInboundDisposition> {
     const settings = this.options.settings();
     if (!settings.enabled) {
-      return { kind: 'rejected', reason: 'voice input is disabled (set voice.enabled in config)' };
+      return {
+        kind: 'rejected',
+        reason: 'voice input is disabled (set voice.enabled in config)',
+        ephemeral: true,
+      };
     }
     if (event.durationMs > settings.maxSeconds * 1000) {
       const seconds = Math.round(event.durationMs / 1000);
       return {
         kind: 'rejected',
         reason: `voice note is ${seconds}s, over the ${settings.maxSeconds}s limit`,
+        ephemeral: true,
       };
     }
 
@@ -141,7 +146,11 @@ export class RemoteVoiceBridge {
     const download = this.options.channel.downloadAttachmentToFile;
     if (!download) {
       await operation.dispose();
-      return { kind: 'rejected', reason: 'this channel cannot download voice notes' };
+      return {
+        kind: 'rejected',
+        reason: 'this channel cannot download voice notes',
+        ephemeral: true,
+      };
     }
     const target = operation.reserve('source.audio');
     const { bytes, mediaType } = await download.call(
@@ -157,7 +166,7 @@ export class RemoteVoiceBridge {
         reason: 'oversize',
         detail: `${bytes} bytes exceeds voice.input.max_bytes ${settings.maxBytes}`,
       });
-      return { kind: 'rejected', reason: 'voice note is too large' };
+      return { kind: 'rejected', reason: 'voice note is too large', ephemeral: true };
     }
     const source = await operation.adopt(target, mediaType);
     // Cold start is ~4.2 s (§6.1b) and the sender has no other signal that

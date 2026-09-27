@@ -96,8 +96,10 @@ export type RemoteInboundDisposition =
   | { kind: 'queued'; requestId: string; position: number }
   | { kind: 'handled' }
   | { kind: 'duplicate'; requestId: string; state: RemoteExecutionState }
-  | { kind: 'rejected'; reason: string }
+  | { kind: 'rejected'; reason: string; ephemeral?: boolean }
   | { kind: 'retry'; reason: string };
+
+export type EphemeralKind = 'queued' | 'transient';
 
 export type RemoteExecutionState =
   | 'queued'
@@ -355,14 +357,9 @@ export interface RemoteChannel {
     messageId: string,
     options?: { signal?: AbortSignal },
   ): Promise<void>;
-  /**
-   * Sets the handler a transport calls after sending an ephemeral
-   * acknowledgement (a transient "got it" queued notice) so the controller can
-   * arm it for best-effort deletion after a fixed delay. Optional: transports
-   * without such acknowledgements omit it.
-   */
-  setEphemeralAcknowledgementHandler?(
-    handler: ((chatId: string, messageIds: string[], delaySeconds: number) => void) | undefined,
+  /** Registers cleanup for transport-sent queued acknowledgements and transient notices. */
+  setEphemeralMessageHandler?(
+    handler: ((chatId: string, messageIds: string[], kind: EphemeralKind) => void) | undefined,
   ): void;
   /** Optional native pagination surface (Telegram inline keyboard). */
   selectionPages?: RemoteSelectionPages;

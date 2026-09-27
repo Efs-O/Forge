@@ -763,7 +763,7 @@ describe('remote selection pagination', () => {
             selectionKind: 'models',
           }),
         ),
-      ).resolves.toEqual({ kind: 'rejected', reason: 'sender is not paired' });
+      ).resolves.toEqual({ kind: 'rejected', reason: 'sender is not paired', ephemeral: true });
       await expect(
         channel.emit(
           selectionEvent(token, {
