@@ -175,8 +175,20 @@ describe('inferCliAgentName', () => {
     expect(inferCliAgentName('C:\\tools\\codex.exe')).toBe('codex');
   });
 
-  it('defaults to claude for anything else', () => {
+  it('infers copilot from a bare name and a Windows shim path', () => {
+    expect(inferCliAgentName('copilot')).toBe('copilot');
+    expect(inferCliAgentName('C:\\Users\\me\\AppData\\Roaming\\npm\\copilot.cmd')).toBe(
+      'copilot',
+    );
+  });
+
+  it('infers claude from a bare name', () => {
     expect(inferCliAgentName('claude')).toBe('claude');
-    expect(inferCliAgentName('/usr/local/bin/my-custom-agent')).toBe('claude');
+  });
+
+  it('throws on an ambiguous name instead of defaulting to claude', () => {
+    expect(() => inferCliAgentName('/usr/local/bin/my-custom-agent')).toThrow(
+      'Cannot infer the CLI agent',
+    );
   });
 });

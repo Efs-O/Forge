@@ -10,6 +10,22 @@ import type { ToolFailureTracker } from '../../src/tools/StripTools';
 import type { DiffDecorations } from '../../src/sidebar/DiffDecorations';
 import { ToolRegistry } from '../../src/tools/ToolRegistry';
 import type { CliAgentDriver } from '../../src/agents/CliAgentDriver';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+
+/**
+ * A hermetic fake CLI executable: a real file whose basename infers as
+ * `claude`, so `inferCliAgentName` accepts it and `resolveCliExecutable`
+ * returns it without a PATH lookup. (An ambiguous name like node.exe is now
+ * rejected by inference, which is the behavior under test.)
+ */
+const FAKE_CLAUDE_CLI = (() => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-fake-cli-'));
+  const file = path.join(dir, process.platform === 'win32' ? 'claude.exe' : 'claude');
+  fs.writeFileSync(file, '');
+  return file;
+})();
 
 const { streamModelChatCompletion, inspectRuntimeModelCapabilities } = vi.hoisted(() => ({
   streamModelChatCompletion: vi.fn(),
@@ -365,7 +381,7 @@ describe('AgentLoop', () => {
       return { status: 'completed' as const, finalText: 'Implemented it.' };
     });
     const driver = { run } as unknown as CliAgentDriver;
-    const config = makeConfig({ provider: 'cli', cli: process.execPath });
+    const config = makeConfig({ provider: 'cli', cli: FAKE_CLAUDE_CLI });
     const conv = makeConversation();
     const acquire = vi.fn(async () => makeBackend());
     const post = vi.fn();
@@ -401,7 +417,7 @@ describe('AgentLoop', () => {
   it('does not commit or launch a CLI prompt when rollback preparation fails', async () => {
     const run = vi.fn();
     const driver = { run } as unknown as CliAgentDriver;
-    const config = makeConfig({ provider: 'cli', cli: process.execPath });
+    const config = makeConfig({ provider: 'cli', cli: FAKE_CLAUDE_CLI });
     const conv = makeConversation();
     const post = vi.fn();
     const checkpoint = {
@@ -439,7 +455,7 @@ describe('AgentLoop', () => {
         finalText: 'Second answer',
         sessionId: 'persistent-session',
       });
-    const config = makeConfig({ provider: 'cli', cli: process.execPath, cli_model: 'opus' });
+    const config = makeConfig({ provider: 'cli', cli: FAKE_CLAUDE_CLI, cli_model: 'opus' });
     const conv = makeConversation();
     const loop = makeLoop(
       makePool(vi.fn(async () => makeBackend())),
@@ -472,7 +488,7 @@ describe('AgentLoop', () => {
         sessionId: 'warm-session',
       })
       .mockResolvedValueOnce({ status: 'completed' as const, finalText: 'Second answer' });
-    const config = makeConfig({ provider: 'cli', cli: process.execPath, cli_model: 'opus' });
+    const config = makeConfig({ provider: 'cli', cli: FAKE_CLAUDE_CLI, cli_model: 'opus' });
     const conv = makeConversation();
     const post = vi.fn();
     const loop = makeLoop(
@@ -518,7 +534,7 @@ describe('AgentLoop', () => {
         return { status: 'completed' as const, finalText: 'First finished' };
       })
       .mockResolvedValueOnce({ status: 'completed' as const, finalText: 'Second finished' });
-    const config = makeConfig({ provider: 'cli', cli: process.execPath });
+    const config = makeConfig({ provider: 'cli', cli: FAKE_CLAUDE_CLI });
     const first = makeConversation();
     const second = { ...makeConversation(), id: 'conversation-2', messages: [] };
     const loop = makeLoop(

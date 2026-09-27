@@ -54,6 +54,11 @@ export async function runCliDelegation(
     );
   }
   const cliName = inferCliAgentName(target.model.cli);
+  if (cliName === 'copilot') {
+    throw new Error(
+      'Copilot is not a one-shot CLI delegation target — it runs as an owned ACP session (CopilotAcpSession), not through the one-shot driver.',
+    );
+  }
   const executable = await resolveCliExecutable(target.model.cli, cliName);
 
   const focusNote = request.focus ? `\nFocus: ${request.focus}` : '';

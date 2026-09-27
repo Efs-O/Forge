@@ -19,6 +19,12 @@ export interface JsonRpcHandlers {
   onNotification: (method: string, params: unknown) => void;
   /** Anything malformed or uncorrelated: the session treats it as fatal. */
   onProtocolError: (message: string) => void;
+  /**
+   * A response frame whose id matches no open request. Without this hook the
+   * frame is a protocol error; a session that deliberately stopped its
+   * in-flight requests (transport teardown) can ignore those specific ids.
+   */
+  onUnmatchedResponse?: (id: number) => void;
 }
 
 /** Correlates outbound requests with their replies. */
@@ -33,25 +39,33 @@ export class JsonRpcPending {
     return id;
   }
 
-  /** Settles the request `id` from its response frame. */
-  settle(id: number, message: Record<string, unknown>, onUnmatched: (msg: string) => void): void {
+  /**
+   * Settles the request `id` from its response frame. Returns false when no
+   * request is open under that id (already settled, or never sent).
+   */
+  settle(id: number, message: Record<string, unknown>): boolean {
     const pending = this.pending.get(id);
-    if (!pending) {
-      onUnmatched(`Codex app-server response ${id} has no matching request.`);
-      return;
-    }
+    if (!pending) return false;
     this.pending.delete(id);
     if (message['error']) {
       pending.reject(new Error(`${pending.method} failed: ${JSON.stringify(message['error'])}`));
     } else {
       pending.resolve(message['result']);
     }
+    return true;
   }
 
-  /** Fails every in-flight request — the transport is gone. */
-  rejectAll(error: Error): void {
-    for (const pending of this.pending.values()) pending.reject(error);
+  /**
+   * Fails every in-flight request — the transport is gone. Rejections are
+   * synchronous: every request promise is owned by a session handler, so none
+   * is left unhandled. Returns the ids that were stopped.
+   */
+  rejectAll(error: Error): number[] {
+    const ids = [...this.pending.keys()];
+    const pending = [...this.pending.values()];
     this.pending.clear();
+    for (const entry of pending) entry.reject(error);
+    return ids;
   }
 }
 
@@ -65,11 +79,11 @@ export function routeJsonRpcLine(
   try {
     message = JSON.parse(line);
   } catch {
-    handlers.onProtocolError('Codex app-server emitted malformed JSON.');
+    handlers.onProtocolError('CLI app-server emitted malformed JSON.');
     return;
   }
   if (!message || typeof message !== 'object') {
-    handlers.onProtocolError('Codex app-server emitted a non-object message.');
+    handlers.onProtocolError('CLI app-server emitted a non-object message.');
     return;
   }
   const value = message as Record<string, unknown>;
@@ -78,12 +92,16 @@ export function routeJsonRpcLine(
     return;
   }
   if (typeof value['id'] === 'number') {
-    pending.settle(value['id'], value, handlers.onProtocolError);
+    if (!pending.settle(value['id'], value)) {
+      if (handlers.onUnmatchedResponse) handlers.onUnmatchedResponse(value['id']);
+      else
+        handlers.onProtocolError(`CLI app-server response ${value['id']} has no matching request.`);
+    }
     return;
   }
   if (typeof value['method'] === 'string') {
     handlers.onNotification(value['method'], value['params']);
     return;
   }
-  handlers.onProtocolError('Codex app-server emitted an uncorrelated message.');
+  handlers.onProtocolError('CLI app-server emitted an uncorrelated message.');
 }

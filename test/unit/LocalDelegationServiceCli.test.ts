@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { describe, expect, it, vi } from 'vitest';
 import type { ForgeConfig } from '../../src/config/types';
@@ -21,9 +23,21 @@ vi.mock('vscode', () => ({
 
 const root = path.resolve('/workspace');
 
+/**
+ * A hermetic fake CLI executable: a real file whose basename infers as
+ * `claude`, so `inferCliAgentName` accepts it and `resolveCliExecutable`
+ * returns it without a PATH lookup.
+ */
+const FAKE_CLAUDE_CLI = (() => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-fake-cli-'));
+  const file = path.join(dir, process.platform === 'win32' ? 'claude.exe' : 'claude');
+  fs.writeFileSync(file, '');
+  return file;
+})();
+
 function config(): ForgeConfig {
   return {
-    models: [{ name: 'claude-code', provider: 'cli', cli: process.execPath }],
+    models: [{ name: 'claude-code', provider: 'cli', cli: FAKE_CLAUDE_CLI }],
     active_model: 'primary',
     llama_server: {},
   };

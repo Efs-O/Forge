@@ -5,7 +5,7 @@
  * registry or runs its own tool-calling loop for these.
  */
 
-export type CliAgentName = 'claude' | 'codex';
+export type CliAgentName = 'claude' | 'codex' | 'copilot';
 
 export interface CliAgentEvent {
   /** 'text': assistant text delta. 'status': concise tool-use status line, e.g. "[claude: Edit src/foo.ts]". */
@@ -50,8 +50,9 @@ export interface CliAdapter {
 /**
  * The `cli` config field only tells us the executable (bare name or path) —
  * it does not declare which CLI it is. We infer it from the basename, since
- * scope is fixed to exactly these two CLIs (plan §2.4). Falls back to
- * 'claude' when ambiguous so a plain `claude`/absolute custom path resolves.
+ * scope is fixed to exactly these three CLIs (plan §2.4). Ambiguous names
+ * throw instead of defaulting to Claude: a misconfigured executable must fail
+ * loudly, not silently run the wrong agent.
  */
 export function inferCliAgentName(cli: string): CliAgentName {
   const base = cli
@@ -60,5 +61,10 @@ export function inferCliAgentName(cli: string): CliAgentName {
     .pop()!
     .replace(/\.(exe|cmd|bat|ps1)$/i, '')
     .toLowerCase();
-  return base.includes('codex') ? 'codex' : 'claude';
+  if (base.includes('codex')) return 'codex';
+  if (base.includes('copilot')) return 'copilot';
+  if (base.includes('claude')) return 'claude';
+  throw new Error(
+    `Cannot infer the CLI agent from executable "${cli}" — name it claude, codex, or copilot.`,
+  );
 }

@@ -9,7 +9,8 @@ import { inferCliAgentName, type CliAgentName, type CliAgentRunResult } from './
 import { snapshotWorkspaceBefore } from './WorkspaceCheckpoint';
 
 export interface PreparedCliChatAgent {
-  cliName: CliAgentName;
+  /** Copilot is excluded: it runs as an owned ACP session, not a warm CLI chat. */
+  cliName: Exclude<CliAgentName, 'copilot'>;
   executable: string;
 }
 
@@ -86,6 +87,11 @@ export async function prepareCliChatAgent(
     throw new Error(`Forge: CLI model "${model.name}" is missing its cli executable setting.`);
   }
   const cliName = inferCliAgentName(model.cli);
+  if (cliName === 'copilot') {
+    throw new Error(
+      'Forge: Copilot is not a warm CLI chat agent — it runs as an owned ACP session (CopilotAcpSession), not through the one-shot driver.',
+    );
+  }
   return { cliName, executable: await resolveCliExecutable(model.cli, cliName) };
 }
 
