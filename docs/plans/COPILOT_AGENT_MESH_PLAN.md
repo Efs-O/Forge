@@ -1,6 +1,6 @@
 # Copilot as a Forge-owned agent-mesh peer
 
-**Status:** P0 transport GO; P1 implemented and verified; P2 pending  
+**Status:** P0 transport GO; P1 implemented and verified; P2 implemented and verified\
 **Date:** 2026-09-27  
 **Builds on:** [AGENT_MESH_PLAN.md](AGENT_MESH_PLAN.md) and
 [AGENT_MESSAGING_PLAN.md](AGENT_MESSAGING_PLAN.md)
@@ -244,6 +244,18 @@ hub-and-spoke mesh; Copilot runs its native tools on an owned turn; and every
 state shown on the board is supported by an observed event. `npm run ci` is
 green.
 
+**Implementation evidence (2026-09-28):** P2 shipped in the single Copilot
+mesh-integration commit (the one that adds `copilotOwned.ts`,
+`ownedSessionFactory.ts`, and the three `AgentMesh*Copilot*` test suites). The
+focused P2 suites pass 33/33 (provider 17, adapter 7, orchestrator 9),
+alongside the unchanged Claude provider, orchestrator, zero-config, and P1
+Copilot session suites (112 tests in the focused set); the final repository
+gate passes 3,315 tests with 36 skipped, plus type-check, lint, production
+build, and bundle-load smoke. Residual: `CliAgentSession.test.ts` (a
+pre-existing, non-Copilot suite) documents a load-dependent timeout race and
+can flake under full-suite load; it passed in the gate run above and in
+isolation.
+
 ## P3 — Telegram, sidebar, notifications, and operator surfaces
 
 Copilot must appear everywhere the user already observes the mesh:
@@ -324,7 +336,7 @@ parallel store.
 
 ## Acceptance criteria
 
-- [ ] **A1 — correct direction.** Copilot is a Forge mesh peer. No
+- [x] **A1 — correct direction.** Copilot is a Forge mesh peer. No
   `forge_delegate_task` or hidden Forge-conversation implementation is shipped
   as a substitute.
 - [x] **A2 — supported CLI contract.** The exact Copilot CLI version,
@@ -333,20 +345,20 @@ parallel store.
 - [ ] **A3 — full native coding capability.** An owned Copilot turn can read,
   edit, and run workspace commands through Copilot's native tools under the
   explicit launch policy, matching the intended owned Codex capability.
-- [ ] **A4 — canonical mesh reuse.** Copilot uses the existing adapter,
+- [x] **A4 — canonical mesh reuse.** Copilot uses the existing adapter,
   provider, FIFO, ownership, exchange log, and orchestrator. No duplicate
   queue, board, or tool surface exists.
-- [ ] **A5 — Forge tools.** `ask_live_session` and `tell_live_session` accept
+- [x] **A5 — Forge tools.** `ask_live_session` and `tell_live_session` accept
   `target: copilot`; mesh `steer`, lifecycle commands, and relays accept the
   `copilot` alias under the existing delegate gate.
-- [ ] **A6 — observed answers.** An ask returns Copilot's correlated final
+- [x] **A6 — observed answers.** An ask returns Copilot's correlated final
   answer. Failures, cancellation, empty answers, and timeouts are distinct.
-- [ ] **A7 — ordered steer.** Acceptance is durable before interruption; the
+- [x] **A7 — ordered steer.** Acceptance is durable before interruption; the
   current turn settles, then the steer runs at the head of the same FIFO.
-- [ ] **A8 — context and recovery.** Confirmed session identity survives normal
+- [x] **A8 — context and recovery.** Confirmed session identity survives normal
   turns and reload when supported. Resume failure emits `context_lost`; no
   silent fresh-session substitution occurs.
-- [ ] **A9 — process safety.** Close, timeout, cancellation, reload recovery,
+- [x] **A9 — process safety.** Close, timeout, cancellation, reload recovery,
   and idle TTL affect only the Forge-owned Copilot child process.
 - [ ] **A10 — truthful visibility.** `forge.sh who`, sidebar board/live
   sessions, Telegram `/status`, and Telegram `/queue` agree. Unobserved states
@@ -354,14 +366,14 @@ parallel store.
 - [ ] **A11 — notifications.** Completion, failure, cancellation, crash,
   recovery, and context-loss messages reach the same user-facing notification
   paths as Claude/Codex, with retry/dedup behavior covered.
-- [ ] **A12 — relay.** Forge, Claude, Codex, and Copilot can address one another
+- [x] **A12 — relay.** Forge, Claude, Codex, and Copilot can address one another
   through the Forge hub with shared exchange correlation and sender validation.
 - [ ] **A13 — disabled and unavailable behavior.** Disabled bus, missing CLI,
   signed-out CLI, quota failure, unsupported version, and malformed protocol
   are actionable errors with no fallback agent or session.
-- [ ] **A14 — old data compatibility.** Existing Claude/Codex aliases,
+- [x] **A14 — old data compatibility.** Existing Claude/Codex aliases,
   ownership files, config, and exchange events parse unchanged.
-- [ ] **A15 — cleanup.** All unneeded inbound Copilot delegation code, tests,
+- [x] **A15 — cleanup.** All unneeded inbound Copilot delegation code, tests,
   manifest entries, mocks, and obsolete report claims are removed; unrelated
   worktree changes are preserved.
 - [ ] **A16 — final gates.** `npm run ci`, `npm run package`, and

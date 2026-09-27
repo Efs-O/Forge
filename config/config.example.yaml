@@ -990,9 +990,13 @@ remote:
       max_fetch_bytes: 200000
       timeout_ms: 15000
 
-# Agent bus: ask_live_session writes straight into a running Claude Code / Codex session.
+# Agent bus: ask_live_session writes straight into a running Claude Code / Codex /
+# Copilot session. Copilot is always reached as a Forge-owned session under the
+# `copilot` alias (no user-opened transport); the CLI must be installed and signed in.
 agent_bus:
   enabled: true
   # Default session for ask_live_session; set a stable name with /rename.
   # claude_session: my-session   # pin one; list them with Forge: Show Live Claude Sessions
   # codex_thread: <thread id>
+  # Copilot CLI executable: a bare name on PATH or an absolute path.
+  # copilot_cli: copilot

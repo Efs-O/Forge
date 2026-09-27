@@ -26,7 +26,7 @@ function aliasesLockPath(root: string): string {
   return path.join(root, ALIASES_LOCK_NAME);
 }
 
-export type AgentKind = 'claude' | 'codex';
+export type AgentKind = 'claude' | 'codex' | 'copilot';
 
 export interface AliasRecord {
   agent: AgentKind;
@@ -81,7 +81,7 @@ export function readAliases(root: string): AliasTable {
     if (
       r &&
       typeof r === 'object' &&
-      (r.agent === 'claude' || r.agent === 'codex') &&
+      (r.agent === 'claude' || r.agent === 'codex' || r.agent === 'copilot') &&
       typeof r.session_id === 'string' &&
       r.session_id.trim().length > 0
     ) {

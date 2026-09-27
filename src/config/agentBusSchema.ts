@@ -26,6 +26,8 @@ export const AgentBusConfigSchema = z
     codex_thread: z.string().min(1).optional(),
     /** Codex executable: a bare name on PATH or an absolute path. */
     codex_cli: z.string().min(1).default('codex'),
+    /** Copilot CLI executable: a bare name on PATH or an absolute path. */
+    copilot_cli: z.string().min(1).default('copilot'),
   })
   .optional();
 

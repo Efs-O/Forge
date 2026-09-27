@@ -147,13 +147,13 @@ export function makeLiveSessionTool(deps: LiveSessionDeps): RegisteredTool {
       function: {
         name: 'ask_live_session',
         description:
-          'Ask a Claude Code (or Codex) session ALREADY RUNNING on this machine, which ' +
-          'knows the current work, and wait for its answer. Use it for "the live session", ' +
-          '"the other Claude", "the open Codex", or to answer a message another session sent ' +
-          'you (ask_local_agent starts a NEW, empty session instead). The target is resolved ' +
-          'by alias (claude / codex). Returns the exchange formatted for the user; an ' +
-          'unreachable session returns at once, saying why. One question per call; blocks ' +
-          'until the answer, the wait limit, or /stop.',
+          'Ask a Claude Code, Codex, or Copilot session ALREADY RUNNING on this machine, ' +
+          'which knows the current work, and wait for its answer. Use it for "the live ' +
+          'session", "the other Claude", "the open Codex", or to answer a message another ' +
+          'session sent you (ask_local_agent starts a NEW, empty session instead). The ' +
+          'target is resolved by alias (claude / codex / copilot). Returns the exchange ' +
+          'formatted for the user; an unreachable session returns at once, saying why. One ' +
+          'question per call; blocks until the answer, the wait limit, or /stop.',
         parameters: {
           type: 'object',
           properties: {
@@ -171,11 +171,11 @@ export function makeLiveSessionTool(deps: LiveSessionDeps): RegisteredTool {
             },
             target: {
               type: 'string',
-              enum: ['claude', 'codex'],
+              enum: ['claude', 'codex', 'copilot'],
               description:
-                'Which live session: "claude" (default) or "codex". Resolved by alias; a ' +
-                'Forge-owned session is created with one-time consent, and the config ' +
-                'thread/session value is a deprecated pin (the alias wins).',
+                'Which live session: "claude" (default), "codex", or "copilot". Resolved ' +
+                'by alias; a Forge-owned session is created with one-time consent, and the ' +
+                'config thread/session value is a deprecated pin (the alias wins).',
             },
             session: {
               type: 'string',
@@ -218,8 +218,8 @@ export function makeLiveSessionTool(deps: LiveSessionDeps): RegisteredTool {
         throw new Error(`ask_live_session: "wait_minutes" must be 1 to ${MAX_WAIT_MINUTES}.`);
       }
       const target: unknown = args['target'] ?? 'claude';
-      if (target !== 'claude' && target !== 'codex') {
-        throw new Error('ask_live_session: "target" must be "claude" or "codex".');
+      if (target !== 'claude' && target !== 'codex' && target !== 'copilot') {
+        throw new Error('ask_live_session: "target" must be "claude", "codex", or "copilot".');
       }
 
       const refusal = unattendedCliRefusal(deps.getConfig(), context?.conversationId);
@@ -238,11 +238,15 @@ export function makeLiveSessionTool(deps: LiveSessionDeps): RegisteredTool {
       // observed, so it gets the question plus a `forge.sh reply` command.
       // An explicit Claude session name bypasses the alias (§10).
       const orchestrator = getMeshOrchestrator();
-      const byAlias = target === 'codex' || !sessionArg || sessionArg.toLowerCase() === 'claude';
+      const byAlias =
+        target === 'codex' ||
+        target === 'copilot' ||
+        !sessionArg ||
+        sessionArg.toLowerCase() === 'claude';
       const adapter =
         orchestrator && byAlias ? await orchestrator.resolveAdapter(target) : undefined;
       if (orchestrator && adapter?.observesTurns) {
-        const who = target === 'codex' ? 'Codex' : 'Claude';
+        const who = target === 'codex' ? 'Codex' : target === 'copilot' ? 'Copilot' : 'Claude';
         // Forge reads this turn's final message as the answer. Say so: told by
         // AGENTS.md to run `forge.sh reply`, Codex reached for a bare `bash`,
         // which in PowerShell is WSL, and failed on a machine without it.
@@ -273,6 +277,16 @@ ${turn}`
         const message = codexMessage(replyFile(paths, id), id, subject, question);
         deliver = () =>
           (deps.queueCodex ?? queueToCodex)(bus?.codex_cli ?? 'codex', thread, message, signal);
+      } else if (target === 'copilot') {
+        // Copilot is always an owned observing session; reaching here means no
+        // copilot session could be resolved (CLI missing / creation failed).
+        return (
+          late +
+          'No live Copilot session is available, so the question was NOT sent. Copilot is ' +
+          'reached as a Forge-owned session under the `copilot` alias; check that the ' +
+          'Copilot CLI is installed and signed in. Do not fall back to ask_local_agent on ' +
+          'your own.'
+        );
       } else {
         const sessions = deps.claudeSessions ? deps.claudeSessions() : readClaudeSessions();
         const board = getBoardContext();

@@ -1,6 +1,7 @@
 import type { ForgeConfig } from '../config/types';
 import type { CodexAppServerSession } from '../agents/CodexAppServerSession';
 import type { ClaudeOwnedSession } from '../agents/ClaudeOwnedSession';
+import type { CopilotAcpSession } from '../agents/CopilotAcpSession';
 import { relayToClaude } from '../agentBus/claudeRelay';
 import { sendPeerMessage, type ClaudeSession } from '../agentBus/claudePeer';
 import { getAlias, type AliasRecord } from './aliasRegistry';
@@ -84,6 +85,16 @@ export interface OwnedClaudeFactory {
   }): Promise<ClaudeOwnedSession>;
 }
 
+export interface OwnedCopilotFactory {
+  create(options: {
+    alias: string;
+    sessionId: string | undefined;
+    executable: string;
+    cwd: string;
+    model?: string;
+  }): Promise<CopilotAcpSession>;
+}
+
 export function defaultSendClaude(
   bus: ForgeConfig['agent_bus'],
 ): (session: ClaudeSession, message: string, signal?: AbortSignal) => Promise<void> {
@@ -121,6 +132,23 @@ export function defaultClaudeFactory(): OwnedClaudeFactory {
         // CLAUDE.md § CLI Agent Delegation: Forge-launched Claude runs
         // unrestricted; the default mode refuses Bash under `-p`.
         permissionMode: 'bypassPermissions',
+      });
+    },
+  };
+}
+
+export function defaultCopilotFactory(): OwnedCopilotFactory {
+  return {
+    create: async ({ executable, cwd, sessionId }) => {
+      const { CopilotAcpSession } = await import('../agents/CopilotAcpSession');
+      // The P1 session launches with the fixed ACP flags
+      // (`--acp --stdio --no-remote --allow-all`), which grant the full native
+      // coding capability with no interactive approval prompt — the same intent
+      // as the owned Codex path. Resume a confirmed session id when present.
+      return new CopilotAcpSession({
+        executable,
+        cwd,
+        ...(sessionId ? { confirmedSessionId: sessionId } : {}),
       });
     },
   };

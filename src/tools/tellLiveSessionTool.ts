@@ -36,8 +36,9 @@ export function makeTellLiveSessionTool(deps: TellLiveSessionDeps): RegisteredTo
       function: {
         name: 'tell_live_session',
         description:
-          'Send a one-way notification (NOT a question) to a live Claude Code or Codex ' +
-          'session, and return at once without waiting for an answer. Use it for progress ' +
+          'Send a one-way notification (NOT a question) to a live Claude Code, Codex, or ' +
+          'Copilot session, and return at once without waiting for an answer. Use it for ' +
+          'progress ' +
           'and lifecycle notes: "started", "blocked", "turn finished", "you can stop". It ' +
           'does NOT block, does NOT expect a reply, and does NOT wait — so it is the right ' +
           'tool for a note, and the wrong tool for anything you need answered (use ' +
@@ -49,8 +50,9 @@ export function makeTellLiveSessionTool(deps: TellLiveSessionDeps): RegisteredTo
           properties: {
             target: {
               type: 'string',
-              enum: ['claude', 'codex'],
-              description: 'Which live session to notify: "claude" (default) or "codex".',
+              enum: ['claude', 'codex', 'copilot'],
+              description:
+                'Which live session to notify: "claude" (default), "codex", or "copilot".',
             },
             message: {
               type: 'string',
@@ -100,8 +102,8 @@ export function makeTellLiveSessionTool(deps: TellLiveSessionDeps): RegisteredTo
         throw new Error('tell_live_session: "to" must be a non-empty alias.');
       }
       const target: unknown = args['target'] ?? 'claude';
-      if (target !== 'claude' && target !== 'codex') {
-        throw new Error('tell_live_session: "target" must be "claude" or "codex".');
+      if (target !== 'claude' && target !== 'codex' && target !== 'copilot') {
+        throw new Error('tell_live_session: "target" must be "claude", "codex", or "copilot".');
       }
       const alias = (typeof toArg === 'string' && toArg.trim() ? toArg : target)
         .trim()

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #   forge.sh reply <id> [file]        answer a question Forge is waiting on
 #   forge.sh say <your-name> [--model <name>] [--new] [--reply-in-chat] [file]  message Forge; chat reply is read with view
-#   forge.sh send <your-name> <to> [file]  relay a message to another agent (claude/codex)
-#   forge.sh steer <your-name> <to> [file] interrupt <to>'s running turn (forge/claude/codex); runs next
+#   forge.sh send <your-name> <to> [file]  relay a message to another agent (claude/codex/copilot)
+#   forge.sh steer <your-name> <to> [file] interrupt <to>'s running turn (forge/claude/codex/copilot); runs next
 #   forge.sh cancel <your-name> <id|all>  withdraw your queued message(s) to Forge not yet started
 #   forge.sh join claude              this Claude Code session becomes the "claude" alias
 #   forge.sh who                      who is in the mesh, and what each is doing

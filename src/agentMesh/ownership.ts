@@ -97,7 +97,10 @@ export function readOwnership(root: string, alias: string): OwnershipRecord | un
   }
   try {
     const rec = JSON.parse(raw) as Partial<OwnershipRecord>;
-    if (typeof rec.alias !== 'string' || (rec.agent !== 'claude' && rec.agent !== 'codex'))
+    if (
+      typeof rec.alias !== 'string' ||
+      (rec.agent !== 'claude' && rec.agent !== 'codex' && rec.agent !== 'copilot')
+    )
       return undefined;
     return {
       alias: rec.alias,
@@ -430,7 +433,8 @@ export function recordConfirmedId(
     root,
     alias,
     {
-      agent: rec?.agent ?? (alias === 'codex' ? 'codex' : 'claude'),
+      agent:
+        rec?.agent ?? (alias === 'codex' ? 'codex' : alias === 'copilot' ? 'copilot' : 'claude'),
       session_id: id,
       registered_at: Date.now(),
       by: 'forge',

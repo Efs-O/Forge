@@ -1,7 +1,7 @@
 import { readEvents, groupByExchange, latestStates } from './exchangeLog';
 import { rendersAsQueued, type ExchangeState } from './deliveryState';
 import { listOwnedAliases, readOwnership } from './ownership';
-import { listAliases } from './aliasRegistry';
+import { listAliases, type AgentKind } from './aliasRegistry';
 import type { HostLivenessDeps } from './hostIdentity';
 
 /**
@@ -33,7 +33,7 @@ export interface BoardRow {
 
 export interface LiveSession {
   alias: string;
-  agent: 'claude' | 'codex';
+  agent: AgentKind;
   /** live (owned, running or idle), parked, dead, or none (no owned session). */
   state: 'live' | 'parked' | 'dead' | 'none';
 }

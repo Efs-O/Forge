@@ -1,5 +1,6 @@
 import type { CodexAppServerSession } from '../agents/CodexAppServerSession';
 import type { ClaudeOwnedSession } from '../agents/ClaudeOwnedSession';
+import type { CopilotAcpSession } from '../agents/CopilotAcpSession';
 import type { ClaudeSession } from '../agentBus/claudePeer';
 import type { MeshAdapter, MeshSendOptions, TurnResult } from './meshAdapter';
 
@@ -84,6 +85,43 @@ export class ClaudeOwnedAdapter implements MeshAdapter {
   async send(message: string, options?: MeshSendOptions): Promise<TurnResult> {
     const result = await this.session
       .send(message, options?.signal ? { signal: options.signal } : {})
+      .finally(() => this.onTurnEnd?.());
+    return {
+      status: result.status === 'timed_out' ? 'failed' : result.status,
+      finalText: result.finalText,
+    };
+  }
+
+  /** F-06: interrupt the running turn (a `priority=steer` message). */
+  interrupt(): void {
+    this.session.interrupt();
+  }
+}
+
+/**
+ * Observing: the Forge-owned GitHub Copilot CLI session (P2). Forge holds the
+ * ACP stdio process, so it sees the turn begin and end → real
+ * `started`/`completed` states, the same lifecycle semantics as the owned
+ * Codex app-server and owned Claude session.
+ */
+export class CopilotOwnedAdapter implements MeshAdapter {
+  readonly kind = 'copilot' as const;
+  readonly observesTurns = true;
+  readonly key = 'copilot-owned';
+
+  /** `onTurnEnd`: see `CodexOwnedAdapter`. `takePreamble`: the one-time
+   *  creation prompt (identifies the agent as `copilot`, points to the
+   *  forge.sh header for the current command list); undefined on resume. */
+  constructor(
+    private readonly session: CopilotAcpSession,
+    private readonly onTurnEnd?: () => void,
+    private readonly takePreamble?: () => string | undefined,
+  ) {}
+
+  async send(message: string, options?: MeshSendOptions): Promise<TurnResult> {
+    const preamble = this.takePreamble?.() ?? '';
+    const result = await this.session
+      .send(preamble + message, options?.signal ? { signal: options.signal } : {})
       .finally(() => this.onTurnEnd?.());
     return {
       status: result.status === 'timed_out' ? 'failed' : result.status,

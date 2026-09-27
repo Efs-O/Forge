@@ -96,8 +96,8 @@ exits 124. Ctrl-C stops it. Use it instead of re-asking Forge how it is going.
 ## Steering (interrupt a running turn)
 
 \`forge.sh steer <your-name> <to>\` stops \`<to>\`'s running turn and runs your
-text next — \`forge\` (Forge's own model), \`claude\` or \`codex\`. Use it to
-correct an agent mid-turn instead of waiting for it to finish.
+text next — \`forge\` (Forge's own model), \`claude\`, \`codex\` or \`copilot\`.
+Use it to correct an agent mid-turn instead of waiting for it to finish.
 
 ## Withdrawing a queued message
 
@@ -158,6 +158,23 @@ export function clientCommand(scriptPath: string): string {
   return `bash "${scriptPath.replace(/\\/g, '/')}"`;
 }
 
+/**
+ * The one-time creation prompt for a freshly-created owned Copilot session.
+ * It identifies the agent as `copilot` in the Forge mesh and points it to the
+ * forge.sh client for the current command list (referenced, not hardcoded, so
+ * it cannot go stale when forge.sh's verbs change). A resumed session already
+ * knows its identity and gets no preamble.
+ */
+export function copilotMeshPreamble(): string {
+  return (
+    `[Forge agent bus — mesh identity]\n` +
+    `You are "copilot", a Forge-owned agent-mesh peer (alongside "claude" and "codex").\n` +
+    `To message Forge or another agent, use the forge.sh client in the agent-bus folder;\n` +
+    `its usage header lists the current commands (say, send, steer, who, status, view, wait).\n` +
+    `Forge reads your final message in this turn as your answer.\n\n`
+  );
+}
+
 /** What a Claude session receives for one `ask_live_session` question. */
 export function claudeQuestion(
   scriptPath: string,
@@ -187,7 +204,9 @@ export function claudeQuestion(
 /** Default live-session reply hint: alias target or named Claude session. */
 function inboundHint(from: string): string {
   const alias = from.trim().toLowerCase();
-  if (alias === 'claude' || alias === 'codex') return `\`target: "${alias}"\``;
+  if (alias === 'claude' || alias === 'codex' || alias === 'copilot') {
+    return `\`target: "${alias}"\``;
+  }
   return `\`session: "${from}"\` (a Claude session)`;
 }
 
