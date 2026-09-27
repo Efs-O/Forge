@@ -76,38 +76,40 @@ if [ "$VERB" = "wait" ]; then
     [ "$FORGE_WAIT_POLL_SECONDS" -ge 1 ] || { echo "forge.sh: FORGE_WAIT_POLL_SECONDS is a positive whole number of seconds" >&2; exit 2; }
     POLL="$FORGE_WAIT_POLL_SECONDS"
   fi
-  # FORGE_WAIT_CLOCK is a test-only override (a function returning seconds
-  # since the epoch) so integration tests can advance the clock without
-  # sleeping; it must be a function name, nothing else.
-  if [ -n "${FORGE_WAIT_CLOCK:-}" ]; then
-    case "$FORGE_WAIT_CLOCK" in *[!A-Za-z0-9_]*) echo "forge.sh: FORGE_WAIT_CLOCK is a function name" >&2; exit 2;; esac
-    declare -F "$FORGE_WAIT_CLOCK" >/dev/null || { echo "forge.sh: FORGE_WAIT_CLOCK is a function name" >&2; exit 2; }
-    NOW="$FORGE_WAIT_CLOCK"
-  else
-    NOW="date +%s"
-  fi
   # Bounded: minutes up to 100000 keeps the deadline within 64-bit range.
   if [ "${MINUTES:-60}" -gt 100000 ]; then
     echo "forge.sh: minutes is 1-100000" >&2
     exit 2
   fi
-  START=$("$NOW")
-  LIMIT=$((START + ${MINUTES:-60} * 60))
+  TIMEOUT_SECONDS=$((${MINUTES:-60} * 60))
+  # Test-only: keep timeout coverage fast without replacing or evaluating a
+  # command from the environment.
+  if [ -n "${FORGE_WAIT_TIMEOUT_SECONDS:-}" ]; then
+    case "$FORGE_WAIT_TIMEOUT_SECONDS" in *[!0-9]*) echo "forge.sh: FORGE_WAIT_TIMEOUT_SECONDS is a positive whole number of seconds" >&2; exit 2;; esac
+    [ "$FORGE_WAIT_TIMEOUT_SECONDS" -ge 1 ] || { echo "forge.sh: FORGE_WAIT_TIMEOUT_SECONDS is a positive whole number of seconds" >&2; exit 2; }
+    TIMEOUT_SECONDS="$FORGE_WAIT_TIMEOUT_SECONDS"
+  fi
+  START="$(date +%s)"
+  LIMIT=$((START + TIMEOUT_SECONDS))
   LAST=""
   while :; do
     if LAST="$(curl -sS --fail-with-body -X GET -H "Authorization: Bearer $TOKEN" "$URL/agent/status?from=$NAME")"; then
-      case "$LAST" in
-        *"State: idle"*"Queued from you: 0"*)
-          printf '%s\n' "$LAST"
-          curl -sS --fail-with-body -X GET -H "Authorization: Bearer $TOKEN" "$URL/agent/view?from=$NAME&count=1" \
-            || { echo "forge.sh: Forge's endpoint did not accept it (see above)." >&2; exit 1; }
-          exit 0;;
+      STATE="$(printf '%s\n' "$LAST" | sed -n 's/^State: //p' | head -n 1)"
+      QUEUED="$(printf '%s\n' "$LAST" | sed -n 's/^Queued from you: //p' | head -n 1)"
+      case "$STATE" in
+        idle*)
+          if [ "$QUEUED" = "0" ]; then
+            printf '%s\n' "$LAST"
+            curl -sS --fail-with-body -X GET -H "Authorization: Bearer $TOKEN" "$URL/agent/view?from=$NAME&count=1" \
+              || { echo "forge.sh: Forge's endpoint did not accept it (see above)." >&2; exit 1; }
+            exit 0
+          fi;;
       esac
     else
       echo "forge.sh: Forge's endpoint did not accept it (see above)." >&2
       exit 1
     fi
-    if [ "$($NOW)" -ge "$LIMIT" ]; then
+    if [ "$(date +%s)" -ge "$LIMIT" ]; then
       echo "forge.sh: still not idle after ${MINUTES:-60} minute(s); last status:" >&2
       printf '%s\n' "$LAST" >&2
       exit 124

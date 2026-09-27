@@ -318,6 +318,13 @@ describe('forge.sh against the routes', () => {
     fs.rmSync(probe, { force: true });
   });
 
+  function installClientRoutes(deps: ConstructorParameters<typeof AgentRoutes>[0]): void {
+    routes.dispose();
+    routes = new AgentRoutes(deps);
+    routes.setEnabled(true);
+    routes.onListening(base);
+  }
+
   it('say starts a message and reply answers a question', async (ctx) => {
     if (!usable) ctx.skip();
     const said = await runClient(['say', 'claude-review'], 'hello Forge\n');
@@ -431,8 +438,10 @@ describe('forge.sh against the routes', () => {
     expect((await runClient(['wait', 'x', '1', 'extra'], '')).code).toBe(2);
     expect((await runClient(['wait', 'x'], '', { FORGE_WAIT_POLL_SECONDS: 'nope' })).code).toBe(2);
     expect((await runClient(['wait', 'x'], '', { FORGE_WAIT_POLL_SECONDS: '0' })).code).toBe(2);
-    expect((await runClient(['wait', 'x'], '', { FORGE_WAIT_CLOCK: 'rm -rf' })).code).toBe(2);
-    expect((await runClient(['wait', 'x'], '', { FORGE_WAIT_CLOCK: 'not_a_function' })).code).toBe(2);
+    expect(
+      (await runClient(['wait', 'x'], '', { FORGE_WAIT_TIMEOUT_SECONDS: 'nope' })).code,
+    ).toBe(2);
+    expect((await runClient(['wait', 'x'], '', { FORGE_WAIT_TIMEOUT_SECONDS: '0' })).code).toBe(2);
     expect(accepted).toEqual([]);
   }, 30_000);
 
@@ -446,7 +455,7 @@ describe('forge.sh against the routes', () => {
 
   it('wait: exits 1 when the endpoint rejects the request', async (ctx) => {
     if (!usable) ctx.skip();
-    install({
+    installClientRoutes({
       paths: () => paths,
       inbox: stubInbox(),
       token: TOKEN,
@@ -460,7 +469,7 @@ describe('forge.sh against the routes', () => {
   it('wait: busy -> idle/no-queue completes and prints the final status and the latest answer', async (ctx) => {
     if (!usable) ctx.skip();
     let polls = 0;
-    install({
+    installClientRoutes({
       paths: () => paths,
       inbox: stubInbox(),
       token: TOKEN,
@@ -491,7 +500,7 @@ describe('forge.sh against the routes', () => {
   it('wait: idle with a queue keeps polling until the queue drains', async (ctx) => {
     if (!usable) ctx.skip();
     let polls = 0;
-    install({
+    installClientRoutes({
       paths: () => paths,
       inbox: stubInbox(),
       token: TOKEN,
@@ -518,9 +527,34 @@ describe('forge.sh against the routes', () => {
     expect(polls).toBe(3);
   }, 30_000);
 
+  it('wait: does not mistake busy narration for the state and queue fields', async (ctx) => {
+    if (!usable) ctx.skip();
+    let polls = 0;
+    installClientRoutes({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      status: () => {
+        polls += 1;
+        return {
+          ok: true,
+          text:
+            `Chat: t · c1\n` +
+            `State: ${polls >= 2 ? 'idle' : 'busy · turn running 1 s'}\n` +
+            `Said: State: idle; Queued from you: 0\n` +
+            `Queued from you: 0`,
+        };
+      },
+      view: () => ({ ok: true, text: 'the answer' }),
+    });
+    const res = await runClient(['wait', 'x'], '', { FORGE_WAIT_POLL_SECONDS: '1' });
+    expect(res.code).toBe(0);
+    expect(polls).toBe(2);
+  }, 30_000);
+
   it('wait: a timed-out wait prints the last status to stderr and exits 124', async (ctx) => {
     if (!usable) ctx.skip();
-    install({
+    installClientRoutes({
       paths: () => paths,
       inbox: stubInbox(),
       token: TOKEN,
@@ -535,7 +569,10 @@ describe('forge.sh against the routes', () => {
           `Work: 1 model request(s), 0 tool call(s), 0 compaction(s) in this chat`,
       }),
     });
-    const res = await runClient(['wait', 'x', '1'], '', { FORGE_WAIT_POLL_SECONDS: '1' });
+    const res = await runClient(['wait', 'x', '1'], '', {
+      FORGE_WAIT_POLL_SECONDS: '1',
+      FORGE_WAIT_TIMEOUT_SECONDS: '1',
+    });
     expect(res.code).toBe(124);
     expect(res.out).toContain('still not idle after 1 minute(s); last status:');
     expect(res.out).toContain('State: busy');
