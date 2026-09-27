@@ -171,6 +171,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
         role: 'user',
         content: tell.text,
         midTurn: true,
+        ...(tell.internal ? { internal: true } : {}),
       })),
     }),
   );
@@ -181,6 +182,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
       // all) was invisible in the sidebar until the turn ended. Show it now.
       for (const tell of drained.messages) {
         if (typeof tell.content !== 'string') continue;
+        if (tell.internal) continue;
         host.post({ type: 'userPrompt', text: tell.content, conversationId, midTurn: true });
       }
       return drained;
@@ -410,9 +412,16 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
   const promptRouter = createSidebarPromptRouter({
     activeId: () => host.getSidebar().activeConversationId,
     isReserved: (id) => requestChains.isReserved(id),
-    addTell: (id, text) => midTurnInbox.add(id, { id: randomUUID(), text }),
-    send: (text, attachments, id, echo) =>
-      void send.send(text, attachments, id, undefined, echo ? { echoPrompt: true } : undefined),
+    addTell: (id, text, internal) =>
+      midTurnInbox.add(id, { id: randomUUID(), text, ...(internal ? { internal: true } : {}) }),
+    send: (text, attachments, id, echo, internal) =>
+      void send.send(
+        text,
+        attachments,
+        id,
+        internal ? { internal: true } : undefined,
+        echo ? { echoPrompt: true } : undefined,
+      ),
     isOpen: (id) => host.getSidebar().conversations.some((conversation) => conversation.id === id),
   });
 

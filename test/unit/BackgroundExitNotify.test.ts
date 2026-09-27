@@ -160,10 +160,16 @@ describe('background exit notification', () => {
     expect(addTell).toHaveBeenCalledWith('chat', 'notice');
     expect(send).not.toHaveBeenCalled();
 
-    deliverBackgroundExitNotice(notice, () => true, (text, id, echo) => {
-      routeSidebarPrompt(text, { conversationId: id }, 'active', () => false, addTell, send, echo);
+    deliverBackgroundExitNotice(notice, () => true, (text, id, echo, internal) => {
+      routeSidebarPrompt(text, { conversationId: id }, 'active', () => false, addTell, send, echo, internal);
     }, log);
-    expect(send).toHaveBeenCalledWith(expect.stringContaining('not a message from the user'), undefined, 'chat', true);
+    expect(send).toHaveBeenCalledWith(
+      expect.stringContaining('not a message from the user'),
+      undefined,
+      'chat',
+      false,
+      true,
+    );
     deliverBackgroundExitNotice(notice, () => false, send, log);
     expect(send).toHaveBeenCalledTimes(1);
     expect(log).toHaveBeenCalledOnce();

@@ -298,6 +298,7 @@ export class SendPipeline {
     const undeliveredAfterRelease = deps.midTurnInbox.takeUndelivered(conv.id);
     if (undeliveredAfterRelease.length === 0) return outcome;
     const tellText = undeliveredAfterRelease.map((tell) => tell.text).join('\n\n');
+    const internalTell = undeliveredAfterRelease.every((tell) => tell.internal === true);
     if (outcome.kind === 'cancelled' || outcome.kind === 'interrupted') {
       deps.post({ type: 'setInput', text: tellText, conversationId: conv.id });
       return outcome;
@@ -305,7 +306,13 @@ export class SendPipeline {
     // The chain has released here. A tell that arrived during evaluation or
     // compaction becomes a new addressed send, so it cannot be stranded in the
     // inbox after the original request has settled.
-    return this.send(tellText, undefined, conv.id, undefined, { echoPrompt: true });
+    return this.send(
+      tellText,
+      undefined,
+      conv.id,
+      internalTell ? { internal: true } : undefined,
+      internalTell ? undefined : { echoPrompt: true },
+    );
   }
 
   private returnUndeliveredTells(conversationId: string): void {

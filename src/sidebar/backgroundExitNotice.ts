@@ -28,27 +28,30 @@ export function routeSidebarPrompt(
   target: SidebarPromptRoute,
   activeConversationId: string,
   isReserved: (id: string) => boolean,
-  addTell: (id: string, text: string) => void,
+  addTell: (id: string, text: string, internal?: boolean) => void,
   send: (
     text: string,
     attachments?: AttachmentData[],
     conversationId?: string,
     echoPrompt?: boolean,
+    internal?: boolean,
   ) => void,
   echoPrompt = false,
+  internal = false,
 ): void {
   const id = target.conversationId ?? activeConversationId;
   if (!target.attachments?.length && isReserved(id)) {
-    addTell(id, text);
+    if (internal) addTell(id, text, true);
+    else addTell(id, text);
     return;
   }
-  send(text, target.attachments, target.conversationId, echoPrompt);
+  send(text, target.attachments, target.conversationId, echoPrompt, internal);
 }
 
 export function deliverBackgroundExitNotice(
   notice: BackgroundExecutionExitNotice,
   isOpen: (conversationId: string) => boolean,
-  route: (text: string, conversationId: string, echoPrompt: boolean) => void,
+  route: (text: string, conversationId: string, echoPrompt: boolean, internal: boolean) => void,
   logDrop: (message: string) => void,
 ): void {
   if (!isOpen(notice.conversationId)) {
@@ -57,12 +60,12 @@ export function deliverBackgroundExitNotice(
     );
     return;
   }
-  route(formatBackgroundExitNotice(notice), notice.conversationId, true);
+  route(formatBackgroundExitNotice(notice), notice.conversationId, false, true);
 }
 
 export function subscribeBackgroundExitNotices(
   isOpen: (conversationId: string) => boolean,
-  route: (text: string, conversationId: string, echoPrompt: boolean) => void,
+  route: (text: string, conversationId: string, echoPrompt: boolean, internal: boolean) => void,
 ): { dispose(): void } {
   return backgroundExecutionManager.onNotifiedExit((notice) =>
     deliverBackgroundExitNotice(notice, isOpen, route, (message) => logger.info(message)),
@@ -78,11 +81,11 @@ export interface SidebarPromptRouter {
 export function createSidebarPromptRouter(options: {
   activeId: () => string;
   isReserved: (id: string) => boolean;
-  addTell: (id: string, text: string) => void;
-  send: (text: string, attachments?: AttachmentData[], id?: string, echoPrompt?: boolean) => void;
+  addTell: (id: string, text: string, internal?: boolean) => void;
+  send: (text: string, attachments?: AttachmentData[], id?: string, echoPrompt?: boolean, internal?: boolean) => void;
   isOpen: (id: string) => boolean;
 }): SidebarPromptRouter {
-  const route = (text: string, attachments?: AttachmentData[], id?: string, echoPrompt = false) =>
+  const route = (text: string, attachments?: AttachmentData[], id?: string, echoPrompt = false, internal = false) =>
     routeSidebarPrompt(
       text,
       { ...(id ? { conversationId: id } : {}), ...(attachments ? { attachments } : {}) },
@@ -91,9 +94,10 @@ export function createSidebarPromptRouter(options: {
       options.addTell,
       options.send,
       echoPrompt,
+      internal,
     );
   const subscription = subscribeBackgroundExitNotices(options.isOpen, (text, id, echo) =>
-    route(text, undefined, id, echo),
+    route(text, undefined, id, echo, true),
   );
   return { route, dispose: () => subscription.dispose() };
 }

@@ -9,6 +9,7 @@ import type { ChatMessage } from '../llm/types';
 export interface MidTurnTell {
   id: string;
   text: string;
+  internal?: boolean;
 }
 
 /**
