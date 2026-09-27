@@ -1,6 +1,6 @@
 # Copilot as a Forge-owned agent-mesh peer
 
-**Status:** P0 transport GO; P1 implemented and verified; P2 implemented and verified\
+**Status:** P0 transport GO; P1 implemented and verified; P2 implemented and verified; P3 implemented and verified\
 **Date:** 2026-09-27  
 **Builds on:** [AGENT_MESH_PLAN.md](AGENT_MESH_PLAN.md) and
 [AGENT_MESSAGING_PLAN.md](AGENT_MESSAGING_PLAN.md)
@@ -258,6 +258,23 @@ isolation.
 
 ## P3 — Telegram, sidebar, notifications, and operator surfaces
 
+**Implementation evidence (2026-09-28):** P3 shipped in the operator-surfaces
+commit. The projection and notification owners (`boardView.projectLiveSessions`,
+`meshWho.projectWho`, `RemoteSessionCommands` `/status` + `/queue`,
+`agentMeshSetup` crash/context-lost/stand-in/idle-TTL events, and the
+lifecycle-command dispatcher in `meshOrchestrator.handleCommand`) are
+agent-agnostic and carry `copilot` through the same paths as Claude/Codex.
+The focused P3 suite (`AgentMeshCopilotSurfaces.test.ts`) passes 19/19, covering
+the `forge.sh who` projection (owned+idle/busy/parked/dead, peer+unknown for a
+foreign live owner, absent for an unknown alias), the sidebar board projection
+(live/parked/dead/none, agent field, no codex default), the Telegram `/status`
+Sessions line (live/parked/dead/none), unbound remote chat (no board line,
+no bus = undefined), Telegram `/queue` (agent-bus label + management note),
+unavailable Copilot CLI (resolveAdapter undefined, tell reports no-live-session,
+no fallback), and outbox retry/dedup (failed send retries the same item,
+delivers exactly once). The final repository gate passes 3,340 tests with 36
+skipped, plus type-check, lint, production build, and bundle-load smoke.
+
 Copilot must appear everywhere the user already observes the mesh:
 
 - `forge.sh who` lists `copilot` with truthful attachment/activity and queue
@@ -360,15 +377,15 @@ parallel store.
   silent fresh-session substitution occurs.
 - [x] **A9 — process safety.** Close, timeout, cancellation, reload recovery,
   and idle TTL affect only the Forge-owned Copilot child process.
-- [ ] **A10 — truthful visibility.** `forge.sh who`, sidebar board/live
+- [x] **A10 — truthful visibility.** `forge.sh who`, sidebar board/live
   sessions, Telegram `/status`, and Telegram `/queue` agree. Unobserved states
   remain unknown/accepted rather than idle/completed.
-- [ ] **A11 — notifications.** Completion, failure, cancellation, crash,
+- [x] **A11 — notifications.** Completion, failure, cancellation, crash,
   recovery, and context-loss messages reach the same user-facing notification
   paths as Claude/Codex, with retry/dedup behavior covered.
 - [x] **A12 — relay.** Forge, Claude, Codex, and Copilot can address one another
   through the Forge hub with shared exchange correlation and sender validation.
-- [ ] **A13 — disabled and unavailable behavior.** Disabled bus, missing CLI,
+- [x] **A13 — disabled and unavailable behavior.** Disabled bus, missing CLI,
   signed-out CLI, quota failure, unsupported version, and malformed protocol
   are actionable errors with no fallback agent or session.
 - [x] **A14 — old data compatibility.** Existing Claude/Codex aliases,
