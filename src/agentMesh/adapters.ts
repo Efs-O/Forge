@@ -6,12 +6,23 @@ import type { MeshAdapter, MeshSendOptions, TurnResult } from './meshAdapter';
 
 const codexAdapterKeys = new WeakMap<CodexAppServerSession, string>();
 let nextCodexAdapterKey = 1;
+const copilotAdapterKeys = new WeakMap<CopilotAcpSession, string>();
+let nextCopilotAdapterKey = 1;
 
 function codexAdapterKey(session: CodexAppServerSession): string {
   let key = codexAdapterKeys.get(session);
   if (!key) {
     key = `codex-owned:${nextCodexAdapterKey++}`;
     codexAdapterKeys.set(session, key);
+  }
+  return key;
+}
+
+function copilotAdapterKey(session: CopilotAcpSession): string {
+  let key = copilotAdapterKeys.get(session);
+  if (!key) {
+    key = `copilot-owned:${nextCopilotAdapterKey++}`;
+    copilotAdapterKeys.set(session, key);
   }
   return key;
 }
@@ -107,7 +118,7 @@ export class ClaudeOwnedAdapter implements MeshAdapter {
 export class CopilotOwnedAdapter implements MeshAdapter {
   readonly kind = 'copilot' as const;
   readonly observesTurns = true;
-  readonly key = 'copilot-owned';
+  readonly key: string;
 
   /** `onTurnEnd`: see `CodexOwnedAdapter`. `takePreamble`: the one-time
    *  creation prompt (identifies the agent as `copilot`, points to the
@@ -116,7 +127,9 @@ export class CopilotOwnedAdapter implements MeshAdapter {
     private readonly session: CopilotAcpSession,
     private readonly onTurnEnd?: () => void,
     private readonly takePreamble?: () => string | undefined,
-  ) {}
+  ) {
+    this.key = copilotAdapterKey(session);
+  }
 
   async send(message: string, options?: MeshSendOptions): Promise<TurnResult> {
     const preamble = this.takePreamble?.() ?? '';

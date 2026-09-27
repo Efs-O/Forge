@@ -34,7 +34,14 @@ describe('CopilotOwnedAdapter (P2)', () => {
     const adapter = new CopilotOwnedAdapter(session);
     expect(adapter.kind).toBe('copilot');
     expect(adapter.observesTurns).toBe(true);
-    expect(adapter.key).toBe('copilot-owned');
+    expect(adapter.key).toMatch(/^copilot-owned:/);
+  });
+
+  it('keeps one key per session and changes it when the session is replaced', () => {
+    const first = new FakeCopilotSession('first', { status: 'completed', finalText: 'x' });
+    const second = new FakeCopilotSession('second', { status: 'completed', finalText: 'x' });
+    expect(new CopilotOwnedAdapter(first).key).toBe(new CopilotOwnedAdapter(first).key);
+    expect(new CopilotOwnedAdapter(second).key).not.toBe(new CopilotOwnedAdapter(first).key);
   });
 
   it('send resolves at turn end with the final text', async () => {
