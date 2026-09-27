@@ -1,5 +1,17 @@
 # Forge — Recent Changes
 
+## 0.16.57
+
+### Copilot agent-mesh P3+P4: operator surfaces and live validation (2026-09-28)
+
+- P3: `AgentMeshCopilotSurfaces.test.ts` (19 tests) pins the projection and
+  notification owners to agree on Copilot state across `forge.sh who`, the
+  sidebar board, Telegram `/status` and `/queue`, unbound remote chats,
+  unavailable-CLI refusal, and outbox retry/dedup.
+- P4: live Copilot CLI validation confirmed read-only task, workspace edit,
+  session resume with retained context, and mesh reply. Packaged
+  `forge-llm-0.16.57.vsix` (8.45 MB).
+
 ## 0.16.56
 
 ### Codex API replies and visible mesh chats (2026-09-25)

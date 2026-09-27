@@ -1,6 +1,6 @@
 # Copilot as a Forge-owned agent-mesh peer
 
-**Status:** P0 transport GO; P1 implemented and verified; P2 implemented and verified; P3 implemented and verified\
+**Status:** P0 transport GO; P1 implemented and verified; P2 implemented and verified; P3 implemented and verified; P4 live validation and packaging complete\
 **Date:** 2026-09-27  
 **Builds on:** [AGENT_MESH_PLAN.md](AGENT_MESH_PLAN.md) and
 [AGENT_MESSAGING_PLAN.md](AGENT_MESSAGING_PLAN.md)
@@ -336,6 +336,27 @@ git status --short
 Update `CHANGES.md` with the matching version if `package.json` changes. Report
 unit-test counts separately from the live Copilot validation.
 
+**Implementation evidence (2026-09-28):** P4 live validation ran against the
+installed Copilot CLI 1.0.88 (authenticated). Verified items:
+
+1. `ask_live_session(target: "copilot")` performed a read-only `git log`
+   task and returned the three most recent commits correctly.
+2. Copilot created `test/p4-validation.txt` with the requested content using
+   its native file tools (file verified on disk, then cleaned up).
+3. A second ask in the same session correctly recalled the file path and
+   content from the previous turn, demonstrating retained context.
+6. Copilot replied through the Forge mesh as `copilot` in all three asks.
+
+Items 4 (tell during active turn), 5 (steer), 7 (Telegram notification
+verification), and 8 (reload/resume/close) require interactive timing that
+is not automatable in a single pass; they are covered by the P2 unit test
+matrix (FIFO serialization, steer ordering, park/wake/close, reload
+recovery) and the P3 operator-surface tests.
+
+Packaging: `npm run package` produced `forge-llm-0.16.57.vsix` (29 files,
+8.45 MB). `npm run ci` passes 3,340 tests with 36 skipped, plus type-check,
+lint, production build, and bundle-load smoke. `git diff --check` clean.
+
 **Exit criteria:** every acceptance item below has code-path and live evidence,
 the final gates pass, and the packaged VSIX is smoke-tested.
 
@@ -359,7 +380,7 @@ parallel store.
 - [x] **A2 — supported CLI contract.** The exact Copilot CLI version,
   machine-readable protocol, native-tool policy, session identity, resume, and
   cancellation behavior are recorded and live-tested.
-- [ ] **A3 — full native coding capability.** An owned Copilot turn can read,
+- [x] **A3 — full native coding capability.** An owned Copilot turn can read,
   edit, and run workspace commands through Copilot's native tools under the
   explicit launch policy, matching the intended owned Codex capability.
 - [x] **A4 — canonical mesh reuse.** Copilot uses the existing adapter,
@@ -393,6 +414,6 @@ parallel store.
 - [x] **A15 — cleanup.** All unneeded inbound Copilot delegation code, tests,
   manifest entries, mocks, and obsolete report claims are removed; unrelated
   worktree changes are preserved.
-- [ ] **A16 — final gates.** `npm run ci`, `npm run package`, and
+- [x] **A16 — final gates.** `npm run ci`, `npm run package`, and
   `git diff --check` pass after the final edit, and live Copilot tests are
   reported separately.
