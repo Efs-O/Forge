@@ -22,6 +22,27 @@ export class ToolLoopDetectedError extends Error {
   }
 }
 
+/**
+ * Consecutive loop-guard stops absorbed by an automatic corrective nudge
+ * before the turn actually ends. Bounded at 2: a stop nobody is watching
+ * (a job, a sleeping remote user) should get a couple of chances to
+ * self-correct rather than dying on the first detection, but a third stop
+ * after two nudges means the nudges did not work and the turn must still
+ * end — an unbounded retry would burn the exact budget this guard exists
+ * to protect.
+ */
+export const MAX_LOOP_RECOVERIES = 2;
+
+/** User-role nudge sent when a loop-guard stop is retried automatically instead of ending the turn. */
+export function loopRecoveryNudge(reason: string, attemptsLeft: number): string {
+  return (
+    `${reason} Forge is continuing this turn automatically instead of stopping, so nobody has to be ` +
+    `watching (${attemptsLeft} more automatic ${attemptsLeft === 1 ? 'retry' : 'retries'} left after this). ` +
+    "Whatever you decide to do next, it can't be that same call again — you already have its result. " +
+    'Use your own judgment about what actually moves the task forward from here.'
+  );
+}
+
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
   if (value && typeof value === 'object') {

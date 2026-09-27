@@ -9,6 +9,7 @@ import {
 import { sendModelProfileSelection } from './RemoteModelProfileSelection';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
+import { QUEUED_ACK_DELETE_SECONDS } from './TelegramAcknowledgement';
 import { collectSystemReport } from '../system/SystemReport';
 import { formatSystemReport } from '../system/formatSystemReport';
 import {
@@ -32,6 +33,15 @@ export interface RemoteCommandContext {
   host: ForgeHostFacade;
   workspaceId: string;
   signal: AbortSignal;
+  /**
+   * Arms deletion of a transient progress message (the /compact progress
+   * line) after the fixed queued-ack delay, once it reaches its terminal
+   * text. Optional: a missing scheduler just leaves the line undeleted,
+   * same as today.
+   */
+  commandCleanup?: {
+    armAfter: (chatId: string, messageIds: string[], delaySeconds: number) => void;
+  };
   inactivityTimeoutMinutes: number;
   /** Current `remote.rate_limit_per_minute`, so `/ratelimit` can report it. */
   rateLimitPerMinute: number;
@@ -232,6 +242,8 @@ async function executeRemoteCommand(
       // progress line to failed; the error then flows through the existing
       // command error path below.
       await editProgress(context.channel, event.chatId, progressId, 'Forge: compaction failed.');
+      if (progressId)
+        context.commandCleanup?.armAfter(event.chatId, [progressId], QUEUED_ACK_DELETE_SECONDS);
       throw err;
     }
     // Edit the progress line from the captured outcome BEFORE the authoritative
@@ -247,6 +259,8 @@ async function executeRemoteCommand(
           ? 'Forge: compaction skipped.'
           : 'Forge: compaction failed.',
     );
+    if (progressId)
+      context.commandCleanup?.armAfter(event.chatId, [progressId], QUEUED_ACK_DELETE_SECONDS);
     const budget = context.host.contextBudget(binding.conversationId);
     await context.channel.send(
       event.chatId,

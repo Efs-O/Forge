@@ -1,5 +1,6 @@
 import type { AgentProgressEvent } from '../sidebar/AgentProgress';
 import type { RemoteChannel } from './types';
+import { QUEUED_ACK_DELETE_SECONDS } from './TelegramAcknowledgement';
 
 const DEFAULT_EDIT_INTERVAL_MS = 1_500;
 const MAX_STATUS_CHARS = 500;
@@ -99,6 +100,19 @@ export class RemoteAgentProgress {
     private maxMessageChars: number,
     private readonly editIntervalMs = DEFAULT_EDIT_INTERVAL_MS,
     private readonly onError?: (message: string) => void,
+    /**
+     * Arms deletion of the finished progress bubble after the fixed queued-ack
+     * delay. The bubble is status only ("Forge: completed.", "Forge: failed.",
+     * a loop-guard warning) — the real answer is always a separate message
+     * (see the class comment), so deleting this one loses no conversation
+     * record; it just stops a purely transient status line from sitting in
+     * the chat forever like the real replies around it do not.
+     */
+    private readonly armAfter?: (
+      chatId: string,
+      messageIds: string[],
+      delaySeconds: number,
+    ) => void,
   ) {}
 
   updateMaxMessageChars(maxMessageChars: number): void {
@@ -255,6 +269,7 @@ export class RemoteAgentProgress {
         signal: this.signal,
       })
       .catch((err) => this.report(err));
+    this.armAfter?.(state.chatId, [state.messageId], QUEUED_ACK_DELETE_SECONDS);
   }
 
   async dispose(): Promise<void> {

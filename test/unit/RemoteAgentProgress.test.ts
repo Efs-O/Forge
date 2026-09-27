@@ -318,4 +318,38 @@ describe('RemoteAgentProgress', () => {
     expect(occurrences).toBe(1);
   });
 
+  it('arms deletion of the finished progress bubble at the fixed queued-ack delay', async () => {
+    vi.useFakeTimers();
+    const channel = new FakeRemoteChannel();
+    const armAfter = vi.fn();
+    const progress = new RemoteAgentProgress(
+      channel,
+      new AbortController().signal,
+      () => true,
+      3_900,
+      1_000,
+      undefined,
+      armAfter,
+    );
+    progress.begin('c1', 'chat-a', 'message-1');
+
+    await progress.finish('c1', 'Forge: completed.');
+
+    expect(armAfter).toHaveBeenCalledWith('chat-a', ['message-1'], 10);
+  });
+
+  it('finishes without arming deletion when no armAfter callback is wired', async () => {
+    vi.useFakeTimers();
+    const channel = new FakeRemoteChannel();
+    const progress = new RemoteAgentProgress(
+      channel,
+      new AbortController().signal,
+      () => true,
+      3_900,
+      1_000,
+    );
+    progress.begin('c1', 'chat-a', 'message-1');
+
+    await expect(progress.finish('c1', 'Forge: completed.')).resolves.toBeUndefined();
+  });
 });

@@ -1057,6 +1057,7 @@ describe('remote compaction progress notifications', () => {
     });
     const compact = vi.fn(async () => 'compacted' as const);
     const channel = new FakeRemoteChannel();
+    const armAfter = vi.fn();
     const context = {
       channel,
       store: state,
@@ -1070,6 +1071,7 @@ describe('remote compaction progress notifications', () => {
       rateLimitPerMinute: 30,
       modelEntries: [],
       workspaceAliases: {},
+      commandCleanup: { armAfter },
     };
     await handleRemoteCommand(
       {
@@ -1093,6 +1095,9 @@ describe('remote compaction progress notifications', () => {
     expect(channel.edits).toContainEqual(
       expect.objectContaining({ chatId: 'chat-a', text: 'Forge: compaction complete.' }),
     );
+    // The progress line is deleted at the fixed queued-ack delay once it
+    // reaches its terminal text; the authoritative result message is untouched.
+    expect(armAfter).toHaveBeenCalledWith('chat-a', [expect.any(String)], 10);
     expect(channel.sent).toContainEqual(
       expect.objectContaining({
         chatId: 'chat-a',

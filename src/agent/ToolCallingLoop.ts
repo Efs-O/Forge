@@ -6,7 +6,12 @@ import type { ChatMessage, ToolCall, ToolDefinition } from '../llm/types';
 import { StructuredOutputStripper } from '../tools/StructuredOutputParser';
 import { extractFallbackToolCalls } from '../tools/ToolCallFallback';
 import { MIN_ROUND_HEADROOM_TOKENS, reasoningReserve } from '../util/contextBudget';
-import { ToolLoopDetectedError, ToolLoopGuard } from './ToolLoopGuard';
+import {
+  loopRecoveryNudge,
+  MAX_LOOP_RECOVERIES,
+  ToolLoopDetectedError,
+  ToolLoopGuard,
+} from './ToolLoopGuard';
 import { StreamedAssistantTurn } from './StreamedAssistantTurn';
 import { buildRoundRequest } from './buildRoundRequest';
 import { sanitizeText, streamOnce } from './toolCallingStream';
@@ -141,7 +146,8 @@ export async function runToolCallingLoop(
   options: ToolCallingLoopOptions,
 ): Promise<ToolCallingLoopResult> {
   let finalText = '';
-  const loopGuard = new ToolLoopGuard();
+  let loopGuard = new ToolLoopGuard();
+  let loopRecoveries = 0;
   let truncationRecoveries = 0;
   let reasoningStopRetries = 0;
   let midTurnCompactions = 0;
@@ -305,6 +311,16 @@ export async function runToolCallingLoop(
       try {
         loopGuard.beforeRound(calls, options.isMutatingTool);
       } catch (error) {
+        if (error instanceof ToolLoopDetectedError && loopRecoveries < MAX_LOOP_RECOVERIES) {
+          loopRecoveries++;
+          loopGuard = new ToolLoopGuard();
+          options.messages.push({
+            role: 'user',
+            content: loopRecoveryNudge(error.message, MAX_LOOP_RECOVERIES - loopRecoveries),
+          });
+          options.onMessagesChanged?.();
+          continue;
+        }
         options.onRepeatedCall?.();
         throw error;
       }
@@ -340,6 +356,16 @@ export async function runToolCallingLoop(
         );
         if (warned) options.onMessagesChanged?.();
       } catch (error) {
+        if (error instanceof ToolLoopDetectedError && loopRecoveries < MAX_LOOP_RECOVERIES) {
+          loopRecoveries++;
+          loopGuard = new ToolLoopGuard();
+          options.messages.push({
+            role: 'user',
+            content: loopRecoveryNudge(error.message, MAX_LOOP_RECOVERIES - loopRecoveries),
+          });
+          options.onMessagesChanged?.();
+          continue;
+        }
         if (error instanceof ToolLoopDetectedError) options.onRepeatedCall?.();
         throw error;
       }

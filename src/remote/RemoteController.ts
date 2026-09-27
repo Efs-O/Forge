@@ -135,6 +135,8 @@ export class RemoteController {
       Math.min(options.maxMessageChars, 3_900),
       1_500,
       options.onError,
+      (chatId, messageIds, delaySeconds) =>
+        this.commandCleanup.armAfter(chatId, messageIds, delaySeconds),
     );
     this.fanout = new RemoteNotificationFanout({
       store,
@@ -413,6 +415,7 @@ export class RemoteController {
           host: this.host,
           workspaceId: this.options.workspaceId,
           signal: this.abort.signal,
+          commandCleanup: this.commandCleanup,
           inactivityTimeoutMinutes: this.options.inactivityTimeoutMinutes ?? 30,
           rateLimitPerMinute: this.options.rateLimitPerMinute,
           modelEntries: this.options.modelEntries,
