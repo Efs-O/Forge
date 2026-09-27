@@ -124,6 +124,13 @@ export class MeshSessionProvider implements SessionProvider {
     await this.factory.waitCodexIdle('codex');
     const existing = this.factory.getOwnedCodex('codex');
     if (existing) return this.factory.codexOwnedAdapter('codex', existing);
+    const aliasRec = getAlias(this.deps.busRoot, 'codex');
+    // `forge.sh join codex` registers the interactive thread as user-owned.
+    // It already has an active writer (the interactive Codex process), so it
+    // must be reached through `codex queue`; attempting an owned app-server
+    // resume races that writer and fails with `thread ... already has an
+    // active writer`.
+    if (aliasRec?.by === 'user') return this.factory.codexAdapterIfLive();
     const rec = readOwnership(this.deps.busRoot, 'codex');
     // M2: a session another LIVE window owns is never re-spawned here (that
     // window serializes the alias's turns; a second app-server would race its

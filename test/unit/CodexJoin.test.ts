@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { joinCodex } from '../../src/agentMesh/codexJoin';
 import { getAlias } from '../../src/agentMesh/aliasRegistry';
 import { codexQueueAdapter } from '../../src/agentMesh/codexPinLiveness';
+import { MeshSessionProvider } from '../../src/agentMesh/sessionProvider';
 import type { ForgeConfig } from '../../src/config/types';
 
 let root: string;
@@ -35,6 +36,35 @@ describe('interactive Codex join', () => {
     expect(adapter?.observesTurns).toBe(false);
     await adapter?.send('wake supervisor');
     expect(queueCodex).toHaveBeenCalledWith('codex', 'thread-7', 'wake supervisor', undefined);
+  });
+
+  it('provider routes a joined interactive thread through queue without resuming it', async () => {
+    expect(joinCodex(root, 'codex', 'thread-7').ok).toBe(true);
+    const queueCodex = vi.fn(async () => undefined);
+    const createOwned = vi.fn(async () => {
+      throw new Error('must not resume a joined interactive thread');
+    });
+    const provider = new MeshSessionProvider({
+      busRoot: root,
+      getConfig: () =>
+        ({ agent_bus: { enabled: true, codex_cli: 'codex' } }) as ForgeConfig,
+      workspaceRoots: () => ['/ws'],
+      queueCodex,
+      codexFactory: { create: createOwned },
+      processStartMs: () => 1_700_000_000_000,
+    });
+
+    const adapter = await provider.resolveAdapter('codex');
+    expect(adapter?.observesTurns).toBe(false);
+    await adapter?.send('one-way progress note');
+    expect(queueCodex).toHaveBeenCalledWith(
+      'codex',
+      'thread-7',
+      'one-way progress note',
+      undefined,
+    );
+    expect(createOwned).not.toHaveBeenCalled();
+    await provider.dispose();
   });
 
   it('rejects an invalid thread id without changing the alias table', () => {
