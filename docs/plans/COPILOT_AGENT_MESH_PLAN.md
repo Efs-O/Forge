@@ -1,6 +1,6 @@
 # Copilot as a Forge-owned agent-mesh peer
 
-**Status:** P0 transport GO; P1 implemented and verified; P2 implemented and verified; P3 implemented and verified; P4 live validation and packaging complete\
+**Status:** P0 transport GO; P1, P2, P3 implemented and verified; P4 live-validated (items 1–6 + the non-reload close); remaining: the user-driven VS Code reload for the resume/close cycle and the A11 terminal-state notifications (the running host predates `4f53b0d`)\
 **Date:** 2026-09-27  
 **Builds on:** [AGENT_MESH_PLAN.md](AGENT_MESH_PLAN.md) and
 [AGENT_MESSAGING_PLAN.md](AGENT_MESSAGING_PLAN.md)
@@ -352,25 +352,51 @@ Update `CHANGES.md` with the matching version if `package.json` changes. Report
 unit-test counts separately from the live Copilot validation.
 
 **Implementation evidence (2026-09-28):** P4 live validation ran against the
-installed Copilot CLI 1.0.88 (authenticated). Verified items:
+installed Copilot CLI 1.0.88 (authenticated), on the live mesh (owned copilot
+session `27d658f0-…`, owner host pid 37124). Durable exchange-log and outbox
+evidence:
 
-1. `ask_live_session(target: "copilot")` performed a read-only `git log`
-   task and returned the three most recent commits correctly.
+1. `ask_live_session(target: "copilot")` performed a read-only `git log` task
+   and returned the three most recent commits correctly.
 2. Copilot created `test/p4-validation.txt` with the requested content using
    its native file tools (file verified on disk, then cleaned up).
 3. A second ask in the same session correctly recalled the file path and
    content from the previous turn, demonstrating retained context.
-6. Copilot replied through the Forge mesh as `copilot` in all three asks.
+4. **Nonblocking tell queues without concurrency** — two FIFO pairs:
+   `806ec064`→`5c023099` and `2bcdac40`→`4b2486fc`; each second tell was
+   `accepted` while the first was `started` and `started` only after the first
+   `completed`.
+5. **Steer durably accepted, cancels the active turn, runs next** —
+   `bad7374e` (audit) `started`; steer `91ed96a3` `accepted` 75.3 s later,
+   `bad7374e` `cancelled` 8 ms after acceptance, the steer `started` 68 ms
+   after the cancel, and it `completed` 4.2 s later.
+6. **Bidirectional relay with correlation** — Forge→Copilot `f5d79584`
+   (accepted→started→completed); Copilot→codex true M6 relay `0ef61d0c` (two
+   hop events share one id: `copilot→forge relay accepted`, `forge→codex relay
+   accepted`), and the send-mirror `[agent mesh 0ef61d0c-…] copilot says to
+   codex: …` was delivered to the bound Telegram chat (outbox, att=1).
+7. **Projections agree; send-mirror delivers** — `forge.sh who` showed
+   `copilot owned idle` (matching the sidebar board and the Telegram
+   `/status` Sessions line), then truthfully `copilot owned dead` after the
+   close test. The send-mirror notifications (`forge says to copilot`,
+   `forge steers copilot`, `copilot says to codex`) are all in the delivered
+   outbox. **Live-host boundary:** the running extension host predates
+   `4f53b0d` (the A11 bridge commit), so the A11 *terminal-state*
+   notifications (completion/cancellation/failure as `[agent mesh <id>]`
+   `<alias> <state>`) are not emitted by it and are absent from the outbox;
+   they are proven by the 30-test P3 suite and become live-validatable only
+   after a reload on a build containing `4f53b0d`. A live induced recoverable
+   failure was therefore not observable on this host.
+8. **Close (non-reload part) verified** — `close copilot` stopped only the
+   Forge-owned process (no `copilot` process remained; `owner_host` cleared to
+   null) and preserved the resumable identity (`session_id 27d658f0-…`
+   retained). **Reload boundary:** the actual VS Code reload → resume → close
+   cycle is irreducibly user-driven; it is the remaining step before item 8 /
+   P4 can be marked fully live-complete.
 
-Items 4 (tell during active turn), 5 (steer), 7 (Telegram notification
-verification), and 8 (reload/resume/close) require interactive timing that
-is not automatable in a single pass; they are covered by the P2 unit test
-matrix (FIFO serialization, steer ordering, park/wake/close, reload
-recovery) and the P3 operator-surface tests.
-
-Packaging: `npm run package` produced `forge-llm-0.16.57.vsix` (29 files,
-8.45 MB). `npm run ci` passes 3,340 tests with 36 skipped, plus type-check,
-lint, production build, and bundle-load smoke. `git diff --check` clean.
+Packaging: the final `forge-llm-0.16.57.vsix` is built after the last P3/P4
+edit and contains `4f53b0d` plus all P4 corrections; the final gate results
+are recorded in the corrective commit.
 
 **Exit criteria:** every acceptance item below has code-path and live evidence,
 the final gates pass, and the packaged VSIX is smoke-tested.

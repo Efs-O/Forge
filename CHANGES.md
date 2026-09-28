@@ -2,15 +2,29 @@
 
 ## 0.16.57
 
-### Copilot agent-mesh P3+P4: operator surfaces and live validation (2026-09-28)
+### Copilot agent-mesh P3+P4: operator surfaces, A11 notification bridge, and live validation (2026-09-28)
 
-- P3: `AgentMeshCopilotSurfaces.test.ts` (19 tests) pins the projection and
+- P3: `AgentMeshCopilotSurfaces.test.ts` (30 tests) pins the projection and
   notification owners to agree on Copilot state across `forge.sh who`, the
   sidebar board, Telegram `/status` and `/queue`, unbound remote chats,
   unavailable-CLI refusal, and outbox retry/dedup.
+- P3 A11: a pure notification policy (`meshNotificationPolicy.ts`) phrases
+  bounded terminal/lifecycle mesh events (completion, failure/cancellation,
+  crash, recovery, context-loss, idle-TTL timeout) as host-activity
+  notifications that reach the bound Telegram chat and sidebar. One terminal
+  event emits exactly one host activity; the policy never includes the prompt
+  or a state event's detail. 10 direct policy tests + 1 integration test
+  (crashed owned copilot → exactly one host activity through the real
+  `onEvent` wiring).
 - P4: live Copilot CLI validation confirmed read-only task, workspace edit,
-  session resume with retained context, and mesh reply. Packaged
-  `forge-llm-0.16.57.vsix` (8.45 MB).
+  session resume with retained context, nonblocking tell (two FIFO pairs),
+  steer (durable accept → cancel active → run next), bidirectional relay with
+  correlation (Forge→Copilot + Copilot→codex M6), projection agreement
+  (`forge.sh who` / sidebar / Telegram `/status`), and the non-reload close
+  (only the owned process stopped, resumable identity preserved). The A11
+  terminal-state notifications and the reload/resume cycle remain pending a
+  user-driven VS Code reload on a build containing the A11 bridge. Packaged
+  `forge-llm-0.16.57.vsix`.
 
 ## 0.16.56
 
