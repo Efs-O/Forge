@@ -294,7 +294,7 @@ handshake: a facade with no subscribed sink is not ready, and the count covers
 facade-before-remote-subscription, remote config reload, and transport
 stop/restart. The focused P3 suite
 (`AgentMeshCopilotSurfaces.test.ts`) passes 33/33, plus a direct
-`PendingHostActivity.test.ts` (6 tests) for the buffer's own contract,
+`PendingHostActivity.test.ts` (7 tests) for the buffer's own contract,
 covering the `forge.sh who`
 projection (owned+idle/busy/parked/dead, peer+unknown for a foreign live
 owner, absent for an unknown alias), the sidebar board projection (live/parked/
@@ -314,7 +314,7 @@ the crash precedes the active conversation), with multiple recovery actions
 continuing past the first, and a production-order test that the facade can be
 available before the sink is subscribed without the startup crash being
 dropped — the buffered item flushes exactly once when a transport subscribes
-and the listener count goes to 1. The final repository gate passes 3,361 tests
+and the listener count goes to 1. The final repository gate passes 3,362 tests
 with
 36 skipped, plus type-check, lint, production build, and bundle-load smoke.
 
@@ -426,7 +426,7 @@ evidence:
 Packaging: the final `forge-llm-0.16.57.vsix` is built after the last P3/P4
 edit and contains `4f53b0d`, all P4 corrections, the A11 startup-lifecycle
 buffer fix, and the listener-count readiness seam (this commit). Final gate:
-3,361 tests passed (36 skipped), plus type-check, lint, production build, and
+3,362 tests passed (36 skipped), plus type-check, lint, production build, and
 bundle-load smoke, all green. Package: sha256
 `cd6948728f342a48345a8d97aa06b1c5587dece51167a99a2c4c471ae987a3fd`,
 8,861,360 bytes (replacing the stale `f89ffa36…` build).

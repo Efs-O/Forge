@@ -26,7 +26,7 @@
   flushes once it is > 0: a facade that exists before the transports subscribe
   is not ready, so the item is retained and retried (bounded backoff) rather
   than flushed into an empty listener set and lost. No activation handshake.
-  10 direct policy tests + 6 buffer tests + 4 integration tests (crashed owned
+  10 direct policy tests + 7 buffer tests + 4 integration tests (crashed owned
   copilot → exactly one host activity; a not-ready facade still recovers and
   delivers the buffered crash exactly once; multiple recovery actions continue
   past the first; the facade can be available before the sink is subscribed

@@ -67,6 +67,23 @@ describe('PendingHostActivity (A11 startup-lifecycle buffer)', () => {
     p.dispose();
   });
 
+  it('retries when the listener-count readiness probe throws', async () => {
+    const emitted: MeshUserNotification[] = [];
+    let fail = true;
+    const p = new PendingHostActivity(() => ({
+      emitHostActivity: (n) => emitted.push(n),
+      hostActivityListenerCount: () => {
+        if (fail) throw new Error('readiness unavailable');
+        return 1;
+      },
+    }));
+    p.enqueue(note('a'));
+    expect(emitted).toHaveLength(0);
+    fail = false;
+    await vi.waitFor(() => expect(emitted.map((e) => e.text)).toEqual(['a']));
+    p.dispose();
+  });
+
   it('dispose clears the buffer and stops the retry mechanism (no later delivery)', async () => {
     const emitted: MeshUserNotification[] = [];
     const p = new PendingHostActivity(() => {

@@ -83,7 +83,14 @@ export class PendingHostActivity {
     // into the void, so do not flush until a listener is present. This is what
     // keeps a startup crash from being lost when the facade is up before the
     // remote transport has subscribed.
-    if ((facade?.hostActivityListenerCount?.() ?? 0) === 0) {
+    let listenerCount: number;
+    try {
+      listenerCount = facade?.hostActivityListenerCount?.() ?? 0;
+    } catch {
+      this.scheduleRetry();
+      return;
+    }
+    if (listenerCount === 0) {
       this.scheduleRetry();
       return;
     }
