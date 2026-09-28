@@ -150,6 +150,11 @@ groups:
     endpoint: http://127.0.0.1:11434
     think: true
     reasoning_effort: medium
+  ollama-cloud:
+    provider: ollama
+    endpoint: http://127.0.0.1:11434
+    think: true
+    reasoning_effort: medium
   openai-compatible-cloud:
     provider: openai-compatible
     endpoint: https://api.cerebras.ai
@@ -750,31 +755,31 @@ models:
   - name: "deepseek-v4-flash:cloud"
     num_ctx: 1000000
     sampling: { max_tokens: 65536 }
-    group: ollama-local
+    group: ollama-cloud
 
 
   - name: "deepseek-v4-pro:cloud"
     num_ctx: 1000000
     sampling: { max_tokens: 65536 }
-    group: ollama-local
+    group: ollama-cloud
 
 
   - name: "kimi-k2.6:cloud"
     num_ctx: 262144
     sampling: { max_tokens: 131072 }
-    group: ollama-local
+    group: ollama-cloud
 
 
   - name: "glm-5.1:cloud"
     num_ctx: 198000
     sampling: { max_tokens: 131072 }
-    group: ollama-local
+    group: ollama-cloud
 
 
   - name: "minimax-m2.7:cloud"
     num_ctx: 200000
     sampling: { max_tokens: 131072 }
-    group: ollama-local
+    group: ollama-cloud
 
 
   # xAI via `opencode auth login` (SuperGrok OAuth). grok-imagine is images-only, not listed here.

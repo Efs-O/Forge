@@ -4,7 +4,7 @@ import { classifyModelRoute } from '../llm/ModelRouteClassifier';
 
 export const MODEL_PICKER_GROUP_ORDER = [
   'Local — llama.cpp',
-  'Local — Ollama',
+  'Ollama Local',
   'Ollama Cloud',
   'xAI / Grok',
   'Cerebras',
@@ -53,7 +53,7 @@ export function modelPickerGroup(model: ModelConfig): ModelPickerGroup {
     case 'local-llama':
       return 'Local — llama.cpp';
     case 'local-ollama':
-      return 'Local — Ollama';
+      return 'Ollama Local';
     case 'ollama-cloud':
       return 'Ollama Cloud';
     case 'cli-agent':

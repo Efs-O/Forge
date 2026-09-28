@@ -5,8 +5,8 @@ describe('groupModels', () => {
   it('uses host categories and preserves input order within each category', () => {
     expect(
       groupModels([
-        { name: 'zeta-local', provider: 'ollama', group: 'Local — Ollama' },
-        { name: 'alpha-local', provider: 'ollama', group: 'Local — Ollama' },
+        { name: 'zeta-local', provider: 'ollama', group: 'Ollama Local' },
+        { name: 'alpha-local', provider: 'ollama', group: 'Ollama Local' },
         { name: 'gpt-5', provider: 'openai', group: 'OpenAI' },
         { name: 'qwen:cloud', provider: 'ollama', group: 'Ollama Cloud' },
         { name: 'cerebras-fast', provider: 'openai-compatible', group: 'Cerebras' },
@@ -14,10 +14,10 @@ describe('groupModels', () => {
       ]),
     ).toEqual([
       {
-        label: 'Local — Ollama',
+        label: 'Ollama Local',
         entries: [
-          { name: 'zeta-local', provider: 'ollama', group: 'Local — Ollama' },
-          { name: 'alpha-local', provider: 'ollama', group: 'Local — Ollama' },
+          { name: 'zeta-local', provider: 'ollama', group: 'Ollama Local' },
+          { name: 'alpha-local', provider: 'ollama', group: 'Ollama Local' },
         ],
       },
       { label: 'Ollama Cloud', entries: [{ name: 'qwen:cloud', provider: 'ollama', group: 'Ollama Cloud' }] },

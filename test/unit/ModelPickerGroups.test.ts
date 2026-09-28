@@ -9,7 +9,7 @@ function model(overrides: Partial<ModelConfig>): ModelConfig {
 describe('modelPickerGroup', () => {
   it.each([
     [{}, 'Local — llama.cpp'],
-    [{ provider: 'ollama' }, 'Local — Ollama'],
+    [{ provider: 'ollama' }, 'Ollama Local'],
     [{ provider: 'ollama', name: 'qwen:cloud' }, 'Ollama Cloud'],
     [{ provider: 'xai' }, 'xAI / Grok'],
     [{ provider: 'openai-compatible', endpoint: 'https://api.cerebras.ai/v1' }, 'Cerebras'],

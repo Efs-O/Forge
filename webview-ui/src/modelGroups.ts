@@ -17,7 +17,7 @@ function groupLabel(entry: ModelEntry): string {
   if (p === 'cli') return 'CLI agents';
   if (p === 'ollama') {
     const n = entry.name;
-    return n.endsWith(':cloud') || n.endsWith('-cloud') ? 'Ollama Cloud' : 'Local — Ollama';
+    return n.endsWith(':cloud') || n.endsWith('-cloud') ? 'Ollama Cloud' : 'Ollama Local';
   }
   return p;
 }
