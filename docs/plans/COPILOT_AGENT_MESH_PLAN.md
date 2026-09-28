@@ -428,8 +428,9 @@ edit and contains `4f53b0d`, all P4 corrections, the A11 startup-lifecycle
 buffer fix, and the listener-count readiness seam (this commit). Final gate:
 3,362 tests passed (36 skipped), plus type-check, lint, production build, and
 bundle-load smoke, all green. Package: sha256
-`cd6948728f342a48345a8d97aa06b1c5587dece51167a99a2c4c471ae987a3fd`,
-8,861,360 bytes (replacing the stale `f89ffa36…` build).
+`774da3b980510623c04393a9585a33dcf533a94c3910ab699d6a101cef59924d`,
+8,861,352 bytes, built from clean commit `0dffe8d` so unrelated uncommitted
+worktree changes are excluded (replacing the stale `cd694872…` build).
 
 **Exit criteria:** every acceptance item below has code-path and live evidence,
 the final gates pass, and the packaged VSIX is smoke-tested.
