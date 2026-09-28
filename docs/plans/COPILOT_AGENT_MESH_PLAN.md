@@ -259,21 +259,36 @@ isolation.
 ## P3 — Telegram, sidebar, notifications, and operator surfaces
 
 **Implementation evidence (2026-09-28):** P3 shipped in the operator-surfaces
-commit. The projection and notification owners (`boardView.projectLiveSessions`,
+commit, with the A11 notification bridge added in a focused follow-up. The
+projection and notification owners (`boardView.projectLiveSessions`,
 `meshWho.projectWho`, `RemoteSessionCommands` `/status` + `/queue`,
 `agentMeshSetup` crash/context-lost/stand-in/idle-TTL events, and the
 lifecycle-command dispatcher in `meshOrchestrator.handleCommand`) are
 agent-agnostic and carry `copilot` through the same paths as Claude/Codex.
-The focused P3 suite (`AgentMeshCopilotSurfaces.test.ts`) passes 19/19, covering
-the `forge.sh who` projection (owned+idle/busy/parked/dead, peer+unknown for a
-foreign live owner, absent for an unknown alias), the sidebar board projection
-(live/parked/dead/none, agent field, no codex default), the Telegram `/status`
-Sessions line (live/parked/dead/none), unbound remote chat (no board line,
-no bus = undefined), Telegram `/queue` (agent-bus label + management note),
-unavailable Copilot CLI (resolveAdapter undefined, tell reports no-live-session,
-no fallback), and outbox retry/dedup (failed send retries the same item,
-delivers exactly once). The final repository gate passes 3,340 tests with 36
-skipped, plus type-check, lint, production build, and bundle-load smoke.
+The A11 bridge is a pure notification policy
+(`agentMesh/meshNotificationPolicy.ts`) that the single `onEvent` owner calls:
+it phrases only the bounded terminal/lifecycle states (completion,
+failure/cancellation, crash, recovery, context-loss, idle-TTL timeout) as
+`[agent mesh <id>] <alias> <state>`, names the alias + exchange/state, never
+includes the prompt or a `state` event's detail (which can be the turn's
+answer), and preserves the exchange's conversation scope so the host-activity
+path reaches the bound Telegram chat/sidebar. One terminal event emits exactly
+one host activity (the stand-in's separate `emitHostActivity` was removed to
+avoid a duplicate); retry/dedup remains the outbox's job. The focused P3 suite
+(`AgentMeshCopilotSurfaces.test.ts`) passes 30/30, covering the `forge.sh who`
+projection (owned+idle/busy/parked/dead, peer+unknown for a foreign live
+owner, absent for an unknown alias), the sidebar board projection (live/parked/
+dead/none, agent field, no codex default), the Telegram `/status` Sessions line
+(live/parked/dead/none), unbound remote chat (no board line, no bus =
+undefined), Telegram `/queue` (agent-bus label + management note), unavailable
+Copilot CLI (resolveAdapter undefined, tell reports no-live-session, no
+fallback), outbox retry/dedup (failed send retries the same item, delivers
+exactly once), the notification policy (every terminal state notifies, no
+prompt/answer leak, accepted and non-terminal states never notify, conversation
+scope preserved), and an integration test that a crashed owned copilot emits
+exactly one host activity naming alias + state through the real `onEvent`
+wiring. The final repository gate passes 3,351 tests with 36 skipped, plus
+type-check, lint, production build, and bundle-load smoke.
 
 Copilot must appear everywhere the user already observes the mesh:
 

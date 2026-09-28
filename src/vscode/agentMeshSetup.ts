@@ -25,6 +25,7 @@ import {
   writeOwnership,
 } from '../agentMesh/ownership';
 import { MeshOrchestrator } from '../agentMesh/meshOrchestrator';
+import { meshEventNotification } from '../agentMesh/meshNotificationPolicy';
 import { MeshSessionProvider } from '../agentMesh/sessionProvider';
 import { projectBoard, projectLiveSessions } from '../agentMesh/boardView';
 import { setBoardContext, setMeshOrchestrator } from '../agentMesh/meshContext';
@@ -95,6 +96,7 @@ export function setupAgentMesh(
   getSidebar: () => { getHostFacade(): ForgeHostFacade },
   getConfig: () => ForgeConfig,
   workspaceRoot: string,
+  home?: string,
 ): AgentMesh {
   // F-08: a user who disabled the bus must not run mesh startup recovery (the
   // ledger's disable row). The routes are already gated on `agent_bus.enabled`;
@@ -103,7 +105,7 @@ export function setupAgentMesh(
     return disabledMesh();
   }
 
-  const paths = busPaths();
+  const paths = busPaths(home);
   const exchangePaths: ExchangeLogPaths = {
     log: path.join(paths.root, EXCHANGES_LOG_NAME),
     lock: path.join(paths.root, EXCHANGES_LOCK_NAME),
@@ -192,6 +194,9 @@ export function setupAgentMesh(
       vscode.window.showErrorMessage(`[agent mesh] could not write a board event: ${String(err)}`);
       throw err;
     }
+    // A11: a terminal event is a bounded user-facing notification (one event => one activity).
+    const notification = meshEventNotification(e, s);
+    if (notification) getSidebar().getHostFacade().emitHostActivity?.(notification);
     // The exchange is over at a terminal state: its scope is no longer needed,
     // so the map is bounded to in-flight exchanges only.
     if (isTerminal(e.state)) exchangeScope.delete(e.exchangeId);
@@ -217,7 +222,7 @@ export function setupAgentMesh(
     // window, every paired chat, and the board all say so.
     onStandIn: (alias, note) => {
       void vscode.window.showWarningMessage(note);
-      getSidebar().getHostFacade().emitHostActivity?.({ text: note });
+      // A11: the notification now flows through onEvent (no second emit here).
       void onEvent({
         exchangeId: `stand-in-${alias}-${Date.now()}`,
         from: 'forge',

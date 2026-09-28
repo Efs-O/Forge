@@ -7,6 +7,7 @@ import { projectLiveSessions } from '../../src/agentMesh/boardView';
 import { setBoardContext, setMeshOrchestrator } from '../../src/agentMesh/meshContext';
 import { projectWho, type WhoDeps } from '../../src/agentMesh/meshWho';
 import { MeshOrchestrator } from '../../src/agentMesh/meshOrchestrator';
+import { meshEventNotification } from '../../src/agentMesh/meshNotificationPolicy';
 import {
   readOwnership,
   writeOwnership,
@@ -20,6 +21,24 @@ import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
 import type { RemoteCommandContext } from '../../src/remote/RemoteCommandHandler';
 import type { RemoteInboundEvent } from '../../src/remote/types';
 import type { ForgeConfig } from '../../src/config/types';
+import { setupAgentMesh } from '../../src/vscode/agentMeshSetup';
+import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
+import type { HostActivityEvent } from '../../src/sidebar/HostActivity';
+
+/** Poll until `predicate` returns a value (the crash-recovery IIFE is fire-and-forget). */
+async function waitFor<T>(
+  predicate: () => T | undefined | null,
+  timeoutMs = 3000,
+  intervalMs = 10,
+): Promise<T> {
+  const start = Date.now();
+  for (;;) {
+    const result = predicate();
+    if (result !== undefined && result !== null) return result;
+    if (Date.now() - start > timeoutMs) throw new Error('waitFor: timed out');
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+}
 
 /**
  * P3 — Copilot on the operator surfaces (COPILOT_AGENT_MESH_PLAN §P3).
@@ -347,5 +366,194 @@ describe('P3: a retried copilot notification is delivered once, not duplicated (
     expect(all.filter((item) => item.text.includes('copilot turn finished'))).toHaveLength(0);
     expect(store.outboxHealth().abandoned).toBe(0);
     await delivery.stop();
+  });
+});
+
+describe('P3: the mesh notification policy phrases terminal events (A11)', () => {
+  const scope = { conversation: 'conv-1' };
+
+  it('a completed turn notifies with alias + exchange/state, no prompt', () => {
+    const n = meshEventNotification(
+      { exchangeId: 'abc123', from: 'forge', to: 'copilot', type: 'state', state: 'completed' },
+      scope,
+    );
+    expect(n?.conversationId).toBe('conv-1');
+    expect(n?.text).toContain('copilot');
+    expect(n?.text).toContain('completed');
+    expect(n?.text).toContain('abc123');
+  });
+
+  it('a cancelled turn notifies, and its detail (the answer) is never included', () => {
+    const n = meshEventNotification(
+      {
+        exchangeId: 'abc123',
+        from: 'forge',
+        to: 'copilot',
+        type: 'state',
+        state: 'cancelled',
+        detail: 'the secret final answer',
+      },
+      {},
+    );
+    expect(n?.text).toContain('copilot');
+    expect(n?.text).toContain('cancelled');
+    expect(n?.text).not.toContain('the secret final answer');
+  });
+
+  it('a rejected turn notifies', () => {
+    const n = meshEventNotification(
+      { exchangeId: 'abc123', from: 'forge', to: 'copilot', type: 'state', state: 'rejected' },
+      {},
+    );
+    expect(n?.text).toContain('copilot');
+    expect(n?.text).toContain('rejected');
+  });
+
+  it('an idle-TTL timeout (notice) notifies with the system reason', () => {
+    const n = meshEventNotification(
+      {
+        exchangeId: 'idle-copilot',
+        from: 'forge',
+        to: 'copilot',
+        type: 'notice',
+        state: 'timeout',
+        detail: 'idle TTL reached; session reaped, thread kept for resume',
+      },
+      scope,
+    );
+    expect(n?.text).toContain('copilot');
+    expect(n?.text).toContain('timeout');
+    expect(n?.text).toContain('idle TTL reached');
+  });
+
+  it('a crash (notice) notifies with the system reason', () => {
+    const n = meshEventNotification(
+      {
+        exchangeId: 'crash-copilot',
+        from: 'forge',
+        to: 'copilot',
+        type: 'notice',
+        state: 'crashed',
+        detail: 'owned session lost; thread kept for resume',
+      },
+      scope,
+    );
+    expect(n?.text).toContain('copilot');
+    expect(n?.text).toContain('crashed');
+    expect(n?.text).toContain('owned session lost');
+  });
+
+  it('a recovery / stand-in (notice) notifies with the note', () => {
+    const n = meshEventNotification(
+      {
+        exchangeId: 'stand-in-copilot-1',
+        from: 'forge',
+        to: 'copilot',
+        type: 'notice',
+        state: 'recovered',
+        detail: 'stand-in answering for a dead session',
+      },
+      scope,
+    );
+    expect(n?.text).toContain('copilot');
+    expect(n?.text).toContain('recovered');
+    expect(n?.text).toContain('stand-in answering');
+  });
+
+  it('a context-loss (notice) notifies with the system reason', () => {
+    const n = meshEventNotification(
+      {
+        exchangeId: 'context-lost-copilot',
+        from: 'forge',
+        to: 'copilot',
+        type: 'notice',
+        state: 'context_lost',
+        detail: 'thread resume failed: thread not found',
+      },
+      scope,
+    );
+    expect(n?.text).toContain('copilot');
+    expect(n?.text).toContain('context_lost');
+    expect(n?.text).toContain('thread resume failed');
+  });
+
+  it('an accepted event does NOT notify (accepted means queued, not processed)', () => {
+    const n = meshEventNotification(
+      { exchangeId: 'abc123', from: 'forge', to: 'copilot', type: 'state', state: 'accepted' },
+      scope,
+    );
+    expect(n).toBeUndefined();
+  });
+
+  it('created / observed / started do NOT notify (non-terminal)', () => {
+    for (const state of ['created', 'observed', 'started'] as const) {
+      const n = meshEventNotification(
+        { exchangeId: 'abc123', from: 'forge', to: 'copilot', type: 'state', state },
+        scope,
+      );
+      expect(n, state).toBeUndefined();
+    }
+  });
+
+  it('a window-scoped exchange (no conversation) notifies without a conversationId', () => {
+    const n = meshEventNotification(
+      { exchangeId: 'abc123', from: 'forge', to: 'copilot', type: 'state', state: 'completed' },
+      {},
+    );
+    expect(n?.conversationId).toBeUndefined();
+    expect(n?.text).toContain('copilot');
+  });
+});
+
+describe('P3: a mesh terminal event reaches the host-activity path (A11 integration)', () => {
+  it('a crashed owned copilot emits exactly one host activity naming alias + state', async () => {
+    // Isolate the bus under a fake home so the test never touches the real one.
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-mesh-home-'));
+    const busRoot = path.join(home, '.forge', 'agent-bus');
+    // Pre-seed a copilot ownership record whose owner host is dead (a PID no
+    // process holds), so startup recovery reaps it and emits a `crashed` event.
+    writeOwnership(busRoot, {
+      alias: 'copilot',
+      agent: 'copilot',
+      session_id: 'copilot-sess',
+      thread_id: 't1',
+      owner_host: { pid: 2000000, startedAt: 1 },
+      workspace: '/ws',
+      created_at: 1,
+      parked: false,
+    });
+
+    const activities: HostActivityEvent[] = [];
+    const facade = {
+      status: () => ({ activeConversationId: 'conv-1' }),
+      emitHostActivity: (event: HostActivityEvent) => {
+        activities.push(event);
+      },
+    } as unknown as ForgeHostFacade;
+    const getSidebar = () => ({ getHostFacade: () => facade });
+    const getConfig = () => ({ agent_bus: { enabled: true } }) as ForgeConfig;
+    const context = { subscriptions: [] as Array<{ dispose(): void }> };
+
+    const mesh = setupAgentMesh(
+      context as unknown as Parameters<typeof setupAgentMesh>[0],
+      getSidebar,
+      getConfig,
+      '/ws',
+      home,
+    );
+
+    try {
+      // The crash-recovery IIFE reaps the dead owner and emits the host activity.
+      const crashed = await waitFor(() => activities.find((a) => a.text.includes('crashed')));
+      expect(crashed.text).toContain('copilot');
+      expect(crashed.text).toContain('crashed');
+      expect(crashed.conversationId).toBe('conv-1');
+      // Exactly one host activity for the crash (no duplicate from onStandIn).
+      const crashActivities = activities.filter((a) => a.text.includes('crashed'));
+      expect(crashActivities).toHaveLength(1);
+    } finally {
+      await mesh.dispose();
+      await fs.rm(home, { recursive: true, force: true });
+    }
   });
 });
