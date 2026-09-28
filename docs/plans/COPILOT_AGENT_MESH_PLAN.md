@@ -1,6 +1,6 @@
 # Copilot as a Forge-owned agent-mesh peer
 
-**Status:** P0 transport GO; P1, P2, P3 implemented and verified; P4 live-validated (items 1–6 + the non-reload close); remaining: the user-driven VS Code reload for the resume/close cycle and the A11 terminal-state notifications (the running host predates `4f53b0d`)\
+**Status:** P0 transport GO; P1, P2, P3 implemented and verified; P4 live-validated (items 1–6 + the non-reload close); the A11 startup-lifecycle fix is in place (a not-ready sidebar facade no longer rejects `onEvent` or aborts crash recovery — the terminal notification is buffered and delivered exactly once when the facade is up); remaining: the user-driven VS Code reload for the resume/close cycle and live A11 terminal-state notifications (the running host predates the A11 bridge + this fix)\
 **Date:** 2026-09-27  
 **Builds on:** [AGENT_MESH_PLAN.md](AGENT_MESH_PLAN.md) and
 [AGENT_MESSAGING_PLAN.md](AGENT_MESSAGING_PLAN.md)
@@ -274,8 +274,17 @@ includes the prompt or a `state` event's detail (which can be the turn's
 answer), and preserves the exchange's conversation scope so the host-activity
 path reaches the bound Telegram chat/sidebar. One terminal event emits exactly
 one host activity (the stand-in's separate `emitHostActivity` was removed to
-avoid a duplicate); retry/dedup remains the outbox's job. The focused P3 suite
-(`AgentMeshCopilotSurfaces.test.ts`) passes 30/30, covering the `forge.sh who`
+avoid a duplicate); retry/dedup remains the outbox's job. A startup crash can
+be emitted before the sidebar is up (activation/control-server setup precedes
+sidebar availability), so a not-ready facade must not reject `onEvent` and
+abort crash recovery: a bounded in-memory pending-activity buffer
+(`agentMesh/pendingHostActivity.ts`) holds the terminal notification until the
+facade is ready and flushes it exactly once, in order, with no second
+transport or persistence owner; a thrown emit is retained and retried, and
+disposal clears the buffer. The focused P3 suite
+(`AgentMeshCopilotSurfaces.test.ts`) passes 32/32, plus a direct
+`PendingHostActivity.test.ts` (5 tests) for the buffer's own contract,
+covering the `forge.sh who`
 projection (owned+idle/busy/parked/dead, peer+unknown for a foreign live
 owner, absent for an unknown alias), the sidebar board projection (live/parked/
 dead/none, agent field, no codex default), the Telegram `/status` Sessions line
@@ -285,10 +294,14 @@ Copilot CLI (resolveAdapter undefined, tell reports no-live-session, no
 fallback), outbox retry/dedup (failed send retries the same item, delivers
 exactly once), the notification policy (every terminal state notifies, no
 prompt/answer leak, accepted and non-terminal states never notify, conversation
-scope preserved), and an integration test that a crashed owned copilot emits
+scope preserved), an integration test that a crashed owned copilot emits
 exactly one host activity naming alias + state through the real `onEvent`
-wiring. The final repository gate passes 3,351 tests with 36 skipped, plus
-type-check, lint, production build, and bundle-load smoke.
+wiring, and startup-crash integration tests that a not-ready facade
+(getSidebar throwing) still completes ownership recovery and flushes the
+buffered crash exactly once when the facade becomes ready (window-scoped, since
+the crash precedes the active conversation), with multiple recovery actions
+continuing past the first. The final repository gate passes 3,358 tests with
+36 skipped, plus type-check, lint, production build, and bundle-load smoke.
 
 Copilot must appear everywhere the user already observes the mesh:
 
@@ -384,8 +397,9 @@ evidence:
    `4f53b0d` (the A11 bridge commit), so the A11 *terminal-state*
    notifications (completion/cancellation/failure as `[agent mesh <id>]`
    `<alias> <state>`) are not emitted by it and are absent from the outbox;
-   they are proven by the 30-test P3 suite and become live-validatable only
-   after a reload on a build containing `4f53b0d`. A live induced recoverable
+   they are proven by the 32-test P3 suite (plus the 5-test buffer suite) and
+   become live-validatable only after a reload on a build containing `4f53b0d`
+   and the startup-lifecycle buffer fix. A live induced recoverable
    failure was therefore not observable on this host.
 8. **Close (non-reload part) verified** — `close copilot` stopped only the
    Forge-owned process (no `copilot` process remained; `owner_host` cleared to
@@ -395,8 +409,9 @@ evidence:
    P4 can be marked fully live-complete.
 
 Packaging: the final `forge-llm-0.16.57.vsix` is built after the last P3/P4
-edit and contains `4f53b0d` plus all P4 corrections; the final gate results
-are recorded in the corrective commit.
+edit and contains `4f53b0d`, all P4 corrections, and the A11 startup-lifecycle
+buffer fix; the final gate results and the package hash are recorded in the
+corrective commit.
 
 **Exit criteria:** every acceptance item below has code-path and live evidence,
 the final gates pass, and the packaged VSIX is smoke-tested.
@@ -444,7 +459,10 @@ parallel store.
   remain unknown/accepted rather than idle/completed.
 - [x] **A11 — notifications.** Completion, failure, cancellation, crash,
   recovery, and context-loss messages reach the same user-facing notification
-  paths as Claude/Codex, with retry/dedup behavior covered.
+  paths as Claude/Codex, with retry/dedup behavior covered. A crash emitted
+  before the sidebar is up (startup recovery) does not reject `onEvent` or
+  abort recovery: the notification is buffered and delivered exactly once, in
+  order, when the facade becomes ready (window-scoped), and disposal clears it.
 - [x] **A12 — relay.** Forge, Claude, Codex, and Copilot can address one another
   through the Forge hub with shared exchange correlation and sender validation.
 - [x] **A13 — disabled and unavailable behavior.** Disabled bus, missing CLI,

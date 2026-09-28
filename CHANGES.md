@@ -13,9 +13,14 @@
   crash, recovery, context-loss, idle-TTL timeout) as host-activity
   notifications that reach the bound Telegram chat and sidebar. One terminal
   event emits exactly one host activity; the policy never includes the prompt
-  or a state event's detail. 10 direct policy tests + 1 integration test
-  (crashed owned copilot → exactly one host activity through the real
-  `onEvent` wiring).
+  or a state event's detail. A startup crash can be emitted before the sidebar
+  is up, so a bounded in-memory pending-activity buffer
+  (`pendingHostActivity.ts`) holds the notification until the facade is ready
+  and flushes it exactly once, in order — a not-ready facade no longer rejects
+  `onEvent` or aborts crash recovery. 10 direct policy tests + 5 buffer tests +
+  3 integration tests (crashed owned copilot → exactly one host activity; a
+  not-ready facade still recovers and delivers the buffered crash exactly once;
+  multiple recovery actions continue past the first).
 - P4: live Copilot CLI validation confirmed read-only task, workspace edit,
   session resume with retained context, nonblocking tell (two FIFO pairs),
   steer (durable accept → cancel active → run next), bidirectional relay with
@@ -23,8 +28,8 @@
   (`forge.sh who` / sidebar / Telegram `/status`), and the non-reload close
   (only the owned process stopped, resumable identity preserved). The A11
   terminal-state notifications and the reload/resume cycle remain pending a
-  user-driven VS Code reload on a build containing the A11 bridge. Packaged
-  `forge-llm-0.16.57.vsix`.
+  user-driven VS Code reload on a build containing the A11 bridge and the
+  startup-lifecycle buffer fix. Packaged `forge-llm-0.16.57.vsix`.
 
 ## 0.16.56
 

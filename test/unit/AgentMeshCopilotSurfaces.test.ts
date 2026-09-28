@@ -22,6 +22,7 @@ import type { RemoteCommandContext } from '../../src/remote/RemoteCommandHandler
 import type { RemoteInboundEvent } from '../../src/remote/types';
 import type { ForgeConfig } from '../../src/config/types';
 import { setupAgentMesh } from '../../src/vscode/agentMeshSetup';
+import { readEvents } from '../../src/agentMesh/exchangeLog';
 import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
 import type { HostActivityEvent } from '../../src/sidebar/HostActivity';
 
@@ -551,6 +552,141 @@ describe('P3: a mesh terminal event reaches the host-activity path (A11 integrat
       // Exactly one host activity for the crash (no duplicate from onStandIn).
       const crashActivities = activities.filter((a) => a.text.includes('crashed'));
       expect(crashActivities).toHaveLength(1);
+    } finally {
+      await mesh.dispose();
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('P3: a startup crash with a not-ready facade still recovers and notifies (A11)', () => {
+  /** Count durable board events for an exchange id under a fake bus root. */
+  const crashCount = (busRoot: string, exchangeId: string): number =>
+    readEvents(path.join(busRoot, 'exchanges.jsonl')).filter(
+      (e) => e.exchangeId === exchangeId,
+    ).length;
+
+  it('a startup crash with getSidebar throwing still recovers, then emits one scoped activity', async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-mesh-home-'));
+    const busRoot = path.join(home, '.forge', 'agent-bus');
+    writeOwnership(busRoot, {
+      alias: 'copilot',
+      agent: 'copilot',
+      session_id: 'copilot-sess',
+      thread_id: 't1',
+      owner_host: { pid: 2000000, startedAt: 1 },
+      workspace: '/ws',
+      created_at: 1,
+      parked: false,
+    });
+
+    const activities: HostActivityEvent[] = [];
+    let sidebarReady = false;
+    const facade = {
+      status: () => ({ activeConversationId: 'conv-1' }),
+      emitHostActivity: (event: HostActivityEvent) => {
+        activities.push(event);
+      },
+    } as unknown as ForgeHostFacade;
+    const getSidebar = () => {
+      if (!sidebarReady) throw new Error('sidebar not ready');
+      return { getHostFacade: () => facade };
+    };
+    const getConfig = () => ({ agent_bus: { enabled: true } }) as ForgeConfig;
+    const context = { subscriptions: [] as Array<{ dispose(): void }> };
+
+    const mesh = setupAgentMesh(
+      context as unknown as Parameters<typeof setupAgentMesh>[0],
+      getSidebar,
+      getConfig,
+      '/ws',
+      home,
+    );
+    try {
+      // The crash-recovery IIFE reaps the dead owner and durably appends the
+      // crashed event. The facade is not ready, so the notification is buffered
+      // (not emitted, not lost) and onEvent does not reject — recovery completes.
+      await waitFor(() => (crashCount(busRoot, 'crash-copilot') > 0 ? true : undefined));
+      expect(activities).toHaveLength(0);
+      // The sidebar comes up; the retry flushes the buffered crash exactly once.
+      sidebarReady = true;
+      const crashed = await waitFor(() => activities.find((a) => a.text.includes('crashed')));
+      expect(crashed.text).toContain('copilot');
+      // The crash happened before the sidebar was up, so the scope is
+      // window-scoped (no conversationId): the notification is a snapshot of the
+      // event at the time it occurred, not re-derived at flush time.
+      expect(crashed.conversationId).toBeUndefined();
+      expect(activities.filter((a) => a.text.includes('crashed'))).toHaveLength(1);
+    } finally {
+      await mesh.dispose();
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('startup recovery continues past the first action when the facade is not ready', async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-mesh-home-'));
+    const busRoot = path.join(home, '.forge', 'agent-bus');
+    // Two dead owned sessions → two reaped recovery actions.
+    for (const alias of ['copilot', 'claude']) {
+      writeOwnership(busRoot, {
+        alias,
+        agent: alias,
+        session_id: `${alias}-sess`,
+        thread_id: `t-${alias}`,
+        owner_host: { pid: 2000000, startedAt: 1 },
+        workspace: '/ws',
+        created_at: 1,
+        parked: false,
+      });
+    }
+
+    const activities: HostActivityEvent[] = [];
+    let sidebarReady = false;
+    const facade = {
+      status: () => ({ activeConversationId: 'conv-1' }),
+      emitHostActivity: (event: HostActivityEvent) => {
+        activities.push(event);
+      },
+    } as unknown as ForgeHostFacade;
+    const getSidebar = () => {
+      if (!sidebarReady) throw new Error('sidebar not ready');
+      return { getHostFacade: () => facade };
+    };
+    const getConfig = () => ({ agent_bus: { enabled: true } }) as ForgeConfig;
+    const context = { subscriptions: [] as Array<{ dispose(): void }> };
+
+    const mesh = setupAgentMesh(
+      context as unknown as Parameters<typeof setupAgentMesh>[0],
+      getSidebar,
+      getConfig,
+      '/ws',
+      home,
+    );
+    try {
+      // Both crashes must be durably appended. In the old code the first
+      // onEvent would throw (getSidebar) and abort the recovery loop, so only
+      // the first crash would be appended; both being present proves the loop
+      // continued past action 1.
+      await waitFor(
+        () =>
+          crashCount(busRoot, 'crash-copilot') > 0 && crashCount(busRoot, 'crash-claude') > 0
+            ? true
+            : undefined,
+      );
+      expect(activities).toHaveLength(0); // both buffered, none emitted (facade not ready)
+      // The sidebar comes up; both buffered crashes flush, exactly once each.
+      sidebarReady = true;
+      const crashed = await waitFor(() => {
+        const c = activities.filter((a) => a.text.includes('crashed'));
+        return c.length >= 2 ? c : undefined;
+      });
+      expect(crashed).toHaveLength(2);
+      const aliases = crashed
+        .map((a) => (a.text.includes('copilot') ? 'copilot' : 'claude'))
+        .sort();
+      expect(aliases).toEqual(['claude', 'copilot']);
+      // Both crashes happened before the sidebar was up: window-scoped.
+      expect(crashed.every((a) => a.conversationId === undefined)).toBe(true);
     } finally {
       await mesh.dispose();
       await fs.rm(home, { recursive: true, force: true });

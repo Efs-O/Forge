@@ -26,6 +26,7 @@ import {
 } from '../agentMesh/ownership';
 import { MeshOrchestrator } from '../agentMesh/meshOrchestrator';
 import { meshEventNotification } from '../agentMesh/meshNotificationPolicy';
+import { PendingHostActivity } from '../agentMesh/pendingHostActivity';
 import { MeshSessionProvider } from '../agentMesh/sessionProvider';
 import { projectBoard, projectLiveSessions } from '../agentMesh/boardView';
 import { setBoardContext, setMeshOrchestrator } from '../agentMesh/meshContext';
@@ -148,6 +149,9 @@ export function setupAgentMesh(
     }
   };
 
+  // A11: buffer terminal notifications until the sidebar facade is ready.
+  const pendingActivities = new PendingHostActivity(() => getSidebar().getHostFacade());
+
   // F-03: board events are DURABLE before a tell/relay returns. `onEvent`
   // awaits the append so the accepted state is on disk before the caller is
   // told the exchange exists — a crash after the return cannot lose it.
@@ -194,9 +198,8 @@ export function setupAgentMesh(
       vscode.window.showErrorMessage(`[agent mesh] could not write a board event: ${String(err)}`);
       throw err;
     }
-    // A11: a terminal event is a bounded user-facing notification (one event => one activity).
     const notification = meshEventNotification(e, s);
-    if (notification) getSidebar().getHostFacade().emitHostActivity?.(notification);
+    if (notification) pendingActivities.enqueue(notification);
     // The exchange is over at a terminal state: its scope is no longer needed,
     // so the map is bounded to in-flight exchanges only.
     if (isTerminal(e.state)) exchangeScope.delete(e.exchangeId);
@@ -222,7 +225,6 @@ export function setupAgentMesh(
     // window, every paired chat, and the board all say so.
     onStandIn: (alias, note) => {
       void vscode.window.showWarningMessage(note);
-      // A11: the notification now flows through onEvent (no second emit here).
       void onEvent({
         exchangeId: `stand-in-${alias}-${Date.now()}`,
         from: 'forge',
@@ -323,10 +325,8 @@ export function setupAgentMesh(
           state: 'crashed',
           detail: 'owned session lost; thread kept for resume',
         });
-        // F-08: the dead owner's in-memory FIFO is gone. Terminalize every
-        // accepted message addressed to this alias immediately instead of
-        // leaving a lost message looking live until the 24-hour compaction
-        // deadline.
+        // F-08: the dead owner's FIFO is gone; terminalize its accepted
+        // messages now instead of leaving them live until compaction.
         const events = readEvents(exchangePaths.log);
         const states = latestStates(events);
         for (const [exchangeId, exchangeEvents] of groupByExchange(events)) {
@@ -361,10 +361,8 @@ export function setupAgentMesh(
         const rec = readOwnership(paths.root, alias);
         if (!rec) continue;
         if (rec.parked) continue; // park-but-warm: exempt (M4)
-        // F-02: reap only a session THIS window owns. An idle session owned by
-        // another live window is not ours to reap — nulling its owner record
-        // would orphan the live process that window holds and let a later
-        // message spawn a duplicate.
+        // F-02: reap only a session THIS window owns; another live window's
+        // idle session is not ours to reap (it would orphan its process).
         if (!provider.isOwner(alias)) continue;
         const last = rec.last_activity ?? rec.created_at;
         if (Date.now() - last > IDLE_TTL_MS) {
@@ -480,6 +478,7 @@ export function setupAgentMesh(
     if (maintenanceTimer) clearInterval(maintenanceTimer);
     if (verdictTimer) clearInterval(verdictTimer);
     orchestrator.dispose();
+    pendingActivities.dispose();
     await provider.dispose();
     if (activeTurnId) turnStatus.markTurnFinished(activeTurnId);
     setMeshOrchestrator(undefined);
