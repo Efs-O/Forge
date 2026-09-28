@@ -5,11 +5,12 @@ import type { MeshUserNotification } from '../../src/agentMesh/meshNotificationP
 /**
  * A11 (COPILOT_AGENT_MESH_PLAN P3) — direct unit tests for the pending
  * host-activity buffer. The wiring-level tests (startup crash with a not-ready
- * facade, multiple recovery actions continuing) live in
- * AgentMeshCopilotSurfaces.test.ts; here we pin the buffer's own contract:
- * synchronous emit when ready, in-order flush, a throwing emit is retained and
- * retried without duplication, dispose stops the retry mechanism, and the
- * buffer is bounded.
+ * facade, multiple recovery actions continuing, and the production-order
+ * facade-before-sink sequence) live in AgentMeshCopilotSurfaces.test.ts; here
+ * we pin the buffer's own contract: synchronous emit when ready, in-order
+ * flush, a throwing emit is retained and retried without duplication, dispose
+ * stops the retry mechanism, the buffer is bounded, and readiness is the
+ * facade's host-activity listener count (a facade with count 0 is not ready).
  */
 
 function note(text: string): MeshUserNotification {
@@ -19,7 +20,12 @@ function note(text: string): MeshUserNotification {
 describe('PendingHostActivity (A11 startup-lifecycle buffer)', () => {
   it('emits synchronously when the facade is ready (no deferral, in order)', () => {
     const emitted: MeshUserNotification[] = [];
-    const p = new PendingHostActivity(() => ({ emitHostActivity: (n) => emitted.push(n) }));
+    const p = new PendingHostActivity(
+      () => ({
+        emitHostActivity: (n) => emitted.push(n),
+        hostActivityListenerCount: () => 1,
+      }),
+    );
     p.enqueue(note('a'));
     p.enqueue(note('b'));
     expect(emitted.map((e) => e.text)).toEqual(['a', 'b']);
@@ -31,7 +37,7 @@ describe('PendingHostActivity (A11 startup-lifecycle buffer)', () => {
     const emitted: MeshUserNotification[] = [];
     const p = new PendingHostActivity(() => {
       if (!ready) throw new Error('not ready');
-      return { emitHostActivity: (n) => emitted.push(n) };
+      return { emitHostActivity: (n) => emitted.push(n), hostActivityListenerCount: () => 1 };
     });
     p.enqueue(note('a'));
     p.enqueue(note('b'));
@@ -44,12 +50,15 @@ describe('PendingHostActivity (A11 startup-lifecycle buffer)', () => {
   it('retries a throwing emit without dropping or duplicating the item', async () => {
     const emitted: MeshUserNotification[] = [];
     let fail = true;
-    const p = new PendingHostActivity(() => ({
-      emitHostActivity: (n) => {
-        if (fail) throw new Error('emit failed');
-        emitted.push(n);
-      },
-    }));
+    const p = new PendingHostActivity(
+      () => ({
+        emitHostActivity: (n) => {
+          if (fail) throw new Error('emit failed');
+          emitted.push(n);
+        },
+        hostActivityListenerCount: () => 1,
+      }),
+    );
     p.enqueue(note('a'));
     expect(emitted).toHaveLength(0); // first emit threw; the item is retained
     fail = false;
@@ -77,7 +86,7 @@ describe('PendingHostActivity (A11 startup-lifecycle buffer)', () => {
     const p = new PendingHostActivity(
       () => {
         if (!ready) throw new Error('not ready');
-        return { emitHostActivity: (n) => emitted.push(n) };
+        return { emitHostActivity: (n) => emitted.push(n), hostActivityListenerCount: () => 1 };
       },
       2, // maxPending = 2
     );
@@ -87,6 +96,35 @@ describe('PendingHostActivity (A11 startup-lifecycle buffer)', () => {
     ready = true;
     await vi.waitFor(() => expect(emitted).toHaveLength(2));
     expect(emitted.map((e) => e.text)).toEqual(['b', 'c']);
+    p.dispose();
+  });
+
+  it('facade available but sink not ready (listener count 0): the item is buffered, not dropped; a listener flushes exactly one', async () => {
+    // The facade exists from the start (the sidebar is up), but no transport
+    // has subscribed its onHostActivity listener, so the listener count is 0.
+    // A naive "facade-exists = ready" flush would deliver into an empty
+    // listener set and lose the item; the buffer must hold it until a listener
+    // is present.
+    let listeners = 0;
+    const emitted: MeshUserNotification[] = [];
+    const p = new PendingHostActivity(
+      () => ({
+        emitHostActivity: (n) => emitted.push(n),
+        hostActivityListenerCount: () => listeners,
+      }),
+    );
+    p.enqueue(note('a'));
+    // The facade is available, but the sink is not ready (count 0): the item
+    // is buffered, not emitted into the void, not dropped.
+    expect(emitted).toHaveLength(0);
+    // The retry timer fires (250ms) but must NOT flush while the count is 0 —
+    // this is the exact race a facade-exists-only readiness would lose.
+    await new Promise((r) => setTimeout(r, 300));
+    expect(emitted).toHaveLength(0);
+    // A transport subscribes (count 1); the buffered item flushes exactly once.
+    listeners = 1;
+    await vi.waitFor(() => expect(emitted.map((e) => e.text)).toEqual(['a']));
+    expect(emitted).toHaveLength(1);
     p.dispose();
   });
 });

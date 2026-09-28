@@ -279,11 +279,22 @@ be emitted before the sidebar is up (activation/control-server setup precedes
 sidebar availability), so a not-ready facade must not reject `onEvent` and
 abort crash recovery: a bounded in-memory pending-activity buffer
 (`agentMesh/pendingHostActivity.ts`) holds the terminal notification until the
-facade is ready and flushes it exactly once, in order, with no second
-transport or persistence owner; a thrown emit is retained and retried, and
-disposal clears the buffer. The focused P3 suite
-(`AgentMeshCopilotSurfaces.test.ts`) passes 32/32, plus a direct
-`PendingHostActivity.test.ts` (5 tests) for the buffer's own contract,
+delivery path is actually ready and flushes it exactly once, in order, with no
+second transport or persistence owner; a thrown emit is retained and retried,
+and disposal clears the buffer. Delivery has TWO readiness stages, and the
+buffer must not flush until both hold: (1) the sidebar facade is available,
+and (2) the host-activity SINK is subscribed — the facade's `emitHostActivity`
+fans out to the remote transport's `onHostActivity` listener, which
+`RemoteRuntime.applyConfig` installs AFTER the facade exists, so a facade that
+exists but has no subscribed sink would deliver into an empty listener set and
+lose the notification. The buffer therefore reads the facade's
+`hostActivityListenerCount()` (wired from `SlashCommandHandler.activityListeners.size`)
+and only flushes once it is > 0 — direct, truthful readiness, no activation
+handshake: a facade with no subscribed sink is not ready, and the count covers
+facade-before-remote-subscription, remote config reload, and transport
+stop/restart. The focused P3 suite
+(`AgentMeshCopilotSurfaces.test.ts`) passes 33/33, plus a direct
+`PendingHostActivity.test.ts` (6 tests) for the buffer's own contract,
 covering the `forge.sh who`
 projection (owned+idle/busy/parked/dead, peer+unknown for a foreign live
 owner, absent for an unknown alias), the sidebar board projection (live/parked/
@@ -300,7 +311,11 @@ wiring, and startup-crash integration tests that a not-ready facade
 (getSidebar throwing) still completes ownership recovery and flushes the
 buffered crash exactly once when the facade becomes ready (window-scoped, since
 the crash precedes the active conversation), with multiple recovery actions
-continuing past the first. The final repository gate passes 3,358 tests with
+continuing past the first, and a production-order test that the facade can be
+available before the sink is subscribed without the startup crash being
+dropped — the buffered item flushes exactly once when a transport subscribes
+and the listener count goes to 1. The final repository gate passes 3,361 tests
+with
 36 skipped, plus type-check, lint, production build, and bundle-load smoke.
 
 Copilot must appear everywhere the user already observes the mesh:
@@ -409,9 +424,12 @@ evidence:
    P4 can be marked fully live-complete.
 
 Packaging: the final `forge-llm-0.16.57.vsix` is built after the last P3/P4
-edit and contains `4f53b0d`, all P4 corrections, and the A11 startup-lifecycle
-buffer fix; the final gate results and the package hash are recorded in the
-corrective commit.
+edit and contains `4f53b0d`, all P4 corrections, the A11 startup-lifecycle
+buffer fix, and the listener-count readiness seam (this commit). Final gate:
+3,361 tests passed (36 skipped), plus type-check, lint, production build, and
+bundle-load smoke, all green. Package: sha256
+`cd6948728f342a48345a8d97aa06b1c5587dece51167a99a2c4c471ae987a3fd`,
+8,861,360 bytes (replacing the stale `f89ffa36…` build).
 
 **Exit criteria:** every acceptance item below has code-path and live evidence,
 the final gates pass, and the packaged VSIX is smoke-tested.

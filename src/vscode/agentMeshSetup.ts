@@ -149,7 +149,7 @@ export function setupAgentMesh(
     }
   };
 
-  // A11: buffer terminal notifications until the sidebar facade is ready.
+  // A11: buffer terminal notifications until the delivery path is ready.
   const pendingActivities = new PendingHostActivity(() => getSidebar().getHostFacade());
 
   // F-03: board events are DURABLE before a tell/relay returns. `onEvent`

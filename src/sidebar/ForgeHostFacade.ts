@@ -112,6 +112,14 @@ export interface ForgeHostFacade {
   /** Publish host news from outside the sidebar (the agent mesh's stand-in notice). */
   emitHostActivity?(event: HostActivityEvent): void;
   /**
+   * How many transports are subscribed to host activity. The mesh's
+   * pending-activity buffer reads this as delivery readiness: a facade that
+   * exists but has no subscribed sink would deliver into the void, so the
+   * buffer only flushes once this is > 0. Optional on the same terms as the
+   * hooks above; unregistered means 0 (not ready).
+   */
+  hostActivityListenerCount?(): number;
+  /**
    * Subscribe to agent-authored notify_user messages.
    *
    * The listener resolves to the number of chats it reached, which the tool
@@ -193,6 +201,7 @@ export interface SidebarHostFacadeDeps {
   onCompactionEvent?: (listener: (event: CompactionEvent) => void) => { dispose(): void };
   onHostActivity?: (listener: HostActivityListener) => { dispose(): void };
   emitHostActivity?: (event: HostActivityEvent) => void;
+  hostActivityListenerCount?: () => number;
   onUserNotification?: (sink: UserNotificationSink) => { dispose(): void };
   setReachProbe?: (probe: (conversationId: string) => number) => { dispose(): void };
   onAgentProgress: (listener: (event: AgentProgressEvent) => void) => { dispose(): void };
@@ -347,6 +356,10 @@ export class SidebarHostFacade implements ForgeHostFacade {
 
   emitHostActivity(event: HostActivityEvent): void {
     this.deps.emitHostActivity?.(event);
+  }
+
+  hostActivityListenerCount(): number {
+    return this.deps.hostActivityListenerCount?.() ?? 0;
   }
 
   onUserNotification(sink: UserNotificationSink): { dispose(): void } {

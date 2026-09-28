@@ -2,23 +2,35 @@ import type { MeshUserNotification } from './meshNotificationPolicy';
 
 /**
  * A11 (COPILOT_AGENT_MESH_PLAN P3) — a bounded, in-memory buffer for terminal
- * mesh notifications when the host-activity facade is not ready.
+ * mesh notifications until the host-activity delivery path is actually ready.
  *
  * The durable board append is authoritative and must never be made to fail by
- * notification readiness. The sidebar facade can be unavailable when startup
- * recovery emits a `crashed` event (activation/control-server setup can precede
- * sidebar availability — see `setupAgentMessaging`), so a not-ready facade
- * buffers the notification here and retries until the facade is up — exactly
- * once, in order — or the mesh is disposed.
+ * notification readiness. Delivery has TWO readiness stages, and the buffer
+ * must not flush until BOTH hold:
  *
- * This is NOT a second transport or persistence owner: it holds nothing on
- * disk and emits only through the single host-activity path the wiring already
- * owns. When the facade is ready it emits synchronously (no deferral); only an
- * unavailable facade defers, and the retry timer is unref'd so it never holds
- * the process open.
+ *   1. The sidebar facade is available. It is not when startup recovery emits
+ *      a `crashed` event (activation/control-server setup can precede sidebar
+ *      availability — see `setupAgentMessaging`).
+ *   2. The host-activity SINK is subscribed. The facade's `emitHostActivity`
+ *      fans out to `SlashCommandHandler.activityListeners`, which is populated
+ *      only by the remote transport, and that transport installs its
+ *      `onHostActivity` listener inside `RemoteRuntime.applyConfig` — AFTER the
+ *      facade exists. A facade that exists but has no subscribed sink is NOT
+ *      ready: `emitActivity` returns normally into an empty listener set, the
+ *      item is shifted out, and the terminal notification is lost. So the
+ *      buffer reads the facade's `hostActivityListenerCount()` and only flushes
+ *      once it is > 0 — direct, truthful readiness, no activation handshake.
+ *
+ * Until both stages hold, a notification is buffered here and retried — exactly
+ * once, in order — or the mesh is disposed. This is NOT a second transport or
+ * persistence owner: it holds nothing on disk and emits only through the single
+ * host-activity path the wiring already owns. When both stages are ready it
+ * emits synchronously (no deferral); the retry timer is unref'd so it never
+ * holds the process open.
  */
 export interface HostActivityFacade {
   emitHostActivity?(n: MeshUserNotification): void;
+  hostActivityListenerCount?(): number;
 }
 
 export class PendingHostActivity {
@@ -64,6 +76,14 @@ export class PendingHostActivity {
     }
     const emit = facade?.emitHostActivity;
     if (typeof emit !== 'function') {
+      this.scheduleRetry();
+      return;
+    }
+    // Stage 2: a facade that exists but has no subscribed sink would deliver
+    // into the void, so do not flush until a listener is present. This is what
+    // keeps a startup crash from being lost when the facade is up before the
+    // remote transport has subscribed.
+    if ((facade?.hostActivityListenerCount?.() ?? 0) === 0) {
       this.scheduleRetry();
       return;
     }

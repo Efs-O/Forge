@@ -59,6 +59,16 @@ export class SlashCommandHandler {
     return { dispose: () => this.activityListeners.delete(listener) };
   }
 
+  /**
+   * How many transports are subscribed to host activity. The mesh's
+   * pending-activity buffer reads this through the facade as its delivery
+   * readiness: a facade that exists but has no subscribed sink would deliver
+   * into the void, so the buffer only flushes once this is > 0.
+   */
+  hostActivityListenerCount(): number {
+    return this.activityListeners.size;
+  }
+
   /** Fan out to every subscribed transport. No listeners is the normal case:
    *  remote is opt-in, and these commands must not care whether it is up. */
   emitActivity(event: HostActivityEvent): void {

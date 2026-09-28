@@ -530,6 +530,7 @@ describe('P3: a mesh terminal event reaches the host-activity path (A11 integrat
       emitHostActivity: (event: HostActivityEvent) => {
         activities.push(event);
       },
+      hostActivityListenerCount: () => 1,
     } as unknown as ForgeHostFacade;
     const getSidebar = () => ({ getHostFacade: () => facade });
     const getConfig = () => ({ agent_bus: { enabled: true } }) as ForgeConfig;
@@ -587,6 +588,7 @@ describe('P3: a startup crash with a not-ready facade still recovers and notifie
       emitHostActivity: (event: HostActivityEvent) => {
         activities.push(event);
       },
+      hostActivityListenerCount: () => 1,
     } as unknown as ForgeHostFacade;
     const getSidebar = () => {
       if (!sidebarReady) throw new Error('sidebar not ready');
@@ -608,7 +610,8 @@ describe('P3: a startup crash with a not-ready facade still recovers and notifie
       // (not emitted, not lost) and onEvent does not reject — recovery completes.
       await waitFor(() => (crashCount(busRoot, 'crash-copilot') > 0 ? true : undefined));
       expect(activities).toHaveLength(0);
-      // The sidebar comes up; the retry flushes the buffered crash exactly once.
+      // The sidebar comes up (facade ready, sink subscribed); the retry
+      // flushes the buffered crash exactly once.
       sidebarReady = true;
       const crashed = await waitFor(() => activities.find((a) => a.text.includes('crashed')));
       expect(crashed.text).toContain('copilot');
@@ -647,6 +650,7 @@ describe('P3: a startup crash with a not-ready facade still recovers and notifie
       emitHostActivity: (event: HostActivityEvent) => {
         activities.push(event);
       },
+      hostActivityListenerCount: () => 1,
     } as unknown as ForgeHostFacade;
     const getSidebar = () => {
       if (!sidebarReady) throw new Error('sidebar not ready');
@@ -674,7 +678,8 @@ describe('P3: a startup crash with a not-ready facade still recovers and notifie
             : undefined,
       );
       expect(activities).toHaveLength(0); // both buffered, none emitted (facade not ready)
-      // The sidebar comes up; both buffered crashes flush, exactly once each.
+      // The sidebar comes up (facade ready, sink subscribed); both buffered
+      // crashes flush, exactly once each.
       sidebarReady = true;
       const crashed = await waitFor(() => {
         const c = activities.filter((a) => a.text.includes('crashed'));
@@ -687,6 +692,62 @@ describe('P3: a startup crash with a not-ready facade still recovers and notifie
       expect(aliases).toEqual(['claude', 'copilot']);
       // Both crashes happened before the sidebar was up: window-scoped.
       expect(crashed.every((a) => a.conversationId === undefined)).toBe(true);
+    } finally {
+      await mesh.dispose();
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('facade available but sink not ready: the startup crash is not dropped, then sink-ready flushes exactly one', async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-mesh-home-'));
+    const busRoot = path.join(home, '.forge', 'agent-bus');
+    writeOwnership(busRoot, {
+      alias: 'copilot',
+      agent: 'copilot',
+      session_id: 'copilot-sess',
+      thread_id: 't1',
+      owner_host: { pid: 2000000, startedAt: 1 },
+      workspace: '/ws',
+      created_at: 1,
+      parked: false,
+    });
+
+    const activities: HostActivityEvent[] = [];
+    // The facade is available from the start (the sidebar is up), but no
+    // transport has subscribed its onHostActivity listener yet, so the
+    // listener count is 0. This is the production order: the facade exists
+    // before the transports subscribe.
+    let listeners = 0;
+    const facade = {
+      status: () => ({ activeConversationId: 'conv-1' }),
+      emitHostActivity: (event: HostActivityEvent) => {
+        activities.push(event);
+      },
+      hostActivityListenerCount: () => listeners,
+    } as unknown as ForgeHostFacade;
+    const getSidebar = () => ({ getHostFacade: () => facade });
+    const getConfig = () => ({ agent_bus: { enabled: true } }) as ForgeConfig;
+    const context = { subscriptions: [] as Array<{ dispose(): void }> };
+
+    const mesh = setupAgentMesh(
+      context as unknown as Parameters<typeof setupAgentMesh>[0],
+      getSidebar,
+      getConfig,
+      '/ws',
+      home,
+    );
+    try {
+      // The crash is durably appended. The facade is available, but the sink
+      // is not ready, so the notification is buffered (NOT emitted into an
+      // empty listener set, NOT dropped).
+      await waitFor(() => (crashCount(busRoot, 'crash-copilot') > 0 ? true : undefined));
+      expect(activities).toHaveLength(0); // buffered, not delivered, not lost
+      // A transport subscribes (listener count 0 → 1); the buffered crash
+      // flushes exactly once.
+      listeners = 1;
+      const crashed = await waitFor(() => activities.find((a) => a.text.includes('crashed')));
+      expect(crashed.text).toContain('copilot');
+      expect(activities.filter((a) => a.text.includes('crashed'))).toHaveLength(1);
     } finally {
       await mesh.dispose();
       await fs.rm(home, { recursive: true, force: true });

@@ -4,7 +4,7 @@
 
 ### Copilot agent-mesh P3+P4: operator surfaces, A11 notification bridge, and live validation (2026-09-28)
 
-- P3: `AgentMeshCopilotSurfaces.test.ts` (30 tests) pins the projection and
+- P3: `AgentMeshCopilotSurfaces.test.ts` (33 tests) pins the projection and
   notification owners to agree on Copilot state across `forge.sh who`, the
   sidebar board, Telegram `/status` and `/queue`, unbound remote chats,
   unavailable-CLI refusal, and outbox retry/dedup.
@@ -15,12 +15,23 @@
   event emits exactly one host activity; the policy never includes the prompt
   or a state event's detail. A startup crash can be emitted before the sidebar
   is up, so a bounded in-memory pending-activity buffer
-  (`pendingHostActivity.ts`) holds the notification until the facade is ready
-  and flushes it exactly once, in order — a not-ready facade no longer rejects
-  `onEvent` or aborts crash recovery. 10 direct policy tests + 5 buffer tests +
-  3 integration tests (crashed owned copilot → exactly one host activity; a
-  not-ready facade still recovers and delivers the buffered crash exactly once;
-  multiple recovery actions continue past the first).
+  (`pendingHostActivity.ts`) holds the notification until the delivery path is
+  actually ready and flushes it exactly once, in order — a not-ready facade no
+  longer rejects `onEvent` or aborts crash recovery. Delivery has two readiness
+  stages: the sidebar facade must be available AND the host-activity sink (the
+  remote transport's `onHostActivity` listener, installed by
+  `RemoteRuntime.applyConfig` after the facade exists) must be subscribed. The
+  buffer reads the facade's `hostActivityListenerCount()` — wired live from
+  `SlashCommandHandler.activityListeners.size` through the facade — and only
+  flushes once it is > 0: a facade that exists before the transports subscribe
+  is not ready, so the item is retained and retried (bounded backoff) rather
+  than flushed into an empty listener set and lost. No activation handshake.
+  10 direct policy tests + 6 buffer tests + 4 integration tests (crashed owned
+  copilot → exactly one host activity; a not-ready facade still recovers and
+  delivers the buffered crash exactly once; multiple recovery actions continue
+  past the first; the facade can be available before the sink is subscribed
+  without the startup crash being dropped — it flushes exactly once when a
+  transport subscribes and the listener count goes to 1).
 - P4: live Copilot CLI validation confirmed read-only task, workspace edit,
   session resume with retained context, nonblocking tell (two FIFO pairs),
   steer (durable accept → cancel active → run next), bidirectional relay with

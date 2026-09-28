@@ -93,4 +93,32 @@ describe('SidebarHostFacade', () => {
       conversations: [{ id: 'c1', activeModel: 'local', archived: false }],
     });
   });
+
+  it('reports the host-activity listener count (0 when the sink is not wired)', () => {
+    const deps = {
+      createConversation: () => conversation('c1'),
+      restoreConversation: () => conversation('c1'),
+      send: vi.fn(),
+      cancel: vi.fn(),
+      queueIntent: vi.fn(),
+      addApprovalSink: vi.fn(() => ({ dispose: vi.fn() })),
+      addQuestionSink: () => ({ dispose: () => undefined }),
+      answerQuestion: () => false,
+      dismissQuestion: () => false,
+      resolveApproval: vi.fn(),
+      getPendingApproval: () => undefined,
+      getActiveConversationId: () => 'c1',
+      getOpenConversations: () => [conversation('c1')],
+      getRequestChains: () => [],
+      getStreamingConversationIds: () => new Set(),
+    };
+    // Unwired sink: the count is 0, so the mesh buffer treats it as not ready.
+    expect(new SidebarHostFacade(deps).hostActivityListenerCount()).toBe(0);
+    // Wired sink: the count is the transport's, read live on each call.
+    let n = 0;
+    const facade = new SidebarHostFacade({ ...deps, hostActivityListenerCount: () => n });
+    expect(facade.hostActivityListenerCount()).toBe(0);
+    n = 1;
+    expect(facade.hostActivityListenerCount()).toBe(1);
+  });
 });
