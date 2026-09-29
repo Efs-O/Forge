@@ -312,7 +312,7 @@ removed and a `.vscodeignore` guard added, then repackaged). `git diff
 | 3 — window open, legacy queue | ✅ PASS | With the user's Codex window open, `ask` returned "queue pong" with **no stand-in note and no mesh exchange entry** — i.e. `resolveAdapter('codex')` returned a non-observing `CodexQueueAdapter` (the live thread is held by the user's Codex) and the legacy `queueToCodex` path delivered to the alias's thread. Contrast with the window-closed attempt (exchange 39dbaf51), which took the stand-in path (logged + note). Code: `liveSessionTool.ts` — `adapter?.observesTurns` gates the mesh `ask()` path; a `CodexQueueAdapter` falls to the legacy `queueToCodex` delivery. |
 | 4 — close codex | ✅ PASS | Refused — no `codex.json` ownership record (user-joined). Code path: `readOwnership` → `null` → `close` returns `false`. |
 | 5 — forge.sh who | ✅ PASS | codex = `peer` / `unknown` / "not observable from this host" — truthful (app-server running, interactive session closed). |
-| 6 — orphan check | ✅ PASS (partial) | No orphaned stand-in `codex app-server` after steps 1–2. After the 09-29 step 2 re-run, zero `codex.exe` processes remained (the stand-in was disposed on `onIdle`). After the 0.16.60 install + reload (15:11), the only `codex.exe` was VS Code's own Codex panel (`openai.chatgpt`, parent `Code`), with no Forge stand-in. No stand-in was alive at that reload, though, so the EOF-exit path is still unexercised: reload during a stand-in drain (with the VS Code Codex panel closed) is pending. |
+| 6 — orphan check | ✅ PASS | **Reload mid-drain, 2026-09-29 12:13Z:** the VS Code Codex panel process was killed first, so Forge started a stand-in (pid 7696, `app-server --stdio`) for a long essay tell (exchange `e8ade296`), and the window was reloaded while it was writing. After the reload pid 7696 was gone, and the only `codex.exe` left was the panel's fresh process (21520). Forge logged the exchange as `cancelled`, with the partial essay as its detail. The Codex rollout simply stops mid-turn (last item is reasoning, with no `turn_aborted`), so the app-server was ended by the host's teardown rather than by a `turn/interrupt`. That is harmless, and the thread resumes normally. Earlier notes: | No orphaned stand-in `codex app-server` after steps 1–2. After the 09-29 step 2 re-run, zero `codex.exe` processes remained (the stand-in was disposed on `onIdle`). After the 0.16.60 install + reload (15:11), the only `codex.exe` was VS Code's own Codex panel (`openai.chatgpt`, parent `Code`), with no Forge stand-in. No stand-in was alive at that reload, though, so the EOF-exit path is still unexercised: reload during a stand-in drain (with the VS Code Codex panel closed) is pending. |
 
 **Copilot ACP 1.0.89 comms:** ✅ PASS — "copilot pong" received through the live extension. The jsonrpc 2.0 + relaxed `session/load` fix is verified.
 
@@ -394,10 +394,10 @@ re-run after the user killed both extension app-servers (step 2 row: PASS).
   gates both.
 - Live validation against the real user-joined Codex thread
   (`01a0e4f6-…`) after the reload: **steps 1, 3, 4, 5 PASS; step 6 partial
-  (orphan check clean, reload-mid-idle re-check pending); step 2 PASS
+  (orphan check incl. reload mid-drain); step 2 PASS
   on the 09-29 re-run (F1 withdrawn: the 09-28 "steer" was a plain tell).** Copilot ACP 1.0.89 comms verified live ("copilot pong").
 - Acceptance criteria: C1, C2, C3, C4, C5, C6, C7, C9, C10, C11, C12, C13
-  checked, and C8 as of the 09-29 re-run. All criteria are met; only the full step 6 reload check is pending.
+  checked, and C8 as of the 09-29 re-run. All criteria are met; step 6 passed with a reload mid-drain on 0.16.60.
 
 **Finding F1: withdrawn.** See "Finding F1 — withdrawn" under the live
 validation evidence above. The 21:38 "steer" was a plain tell, and Codex's
@@ -415,7 +415,7 @@ default distro, so a bare `bash` works. `forge.sh` routes `curl` through
 Windows' `curl.exe` under WSL, because WSL2 NAT hides Windows' loopback.
 
 **Pending user actions before this can close:**
-1. Reload the window mid-idle → re-run the orphan check (full step 6).
+1. ~~Reload the window mid-idle → re-run the orphan check (full step 6).~~ Done 2026-09-29, PASS.
 2. ~~Re-run step 2 with a real steer~~ done 2026-09-29 (C8 ✅).
 3. Commit + publish decision (user gates both; the 0.16.58 VSIX is already
    installed in the running VS Code).
