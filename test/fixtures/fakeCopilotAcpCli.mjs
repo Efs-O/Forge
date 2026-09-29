@@ -82,6 +82,18 @@ if (process.argv.includes('--acp')) {
         return;
       }
       sessionId = message.params.sessionId;
+      if (argv.includes('LOAD_REPLAY')) {
+        // ACP spec: session/load replays the past conversation first.
+        for (const sessionUpdate of ['user_message_chunk', 'agent_message_chunk']) {
+          line({
+            method: 'session/update',
+            params: {
+              sessionId,
+              update: { sessionUpdate, content: { type: 'text', text: 'OLD-HISTORY ' } },
+            },
+          });
+        }
+      }
       // ACP spec: the load result is an empty {} after the replay.
       line({ id: message.id, result: {} });
       return;

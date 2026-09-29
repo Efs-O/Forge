@@ -65,6 +65,15 @@ describe('CopilotAcpSession', () => {
     await current.dispose();
   });
 
+  it('does not fold the session/load history replay into the resumed turn', async () => {
+    const current = session('persisted-copilot-session', ['LOAD_REPLAY']);
+    const result = await current.send('resumed');
+    expect(result.status).toBe('completed');
+    expect(result.finalText).not.toContain('OLD-HISTORY');
+    expect(result.finalText).toContain('finished.');
+    await current.dispose();
+  });
+
   it('fails when session/load fails (context lost, no silent fresh session)', async () => {
     const current = session('dead-session', ['LOAD_FAILS']);
     await expect(current.send('resumed')).rejects.toThrow('session not found');

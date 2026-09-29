@@ -298,7 +298,11 @@ export class CopilotAcpSession {
   private handleNotification(method: string, rawParams: unknown): void {
     if (method !== 'session/update') return;
     const active = this.active;
-    if (!active) return;
+    // The turn slot is reserved before the cold start, and ACP `session/load`
+    // replays the whole past conversation as `session/update` notifications
+    // before it responds. Those belong to earlier turns: folding them into
+    // this one returned every old answer ahead of the new one.
+    if (!active?.promptSent) return;
     applyCopilotSessionUpdate(
       rawParams,
       active,
