@@ -1,6 +1,7 @@
 import type { BackgroundExecutionExitNotice } from '../tools/BackgroundExecutionManager';
 import type { AttachmentData } from './messageBridge';
 import { backgroundExecutionManager } from '../tools/BackgroundExecutionManager';
+import { subscribeLiveAnswerNotices } from '../agentBus/liveAnswerNotices';
 import { logger } from '../util/logger';
 
 export function formatBackgroundExitNotice(notice: BackgroundExecutionExitNotice): string {
@@ -121,9 +122,17 @@ export function createSidebarPromptRouter(options: {
   const subscription = subscribeBackgroundExitNotices(options.isOpen, (text, id, echo) =>
     route(text, undefined, id, echo, true),
   );
+  const answers = subscribeLiveAnswerNotices(
+    options.isOpen,
+    (text, id, echo) => route(text, undefined, id, echo, true),
+    (message) => logger.info(message),
+  );
   return {
     route: (text, attachments, id, tellId) => route(text, attachments, id, false, false, tellId),
     cancelTell: options.removeTell,
-    dispose: () => subscription.dispose(),
+    dispose: () => {
+      subscription.dispose();
+      answers.dispose();
+    },
   };
 }

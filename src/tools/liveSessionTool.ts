@@ -15,6 +15,7 @@ import {
   type Orphans,
 } from '../agentBus/agentBus';
 import { claudeQuestion } from '../agentBus/busContent';
+import { liveAnswerNotices } from '../agentBus/liveAnswerNotices';
 import { codexMessage, queueToCodex } from '../agentBus/codexDelivery';
 import { getBoardContext, getMeshOrchestrator } from '../agentMesh/meshContext';
 import { getAlias, joinedPeer } from '../agentMesh/aliasRegistry';
@@ -29,7 +30,7 @@ import {
 import { relayToClaude } from '../agentBus/claudeRelay';
 import { unattendedCliRefusal } from '../jobs/cliAgentGate';
 
-export const MAX_SUBJECT_CHARS = 120;
+export const MAX_SUBJECT_CHARS = 160;
 export const MAX_QUESTION_CHARS = 4000;
 export const MAX_WAIT_MINUTES = 20;
 const MAX_SESSION_CHARS = 60;
@@ -99,6 +100,33 @@ function reason(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+function timeoutText(who: string, minutes: number, id: string, subject: string): string {
+  return (
+    `No answer from ${who} within ${minutes} min ` +
+    `(question \`${id}\`: ${subject}). If it answers later, the answer appears at the start of ` +
+    'your next ask_live_session call. Tell the user; do not fall back to ask_local_agent on ' +
+    'your own.'
+  );
+}
+
+/** notify_on_answer: run the wait detached and return at once (plan: LIVE_SESSION_NOTIFY_ON_ANSWER). */
+function deferAnswer(
+  conversationId: string,
+  id: string,
+  who: string,
+  subject: string,
+  minutes: number,
+  settle: (signal: AbortSignal) => Promise<string>,
+  timeout: { abortAfterMs: number; timeoutText: string } | undefined = undefined,
+): string {
+  liveAnswerNotices.defer({ id, conversationId, who, subject, settle, ...timeout });
+  return (
+    `Sent to ${who} without waiting (question \`${id}\`: ${subject}). Its answer arrives in this ` +
+    `chat as a "[Forge notice]" message within ${minutes} min, starting a new turn if the chat is ` +
+    'idle. Continue other work or end your turn; do not poll or ask again for this question.'
+  );
+}
+
 /** An observed turn (a Forge-owned session) formatted for the user. */
 function formatTurn(
   who: string,
@@ -161,14 +189,17 @@ export function makeLiveSessionTool(deps: LiveSessionDeps): RegisteredTool {
           'session sent you (ask_local_agent starts a NEW, empty session instead). The ' +
           'target is resolved by alias (claude / codex / copilot). Returns the exchange ' +
           'formatted for the user; an unreachable session returns at once, saying why. One ' +
-          'question per call; blocks until the answer, the wait limit, or /stop.',
+          'question per call; blocks until the answer, the wait limit, or /stop. To keep ' +
+          'working instead of blocking, set notify_on_answer: the call returns at once and the ' +
+          'answer arrives later in this chat as a "[Forge notice]" message (a new turn if the ' +
+          'chat is idle). Not delivered if the window reloads first.',
         parameters: {
           type: 'object',
           properties: {
             subject: {
               type: 'string',
               maxLength: MAX_SUBJECT_CHARS,
-              description: 'One self-contained line: all the other session sees first.',
+              description: `One self-contained line, at most ${MAX_SUBJECT_CHARS} characters: all the other session sees first. Detail goes in "question".`,
             },
             question: {
               type: 'string',
@@ -191,6 +222,13 @@ export function makeLiveSessionTool(deps: LiveSessionDeps): RegisteredTool {
               description:
                 'Claude only: the session name, when several are open or a message came ' +
                 'from one ("<name> says:"). Omit to use the configured or only open session.',
+            },
+            notify_on_answer: {
+              type: 'boolean',
+              description:
+                'Return at once and deliver the answer to this chat as a new message when it ' +
+                'lands (within wait_minutes). Use it when you have other work to do meanwhile; ' +
+                'do not poll or re-ask. Default false: block until the answer.',
             },
             wait_minutes: {
               type: 'integer',
@@ -224,6 +262,20 @@ export function makeLiveSessionTool(deps: LiveSessionDeps): RegisteredTool {
         requested > MAX_WAIT_MINUTES
       ) {
         throw new Error(`ask_live_session: "wait_minutes" must be 1 to ${MAX_WAIT_MINUTES}.`);
+      }
+      const notifyOnAnswer = args['notify_on_answer'] === true;
+      if (notifyOnAnswer && !context?.conversationId) {
+        throw new Error(
+          'ask_live_session: notify_on_answer requires a conversation; ask from a chat.',
+        );
+      }
+      const conversationId = context?.conversationId ?? '';
+      if (notifyOnAnswer) {
+        try {
+          liveAnswerNotices.assertCanDefer();
+        } catch (err) {
+          throw new Error(`ask_live_session: ${reason(err)}`);
+        }
       }
       const target: unknown = args['target'] ?? 'claude';
       if (target !== 'claude' && target !== 'codex' && target !== 'copilot') {
@@ -264,16 +316,25 @@ ${question}
 
 (Your final message in this turn is the answer; Forge reads it directly. Do not run forge.sh reply or write an outbox file.)`;
         const note = adapter.note;
-        const result = await orchestrator.ask(target, message, signal);
-        const turn = formatTurn(who, subject, result, signal?.aborted === true);
-        return (
-          late +
-          (note
+        const settle = async (sig?: AbortSignal): Promise<string> => {
+          const result = await orchestrator.ask(target, message, sig);
+          const turn = formatTurn(who, subject, result, sig?.aborted === true);
+          return note
             ? `${note}
 
 ${turn}`
-            : turn)
-        );
+            : turn;
+        };
+        if (notifyOnAnswer) {
+          return (
+            late +
+            deferAnswer(conversationId, id, who, subject, requested, settle, {
+              abortAfterMs: requested * 60_000,
+              timeoutText: timeoutText(who, requested, id, subject),
+            })
+          );
+        }
+        return late + (await settle(signal));
       }
 
       let deliver: () => Promise<void>;
@@ -350,30 +411,30 @@ ${turn}`
         return `${late}Could not deliver to ${who}, so the question was NOT sent: ${reason(err)}${NOT_SENT_SUFFIX}`;
       }
       const waitMs = requested * 60_000;
-      const reply = await waitForReply(paths, id, waitMs, signal);
-
-      if (reply !== undefined) {
-        clearExchange(paths, id);
-        return `${late}**Asked ${who}:** ${subject}\n\n**${who} says:**\n\n${reply.trim()}`;
+      const settle = async (sig?: AbortSignal): Promise<string> => {
+        const reply = await waitForReply(paths, id, waitMs, sig);
+        if (reply !== undefined) {
+          clearExchange(paths, id);
+          return `**Asked ${who}:** ${subject}\n\n**${who} says:**\n\n${reply.trim()}`;
+        }
+        // Withdraw so a later answer is an orphan: announced once on the next
+        // call rather than silently lost.
+        withdrawQuestion(paths, id);
+        if (sig?.aborted) {
+          return `Stopped before ${who} answered. The turn is stopping; do not start further work.`;
+        }
+        const hint =
+          target === 'codex'
+            ? ' Codex answers only while its session is open in a terminal with write access to the bus folder.'
+            : ' The question was delivered to its window. If that session runs with bypass permissions ' +
+              'and ~/.claude/settings.json lacks `"crossSessionInbound": "accept"`, it is waiting ' +
+              'there for the user to approve it.';
+        return `${timeoutText(who, requested, id, subject)}${hint}`;
+      };
+      if (notifyOnAnswer) {
+        return late + deferAnswer(conversationId, id, who, subject, requested, settle);
       }
-      // Withdraw so a later answer is an orphan: announced once on the next
-      // call rather than silently lost.
-      withdrawQuestion(paths, id);
-      if (signal?.aborted) {
-        return `${late}Stopped before ${who} answered. The turn is stopping; do not start further work.`;
-      }
-      const hint =
-        target === 'codex'
-          ? ' Codex answers only while its session is open in a terminal with write access to the bus folder.'
-          : ' The question was delivered to its window. If that session runs with bypass permissions ' +
-            'and ~/.claude/settings.json lacks `"crossSessionInbound": "accept"`, it is waiting ' +
-            'there for the user to approve it.';
-      return (
-        `${late}No answer from ${who} within ${requested} min ` +
-        `(question \`${id}\`: ${subject}). If it answers later, the answer appears at the start of ` +
-        'your next ask_live_session call. Tell the user; do not fall back to ask_local_agent on ' +
-        `your own.${hint}`
-      );
+      return late + (await settle(signal));
     },
   };
 }

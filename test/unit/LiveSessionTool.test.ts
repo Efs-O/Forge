@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { busPaths, ensureBus, type BusPaths } from '../../src/agentBus/agentBus';
 import type { ClaudeSession } from '../../src/agentBus/claudePeer';
 import { CodexQueueAdapter } from '../../src/agentMesh/adapters';
@@ -134,6 +134,40 @@ describe('ask_live_session', () => {
     expect(result).toContain('ask_local_agent');
     expect(sent).toEqual([]);
     expect(fs.readdirSync(paths.inbox)).toEqual([]);
+  });
+
+  it('notify_on_answer returns at once and delivers the answer through the notice listener', async () => {
+    const { liveAnswerNotices } = await import('../../src/agentBus/liveAnswerNotices');
+    const got: { id: string; text: string; conversationId: string }[] = [];
+    const sub = liveAnswerNotices.onAnswer((n) => got.push(n));
+    try {
+      const result = await tool().handler(
+        { ...ask, notify_on_answer: true },
+        { conversationId: 'c1' } as never,
+      );
+      expect(result).toContain('without waiting');
+      expect(result).toContain('[Forge notice]');
+      expect(sent).toHaveLength(1);
+      expect(got).toEqual([]);
+      answerNextQuestion('Yes, X holds.');
+      await vi.waitFor(() => expect(got).toHaveLength(1), { timeout: 3_000 });
+      expect(got[0].conversationId).toBe('c1');
+      expect(got[0].text).toContain('Yes, X holds.');
+      expect(got[0].text).toContain('**Claude (forge-dd) says:**');
+    } finally {
+      sub.dispose();
+      liveAnswerNotices.dispose();
+    }
+  });
+
+  it('notify_on_answer needs a conversation and a listener, and sends nothing when refused', async () => {
+    await expect(tool().handler({ ...ask, notify_on_answer: true })).rejects.toThrow(
+      /requires a conversation/,
+    );
+    await expect(
+      tool().handler({ ...ask, notify_on_answer: true }, { conversationId: 'c1' } as never),
+    ).rejects.toThrow(/no chat is listening/);
+    expect(sent).toEqual([]);
   });
 
   it('sends into the one session in this workspace and returns the exchange', async () => {

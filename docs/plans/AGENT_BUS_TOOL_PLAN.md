@@ -36,7 +36,7 @@ owns the file protocol.
 
 | Arg | Type | Notes |
 | --- | --- | --- |
-| `subject` | string, maxLength 120 | One line. It is all the live session sees first. |
+| `subject` | string, maxLength 160 | One line. It is all the live session sees first. |
 | `question` | string, maxLength 4000 | Bounded, like `ask_local_agent`'s `task`. |
 | `wait_minutes` | integer 1–20, default 20 | Ceiling, not a delay. Returns the moment the reply lands. |
 
