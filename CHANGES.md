@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## 0.16.60
+## 0.16.61
 
 ### Forge's Telegram notices stand apart from replies (2026-09-29)
 
@@ -38,6 +38,8 @@
   and unlocking resent pending approvals but not questions, so the sidebar
   showed the choice box while Telegram stayed silent. Unlocking now also sends
   any question that chat has not been shown yet, and sends it once.
+
+## 0.16.60
 
 ### `forge.sh` works from WSL bash (2026-09-29)
 
