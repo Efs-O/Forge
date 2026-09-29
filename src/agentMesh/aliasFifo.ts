@@ -104,6 +104,11 @@ export class AliasFifo {
     return this.adapter.key;
   }
 
+  /** The adapter's stand-in note, if any (so a tell need not re-resolve). */
+  get note(): string | undefined {
+    return this.adapter.note;
+  }
+
   /**
    * F-03: whether this queue's adapter observes turns. A non-observing one
    * stays `accepted` until a verdict appears, so the sender binds the exchange

@@ -432,8 +432,205 @@ bundle-load smoke, all green. Package: sha256
 8,861,352 bytes, built from clean commit `0dffe8d` so unrelated uncommitted
 worktree changes are excluded (replacing the stale `cd694872…` build).
 
+**CLI update compatibility (2026-09-29):** the Copilot CLI self-updated
+1.0.88 → 1.0.89 on 2026-09-28 19:46Z (between two failed Forge attempts).
+Two client-side defects surfaced; both are fixed, `npm run ci` is green
+(3,378 passed), and the fix is live-validated against the real 1.0.89:
+
+1. **Strict JSON-RPC 2.0.** 1.0.89 rejects frames without
+   `jsonrpc: "2.0"` ("every JSON-RPC message must carry …"); 1.0.88 tolerated
+   them. The ACP client never sent the field. It is now added to every
+   outgoing frame in `CopilotAcpSession.write()` (requests, notifications,
+   permission responses).
+2. **Latent resume bug (never live-validated).** Per the ACP spec,
+   `session/load` responds after replaying the conversation with a result
+   that carries **no** `sessionId` (the confirmed id is the one requested).
+   The client required a `sessionId` in the load result, so every
+   cross-process resume failed with "session/load returned no session id" —
+   even though the CLI had loaded the session and replayed its history. P4
+   item 3's "second ask" ran in the same warm process (no load), so the
+   defect was never exercised. A mismatched id in a load result is still a
+   protocol error.
+
+Live probe against the real 1.0.89 (2026-09-29, `test/copilot-live-comms-probe.mjs`):
+`initialize` accepted (`protocolVersion 1`, `loadSession: true`),
+`session/load` resumed the Forge-owned session with full history replay, and a
+`session/prompt` answered through the resumed context
+(`stopReason: end_turn`). The fake ACP CLI fixture now models 1.0.89
+(strict `jsonrpc: "2.0"`, spec-shaped load result), so the session suite
+exercises the strict wire.
+
 **Exit criteria:** every acceptance item below has code-path and live evidence,
 the final gates pass, and the packaged VSIX is smoke-tested.
+
+## P4b — Live mesh-command validation against the user-joined peers (Claude, Codex)
+
+**Implementation evidence (2026-09-28):** the user asked whether the same live
+mesh-command matrix P4 ran against the owned copilot (ask / tell / steer /
+relay / close) could be run live against Claude Code and Codex. Mesh state at
+the time: `forge` hub/busy, `claude` joined/dead, `codex` peer/unknown
+("not observable from this host"), `copilot` owned/dead.
+
+**Claude** (user-joined, `by: "user"`; the panel was stopped by the VS Code
+reload, so Forge resumed that conversation headless via the stand-in —
+reopening the panel continues it there):
+
+1. **ask ✅** — `ask_live_session(target: "claude")` round-trip returned
+   `CLAUDE-MESH-OK n:\vs code apps\Forge`.
+2. **tell ✅** — one-way tell `accepted (queued)`, exchange
+   `ee1e2b8a-f755-4654-9e45-9c096a2e5643`.
+3. **steer ✅** — the interrupt path, proven from the durable exchange log:
+   slow turn `0d057d98` started 12:00:56.414; steer `a16d1646` **accepted
+   12:01:02.439**; the active turn **cancelled 12:01:02.452** (13 ms after
+   acceptance); the steer **started 12:01:02.460** (8 ms after the cancel) and
+   completed 12:01:06.009. Durable acceptance before interruption, the current
+   turn settles as `cancelled`, and the steer runs next — the documented
+   contract (same shape as P4 item 5's copilot steer).
+4. **relay ✅** — the hub relay path was exercised: the slow ask carried both
+   hop events of the same exchange id (`forge→forge inbound` +
+   `forge→claude host relay`).
+5. **close — not applicable by design** — `close` is "hard-kill a
+   Forge-owned session (never user-opened)"; claude is user-joined
+   (`by: "user"`), so it is structurally not applicable — the same reason it
+   only applied to the Forge-owned copilot in P4.
+
+**Codex** (user-joined, `by: "user"`, `peer`, "not observable from this host"):
+
+- **Not reachable from this window** — `ask_live_session(target: "codex")`
+  was refused: "No Codex session is available through the agent mesh or
+  configured live pin." No live Codex session exists and no
+  `agent_bus.codex_thread` pin is set.
+- **How to make it testable:** open
+  `codex resume <thread> --sandbox workspace-write --add-dir "<the agent-bus
+  folder>"` in a terminal and set `agent_bus.codex_thread: <thread>` in
+  `.forge/config.yaml`; then run the same ask/tell/steer matrix and capture
+  the exchange-log evidence.
+
+**Structural difference from copilot:** copilot was Forge-*owned*
+(`by: "forge"`), so all five commands applied. User-*joined* peers support
+ask/tell/steer/relay; `close` is by design not applicable to them.
+
+### Codex refusal chain (code-level, verified 2026-09-28; corrected after
+Claude review)
+
+The live refusal ("No Codex session is available through the agent mesh or
+configured live pin") comes from this exact chain:
+
+1. `ask_live_session(target: "codex")` → `orchestrator.resolveAdapter("codex")`
+   → `sessionProvider.codexAdapterAsync()`.
+2. **The short-circuit** (`sessionProvider.ts:133`):
+   `if (aliasRec?.by === 'user') return this.factory.codexAdapterIfLive();`
+   — a user-joined codex alias returns *here*, before the
+   `ensureOwnedCodex` headless-resume fallback that a Forge-owned (or
+   unregistered) codex alias reaches.
+3. `codexAdapterIfLive` (`ownedSessionFactory.ts:112`) →
+   `codexQueueAdapterIfLive` (`codexPinLiveness.ts`): because the alias
+   record exists, `resolveSessionIdentity` returns `fromAlias: true`, so the
+   function goes straight to `codexQueueAdapter` **without any liveness
+   probe**; `codexQueueAdapter` returns a **non-observing**
+   `CodexQueueAdapter` unconditionally for a user-joined alias (the
+   "undefined when the pin is not live" branch applies only to a pin with no
+   alias). In the live run the adapter was therefore **defined but
+   non-observing**, not undefined.
+4. `liveSessionTool.ts` uses the mesh ask path only when
+   `adapter.observesTurns` is true. The queue adapter is non-observing, so the
+   tool falls to the legacy peer path.
+5. The legacy codex path reads **only** the `agent_bus.codex_thread` config
+   pin (`liveSessionTool.ts:274`: `if (!thread) return late + NO_CODEX_THREAD`)
+   and ignores the joined alias's own `session_id` — unset here → the refusal.
+
+**Root causes (two):**
+
+- **Primary:** a user-joined codex thread can resolve *only* to a
+  non-observing adapter, while the mesh ask path needs an observing one (the
+  mesh FIFO). There is no headless-resume fallback for user-joined codex —
+  the `by === 'user'` short-circuit returns before it.
+- **Secondary:** the legacy fallback ignores the alias's `session_id`, so even
+  a *live* user-joined codex refuses `ask` unless the config pin is also set.
+
+**Why the original code was conservative:** a codex thread admits one active
+writer. With the user's window open, a headless resume would race that writer
+and fail with `thread … already has an active writer`. With the window
+closed, there is no writer and a headless resume is safe. The current code
+does not check liveness at the short-circuit — it simply never resumes.
+Note: `codexPinIsLive`/`CodexDiscovery` **cannot** make that live/dead split
+— per `sessionProvider.ts`'s own comment, discovery "live" only proves the
+thread exists on disk, not that a Codex window has it open. The only reliable
+signal is the resume attempt itself: try `thread/resume`, and on
+`already has an active writer` dispose and fall back to the queue adapter.
+
+### Proposal: Codex stand-in (mirrors `claudeStandIn.ts`; corrected after
+Claude review)
+
+Make user-joined codex behave like user-joined claude:
+
+- **Live thread (window open):** the non-observing queue adapter reaches the
+  live thread (current behavior). Ask/tell work through the legacy peer path,
+  which must be fixed to resolve the thread via `resolveSessionIdentity`
+  (alias first, pin second) instead of `bus.codex_thread` alone — closing the
+  secondary root cause. Steer remains N/A for a live (non-observing) thread,
+  as today.
+- **Dead thread (window closed):** a new `CodexStandIn`
+  (`src/agentMesh/codexStandIn.ts`, owner-preserving, its own file —
+  `sessionProvider.ts` is at the 500-line lint limit) spawns a **headless
+  owned codex app-server that resumes the user-joined thread id** (the
+  `session_id` in `aliases.json`), using the raw
+  `defaultCodexFactory().create({ threadId })` — the same factory call
+  `createOwnedCodex` uses, *without* its `beginCreation`/`writeOwnership`
+  wrapper.
+- **The live/dead split is built on the resume attempt, not on discovery:**
+  the stand-in's first `send` triggers `ensureStarted()` → `thread/resume`
+  (lazily — `create()` only constructs the session). On
+  `already has an active writer`, dispose the stand-in and fall back to the
+  queue adapter (the window opened in the meantime). All resume failures
+  surface at first send, so failure/fallback handling wraps the first send,
+  not `create()`.
+- **Observing:** the stand-in adapter has `observesTurns: true`, so ask goes
+  through the mesh FIFO and steer works — the full ask/tell/steer matrix,
+  same as the claude stand-in.
+- **Not an owned session** (same invariant as the claude stand-in): it never
+  enters the provider's owned map and writes no ownership or alias record —
+  M3 resume, recovery and the TTL reaper cannot see it, and the user's thread
+  id can never leak into `ownership/codex.json`.
+- **Window-reopen rule (invariant #5):** while the stand-in holds the thread,
+  *it* is the active writer, so a user reopening Codex would hit the writer
+  conflict. The stand-in therefore **never outlives one FIFO drain**
+  (`onIdle`), also disposes when the live thread becomes reachable again, and
+  never kills or races a user process.
+- **Never silent:** a stand-in answering for a dead user-joined codex emits
+  the same user-facing note as the claude stand-in (window warning + board
+  event + Telegram), via the existing `onStandIn`-style seam.
+- **A mismatched id is a reported resume failure, not a fork:**
+  `CodexAppServerSession.validateThreadResult` throws
+  `Codex thread/resume returned a mismatched thread id` — there is no silent
+  fork to report (unlike Claude). That case goes through the same plain
+  failure note as any resume failure.
+- **Empty `session_id` (the known `forge.sh join codex` alias bug):** mirror
+  the claude stand-in — start a fresh thread with an explicit user-facing
+  note that it does NOT have the context of the joined conversation (no
+  claimed continuity, invariant #6).
+- **`close` still does not apply** to user-joined codex (invariant #5: never
+  kill a user process). The stand-in is a transient Forge-spawned process
+  that disposes itself on idle — it is not a `close` target.
+
+### Proposed FORGE.md block (apply when the stand-in lands)
+
+Recorded here as a proposal so it is applied at implementation time, when it
+becomes truthful:
+
+```markdown
+## Agent mesh comms (quick reference)
+- Tools: ask_live_session / tell_live_session (targets: claude, codex, copilot).
+  Mesh state: GET /agent/who (token from .forge/agent-bus/endpoint.json).
+- Copilot: Forge-owned, always headless. ask/tell/steer/close all work.
+- Claude: user-joined. ask/tell/steer work headlessly (a stand-in resumes the
+  dead session; the answer lands in that session's history). close does NOT
+  apply (user-joined = never killed by Forge).
+- Codex: user-joined. ask/tell/steer work headlessly (a stand-in resumes the
+  dead thread when no window is open; with a window open, Forge talks to the
+  live thread, non-observing). close does NOT apply.
+- close: only Forge-owned sessions (by:"forge"). Never user-joined (by:"user").
+```
 
 ## State × lifecycle ledger
 

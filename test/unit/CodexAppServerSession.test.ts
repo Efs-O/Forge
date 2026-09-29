@@ -136,4 +136,20 @@ describe('CodexAppServerSession', () => {
     expect(result.finalText).toBe('Done codex turn 1 The command completed successfully from history.');
     await current.dispose();
   });
+
+  // Phase 1 (CODEX_STAND_IN_PLAN test 12): the eager-start seam is idempotent
+  // (a second call reuses the same start — no second spawn) and refuses after
+  // dispose (stop() clears startPromise, so without the guard a post-dispose
+  // eager start would spawn a fresh app-server).
+  it('eager-starts once and refuses to start again after dispose', async () => {
+    const current = session();
+    await current.ensureStarted();
+    const pid = current.pid;
+    expect(pid).toBeTypeOf('number');
+    await current.ensureStarted();
+    expect(current.pid).toBe(pid);
+    await current.dispose();
+    await expect(current.ensureStarted()).rejects.toThrow(/disposed/);
+    expect(current.pid).toBeUndefined();
+  });
 });

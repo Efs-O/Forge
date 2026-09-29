@@ -38,12 +38,26 @@ describe('interactive Codex join', () => {
     expect(queueCodex).toHaveBeenCalledWith('codex', 'thread-7', 'wake supervisor', undefined);
   });
 
-  it('provider routes a joined interactive thread through queue without resuming it', async () => {
+  it('provider reaches a joined thread with a live window through the queue adapter', async () => {
     expect(joinCodex(root, 'codex', 'thread-7').ok).toBe(true);
     const queueCodex = vi.fn(async () => undefined);
-    const createOwned = vi.fn(async () => {
-      throw new Error('must not resume a joined interactive thread');
-    });
+    let disposed = false;
+    // A joined thread is now reached through the stand-in, which tries to resume
+    // it. A live window holds the thread, so the resume hits the writer conflict
+    // and the stand-in falls back to the non-observing queue adapter (CODEX
+    // _STAND_IN_PLAN Phase 3) — the factory IS called, unlike the old direct path.
+    const createOwned = vi.fn(async () =>
+      ({
+        ensureStarted: async () => {
+          throw new Error('thread thread-7 already has an active writer');
+        },
+        send: async () => ({ status: 'completed', finalText: 'x' }),
+        interrupt: () => {},
+        dispose: async () => {
+          disposed = true;
+        },
+      }) as never,
+    );
     const provider = new MeshSessionProvider({
       busRoot: root,
       getConfig: () =>
@@ -55,6 +69,8 @@ describe('interactive Codex join', () => {
     });
 
     const adapter = await provider.resolveAdapter('codex');
+    expect(createOwned).toHaveBeenCalled();
+    expect(disposed).toBe(true);
     expect(adapter?.observesTurns).toBe(false);
     await adapter?.send('one-way progress note');
     expect(queueCodex).toHaveBeenCalledWith(
@@ -63,7 +79,6 @@ describe('interactive Codex join', () => {
       'one-way progress note',
       undefined,
     );
-    expect(createOwned).not.toHaveBeenCalled();
     await provider.dispose();
   });
 

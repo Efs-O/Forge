@@ -101,6 +101,7 @@ const ModelConfigSchema = z.object({
   group: z.string().min(1).optional(),
   groups: z.array(z.string().min(1)).optional(),
   short_name: z.string().min(1).optional(),
+  display_name: z.string().trim().min(1).max(60).optional(),
   category: z.string().min(1).optional(),
   comment: z.string().optional(),
   tools: z.array(z.string().min(1)).optional(),

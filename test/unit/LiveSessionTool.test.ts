@@ -4,6 +4,8 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { busPaths, ensureBus, type BusPaths } from '../../src/agentBus/agentBus';
 import type { ClaudeSession } from '../../src/agentBus/claudePeer';
+import { CodexQueueAdapter } from '../../src/agentMesh/adapters';
+import { registerAlias } from '../../src/agentMesh/aliasRegistry';
 import { setMeshOrchestrator } from '../../src/agentMesh/meshContext';
 import type { MeshAdapter } from '../../src/agentMesh/meshAdapter';
 import type { MeshOrchestrator } from '../../src/agentMesh/meshOrchestrator';
@@ -315,6 +317,45 @@ describe('ask_live_session', () => {
       const result = await tool().handler(askCodex);
       expect(asked).toEqual(['codex']);
       expect(result).toContain('via fifo');
+    });
+
+    it('with a live user-joined window and no pin, queues to the alias thread from the adapter', async () => {
+      registerAlias(paths.root, 'codex', {
+        agent: 'codex',
+        session_id: 'thread-7',
+        registered_at: 1,
+        by: 'user',
+      });
+      codexThread = undefined; // no pin: the thread must come from the adapter
+      answerNextQuestion('Yes from the live Codex.');
+      installMeshAdapter(new CodexQueueAdapter('codex', 'thread-7', async () => undefined));
+      const result = await tool().handler(askCodex);
+      expect(sent).toEqual([]);
+      expect(queued).toHaveLength(1);
+      expect(queued[0].thread).toBe('thread-7');
+      expect(queued[0].message).toContain('Check X.');
+      expect(result).toContain('**Asked Codex:** Does X hold?');
+    });
+
+    it('with a user-joined alias whose stand-in failed, refuses and does not queue', async () => {
+      registerAlias(paths.root, 'codex', {
+        agent: 'codex',
+        session_id: 'thread-7',
+        registered_at: 1,
+        by: 'user',
+      });
+      codexThread = undefined; // no pin: must not fall back to a ghost thread
+      setMeshOrchestrator({
+        resolveAdapter: async () => undefined, // the stand-in failed (mismatched id, etc.)
+        ask: async () => {
+          throw new Error('must not reach the observing path');
+        },
+      } as unknown as MeshOrchestrator);
+      const result = await tool().handler(askCodex);
+      expect(result).toContain('could not be resumed headlessly');
+      expect(queued).toEqual([]);
+      expect(sent).toEqual([]);
+      expect(fs.readdirSync(paths.inbox)).toEqual([]);
     });
 
     it('rejects an unknown target', async () => {

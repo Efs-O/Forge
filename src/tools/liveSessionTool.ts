@@ -18,6 +18,7 @@ import { claudeQuestion } from '../agentBus/busContent';
 import { codexMessage, queueToCodex } from '../agentBus/codexDelivery';
 import { getBoardContext, getMeshOrchestrator } from '../agentMesh/meshContext';
 import { getAlias, joinedPeer } from '../agentMesh/aliasRegistry';
+import { CodexQueueAdapter } from '../agentMesh/adapters';
 import type { TurnResult } from '../agentMesh/meshAdapter';
 import {
   pickClaudePeer,
@@ -49,11 +50,18 @@ export interface LiveSessionDeps {
 }
 
 const NO_CODEX_THREAD =
-  'No Codex session is available through the agent mesh or configured live pin, so the question ' +
-  'was NOT sent. Tell the user. To use a user-opened one, open it in a terminal with `codex ' +
-  'resume <thread> --sandbox workspace-write --add-dir "<the agent-bus folder>"` and set ' +
-  '`agent_bus.codex_thread: <thread>` in config.yaml. Do not fall back to ask_local_agent on ' +
-  'your own.';
+  'No Codex session is available through the agent mesh or configured live pin, so the ' +
+  'question was NOT sent. Tell the user. To use a user-opened one, join it ' +
+  '(`forge.sh join codex`) or open it in a terminal with `codex resume <thread> ' +
+  '--sandbox workspace-write --add-dir "<the agent-bus folder>"` and set ' +
+  '`agent_bus.codex_thread: <thread>` in config.yaml. Do not fall back to ' +
+  'ask_local_agent on your own.';
+
+const CODEX_STAND_IN_FAILED =
+  'The Codex session the user joined could not be resumed headlessly, so the ' +
+  'question was NOT sent. The reason was already shown to the user. Tell the ' +
+  'user. Do not fall back to ask_local_agent on your own: it starts a new, ' +
+  'empty session that does not know this work.';
 
 const NOT_SENT_SUFFIX =
   '\n\nTell the user. Do not fall back to ask_local_agent on your own: it starts a new, ' +
@@ -271,12 +279,40 @@ ${turn}`
       let deliver: () => Promise<void>;
       let who: string;
       if (target === 'codex') {
-        const thread = bus?.codex_thread;
-        if (!thread) return late + NO_CODEX_THREAD;
-        who = 'Codex';
-        const message = codexMessage(replyFile(paths, id), id, subject, question);
-        deliver = () =>
-          (deps.queueCodex ?? queueToCodex)(bus?.codex_cli ?? 'codex', thread, message, signal);
+        // The adapter was resolved earlier in this handler. While a user-opened
+        // Codex window is live, that is a non-observing CodexQueueAdapter whose
+        // thread is the alias's (or a live pin's) — take it from the adapter
+        // rather than re-reading a pin that may not match (Phase 4).
+        const queueAdapter = adapter instanceof CodexQueueAdapter ? adapter : undefined;
+        const aliasRec = getAlias(paths.root, 'codex');
+        if (queueAdapter) {
+          who = 'Codex';
+          const message = codexMessage(replyFile(paths, id), id, subject, question);
+          deliver = () =>
+            (deps.queueCodex ?? queueToCodex)(
+              bus?.codex_cli ?? 'codex',
+              queueAdapter.thread,
+              message,
+              signal,
+            );
+        } else if (aliasRec?.by === 'user' && orchestrator) {
+          // A user-joined alias whose stand-in could not reach the thread
+          // (create failed, mismatched id, protocol error, timeout). The
+          // reason was shown to the user; refuse plainly and never queue to a
+          // thread no window holds (invariant 5). Gated on the orchestrator:
+          // without one, no stand-in was ever attempted, so that wording
+          // would be false (audit, minor 5).
+          return late + CODEX_STAND_IN_FAILED;
+        } else if (bus?.codex_thread) {
+          // No alias: the deprecated pin, used only when no alias exists.
+          const pin = bus.codex_thread;
+          who = 'Codex';
+          const message = codexMessage(replyFile(paths, id), id, subject, question);
+          deliver = () =>
+            (deps.queueCodex ?? queueToCodex)(bus?.codex_cli ?? 'codex', pin, message, signal);
+        } else {
+          return late + NO_CODEX_THREAD;
+        }
       } else if (target === 'copilot') {
         // Copilot is always an owned observing session; reaching here means no
         // copilot session could be resolved (CLI missing / creation failed).

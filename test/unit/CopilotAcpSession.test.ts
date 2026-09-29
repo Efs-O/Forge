@@ -71,6 +71,12 @@ describe('CopilotAcpSession', () => {
     await current.dispose();
   });
 
+  it('fails when session/load returns a mismatched session id', async () => {
+    const current = session('persisted-copilot-session', ['LOAD_MISMATCH']);
+    await expect(current.send('resumed')).rejects.toThrow('mismatched session id');
+    await current.dispose();
+  });
+
   it('fails on malformed protocol output', async () => {
     const current = session();
     const result = await current.send('TRIGGER_PROTOCOL');

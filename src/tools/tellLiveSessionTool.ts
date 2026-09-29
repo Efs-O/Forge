@@ -114,7 +114,10 @@ export function makeTellLiveSessionTool(deps: TellLiveSessionDeps): RegisteredTo
         return `tell_live_session: ${outcome.error}`;
       }
       const state = outcome.observing ? 'started (owned session)' : 'accepted (queued)';
-      const note = (await orchestrator.resolveAdapter(alias))?.note;
+      // The note rides on the tell outcome: a fresh resolve here would create
+      // a second stand-in (the first already drained) that never reaches a
+      // FIFO, holding the thread's writer (audit, major 2).
+      const note = outcome.note;
       return (
         (note
           ? `${note}

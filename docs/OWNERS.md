@@ -79,6 +79,7 @@ overlaps with an existing owner, extend the owner instead.
 | Webview diagnostic message shapes                    | `src/sidebar/diagnosticMessages.ts`      |
 | Conversation-tab webview message shapes              | `src/sidebar/conversationMessages.ts`    |
 | "Open this in the editor" message shapes             | `src/sidebar/openMessages.ts`            |
+| Model-picker message shapes (labels, residency)      | `src/sidebar/modelMessages.ts`           |
 | Chat attachment bytes on disk (thumbnails)           | `src/sidebar/ChatAttachmentStore.ts`     |
 | In-editor green/red diff decorations                 | `src/sidebar/DiffDecorations.ts`         |
 | Diff computation + unified-diff parsing              | `src/sidebar/DiffUtils.ts`               |
@@ -518,6 +519,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Per-alias ownership + creation lease + recovery (M2/M3)  | `src/agentMesh/ownership.ts`                |
 | Per-alias host-side FIFO (M5)                            | `src/agentMesh/aliasFifo.ts`                |
 | Delivery adapters (owned Codex / Claude peer / Codex queue) | `src/agentMesh/adapters.ts`            |
+| Headless Codex stand-in for a joined Codex with no window | `src/agentMesh/codexStandIn.ts`        |
 | Session provider (owned-session lifecycle, M2/M3)        | `src/agentMesh/sessionProvider.ts`          |
 | Joined Claude peer + dead-join stand-in (resume, notice) | `src/agentMesh/claudeStandIn.ts`            |
 | Mesh orchestrator (tell + host-side relay M6)            | `src/agentMesh/meshOrchestrator.ts`         |

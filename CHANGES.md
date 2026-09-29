@@ -2,6 +2,15 @@
 
 ## 0.16.59
 
+### `forge.sh` works from WSL bash (2026-09-29)
+
+- Under WSL2 on Windows 10 (NAT networking only), `127.0.0.1` is the Linux
+  VM, so every `forge.sh` verb failed with `curl: (7) Failed to connect to
+  127.0.0.1 port 8799`. When `WSL_DISTRO_NAME` is set and `curl.exe` is on
+  PATH, the script now calls Windows' `curl.exe` through interop and
+  rewrites `@/tmp/...` body paths with `wslpath -w`. The control server
+  still binds loopback only. Git Bash and other shells are unchanged.
+
 ### Local llama.cpp requests wait up to 30 min for a busy slot (2026-09-29)
 
 - A chat queued behind another chat on a single-slot llama-server failed after
@@ -15,6 +24,62 @@
   Stop still cancels a waiting request. New dependency: `undici@^6`.
 - Plan: `docs/plans/LOCAL_QUEUE_WAIT_PLAN.md`. The waiting notice (fix 2) is
   not in this build.
+
+## 0.16.58
+
+### Friendly model labels: `display_name` (2026-09-28)
+
+- New optional per-model `display_name` in `config.yaml` (max 60 chars). The
+  sidebar model picker and the Telegram `/models` list show it in place of the
+  model id; the id (`name`) is still what selection, routing, `active_model`
+  and `/model <name>` use, and the picker shows it on hover. Models without a
+  `display_name` render exactly as before. Telegram sorts within a group by the
+  label shown, so `/model <n>` numbering follows what the user sees.
+- Model-picker message shapes moved from `messageBridge.ts` (at the 500-line
+  cap) to `src/sidebar/modelMessages.ts`, re-exported unchanged.
+
+### Codex stand-in: headless comms for a user-joined Codex with no open window (2026-09-28)
+
+- A user-joined Codex (`forge.sh join codex`, `by: "user"`) is now reachable
+  from Forge with no Codex window open, the same way user-joined Claude is:
+  Forge spawns a transient headless `codex app-server` that resumes the
+  joined thread, answers through the mesh, and disposes itself after one FIFO
+  drain. With a window open, behavior is unchanged — the stand-in's resume
+  hits `already has an active writer` and falls back to the non-observing
+  queue adapter, so a live window is never killed or raced.
+- `ask_live_session` / `tell_live_session` now reach a live user-joined Codex
+  without the deprecated `agent_bus.codex_thread` pin: the legacy ask path
+  takes the thread from the adapter it already resolved, and a user-joined
+  alias whose stand-in could not resume (mismatched id, protocol error,
+  timeout) is refused plainly rather than queued to a thread no window holds.
+- The stand-in is never an owned session: it writes no ownership, alias, or
+  board-identity record, so M3 resume, recovery, and the TTL reaper cannot see
+  it and the user's thread id can never leak into `ownership/codex.json`.
+  `close codex` on a user-joined alias is still refused.
+- After this, all three agents work headlessly from a fresh Forge session:
+  copilot (Forge-owned), claude (stand-in), codex (stand-in).
+
+### Copilot ACP: CLI 1.0.89 compatibility + spec-compliant session/load (2026-09-29)
+
+- The Copilot CLI self-updated 1.0.88 → 1.0.89 (2026-09-28 19:46Z, between
+  two failed Forge attempts). The new version enforces strict JSON-RPC 2.0
+  and rejects frames without `jsonrpc: "2.0"`. The ACP client now sends the
+  version field on every outgoing frame (requests, notifications, permission
+  responses) — one change in `CopilotAcpSession.write()`.
+- Fixed a latent resume bug the update exposed: per the ACP spec,
+  `session/load` responds after replaying the conversation with a result that
+  carries no `sessionId` (the confirmed id is the one requested). The client
+  required a `sessionId` in the load result and refused every cross-process
+  resume with "session/load returned no session id" — the P4 live validation
+  never exercised a cross-process resume (its "second ask" ran in the same
+  warm process). A mismatched id in a load result is still a protocol error.
+- The fake ACP CLI fixture now models 1.0.89: it rejects frames without
+  `jsonrpc: "2.0"` and answers `session/load` with the spec result, so the
+  whole session suite exercises the strict wire.
+- Live-validated against the real 1.0.89 CLI (probe, 2026-09-29): initialize
+  accepted, `session/load` resumed the Forge-owned session with full history
+  replay, and a prompt answered through the resumed context
+  (`stopReason: end_turn`).
 
 ## 0.16.57
 

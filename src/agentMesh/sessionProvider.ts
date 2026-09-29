@@ -3,6 +3,7 @@ import type { CodexAppServerSession } from '../agents/CodexAppServerSession';
 import { queueToCodex } from '../agentBus/codexDelivery';
 import { getAlias } from './aliasRegistry';
 import { JoinedClaude, type JoinedClaudeDeps } from './claudeStandIn';
+import { CodexStandIn } from './codexStandIn';
 import type { OwnedCodexFactory, OwnedCopilotFactory } from './creationPreamble';
 import { CopilotOwnedSessions } from './copilotOwned';
 import type { MeshAdapter } from './meshAdapter';
@@ -56,6 +57,8 @@ export class MeshSessionProvider implements SessionProvider {
   private readonly reaping = new Set<string>();
   /** The joined peer and its stand-in (never an owned session). */
   private readonly joined: JoinedClaude;
+  /** The user-joined Codex stand-in (never an owned session). */
+  private readonly codexStandIn: CodexStandIn;
   private readonly copilotOwned: CopilotOwnedSessions;
   /** The owned Codex + Claude session construction (in-memory maps + create/ensure). */
   private readonly factory: OwnedSessionFactory;
@@ -66,6 +69,12 @@ export class MeshSessionProvider implements SessionProvider {
     this.factory = new OwnedSessionFactory({
       ...deps,
       claudePeerAdapter: () => this.joined.peerAdapter(),
+    });
+    // The stand-in reuses the factory's queue-adapter path for its
+    // writer-conflict fallback, so it never builds its own CodexPinContext.
+    this.codexStandIn = new CodexStandIn({
+      ...deps,
+      queueAdapter: () => this.factory.codexAdapterIfLive(),
     });
   }
 
@@ -126,11 +135,11 @@ export class MeshSessionProvider implements SessionProvider {
     if (existing) return this.factory.codexOwnedAdapter('codex', existing);
     const aliasRec = getAlias(this.deps.busRoot, 'codex');
     // `forge.sh join codex` registers the interactive thread as user-owned.
-    // It already has an active writer (the interactive Codex process), so it
-    // must be reached through `codex queue`; attempting an owned app-server
-    // resume races that writer and fails with `thread ... already has an
-    // active writer`.
-    if (aliasRec?.by === 'user') return this.factory.codexAdapterIfLive();
+    // While its window is open it has an active writer, so the stand-in's
+    // eager resume hits `thread ... already has an active writer` and falls
+    // back to `codex queue`; with the window closed the resume succeeds and
+    // the stand-in answers headless (CODEX_STAND_IN_PLAN).
+    if (aliasRec?.by === 'user') return this.codexStandIn.resolve(aliasRec);
     const rec = readOwnership(this.deps.busRoot, 'codex');
     // M2: a session another LIVE window owns is never re-spawned here (that
     // window serializes the alias's turns; a second app-server would race its
@@ -292,6 +301,7 @@ export class MeshSessionProvider implements SessionProvider {
     await Promise.all([
       this.factory.disposeAll(),
       this.joined.dispose(),
+      this.codexStandIn.dispose(),
       this.copilotOwned.dispose(),
     ]);
   }

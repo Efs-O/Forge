@@ -195,6 +195,8 @@ export interface ModelConfig {
   groups?: string[];
   /** Short, memorable identifier for fuzzy worker/chat-picker resolution (e.g. `gemma4`). Must be globally unique against all names/aliases/short_names. */
   short_name?: string;
+  /** Label shown in the sidebar picker and the remote (Telegram) model list. Presentation only: selection, routing and `active_model` still use `name`. */
+  display_name?: string;
   /** Free-tag category for the Model Manager UI (e.g. coding, vision, worker, cloud). */
   category?: string;
   /** User-authored note, first-class so it survives YAML rewrites without depending on comments. */

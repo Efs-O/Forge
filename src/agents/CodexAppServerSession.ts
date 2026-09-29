@@ -103,7 +103,17 @@ export class CodexAppServerSession {
     await this.stop('CLI agent session disposed.');
   }
 
-  private async ensureStarted(): Promise<void> {
+  /**
+   * Eager-start seam (CODEX_STAND_IN_PLAN Phase 1): run the spawn +
+   * `initialize` + `thread/resume` (or `thread/start`) now, so a caller can
+   * learn the resume result at resolve time rather than on the first `send`.
+   * Idempotent: `send()` awaits the same `startPromise`, so it does not start
+   * twice. Refuses after `dispose()` — `stop()` clears `startPromise`, so
+   * without this guard a post-dispose eager start would spawn a fresh
+   * app-server (the stand-in's dispose-then-resolve race, Phase 2).
+   */
+  async ensureStarted(): Promise<void> {
+    if (this.currentState === 'disposed') throw new Error('CLI agent session is disposed.');
     if (!this.startPromise) this.startPromise = this.start();
     await this.startPromise;
   }

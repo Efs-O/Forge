@@ -1,6 +1,7 @@
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import {
   MODEL_PICKER_GROUP_ORDER,
+  modelPickerLabel,
   sortModelPickerEntries,
   type ModelPickerDescriptor,
 } from '../sidebar/ModelPickerGroups';
@@ -336,7 +337,8 @@ function formatModels(
     const profileHint = profiles?.length
       ? ` · profiles: ${profiles.map((profile) => `@${profile}`).join(', ')}`
       : '';
-    lines.push(`${start + offset + 1}. ${clip(name, 220)}${profileHint}`);
+    const label = modelPickerLabel(byName.get(name) ?? { name });
+    lines.push(`${start + offset + 1}. ${clip(label, 220)}${profileHint}`);
   }
   return lines;
 }

@@ -56,6 +56,9 @@ scripts/**
 # The build only ever emits extension.js and webview/.
 dist/_*
 **/*.vsix
+# Vitest --reporter=json debug dump written to the workspace root. A 1 MB
+# .ci-failures.json rode along inside a 0.16.58 VSIX until this line existed.
+.ci-failures.json
 .coordination/**
 smoke3d/**
 prodtest-md2html/**

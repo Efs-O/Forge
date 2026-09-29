@@ -38,9 +38,11 @@ export function validateCopilotInitResult(result: unknown): void {
 }
 
 /**
- * Validates a `session/new` / `session/load` result: a non-empty session id
- * that, when a confirmed id is being resumed, matches it exactly. Returns the
- * confirmed id.
+ * Validates a `session/new` / `session/load` result. `session/new` must
+ * return a non-empty session id. Per the ACP spec, `session/load` responds
+ * with an empty result `{}` after replaying the conversation — the confirmed
+ * id is the one requested, and a different id in the result is a protocol
+ * violation. Returns the confirmed id.
  */
 export function validateCopilotSessionResult(
   result: unknown,
@@ -50,11 +52,15 @@ export function validateCopilotSessionResult(
   const value =
     result && typeof result === 'object' ? (result as Record<string, unknown>) : undefined;
   const id = value?.['sessionId'];
+  if (method === 'session/load') {
+    if (typeof id === 'string' && id.trim() !== '' && expectedId && id !== expectedId) {
+      throw new Error('Copilot session/load returned a mismatched session id.');
+    }
+    if (!expectedId) throw new Error('Copilot session/load was called without a session id.');
+    return expectedId;
+  }
   if (typeof id !== 'string' || id.trim() === '') {
     throw new Error(`Copilot ${method} returned no session id.`);
-  }
-  if (expectedId && id !== expectedId) {
-    throw new Error(`Copilot ${method} returned a mismatched session id.`);
   }
   return id;
 }

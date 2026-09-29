@@ -15,10 +15,9 @@ import type { MeshMessageAcceptedSink } from './meshMessageAccepted';
 export interface SessionProvider {
   /**
    * Return the adapter for an alias, creating a Forge-owned session if needed
-   * (consent is the tool's confirmation gate for `tell`; an inbound relay
-   * only ever reaches an already-consented alias). Resolving may be async
-   * (a first owned creation or a thread resume). Returns undefined when no
-   * adapter can be resolved (no alias, no live pin, no owned session).
+   * (consent is the tool's confirmation gate for `tell`; an inbound relay only
+   * reaches an already-consented alias). Resolving may be async (a first owned
+   * creation or a thread resume); undefined when no adapter can be resolved.
    */
   resolveAdapter(alias: string): Promise<MeshAdapter | undefined>;
   /** Whether this alias has a live, owned session this window holds. */
@@ -50,6 +49,8 @@ export interface TellOutcome {
   to: string;
   /** True when the recipient is an owned session (states will reach `started`). */
   observing: boolean;
+  /** The adapter's stand-in note, if the recipient answers for a dead joined session. */
+  note?: string;
 }
 
 export interface PendingMeshMessage {
@@ -67,9 +68,8 @@ export interface OrchestratorDeps extends HostLivenessDeps {
   provider: SessionProvider;
   scope: () => MeshScope;
   /**
-   * Write a board event (wired to the exchange log by the wiring layer).
-   * F-03: must be durable before the tell/relay result is returned, so the
-   * accepted state is on disk before the caller is told the exchange exists.
+   * Write a board event (wired to the exchange log). F-03: must be durable
+   * before the tell/relay result is returned (accepted on disk first).
    */
   onEvent: (e: {
     exchangeId: string;
@@ -86,16 +86,13 @@ export interface OrchestratorDeps extends HostLivenessDeps {
   knownAliases: () => string[];
   /**
    * F-03: the outbox dir where a non-observing agent writes its verdict
-   * (`<exchangeId>.verdict.md`). Passed to the adapter so it can bind the
-   * exchange id to the verdict instruction; the wiring polls it to complete
-   * the exchange.
+   * (`<exchangeId>.verdict.md`); the wiring polls it to complete the exchange.
    */
   verdictDir?: string;
   /**
    * F-09: render an observational command (status/board/peers/queue/context)
-   * into a reply string. The wiring layer knows the scope and board projection,
-   * so it renders; the orchestrator dispatches. Absent ⇒ the command reports
-   * that the host has no board (the placeholder is preserved).
+   * into a reply string; the wiring knows the scope and board projection.
+   * Absent ⇒ the command reports that the host has no board.
    */
   onObservation?: (verb: 'status' | 'board' | 'peers' | 'queue' | 'context') => string;
   onMessageAccepted?: MeshMessageAcceptedSink;
@@ -216,11 +213,9 @@ export class MeshOrchestrator {
       return { error: `no live session for "${to}" (no alias, no live pin, no owned session)` };
     }
     const exchangeId = newEventId();
-    // F-03: a non-observing recipient (a user-opened session) cannot be
-    // observed directly, so the exchange id is bound into the message. The
-    // agent's verdict file is named `<exchangeId>.verdict.md`, which the
-    // wiring polls to complete the exchange (an exchange-correlated verdict,
-    // not a transport exit code).
+    // F-03: a non-observing recipient cannot be observed directly, so the
+    // exchange id is bound into the message: the agent's verdict file is
+    // `<exchangeId>.verdict.md`, which the wiring polls to complete the exchange.
     const outbound = fifo.observesTurns
       ? message
       : `${message}\n\n[forge: when you finish this, write your verdict to outbox/${exchangeId}.verdict.md]`;
@@ -245,7 +240,12 @@ export class MeshOrchestrator {
     });
     // F-07: a message just went to this session; refresh its idle-TTL clock.
     this.deps.provider.touchActivity(alias);
-    return { exchangeId, to: alias, observing: this.deps.provider.isOwned(alias) };
+    return {
+      exchangeId,
+      to: alias,
+      observing: this.deps.provider.isOwned(alias),
+      ...(fifo.note ? { note: fifo.note } : {}),
+    };
   }
 
   /**
@@ -289,12 +289,9 @@ export class MeshOrchestrator {
 
   /**
    * The host-side relay (M6). An inbound bus message with `to` not equal to
-   * Forge is forwarded by the host through the recipient's adapter — no Forge
-   * model turn is spent, and the model does not decide whether to relay.
-   *
-   * Two hop events share one exchange id: the inbound hop (from the sender)
-   * and the forwarded hop (to the recipient). A relayed message cannot be
-   * relayed again (`hops` ≥ 2 is refused).
+   * Forge is forwarded through the recipient's adapter — no Forge model turn
+   * is spent, and the model does not decide whether to relay. Two hop events
+   * share one exchange id; a relayed message cannot be relayed again.
    */
   async relay(
     from: string,

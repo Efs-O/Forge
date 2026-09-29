@@ -21,6 +21,18 @@ usage() { awk 'NR==1{next} /^#/{print;next} {exit}' "$0" >&2; exit 2; }
 VERB="${1:-}"; [ -n "$VERB" ] || usage
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 EP="$ROOT/endpoint.json"
+# Under WSL2 (NAT on Windows 10) 127.0.0.1 is the Linux VM, not Windows where
+# Forge listens; Windows' curl.exe (via interop) reaches Windows' loopback.
+# It cannot read /tmp, so @file bodies are translated with wslpath -w.
+if [ -n "${WSL_DISTRO_NAME:-}" ] && command -v curl.exe >/dev/null 2>&1; then
+  curl() {
+    local a out=()
+    for a in "$@"; do
+      case "$a" in @/*) out+=("@$(wslpath -w "${a#@}")");; *) out+=("$a");; esac
+    done
+    curl.exe "${out[@]}"
+  }
+fi
 # who is a GET with no body: it prints the mesh and exits before the body logic.
 if [ "$VERB" = "who" ]; then
   [ $# -le 1 ] || usage

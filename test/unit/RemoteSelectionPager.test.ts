@@ -570,6 +570,30 @@ describe('remote selection pagination', () => {
     ]);
   });
 
+  it('prints display_name labels, sorts by them, and keeps the real names as selection values', async () => {
+    const store = await requestStore();
+    const channel = new FakeRemoteChannel();
+    const ctx: RemoteSelectionContext = {
+      ...context(channel, store, 0),
+      modelEntries: [
+        { name: 'aaa-q6-long-id', displayName: 'Qwen quality', group: 'Local — llama.cpp' },
+        { name: 'zzz-q4-long-id', displayName: 'Qwen fast', group: 'Local — llama.cpp' },
+        { name: 'plain-model', group: 'Local — llama.cpp' },
+      ],
+    };
+
+    await sendModelSelection(textEvent('/models'), ctx);
+
+    expect(channel.selectionPageSends[0]!.text).toContain(
+      'LOCAL — LLAMA.CPP\n1. plain-model\n2. Qwen fast\n3. Qwen quality',
+    );
+    expect(store.selection('fake', 'chat', 'models')?.values).toEqual([
+      'plain-model',
+      'zzz-q4-long-id',
+      'aaa-q6-long-id',
+    ]);
+  });
+
   it('lists request profiles as selectable model variants', async () => {
     const store = await requestStore();
     const channel = new FakeRemoteChannel();

@@ -31,6 +31,20 @@ if (process.argv.includes('--acp')) {
     } catch {
       return; // not a protocol frame
     }
+    // CLI 1.0.89+ enforces strict JSON-RPC 2.0: every frame must carry the
+    // version field. A request gets the spec error; a notification ends the
+    // transport (a server cannot answer a notification with an error).
+    if (message.jsonrpc !== '2.0') {
+      if (typeof message.id === 'number') {
+        line({
+          id: message.id,
+          error: { code: -32600, message: 'every JSON-RPC message must carry "jsonrpc": "2.0"' },
+        });
+      } else {
+        process.exit(1);
+      }
+      return;
+    }
     if (message.method === 'initialize') {
       if (argv.includes('REQUIRE_PROTOCOL_VERSION') && message.params?.protocolVersion !== 1) {
         line({ id: message.id, error: { message: 'unsupported protocol version' } });
@@ -63,8 +77,13 @@ if (process.argv.includes('--acp')) {
         line({ id: message.id, error: { message: 'session not found' } });
         return;
       }
+      if (argv.includes('LOAD_MISMATCH')) {
+        line({ id: message.id, result: { sessionId: 'some-other-session' } });
+        return;
+      }
       sessionId = message.params.sessionId;
-      line({ id: message.id, result: { sessionId } });
+      // ACP spec: the load result is an empty {} after the replay.
+      line({ id: message.id, result: {} });
       return;
     }
     if (message.method === 'session/prompt') {

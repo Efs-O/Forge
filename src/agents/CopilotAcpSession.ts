@@ -255,7 +255,9 @@ export class CopilotAcpSession {
       void this.failProtocol('Copilot ACP stdin is unavailable.');
       return;
     }
-    this.child.stdin.write(`${JSON.stringify(message)}\n`, (error) => {
+    // ACP v1 is strict JSON-RPC 2.0: every frame must carry the version
+    // field. CLI 1.0.89 rejects frames without it (1.0.88 tolerated them).
+    this.child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`, (error) => {
       if (error) void this.failProtocol(`Copilot ACP write failed: ${error.message}`);
     });
   }

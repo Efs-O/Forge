@@ -181,16 +181,25 @@ export class CodexQueueAdapter implements MeshAdapter {
     return `codex-queue:${this.thread}`;
   }
 
+  /**
+   * The thread this adapter queues to. Public so the legacy ask path can take
+   * the thread from the adapter it already resolved, rather than re-reading a
+   * config pin that may not match the alias (CODEX_STAND_IN_PLAN Phase 4).
+   */
+  readonly thread: string;
+
   constructor(
     private readonly cli: string,
-    private readonly thread: string,
+    thread: string,
     private readonly queueCodex: (
       cli: string,
       thread: string,
       message: string,
       signal?: AbortSignal,
     ) => Promise<void>,
-  ) {}
+  ) {
+    this.thread = thread;
+  }
 
   async send(message: string, options?: MeshSendOptions): Promise<TurnResult> {
     await this.queueCodex(this.cli, this.thread, message, options?.signal);

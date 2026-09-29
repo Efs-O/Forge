@@ -111,7 +111,9 @@ export function ModelSelector({
           {activeModel ? (
             <>
               <ResidencyDot residency={activeModelEntry?.residency} />
-              <ModelName name={activeSelection?.base ?? activeModel} />
+              <ModelName
+                name={activeModelEntry?.displayName ?? activeSelection?.base ?? activeModel}
+              />
               <ProfileName profile={activeSelection?.profile} />
             </>
           ) : (
@@ -128,7 +130,7 @@ export function ModelSelector({
           {profileModel ? (
             <>
               <div className="ms-group-header" aria-hidden="true">
-                {profileModel.name} — profile
+                {profileModel.displayName ?? profileModel.name} — profile
               </div>
               <div
                 className="ms-item"
@@ -191,6 +193,7 @@ export function ModelSelector({
                       key={m.name}
                       className={`ms-item${m.name === activeModel ? ' ms-item--active' : ''}`}
                       role="option"
+                      title={m.displayName ? m.name : undefined}
                       aria-selected={m.name === activeModel}
                       onClick={() => {
                         if (m.profiles && m.profiles.length > 0) {
@@ -202,7 +205,7 @@ export function ModelSelector({
                       }}
                     >
                       <ResidencyDot residency={m.residency} />
-                      <ModelName name={m.name} />
+                      <ModelName name={m.displayName ?? m.name} />
                       {m.profiles && m.profiles.length > 0 && (
                         <span className="ms-profile-hint"> + profile</span>
                       )}
