@@ -2,6 +2,15 @@
 
 ## 0.16.60
 
+### Telegram shows a question asked before the chat unlocked (2026-09-29)
+
+- An `ask_user` raised while the Telegram session was still locked (for
+  example just after a window reload, before the TOTP code) was never shown
+  on the phone. The question bridge dropped it when the session check failed,
+  and unlocking resent pending approvals but not questions, so the sidebar
+  showed the choice box while Telegram stayed silent. Unlocking now also sends
+  any question that chat has not been shown yet, and sends it once.
+
 ### `forge.sh` works from WSL bash (2026-09-29)
 
 - Under WSL2 on Windows 10 (NAT networking only), `127.0.0.1` is the Linux

@@ -14,6 +14,8 @@ interface RemoteQuestionEntry {
   event: UserQuestionRequestEvent;
   messageId?: string;
   freeTextMode: boolean;
+  /** False until the chat has been shown it; a locked chat is shown it on unlock. */
+  delivered: boolean;
 }
 
 type QuestionActionEvent = Extract<RemoteInboundEvent, { kind: 'question_action' }>;
@@ -63,6 +65,18 @@ export class RemoteQuestionBridge {
       if (entry.chatId === chatId) return true;
     }
     return false;
+  }
+
+  /**
+   * Shows a newly authenticated chat the questions it could not be handed while
+   * locked. `publish` drops a question for a locked chat, so without this an
+   * ask_user raised before the owner unlocked (e.g. just after a window reload)
+   * never reaches the phone while the turn waits on it.
+   */
+  republish(chatId: string): void {
+    for (const [id, entry] of this.questions) {
+      if (entry.chatId === chatId && !entry.delivered) void this.publish(id);
+    }
   }
 
   /** Answers the chat's outstanding question. False when there is none. */
@@ -119,7 +133,7 @@ export class RemoteQuestionBridge {
     if (!event.conversationId) return;
     const chatId = this.chatFor(event.conversationId);
     if (!chatId) return;
-    this.questions.set(event.id, { chatId, event, freeTextMode: false });
+    this.questions.set(event.id, { chatId, event, freeTextMode: false, delivered: false });
     void this.publish(event.id);
   }
 
@@ -184,6 +198,7 @@ export class RemoteQuestionBridge {
           telegramQuestionButtons(pending.event.id, pending.event.options!),
           { signal: this.signal },
         );
+        pending.delivered = true;
         if (this.questions.get(id) === pending) {
           if (messageId) pending.messageId = messageId;
         } else if (messageId) {
@@ -200,6 +215,7 @@ export class RemoteQuestionBridge {
         `Forge asks: ${body}`.slice(0, this.maxMessageChars),
         { signal: this.signal },
       );
+      pending.delivered = true;
     } catch (err) {
       this.onError?.(
         `Forge remote question delivery failed: ${err instanceof Error ? err.message : String(err)}`,

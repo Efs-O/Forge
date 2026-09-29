@@ -476,6 +476,22 @@ describe('RemoteQuestionBridge', () => {
     expect(channel.sent).toHaveLength(0);
   });
 
+  it('shows a question asked while locked once the chat authenticates, and only once', async () => {
+    const options = { canDeliver: false };
+    const { bridge, channel, service } = bridgeRig(options);
+    void service.ask({ prompt: 'Asked before unlock', conversationId: 'c1' });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(channel.sent).toHaveLength(0);
+    options.canDeliver = true;
+    bridge.republish('someone-else');
+    bridge.republish('chat-1');
+    await vi.waitFor(() => expect(channel.sent).toHaveLength(1));
+    expect(channel.sent[0]?.text).toContain('Forge asks: Asked before unlock');
+    bridge.republish('chat-1');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(channel.sent).toHaveLength(1);
+  });
+
   it('reports no pending question for an unknown chat', () => {
     const { bridge } = bridgeRig();
     expect(bridge.answerText('someone-else', 'hello')).toBe(false);

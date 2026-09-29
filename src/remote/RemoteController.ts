@@ -298,7 +298,7 @@ export class RemoteController {
       this.outbox.kick();
       const binding = this.store.binding(event.channel, event.chatId);
       if (binding) this.kickDrain(binding.conversationId);
-      this.approvals.republish(event.chatId);
+      for (const gate of [this.approvals, this.questions]) gate.republish(event.chatId);
       await this.sendTransientMessage(event.chatId, 'Forge: authenticated.');
       const heldPrompt = this.pending.take(event.channel, event.chatId);
       if (!heldPrompt) return { kind: 'handled' };
