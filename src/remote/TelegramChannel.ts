@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { TelegramAlbumCoordinator, MAX_TELEGRAM_IMAGES_PER_MESSAGE } from './TelegramAlbumBuffer';
 import { TelegramAcknowledgement, type EphemeralMessageHandler } from './TelegramAcknowledgement';
-import { splitTelegramText } from './TelegramText';
+import { plainTelegramText, splitTelegramText } from './TelegramText';
 import { styleTelegramNotice } from './telegramNoticeStyle';
 import { sendTelegramVoice } from './TelegramVoice';
 import { sendTelegramPhoto } from './TelegramPhoto';
@@ -179,7 +179,7 @@ export class TelegramChannel implements RemoteChannel {
     const notice = styleTelegramNotice(text);
     return notice
       ? this.sendText(chatId, notice, options, 'HTML')
-      : this.sendText(chatId, text, options);
+      : this.sendText(chatId, plainTelegramText(text), options);
   }
 
   /** Rich text is deliberately opt-in; normal agent replies stay literal. */
