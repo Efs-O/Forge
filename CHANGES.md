@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## 0.16.59
+## 0.16.60
 
 ### `forge.sh` works from WSL bash (2026-09-29)
 
@@ -10,6 +10,8 @@
   PATH, the script now calls Windows' `curl.exe` through interop and
   rewrites `@/tmp/...` body paths with `wslpath -w`. The control server
   still binds loopback only. Git Bash and other shells are unchanged.
+
+## 0.16.59
 
 ### Local llama.cpp requests wait up to 30 min for a busy slot (2026-09-29)
 
