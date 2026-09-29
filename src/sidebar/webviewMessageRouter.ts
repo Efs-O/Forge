@@ -24,7 +24,14 @@ export interface WebviewActions {
   isBackendReady: () => boolean;
   getClankerMode: () => boolean;
   getRemoteStatus: () => { transports: string[]; paired: boolean };
-  send: (text: string, attachments?: AttachmentData[], conversationId?: string) => void;
+  send: (
+    text: string,
+    attachments?: AttachmentData[],
+    conversationId?: string,
+    tellId?: string,
+  ) => void;
+  /** False when the tell had already reached the running turn. */
+  cancelTell: (conversationId: string, tellId: string) => boolean;
   cancel: () => void;
   switchModel: (name: string | null) => Promise<void>;
   undo: () => Promise<string[]>;
@@ -71,7 +78,16 @@ export function routeWebviewMessage(actions: WebviewActions, msg: WebviewToHost)
       break;
 
     case 'send':
-      actions.send(msg.text, msg.attachments, msg.conversationId);
+      actions.send(msg.text, msg.attachments, msg.conversationId, msg.tellId);
+      break;
+
+    case 'cancelTell':
+      if (!actions.cancelTell(msg.conversationId, msg.tellId)) {
+        actions.post({
+          type: 'error',
+          message: 'Forge: that message had already reached the running turn.',
+        });
+      }
       break;
 
     case 'cancel':

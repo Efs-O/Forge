@@ -7,7 +7,13 @@ interface FakeStore {
   records: RemoteRequestRecord[];
   queued(conversationId?: string): RemoteRequestRecord[];
   claimMidTurnTell(id: string): Promise<RemoteRequestRecord | undefined>;
-  finish(id: string, state: 'completed', opts?: { notification?: string }): Promise<void>;
+  finish(
+    id: string,
+    state: 'completed',
+    opts?: { notification?: string; ephemeral?: boolean },
+  ): Promise<void>;
+  /** The ephemeral flag each finished record was given, by id. */
+  ephemeral: Map<string, boolean | undefined>;
 }
 
 function makeRecord(overrides: Partial<RemoteRequestRecord> = {}): RemoteRequestRecord {
@@ -32,8 +38,10 @@ function makeStore(records: RemoteRequestRecord[]): FakeStore {
   // `queued` by claim time is skipped, exactly like the store's serialized
   // mutation. This is what lets the "already claimed" race be exercised.
   const snapshot = records.filter((item) => item.state === 'queued');
+  const ephemeral = new Map<string, boolean | undefined>();
   return {
     records,
+    ephemeral,
     queued(conversationId) {
       return snapshot.filter((item) => item.conversationId === conversationId);
     },
@@ -49,6 +57,7 @@ function makeStore(records: RemoteRequestRecord[]): FakeStore {
       if (record) {
         record.state = state;
         record.notification = opts?.notification;
+        ephemeral.set(id, opts?.ephemeral);
       }
     },
   };
@@ -68,6 +77,8 @@ describe('claimRemoteMidTurnTell', () => {
     await result.settle?.();
     expect(store.records[0]?.state).toBe('completed');
     expect(store.records[0]?.notification).toBe('Seen by the running turn.');
+    // The receipt clears itself from the chat like the other transient replies.
+    expect(store.ephemeral.get('req-1')).toBe(true);
   });
 
   it('claims every eligible request in queue order and finishes each after settle', async () => {

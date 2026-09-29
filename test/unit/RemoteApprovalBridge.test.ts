@@ -1,13 +1,20 @@
 import { describe, expect, it, vi } from 'vitest';
 import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
 import { RemoteApprovalBridge } from '../../src/remote/RemoteApprovalBridge';
+import type { CommandCleanupScheduler } from '../../src/remote/CommandCleanupScheduler';
 import type { RemoteAuth } from '../../src/remote/RemoteAuth';
 import type { RemoteRequestStore } from '../../src/remote/RemoteRequestStore';
 import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
 import type { ToolApprovalSink } from '../../src/sidebar/ToolApprovalService';
 import { correlateGate, recordingWindow } from '../../src/voice/VoiceGrammar';
 
-function rig(options: { remoteRequestId?: string | undefined; boundChatId?: string } = {}) {
+function rig(
+  options: {
+    remoteRequestId?: string | undefined;
+    boundChatId?: string;
+    cleanup?: CommandCleanupScheduler;
+  } = {},
+) {
   const channel = new FakeRemoteChannel();
   let sink: ToolApprovalSink | undefined;
   const resolveApproval = vi.fn();
@@ -50,6 +57,8 @@ function rig(options: { remoteRequestId?: string | undefined; boundChatId?: stri
     host,
     new AbortController().signal,
     4_000,
+    undefined,
+    options.cleanup,
   );
   bridge.start();
   const request = (): void =>
@@ -60,7 +69,17 @@ function rig(options: { remoteRequestId?: string | undefined; boundChatId?: stri
       dangerous: false,
       conversationId: 'c1',
     });
-  return { bridge, channel, request, resolveApproval };
+  const resolve = (approved: boolean): void =>
+    sink?.resolved({
+      id: 'gate-1',
+      toolName: 'write_file',
+      detail: 'src/index.ts',
+      dangerous: false,
+      conversationId: 'c1',
+      approved,
+      reason: 'resolved',
+    });
+  return { bridge, channel, request, resolve, resolveApproval };
 }
 
 describe('RemoteApprovalBridge', () => {
@@ -113,6 +132,21 @@ describe('RemoteApprovalBridge', () => {
       kind: 'resolve',
       gate: { id: 'gate-1' },
     });
+  });
+
+  it('clears an approved receipt after the reply delay but keeps a denial', async () => {
+    for (const approved of [true, false]) {
+      const armEphemeral = vi.fn();
+      const cleanup = { armEphemeral } as unknown as CommandCleanupScheduler;
+      const { channel, request, resolve } = rig({ cleanup });
+      request();
+      await vi.waitFor(() => expect(channel.sent).toHaveLength(1));
+      resolve(approved);
+      await vi.waitFor(() => expect(channel.sent).toHaveLength(2));
+      expect(channel.sent[1]?.text).toContain(approved ? 'approved' : 'denied');
+      if (approved) expect(armEphemeral).toHaveBeenCalledWith('chat-1', expect.any(Array));
+      else expect(armEphemeral).not.toHaveBeenCalled();
+    }
   });
 
   it('stays silent when no chat is queued and none is bound', async () => {

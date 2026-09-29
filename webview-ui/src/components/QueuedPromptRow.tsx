@@ -26,11 +26,9 @@ export function QueuedPromptRow({
             ? 'Will reach Forge at its next step'
             : `Sends when this turn ends${attachmentLabel}`}
         </span>
-        {!tell && (
-          <button className="btn-action" type="button" onClick={onCancel}>
-            Cancel
-          </button>
-        )}
+        <button className="btn-action" type="button" onClick={onCancel}>
+          Cancel
+        </button>
       </div>
     </div>
   );

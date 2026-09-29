@@ -683,7 +683,8 @@ describe('TelegramChannel', () => {
     await vi.waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]).toMatchObject({
       chat_id: '99',
-      text: 'Forge: voice input is disabled (set voice.enabled in config)',
+      text: '<blockquote>ℹ️ Forge: voice input is disabled (set voice.enabled in config)</blockquote>',
+      parse_mode: 'HTML',
     });
     expect(armed).toEqual([{ chatId: '99', messageIds: ['7'], kind: 'transient' }]);
   });
@@ -741,7 +742,8 @@ describe('TelegramChannel', () => {
     await vi.waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]).toMatchObject({
       chat_id: '99',
-      text: 'Forge: conversation could not be restored.',
+      text: '<blockquote>⚠️ Forge: conversation could not be restored.</blockquote>',
+      parse_mode: 'HTML',
     });
   });
 

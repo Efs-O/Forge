@@ -56,5 +56,7 @@ describe('QueuedPromptRow', () => {
     });
 
     expect(container.textContent).toContain('Will reach Forge at its next step');
+    // A tell sits in the host inbox, and Cancel withdraws it there.
+    expect(Array.from(container.querySelectorAll('button'), (b) => b.textContent)).toEqual(['Cancel']);
   });
 });

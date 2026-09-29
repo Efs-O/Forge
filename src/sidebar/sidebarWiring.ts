@@ -412,8 +412,13 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
   const promptRouter = createSidebarPromptRouter({
     activeId: () => host.getSidebar().activeConversationId,
     isReserved: (id) => requestChains.isReserved(id),
-    addTell: (id, text, internal) =>
-      midTurnInbox.add(id, { id: randomUUID(), text, ...(internal ? { internal: true } : {}) }),
+    addTell: (id, text, internal, tellId) =>
+      midTurnInbox.add(id, {
+        id: tellId ?? randomUUID(),
+        text,
+        ...(internal ? { internal: true } : {}),
+      }),
+    removeTell: (id, tellId) => midTurnInbox.remove(id, tellId),
     send: (text, attachments, id, echo, internal) =>
       void send.send(
         text,

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { TelegramAlbumCoordinator, MAX_TELEGRAM_IMAGES_PER_MESSAGE } from './TelegramAlbumBuffer';
 import { TelegramAcknowledgement, type EphemeralMessageHandler } from './TelegramAcknowledgement';
 import { splitTelegramText } from './TelegramText';
+import { styleTelegramNotice } from './telegramNoticeStyle';
 import { sendTelegramVoice } from './TelegramVoice';
 import { sendTelegramPhoto } from './TelegramPhoto';
 import { downloadTelegramAttachment, downloadTelegramAttachmentToFile } from './TelegramDownloads';
@@ -175,7 +176,10 @@ export class TelegramChannel implements RemoteChannel {
     text: string,
     options?: { correlationId?: string; signal?: AbortSignal },
   ): Promise<string[]> {
-    return this.sendText(chatId, text, options);
+    const notice = styleTelegramNotice(text);
+    return notice
+      ? this.sendText(chatId, notice, options, 'HTML')
+      : this.sendText(chatId, text, options);
   }
 
   /** Rich text is deliberately opt-in; normal agent replies stay literal. */
@@ -250,7 +254,9 @@ export class TelegramChannel implements RemoteChannel {
     buttons: readonly RemoteContactButton[][],
     options?: { signal?: AbortSignal; parseMode?: 'HTML' },
   ): Promise<string | undefined> {
-    const chunks = splitTelegramText(text);
+    const notice = options?.parseMode ? undefined : styleTelegramNotice(text);
+    const parseMode = notice ? 'HTML' : options?.parseMode;
+    const chunks = splitTelegramText(notice ?? text);
     const keyboard = buttons.map((row) =>
       row.map((button) => {
         if (Buffer.byteLength(button.callbackData, 'utf8') > TELEGRAM_CALLBACK_DATA_LIMIT_BYTES) {
@@ -266,7 +272,7 @@ export class TelegramChannel implements RemoteChannel {
         {
           chat_id: chatId,
           text: chunks[index],
-          ...(options?.parseMode ? { parse_mode: options.parseMode } : {}),
+          ...(parseMode ? { parse_mode: parseMode } : {}),
           ...(index === 0 ? { reply_markup: { inline_keyboard: keyboard } } : {}),
         },
         options?.signal,

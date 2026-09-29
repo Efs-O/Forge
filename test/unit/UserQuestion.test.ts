@@ -7,6 +7,7 @@ import { openQuickInputs } from '../support/vscode';
 import { UserQuestionService } from '../../src/sidebar/UserQuestionService';
 import { makeAskUserTool } from '../../src/tools/uxTools';
 import { unattendedConversations } from '../../src/sidebar/unattendedConversations';
+import type { CommandCleanupScheduler } from '../../src/remote/CommandCleanupScheduler';
 import { RemoteQuestionBridge } from '../../src/remote/RemoteQuestionBridge';
 import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
 import { RemoteAuth } from '../../src/remote/RemoteAuth';
@@ -230,6 +231,7 @@ function bridgeRig(
     /** Chat bound to c1, standing in for a paired phone. */
     boundChatId?: string;
     channelName?: 'fake' | 'telegram';
+    cleanup?: CommandCleanupScheduler;
   } = {},
 ) {
   const channel = new FakeRemoteChannel(options.channelName ?? 'fake');
@@ -279,6 +281,8 @@ function bridgeRig(
     host,
     new AbortController().signal,
     4_000,
+    undefined,
+    options.cleanup,
   );
   bridge.start();
   return { bridge, channel, service };
@@ -366,8 +370,11 @@ describe('RemoteQuestionBridge', () => {
     await expect(bridge.handleAction(other)).resolves.toEqual({ kind: 'handled' });
     expect(service.hasPending('c1')).toBe(true);
     expect(channel.sent.at(-1)?.text).toContain('send your answer as text');
+    const promptIds = [`sent-${channel.sent.length}`];
     expect(bridge.answerText('chat-1', 'use vllm')).toBe(true);
     await expect(pending).resolves.toBe('use vllm');
+    await vi.waitFor(() => expect(channel.deleted.length).toBeGreaterThan(0));
+    expect(channel.deleted.map((d) => d.messageId)).toEqual(promptIds);
 
     await expect(bridge.handleAction(other)).resolves.toEqual({
       kind: 'rejected',
@@ -490,6 +497,24 @@ describe('RemoteQuestionBridge', () => {
     bridge.republish('chat-1');
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(channel.sent).toHaveLength(1);
+  });
+
+  it('clears the "answered" receipt after the reply delay but keeps a dismissal', async () => {
+    for (const answered of [true, false]) {
+      const armEphemeral = vi.fn();
+      const cleanup = { armEphemeral } as unknown as CommandCleanupScheduler;
+      const { channel, service } = bridgeRig({ cleanup });
+      let id = '';
+      service.addSink({ asked: (event) => (id = event.id), answered: () => undefined });
+      const pending = service.ask({ prompt: 'Which file?', conversationId: 'c1' });
+      await vi.waitFor(() => expect(channel.sent).toHaveLength(1));
+      if (answered) service.answer(id, 'a.ts');
+      else service.dismiss(id);
+      await pending;
+      await vi.waitFor(() => expect(channel.sent).toHaveLength(2));
+      if (answered) expect(armEphemeral).toHaveBeenCalledWith('chat-1', expect.any(Array));
+      else expect(armEphemeral).not.toHaveBeenCalled();
+    }
   });
 
   it('reports no pending question for an unknown chat', () => {

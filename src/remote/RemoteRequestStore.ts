@@ -343,6 +343,8 @@ export class RemoteRequestStore {
       error?: string;
       notification: string;
       announceConversationId?: string;
+      /** Deleted from the chat after the command-reply delay, like a transient reply. */
+      ephemeral?: boolean;
     },
   ): Promise<void> {
     await this.mutate((draft) => {
@@ -361,6 +363,7 @@ export class RemoteRequestStore {
         state: 'pending',
         attempts: 0,
         updatedAt: Date.now(),
+        ...(payload.ephemeral ? { ephemeral: true } : {}),
       });
       if (payload.announceConversationId) {
         const binding = draft.bindings.find(

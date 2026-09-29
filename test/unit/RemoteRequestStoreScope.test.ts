@@ -157,3 +157,19 @@ describe('outbox ephemeral flag', () => {
     expect('ephemeral' in records[1]!).toBe(false);
   });
 });
+
+describe('finish notification ephemerality', () => {
+  it('marks the outbox item ephemeral only when asked', async () => {
+    const store = await newStore();
+    await store.enqueue(request({ id: 'seen', state: 'running' }));
+    await store.enqueue(request({ id: 'done', state: 'running' }));
+    await store.finish('seen', 'completed', {
+      notification: 'Seen by the running turn.',
+      ephemeral: true,
+    });
+    await store.finish('done', 'completed', { notification: 'Done.' });
+    const outbox = store.pendingOutbox('fake');
+    expect(outbox.find((item) => item.requestId === 'seen')?.ephemeral).toBe(true);
+    expect(outbox.find((item) => item.requestId === 'done')).not.toHaveProperty('ephemeral');
+  });
+});

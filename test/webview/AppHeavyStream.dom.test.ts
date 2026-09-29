@@ -130,6 +130,8 @@ describe('App heavy streaming load', () => {
       type: 'send',
       text: 'redirect the active turn',
       conversationId: 'stress-conversation',
+      // The chip's id, so its Cancel button can withdraw the tell on the host.
+      tellId: expect.any(String),
     });
     expect(container.textContent).toContain('redirect the active turn');
 

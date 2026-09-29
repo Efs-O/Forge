@@ -451,8 +451,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         isBackendReady: () => this.pool.isAnyReady(),
         getClankerMode: () => this.agentLoop.getClankerMode(),
         getRemoteStatus: () => this.remoteStatus,
-        send: (text, attachments, conversationId) =>
-          this.promptRouter.route(text, attachments, conversationId),
+        send: (text, attachments, conversationId, tellId) =>
+          this.promptRouter.route(text, attachments, conversationId, tellId),
+        cancelTell: (id, tellId) => this.promptRouter.cancelTell(id, tellId),
         cancel: () => {
           this.requestChains.markCancelling(this.sidebar.activeConversationId);
           void this.agentLoop.cancel(this.sidebar.activeConversationId);

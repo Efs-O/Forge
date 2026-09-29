@@ -50,6 +50,16 @@ export class MidTurnInbox {
     return this.take(conversationId);
   }
 
+  /** Withdraws one tell the user cancelled; false once a drain has already taken it. */
+  remove(conversationId: string, id: string): boolean {
+    const tells = this.pending.get(conversationId);
+    const index = tells?.findIndex((tell) => tell.id === id) ?? -1;
+    if (!tells || index < 0) return false;
+    tells.splice(index, 1);
+    if (tells.length === 0) this.pending.delete(conversationId);
+    return true;
+  }
+
   takeUndelivered(conversationId: string): MidTurnTell[] {
     return this.take(conversationId);
   }

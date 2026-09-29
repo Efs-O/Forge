@@ -114,7 +114,7 @@ export class RemoteController {
       speech,
       commandCleanup: this.commandCleanup,
     });
-    // The two bridges take the same seven dependencies by design -- both turn
+    // The two bridges take the same eight dependencies by design -- both turn
     // one host-side prompt into a chat round-trip. Naming that shape once means
     // a change to it cannot reach only one of them.
     const bridgeDeps = [
@@ -125,6 +125,7 @@ export class RemoteController {
       this.abort.signal,
       options.maxMessageChars,
       options.onError,
+      this.commandCleanup,
     ] as const;
     this.approvals = new RemoteApprovalBridge(...bridgeDeps);
     this.questions = new RemoteQuestionBridge(...bridgeDeps);

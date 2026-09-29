@@ -62,6 +62,7 @@ export function usePendingPrompts({
         text: prompt.text,
         attachments: prompt.attachments.length ? prompt.attachments : undefined,
         conversationId: prompt.conversationId,
+        ...(prompt.tell ? { tellId: prompt.id } : {}),
       });
     },
     [dispatch],
@@ -98,9 +99,22 @@ export function usePendingPrompts({
     postPrompt(next);
   }, [postPrompt, queuedPrompts, streamingIds]);
 
-  const cancelQueuedPrompt = useCallback((id: string) => {
-    setQueuedPrompts((current) => current.filter((prompt) => prompt.id !== id));
-  }, []);
+  const cancelQueuedPrompt = useCallback(
+    (id: string) => {
+      const prompt = queuedPrompts.find((candidate) => candidate.id === id);
+      // A tell already sits in the host inbox; withdraw it there too. If the
+      // turn has read it, the host says so and the bubble stays.
+      if (prompt?.tell) {
+        vscode.postMessage({
+          type: 'cancelTell',
+          conversationId: prompt.conversationId,
+          tellId: prompt.id,
+        });
+      }
+      setQueuedPrompts((current) => current.filter((candidate) => candidate.id !== id));
+    },
+    [queuedPrompts],
+  );
 
   const clearTellPrompts = useCallback((conversationId?: string) => {
     const targetId = conversationId ?? activeConversationIdRef.current;

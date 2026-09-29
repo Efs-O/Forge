@@ -53,6 +53,8 @@ export async function claimRemoteMidTurnTell(
       for (const record of claimed) {
         await store.finish(record.id, 'completed', {
           notification: 'Seen by the running turn.',
+          // A receipt, not news: it clears itself like the other transient replies.
+          ephemeral: true,
         });
       }
       for (const channel of new Set(claimed.map((record) => record.channel))) {

@@ -3,6 +3,7 @@ import type {
   UserQuestionRequestEvent,
 } from '../sidebar/UserQuestionService';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
+import type { CommandCleanupScheduler } from './CommandCleanupScheduler';
 import type { RemoteAuth } from './RemoteAuth';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
@@ -14,6 +15,8 @@ interface RemoteQuestionEntry {
   event: UserQuestionRequestEvent;
   messageId?: string;
   freeTextMode: boolean;
+  /** The "send your answer as text" prompt, deleted once the question closes. */
+  textPromptIds?: string[];
   /** False until the chat has been shown it; a locked chat is shown it on unlock. */
   delivered: boolean;
 }
@@ -40,6 +43,8 @@ export class RemoteQuestionBridge {
     private readonly signal: AbortSignal,
     private maxMessageChars: number,
     private readonly onError?: (message: string) => void,
+    /** Deletes a routine receipt after the command-reply delay; absent in rigs = kept. */
+    private readonly cleanup?: CommandCleanupScheduler,
   ) {}
 
   start(): void {
@@ -112,7 +117,8 @@ export class RemoteQuestionBridge {
       if (pending.freeTextMode) return { kind: 'handled' };
       pending.freeTextMode = true;
       await this.clearKeyboard(pending);
-      await this.sendNotice(pending.chatId, 'Forge: send your answer as text.');
+      const ids = await this.sendNotice(pending.chatId, 'Forge: send your answer as text.');
+      if (ids?.length) pending.textPromptIds = ids;
       return { kind: 'handled' };
     }
     if (event.choice === undefined) {
@@ -164,6 +170,7 @@ export class RemoteQuestionBridge {
     if (!pending) return;
     this.questions.delete(event.id);
     void this.clearKeyboard(pending);
+    void this.deleteTextPrompt(pending);
     // Only worth reporting when the answer came from somewhere else; a remote
     // answer already echoes as the message the user just sent.
     void this.publishResolution(pending, event);
@@ -235,15 +242,32 @@ export class RemoteQuestionBridge {
     );
   }
 
-  private async sendNotice(chatId: string, text: string): Promise<void> {
+  private async sendNotice(chatId: string, text: string): Promise<string[] | undefined> {
     try {
-      await this.channel.send(chatId, text.slice(0, this.maxMessageChars), {
+      const sent = await this.channel.send(chatId, text.slice(0, this.maxMessageChars), {
         signal: this.signal,
       });
+      return sent ?? undefined;
     } catch (err) {
       this.onError?.(
         `Forge remote question notice failed: ${err instanceof Error ? err.message : String(err)}`,
       );
+      return undefined;
+    }
+  }
+
+  /** Best-effort: the prompt is presentation only, so a failed delete is reported, not retried. */
+  private async deleteTextPrompt(entry: RemoteQuestionEntry): Promise<void> {
+    const ids = entry.textPromptIds ?? [];
+    delete entry.textPromptIds;
+    for (const id of ids) {
+      try {
+        await this.channel.deleteMessage?.(entry.chatId, id, { signal: this.signal });
+      } catch (err) {
+        this.onError?.(
+          `Forge remote question prompt cleanup failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
   }
 
@@ -270,7 +294,9 @@ export class RemoteQuestionBridge {
         ? `Forge: answered — "${(event.answer ?? '').slice(0, 120)}"`
         : 'Forge: the question was dismissed without an answer.';
     try {
-      await this.channel.send(pending.chatId, text, { signal: this.signal });
+      const sent = await this.channel.send(pending.chatId, text, { signal: this.signal });
+      // An answer is a receipt; a dismissal means the turn got nothing, so it stays.
+      if (event.reason === 'answered') this.cleanup?.armEphemeral(pending.chatId, sent ?? []);
     } catch (err) {
       this.onError?.(
         `Forge remote question update failed: ${err instanceof Error ? err.message : String(err)}`,

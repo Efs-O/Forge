@@ -181,6 +181,7 @@ overlaps with an existing owner, extend the owner instead.
 | Telegram photo send + document fallback       | `src/remote/TelegramPhoto.ts`                   |
 | Per-chat send ordering + Bot API 429 retry    | `src/remote/telegramSendQueue.ts`               |
 | Telegram HTML escaping + line markup helpers  | `src/remote/telegramHtml.ts`                    |
+| Telegram notice emoji + blockquote styling   | `src/remote/telegramNoticeStyle.ts`             |
 | /help command map text + its markup           | `src/remote/remoteHelpText.ts`                  |
 | WhatsApp linked-device transport              | `src/remote/whatsapp/BaileysWhatsAppChannel.ts` |
 | Local setup/validation commands               | `src/vscode/remoteCommands.ts`                  |

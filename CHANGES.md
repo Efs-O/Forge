@@ -2,6 +2,34 @@
 
 ## 0.16.60
 
+### Forge's Telegram notices stand apart from replies (2026-09-29)
+
+- Messages Forge itself writes (approvals, questions, receipts, errors, command
+  replies) now arrive in a blockquote, which gives them a coloured bar, with an
+  emoji for their kind: 🔔 approval, ❓ question, ✅ done, 🚫 cancelled or
+  denied, ⚠️ failed, 👀 seen by the running turn, ℹ️ anything else. The agent's
+  own answers are unchanged. Styling happens at send time only, so the stored
+  outbox text, the audit log and speech still carry the plain text.
+
+### Cancel a message sent mid-turn from the sidebar (2026-09-29)
+
+- A text message typed while a turn runs now has a Cancel button, as the
+  Telegram `/drop` already allowed. It withdraws the message from the running
+  turn's inbox, so the model never reads it. If the turn had already read it,
+  Forge says so and the message stays in the chat.
+  Plan: `docs/plans/SIDEBAR_TELL_CANCEL_PLAN.md`.
+
+### Telegram's "send your answer as text" clears itself (2026-09-29)
+
+- After **Other** on a Telegram question, the "Forge: send your answer as
+  text." prompt is deleted once the question is answered or closed.
+
+### "Seen by the running turn." clears itself (2026-09-29)
+
+- The receipt Telegram gets when a message is handed to a running turn is now
+  ephemeral: it is deleted after the same `delete_command_replies_after` delay
+  as the other transient replies, instead of staying in the chat.
+
 ### Telegram shows a question asked before the chat unlocked (2026-09-29)
 
 - An `ask_user` raised while the Telegram session was still locked (for

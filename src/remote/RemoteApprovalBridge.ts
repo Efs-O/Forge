@@ -4,6 +4,7 @@ import type {
   ToolApprovalResolvedEvent,
 } from '../sidebar/ToolApprovalService';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
+import type { CommandCleanupScheduler } from './CommandCleanupScheduler';
 import type { RemoteAuth } from './RemoteAuth';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteChannel, RemoteInboundEvent } from './types';
@@ -63,6 +64,8 @@ export class RemoteApprovalBridge {
     private readonly signal: AbortSignal,
     private maxMessageChars: number,
     private readonly onError?: (message: string) => void,
+    /** Deletes a routine receipt after the command-reply delay; absent in rigs = kept. */
+    private readonly cleanup?: CommandCleanupScheduler,
   ) {}
 
   start(): void {
@@ -236,11 +239,14 @@ export class RemoteApprovalBridge {
       .retractPrompt?.(pending.chatId, pending.actionId ?? event.id, this.signal)
       .catch(() => undefined);
     try {
-      await this.channel.send(
+      const sent = await this.channel.send(
         pending.chatId,
         `Forge approval ${event.approved ? 'approved' : 'denied'} (${event.reason}).`,
         { signal: this.signal },
       );
+      // An approval is a receipt for what the user just did; a denial changes
+      // what the turn does next, so it stays in the chat.
+      if (event.approved) this.cleanup?.armEphemeral(pending.chatId, sent ?? []);
     } catch (err) {
       this.onError?.(
         `Forge remote approval update failed: ${err instanceof Error ? err.message : String(err)}`,

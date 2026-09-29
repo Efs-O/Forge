@@ -384,6 +384,14 @@ export interface SendMsg {
   attachments?: AttachmentData[];
   /** Set by the standby-prompt queue so it stays with the conversation that queued it. */
   conversationId?: string;
+  /** Present on a mid-turn tell: the id `cancelTell` withdraws it by. */
+  tellId?: string;
+}
+/** Withdraws a mid-turn tell the running turn has not read yet. */
+export interface CancelTellMsg {
+  type: 'cancelTell';
+  conversationId: string;
+  tellId: string;
 }
 export interface CancelMsg {
   type: 'cancel';
@@ -453,6 +461,7 @@ import type { OpenFileMsg, OpenAttachmentMsg } from './openMessages';
 export type WebviewToHost =
   | SendMsg
   | CancelMsg
+  | CancelTellMsg
   | SwitchModelMsg
   | WebviewReadyMsg
   | QueuedConversationIdsMsg

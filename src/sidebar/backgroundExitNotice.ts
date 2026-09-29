@@ -21,6 +21,8 @@ export function formatBackgroundExitNotice(notice: BackgroundExecutionExitNotice
 export interface SidebarPromptRoute {
   conversationId?: string;
   attachments?: AttachmentData[];
+  /** The webview's chip id, so a cancel can name the tell it withdraws. */
+  tellId?: string;
 }
 
 export function routeSidebarPrompt(
@@ -28,7 +30,7 @@ export function routeSidebarPrompt(
   target: SidebarPromptRoute,
   activeConversationId: string,
   isReserved: (id: string) => boolean,
-  addTell: (id: string, text: string, internal?: boolean) => void,
+  addTell: (id: string, text: string, internal?: boolean, tellId?: string) => void,
   send: (
     text: string,
     attachments?: AttachmentData[],
@@ -42,7 +44,7 @@ export function routeSidebarPrompt(
   const id = target.conversationId ?? activeConversationId;
   if (!target.attachments?.length && isReserved(id)) {
     if (internal) addTell(id, text, true);
-    else addTell(id, text);
+    else addTell(id, text, false, target.tellId);
     return;
   }
   send(text, target.attachments, target.conversationId, echoPrompt, internal);
@@ -73,7 +75,9 @@ export function subscribeBackgroundExitNotices(
 }
 
 export interface SidebarPromptRouter {
-  route: (text: string, attachments?: AttachmentData[], id?: string) => void;
+  route: (text: string, attachments?: AttachmentData[], id?: string, tellId?: string) => void;
+  /** False when the tell had already reached the turn. */
+  cancelTell: (conversationId: string, tellId: string) => boolean;
   /** Stops delivering background exit notices. */
   dispose(): void;
 }
@@ -81,7 +85,8 @@ export interface SidebarPromptRouter {
 export function createSidebarPromptRouter(options: {
   activeId: () => string;
   isReserved: (id: string) => boolean;
-  addTell: (id: string, text: string, internal?: boolean) => void;
+  addTell: (id: string, text: string, internal?: boolean, tellId?: string) => void;
+  removeTell: (conversationId: string, tellId: string) => boolean;
   send: (
     text: string,
     attachments?: AttachmentData[],
@@ -97,10 +102,15 @@ export function createSidebarPromptRouter(options: {
     id?: string,
     echoPrompt = false,
     internal = false,
+    tellId?: string,
   ) =>
     routeSidebarPrompt(
       text,
-      { ...(id ? { conversationId: id } : {}), ...(attachments ? { attachments } : {}) },
+      {
+        ...(id ? { conversationId: id } : {}),
+        ...(attachments ? { attachments } : {}),
+        ...(tellId ? { tellId } : {}),
+      },
       options.activeId(),
       options.isReserved,
       options.addTell,
@@ -111,5 +121,9 @@ export function createSidebarPromptRouter(options: {
   const subscription = subscribeBackgroundExitNotices(options.isOpen, (text, id, echo) =>
     route(text, undefined, id, echo, true),
   );
-  return { route, dispose: () => subscription.dispose() };
+  return {
+    route: (text, attachments, id, tellId) => route(text, attachments, id, false, false, tellId),
+    cancelTell: options.removeTell,
+    dispose: () => subscription.dispose(),
+  };
 }
