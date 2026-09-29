@@ -88,6 +88,8 @@ import { makeWaitTool } from './waitTool';
 import { makeViewVideoTool } from './videoTool';
 import { makeGenerateImageTool } from './imageGeneration/generateImageTool';
 import { makeImageSearchTool } from './imageSearch/imageSearchTool';
+import { makeBrowserTools } from './browser/browserTools';
+import { makeDesktopTools } from './desktop/desktopTools';
 import {
   makeListExecutionsTool,
   makeMonitorExecutionTool,
@@ -259,6 +261,17 @@ export function registerAllTools(
     );
     // The one-way push (P0): a distinct typed primitive, not ask with wait:false.
     registry.register(makeTellLiveSessionTool({ getConfig }));
+  }
+
+  // Browser tools (plan §4.2): registered when a config getter exists; the
+  // `browser` permission (deny-by-default) filters advertisement and dispatch, so
+  // a config without `permissions.browser.enabled` advertises none of them and
+  // the native prefix stays byte-identical for existing users.
+  if (getConfig) {
+    for (const tool of makeBrowserTools(getConfig)) registry.register(tool);
+    // Desktop tools (plan §4.2): same pattern; `desktop` permission +
+    // `advertise: isWin` (B7) filter advertisement and dispatch.
+    for (const tool of makeDesktopTools(getConfig)) registry.register(tool);
   }
 
   // Registered last, and self-suppressing until a lazy group is actually

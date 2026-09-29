@@ -31,6 +31,7 @@ overlaps with an existing owner, extend the owner instead.
 | Primary turn + streaming lifecycle                   | `src/sidebar/AgentLoop.ts`               |
 | Per-conversation streaming/cancel state              | `src/sidebar/TurnLifecycle.ts`           |
 | Model-endpoint turn: preflight + request             | `src/sidebar/ModelTurn.ts`               |
+| Vision gate: single source of truth (advertise + refuse) | `src/sidebar/visionGate.ts`    |
 | Model-facing message preparation for a turn (window, images, system prompt, turn context, tool-result excerpts) | `src/sidebar/prepareModelTurnMessages.ts` |
 | Per-round chat request assembly (native vs fallback tools, thinking kwargs, sampling, output cap) | `src/agent/buildRoundRequest.ts` |
 | Cloud target / local backend startup                 | `src/sidebar/ProviderTurn.ts`            |
@@ -362,6 +363,12 @@ overlaps with an existing owner, extend the owner instead.
 | `view_video` tool definition + handler     | `src/tools/videoTool.ts`              |
 | ffmpeg probe + frame extraction            | `src/tools/videoExtract.ts`           |
 | ffmpeg/ffprobe executable discovery        | `src/tools/ffmpegLocate.ts`           |
+| Browser session lifecycle (system channel, lazy playwright-core) | `src/tools/browser/BrowserSessionManager.ts` |
+| Desktop driver contract (SendInput/GDI impl lands Phase 2) | `src/tools/desktop/DesktopDriver.ts` |
+| Desktop tool approval predicates (window-capture binding, cloud monitor gate, system chords, consequential) | `src/tools/desktop/desktopApprovals.ts` |
+| Desktop B2 target-window gate (refused windows, foreground + rect check) | `src/tools/desktop/targetWindowGate.ts` |
+| Desktop driver wrapper (approval binding, coordinate transform, identity) | `src/tools/desktop/PowerShellDesktopDriver.ts` |
+| Desktop driver process transport (spawn/fallback, per-request timeout, respawn, release-all backstop) | `src/tools/desktop/PowerShellTransport.ts` |
 
 ## Semantic Search
 
@@ -497,10 +504,10 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Outbox watcher (drains the outbox to the owner chat)       | `src/remote/JobOutboxWatcher.ts`                               |
 | Agent-bus files (ids, wait, replies, orphans, TTL)         | `src/agentBus/agentBus.ts`                                     |
 | Agent-bus shipped text (README, message bodies)            | `src/agentBus/busContent.ts`                                   |
+| Deferred live-session answers (`notify_on_answer` notices)  | `src/agentBus/liveAnswerNotices.ts`                            |
 | Agent-bus client script (`~/.forge/agent-bus/forge.sh`)    | `src/agentBus/forge.sh` (bundled as text by busContent.ts)     |
 | Claude session registry + peer-pipe delivery               | `src/agentBus/claudePeer.ts`                                   |
 | Claude delivery via a `claude -p` relay (opt-in)           | `src/agentBus/claudeRelay.ts`                                  |
-| Deferred live-session answers (`notify_on_answer` notices)  | `src/agentBus/liveAnswerNotices.ts`                            |
 | Inbound agent messages → Forge turns (queue)               | `src/agentBus/agentInbox.ts`                                   |
 | Which chat an inbound bus message lands in (sender affinity) | `src/agentBus/busTarget.ts`                                    |
 | `/agent/message` + `/agent/reply` routes, endpoint.json    | `src/backend/agentRoutes.ts`                                   |
@@ -529,6 +536,14 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Process-wide orchestrator handle                         | `src/agentMesh/meshContext.ts`              |
 | `tell_live_session` tool (§1)                            | `src/tools/tellLiveSessionTool.ts`          |
 | Agent-mesh activation wiring (orchestrator + recovery)   | `src/vscode/agentMeshSetup.ts`              |
+
+## Build / packaging
+
+| Concern                                                    | Owner                                     |
+| ---------------------------------------------------------- | ----------------------------------------- |
+| Extension + webview bundles, webview asset copy            | `esbuild.config.mjs`                      |
+| playwright-core ship (external + dist/node_modules copy)   | `esbuild.config.mjs` (`copyPlaywrightCore`) |
+| Bundle load check (circular/TDZ + playwright-core resolve) | `scripts/bundle-load-check.js`            |
 
 ## Misc
 

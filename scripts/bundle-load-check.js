@@ -92,4 +92,16 @@ if (typeof ext.activate !== 'function') throw new Error('bundle does not export 
 if (typeof ext.deactivate !== 'function') throw new Error('bundle does not export deactivate()');
 ext.deactivate();
 
+// B4 guard: the bundle's require('playwright-core') must resolve to the shipped
+// intact package in dist/node_modules (the build copies it there; playwright-core
+// is external, not inlined). If it resolves elsewhere — e.g. a future
+// .vscodeignore edit drops the shipped copy, or the build stops copying it — the
+// browser tools fail at runtime; fail CI now instead.
+const distDir = path.resolve(__dirname, '..', 'dist');
+const pwResolved = require.resolve('playwright-core', { paths: [distDir] });
+if (!pwResolved.startsWith(path.join(distDir, 'node_modules'))) {
+  throw new Error(`playwright-core resolved outside dist/node_modules: ${pwResolved}`);
+}
+
 console.log('bundle-load: module scope OK, activate/deactivate exported, deactivate() clean');
+console.log(`bundle-load: playwright-core resolves to the shipped copy (${pwResolved})`);

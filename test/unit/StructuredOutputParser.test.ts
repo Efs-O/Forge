@@ -24,6 +24,32 @@ describe('StructuredOutputStripper', () => {
     expect(visible).toBe('Before  after');
   });
 
+  // Seen 2026-09-30 on Qwen3.8: the call ran, but its XML stayed in the sidebar.
+  it('hides a streamed <tool_call><function=...> span split across chunks', () => {
+    const stripper = new StructuredOutputStripper();
+    const chunks = [
+      'Let me look. <tool',
+      '_call>\n<function=view_image>\n<parameter=path>\nout/a.png\n</param',
+      'eter>\n</function>\n</tool_',
+      'call> after',
+    ];
+
+    const visible = chunks.map((chunk) => stripper.push(chunk)).join('') + stripper.flush();
+    expect(visible).toBe('Let me look.  after');
+  });
+
+  it('shows a closed <tool_call> span that is not a call', () => {
+    const stripper = new StructuredOutputStripper();
+    const text = 'Qwen writes <tool_call>tags</tool_call> in prose.';
+    expect(stripper.push(text) + stripper.flush()).toBe(text);
+  });
+
+  it('shows an unclosed <tool_call> span on flush', () => {
+    const stripper = new StructuredOutputStripper();
+    const text = 'The <tool_call> tag leaked';
+    expect(stripper.push(text) + stripper.flush()).toBe(text);
+  });
+
   it('removes fenced tool JSON from persisted assistant text', () => {
     const text = [
       'Plan:',

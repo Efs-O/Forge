@@ -1,5 +1,36 @@
 # Forge — Recent Changes
 
+## 0.16.62
+
+### Browser and Windows desktop computer-use tools (2026-09-29)
+
+- New `browser_*` tools (Playwright, system Chrome/Edge channel): open, close,
+  navigate, list/select tabs, screenshot (viewport or full page), inspect
+  interactive elements, click, type, scroll, hover, drag, press keys. Element-
+  based actions first; screenshot-coordinate fallback. Screenshots return
+  inline to the model as multimodal image results.
+- New `desktop_*` tools (long-lived PowerShell driver, per-monitor-DPI-aware,
+  physical pixels): list windows, focus/approve a window, capture a window or
+  monitor, move mouse, click/double-click/right-click, drag, scroll, type
+  text, press keys. Coordinate actions reference an explicit `capture_id`.
+- Both families are deny-by-default: `permissions.browser.enabled` /
+  `permissions.desktop.enabled: true` in `.forge/config.yaml`. Desktop tools
+  are Windows-only (`advertise: win32`).
+- Vision-gated: `browser_screenshot` and `desktop_capture` are advertised only
+  when the active model has a vision projector (B8 single source of truth).
+- Structural safety gates: per-origin approval (browser), target-window
+  approval binding HWND+pid with foreground + in-rect check before every input
+  (desktop, B2), system-chord confirmation (`win+*`, `alt+f4`, `ctrl+alt+*`),
+  and a "release all" on abort/dispose so no key or button is left held (B3).
+- Cloud-model capture gate: a full-screen/monitor capture on a cloud vision
+  model requires approval naming the provider (§4.7).
+- Screenshots saved under `~/.forge/screenshots/<conversation-id>/` (outside
+  the workspace). Atomic temp→rename; size-capped.
+- Playwright-core shipped intact next to the bundle (external in esbuild);
+  lazy-loaded on first `browser_open`. Version pinned to 1.63.0.
+- Docs: `docs/BROWSER_DESKTOP_TOOLS.md`. Plan:
+  `docs/plans/BROWSER_DESKTOP_USE_TOOLS_PLAN.md`.
+
 ## 0.16.61
 
 ### Forge's Telegram notices stand apart from replies (2026-09-29)

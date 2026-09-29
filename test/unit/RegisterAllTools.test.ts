@@ -29,11 +29,35 @@ const EXPECTED_NATIVE_NAMES = [
   'ask_live_session',
   'ask_local_agent',
   'ask_user',
+  'browser_click',
+  'browser_close',
+  'browser_close_tab',
+  'browser_drag',
+  'browser_hover',
+  'browser_inspect',
+  'browser_navigate',
+  'browser_new_tab',
+  'browser_open',
+  'browser_press',
+  'browser_screenshot',
+  'browser_scroll',
+  'browser_select_tab',
+  'browser_tabs',
+  'browser_type',
   'commit',
   'copy_to_clipboard',
   'create_branch',
   'create_directory',
   'delete_file',
+  'desktop_capture',
+  'desktop_click',
+  'desktop_drag',
+  'desktop_focus_window',
+  'desktop_move_mouse',
+  'desktop_press',
+  'desktop_scroll',
+  'desktop_type',
+  'desktop_windows',
   'edit_file',
   'edit_notebook_cell',
   'exec_command',
@@ -152,7 +176,7 @@ function makeRegistry(
 }
 
 describe('registerAllTools canonical coordinator catalog', () => {
-  it('exposes the exact 78-tool native catalog when all optional wiring is present', () => {
+  it('exposes the exact 102-tool native catalog when all optional wiring is present', () => {
     const registry = makeRegistry({ search: true, delegation: true });
     expect(registry.names().sort()).toEqual(EXPECTED_NATIVE_NAMES);
     // load_tool_group is registered but suppresses its own advertisement while
@@ -176,7 +200,13 @@ describe('registerAllTools canonical coordinator catalog', () => {
           // query_powershell spawns powershell.exe, so it is advertised on Windows only.
           (process.platform === 'win32' || name !== 'query_powershell') &&
           name !== 'ask_live_session' &&
-          name !== 'tell_live_session',
+          name !== 'tell_live_session' &&
+          // browser_* tools require the 'browser' permission, which this
+          // "all permissions" set does not grant, so none are advertised here.
+          !name.startsWith('browser_') &&
+          // desktop_* tools require the 'desktop' permission, which this
+          // "all permissions" set does not grant, so none are advertised here.
+          !name.startsWith('desktop_'),
       ),
     );
   });

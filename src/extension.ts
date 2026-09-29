@@ -31,6 +31,8 @@ import {
 } from './llm/ForgeInstructionsLoader';
 import { SESSION_KEY_V1 } from './sidebar/sessionTypes';
 import { registerAllTools } from './tools/registerAllTools';
+import { closeBrowserSessionOnShutdown } from './tools/browser/BrowserSessionManager';
+import { getDesktopDriver } from './tools/desktop/PowerShellDesktopDriver';
 import { connectMcpServers } from './tools/mcpBridge';
 import { BackendStatusBar } from './vscode/BackendStatusBar';
 import { SessionTimeStatusBar } from './vscode/SessionTimeStatusBar';
@@ -459,7 +461,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     setConfig: (next) => {
       config = next;
       sidebarProvider.applyForgeConfig(config);
-      // pool.applyForgeConfig is called inside sidebarProvider.applyForgeConfig
       statusBar.setStopped(config.active_model);
     },
   });
@@ -488,10 +489,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 }
 
 export async function deactivate(): Promise<void> {
-  // backend.stop() called via subscription above.
+  // backend.stop() runs via the subscription above; the rest is explicit teardown.
   disposeServerChannel();
-  // Debounced last_used writes would otherwise be lost when the window closes
-  // within DEBOUNCE_MS of a turn — the exact case the Model Manager cares about.
+  await closeBrowserSessionOnShutdown((err) => getLogger().error('browser close failed', err));
+  const desktopDriver = getDesktopDriver();
+  await desktopDriver.dispose().catch((e) => getLogger().error('desktop dispose', e));
   flushPendingModelUsage();
   await activeRemoteRuntime?.dispose();
   activeRemoteRuntime = undefined;

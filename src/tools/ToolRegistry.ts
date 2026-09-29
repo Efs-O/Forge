@@ -11,6 +11,8 @@ export type ToolPermission =
   | 'fetch'
   | 'git-read'
   | 'git-write'
+  | 'browser'
+  | 'desktop'
   | 'delegate';
 
 export interface ToolApprovalMetadata {
@@ -84,6 +86,13 @@ export interface RegisteredTool {
    * return the same tool name and schema shape.
    */
   describe?: () => ToolDefinition;
+  /**
+   * When present, the tool requires a vision projector (mmproj). Returns the
+   * refusal message (naming the model) for a non-vision model. This is the
+   * single source of truth for the vision gate: both the advertise filter and
+   * the dispatch refusal derive from it, so the two halves cannot drift apart.
+   */
+  requiresVision?: (modelName: string) => string;
 }
 
 /**
@@ -169,5 +178,19 @@ export class ToolRegistry {
 
   names(): string[] {
     return [...this.tools.keys()];
+  }
+
+  /**
+   * Tools flagged `requiresVision`, keyed by name → refusal-message builder.
+   * The single source of truth for the vision gate (B8): ModelTurn derives
+   * both the advertise filter and the dispatch refusal map from this, so the
+   * two halves cannot drift apart.
+   */
+  visionGated(): ReadonlyMap<string, (modelName: string) => string> {
+    const map = new Map<string, (modelName: string) => string>();
+    for (const tool of this.tools.values()) {
+      if (tool.requiresVision) map.set(tool.definition.function.name, tool.requiresVision);
+    }
+    return map;
   }
 }

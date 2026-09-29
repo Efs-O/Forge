@@ -85,6 +85,21 @@ export function generatedImagePath(toolName: string, result: string): string | u
 }
 
 /**
+ * Absolute screenshot path a browser or desktop capture saved, parsed from its
+ * final result line. Unlike generated images, screenshots live outside the
+ * workspace under the user's Forge directory.
+ */
+export function screenshotPath(toolName: string, result: string): string | undefined {
+  if (
+    (toolName !== 'browser_screenshot' && toolName !== 'desktop_capture') ||
+    isFailureResult(result)
+  ) {
+    return undefined;
+  }
+  return /Saved to (.+?\.(?:png|jpe?g|gif|bmp|webp))\.\s*$/iu.exec(result)?.[1];
+}
+
+/**
  * How `image_search` lists the thumbnails it saved. Same contract as
  * GENERATED_IMAGE_PREFIX: the tool writes the line, the webview parses it back,
  * and a restored session rebuilds the thumbnails from the persisted text.

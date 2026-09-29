@@ -35,8 +35,7 @@ import { latestPastedTerminalCommand } from './compactionLedger';
 import { terminalCommandTracker } from '../tools/TerminalCommandTracker';
 import { formatPromptCacheStats, readPromptCacheStats } from '../llm/promptCacheStats';
 import { getLogger } from '../util/logger';
-import { visionUnavailableMessage } from '../tools/imageTool';
-import { videoUnavailableMessage } from '../tools/videoTool';
+import { buildVisionRefusals, filterVisionGated, visionGatedNames } from './visionGate';
 import {
   isTurnCutOffError,
   ROUND_CAP_INCOMPLETE_PREFIX,
@@ -47,9 +46,6 @@ import { canUseThinkingKwargs, shouldStripThinking } from './turnModelBehavior';
 import type { AgentProgressEvent } from './AgentProgress';
 
 const log = getLogger();
-
-/** Tools that need an mmproj projector. Gated in two places below; keep in sync. */
-const VISION_ONLY_TOOLS = new Set(['view_image', 'view_video']);
 
 function activeTerminalCwd(): string | undefined {
   const cwd = vscode.window.activeTerminal?.shellIntegration?.cwd;
@@ -192,31 +188,25 @@ export async function runModelTurn(
 
   const maxRounds = resolveMaxToolRounds(model);
   const isVisionModel = deriveStaticCapabilities(model).includes('vision');
+  // Single source of truth for the vision gate (B8): both halves derive from
+  // the registry's `requiresVision` tools, so they cannot drift apart.
   // Withholding the definition is not enforcement: the tool stays in the
   // registry and a model that calls it blind would ship base64 to a backend
   // with no projector. Refuse it at dispatch, with the reason.
+  const visionGated = visionGatedNames(ctx.toolRegistry);
   const unavailableTools = isVisionModel
     ? undefined
-    : new Map([
-        ['view_image', visionUnavailableMessage(model.name)],
-        ['view_video', videoUnavailableMessage(model.name)],
-      ]);
-  // Both halves of the gate must list the same tools. Advertising without
-  // refusing ships base64 at a projector-less backend; refusing without
-  // withholding advertises a tool that always fails.
-  //
+    : buildVisionRefusals(ctx.toolRegistry, model.name);
   // Rebuilt on every round rather than snapshotted once per turn: a lazy tool
   // group activates mid-turn via `load_tool_group`, and its schemas have to
   // reach the request that immediately follows.
   const buildToolDefinitions = (): ToolDefinition[] => {
     const hiddenLazyTools = hiddenLazyToolNames(conv.id);
-    const advertised = ctx.toolRegistry
-      .definitions(allowed)
-      .filter(
-        (definition) =>
-          (isVisionModel || !VISION_ONLY_TOOLS.has(definition.function.name)) &&
-          !hiddenLazyTools.has(definition.function.name),
-      );
+    const advertised = filterVisionGated(
+      ctx.toolRegistry.definitions(allowed),
+      isVisionModel,
+      visionGated,
+    ).filter((definition) => !hiddenLazyTools.has(definition.function.name));
     return budget.filterDefinitions(advertised);
   };
   const nativeTools = runtimeCaps?.likelySupportsTools !== false;

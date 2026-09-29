@@ -66,6 +66,29 @@ describe('resolveToolPermissions', () => {
     );
     expect([...allowed]).toEqual(['read', 'write', 'git-read', 'delegate']);
   });
+
+  it('never grants browser or desktop via the legacy fallback or group defaults', () => {
+    expect(resolveToolPermissions(configWith()).has('browser')).toBe(false);
+    expect(resolveToolPermissions(configWith()).has('desktop')).toBe(false);
+    expect(resolveToolPermissions(configWith({})).has('browser')).toBe(false);
+    expect(resolveToolPermissions(configWith({})).has('desktop')).toBe(false);
+    expect(resolveToolPermissions(configWith({ fs: {} })).has('browser')).toBe(false);
+    expect(resolveToolPermissions(configWith({ fs: {} })).has('desktop')).toBe(false);
+  });
+
+  it('grants browser only on an explicit permissions.browser.enabled: true', () => {
+    const allowed = resolveToolPermissions(configWith({ browser: { enabled: true } }));
+    expect(allowed.has('browser')).toBe(true);
+    expect(allowed.has('desktop')).toBe(false);
+    expect([...allowed]).toEqual(['read', 'write', 'git-read', 'browser']);
+  });
+
+  it('grants desktop only on an explicit permissions.desktop.enabled: true', () => {
+    const allowed = resolveToolPermissions(configWith({ desktop: { enabled: true } }));
+    expect(allowed.has('desktop')).toBe(true);
+    expect(allowed.has('browser')).toBe(false);
+    expect([...allowed]).toEqual(['read', 'write', 'git-read', 'desktop']);
+  });
 });
 
 // The block is all-or-nothing: naming one group makes the schema defaults
@@ -83,6 +106,8 @@ describe('permissionsSuppressedByBlock', () => {
       'net.search',
       'net.fetch',
       'git.write',
+      'browser',
+      'desktop',
     ]);
   });
 
@@ -94,16 +119,20 @@ describe('permissionsSuppressedByBlock', () => {
       net: { search: false, fetch: false },
       exec: { terminal: false, headless: false },
       git: { read: true, write: false },
+      browser: { enabled: false },
+      desktop: { enabled: false },
     };
     expect(permissionsSuppressedByBlock(configWith(permissions))).toEqual([]);
   });
 
-  it('reports nothing when every legacy capability is granted back', () => {
+  it('reports nothing when every capability is granted back', () => {
     const permissions = {
       fs: { delete: true },
       net: { search: true, fetch: true },
       exec: { terminal: true, headless: true },
       git: { write: true },
+      browser: { enabled: true },
+      desktop: { enabled: true },
     };
     expect(permissionsSuppressedByBlock(configWith(permissions))).toEqual([]);
   });

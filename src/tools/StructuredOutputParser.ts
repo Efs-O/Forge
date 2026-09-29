@@ -40,6 +40,10 @@ const OLLAMA_TOOL_MARKERS = [
   OLLAMA_TOOL_CALLS_BEGIN,
   OLLAMA_TOOL_CALLS_END,
 ] as const;
+const HERMES_OPEN = '<tool_call>';
+const HERMES_CLOSE = '</tool_call>';
+const STREAM_MARKERS = [...OLLAMA_TOOL_MARKERS, HERMES_OPEN, HERMES_CLOSE] as const;
+type StreamMarker = (typeof STREAM_MARKERS)[number];
 
 // Matches ```json ... ``` blocks (non-greedy, case-insensitive fence)
 const JSON_FENCE_RE = /```json\s*([\s\S]*?)```/gi;
@@ -80,10 +84,17 @@ export function parseStructuredOutput(
  * preserving surrounding prose. This is intentionally marker-only: JSON-fenced
  * blocks are handled after the full response is available so normal JSON/code
  * snippets are not hidden mid-stream.
+ *
+ * A `<tool_call>` span is held until it closes, then hidden only if it parses
+ * as a call — the same rule stripStructuredOutputFromFullText applies. Without
+ * this, Qwen's `<tool_call><function=...>` text streamed into the sidebar and
+ * stayed there after the call ran.
  */
 export class StructuredOutputStripper {
   private carry = '';
   private hiddenDepth = 0;
+  /** Body of an open `<tool_call>` span, or null outside one. */
+  private hermesBody: string | null = null;
 
   push(raw: string): string {
     const [processed, nextCarry] = stripCarry(raw, this.carry);
@@ -93,8 +104,15 @@ export class StructuredOutputStripper {
 
   /** The held tail was only the start of a marker if more text followed; it is text. */
   flush(): string {
-    const tail = this.hiddenDepth === 0 ? this.carry : '';
+    // An unclosed <tool_call> is not a call; the full-text pass keeps it too.
+    const tail =
+      this.hermesBody !== null
+        ? HERMES_OPEN + this.hermesBody + this.carry
+        : this.hiddenDepth === 0
+          ? this.carry
+          : '';
     this.carry = '';
+    this.hermesBody = null;
     return tail;
   }
 
@@ -103,6 +121,19 @@ export class StructuredOutputStripper {
     const visible: string[] = [];
 
     while (rest) {
+      if (this.hermesBody !== null) {
+        const end = rest.indexOf(HERMES_CLOSE);
+        if (end === -1) {
+          this.hermesBody += rest;
+          break;
+        }
+        const body = this.hermesBody + rest.slice(0, end);
+        this.hermesBody = null;
+        rest = rest.slice(end + HERMES_CLOSE.length);
+        if (!isHermesCall(body)) visible.push(HERMES_OPEN + body + HERMES_CLOSE);
+        continue;
+      }
+
       const next = findNextToolMarker(rest);
       if (!next) {
         if (this.hiddenDepth === 0) visible.push(rest);
@@ -115,7 +146,12 @@ export class StructuredOutputStripper {
       }
 
       rest = rest.slice(pos + marker.length);
-      if (marker === OLLAMA_TOOL_CALL_BEGIN || marker === OLLAMA_TOOL_CALLS_BEGIN) {
+      if (marker === HERMES_OPEN) {
+        if (this.hiddenDepth === 0) this.hermesBody = '';
+      } else if (marker === HERMES_CLOSE) {
+        // A stray close tag is prose; the full-text pass leaves it as well.
+        if (this.hiddenDepth === 0) visible.push(marker);
+      } else if (marker === OLLAMA_TOOL_CALL_BEGIN || marker === OLLAMA_TOOL_CALLS_BEGIN) {
         this.hiddenDepth += 1;
       } else if (marker === OLLAMA_TOOL_CALL_END || marker === OLLAMA_TOOL_CALLS_END) {
         this.hiddenDepth = Math.max(0, this.hiddenDepth - 1);
@@ -135,8 +171,7 @@ export function stripStructuredOutputFromFullText(
 
   const isFenceCall = (match: string, body: string): string =>
     fenceCall(body, toolNames) ? '' : match;
-  const isCall = (match: string, body: string): string =>
-    (parseJsonToolObject(body.trim()) ?? parseXmlFunction(body)) ? '' : match;
+  const isCall = (match: string, body: string): string => (isHermesCall(body) ? '' : match);
   return withoutMarkers.replace(JSON_FENCE_RE, isFenceCall).replace(HERMES_TOOL_CALL_RE, isCall);
 }
 
@@ -180,6 +215,10 @@ function collectHermesToolCalls(text: string, results: ParsedToolCall[]): void {
     const candidate = parseJsonToolObject(body) ?? parseXmlFunction(body);
     if (candidate) results.push(candidate);
   }
+}
+
+function isHermesCall(body: string): boolean {
+  return (parseJsonToolObject(body.trim()) ?? parseXmlFunction(body)) !== null;
 }
 
 function parseXmlFunction(body: string): ParsedToolCall | null {
@@ -254,11 +293,9 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function findNextToolMarker(
-  content: string,
-): [number, (typeof OLLAMA_TOOL_MARKERS)[number]] | null {
-  let best: [number, (typeof OLLAMA_TOOL_MARKERS)[number]] | null = null;
-  for (const marker of OLLAMA_TOOL_MARKERS) {
+function findNextToolMarker(content: string): [number, StreamMarker] | null {
+  let best: [number, StreamMarker] | null = null;
+  for (const marker of STREAM_MARKERS) {
     const pos = content.indexOf(marker);
     if (pos === -1) continue;
     if (best === null || pos < best[0] || (pos === best[0] && marker.length < best[1].length)) {
@@ -272,7 +309,7 @@ function stripCarry(raw: string, carry: string): [string, string] {
   const content = `${carry}${raw}`;
   let bestCarry = '';
 
-  for (const marker of OLLAMA_TOOL_MARKERS) {
+  for (const marker of STREAM_MARKERS) {
     const maxPartial = Math.min(content.length, marker.length - 1);
     for (let i = 1; i <= maxPartial; i++) {
       const candidate = marker.slice(0, i);

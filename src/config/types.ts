@@ -407,6 +407,14 @@ export interface ForgeConfig {
     exec?: { terminal?: boolean; headless?: boolean };
     git?: { read?: boolean; write?: boolean };
     agents?: { delegate?: boolean; cloud_workers?: boolean };
+    browser?: { enabled?: boolean };
+    desktop?: { enabled?: boolean };
+  };
+  /** Non-permission browser knobs (channel, headless, allowed_origins). */
+  browser?: {
+    channel?: 'chrome' | 'msedge' | 'chromium';
+    headless?: boolean;
+    allowed_origins?: string[];
   };
   /** Execution sandbox settings. */
   exec?: {

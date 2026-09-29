@@ -1,6 +1,6 @@
 import * as esbuild from 'esbuild';
 import { argv } from 'process';
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { copyFileSync, cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 
 const watchMode = argv.includes('--watch');
 const buildAll = argv.includes('--all');
@@ -11,9 +11,16 @@ const extensionConfig = {
   entryPoints: ['src/extension.ts'],
   bundle: true,
   outfile: 'dist/extension.js',
-  external: ['vscode'],
+  // `vscode` is provided by the host. `playwright-core` is external (NOT
+  // inlined) and shipped intact next to the bundle (dist/node_modules/): its
+  // launcher does runtime file lookups (browsers.json, the optional
+  // chromium-bidi require) relative to its package location, which break when
+  // esbuild inlines the package. See docs/plans/BROWSER_DESKTOP_USE_TOOLS_PLAN.md §9.
+  external: ['vscode', 'playwright-core'],
   // The agent-bus client script is a real file bundled as text (MESH_RUN_1_FINDINGS F1).
-  loader: { '.sh': 'text' },
+  // The Windows desktop driver is the same: a .ps1 bundled as text, written to a
+  // temp file at driver start and spawned with `pwsh -File` (no script-text interpolation).
+  loader: { '.sh': 'text', '.ps1': 'text' },
   format: 'cjs',
   platform: 'node',
   target: 'node20',
@@ -84,6 +91,19 @@ function copyWebviewAssets() {
   copyFileSync('webview-ui/modelManager.html', 'dist/webview/modelManager.html');
 }
 
+// B4: playwright-core is external and shipped intact next to the bundle, where
+// the bundle's require('playwright-core') resolves it. Its launcher does runtime
+// file lookups (browsers.json, the optional chromium-bidi require) relative to
+// its package location, which break when inlined. Delete the old copy first so a
+// stale/changed package never lingers in dist/. Its LICENSE/NOTICE ship with it.
+function copyPlaywrightCore() {
+  const src = 'node_modules/playwright-core';
+  const dest = 'dist/node_modules/playwright-core';
+  rmSync(dest, { recursive: true, force: true });
+  mkdirSync('dist/node_modules', { recursive: true });
+  cpSync(src, dest, { recursive: true });
+}
+
 async function build() {
   if (watchMode) {
     const extCtx = await esbuild.context(extensionConfig);
@@ -105,6 +125,7 @@ async function build() {
 
   await esbuild.build(extensionConfig);
   console.log('Extension built.');
+  copyPlaywrightCore();
 
   if (buildAll) {
     await esbuild.build(webviewConfig);

@@ -8,6 +8,7 @@ import {
   readPathArg,
   rendersAsMarkdown,
   resultLabel,
+  screenshotPath,
 } from '../../src/sidebar/toolResultView';
 import { capDisplayText, MAX_DISPLAY_RESULT_CHARS } from '../../src/tools/resultCap';
 import { workspaceFileUri } from '../../webview-ui/src/workspaceRootUri';
@@ -121,6 +122,37 @@ describe('generatedImagePath', () => {
     expect(workspaceFileUri('https://file.vscode-resource/N:/ws/', 'art/a fox (1).jpg')).toBe(
       'https://file.vscode-resource/N:/ws/art/a%20fox%20(1).jpg',
     );
+  });
+});
+
+describe('screenshotPath', () => {
+  const browserScreenshot =
+    'Screenshot of tab t1 (example.com), 1280x800 px, coord_space=image_px. Saved to C:\\Users\\efso office\\.forge\\screenshots\\conv1\\1700000000000-abc123.png.';
+
+  it('reads a browser screenshot path with Windows separators and spaces', () => {
+    expect(screenshotPath('browser_screenshot', browserScreenshot)).toBe(
+      'C:\\Users\\efso office\\.forge\\screenshots\\conv1\\1700000000000-abc123.png',
+    );
+  });
+
+  it('reads a desktop capture path', () => {
+    expect(
+      screenshotPath(
+        'desktop_capture',
+        'Desktop capture saved. Saved to C:\\Users\\efso office\\.forge\\screenshots\\desktop.jpg.',
+      ),
+    ).toBe('C:\\Users\\efso office\\.forge\\screenshots\\desktop.jpg');
+  });
+
+  it('ignores other tools, failures, and results without a saved path', () => {
+    expect(screenshotPath('view_image', browserScreenshot)).toBeUndefined();
+    expect(
+      screenshotPath(
+        'browser_screenshot',
+        'Error: could not capture the active browser tab.',
+      ),
+    ).toBeUndefined();
+    expect(screenshotPath('desktop_capture', 'Desktop capture completed.')).toBeUndefined();
   });
 });
 

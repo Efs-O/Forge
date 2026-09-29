@@ -116,6 +116,7 @@ export function makeViewImageTool(): RegisteredTool {
       },
     },
     permission: 'read',
+    requiresVision: (name) => visionUnavailableMessage(name),
     handler: async (args): Promise<MultimodalToolResult> => {
       const requestedPath = args['path'];
       if (typeof requestedPath !== 'string') {

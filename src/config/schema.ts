@@ -15,6 +15,11 @@ import { ImageGenerationConfigSchema } from './imageGenerationSchema';
 import { JobsConfigSchema } from './jobsSchema';
 import { AgentBusConfigSchema } from './agentBusSchema';
 import { ImageSearchConfigSchema } from './imageSearchSchema';
+import {
+  BrowserPermissionSchema,
+  DesktopPermissionSchema,
+  BrowserConfigSchema,
+} from './browserSchema';
 
 const ToolPermissionSchema = z.enum(
   [
@@ -213,22 +218,13 @@ const PermissionsSchema = z
       })
       .optional(),
     net: z
-      .object({
-        search: z.boolean().default(false),
-        fetch: z.boolean().default(false),
-      })
+      .object({ search: z.boolean().default(false), fetch: z.boolean().default(false) })
       .optional(),
     exec: z
-      .object({
-        terminal: z.boolean().default(false),
-        headless: z.boolean().default(false),
-      })
+      .object({ terminal: z.boolean().default(false), headless: z.boolean().default(false) })
       .optional(),
     git: z
-      .object({
-        read: z.boolean().default(true),
-        write: z.boolean().default(false),
-      })
+      .object({ read: z.boolean().default(true), write: z.boolean().default(false) })
       .optional(),
     agents: z
       .object({
@@ -239,6 +235,8 @@ const PermissionsSchema = z
         cloud_workers: z.boolean().default(false),
       })
       .optional(),
+    browser: BrowserPermissionSchema,
+    desktop: DesktopPermissionSchema,
   })
   .optional();
 
@@ -375,6 +373,7 @@ export const ForgeConfigSchema = z
       .optional(),
     remote: RemoteConfigSchema,
     permissions: PermissionsSchema,
+    browser: BrowserConfigSchema,
     exec: ExecConfigSchema,
     mcp_servers: z
       .array(

@@ -37,6 +37,12 @@ export function resolveToolPermissions(config: ForgeConfig): Set<ToolPermission>
   if (configured.git?.read ?? true) allowed.add('git-read');
   if (configured.git?.write ?? false) allowed.add('git-write');
   if (configured.agents?.delegate ?? false) allowed.add('delegate');
+  // browser / desktop are deny-by-default: a config with no `permissions`
+  // block (LEGACY_PERMISSIONS) grants neither, so the families stay off for
+  // existing users. An explicit `permissions` block makes the schema defaults
+  // authoritative, and both default to `enabled: false`.
+  if (configured.browser?.enabled ?? false) allowed.add('browser');
+  if (configured.desktop?.enabled ?? false) allowed.add('desktop');
   // agents.cloud_workers is still accepted by the schema so existing configs
   // keep booting, but dispatch_workers no longer exists — it grants nothing
   // and is deliberately not resolved into a capability.
@@ -58,6 +64,8 @@ const DENY_BY_DEFAULT: readonly (readonly [
   ['net.search', (p) => p.net?.search],
   ['net.fetch', (p) => p.net?.fetch],
   ['git.write', (p) => p.git?.write],
+  ['browser', (p) => p.browser?.enabled],
+  ['desktop', (p) => p.desktop?.enabled],
 ];
 
 /**

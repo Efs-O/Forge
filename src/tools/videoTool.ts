@@ -201,6 +201,7 @@ export function makeViewVideoTool(getVideoConfig?: () => VideoConfig | undefined
       },
     },
     permission: 'read',
+    requiresVision: (name) => videoUnavailableMessage(name),
     handler: async (args, context): Promise<MultimodalToolResult> => {
       const requestedPath = args['path'];
       if (typeof requestedPath !== 'string' || !requestedPath.trim()) {
