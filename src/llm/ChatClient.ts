@@ -1,5 +1,6 @@
 import type { ModelConfig } from '../config/types';
 import { streamChatCompletion, type StreamHandlers } from './OpenAIClient';
+import { localLlamaFetch } from './localLlamaFetch';
 import { streamOllamaChatCompletion } from './OllamaNativeClient';
 import type { ChatCompletionRequest } from './types';
 
@@ -29,5 +30,15 @@ export async function streamModelChatCompletion(
     await streamOllamaChatCompletion(baseUrl, request, model, handlers, signal);
     return;
   }
-  await streamChatCompletion(baseUrl, request, handlers, signal, apiKey);
+  // Only local llama.cpp gets the longer headers wait; cloud providers keep
+  // the extension host's fetch. An unset provider means llama.cpp.
+  const local = model !== undefined && (model.provider ?? 'llama.cpp') === 'llama.cpp';
+  await streamChatCompletion(
+    baseUrl,
+    request,
+    handlers,
+    signal,
+    apiKey,
+    local ? localLlamaFetch : undefined,
+  );
 }

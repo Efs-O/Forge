@@ -127,6 +127,7 @@ export async function streamChatCompletion(
   handlers: StreamHandlers,
   signal?: AbortSignal,
   apiKey?: string,
+  fetchImpl: (url: string, init: RequestInit) => Promise<Response> = fetch,
 ): Promise<void> {
   const requestId = ++requestSequence;
   const startedAt = Date.now();
@@ -149,7 +150,7 @@ export async function streamChatCompletion(
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
   try {
-    response = await fetch(`${baseUrl}/v1/chat/completions`, {
+    response = await fetchImpl(`${baseUrl}/v1/chat/completions`, {
       method: 'POST',
       headers,
       body: JSON.stringify(toWireRequest(request)),

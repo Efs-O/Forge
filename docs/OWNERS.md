@@ -276,6 +276,7 @@ overlaps with an existing owner, extend the owner instead.
 | FORGE.md workspace instructions loader       | `src/llm/ForgeInstructionsLoader.ts`         |
 | FORGE.md chain assembly + byte budget        | `src/llm/forgeInstructionsChain.ts`          |
 | Streaming OpenAI-compat client               | `src/llm/OpenAIClient.ts`                    |
+| Local llama.cpp fetch (30 min headers wait)  | `src/llm/localLlamaFetch.ts`                 |
 | Cut-off tool call: type + classification     | `src/llm/ToolCallTruncatedError.ts`          |
 | No-projector backend error classification    | `src/llm/imageUnsupportedError.ts`           |
 | Context measured + output budget estimate    | `src/util/contextBudget.ts`                  |

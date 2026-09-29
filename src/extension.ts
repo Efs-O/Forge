@@ -58,6 +58,7 @@ import { registerRemoteCommands } from './vscode/remoteCommands';
 import { startWakeRelay } from './vscode/wakeRelaySetup';
 import { setupJobs } from './vscode/jobsSetup';
 import { JobStore } from './jobs/JobStore';
+import { disposeLocalLlamaFetch } from './llm/localLlamaFetch';
 
 let activeRemoteRuntime: RemoteRuntime | undefined;
 
@@ -384,12 +385,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     void vscode.window.showErrorMessage(`Forge remote failed to start: ${(err as Error).message}`);
   });
   await publishRemoteStatus();
-  context.subscriptions.push({
-    dispose: () => {
-      void sidebarProvider.dispose();
-    },
-  });
+  context.subscriptions.push({ dispose: () => void sidebarProvider.dispose() });
   context.subscriptions.push({ dispose: () => void remoteRuntime.dispose() });
+  context.subscriptions.push({ dispose: () => void disposeLocalLlamaFetch() });
   registerRemoteCommands(context, remoteRuntime, () => config, activeConfigPath);
   const sessionTimeBar = new SessionTimeStatusBar(() => sidebarProvider.getActiveSessionMetrics());
   refreshSessionTime = () => sessionTimeBar.refresh();

@@ -1,5 +1,21 @@
 # Forge — Recent Changes
 
+## 0.16.59
+
+### Local llama.cpp requests wait up to 30 min for a busy slot (2026-09-29)
+
+- A chat queued behind another chat on a single-slot llama-server failed after
+  5 minutes with `fetch failed: Headers Timeout Error
+  (UND_ERR_HEADERS_TIMEOUT)`. llama-server sends no response headers until a
+  request's first result exists, and the extension host's built-in `fetch`
+  gives up after undici's default 300 s with no option to change it.
+- Local llama.cpp chat requests now go through the `undici` package's own
+  `fetch` with one shared `Agent` whose `headersTimeout` is 30 minutes
+  (`src/llm/localLlamaFetch.ts`). Cloud providers and Ollama are unchanged.
+  Stop still cancels a waiting request. New dependency: `undici@^6`.
+- Plan: `docs/plans/LOCAL_QUEUE_WAIT_PLAN.md`. The waiting notice (fix 2) is
+  not in this build.
+
 ## 0.16.57
 
 ### Copilot agent-mesh P3+P4: operator surfaces, A11 notification bridge, and live validation (2026-09-28)
