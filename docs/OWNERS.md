@@ -390,6 +390,8 @@ overlaps with an existing owner, extend the owner instead.
 | Concern                                                 | Owner                                |
 | ------------------------------------------------------- | ------------------------------------ |
 | `config.yaml` schema (Zod)                              | `src/config/schema.ts`               |
+| Model config schema (model/profile/active/group field)  | `src/config/modelSchema.ts`          |
+| Remote config schema (queue/auth/attachments/aliases)   | `src/config/remoteSchema.ts`         |
 | Shared Zod primitives (groups/spawn/sampling)           | `src/config/schemaShared.ts`         |
 | Config load + validation                                | `src/config/ConfigLoader.ts`         |
 | Two-flavor model/profile/alias resolver                 | `src/config/ConfigResolver.ts`       |

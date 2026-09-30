@@ -1,15 +1,6 @@
 import { z } from 'zod';
 import { isAbsolute } from 'path';
-import {
-  CacheTypeSchema,
-  CapabilitiesSchema,
-  GroupSchema,
-  ProviderSchema,
-  ReasoningEffortSchema,
-  SamplingSchema,
-  SpawnSchema,
-  ToolCallLimitsSchema,
-} from './schemaShared';
+import { CacheTypeSchema, GroupSchema } from './schemaShared';
 import { VoiceConfigSchema } from './voiceSchema';
 import { ImageGenerationConfigSchema } from './imageGenerationSchema';
 import { JobsConfigSchema } from './jobsSchema';
@@ -20,6 +11,13 @@ import {
   DesktopPermissionSchema,
   BrowserConfigSchema,
 } from './browserSchema';
+import {
+  ActiveModelSchema,
+  ProfileSchema,
+  ModelConfigSchema,
+  effectiveGroupField,
+} from './modelSchema';
+import { RemoteConfigSchema } from './remoteSchema';
 
 const ToolPermissionSchema = z.enum(
   [
@@ -39,107 +37,6 @@ const ToolPermissionSchema = z.enum(
       'MCP tool permission must be one of: read, write, delete, terminal, headless, search, fetch, git-read, git-write, delegate',
   },
 );
-const ActiveModelSchema = z.preprocess(
-  (value) => {
-    if (value === undefined || value === null) return null;
-    if (typeof value === 'string' && value.trim().toLowerCase() === 'none') return null;
-    return value;
-  },
-  z.union([z.string().min(1), z.null()]),
-);
-
-// Request-time role preset (F6).
-const ProfileSchema = z.object({
-  system_prompt: z.string().optional(),
-  // 'replace' sends system_prompt INSTEAD of the Forge template. Default
-  // 'append' keeps the template and adds system_prompt beneath it.
-  system_prompt_mode: z.enum(['append', 'replace']).optional(),
-  sampling: SamplingSchema.optional(),
-  think: z.boolean().optional(),
-  reasoning_effort: ReasoningEffortSchema.optional(),
-  strip_tools: z.boolean().optional(),
-  strip_thinking_channels: z.boolean().optional(),
-  capabilities: CapabilitiesSchema.optional(),
-  max_tool_rounds: z.number().int().positive().optional(),
-});
-
-const ModelConfigSchema = z.object({
-  name: z.string().min(1),
-  provider: ProviderSchema.optional(),
-  cli: z.string().min(1).optional(),
-  cli_model: z.string().min(1).optional(),
-  gguf_path: z.string().min(1).optional(),
-  mmproj_path: z.string().min(1).optional(),
-  // Per-model llama-server executable override (e.g. a patched fork for one
-  // model). Absent = the global llama_server.binary. See ModelConfig.
-  llama_server_binary: z.string().min(1).optional(),
-  startup_timeout_ms: z.number().int().min(1_000).optional(),
-  // Omitted = disabled. No implicit default, and YAML `null` is rejected rather
-  // than silently meaning "off" — opting in is explicit.
-  image_retention_turns: z.number().int().nonnegative().optional(),
-  endpoint: z.string().url().optional(),
-  n_gpu_layers: z.number().int().optional(),
-  num_ctx: z.number().int().positive().optional(),
-  n_batch: z.number().int().positive().optional(),
-  type_k: CacheTypeSchema.optional(),
-  type_v: CacheTypeSchema.optional(),
-  flash_attn: z.boolean().optional(),
-  extra_llama_server_args: z.array(z.string()).optional(),
-  n_parallel: z.number().int().positive().optional(),
-  // v0.3 additions
-  sampling: SamplingSchema.optional(),
-  capabilities: CapabilitiesSchema.optional(),
-  strip_tools: z.boolean().optional(),
-  system_prompt: z.string().optional(),
-  system_prompt_mode: z.enum(['append', 'replace']).optional(),
-  think: z.boolean().optional(),
-  chat_template_thinking: z.boolean().optional(),
-  reasoning_effort: ReasoningEffortSchema.optional(),
-  strip_thinking_channels: z.boolean().optional(),
-  api_key_secret: z.string().min(1).optional(),
-  // F6 additions
-  /** Request-time profiles exposed for this model; [] disables them. */
-  profiles: z.array(z.string().min(1)).optional(),
-  spawn: SpawnSchema.optional(),
-  spawn_profiles: z.record(z.string(), SpawnSchema.partial()).optional(),
-  // F7 additions (groups + fuzzy resolution + model manager identity fields)
-  group: z.string().min(1).optional(),
-  groups: z.array(z.string().min(1)).optional(),
-  short_name: z.string().min(1).optional(),
-  display_name: z.string().trim().min(1).max(60).optional(),
-  category: z.string().min(1).optional(),
-  comment: z.string().optional(),
-  tools: z.array(z.string().min(1)).optional(),
-  tool_call_limits: ToolCallLimitsSchema.optional(),
-  max_output_tokens: z.number().int().positive().optional(),
-  max_tool_rounds: z.number().int().positive().optional(),
-});
-
-// Provider-requiredness checks (gguf_path/cli/endpoint/api_key_secret) live at
-// the top-level ForgeConfigSchema refine (see below), not here — `provider`
-// and `endpoint` are both fields a model may inherit from a referenced
-// `group` (F7 §2.1), and a per-model refine has no visibility into `groups`.
-// gguf_path/cli/api_key_secret are never group-suppliable (GroupSchema omits
-// them), so they still resolve purely from the model itself.
-type ModelConfigLike = z.infer<typeof ModelConfigSchema>;
-
-/** Last group in the model's `group`/`groups` list that defines `field`
- *  wins — matches ConfigResolver.mergeGroupsIntoModel's merge order. */
-function effectiveGroupField<K extends 'provider' | 'endpoint'>(
-  model: ModelConfigLike,
-  groups: Record<string, z.infer<typeof GroupSchema>> | undefined,
-  field: K,
-): ModelConfigLike[K] | undefined {
-  const names = model.groups ?? (model.group ? [model.group] : []);
-  let value: ModelConfigLike[K] | undefined;
-  for (const name of names) {
-    const group = groups?.[name];
-    const fieldValue = group?.[field];
-    if (fieldValue !== undefined) value = fieldValue as ModelConfigLike[K];
-  }
-  return value;
-}
-
 const LlamaServerConfigSchema = z.object({
   binary: z.string().min(1).optional(),
   extra_llama_server_args: z.array(z.string()).optional(),
@@ -244,75 +141,6 @@ const ExecConfigSchema = z
   .object({
     timeout_ms: z.number().int().positive().default(30000),
     denylist_extra: z.array(z.string()).optional(),
-  })
-  .optional();
-
-const RemoteContactsConfigSchema = z
-  .object({
-    enabled: z.boolean().default(false),
-    web: z
-      .object({
-        enabled: z.boolean().default(false),
-        max_results: z.number().int().min(1).max(5).default(5),
-        max_fetch_bytes: z.number().int().min(10_000).max(200_000).default(200_000),
-        timeout_ms: z.number().int().min(1_000).max(30_000).default(15_000),
-      })
-      .default({
-        enabled: false,
-        max_results: 5,
-        max_fetch_bytes: 200_000,
-        timeout_ms: 15_000,
-      }),
-  })
-  .default({
-    enabled: false,
-    web: {
-      enabled: false,
-      max_results: 5,
-      max_fetch_bytes: 200_000,
-      timeout_ms: 15_000,
-    },
-  });
-
-const RemoteConfigSchema = z
-  .object({
-    enabled: z.boolean().default(false),
-    queue_limit: z.number().int().min(1).max(100).default(5),
-    max_message_chars: z.number().int().min(1).max(50_000).default(12_000),
-    rate_limit_per_minute: z.number().int().min(1).max(600).default(30),
-    /** Seconds to keep a recognized /command before deleting it from Telegram; 0 disables. */
-    delete_command_messages_after: z.number().int().min(0).max(3600).default(5),
-    /** Seconds to keep command replies and ephemeral host notifications; 0 disables. */
-    delete_command_replies_after: z.number().int().min(0).max(3600).default(10),
-    auth: z
-      .object({
-        inactivity_timeout_minutes: z.number().int().min(0).max(1_440).default(30),
-      })
-      .default({ inactivity_timeout_minutes: 30 }),
-    attachments: z
-      .object({
-        enabled: z.boolean().default(false),
-        retain_days: z.union([z.number().int().min(1).max(365), z.null()]).default(30),
-        accept_pdf: z.boolean().default(true),
-      })
-      .default({ enabled: false, retain_days: 30, accept_pdf: true }),
-    contacts: RemoteContactsConfigSchema,
-    workspace_aliases: z
-      .record(
-        z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/),
-        z.object({ path: z.string().min(1), display_name: z.string().min(1).max(80) }),
-      )
-      .default({}),
-    wake_relay: z
-      .object({
-        enabled: z.boolean().default(false),
-        host: z.string().regex(/^(?:\d{1,3}\.){3}\d{1,3}$/, 'host must be an IPv4 address'),
-        port: z.number().int().min(1024).max(65535),
-        relay_ip: z.string().regex(/^(?:\d{1,3}\.){3}\d{1,3}$/, 'relay_ip must be an IPv4 address'),
-      })
-      .optional(),
-    telegram: z.object({ enabled: z.boolean().default(false) }).default({ enabled: false }),
-    whatsapp: z.object({ enabled: z.boolean().default(false) }).default({ enabled: false }),
   })
   .optional();
 
