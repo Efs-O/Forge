@@ -412,3 +412,26 @@ corrected here (Claude, supervisor review):
   mechanism, and since a group load re-reads the conversation, its stall **is** the
   cold-prefill time for that size. The README quotes these: ~100 s at 70K,
   ~190 s at 120K on this server.
+
+## Phase 3 live results (2026-09-30, 0.16.66, qwen38-27b-mtp-ud-q6k-tensor-vision on b11243)
+
+`test/live/LazyToolGroups.live.test.ts`: **22 of 23 pass** (39deb6b harness).
+
+- Loaded the right group unprompted for `computer_use`, `media`, `editor_ui`,
+  `system`, `memory` and `halluscribe`; never loaded a group it did not need
+  (`wrongGroupLoads` 0).
+- **Notebook, failing, accepted as model choice.** The prompt asks it to read a
+  `.ipynb`; the model calls `read_file`, gets the JSON, answers correctly, and
+  never loads `notebook`. That answers the question, so it is not a defect in
+  the tool or the grouping. For file-format groups (media, notebook) the model
+  reaches for the built-in file tools first; `read_file` on an image now names
+  the `media` group (5886609) for that reason.
+- **Exact-string recovery passes only with a 600 s budget**: the model loops on
+  `search_raw_transcripts` to the 10-step limit instead of stopping at the hit.
+  A model convergence issue, not a lazy-group one.
+- Three harness defects found and fixed on the way, none in Forge: no workspace
+  folder or vision flag in the tool context (8ebb372); a thrown tool ended the run
+  instead of returning `Error:` to the model (7103235); a structured tool result
+  (`view_image`) was sent as the message object and got HTTP 400 (39deb6b).
+- Not covered by this run: "a compaction clears active groups" and "a non-vision
+  model cannot load `computer_use`" are covered by unit tests, not live.
