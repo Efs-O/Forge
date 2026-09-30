@@ -6,7 +6,7 @@
 //
 // Requires a vision-capable Qwen3.8 model, browser/desktop permissions, and the
 // real HalluScribe MCP server from .forge/config.yaml. Set FORGE_LIVE_MODEL to a
-// vision model; checks dispatch real tool schemas from all eight groups.
+// vision model; checks dispatch real tool schemas from all seven groups.
 //
 //   FORGE_LIVE_LAZY_TOOLS=1 npx vitest run test/live/LazyToolGroups.live.test.ts
 //
@@ -67,12 +67,7 @@ const NATIVE_GROUP_TASKS = [
     prompt: 'Tell me the filename and selected text in the editor that is open right now.',
   },
   {
-    group: 'admin',
-    tool: 'get_system_status',
-    prompt: 'Report the machine OS and available memory from Forge system status.',
-  },
-  {
-    group: 'power',
+    group: 'system',
     tool: 'get_power_info',
     prompt: 'Report the computer power and wake-on-LAN information without changing anything.',
   },
@@ -145,9 +140,9 @@ describe.runIf(LIVE)('lazy tool groups against a live Qwen3.8', () => {
       throw new Error('Set FORGE_LIVE_MODEL to a vision-capable model for the computer_use acceptance cases.');
     }
     await buildRegistry();
-    // A green run here without all eight groups registered would prove nothing.
+    // A green run here without all seven groups registered would prove nothing.
     for (const group of [
-      'computer_use', 'media', 'editor_ui', 'admin', 'power', 'memory', 'notebook', 'halluscribe',
+      'computer_use', 'media', 'editor_ui', 'system', 'memory', 'notebook', 'halluscribe',
     ]) expect(isLazyGroupAvailable(group)).toBe(true);
     const names = registry.definitions(READ_ONLY_PERMISSIONS).map((d) => d.function.name);
     expect(names).toContain('load_tool_group');
@@ -155,7 +150,7 @@ describe.runIf(LIVE)('lazy tool groups against a live Qwen3.8', () => {
     expect(loader?.function.parameters).toMatchObject({
       properties: {
         group: {
-          enum: ['admin', 'computer_use', 'editor_ui', 'halluscribe', 'media', 'memory', 'notebook', 'power'],
+          enum: ['computer_use', 'editor_ui', 'halluscribe', 'media', 'memory', 'notebook', 'system'],
         },
       },
     });

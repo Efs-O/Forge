@@ -7,9 +7,15 @@
 const LAZY_GROUP_BY_SERVER: ReadonlyMap<string, string> = new Map([['halluscribe', 'halluscribe']]);
 
 /**
- * Native families follow the registered tool boundaries: screen/browser,
- * media, editor, administration/agent coordination, power, memory, and notebook
- * tasks are rare enough to pay one conversation re-prefill when needed.
+ * Membership follows the 2026-09-30 audit of 15,676 Qwen calls across 86+
+ * sessions: tools called at least 10 times stay eager because first use costs
+ * a full conversation re-read (~100 s at 70K). Counts: ask_live_session 152,
+ * manage_jobs 73, notify_user 67, ask_local_agent 56, ask_user 34,
+ * tell_live_session 21, list_delegation_targets 14, get_system_status 11.
+ * view_image (17) is the exception: it stays in media because it works only on
+ * vision models and most calls came from image-review sessions. Other grouped
+ * tools each had at most 7 calls. Rare tools stay grouped to avoid paying their
+ * schema cost on every conversation.
  */
 const NATIVE_GROUP_BY_TOOL: ReadonlyMap<string, string> = new Map([
   ...[
@@ -48,22 +54,13 @@ const NATIVE_GROUP_BY_TOOL: ReadonlyMap<string, string> = new Map([
     'show_diff',
     'open_file',
     'open_url_in_browser',
-    'ask_user',
-    'notify_user',
     'show_notification',
     'copy_to_clipboard',
     'read_clipboard',
   ].map((name) => [name, 'editor_ui'] as const),
-  ...[
-    'manage_jobs',
-    'install_llamacpp',
-    'get_system_status',
-    'ask_local_agent',
-    'list_delegation_targets',
-    'ask_live_session',
-    'tell_live_session',
-  ].map((name) => [name, 'admin'] as const),
-  ...['get_power_info', 'schedule_wake', 'sleep_computer'].map((name) => [name, 'power'] as const),
+  ...['install_llamacpp', 'get_power_info', 'schedule_wake', 'sleep_computer'].map(
+    (name) => [name, 'system'] as const,
+  ),
   ...['remember', 'recall', 'list_memories'].map((name) => [name, 'memory'] as const),
   ...['read_notebook', 'edit_notebook_cell'].map((name) => [name, 'notebook'] as const),
 ]);

@@ -17,7 +17,7 @@
 
 ### Rare native tool groups load on demand (2026-09-30)
 
-- Computer-use, media, editor UI, administration, power, memory, notebook, and
+- Computer-use, media, editor UI, system, memory, notebook, and
   HalluScribe tools now load through `load_tool_group`. This saves their schemas
   on ordinary conversations; a group load changes the tool list and makes the
   model re-read the conversation (about 100 seconds at 70K and 190 seconds at
