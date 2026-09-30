@@ -379,23 +379,25 @@ Cold-base prefill throughput is ~720 tok/s at 20K, falling to ~540–630 tok/s a
 70K/120K (larger context / memory pressure). Wall time exceeds `prompt_ms` by a
 variable ~1–3× at 120K (MTP draft verification is not counted in `prompt_ms`).
 
-**Does a tool-list change still force a full cold re-prefill (`cache_n = 0`)?**
-No — at sizes that fit the KV cache, it does not. At 20K the common prefix is
-reused: request 3 (base + git group appended to the END) reuses `cache_n=8828`
-tokens instead of re-prefilling all ~20.5K from scratch, and request 4 (back to
-base) is fully cached again (`prompt_n=4`). This is **partial KV-cache reuse** —
-the opposite of b10894's full-cold-on-tool-change behavior. The reuse extends to
-the point where the appended group begins, so only the prefix up to that point is
-kept.
+**Does a tool-list change still force a re-prefill?** Yes, of everything after the
+tool block. The measurer first recorded "partial reuse now works"; that reading is
+corrected here (Claude, supervisor review):
 
-Caveats: (a) request 1 "cold base" is not truly cold — a prior probe primed the
-system + base-tools + template prefix (~9.3K tokens), which is why its `cache_n`
-is non-zero; the relative comparison (2 vs 3 vs 4) is what matters. (b) At 70K and
-120K the KV cache is **not retained between requests at all** — even the identical
-request 2 is full cold (`cache_n=0`) — so the tool-change comparison is
-inconclusive there; that is a KV-cache-capacity artifact (q8_0 cache + tensor split
-cannot hold a 70K+ conversation), not a tool-list effect.
-
-**Implication for phase 3:** partial reuse now works at sizes that fit the cache.
-Per the plan, this reopens phase 3's scope — whether to widen it is Claude's call,
-not the measurer's.
+- At 20K, request 3 (base + git group appended to the END of `tools`) reused only
+  `cache_n=8828`, the system-prompt prefix, and re-processed `prompt_n=11729`, the
+  whole conversation. Qwen3.8's chat template renders the tool list inside the
+  system block, **ahead of** the conversation, so any change to `tools`
+  invalidates every token after that point wherever the new group sits in the
+  array. What b11243 reuses is the prefix before the tool block, which saves little.
+- So a group load costs roughly a full re-read of the conversation: at the
+  measured ~550–700 tok/s, about **100 s at 70K and ~190 s at 120K**, the same
+  order as b10894's 95 s. **Phase 3 ships as designed (rare groups only); the
+  growth plan's "out of bounds" list is NOT reopened.**
+- The 70K and 120K rows are **void as a reuse test**. `--ctx-size 131072` on one
+  slot holds a 120K prompt, so capacity is not the cause. The measurement ran in
+  the background while the measuring chat's own ~60–120K requests went to the same
+  single slot (`--parallel 1`) between measurement requests and evicted the
+  measurement prompt; the identical request 2 coming back `cache_n=0` shows the
+  contamination. Those rows are still valid as **cold prefill times**: 70K
+  ≈ 94–115 s, 120K ≈ 192–194 s. A foreground re-run, with no model request between
+  the four requests, is requested for the README's stall figure.
