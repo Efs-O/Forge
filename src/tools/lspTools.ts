@@ -10,7 +10,7 @@ import { resolveWorkspaceUri } from '../util/WorkspacePaths';
  * VS Code's language servers analyse open documents. A file the user has never
  * opened may have no symbols, no hover and no definitions — not because the
  * code lacks them, but because nothing asked for the file to be parsed. That
- * reads as a broken tool: measured on a real run, `get_document_symbols` on a
+ * reads as a broken code-intelligence operation: measured on a real run, a
  * file containing `export class Game` returned "No symbols found." while a
  * plain text search found the class on line 32.
  *
@@ -54,8 +54,8 @@ function symbolKindLabel(k: vscode.SymbolKind): string {
  * lets a provider answer with `LocationLink[]` instead — and the JavaScript/
  * TypeScript server does. Those carry `targetUri`/`targetRange` and no `range`
  * at all, so reading `loc.range.start` threw
- * "Cannot read properties of undefined (reading 'start')" and go_to_definition
- * failed on every JS file. `find_references` was unaffected because the
+ * "Cannot read properties of undefined (reading 'start')" and definition lookup
+ * failed on every JS file. The references handler was unaffected because the
  * references provider does return plain Locations.
  */
 function locationToString(loc: vscode.Location | vscode.LocationLink): string {
@@ -67,14 +67,14 @@ function locationToString(loc: vscode.Location | vscode.LocationLink): string {
   return `${vscode.workspace.asRelativePath(uri)}:${range.start.line + 1}:${range.start.character + 1}`;
 }
 
-// ── get_diagnostics ───────────────────────────────────────────────────────────
+// ── Diagnostics handler ────────────────────────────────────────────────────────
 
 export function makeGetDiagnosticsTool(): RegisteredTool {
   return {
     definition: {
       type: 'function',
       function: {
-        name: 'get_diagnostics',
+        name: '__code_intel_get_diagnostics',
         description:
           'Get language diagnostics (errors, warnings) for a file or the whole workspace.',
         parameters: {
@@ -118,7 +118,7 @@ export function makeGetDiagnosticsTool(): RegisteredTool {
   };
 }
 
-// ── get_document_symbols ──────────────────────────────────────────────────────
+// ── Document symbols handler ───────────────────────────────────────────────────
 
 function formatSymbolTree(symbols: vscode.DocumentSymbol[], indent = 0): string[] {
   const lines: string[] = [];
@@ -138,7 +138,7 @@ export function makeGetDocumentSymbolsTool(): RegisteredTool {
     definition: {
       type: 'function',
       function: {
-        name: 'get_document_symbols',
+        name: '__code_intel_get_document_symbols',
         description:
           'List all symbols (functions, classes, variables, etc.) in a file as an indented tree.',
         parameters: {
@@ -166,14 +166,14 @@ export function makeGetDocumentSymbolsTool(): RegisteredTool {
   };
 }
 
-// ── get_workspace_symbols ─────────────────────────────────────────────────────
+// ── Workspace symbols handler ──────────────────────────────────────────────────
 
 export function makeGetWorkspaceSymbolsTool(): RegisteredTool {
   return {
     definition: {
       type: 'function',
       function: {
-        name: 'get_workspace_symbols',
+        name: '__code_intel_get_workspace_symbols',
         description: 'Search for symbols by name across the entire workspace.',
         parameters: {
           type: 'object',
@@ -203,14 +203,14 @@ export function makeGetWorkspaceSymbolsTool(): RegisteredTool {
   };
 }
 
-// ── get_hover ─────────────────────────────────────────────────────────────────
+// ── Hover handler ──────────────────────────────────────────────────────────────
 
 export function makeGetHoverTool(): RegisteredTool {
   return {
     definition: {
       type: 'function',
       function: {
-        name: 'get_hover',
+        name: '__code_intel_get_hover',
         description: 'Get hover information (type info, docs) at a specific position in a file.',
         parameters: {
           type: 'object',
@@ -249,14 +249,14 @@ export function makeGetHoverTool(): RegisteredTool {
   };
 }
 
-// ── go_to_definition ──────────────────────────────────────────────────────────
+// ── Definition handler ─────────────────────────────────────────────────────────
 
 export function makeGoToDefinitionTool(): RegisteredTool {
   return {
     definition: {
       type: 'function',
       function: {
-        name: 'go_to_definition',
+        name: '__code_intel_go_to_definition',
         description: 'Find the definition location(s) of the symbol at the given position.',
         parameters: {
           type: 'object',
@@ -283,14 +283,14 @@ export function makeGoToDefinitionTool(): RegisteredTool {
   };
 }
 
-// ── find_references ───────────────────────────────────────────────────────────
+// ── References handler ─────────────────────────────────────────────────────────
 
 export function makeFindReferencesTool(): RegisteredTool {
   return {
     definition: {
       type: 'function',
       function: {
-        name: 'find_references',
+        name: '__code_intel_find_references',
         description: 'Find all references to the symbol at the given position (max 50).',
         parameters: {
           type: 'object',
@@ -319,7 +319,7 @@ export function makeFindReferencesTool(): RegisteredTool {
   };
 }
 
-// ── find_implementations ──────────────────────────────────────────────────────
+// ── Implementations handler ────────────────────────────────────────────────────
 
 /**
  * "Who implements this?" — the question find_references answers badly.
@@ -336,7 +336,7 @@ export function makeFindImplementationsTool(): RegisteredTool {
     definition: {
       type: 'function',
       function: {
-        name: 'find_implementations',
+        name: '__code_intel_find_implementations',
         description:
           'Find the implementations of the interface, abstract class, or abstract method at the ' +
           'given position (max 50). Prefer this over find_references when you want the concrete ' +

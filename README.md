@@ -117,11 +117,12 @@ batched `edits[]`, `apply_line_edits`, `insert_code`, `create_directory`,
 than destroying. Every write is checkpointed and shown as a diff.
 
 **Code intelligence, through VS Code's own language servers** — not grep
-heuristics. `go_to_definition`, `find_references`, `find_implementations`,
-`get_hover`, `get_document_symbols`, `get_workspace_symbols`,
-`get_diagnostics`, `get_code_actions`, `apply_code_action`, `rename_symbol`,
-`format_file`. The agent sees the same analysis your editor does, so it answers
+heuristics. `code_intel` handles diagnostics, document/workspace symbols, hover,
+definitions, references, implementations and code actions. `apply_code_action`,
+`rename_symbol` and `format_file` remain separate write tools. The agent sees the same analysis your editor does, so it answers
 "who implements this?" instead of guessing from a name.
+Its operation values are `diagnostics`, `document_symbols`, `workspace_symbols`,
+`hover`, `definition`, `references`, `implementations` and `code_actions`.
 
 **Search.** `search_code` and `find_files` (both ripgrep — one index, so they
 cannot disagree), plus `search_codebase` for local semantic search over your

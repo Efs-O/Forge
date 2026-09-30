@@ -22,7 +22,7 @@ vi.mock('vscode', () => ({
 }));
 
 import { makeGetEditorContextTool } from '../../src/tools/builtinTools';
-import { makeFindImplementationsTool } from '../../src/tools/lspTools';
+import { makeCodeIntelTool } from '../../src/tools/codeIntelTool';
 
 const win = vscode.window as unknown as {
   activeTextEditor: unknown;
@@ -93,7 +93,7 @@ describe('find_implementations', () => {
     vi.mocked(vscode.commands.executeCommand).mockResolvedValue([
       { targetUri: { fsPath: '/ws/src/impl.ts' }, targetRange: { start: { line: 7, character: 2 } } },
     ] as never);
-    const out = (await makeFindImplementationsTool().handler({
+    const out = (await makeCodeIntelTool().handler({ operation: 'implementations',
       path: 'src/app.ts',
       line: 3,
       character: 10,
@@ -108,7 +108,7 @@ describe('find_implementations', () => {
 
   it('says so when nothing implements the symbol', async () => {
     vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined as never);
-    const out = (await makeFindImplementationsTool().handler({
+    const out = (await makeCodeIntelTool().handler({ operation: 'implementations',
       path: 'src/app.ts',
       line: 1,
       character: 1,

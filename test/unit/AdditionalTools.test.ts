@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { makeApplyCodeActionTool, makeGetCodeActionsTool } from '../../src/tools/codeActionTools';
+import { makeApplyCodeActionTool } from '../../src/tools/codeActionTools';
+import { makeCodeIntelTool } from '../../src/tools/codeIntelTool';
 import { makeEditNotebookCellTool, makeReadNotebookTool } from '../../src/tools/notebookTools';
 import {
   makeListWorkspaceTasksTool,
@@ -9,7 +10,7 @@ import {
 describe('additional VS Code-native tools', () => {
   it('uses strict schemas and the appropriate capability gates', () => {
     const tools = [
-      makeGetCodeActionsTool(),
+      makeCodeIntelTool(),
       makeApplyCodeActionTool(),
       makeReadNotebookTool(),
       makeEditNotebookCellTool(),
@@ -17,7 +18,7 @@ describe('additional VS Code-native tools', () => {
       makeRunWorkspaceTaskTool(),
     ];
     expect(tools.map((tool) => tool.definition.function.name)).toEqual([
-      'get_code_actions',
+      'code_intel',
       'apply_code_action',
       'read_notebook',
       'edit_notebook_cell',

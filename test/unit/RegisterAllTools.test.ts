@@ -44,6 +44,7 @@ const EXPECTED_NATIVE_NAMES = [
   'browser_select_tab',
   'browser_tabs',
   'browser_type',
+  'code_intel',
   'commit',
   'copy_to_clipboard',
   'create_branch',
@@ -62,24 +63,16 @@ const EXPECTED_NATIVE_NAMES = [
   'edit_notebook_cell',
   'exec_command',
   'find_files',
-  'find_implementations',
-  'find_references',
   'format_file',
   'generate_image',
-  'get_code_actions',
-  'get_diagnostics',
-  'get_document_symbols',
   'get_editor_context',
-  'get_hover',
   'get_power_info',
   'get_system_status',
-  'get_workspace_symbols',
   'git_blame',
   'git_diff',
   'git_log',
   'git_show',
   'git_status',
-  'go_to_definition',
   'image_search',
   'insert_code',
   'install_llamacpp',
@@ -218,6 +211,6 @@ describe('registerAllTools canonical coordinator catalog', () => {
     expect(names).not.toContain('web_search');
     expect(names).not.toContain('ask_local_agent');
     expect(names).not.toContain('list_delegation_targets');
-    expect(names).toHaveLength(68);
+    expect(names).toHaveLength(61);
   });
 });

@@ -65,8 +65,8 @@ Candidates, in order:
 
 | Family | Today | Merged shape | Notes |
 |---|---|---|---|
-| LSP read | 9 tools (`get_diagnostics` … `find_implementations`, `get_code_actions`) | `code_intel(operation, path, line?, character?, query?)` | Keep `apply_code_action` separate — it writes. |
-| git read | `git_status`, `git_log`, `git_diff`, `git_blame`, `git_show` | `git_read(operation, cwd?, ref?, path?, …)` | Keep writers (`stage`, `commit`, `create_branch`, `switch_branch`, `restore_file`) separate — distinct permissions and `restore_file`'s overwrite warning. |
+| LSP read | 8 tools (`get_diagnostics` … `find_implementations`, `get_code_actions`) | `code_intel(operation, path, line?, character?, query?)` with `diagnostics`, `document_symbols`, `workspace_symbols`, `hover`, `definition`, `references`, `implementations`, `code_actions` | Keep `apply_code_action` separate — it writes. |
+| git read | `git_status`, `git_log`, `git_diff`, `git_blame`, `git_show` | `git_read(operation, cwd?, ref?, path?, …)` with `status`, `log`, `diff`, `blame`, `show` | Keep writers (`stage`, `commit`, `create_branch`, `switch_branch`, `restore_file`) separate — distinct permissions and `restore_file`'s overwrite warning. |
 | power | 3 tools | `power(operation, …)` | `sleep_computer` is destructive; merge only if the approval gate stays per-operation. |
 
 Constraints for every merge:
@@ -109,7 +109,16 @@ in `FULL_LAZY_MEASUREMENT.md` first.
 - [ ] Step 1 failure message names step 2 and step 3 and the `CHANGES.md` rule.
 - [ ] Step 1 budget constant carries its measurement date and chars→tokens ratio.
 - [ ] **Step 2 (per merge):** tokenized schema size before/after recorded in this doc.
-- [ ] Every gotcha in the replaced tools' descriptions appears in the merged
+- [x] Step 2 — code intelligence merge (2026-09-30):
+      `JSON.stringify(definitions)` was **3,606 chars before** (eight definitions)
+      and **2,125 chars after** (`code_intel`, one definition); with the configured
+      Qwen3.8-27B Q6_K tokenizer, **723 tokens before, 450 after**.
+- [x] Step 2 — git read merge (2026-09-30): `JSON.stringify(definitions)` was
+      **2,568 chars before** (five definitions) and **1,803 chars after**
+      (`git_read`, one definition); with the same tokenizer, **540 tokens before,
+      424 after**. The regenerated pre-merge schema measured 2 chars above the
+      earlier recorded 2,566.
+- [x] Every gotcha in the replaced tools' descriptions appears in the merged
       description — checked item by item against the old strings.
 - [ ] A call missing an operation-required param returns an error naming that param
       (unit test per operation).

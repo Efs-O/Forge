@@ -9,6 +9,8 @@ export const READ_ONLY_TOOLS = new Set([
   'read_file',
   'list_directory',
   'search_code',
+  'code_intel',
+  // Keep historical transcripts readable after the LSP family was merged.
   'get_diagnostics',
 ]);
 

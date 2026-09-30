@@ -13,16 +13,8 @@ import {
 } from './builtinTools';
 import { makeSearchCodeTool, makeFindFilesTool } from './dirTools';
 import { makeListDirectoryTool } from './listDirectoryTool';
-import {
-  makeGetDiagnosticsTool,
-  makeGetDocumentSymbolsTool,
-  makeGetWorkspaceSymbolsTool,
-  makeGetHoverTool,
-  makeGoToDefinitionTool,
-  makeFindReferencesTool,
-  makeFindImplementationsTool,
-} from './lspTools';
-import { makeApplyCodeActionTool, makeGetCodeActionsTool } from './codeActionTools';
+import { makeCodeIntelTool } from './codeIntelTool';
+import { makeApplyCodeActionTool } from './codeActionTools';
 import { makeEditNotebookCellTool, makeReadNotebookTool } from './notebookTools';
 import { makeListWorkspaceTasksTool, makeRunWorkspaceTaskTool } from './taskTools';
 import {
@@ -137,14 +129,7 @@ export function registerAllTools(
   registry.register(makeReadToolResultTool());
   registry.register(makeUpdatePlanTool());
   registry.register(makeSearchCodebaseTool(indexManager));
-  registry.register(makeGetDiagnosticsTool());
-  registry.register(makeGetDocumentSymbolsTool());
-  registry.register(makeGetWorkspaceSymbolsTool());
-  registry.register(makeGetHoverTool());
-  registry.register(makeGoToDefinitionTool());
-  registry.register(makeFindReferencesTool());
-  registry.register(makeFindImplementationsTool());
-  registry.register(makeGetCodeActionsTool());
+  registry.register(makeCodeIntelTool());
   registry.register(makeReadNotebookTool());
   registry.register(makeListWorkspaceTasksTool());
   registry.register(makeShowDiffTool());

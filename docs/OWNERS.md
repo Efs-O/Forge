@@ -50,6 +50,8 @@ overlaps with an existing owner, extend the owner instead.
 | Agent notification: toast + remote fan-out           | `src/sidebar/UserNotificationService.ts` |
 | Model residency polling timer                        | `src/sidebar/ResidencyPoller.ts`         |
 | Timed pause for the agent loop                       | `src/tools/waitTool.ts`                  |
+| LSP read operations + strict `code_intel` dispatch   | `src/tools/codeIntelTool.ts`             |
+| LSP code-action read/write handler                   | `src/tools/codeActionTools.ts`            |
 | Filesystem-miss error text for tools                 | `src/tools/pathErrorHint.ts`             |
 | Tool call execution + result formatting              | `src/sidebar/ToolDispatch.ts`            |
 | Delete approval preview and bounded inventory        | `src/sidebar/deletePreview.ts`           |
@@ -340,7 +342,7 @@ overlaps with an existing owner, extend the owner instead.
 | git log argv, framing and parsing          | `src/tools/gitLog.ts`                 |
 | Search (Tavily / Brave)                    | `src/tools/searchTool.ts`             |
 | URL fetch tool (SSRF-guarded)              | `src/tools/fetchTool.ts`              |
-| LSP tools (go-to-def, refs, impls, diags)  | `src/tools/lspTools.ts`               |
+| LSP provider handlers dispatched by `code_intel` | `src/tools/lspTools.ts`          |
 | In-memory workspace memory tool            | `src/tools/memoryTools.ts`            |
 | UX tools (show_diff, open_file)            | `src/tools/uxTools.ts`                |
 | Power tools (sleep, wake timer, WoL info)  | `src/tools/powerTools.ts`             |

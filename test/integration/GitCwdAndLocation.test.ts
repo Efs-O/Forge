@@ -5,7 +5,7 @@ import * as vscode from 'vscode';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'child_process';
 import { getRepo, getRepoForPaths, gitCwd, withGitError } from '../../src/tools/gitRepo';
-import { makeGetDocumentSymbolsTool, makeGoToDefinitionTool } from '../../src/tools/lspTools';
+import { makeCodeIntelTool } from '../../src/tools/codeIntelTool';
 
 function initRepo(dir: string): void {
   fs.mkdirSync(dir, { recursive: true });
@@ -182,7 +182,7 @@ describe('Git repository selection', () => {
   });
 });
 
-describe('go_to_definition location rendering', () => {
+describe('definition location rendering', () => {
   let root: string;
 
   beforeEach(() => {
@@ -204,8 +204,8 @@ describe('go_to_definition location rendering', () => {
 
   it('renders a LocationLink, which the JS/TS server actually returns', async () => {
     // Reading loc.range.start on one of these threw
-    // "Cannot read properties of undefined (reading 'start')" — go_to_definition
-    // failed on every JS file while find_references, which gets plain
+    // "Cannot read properties of undefined (reading 'start')" — definition
+    // failed on every JS file while references, which gets plain
     // Locations, worked.
     vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue([
       {
@@ -214,7 +214,7 @@ describe('go_to_definition location rendering', () => {
         targetSelectionRange: range(0, 13),
       },
     ]);
-    const out = await makeGoToDefinitionTool().handler({
+    const out = await makeCodeIntelTool().handler({ operation: 'definition',
       path: 'Game.js',
       line: 0,
       character: 13,
@@ -226,14 +226,14 @@ describe('go_to_definition location rendering', () => {
     vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue([
       { uri: vscode.Uri.file(path.join(root, 'Game.js')), range: range(2, 5) },
     ]);
-    const out = await makeGoToDefinitionTool().handler({ path: 'Game.js', line: 2, character: 5 });
+    const out = await makeCodeIntelTool().handler({ operation: 'definition', path: 'Game.js', line: 2, character: 5 });
     expect(String(out)).toContain('Game.js:3:6');
   });
 
   it('reports no definition rather than throwing', async () => {
     vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue([]);
     await expect(
-      makeGoToDefinitionTool().handler({ path: 'Game.js', line: 0, character: 0 }),
+      makeCodeIntelTool().handler({ operation: 'definition', path: 'Game.js', line: 0, character: 0 }),
     ).resolves.toBe('No definition found.');
   });
 });
@@ -258,7 +258,7 @@ describe('LSP tools prime the language service', () => {
     // returned "No symbols found." for a file containing `export class Game`.
     const open = vi.spyOn(vscode.workspace, 'openTextDocument').mockResolvedValue({} as never);
     vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue([]);
-    await makeGetDocumentSymbolsTool().handler({ path: 'Game.js' }, undefined);
+    await makeCodeIntelTool().handler({ operation: 'document_symbols', path: 'Game.js' }, undefined);
     expect(open).toHaveBeenCalledOnce();
   });
 
@@ -268,7 +268,7 @@ describe('LSP tools prime the language service', () => {
     vi.spyOn(vscode.workspace, 'openTextDocument').mockRejectedValue(new Error('binary'));
     vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue([]);
     await expect(
-      makeGetDocumentSymbolsTool().handler({ path: 'Game.js' }, undefined),
+      makeCodeIntelTool().handler({ operation: 'document_symbols', path: 'Game.js' }, undefined),
     ).resolves.toBe('No symbols found.');
   });
 });

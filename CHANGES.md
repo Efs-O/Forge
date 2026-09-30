@@ -21,6 +21,13 @@
 - A test checks every command, config key and file path `AI_SETUP.md` names, so
   the file cannot drift from the extension unnoticed.
 
+### Code intelligence uses one read tool (2026-09-30)
+
+- `code_intel` now selects diagnostics, symbols, hover, definitions, references,
+  implementations or code actions by operation (`diagnostics`,
+  `document_symbols`, `workspace_symbols`, `hover`, `definition`, `references`,
+  `implementations`, `code_actions`). The write tools remain separate.
+
 ### Reading an image points at the media group (2026-09-30)
 
 - `read_file` on an image told the model that if `view_image` was not

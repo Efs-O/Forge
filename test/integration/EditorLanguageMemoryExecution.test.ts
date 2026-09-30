@@ -5,14 +5,7 @@ import * as vscode from 'vscode';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeFindFilesTool } from '../../src/tools/dirTools';
 import { makeFormatFileTool, makeRenameSymbolTool } from '../../src/tools/fileEditTools';
-import {
-  makeFindReferencesTool,
-  makeGetDiagnosticsTool,
-  makeGetDocumentSymbolsTool,
-  makeGetHoverTool,
-  makeGetWorkspaceSymbolsTool,
-  makeGoToDefinitionTool,
-} from '../../src/tools/lspTools';
+import { makeCodeIntelTool } from '../../src/tools/codeIntelTool';
 import {
   makeListMemoriesTool,
   makeRecallTool,
@@ -81,7 +74,7 @@ describe('isolated editor, language, search, and memory tool execution', () => {
         message: 'fixture warning',
       },
     ] as never);
-    await expect(makeGetDiagnosticsTool().handler({ path: 'sample.ts' })).resolves.toBe(
+    await expect(makeCodeIntelTool().handler({ operation: 'diagnostics', path: 'sample.ts' })).resolves.toBe(
       'sample.ts:1: warning: fixture warning',
     );
 
@@ -123,20 +116,20 @@ describe('isolated editor, language, search, and memory tool execution', () => {
       },
     );
 
-    await expect(makeGetDocumentSymbolsTool().handler({ path: 'sample.ts' })).resolves.toContain(
+    await expect(makeCodeIntelTool().handler({ operation: 'document_symbols', path: 'sample.ts' })).resolves.toContain(
       'Variable sample (line 1)',
     );
-    await expect(makeGetWorkspaceSymbolsTool().handler({ query: 'sample' })).resolves.toContain(
+    await expect(makeCodeIntelTool().handler({ operation: 'workspace_symbols', query: 'sample' })).resolves.toContain(
       'Variable sample — sample.ts:1',
     );
     await expect(
-      makeGetHoverTool().handler({ path: 'sample.ts', line: 0, character: 1 }),
+      makeCodeIntelTool().handler({ operation: 'hover', path: 'sample.ts', line: 0, character: 1 }),
     ).resolves.toBe('const sample: 1');
     await expect(
-      makeGoToDefinitionTool().handler({ path: 'sample.ts', line: 0, character: 1 }),
+      makeCodeIntelTool().handler({ operation: 'definition', path: 'sample.ts', line: 0, character: 1 }),
     ).resolves.toBe('sample.ts:1:1');
     await expect(
-      makeFindReferencesTool().handler({ path: 'sample.ts', line: 0, character: 1 }),
+      makeCodeIntelTool().handler({ operation: 'references', path: 'sample.ts', line: 0, character: 1 }),
     ).resolves.toBe('sample.ts:1:1');
   });
 

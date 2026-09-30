@@ -13,7 +13,7 @@ import { makeExecCommandTool } from '../../src/tools/execTools';
 import { buildFallbackToolInstructions } from '../../src/tools/FallbackToolPrompt';
 import { makeEditFileTool } from '../../src/tools/editFileTool';
 import { makeGitStatusTool } from '../../src/tools/gitTools';
-import { makeGetDiagnosticsTool, makeGetDocumentSymbolsTool } from '../../src/tools/lspTools';
+import { makeCodeIntelTool } from '../../src/tools/codeIntelTool';
 import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
 import { extractFallbackToolCalls } from '../../src/tools/ToolCallFallback';
 import {
@@ -204,6 +204,7 @@ describe.skipIf(!LIVE)(
     it('handles three prompt phrasings for representative schemas and fallback format', async () => {
       const representativeTools = [
         { tool: makeGitStatusTool(), args: {} },
+        { tool: makeCodeIntelTool(), args: { operation: 'get_diagnostics', path: 'package.json' } },
         {
           tool: makeReadFileTool(),
           args: { path: 'package.json', start_line: 1, end_line: 2 },
