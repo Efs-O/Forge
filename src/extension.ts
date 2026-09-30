@@ -14,9 +14,11 @@ import { ControlServerRegistry, controlServerRegistryPath } from './backend/Cont
 import { buildControlChatProxy } from './llm/ControlChatProxy';
 import { registerControlServerCommands } from './vscode/controlCommands';
 import { setupAgentMessaging } from './vscode/agentMessagingSetup';
+import { bootstrapConfig } from './vscode/configBootstrap';
+import { setupRemoteRuntime } from './vscode/remoteRuntimeSetup';
+import { bootstrapWorkspace } from './vscode/workspaceBootstrap';
+import { registerIndexWatchers } from './vscode/indexWatchers';
 import type { ForgeConfig } from './config/types';
-import { loadConfig, findConfigPath } from './config/ConfigLoader';
-import { updateConfigFile } from './config/ConfigWriter';
 import { initLogger, getLogger } from './util/logger';
 import { ToolRegistry } from './tools/ToolRegistry';
 import { createCheckpointStack } from './vscode/checkpointSetup';
@@ -24,12 +26,7 @@ import { watchForgeConfig } from './vscode/configReload';
 import { KeepUndoCodeLensProvider } from './sidebar/KeepUndoCodeLens';
 import { DiffDecorations } from './sidebar/DiffDecorations';
 import { TemplateEngine } from './llm/TemplateEngine';
-import {
-  createForgeInstructionsLoader,
-  discoverWorkspaceRepositoryRoots,
-  ensureForgeInstructionsFile,
-} from './llm/ForgeInstructionsLoader';
-import { SESSION_KEY_V1 } from './sidebar/sessionTypes';
+import { createForgeInstructionsLoader } from './llm/ForgeInstructionsLoader';
 import { registerAllTools } from './tools/registerAllTools';
 import { closeBrowserSessionOnShutdown } from './tools/browser/BrowserSessionManager';
 import { getDesktopDriver } from './tools/desktop/PowerShellDesktopDriver';
@@ -41,7 +38,6 @@ import { registerNativeCommands } from './vscode/nativeCommands';
 import { EmbeddingBackend } from './backend/EmbeddingBackend';
 import { IndexManager } from './search/IndexManager';
 import { registerSecretCommands } from './vscode/secretCommands';
-import { enterSetupMode } from './sidebar/SetupMode';
 import { LocalDelegationService } from './delegation/LocalDelegationService';
 import {
   CliSessionRegistry,
@@ -53,14 +49,10 @@ import { registerSidebarCommands } from './vscode/sidebarCommands';
 import { flushPendingModelUsage } from './sidebar/modelManager/usageTracker';
 import { backgroundExecutionManager } from './tools/BackgroundExecutionManager';
 import { terminalCommandTracker } from './tools/TerminalCommandTracker';
-import { RemoteRuntime } from './remote/RemoteRuntime';
+import type { RemoteRuntime } from './remote/RemoteRuntime';
 import { workspaceIdFor } from './remote/RemoteWorkspaceHandoff';
-import { TelegramChannel, TELEGRAM_BOT_TOKEN_SECRET } from './remote/TelegramChannel';
-import { registerRemoteCommands } from './vscode/remoteCommands';
-import { startWakeRelay } from './vscode/wakeRelaySetup';
 import { setupJobs } from './vscode/jobsSetup';
 import { JobStore } from './jobs/JobStore';
-import { disposeLocalLlamaFetch } from './llm/localLlamaFetch';
 
 let activeRemoteRuntime: RemoteRuntime | undefined;
 
@@ -74,43 +66,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(statusBar);
 
   // ── Find or create config ─────────────────────────────────────────────────
-  const explicitConfig = vscode.workspace.getConfiguration('forge').get<string>('configFile');
-  const configPath = findConfigPath(storagePath, explicitConfig);
-
-  if (!configPath) {
-    enterSetupMode(
-      context,
-      statusBar,
-      'Forge: No config found. Run the setup wizard to get started.',
-    );
-    return;
-  }
-  const activeConfigPath = configPath;
-
-  let config: ForgeConfig;
-  try {
-    config = loadConfig(path.dirname(activeConfigPath));
-  } catch (err) {
-    const msg = (err as Error).message;
-    log.error(msg);
-    // A broken global fallback config must not brick every workspace. Surface
-    // the reason, then drop into setup mode rather than aborting activation.
-    // For an explicit/workspace config the user is actively editing, surface a
-    // hard error instead so the mistake is not masked.
-    const isGlobalFallback = activeConfigPath.startsWith(storagePath);
-    if (isGlobalFallback) {
-      enterSetupMode(
-        context,
-        statusBar,
-        `Forge: global config failed to load — ${msg}. Run setup or fix ${activeConfigPath}.`,
-      );
-    } else {
-      void vscode.window.showErrorMessage(msg);
-    }
-    return;
-  }
-
-  if (config.log_level) log.setLevel(config.log_level);
+  const bootstrapped = bootstrapConfig(context, statusBar, storagePath);
+  if (!bootstrapped) return;
+  const activeConfigPath = bootstrapped.configPath;
+  let config: ForgeConfig = bootstrapped.config;
 
   // ── Template engine (v0.8) ────────────────────────────────────────────────
   const builtinDir = path.join(context.extensionPath, 'config', 'templates', 'builtin');
@@ -231,27 +190,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     codeLensProvider,
   );
 
-  // ── Migration v2: globalState → workspaceState (sessions now per-workspace) ──
-  if (!context.workspaceState.get<boolean>('forge.migrated.sessions.v2')) {
-    await context.workspaceState.update('forge.migrated.sessions.v2', true);
-    if (!context.workspaceState.get(SESSION_KEY_V1)) {
-      const globalSession = context.globalState.get(SESSION_KEY_V1);
-      if (globalSession) await context.workspaceState.update(SESSION_KEY_V1, globalSession);
-    }
-  }
+  // ── Workspace bootstrap: session migration (v2) + FORGE.md auto-create ──
+  await bootstrapWorkspace(context, workspaceRoot, config.forge_instructions?.auto_create);
 
   // ── Sidebar ───────────────────────────────────────────────────────────────
-  if (workspaceRoot && config.forge_instructions?.auto_create) {
-    const repositoryRoots = await discoverWorkspaceRepositoryRoots(workspaceRoot);
-    for (const repositoryRoot of repositoryRoots) {
-      const bootstrap = ensureForgeInstructionsFile(repositoryRoot);
-      if (bootstrap.status === 'error') {
-        const message = `Forge: could not create ${path.basename(bootstrap.path)} in ${repositoryRoot} — ${bootstrap.error.message}`;
-        log.warn(message);
-        void vscode.window.showWarningMessage(message);
-      }
-    }
-  }
   const forgeLoader = createForgeInstructionsLoader();
   if (forgeLoader) context.subscriptions.push(forgeLoader);
 
@@ -307,90 +249,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Persistent agent jobs (B1). Runs in whichever window wins the
   // `jobs-scheduler` lease; a no-op when `jobs.enabled` is false.
   const jobsSetup = setupJobs(context, () => config, workspaceId, sidebarProvider, jobsStore, pool);
-  const remoteRuntime = new RemoteRuntime({
-    storageDirectory: context.globalStorageUri.fsPath,
-    ...(workspaceRoot ? { workspaceRoot } : {}),
+  const remoteRuntime = await setupRemoteRuntime(context, {
+    workspaceRoot,
     workspaceId,
     configPath: activeConfigPath,
-    host: sidebarProvider.getHostFacade(),
-    secrets: context.secrets,
-    // Shared job store (B3): /jobs and /job edit the same files the scheduler and manage_jobs use.
+    getConfig: () => config,
+    setConfig: (next) => {
+      config = next;
+    },
+    sidebarProvider,
     jobStore: jobsStore,
-    channelFactories: {
-      telegram: async (cursor) => {
-        const token = await context.secrets.get(TELEGRAM_BOT_TOKEN_SECRET);
-        if (!token) {
-          throw new Error(
-            'Telegram is enabled but no bot token is stored. Run “Forge: Set Telegram Bot Token”.',
-          );
-        }
-        return new TelegramChannel({
-          token,
-          ...cursor,
-          onError: (message) => void vscode.window.showErrorMessage(message),
-        });
-      },
-      whatsapp: async () => {
-        const [{ BaileysWhatsAppChannel }, { WhatsAppAuthStore }] = await Promise.all([
-          import('./remote/whatsapp/BaileysWhatsAppChannel'),
-          import('./remote/whatsapp/WhatsAppAuthStore'),
-        ]);
-        return new BaileysWhatsAppChannel({
-          authStore: new WhatsAppAuthStore(
-            path.join(context.globalStorageUri.fsPath, 'whatsapp-auth-v1.enc.json'),
-            context.secrets,
-          ),
-          onError: (message) => void vscode.window.showErrorMessage(message),
-          onPairingCode: (code) =>
-            void vscode.window.showInformationMessage(
-              `Forge WhatsApp pairing code: ${code}. Enter it in WhatsApp Linked Devices.`,
-              { modal: true },
-            ),
-        });
-      },
-    },
-    notifyLocal: (message) => void vscode.window.showErrorMessage(message),
-    setInactivityTimeout: async (minutes) => {
-      updateConfigFile(activeConfigPath, (doc) => {
-        doc.setIn(['remote', 'auth', 'inactivity_timeout_minutes'], minutes);
-      });
-      config = loadConfig(path.dirname(activeConfigPath));
-      await activeRemoteRuntime?.applyConfig(config);
-    },
-    setRateLimit: async (perMinute) => {
-      updateConfigFile(activeConfigPath, (doc) => {
-        doc.setIn(['remote', 'rate_limit_per_minute'], perMinute);
-      });
-      config = loadConfig(path.dirname(activeConfigPath));
-      await activeRemoteRuntime?.applyConfig(config);
-    },
-    reloadWindow: async () => {
-      await vscode.commands.executeCommand('workbench.action.reloadWindow');
-    },
-    openWorkspace: async (directory) => {
-      await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(directory), false);
-    },
-    confirmWhisperServerStart: async (detail) =>
-      (await vscode.window.showWarningMessage(detail, { modal: true }, 'Start Whisper server')) ===
-      'Start Whisper server',
-    onStatusChanged: () => void publishRemoteStatus(),
   });
   activeRemoteRuntime = remoteRuntime;
-  sidebarProvider.remoteEvictionQuery = (conversationId) =>
-    remoteRuntime.blocksConversationEviction(conversationId);
-  sidebarProvider.tellDrain.registerSource('remote', (id) => remoteRuntime.claimMidTurnTell(id));
-  await startWakeRelay(context, config, sidebarProvider.getHostFacade());
-  const publishRemoteStatus = async (): Promise<void> => {
-    sidebarProvider.setRemoteStatus(await remoteRuntime.status());
-  };
-  await remoteRuntime.applyConfig(config).catch((err) => {
-    void vscode.window.showErrorMessage(`Forge remote failed to start: ${(err as Error).message}`);
-  });
-  await publishRemoteStatus();
-  context.subscriptions.push({ dispose: () => void sidebarProvider.dispose() });
-  context.subscriptions.push({ dispose: () => void remoteRuntime.dispose() });
-  context.subscriptions.push({ dispose: () => void disposeLocalLlamaFetch() });
-  registerRemoteCommands(context, remoteRuntime, () => config, activeConfigPath);
   const sessionTimeBar = new SessionTimeStatusBar(() => sidebarProvider.getActiveSessionMetrics());
   refreshSessionTime = () => sessionTimeBar.refresh();
   context.subscriptions.push(sessionTimeBar);
@@ -406,22 +276,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       webviewOptions: { retainContextWhenHidden: retainSidebarContext },
     }),
     watchWorkspaceFolders(workspaceRoot, () => sidebarProvider.postWorkspaceInfo()),
-    vscode.workspace.onDidSaveTextDocument((document) => {
-      indexManager.markDirty(document.uri.fsPath);
-    }),
-    vscode.workspace.onDidCreateFiles((event) => {
-      for (const file of event.files) indexManager.markDirty(file.fsPath);
-    }),
-    vscode.workspace.onDidDeleteFiles((event) => {
-      for (const file of event.files) indexManager.removePath(file.fsPath);
-    }),
-    vscode.workspace.onDidRenameFiles((event) => {
-      for (const file of event.files) {
-        indexManager.removePath(file.oldUri.fsPath);
-        indexManager.markDirty(file.newUri.fsPath);
-      }
-    }),
   );
+  registerIndexWatchers(context, indexManager);
 
   log.info('[Forge] backend will start on first prompt');
   statusBar.setStopped(config.active_model);
