@@ -28,6 +28,19 @@ export const AgentBusConfigSchema = z
     codex_cli: z.string().min(1).default('codex'),
     /** Copilot CLI executable: a bare name on PATH or an absolute path. */
     copilot_cli: z.string().min(1).default('copilot'),
+    /** Model for a Forge-owned Codex session (`thread/start` `model`). Unset:
+     *  the `~/.codex/config.toml` default. Applies at the next creation. */
+    codex_model: z.string().min(1).optional(),
+    /** Reasoning effort for a Forge-owned Codex session, passed to the
+     *  app-server process as `-c model_reasoning_effort="<v>"`. Unset: the
+     *  CLI's own default. Applies at the next creation. */
+    codex_effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional(),
+    /** Model for a Forge-owned Claude session (`--model`). Unset: the CLI's
+     *  own default. Applies at the next creation. */
+    claude_model: z.string().min(1).optional(),
+    /** Reasoning effort for a Forge-owned Claude session (`--effort`). Unset:
+     *  the CLI's own default. Applies at the next creation. */
+    claude_effort: z.string().min(1).optional(),
   })
   .optional();
 

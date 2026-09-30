@@ -110,6 +110,18 @@ if (process.argv.includes('--input-format')) {
       line({ type: 'result', is_error: false, result: `entrypoint=${process.env.CLAUDE_CODE_ENTRYPOINT ?? ''}` });
       return;
     }
+    if (text.includes('TRIGGER_ECHO_ARGV')) {
+      // Side change A: lets a test assert `--model`/`--effort` reached the
+      // spawned process (or did not, when unset).
+      line({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        session_id: sessionId,
+        result: `argv=${process.argv.slice(2).join(' ')}`,
+      });
+      return;
+    }
     if (text.includes('TRIGGER_INIT_THEN_SLOW')) {
       // Re-announce the id and stall, so a caller timeout fires on a known id.
       line({ type: 'system', subtype: 'init', session_id: sessionId });

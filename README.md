@@ -285,6 +285,25 @@ Nothing needs to go into Claude's memory or an `AGENTS.md`: Forge writes its own
 agent-bus notes to `~/.forge/agent-bus/`, and every message it sends carries its
 own reply instructions.
 
+**Model and effort for a Forge-owned Codex/Claude session.** With no joined
+session, Forge may create its own owned Codex or Claude CLI process (the
+agent-bus mesh, above); by default it runs each CLI's own configured default
+model and effort. Four optional `agent_bus:` keys pick them instead:
+
+```yaml
+agent_bus:
+  codex_model: gpt-6-luna
+  codex_effort: high # low | medium | high | xhigh | max
+  claude_model: opus
+  claude_effort: high
+```
+
+Unset keys keep today's behaviour: Forge passes nothing and the CLI's own
+config decides. A change applies at the next owned-session creation, not to a
+session already running — restart `forge.sh`/the mesh (or reload the window)
+to pick it up. Codex/Claude reject an unknown model or effort value the same
+way they would from a terminal; Forge surfaces that error unchanged.
+
 ## Backend Modes
 
 ### 1. Direct GGUF mode

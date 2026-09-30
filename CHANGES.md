@@ -12,6 +12,18 @@
   breaks the marker with a zero-width space in llama.cpp requests, so the text
   stays readable and is no longer taken for an image slot.
 
+### Model and effort for a Forge-owned Codex/Claude session (2026-09-30)
+
+- A Forge-owned Codex or Claude session always ran the CLI's own
+  `~/.codex/config.toml` / built-in default model and effort — the only other
+  way to change it was editing that global file, which also changed the
+  user's own terminal sessions. Four optional `agent_bus:` keys now pick them
+  per Forge config instead: `codex_model`, `codex_effort`
+  (`low|medium|high|xhigh|max`, passed to the app-server process as `-c
+  model_reasoning_effort="<v>"`), `claude_model`, and `claude_effort` (passed
+  as `--effort <v>`). Unset keys keep today's behaviour exactly; a change
+  applies at the next owned-session creation, not to one already running.
+
 ## 0.16.65
 
 ### Agent messages reach a busy chat at the next tool round (2026-09-30)

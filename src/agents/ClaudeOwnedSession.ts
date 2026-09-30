@@ -32,6 +32,9 @@ export interface ClaudeOwnedSessionOptions {
   confirmedSessionId?: string;
   /** Model to run (optional; the CLI default otherwise). */
   model?: string;
+  /** Reasoning effort (`agent_bus.claude_effort`), passed as `--effort <v>`.
+   *  Unset: the CLI's own default. */
+  effort?: string;
   /** Permission mode for an unattended owned session. */
   permissionMode?: string;
   /**
@@ -168,6 +171,7 @@ export class ClaudeOwnedSession {
       '--replay-user-messages',
       ...(this.options.confirmedSessionId ? ['--resume', this.options.confirmedSessionId] : []),
       ...(this.options.model ? ['--model', this.options.model] : []),
+      ...(this.options.effort ? ['--effort', this.options.effort] : []),
       ...(this.options.permissionMode ? ['--permission-mode', this.options.permissionMode] : []),
     ];
     const child = spawnCliProcess({

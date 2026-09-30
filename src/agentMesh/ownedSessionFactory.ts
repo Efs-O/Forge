@@ -156,6 +156,8 @@ export class OwnedSessionFactory {
         threadId,
         executable,
         cwd: this.deps.workspaceRoots()[0] ?? os.homedir(),
+        ...(bus?.codex_model ? { model: bus.codex_model } : {}),
+        ...(bus?.codex_effort ? { effort: bus.codex_effort } : {}),
       });
 
       const newThreadId = session.confirmedSessionId ?? threadId;
@@ -245,6 +247,8 @@ export class OwnedSessionFactory {
         sessionId,
         executable,
         cwd: this.deps.workspaceRoots()[0] ?? os.homedir(),
+        ...(bus?.claude_model ? { model: bus.claude_model } : {}),
+        ...(bus?.claude_effort ? { effort: bus.claude_effort } : {}),
       });
 
       const newSessionId = session.confirmedSessionId ?? sessionId;

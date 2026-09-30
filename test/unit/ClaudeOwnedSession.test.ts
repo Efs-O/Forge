@@ -86,4 +86,29 @@ describe('ClaudeOwnedSession (P4: persistent stdio Claude session)', () => {
     expect(typeof current.pid).toBe('number');
     await current.dispose();
   });
+
+  // Side change A (TOOL_SURFACE_AND_SHELL_ACCESS_PLAN.md): agent_bus.claude_model
+  // / claude_effort reach the spawned CLI's argv as --model/--effort, and are
+  // absent (today's byte-identical argv) when unset.
+  it('carries --model and --effort in argv when both are set', async () => {
+    const current = new ClaudeOwnedSession({
+      executable: process.execPath,
+      argsPrefix: [fixture],
+      cwd: process.cwd(),
+      model: 'opus',
+      effort: 'high',
+    });
+    const result = await current.send('TRIGGER_ECHO_ARGV');
+    expect(result.finalText).toContain('--model opus');
+    expect(result.finalText).toContain('--effort high');
+    await current.dispose();
+  });
+
+  it('omits --model and --effort from argv when both are unset', async () => {
+    const current = session();
+    const result = await current.send('TRIGGER_ECHO_ARGV');
+    expect(result.finalText).not.toContain('--model');
+    expect(result.finalText).not.toContain('--effort');
+    await current.dispose();
+  });
 });

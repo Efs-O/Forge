@@ -14,6 +14,8 @@ export interface CliAgentSessionOptions {
   argsPrefix?: string[];
   cwd: string;
   model?: string;
+  /** Codex only: `agent_bus.codex_effort`, forwarded to `codexAppServerArgs`. */
+  effort?: string;
   confirmedSessionId?: string;
   timeoutMs?: number;
 }

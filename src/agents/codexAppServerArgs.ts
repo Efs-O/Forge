@@ -10,6 +10,9 @@
 export interface CodexAppServerLaunch {
   executable: string;
   argsPrefix?: readonly string[];
+  /** Reasoning effort (`agent_bus.codex_effort`). Unset: no `-c` flag, the
+   *  CLI's own default applies. */
+  effort?: string;
 }
 
 export function codexAppServerArgs(launch: CodexAppServerLaunch): string[] {
@@ -25,6 +28,7 @@ export function codexAppServerArgs(launch: CodexAppServerLaunch): string[] {
     'sandbox_mode="danger-full-access"',
     '-c',
     'approval_policy="never"',
+    ...(launch.effort ? ['-c', `model_reasoning_effort="${launch.effort}"`] : []),
   ];
 }
 

@@ -72,6 +72,7 @@ export interface OwnedCodexFactory {
     executable: string;
     cwd: string;
     model?: string;
+    effort?: string;
   }): Promise<CodexAppServerSession>;
 }
 
@@ -82,6 +83,7 @@ export interface OwnedClaudeFactory {
     executable: string;
     cwd: string;
     model?: string;
+    effort?: string;
   }): Promise<ClaudeOwnedSession>;
 }
 
@@ -108,12 +110,13 @@ export function defaultSendClaude(
 
 export function defaultCodexFactory(): OwnedCodexFactory {
   return {
-    create: async ({ executable, cwd, model, threadId }) => {
+    create: async ({ executable, cwd, model, effort, threadId }) => {
       const { CodexAppServerSession } = await import('../agents/CodexAppServerSession');
       return new CodexAppServerSession({
         executable,
         cwd,
         ...(model ? { model } : {}),
+        ...(effort ? { effort } : {}),
         ...(threadId ? { confirmedSessionId: threadId } : {}),
       });
     },
@@ -122,12 +125,13 @@ export function defaultCodexFactory(): OwnedCodexFactory {
 
 export function defaultClaudeFactory(): OwnedClaudeFactory {
   return {
-    create: async ({ executable, cwd, model, sessionId }) => {
+    create: async ({ executable, cwd, model, effort, sessionId }) => {
       const { ClaudeOwnedSession } = await import('../agents/ClaudeOwnedSession');
       return new ClaudeOwnedSession({
         executable,
         cwd,
         ...(model ? { model } : {}),
+        ...(effort ? { effort } : {}),
         ...(sessionId ? { confirmedSessionId: sessionId } : {}),
         // CLAUDE.md § CLI Agent Delegation: Forge-launched Claude runs
         // unrestricted; the default mode refuses Bash under `-p`.
