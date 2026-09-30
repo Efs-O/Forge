@@ -22,9 +22,9 @@ function binaryRefusal(bytes: Buffer, requestedPath: string): string | null {
   const imageMime = mimeFromHeader(bytes);
   if (imageMime) {
     return (
-      `read_file: ${requestedPath} is an image (${imageMime}), not text. Use view_image to look at it. ` +
-      'If view_image is not available to you, the active model has no vision projector configured; ' +
-      'tell the user to switch to a vision-capable model.'
+      `read_file: ${requestedPath} is an image (${imageMime}), not text. Use view_image to look at it; ` +
+      'it is in the `media` tool group, so if you do not see it, call load_tool_group with ' +
+      'group "media" first. view_image itself says so if the active model has no vision.'
     );
   }
   if (!bytes.subarray(0, BINARY_SNIFF_BYTES).includes(0)) return null;

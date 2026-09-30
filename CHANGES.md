@@ -1,5 +1,15 @@
 # Forge — Recent Changes
 
+## 0.16.67
+
+### Reading an image points at the media group (2026-09-30)
+
+- `read_file` on an image told the model that if `view_image` was not
+  available, the model had no vision. Since 0.16.66 `view_image` is in the
+  demand-loaded `media` group, so on a vision model that was false: the
+  refusal now says to call `load_tool_group` with `media` first, and leaves the
+  no-vision verdict to `view_image`, which already gives it.
+
 ## 0.16.66
 
 ### A job's state write no longer dies on a transient Windows rename (2026-09-30)
