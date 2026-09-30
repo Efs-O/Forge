@@ -316,6 +316,7 @@ describe('deliveredPrompt', () => {
     const item = { prompt, from: 'claude', queuedAt: 1_000 };
     const out = deliveredPrompt(item, 1_000 + 12 * 60_000);
     expect(out.startsWith(prompt)).toBe(true);
+    expect(out).toContain('Queued: claude wrote this at');
     expect(out).toContain('12 min before it reached you');
     expect(out).toContain('including an answer to your question, is newer and overrides it');
     expect(parseForgeInboundPrompt(out)?.text).toBe('redo 70K');

@@ -106,7 +106,7 @@ export function deliveredPrompt(
   const sent = new Date(item.queuedAt).toTimeString().slice(0, 8);
   const mins = Math.round(waited / 60_000);
   return (
-    `${item.prompt}\n\n_(Queued:${item.from} wrote this at ${sent}, ${mins} min before it ` +
+    `${item.prompt}\n\n_(Queued: ${item.from} wrote this at ${sent}, ${mins} min before it ` +
     `reached you. Anything ${item.from} told you after that, including an answer to your ` +
     `question, is newer and overrides it.)_`
   );
