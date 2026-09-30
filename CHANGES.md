@@ -1,5 +1,17 @@
 # Forge — Recent Changes
 
+## 0.16.66
+
+### Quoting a llama-server media marker no longer kills the chat (2026-09-30)
+
+- A local vision model's llama-server marks image slots with a media marker
+  (`<__media__>`, or a random `<__media_…__>` on newer builds, shown in
+  `GET /props`). When that string reached the conversation as text (an agent
+  that curled `/props` or read a log), every later request failed with HTTP
+  400 "Failed to tokenize prompt" and the chat could not recover. Forge now
+  breaks the marker with a zero-width space in llama.cpp requests, so the text
+  stays readable and is no longer taken for an image slot.
+
 ## 0.16.65
 
 ### Agent messages reach a busy chat at the next tool round (2026-09-30)

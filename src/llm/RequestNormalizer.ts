@@ -1,5 +1,6 @@
 import type { ModelConfig } from '../config/types';
 import type { ChatCompletionRequest } from './types';
+import { neutralizeMediaMarkers } from './mediaMarkerGuard';
 
 function ollamaReasoningEffort(
   model: ModelConfig,
@@ -22,8 +23,11 @@ export function normalizeRequestForModel(
     // Be explicit rather than relying on a llama-server build's default. Long
     // agent turns append a small tool result each round, so their stable
     // prefix should remain in the slot cache instead of being re-prefilled.
+    // A llama-server media marker quoted as text poisons the chat for good
+    // (HTTP 400 "Failed to tokenize prompt"); see mediaMarkerGuard.ts.
     const cachedRequest = {
       ...request,
+      messages: neutralizeMediaMarkers(request.messages),
       cache_prompt: request.cache_prompt ?? true,
     };
     // The model flag is only the default: a recovery round sends an explicit

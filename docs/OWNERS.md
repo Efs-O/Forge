@@ -303,6 +303,7 @@ overlaps with an existing owner, extend the owner instead.
 | Finished-turn mirroring to remote chats      | `src/sidebar/turnMirrorWiring.ts`            |
 | Streaming Ollama native client               | `src/llm/OllamaNativeClient.ts`              |
 | Request normalization (per-provider)         | `src/llm/RequestNormalizer.ts`               |
+| llama-server media-marker neutralization     | `src/llm/mediaMarkerGuard.ts`                |
 | Sampling parameter merge                     | `src/llm/SamplingMerge.ts`                   |
 | System-prompt injection                      | `src/llm/SystemPromptInjector.ts`            |
 | Nunjucks template engine                     | `src/llm/TemplateEngine.ts`                  |
