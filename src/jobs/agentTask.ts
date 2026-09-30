@@ -1,7 +1,6 @@
 import * as fs from 'fs';
-import * as path from 'path';
 import type { JobStore } from './JobStore';
-import { configBackupPath, startTaskRunHeartbeat } from './agentTaskState';
+import { startTaskRunHeartbeat, snapshotConfig } from './agentTaskState';
 import type { PowerControl } from '../system/PowerControl';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import type { IBackendPool } from '../backend/poolTypes';
@@ -12,9 +11,14 @@ import { getLogger } from '../util/logger';
 import { resolveJobConversation } from './jobDiscuss';
 import { nextDueWithBackoff } from './backoff';
 import { restartAfterTurn } from './agentTaskRestart';
-import type { Action, JobFile, RunRow, Schedule } from './jobSchema';
-import { buildAgentTaskPrompt, formatAthensDateTime, parseResult } from './agentTaskPrompt';
+import type { Action, JobFile, RunRow } from './jobSchema';
+import { buildAgentTaskPrompt } from './agentTaskPrompt';
+import { canStartNow, CLEAR_PENDING, deferBusyTask } from './agentTaskAdmission';
+import { sendWithCap, sleepWithAbort } from './agentTaskCap';
+import { outcomeOf, reportMessage, type AgentTaskOutcome } from './agentTaskReport';
 export { parseResult } from './agentTaskPrompt';
+export { canStartNow, schedulePeriodMs } from './agentTaskAdmission';
+export type { AgentTaskOutcome } from './agentTaskReport';
 
 /** The `agent_task` action, narrowed from the discriminated union. */
 export type AgentTaskAction = Extract<Action, { kind: 'agent_task' }>;
@@ -45,67 +49,6 @@ export interface AgentTaskDeps {
   /** Injectable abortable timer for the `max_minutes` cap. Defaults to setTimeout. */
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
 }
-
-/** The parsed outcome of an agent turn's final message. */
-export interface AgentTaskOutcome {
-  /** ok | no_change | failed | timeout. */
-  kind: 'ok' | 'no_change' | 'failed' | 'timeout';
-  /** The RESULT sentence (after the `RESULT:` line), or a fallback. */
-  sentence: string;
-  /** Whether the final message asked for a backend restart. */
-  restart: boolean;
-  /** The final assistant text of the turn. */
-  finalText: string;
-}
-
-/**
- * Decide whether a slot is free for the job to start now (step 1). The job does
- * not wait for full idle: it starts when its model is usable, enough parallel
- * slots are free, and its own conversation is not streaming.
- */
-export function canStartNow(
-  jobModel: string,
-  ownConversationId: string | null,
-  pool: IBackendPool,
-  streamingConversationIds: readonly string[],
-): { start: boolean; reason: string } {
-  const streaming = streamingConversationIds.length;
-  const others = pool.loadedModelsExcept(jobModel);
-
-  // Hard wait: its own chat is busy (two turns in one conversation interleave).
-  if (ownConversationId !== null && streamingConversationIds.includes(ownConversationId)) {
-    return { start: false, reason: 'its own conversation is streaming' };
-  }
-  // Hard wait: another model is loaded and a chat is streaming. The job may not
-  // unload it mid-turn, and loading beside it spills VRAM (2026-09-23: two
-  // resident models plus a job's third server took every GPU down).
-  if (others.length > 0 && streaming > 0) {
-    return { start: false, reason: `another model (${others.join(', ')}) is in use` };
-  }
-  // Nothing else streams: step 3 unloads every other model before the turn.
-  const capacity = pool.parallelCapacity(jobModel);
-  if (streaming >= capacity) {
-    return { start: false, reason: `all ${capacity} parallel slot(s) are streaming` };
-  }
-  return { start: true, reason: '' };
-}
-
-/** The nominal period between ticks (ms) — the `task_pending` TTL bound. */
-export function schedulePeriodMs(schedule: Schedule, now: number): number {
-  switch (schedule.kind) {
-    case 'interval':
-      return schedule.minutes * 60_000;
-    case 'daily':
-    case 'weekly':
-      return Math.max(60_000, nextDue(schedule, new Date(now)).getTime() - now);
-  }
-}
-
-const CLEAR_PENDING = {
-  task_pending: false,
-  task_pending_since: null,
-  task_pending_observation: null,
-} as const;
 
 export class AgentTaskRunner {
   private readonly deps: AgentTaskDeps;
@@ -170,34 +113,7 @@ export class AgentTaskRunner {
       host.status().streamingConversationIds,
     );
     if (!slot.start) {
-      // Drop a pending task older than one schedule period (the task_pending TTL).
-      if (state.task_pending && state.task_pending_since !== null) {
-        const period = schedulePeriodMs(job.schedule, startedAt);
-        if (startedAt - state.task_pending_since >= period) {
-          // Advance to the next scheduled time, or the very next tick re-checks,
-          // pends again and the TTL never takes effect.
-          this.deps.store.patchState(job.id, {
-            ...CLEAR_PENDING,
-            next_due_at: nextDue(job.schedule, new Date(startedAt)).getTime(),
-          });
-          await this.deps.store.appendRun(job.id, {
-            at: startedAt,
-            late: wasLate,
-            outcome: 'skipped',
-            changed: false,
-            summary: `skipped: busy (pending ${Math.round((startedAt - state.task_pending_since) / 60000)} min)`,
-            delivered: 0,
-          });
-          return;
-        }
-      }
-      this.deps.store.patchState(job.id, {
-        task_pending: true,
-        task_pending_since: state.task_pending ? state.task_pending_since : startedAt,
-        // The observation handed over by this tick: the fresh check's, or on a
-        // retry the one saved here when the task was first deferred.
-        task_pending_observation: state.last_observation,
-      });
+      await deferBusyTask(this.deps.store, jobFile, startedAt, wasLate);
       return;
     }
     // A previously-pending task that can now start: clear the pending flag.
@@ -248,40 +164,14 @@ export class AgentTaskRunner {
       // Step 4: mark unattended, hold awake, and snapshot config.yaml.
       marker = unattendedConversations.mark(conversationId, { jobId: job.id, jobName: job.name });
       hold = this.deps.power.holdAwake(`agent task ${job.id}`);
-      backupPath = await this.snapshotConfig(job.id);
+      backupPath = await snapshotConfig(this.deps.store, this.deps.configPath, job.id);
 
       // Steps 5+6: send the prompt with the optional max_minutes cap.
       const prompt = await buildAgentTaskPrompt(this.deps.store, jobFile, action);
-      let timedOut = false;
       const capMs = action.max_minutes !== undefined ? action.max_minutes * 60_000 : undefined;
       const sleep = this.deps.sleep ?? sleepWithAbort;
-      const capController = capMs !== undefined ? new AbortController() : undefined;
-      let capCancelled = false;
-      const cap =
-        capMs !== undefined
-          ? sleep(capMs, capController!.signal)
-              .then(async () => {
-                if (capCancelled) return;
-                timedOut = true;
-                await host.cancel(conversationId!);
-              })
-              .catch(() => undefined)
-          : undefined;
-      let result;
-      try {
-        result = await host.send(conversationId, prompt);
-      } finally {
-        if (cap) {
-          if (timedOut) {
-            // Do not clear the marker or awake hold until cancellation settles.
-            await cap;
-          } else {
-            capCancelled = true;
-            capController!.abort();
-          }
-        }
-      }
-      outcome = this.outcomeOf(result, timedOut);
+      const { result, timedOut } = await sendWithCap(host, conversationId, prompt, capMs, sleep);
+      outcome = outcomeOf(result, timedOut);
     } catch (err) {
       outcome = {
         kind: 'failed',
@@ -348,54 +238,6 @@ export class AgentTaskRunner {
     }
   }
 
-  /** Snapshot config.yaml's bytes to `state/<id>.config.bak`. */
-  private async snapshotConfig(jobId: string): Promise<string | undefined> {
-    if (!this.deps.configPath) return undefined;
-    const backupPath = configBackupPath(this.deps.store, jobId);
-    try {
-      const bytes = await fs.promises.readFile(this.deps.configPath);
-      await fs.promises.mkdir(path.dirname(backupPath), { recursive: true });
-      await fs.promises.writeFile(backupPath, bytes);
-      return backupPath;
-    } catch {
-      // A missing config is not fatal; rollback simply has nothing to restore.
-      return undefined;
-    }
-  }
-
-  /** Build the prompt from the task, observation, last 3 runs, and instructions. */
-  /** Step 8: map a request outcome + timeout flag to the report outcome. */
-  private outcomeOf(
-    result:
-      | { kind: 'completed'; finalText: string }
-      | { kind: 'failed'; error: string; finalText?: string }
-      | { kind: 'cancelled'; finalText?: string }
-      | { kind: 'interrupted'; finalText?: string },
-    timedOut: boolean,
-  ): AgentTaskOutcome {
-    const finalText = result.finalText ?? '';
-    if (timedOut)
-      return {
-        kind: 'timeout',
-        sentence: 'timed out after the max_minutes cap',
-        restart: false,
-        finalText,
-      };
-    if (result.kind === 'failed') {
-      return { kind: 'failed', sentence: result.error, restart: false, finalText };
-    }
-    if (result.kind === 'cancelled' || result.kind === 'interrupted') {
-      return { kind: 'failed', sentence: `the turn was ${result.kind}`, restart: false, finalText };
-    }
-    const parsed = parseResult(finalText);
-    return {
-      kind: parsed.kind,
-      sentence: parsed.sentence,
-      restart: parsed.restart,
-      finalText,
-    };
-  }
-
   private async finish(
     jobFile: JobFile,
     action: AgentTaskAction,
@@ -418,7 +260,7 @@ export class AgentTaskRunner {
     const shouldReport =
       failed || outcome.kind === 'ok' || (outcome.kind === 'no_change' && report === 'always');
     if (shouldReport) {
-      const message = this.reportMessage(outcome, startedAt, durationMs, conversationId);
+      const message = reportMessage(outcome, startedAt, durationMs, conversationId);
       await this.delivery.deliver(job, message).catch(() => undefined);
       delivered = 1;
     }
@@ -457,44 +299,4 @@ export class AgentTaskRunner {
     };
     await this.deps.store.appendRun(job.id, row);
   }
-
-  private reportMessage(
-    outcome: AgentTaskOutcome,
-    startedAt: number,
-    durationMs: number,
-    conversationId: string | null,
-  ): string {
-    const tail = outcome.finalText.slice(-800);
-    return (
-      `Date/time (Europe/Athens, 24-hour): ${formatAthensDateTime(startedAt)}\n` +
-      `${outcome.kind}: ${outcome.sentence} ` +
-      `(${formatDuration(durationMs)})` +
-      (conversationId ? ` — conversation ${conversationId}` : '') +
-      (tail ? `\n\n${tail}` : '')
-    );
-  }
-}
-
-function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) return reject(new Error('timer aborted'));
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    const onAbort = () => {
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', onAbort);
-      reject(new Error('timer aborted'));
-    };
-    signal?.addEventListener('abort', onAbort, { once: true });
-  });
-}
-
-function formatDuration(ms: number): string {
-  const totalSeconds = Math.round(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  if (minutes === 0) return `${seconds}s`;
-  return `${minutes}m ${seconds}s`;
 }

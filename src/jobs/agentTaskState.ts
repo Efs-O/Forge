@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import * as path from 'path';
 import type { JobStore } from './JobStore';
 import { writeOutboxItem } from './JobOutbox';
@@ -12,6 +13,28 @@ import type { JobFile, JobState } from './jobSchema';
 /** Where a run's config.yaml snapshot lives: `state/<id>.config.bak`. */
 export function configBackupPath(store: JobStore, jobId: string): string {
   return path.join(store.root, 'state', `${jobId}.config.bak`);
+}
+
+/**
+ * Step 4: snapshot config.yaml's bytes to `state/<id>.config.bak` (the rollback
+ * source for step 7). A missing config is not fatal; rollback simply has
+ * nothing to restore.
+ */
+export async function snapshotConfig(
+  store: JobStore,
+  configPath: string | undefined,
+  jobId: string,
+): Promise<string | undefined> {
+  if (!configPath) return undefined;
+  const backupPath = configBackupPath(store, jobId);
+  try {
+    const bytes = await fs.promises.readFile(configPath);
+    await fs.promises.mkdir(path.dirname(backupPath), { recursive: true });
+    await fs.promises.writeFile(backupPath, bytes);
+    return backupPath;
+  } catch {
+    return undefined;
+  }
 }
 
 /** How often a running agent task refreshes `task_run.heartbeat_at`. */

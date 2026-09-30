@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as YAML from 'yaml';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import type { IBackendPool } from '../backend/poolTypes';
-import type { AgentTaskOutcome } from './agentTask';
+import type { AgentTaskOutcome } from './agentTaskReport';
 
 /**
  * Step 7 of the agent-task runner (AGENT_TASK_JOBS_PLAN phase 4): after the
