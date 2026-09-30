@@ -1,5 +1,6 @@
 import { isRemoteCommand } from './RemotePromptAdmission';
 import { previewPrompt, type RemotePendingPrompt } from './RemotePendingPrompt';
+import { ephemeralRejection } from './RemoteEphemeralMessages';
 import type { RemoteAuth } from './RemoteAuth';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteApprovalBridge } from './RemoteApprovalBridge';
@@ -41,7 +42,7 @@ export async function applyRemoteAuthGate(
       await deps.sendTransientMessage(event.chatId, 'Forge remote pairing complete.');
       return { kind: 'handled' };
     }
-    return { kind: 'rejected', reason: 'sender is not paired', ephemeral: true };
+    return ephemeralRejection('sender is not paired');
   }
   const gate = await deps.auth.gate(event);
   if (gate.kind === 'challenge') {
@@ -69,14 +70,10 @@ export async function applyRemoteAuthGate(
   if (gate.kind === 'locked_out') {
     await deps.audit?.record(event, 'authentication_locked_out').catch(() => undefined);
     deps.pending.clear(event.channel, event.chatId);
-    return {
-      kind: 'rejected',
-      reason: 'remote authentication is temporarily locked',
-      ephemeral: true,
-    };
+    return ephemeralRejection('remote authentication is temporarily locked');
   }
   if (gate.kind === 'blocked') {
-    return { kind: 'rejected', reason: 'remote authentication is required', ephemeral: true };
+    return ephemeralRejection('remote authentication is required');
   }
   if (gate.newlyAuthenticated) {
     await deps.audit?.record(event, 'authenticated').catch(() => undefined);

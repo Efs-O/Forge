@@ -20,7 +20,8 @@ export interface RemoteCommandDepsSource {
   setNotify(chatId: string, on: boolean): void;
   isMirrorOn(chatId: string): boolean;
   setMirror(chatId: string, on: boolean): void;
-  promptDeps: RemotePromptAdmissionDeps & {
+  /** Read at resume time, not captured at dispatch: options can change in between. */
+  promptDeps: () => RemotePromptAdmissionDeps & {
     restoreConversation: (conversationId: string) => Promise<unknown>;
   };
 }
@@ -71,6 +72,6 @@ export function buildRemoteCommandDeps(
     ...(options.jobs ? { jobs: options.jobs } : {}),
     ...(deps.contactCommands ? { contactCommands: deps.contactCommands } : {}),
     resumeCurrent: (resumeEvent, resumeDedupKey) =>
-      resumeRemoteConversation(resumeEvent, resumeDedupKey, source.promptDeps),
+      resumeRemoteConversation(resumeEvent, resumeDedupKey, source.promptDeps()),
   };
 }

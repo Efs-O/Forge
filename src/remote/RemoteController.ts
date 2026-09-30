@@ -372,7 +372,7 @@ export class RemoteController {
             setNotify: (chatId, on) => this.setNotify(chatId, on),
             isMirrorOn: (chatId) => this.isMirrorOn(chatId),
             setMirror: (chatId, on) => this.setMirror(chatId, on),
-            promptDeps: this.promptDeps,
+            promptDeps: () => this.promptDeps,
           },
         ),
         key,
