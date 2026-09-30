@@ -188,6 +188,8 @@ overlaps with an existing owner, extend the owner instead.
 | Telegram selection keyboard + callback codec  | `src/remote/TelegramSelectionPagination.ts`     |
 | Forge approval presentation + correlation     | `src/remote/RemoteApprovalBridge.ts`            |
 | Telegram Bot API transport                    | `src/remote/TelegramChannel.ts`                 |
+| Telegram group-contact workflow (link, /owner) | `src/remote/TelegramGroupContacts.ts`          |
+| Telegram command-text parsing helpers         | `src/remote/telegramContactText.ts`             |
 | Telegram outbound sends, edits, and media | `src/remote/TelegramOutbound.ts`                   |
 | Telegram photo send + document fallback       | `src/remote/TelegramPhoto.ts`                   |
 | Per-chat send ordering + Bot API 429 retry    | `src/remote/telegramSendQueue.ts`               |
@@ -495,6 +497,8 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Job schema (Zod) + state / run-row types                   | `src/jobs/jobSchema.ts`                                        |
 | Schedule math (`nextDue`, `isDue`, `wakeTimesFor`)         | `src/jobs/schedule.ts`                                         |
 | Tick loop, lease, concurrency                               | `src/jobs/JobScheduler.ts`                                     |
+| Scheduler lease acquisition (FileLease + wake reset)        | `src/jobs/jobLease.ts`                                         |
+| Per-job run leaves: check, backoff, sleep-if-idle           | `src/jobs/jobRunLifecycle.ts`                                  |
 | Failure threshold and next-due backoff math                 | `src/jobs/backoff.ts`                                          |
 | CLI-agent consent gate for jobs (`jobs.allow_cli_agents`)  | `src/jobs/cliAgentGate.ts`                                     |
 | Wake-task ownership (dedupe, lease-guarded delete)         | `src/jobs/schedulerWakes.ts`                                   |
