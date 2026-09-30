@@ -2,6 +2,15 @@
 
 ## 0.16.65
 
+### Agent messages reach a busy chat at the next tool round (2026-09-30)
+
+- A `forge.sh say` message to a chat that was mid-turn waited for the turn to
+  end. A long agentic turn (a refactor running for hours as one turn) never
+  ended, so the message sat queued while Telegram and typed messages reached
+  the same turn at its next tool round. Plain bus messages now take that
+  route too. A steer, `--new` or `--model` message still waits for a turn of
+  its own.
+
 ### Asking a closed Claude session no longer returns an empty answer (2026-09-30)
 
 - When Forge asks Claude and the joined Claude session is closed, it answers

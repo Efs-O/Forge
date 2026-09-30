@@ -80,6 +80,8 @@ interface QueuedMessage {
   /** The bus sender alias, when the message came through the agent bus. */
   from?: string;
   options?: InboxMessageOptions;
+  /** A steer interrupts the turn and runs as its own; never claimed mid-turn. */
+  steer?: boolean;
 }
 
 /** A queued message's options as the host sees them: with its sender. */
@@ -118,7 +120,13 @@ export class AgentInbox {
   ): { position: number; id: string } | undefined {
     if (this.disposed || this.queue.length >= INBOX_CAP) return undefined;
     const id = `m${randomBytes(4).toString('hex')}`;
-    const item = { id, prompt, ...(from ? { from } : {}), ...(options ? { options } : {}) };
+    const item = {
+      id,
+      prompt,
+      ...(from ? { from } : {}),
+      ...(options ? { options } : {}),
+      ...(front ? { steer: true } : {}),
+    };
     if (front) this.queue.unshift(item);
     else this.queue.push(item);
     void this.drain();
@@ -149,6 +157,29 @@ export class AgentInbox {
   /** How many of `from`'s messages are queued and not yet started. */
   pendingFrom(from: string): number {
     return this.queue.filter((item) => item.from === from).length;
+  }
+
+  /**
+   * Take the messages waiting on `conversationId` for its running turn's next
+   * tool-round gap. Waiting for the turn to end starved a long agentic turn:
+   * a refactor ran for hours as one turn and a message sat queued throughout,
+   * while a Telegram or typed message reached it at the next round. A steer,
+   * `--new` or `--model` message still needs a turn of its own and keeps
+   * waiting. `targetOf` resolves the chat a message belongs in.
+   */
+  claimMidTurn(
+    conversationId: string,
+    targetOf: (options?: InboxMessageOptions) => string,
+  ): string[] {
+    const claimed: string[] = [];
+    for (let i = 0; i < this.queue.length; i++) {
+      const item = this.queue[i] as QueuedMessage;
+      if (item.steer || item.options?.newChat || item.options?.model) continue;
+      if (targetOf(hostOptions(item)) !== conversationId) continue;
+      claimed.push(item.prompt);
+      this.queue.splice(i--, 1);
+    }
+    return claimed;
   }
 
   dispose(): void {

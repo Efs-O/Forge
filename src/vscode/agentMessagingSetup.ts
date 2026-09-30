@@ -12,6 +12,7 @@ import { joinCodex } from '../agentMesh/codexJoin';
 import { availableProfilesFor, expandAlias } from '../config/ConfigResolver';
 import type { ForgeConfig } from '../config/types';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
+import type { MidTurnTellDrain } from '../agent/MidTurnTellDrain';
 import { parseMeshCommand } from '../agentMesh/meshCommands';
 import { projectWho } from '../agentMesh/meshWho';
 import { readClaudeSessions } from '../agentBus/claudePeer';
@@ -88,7 +89,7 @@ export async function submitBusMessage(
  */
 export function setupAgentMessaging(
   context: vscode.ExtensionContext,
-  getSidebar: () => { getHostFacade(): ForgeHostFacade },
+  getSidebar: () => { getHostFacade(): ForgeHostFacade; readonly tellDrain: MidTurnTellDrain },
   getConfig: () => ForgeConfig,
   workspaceRoot: string,
 ): AgentRoutes {
@@ -98,6 +99,7 @@ export function setupAgentMessaging(
     isBusy: (options?: InboxMessageOptions) => {
       if (options?.newChat) return false;
       const facade = getSidebar().getHostFacade();
+      registerTellSource(); // every queued message asks this first
       return facade.status().streamingConversationIds.includes(busTarget(facade, options?.from));
     },
     submit: async (prompt, options?: InboxMessageOptions) => {
@@ -135,6 +137,23 @@ export function setupAgentMessaging(
   });
   context.subscriptions.push(inbox);
   context.subscriptions.push(watch);
+  // A chat that is mid-turn reads its waiting bus messages at the next
+  // tool-round gap, the way Telegram and typed messages reach it. The sidebar
+  // may not exist yet at activation, so the first busy check registers it.
+  let tellSourceRegistered = false;
+  const registerTellSource = (): void => {
+    if (tellSourceRegistered) return;
+    getSidebar().tellDrain.registerSource('agent-bus', (conversationId) => {
+      const facade = getSidebar().getHostFacade();
+      const prompts = inbox.claimMidTurn(conversationId, (options) =>
+        busTarget(facade, options?.from),
+      );
+      return Promise.resolve({
+        messages: prompts.map((content) => ({ role: 'user' as const, content, midTurn: true })),
+      });
+    });
+    tellSourceRegistered = true;
+  };
   const readTarget = (from: string) => {
     const facade = getSidebar().getHostFacade();
     watch.attach(facade);

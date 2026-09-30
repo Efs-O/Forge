@@ -264,6 +264,27 @@ describe('AgentInbox', () => {
     expect(h.finished).toHaveLength(1); // notice fires on success
     inbox.dispose();
   });
+
+  it("hands a busy chat's plain messages to its running turn, leaving the rest queued", async () => {
+    const h = host();
+    h.busy = true;
+    const inbox = new AgentInbox(h, 5);
+    inbox.accept('for A', 'claude');
+    inbox.accept('for B', 'codex');
+    inbox.accept('new chat', 'claude', false, { newChat: true });
+    inbox.accept('switch model', 'claude', false, { model: 'm' });
+    inbox.accept('steer', 'claude', true);
+    const target = (options?: { from?: string }): string =>
+      options?.from === 'claude' ? 'A' : 'B';
+    // A turn that never ends would starve these; the next tool-round gap takes them.
+    expect(inbox.claimMidTurn('A', target)).toEqual(['for A']);
+    expect(inbox.claimMidTurn('A', target)).toEqual([]);
+    expect(inbox.pending).toBe(4);
+    expect(inbox.claimMidTurn('B', target)).toEqual(['for B']);
+    await tick();
+    expect(h.submitted).toEqual([]); // claimed messages never also start a turn
+    inbox.dispose();
+  });
 });
 
 describe('busTurnEndLine', () => {
