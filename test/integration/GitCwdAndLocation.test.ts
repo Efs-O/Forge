@@ -22,8 +22,8 @@ describe('git repository discovery', () => {
 
   beforeEach(() => {
     // A workspace root that is NOT a repo, holding a real repo one level down —
-    // the shape that made git_blame and git_show report "not a git repository"
-    // while git_status, going through the VS Code Git API, worked fine.
+    // the shape that made blame and show report "not a git repository"
+    // while status, going through the VS Code Git API, worked fine.
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-git-cwd-'));
     initRepo(path.join(root, 'subproject'));
     fs.mkdirSync(path.join(root, 'subproject', 'src'), { recursive: true });

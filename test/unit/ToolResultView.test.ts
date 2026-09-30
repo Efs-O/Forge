@@ -92,7 +92,7 @@ describe('rendersAsMarkdown', () => {
     // A YAML/shell/Python comment line is not a heading.
     expect(rendersAsMarkdown('read_file')).toBe(false);
     expect(rendersAsMarkdown('exec_command')).toBe(false);
-    expect(rendersAsMarkdown('git_diff')).toBe(false);
+    expect(rendersAsMarkdown('git_read')).toBe(false);
     expect(rendersAsMarkdown('unknown_tool')).toBe(false);
   });
 });

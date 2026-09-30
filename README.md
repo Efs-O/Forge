@@ -143,11 +143,12 @@ it corrects them in chat instead of asking you to paste output it already has.
 `list_workspace_tasks` cover the structured cases; `exec_command` runs `npm
 test` / `npm run <script>` directly (no shell needed).
 
-**Git.** `git_status`, `git_diff`, `git_log`, `git_blame`, `git_show` (which
-reads a file at any past commit), `restore_file` (brings a path back from a
-commit, checkpointed), `stage`, `commit` (including `amend`), `create_branch`,
-`switch_branch`. They run the `git` CLI directly; the VS Code Git extension is
-not required.
+**Git.** `git_read` handles status, diff, log, blame and show (including a file
+at any past commit). `restore_file` (brings a path back from a commit,
+checkpointed), `stage`, `commit` (including `amend`), `create_branch` and
+`switch_branch` remain separate tools. Git reads run the CLI directly; the VS
+Code Git extension is not required.
+Its operation values are `status`, `log`, `diff`, `blame` and `show`.
 
 **Delegation.** `ask_local_agent` hands a task to another configured model or
 CLI agent; `list_delegation_targets` lists them on demand instead of spending

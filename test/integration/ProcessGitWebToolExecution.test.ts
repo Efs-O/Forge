@@ -6,13 +6,7 @@ import * as vscode from 'vscode';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeExecCommandTool, makeRunTerminalTool } from '../../src/tools/execTools';
 import { makeWebFetchTool } from '../../src/tools/fetchTool';
-import {
-  makeGitBlameTool,
-  makeGitDiffTool,
-  makeGitLogTool,
-  makeGitShowTool,
-  makeGitStatusTool,
-} from '../../src/tools/gitReadTools';
+import { makeGitReadTool } from '../../src/tools/gitReadTool';
 import {
   makeCommitTool,
   makeCreateBranchTool,
@@ -78,11 +72,12 @@ describe('isolated process, Git, and web tool execution', () => {
   });
 
   it('executes every Git handler through CLI discovery, with no Git extension present', async () => {
+    const gitRead = makeGitReadTool();
     // The VS Code Git extension is deliberately absent here. Every tool below
-    // used to need it: `git_log`, `create_branch` and `switch_branch` went
+    // used to need it: the log operation, `create_branch` and `switch_branch` went
     // through its wrapper methods, and repository discovery went through its
     // repository list, so all three failed outright in a window where the
-    // extension was unavailable while `git_status` beside them worked.
+    // extension was unavailable while the status operation beside them worked.
     vi.spyOn(vscode.extensions, 'getExtension').mockReturnValue(undefined as never);
 
     execFileSync('git', ['init', '-b', 'main'], { cwd: root });
@@ -93,18 +88,18 @@ describe('isolated process, Git, and web tool execution', () => {
     execFileSync('git', ['commit', '-m', 'fixture commit\n\nbody line'], { cwd: root });
     fs.writeFileSync(path.join(root, 'tracked.txt'), 'changed\n', 'utf8');
 
-    await expect(makeGitStatusTool().handler({})).resolves.toBe('M tracked.txt');
+    await expect(gitRead.handler({ operation: 'status' })).resolves.toBe('M tracked.txt');
 
-    const log = String(await makeGitLogTool().handler({ max_entries: 1 }));
+    const log = String(await gitRead.handler({ operation: 'log', max_entries: 1 }));
     // First line of the raw body, not git's normalised subject.
     expect(log).toContain('fixture commit (Forge Test, ');
     expect(log).not.toContain('body line');
 
-    await expect(makeGitDiffTool().handler({ staged: false })).resolves.toContain('-fixture');
-    await expect(makeGitBlameTool().handler({ path: 'tracked.txt' })).resolves.toContain(
+    await expect(gitRead.handler({ operation: 'diff', staged: false })).resolves.toContain('-fixture');
+    await expect(gitRead.handler({ operation: 'blame', path: 'tracked.txt' })).resolves.toContain(
       'author Not Committed Yet',
     );
-    await expect(makeGitShowTool().handler({ ref: 'HEAD' })).resolves.toContain('fixture');
+    await expect(gitRead.handler({ operation: 'show', ref: 'HEAD' })).resolves.toContain('fixture');
 
     await expect(makeCreateBranchTool().handler({ name: 'feature', from: 'HEAD' })).resolves.toBe(
       'Branch created: feature',
@@ -116,12 +111,12 @@ describe('isolated process, Git, and web tool execution', () => {
     // Acceptance #9: the refusal must name the tool that fixes it, not just
     // state the rule -- see docs/plans/TOOL_ERROR_PROMPT_PLAN.md.
     await expect(makeCommitTool().handler({ message: 'empty' })).rejects.toThrow(
-      /nothing is staged\. Call stage with the paths to commit first, or git_status/u,
+      /nothing is staged\. Call stage with the paths to commit first, or git_read with operation "status"/u,
     );
     await expect(makeStageTool().handler({ paths: ['tracked.txt'] })).resolves.toContain(
       'tracked.txt',
     );
-    await expect(makeGitStatusTool().handler({})).resolves.toBe('M tracked.txt [staged]');
+    await expect(gitRead.handler({ operation: 'status' })).resolves.toBe('M tracked.txt [staged]');
     await expect(makeCommitTool().handler({ message: 'next' })).resolves.toBe('Committed: next');
   }, 15_000);
 
@@ -156,7 +151,7 @@ describe('isolated process, Git, and web tool execution', () => {
     await expect(makeCreateBranchTool().handler({ name: 'bad\nname' })).rejects.toThrow(
       /control characters/u,
     );
-    await expect(makeGitLogTool().handler({ max_entries: 0 })).rejects.toThrow(
+    await expect(makeGitReadTool().handler({ operation: 'log', max_entries: 0 })).rejects.toThrow(
       /max_entries must be an integer/u,
     );
   });
@@ -165,8 +160,8 @@ describe('isolated process, Git, and web tool execution', () => {
     vi.spyOn(vscode.extensions, 'getExtension').mockReturnValue(undefined as never);
     execFileSync('git', ['init', '-b', 'main'], { cwd: root });
 
-    await expect(makeGitLogTool().handler({})).resolves.toBe('No commits.');
-    await expect(makeGitLogTool().handler({ branch: 'no-such-branch' })).rejects.toThrow(/git log/u);
+    await expect(makeGitReadTool().handler({ operation: 'log' })).resolves.toBe('No commits.');
+    await expect(makeGitReadTool().handler({ operation: 'log', branch: 'no-such-branch' })).rejects.toThrow(/git log/u);
   });
 
   it('frames log records so separator characters in a message cannot split them', async () => {
@@ -182,7 +177,7 @@ describe('isolated process, Git, and web tool execution', () => {
       cwd: root,
     });
 
-    const log = String(await makeGitLogTool().handler({}));
+    const log = String(await makeGitReadTool().handler({ operation: 'log' }));
     expect(log.split('\n')).toHaveLength(1);
     expect(log).toContain('sep \x1f and \x1e and — em dash');
     expect(log).toContain('Ünïcode Authör');

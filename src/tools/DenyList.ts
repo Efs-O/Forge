@@ -143,7 +143,7 @@ export function getBuiltinDenyList(): DenyListEntry[] {
         'This deletes uncommitted work unrecoverably. To put a file back to its ' +
         'committed content — including one a commit deleted — use the restore_file ' +
         'tool, which asks first: restore_file({"paths": ["<path>"], "ref": "HEAD~1"}). ' +
-        'To move between branches use switch_branch; to inspect a file at a ref use git_show.',
+        'To move between branches use switch_branch; to inspect a file at a ref use git_read with operation "show".',
     },
     // A plain push is allowed — exec_command's terminal approval gate is the
     // check on it. Only pushes that overwrite or delete remote history stay out.

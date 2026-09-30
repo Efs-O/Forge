@@ -1,9 +1,9 @@
 /**
  * `git log` (and `git show`) argument construction, and log output framing.
  *
- * `git_log` used to go through the VS Code Git extension's `repo.log()`, which
+ * The log operation used to go through the VS Code Git extension's `repo.log()`, which
  * meant the tool did nothing at all in a workspace where that extension was
- * unavailable while `git_status` beside it worked. Running git directly needs
+ * unavailable while status beside it worked. Running git directly needs
  * two things the extension gave for free, so they live here rather than inline
  * in the tool: argument validation, and a record framing that cannot be
  * confused by commit message content.
@@ -35,16 +35,20 @@ interface GitLogEntry {
 export function gitLogArgs(maxEntries: number, ref?: string): string[] {
   if (!Number.isInteger(maxEntries) || maxEntries < 1 || maxEntries > MAX_ENTRIES_LIMIT) {
     throw new Error(
-      `git_log: max_entries must be an integer between 1 and ${MAX_ENTRIES_LIMIT} (got ${String(maxEntries)})`,
+      `git_read operation "log": max_entries must be an integer between 1 and ${MAX_ENTRIES_LIMIT} (got ${String(maxEntries)})`,
     );
   }
   const args = ['log', `--max-count=${maxEntries}`, FORMAT, '-z'];
   if (ref !== undefined) {
     if (ref.startsWith('-')) {
-      throw new Error(`git_log: branch "${ref}" is not a valid ref (it looks like an option)`);
+      throw new Error(
+        `git_read operation "log": branch "${ref}" is not a valid ref (it looks like an option)`,
+      );
     }
     if (ref === '' || /[\0\n\r]/.test(ref)) {
-      throw new Error('git_log: branch must be a non-empty ref without control characters');
+      throw new Error(
+        'git_read operation "log": branch must be a non-empty ref without control characters',
+      );
     }
     args.push(ref);
   }
@@ -55,16 +59,20 @@ export function gitLogArgs(maxEntries: number, ref?: string): string[] {
 }
 
 /**
- * `git show <ref>` arguments. The model supplies `ref`, and `git_show` runs
+ * `git show <ref>` arguments. The model supplies `ref`, and the show operation runs
  * unconfirmed as a read, so a ref git would parse as an option must never reach
  * it: `--output=<file>` makes `git show` write the diff to any path it names.
  */
 export function gitShowArgs(ref: unknown): string[] {
   if (typeof ref !== 'string' || ref.trim() === '' || /[\0\n\r]/.test(ref)) {
-    throw new Error('git_show: ref must be a non-empty ref without control characters');
+    throw new Error(
+      'git_read operation "show": ref must be a non-empty ref without control characters',
+    );
   }
   if (ref.startsWith('-')) {
-    throw new Error(`git_show: ref "${ref}" is not a valid ref (it looks like an option)`);
+    throw new Error(
+      `git_read operation "show": ref "${ref}" is not a valid ref (it looks like an option)`,
+    );
   }
   return ['show', ref];
 }

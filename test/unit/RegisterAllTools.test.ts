@@ -68,11 +68,7 @@ const EXPECTED_NATIVE_NAMES = [
   'get_editor_context',
   'get_power_info',
   'get_system_status',
-  'git_blame',
-  'git_diff',
-  'git_log',
-  'git_show',
-  'git_status',
+  'git_read',
   'image_search',
   'insert_code',
   'install_llamacpp',
@@ -211,6 +207,6 @@ describe('registerAllTools canonical coordinator catalog', () => {
     expect(names).not.toContain('web_search');
     expect(names).not.toContain('ask_local_agent');
     expect(names).not.toContain('list_delegation_targets');
-    expect(names).toHaveLength(61);
+    expect(names).toHaveLength(57);
   });
 });

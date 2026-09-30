@@ -335,7 +335,8 @@ overlaps with an existing owner, extend the owner instead.
 | Exec script-file denylist scan              | `src/tools/execScriptScanner.ts`      |
 | exec_command program resolution            | `src/tools/execProgramResolver.ts`    |
 | Git tools (status, diff, commit)           | `src/tools/gitTools.ts`               |
-| Read-only git tools (status, log, diff)    | `src/tools/gitReadTools.ts`           |
+| Strict `git_read` operation schema/dispatch | `src/tools/gitReadTool.ts`           |
+| Git read-operation handlers                 | `src/tools/gitReadTools.ts`          |
 | Git handle, execution, status parsing      | `src/tools/gitRepo.ts`                |
 | Git repository discovery + selection       | `src/tools/gitDiscovery.ts`           |
 | Git tracked/ignored state of a path        | `src/tools/gitTrackedStatus.ts`       |

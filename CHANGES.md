@@ -28,6 +28,11 @@
   `document_symbols`, `workspace_symbols`, `hover`, `definition`, `references`,
   `implementations`, `code_actions`). The write tools remain separate.
 
+### Git reads use one tool (2026-09-30)
+
+- `git_read` now selects status, log, diff, blame or show by operation (`status`,
+  `log`, `diff`, `blame`, `show`). Git writers remain separate.
+
 ### Reading an image points at the media group (2026-09-30)
 
 - `read_file` on an image told the model that if `view_image` was not

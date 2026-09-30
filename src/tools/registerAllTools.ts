@@ -51,13 +51,7 @@ import { makeLiveSessionTool } from './liveSessionTool';
 import { makeTellLiveSessionTool } from './tellLiveSessionTool';
 import { makeReadToolResultTool } from './toolResultTools';
 import { makeUpdatePlanTool } from './planTools';
-import {
-  makeGitStatusTool,
-  makeGitLogTool,
-  makeGitDiffTool,
-  makeGitBlameTool,
-  makeGitShowTool,
-} from './gitReadTools';
+import { makeGitReadTool } from './gitReadTool';
 import {
   makeCreateBranchTool,
   makeSwitchBranchTool,
@@ -178,11 +172,7 @@ export function registerAllTools(
   registry.register(makeSafePowerShellTool());
   registry.register(makeSystemStatusTool(backendProcesses ? { backendProcesses } : {}));
   registry.register(makeRunWorkspaceTaskTool());
-  registry.register(makeGitStatusTool());
-  registry.register(makeGitLogTool());
-  registry.register(makeGitDiffTool());
-  registry.register(makeGitBlameTool());
-  registry.register(makeGitShowTool());
+  registry.register(makeGitReadTool());
   registry.register(makeCreateBranchTool());
   registry.register(makeSwitchBranchTool());
   registry.register(makeStageTool());

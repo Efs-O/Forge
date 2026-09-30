@@ -143,7 +143,7 @@ imported by both. New row in `docs/OWNERS.md`.
 ### 4. `commit` names `stage`
 
 `gitTools.ts:162`. Append: nothing is staged; call `stage` with the paths to
-commit first, or check `git_status`.
+commit first, or check `git_read` with operation `status`.
 
 ### 5. FORGE.md — one correction, one deletion
 

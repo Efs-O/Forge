@@ -157,7 +157,7 @@ export async function readLiveGitStatus(repo: GitRepoHandle): Promise<LiveGitSta
 
 /**
  * Directory to spawn git in for the tools that still shell out themselves
- * (`git_blame`, per-file `git_diff`, `git_show`).
+ * (the `git_read` blame, per-file diff, and show operations).
  *
  * Prefers the repository containing `filePath`, so a workspace holding several
  * repositories blames the right one. It no longer swallows an ambiguity error

@@ -21,7 +21,7 @@ export function makeGitStatusTool(): RegisteredTool {
     definition: {
       type: 'function',
       function: {
-        name: 'git_status',
+        name: '__git_read_status',
         description: 'Show working tree and index status (modified, added, deleted files).',
         parameters: {
           type: 'object',
@@ -51,14 +51,14 @@ export function makeGitStatusTool(): RegisteredTool {
   };
 }
 
-// ── git_log ────────────────────────────────────────────────────────────────────
+// ── Commit log handler ──────────────────────────────────────────────────────────
 
 export function makeGitLogTool(): RegisteredTool {
   return {
     definition: {
       type: 'function',
       function: {
-        name: 'git_log',
+        name: '__git_read_log',
         description: 'Show recent commit log.',
         parameters: {
           type: 'object',
@@ -91,14 +91,14 @@ export function makeGitLogTool(): RegisteredTool {
   };
 }
 
-// ── git_diff ───────────────────────────────────────────────────────────────────
+// ── Diff handler ───────────────────────────────────────────────────────────────
 
 export function makeGitDiffTool(): RegisteredTool {
   return {
     definition: {
       type: 'function',
       function: {
-        name: 'git_diff',
+        name: '__git_read_diff',
         description: 'Show diff of working tree or staged changes.',
         parameters: {
           type: 'object',
@@ -137,14 +137,14 @@ export function makeGitDiffTool(): RegisteredTool {
   };
 }
 
-// ── git_blame ──────────────────────────────────────────────────────────────────
+// ── Blame handler ──────────────────────────────────────────────────────────────
 
 export function makeGitBlameTool(): RegisteredTool {
   return {
     definition: {
       type: 'function',
       function: {
-        name: 'git_blame',
+        name: '__git_read_blame',
         description: 'Show git blame for a file (line-porcelain format).',
         parameters: {
           type: 'object',
@@ -164,20 +164,20 @@ export function makeGitBlameTool(): RegisteredTool {
         cwd: await gitCwd((args['path'] as string) ?? (args['cwd'] as string | undefined)),
         encoding: 'utf8',
       });
-      if (result.error) throw new Error(`git_blame: ${result.error.message}`);
+      if (result.error) throw new Error(`git_read operation "blame": ${result.error.message}`);
       return result.stdout || result.stderr || '(no output)';
     },
   };
 }
 
-// ── git_show ───────────────────────────────────────────────────────────────────
+// ── Show handler ───────────────────────────────────────────────────────────────
 
 export function makeGitShowTool(): RegisteredTool {
   return {
     definition: {
       type: 'function',
       function: {
-        name: 'git_show',
+        name: '__git_read_show',
         description:
           'Show a commit or object (git show <ref>). The ref accepts the <ref>:<path> form, ' +
           'so "HEAD~1:src/app.ts" prints that file as it was in the previous commit — the way ' +
@@ -204,7 +204,7 @@ export function makeGitShowTool(): RegisteredTool {
         cwd: await gitCwd(args['cwd'] as string | undefined),
         encoding: 'utf8',
       });
-      if (result.error) throw new Error(`git_show: ${result.error.message}`);
+      if (result.error) throw new Error(`git_read operation "show": ${result.error.message}`);
       return result.stdout || result.stderr || '(no output)';
     },
   };

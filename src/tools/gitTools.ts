@@ -145,7 +145,7 @@ export function makeStageTool(): RegisteredTool {
  *
  * The raw command is refused for a good reason — it overwrites uncommitted work
  * with no reflog entry — but the refusal used to offer `switch_branch` and
- * `git_show` as alternatives, neither of which can put a file back. An agent
+ * `git_read` with operation `show` as an alternative, which cannot put a file back. An agent
  * that had just deleted and committed a tracked file hit that wall and had to
  * hand the problem to the user. The capability is legitimate; what it needed
  * was a gate, which being a confirmation-gated tool provides.
@@ -246,7 +246,7 @@ export function makeCommitTool(): RegisteredTool {
       if (!staged && !amend) {
         throw new Error(
           `git commit failed in repository "${repo.root}": nothing is staged. ` +
-            'Call stage with the paths to commit first, or git_status to see what changed.',
+            'Call stage with the paths to commit first, or git_read with operation "status" to see what changed.',
         );
       }
       if (amend) await refuseAmendOfPublishedCommit(repo);

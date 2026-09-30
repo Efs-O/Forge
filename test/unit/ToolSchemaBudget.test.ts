@@ -21,7 +21,8 @@ import { recordLazyGroupTool, resetLazyToolGroups } from '../../src/tools/lazyTo
  *
  * The budget is on **characters of `JSON.stringify(definitions)`**, not tokens:
  * CI has no tokenizer. The chars→tokens ratio is recorded next to the constant
- * (measured 2026-09-17, see TOOL_SCHEMA_REPORT.md §1 and the plan doc). The
+ * (measured 2026-09-30 with llama.cpp b11243 and Qwen3.8-27B Q6_K; see the plan
+ * doc). The
  * gate is on the **maximally-advertised** set — every optional block enabled —
  * because a config that turns on image_generation / jobs / agent_bus /
  * image_search advertises more tools than a bare one, and that is the case that
@@ -32,14 +33,14 @@ import { recordLazyGroupTool, resetLazyToolGroups } from '../../src/tools/lazyTo
  * to stop.
  */
 
-// Measured 2026-09-17: 77 tools, 52440 chars of JSON.stringify(definitions),
-// 18227 tokens (llama.cpp-unsloth-b10798 tokenizer, Qwen3.8-Flash-Next).
-// Ratio: 52440 chars / 18227 tokens ≈ 2.88 chars/token.
-const MEASURED_CHARS = 52440;
+// Measured 2026-09-30: 65 tools, 50439 chars of JSON.stringify(definitions),
+// 10913 tokens (llama.cpp b11243 tokenizer, Qwen3.8-27B Q6_K).
+// Ratio: 50439 chars / 10913 tokens ≈ 4.62 chars/token.
+const MEASURED_CHARS = 50439;
 // Ceiling ~10% above the measured size, so a single new tool (a few hundred
 // chars) does not trip it, but a batch of new tools or a large description
 // growth does.
-const TOOL_SCHEMA_CHAR_BUDGET = 57_000;
+const TOOL_SCHEMA_CHAR_BUDGET = 55_483;
 
 const ALL_PERMISSIONS = new Set<ToolPermission>([
   'read',
@@ -136,10 +137,10 @@ describe('tool schema CI budget (TOOL_SCHEMA_GROWTH_PLAN.md Step 1)', () => {
     Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true }),
   );
 
-  it('advertises the full 69-tool set under the maximal config', () => {
+  it('advertises the full 65-tool set under the maximal config', () => {
     const registry = makeMaximalRegistry();
     const names = registry.definitions(ALL_PERMISSIONS).map((d) => d.function.name).sort();
-    expect(names).toHaveLength(69);
+    expect(names).toHaveLength(65);
     // Spot-check the five self-suppressing tools that only appear when their
     // config block is present — these are the ones a bare config would drop.
     for (const name of [
@@ -191,7 +192,7 @@ describe('tool schema CI budget (TOOL_SCHEMA_GROWTH_PLAN.md Step 1)', () => {
         type: 'function',
         function: {
           name: '_budget_canary',
-          description: 'x'.repeat(10_000),
+          description: 'x'.repeat(5_000),
           parameters: { type: 'object', properties: {}, additionalProperties: false },
         },
       },

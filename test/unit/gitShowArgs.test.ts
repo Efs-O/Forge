@@ -7,7 +7,7 @@ describe('gitShowArgs', () => {
     expect(gitShowArgs('main:package.json')).toEqual(['show', 'main:package.json']);
   });
 
-  // git_show runs unconfirmed; `git show --output=<file>` writes anywhere.
+  // git_read's show operation runs unconfirmed; `git show --output=<file>` writes anywhere.
   it('refuses a ref git would read as an option', () => {
     expect(() => gitShowArgs('--output=C:/Users/me/.bashrc')).toThrow(/looks like an option/);
     expect(() => gitShowArgs('-p')).toThrow(/looks like an option/);

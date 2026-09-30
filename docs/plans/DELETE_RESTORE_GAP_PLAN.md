@@ -90,11 +90,10 @@ In `src/tools/gitTools.ts`. `permission: 'write'`, with
 `git checkout <ref> -- <paths>` through `runGit` (tools are not denylisted;
 the write-confirmation gate still applies). `ref` defaults to `HEAD`.
 
-Then rewrite the `isDestructiveGitCheckout` entry's `alternative` in
-`src/tools/DenyList.ts` to name `restore_file`. Today's text points at
-`switch_branch` and `git_show` — the exact "refusal that does not name a
-sanctioned alternative" trap CLAUDE.md documents, which is what sent the agent
-to the user instead of to a tool.
+The `isDestructiveGitCheckout` entry's `alternative` in `src/tools/DenyList.ts`
+now names `restore_file` for restoration and `git_read` with operation
+`git_show` for inspection. The historical incident above records the older
+`switch_branch`/`git_show` wording that did not offer a restoration capability.
 
 ### C. `restore_from_trash` tool
 
