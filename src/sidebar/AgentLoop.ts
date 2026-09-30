@@ -5,7 +5,7 @@ import type { HostToWebview } from './messageBridge';
 import type { ConversationRuntime, SidebarRuntime } from './sessionTypes';
 import { isCloudProvider } from '../llm/CloudProviders';
 import type { AttachmentData } from './messageBridge';
-import { appendUserPrompt, applyUsage, type UserPromptOptions } from './transcriptMutations';
+import { appendUserPrompt, type UserPromptOptions } from './transcriptMutations';
 import type { TemplateEngine } from '../llm/TemplateEngine';
 import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
 import { deriveStaticCapabilities } from '../config/ConfigResolver';
@@ -21,9 +21,8 @@ import { CapabilityCache } from './CapabilityCache';
 import { ToolDispatch, type OpenFileOptions } from './ToolDispatch';
 import { TurnLifecycle } from './TurnLifecycle';
 import { runCliTurn } from './CliTurn';
-import { runModelTurn } from './ModelTurn';
 import type { MidTurnTellServices, TurnServices } from './turnServices';
-import { makeRunModelTurn } from './turnServices';
+import { buildTurnServices } from './turnServicesAssembly';
 import { runPromptToMarkdown, type PromptRunOptions } from './PromptRun';
 import { runCloudProviderTurn, runLocalProviderTurn } from './ProviderTurn';
 import type { ForgeTurnOutcome } from './turnOutcome';
@@ -33,8 +32,8 @@ import type { ToolApprovalSink, ToolApprovalRequestEvent } from './ToolApprovalS
 import { recordModelUsage } from './modelManager/usageTracker';
 import type { AgentProgressEvent, AgentProgressListener } from './AgentProgress';
 import { CliAgentDriver } from '../agents/CliAgentDriver';
-import { createContactWebTools } from '../tools/contactWebTools';
-import { resolveRequestModel } from '../config/ConfigResolver';
+import { ContactPromptGate } from './contactPrompt';
+import { AgentProgressBus } from './AgentProgressBus';
 import {
   CliSessionRegistry,
   DEFAULT_CLI_IDLE_TIMEOUT_MS,
@@ -56,7 +55,7 @@ export class AgentLoop {
   private readonly services: TurnServices;
   /** Every out-of-band prompt remains independently cancellable by owner. */
   private readonly promptRunControllers = new Map<AbortController, string | undefined>();
-  private contactPromptReservations = 0;
+  private readonly contactGate: ContactPromptGate;
   private readonly sessionTimer = new SessionTimer();
   /**
    * Resolves a conversation id to its runtime object. Set by the SidebarProvider
@@ -68,7 +67,7 @@ export class AgentLoop {
   private midTurnCompactor?: TurnServices['compactMidTurn'];
   private midTurnTells?: MidTurnTellServices;
   private onTranscriptChanged?: (convId: string) => void;
-  private readonly progressListeners = new Set<AgentProgressListener>();
+  private readonly progress = new AgentProgressBus();
 
   /**
    * Registers the mid-turn context listener. A setter rather than an 18th
@@ -115,8 +114,7 @@ export class AgentLoop {
   }
 
   onAgentProgress(listener: AgentProgressListener): { dispose(): void } {
-    this.progressListeners.add(listener);
-    return { dispose: () => this.progressListeners.delete(listener) };
+    return this.progress.onAgentProgress(listener);
   }
 
   get streaming(): boolean {
@@ -188,7 +186,7 @@ export class AgentLoop {
         this.approvals.request(name, detail, isDangerous, convId, signal),
       diffDecorations,
     );
-    this.services = {
+    this.services = buildTurnServices({
       pool,
       getConfig,
       toolRegistry,
@@ -201,46 +199,32 @@ export class AgentLoop {
       post,
       workspaceRoot: this.workspaceRoot,
       cliSessions: this.cliSessions,
+      capabilities: this.capabilities,
+      promptRunControllers: this.promptRunControllers,
       ...(secrets ? { secrets } : {}),
       ...(templateEngine ? { templateEngine } : {}),
       ...(forgeLoader ? { forgeLoader } : {}),
       ...(cliDriver ? { cliDriver } : {}),
       ...(this.getConfigPath ? { getConfigPath: this.getConfigPath } : {}),
-      capabilities: (model, baseUrl) => this.capabilities.get(model, baseUrl),
+      getOnContextChanged: () => this.onContextChanged,
+      getRemoteReach: () => this.remoteReach,
+      getMidTurnCompactor: () => this.midTurnCompactor,
+      getMidTurnTells: () => this.midTurnTells,
       warnOnce: (key, message) => this.warnOnce(key, message),
-      // Wrapped rather than passed: both listeners are registered after
-      // construction, so a snapshot taken here would capture undefined.
-      onContextChanged: (convId) => this.onContextChanged?.(convId),
-      onUsage: (conv, inputTokens, outputTokens) => {
-        applyUsage(conv, inputTokens, outputTokens);
-        this.recordTranscriptMutation(conv);
-      },
-      onTranscriptChanged: (conv) => this.recordTranscriptMutation(conv),
-      emitAgentProgress: (event) => this.emitAgentProgress(event),
-      // Wrapped, not snapshotted, for the reason above: the probe is
-      // registered after construction and only while a transport is running.
-      remoteReach: (conversationId) => this.remoteReach?.(conversationId) ?? 0,
-      compactMidTurn: (conv, request) =>
-        this.midTurnCompactor?.(conv, request) ?? Promise.resolve(false),
-      drainTells: (id) => this.midTurnTells?.drainTells(id) ?? Promise.resolve({ messages: [] }),
-      onTellArrived: (id, callback) => this.midTurnTells?.onTellArrived(id, callback) ?? (() => {}),
-      // `options` is load-bearing and was missing here: a narrower function is
-      // assignable, so dropping the 4th parameter type-checked while silently
-      // discarding `internal: true`. Every Forge-authored prompt — the
-      // compaction resume above all — was then indistinguishable from something
-      // the user typed, and `collectCompactionUserMessages` carried the resume
-      // prompt forward as a verbatim user request.
+      recordTranscriptMutation: (conv) => this.recordTranscriptMutation(conv),
+      emitAgentProgress: (event) => this.progress.emit(event),
       commitUserPrompt: (conv, text, attachments, options) =>
         this.commitUserPrompt(conv, text, attachments, options),
-      runModelTurn: makeRunModelTurn(() => this.services, runModelTurn),
       waitForCancelledTurns: () => this.waitForCancelledTurns(),
-      setController: (ctrl, conversationId) => {
-        this.promptRunControllers.set(ctrl, conversationId);
-      },
-      releaseController: (ctrl) => {
-        this.promptRunControllers.delete(ctrl);
-      },
-    };
+    });
+    this.contactGate = new ContactPromptGate({
+      services: this.services,
+      streamingIds: () => this.lifecycle.streamingIds(),
+      conversationLookup: () => this.conversationLookup,
+      ownerPromptRunCount: () =>
+        [...this.promptRunControllers.values()].filter((id) => id !== '__forge_contact__').length,
+      abortContactRuns: () => this.abortPromptRuns('__forge_contact__'),
+    });
   }
 
   disposeConversation(id: string): Promise<void> {
@@ -251,7 +235,7 @@ export class AgentLoop {
 
   dispose(): Promise<void> {
     this.sessionTimer.dispose();
-    this.progressListeners.clear();
+    this.progress.clear();
     return this.cliSessions.dispose();
   }
 
@@ -396,27 +380,13 @@ export class AgentLoop {
   }
 
   /**
-   * Publish a progress event raised outside the turn path.
-   *
-   * The turn emits its own commentary and tool milestones. This is for the
-   * sidebar's webview-only status rows -- notices, and mid-turn errors -- which
-   * `SidebarProvider.post` folds in so all 12 notice sites and all 27 error
-   * sites are covered without editing any of them.
+   * Publish a progress event raised outside the turn path — the sidebar's
+   * webview-only status rows (notices, mid-turn errors) that
+   * `SidebarProvider.post` folds in. The turn emits its own commentary and
+   * tool milestones.
    */
   reportProgress(event: AgentProgressEvent): void {
-    this.emitAgentProgress(event);
-  }
-
-  private emitAgentProgress(event: AgentProgressEvent): void {
-    for (const listener of this.progressListeners) {
-      try {
-        listener(event);
-      } catch (err) {
-        log.warn(
-          `[AgentLoop] progress listener failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-    }
+    this.progress.emit(event);
   }
 
   runPromptToMarkdown(
@@ -429,68 +399,21 @@ export class AgentLoop {
 
   /**
    * Runs the contact-only prompt without allowing PromptRun to cold-start or
-   * evict a model. The reservation is synchronous with the capacity decision,
-   * so two contact batches cannot both observe the same free slot.
+   * evict a model. Delegates to the gate, which owns the reservation counter so
+   * two contact batches cannot both observe the same free slot.
    */
   async runContactPrompt(
     text: string,
     systemPromptText: string,
     options?: { web?: boolean },
   ): Promise<string> {
-    const config = this.services.getConfig();
-    if (!config.active_model) throw new Error('Forge contact model is unavailable.');
-    const fallbackModel = config.active_model;
-    const target = resolveRequestModel(config, fallbackModel).name;
-    if (!this.services.pool.isLoaded(target) || !this.services.pool.isModelReady(target)) {
-      throw new Error('Forge contact model is unavailable.');
-    }
-    const activeModels = [...this.lifecycle.streamingIds()].map(
-      (id) => this.conversationLookup?.(id)?.active_model ?? fallbackModel,
-    );
-    if (activeModels.some((model) => resolveRequestModel(config, model).name !== target)) {
-      throw new Error('Forge contact model is unavailable.');
-    }
-    const ownerPromptRuns = [...this.promptRunControllers.values()].filter(
-      (id) => id !== '__forge_contact__',
-    ).length;
-    if (ownerPromptRuns > 0) throw new Error('Forge contact model is unavailable.');
-    const capacity = this.services.pool.parallelCapacity(target);
-    const occupied = activeModels.length + this.contactPromptReservations;
-    if (occupied >= capacity) throw new Error('Forge contact model is unavailable.');
-    this.contactPromptReservations += 1;
-    let hold;
-    try {
-      hold = await this.services.pool.acquireForDelegation(target, target);
-      if (!hold.backend.isReady()) throw new Error('Forge contact model is unavailable.');
-      const web = options?.web
-        ? createContactWebTools(this.services.toolRegistry, config)
-        : undefined;
-      return await runPromptToMarkdown(this.services, text, '__forge_contact__', {
-        modelName: target,
-        systemPromptText,
-        outputTokens: 1_024,
-        alwaysStripThinking: true,
-        backend: hold.backend,
-        ...(web
-          ? {
-              contactTools: web.definitions,
-              dispatchContactTool: web.dispatch,
-              maxContactToolRounds: 3,
-            }
-          : {}),
-      });
-    } finally {
-      hold?.release();
-      this.contactPromptReservations -= 1;
-    }
+    return this.contactGate.run(text, systemPromptText, options);
   }
 
   cancelContactPrompts(): void {
-    this.abortPromptRuns('__forge_contact__');
+    this.contactGate.cancel();
   }
   private warnOnce(key: string, message: string): void {
-    this.capabilities.warnOnce(key, message, (text) => {
-      void vscode.window.showWarningMessage(text);
-    });
+    this.capabilities.warnOnce(key, message, (text) => void vscode.window.showWarningMessage(text));
   }
 }

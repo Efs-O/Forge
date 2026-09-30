@@ -29,6 +29,9 @@ overlaps with an existing owner, extend the owner instead.
 | Send guards, model resolution, turn logs             | `src/sidebar/SendPipeline.ts`            |
 | /reindex progress interaction                        | `src/sidebar/reindexCommand.ts`          |
 | Primary turn + streaming lifecycle                   | `src/sidebar/AgentLoop.ts`               |
+| Contact-prompt capacity gate (ready-slot reservation) | `src/sidebar/contactPrompt.ts`          |
+| TurnServices object assembly (ctor extraction)       | `src/sidebar/turnServicesAssembly.ts`    |
+| Out-of-band agent-progress pub/sub (safe dispatch)   | `src/sidebar/AgentProgressBus.ts`        |
 | Per-conversation streaming/cancel state              | `src/sidebar/TurnLifecycle.ts`           |
 | Model-endpoint turn: preflight + request             | `src/sidebar/ModelTurn.ts`               |
 | Vision gate: single source of truth (advertise + refuse) | `src/sidebar/visionGate.ts`    |
