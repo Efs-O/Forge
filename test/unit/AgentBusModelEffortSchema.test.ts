@@ -9,7 +9,7 @@ import { AgentBusConfigSchema } from '../../src/config/agentBusSchema';
  * `claude_effort` are free-form strings.
  */
 describe('AgentBusConfigSchema: codex_model/codex_effort/claude_model/claude_effort', () => {
-  it('parses all four keys unset (today\'s config keeps validating)', () => {
+  it("parses all four keys unset (today's config keeps validating)", () => {
     const parsed = AgentBusConfigSchema.parse({});
     expect(parsed?.codex_model).toBeUndefined();
     expect(parsed?.codex_effort).toBeUndefined();
@@ -39,5 +39,13 @@ describe('AgentBusConfigSchema: codex_model/codex_effort/claude_model/claude_eff
   it('accepts any non-empty claude_effort string (no local allowlist)', () => {
     const parsed = AgentBusConfigSchema.parse({ claude_effort: 'some-future-tier' });
     expect(parsed?.claude_effort).toBe('some-future-tier');
+  });
+});
+
+describe('AgentBusConfigSchema: copilot_model', () => {
+  // Without --model the Copilot CLI runs its premium default on every call.
+  it('defaults to auto and keeps an explicit value', () => {
+    expect(AgentBusConfigSchema.parse({})?.copilot_model).toBe('auto');
+    expect(AgentBusConfigSchema.parse({ copilot_model: 'gpt-5.4' })?.copilot_model).toBe('gpt-5.4');
   });
 });

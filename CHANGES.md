@@ -2,6 +2,13 @@
 
 ## 0.16.66
 
+### A Forge-owned Copilot session runs on `auto` (2026-09-30)
+
+- Forge launched its owned Copilot CLI with no `--model`, so every call ran
+  the CLI's premium default model. `agent_bus.copilot_model` (default `auto`)
+  is now passed as `--model`; set it to a model name to pin one. Applies at
+  the next owned-session creation.
+
 ### Retired `run_tests` and `run_build` in favour of `exec_command` (2026-09-30)
 
 - The 2026-09-30 audit showed the model already reaching for `exec_command`

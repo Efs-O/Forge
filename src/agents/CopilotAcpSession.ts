@@ -45,6 +45,8 @@ export interface CopilotAcpSessionOptions {
    * fixture here, the way `CodexAppServerSession` takes `argsPrefix`).
    */
   argsPrefix?: string[];
+  /** `--model <v>` (`agent_bus.copilot_model`); unset: the CLI's default. */
+  model?: string;
   /** Per-turn deadline; the timeout takes the same cancel path as abort. */
   timeoutMs?: number;
   /** Bounded grace after `session/cancel` before the owned child is killed. */
@@ -188,13 +190,7 @@ export class CopilotAcpSession {
   }
 
   private async start(): Promise<void> {
-    const args = [
-      ...(this.options.argsPrefix ?? []),
-      '--acp',
-      '--stdio',
-      '--no-remote',
-      '--allow-all',
-    ];
+    const args = copilotAcpArgs(this.options);
     const child = spawnCliProcess({
       executable: this.options.executable,
       args,
@@ -438,4 +434,17 @@ export class CopilotAcpSession {
     if (active.signal && active.onAbort) active.signal.removeEventListener('abort', active.onAbort);
     if (this.active === active) this.active = undefined;
   }
+}
+
+export function copilotAcpArgs(
+  options: Pick<CopilotAcpSessionOptions, 'argsPrefix' | 'model'>,
+): string[] {
+  return [
+    ...(options.argsPrefix ?? []),
+    '--acp',
+    '--stdio',
+    '--no-remote',
+    '--allow-all',
+    ...(options.model ? ['--model', options.model] : []),
+  ];
 }

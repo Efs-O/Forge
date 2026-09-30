@@ -1,5 +1,6 @@
 import * as os from 'os';
 import type { ForgeConfig } from '../config/types';
+import { DEFAULT_COPILOT_MODEL } from '../config/agentBusSchema';
 import type { CopilotAcpSession } from '../agents/CopilotAcpSession';
 import { copilotMeshPreamble } from '../agentBus/busContent';
 import { resolveCliExecutable } from '../agents/resolveCliExecutable';
@@ -179,6 +180,7 @@ export class CopilotOwnedSessions {
         sessionId,
         executable,
         cwd: this.deps.workspaceRoots()[0] ?? os.homedir(),
+        model: bus?.copilot_model ?? DEFAULT_COPILOT_MODEL,
       });
       const newSessionId = session.confirmedSessionId ?? sessionId;
       this.owned.set(alias, session);

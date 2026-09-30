@@ -1,6 +1,6 @@
 import * as path from 'path';
 import { describe, expect, it } from 'vitest';
-import { CopilotAcpSession } from '../../src/agents/CopilotAcpSession';
+import { CopilotAcpSession, copilotAcpArgs } from '../../src/agents/CopilotAcpSession';
 
 const fixture = path.resolve(__dirname, '../fixtures/fakeCopilotAcpCli.mjs');
 
@@ -205,5 +205,13 @@ describe('CopilotAcpSession', () => {
     const result = await first;
     expect(result.status).toBe('completed');
     await current.dispose();
+  });
+});
+
+describe('copilotAcpArgs', () => {
+  it('adds --model only when a model is set', () => {
+    const fixed = ['--acp', '--stdio', '--no-remote', '--allow-all'];
+    expect(copilotAcpArgs({})).toEqual(fixed);
+    expect(copilotAcpArgs({ model: 'auto' })).toEqual([...fixed, '--model', 'auto']);
   });
 });

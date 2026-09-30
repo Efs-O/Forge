@@ -6,6 +6,9 @@ import { z } from 'zod';
  * means no `ask_live_session` tool and no `/agent/*` routes, so a config
  * without it keeps the tool list, and with it the KV prefix, unchanged.
  */
+/** `agent_bus.copilot_model` default; also used when there is no `agent_bus` block. */
+export const DEFAULT_COPILOT_MODEL = 'auto';
+
 export const AgentBusConfigSchema = z
   .object({
     enabled: z.boolean().default(false),
@@ -28,6 +31,10 @@ export const AgentBusConfigSchema = z
     codex_cli: z.string().min(1).default('codex'),
     /** Copilot CLI executable: a bare name on PATH or an absolute path. */
     copilot_cli: z.string().min(1).default('copilot'),
+    /** Model for a Forge-owned Copilot session (`--model`). Defaults to
+     *  `auto`: with no flag the CLI runs its premium default model on every
+     *  call. Applies at the next creation. */
+    copilot_model: z.string().min(1).default(DEFAULT_COPILOT_MODEL),
     /** Model for a Forge-owned Codex session (`thread/start` `model`). Unset:
      *  the `~/.codex/config.toml` default. Applies at the next creation. */
     codex_model: z.string().min(1).optional(),

@@ -143,7 +143,7 @@ export function defaultClaudeFactory(): OwnedClaudeFactory {
 
 export function defaultCopilotFactory(): OwnedCopilotFactory {
   return {
-    create: async ({ executable, cwd, sessionId }) => {
+    create: async ({ executable, cwd, model, sessionId }) => {
       const { CopilotAcpSession } = await import('../agents/CopilotAcpSession');
       // The P1 session launches with the fixed ACP flags
       // (`--acp --stdio --no-remote --allow-all`), which grant the full native
@@ -152,6 +152,7 @@ export function defaultCopilotFactory(): OwnedCopilotFactory {
       return new CopilotAcpSession({
         executable,
         cwd,
+        ...(model ? { model } : {}),
         ...(sessionId ? { confirmedSessionId: sessionId } : {}),
       });
     },

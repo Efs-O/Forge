@@ -297,7 +297,12 @@ agent_bus:
   codex_effort: high # low | medium | high | xhigh | max
   claude_model: opus
   claude_effort: high
+  copilot_model: auto # the default; see below
 ```
+
+`copilot_model` is the exception: it defaults to `auto`, because with no
+`--model` the Copilot CLI runs its premium default model on every call. Set it
+to a model name to pin one.
 
 Unset keys keep today's behaviour: Forge passes nothing and the CLI's own
 config decides. A change applies at the next owned-session creation, not to a
