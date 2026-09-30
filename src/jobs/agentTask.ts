@@ -13,7 +13,13 @@ import { nextDueWithBackoff } from './backoff';
 import { restartAfterTurn } from './agentTaskRestart';
 import type { Action, JobFile, RunRow } from './jobSchema';
 import { buildAgentTaskPrompt } from './agentTaskPrompt';
-import { canStartNow, CLEAR_PENDING, deferBusyTask } from './agentTaskAdmission';
+import {
+  canStartNow,
+  CLEAR_PENDING,
+  deferBusyTask,
+  USER_QUIET_MS,
+  userQuietGate,
+} from './agentTaskAdmission';
 import { sendWithCap, sleepWithAbort } from './agentTaskCap';
 import { outcomeOf, reportMessage, type AgentTaskOutcome } from './agentTaskReport';
 export { parseResult } from './agentTaskPrompt';
@@ -106,13 +112,27 @@ export class AgentTaskRunner {
       });
       return this.deps.store.appendRun(job.id, blocked);
     }
+    const status = host.status();
     const slot = canStartNow(
       jobModel,
       state.conversation_id,
       pool,
-      host.status().streamingConversationIds,
+      status.streamingConversationIds,
     );
-    if (!slot.start) {
+    // Only a recent conversation can hold the job back; read which ones are
+    // the jobs' own (they must not) only when there is one.
+    const recent = status.conversations.filter((c) => startedAt - c.updatedAt < USER_QUIET_MS);
+    const quiet =
+      recent.length === 0
+        ? undefined
+        : userQuietGate(
+            recent,
+            new Set(
+              (await this.deps.store.loadAll()).flatMap((jf) => jf.state.conversation_id ?? []),
+            ),
+            startedAt,
+          );
+    if (!slot.start || quiet !== undefined) {
       await deferBusyTask(this.deps.store, jobFile, startedAt, wasLate);
       return;
     }

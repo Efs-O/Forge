@@ -35,6 +35,32 @@ export function canStartNow(
   return { start: true, reason: '' };
 }
 
+/**
+ * How long the user's own chats must have been quiet before a job may start.
+ * `canStartNow` only sees a turn while it streams; between two turns of a long
+ * session the box looks idle, and a job that starts there holds the model (or
+ * swaps it) under the user's next message.
+ */
+export const USER_QUIET_MS = 10 * 60_000;
+
+/**
+ * The reason to wait when a conversation that is not a job's own was updated
+ * within `USER_QUIET_MS`, or undefined when the user has been quiet long enough.
+ */
+export function userQuietGate(
+  conversations: readonly { id: string; updatedAt: number }[],
+  jobConversationIds: ReadonlySet<string>,
+  now: number,
+): string | undefined {
+  let last = 0;
+  for (const c of conversations) {
+    if (!jobConversationIds.has(c.id) && c.updatedAt > last) last = c.updatedAt;
+  }
+  const ago = now - last;
+  if (ago >= USER_QUIET_MS) return undefined;
+  return `the user was active ${Math.floor(ago / 60_000)} min ago`;
+}
+
 /** The nominal period between ticks (ms) — the `task_pending` TTL bound. */
 export function schedulePeriodMs(schedule: Schedule, now: number): number {
   switch (schedule.kind) {

@@ -1,5 +1,21 @@
 # Forge — Recent Changes
 
+## 0.16.63
+
+### Scheduled jobs wait for the user to go quiet (2026-09-30)
+
+- An `agent_task` job no longer starts within 10 minutes of activity in any
+  non-job conversation. Before, it checked only whether a turn was streaming
+  at that instant, so between two turns of a long session it could start,
+  hold the single slot, or unload the user's model under their next message.
+  A deferred job stays pending and retries every tick, as a busy one already did.
+
+### Mid-turn compaction cap resets after a productive stretch (2026-09-30)
+
+- The two-compactions-per-turn cap now resets once a compaction has bought
+  10 rounds of work. A multi-hour turn had spent the cap and then died at 100%
+  of context with auto-compact enabled.
+
 ## 0.16.62
 
 ### Browser and Windows desktop computer-use tools (2026-09-29)

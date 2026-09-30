@@ -28,6 +28,7 @@ import {
 import { JobSchema, JobStateSchema, type Job, type JobFile } from '../../src/jobs/jobSchema';
 import type { PowerControl } from '../../src/system/PowerControl';
 import type { IBackendPool } from '../../src/backend/poolTypes';
+import { userQuietGate, USER_QUIET_MS } from '../../src/jobs/agentTaskAdmission';
 import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
 import type { ForgeRequestOutcome } from '../../src/sidebar/turnOutcome';
 import { readOutboxItem } from '../../src/jobs/JobOutbox';
@@ -116,6 +117,25 @@ function baseJob(overrides: Partial<Job> = {}): Job {
     ...overrides,
   });
 }
+
+// ── userQuietGate ────────────────────────────────────────────────────────────
+
+describe('userQuietGate', () => {
+  const now = 100 * 60_000;
+  it('waits while a user chat was updated within the quiet window', () => {
+    const convs = [{ id: 'user', updatedAt: now - 3 * 60_000 }];
+    expect(userQuietGate(convs, new Set(), now)).toBe('the user was active 3 min ago');
+  });
+  it("ignores the jobs' own conversations", () => {
+    const convs = [{ id: 'job', updatedAt: now - 60_000 }];
+    expect(userQuietGate(convs, new Set(['job']), now)).toBeUndefined();
+  });
+  it('lets the job start once the user has been quiet long enough', () => {
+    const convs = [{ id: 'user', updatedAt: now - USER_QUIET_MS }];
+    expect(userQuietGate(convs, new Set(), now)).toBeUndefined();
+    expect(userQuietGate([], new Set(), now)).toBeUndefined();
+  });
+});
 
 // ── canStartNow (AC8) ────────────────────────────────────────────────────────
 
