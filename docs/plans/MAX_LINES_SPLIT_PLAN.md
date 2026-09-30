@@ -137,7 +137,7 @@ complete. Claude supervises and reviews each commit.
 | **`vscode/agentMeshSetup.ts` (499)** | `setupAgentMesh()` is one ~400-line function. (1) Startup recovery + `runMaintenance` (~312–393) → `meshMaintenance.ts` returning `{start, dispose}`, owning its own timer. (2) `pollVerdictsOnce`/`pollVerdicts` (~394–452) → `meshVerdictPoll.ts`, same shape. (3) `renderObservation` (~243–278) → `meshObservation.ts`. | ~320 | Real sub-services with their own timers, so a 3–5-field deps object is justified. **Both `setInterval` timers must still be cleared in the returned `dispose`** — a started-but-never-disposed timer is the likely bug in this split. `exchangeScope` map and `activeTurnId` stay in setup (`onEvent`/`markTurn*` close over them). Importers (`AgentMeshCopilotSurfaces`, `AgentMeshZeroConfig`, `agentMessagingSetup`) use `setupAgentMesh`/`AgentMesh`/`knownAliasesForMesh`, none of which move. |
 | **`agentMesh/meshOrchestrator.ts` (497)** | (1) The contract types `SessionProvider`, `MeshScope`, `TellOutcome`, `PendingMeshMessage`, `RelayOutcome`, `OrchestratorDeps` (~15–100) → `meshTypes.ts`. (2) `handleCommand` dispatch (~452–497) → `meshCommandDispatch.ts` as `dispatchMeshCommand(orchestrator, cmd)`. | ~365 | 7 tests + `meshContext` and `sessionProvider` import from here — **re-export the types** from `meshOrchestrator.ts`. `sessionProvider.ts` probably imports `SessionProvider` type-only; moving it to `meshTypes` removes that cycle. `tell`/`steer`/`relay` stay (they share `fifoFor` and `isKnownAlias`). |
 | **`remote/TelegramChannel.ts` (495)** — DONE 495→266 (Copilot) | The plan's two rows were **stale**: the multipart upload was already extracted to `./TelegramPhoto` + `./TelegramVoice`, and the command table is only ~37 lines (too small to reach 420 on its own). The real cohesive seam (supervisor call) was the whole **outbound** half — `send`/`sendHtml`/`sendText`/`sendProgress`/`sendInlineKeyboard`/`sendHelp`/`handleHelpAction`, `answerCallbackQuery`/`clearInlineKeyboard`/`editMessage`/`deleteMessage`, `retractPrompt`/`rememberPrompt`, `sendPhoto`/`sendVoice`/`downloadAttachment(ToFile)` — into `TelegramOutbound.ts`, which takes the queued `call` fn + `fetchImpl`/`token`/`sendQueue` (precedent: `TelegramHelpMessages`, which takes a structural `TelegramHelpTransport`). The channel keeps one-line `Parameters<…>` delegates so the `RemoteChannel` surface and `sendQueue` ordering are unchanged; `start`/`poll`/`healthCheck`/`onEvent`/`call` stay. | 266 | `TelegramOutbound` imports nothing from `TelegramChannel` (no cycle). Re-exports (`MAX_TELEGRAM_IMAGES_PER_MESSAGE`, `splitTelegramText`, `TELEGRAM_BOT_TOKEN_SECRET`, `TELEGRAM_BOT_COMMANDS`) preserved. 6/6 Telegram test files, 62/62 tests green; type-check + lint green. |
-| **`remote/TelegramContactService.ts` (498)** — DONE 498→373 | Both rows done. (1) The pure text helpers `stripBotUsername`, `commandName`, `isCommand`, `ownerCommandText` → `telegramContactText.ts`. (2) The whole group-contact workflow — `handleGroup`, `handleOwnerGroupMessage`, `requestGroupLink`, `escalateToOwner`, plus `resolveContacts` (only used by `requestGroupLink`) → `TelegramGroupContacts.ts`, a class taking a 6-field deps object (channel, auth, store, audit, signal, and one `acceptContactMessage` callback). | 373 | (2) was the plan's "borderline" row; it is clean because the group workflow is a genuine concern and the deps are its real inputs (precedent: the RemoteController auth gate's ~8 deps). `acceptContactMessage` stays with the `bursts` map and `processBurst` and is passed as the one callback — no duplication of burst state. The class's `handleGroup` is a one-line delegate; the `TelegramGroupDeps.audit` field is `RemoteAuditLog | undefined` for `exactOptionalPropertyTypes`. 50/50 Telegram tests green. |
+| **`remote/TelegramContactService.ts` (498)** — DONE 498→378 | Both rows done. (1) The pure text helpers `stripBotUsername`, `commandName`, `isCommand`, `ownerCommandText` → `telegramContactText.ts`. (2) The whole group-contact workflow — `handleGroup`, `handleOwnerGroupMessage`, `requestGroupLink`, `escalateToOwner`, plus `resolveContacts` (only used by `requestGroupLink`) → `TelegramGroupContacts.ts`, a class taking a 6-field deps object (channel, auth, store, audit, signal, and one `acceptContactMessage` callback). | 378 | (2) was the plan's "borderline" row; it is clean because the group workflow is a genuine concern and the deps are its real inputs (precedent: the RemoteController auth gate's ~8 deps). `acceptContactMessage` stays with the `bursts` map and `processBurst` and is passed as the one callback — no duplication of burst state. The class's `handleGroup` is a one-line delegate; the `TelegramGroupDeps.audit` field is `RemoteAuditLog | undefined` for `exactOptionalPropertyTypes`. 50/50 Telegram tests green. |
 | **`jobs/JobScheduler.ts` (499)** — DONE 499→416 | The plan's three rows were re-cut into two cohesive units: (1) the per-job run leaves `runJob` delegates to — `runJobCheck` (check + `llamacpp_update` staging), `applyJobBackoff` (B.3 state math), `sleepIfIdleIfRequested` (D6 re-suspend) → `jobRunLifecycle.ts`; (2) the lease acquisition (`FileLease.acquire` + `wakes.reset()`) → `jobLease.ts` as `acquireSchedulerLease`. The scheduler keeps the tick loop, `runJob`, and the lease field; `FileLease` is now a type-only import. | 416 | The lease-loss test simulated a loss by calling the private `handleLeaseLost()`; it now clears the `lease` field directly (the `onLost` callback's only effect). The verified behaviour — re-acquire on the next tick, never a permanent `stop()` — is unchanged. 29/29 `JobScheduler` tests green. |
 | **`sidebar/AgentLoop.ts` (496)** — DONE 496→419 | The plan's `openFile` target was **stale** (already a 3-line delegate to `toolDispatch`). The real cohesive seams were: (1) the contact-prompt capacity gate (`runContactPrompt` + reservation counter) → `contactPrompt.ts` (`ContactPromptGate`, owns the counter so two batches can't see the same free slot). (2) the constructor's `this.services` assembly → `turnServicesAssembly.ts` (`buildTurnServices`, imports `AgentLoop` type-only). (3) the out-of-band progress pub/sub (`progressListeners` + safe `emitAgentProgress`) → `AgentProgressBus.ts`. The loop keeps one-line delegates for `runContactPrompt`/`cancelContactPrompts`/`onAgentProgress`/`reportProgress`. | 419 | The gate reads `conversationLookup` at call time (wired after ctor). `runModelTurn` is wired last in `buildTurnServices` (it holds the services object). 17 `AgentLoop.test` + full non-live suite green. |
 | **`sidebar/SidebarProvider.ts` (495)** — DONE 495→479 (documented exception) | **Trim, not split.** The only clean, small-surface unit is `attachmentsRootUri` + `openAttachment` (close over just `attachmentStore` + `view`) → `attachmentAccess.ts`. The constructor wiring was **already** extracted to `wireSidebar`/`createSidebarHostFacade` by a prior refactor; what remains (the `wireSidebar` hooks object, the `handleMessage` actions literal) closes over ~20 fields of the provider. | **479** (floor) | **This is the documented exception to A1.** The file's own header comment says the remaining methods stay deliberately: "extracting either threads a context object purely to shed lines." Forcing ≤420 means a ~20-field context object — the anti-pattern the "cohesive units, not arbitrary line chunks" rule forbids. 479 is under the 500 hard ESLint limit, so the build is safe. Supervisor (Claude) was unreachable to override; decided on engineering soundness, flagged to the user. |
@@ -151,27 +151,52 @@ Each item maps to a validation step. All must hold before the plan is done.
   **with one documented exception: `SidebarProvider.ts` at 479** (see its Wave-2 row — a facade
   whose remaining methods close over the whole runtime; the only clean cut is the attachment
   helpers, and forcing ≤420 would require a ~20-field context object the plan's own rules forbid).
-  Validate with `scripts/audit-lines.ps1` (or `wc -l`) after each commit; no listed file may
+  Validate with `wc -l` after each commit; no listed file may
   reappear at ≥ 420 **except the documented `SidebarProvider.ts` floor of 479**.
-- [ ] **A2 — Build stays green:** `npm run ci` (type-check, lint, full test suite, build, bundle
+  *Verified 2026-09-30 at `6899ab3` (`wc -l`): highest are RemoteController 420, AgentLoop 419,
+  JobScheduler 416; SidebarProvider 479. (`scripts/audit-lines.ps1` was a local helper with a
+  hardcoded path and was deleted.)*
+- [x] **A2 — Build stays green:** `npm run ci` (type-check, lint, full test suite, build, bundle
   check) passes **after each commit**, not just at the end.
-- [ ] **A3 — Package passes:** `npm run package` succeeds at the end of Phase 3 (the VSIX still
+  *Verified 2026-09-30: `npm run ci` green at `4c21e1a` (350 files, 3502 tests). Per-commit runs
+  are as reported in each commit message, not re-run afterwards.*
+- [x] **A3 — Package passes:** `npm run package` succeeds at the end of Phase 3 (the VSIX still
   builds with the new module layout and the `playwright-core`/`.ps1` bundling intact).
-- [ ] **A4 — No behaviour change:** the full test suite passes with **no test-logic changes** —
+  *Verified 2026-09-30 at `6899ab3`: 125 files, 11.62 MB.*
+- [x] **A4 — No behaviour change:** the full test suite passes with **no test-logic changes** —
   the only test edits are import-path updates, plus the single new `this.options` test in
   `RemoteController` row A.
-- [ ] **A5 — No new value-import cycles:** for every new module, a grep (or `madge`) confirms it
+  *Verified 2026-09-30: three test edits in the 13 split commits. `a12c2f0` RemoteCore is the
+  planned `this.options` test plus one Prettier reflow. `5e3e548` RemoteRichText adds the three
+  moved files to its source-scan list, the same kind of change as an import-path update.
+  `b448690` JobScheduler is the one real deviation: the lease-loss test called the private
+  `handleLeaseLost()`, which the split inlined, so the test now clears the lease field directly.
+  The asserted behaviour (re-acquire on the next tick) is unchanged. Accepted.*
+- [x] **A5 — No new value-import cycles:** for every new module, a grep (or `madge`) confirms it
   imports its old host **type-only**, never as a value.
-- [ ] **A6 — Re-exports preserved:** every symbol a test or other source imports from an old path
+  *Verified 2026-09-30 by grep over all 29 new modules. The only hit is `remoteVoiceWiring.ts`,
+  whose import from `RemoteVoiceBridge` is all inline `type` specifiers. Without
+  `verbatimModuleSyntax`, tsc and esbuild drop that import entirely, so there is no runtime cycle.*
+- [x] **A6 — Re-exports preserved:** every symbol a test or other source imports from an old path
   still resolves (re-exported or the importer updated in the same commit). Validate by `npm run
   type-check` (a broken re-export is a type error).
-- [ ] **A7 — OWNERS.md updated:** every new module has a row in `docs/OWNERS.md` (Phase 0).
-- [ ] **A8 — Timers disposed:** for `agentMeshSetup.ts` (Phase 2), both extracted `setInterval`
+  *Verified 2026-09-30: type-check green at `4c21e1a`.*
+- [x] **A7 — OWNERS.md updated:** every new module has a row in `docs/OWNERS.md` (Phase 0).
+  *Verified 2026-09-30: all 29 new modules are named in OWNERS.md.*
+- [x] **A8 — Timers disposed:** for `agentMeshSetup.ts` (Phase 2), both extracted `setInterval`
   timers are cleared in the returned `dispose` — covered by the existing `AgentMesh*` tests plus a
   focused check that `dispose()` stops the timers.
-- [ ] **A9 — extension.ts subscription order preserved:** `context.subscriptions` is pushed in the
+  *Verified 2026-09-30: both `meshMaintenance.ts` and `meshVerdictPoll.ts` clear their interval in
+  `dispose()`, and `agentMeshSetup` disposes both. The focused check had not been written; it is
+  now `test/unit/MeshTimers.test.ts`, added after the phases.*
+- [x] **A9 — extension.ts subscription order preserved:** `context.subscriptions` is pushed in the
   same order as before (disposal runs in reverse); the extension still activates and deactivates
   cleanly (covered by the existing extension smoke tests).
+  *Verified 2026-09-30: compared `eeea40a^` with HEAD. `registerIndexWatchers` pushes the same four
+  listeners at the same point, and `setupRemoteRuntime` pushes the sidebar, remote and llama-fetch
+  disposers as its last step, just before `sessionTimeBar`, as before.*
+
+**Plan complete 2026-09-30.**
 
 ## State × lifecycle ledger
 
