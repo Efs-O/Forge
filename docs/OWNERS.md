@@ -544,6 +544,8 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Session provider (owned-session lifecycle, M2/M3)        | `src/agentMesh/sessionProvider.ts`          |
 | Joined Claude peer + dead-join stand-in (resume, notice) | `src/agentMesh/claudeStandIn.ts`            |
 | Mesh orchestrator (tell + host-side relay M6)            | `src/agentMesh/meshOrchestrator.ts`         |
+| Mesh orchestrator contracts                              | `src/agentMesh/meshTypes.ts`                |
+| Mesh lifecycle-command dispatch                          | `src/agentMesh/meshCommandDispatch.ts`      |
 | Claude self-join as the `claude` alias (§11)             | `src/agentMesh/claudeJoin.ts`               |
 | Process-wide orchestrator handle                         | `src/agentMesh/meshContext.ts`              |
 | `tell_live_session` tool (§1)                            | `src/tools/tellLiveSessionTool.ts`          |

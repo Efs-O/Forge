@@ -5,98 +5,25 @@ import {
   type AgentKind,
 } from './aliasRegistry';
 import { AliasFifo, type FifoEvent } from './aliasFifo';
-import type { ExchangeState } from './deliveryState';
 import { newEventId } from './exchangeLog';
 import type { MeshAdapter, TurnResult } from './meshAdapter';
-import type { HostLivenessDeps } from './hostIdentity';
 import type { MeshCommand } from './meshCommands';
-import type { MeshMessageAcceptedSink } from './meshMessageAccepted';
-
-export interface SessionProvider {
-  /**
-   * Return the adapter for an alias, creating a Forge-owned session if needed
-   * (consent is the tool's confirmation gate for `tell`; an inbound relay only
-   * reaches an already-consented alias). Resolving may be async (a first owned
-   * creation or a thread resume); undefined when no adapter can be resolved.
-   */
-  resolveAdapter(alias: string): Promise<MeshAdapter | undefined>;
-  /** Whether this alias has a live, owned session this window holds. */
-  isOwned(alias: string): boolean;
-  /** F-07: record activity on the alias's owned session (the idle-TTL clock). */
-  touchActivity(alias: string): void;
-  /** Standby: park-but-warm (§2b). True when a record was parked. */
-  park(alias: string): boolean;
-  /** Wake a parked session (§2b). True when a record was woken. */
-  wake(alias: string): boolean;
-  /** Is the alias parked? (the board's `parked` state, §2b.) */
-  isParked(alias: string): boolean;
-  /**
-   * Close: hard-kill a Forge-owned session (§8). Disposes the in-memory
-   * session (if held) and clears `owner_host`; keeps `thread_id` (M3). Never
-   * targets a user-opened session (no ownership record). True when closed.
-   */
-  close(alias: string): Promise<boolean>;
-}
-
-export interface MeshScope {
-  workspace: string;
-  conversation?: string;
-}
-
-export interface TellOutcome {
-  exchangeId: string;
-  /** The recipient alias the message was accepted for. */
-  to: string;
-  /** True when the recipient is an owned session (states will reach `started`). */
-  observing: boolean;
-  /** The adapter's stand-in note, if the recipient answers for a dead joined session. */
-  note?: string;
-}
-
-export interface PendingMeshMessage {
-  alias: string;
-  message: string;
-}
-
-export interface RelayOutcome extends TellOutcome {
-  /** The two hop events share this exchange id (M6). */
-  relayed: true;
-}
-
-export interface OrchestratorDeps extends HostLivenessDeps {
-  busRoot: string;
-  provider: SessionProvider;
-  scope: () => MeshScope;
-  /**
-   * Write a board event (wired to the exchange log). F-03: must be durable
-   * before the tell/relay result is returned (accepted on disk first).
-   */
-  onEvent: (e: {
-    exchangeId: string;
-    from: string;
-    to?: string;
-    type: string;
-    state: ExchangeState;
-    detail?: string;
-  }) => Promise<void> | void;
-  /**
-   * The set of known aliases (registered + the live config pins). Used to
-   * validate a relay's `to` and to report the live list on an unknown `to`.
-   */
-  knownAliases: () => string[];
-  /**
-   * F-03: the outbox dir where a non-observing agent writes its verdict
-   * (`<exchangeId>.verdict.md`); the wiring polls it to complete the exchange.
-   */
-  verdictDir?: string;
-  /**
-   * F-09: render an observational command (status/board/peers/queue/context)
-   * into a reply string; the wiring knows the scope and board projection.
-   * Absent ⇒ the command reports that the host has no board.
-   */
-  onObservation?: (verb: 'status' | 'board' | 'peers' | 'queue' | 'context') => string;
-  onMessageAccepted?: MeshMessageAcceptedSink;
-}
+import { dispatchMeshCommand } from './meshCommandDispatch';
+import type {
+  MeshScope,
+  OrchestratorDeps,
+  PendingMeshMessage,
+  RelayOutcome,
+  TellOutcome,
+} from './meshTypes';
+export type {
+  MeshScope,
+  OrchestratorDeps,
+  PendingMeshMessage,
+  RelayOutcome,
+  SessionProvider,
+  TellOutcome,
+} from './meshTypes';
 
 export class MeshOrchestrator {
   private readonly fifos = new Map<string, AliasFifo>();
@@ -444,54 +371,25 @@ export class MeshOrchestrator {
     return messages;
   }
 
-  /**
-   * Dispatch a typed lifecycle command (§8, P3). The single owner of the
-   * command grammar is `meshCommands.ts`; this method supplies the handlers.
-   * Returns the reply string (what the caller shows the sender).
-   */
+  park(alias: string): boolean {
+    return this.deps.provider.park(alias);
+  }
+
+  wake(alias: string): boolean {
+    return this.deps.provider.wake(alias);
+  }
+
+  close(alias: string): Promise<boolean> {
+    return this.deps.provider.close(alias);
+  }
+
+  observe(verb: 'status' | 'board' | 'peers' | 'queue' | 'context'): string {
+    return this.deps.onObservation
+      ? this.deps.onObservation(verb)
+      : `"${verb}" is handled by the host (scope + board)`;
+  }
+
   async handleCommand(cmd: MeshCommand): Promise<string> {
-    switch (cmd.verb) {
-      case 'say': {
-        const res = await this.tell(cmd.alias, cmd.message);
-        return 'error' in res ? res.error : `sent to ${res.to} (exchange ${res.exchangeId})`;
-      }
-      case 'steer': {
-        // F-06: a steer interrupts the active turn and runs next (§6/§2b).
-        const message = cmd.message.trim()
-          ? cmd.message
-          : 'steer: interrupt the current work and report status';
-        const res = await this.steer(cmd.alias, message);
-        return 'error' in res ? res.error : `steered ${res.to} (exchange ${res.exchangeId})`;
-      }
-      case 'standby': {
-        const ok = this.deps.provider.park(cmd.alias);
-        return ok
-          ? `${cmd.alias} parked (warm; the thread stays resumable)`
-          : `no session to park for "${cmd.alias}"`;
-      }
-      case 'wake': {
-        const ok = this.deps.provider.wake(cmd.alias);
-        return ok ? `${cmd.alias} woken` : `no parked session for "${cmd.alias}"`;
-      }
-      case 'handoff': {
-        const message = cmd.context.trim()
-          ? `handoff: my part is done. ${cmd.context}`
-          : 'handoff: my part is done; you take over.';
-        const res = await this.tell(cmd.alias, message);
-        return 'error' in res ? res.error : `handed off to ${res.to} (exchange ${res.exchangeId})`;
-      }
-      case 'close': {
-        const ok = await this.deps.provider.close(cmd.alias);
-        return ok
-          ? `${cmd.alias} closed (Forge-owned session killed; thread kept for resume)`
-          : `"${cmd.alias}" is not a Forge-owned session (never closes a user-opened session)`;
-      }
-      default:
-        // F-09: observational commands render real scoped state through the
-        // wiring layer's projection. Without a renderer installed, the
-        // placeholder is preserved (the grammar stays complete).
-        if (this.deps.onObservation) return this.deps.onObservation(cmd.verb);
-        return `"${cmd.verb}" is handled by the host (scope + board)`;
-    }
+    return dispatchMeshCommand(this, cmd);
   }
 }
