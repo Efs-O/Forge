@@ -33,6 +33,12 @@
 - `git_read` now selects status, log, diff, blame or show by operation (`status`,
   `log`, `diff`, `blame`, `show`). Git writers remain separate.
 
+### `search_code` finds text that starts with a dash (2026-09-30)
+
+- A query such as `--new` reached ripgrep as a flag and failed with
+  `rg: unrecognized flag --new`; the agent tried twice and gave up searching.
+  The query now goes behind `--regexp`, so it is always the pattern.
+
 ### Reading an image points at the media group (2026-09-30)
 
 - `read_file` on an image told the model that if `view_image` was not

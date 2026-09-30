@@ -325,6 +325,8 @@ async function searchWorkspaceText(
     ...(named
       ? ['--no-ignore-vcs']
       : ['--glob', include, ...SEARCH_EXCLUDES.flatMap((glob) => ['--glob', glob])]),
+    // Behind --regexp, so a query like `--new` is the pattern, not a flag rg refuses.
+    '--regexp',
     query,
     named ?? '.',
   ];

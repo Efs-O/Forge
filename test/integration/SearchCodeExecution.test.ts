@@ -38,6 +38,12 @@ describe('isolated search_code process execution', () => {
     expect(result).not.toContain('second.ts');
   });
 
+  // Qwen searched for `--new` twice and gave up: rg took the query for a flag.
+  it('passes a query that starts with dashes as the pattern, not a flag', async () => {
+    const result = await tool().handler({ query: '--new', include: '**/*.ts', max_results: 1 });
+    expect(result).toContain('> 2: --new');
+  });
+
   it('kills the spawned search and reports caller cancellation', async () => {
     const controller = new AbortController();
     const pending = tool().handler(
