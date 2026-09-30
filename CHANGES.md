@@ -1,5 +1,18 @@
 # Forge — Recent Changes
 
+## 0.16.65
+
+### Asking a closed Claude session no longer returns an empty answer (2026-09-30)
+
+- When Forge asks Claude and the joined Claude session is closed, it answers
+  through a headless `--resume` of that session. If the resumed session still
+  owed a result to an earlier message (a queued task notification), Forge
+  took that result as the answer and ended the exchange before Claude had
+  read the question, so `ask_live_session` reported "completed without
+  returning an answer" and the real reply was lost. Forge now tags each
+  message it sends and ignores output until Claude echoes that tag back
+  (`--replay-user-messages`).
+
 ## 0.16.64
 
 ### `hf_discussion` job check (2026-09-30)

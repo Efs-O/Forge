@@ -90,6 +90,17 @@ if (process.argv.includes('--input-format')) {
           : '';
     turn += 1;
 
+    if (text.includes('TRIGGER_STALE_RESULT_FIRST')) {
+      // A resumed session finishing a turn queued before this message (e.g. a
+      // leftover task notification): its result arrives BEFORE our echo.
+      line({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Stale. ' }] } });
+      line({ type: 'result', subtype: 'success', is_error: false, session_id: sessionId, result: 'stale answer' });
+    }
+    if (process.argv.includes('--replay-user-messages')) {
+      // The real CLI echoes each user frame, keeping a caller-supplied uuid.
+      line({ type: 'user', message: msg.message, session_id: sessionId, uuid: msg.uuid, isReplay: true });
+    }
+
     if (text.includes('TRIGGER_PROTOCOL')) {
       // A line that is not a JSON frame: the owned session must fail the turn.
       process.stdout.write('{broken json\n');

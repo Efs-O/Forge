@@ -35,6 +35,17 @@ describe('ClaudeOwnedSession (P4: persistent stdio Claude session)', () => {
     await current.dispose();
   });
 
+  it('ignores a result owed to an earlier message and waits for its own', async () => {
+    // A resumed session can still owe a result to a message queued before
+    // ours (a leftover task notification); taking it ended an ask_live_session
+    // exchange with an empty answer while the real one was lost.
+    const current = session('persisted-claude-id');
+    const result = await current.send('TRIGGER_STALE_RESULT_FIRST');
+    expect(result.status).toBe('completed');
+    expect(result.finalText).toBe('Done claude turn 1 finished.');
+    await current.dispose();
+  });
+
   it('fails the turn on malformed protocol output and stays disposed-safe', async () => {
     const current = session();
     const result = await current.send('TRIGGER_PROTOCOL');

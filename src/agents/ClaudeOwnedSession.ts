@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import * as readline from 'readline';
 import { spawnCliProcess, terminateProcessTree, waitForCliProcessExit } from './cliProcess';
 import type { CliAgentRunResult } from './types';
@@ -46,6 +47,10 @@ interface ActiveTurn {
   signal?: AbortSignal;
   onAbort?: () => void;
   interrupted: boolean;
+  /** The uuid on this turn's user frame. Output before the CLI echoes it
+   *  (`--replay-user-messages`) belongs to an earlier turn, not this one. */
+  frameUuid?: string;
+  echoed?: boolean;
 }
 
 /**
@@ -118,7 +123,7 @@ export class ClaudeOwnedSession {
       if (options.signal?.aborted) onAbort();
       else options.signal?.addEventListener('abort', onAbort, { once: true });
       if (active.interrupted) void this.stop('Claude owned session interrupted.');
-      else this.writeUserMessage(task);
+      else this.writeUserMessage(active, task);
     });
   }
 
@@ -157,6 +162,10 @@ export class ClaudeOwnedSession {
       '--output-format',
       'stream-json',
       '--verbose',
+      // Echo each user frame back, so a turn can tell its own result from one
+      // a resumed session was still owing to an earlier message (a queued task
+      // notification finished first and its result was taken as the answer).
+      '--replay-user-messages',
       ...(this.options.confirmedSessionId ? ['--resume', this.options.confirmedSessionId] : []),
       ...(this.options.model ? ['--model', this.options.model] : []),
       ...(this.options.permissionMode ? ['--permission-mode', this.options.permissionMode] : []),
@@ -185,13 +194,15 @@ export class ClaudeOwnedSession {
     this.lifecycle = 'idle';
   }
 
-  private writeUserMessage(text: string): void {
+  private writeUserMessage(active: ActiveTurn, text: string): void {
     if (!this.child?.stdin?.writable) {
       void this.failProtocol('Claude owned session stdin is unavailable.');
       return;
     }
+    active.frameUuid = randomUUID();
     const frame = {
       type: 'user',
+      uuid: active.frameUuid,
       message: { role: 'user', content: text },
       parent_tool_use_id: null,
     };
@@ -218,6 +229,15 @@ export class ClaudeOwnedSession {
       if (typeof sid === 'string' && sid) this.sessionId = sid;
       return;
     }
+    if (type === 'user') {
+      const active = this.active;
+      if (active && msg['isReplay'] === true && msg['uuid'] === active.frameUuid) {
+        active.echoed = true;
+        active.text = '';
+      }
+      return;
+    }
+    if (!this.active?.echoed) return; // an earlier turn's tail, not ours
     if (type === 'assistant') {
       const message = msg['message'];
       const content =
