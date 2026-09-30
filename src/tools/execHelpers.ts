@@ -150,9 +150,17 @@ const PS_DANGEROUS_FLAGS = ['-command', '-encodedcommand', '-enc', '-ec', '-e', 
  * cannot be checked by the denylist. Matching the launcher name is the point:
  * a new PowerShell binary is a new hole, not a variant of an old one.
  */
-const PS_LAUNCHERS = ['powershell.exe', 'powershell', 'pwsh.exe', 'pwsh'];
-const SCRIPT_LAUNCHERS = ['bash', 'sh', 'zsh', 'dash', 'cmd', 'cmd.exe', 'busybox'];
+export const PS_LAUNCHERS = ['powershell.exe', 'powershell', 'pwsh.exe', 'pwsh'];
+export const SCRIPT_LAUNCHERS = ['bash', 'sh', 'zsh', 'dash', 'cmd', 'cmd.exe', 'busybox'];
 const SCRIPT_FLAGS = ['-c', '/c'];
+
+/** Return the first argument occupied by an inline script, or -1. */
+export function inlineScriptStart(command: string, args: string[]): number {
+  const cmd = (command.split(/[\\/]/).pop() ?? command).toLowerCase();
+  if (![...PS_LAUNCHERS, ...SCRIPT_LAUNCHERS].includes(cmd)) return -1;
+  const index = args.findIndex((arg) => ['-command', '-c', '/c'].includes(arg.toLowerCase()));
+  return index < 0 ? -1 : index + 1;
+}
 
 export function checkPowerShellBan(command: string, args: string[], shellScripts = false): void {
   // By basename: `/bin/bash` and a full `...\System32\cmd.exe` path are the same launchers.

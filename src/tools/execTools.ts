@@ -10,6 +10,7 @@ import {
   formatExecCommandOutput,
   formatOutput,
   guardExec,
+  inlineScriptStart,
   MAX_OUTPUT_CHARS,
   MAX_EXEC_OUTPUT_LINES,
   MAX_EXEC_STORED_CHARS,
@@ -174,29 +175,8 @@ export function makeExecCommandTool(
       }
       const cwd = resolveExecCwd(args['cwd'] as string | undefined);
       const shellScripts = shellScriptsEnabled();
-      const shellFlagIndex = cmdArgs.findIndex((arg) =>
-        ['-command', '-c', '/c'].includes(arg.toLowerCase()),
-      );
-
       try {
-        const launcher = command.split(/[\\/]/u).pop()?.toLowerCase() ?? command.toLowerCase();
-        const shellLauncher = [
-          'pwsh',
-          'pwsh.exe',
-          'powershell',
-          'powershell.exe',
-          'bash',
-          'sh',
-          'zsh',
-          'dash',
-          'cmd',
-          'cmd.exe',
-          'busybox',
-        ].includes(launcher);
-        checkShellOperators(
-          cmdArgs,
-          shellScripts && shellLauncher && shellFlagIndex >= 0 ? shellFlagIndex + 1 : -1,
-        );
+        checkShellOperators(cmdArgs, shellScripts ? inlineScriptStart(command, cmdArgs) : -1);
       } catch (error) {
         throw new ExecCommandError(
           'invalid_shell_syntax',

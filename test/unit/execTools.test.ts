@@ -44,8 +44,13 @@ describe('exec_command safety policy', () => {
     const tool = makeExecCommandTool(() => true);
     const cases = [
       { command: 'pwsh', args: ['-Command', 'Remove-Item x -Recurse -Force'] },
+      { command: 'pwsh', args: ['-Comm', 'Remove-Item x -Recurse -Force'] },
       { command: 'cmd', args: ['/c', 'rd /s x'] },
       { command: 'bash', args: ['-c', 'rm -rf x'] },
+      { command: 'bash', args: ['-c', 'echo hi && rm -rf x'] },
+      { command: 'bash', args: ['-c', 'echo hi; git reset --hard'] },
+      { command: 'bash', args: ['-c', 'if true; then rm -rf x; fi'] },
+      { command: 'bash', args: ['-c', 'X=1 rm -rf x'] },
       { command: 'bash', args: ['-c', 'git reset --hard'] },
     ];
     for (const run of cases) {
@@ -69,6 +74,43 @@ describe('exec_command safety policy', () => {
           }),
         ).rejects.toThrow('line 2');
       }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('scans extensionless shell scripts and any PowerShell -File extension', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-exec-extensionless-'));
+    const shellFile = path.join(dir, 'deploy');
+    const chainedFile = path.join(dir, 'deploy.sh');
+    const psFile = path.join(dir, 'deploy.txt');
+    fs.writeFileSync(shellFile, 'git reset --hard\n');
+    fs.writeFileSync(chainedFile, 'if true; then rm -rf x; fi\n');
+    fs.writeFileSync(psFile, 'Remove-Item x -Recurse -Force\n');
+    try {
+      await expect(makeExecCommandTool(() => true).handler({
+        command: 'bash', args: [shellFile], cwd: dir,
+      })).rejects.toThrow('git reset --hard');
+      await expect(makeExecCommandTool(() => true).handler({
+        command: 'bash', args: [chainedFile], cwd: dir,
+      })).rejects.toThrow('rm -rf');
+      await expect(makeExecCommandTool(() => true).handler({
+        command: 'pwsh', args: [psFile], cwd: dir,
+      })).rejects.toThrow('PowerShell recursive force delete');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('scans UTF-16LE PowerShell scripts', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-exec-utf16-'));
+    const file = path.join(dir, 'danger.ps1');
+    const body = Buffer.from('Remove-Item x -Recurse -Force\n', 'utf16le');
+    fs.writeFileSync(file, Buffer.concat([Buffer.from([0xff, 0xfe]), body]));
+    try {
+      await expect(makeExecCommandTool(() => true).handler({
+        command: 'pwsh', args: ['-File', file], cwd: dir,
+      })).rejects.toThrow('PowerShell recursive force delete');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
