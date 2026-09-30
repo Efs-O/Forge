@@ -168,7 +168,7 @@ export class ToolDispatch {
         }
         const lazyGroup = lazyGroupForTool(tc.function.name);
         if (lazyGroup === 'computer_use' && modelContext?.isVisionModel === false) {
-          result = `computer_use is unavailable on non-vision model "${modelContext.modelName}"`;
+          result = `computer_use is unavailable on non-vision model "${modelContext.modelName}"; do not retry. Answer from the workspace and the conversation instead.`;
           this.postResult(tc, result, undefined, convId);
           messages.push(this.toolMessage(tc, toolResultContent(result), startedAt));
           continue;

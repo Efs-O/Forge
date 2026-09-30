@@ -326,8 +326,17 @@ default fails this test.
 - Phase 1: README carries warnings 1–3 in "Responsibility and Risk".
 - Phase 2: `run_tests`/`run_build` gone from the registry, benchmark harness green,
   audit script shows no rise in npm/npx `exec_command` failures over one week.
-- Phase 3: tool-schema tokens for a default conversation drop by ≥ 8K (measured with
-  the tokenizer script); live test passes the criteria above; a compaction clears
+- Phase 3: tool-schema tokens drop, measured with llama-tokenize per definition.
+  **Amended 2026-09-30 after measuring; the original "≥ 8K" is not met.** That
+  figure came from the audit's "~11.7K in tools used ≤ 3×". The rare-only rule
+  (≥ 10 audited calls stays eager) keeps `ask_live_session`, `manage_jobs`,
+  `notify_user`, `ask_local_agent`, `ask_user` and three more eager, and they carry
+  much of that 11.7K. Measured: the user's config (79 tools, browser/desktop off)
+  saves ~4.8K of grouped schemas, minus the larger `load_tool_group` description,
+  so about 4.5K net. StarterConfig defaults save 1,725 (6,987 → 5,262); with
+  browser+desktop on, 4,272 (9,534 → 5,262). Shipped anyway: the cost is a
+  one-time re-read in the rare conversations that need a group.
+  Live test passes the criteria above; a compaction clears
   active groups; a non-vision model cannot load `computer_use`.
 - Side change A: with the keys unset, owned-session argv and `thread/start` params are
   byte-identical to today (test); with them set, `codex_model`/`codex_effort` reach
