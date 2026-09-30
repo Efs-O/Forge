@@ -10,6 +10,13 @@
   hold the single slot, or unload the user's model under their next message.
   A deferred job stays pending and retries every tick, as a busy one already did.
 
+### Job admission reads the real slot count (2026-09-30)
+
+- `parallelCapacity` read `n_parallel` from the request-time model, which never
+  sees the `spawn:` block where every config sets it, so every 1-slot server
+  reported 4 slots. A scheduled job was admitted beside a streaming turn on the
+  same single slot and the two interleaved. It now reads the spawn-time model.
+
 ### Mid-turn compaction cap resets after a productive stretch (2026-09-30)
 
 - The two-compactions-per-turn cap now resets once a compaction has bought

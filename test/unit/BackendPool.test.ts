@@ -167,6 +167,19 @@ describe('BackendPool port accounting', () => {
     expect(pool.isLoaded('A-legacy')).toBe(true);
   });
 
+  it('reads parallel capacity from the spawn block, through @profile and aliases', () => {
+    const cfg = makeConfig(1);
+    cfg.profiles = { main: {} };
+    cfg.aliases = { 'A-legacy': 'A@main' };
+    cfg.models[0].spawn = { n_parallel: 1 };
+    const pool = new BackendPool(cfg);
+    // The 08:00 job was admitted beside a streaming turn on a 1-slot server
+    // because the request-time model never sees `spawn:` and this read 4.
+    expect(pool.parallelCapacity('A@main')).toBe(1);
+    expect(pool.parallelCapacity('A-legacy')).toBe(1);
+    expect(pool.parallelCapacity('B')).toBe(4);
+  });
+
   it('retains the old slot and port when eviction fails, then permits retry', async () => {
     const pool = new BackendPool(makeConfig(1));
     const first = pool.acquire('A');

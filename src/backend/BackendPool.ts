@@ -4,7 +4,6 @@ import type { ForgeConfig } from '../config/types';
 import {
   expandAlias,
   mergeGroupsIntoModel,
-  resolveRequestModel,
   resolveSpawnModel,
   splitModelProfile,
 } from '../config/ConfigResolver';
@@ -90,9 +89,12 @@ export class BackendPool implements IBackendPool {
     return this.gate.acquire(primaryModel, targetModel);
   }
 
+  /** Slots on the server this model runs on. `n_parallel` is a spawn field
+   *  (usually under `spawn:`), so it must come from the spawn-time flatten —
+   *  the request-time model never sees it and reported 4 for 1-slot servers. */
   parallelCapacity(modelName: string): number {
-    const model = resolveRequestModel(this.config, modelName);
-    return model?.n_parallel ?? this.config.llama_server.n_parallel ?? 4;
+    const model = resolveSpawnModel(this.config, this.poolKey(modelName));
+    return model.n_parallel ?? this.config.llama_server.n_parallel ?? 4;
   }
 
   acquire(modelName: string): Promise<BackendController> {
