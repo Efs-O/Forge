@@ -2,6 +2,25 @@
 
 ## 0.16.67
 
+### Set up Forge with Claude Code or Codex (2026-09-30)
+
+- New command **Forge: Set Up With Claude Code / Codex**. It copies a prompt
+  to paste into the agent you already use. The prompt points the agent at
+  `AI_SETUP.md`, which now ships in the extension, and names the extension
+  folder and both config locations.
+- The file takes the agent through the setup step by step:
+  - survey the GPU, the model files and the tools already on PATH;
+  - install llama.cpp with checksums verified;
+  - write the config with settings that fit the GPU;
+  - check each step against Forge's own control server;
+  - optionally set up the Claude/Codex mesh, Telegram and web search.
+- Keys and tokens stay in VS Code's secret storage: the agent hands those steps
+  to you rather than asking for them.
+- It works before any config exists. With no config, the setup screen offers it
+  next to the wizard.
+- A test checks every command, config key and file path `AI_SETUP.md` names, so
+  the file cannot drift from the extension unnoticed.
+
 ### Reading an image points at the media group (2026-09-30)
 
 - `read_file` on an image told the model that if `view_image` was not

@@ -390,6 +390,15 @@ is not the setting for this.
 
 Install Forge from the VS Code Marketplace or Open VSX, or load the packaged VSIX.
 
+**Easiest: let Claude Code or Codex set it up.** Run **Forge: Set Up With
+Claude Code / Codex** from the Command Palette. It copies a prompt that points
+your agent at `AI_SETUP.md`, which ships with the extension. The agent surveys
+your GPU and model files, installs llama.cpp if you need it, writes the config,
+and checks the result against Forge itself. It stops and asks you whenever a
+step needs you: a window reload, a login, or a key, which you enter into VS Code
+yourself and never into a file or the chat. The steps below are the manual
+route.
+
 ### 2. Create `.forge/config.yaml`
 
 Forge looks for:

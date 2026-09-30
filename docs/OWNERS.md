@@ -79,6 +79,7 @@ overlaps with an existing owner, extend the owner instead.
 | First-run setup wizard                               | `src/sidebar/FirstRunWizard.ts`          |
 | Add-model setup wizard                               | `src/sidebar/AddModelWizard.ts`          |
 | Missing-config setup mode                            | `src/sidebar/SetupMode.ts`               |
+| AI setup handoff (prompt for Claude Code / Codex)    | `src/vscode/agentSetupCommand.ts` + `AI_SETUP.md` |
 | Keep/Undo CodeLens decorations                       | `src/sidebar/KeepUndoCodeLens.ts`        |
 | Typed webview ↔ host message contract                | `src/sidebar/messageBridge.ts`           |
 | Webview diagnostic message shapes                    | `src/sidebar/diagnosticMessages.ts`      |

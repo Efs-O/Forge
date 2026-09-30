@@ -14,6 +14,7 @@ import { ControlServerRegistry, controlServerRegistryPath } from './backend/Cont
 import { buildControlChatProxy } from './llm/ControlChatProxy';
 import { registerControlServerCommands } from './vscode/controlCommands';
 import { setupAgentMessaging } from './vscode/agentMessagingSetup';
+import { registerAgentSetupCommand } from './vscode/agentSetupCommand';
 import { bootstrapConfig } from './vscode/configBootstrap';
 import { setupRemoteRuntime } from './vscode/remoteRuntimeSetup';
 import { bootstrapWorkspace } from './vscode/workspaceBootstrap';
@@ -64,6 +65,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const storagePath = context.globalStorageUri.fsPath;
   const statusBar = new BackendStatusBar();
   context.subscriptions.push(statusBar);
+
+  registerAgentSetupCommand(context);
 
   // ── Find or create config ─────────────────────────────────────────────────
   const bootstrapped = bootstrapConfig(context, statusBar, storagePath);
