@@ -122,7 +122,8 @@ user has signed in with the Ollama CLI; Forge sends no key.
 ## Step 5 — Turn on the control server
 
 Add this to the config. It binds to `127.0.0.1` only and is how you check the
-setup (and it carries the agent mesh in step 7):
+setup (and it carries the agent mesh in step 7, which also needs
+`agent_bus.enabled`):
 
 ```yaml
 control_server:
@@ -166,7 +167,13 @@ Forge installs its message client at `~/.forge/agent-bus/forge.sh` and its own
 notes in `~/.forge/agent-bus/README.md`; read that README rather than this
 section for the command set. Requirements:
 
-- the control server from step 5;
+- the control server from step 5, and the bus itself, which is off by default:
+
+  ```yaml
+  agent_bus:
+    enabled: true
+  ```
+
 - the CLIs installed and logged in (step 4);
 - **Windows:** run `forge.sh` with Git Bash by full path
   (`& "C:\Program Files\Git\bin\bash.exe" ~/.forge/agent-bus/forge.sh ...`),

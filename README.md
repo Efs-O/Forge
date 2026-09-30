@@ -293,6 +293,15 @@ extensions, so:
    Microsoft Store package does not work), and the `~/.forge/agent-bus/forge.sh`
    client needs **Git Bash** — in PowerShell a bare `bash` is WSL.
 
+5. **For the agent mesh** (`forge.sh`), turn on both the control server and the
+   bus. Both are off by default:
+   ```yaml
+   control_server:
+     enabled: true
+   agent_bus:
+     enabled: true
+   ```
+
 Nothing needs to go into Claude's memory or an `AGENTS.md`: Forge writes its own
 agent-bus notes to `~/.forge/agent-bus/`, and every message it sends carries its
 own reply instructions.

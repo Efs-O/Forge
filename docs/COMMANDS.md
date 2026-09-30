@@ -28,6 +28,7 @@ These commands are currently contributed by the extension.
 | `Forge: Add Models`           | Add model entries to the config      |
 | `Forge: Compact config into groups` | Migrate the config into shared groups (comment-preserving) |
 | `Forge: Setup Wizard`         | Run the first-run or repair flow     |
+| `Forge: Set Up With Claude Code / Codex` | Copy a prompt that has your Claude Code / Codex set Forge up from the shipped `AI_SETUP.md` |
 | `Forge: Unload Active Chat's Model` | Release only the active chat's model |
 | `Forge: Unload All Models`    | Stop all backends and release models |
 | `Forge: New Chat`             | Open a new conversation tab          |
