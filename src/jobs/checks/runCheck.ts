@@ -1,6 +1,7 @@
 import { jobsFetch } from '../jobsFetch';
 import { githubIssueCheck, githubReleaseCheck } from './github';
 import { diskSpaceCheck } from './diskSpace';
+import { hfDiscussionCheck } from './huggingface';
 import type { CheckContext } from './checkTypes';
 import type { CheckResult } from './checkTypes';
 import type { JobFile } from '../jobSchema';
@@ -19,6 +20,8 @@ export async function runCheck(job: JobFile, ctx: CheckContext): Promise<CheckRe
       return githubReleaseCheck(def.check, lastObservation, ctx);
     case 'github_issue':
       return githubIssueCheck(def.check, lastObservation, ctx);
+    case 'hf_discussion':
+      return hfDiscussionCheck(def.check, lastObservation, ctx);
     case 'disk_space':
       return diskSpaceCheck(def.check, lastObservation, ctx);
     case 'none':

@@ -50,7 +50,7 @@ export const ScheduleSchema = z.discriminatedUnion('kind', [
 ]);
 export type Schedule = z.infer<typeof ScheduleSchema>;
 
-/** What a job watches. Exactly one of the four (B.2). */
+/** What a job watches. Exactly one of the five (B.2). */
 export const CheckSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('github_release'),
@@ -71,6 +71,13 @@ export const CheckSchema = z.discriminatedUnion('kind', [
     repo: RepoSchema,
     issue_number: z.number().int().positive(),
   }),
+  /** A Hugging Face discussion or PR thread; a new event or status change is a change. */
+  z.object({
+    kind: z.literal('hf_discussion'),
+    repo: RepoSchema,
+    repo_type: z.enum(['model', 'dataset', 'space']).default('model'),
+    discussion_number: z.number().int().positive(),
+  }),
   z.object({
     kind: z.literal('disk_space'),
     path: z.string().min(1),
@@ -84,6 +91,7 @@ export const CheckSchema = z.discriminatedUnion('kind', [
 export type Check = z.infer<typeof CheckSchema>;
 export type GithubReleaseCheck = Extract<Check, { kind: 'github_release' }>;
 export type GithubIssueCheck = Extract<Check, { kind: 'github_issue' }>;
+export type HfDiscussionCheck = Extract<Check, { kind: 'hf_discussion' }>;
 export type DiskSpaceCheck = Extract<Check, { kind: 'disk_space' }>;
 
 /**

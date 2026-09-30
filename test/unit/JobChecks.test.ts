@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { assetMatches, githubIssueCheck, githubReleaseCheck } from '../../src/jobs/checks/github';
+import { hfDiscussionCheck } from '../../src/jobs/checks/huggingface';
 import type { CheckContext } from '../../src/jobs/checks/checkTypes';
 import type { JobsFetchResult } from '../../src/jobs/jobsFetch';
 
@@ -164,5 +165,54 @@ describe('githubIssueCheck', () => {
     );
     expect(result.changed).toBe(false);
     expect(result.observation).toBe(last);
+  });
+});
+
+describe('hfDiscussionCheck', () => {
+  const check = {
+    kind: 'hf_discussion' as const,
+    repo: 'Jackrong/Qwopus3.8-27B-Flash-V2-GGUF',
+    repo_type: 'model' as const,
+    discussion_number: 2,
+  };
+  const comment = (id: string, raw: string) => ({
+    id,
+    type: 'comment',
+    createdAt: '2026-09-23T10:30:56.000Z',
+    author: { name: 'Efso' },
+    data: { latest: { raw } },
+  });
+  const thread = (status: string, events: object[]) => JSON.stringify({ status, title: 't', events });
+
+  it('fetches the model discussion API and records a baseline without a change', async () => {
+    const urls: string[] = [];
+    const ctx = fakeCtx(thread('open', [comment('a', 'hi')]));
+    const r = await hfDiscussionCheck(check, null, { ...ctx, fetch: (u) => (urls.push(u), ctx.fetch(u)) });
+    expect(urls).toEqual([
+      'https://huggingface.co/api/models/Jackrong/Qwopus3.8-27B-Flash-V2-GGUF/discussions/2',
+    ]);
+    expect(r.changed).toBe(false);
+    expect(JSON.parse(r.observation!)).toMatchObject({ status: 'open', events: 1 });
+  });
+
+  it('a new comment or a status change is a change; an edited comment is not', async () => {
+    const base = (await hfDiscussionCheck(check, null, fakeCtx(thread('open', [comment('a', 'hi')])))).observation;
+    const edited = await hfDiscussionCheck(check, base, fakeCtx(thread('open', [comment('a', 'hi (edited)')])));
+    expect(edited.changed).toBe(false);
+    const reply = await hfDiscussionCheck(check, base, fakeCtx(thread('open', [comment('a', 'hi'), comment('b', 'ok')])));
+    expect(reply.changed).toBe(true);
+    expect(reply.summary).toContain('2 events');
+    const closed = await hfDiscussionCheck(check, base, fakeCtx(thread('closed', [comment('a', 'hi')])));
+    expect(closed.changed).toBe(true);
+  });
+
+  it('a 304 keeps the last observation, even a null baseline', async () => {
+    expect(await hfDiscussionCheck(check, null, fakeCtx(null))).toMatchObject({ observation: null, changed: false });
+  });
+
+  it('an error payload throws with the API message', async () => {
+    await expect(hfDiscussionCheck(check, null, fakeCtx(JSON.stringify({ error: 'Repository not found' })))).rejects.toThrow(
+      'Repository not found',
+    );
   });
 });

@@ -1,5 +1,16 @@
 # Forge — Recent Changes
 
+## 0.16.64
+
+### `hf_discussion` job check (2026-09-30)
+
+- A job can now watch a Hugging Face discussion or PR thread:
+  `check: {kind: hf_discussion, repo, repo_type?, discussion_number}`. A new
+  comment or status change is a change; an edit to an existing comment is not.
+  Paired with an `agent_task`, the agent reads the thread only on days it
+  moved, instead of running a model turn daily to report "no new comments".
+  Needs `huggingface.co` in `jobs.allowed_hosts`.
+
 ## 0.16.63
 
 ### Scheduled jobs wait for the user to go quiet (2026-09-30)

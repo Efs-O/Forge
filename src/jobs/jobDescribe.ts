@@ -26,6 +26,8 @@ export function describeCheck(check: Job['check']): string {
       return `github_release ${check.repo}${check.asset_pattern ? ` (asset ${check.asset_pattern})` : ''}`;
     case 'github_issue':
       return `github_issue ${check.repo}#${check.issue_number}`;
+    case 'hf_discussion':
+      return `hf_discussion ${check.repo}#${check.discussion_number}`;
     case 'disk_space':
       return `disk_space ${check.path} (min ${check.min_free_gb} GB free)`;
     case 'none':
