@@ -10,6 +10,16 @@
   refusal now says to call `load_tool_group` with `media` first, and leaves the
   no-vision verdict to `view_image`, which already gives it.
 
+### Live tests resolve the bundled ripgrep (2026-09-30)
+
+- The lazy-tool live tests ran with the vscode mock's `env.appRoot` undefined,
+  so `find_files`/`search_code` fell back to a bare `rg` that is not on PATH and
+  failed with `spawn rg ENOENT`. The live test now points `env.appRoot` at the
+  real VS Code app root — discovered from the `code` shim on PATH, or an
+  explicit `FORGE_LIVE_APP_ROOT` override — where the bundled ripgrep lives, so
+  those tools resolve a real binary. Live-only: it runs on a dev machine where
+  VS Code is installed, and there is no silent PATH fallback in production code.
+
 ## 0.16.66
 
 ### A job's state write no longer dies on a transient Windows rename (2026-09-30)

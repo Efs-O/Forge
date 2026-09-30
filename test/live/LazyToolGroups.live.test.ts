@@ -33,7 +33,7 @@ import { UserQuestionService } from '../../src/sidebar/UserQuestionService';
 import { UserNotificationService } from '../../src/sidebar/UserNotificationService';
 import type { IndexManager } from '../../src/search/IndexManager';
 import type { ToolDefinition } from '../../src/llm/types';
-import { runLiveToolLoop } from './liveModelHarness';
+import { resolveLiveAppRoot, runLiveToolLoop } from './liveModelHarness';
 
 const LIVE = process.env['FORGE_LIVE_LAZY_TOOLS'] === '1';
 const ENDPOINT = process.env['FORGE_LIVE_ENDPOINT'] ?? 'http://127.0.0.1:8080';
@@ -150,6 +150,15 @@ describe.runIf(LIVE)('lazy tool groups against a live Qwen3.8', () => {
     }
     // Real Forge always has the repo open; without it every path tool throws.
     vscode.workspace.workspaceFolders.splice(0, Infinity, { uri: vscode.Uri.file(ROOT) });
+    // The mock's appRoot is undefined, so find_files/search_code would fall back
+    // to a bare `rg` that is not on PATH. Point it at the real VS Code app root.
+    const appRoot = resolveLiveAppRoot();
+    if (!appRoot) {
+      throw new Error(
+        'No VS Code install found for the bundled ripgrep; set FORGE_LIVE_APP_ROOT to <install>/<hash>/resources/app',
+      );
+    }
+    vscode.env.appRoot = appRoot;
     await buildRegistry();
     // A green run here without all seven groups registered would prove nothing.
     for (const group of [
@@ -169,6 +178,7 @@ describe.runIf(LIVE)('lazy tool groups against a live Qwen3.8', () => {
 
   afterAll(() => {
     vscode.workspace.workspaceFolders.splice(0);
+    vscode.env.appRoot = undefined;
     mcp?.dispose();
     expect(wrongGroupLoads).toBeLessThanOrEqual(1);
   });

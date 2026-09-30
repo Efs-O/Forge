@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import type { ChatMessage, ToolDefinition } from '../../src/llm/types';
 import type {
   ToolHandlerContext,
@@ -162,4 +164,43 @@ export async function runLiveToolLoop(options: {
   // cap: the steps already spent did real work, and throwing discards the
   // record of what the model actually chose to call.
   return { final: '', calls, toolCalls: recordedCalls, hitStepLimit: true };
+}
+
+/**
+ * Resolve the real VS Code app root so the bundled ripgrep can be found.
+ *
+ * The vscode mock's env.appRoot is undefined, so find_files/search_code would
+ * fall back to a bare `rg` that is not on PATH (and fail with `spawn rg
+ * ENOENT`). The `code` shim is on PATH at <install>/bin/code(.cmd); the app
+ * root is <install>/<commitHash>/resources/app — the commit-hash dir whose
+ * resources/app/out/cli.js exists, most recently modified wins. An explicit
+ * FORGE_LIVE_APP_ROOT override wins over discovery. Live-only: this runs in a
+ * manually-invoked live test on a dev machine where VS Code is installed.
+ */
+export function resolveLiveAppRoot(): string | undefined {
+  const override = process.env['FORGE_LIVE_APP_ROOT'];
+  if (override) return override;
+  const shimNames = process.platform === 'win32' ? ['code.cmd', 'code'] : ['code'];
+  for (const dir of (process.env['PATH'] ?? '').split(path.delimiter)) {
+    if (!dir) continue;
+    for (const name of shimNames) {
+      const shim = path.join(dir, name);
+      if (!fs.existsSync(shim)) continue;
+      const installRoot = path.dirname(path.dirname(shim));
+      let best: { appDir: string; mtime: number } | undefined;
+      try {
+        for (const entry of fs.readdirSync(installRoot, { withFileTypes: true })) {
+          if (!entry.isDirectory()) continue;
+          const appDir = path.join(installRoot, entry.name, 'resources', 'app');
+          if (!fs.existsSync(path.join(appDir, 'out', 'cli.js'))) continue;
+          const mtime = fs.statSync(appDir).mtimeMs;
+          if (!best || mtime > best.mtime) best = { appDir, mtime };
+        }
+      } catch {
+        continue; // install root unreadable; try the next shim hit
+      }
+      if (best) return best.appDir;
+    }
+  }
+  return undefined;
 }
