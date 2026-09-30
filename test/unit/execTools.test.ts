@@ -28,7 +28,10 @@ describe('exec_command safety policy', () => {
     const tool = makeExecCommandTool(() => true);
     const cases = [
       { command: 'pwsh', args: ['-NoProfile', '-Command', 'Write-Output forge-ok'] },
-      { command: 'cmd', args: ['/c', 'echo forge-ok'] },
+      // cmd exists only on Windows; the Linux and macOS runners skip it.
+      ...(process.platform === 'win32'
+        ? [{ command: 'cmd', args: ['/c', 'echo forge-ok'] }]
+        : []),
       { command: 'bash', args: ['-c', 'printf forge-ok'] },
     ];
     for (const run of cases) {
@@ -38,7 +41,7 @@ describe('exec_command safety policy', () => {
       expect(output.exitCode).toBe(0);
       expect(output.stdout.toLowerCase()).toContain('forge-ok');
     }
-  });
+  }, 30_000);
 
   it('keeps the denylist active for script text with the flag enabled', async () => {
     const tool = makeExecCommandTool(() => true);

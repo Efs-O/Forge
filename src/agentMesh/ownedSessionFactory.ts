@@ -149,7 +149,11 @@ export class OwnedSessionFactory {
     const threadId = rec?.thread_id ?? aliasRec?.session_id;
     try {
       const bus = this.deps.getConfig().agent_bus;
-      const executable = await resolveCliExecutable(bus?.codex_cli ?? 'codex', 'codex');
+      // As for Claude below: an injected factory is a test double, so resolving
+      // the real CLI would make the mesh tests depend on Codex being installed.
+      const executable = this.deps.codexFactory
+        ? (bus?.codex_cli ?? 'codex')
+        : await resolveCliExecutable(bus?.codex_cli ?? 'codex', 'codex');
       const factory = this.deps.codexFactory ?? defaultCodexFactory();
       const session = await factory.create({
         alias,
