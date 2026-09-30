@@ -428,6 +428,37 @@ describe('forge.sh against the routes', () => {
     expect(calls.slice(2)).toEqual(['accept front=false']);
   }, 30_000);
 
+  it('refuses a queued message from the agent Forge is blocked on, for any sender', async (ctx) => {
+    if (!usable) ctx.skip();
+    const calls: string[] = [];
+    const awaited: Record<string, string> = { claude: 'fg1-aaaa', codex: 'fg2-bbbb' };
+    routes = new AgentRoutes({
+      paths: () => paths,
+      inbox: {
+        accept: (_prompt, from, front) => (
+          calls.push(`${String(from)} front=${String(front)}`),
+          { position: 1, id: 'm1' }
+        ),
+        cancel: () => 0,
+      },
+      token: TOKEN,
+      interruptForge: async () => void calls.push('interrupt'),
+      awaitingAnswerFrom: (from) => awaited[from],
+    });
+    routes.setEnabled(true);
+    routes.onListening(base);
+    for (const sender of ['claude', 'codex']) {
+      const said = await runClient(['say', sender], 'redo 70K');
+      expect(said.code).not.toBe(0);
+      expect(said.out).toContain(`forge.sh reply ${awaited[sender]}`);
+    }
+    expect(calls).toEqual([]);
+    // A steer is the explicit stop and still gets through; others still queue.
+    expect((await runClient(['steer', 'codex', 'forge'], 'stop')).out).toContain('"steered":true');
+    expect((await runClient(['say', 'copilot'], 'plain')).out).toContain('"queued"');
+    expect(calls).toEqual(['codex front=true', 'interrupt', 'copilot front=false']);
+  }, 30_000);
+
   it('refuses a bad id or name before sending anything', async (ctx) => {
     if (!usable) ctx.skip();
     expect((await runClient(['reply', '../x'], 'a')).code).toBe(2);

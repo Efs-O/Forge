@@ -77,6 +77,12 @@ export interface AgentRoutesDeps {
    * next. Absent ⇒ a steer to Forge queues like any message.
    */
   interruptForge?: () => Promise<void>;
+  /**
+   * The question Forge's turn is blocked on `from` answering, if any. A queued
+   * message from that sender would run only after the answer and read as newer
+   * than it, so it is refused with the reply command instead. Steers pass.
+   */
+  awaitingAnswerFrom?: (from: string) => string | undefined;
   join?: (
     alias: string,
     pid: number,
@@ -347,6 +353,15 @@ export class AgentRoutes {
       const steerForge =
         (typeof fields['priority'] === 'string' ? fields['priority'] : '').trim().toLowerCase() ===
           'steer' && !!this.deps.interruptForge;
+      const awaited = steerForge ? undefined : this.deps.awaitingAnswerFrom?.(from);
+      if (awaited) {
+        throw new HttpError(
+          409,
+          `Forge is blocked waiting for your answer to question ${awaited}, so this message would ` +
+            `only reach it after that answer and read as newer. Put it in your answer instead: ` +
+            `forge.sh reply ${awaited} <file>. To stop Forge's turn, send it as a steer.`,
+        );
+      }
       const options = this.messageOptions(fields);
       const accepted = this.deps.inbox.accept(
         forgeInboundPrompt(from, text, options.replyInChat === true),

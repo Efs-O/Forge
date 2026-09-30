@@ -2,6 +2,14 @@
 
 ## 0.16.66
 
+### No queued message from an agent Forge is waiting on (2026-09-30)
+
+- While Forge's turn is blocked waiting for Claude, Codex or Copilot to answer
+  its question, a queued message from that same agent is refused. The refusal
+  names the `forge.sh reply` command to put the message into the answer
+  instead. Such a message could only run after the answer and would read as
+  newer than it. A steer still gets through.
+
 ### A queued agent message says how old it is (2026-09-30)
 
 - A bus message that waited a minute or more in Forge's queue now arrives

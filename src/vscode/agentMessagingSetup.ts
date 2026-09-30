@@ -20,6 +20,7 @@ import { parseForgeInboundPrompt } from '../agentBus/busContent';
 import { setupAgentMesh } from './agentMeshSetup';
 import { BUS_TARGET_SCAN, busTargetConversation, senderConversation } from '../agentBus/busTarget';
 import { BusTurnWatch } from '../agentBus/busTurnWatch';
+import { awaitedAnswers } from '../agentBus/awaitedAnswers';
 import { renderBusStatus, renderBusView } from '../agentBus/busStatusView';
 import { MAX_VIEW_COUNT, parseViewCount } from '../remote/RemoteTranscriptView';
 
@@ -196,6 +197,7 @@ export function setupAgentMessaging(
         await facade.interrupt(status.activeConversationId);
       }
     },
+    awaitingAnswerFrom: (from) => awaitedAnswers.pendingFor(from),
     validateFrom: mesh.validateFrom,
     // §10: an interactive Claude/Codex session supersedes a Forge-owned peer.
     join: async (alias, pid, thread) => {

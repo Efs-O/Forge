@@ -15,6 +15,7 @@ import {
   type Orphans,
 } from '../agentBus/agentBus';
 import { claudeQuestion } from '../agentBus/busContent';
+import { awaitedAnswers } from '../agentBus/awaitedAnswers';
 import { liveAnswerNotices } from '../agentBus/liveAnswerNotices';
 import { codexMessage, queueToCodex } from '../agentBus/codexDelivery';
 import { getBoardContext, getMeshOrchestrator } from '../agentMesh/meshContext';
@@ -334,7 +335,7 @@ ${turn}`
             })
           );
         }
-        return late + (await settle(signal));
+        return late + (await awaitedAnswers.during(target, id, () => settle(signal)));
       }
 
       let deliver: () => Promise<void>;
@@ -434,7 +435,7 @@ ${turn}`
       if (notifyOnAnswer) {
         return late + deferAnswer(conversationId, id, who, subject, requested, settle);
       }
-      return late + (await settle(signal));
+      return late + (await awaitedAnswers.during(target, id, () => settle(signal)));
     },
   };
 }

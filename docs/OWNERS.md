@@ -531,6 +531,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Agent-bus files (ids, wait, replies, orphans, TTL)         | `src/agentBus/agentBus.ts`                                     |
 | Agent-bus shipped text (README, message bodies)            | `src/agentBus/busContent.ts`                                   |
 | Deferred live-session answers (`notify_on_answer` notices)  | `src/agentBus/liveAnswerNotices.ts`                            |
+| Agents Forge's turn is blocked on (refuses their queued messages) | `src/agentBus/awaitedAnswers.ts` |
 | Agent-bus client script (`~/.forge/agent-bus/forge.sh`)    | `src/agentBus/forge.sh` (bundled as text by busContent.ts)     |
 | Claude session registry + peer-pipe delivery               | `src/agentBus/claudePeer.ts`                                   |
 | Claude delivery via a `claude -p` relay (opt-in)           | `src/agentBus/claudeRelay.ts`                                  |
