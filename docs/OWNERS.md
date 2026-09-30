@@ -463,6 +463,7 @@ overlaps with an existing owner, extend the owner instead.
 | Markdown -> speakable text                       | `src/voice/SpeechRenderer.ts`          |
 | Spoken reply delivery                            | `src/remote/RemoteSpeechDelivery.ts`   |
 | Telegram voice note -> draft -> prompt           | `src/remote/RemoteVoiceBridge.ts`      |
+| Voice config-to-bridge assembly and draft wiring | `src/remote/remoteVoiceWiring.ts`      |
 | Bot API update -> `RemoteInboundEvent`           | `src/remote/TelegramInboundMapping.ts` |
 
 ffmpeg discovery is NOT owned here — it stays `src/tools/ffmpegLocate.ts`, and

@@ -1,7 +1,9 @@
 import { VoiceIngress, type NormalizeStep } from '../voice/VoiceIngress';
 import { VoiceOperation } from '../voice/VoiceOperation';
 import { admittedFrom, VoiceAuditLog, type VoiceAuditSink } from '../voice/VoiceAudit';
+import { VoiceAuditFileSink } from '../voice/VoiceAuditFileSink';
 import type { VoiceTranscript, WhisperRunner } from '../voice/VoiceTypes';
+import type { ForgeConfig } from '../config/types';
 import {
   correlateGate,
   matchVoiceCommand,
@@ -10,12 +12,8 @@ import {
   type VoiceCommand,
 } from '../voice/VoiceGrammar';
 import { PendingVoiceDraft, type DraftResolution } from '../voice/PendingVoiceDraft';
-import { VoiceAuditFileSink } from '../voice/VoiceAuditFileSink';
 import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
-import { WhisperCppRunner, type WhisperCppOptions } from '../voice/WhisperCppRunner';
-import type { ForgeConfig, VoiceConfig } from '../config/types';
-import { WhisperServerProcess } from '../voice/WhisperServerProcess';
-import { WhisperServerRunner } from '../voice/WhisperServerRunner';
+import { buildVoiceBridge as buildVoiceBridgeWiring } from './remoteVoiceWiring';
 
 /**
  * Turns an inbound voice note into a draft the sender confirms, and nothing more.
@@ -338,159 +336,19 @@ export class RemoteVoiceBridge {
 function draftKey(channel: string, chatId: string): string {
   return `${channel} ${chatId}`;
 }
+export { buildSpokenGateContext, resolveVoiceDraft } from './remoteVoiceWiring';
 
-/**
- * Builds the bridge from config, or returns undefined when voice is off.
- *
- * Undefined rather than a disabled instance: an absent bridge makes the
- * controller's voice branch statically dead when the feature is off, so a
- * misconfigured install cannot spawn a transcription process at all.
- *
- * Both paths must be set. A default guess at where a 3 GB model lives would
- * fail at record time with a bare non-zero exit, which is exactly the hidden
- * fallback the no-fallbacks rule exists to prevent.
- */
 export function buildVoiceBridge(
   channel: RemoteChannel,
   config: ForgeConfig,
   sink: VoiceAuditSink = new VoiceAuditFileSink(),
-  lifecycle: {
-    confirmServerStart?: ((detail: string) => Promise<boolean>) | undefined;
-  } = {},
+  lifecycle: { confirmServerStart?: ((detail: string) => Promise<boolean>) | undefined } = {},
 ): VoiceBridgeBundle | undefined {
-  const voice = config.voice;
-  if (voice?.enabled !== true) return undefined;
-  if (!voice.whisper_model) return undefined;
-  const serverEnabled = voice.server?.enabled === true;
-  if (serverEnabled ? !voice.server?.binary : !voice.whisper_binary) return undefined;
-  const drafts = new PendingVoiceDraft();
-  const compute = whisperCompute(voice.compute);
-  const server = serverEnabled
-    ? new WhisperServerProcess({
-        binary: voice.server!.binary!,
-        model: voice.whisper_model,
-        port: voice.server!.port,
-        idleTimeoutMs: voice.server!.idle_timeout_ms,
-        confirmOnStart: voice.server!.confirm_on_start,
-        confirmStart: lifecycle.confirmServerStart,
-        ...compute,
-      })
-    : undefined;
-  const runner: WhisperRunner = server
-    ? new WhisperServerRunner({
-        baseUrl: server.baseUrl(),
-        model: voice.whisper_model,
-        useGpu: compute.useGpu,
-      })
-    : new WhisperCppRunner({
-        binary: voice.whisper_binary!,
-        model: voice.whisper_model,
-        ...compute,
-      });
-  const bridge = new RemoteVoiceBridge({
+  return buildVoiceBridgeWiring(
     channel,
-    runner,
-    audit: new VoiceAuditLog(sink),
-    drafts,
-    settings: () => voiceSettings(config),
-    ...(server ? { withActivity: (operation) => server.withActivity(operation) } : {}),
-  });
-  return { bridge, drafts, dispose: async () => await server?.dispose() };
-}
-
-/**
- * Maps `voice.compute:` onto the runner's options, dropping every key the user
- * left unset so whisper-cli keeps its own defaults for those (see
- * `buildWhisperArgs`).
- */
-function whisperCompute(compute: VoiceConfig['compute']): Partial<WhisperCppOptions> {
-  if (!compute) return {};
-  return {
-    ...(compute.gpu !== undefined ? { useGpu: compute.gpu } : {}),
-    ...(compute.device !== undefined ? { gpuDevice: compute.device } : {}),
-    ...(compute.threads !== undefined ? { threads: compute.threads } : {}),
-    ...(compute.beam_size !== undefined ? { beamSize: compute.beam_size } : {}),
-    ...(compute.flash_attn !== undefined ? { flashAttn: compute.flash_attn } : {}),
-  };
-}
-
-/** Reads the `voice:` block every call, so a config reload takes effect. */
-function voiceSettings(config: ForgeConfig): VoiceBridgeSettings {
-  const voice = config.voice ?? {};
-  return {
-    enabled: voice.enabled === true,
-    language: voice.language ?? 'auto',
-    maxBytes: voice.input?.max_bytes ?? 25 * 1024 * 1024,
-    maxSeconds: voice.input?.max_seconds ?? 300,
-    biasPrompt: voice.bias_prompt ?? '',
-    trimSilence: voice.trim_silence !== false,
-    ...(config.video?.ffmpeg_path ? { ffmpegPath: config.video.ffmpeg_path } : {}),
-  };
-}
-
-/**
- * Assembles the gate context for one inbound voice note.
- *
- * Lives here rather than in `RemoteController` because `SpokenGateContext` is
- * declared here: the shape and the only thing that builds it stay together, and
- * the controller keeps one call instead of a dozen lines of wiring.
- *
- * Typed structurally so this module never imports the approval bridge or the
- * host facade -- the dependency runs the other way, and a cycle here would drag
- * the whole remote layer into every voice test.
- */
-export function buildSpokenGateContext(
-  event: Extract<RemoteInboundEvent, { kind: 'voice' }>,
-  nonce: string | undefined,
-  deps: {
-    pendingGates(chatId: string): PendingGate[];
-    resolveSpoken(gateId: string, approve: boolean, chatId: string, nonce?: string): boolean;
-    conversationFor(channel: string, chatId: string): string | undefined;
-    interrupt(conversationId: string): void;
-  },
-): SpokenGateContext {
-  return {
-    gates: deps.pendingGates(event.chatId),
-    nonce,
-    resolve: (gateId, approve, resolveNonce) =>
-      deps.resolveSpoken(gateId, approve, event.chatId, resolveNonce),
-    cancel: () => {
-      const conversationId = deps.conversationFor(event.channel, event.chatId);
-      if (!conversationId) return false;
-      deps.interrupt(conversationId);
-      return true;
-    },
-  };
-}
-
-/**
- * Interprets one inbound text against a pending voice draft.
- *
- * Lives beside the bridge rather than in `RemoteController` because the draft
- * verbs and their precedence are this module's semantics, not the controller's
- * -- the controller only knows when to ask.
- *
- * A confirmed draft is re-run through `rerun` as ordinary text rather than
- * executed here, so /commands, /steer, the length limit and dedup all apply to a
- * spoken prompt exactly as to a typed one. It cannot recurse: the replayed event
- * is text and `resolve()` has already cleared the draft.
- */
-export async function resolveVoiceDraft(
-  event: Extract<RemoteInboundEvent, { kind: 'text' }>,
-  voice: { bridge: RemoteVoiceBridge; drafts: PendingVoiceDraft },
-  deps: {
-    touch(): void;
-    say(text: string): Promise<void>;
-    rerun(text: string): Promise<RemoteInboundDisposition>;
-  },
-): Promise<RemoteInboundDisposition | undefined> {
-  const resolution = voice.drafts.resolve(event.channel, event.chatId, event.text);
-  if (resolution.kind === 'none') return undefined;
-  const text = voice.bridge.finishDraft(resolution);
-  deps.touch();
-  if (text === undefined) {
-    await deps.say('Forge: draft discarded.');
-    return { kind: 'handled' };
-  }
-  return await deps.rerun(text);
+    config,
+    sink,
+    lifecycle,
+    (options) => new RemoteVoiceBridge(options),
+  );
 }
