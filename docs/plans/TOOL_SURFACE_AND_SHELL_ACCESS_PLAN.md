@@ -399,5 +399,7 @@ corrected here (Claude, supervisor review):
   single slot (`--parallel 1`) between measurement requests and evicted the
   measurement prompt; the identical request 2 coming back `cache_n=0` shows the
   contamination. Those rows are still valid as **cold prefill times**: 70K
-  ≈ 94–115 s, 120K ≈ 192–194 s. A foreground re-run, with no model request between
-  the four requests, is requested for the README's stall figure.
+  ≈ 94–115 s, 120K ≈ 192–194 s. No re-run is needed: the 20K rows settle the
+  mechanism, and since a group load re-reads the conversation, its stall **is** the
+  cold-prefill time for that size. The README quotes these: ~100 s at 70K,
+  ~190 s at 120K on this server.
