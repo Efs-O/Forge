@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BackgroundExecutionManager } from '../../src/tools/BackgroundExecutionManager';
-import { makeExecCommandTool, makeRunBuildTool } from '../../src/tools/execTools';
+import { makeExecCommandTool } from '../../src/tools/execTools';
 import { MidTurnInbox } from '../../src/agent/MidTurnInbox';
 import { makeWaitTool } from '../../src/tools/waitTool';
 import { checkPowerShellBan, checkShellOperators } from '../../src/tools/execHelpers';
@@ -63,14 +63,12 @@ describe('background exit notification', () => {
     expect(listener).not.toHaveBeenCalled();
   });
 
-  it('validates notify_on_exit and passes the chat id to both tools', async () => {
+  it('validates notify_on_exit and passes the chat id to exec_command', async () => {
     await expect(makeExecCommandTool().handler({
       command: process.execPath,
       args: ['-e', ''],
       notify_on_exit: true,
     }, { beforeMutate: () => {} })).rejects.toThrow('requires background: true');
-    await expect(makeRunBuildTool().handler({ notify_on_exit: true }, { beforeMutate: () => {} }))
-      .rejects.toThrow('requires background: true');
     await expect(makeExecCommandTool().handler({
       command: process.execPath,
       args: ['-e', ''],
@@ -101,8 +99,9 @@ describe('background exit notification', () => {
         stdoutOldest: 0, stderrOldest: 0, stdoutDropped: 0, stderrDropped: 0,
       };
       const observeSpy = vi.spyOn(backgroundExecutionManager, 'observe').mockResolvedValue(observation);
-      await makeRunBuildTool().handler({
-        script: 'type-check',
+      await makeExecCommandTool().handler({
+        command: 'npm',
+        args: ['run', 'type-check'],
         background: true,
         notify_on_exit: true,
       }, { beforeMutate: () => {}, conversationId: 'build-chat' });

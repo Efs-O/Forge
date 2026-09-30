@@ -48,12 +48,7 @@ import {
   makeFormatFileTool,
   makeRenameSymbolTool,
 } from './fileEditTools';
-import {
-  makeRunTerminalTool,
-  makeExecCommandTool,
-  makeRunTestsTool,
-  makeRunBuildTool,
-} from './execTools';
+import { makeRunTerminalTool, makeExecCommandTool } from './execTools';
 import { makeSafePowerShellTool } from './safePowerShellTool';
 import { makeSystemStatusTool } from './systemStatusTool';
 import type { BackendProcess } from '../system/SystemReport';
@@ -197,8 +192,6 @@ export function registerAllTools(
   registry.register(makeListExecutionsTool());
   registry.register(makeSafePowerShellTool());
   registry.register(makeSystemStatusTool(backendProcesses ? { backendProcesses } : {}));
-  registry.register(makeRunTestsTool());
-  registry.register(makeRunBuildTool());
   registry.register(makeRunWorkspaceTaskTool());
   registry.register(makeGitStatusTool());
   registry.register(makeGitLogTool());

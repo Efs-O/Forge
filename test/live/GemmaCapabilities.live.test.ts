@@ -9,7 +9,7 @@ import { cosineSimilarity } from '../../src/search/semanticMath';
 import { makeReadFileTool, makeWriteFileTool } from '../../src/tools/builtinTools';
 import { makeFindFilesTool, makeSearchCodeTool } from '../../src/tools/dirTools';
 import { makeListDirectoryTool } from '../../src/tools/listDirectoryTool';
-import { makeRunTestsTool } from '../../src/tools/execTools';
+import { makeExecCommandTool } from '../../src/tools/execTools';
 import { buildFallbackToolInstructions } from '../../src/tools/FallbackToolPrompt';
 import { makeEditFileTool } from '../../src/tools/editFileTool';
 import { makeGitStatusTool } from '../../src/tools/gitTools';
@@ -115,21 +115,21 @@ describe.skipIf(!LIVE)(
       registry.register(makeReadFileTool());
       registry.register(makeSearchCodeTool());
       registry.register(makeEditFileTool());
-      registry.register(makeRunTestsTool());
+      registry.register(makeExecCommandTool());
       const checkpoints = new CheckpointStack();
       const session = checkpoints.beginTurn('live-coordinator');
       const result = await runLiveToolLoop({
         endpoint: ENDPOINT,
         model: MODEL,
         prompt:
-          'Read status.txt. Use search_code to find STATUS=old in the workspace. Replace the exact text STATUS=old with STATUS=done using edit_file. Then run the project tests with run_tests. Do not skip any step.',
+          'Read status.txt. Use search_code to find STATUS=old in the workspace. Replace the exact text STATUS=old with STATUS=done using edit_file. Then run the project tests with exec_command (npm test). Do not skip any step.',
         registry,
         allowed: new Set<ToolPermission>(['read', 'write', 'headless']),
         context: contextFor(session),
       });
       checkpoints.commitTurn(session);
       expect(result.calls).toEqual(
-        expect.arrayContaining(['read_file', 'search_code', 'edit_file', 'run_tests']),
+        expect.arrayContaining(['read_file', 'search_code', 'edit_file', 'exec_command']),
       );
       expect(fs.readFileSync(target, 'utf8')).toBe('STATUS=done\n');
       await expect(checkpoints.undo()).resolves.toEqual([target]);

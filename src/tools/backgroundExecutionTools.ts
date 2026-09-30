@@ -13,8 +13,8 @@ export const DEFAULT_MONITOR_WAIT_MS = 10_000;
 export const MAX_MONITOR_WAIT_MS = 60_000;
 
 /**
- * exec_command carries the full text; run_build points to it rather than
- * repeating it, because the schema budget counts every copy. The negative
+ * Shared between exec_command's background-run schema and monitor_execution's
+ * description, so the schema budget counts one copy, not two. The negative
  * cases are the point: a model that expects a notice which never comes waits
  * forever, so it must know exactly when none is sent.
  */

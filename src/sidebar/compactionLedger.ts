@@ -43,8 +43,14 @@ const WRITE_TOOLS = new Set([
 ]);
 const PATH_KEYS = ['path', 'filepath', 'file_path', 'source', 'destination'];
 
-/** Tools that run something. `query_powershell` is the registered name — there
- *  is no `safe_powershell`. */
+/**
+ * Tools that run something. `query_powershell` is the registered name — there
+ * is no `safe_powershell`. `run_tests`/`run_build` were retired in favour of
+ * `exec_command` (Phase 2, TOOL_SURFACE_AND_SHELL_ACCESS_PLAN.md) and can no
+ * longer be called, but existing saved conversations still contain tool calls
+ * under those names — keep recognising them so compacting an OLD chat still
+ * classifies and labels those calls correctly.
+ */
 const COMMAND_TOOLS = new Set([
   'exec_command',
   'run_tests',
@@ -236,10 +242,14 @@ function commandLabel(tool: string, args: Record<string, unknown>): string {
     return truncate(extra ? `${command} ${extra}` : command, 120);
   }
   if (tool === 'run_build') {
+    // Retired tool name; still recognised for old saved conversations (see
+    // COMMAND_TOOLS above).
     const script = typeof args['script'] === 'string' ? args['script'] : 'build';
     return truncate(`npm run ${script}`, 120);
   }
   if (tool === 'run_tests') {
+    // Retired tool name; still recognised for old saved conversations (see
+    // COMMAND_TOOLS above).
     const pattern = typeof args['pattern'] === 'string' ? ` ${args['pattern']}` : '';
     return truncate(`run_tests${pattern}`, 120);
   }

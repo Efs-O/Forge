@@ -1,15 +1,10 @@
-import * as fs from 'fs';
-import * as path from 'path';
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
 import {
   checkShellOperators,
   checkPowerShellBan,
-  detectTestRunner,
   ExecCommandError,
   formatExecCommandOutput,
-  formatOutput,
-  guardExec,
   inlineScriptStart,
   MAX_OUTPUT_CHARS,
   MAX_EXEC_OUTPUT_LINES,
@@ -23,7 +18,6 @@ import {
   describeShellBuiltin,
   describeWrongPlatformProgram,
   resolveExecInvocation,
-  resolvePackageRunnerInvocation,
 } from './execProgramResolver';
 import { validateExecEnv } from './execEnvPolicy';
 import { checkDenyList, getBuiltinDenyList } from './DenyList';
@@ -95,7 +89,7 @@ export function makeExecCommandTool(
       function: {
         name: 'exec_command',
         description:
-          'Run an executable directly without a shell; pass args separately. npm/npx work cross-platform. Shell builtins, operators, and dangerous commands are refused. Shell scripts require permissions.exec.shell_scripts in config.yaml. Use the output options instead of pipes. Long jobs: background=true + monitor_execution or notify_on_exit.',
+          'Run an executable directly without a shell; pass args separately. npm/npx work cross-platform — `npm test` / `npm run <script>` work directly (no shell needed). Shell builtins, operators, and dangerous commands are refused. Shell scripts require permissions.exec.shell_scripts in config.yaml. Use the output options instead of pipes. Long jobs: background=true + monitor_execution or notify_on_exit.',
         parameters: {
           type: 'object',
           properties: {
@@ -272,191 +266,6 @@ export function makeExecCommandTool(
         }
         throw error;
       }
-    },
-  };
-}
-
-// ── run_tests ──────────────────────────────────────────────────────────────────
-
-export function makeRunTestsTool(): RegisteredTool {
-  return {
-    definition: {
-      type: 'function',
-      function: {
-        name: 'run_tests',
-        description:
-          'Run the project test suite. Auto-detects vitest, jest, or mocha via package.json.',
-        parameters: {
-          type: 'object',
-          properties: {
-            pattern: {
-              type: 'string',
-              description: 'File or test name pattern to filter. Optional.',
-            },
-            reporter: { type: 'string', description: 'Reporter name (e.g. verbose). Optional.' },
-            cwd: {
-              type: 'string',
-              description:
-                'Project directory to run in, relative to the workspace root (or absolute). Defaults to the workspace root — set it when the project is a subdirectory, e.g. "threejs-game-prompt".',
-            },
-          },
-          required: [],
-          additionalProperties: false,
-        },
-      },
-    },
-    permission: 'headless',
-    handler: async (args, context) => {
-      // Was hardcoded to the workspace root, so in a workspace holding several
-      // projects it looked for a package.json that was never there and failed
-      // with a bare ENOENT naming a path nobody had chosen.
-      const root = resolveExecCwd(args['cwd'] as string | undefined);
-      const runner = detectTestRunner(root);
-      const cmdArgs = [...runner.baseArgs];
-
-      const pattern = args['pattern'] as string | undefined;
-      const reporter = args['reporter'] as string | undefined;
-
-      if (pattern) cmdArgs.push(pattern);
-      if (reporter) cmdArgs.push('--reporter', reporter);
-
-      guardExec(runner.command, cmdArgs);
-
-      const invocation = resolvePackageRunnerInvocation(runner.command as 'npm' | 'npx');
-      const result = await spawnAndWait(
-        invocation.command,
-        [...invocation.argsPrefix, ...cmdArgs],
-        root,
-        60_000,
-        {},
-        context?.abortSignal,
-      );
-      return formatOutput(result);
-    },
-  };
-}
-
-// ── run_build ──────────────────────────────────────────────────────────────────
-
-/** Foreground ceiling. Anything slower must be started with background: true. */
-const RUN_BUILD_TIMEOUT_MS = 120_000;
-
-export function makeRunBuildTool(): RegisteredTool {
-  return {
-    definition: {
-      type: 'function',
-      function: {
-        name: 'run_build',
-        description:
-          'Run an npm script (default: "build"). Reads package.json to verify the script exists. ' +
-          'Foreground runs are capped at 2 minutes — pass background=true for a script that takes ' +
-          'longer (release builds, packaging) and poll it with monitor_execution or use notify_on_exit.',
-        parameters: {
-          type: 'object',
-          properties: {
-            script: { type: 'string', description: 'npm script name. Default "build".' },
-            cwd: {
-              type: 'string',
-              description:
-                'Project directory to run in, relative to the workspace root (or absolute). Defaults to the workspace root — set it when the project is a subdirectory, e.g. "threejs-game-prompt".',
-            },
-            background: {
-              type: 'boolean',
-              description:
-                'Start the script without waiting for it. Returns an execution_id for monitor_execution. Required for anything over 2 minutes.',
-            },
-            notify_on_exit: {
-              type: 'boolean',
-              description: "As exec_command's notify_on_exit (background=true only).",
-            },
-          },
-          required: [],
-          additionalProperties: false,
-        },
-      },
-    },
-    permission: 'headless',
-    handler: async (args, context) => {
-      const script = (args['script'] as string | undefined) ?? 'build';
-      const notifyOnExit = args['notify_on_exit'] === true;
-      if (notifyOnExit && args['background'] !== true) {
-        throw new Error('notify_on_exit requires background: true.');
-      }
-      if (notifyOnExit && !context?.conversationId) {
-        throw new Error('notify_on_exit requires a conversation; start this job from a chat.');
-      }
-      const root = resolveExecCwd(args['cwd'] as string | undefined);
-
-      // Verify script exists in package.json
-      const pkgPath = path.join(root, 'package.json');
-      if (!fs.existsSync(pkgPath)) {
-        throw new Error(
-          `run_build: no package.json in ${root}. Pass cwd if the project is a subdirectory.`,
-        );
-      }
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- package.json is untyped
-      let pkg: any;
-      try {
-        pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-      } catch (err) {
-        throw new Error(`run_build: cannot parse package.json — ${(err as Error).message}`);
-      }
-
-      const scripts: Record<string, string> = pkg.scripts ?? {};
-      if (!scripts[script]) {
-        throw new Error(`run_build: script "${script}" not found in package.json`);
-      }
-
-      const cmdArgs = ['run', script];
-      guardExec('npm', cmdArgs);
-
-      const invocation = resolvePackageRunnerInvocation('npm');
-      const command = invocation.command;
-      const spawnArgs = [...invocation.argsPrefix, ...cmdArgs];
-
-      if (args['background'] === true) {
-        const started = backgroundExecutionManager.start({
-          command,
-          args: spawnArgs,
-          cwd: root,
-          ...(notifyOnExit ? { notifyConversationId: context!.conversationId! } : {}),
-        });
-        // Same reason as exec_command: a failed launch is reported on the next
-        // tick, so observing immediately would call a dead process "running".
-        await new Promise((resolve) => setImmediate(resolve));
-        const observation = await backgroundExecutionManager.observe(started.id, 0, 0, 0);
-        return formatBackgroundObservation(observation, 0, {});
-      }
-
-      let result;
-      try {
-        result = await spawnAndWait(
-          command,
-          spawnArgs,
-          root,
-          RUN_BUILD_TIMEOUT_MS,
-          {},
-          context?.abortSignal,
-        );
-      } catch (error) {
-        // A bare "process timed out after 120000ms" taught the agent nothing:
-        // `npm run package` takes ~3 minutes here, so this call could NEVER
-        // succeed, and the retry that does work had to be guessed. An audited
-        // session burned a turn and two minutes on exactly that. Name the way
-        // out in the failure that blocks it.
-        if (error instanceof ExecCommandError && error.kind === 'timeout') {
-          throw new ExecCommandError(
-            'timeout',
-            command,
-            `npm run ${script} exceeded run_build's ${RUN_BUILD_TIMEOUT_MS / 1000}s foreground ` +
-              `limit. It is still a valid script — re-run it as run_build with background: true, ` +
-              `then poll monitor_execution for the execution_id it returns.`,
-          );
-        }
-        throw error;
-      }
-      return formatOutput(result);
     },
   };
 }

@@ -4,12 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  makeExecCommandTool,
-  makeRunBuildTool,
-  makeRunTerminalTool,
-  makeRunTestsTool,
-} from '../../src/tools/execTools';
+import { makeExecCommandTool, makeRunTerminalTool } from '../../src/tools/execTools';
 import { makeWebFetchTool } from '../../src/tools/fetchTool';
 import {
   makeGitBlameTool,
@@ -60,10 +55,12 @@ describe('isolated process, Git, and web tool execution', () => {
         timeout_ms: 10_000,
       }),
     ).resolves.toContain('fixture command');
-    await expect(makeRunTestsTool().handler({})).resolves.toContain('fixture tests passed');
-    await expect(makeRunBuildTool().handler({ script: 'build' })).resolves.toContain(
-      'fixture build passed',
-    );
+    await expect(
+      makeExecCommandTool().handler({ command: 'npm', args: ['test'] }),
+    ).resolves.toContain('fixture tests passed');
+    await expect(
+      makeExecCommandTool().handler({ command: 'npm', args: ['run', 'build'] }),
+    ).resolves.toContain('fixture build passed');
     await expect(
       makeExecCommandTool().handler({ command: process.execPath, args: ['&&', 'bad'] }),
     ).rejects.toThrow('Shell operator');

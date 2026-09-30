@@ -1,7 +1,5 @@
-import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { checkDenyList, getBuiltinDenyList } from './DenyList';
 
 export const MAX_OUTPUT_CHARS = 16_000;
 export const MAX_EXEC_OUTPUT_LINES = 2_000;
@@ -244,18 +242,6 @@ export function stripAnsi(s: string): string {
 
 // ── Output formatter ───────────────────────────────────────────────────────────
 
-/** `run_tests` / `run_build` output: each stream bounded, keeping its end (see `storedStream`). */
-export function formatOutput(result: SpawnResult): string {
-  // Strip ANSI BEFORE slicing: codes inflate the char count and a mid-escape
-  // slice would leave dangling garbage.
-  let out = storedStream(result.stdout, MAX_OUTPUT_CHARS).text;
-  if (result.stderr) {
-    out += `\n[stderr]\n${storedStream(result.stderr, MAX_OUTPUT_CHARS).text}`;
-  }
-  out += `\n[exit code: ${result.exitCode ?? 'null'}]`;
-  return out;
-}
-
 function filterExecOutput(
   text: string,
   options: ExecOutputOptions,
@@ -349,49 +335,4 @@ export function formatExecCommandOutput(
   if (stream !== 'stderr') emit('stdout', result.stdout);
   if (stream !== 'stdout') emit('stderr', result.stderr);
   return JSON.stringify(out);
-}
-
-// ── Denylist guard ─────────────────────────────────────────────────────────────
-
-export function guardExec(command: string, args: string[]): void {
-  const denyEntry = checkDenyList(command, args, getBuiltinDenyList());
-  if (denyEntry) {
-    // Name the sanctioned route. A bare refusal left the agent to invent one,
-    // and `delete_file` — which it is permitted to use — went uncalled across
-    // roughly three thousand tool calls while it reached for the shell instead.
-    const alternative = denyEntry.alternative ? ` ${denyEntry.alternative}` : '';
-    throw new Error(`exec_command: blocked — ${denyEntry.description}.${alternative}`);
-  }
-}
-
-// ── Test runner detection ──────────────────────────────────────────────────────
-
-export interface TestRunnerConfig {
-  command: string;
-  baseArgs: string[];
-}
-
-export function detectTestRunner(workspaceRoot: string): TestRunnerConfig {
-  const pkgPath = path.join(workspaceRoot, 'package.json');
-  if (!fs.existsSync(pkgPath)) {
-    return { command: 'npm', baseArgs: ['test'] };
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- package.json is untyped
-  let pkg: any;
-  try {
-    pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-  } catch {
-    return { command: 'npm', baseArgs: ['test'] };
-  }
-
-  const allDeps: Record<string, string> = {
-    ...(pkg.dependencies ?? {}),
-    ...(pkg.devDependencies ?? {}),
-  };
-
-  if (allDeps['vitest']) return { command: 'npx', baseArgs: ['vitest', 'run'] };
-  if (allDeps['jest']) return { command: 'npx', baseArgs: ['jest', '--no-coverage'] };
-  if (allDeps['mocha']) return { command: 'npx', baseArgs: ['mocha'] };
-  return { command: 'npm', baseArgs: ['test'] };
 }

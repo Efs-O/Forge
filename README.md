@@ -133,8 +133,9 @@ check that cannot succeed yet.
 real terminal and reports how it turned out via shell integration. The agent
 also _sees the commands you run yourself_ — including the ones that failed — so
 it corrects them in chat instead of asking you to paste output it already has.
-`query_powershell` and `run_build` / `run_tests` / `run_workspace_task` /
-`list_workspace_tasks` cover the structured cases.
+`query_powershell` and `run_workspace_task` /
+`list_workspace_tasks` cover the structured cases; `exec_command` runs `npm
+test` / `npm run <script>` directly (no shell needed).
 
 **Git.** `git_status`, `git_diff`, `git_log`, `git_blame`, `git_show` (which
 reads a file at any past commit), `restore_file` (brings a path back from a

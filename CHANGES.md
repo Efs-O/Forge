@@ -2,6 +2,18 @@
 
 ## 0.16.66
 
+### Retired `run_tests` and `run_build` in favour of `exec_command` (2026-09-30)
+
+- The 2026-09-30 audit showed the model already reaching for `exec_command`
+  over these tools 7–15× more often (350 vs 52 for tests, 367 vs 23 for
+  builds). `run_tests` and `run_build` are removed from the registry;
+  `exec_command`'s description now says directly that `npm test` / `npm run
+  <script>` work without a shell. Saved conversations that still contain old
+  `run_tests`/`run_build` tool calls compact exactly as before — the
+  compaction ledger keeps recognising those retired names for old history.
+  The benchmark harness's own `run_tests` tool (`src/benchmark/`) is a
+  separate, independent tool and is unaffected.
+
 ### Quoting a llama-server media marker no longer kills the chat (2026-09-30)
 
 - A local vision model's llama-server marks image slots with a media marker

@@ -3,7 +3,6 @@ import {
   ExecCommandError,
   formatExecCommandOutput,
   checkPowerShellBan,
-  formatOutput,
   MAX_EXEC_STORED_CHARS,
   MAX_OUTPUT_CHARS,
   spawnAndWait,
@@ -25,28 +24,6 @@ describe('stripAnsi', () => {
 
   it('leaves plain text untouched', () => {
     expect(stripAnsi('no codes here')).toBe('no codes here');
-  });
-});
-
-describe('formatOutput', () => {
-  it('strips ANSI from both stdout and stderr', () => {
-    const out = formatOutput({
-      stdout: `${ESC}[32mok${ESC}[0m`,
-      stderr: `${ESC}[31mwarn${ESC}[0m`,
-      exitCode: 0,
-    });
-    expect(out).toBe('ok\n[stderr]\nwarn\n[exit code: 0]');
-    expect(out.includes(ESC)).toBe(false);
-  });
-
-  it('keeps the summary at the end of over-long test output', () => {
-    const out = formatOutput({
-      stdout: 'x'.repeat(200_000) + '\nTests  3 failed | 12 passed',
-      stderr: '',
-      exitCode: 1,
-    });
-    expect(out).toContain('Tests  3 failed | 12 passed');
-    expect(out).toContain('characters dropped');
   });
 });
 
