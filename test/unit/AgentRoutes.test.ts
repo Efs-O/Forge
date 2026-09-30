@@ -177,6 +177,57 @@ describe('auth and limits', () => {
 });
 
 describe('routes', () => {
+  it('refuses a --new at an unrecoverable cap with 409 and the reasons, queueing nothing', async () => {
+    // The lie this closes: the route used to answer 202 for a message `drain()`
+    // could never deliver, because the 202 is the last thing the caller sees.
+    routes = new AgentRoutes({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      configuredModels: () => ['alpha', 'beta'],
+      chatCapBlockers: (options) => {
+        expect(options).toEqual({ activate: true });
+        return ['7 running a turn', '5 bound to a remote chat'];
+      },
+    });
+    routes.setEnabled(true);
+    routes.onListening(base);
+    const response = await post('/agent/message?from=codex&new_chat=true', 'start a phase');
+    expect(response.status).toBe(409);
+    expect(response.body.error).toContain('7 running a turn');
+    expect(response.body.error).toContain('5 bound to a remote chat');
+    expect(response.body.error).toContain('not queued');
+    // No id, and nothing in the inbox: the sender is not left holding a message
+    // it believes is pending.
+    expect(response.body).not.toHaveProperty('id');
+    expect(accepted).toEqual([]);
+  });
+
+  it('accepts a --new when a slot can be freed, and never pre-flights an ordinary message', async () => {
+    let asked = 0;
+    routes = new AgentRoutes({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      configuredModels: () => ['alpha', 'beta'],
+      chatCapBlockers: () => {
+        asked++;
+        return [];
+      },
+    });
+    routes.setEnabled(true);
+    routes.onListening(base);
+    const fresh = await post('/agent/message?from=codex&new_chat=true', 'start a phase');
+    expect(fresh.status).toBe(202);
+    expect(fresh.body).toMatchObject({ id: expect.any(String) });
+    expect(asked).toBe(1);
+
+    // Only `--new` needs a tab, so only `--new` pays for the question.
+    const ordinary = await post('/agent/message?from=codex', 'follow-up');
+    expect(ordinary.status).toBe(202);
+    expect(asked).toBe(1);
+  });
+
   it('turns a message into a labelled prompt (text or JSON)', async () => {
     const plain = await post('/agent/message?from=forge-dd', 'hello');
     expect(plain).toEqual({ status: 202, body: { queued: 1, id: 'm1' } });

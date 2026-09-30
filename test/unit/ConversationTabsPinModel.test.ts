@@ -1,4 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { CheckpointStack } from '../../src/checkpoint/CheckpointStack';
 import { ConversationTabs, type ConversationTabsDeps } from '../../src/sidebar/ConversationTabs';
 import type { ForgeConfig } from '../../src/config/types';
 import type { HostToWebview } from '../../src/sidebar/messageBridge';
@@ -44,6 +49,10 @@ function harness(
     cancelClearsStreaming?: boolean;
     loaded?: string[];
     evictable?: boolean;
+    /** Real stack instead of the stub, for the checkpoint round-trip tests. */
+    checkpoints?: ConversationTabsDeps['checkpoints'];
+    /** Labels per conversation id, for the cap message. */
+    blockers?: (id: string) => string[];
   } = {},
 ) {
   let state = sidebar(options.tabs ?? ['12b']);
@@ -74,7 +83,12 @@ function harness(
       },
       getStreamingIds: () => streamingIds,
     },
-    checkpoints: { disposeConversation: async () => {} },
+    requestChains: { invalidateConversation: () => {} },
+    checkpoints: options.checkpoints ?? {
+      disposeConversation: async () => {},
+      canUndo: () => false,
+      pendingSnapshots: () => [],
+    },
     failureTracker: { reset: () => {} },
     events: {},
     post: (msg: HostToWebview) => posted.push(msg),
@@ -82,6 +96,7 @@ function harness(
     baseOf: (id: string | null | undefined) => (id ? id.split('@')[0] : null),
     refreshUi: () => {},
     isConversationEvictable: () => options.evictable ?? false,
+    evictionBlockers: options.blockers ?? (() => (options.evictable ? [] : ['running a turn'])),
   } as unknown as ConversationTabsDeps;
   return { tabs: new ConversationTabs(deps), release, posted };
 }
@@ -114,10 +129,13 @@ describe('ConversationTabs capacity', () => {
       expect(updated.conversations).toHaveLength(MAX_CONVERSATIONS);
       expect(updated.history.some((conversation) => conversation.id === 'tab0')).toBe(true);
       expect(updated.conversations.some((conversation) => conversation.id === 'tab0')).toBe(false);
-      // Eviction is a close: the archived chat's loop and checkpoint state go too.
+      // Eviction is a close: the archived chat's loop state and failure streak
+      // go too. Its CHECKPOINT stack deliberately does not — it is keyed by
+      // conversationId and an archived chat keeps that id, so the stack is the
+      // chat's Undo waiting for it to be reopened.
       await flush();
       expect(disposeLoop).toHaveBeenCalledWith('tab0');
-      expect(disposeCheckpoints).toHaveBeenCalledWith('tab0');
+      expect(disposeCheckpoints).not.toHaveBeenCalled();
     },
   );
 
@@ -157,7 +175,7 @@ describe('ConversationTabs capacity', () => {
       conversation.updatedAt = i;
       conversation.messages = [{ role: 'user', content: `chat ${i}` }];
     });
-    vi.spyOn(deps.checkpoints, 'disposeConversation').mockRejectedValue(new Error('locked'));
+    vi.spyOn(deps.agentLoop, 'disposeConversation').mockRejectedValue(new Error('locked'));
     expect(tabs.create()).toBeDefined();
     await flush();
     expect(posted).toContainEqual({
@@ -186,6 +204,157 @@ describe('ConversationTabs capacity', () => {
       expect(result).toBeUndefined();
     },
   );
+
+  it('names the reasons with counts instead of claiming every chat is busy', async () => {
+    const messages: string[] = [];
+    const warning = vi
+      .spyOn(vscode.window, 'showWarningMessage')
+      .mockImplementation((message) => Promise.resolve(messages.push(String(message)) as never));
+    try {
+      const { tabs } = harness({
+        tabs: Array.from({ length: MAX_CONVERSATIONS }, (_, i) => `tab${i}`),
+        blockers: (id) =>
+          Number(id.slice(3)) < 7
+            ? ['running a turn']
+            : Number(id.slice(3)) < 10
+              ? ['waiting on a tool approval']
+              : ['bound to a remote chat'],
+      });
+      expect(tabs.create()).toBeUndefined();
+      expect(messages).toHaveLength(1);
+      expect(messages[0]).toContain('7 running a turn');
+      expect(messages[0]).toContain('3 waiting on a tool approval');
+      expect(messages[0]).toContain('2 bound to a remote chat');
+      expect(messages[0]).toContain('Archive one yourself');
+      // The old lie: a blanket "busy" that named nothing, plus advice to
+      // Keep/Undo changes that no longer block anything.
+      expect(messages[0]).not.toContain('open chats are busy');
+      expect(messages[0]).not.toContain('Keep/Undo');
+    } finally {
+      warning.mockRestore();
+    }
+  });
+});
+
+describe('ConversationTabs checkpoint survival', () => {
+  let root: string;
+
+  afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  it('archiving a chat with undecided changes keeps its stack and its disk dirs', async () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-evict-checkpoint-'));
+    // Two separate roots: the in-memory half covers a file outside the
+    // workspace the disk half captures, so the two restores cannot collide on
+    // one path's postcondition fingerprint.
+    const cliWorkspace = path.join(root, 'cli-workspace');
+    const storageRoot = path.join(root, 'checkpoints');
+    fs.mkdirSync(cliWorkspace);
+    fs.mkdirSync(storageRoot);
+    const checkpoints = new CheckpointStack({ storageRoot });
+    const file = path.join(root, 'notes.txt');
+    const cliFile = path.join(cliWorkspace, 'cli.txt');
+    fs.writeFileSync(file, 'before');
+    fs.writeFileSync(cliFile, 'before');
+
+    // Both halves of a checkpoint: the in-memory `Buffer` a native tool writes,
+    // and the disk capture an external CLI turn writes. Eviction must survive
+    // both, so the disk dir is asserted too.
+    const session = checkpoints.beginTurn('turn-1', 'tab0');
+    const capture = await session.prepareWorkspace(cliWorkspace, new AbortController().signal);
+    checkpoints.snapshotBefore(file);
+    fs.writeFileSync(file, 'after');
+    fs.writeFileSync(cliFile, 'after');
+    await capture.finish();
+    checkpoints.commitTurn(session);
+    expect(checkpoints.canUndo('tab0')).toBe(true);
+    const dirsBefore = fs.readdirSync(storageRoot);
+    expect(dirsBefore.some((name) => name.startsWith('turn-'))).toBe(true);
+
+    const { tabs } = harness({
+      tabs: Array.from({ length: MAX_CONVERSATIONS }, (_, i) => `tab${i}`),
+      evictable: true,
+      checkpoints,
+    });
+    const deps = (tabs as unknown as { deps: ConversationTabsDeps }).deps;
+    deps.getSidebar().conversations.forEach((conversation, i) => {
+      conversation.updatedAt = i;
+      conversation.messages = [{ role: 'user', content: `chat ${i}` }];
+    });
+
+    expect(tabs.create()).toBeDefined();
+    await flush();
+
+    // The archived chat's Undo is intact: still undoable, its recovery data
+    // still on disk, and both halves still recoverable.
+    expect(checkpoints.canUndo('tab0')).toBe(true);
+    expect(fs.readdirSync(storageRoot)).toEqual(dirsBefore);
+    const restored = await checkpoints.undo('tab0');
+    expect(restored).toContain(file);
+    expect(fs.readFileSync(file, 'utf8')).toBe('before');
+    expect(fs.readFileSync(cliFile, 'utf8')).toBe('before');
+    // Keep/Undo of the last checkpoint cleans up the disk dir, as always.
+    expect(fs.readdirSync(storageRoot)).toEqual([]);
+  });
+
+  it('restore re-posts the Keep/Undo bar for a chat that still has one', async () => {
+    const canUndo = vi.fn((id: string) => id === 'restored');
+    const { tabs, posted } = harness({
+      checkpoints: {
+        disposeConversation: async () => {},
+        canUndo,
+        pendingSnapshots: () => [],
+      } as unknown as ConversationTabsDeps['checkpoints'],
+    });
+    const deps = (tabs as unknown as { deps: ConversationTabsDeps }).deps;
+    deps.getSidebar().history.push({
+      id: 'restored',
+      title: 'Restored',
+      createdAt: 0,
+      updatedAt: 50,
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+
+    expect(tabs.restore('restored')).toBeDefined();
+    expect(posted).toContainEqual({ type: 'checkpointReady', conversationId: 'restored' });
+  });
+
+  it('restore posts nothing for a chat with no pending changes', async () => {
+    const { tabs, posted } = harness();
+    const deps = (tabs as unknown as { deps: ConversationTabsDeps }).deps;
+    deps.getSidebar().history.push({
+      id: 'restored',
+      title: 'Restored',
+      createdAt: 0,
+      updatedAt: 50,
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+
+    expect(tabs.restore('restored')).toBeDefined();
+    expect(posted).not.toContainEqual({ type: 'checkpointReady', conversationId: 'restored' });
+  });
+
+  it('closing a tab with the ✕ still forfeits the checkpoint', async () => {
+    const { tabs } = harness();
+    const deps = (tabs as unknown as { deps: ConversationTabsDeps }).deps;
+    const dispose = vi.spyOn(deps.checkpoints, 'disposeConversation');
+    await tabs.close('tab0');
+    expect(dispose).toHaveBeenCalledWith('tab0');
+  });
+
+  it('deleting a chat still disposes its checkpoint stack', async () => {
+    const confirm = vi
+      .spyOn(vscode.window, 'showWarningMessage')
+      .mockResolvedValue('Delete' as never);
+    try {
+      const { tabs } = harness();
+      const deps = (tabs as unknown as { deps: ConversationTabsDeps }).deps;
+      const dispose = vi.spyOn(deps.checkpoints, 'disposeConversation');
+      await tabs.deleteConversation('tab0');
+      expect(dispose).toHaveBeenCalledWith('tab0');
+    } finally {
+      confirm.mockRestore();
+    }
+  });
 });
 
 describe('ConversationTabs failure streak', () => {

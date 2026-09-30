@@ -103,6 +103,14 @@ export interface AgentRoutesDeps {
   view?: (from: string, count: string | undefined) => BusReadResult | Promise<BusReadResult>;
   /** Valid model ids for an inbound message, `model@profile` forms included. */
   configuredModels?: () => readonly string[];
+  /**
+   * Why a `--new` message could not open a chat, as counts per reason; EMPTY
+   * when one can be opened. Asked BEFORE the message is accepted, because the
+   * 202 is the last thing the caller can see: without the pre-flight an
+   * undeliverable `--new` is accepted, then silently dropped in `drain()`.
+   * Absent ⇒ no pre-flight (the failure is only reported afterwards).
+   */
+  chatCapBlockers?: (options?: { activate?: boolean }) => string[];
 }
 
 interface Fields {
@@ -363,6 +371,20 @@ export class AgentRoutes {
         );
       }
       const options = this.messageOptions(fields);
+      // A `--new` needs a tab to exist, so it is the one message the cap can
+      // make undeliverable. Refuse it here, with the reasons, rather than
+      // accepting it and losing it: `drain()` can only report after the 202.
+      if (options.newChat && this.deps.chatCapBlockers) {
+        const blockers = this.deps.chatCapBlockers({ activate: true });
+        if (blockers.length > 0) {
+          throw new HttpError(
+            409,
+            `Forge cannot open a new chat — ${blockers.join(', ')}. ` +
+              'Close or archive a chat in that window, then send again. ' +
+              'This message was not queued.',
+          );
+        }
+      }
       const accepted = this.deps.inbox.accept(
         forgeInboundPrompt(from, text, options.replyInChat === true),
         from,

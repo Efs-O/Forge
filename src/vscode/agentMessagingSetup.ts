@@ -151,10 +151,10 @@ export function setupAgentMessaging(
     onBusTurnStatusCleared: (turnId) => {
       mesh.markTurnFinished(turnId);
     },
-    // §9 (P1): a bus-started turn just ended successfully. The sender gets one
-    // `finished` line via tell (which writes the board event), so there are no
-    // silent stalls. A user-typed turn has no bus sender, so this never fires
-    // for it.
+    // §9 (P1): a bus-started turn just ended — successfully, or as a failure the
+    // inbox is telling about. The sender gets one `finished`/`failed` line via
+    // tell (which writes the board event), so there are no silent stalls. A
+    // user-typed turn has no bus sender, so this never fires for it.
     onBusTurnFinished: (from, durationMs, end) => {
       void mesh.orchestrator
         .tell(from, busTurnEndLine(end, durationMs))
@@ -225,6 +225,10 @@ export function setupAgentMessaging(
       }
     },
     awaitingAnswerFrom: (from) => awaitedAnswers.pendingFor(from),
+    // A `--new` message needs a tab to exist. Ask the sidebar NOW whether one
+    // could be opened, so the route can answer 409 with the reasons instead of
+    // answering 202 and dropping the message in `drain()`.
+    chatCapBlockers: (options) => getSidebar().getHostFacade().chatCapBlockers(options),
     validateFrom: mesh.validateFrom,
     // §10: an interactive Claude/Codex session supersedes a Forge-owned peer.
     join: async (alias, pid, thread) => {

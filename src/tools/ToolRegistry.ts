@@ -121,23 +121,39 @@ export class ToolRegistry {
   }
 
   /**
-   * Refusal text when `args` omits a property the tool's schema requires, else
-   * undefined. llama-server's grammar makes such a call impossible, but not
-   * every backend constrains decoding: Strata sent `exec_command` without
-   * `command`, and the handler died on `undefined.toLowerCase()` — an error
-   * that names neither the tool nor the missing field.
+   * Refusal text when `args` omits a property the tool's schema requires, or
+   * sends a declared boolean as anything but a boolean; else undefined.
+   * llama-server's grammar makes such a call impossible, but not every backend
+   * constrains decoding. Strata sent `exec_command` without `command`, and the
+   * handler died on `undefined.toLowerCase()` — an error that names neither the
+   * tool nor the field. It also sent `background: "True"`; handlers test
+   * `=== true`, so the job ran in the foreground and hit the 30 s default
+   * deadline with nothing saying why.
    */
-  missingRequiredArgs(tool: RegisteredTool, args: Record<string, unknown>): string | undefined {
-    const required = tool.definition.function.parameters.required;
-    if (!Array.isArray(required)) return undefined;
+  invalidArgs(tool: RegisteredTool, args: Record<string, unknown>): string | undefined {
+    const { name, parameters } = tool.definition.function;
     // JSON.parse can hand back `null` for a call whose arguments were "null".
     const present: Record<string, unknown> = typeof args === 'object' && args !== null ? args : {};
+    const required = Array.isArray(parameters.required) ? parameters.required : [];
     const missing = required.filter(
       (key): key is string => typeof key === 'string' && present[key] === undefined,
     );
-    if (missing.length === 0) return undefined;
-    const names = missing.map((key) => `"${key}"`).join(', ');
-    return `Error: ${tool.definition.function.name} is missing required argument${missing.length > 1 ? 's' : ''} ${names}. Resend the call with ${missing.length > 1 ? 'them' : 'it'} set.`;
+    if (missing.length > 0) {
+      const names = missing.map((key) => `"${key}"`).join(', ');
+      return `Error: ${name} is missing required argument${missing.length > 1 ? 's' : ''} ${names}. Resend the call with ${missing.length > 1 ? 'them' : 'it'} set.`;
+    }
+    const properties = parameters.properties;
+    if (typeof properties !== 'object' || properties === null) return undefined;
+    const notBoolean = Object.entries(properties as Record<string, { type?: unknown }>)
+      .filter(
+        ([key, schema]) =>
+          schema?.type === 'boolean' &&
+          present[key] !== undefined &&
+          typeof present[key] !== 'boolean',
+      )
+      .map(([key]) => `"${key}" (got ${JSON.stringify(present[key])})`);
+    if (notBoolean.length === 0) return undefined;
+    return `Error: ${name} needs JSON true or false, not a string or number, for ${notBoolean.join(', ')}. Resend the call with a bare boolean.`;
   }
 
   get(name: string): RegisteredTool | undefined {

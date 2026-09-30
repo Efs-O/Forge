@@ -11,6 +11,7 @@ import {
 import type { SidebarRuntime } from '../../src/sidebar/sessionTypes';
 import { UNTITLED_TITLE } from '../../src/sidebar/sessionTypes';
 import {
+  evictionBlockers,
   isConversationEvictable,
   type ConversationEvictionSignals,
 } from '../../src/sidebar/sidebarWiring';
@@ -128,7 +129,6 @@ describe('conversation eviction ledger', () => {
     remoteRuntimeUnavailable: false,
     remoteBinding: false,
     remoteIntakeQueue: false,
-    undecidedChanges: false,
   };
   const signals: (keyof ConversationEvictionSignals)[] = [
     'streaming',
@@ -141,9 +141,9 @@ describe('conversation eviction ledger', () => {
     'hostQueue',
     'webviewQueue',
     'beforeWebviewQueueReport',
+    'remoteRuntimeUnavailable',
     'remoteBinding',
     'remoteIntakeQueue',
-    'undecidedChanges',
   ];
 
   it.each(signals)('%s blocks eviction and selects the next eligible chat', (signal) => {
@@ -167,6 +167,45 @@ describe('conversation eviction ledger', () => {
     const state = sidebar();
     const archived = opArchiveLeastRecent(state, () => isConversationEvictable(clear));
     expect(archived?.conversations.map((conversation) => conversation.id)).toEqual(['other']);
+  });
+
+  it('has no undecided-changes signal, so a chat with un-kept changes is evictable', () => {
+    // Archiving keeps the checkpoint stack, so "nobody pressed Keep or Undo"
+    // stopped being a reason to refuse. A gate that grew the signal back would
+    // pin every chat whose agent wrote files, forever.
+    expect(clear).not.toHaveProperty('undecidedChanges');
+    expect(evictionBlockers(clear)).toEqual([]);
+    const state = sidebar();
+    const archived = opArchiveLeastRecent(state, () => isConversationEvictable(clear));
+    expect(archived?.conversations).toHaveLength(1);
+  });
+
+  it('names one label per blocking signal, and none for a clear chat', () => {
+    expect(evictionBlockers({ ...clear, streaming: true })).toEqual(['running a turn']);
+    expect(evictionBlockers({ ...clear, pendingApprovalActive: true })).toEqual([
+      'waiting on a tool approval',
+    ]);
+    expect(evictionBlockers({ ...clear, remoteBinding: true })).toEqual(['bound to a remote chat']);
+    // An unreadable queue state blocks, and says so, rather than reading as
+    // free. In production `hostQueue === undefined` always arrives together
+    // with `beforeWebviewQueueReport: true`, so the refusal names both labels.
+    expect(evictionBlockers({ ...clear, beforeWebviewQueueReport: true })).toEqual([
+      'not yet reporting a queue',
+    ]);
+    expect(
+      evictionBlockers({ ...clear, hostQueue: undefined, beforeWebviewQueueReport: true }),
+    ).toEqual(['with messages queued', 'not yet reporting a queue']);
+    // Two signals sharing a label collapse to one count, so the sentence does
+    // not report the same chat twice.
+    expect(evictionBlockers({ ...clear, pendingApprovalActive: true, pendingApprovalQueued: true }))
+      .toEqual(['waiting on a tool approval']);
+  });
+
+  it('names every signal in the gate, so an added one cannot go unexplained', () => {
+    for (const signal of signals) {
+      expect(evictionBlockers({ ...clear, [signal]: true } as ConversationEvictionSignals)).not
+        .toEqual([]);
+    }
   });
 });
 

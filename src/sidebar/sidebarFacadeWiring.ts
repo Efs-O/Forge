@@ -56,6 +56,10 @@ export function createSidebarHostFacade(deps: SidebarFacadeDeps): ForgeHostFacad
     getArchivedConversations: () => deps.getSidebar().history,
     getRequestChains: () => requestChains.status(),
     getStreamingConversationIds: () => agentLoop.getStreamingIds(),
+    // The cap question a transport must be able to ask BEFORE it wants a chat:
+    // the agent bus pre-flights a `--new` message against this so a sender gets
+    // a real refusal instead of a 202 and silence.
+    capBlockers: (options) => tabs.capBlockers(options),
     clankerMode: () => agentLoop.getClankerMode(),
     // Remote and sidebar arming persist identically, to workspaceState. The
     // asymmetry that used to live here — remote ON in memory only, so it died at

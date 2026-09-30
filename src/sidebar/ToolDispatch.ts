@@ -166,11 +166,11 @@ export class ToolDispatch {
           messages.push(this.toolMessage(tc, toolResultContent(result), startedAt));
           continue;
         }
-        const missingArgs = this.toolRegistry.missingRequiredArgs(reg, args);
-        if (missingArgs) {
+        const invalid = this.toolRegistry.invalidArgs(reg, args);
+        if (invalid) {
           this.failureTracker.record(convId);
-          this.postResult(tc, missingArgs, undefined, convId);
-          messages.push(this.toolMessage(tc, missingArgs, startedAt));
+          this.postResult(tc, invalid, undefined, convId);
+          messages.push(this.toolMessage(tc, invalid, startedAt));
           continue;
         }
         const lazyGroup = lazyGroupForTool(tc.function.name);

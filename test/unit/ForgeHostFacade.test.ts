@@ -15,20 +15,85 @@ function conversation(id: string): ConversationRuntime {
 }
 
 describe('SidebarHostFacade', () => {
-  it('create succeeds after eligible eviction and reports the busy explanation when all are protected', async () => {
+  it('create succeeds after eligible eviction, then reports the real reasons', async () => {
     const open = Array.from({ length: MAX_CONVERSATIONS }, (_, i) => conversation(`c${i}`));
     const created = conversation('created');
     const createConversation = vi.fn().mockReturnValueOnce(created).mockReturnValueOnce(undefined);
+    const capBlockers = vi.fn(() => ['7 running a turn', '3 waiting on a tool approval', '2 bound to a remote chat']);
     const facade = new SidebarHostFacade({
       createConversation, restoreConversation: () => created, send: vi.fn(), cancel: vi.fn(),
       queueIntent: vi.fn(), addApprovalSink: vi.fn(() => ({ dispose: vi.fn() })),
       addQuestionSink: () => ({ dispose: () => undefined }), answerQuestion: () => false,
       dismissQuestion: () => false, resolveApproval: vi.fn(), getPendingApproval: () => undefined,
       getActiveConversationId: () => 'c0', getOpenConversations: () => open,
-      getRequestChains: () => [], getStreamingConversationIds: () => new Set(),
+      getRequestChains: () => [], getStreamingConversationIds: () => new Set(), capBlockers,
     });
     await expect(facade.createConversation()).resolves.toMatchObject({ id: 'created' });
-    await expect(facade.createConversation()).rejects.toThrow(`Forge: all ${MAX_CONVERSATIONS} open chats are busy.`);
+    const failure = await facade.createConversation().catch((err: unknown) => err as Error);
+    // A transport needs the reasons as data, not one sentence it cannot count.
+    expect((failure as { atCapReason?: readonly string[] }).atCapReason).toEqual([
+      '7 running a turn',
+      '3 waiting on a tool approval',
+      '2 bound to a remote chat',
+    ]);
+    expect(failure.message).toContain('7 running a turn');
+    expect(failure.message).not.toContain('open chats are busy');
+    expect(facade.chatCapBlockers({ activate: true })).toEqual([
+      '7 running a turn',
+      '3 waiting on a tool approval',
+      '2 bound to a remote chat',
+    ]);
+    expect(capBlockers).toHaveBeenCalledWith({ activate: false });
+  });
+
+  it('a restore blocked by the cap carries the reasons too', async () => {
+    const open = Array.from({ length: MAX_CONVERSATIONS }, (_, i) => conversation(`c${i}`));
+    const facade = new SidebarHostFacade({
+      createConversation: () => undefined,
+      restoreConversation: () => undefined,
+      send: vi.fn(),
+      cancel: vi.fn(),
+      queueIntent: vi.fn(),
+      addApprovalSink: () => ({ dispose: () => undefined }),
+      addQuestionSink: () => ({ dispose: () => undefined }),
+      answerQuestion: () => false,
+      dismissQuestion: () => false,
+      resolveApproval: () => undefined,
+      getPendingApproval: () => undefined,
+      getActiveConversationId: () => 'c0',
+      getOpenConversations: () => open,
+      getRequestChains: () => [],
+      getStreamingConversationIds: () => new Set(),
+      capBlockers: () => ['12 running a turn'],
+    });
+    const failure = await facade
+      .restoreConversation('archived')
+      .catch((err: unknown) => err as { message: string; atCapReason?: readonly string[] });
+    expect(failure.atCapReason).toEqual(['12 running a turn']);
+  });
+
+  it('a restore of an unknown id is still a plain not-found, not a cap error', async () => {
+    const facade = new SidebarHostFacade({
+      createConversation: () => undefined,
+      restoreConversation: () => undefined,
+      send: vi.fn(),
+      cancel: vi.fn(),
+      queueIntent: vi.fn(),
+      addApprovalSink: () => ({ dispose: () => undefined }),
+      addQuestionSink: () => ({ dispose: () => undefined }),
+      answerQuestion: () => false,
+      dismissQuestion: () => false,
+      resolveApproval: () => undefined,
+      getPendingApproval: () => undefined,
+      getActiveConversationId: () => 'c0',
+      getOpenConversations: () => [conversation('c0')],
+      getRequestChains: () => [],
+      getStreamingConversationIds: () => new Set(),
+      capBlockers: () => [],
+    });
+    await expect(facade.restoreConversation('nope')).rejects.toThrow(
+      'Forge: conversation could not be restored.',
+    );
   });
   it('creates and restores without activation by default', async () => {
     const created = conversation('created');
@@ -51,6 +116,7 @@ describe('SidebarHostFacade', () => {
       getOpenConversations: () => [created, restored],
       getRequestChains: () => [],
       getStreamingConversationIds: () => new Set(),
+      capBlockers: () => [],
     });
 
     await facade.createConversation();
@@ -80,6 +146,7 @@ describe('SidebarHostFacade', () => {
       getOpenConversations: () => [conv],
       getRequestChains: () => [],
       getStreamingConversationIds: () => new Set(['c1']),
+      capBlockers: () => [],
     });
 
     await expect(facade.send('c1', 'hello')).resolves.toEqual({
@@ -111,6 +178,7 @@ describe('SidebarHostFacade', () => {
       getOpenConversations: () => [conversation('c1')],
       getRequestChains: () => [],
       getStreamingConversationIds: () => new Set(),
+      capBlockers: () => [],
     };
     // Unwired sink: the count is 0, so the mesh buffer treats it as not ready.
     expect(new SidebarHostFacade(deps).hostActivityListenerCount()).toBe(0);

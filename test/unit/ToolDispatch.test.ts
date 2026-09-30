@@ -225,6 +225,42 @@ describe('ToolDispatch', () => {
     expect(failureTracker.record).toHaveBeenCalledWith('conv-a');
   });
 
+  it('refuses a boolean argument sent as a string before the handler runs', async () => {
+    // Strata sent background: "True"; exec_command tests `=== true`, so the job
+    // ran in the foreground and timed out at the 30 s default with no reason.
+    const handler = vi.fn().mockResolvedValue('should not run');
+    toolRegistry.register({
+      definition: {
+        type: 'function',
+        function: {
+          name: 'exec_command',
+          description: 'Run',
+          parameters: {
+            type: 'object',
+            properties: { command: { type: 'string' }, background: { type: 'boolean' } },
+            required: ['command'],
+          },
+        },
+      },
+      permission: 'read',
+      handler,
+    });
+
+    const messages: ChatMessage[] = [];
+    await dispatch.dispatch(
+      [makeToolCall('exec_command', { command: 'npx', background: 'True' })],
+      allowed,
+      messages,
+      'conv-a',
+    );
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(messages[0]?.content).toBe(
+      'Error: exec_command needs JSON true or false, not a string or number, for "background" (got "True"). Resend the call with a bare boolean.',
+    );
+    expect(failureTracker.record).toHaveBeenCalledWith('conv-a');
+  });
+
   it('does not clear the streak for a refusal or a declined call', async () => {
     requestApproval.mockResolvedValue(false);
     toolRegistry.register({

@@ -163,7 +163,8 @@ describe('AgentInbox', () => {
     inbox.dispose();
   });
 
-  it('warns the user when a submit fails, then moves on', async () => {
+  it('warns the user when a submit fails with no bus sender, then moves on', async () => {
+    // No `from`, so there is no sender to notify — only the window is told.
     const h = host({ submit: () => Promise.reject(new Error('no model')) });
     const inbox = new AgentInbox(h, 5);
     inbox.accept('a');
@@ -171,6 +172,7 @@ describe('AgentInbox', () => {
     await tick();
     expect(h.warnings).toHaveLength(2);
     expect(h.warnings[0]).toContain('no model');
+    expect(h.finished).toEqual([]);
     inbox.dispose();
   });
 
@@ -223,13 +225,60 @@ describe('AgentInbox', () => {
     inbox.dispose();
   });
 
-  it('does not fire a finished notice when the turn fails to submit', async () => {
+  it('tells the sender when the turn fails to submit, instead of dropping it', async () => {
+    // A `--new` at the chat cap throws out of `submit`, so `onBusTurnFinished`
+    // never ran on the success path. Without this notice the sender got a 202
+    // and silence — the message vanished with only a window toast as evidence.
     const h = host({ submit: () => Promise.reject(new Error('no model')) });
     const inbox = new AgentInbox(h, 5);
     inbox.accept('a', 'codex');
     await tick();
-    expect(h.finished).toEqual([]);
+    expect(h.finished).toHaveLength(1);
+    expect(h.ends).toEqual([{ kind: 'failed', error: 'no model' }]);
     expect(h.warnings).toHaveLength(1);
+    // Reported, not replayed: a prompt re-queued after the user fixes the cap
+    // is stale intent.
+    expect(inbox.pending).toBe(0);
+    inbox.dispose();
+  });
+
+  it('reports an undeliverable turn exactly once and never re-queues it', async () => {
+    let attempts = 0;
+    const h = host({
+      submit: () => {
+        attempts++;
+        return Promise.reject(new Error('no open chat can be archived'));
+      },
+    });
+    const inbox = new AgentInbox(h, 5);
+    inbox.accept('a', 'claude');
+    await tick(40);
+    expect(h.finished.filter((f) => f.from === 'claude')).toHaveLength(1);
+    expect(attempts).toBe(1); // not retried
+    expect(inbox.pending).toBe(0);
+    inbox.dispose();
+  });
+
+  it('keeps a lost race with a typed prompt queued, and says nothing to the sender', async () => {
+    // The other branch of the same catch: a chat that BECAME busy keeps its
+    // place in line, so there is no failure to report yet.
+    let first = true;
+    const h = host({
+      isBusy: () => !first,
+      submit: () => {
+        if (first) {
+          first = false;
+          return Promise.reject(new Error('someone typed first'));
+        }
+        return new Promise<BusTurnEnd>(() => undefined);
+      },
+    });
+    const inbox = new AgentInbox(h, 5);
+    inbox.accept('a', 'codex');
+    await tick();
+    expect(h.finished).toEqual([]);
+    expect(h.warnings).toEqual([]);
+    expect(inbox.pending).toBe(1);
     inbox.dispose();
   });
 
@@ -246,7 +295,9 @@ describe('AgentInbox', () => {
     await tick();
     expect(started).toHaveLength(1);
     expect(cleared).toEqual(started); // cleared with the same turn id
-    expect(h.finished).toEqual([]); // no notice on failure
+    // The sender IS told it failed — a turn that never started still has a
+    // sender waiting on an answer.
+    expect(h.ends).toEqual([{ kind: 'failed', error: 'no model' }]);
     inbox.dispose();
   });
 

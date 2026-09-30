@@ -49,6 +49,11 @@ When several Forge windows are open, the client reaches the last focused
 Forge window. \`forge.sh say <name> --new\` opens and selects a new chat there;
 ordinary \`say\` follows that sender's previous chat without changing the view.
 
+A \`--new\` needs a free chat tab. If that window is at its chat cap and nothing
+can be archived, \`say --new\` exits non-zero with a 409 naming what is holding
+every tab, and the message is **not** queued — send it again after a chat is
+closed, or send it without \`--new\` to reach your existing chat.
+
 ## Joining (no renames, no config)
 
 A Claude Code session runs \`forge.sh join claude\`; an interactive API Codex

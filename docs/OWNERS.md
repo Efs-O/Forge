@@ -23,7 +23,9 @@ overlaps with an existing owner, extend the owner instead.
 | Sidebar collaborator construction                    | `src/sidebar/sidebarWiring.ts`           |
 | Host facade construction (remote/extension seam)     | `src/sidebar/sidebarFacadeWiring.ts`     |
 | Ctx bar, HalluMeter bridge, thresholds               | `src/sidebar/ContextBudgetPublisher.ts`  |
-| Chat create/switch/close/restore, auto-archive, VRAM | `src/sidebar/ConversationTabs.ts`        |
+| Chat create/switch/close/restore, auto-archive | `src/sidebar/ConversationTabs.ts`        |
+| A tab's model VRAM release (switch, close, `/unloadModel`) | `src/sidebar/TabModelRelease.ts` |
+| Chat-cap refusal wording (`chatCapMessage`) | `src/sidebar/sessionTypes.ts` |
 | Hidden conversation notifications                    | `src/sidebar/hiddenChatAlerts.ts`        |
 | Background process exit notice text                  | `src/sidebar/backgroundExitNotice.ts`    |
 | Send guards, model resolution, turn logs             | `src/sidebar/SendPipeline.ts`            |

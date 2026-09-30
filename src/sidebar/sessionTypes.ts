@@ -27,6 +27,18 @@ export { UNTITLED_TITLE, deriveTitle, displayTitle, isUntitled } from './convers
 export const MAX_CONVERSATIONS = 12;
 export const MAX_HISTORY_CONVERSATIONS = 40;
 
+/**
+ * The refusal shown when no open chat can be archived, from the per-reason
+ * counts `ConversationTabs.capBlockers` computes. One wording for the sidebar
+ * toast and every transport that surfaces the facade's error.
+ */
+export function chatCapMessage(reasons: readonly string[]): string {
+  return reasons.length === 0
+    ? `Forge: all ${MAX_CONVERSATIONS} open chats are at the cap.`
+    : `Forge: no open chat can be archived — ${reasons.join(', ')}. ` +
+        'Archive one yourself (✕ on its tab) or unload its model, then try again.';
+}
+
 export const HISTORY_KEY_LEGACY = 'forge.conversation.history';
 
 export const SESSION_KEY_V1 = 'forge.conversations.v1';

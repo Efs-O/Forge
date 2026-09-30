@@ -55,7 +55,9 @@ export interface InboxHost {
   /**
    * Called when a bus-started turn ends (AGENT_MESH_PLAN §9, P1). The sender
    * gets one line saying how it ended and a board event is written. Absent ⇒
-   * no notice (a user-typed turn has no bus sender).
+   * no notice (a user-typed turn has no bus sender). Also fires when `submit`
+   * itself threw — a turn that never started still has a sender waiting on an
+   * answer, and a silent drop is the one outcome that cannot be recovered from.
    */
   onBusTurnFinished?(from: string, durationMs: number, end: BusTurnEnd): void;
   /**
@@ -66,9 +68,8 @@ export interface InboxHost {
   /**
    * Called when a bus-started turn ENDS, on EVERY exit (success or failure)
    * (F-08). The wiring clears the turn's status file. This is distinct from
-   * `onBusTurnFinished` (the sender notice, which fires only on success): a
-   * failed turn still must not leave a stale "running" status record, but it
-   * has no successful turn to report to the sender.
+   * `onBusTurnFinished` (the sender notice): a failed turn still must not leave
+   * a stale "running" status record, even when the sender is only told it failed.
    */
   onBusTurnStatusCleared?(turnId: string): void;
 }
@@ -266,6 +267,22 @@ export class AgentInbox {
             const why = err instanceof Error ? err.message : String(err);
             log.error(`[agentInbox] could not deliver an agent message: ${why}`);
             this.host.warn(`Forge: an agent message could not be shown: ${why}`);
+            // The item is still dropped — a prompt replayed after the user
+            // fixes the cap is stale intent — but the sender is told, in the
+            // same shape it is told for every other failed turn. Without this
+            // the route's earlier 202 is the only thing the sender ever sees:
+            // `submit` never resolved, so no `onBusTurnFinished` ran and the
+            // message vanished with only a window-modal toast as evidence.
+            if (item.from && this.host.onBusTurnFinished) {
+              try {
+                this.host.onBusTurnFinished(item.from, Date.now() - startedAt, {
+                  kind: 'failed',
+                  error: why,
+                });
+              } catch (notifyErr) {
+                log.error(`[agentInbox] failure notice failed: ${String(notifyErr)}`);
+              }
+            }
           }
         } finally {
           // F-08: clear the status file on EVERY exit (success or failure) so a

@@ -21,6 +21,31 @@
   Forge; the missing-argument check and the leftover tab resets were finished
   in review.
 
+### Chat cap: archiving no longer costs you Keep/Undo (2026-10-01)
+
+- Archiving a chat to free a slot at the 12-chat cap now keeps that chat's
+  checkpoint stack. A chat whose agent edited files and nobody dismissed the
+  bar was previously pinned open forever by its own pending changes, and
+  archiving it destroyed the only way back. Reopening it from history re-posts
+  the Keep/Undo bar; ✕ on the tab and Delete still forfeit it, as before.
+- A chat with undecided changes is no longer counted as busy, and the refusal
+  at an unrecoverable cap names the real reasons with counts — `no open chat
+  can be archived — 7 running a turn, 3 waiting on a tool approval` — instead
+  of claiming every chat is busy when none is.
+- `forge.sh say <name> --new` at an unrecoverable cap now answers 409 with
+  those reasons and queues nothing, instead of answering 202 and dropping the
+  message. A bus message that fails after it was accepted tells its sender it
+  failed; before, the sender saw a 202 and then silence.
+- Written by Strata (Qwen3.8-Flash-Next IQ3_S) through Forge on a 151K
+  context, one 69-minute session. In review the refusal wording moved to one
+  function (`chatCapMessage`) instead of two copies, and the per-tab VRAM
+  release code moved out of `ConversationTabs.ts` to `TabModelRelease.ts`,
+  which the change had pushed past the 500-line limit.
+- A tool call that sends a boolean argument as a string (`background: "True"`)
+  is now refused with an error naming the field. `exec_command` tests
+  `=== true`, so Strata's background type check silently ran in the foreground
+  and died at the 30-second default deadline with no reason given.
+
 ## 0.16.67
 
 ### Set up Forge with Claude Code or Codex (2026-09-30)

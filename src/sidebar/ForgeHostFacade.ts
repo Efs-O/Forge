@@ -1,5 +1,5 @@
 import type { AttachmentData } from './messageBridge';
-import { MAX_CONVERSATIONS, type ConversationRuntime } from './sessionTypes';
+import { chatCapMessage, MAX_CONVERSATIONS, type ConversationRuntime } from './sessionTypes';
 import type { ForgeRequestOutcome } from './turnOutcome';
 import type { CompactionEvent, CompactionOutcome, CompactionTrigger } from './CompactionService';
 import type { HostActivityEvent, HostActivityListener } from './HostActivity';
@@ -44,6 +44,15 @@ export interface ForgeHostFacade {
     conversationId: string,
     options?: { activate?: boolean },
   ): Promise<ForgeConversationSummary>;
+  /**
+   * Why a new chat cannot be opened, as counts per reason; EMPTY when one can.
+   *
+   * The bus pre-flight asks this before accepting a `--new` message, so a
+   * sender is told the truth at the moment it asks instead of after a 202.
+   * `activate: false` matches a background open, which may not archive the
+   * visible chat.
+   */
+  chatCapBlockers(options?: { activate?: boolean }): string[];
   send(
     conversationId: string,
     text: string,
@@ -181,6 +190,8 @@ export interface SidebarHostFacadeDeps {
   getArchivedConversations?: () => ConversationRuntime[];
   getRequestChains: () => RequestChainStatus[];
   getStreamingConversationIds: () => ReadonlySet<string>;
+  /** Counts per reason a slot cannot be freed; empty when a slot can be. */
+  capBlockers: (options?: { activate?: boolean }) => string[];
   clankerMode: () => boolean;
   setClankerMode: (on: boolean) => void;
   contextBudget: (conversationId: string) => { used: number; max: number } | undefined;
@@ -207,6 +218,25 @@ export interface SidebarHostFacadeDeps {
   onAgentProgress: (listener: (event: AgentProgressEvent) => void) => { dispose(): void };
 }
 
+/**
+ * A transport asked for a chat and none could be opened at the cap.
+ *
+ * Carries the reasons as data, not as one formatted sentence: `ConversationTabs`
+ * owns the human wording, while a remote surface needs to decide what to tell a
+ * phone and the bus needs to put the reasons in a JSON body. Existing callers
+ * already catch a throw here, so only the error's shape changes.
+ */
+export class ChatCapacityError extends Error {
+  constructor(
+    /** Counts per reason, e.g. `7 running a turn`. Never empty in practice. */
+    readonly atCapReason: readonly string[],
+    message: string,
+  ) {
+    super(message);
+    this.name = 'ChatCapacityError';
+  }
+}
+
 function summarize(conv: ConversationRuntime, archived: boolean): ForgeConversationSummary {
   return {
     id: conv.id,
@@ -228,7 +258,10 @@ export class SidebarHostFacade implements ForgeHostFacade {
     options: { activate?: boolean } = { activate: false },
   ): Promise<ForgeConversationSummary> {
     const conv = this.deps.createConversation({ activate: options.activate ?? false });
-    if (!conv) throw new Error(`Forge: all ${MAX_CONVERSATIONS} open chats are busy.`);
+    if (!conv) {
+      const reasons = this.deps.capBlockers(options);
+      throw new ChatCapacityError(reasons, chatCapMessage(reasons));
+    }
     return summarize(conv, false);
   }
 
@@ -241,11 +274,16 @@ export class SidebarHostFacade implements ForgeHostFacade {
     });
     if (!conv) {
       if (this.deps.getOpenConversations().length >= MAX_CONVERSATIONS) {
-        throw new Error(`Forge: all ${MAX_CONVERSATIONS} open chats are busy.`);
+        const reasons = this.deps.capBlockers(options);
+        throw new ChatCapacityError(reasons, chatCapMessage(reasons));
       }
       throw new Error('Forge: conversation could not be restored.');
     }
     return summarize(conv, false);
+  }
+
+  chatCapBlockers(options: { activate?: boolean } = {}): string[] {
+    return this.deps.capBlockers(options);
   }
 
   send(

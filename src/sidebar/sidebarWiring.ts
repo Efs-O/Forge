@@ -128,12 +128,49 @@ export interface ConversationEvictionSignals {
   remoteRuntimeUnavailable: boolean;
   remoteBinding: boolean;
   remoteIntakeQueue: boolean;
-  /** Keep/Undo still undecided: archiving would hide the only way to undo. */
-  undecidedChanges: boolean;
 }
 
 export function isConversationEvictable(signals: ConversationEvictionSignals): boolean {
   return !Object.values(signals).some((signal) => signal === true || signal === undefined);
+}
+
+/**
+ * Why each signal blocks, phrased to follow a count ("7 running a turn").
+ * `Record<keyof …>` makes a signal added to the gate without a label a
+ * compile error, so the explanation cannot drift from the gate.
+ */
+const EVICTION_BLOCKER_LABELS: Record<keyof ConversationEvictionSignals, string> = {
+  streaming: 'running a turn',
+  activeRequestChain: 'mid-request',
+  unattended: 'running unattended',
+  pendingApprovalActive: 'waiting on a tool approval',
+  pendingApprovalQueued: 'waiting on a tool approval',
+  pendingQuestion: 'waiting on a question',
+  unattributedRequest: 'holding an unattributed request',
+  hostQueue: 'with messages queued',
+  webviewQueue: 'with messages queued',
+  beforeWebviewQueueReport: 'not yet reporting a queue',
+  remoteRuntimeUnavailable: 'with an unreachable remote runtime',
+  remoteBinding: 'bound to a remote chat',
+  remoteIntakeQueue: 'with remote messages queued',
+};
+
+/**
+ * The labels for every signal that blocks, deduped, in gate order.
+ *
+ * Derived from the same signal object as `isConversationEvictable` rather than
+ * a second enumeration of "reasons", so a refusal can name what actually
+ * blocked. A chat with a Keep/Undo still undecided is NOT in this list: an
+ * archived chat keeps its checkpoint stack, so there is nothing to warn about.
+ */
+export function evictionBlockers(signals: ConversationEvictionSignals): string[] {
+  const labels: string[] = [];
+  for (const key of Object.keys(EVICTION_BLOCKER_LABELS) as (keyof ConversationEvictionSignals)[]) {
+    if (signals[key] !== true && signals[key] !== undefined) continue;
+    const label = EVICTION_BLOCKER_LABELS[key];
+    if (!labels.includes(label)) labels.push(label);
+  }
+  return labels;
 }
 
 export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRuntimeParts {
@@ -317,6 +354,35 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     midTurnInbox,
   });
 
+  // One reading of the eviction gate, shared by the yes/no decision and the
+  // explanation of a refusal. Both come from the same object so a reason can
+  // never drift from the rule that produced it.
+  const evictionSignals = (id: string): ConversationEvictionSignals => {
+    const queued = host.isConversationQueued(id);
+    const approvals = agentLoop.pendingApprovalConversationIds();
+    const questions = parts.questions.pendingConversationIds();
+    const remote = host.isRemoteEvictionClear(id);
+    const chains = requestChains.status();
+    return {
+      // Every signal here is activity or an unresolved prompt. A Keep/Undo
+      // still undecided is deliberately absent: `disposeEvictedConversation`
+      // keeps the checkpoint stack, so archiving no longer hides the undo.
+      streaming: agentLoop.isStreamingConv(id),
+      activeRequestChain: chains.some((chain) => chain.conversationId === id),
+      unattended: unattendedConversations.has(id),
+      pendingApprovalActive: approvals.has(id),
+      pendingApprovalQueued: approvals.has(id),
+      pendingQuestion: parts.questions.hasPending(id),
+      unattributedRequest: approvals.has('') || questions.has(''),
+      hostQueue: queued,
+      webviewQueue: queued === true,
+      beforeWebviewQueueReport: queued === undefined,
+      remoteRuntimeUnavailable: remote === undefined,
+      remoteBinding: remote,
+      remoteIntakeQueue: remote,
+    };
+  };
+
   const tabs = new ConversationTabs({
     isStreaming: () => agentLoop.streaming,
     getConfig: host.getConfig,
@@ -341,29 +407,8 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
       host.postSessionSync();
       host.postTokenBudget();
     },
-    isConversationEvictable: (id) => {
-      const queued = host.isConversationQueued(id);
-      const approvals = agentLoop.pendingApprovalConversationIds();
-      const questions = parts.questions.pendingConversationIds();
-      const remote = host.isRemoteEvictionClear(id);
-      const chains = requestChains.status();
-      return isConversationEvictable({
-        streaming: agentLoop.isStreamingConv(id),
-        activeRequestChain: chains.some((chain) => chain.conversationId === id),
-        unattended: unattendedConversations.has(id),
-        pendingApprovalActive: approvals.has(id),
-        pendingApprovalQueued: approvals.has(id),
-        pendingQuestion: parts.questions.hasPending(id),
-        unattributedRequest: approvals.has('') || questions.has(''),
-        hostQueue: queued,
-        webviewQueue: queued === true,
-        beforeWebviewQueueReport: queued === undefined,
-        remoteRuntimeUnavailable: remote === undefined,
-        remoteBinding: remote,
-        remoteIntakeQueue: remote,
-        undecidedChanges: checkpoints.canUndo(id),
-      });
-    },
+    isConversationEvictable: (id) => isConversationEvictable(evictionSignals(id)),
+    evictionBlockers: (id) => evictionBlockers(evictionSignals(id)),
     ...(parts.archivedSessions ? { archivedSessions: parts.archivedSessions } : {}),
   });
 
