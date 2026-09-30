@@ -2,6 +2,19 @@
 
 ## 0.16.66
 
+### A job's state write no longer dies on a transient Windows rename (2026-09-30)
+
+- Every atomic file write — including a scheduled job's definition and state —
+  now retries the final rename when Windows refuses it for a few milliseconds
+  because another handle (the writer's own reader, an indexer, antivirus) still
+  has the destination open. The retry is bounded and short (well under a second)
+  and surfaces the final error rather than swallowing it. Before this, a busy
+  box could fail a job state write with `EPERM` — and, in the tests, flake
+  `agentTask.test.ts` under load while passing in isolation. The two sibling
+  atomic writers (`remoteStateFile`, `FileLease`) already carried this retry;
+  the shared `writeFileAtomicSync` owner did not, so it is now the single place
+  that does.
+
 ### No queued message from an agent Forge is waiting on (2026-09-30)
 
 - While Forge's turn is blocked waiting for Claude, Codex or Copilot to answer
