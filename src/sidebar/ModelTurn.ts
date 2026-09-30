@@ -173,7 +173,7 @@ export async function runModelTurn(
   // One budget per turn — model is already resolveRequestModel()'d
   // (group tools/tool_call_limits merged) by the caller.
   const budget = new ToolBudget(model);
-  const useStrip = ctx.failureTracker.shouldStrip();
+  const useStrip = ctx.failureTracker.shouldStrip(conv.id);
   // One probe per turn is right — capabilities describe the model, not the
   // port it happens to be on — but it must still start from a live endpoint.
   const runtimeCaps = await ctx.capabilities(model, await resolveBaseUrl());

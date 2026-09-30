@@ -160,4 +160,157 @@ describe('streamOllamaChatCompletion', () => {
     expect(done).toHaveBeenCalledWith('stop');
     vi.unstubAllGlobals();
   });
+
+  it('does not double a tool name repeated across frames', async () => {
+    // A provider that repeats the name on every frame used to accumulate
+    // "search_codesearch_code" — an unknown tool, and a wasted round.
+    const lines = [
+      JSON.stringify({
+        message: { tool_calls: [{ function: { name: 'search_code', arguments: {} } }] },
+        done: false,
+      }),
+      JSON.stringify({
+        message: {
+          tool_calls: [{ function: { name: 'search_code', arguments: { query: 'x' } } }],
+        },
+        done: false,
+      }),
+      JSON.stringify({ done: true, done_reason: 'stop' }),
+    ].join('\n');
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      body: new Response(`${lines}\n`).body,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const toolCalls = vi.fn();
+    await streamOllamaChatCompletion('http://127.0.0.1:11434', baseRequest, baseModel, {
+      onToken: vi.fn(),
+      onDone: vi.fn(),
+      onError: vi.fn(),
+      onToolCalls: toolCalls,
+    });
+
+    const calls = toolCalls.mock.calls[0]![0];
+    expect(calls).toHaveLength(1);
+    expect(calls[0].function.name).toBe('search_code');
+    expect(calls[0].function.arguments).toBe('{"query":"x"}');
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps two tool calls that arrive at index 0 in separate frames', async () => {
+    // Ollama has emitted every tool call of a multi-call response at index 0
+    // (ollama/ollama#15457, #16212). Keying on index alone merged them into one
+    // unparseable call and the second tool never ran.
+    const lines = [
+      JSON.stringify({
+        message: {
+          tool_calls: [{ function: { index: 0, name: 'read_file', arguments: { path: 'a.ts' } } }],
+        },
+        done: false,
+      }),
+      JSON.stringify({
+        message: {
+          tool_calls: [{ function: { index: 0, name: 'read_file', arguments: { path: 'b.ts' } } }],
+        },
+        done: false,
+      }),
+      JSON.stringify({ done: true, done_reason: 'stop' }),
+    ].join('\n');
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      body: new Response(`${lines}\n`).body,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const toolCalls = vi.fn();
+    await streamOllamaChatCompletion('http://127.0.0.1:11434', baseRequest, baseModel, {
+      onToken: vi.fn(),
+      onDone: vi.fn(),
+      onError: vi.fn(),
+      onToolCalls: toolCalls,
+    });
+
+    const calls = toolCalls.mock.calls[0]![0];
+    expect(calls).toHaveLength(2);
+    expect(calls.map((c: { function: { arguments: string } }) => c.function.arguments)).toEqual([
+      '{"path":"a.ts"}',
+      '{"path":"b.ts"}',
+    ]);
+    vi.unstubAllGlobals();
+  });
+
+  it('still concatenates argument fragments for one call', async () => {
+    // The name-repeat guard must not break genuine fragmentation: a string
+    // argument arriving in pieces belongs to the call already in that slot.
+    const lines = [
+      JSON.stringify({
+        message: { tool_calls: [{ function: { index: 0, name: 'write_file', arguments: '{"pa' } }] },
+        done: false,
+      }),
+      JSON.stringify({
+        message: { tool_calls: [{ function: { index: 0, arguments: 'th":"a.ts"}' } }] },
+        done: false,
+      }),
+      JSON.stringify({ done: true, done_reason: 'stop' }),
+    ].join('\n');
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      body: new Response(`${lines}\n`).body,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const toolCalls = vi.fn();
+    await streamOllamaChatCompletion('http://127.0.0.1:11434', baseRequest, baseModel, {
+      onToken: vi.fn(),
+      onDone: vi.fn(),
+      onError: vi.fn(),
+      onToolCalls: toolCalls,
+    });
+
+    const calls = toolCalls.mock.calls[0]![0];
+    expect(calls).toHaveLength(1);
+    expect(calls[0].function.name).toBe('write_file');
+    expect(calls[0].function.arguments).toBe('{"path":"a.ts"}');
+    vi.unstubAllGlobals();
+  });
+
+  it('aborts an Ollama stream that goes silent after its first frame', async () => {
+    // The Ollama route had no idle budget: a model that wedged mid-stream left
+    // the turn hanging with no tokens, no error, and no way out but a restart.
+    vi.useFakeTimers();
+    const encoder = new TextEncoder();
+    let push: ((line: string) => void) | undefined;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        push = (line) => controller.enqueue(encoder.encode(`${line}\n`));
+      },
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, body })));
+
+    const tokens = vi.fn();
+    const done = vi.fn();
+    const onError = vi.fn();
+    const running = streamOllamaChatCompletion('http://127.0.0.1:11434', baseRequest, baseModel, {
+      onToken: tokens,
+      onDone: done,
+      onError,
+    });
+
+    // Silence before the first byte is prefill, not a stall: the longer budget
+    // applies, so 300 s of thinking must stay alive.
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(onError).not.toHaveBeenCalled();
+
+    push?.(JSON.stringify({ message: { content: 'partial' }, done: false }));
+    await vi.advanceTimersByTimeAsync(135_000);
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'Stream stalled after 120s idle' }),
+    );
+    // A stall is an error, never a silent completion of the turn.
+    expect(done).not.toHaveBeenCalled();
+    await running;
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
 });

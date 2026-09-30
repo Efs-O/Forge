@@ -142,7 +142,7 @@ export class ToolDispatch {
         try {
           args = JSON.parse(tc.function.arguments) as Record<string, unknown>;
         } catch {
-          this.failureTracker.record();
+          this.failureTracker.record(convId);
           result = `Error: malformed tool arguments (invalid JSON)`;
           this.postResult(tc, toolResultText(result), undefined, convId);
           messages.push(this.toolMessage(tc, toolResultContent(result), startedAt));
@@ -164,6 +164,13 @@ export class ToolDispatch {
           result = `Error: unknown tool "${tc.function.name}"`;
           this.postResult(tc, toolResultText(result), undefined, convId);
           messages.push(this.toolMessage(tc, toolResultContent(result), startedAt));
+          continue;
+        }
+        const missingArgs = this.toolRegistry.missingRequiredArgs(reg, args);
+        if (missingArgs) {
+          this.failureTracker.record(convId);
+          this.postResult(tc, missingArgs, undefined, convId);
+          messages.push(this.toolMessage(tc, missingArgs, startedAt));
           continue;
         }
         const lazyGroup = lazyGroupForTool(tc.function.name);
@@ -258,9 +265,15 @@ export class ToolDispatch {
             }
           }
         }
+
+        // A call that ran clears this conversation's streak. The tracker counts
+        // CONSECUTIVE failures: without this a model that recovered after nine
+        // bad calls was still one call from losing its tools for the rest of
+        // the chat. Refusals and declines are not successes and do not reset.
+        if (!isFailureResult(toolResultText(result))) this.failureTracker.reset(convId);
       } catch (err) {
         const policyDenied = err instanceof ToolApprovalPolicyDenied;
-        if (!policyDenied) this.failureTracker.record();
+        if (!policyDenied) this.failureTracker.record(convId);
         result = policyDenied ? err.message : `Error: ${(err as Error).message}`;
       }
 

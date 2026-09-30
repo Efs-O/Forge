@@ -181,6 +181,40 @@ describe('truncated tool calls', () => {
     expect(nudge?.content).toContain('append_file');
   });
 
+  it('does not charge the failure tracker for a truncated tool call', async () => {
+    // CLAUDE.md: truncation is an output-size limit, not the model failing at
+    // tool calls. Charging the tracker here is what used to disable tool
+    // calling for the rest of a chat after three oversized writes.
+    let round = 0;
+    streamModelChatCompletion.mockImplementation(
+      async (_url: string, _req: unknown, _model: unknown, h: Handlers) => {
+        round += 1;
+        if (round === 1) {
+          h.onError(
+            new ToolCallTruncatedError({
+              toolName: 'write_file',
+              toolCallId: 'call_1',
+              approxBytes: 10509,
+              finishReason: 'length',
+            }),
+          );
+          return;
+        }
+        h.onToken('done');
+        h.onDone('stop');
+      },
+    );
+    const record = vi.fn();
+    const tracker = { record, reset: vi.fn(), shouldStrip: vi.fn().mockReturnValue(false) };
+    await runToolCallingLoop(
+      runOptions([{ role: 'user', content: 'go' }], {
+        failureTracker: tracker as unknown as ToolFailureTracker,
+      }) as never,
+    );
+    expect(round).toBe(2);
+    expect(record).not.toHaveBeenCalled();
+  });
+
   it('still falls back to the prompt tool format on a genuinely malformed call', async () => {
     let round = 0;
     streamModelChatCompletion.mockImplementation(

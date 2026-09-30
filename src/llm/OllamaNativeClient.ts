@@ -2,10 +2,13 @@ import type { ModelConfig } from '../config/types';
 import { getLogger } from '../util/logger';
 import type { ChatCompletionRequest, ChatMessage, ContentPart, ToolCall } from './types';
 import { wireMessageContent, type StreamHandlers } from './OpenAIClient';
+import { StreamWatchdog } from './streamWatchdog';
 import { withDescribedCause } from '../util/describeError';
 
 interface OllamaToolCallChunk {
   function?: {
+    /** Ollama's own call slot. Unreliable: see `accumulateToolCalls`. */
+    index?: number;
     name?: string;
     arguments?: Record<string, unknown> | string;
   };
@@ -187,28 +190,107 @@ function buildOllamaOptions(
   return Object.keys(options).length > 0 ? options : undefined;
 }
 
+/** One tool call being rebuilt from stream frames. */
+interface OllamaToolCallAccumulator {
+  name: string;
+  arguments: string;
+}
+
+/**
+ * True when `value` is a whole argument object rather than a text fragment.
+ *
+ * Ollama's native API hands back parsed arguments (`map[string]any` in its own
+ * `api.ToolCallFunction`), so an object means "this frame carries whole
+ * arguments", while a string is what a fragmenting provider sends. That
+ * difference is what makes a repeated tool name tellable apart from a new call.
+ */
+function argumentsAreWhole(value: unknown): boolean {
+  return typeof value === 'object' && value !== null;
+}
+
+/** True when accumulated text is a complete, non-empty argument object. */
+function argumentsAreComplete(argumentsText: string): boolean {
+  if (!argumentsText || argumentsText === '{}') return false;
+  try {
+    JSON.parse(argumentsText);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True when a frame opens a SECOND call in a slot that already holds one.
+ *
+ * Ollama's `function.index` cannot be trusted to separate calls: multiple tool
+ * calls in one stream have been reported at index 0 (ollama/ollama#15457,
+ * #16212). Keying on index alone merged them into one call whose arguments were
+ * the two payloads concatenated — an unparseable call, and the second call
+ * never ran. A different name, or a whole argument object that differs from the
+ * complete one already in the slot, is a new call; a name arriving over an empty
+ * or partial slot is the same call's header arriving again.
+ */
+function opensNewCall(
+  acc: OllamaToolCallAccumulator,
+  incomingName: string | undefined,
+  incomingArguments: unknown,
+): boolean {
+  if (incomingName && acc.name && acc.name !== incomingName) return true;
+  return (
+    argumentsAreWhole(incomingArguments) &&
+    argumentsAreComplete(acc.arguments) &&
+    JSON.stringify(incomingArguments) !== acc.arguments
+  );
+}
+
+/** Next slot key past `from` that no accumulated call occupies. */
+function freeSlotKey(toolAccum: Map<number, OllamaToolCallAccumulator>, from: number): number {
+  let key = from;
+  while (toolAccum.has(key)) key += 1;
+  return key;
+}
+
 function accumulateToolCalls(
   chunks: OllamaToolCallChunk[] | undefined,
-  toolAccum: Map<number, { name: string; arguments: string }>,
+  toolAccum: Map<number, OllamaToolCallAccumulator>,
 ): void {
   if (!chunks?.length) return;
-  chunks.forEach((toolCall, index) => {
-    if (!toolAccum.has(index)) {
-      toolAccum.set(index, { name: '', arguments: '' });
+  chunks.forEach((toolCall, position) => {
+    const incomingName = toolCall.function?.name;
+    const incomingArguments = toolCall.function?.arguments;
+    const declaredIndex = toolCall.function?.index ?? position;
+    let key = declaredIndex;
+    const current = toolAccum.get(key);
+    if (current && opensNewCall(current, incomingName, incomingArguments)) {
+      key = freeSlotKey(toolAccum, declaredIndex);
     }
-    const acc = toolAccum.get(index)!;
-    if (toolCall.function?.name) acc.name += toolCall.function.name;
-    if (toolCall.function?.arguments !== undefined) {
-      acc.arguments +=
-        typeof toolCall.function.arguments === 'string'
-          ? toolCall.function.arguments
-          : JSON.stringify(toolCall.function.arguments);
+    if (!toolAccum.has(key)) {
+      toolAccum.set(key, { name: '', arguments: '' });
+    }
+    const acc = toolAccum.get(key)!;
+    // Only `arguments` fragments across frames; the name arrives whole in the
+    // frame that opens the call. Appending every name frame assumed otherwise,
+    // so a provider that repeats the name produced "search_codesearch_code" —
+    // an unknown tool, every time. Genuine fragmentation still concatenates:
+    // only a repeat of what is already accumulated is dropped.
+    if (incomingName && !acc.name.includes(incomingName)) acc.name += incomingName;
+    if (incomingArguments !== undefined) {
+      if (typeof incomingArguments === 'string') {
+        acc.arguments += incomingArguments;
+      } else {
+        // Whole-object arguments repair or confirm the slot, never concatenate:
+        // two `{...}` payloads glued together are not parseable JSON.
+        const incomingText = JSON.stringify(incomingArguments);
+        if (!argumentsAreComplete(acc.arguments) || incomingText === acc.arguments) {
+          acc.arguments = incomingText;
+        }
+      }
     }
   });
 }
 
 function flushToolCalls(
-  toolAccum: Map<number, { name: string; arguments: string }>,
+  toolAccum: Map<number, OllamaToolCallAccumulator>,
   onToolCalls: StreamHandlers['onToolCalls'],
 ): void {
   if (!onToolCalls || toolAccum.size === 0) return;
@@ -234,6 +316,7 @@ export async function streamOllamaChatCompletion(
 ): Promise<void> {
   const options = buildOllamaOptions(request, model);
   const think = toOllamaThink(model);
+  const startedAt = Date.now();
   let response: Response;
   try {
     response = await fetch(`${baseUrl}/api/chat`, {
@@ -281,12 +364,35 @@ export async function streamOllamaChatCompletion(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  const toolAccum = new Map<number, { name: string; arguments: string }>();
+  const toolAccum = new Map<number, OllamaToolCallAccumulator>();
+  let readCount = 0;
+  let bytesRead = 0;
+  let textChars = 0;
+  let reasoningChars = 0;
+  let toolDeltaCount = 0;
+  // Same idle budget as the OpenAI route (FIRST_BYTE_STALL_TIMEOUT_MS /
+  // STREAM_STALL_TIMEOUT_MS, owned by streamWatchdog). Without it a model that
+  // wedged after its headers left the turn hanging: no tokens, no error, no
+  // way out but a restart.
+  const streamSummary = (): string =>
+    `[OllamaNativeClient] model=${request.model} elapsed_ms=${Date.now() - startedAt} ` +
+    `ttfb_ms=${watchdog.ttfbMs ?? '?'} reads=${readCount} bytes=${bytesRead} ` +
+    `text_chars=${textChars} reasoning_chars=${reasoningChars} tool_deltas=${toolDeltaCount}`;
+  const watchdog = new StreamWatchdog(
+    '[OllamaNativeClient]',
+    startedAt,
+    streamSummary,
+    () => void reader.cancel().catch(() => undefined),
+    (err) => handlers.onError(err),
+  );
 
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+      readCount += 1;
+      bytesRead += value.byteLength;
+      watchdog.activity();
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
       buffer = lines.pop() ?? '';
@@ -308,12 +414,15 @@ export async function streamOllamaChatCompletion(
         }
 
         if (typeof chunk.message?.thinking === 'string' && chunk.message.thinking.length > 0) {
+          reasoningChars += chunk.message.thinking.length;
           if (handlers.onReasoning) handlers.onReasoning(chunk.message.thinking);
           else handlers.onToken(chunk.message.thinking);
         }
         if (typeof chunk.message?.content === 'string' && chunk.message.content.length > 0) {
+          textChars += chunk.message.content.length;
           handlers.onToken(chunk.message.content);
         }
+        toolDeltaCount += chunk.message?.tool_calls?.length ?? 0;
         accumulateToolCalls(chunk.message?.tool_calls, toolAccum);
 
         if (chunk.done) {
@@ -332,12 +441,15 @@ export async function streamOllamaChatCompletion(
           typeof trailing.message?.thinking === 'string' &&
           trailing.message.thinking.length > 0
         ) {
+          reasoningChars += trailing.message.thinking.length;
           if (handlers.onReasoning) handlers.onReasoning(trailing.message.thinking);
           else handlers.onToken(trailing.message.thinking);
         }
         if (typeof trailing.message?.content === 'string' && trailing.message.content.length > 0) {
+          textChars += trailing.message.content.length;
           handlers.onToken(trailing.message.content);
         }
+        toolDeltaCount += trailing.message?.tool_calls?.length ?? 0;
         accumulateToolCalls(trailing.message?.tool_calls, toolAccum);
         if (trailing.done) {
           flushToolCalls(toolAccum, handlers.onToolCalls);
@@ -349,15 +461,18 @@ export async function streamOllamaChatCompletion(
         // ignore malformed trailing bytes
       }
     }
+    if (watchdog.stalled) return;
     flushToolCalls(toolAccum, handlers.onToolCalls);
     handlers.onDone(null);
   } catch (err) {
+    if (watchdog.stalled) return;
     if ((err as Error)?.name === 'AbortError') {
       handlers.onDone('cancelled');
     } else {
       handlers.onError(withDescribedCause(err));
     }
   } finally {
+    watchdog.stop();
     reader.releaseLock();
   }
 }

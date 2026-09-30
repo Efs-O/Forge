@@ -163,6 +163,87 @@ describe('ToolDispatch', () => {
     expect(messages[0].tool_call_id).toBe('call-read_file');
   });
 
+  it('attributes a malformed-arguments failure to the conversation', async () => {
+    // record() with no id piled every chat's failures into one shared bucket,
+    // so one bad model disabled tool calling in tabs it never touched.
+    const messages: ChatMessage[] = [];
+    await dispatch.dispatch(
+      [{ id: 'call-bad', type: 'function', function: { name: 'read_file', arguments: '{"path":' } }],
+      allowed,
+      messages,
+      'conv-a',
+    );
+
+    expect(messages[0]?.content).toContain('malformed tool arguments');
+    expect(failureTracker.record).toHaveBeenCalledWith('conv-a');
+  });
+
+  it('clears the conversation streak after a tool call that ran', async () => {
+    // The tracker counts CONSECUTIVE failures: without a success reset a model
+    // that recovered after nine bad calls stayed one call from losing its tools.
+    toolRegistry.register({
+      definition: {
+        type: 'function',
+        function: { name: 'read_file', description: 'Read a file', parameters: { type: 'object' } },
+      },
+      permission: 'read',
+      handler: vi.fn().mockResolvedValue('file contents'),
+    });
+
+    const messages: ChatMessage[] = [];
+    await dispatch.dispatch([makeToolCall('read_file', { path: 'test.txt' })], allowed, messages, 'conv-a');
+
+    expect(failureTracker.reset).toHaveBeenCalledWith('conv-a');
+    expect(failureTracker.record).not.toHaveBeenCalled();
+  });
+
+  it('refuses a call missing a required argument before the handler runs', async () => {
+    // Strata does not grammar-constrain tool calls: it sent exec_command with
+    // args but no `command`, and the handler died on undefined.toLowerCase().
+    const handler = vi.fn().mockResolvedValue('should not run');
+    toolRegistry.register({
+      definition: {
+        type: 'function',
+        function: {
+          name: 'exec_command',
+          description: 'Run',
+          parameters: { type: 'object', required: ['command', 'args'] },
+        },
+      },
+      permission: 'read',
+      handler,
+    });
+
+    const messages: ChatMessage[] = [];
+    await dispatch.dispatch([makeToolCall('exec_command', { args: ['log'] })], allowed, messages, 'conv-a');
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(requestApproval).not.toHaveBeenCalled();
+    expect(messages[0]?.content).toBe(
+      'Error: exec_command is missing required argument "command". Resend the call with it set.',
+    );
+    expect(failureTracker.record).toHaveBeenCalledWith('conv-a');
+  });
+
+  it('does not clear the streak for a refusal or a declined call', async () => {
+    requestApproval.mockResolvedValue(false);
+    toolRegistry.register({
+      definition: {
+        type: 'function',
+        function: { name: 'run_terminal', description: 'Run', parameters: { type: 'object' } },
+      },
+      permission: 'terminal',
+      handler: vi.fn().mockResolvedValue('should not run'),
+    });
+
+    const messages: ChatMessage[] = [];
+    await dispatch.dispatch([makeToolCall('run_terminal', { command: 'ls' })], allowed, messages, 'conv-a');
+
+    expect(messages[0]?.content).toContain('User declined');
+    expect(failureTracker.reset).not.toHaveBeenCalled();
+    expect(failureTracker.record).not.toHaveBeenCalled();
+  });
+
   it('passes multimodal tool results back to the model while displaying text', async () => {
     const content = [
       { type: 'text' as const, text: 'Loaded image assets/diagram.png.' },

@@ -120,6 +120,26 @@ export class ToolRegistry {
     recordNativeLazyTool(name);
   }
 
+  /**
+   * Refusal text when `args` omits a property the tool's schema requires, else
+   * undefined. llama-server's grammar makes such a call impossible, but not
+   * every backend constrains decoding: Strata sent `exec_command` without
+   * `command`, and the handler died on `undefined.toLowerCase()` — an error
+   * that names neither the tool nor the missing field.
+   */
+  missingRequiredArgs(tool: RegisteredTool, args: Record<string, unknown>): string | undefined {
+    const required = tool.definition.function.parameters.required;
+    if (!Array.isArray(required)) return undefined;
+    // JSON.parse can hand back `null` for a call whose arguments were "null".
+    const present: Record<string, unknown> = typeof args === 'object' && args !== null ? args : {};
+    const missing = required.filter(
+      (key): key is string => typeof key === 'string' && present[key] === undefined,
+    );
+    if (missing.length === 0) return undefined;
+    const names = missing.map((key) => `"${key}"`).join(', ');
+    return `Error: ${tool.definition.function.name} is missing required argument${missing.length > 1 ? 's' : ''} ${names}. Resend the call with ${missing.length > 1 ? 'them' : 'it'} set.`;
+  }
+
   get(name: string): RegisteredTool | undefined {
     return this.tools.get(name);
   }

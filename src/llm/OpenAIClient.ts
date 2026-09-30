@@ -8,21 +8,10 @@ import {
 import { imageUnsupportedMessage, isImageUnsupportedError } from './imageUnsupportedError';
 import { getLogger } from '../util/logger';
 import { withDescribedCause } from '../util/describeError';
+import { StreamWatchdog } from './streamWatchdog';
 
 const log = getLogger();
 let requestSequence = 0;
-/**
- * Idle budget before a stream is abandoned as stalled.
- *
- * Two budgets, because silence means different things either side of the first
- * byte. Before it, a provider that sends headers early (OpenAI, xAI) may be
- * reasoning with nothing to stream for minutes, and a server without
- * early-error handling may still be prefilling a long prompt — neither is a
- * stall. Once bytes flow, a long gap is.
- */
-const FIRST_BYTE_STALL_TIMEOUT_MS = 600_000;
-const STREAM_STALL_TIMEOUT_MS = 120_000;
-
 export const MID_TURN_WIRE_LABEL =
   '[Sent by the user while you were working. If it changes the task, adjust; otherwise acknowledge it in one line and continue.]';
 
@@ -227,39 +216,19 @@ export async function streamChatCompletion(
   let textChars = 0;
   let reasoningChars = 0;
   let toolDeltaCount = 0;
-  let firstByteAt: number | null = null;
-  let lastActivityAt = Date.now();
-  let streamStallWarned = false;
-  let streamStalled = false;
-  const heartbeat = setInterval(() => {
-    const now = Date.now();
-    const idleMs = now - lastActivityAt;
-    const heartbeatLine =
-      `[OpenAIClient] stream heartbeat id=${requestId} elapsed_ms=${now - startedAt} ` +
-      `idle_ms=${idleMs} reads=${readCount} sse_frames=${sseFrameCount} ` +
-      `bytes=${bytesRead} text_chars=${textChars} reasoning_chars=${reasoningChars} ` +
-      `tool_deltas=${toolDeltaCount}`;
-    const stallAfterMs =
-      firstByteAt === null ? FIRST_BYTE_STALL_TIMEOUT_MS : STREAM_STALL_TIMEOUT_MS;
-    if (idleMs >= stallAfterMs) {
-      streamStalled = true;
-      clearInterval(heartbeat);
-      log.error(`${heartbeatLine} — aborting stalled stream`);
-      void reader.cancel().catch(() => undefined);
-      handlers.onError(new Error(`Stream stalled after ${stallAfterMs / 1000}s idle`));
-    } else if (idleMs >= 15_000 && !streamStallWarned) {
-      streamStallWarned = true;
-      log.warn(heartbeatLine);
-    } else {
-      log.debug(heartbeatLine);
-    }
-  }, 15_000);
   const streamSummary = (): string =>
     `id=${requestId} elapsed_ms=${Date.now() - startedAt} ` +
-    `ttfb_ms=${firstByteAt === null ? '?' : firstByteAt - startedAt} reads=${readCount} ` +
+    `ttfb_ms=${watchdog.ttfbMs ?? '?'} reads=${readCount} ` +
     `sse_frames=${sseFrameCount} bytes=${bytesRead} text_chars=${textChars} ` +
     `reasoning_chars=${reasoningChars} tool_deltas=${toolDeltaCount} ` +
     `finish_reason=${terminalFinishReason ?? '?'}`;
+  const watchdog = new StreamWatchdog(
+    '[OpenAIClient]',
+    startedAt,
+    streamSummary,
+    () => void reader.cancel().catch(() => undefined),
+    (err) => handlers.onError(err),
+  );
   // key = index, accumulates partial tool call fragments
   const toolAccum = new Map<number, { id: string; name: string; arguments: string }>();
 
@@ -283,9 +252,7 @@ export async function streamChatCompletion(
       if (done) break;
       readCount += 1;
       bytesRead += value.byteLength;
-      lastActivityAt = Date.now();
-      streamStallWarned = false;
-      firstByteAt ??= lastActivityAt;
+      watchdog.activity();
 
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
@@ -430,14 +397,14 @@ export async function streamChatCompletion(
         }
       }
     }
-    if (streamStalled) return;
+    if (watchdog.stalled) return;
     // Stream ended without [DONE] or a terminal finish_reason (server crash or
     // dropped connection) — settle anyway so the agent loop never hangs.
     flushAccumulatedToolCalls();
     log.warn(`[OpenAIClient] stream ended without terminal frame ${streamSummary()}`);
     handlers.onDone(terminalFinishReason);
   } catch (err) {
-    if (streamStalled) return;
+    if (watchdog.stalled) return;
     if ((err as Error)?.name === 'AbortError') {
       log.info(`[OpenAIClient] stream aborted ${streamSummary()}`);
       handlers.onDone('cancelled');
@@ -446,7 +413,7 @@ export async function streamChatCompletion(
       handlers.onError(withDescribedCause(err));
     }
   } finally {
-    clearInterval(heartbeat);
+    watchdog.stop();
     reader.releaseLock();
   }
 }

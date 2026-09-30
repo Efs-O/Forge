@@ -188,6 +188,61 @@ describe('ConversationTabs capacity', () => {
   );
 });
 
+describe('ConversationTabs failure streak', () => {
+  it('clears only the closed chat streak when a tab is evicted', async () => {
+    // The streak is per conversation, so closing a chat must clear that id and
+    // not the shared bucket another tab is still counting in.
+    const { tabs } = harness({
+      tabs: Array.from({ length: MAX_CONVERSATIONS }, (_, i) => `tab${i}`),
+      evictable: true,
+    });
+    const deps = (tabs as unknown as { deps: ConversationTabsDeps }).deps;
+    deps.getSidebar().conversations.forEach((conversation, i) => {
+      conversation.updatedAt = i;
+      conversation.messages = [{ role: 'user', content: `chat ${i}` }];
+    });
+    const reset = vi.spyOn(deps.failureTracker, 'reset');
+
+    expect(tabs.create()).toBeDefined();
+    await flush();
+
+    expect(reset).toHaveBeenCalledWith('tab0');
+    expect(reset).not.toHaveBeenCalledWith(undefined);
+  });
+
+  it('clears the active chat streak by its id when the transcript is cleared', () => {
+    const { tabs } = harness({ tabs: ['12b', '27b'] });
+    const deps = (tabs as unknown as { deps: ConversationTabsDeps }).deps;
+    const reset = vi.spyOn(deps.failureTracker, 'reset');
+
+    tabs.clearActive();
+
+    expect(reset).toHaveBeenCalledWith('tab0');
+    expect(reset).not.toHaveBeenCalledWith(undefined);
+  });
+
+  it('clears the closed chat streak by its id when a tab is closed', async () => {
+    const { tabs } = harness({ tabs: ['12b', '27b'] });
+    const deps = (tabs as unknown as { deps: ConversationTabsDeps }).deps;
+    const reset = vi.spyOn(deps.failureTracker, 'reset');
+
+    await tabs.close('tab1');
+
+    expect(reset).toHaveBeenCalledWith('tab1');
+    expect(reset).not.toHaveBeenCalledWith(undefined);
+  });
+
+  it('keeps each chat streak across a switch', () => {
+    const { tabs } = harness({ tabs: ['12b', '27b'] });
+    const deps = (tabs as unknown as { deps: ConversationTabsDeps }).deps;
+    const reset = vi.spyOn(deps.failureTracker, 'reset');
+
+    tabs.switch('tab1');
+
+    expect(reset).not.toHaveBeenCalled();
+  });
+});
+
 describe('ConversationTabs.pinModel VRAM release', () => {
   it('frees the outgoing local model when the tab switches away from it', async () => {
     const { tabs, release, posted } = harness();

@@ -120,7 +120,7 @@ export class ConversationTabs {
       this.deps.persistSession();
       this.deps.postSessionSync();
     } else {
-      this.deps.failureTracker.reset();
+      this.deps.failureTracker.reset(result.newId);
       this.deps.refreshUi();
     }
     log.debug('[ConversationTabs] new conversation tab');
@@ -135,7 +135,7 @@ export class ConversationTabs {
     // bar and the HalluMeter bridge fall back to 0 rather than describing a
     // transcript that no longer exists.
     opClearMessages(conv);
-    this.deps.failureTracker.reset();
+    this.deps.failureTracker.reset(conv.id);
     this.deps.refreshUi();
   }
 
@@ -171,7 +171,8 @@ export class ConversationTabs {
     if (!result) return;
     this.deps.setSidebar(result.sidebar);
     if (result.activeModelOverride) this.deps.setActiveModel(result.activeModelOverride);
-    this.deps.failureTracker.reset();
+    // No failure-tracker reset: a streak belongs to its conversation and
+    // survives a switch away and back.
     // A switch moves the active id and nothing else: no transcript, title,
     // counter or pin changes here, so there is nothing for a full save to write.
     this.deps.refreshUi({ pointerOnly: true });
@@ -188,7 +189,7 @@ export class ConversationTabs {
     const result = opCloseConversation(this.deps.getSidebar(), id);
     if (!result) return;
     this.deps.setSidebar(result.sidebar);
-    this.deps.failureTracker.reset();
+    this.deps.failureTracker.reset(id);
     // Closing a tab hands focus to another one, which is a change of active
     // conversation like any other: adopt its pinned model instead of leaving
     // the closed tab's selection in place.
@@ -206,6 +207,9 @@ export class ConversationTabs {
       await this.deps.agentLoop.stopStreamingIfNeeded(id);
       await this.deps.agentLoop.disposeConversation(id);
       await this.deps.checkpoints.disposeConversation(id);
+      // A closed conversation must not leave a streak behind: its id can never
+      // be recorded again, so the entry would simply leak.
+      this.deps.failureTracker.reset(id);
     })().catch((err: unknown) => {
       const detail = err instanceof Error ? err.message : String(err);
       this.deps.post({
@@ -257,7 +261,7 @@ export class ConversationTabs {
     if (!('ok' in result)) return;
     this.deps.archivedSessions?.purge(id);
     this.deps.setSidebar(result.sidebar);
-    this.deps.failureTracker.reset();
+    this.deps.failureTracker.reset(id);
     const nextActive = this.deps
       .getSidebar()
       .conversations.find((c) => c.id === result.newActiveId);
@@ -338,7 +342,6 @@ export class ConversationTabs {
       this.deps.postSessionSync();
     } else {
       if (result.activeModelOverride) this.deps.setActiveModel(result.activeModelOverride);
-      this.deps.failureTracker.reset();
       this.deps.refreshUi();
     }
     this.deps.archivedSessions?.delete(id);

@@ -34,4 +34,34 @@ describe('ToolFailureTracker threshold', () => {
     tracker.reset();
     expect(tracker.shouldStrip()).toBe(false);
   });
+
+  it('reset clears only that conversation', () => {
+    const tracker = new ToolFailureTracker();
+    for (let i = 0; i < ToolFailureTracker.THRESHOLD; i++) {
+      tracker.record('a');
+      tracker.record('b');
+    }
+    tracker.reset('a');
+    expect(tracker.shouldStrip('a')).toBe(false);
+    expect(tracker.shouldStrip('b')).toBe(true);
+  });
+
+  it('treats a success as the end of the streak', () => {
+    // "Consecutive" has to mean consecutive: a model that recovered after
+    // nine bad calls must not stay one call from losing its tools.
+    const tracker = new ToolFailureTracker();
+    for (let i = 0; i < ToolFailureTracker.THRESHOLD - 1; i++) tracker.record('a');
+    tracker.reset('a');
+    for (let i = 0; i < ToolFailureTracker.THRESHOLD - 1; i++) tracker.record('a');
+    expect(tracker.shouldStrip('a')).toBe(false);
+    tracker.record('a');
+    expect(tracker.shouldStrip('a')).toBe(true);
+  });
+
+  it('never strips on the strength of another conversation', () => {
+    const tracker = new ToolFailureTracker();
+    for (let i = 0; i < ToolFailureTracker.THRESHOLD; i++) tracker.record('a');
+    expect(tracker.shouldStrip('b')).toBe(false);
+    expect(tracker.shouldStrip()).toBe(false);
+  });
 });

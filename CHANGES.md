@@ -1,5 +1,26 @@
 # Forge — Recent Changes
 
+## 0.16.68
+
+### Ollama tool calls and stalls, per-chat tool stripping (2026-10-01)
+
+- Ollama: a tool name repeated across stream frames no longer doubles
+  (`search_codesearch_code`), and two calls that Ollama numbers `index: 0`
+  stay two calls instead of merging into one unparseable call.
+- Ollama: a stream that goes silent now ends the turn with an error after the
+  same idle budget as the OpenAI route (600 s before the first byte, 120 s
+  after), instead of hanging.
+- Ten tool failures now strip tools from that chat only, and only when the ten
+  are consecutive: a call that runs clears the chat's count. Before, one chat's
+  failures counted for every tab and never went down.
+- A tool call missing a required argument is refused by name
+  (`exec_command is missing required argument "command"`) before approval or
+  the handler. Backends without grammar-constrained decoding could send one,
+  and the handler failed with `Cannot read properties of undefined`.
+- Found and fixed with Qwen3.8 Flash-Next served by Strata, driven through
+  Forge; the missing-argument check and the leftover tab resets were finished
+  in review.
+
 ## 0.16.67
 
 ### Set up Forge with Claude Code or Codex (2026-09-30)
