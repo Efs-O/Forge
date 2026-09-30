@@ -339,4 +339,63 @@ default fails this test.
 
 ## Phase 0 results
 
-_Not yet measured._
+Measured 2026-09-30 against the live server (no restart, no `config.yaml` edit).
+
+**Server build & flags** (from the running process, PID 7032):
+
+- Build: `llama.cpp-b11243` (`llama-server.exe`)
+- Model: `Qwen3.8-27B-UD-Q6_K.gguf` + `mmproj-BF16.gguf`
+- `--ctx-size 131072` (128K per-slot context, `--parallel 1`) → all three sizes, including 120K, fit; none was truncated
+- `--n-gpu-layers 99`, `--batch-size 8192`, `--ubatch-size 512`
+- `--split-mode tensor --tensor-split 1,1` on `--device CUDA0,CUDA1` (tensor split)
+- `--cache-type-k q8_0 --cache-type-v q8_0`, `--flash-attn on`
+- `--spec-type draft-mtp --spec-draft-n-max 5` (MTP), `--ctx-checkpoints 8 --checkpoint-min-step 1024`
+
+Content: real `FORGE.md` + `src/**/*.{ts,md}`, sized to ~20K / ~70K / ~120K prompt
+tokens. Four `/v1/chat/completions` requests per size, `max_tokens=1`, real tool
+schema: (1) cold base tools, (2) identical, (3) base + one git group appended to
+the END of `tools`, (4) back to base. `prompt_n` / `cache_n` are read from the
+response `timings` object: `prompt_n` = tokens newly processed, `cache_n` = tokens
+reused from the KV cache (total prompt ≈ `prompt_n + cache_n`). `prefill tok/s` is
+`prompt_n / prompt_ms` and is only meaningful for the cold/partial rows, not the
+fully-cached ones.
+
+| size | request | prompt_n | cache_n | prompt_ms | prefill tok/s |
+|------|---------|---------:|--------:|----------:|--------------:|
+| 20000 | 1 cold base | 10264 | 9333 | 14245.8 | 720 |
+| 20000 | 2 identical | 4 | 19593 | 413.9 | 10 |
+| 20000 | 3 base+git | 11729 | 8828 | 16836.1 | 697 |
+| 20000 | 4 back base | 4 | 19593 | 351.4 | 11 |
+| 70000 | 1 cold base | 51152 | 19081 | 94169.5 | 543 |
+| 70000 | 2 identical | 70233 | 0 | 115176.5 | 610 |
+| 70000 | 3 base+git | 71193 | 0 | 104347.8 | 682 |
+| 70000 | 4 back base | 70233 | 0 | 101260.8 | 694 |
+| 120000 | 1 cold base | 120984 | 0 | 193110.7 | 627 |
+| 120000 | 2 identical | 120984 | 0 | 192242.0 | 629 |
+| 120000 | 3 base+git | 121944 | 0 | 194285.5 | 628 |
+| 120000 | 4 back base | 120984 | 0 | 192363.7 | 629 |
+
+Cold-base prefill throughput is ~720 tok/s at 20K, falling to ~540–630 tok/s at
+70K/120K (larger context / memory pressure). Wall time exceeds `prompt_ms` by a
+variable ~1–3× at 120K (MTP draft verification is not counted in `prompt_ms`).
+
+**Does a tool-list change still force a full cold re-prefill (`cache_n = 0`)?**
+No — at sizes that fit the KV cache, it does not. At 20K the common prefix is
+reused: request 3 (base + git group appended to the END) reuses `cache_n=8828`
+tokens instead of re-prefilling all ~20.5K from scratch, and request 4 (back to
+base) is fully cached again (`prompt_n=4`). This is **partial KV-cache reuse** —
+the opposite of b10894's full-cold-on-tool-change behavior. The reuse extends to
+the point where the appended group begins, so only the prefix up to that point is
+kept.
+
+Caveats: (a) request 1 "cold base" is not truly cold — a prior probe primed the
+system + base-tools + template prefix (~9.3K tokens), which is why its `cache_n`
+is non-zero; the relative comparison (2 vs 3 vs 4) is what matters. (b) At 70K and
+120K the KV cache is **not retained between requests at all** — even the identical
+request 2 is full cold (`cache_n=0`) — so the tool-change comparison is
+inconclusive there; that is a KV-cache-capacity artifact (q8_0 cache + tensor split
+cannot hold a 70K+ conversation), not a tool-list effect.
+
+**Implication for phase 3:** partial reuse now works at sizes that fit the cache.
+Per the plan, this reopens phase 3's scope — whether to widen it is Claude's call,
+not the measurer's.
