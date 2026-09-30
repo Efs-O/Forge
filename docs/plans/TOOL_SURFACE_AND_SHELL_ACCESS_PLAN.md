@@ -220,6 +220,14 @@ LSP read (8 tools, 1,404 tokens → one `code_intel(operation, …)`; `apply_cod
 761 tokens → `git_read(operation, …)`). Each merge is measured in the session logs
 for two weeks before the next; revert one that raises failures.
 
+**Amended 2026-09-30 (user decision): both merges ship in one release.** The
+one-family-per-release rule existed so a regression is attributable; the merged
+tools have distinct names (`code_intel`, `git_read`), so the session logs keep
+per-family failure and recovery rates apart anyway. Each family is its own
+commit, so either one reverts alone. Model, quant and KV cache stay fixed
+(Q6 tensor vision, b11243) for the two-week data window, and results are read
+by `session_start.forge_version`, never by date alone.
+
 ## Side change A — Model and effort for Forge-owned Codex/Claude sessions
 
 Independent of phases 1–3 (touches only `src/agentMesh/` and `src/agents/`), so it
