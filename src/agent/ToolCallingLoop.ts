@@ -23,6 +23,7 @@ import {
   isLlamaContextExhaustion,
   isNativeToolJsonParseError,
   MAX_MID_TURN_COMPACTIONS,
+  MID_TURN_COMPACTION_RESET_ROUNDS,
   MAX_ROUNDS_MESSAGE_PREFIX,
   OUTPUT_BUDGET_EXHAUSTED_NOTICE,
   MAX_REASONING_STOP_RETRIES,
@@ -151,6 +152,7 @@ export async function runToolCallingLoop(
   let truncationRecoveries = 0;
   let reasoningStopRetries = 0;
   let midTurnCompactions = 0;
+  let lastCompactionRound = 0;
   // Set when truncation retries ran out: the next round compacts or the turn fails.
   let forceCompaction = false;
 
@@ -179,10 +181,12 @@ export async function runToolCallingLoop(
     // Compact between rounds rather than failing the turn and resuming it
     // afterwards: auto-compaction only ran post-turn, so a long turn could
     // start at 60% and die at 100% without the threshold ever being checked.
+    if (round - lastCompactionRound >= MID_TURN_COMPACTION_RESET_ROUNDS) midTurnCompactions = 0;
     if (options.compactMidTurn && midTurnCompactions < MAX_MID_TURN_COMPACTIONS) {
       const exhausted = forceCompaction || exhaustion() !== undefined;
       if (await options.compactMidTurn({ exhausted })) {
         midTurnCompactions++;
+        lastCompactionRound = round;
         // Room changed, so a pending retry starts a fresh (thinking-off) streak.
         truncationRecoveries = Math.min(truncationRecoveries, 1);
         options.onMessagesChanged?.();

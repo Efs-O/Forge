@@ -147,6 +147,41 @@ describe('tool loop mid-turn compaction', () => {
     expect(forced).toBe(2);
   });
 
+  it('resets the cap once a compaction has bought a stretch of work', async () => {
+    // A long healthy turn: every round is a tool call, and the threshold is
+    // crossed again every 12 rounds. The per-turn cap used to stop at 2.
+    let round = 0;
+    streamModelChatCompletion.mockImplementation(
+      async (_u: string, _r: unknown, _m: unknown, h: Handlers) => {
+        round += 1;
+        if (round > 40) {
+          h.onToken('done');
+          h.onDone('stop');
+          return;
+        }
+        h.onToolCalls([
+          {
+            id: `c${round}`,
+            type: 'function',
+            function: { name: 'write_file', arguments: JSON.stringify({ path: `f${round}` }) },
+          },
+        ]);
+        h.onDone('tool_calls');
+      },
+    );
+    let calls = 0;
+    let compactions = 0;
+    const compact = vi.fn(async () => (++calls % 12 === 0 ? ++compactions > 0 : false));
+    const result = await runToolCallingLoop(
+      runOptions([{ role: 'user', content: 'go' }], {
+        compactMidTurn: compact,
+        maxRounds: 50,
+      }) as never,
+    );
+    expect(result.finalText).toBe('done');
+    expect(compactions).toBe(3);
+  });
+
   it('compacts on the server context 400 when a compactor is wired', async () => {
     let compacted = false;
     streamModelChatCompletion.mockImplementation(

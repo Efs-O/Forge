@@ -116,11 +116,19 @@ export const CONTEXT_EXHAUSTED_MESSAGE =
   `Compact the conversation (automatic when auto_compact is enabled) or start a new chat.`;
 
 /**
- * Compactions one turn may run between its own rounds. The shrink guards in
- * `runCompaction` refuse a compaction that buys no room; this caps the case
- * where each one buys a little and the turn eats it straight back.
+ * Back-to-back compactions one turn may run between its own rounds. The shrink
+ * guards in `runCompaction` refuse a compaction that buys no room; this caps the
+ * case where each one buys a little and the turn eats it straight back.
  */
 export const MAX_MID_TURN_COMPACTIONS = 2;
+
+/**
+ * Rounds after which a compaction counts as having bought real work, resetting
+ * the cap above. Without the reset the cap was per turn: a healthy turn ran
+ * ~120 rounds over 3 hours on its second compaction's room, then died at 100%
+ * of context with the cap spent and the threshold no longer checked.
+ */
+export const MID_TURN_COMPACTION_RESET_ROUNDS = 10;
 
 /**
  * Why the next round cannot be sent, or undefined when it can. The three
