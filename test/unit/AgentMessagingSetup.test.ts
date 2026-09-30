@@ -67,6 +67,44 @@ describe('agent bus conversation targeting', () => {
   });
 });
 
+describe('a --new without --model follows the loaded backend', () => {
+  const makeFacade = (activeModel: string | null) => {
+    const setConversationModel = vi.fn(async () => {});
+    // Like the real host, creating a chat activates it, on the stale default.
+    let activeConversationId = 'visible';
+    const facade = {
+      status: () => ({
+        activeConversationId,
+        conversations: [
+          { id: 'visible', title: 'Visible', activeModel },
+          { id: 'new-chat', title: 'New', activeModel: 'stale-default' },
+        ],
+      }),
+      recentExchanges: () => [],
+      createConversation: vi.fn(async () => {
+        activeConversationId = 'new-chat';
+        return { id: 'new-chat' };
+      }),
+      restoreConversation: vi.fn(async () => ({})),
+      setConversationModel,
+      send: vi.fn(async () => ({ kind: 'completed' as const })),
+    } as unknown as ForgeHostFacade;
+    return { facade, setConversationModel };
+  };
+
+  it('opens a --new chat on the active conversation\'s model when no --model is given', async () => {
+    const { facade, setConversationModel } = makeFacade('tensor-vision');
+    await submitBusMessage(facade, 'hello', { from: 'codex', newChat: true });
+    expect(setConversationModel).toHaveBeenCalledWith('new-chat', 'tensor-vision');
+  });
+
+  it('leaves a --new chat on the default when the active conversation has no model', async () => {
+    const { facade, setConversationModel } = makeFacade(null);
+    await submitBusMessage(facade, 'hello', { from: 'codex', newChat: true });
+    expect(setConversationModel).not.toHaveBeenCalled();
+  });
+});
+
 describe('busModelIds', () => {
   it('accepts each model and every model@profile it offers', () => {
     const config = {

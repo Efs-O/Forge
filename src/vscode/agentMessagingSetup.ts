@@ -42,6 +42,21 @@ export function busModelIds(config: ForgeConfig): string[] {
   ];
 }
 
+/**
+ * The model the user is actually talking to: the active conversation's model.
+ * The config-level active_model is only a fallback default and can be stale
+ * (pointing at a model that is not the one loaded), so a `--new` without an
+ * explicit --model follows this instead — otherwise it opens on the stale
+ * default and loading it spawns a second server.
+ */
+function currentLoadedModel(facade: ForgeHostFacade): string | undefined {
+  const status = facade.status();
+  const active = status.conversations.find(
+    (conversation) => conversation.id === status.activeConversationId,
+  );
+  return active?.activeModel ?? undefined;
+}
+
 /** An explicit new chat becomes visible; follow-ups keep their addressed chat. */
 
 export async function submitBusMessage(
@@ -50,12 +65,24 @@ export async function submitBusMessage(
   options: InboxMessageOptions | undefined,
 ): Promise<BusTurnEnd> {
   let conversationId = busTarget(facade, options?.from);
+  // Read before createConversation: it activates the new chat, whose model is
+  // the stale config default this is meant to replace.
+  const current = options?.newChat && !options.model ? currentLoadedModel(facade) : undefined;
   if (options?.newChat) {
     conversationId = (await facade.createConversation({ activate: true })).id;
   } else if (conversationId !== facade.status().activeConversationId) {
     await facade.restoreConversation(conversationId, { activate: false });
   }
-  if (options?.model) await facade.setConversationModel(conversationId, options.model);
+  if (options?.model) {
+    await facade.setConversationModel(conversationId, options.model);
+  } else if (current) {
+    // A --new without --model follows the model the user is actually talking
+    // to (the active conversation's model — the currently loaded backend), not
+    // the stale config active_model that createConversation defaults to. That
+    // stale default opened a new chat on a different model and loading it
+    // spawned a second server.
+    await facade.setConversationModel(conversationId, current);
+  }
   const inbound = parseForgeInboundPrompt(prompt);
   if (inbound) {
     // The agent-bus sender cannot see the user's Telegram chat. Reuse the

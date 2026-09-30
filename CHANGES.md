@@ -20,6 +20,14 @@
   those tools resolve a real binary. Live-only: it runs on a dev machine where
   VS Code is installed, and there is no silent PATH fallback in production code.
 
+### `forge.sh say --new` opens on the model you are using (2026-09-30)
+
+- A `--new` without `--model` opened the chat on the config's `active_model`,
+  even while a different model was loaded; loading it spawned a second
+  llama-server. The new chat now takes the model of the conversation that was
+  active when the message arrived, read before the new chat takes its place.
+  With `--model`, or with no model on the active chat, nothing changes.
+
 ## 0.16.66
 
 ### A job's state write no longer dies on a transient Windows rename (2026-09-30)
