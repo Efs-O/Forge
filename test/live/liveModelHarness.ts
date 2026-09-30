@@ -124,12 +124,19 @@ export async function runLiveToolLoop(options: {
       const tool = options.registry.get(call.function.name);
       if (!tool) throw new Error(`Live model requested unknown tool ${call.function.name}`);
       if (tool.mutation) options.context.beforeMutate(tool.mutation.paths(args));
-      const result = (await options.registry.dispatch(
-        call.function.name,
-        args,
-        options.allowed,
-        options.context,
-      )) as string;
+      // A thrown tool goes back to the model as `Error: ...`, as ToolDispatch
+      // sends it; throwing here ended the run on the first failed call.
+      let result: string;
+      try {
+        result = (await options.registry.dispatch(
+          call.function.name,
+          args,
+          options.allowed,
+          options.context,
+        )) as string;
+      } catch (err) {
+        result = `Error: ${(err as Error).message}`;
+      }
       calls.push(call.function.name);
       recordedCalls.push({ name: call.function.name, args });
       options.onRound?.({

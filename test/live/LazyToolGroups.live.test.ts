@@ -277,7 +277,8 @@ describe.runIf(LIVE)('lazy tool groups against a live Qwen3.8', () => {
     });
     countWrongGroupLoads(result, kind === 'needs' ? group : undefined);
     if (kind === 'needs') {
-      expect(result.calls[0]).toBe('load_tool_group');
+      // Looking first (find_files, read_file) is fine; never loading the group is not.
+      expect(result.calls).toContain('load_tool_group');
       expect(result.calls).toContain(tool);
       expect(result.toolCalls.find((call) => call.name === 'load_tool_group')?.args['group']).toBe(group);
     } else {
