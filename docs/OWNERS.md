@@ -188,6 +188,7 @@ overlaps with an existing owner, extend the owner instead.
 | Telegram selection keyboard + callback codec  | `src/remote/TelegramSelectionPagination.ts`     |
 | Forge approval presentation + correlation     | `src/remote/RemoteApprovalBridge.ts`            |
 | Telegram Bot API transport                    | `src/remote/TelegramChannel.ts`                 |
+| Telegram outbound sends, edits, and media | `src/remote/TelegramOutbound.ts`                   |
 | Telegram photo send + document fallback       | `src/remote/TelegramPhoto.ts`                   |
 | Per-chat send ordering + Bot API 429 retry    | `src/remote/telegramSendQueue.ts`               |
 | Telegram HTML escaping + line markup helpers  | `src/remote/telegramHtml.ts`                    |

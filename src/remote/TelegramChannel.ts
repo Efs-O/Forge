@@ -1,30 +1,14 @@
-import { z } from 'zod';
 import { TelegramAlbumCoordinator, MAX_TELEGRAM_IMAGES_PER_MESSAGE } from './TelegramAlbumBuffer';
 import { TelegramAcknowledgement, type EphemeralMessageHandler } from './TelegramAcknowledgement';
-import { plainTelegramText, splitTelegramText } from './TelegramText';
-import { styleTelegramNotice } from './telegramNoticeStyle';
-import { sendTelegramVoice } from './TelegramVoice';
-import { sendTelegramPhoto } from './TelegramPhoto';
-import { downloadTelegramAttachment, downloadTelegramAttachmentToFile } from './TelegramDownloads';
 import { pollTelegramUpdates, TELEGRAM_CURSOR_KEY } from './TelegramPolling';
 export { MAX_TELEGRAM_IMAGES_PER_MESSAGE } from './TelegramAlbumBuffer';
 export { splitTelegramText } from './TelegramText';
-import type {
-  RemoteChannel,
-  RemoteContactButton,
-  RemoteInboundDisposition,
-  RemoteInboundEvent,
-} from './types';
+import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
 import { createTelegramSelectionPages } from './TelegramSelectionPagination';
 import { postTelegram, TelegramChatQueue } from './telegramSendQueue';
-import { TelegramHelpMessages } from './TelegramHelpMessages';
+import { TelegramOutbound } from './TelegramOutbound';
 
 type Fetch = typeof fetch;
-const TelegramSentMessageSchema = z.object({ message_id: z.number().int() });
-
-/** Unanswered prompts are rare; this only bounds a pathological case. */
-const PROMPT_MESSAGE_LIMIT = 256;
-const TELEGRAM_CALLBACK_DATA_LIMIT_BYTES = 64;
 export const TELEGRAM_BOT_TOKEN_SECRET = 'forge.remote.telegram.botToken';
 
 /** Native Telegram command menu. Parsing remains transport-independent. */
@@ -90,8 +74,7 @@ export class TelegramChannel implements RemoteChannel {
    * PROMPT_MESSAGE_LIMIT: an approval nobody ever answers would otherwise leak
    * an entry per prompt for the life of the window.
    */
-  private readonly promptMessages = new Map<string, number>();
-  private readonly helpMessages: TelegramHelpMessages;
+  private readonly outbound: TelegramOutbound;
   /** Serializes every chat-addressed call so sends cannot overtake each other. */
   private readonly sendQueue = new TelegramChatQueue();
   private readonly albumCoordinator: TelegramAlbumCoordinator;
@@ -101,7 +84,13 @@ export class TelegramChannel implements RemoteChannel {
    */
   constructor(private readonly options: TelegramChannelOptions) {
     this.fetchImpl = options.fetch ?? fetch;
-    this.helpMessages = new TelegramHelpMessages(this, options.onError);
+    this.outbound = new TelegramOutbound(
+      (method, body, signal) => this.call(method, body, signal),
+      this.fetchImpl,
+      options.token,
+      this.sendQueue,
+      options.onError,
+    );
     this.acknowledgement = new TelegramAcknowledgement(
       (chatId, text, sendOptions) => this.send(chatId, text, sendOptions),
       options.onError,
@@ -171,210 +160,38 @@ export class TelegramChannel implements RemoteChannel {
     });
   }
 
-  async send(
-    chatId: string,
-    text: string,
-    options?: { correlationId?: string; signal?: AbortSignal },
-  ): Promise<string[]> {
-    const notice = styleTelegramNotice(text);
-    return notice
-      ? this.sendText(chatId, notice, options, 'HTML')
-      : this.sendText(chatId, plainTelegramText(text), options);
+  send(...args: Parameters<TelegramOutbound['send']>) {
+    return this.outbound.send(...args);
   }
-
-  /** Rich text is deliberately opt-in; normal agent replies stay literal. */
-  async sendHtml(
-    chatId: string,
-    html: string,
-    options?: { signal?: AbortSignal },
-  ): Promise<string[]> {
-    return this.sendText(chatId, html, options, 'HTML');
+  sendHtml(...args: Parameters<TelegramOutbound['sendHtml']>) {
+    return this.outbound.sendHtml(...args);
   }
-
-  private async sendText(
-    chatId: string,
-    text: string,
-    options?: { correlationId?: string; signal?: AbortSignal },
-    parseMode?: 'HTML',
-  ): Promise<string[]> {
-    const messageIds: string[] = [];
-    const chunks = splitTelegramText(text);
-    for (let index = 0; index < chunks.length; index++) {
-      const correlationId = index === 0 ? options?.correlationId : undefined;
-      const approveData = correlationId ? `a:${correlationId}` : undefined;
-      const denyData = correlationId ? `d:${correlationId}` : undefined;
-      if (
-        (approveData &&
-          Buffer.byteLength(approveData, 'utf8') > TELEGRAM_CALLBACK_DATA_LIMIT_BYTES) ||
-        (denyData && Buffer.byteLength(denyData, 'utf8') > TELEGRAM_CALLBACK_DATA_LIMIT_BYTES)
-      ) {
-        throw new Error('Forge Telegram approval identifier exceeds the Bot API limit.');
-      }
-      const sent = await this.call(
-        'sendMessage',
-        {
-          chat_id: chatId,
-          text: chunks[index],
-          ...(parseMode ? { parse_mode: parseMode } : {}),
-          ...(correlationId
-            ? {
-                reply_markup: {
-                  inline_keyboard: [
-                    [
-                      { text: 'Approve', callback_data: approveData },
-                      { text: 'Deny', callback_data: denyData },
-                    ],
-                  ],
-                },
-              }
-            : {}),
-        },
-        options?.signal,
-      );
-      if (correlationId) this.rememberPrompt(correlationId, sent);
-      const parsed = TelegramSentMessageSchema.safeParse(sent);
-      if (parsed.success) messageIds.push(String(parsed.data.message_id));
-    }
-    return messageIds;
+  sendProgress(...args: Parameters<TelegramOutbound['sendProgress']>) {
+    return this.outbound.sendProgress(...args);
   }
-
-  async sendProgress(
-    chatId: string,
-    text: string,
-    options?: { signal?: AbortSignal },
-  ): Promise<string | undefined> {
-    const sent = await this.call('sendMessage', { chat_id: chatId, text }, options?.signal);
-    const parsed = TelegramSentMessageSchema.safeParse(sent);
-    return parsed.success ? String(parsed.data.message_id) : undefined;
+  sendInlineKeyboard(...args: Parameters<TelegramOutbound['sendInlineKeyboard']>) {
+    return this.outbound.sendInlineKeyboard(...args);
   }
-
-  async sendInlineKeyboard(
-    chatId: string,
-    text: string,
-    buttons: readonly RemoteContactButton[][],
-    options?: { signal?: AbortSignal; parseMode?: 'HTML' },
-  ): Promise<string | undefined> {
-    const notice = options?.parseMode ? undefined : styleTelegramNotice(text);
-    const parseMode = notice ? 'HTML' : options?.parseMode;
-    const chunks = splitTelegramText(notice ?? text);
-    const keyboard = buttons.map((row) =>
-      row.map((button) => {
-        if (Buffer.byteLength(button.callbackData, 'utf8') > TELEGRAM_CALLBACK_DATA_LIMIT_BYTES) {
-          throw new Error('Forge Telegram callback identifier exceeds the Bot API limit.');
-        }
-        return { text: button.text, callback_data: button.callbackData };
-      }),
-    );
-    let firstMessageId: string | undefined;
-    for (let index = 0; index < chunks.length; index++) {
-      const sent = await this.call(
-        'sendMessage',
-        {
-          chat_id: chatId,
-          text: chunks[index],
-          ...(parseMode ? { parse_mode: parseMode } : {}),
-          ...(index === 0 ? { reply_markup: { inline_keyboard: keyboard } } : {}),
-        },
-        options?.signal,
-      );
-      if (index === 0) {
-        const parsed = TelegramSentMessageSchema.safeParse(sent);
-        if (parsed.success) firstMessageId = String(parsed.data.message_id);
-      }
-    }
-    return firstMessageId;
+  sendHelp(...args: Parameters<TelegramOutbound['sendHelp']>) {
+    return this.outbound.sendHelp(...args);
   }
-  sendHelp(
-    ...args: Parameters<TelegramHelpMessages['send']>
-  ): ReturnType<TelegramHelpMessages['send']> {
-    return this.helpMessages.send(...args);
+  handleHelpAction(...args: Parameters<TelegramOutbound['handleHelpAction']>) {
+    return this.outbound.handleHelpAction(...args);
   }
-  handleHelpAction(
-    ...args: Parameters<TelegramHelpMessages['handleAction']>
-  ): ReturnType<TelegramHelpMessages['handleAction']> {
-    return this.helpMessages.handleAction(...args);
+  answerCallbackQuery(...args: Parameters<TelegramOutbound['answerCallbackQuery']>) {
+    return this.outbound.answerCallbackQuery(...args);
   }
-
-  async answerCallbackQuery(
-    callbackId: string,
-    text?: string,
-    options?: { signal?: AbortSignal },
-  ): Promise<void> {
-    await this.call(
-      'answerCallbackQuery',
-      { callback_query_id: callbackId, ...(text ? { text } : {}) },
-      options?.signal,
-    );
+  clearInlineKeyboard(...args: Parameters<TelegramOutbound['clearInlineKeyboard']>) {
+    return this.outbound.clearInlineKeyboard(...args);
   }
-
-  async clearInlineKeyboard(
-    chatId: string,
-    messageId: string,
-    options?: { signal?: AbortSignal },
-  ): Promise<void> {
-    await this.call(
-      'editMessageReplyMarkup',
-      { chat_id: chatId, message_id: Number(messageId), reply_markup: { inline_keyboard: [] } },
-      options?.signal,
-    );
+  editMessage(...args: Parameters<TelegramOutbound['editMessage']>) {
+    return this.outbound.editMessage(...args);
   }
-
-  async editMessage(
-    chatId: string,
-    messageId: string,
-    text: string,
-    options?: { signal?: AbortSignal },
-  ): Promise<void> {
-    await this.call(
-      'editMessageText',
-      { chat_id: chatId, message_id: Number(messageId), text },
-      options?.signal,
-    );
+  deleteMessage(...args: Parameters<TelegramOutbound['deleteMessage']>) {
+    return this.outbound.deleteMessage(...args);
   }
-
-  /**
-   * Deletes a previously sent message. The command auto-cleanup path uses this
-   * to remove the owner's original /command after the configured delay. It
-   * runs through `call`, so it shares the chat's send lane with the command's
-   * own reply and aborts with the controller signal.
-   */
-  async deleteMessage(
-    chatId: string,
-    messageId: string,
-    options?: { signal?: AbortSignal },
-  ): Promise<void> {
-    await this.call(
-      'deleteMessage',
-      { chat_id: chatId, message_id: Number(messageId) },
-      options?.signal,
-    );
-  }
-
-  /**
-   * Clears the inline keyboard, leaving the prompt text in place as the record
-   * of what was asked. A prompt already edited, deleted, or unknown to this
-   * process (a window reload drops the map) is not an error: there is nothing
-   * left to retract, and failing here would surface as a spurious remote error.
-   */
-  async retractPrompt(chatId: string, correlationId: string, signal?: AbortSignal): Promise<void> {
-    const messageId = this.promptMessages.get(correlationId);
-    this.promptMessages.delete(correlationId);
-    if (messageId === undefined) return;
-    await this.call(
-      'editMessageReplyMarkup',
-      { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } },
-      signal,
-    ).catch(() => undefined);
-  }
-
-  private rememberPrompt(correlationId: string, sent: unknown): void {
-    const parsed = TelegramSentMessageSchema.safeParse(sent);
-    if (!parsed.success) return;
-    if (this.promptMessages.size >= PROMPT_MESSAGE_LIMIT) {
-      const oldest = this.promptMessages.keys().next();
-      if (!oldest.done) this.promptMessages.delete(oldest.value);
-    }
-    this.promptMessages.set(correlationId, parsed.data.message_id);
+  retractPrompt(...args: Parameters<TelegramOutbound['retractPrompt']>) {
+    return this.outbound.retractPrompt(...args);
   }
 
   async healthCheck(): Promise<{ ok: boolean; detail: string }> {
@@ -418,63 +235,17 @@ export class TelegramChannel implements RemoteChannel {
     });
   }
 
-  async downloadAttachment(
-    attachment: import('./types').RemoteInboundAttachment,
-  ): Promise<import('./types').RemoteInboundAttachment> {
-    return downloadTelegramAttachment(attachment, {
-      call: (method, body, signal) => this.call(method, body, signal),
-      fetchImpl: this.fetchImpl,
-      token: this.options.token,
-    });
+  downloadAttachment(...args: Parameters<TelegramOutbound['downloadAttachment']>) {
+    return this.outbound.downloadAttachment(...args);
   }
-
-  /**
-   * Streams a Telegram file to disk without it ever becoming a string (§9.2).
-   *
-   * Telegram's Bot API caps downloads at 20 MB, well under any voice note the
-   * `voice.input.max_seconds` gate would allow through, so the whole body is
-   * buffered once rather than piped -- a stream here would add a partial-file
-   * failure mode for no benefit at this size.
-   */
-  async downloadAttachmentToFile(
-    providerFileId: string,
-    targetPath: string,
-    signal?: AbortSignal,
-  ): Promise<{ bytes: number; mediaType: string }> {
-    return downloadTelegramAttachmentToFile(providerFileId, targetPath, signal, {
-      call: (method, body, callSignal) => this.call(method, body, callSignal),
-      fetchImpl: this.fetchImpl,
-      token: this.options.token,
-    });
+  downloadAttachmentToFile(...args: Parameters<TelegramOutbound['downloadAttachmentToFile']>) {
+    return this.outbound.downloadAttachmentToFile(...args);
   }
-
-  async sendPhoto(
-    chatId: string,
-    filePath: string,
-    caption: string,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    const { fetchImpl, sendQueue } = this;
-    await sendTelegramPhoto(
-      fetchImpl,
-      this.options.token,
-      sendQueue,
-      chatId,
-      filePath,
-      caption,
-      signal,
-    );
+  sendPhoto(...args: Parameters<TelegramOutbound['sendPhoto']>) {
+    return this.outbound.sendPhoto(...args);
   }
-
-  async sendVoice(chatId: string, oggPath: string, signal?: AbortSignal): Promise<void> {
-    await sendTelegramVoice(
-      this.fetchImpl,
-      this.options.token,
-      this.sendQueue,
-      chatId,
-      oggPath,
-      signal,
-    );
+  sendVoice(...args: Parameters<TelegramOutbound['sendVoice']>) {
+    return this.outbound.sendVoice(...args);
   }
 
   /**
