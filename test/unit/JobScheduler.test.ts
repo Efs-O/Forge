@@ -416,9 +416,10 @@ describe('JobScheduler lease loss (audit F2)', () => {
     expect(await scheduler.start({ immediate: false })).toBe(true);
 
     // Simulate the lease going away: the heartbeat fails, or another window
-    // steals it. Disposing here is what made a transient loss permanent —
-    // silently, with the wake task still armed.
-    (scheduler as unknown as { handleLeaseLost(): void }).handleLeaseLost();
+    // steals it. The onLost callback clears the handle (the scheduler stays
+    // alive and re-acquires on the next tick); simulate it by clearing the
+    // field directly, then remove the lease file another window would hold.
+    (scheduler as unknown as { lease: unknown }).lease = undefined;
     await fs.promises.rm(path.join(jobsRoot, 'jobs-scheduler.lease.json'), { force: true });
 
     nowMs += 15 * 60_000;

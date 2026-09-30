@@ -1,17 +1,17 @@
-import { FileLease } from '../util/FileLease';
+import type { FileLease } from '../util/FileLease';
 import { defaultOutboxDir } from './JobOutbox';
 import { JobDelivery } from './JobDelivery';
-import { runCheck, buildCheckContext } from './checks/runCheck';
 import { isDue, nextDue, wakeTimesFor } from './schedule';
 import type { JobFile, RunRow } from './jobSchema';
 import type { JobStore } from './JobStore';
-import type { PowerControl, SleepIfIdleInput } from '../system/PowerControl';
-import { shouldSleepIfIdle } from '../system/PowerControl';
+import type { PowerControl } from '../system/PowerControl';
 import { LlamacppAction, type LlamacppActionDeps } from './actions/llamacppAction';
 import { AgentTaskRunner, type AgentTaskDeps } from './agentTask';
 import { recoverInterruptedRuns } from './agentTaskState';
-import { SCHEDULER_LEASE_KEY, WakeReconciler } from './schedulerWakes';
-import { BACKOFF_THRESHOLD, nextDueWithBackoff } from './backoff';
+import { WakeReconciler } from './schedulerWakes';
+import { acquireSchedulerLease } from './jobLease';
+import { BACKOFF_THRESHOLD } from './backoff';
+import { runJobCheck, applyJobBackoff, sleepIfIdleIfRequested } from './jobRunLifecycle';
 
 /** The tick loop that runs due jobs, holds the `jobs-scheduler` lease, and
  * delivers changes through the coalescing outbox. Deps are injected so the
@@ -161,20 +161,16 @@ export class JobScheduler {
    * without one, so a lost lease is recovered rather than fatal.
    */
   private async acquireLease(): Promise<boolean> {
-    try {
-      this.lease = await FileLease.acquire({
-        directory: this.leaseDirectory,
-        key: SCHEDULER_LEASE_KEY,
-        workspaceId: this.workspaceId,
-        instanceId: this.instanceId,
-        onLost: () => this.handleLeaseLost(),
-      });
-      this.wakes.reset();
-      return true;
-    } catch {
-      this.lease = undefined;
-      return false;
-    }
+    this.lease = await acquireSchedulerLease(
+      this.leaseDirectory,
+      this.workspaceId,
+      this.instanceId,
+      () => {
+        this.lease = undefined;
+      },
+      this.wakes,
+    );
+    return this.lease !== undefined;
   }
 
   /**
@@ -182,8 +178,8 @@ export class JobScheduler {
    * cannot be restarted. This is disposal — `jobsSetup` calls it on
    * deactivation and on a config reload that disables jobs.
    *
-   * It is NOT what happens when the lease is merely lost; see
-   * {@link handleLeaseLost}.
+   * It is NOT what happens when the lease is merely lost (see
+   * {@link acquireLease}); a lost lease keeps the scheduler alive.
    */
   async stop(): Promise<void> {
     if (this.disposed) return;
@@ -193,18 +189,6 @@ export class JobScheduler {
     // Its failure was already reported to whoever started it.
     await this.running?.catch(() => undefined);
     await this.lease?.release();
-    this.lease = undefined;
-  }
-
-  /**
-   * The lease was lost — another window stole it, or a heartbeat failed. Drop
-   * it and go passive, but **stay alive and keep ticking**: the next tick tries
-   * to re-acquire, and picks the scheduler back up if it succeeds.
-   *
-   * Never `stop()`: that made a transient loss permanent for the window's
-   * lifetime, silently, while the scheduled wake kept waking the machine.
-   */
-  private handleLeaseLost(): void {
     this.lease = undefined;
   }
 
@@ -417,83 +401,16 @@ export class JobScheduler {
 
   /** D6: suspend again after a wake if a job asked to and nothing is busy. */
   private async maybeSleepIfIdle(jobs: readonly JobFile[]): Promise<void> {
-    if (this.busy() !== undefined) return;
-    // A running agent task is busy even when no turn streams (a tool may be
-    // mid-download); `runningJobs` holds it for the whole detached run (AC11).
-    if (this.runningJobs.size > 0) return;
-    const anySleepIfIdle = jobs.some((jf) => jf.job.enabled && jf.job.after === 'sleep_if_idle');
-    if (!anySleepIfIdle) return;
-    const msSinceInput = await this.power.idleSinceResume();
-    if (msSinceInput === null) return;
-    // Anchor on the last input: untouched since the resume, the machine may sleep again.
-    const input: SleepIfIdleInput = {
-      msSinceResume: 0,
-      msSinceInput,
-      busy: this.busy(),
-    };
-    if (shouldSleepIfIdle(input)) {
-      await this.power.suspend().catch(() => undefined);
-    }
+    return sleepIfIdleIfRequested(this.busy, this.runningJobs, this.power, jobs);
   }
 
   /** Run the check. Returns the observation, whether it changed, and a summary. */
-  private async runCheck(jobFile: JobFile): Promise<{
-    observation: string | null;
-    changed: boolean;
-    summary: string;
-  }> {
-    const { job } = jobFile;
-    const { allowedHosts } = this.getConfig();
-    const ctx = buildCheckContext(allowedHosts, job.id, this.etagCache);
-    let checkResult = await runCheck(jobFile, ctx);
-
-    // A mutating action (llamacpp_update) runs when the check reports a change
-    // (B5). It is the only action that mutates the machine; a failure here is a
-    // failed run and backs off like any other. It needs a github_release check
-    // (the tag comes from the observation) and the action to be wired.
-    if (checkResult.changed && job.action?.kind === 'llamacpp_update') {
-      if (job.check.kind === 'github_release' && this.llamacpp) {
-        // The type is nullable; never `JSON.parse(null)` before a machine mutation.
-        const tag =
-          checkResult.observation === null
-            ? undefined
-            : (JSON.parse(checkResult.observation) as { tag?: string }).tag;
-        if (typeof tag === 'string' && tag.length > 0) {
-          const stage = await this.llamacpp.stage(job.action, job.id, job.check.repo, tag);
-          checkResult = { ...checkResult, summary: stage.summary };
-        }
-      }
-    }
-
-    return checkResult;
+  private async runCheck(jobFile: JobFile) {
+    return runJobCheck(this.getConfig, this.etagCache, this.llamacpp, jobFile);
   }
 
   /** Apply backoff after a failure: double the interval up to 24 h (B.3). */
   private async applyBackoff(jobFile: JobFile, message: string): Promise<void> {
-    const { job, state } = jobFile;
-    const count = state.consecutive_failures + 1;
-    const now = this.now();
-    const nextDueAt = nextDueWithBackoff(job.schedule, now, count);
-    this.store.patchState(job.id, {
-      last_run_at: now.getTime(),
-      next_due_at: nextDueAt,
-      consecutive_failures: count,
-    });
-    // Not yet backed off: that was just a normal reschedule.
-    if (count < BACKOFF_THRESHOLD) return;
-    // Report once, on the run that crosses the threshold. Later
-    // failures keep extending the backoff silently; the recovery (a success
-    // after backoff) is reported by the next successful run.
-    if (count === BACKOFF_THRESHOLD) {
-      await this.delivery.deliver(job, `failing: ${message}`).catch(() => undefined);
-    }
-    await this.store.appendRun(job.id, {
-      at: now.getTime(),
-      late: false,
-      outcome: 'skipped',
-      changed: false,
-      summary: `backed off after ${count} failures: ${message}`,
-      delivered: 0,
-    });
+    return applyJobBackoff(this.store, this.delivery, this.now, jobFile, message);
   }
 }
