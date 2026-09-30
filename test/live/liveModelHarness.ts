@@ -1,4 +1,4 @@
-import type { ToolDefinition } from '../../src/llm/types';
+import type { ChatMessage, ToolDefinition } from '../../src/llm/types';
 import type {
   ToolHandlerContext,
   ToolPermission,
@@ -7,7 +7,7 @@ import type {
 
 interface LiveMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string | null;
+  content: ChatMessage['content'];
   tool_call_id?: string;
   name?: string;
   tool_calls?: LiveToolCall[];
@@ -46,7 +46,7 @@ export async function callLiveModel(
         {
           role: last?.role ?? 'user',
           content: [
-            { type: 'text', text: last?.content ?? '' },
+            { type: 'text', text: typeof last?.content === 'string' ? last.content : '' },
             { type: 'image_url', image_url: { url: imageDataUrl } },
           ],
         },
@@ -126,16 +126,22 @@ export async function runLiveToolLoop(options: {
       if (tool.mutation) options.context.beforeMutate(tool.mutation.paths(args));
       // A thrown tool goes back to the model as `Error: ...`, as ToolDispatch
       // sends it; throwing here ended the run on the first failed call.
+      // A structured result (view_image's image parts) is unwrapped the way
+      // ToolDispatch does it; sending the whole object got HTTP 400.
       let result: string;
+      let content: ChatMessage['content'];
       try {
-        result = (await options.registry.dispatch(
+        const handled = await options.registry.dispatch(
           call.function.name,
           args,
           options.allowed,
           options.context,
-        )) as string;
+        );
+        result = typeof handled === 'string' ? handled : handled.text;
+        content = typeof handled === 'string' ? handled : handled.content;
       } catch (err) {
         result = `Error: ${(err as Error).message}`;
+        content = result;
       }
       calls.push(call.function.name);
       recordedCalls.push({ name: call.function.name, args });
@@ -148,7 +154,7 @@ export async function runLiveToolLoop(options: {
         role: 'tool',
         tool_call_id: call.id,
         name: call.function.name,
-        content: result,
+        content,
       });
     }
   }
