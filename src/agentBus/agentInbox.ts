@@ -82,6 +82,34 @@ interface QueuedMessage {
   options?: InboxMessageOptions;
   /** A steer interrupts the turn and runs as its own; never claimed mid-turn. */
   steer?: boolean;
+  /** When the sender wrote it; delivery can come much later. */
+  queuedAt: number;
+}
+
+/** Waits shorter than this are ordinary queueing and say nothing. */
+export const STALE_NOTE_AFTER_MS = 60_000;
+
+/**
+ * A bus message's prompt as delivered. One that sat in the queue gets its age
+ * appended: a "redo 70K/120K" queued while Forge was blocked on a question
+ * reached it after the sender's newer "no redo" reply, and with nothing
+ * showing the order the agent read delivery order as authorship order and
+ * started the withdrawn redo. The note sits after the agent-bus trailer, so
+ * `parseForgeInboundPrompt` strips it from remote views.
+ */
+export function deliveredPrompt(
+  item: Pick<QueuedMessage, 'prompt' | 'from' | 'queuedAt'>,
+  now: number,
+): string {
+  const waited = now - item.queuedAt;
+  if (!item.from || waited < STALE_NOTE_AFTER_MS) return item.prompt;
+  const sent = new Date(item.queuedAt).toTimeString().slice(0, 8);
+  const mins = Math.round(waited / 60_000);
+  return (
+    `${item.prompt}\n\n_(Queued:${item.from} wrote this at ${sent}, ${mins} min before it ` +
+    `reached you. Anything ${item.from} told you after that, including an answer to your ` +
+    `question, is newer and overrides it.)_`
+  );
 }
 
 /** A queued message's options as the host sees them: with its sender. */
@@ -120,9 +148,10 @@ export class AgentInbox {
   ): { position: number; id: string } | undefined {
     if (this.disposed || this.queue.length >= INBOX_CAP) return undefined;
     const id = `m${randomBytes(4).toString('hex')}`;
-    const item = {
+    const item: QueuedMessage = {
       id,
       prompt,
+      queuedAt: Date.now(),
       ...(from ? { from } : {}),
       ...(options ? { options } : {}),
       ...(front ? { steer: true } : {}),
@@ -176,7 +205,7 @@ export class AgentInbox {
       const item = this.queue[i] as QueuedMessage;
       if (item.steer || item.options?.newChat || item.options?.model) continue;
       if (targetOf(hostOptions(item)) !== conversationId) continue;
-      claimed.push(item.prompt);
+      claimed.push(deliveredPrompt(item, Date.now()));
       this.queue.splice(i--, 1);
     }
     return claimed;
@@ -218,7 +247,7 @@ export class AgentInbox {
           }
         }
         try {
-          const end = await this.host.submit(item.prompt, hostOptions(item));
+          const end = await this.host.submit(deliveredPrompt(item, startedAt), hostOptions(item));
           // §9: a bus-started turn just ended — the sender gets one line saying
           // how (finished, failed, cancelled) + a board event. A user-typed turn
           // has no `from`, so this fires only for agent messages.

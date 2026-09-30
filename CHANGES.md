@@ -2,6 +2,15 @@
 
 ## 0.16.66
 
+### A queued agent message says how old it is (2026-09-30)
+
+- A bus message that waited a minute or more in Forge's queue now arrives
+  with the time its sender wrote it and how long it waited, plus a note that
+  anything the sender said since, including an answer to Forge's question,
+  overrides it. Before this, a withdrawn request queued while Forge was
+  waiting on a question arrived after the sender's newer answer, and Forge
+  took delivery order for writing order and ran it.
+
 ### A Forge-owned Copilot session runs on `auto` (2026-09-30)
 
 - Forge launched its owned Copilot CLI with no `--model`, so every call ran

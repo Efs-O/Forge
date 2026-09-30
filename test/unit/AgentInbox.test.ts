@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   AgentInbox,
   busTurnEndLine,
+  deliveredPrompt,
   INBOX_CAP,
+  STALE_NOTE_AFTER_MS,
   type BusTurnEnd,
   type InboxHost,
 } from '../../src/agentBus/agentInbox';
+import { parseForgeInboundPrompt } from '../../src/agentBus/busContent';
 
 const tick = (ms = 20): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -298,5 +301,27 @@ describe('busTurnEndLine', () => {
       /^cancelled · 1 min · .*before it answered/,
     );
     expect(busTurnEndLine({ kind: 'interrupted' }, 60_000)).toMatch(/^interrupted · /);
+  });
+});
+
+describe('deliveredPrompt', () => {
+  const prompt = '**claude says:**\n\nredo 70K\n\n_(Agent-bus message. To answer, ...)_';
+
+  it('leaves a promptly delivered message untouched', () => {
+    const item = { prompt, from: 'claude', queuedAt: 1_000 };
+    expect(deliveredPrompt(item, 1_000 + STALE_NOTE_AFTER_MS - 1)).toBe(prompt);
+  });
+
+  it('says how long a message waited and that later words from its sender win', () => {
+    const item = { prompt, from: 'claude', queuedAt: 1_000 };
+    const out = deliveredPrompt(item, 1_000 + 12 * 60_000);
+    expect(out.startsWith(prompt)).toBe(true);
+    expect(out).toContain('12 min before it reached you');
+    expect(out).toContain('including an answer to your question, is newer and overrides it');
+    expect(parseForgeInboundPrompt(out)?.text).toBe('redo 70K');
+  });
+
+  it('never annotates a message with no bus sender', () => {
+    expect(deliveredPrompt({ prompt: 'typed', queuedAt: 0 }, 10 * 60_000)).toBe('typed');
   });
 });
