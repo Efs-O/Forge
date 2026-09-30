@@ -81,6 +81,12 @@ describe('remote command map', () => {
     'src/remote/RemotePowerCommands.ts',
     // B3: /jobs and /job live in their own file, same reason as the power one.
     'src/remote/RemoteJobCommands.ts',
+    // max-lines split: the settings and model command families moved to their
+    // own files, same reason as the power and job ones above.
+    'src/remote/remoteSettingsCommands.ts',
+    'src/remote/remoteModelCommands.ts',
+    // /lock moved with the auth gate in the RemoteController split.
+    'src/remote/remoteAuthGate.ts',
     // Contact management is intentionally isolated from the ordinary command
     // handler so non-owner users can never reach it.
     'src/remote/TelegramContactService.ts',

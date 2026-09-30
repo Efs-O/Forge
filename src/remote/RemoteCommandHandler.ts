@@ -1,31 +1,20 @@
 import type { CompactionOutcome } from '../sidebar/CompactionService';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import { describeBudget, handleRemoteSessionCommand } from './RemoteSessionCommands';
-import {
-  sendConversationSelection,
-  sendModelSelection,
-  sendWorkspaceSelection,
-} from './RemoteSelectionPager';
-import { sendModelProfileSelection } from './RemoteModelProfileSelection';
+import { sendConversationSelection, sendWorkspaceSelection } from './RemoteSelectionPager';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
 import { QUEUED_ACK_DELETE_SECONDS } from './TelegramAcknowledgement';
-import { collectSystemReport } from '../system/SystemReport';
-import { formatSystemReport } from '../system/formatSystemReport';
-import {
-  modelPickerSelectionEntries,
-  type ModelPickerDescriptor,
-} from '../sidebar/ModelPickerGroups';
+import type { ModelPickerDescriptor } from '../sidebar/ModelPickerGroups';
 import { PowerControl } from '../system/PowerControl';
 import { handleRemotePowerCommand } from './RemotePowerCommands';
 import { handleRemoteJobCommand } from './RemoteJobCommands';
 import type { JobStore } from '../jobs/JobStore';
 import { switchWorkspaceCommand } from './remoteWorkspaceCommand';
-import {
-  resolveConversationSelection,
-  resolveModelSelection,
-  shortId,
-} from './remoteCommandSelectors';
+import { handleRemoteSettingsCommand } from './remoteSettingsCommands';
+import { handleRemoteModelCommand } from './remoteModelCommands';
+import { editProgress } from './remoteCommandShared';
+import { resolveConversationSelection, shortId } from './remoteCommandSelectors';
 
 export interface RemoteCommandContext {
   channel: RemoteChannel;
@@ -152,79 +141,8 @@ async function executeRemoteCommand(
     });
     if (jobCommand) return jobCommand;
   }
-  if (command === '/clanker') {
-    const desired = argument?.toLowerCase();
-    if (desired !== 'on' && desired !== 'off') {
-      return { kind: 'rejected', reason: 'usage: /clanker on|off' };
-    }
-    // Owner-authenticated command, never a tool: a model that could call this
-    // would be able to switch off its own approval gate mid-turn.
-    context.host.setClankerMode(desired === 'on');
-    await context.channel.send(
-      event.chatId,
-      desired === 'on'
-        ? 'Forge: clanker mode ON — non-dangerous tools now run with no approval, here or in the sidebar, for every tab in this window. It covers this workspace, and stays armed across a window reload until it is turned off.'
-        : 'Forge: clanker mode OFF — tool approvals are gated again in this workspace, and stay gated across a reload.',
-      { signal: context.signal },
-    );
-    return { kind: 'handled' };
-  }
-  if (command === '/timeout') {
-    if (!argument) {
-      await context.channel.send(
-        event.chatId,
-        `Forge: remote inactivity timeout is ${
-          context.inactivityTimeoutMinutes === 0
-            ? 'off'
-            : `${context.inactivityTimeoutMinutes} minutes`
-        }.`,
-        { signal: context.signal },
-      );
-      return { kind: 'handled' };
-    }
-    const minutes = argument.toLowerCase() === 'off' ? 0 : Number(argument);
-    if (!Number.isInteger(minutes) || minutes < 0 || minutes > 1_440) {
-      return { kind: 'rejected', reason: 'usage: /timeout <1-1440|off>' };
-    }
-    if (!context.setInactivityTimeout) {
-      return { kind: 'rejected', reason: 'remote timeout configuration is unavailable' };
-    }
-    await context.setInactivityTimeout(minutes);
-    await context.channel.send(
-      event.chatId,
-      `Forge: remote inactivity timeout ${minutes === 0 ? 'disabled' : `set to ${minutes} minutes`}.`,
-      { signal: context.signal },
-    );
-    return { kind: 'handled' };
-  }
-  if (command === '/ratelimit') {
-    if (!argument) {
-      await context.channel.send(
-        event.chatId,
-        `Forge: remote rate limit is ${context.rateLimitPerMinute} messages per minute.`,
-        { signal: context.signal },
-      );
-      return { kind: 'handled' };
-    }
-    // `off` maps to the schema ceiling rather than removing the limiter. The
-    // limiter is the only backstop the Telegram poll loop has against a single
-    // poisoned update being redelivered forever; a true “off” would trade a
-    // visible error for a silent hot loop.
-    const perMinute = argument.toLowerCase() === 'off' ? 600 : Number(argument);
-    if (!Number.isInteger(perMinute) || perMinute < 1 || perMinute > 600) {
-      return { kind: 'rejected', reason: 'usage: /ratelimit <1-600|off>' };
-    }
-    if (!context.setRateLimit) {
-      return { kind: 'rejected', reason: 'remote rate limit configuration is unavailable' };
-    }
-    await context.setRateLimit(perMinute);
-    await context.channel.send(
-      event.chatId,
-      `Forge: remote rate limit set to ${perMinute} messages per minute.`,
-      { signal: context.signal },
-    );
-    return { kind: 'handled' };
-  }
+  const settingsCommand = await handleRemoteSettingsCommand(command, argument, event, context);
+  if (settingsCommand) return settingsCommand;
   if (command === '/compact') {
     const binding = context.store.binding(event.channel, event.chatId);
     if (!binding) return { kind: 'rejected', reason: 'no conversation is bound' };
@@ -372,128 +290,7 @@ async function executeRemoteCommand(
     }
     return context.resumeCurrent(event, dedupKey);
   }
-  if (command === '/models') {
-    return sendModelSelection(event, context, argument);
-  }
-  if (command === '/model' && argument) {
-    const binding = context.store.binding(event.channel, event.chatId);
-    if (!binding) return { kind: 'rejected', reason: 'no conversation is bound' };
-    const status = context.host.status();
-    if (
-      status.requestChains.some((chain) => chain.conversationId === binding.conversationId) ||
-      status.streamingConversationIds.includes(binding.conversationId) ||
-      context.store.queued(binding.conversationId).length > 0
-    ) {
-      return { kind: 'rejected', reason: 'the bound conversation is busy or has queued work' };
-    }
-    const modelName = resolveModelSelection(context, event, argument);
-    if (
-      !modelName ||
-      !modelPickerSelectionEntries(context.modelEntries).some((model) => model.name === modelName)
-    ) {
-      return { kind: 'rejected', reason: 'model is unavailable; use /models' };
-    }
-    const baseEntry = context.modelEntries.find((model) => model.name === modelName);
-    if (baseEntry?.profiles?.length && !modelName.includes('@')) {
-      return sendModelProfileSelection(event, context, modelName);
-    }
-    await context.host.setConversationModel(binding.conversationId, modelName);
-    await context.channel.send(event.chatId, `Forge: pinned ${modelName} to this chat.`, {
-      signal: context.signal,
-    });
-    return { kind: 'handled' };
-  }
-  // /model with no argument lists the models, the way /chats and /workspace do
-  // with no argument — a bare command is a request to see the list, not a
-  // failed pick.
-  if (command === '/model') {
-    return sendModelSelection(event, context, undefined);
-  }
-  if (command === '/system') {
-    // Deliberately not gated on a busy window: "what is holding the VRAM" is
-    // the question a user asks precisely while a turn is running, and the
-    // probes read counters without touching anything the turn owns.
-    const report = await collectSystemReport({
-      backendProcesses: () => context.host.backendProcesses?.() ?? [],
-    });
-    const text = formatSystemReport(report, {
-      compact: true,
-      telegramHtml: context.channel.sendHtml !== undefined,
-    });
-    if (context.channel.sendHtml) {
-      await context.channel.sendHtml(event.chatId, text, { signal: context.signal });
-    } else {
-      await context.channel.send(event.chatId, text, { signal: context.signal });
-    }
-    return { kind: 'handled' };
-  }
-  if (command === '/unload') {
-    const idleReason = globalBusyReason(context);
-    if (idleReason) return { kind: 'rejected', reason: idleReason };
-    const binding = context.store.binding(event.channel, event.chatId);
-    if (!binding) {
-      return { kind: 'rejected', reason: 'this chat has no conversation; use /unloadall' };
-    }
-    const { model, wasLoaded } = await context.host.unloadConversationModel(binding.conversationId);
-    const text = wasLoaded
-      ? `Forge: ${model} unloaded, memory released. Other loaded models stay; /unloadall frees them too.`
-      : `Forge: ${model} was not loaded.`;
-    await context.channel.send(event.chatId, text, { signal: context.signal });
-    return { kind: 'handled' };
-  }
-  if (command === '/unloadall') {
-    const idleReason = globalBusyReason(context);
-    if (idleReason) return { kind: 'rejected', reason: idleReason };
-    await context.host.unloadModels();
-    await context.channel.send(
-      event.chatId,
-      'Forge: all models unloaded, memory released. Send a prompt to start the backend again.',
-      { signal: context.signal },
-    );
-    return { kind: 'handled' };
-  }
-  if (command === '/restart') {
-    const idleReason = globalBusyReason(context);
-    if (idleReason) return { kind: 'rejected', reason: idleReason };
-    const binding = context.store.binding(event.channel, event.chatId);
-    const modelName = binding
-      ? context.host.status().conversations.find((item) => item.id === binding.conversationId)
-          ?.activeModel
-      : undefined;
-    if (!modelName) {
-      return {
-        kind: 'rejected',
-        reason: 'this chat has no explicitly pinned model; use /models then /model',
-      };
-    }
-    await context.host.restartModel(modelName);
-    await context.channel.send(event.chatId, `Forge: restarted ${modelName}.`, {
-      signal: context.signal,
-    });
-    return { kind: 'handled' };
-  }
+  const modelCommand = await handleRemoteModelCommand(command, argument, event, context);
+  if (modelCommand) return modelCommand;
   return { kind: 'rejected', reason: 'unknown command' };
-}
-
-/** Best-effort edit of a progress message; silently skipped when unsupported. */
-async function editProgress(
-  channel: RemoteChannel,
-  chatId: string,
-  messageId: string | undefined,
-  text: string,
-): Promise<void> {
-  if (!messageId || !channel.editMessage) return;
-  await channel.editMessage(chatId, messageId, text).catch(() => undefined);
-}
-
-function globalBusyReason(context: RemoteCommandContext): string | undefined {
-  const status = context.host.status();
-  if (
-    status.requestChains.length ||
-    status.streamingConversationIds.length ||
-    status.pendingApproval
-  ) {
-    return 'Forge is busy; wait for requests, streams, and approvals to finish';
-  }
-  return context.store.queued().length > 0 ? 'Forge has queued remote requests' : undefined;
 }

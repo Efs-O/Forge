@@ -165,6 +165,9 @@ overlaps with an existing owner, extend the owner instead.
 | Remote owner command behavior                 | `src/remote/RemoteCommandHandler.ts`            |
 | Command argument → id, and miss messages      | `src/remote/remoteCommandSelectors.ts`          |
 | `/workspace <n>` switch preflight             | `src/remote/remoteWorkspaceCommand.ts`          |
+| `/clanker`, `/timeout`, `/ratelimit`          | `src/remote/remoteSettingsCommands.ts`            |
+| `/models`, `/model`, `/system`, unload        | `src/remote/remoteModelCommands.ts`               |
+| Shared helpers: busy check, progress edit     | `src/remote/remoteCommandShared.ts`               |
 | /sleep, /wake, sleep confirmation state       | `src/remote/RemotePowerCommands.ts`             |
 | Queue order, promote/cancel/claim rules       | `src/remote/remoteQueueOrdering.ts`             |
 | Claim a queued request as a mid-turn tell     | `src/remote/RemoteMidTurnTells.ts`              |
