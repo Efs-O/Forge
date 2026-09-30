@@ -21,6 +21,7 @@ import type { ChatMessage } from '../../src/llm/types';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
 import type { HostToWebview } from '../../src/sidebar/messageBridge';
 import type { CompactionLogEntry } from '../../src/sidebar/SessionLogger';
+import { activateLazyGroup, isLazyGroupActive, resetLazyToolGroups } from '../../src/tools/lazyToolGroups';
 
 function conv(messages: ChatMessage[]): ConversationRuntime {
   return { id: 'c1', title: 't', messages, createdAt: 0, updatedAt: 0 } as ConversationRuntime;
@@ -417,6 +418,23 @@ describe('runCompaction after an automatic failure', () => {
 });
 
 describe('runCompaction', () => {
+  it('records loaded lazy groups in the summary and clears them after compaction', async () => {
+    resetLazyToolGroups();
+    const c = conv([
+      { role: 'user', content: 'first task' },
+      { role: 'assistant', content: 'did the first task' },
+      { role: 'user', content: 'second task' },
+    ]);
+    activateLazyGroup(c.id, 'media');
+    const h = harness(c, async () => long('summary'));
+
+    await expect(runCompaction(h.deps, c.id, { auto: true })).resolves.toBe('compacted');
+
+    expect(c.compaction?.summary).toContain('Loaded optional tool groups before compaction: media');
+    expect(isLazyGroupActive(c.id, 'media')).toBe(false);
+    resetLazyToolGroups();
+  });
+
   it('pins a completed download in both the summary request and compacted context', async () => {
     const c = conv([
       { role: 'user', content: 'install Krea 2' },

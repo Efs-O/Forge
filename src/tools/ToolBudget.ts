@@ -27,6 +27,11 @@ export class ToolBudget {
     return this.limits.get(name) === 0;
   }
 
+  /** Configured allowlists explicitly opt named lazy tools into eager advertisement. */
+  isExplicitlyAllowed(name: string): boolean {
+    return this.allowlist?.has(name) === true;
+  }
+
   /** Drop excluded tool definitions from an already permission-filtered list. */
   filterDefinitions(definitions: readonly ToolDefinition[]): ToolDefinition[] {
     return definitions.filter((d) => !this.isExcluded(d.function.name));

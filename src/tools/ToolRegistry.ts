@@ -1,5 +1,6 @@
 import type { ChatMessage, ContentPart, ToolDefinition } from '../llm/types';
 import type { PlanItem } from '../sidebar/sessionTypes';
+import { recordNativeLazyTool } from './lazyToolGroups';
 
 export type ToolPermission =
   | 'read'
@@ -39,6 +40,10 @@ export interface ToolHandlerContext {
   /** Conversation the call belongs to. ask_local_agent keys warm CLI agent
    *  sessions on it so repeat delegations reuse one process. */
   conversationId?: string;
+  /** Resolved model name, used by model-specific tool-group refusals. */
+  modelName?: string;
+  /** Whether the resolved model accepts image input. */
+  isVisionModel?: boolean;
   /** Full raw transcript for the current conversation. Read-only tools may use
    * this to recover an earlier result without widening the model prompt. */
   conversationMessages?: readonly ChatMessage[];
@@ -112,6 +117,7 @@ export class ToolRegistry {
       throw new Error(`ToolRegistry: mutating tool "${name}" must declare mutation metadata`);
     }
     this.tools.set(name, tool);
+    recordNativeLazyTool(name);
   }
 
   get(name: string): RegisteredTool | undefined {

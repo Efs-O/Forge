@@ -22,6 +22,7 @@ import { isFailureResult, readPathArg, resultLabel } from './toolResultView';
 import type { PlanItem } from './sessionTypes';
 import { getLogger } from '../util/logger';
 import { ToolApprovalPolicyDenied } from './ToolApprovalService';
+import { isLazyGroupActive, lazyGroupForTool } from '../tools/lazyToolGroups';
 
 const log = getLogger();
 /** A directory has no text to diff, and `readFileSync` on one throws EISDIR. */
@@ -120,6 +121,7 @@ export class ToolDispatch {
     unavailableTools?: ReadonlyMap<string, string>,
     setPlan?: (items: PlanItem[]) => void,
     tellArrived?: (callback: () => void) => () => void,
+    modelContext?: { modelName: string; isVisionModel: boolean },
   ): Promise<void> {
     for (const tc of toolCalls) {
       // Every exit from this iteration pushes exactly one tool message, so the
@@ -161,6 +163,24 @@ export class ToolDispatch {
         if (!reg) {
           result = `Error: unknown tool "${tc.function.name}"`;
           this.postResult(tc, toolResultText(result), undefined, convId);
+          messages.push(this.toolMessage(tc, toolResultContent(result), startedAt));
+          continue;
+        }
+        const lazyGroup = lazyGroupForTool(tc.function.name);
+        if (lazyGroup === 'computer_use' && modelContext?.isVisionModel === false) {
+          result = `computer_use is unavailable on non-vision model "${modelContext.modelName}"`;
+          this.postResult(tc, result, undefined, convId);
+          messages.push(this.toolMessage(tc, toolResultContent(result), startedAt));
+          continue;
+        }
+        if (
+          lazyGroup &&
+          convId &&
+          !isLazyGroupActive(convId, lazyGroup) &&
+          !budget?.isExplicitlyAllowed(tc.function.name)
+        ) {
+          result = `\`${tc.function.name}\` is in group \`${lazyGroup}\` — call \`load_tool_group\` first`;
+          this.postResult(tc, result, undefined, convId);
           messages.push(this.toolMessage(tc, toolResultContent(result), startedAt));
           continue;
         }
@@ -214,6 +234,7 @@ export class ToolDispatch {
           },
           ...(signal !== undefined ? { abortSignal: signal } : {}),
           ...(convId !== undefined ? { conversationId: convId } : {}),
+          ...(modelContext ?? {}),
           conversationMessages: messages,
           ...(setPlan !== undefined ? { setPlan } : {}),
           ...(tellArrived !== undefined ? { tellArrived } : {}),

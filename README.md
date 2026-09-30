@@ -106,6 +106,11 @@ advertised per round rather than per turn — so a capability you enable becomes
 usable immediately. Groups an agent rarely needs are demand-loaded through
 `load_tool_group` and cost no context until called.
 
+The first load in a conversation pauses while the model re-reads its context:
+about **100 seconds at 70K tokens** and **190 seconds at 120K tokens** on the
+reference machine (Qwen3.8-27B, llama.cpp b11243). Only rare tool groups use this
+path; frequently used code and git tools stay available by default.
+
 **Files and edits.** `read_file`, `write_file`, `append_file`, `edit_file` with
 batched `edits[]`, `apply_line_edits`, `insert_code`, `create_directory`,
 `move_file`, `list_directory`. `delete_file` moves to the recycle bin rather
@@ -157,6 +162,10 @@ write back into it.
 
 **Vision.** `view_image` for screenshots and diagrams, `view_video` for frames
 sampled out of a workspace clip (needs ffmpeg).
+
+**Browser and desktop.** Computer-use tools require a vision model and the
+corresponding `permissions.browser.enabled` or `permissions.desktop.enabled`
+setting. Desktop tools click and type into whichever window is focused.
 
 **Memory that outlives the conversation.** `remember`, `recall`, and
 `list_memories` give the agent durable notes across sessions, separate from

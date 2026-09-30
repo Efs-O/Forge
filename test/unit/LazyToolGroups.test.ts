@@ -4,6 +4,8 @@ import {
   hiddenLazyToolNames,
   isLazyGroupActive,
   isLazyGroupAvailable,
+  lazyGroupForTool,
+  lazyGroupNames,
   lazyGroupForServer,
   recordLazyGroupTool,
   resetLazyToolGroups,
@@ -11,6 +13,7 @@ import {
 import { makeLoadToolGroupTool } from '../../src/tools/toolGroupTools';
 import { mcpToolToRegisteredTool } from '../../src/tools/mcpBridge';
 import { ToolRegistry, type ToolPermission } from '../../src/tools/ToolRegistry';
+import { ToolBudget } from '../../src/tools/ToolBudget';
 
 const ALL_PERMISSIONS = new Set<ToolPermission>(['read']);
 
@@ -135,6 +138,75 @@ describe('lazy tool groups', () => {
     for (const name of OTHER_MCP_TOOLS) {
       expect(modelFacingTools(registry, 'conv-a')).toContain(name);
     }
+  });
+
+  it('registers the eight rare native and MCP groups with their tool families', () => {
+    const registry = new ToolRegistry();
+    registry.register(makeLoadToolGroupTool());
+    for (const name of [
+      'desktop_capture', 'view_image', 'get_editor_context', 'manage_jobs',
+      'get_power_info', 'remember', 'read_notebook',
+    ]) {
+      registry.register({
+        definition: { type: 'function', function: { name, description: '', parameters: { type: 'object' } } },
+        permission: 'read',
+        handler: async () => 'ok',
+      });
+    }
+    bridge(registry, 'halluscribe', HALLUSCRIBE_TOOLS);
+
+    expect(lazyGroupNames()).toEqual([
+      'admin', 'computer_use', 'editor_ui', 'halluscribe', 'media', 'memory', 'notebook', 'power',
+    ]);
+    expect([
+      lazyGroupForTool('desktop_capture'), lazyGroupForTool('view_image'),
+      lazyGroupForTool('get_editor_context'), lazyGroupForTool('manage_jobs'),
+      lazyGroupForTool('get_power_info'), lazyGroupForTool('remember'),
+      lazyGroupForTool('read_notebook'), lazyGroupForTool('search_sessions'),
+    ]).toEqual([
+      'computer_use', 'media', 'editor_ui', 'admin', 'power', 'memory', 'notebook', 'halluscribe',
+    ]);
+    const loader = registry.definitions(ALL_PERMISSIONS).find((d) => d.function.name === 'load_tool_group');
+    expect(loader?.function.parameters).toMatchObject({
+      properties: { group: { enum: lazyGroupNames() } },
+    });
+    expect(loader?.function.description).toContain('computer_use: desktop_capture');
+    expect(loader?.function.description).toContain('halluscribe:');
+  });
+
+  it('refuses computer_use on a non-vision model and names that model', async () => {
+    const registry = new ToolRegistry();
+    registry.register(makeLoadToolGroupTool());
+    registry.register({
+      definition: { type: 'function', function: { name: 'desktop_capture', description: '', parameters: { type: 'object' } } },
+      permission: 'read',
+      handler: async () => 'should not run',
+    });
+    activateLazyGroup('conv-a', 'computer_use');
+
+    await expect(registry.dispatch('load_tool_group', { group: 'computer_use' }, ALL_PERMISSIONS, {
+      beforeMutate: () => undefined,
+      conversationId: 'conv-a',
+      modelName: 'qwen38-no-vision',
+      isVisionModel: false,
+    })).rejects.toThrow('computer_use is unavailable on non-vision model "qwen38-no-vision"');
+    expect(isLazyGroupActive('conv-a', 'computer_use')).toBe(true);
+    expect(hiddenLazyToolNames('conv-a', new Set(['desktop_capture']), false)).toContain('desktop_capture');
+  });
+
+  it('eagerly advertises configured native tools from the lazy groups', () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      definition: { type: 'function', function: { name: 'remember', description: '', parameters: { type: 'object' } } },
+      permission: 'read',
+      handler: async () => 'ok',
+    });
+    const budget = new ToolBudget({ tools: ['remember'] });
+    const hidden = hiddenLazyToolNames('conv-a', new Set(['remember']));
+    const advertised = budget.filterDefinitions(
+      registry.definitions(ALL_PERMISSIONS).filter((d) => !hidden.has(d.function.name)),
+    );
+    expect(advertised.map((definition) => definition.function.name)).toContain('remember');
   });
 
   it('appends the loaded schemas after the existing prefix, leaving it byte-identical', () => {

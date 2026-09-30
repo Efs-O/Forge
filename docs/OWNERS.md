@@ -353,7 +353,7 @@ overlaps with an existing owner, extend the owner instead.
 | `get_system_status` tool                   | `src/tools/systemStatusTool.ts`       |
 | Semantic codebase search tool              | `src/tools/semanticSearchTool.ts`     |
 | MCP client bridge (external MCP servers)   | `src/tools/mcpBridge.ts`              |
-| Demand-loaded MCP tool groups (lazy)       | `src/tools/lazyToolGroups.ts`         |
+| Demand-loaded native and MCP tool groups  | `src/tools/lazyToolGroups.ts`         |
 | `load_tool_group` discovery tool           | `src/tools/toolGroupTools.ts`         |
 | Tool-result size capping                   | `src/tools/resultCap.ts`              |
 | Bundled ripgrep executable resolution      | `src/tools/RipgrepResolver.ts`        |

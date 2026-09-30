@@ -1,50 +1,119 @@
 /**
- * Demand-loaded MCP tool groups.
- *
- * A lazy group's tools stay registered, connected, and dispatchable at all
- * times — this module only decides whether their schemas are *advertised* to
- * the model. Nothing here touches MCP process lifecycle.
- *
- * The motive is static prompt cost: HalluScribe's six schemas are 2382 tokens
- * of every request (`test/prompt-context-measurement.txt`) on conversations
- * that never ask about past sessions. Hiding them behind `load_tool_group`
- * trades that for ~1 extra tool round on the turns that genuinely need history.
- *
- * Activation is per conversation and in memory only: it is a prompt-shaping
- * hint, not user configuration, so it never reaches config.yaml. A window
- * reload therefore drops it and the model re-activates — one round, not a bug.
+ * Demand-loaded groups. Tools stay registered and dispatchable; this module
+ * controls only which schemas are advertised in each conversation.
  */
 
-/**
- * MCP server name -> lazy group name. Only servers listed here are lazy;
- * every other MCP server advertises exactly as it always has.
- */
+/** MCP server name -> lazy group name. Unlisted servers remain eager. */
 const LAZY_GROUP_BY_SERVER: ReadonlyMap<string, string> = new Map([['halluscribe', 'halluscribe']]);
 
-/** Tool names actually bridged in, per group. Empty => the group is unavailable. */
-const membersByGroup = new Map<string, Set<string>>();
+/**
+ * Native families follow the registered tool boundaries: screen/browser,
+ * media, editor, administration/agent coordination, power, memory, and notebook
+ * tasks are rare enough to pay one conversation re-prefill when needed.
+ */
+const NATIVE_GROUP_BY_TOOL: ReadonlyMap<string, string> = new Map([
+  ...[
+    'browser_open',
+    'browser_close',
+    'browser_navigate',
+    'browser_tabs',
+    'browser_select_tab',
+    'browser_new_tab',
+    'browser_close_tab',
+    'browser_click',
+    'browser_drag',
+    'browser_hover',
+    'browser_inspect',
+    'browser_press',
+    'browser_screenshot',
+    'browser_scroll',
+    'browser_type',
+    'desktop_capture',
+    'desktop_windows',
+    'desktop_focus_window',
+    'desktop_move_mouse',
+    'desktop_click',
+    'desktop_drag',
+    'desktop_scroll',
+    'desktop_type',
+    'desktop_press',
+  ].map((name) => [name, 'computer_use'] as const),
+  ...['view_image', 'view_video', 'generate_image', 'image_search'].map(
+    (name) => [name, 'media'] as const,
+  ),
+  ...[
+    'get_editor_context',
+    'replace_selection',
+    'insert_code',
+    'show_diff',
+    'open_file',
+    'open_url_in_browser',
+    'ask_user',
+    'notify_user',
+    'show_notification',
+    'copy_to_clipboard',
+    'read_clipboard',
+  ].map((name) => [name, 'editor_ui'] as const),
+  ...[
+    'manage_jobs',
+    'install_llamacpp',
+    'get_system_status',
+    'ask_local_agent',
+    'list_delegation_targets',
+    'ask_live_session',
+    'tell_live_session',
+  ].map((name) => [name, 'admin'] as const),
+  ...['get_power_info', 'schedule_wake', 'sleep_computer'].map((name) => [name, 'power'] as const),
+  ...['remember', 'recall', 'list_memories'].map((name) => [name, 'memory'] as const),
+  ...['read_notebook', 'edit_notebook_cell'].map((name) => [name, 'notebook'] as const),
+]);
 
-/** Conversation id -> groups activated in it. */
+/** Tools actually registered or bridged in, per group. */
+const membersByGroup = new Map<string, Set<string>>();
 const activeByConversation = new Map<string, Set<string>>();
 
-/** The lazy group `serverName` belongs to, or undefined when it is not lazy. */
 export function lazyGroupForServer(serverName: string): string | undefined {
   return LAZY_GROUP_BY_SERVER.get(serverName);
 }
 
-/** Records one successfully bridged tool as a member of `group`. */
+export function lazyGroupForTool(toolName: string): string | undefined {
+  return NATIVE_GROUP_BY_TOOL.get(toolName) ?? groupForMember(toolName);
+}
+
+function groupForMember(toolName: string): string | undefined {
+  for (const [group, members] of membersByGroup) if (members.has(toolName)) return group;
+  return undefined;
+}
+
+/** Records a native tool from the static membership map when it is registered. */
+export function recordNativeLazyTool(toolName: string): void {
+  const group = NATIVE_GROUP_BY_TOOL.get(toolName);
+  if (group) recordLazyGroupTool(group, toolName);
+}
+
+/** Records one successfully bridged tool as a member of an MCP group. */
 export function recordLazyGroupTool(group: string, toolName: string): void {
   const members = membersByGroup.get(group) ?? new Set<string>();
   members.add(toolName);
   membersByGroup.set(group, members);
 }
 
-/** True once at least one of the group's tools has been bridged in. */
+export function lazyGroupNames(): string[] {
+  return [...membersByGroup.keys()].filter((group) => isLazyGroupAvailable(group)).sort();
+}
+
+export function lazyGroupMembers(group: string): string[] {
+  return [...(membersByGroup.get(group) ?? [])].sort();
+}
+
 export function isLazyGroupAvailable(group: string): boolean {
   return (membersByGroup.get(group)?.size ?? 0) > 0;
 }
 
-/** Marks `group` advertised for the rest of `conversationId`. */
+export function hasAvailableLazyGroup(): boolean {
+  return lazyGroupNames().length > 0;
+}
+
 export function activateLazyGroup(conversationId: string, group: string): void {
   const active = activeByConversation.get(conversationId) ?? new Set<string>();
   active.add(group);
@@ -55,21 +124,37 @@ export function isLazyGroupActive(conversationId: string, group: string): boolea
   return activeByConversation.get(conversationId)?.has(group) === true;
 }
 
-/**
- * Tool names that must be withheld from `conversationId`'s model-facing tool
- * list. An unknown conversation hides everything lazy — the safe direction,
- * since a withheld tool costs a round while a leaked one costs every request.
- */
-export function hiddenLazyToolNames(conversationId: string | undefined): ReadonlySet<string> {
+/** Clears loaded schemas after compaction and returns the note to preserve in its summary. */
+export function deactivateLazyGroups(conversationId: string): void {
+  activeByConversation.delete(conversationId);
+}
+
+export function lazyGroupSummaryNote(conversationId: string): string {
+  const groups = [...(activeByConversation.get(conversationId) ?? [])].sort();
+  return groups.length
+    ? `Loaded optional tool groups before compaction: ${groups.join(', ')}. Reload with load_tool_group if needed.`
+    : '';
+}
+
+/** Hidden names omit explicitly allowlisted tools: config is an eager opt-in. */
+export function hiddenLazyToolNames(
+  conversationId: string | undefined,
+  eagerNames: ReadonlySet<string> = new Set(),
+  isVisionModel = true,
+): ReadonlySet<string> {
   const hidden = new Set<string>();
   for (const [group, members] of membersByGroup) {
-    if (conversationId !== undefined && isLazyGroupActive(conversationId, group)) continue;
-    for (const name of members) hidden.add(name);
+    const unavailable = group === 'computer_use' && !isVisionModel;
+    if (!unavailable && conversationId !== undefined && isLazyGroupActive(conversationId, group))
+      continue;
+    for (const name of members) {
+      if (!eagerNames.has(name) || unavailable) hidden.add(name);
+    }
   }
   return hidden;
 }
 
-/** Test seam: drops both bridged membership and every conversation's activation. */
+/** Test seam: drops bridged/registered membership and every activation. */
 export function resetLazyToolGroups(): void {
   membersByGroup.clear();
   activeByConversation.clear();

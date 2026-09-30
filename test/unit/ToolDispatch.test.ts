@@ -13,6 +13,7 @@ import type { ToolFailureTracker } from '../../src/tools/StripTools';
 import { ToolRegistry } from '../../src/tools/ToolRegistry';
 import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
 import { ToolBudget } from '../../src/tools/ToolBudget';
+import { resetLazyToolGroups } from '../../src/tools/lazyToolGroups';
 
 // vi.mock is hoisted — compute WS inside the factory using require
 vi.mock('vscode', () => {
@@ -92,6 +93,7 @@ describe('ToolDispatch', () => {
   ] as const);
 
   beforeEach(() => {
+    resetLazyToolGroups();
     toolRegistry = new ToolRegistry();
     checkpoints = {
       snapshotBefore: vi.fn(),
@@ -217,6 +219,28 @@ describe('ToolDispatch', () => {
     expect(handler).not.toHaveBeenCalled();
     expect(messages[0]?.content).toContain('not available');
     expect(messages[0]?.tool_call_id).toBe('call-view_image');
+  });
+
+  it('refuses a registered hidden tool with its group and loader instruction', async () => {
+    const handler = vi.fn().mockResolvedValue('should not run');
+    toolRegistry.register({
+      definition: {
+        type: 'function',
+        function: { name: 'view_image', description: 'View image', parameters: { type: 'object' } },
+      },
+      permission: 'read',
+      handler,
+    });
+    const messages: ChatMessage[] = [];
+    await dispatch.dispatch(
+      [makeToolCall('view_image', { path: 'image.png' })],
+      allowed,
+      messages,
+      'hidden-conversation',
+    );
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(messages[0]?.content).toContain('`view_image` is in group `media` — call `load_tool_group` first');
   });
 
   it('requests approval for write tools', async () => {

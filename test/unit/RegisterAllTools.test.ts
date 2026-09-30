@@ -177,8 +177,7 @@ describe('registerAllTools canonical coordinator catalog', () => {
   it('exposes the exact 100-tool native catalog when all optional wiring is present', () => {
     const registry = makeRegistry({ search: true, delegation: true });
     expect(registry.names().sort()).toEqual(EXPECTED_NATIVE_NAMES);
-    // load_tool_group is registered but suppresses its own advertisement while
-    // no lazy MCP group has been bridged in, and generate_image while config.yaml
+    // load_tool_group is advertised for registered native groups; generate_image while config.yaml
     // has no image_generation block, install_llamacpp while it sets no
     // llama_server.binary, and ask_live_session while it has no
     // enabled agent_bus block, so the tools the model actually sees are
@@ -191,7 +190,6 @@ describe('registerAllTools canonical coordinator catalog', () => {
     ).toEqual(
       EXPECTED_NATIVE_NAMES.filter(
         (name) =>
-          name !== 'load_tool_group' &&
           name !== 'generate_image' &&
           name !== 'image_search' &&
           name !== 'install_llamacpp' &&

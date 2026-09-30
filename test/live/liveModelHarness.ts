@@ -27,6 +27,7 @@ interface CompletionMessage {
 export interface ToolLoopResult {
   final: string;
   calls: string[];
+  toolCalls: Array<{ name: string; args: Record<string, unknown> }>;
   /** The loop ran out of steps rather than the model finishing. */
   hitStepLimit: boolean;
 }
@@ -101,6 +102,7 @@ export async function runLiveToolLoop(options: {
   const definitionsFor = (): ToolDefinition[] =>
     options.getDefinitions?.() ?? options.registry.definitions(options.allowed);
   const calls: string[] = [];
+  const recordedCalls: ToolLoopResult['toolCalls'] = [];
   for (let step = 0; step < (options.maxSteps ?? 8); step += 1) {
     const assistant = await callLiveModel(
       options.endpoint,
@@ -114,7 +116,9 @@ export async function runLiveToolLoop(options: {
       content: assistant.content ?? null,
       ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
     });
-    if (!toolCalls.length) return { final: assistant.content ?? '', calls, hitStepLimit: false };
+    if (!toolCalls.length) {
+      return { final: assistant.content ?? '', calls, toolCalls: recordedCalls, hitStepLimit: false };
+    }
     for (const call of toolCalls) {
       const args = JSON.parse(call.function.arguments || '{}') as Record<string, unknown>;
       const tool = options.registry.get(call.function.name);
@@ -127,6 +131,7 @@ export async function runLiveToolLoop(options: {
         options.context,
       )) as string;
       calls.push(call.function.name);
+      recordedCalls.push({ name: call.function.name, args });
       options.onRound?.({
         call: call.function.name,
         result,
@@ -143,5 +148,5 @@ export async function runLiveToolLoop(options: {
   // Returned, not thrown -- the same call ToolCallingLoop makes for its round
   // cap: the steps already spent did real work, and throwing discards the
   // record of what the model actually chose to call.
-  return { final: '', calls, hitStepLimit: true };
+  return { final: '', calls, toolCalls: recordedCalls, hitStepLimit: true };
 }

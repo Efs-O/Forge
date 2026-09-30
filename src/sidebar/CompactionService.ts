@@ -32,6 +32,7 @@ import type { CompactionLogEntry } from './SessionLogger';
 import { reportedContextTokens } from '../util/contextBudget';
 import { boundMemoryKeys, compactionWindowChars } from './compactionWindow';
 import type { CompactionState } from './compactionTypes';
+import { deactivateLazyGroups, lazyGroupSummaryNote } from '../tools/lazyToolGroups';
 
 const log = getLogger();
 
@@ -374,7 +375,8 @@ async function compactOnce(
       if (!midTurn) deps.post({ type: 'done', finishReason: 'stop', conversationId: conv.id });
     }
 
-    const trimmed = capSummary(summary);
+    const groupsNote = lazyGroupSummaryNote(conversationId);
+    const trimmed = capSummary(groupsNote ? `${summary.trim()}\n\n${groupsNote}` : summary);
     if (!isUsableSummary(trimmed)) {
       log.info(`[compact] rejected unusable summary (${trimmed.length} chars)`);
       void vscode.window.showWarningMessage(
@@ -461,6 +463,7 @@ async function compactOnce(
       );
     }
     outcome = 'compacted';
+    deactivateLazyGroups(conversationId);
     return outcome;
   } catch (err) {
     deps.post({

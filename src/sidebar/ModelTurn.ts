@@ -201,7 +201,7 @@ export async function runModelTurn(
   // group activates mid-turn via `load_tool_group`, and its schemas have to
   // reach the request that immediately follows.
   const buildToolDefinitions = (): ToolDefinition[] => {
-    const hiddenLazyTools = hiddenLazyToolNames(conv.id);
+    const hiddenLazyTools = hiddenLazyToolNames(conv.id, new Set(model.tools ?? []), isVisionModel);
     const advertised = filterVisionGated(
       ctx.toolRegistry.definitions(allowed),
       isVisionModel,
@@ -323,6 +323,7 @@ export async function runModelTurn(
             ctx.onTranscriptChanged?.(conv);
           },
           ctx.onTellArrived ? (callback) => ctx.onTellArrived!(conv.id, callback) : undefined,
+          { modelName: model.name, isVisionModel },
         );
         mirrorLiveSessionAnswers(conv.id, toolCalls, messages, ctx.emitAgentProgress);
         // Token bar ticks in `onUsage`: a tool result moves no measured context.

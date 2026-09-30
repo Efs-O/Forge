@@ -15,6 +15,16 @@
   the shared `writeFileAtomicSync` owner did not, so it is now the single place
   that does.
 
+### Rare native tool groups load on demand (2026-09-30)
+
+- Computer-use, media, editor UI, administration, power, memory, notebook, and
+  HalluScribe tools now load through `load_tool_group`. This saves their schemas
+  on ordinary conversations; a group load changes the tool list and makes the
+  model re-read the conversation (about 100 seconds at 70K and 190 seconds at
+  120K context on the reference machine). A compaction clears loaded groups and
+  records them in the summary. Computer-use is unavailable to non-vision models;
+  per-model `tools:` entries still advertise named lazy tools eagerly.
+
 ### No queued message from an agent Forge is waiting on (2026-09-30)
 
 - While Forge's turn is blocked waiting for Claude, Codex or Copilot to answer
