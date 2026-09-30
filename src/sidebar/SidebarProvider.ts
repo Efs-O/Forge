@@ -55,6 +55,7 @@ import type { UserNotificationService } from './UserNotificationService';
 import type { MidTurnTellDrain } from '../agent/MidTurnTellDrain';
 import { HiddenChatAlerts } from './hiddenChatAlerts';
 import type { SidebarPromptRouter } from './backgroundExitNotice';
+import { attachmentsRootUri, openAttachment } from './attachmentAccess';
 
 export type { SidebarProviderEvents };
 /** Residency refresh while visible: cheap, but fast enough to avoid a stale dot. */
@@ -370,7 +371,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.sidebar,
         this.agentLoop.getStreamingIds(),
         (conversation) => this.agentLoop.getSessionActiveMs(conversation),
-        this.attachmentsRootUri(),
+        attachmentsRootUri({ store: this.attachmentStore, view: () => this.view }),
         new Set([
           ...this.agentLoop.pendingApprovalConversationIds(),
           ...this.questions.pendingConversationIds(),
@@ -378,24 +379,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.historyArchive?.overflow.list(),
       ),
     );
-  }
-
-  private attachmentsRootUri(): string | undefined {
-    if (!this.attachmentStore || !this.view) return undefined;
-    return this.view.webview
-      .asWebviewUri(vscode.Uri.file(this.attachmentStore.rootPath))
-      .toString();
-  }
-
-  /**
-   * Opens a stored attachment in VS Code's own viewer — the image preview for
-   * images, the editor for text. `resolve` refuses a path that escapes the
-   * store, so a crafted transcript row cannot address arbitrary files.
-   */
-  private async openAttachment(relativePath: string): Promise<void> {
-    if (!this.attachmentStore) throw new Error('attachments are not stored in this window');
-    const target = this.attachmentStore.resolve(relativePath);
-    await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(target));
   }
 
   /** Every conversation id the session can still reach, open or archived. */
@@ -474,7 +457,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         renameConversation: (id, title) => this.tabs.rename(id, title),
         runSlashCommand: (id) => void this.slashHandler.handle(id),
         openFile: (path, line, beside) => this.agentLoop.openFile(path, { line, beside }),
-        openAttachment: (relativePath) => this.openAttachment(relativePath),
+        openAttachment: (relativePath) =>
+          openAttachment({ store: this.attachmentStore, view: () => this.view }, relativePath),
         resolveConfirmation: (id, approved) => this.agentLoop.resolveConfirmation(id, approved),
         recordWebviewDiagnostic: (message) => logWebviewDiagnostic(message),
         queuedConversationIds: (ids) => (this.queuedConversationIds = new Set(ids)),

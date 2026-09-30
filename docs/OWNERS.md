@@ -32,6 +32,7 @@ overlaps with an existing owner, extend the owner instead.
 | Contact-prompt capacity gate (ready-slot reservation) | `src/sidebar/contactPrompt.ts`          |
 | TurnServices object assembly (ctor extraction)       | `src/sidebar/turnServicesAssembly.ts`    |
 | Out-of-band agent-progress pub/sub (safe dispatch)   | `src/sidebar/AgentProgressBus.ts`        |
+| Sidebar attachment access (root URI + open)          | `src/sidebar/attachmentAccess.ts`        |
 | Per-conversation streaming/cancel state              | `src/sidebar/TurnLifecycle.ts`           |
 | Model-endpoint turn: preflight + request             | `src/sidebar/ModelTurn.ts`               |
 | Vision gate: single source of truth (advertise + refuse) | `src/sidebar/visionGate.ts`    |
