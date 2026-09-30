@@ -404,7 +404,7 @@ export interface ForgeConfig {
   permissions?: {
     fs?: { read?: boolean; write?: boolean; delete?: boolean };
     net?: { search?: boolean; fetch?: boolean };
-    exec?: { terminal?: boolean; headless?: boolean };
+    exec?: { terminal?: boolean; headless?: boolean; shell_scripts?: boolean };
     git?: { read?: boolean; write?: boolean };
     agents?: { delegate?: boolean; cloud_workers?: boolean };
     browser?: { enabled?: boolean };

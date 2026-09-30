@@ -329,6 +329,7 @@ overlaps with an existing owner, extend the owner instead.
 | list_directory + size/age formatting       | `src/tools/listDirectoryTool.ts`      |
 | Terminal + headless exec tools             | `src/tools/execTools.ts`              |
 | Exec child-process helpers                 | `src/tools/execHelpers.ts`            |
+| Exec script-file denylist scan              | `src/tools/execScriptScanner.ts`      |
 | exec_command program resolution            | `src/tools/execProgramResolver.ts`    |
 | Git tools (status, diff, commit)           | `src/tools/gitTools.ts`               |
 | Read-only git tools (status, log, diff)    | `src/tools/gitReadTools.ts`           |

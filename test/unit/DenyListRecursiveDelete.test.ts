@@ -52,7 +52,9 @@ describe('recursive force delete', () => {
 
   it('leaves the other destructive rules intact', () => {
     expect(denied('git', ['clean', '-fd'])).toBe('git clean -f');
-    expect(denied('git', ['reset', '--hard'])).toBe('git reset (hard/mixed/soft)');
+    expect(denied('git', ['reset', '--hard'])).toBe(
+      'git reset --hard (discards working-tree changes)',
+    );
     expect(denied('git', ['push', '--force'])).toContain('overwrites remote history');
     expect(denied('shutdown', ['/s'])).toBe('system power command');
     expect(denied('diskpart', [])).toBe('diskpart');
@@ -81,6 +83,15 @@ describe('destructive git', () => {
     expect(denied('git', ['stash', 'clear'])).toBe('git stash drop/clear');
     expect(denied('git', ['filter-branch', '--all'])).toContain('rewrites history');
     expect(denied('git', ['reflog', 'expire'])).toContain('destroys recovery');
+  });
+
+  it('blocks only git reset --hard and names restore_file as the alternative', () => {
+    expect(denied('git', ['reset', '--hard'])).toContain('git reset --hard');
+    expect(checkDenyList('git', ['reset', '--hard'], getBuiltinDenyList())?.alternative).toContain(
+      'restore_file',
+    );
+    expect(denied('git', ['reset', '--mixed'])).toBeNull();
+    expect(denied('git', ['reset', '--soft'])).toBeNull();
   });
 
   it('leaves everyday git alone', () => {

@@ -633,10 +633,18 @@ what each one does and does not cover:
 - **Confirmation gates** on writes, terminal actions, and git actions. `/clanker`
   turns these off for the session — recursive deletes still ask.
 - **Per-turn checkpoints** with Keep/Undo. Undo restores the paths a turn
-  mutated; it is not a backup, does not cover changes made outside Forge, and
-  external CLI turns are only covered when checkpoint preparation succeeds.
-- **A command denylist** for destructive git and shell operations, and
-  **deny-by-default tool permissions** you opt out of in `config.yaml`.
+  mutated; it is not a backup. Keep/Undo covers Forge's file tools only.
+  Changes made by a command or script — `exec_command`, `run_terminal`, shell
+  scripts, or a build — are not captured; git is the only way back. External
+  CLI turns are only covered when checkpoint preparation succeeds.
+- **`permissions.exec.shell_scripts`** lets the agent run PowerShell, `cmd` and
+  `bash` scripts. The denylist still reads every script, but it is
+  pattern-matching, not a sandbox: a script can do anything your user account
+  can. **Off by default. Leave it off unless you commit before every agent run.**
+- **A best-effort command denylist** for destructive git and shell operations.
+  It is pattern-matching, not a sandbox; interpreters that were never banned,
+  such as `node -e` and `python -c`, can already do what a shell script can.
+- **Deny-by-default tool permissions** you opt out of in `config.yaml`.
 - **An SSRF-guarded, GET-only fetch** and no outbound traffic beyond the
   endpoints you configure.
 

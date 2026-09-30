@@ -119,6 +119,7 @@ const PermissionsSchema = z
       .optional(),
     exec: z
       .object({ terminal: z.boolean().default(false), headless: z.boolean().default(false) })
+      .extend({ shell_scripts: z.boolean().default(false) })
       .optional(),
     git: z
       .object({ read: z.boolean().default(true), write: z.boolean().default(false) })
@@ -216,6 +217,13 @@ export const ForgeConfigSchema = z
       .optional(),
   })
   .superRefine((cfg, ctx) => {
+    if (cfg.permissions?.exec?.shell_scripts && !cfg.permissions.exec.headless) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['permissions', 'exec', 'shell_scripts'],
+        message: 'permissions.exec.shell_scripts requires permissions.exec.headless: true',
+      });
+    }
     if (cfg.models.length === 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

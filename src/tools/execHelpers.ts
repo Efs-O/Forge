@@ -121,8 +121,9 @@ const SHELL_OPERATOR_TOKENS = new Set([
   '2>&1',
 ]);
 
-export function checkShellOperators(args: string[]): void {
-  for (const arg of args) {
+export function checkShellOperators(args: string[], allowScriptArgsFrom = -1): void {
+  for (const [index, arg] of args.entries()) {
+    if (allowScriptArgsFrom >= 0 && index >= allowScriptArgsFrom) continue;
     if (SHELL_OPERATOR_TOKENS.has(arg.trim())) {
       throw new Error(
         `Shell operators are not permitted in arguments ("${arg.trim()}" is one). ` +
@@ -153,20 +154,34 @@ const PS_LAUNCHERS = ['powershell.exe', 'powershell', 'pwsh.exe', 'pwsh'];
 const SCRIPT_LAUNCHERS = ['bash', 'sh', 'zsh', 'dash', 'cmd', 'cmd.exe', 'busybox'];
 const SCRIPT_FLAGS = ['-c', '/c'];
 
-export function checkPowerShellBan(command: string, args: string[]): void {
+export function checkPowerShellBan(command: string, args: string[], shellScripts = false): void {
   // By basename: `/bin/bash` and a full `...\System32\cmd.exe` path are the same launchers.
   const cmd = (command.split(/[\\/]/).pop() ?? command).toLowerCase();
-  if (
-    SCRIPT_LAUNCHERS.includes(cmd) &&
-    args.some((arg) => SCRIPT_FLAGS.includes(arg.toLowerCase()))
-  ) {
-    throw new Error(
-      'Shell script flags are banned — a model-authored script cannot be checked by the denylist. ' +
-        'Use a real executable with an args array or the dedicated filesystem tools instead.',
+  if (PS_LAUNCHERS.includes(cmd)) {
+    const encoded = args.find((arg) =>
+      ['-encodedcommand', '-enc', '-ec', '-e'].includes(arg.toLowerCase()),
     );
+    if (encoded) {
+      throw new Error(
+        `PowerShell flag "${encoded}" is always banned because its script is base64 and cannot be checked. ` +
+          'Use exec_command with a script file that can be scanned, or the dedicated tools instead.',
+      );
+    }
+  }
+  if (SCRIPT_LAUNCHERS.includes(cmd)) {
+    const flagIndex = args.findIndex((arg) => SCRIPT_FLAGS.includes(arg.toLowerCase()));
+    if (flagIndex !== -1 && !shellScripts) {
+      throw new Error(
+        'Shell script flags are banned while permissions.exec.shell_scripts is false. ' +
+          'Enable permissions.exec.shell_scripts in config.yaml to allow scripts, or use a real executable with an args array or the dedicated tools.',
+      );
+    }
   }
   if (PS_LAUNCHERS.includes(cmd)) {
     for (const arg of args) {
+      if (arg.toLowerCase() === '-command' || arg.toLowerCase() === '-c') {
+        if (shellScripts) return;
+      }
       if (PS_DANGEROUS_FLAGS.includes(arg.toLowerCase())) {
         // Name the route that works. "Use a non-shell binary instead" told the
         // model what to stop doing and nothing about what to do, so it kept
@@ -176,7 +191,7 @@ export function checkPowerShellBan(command: string, args: string[]): void {
         // every write route has to be named too.
         throw new Error(
           `PowerShell flag "${arg}" is banned — a model-authored script cannot be checked ` +
-            'by the denylist, so it is never run. Use the dedicated tools instead: ' +
+            'by the denylist, so it is never run. Set permissions.exec.shell_scripts in config.yaml to enable checked scripts, or use the dedicated tools instead: ' +
             'wait to pause for a number of seconds, list_directory to list files, ' +
             'read_file to read them, search_code to search, query_powershell for a ' +
             'read-only workspace overview or a file hash; to change the filesystem, ' +

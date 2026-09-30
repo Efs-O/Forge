@@ -24,6 +24,18 @@
   as `--effort <v>`). Unset keys keep today's behaviour exactly; a change
   applies at the next owned-session creation, not to one already running.
 
+### Opt-in shell scripts with denylist scanning (2026-09-30)
+
+- `permissions.exec.shell_scripts` defaults to `false` and requires
+  `permissions.exec.headless: true`. When enabled, `pwsh -Command`, `cmd /c`,
+  and `bash -c` can run after the denylist checks their command text.
+  PowerShell encoded commands remain refused. Script files are read and
+  checked line by line in either mode, up to 256 KB; larger files are refused.
+- The `git reset` denylist now blocks only `--hard`, which destroys uncommitted
+  work. `--mixed` and `--soft` are allowed.
+- README safety notes now explain shell-script risk, command checkpoint scope,
+  and the denylist's limits.
+
 ## 0.16.65
 
 ### Agent messages reach a busy chat at the next tool round (2026-09-30)

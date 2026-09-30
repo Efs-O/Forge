@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { makeExecCommandTool } from '../../src/tools/execTools';
 import {
   makeListExecutionsTool,
@@ -7,6 +10,70 @@ import {
 } from '../../src/tools/backgroundExecutionTools';
 
 describe('exec_command safety policy', () => {
+  it('reads the shell script permission getter on every dispatch', async () => {
+    let enabled = false;
+    let reads = 0;
+    const tool = makeExecCommandTool(() => {
+      reads += 1;
+      return enabled;
+    });
+    for (let call = 0; call < 2; call += 1) {
+      await tool.handler({ command: process.execPath, args: ['-e', 'process.exit(0)'], cwd: process.cwd() });
+      enabled = true;
+    }
+    expect(reads).toBe(2);
+  });
+
+  it('runs enabled PowerShell, cmd, and bash command strings', async () => {
+    const tool = makeExecCommandTool(() => true);
+    const cases = [
+      { command: 'pwsh', args: ['-NoProfile', '-Command', 'Write-Output forge-ok'] },
+      { command: 'cmd', args: ['/c', 'echo forge-ok'] },
+      { command: 'bash', args: ['-c', 'printf forge-ok'] },
+    ];
+    for (const run of cases) {
+      const output = JSON.parse(
+        (await tool.handler({ ...run, cwd: process.cwd() })) as string,
+      ) as { stdout: string; exitCode: number };
+      expect(output.exitCode).toBe(0);
+      expect(output.stdout.toLowerCase()).toContain('forge-ok');
+    }
+  });
+
+  it('keeps the denylist active for script text with the flag enabled', async () => {
+    const tool = makeExecCommandTool(() => true);
+    const cases = [
+      { command: 'pwsh', args: ['-Command', 'Remove-Item x -Recurse -Force'] },
+      { command: 'cmd', args: ['/c', 'rd /s x'] },
+      { command: 'bash', args: ['-c', 'rm -rf x'] },
+      { command: 'bash', args: ['-c', 'git reset --hard'] },
+    ];
+    for (const run of cases) {
+      await expect(
+        tool.handler({ ...run, cwd: process.cwd() }),
+      ).rejects.toThrow('denylist pattern');
+    }
+  });
+
+  it('scans a script file before dispatch with shell scripts both off and on', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-exec-script-dispatch-'));
+    const file = path.join(dir, 'danger.sh');
+    fs.writeFileSync(file, 'echo ready\ngit reset --hard\n');
+    try {
+      for (const enabled of [false, true]) {
+        await expect(
+          makeExecCommandTool(() => enabled).handler({
+            command: 'bash',
+            args: [file],
+            cwd: dir,
+          }),
+        ).rejects.toThrow('line 2');
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('rejects a denylisted command before spawning it', async () => {
     await expect(
       makeExecCommandTool().handler({

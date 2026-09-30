@@ -199,4 +199,17 @@ describe('checkPowerShellBan', () => {
     // The sanctioned -File route stays open (BackgroundExitNotify.test.ts).
     expect(() => checkPowerShellBan('pwsh', ['-NoProfile', '-File', 'watch.ps1'])).not.toThrow();
   });
+
+  it('allows checked script launchers only when opted in and always refuses encoded PowerShell', () => {
+    expect(() => checkPowerShellBan('pwsh', ['-Command', 'Get-Process'])).toThrow(
+      'permissions.exec.shell_scripts',
+    );
+    expect(() => checkPowerShellBan('pwsh', ['-Command', 'Get-Process'], true)).not.toThrow();
+    expect(() => checkPowerShellBan('cmd', ['/c', 'echo ready'], true)).not.toThrow();
+    expect(() => checkPowerShellBan('bash', ['-c', 'echo ready'], true)).not.toThrow();
+    for (const flag of ['-EncodedCommand', '-enc', '-ec', '-e']) {
+      expect(() => checkPowerShellBan('pwsh', [flag, 'YQ=='], true)).toThrow('always banned');
+      expect(() => checkPowerShellBan('pwsh', [flag, 'YQ=='])).toThrow('always banned');
+    }
+  });
 });

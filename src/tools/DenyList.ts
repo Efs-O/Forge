@@ -68,8 +68,9 @@ export function isRecursiveForceDelete(fullCommand: string): boolean {
  *
  * `git checkout -- .` and `git restore .` delete uncommitted work with no
  * confirmation and no reflog entry to recover from — the one genuinely
- * unrecoverable thing in everyday git. Neither was on the denylist, while
- * `git reset --hard` (which IS recoverable via reflog) was.
+ * unrecoverable thing in everyday git. `git reset --hard` also destroys
+ * uncommitted working-tree changes; the reflog can restore commits, not those
+ * discarded changes, so it remains refused.
  *
  * `git checkout <branch>` stays allowed: git refuses it when it would clobber
  * local modifications, so it is not the hazard. `git restore --staged <path>`
@@ -125,7 +126,11 @@ export function getBuiltinDenyList(): DenyListEntry[] {
         'To remove a path, use the delete_file tool (recursive: true for a directory). ' +
         'It moves the target to the recycle bin unless you pass to_trash: false.',
     },
-    { pattern: /git\s+reset\s+--(hard|mixed|soft)/, description: 'git reset (hard/mixed/soft)' },
+    {
+      pattern: /\bgit\s+reset\s+--hard\b/,
+      description: 'git reset --hard (discards working-tree changes)',
+      alternative: 'Use restore_file for tracked file restoration.',
+    },
     {
       pattern: /git\s+clean\s+-[fFdDxX]/,
       description: 'git clean -f',

@@ -26,6 +26,7 @@ import {
 } from './execProgramResolver';
 import { validateExecEnv } from './execEnvPolicy';
 import { checkDenyList, getBuiltinDenyList } from './DenyList';
+import { checkExecScriptFile, checkInlineExecScript } from './execScriptScanner';
 import { backgroundExecutionManager } from './BackgroundExecutionManager';
 import {
   formatBackgroundObservation,
@@ -84,14 +85,16 @@ export function makeRunTerminalTool(): RegisteredTool {
 
 // ── exec_command ───────────────────────────────────────────────────────────────
 
-export function makeExecCommandTool(): RegisteredTool {
+export function makeExecCommandTool(
+  shellScriptsEnabled: () => boolean = () => false,
+): RegisteredTool {
   return {
     definition: {
       type: 'function',
       function: {
         name: 'exec_command',
         description:
-          'Run an executable directly without a shell; pass args separately. npm/npx work cross-platform. Shell builtins, operators, and dangerous commands are refused. Use the output options instead of pipes. Long jobs: background=true + monitor_execution or notify_on_exit.',
+          'Run an executable directly without a shell; pass args separately. npm/npx work cross-platform. Shell builtins, operators, and dangerous commands are refused. Shell scripts require permissions.exec.shell_scripts in config.yaml. Use the output options instead of pipes. Long jobs: background=true + monitor_execution or notify_on_exit.',
         parameters: {
           type: 'object',
           properties: {
@@ -170,9 +173,30 @@ export function makeExecCommandTool(): RegisteredTool {
         throw new Error('notify_on_exit requires a conversation; start this job from a chat.');
       }
       const cwd = resolveExecCwd(args['cwd'] as string | undefined);
+      const shellScripts = shellScriptsEnabled();
+      const shellFlagIndex = cmdArgs.findIndex((arg) =>
+        ['-command', '-c', '/c'].includes(arg.toLowerCase()),
+      );
 
       try {
-        checkShellOperators(cmdArgs);
+        const launcher = command.split(/[\\/]/u).pop()?.toLowerCase() ?? command.toLowerCase();
+        const shellLauncher = [
+          'pwsh',
+          'pwsh.exe',
+          'powershell',
+          'powershell.exe',
+          'bash',
+          'sh',
+          'zsh',
+          'dash',
+          'cmd',
+          'cmd.exe',
+          'busybox',
+        ].includes(launcher);
+        checkShellOperators(
+          cmdArgs,
+          shellScripts && shellLauncher && shellFlagIndex >= 0 ? shellFlagIndex + 1 : -1,
+        );
       } catch (error) {
         throw new ExecCommandError(
           'invalid_shell_syntax',
@@ -195,7 +219,9 @@ export function makeExecCommandTool(): RegisteredTool {
               (denied.alternative ? ` ${denied.alternative}` : ''),
           );
         }
-        checkPowerShellBan(command, cmdArgs);
+        checkPowerShellBan(command, cmdArgs, shellScripts);
+        checkInlineExecScript(command, cmdArgs, shellScripts);
+        checkExecScriptFile(command, cmdArgs, cwd);
         // Before the spawn, not after: this command would start successfully
         // and fail on its own terms, so there is no error path to improve.
         const wrongProgram = describeWrongPlatformProgram(command, cmdArgs);
