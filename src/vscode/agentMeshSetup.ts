@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import * as fs from 'fs';
 import { busPaths } from '../agentBus/agentBus';
 import type { ForgeConfig } from '../config/types';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
@@ -8,30 +7,24 @@ import { listAliases } from '../agentMesh/aliasRegistry';
 import { isTerminal, type ExchangeState } from '../agentMesh/deliveryState';
 import {
   appendEvent,
-  compact,
   EXCHANGES_LOCK_NAME,
   EXCHANGES_LOG_NAME,
   NON_TERMINAL_DEADLINE_MS,
   newEventId,
-  groupByExchange,
-  latestStates,
   readEvents,
   type ExchangeLogPaths,
 } from '../agentMesh/exchangeLog';
-import {
-  listOwnedAliases,
-  readOwnership,
-  recoverOwnership,
-  writeOwnership,
-} from '../agentMesh/ownership';
+import { listOwnedAliases } from '../agentMesh/ownership';
 import { MeshOrchestrator } from '../agentMesh/meshOrchestrator';
 import { meshEventNotification } from '../agentMesh/meshNotificationPolicy';
 import { PendingHostActivity } from '../agentMesh/pendingHostActivity';
 import { MeshSessionProvider } from '../agentMesh/sessionProvider';
-import { projectBoard, projectLiveSessions } from '../agentMesh/boardView';
 import { setBoardContext, setMeshOrchestrator } from '../agentMesh/meshContext';
 import { TurnStatus } from '../agentMesh/turnStatus';
 import { validateInboundSender } from '../agentMesh/senderValidation';
+import { createMeshMaintenance } from './meshMaintenance';
+import { renderMeshObservation } from './meshObservation';
+import { createMeshVerdictPoll } from './meshVerdictPoll';
 
 /** Agent-mesh activation wiring: durable board, recovery, relay, and lifecycle timers. */
 
@@ -86,11 +79,6 @@ function disabledMesh(): AgentMesh {
     dispose: async () => undefined,
   };
 }
-
-/** How often the compaction / verdict / idle-TTL timers run (ms). */
-const MAINTENANCE_INTERVAL_MS = 60_000;
-/** An owned session idle longer than this (and not parked) is reaped (F-07). */
-const IDLE_TTL_MS = 2 * 60 * 60_000;
 
 export function setupAgentMesh(
   context: vscode.ExtensionContext,
@@ -240,42 +228,14 @@ export function setupAgentMesh(
     return knownAliasesForMesh(paths.root, getConfig().agent_bus);
   };
 
-  // F-09: render the observational commands (status/board/peers/queue/context)
-  // into real scoped state, not a placeholder. The wiring layer knows the
-  // scope and board projection, so it renders; the orchestrator dispatches.
-  const renderObservation = (verb: 'status' | 'board' | 'peers' | 'queue' | 'context'): string => {
-    const s = scope();
-    switch (verb) {
-      case 'status':
-      case 'board': {
-        const rows = projectBoard(exchangePaths.log, s.workspace, s.conversation, 5);
-        const sessions = projectLiveSessions(paths.root);
-        const board = rows
-          .map((r) => `${r.from}→${r.to ?? '?'}: ${r.label}${r.detail ? ` (${r.detail})` : ''}`)
-          .join('; ');
-        const live = sessions.map((ls) => `${ls.alias}[${ls.state}]`).join(', ');
-        return `board: ${board || 'empty'}\nlive: ${live || 'none'}`;
-      }
-      case 'peers': {
-        const sessions = projectLiveSessions(paths.root);
-        return `peers: ${sessions.map((ls) => `${ls.alias}[${ls.state}]`).join(', ') || 'none'}`;
-      }
-      case 'queue': {
-        // F-09: the mesh FIFO pending per alias (agent-bus messages), not just
-        // the remote conversation queue.
-        const parts: string[] = [];
-        for (const alias of orchestrator.aliases()) {
-          if (alias === 'forge') continue;
-          const n = orchestrator.queueLength(alias);
-          if (n > 0) parts.push(`${alias}: ${n}`);
-        }
-        return `queue: ${parts.join(', ') || 'empty'}`;
-      }
-      case 'context':
-        return `context: workspace=${s.workspace}${s.conversation ? ` conversation=${s.conversation}` : ' (unbound)'}`;
-    }
-  };
-
+  const renderObservation = (verb: 'status' | 'board' | 'peers' | 'queue' | 'context'): string =>
+    renderMeshObservation(verb, {
+      scope,
+      logPath: exchangePaths.log,
+      root: paths.root,
+      aliases: () => orchestrator.aliases(),
+      queueLength: (alias) => orchestrator.queueLength(alias),
+    });
   const orchestrator = new MeshOrchestrator({
     busRoot: paths.root,
     provider,
@@ -309,147 +269,16 @@ export function setupAgentMesh(
     turnStatus.markTurnFinished(turnId);
   };
 
-  // Startup recovery reaps dead owners, records the crash, and times out their
-  // accepted-but-not-started FIFO exchanges. A null owner is a clean close.
-  void (async () => {
-    try {
-      const recovery = recoverOwnership(paths.root);
-      for (const action of recovery.actions) {
-        if (action.action !== 'reaped') continue;
-        await provider.reap(action.alias);
-        await onEvent({
-          exchangeId: `crash-${action.alias}`,
-          from: 'forge',
-          to: action.alias,
-          type: 'notice',
-          state: 'crashed',
-          detail: 'owned session lost; thread kept for resume',
-        });
-        // F-08: the dead owner's FIFO is gone; terminalize its accepted
-        // messages now instead of leaving them live until compaction.
-        const events = readEvents(exchangePaths.log);
-        const states = latestStates(events);
-        for (const [exchangeId, exchangeEvents] of groupByExchange(events)) {
-          if (states.get(exchangeId) !== 'accepted') continue;
-          if (!exchangeEvents.some((event) => event.to?.toLowerCase() === action.alias)) continue;
-          await onEvent({
-            exchangeId,
-            from: 'forge',
-            to: action.alias,
-            type: 'state',
-            state: 'timeout',
-            detail: 'owner host died before the queued message started',
-          });
-        }
-      }
-    } catch {
-      // Recovery is best-effort; a failure here must not block activation.
-    } finally {
-      // F-08: clear only status files whose owning host is proven dead. A
-      // second extension window may have a live turn in the shared directory.
-      turnStatus.sweepDead();
-    }
-  })();
-
-  // F-07: bounded compaction and idle-TTL maintenance; parked sessions are exempt.
-  const runMaintenance = async (): Promise<void> => {
-    try {
-      await compact(exchangePaths, {}, {});
-      // Idle-TTL reap: an owned session with no recent activity (and not
-      // parked) is disposed, keeping its thread_id for resume (M3).
-      for (const alias of listOwnedAliases(paths.root)) {
-        const rec = readOwnership(paths.root, alias);
-        if (!rec) continue;
-        if (rec.parked) continue; // park-but-warm: exempt (M4)
-        // F-02: reap only a session THIS window owns; another live window's
-        // idle session is not ours to reap (it would orphan its process).
-        if (!provider.isOwner(alias)) continue;
-        const last = rec.last_activity ?? rec.created_at;
-        if (Date.now() - last > IDLE_TTL_MS) {
-          await provider.reap(alias);
-          writeOwnership(paths.root, { ...rec, owner_host: null, parked: false });
-          await onEvent({
-            exchangeId: `idle-${alias}`,
-            from: 'forge',
-            to: alias,
-            type: 'notice',
-            state: 'timeout',
-            detail: 'idle TTL reached; session reaped, thread kept for resume',
-          });
-        }
-      }
-    } catch {
-      // Maintenance is best-effort; a failure must not crash the host.
-    }
-  };
-  let maintenanceRun: Promise<void> | undefined;
-  const maintenanceTimer = setInterval(() => {
-    if (maintenanceRun) return;
-    maintenanceRun = runMaintenance().finally(() => {
-      maintenanceRun = undefined;
-    });
-  }, MAINTENANCE_INTERVAL_MS);
-  maintenanceTimer.unref?.();
-
-  // F-03: consume exchange-correlated verdicts for non-observing sends; late or
-  // unknown verdicts are discarded as orphans.
-  const pollVerdictsOnce = async (): Promise<void> => {
-    let names: string[];
-    try {
-      names = fs.readdirSync(outboxDir);
-    } catch {
-      return; // no outbox yet
-    }
-    const states = latestStates(readEvents(exchangePaths.log));
-    for (const name of names) {
-      if (!name.endsWith('.verdict.md')) continue;
-      const exchangeId = name.slice(0, -'.verdict.md'.length);
-      const file = path.join(outboxDir, name);
-      const state = states.get(exchangeId);
-      // A verdict is only meaningful for an exchange already accepted by the
-      // mesh. Unknown files and verdicts for terminal exchanges are orphans;
-      // consume them once without creating a false completed exchange.
-      if (state === undefined || isTerminal(state) || state === 'created') {
-        try {
-          fs.unlinkSync(file);
-        } catch {
-          // Absent: another window consumed the orphan.
-        }
-        void vscode.window.showWarningMessage(
-          `[agent mesh] ignored orphan verdict for exchange ${exchangeId}`,
-        );
-        continue;
-      }
-      let body = '';
-      try {
-        body = fs.readFileSync(file, 'utf8');
-      } catch {
-        continue;
-      }
-      await onEvent({
-        exchangeId,
-        from: 'forge',
-        type: 'verdict',
-        state: 'completed',
-        detail: body.slice(0, 500),
-      });
-      try {
-        fs.unlinkSync(file);
-      } catch {
-        // Absent: another window consumed it.
-      }
-    }
-  };
-  let verdictPoll: Promise<void> | undefined;
-  const pollVerdicts = (): Promise<void> => {
-    if (verdictPoll) return verdictPoll;
-    verdictPoll = pollVerdictsOnce().finally(() => {
-      verdictPoll = undefined;
-    });
-    return verdictPoll;
-  };
-  const verdictTimer = setInterval(() => void pollVerdicts(), MAINTENANCE_INTERVAL_MS);
-  verdictTimer.unref?.();
+  const maintenance = createMeshMaintenance({
+    root: paths.root,
+    exchangePaths,
+    provider,
+    turnStatus,
+    onEvent,
+  });
+  const verdictPoll = createMeshVerdictPoll({ outboxDir, exchangePaths, onEvent });
+  maintenance.start();
+  verdictPoll.start();
 
   const relay: AgentMesh['relay'] = async (from, to, text) => {
     const result = await orchestrator.relay(from, to, text);
@@ -475,8 +304,8 @@ export function setupAgentMesh(
     );
 
   const dispose = async (): Promise<void> => {
-    if (maintenanceTimer) clearInterval(maintenanceTimer);
-    if (verdictTimer) clearInterval(verdictTimer);
+    maintenance.dispose();
+    verdictPoll.dispose();
     orchestrator.dispose();
     pendingActivities.dispose();
     await provider.dispose();

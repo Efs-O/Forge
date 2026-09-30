@@ -550,6 +550,9 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Process-wide orchestrator handle                         | `src/agentMesh/meshContext.ts`              |
 | `tell_live_session` tool (§1)                            | `src/tools/tellLiveSessionTool.ts`          |
 | Agent-mesh activation wiring (orchestrator + recovery)   | `src/vscode/agentMeshSetup.ts`              |
+| Agent-mesh recovery and idle maintenance                 | `src/vscode/meshMaintenance.ts`             |
+| Agent-mesh non-observing verdict polling                | `src/vscode/meshVerdictPoll.ts`             |
+| Agent-mesh observational-command rendering              | `src/vscode/meshObservation.ts`             |
 
 ## Build / packaging
 
