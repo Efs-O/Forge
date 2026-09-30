@@ -18,6 +18,8 @@ import {
 } from './RemoteEphemeralMessages';
 import { createRemoteOutboxDelivery, RemoteOutboxDelivery } from './RemoteOutboxDelivery';
 import { handleRemoteCommand } from './RemoteCommandHandler';
+import { buildRemoteCommandDeps, workspaceContextOf } from './remoteCommandDeps';
+import { applyRemoteAuthGate } from './remoteAuthGate';
 import { RemoteApprovalBridge } from './RemoteApprovalBridge';
 import { RemoteQuestionBridge } from './RemoteQuestionBridge';
 import { CommandCleanupScheduler } from './CommandCleanupScheduler';
@@ -27,11 +29,10 @@ import { RemoteNotificationFanout } from './RemoteNotificationFanout';
 import {
   admitRemoteText,
   isRemoteCommand,
-  resumeRemoteConversation,
   type RemotePromptAdmissionDeps,
 } from './RemotePromptAdmission';
 import { drainRemoteQueue } from './RemoteQueueDrain';
-import { previewPrompt, RemotePendingPrompt } from './RemotePendingPrompt';
+import { RemotePendingPrompt } from './RemotePendingPrompt';
 import {
   buildSpokenGateContext,
   resolveVoiceDraft,
@@ -227,15 +228,12 @@ export class RemoteController {
   setMirror(chatId: string, on: boolean): void {
     this.fanout.setMirror(chatId, on);
   }
-
   isMirrorOn(chatId: string): boolean {
     return this.fanout.isMirrorOn(chatId);
   }
-
   setNotify(chatId: string, on: boolean): void {
     this.fanout.setNotify(chatId, on);
   }
-
   isNotifyOn(chatId: string): boolean {
     return this.fanout.isNotifyOn(chatId);
   }
@@ -249,75 +247,23 @@ export class RemoteController {
       const groupResult = await this.contactService?.handleGroup(event);
       return groupResult ?? ephemeralRejection('private chats only');
     }
-
-    if (!(await this.auth.isOwner(event))) {
-      const contactResult = await this.contactService?.handleNonOwner(event);
-      if (contactResult) return contactResult;
-      if ((await this.auth.tryPair(event)) === 'paired') {
-        await this.audit?.record(event, 'paired').catch(() => undefined);
-        await this.sendTransientMessage(event.chatId, 'Forge remote pairing complete.');
-        return { kind: 'handled' };
-      }
-      return ephemeralRejection('sender is not paired');
-    }
-    const gate = await this.auth.gate(event);
-    if (gate.kind === 'challenge') {
-      await this.audit?.record(event, 'authentication_challenge').catch(() => undefined);
-      const held = event.kind === 'text' && !isRemoteCommand(event.text);
-      if (held) this.pending.hold(event);
-      const idleMinutes = this.options.inactivityTimeoutMinutes ?? 30;
-      const cause =
-        gate.reason === 'expired'
-          ? `session expired after ${idleMinutes} min idle`
-          : 'authentication required';
-      await this.sendTransientMessage(
-        event.chatId,
-        held
-          ? `Forge: ${cause}. Your prompt is held and will run once you verify — ` +
-              'send your 6-digit code.'
-          : `Forge: ${cause}. Send your 6-digit code, then send the command again — ` +
-              'commands are not held.',
-      );
-      return { kind: 'handled' };
-    }
-    if (gate.kind === 'failed') {
-      await this.audit?.record(event, 'authentication_failed').catch(() => undefined);
-      await this.sendTransientMessage(event.chatId, 'Forge: authentication failed.');
-      return { kind: 'handled' };
-    }
-    if (gate.kind === 'locked_out') {
-      await this.audit?.record(event, 'authentication_locked_out').catch(() => undefined);
-      // Repeated wrong codes must not leave a prompt armed to fire later.
-      this.pending.clear(event.channel, event.chatId);
-      return ephemeralRejection('remote authentication is temporarily locked');
-    }
-    if (gate.kind === 'blocked') {
-      return ephemeralRejection('remote authentication is required');
-    }
-    if (gate.newlyAuthenticated) {
-      await this.audit?.record(event, 'authenticated').catch(() => undefined);
-      this.outbox.kick();
-      const binding = this.store.binding(event.channel, event.chatId);
-      if (binding) this.kickDrain(binding.conversationId);
-      for (const gate of [this.approvals, this.questions]) gate.republish(event.chatId);
-      await this.sendTransientMessage(event.chatId, 'Forge: authenticated.');
-      const heldPrompt = this.pending.take(event.channel, event.chatId);
-      if (!heldPrompt) return { kind: 'handled' };
-      await this.audit?.record(heldPrompt, 'held_prompt_replayed').catch(() => undefined);
-      await this.sendTransientMessage(
-        event.chatId,
-        `Forge: running your held prompt — ${previewPrompt(heldPrompt.text)}`,
-      );
-      return await this.handle(heldPrompt);
-    }
-    if (event.kind === 'text' && event.text === '/lock') {
-      this.auth.lock(event);
-      this.pending.clear(event.channel, event.chatId);
-      await this.audit?.record(event, 'session_locked').catch(() => undefined);
-      await this.sendTransientMessage(event.chatId, 'Forge: remote session locked.');
-      this.commandCleanup.schedule(event);
-      return { kind: 'handled' };
-    }
+    const authGate = await applyRemoteAuthGate(event, {
+      auth: this.auth,
+      ...(this.contactService ? { contactService: this.contactService } : {}),
+      ...(this.audit ? { audit: this.audit } : {}),
+      sendTransientMessage: this.sendTransientMessage,
+      pending: this.pending,
+      outbox: this.outbox,
+      store: this.store,
+      kickDrain: (conversationId) => this.kickDrain(conversationId),
+      approvals: this.approvals,
+      questions: this.questions,
+      inactivityTimeoutMinutes: () => this.options.inactivityTimeoutMinutes,
+      rehandle: (heldEvent) => this.handle(heldEvent),
+      scheduleCommandCleanup: (commandEvent) => this.commandCleanup.schedule(commandEvent),
+    });
+    if (!('continue' in authGate)) return authGate;
+    const nonce = authGate.nonce;
     if (!this.rateLimiter.allow(`${event.channel}:${event.senderId}:${event.chatId}`)) {
       return ephemeralRejection('remote rate limit exceeded');
     }
@@ -331,12 +277,7 @@ export class RemoteController {
           signal: this.abort.signal,
           modelEntries: this.options.modelEntries,
           workspaceAliases: this.options.workspaceAliases,
-          ...(this.options.currentWorkspaceAlias
-            ? { currentWorkspaceAlias: this.options.currentWorkspaceAlias }
-            : {}),
-          ...(this.options.currentWorkspaceName
-            ? { currentWorkspaceName: this.options.currentWorkspaceName }
-            : {}),
+          ...workspaceContextOf(this.options),
         },
         remoteDedupKey(event.channel, event.chatId, event.providerMessageId),
       );
@@ -350,7 +291,7 @@ export class RemoteController {
       return result;
     }
     if (event.kind === 'action') {
-      if (!this.approvals.resolveAction(event, gate.nonce)) {
+      if (!this.approvals.resolveAction(event, nonce)) {
         return { kind: 'rejected', reason: 'approval is stale or not owned by this chat' };
       }
       this.auth.touch(event);
@@ -370,7 +311,7 @@ export class RemoteController {
       }
       const result = await this.voice.bridge.handle(
         event,
-        buildSpokenGateContext(event, gate.nonce, {
+        buildSpokenGateContext(event, nonce, {
           pendingGates: (chatId) => this.approvals.pendingGates(chatId),
           resolveSpoken: (gateId, approve, chatId, nonce) =>
             this.approvals.resolveSpoken(gateId, approve, chatId, nonce),
@@ -410,51 +351,30 @@ export class RemoteController {
     if (isRemoteCommand(event.text)) {
       const result = await handleRemoteCommand(
         event,
-        {
-          channel: this.commandCleanup.trackReplies(this.channel, event.text),
-          store: this.store,
-          host: this.host,
-          workspaceId: this.options.workspaceId,
-          signal: this.abort.signal,
-          commandCleanup: this.commandCleanup,
-          inactivityTimeoutMinutes: this.options.inactivityTimeoutMinutes ?? 30,
-          rateLimitPerMinute: this.options.rateLimitPerMinute,
-          modelEntries: this.options.modelEntries,
-          workspaceAliases: this.options.workspaceAliases,
-          totpEnrolled: () => this.auth.totpEnrolled(this.channel.name),
-          // Without this, `/workspace list` never marks the current entry and
-          // the "already in this workspace" guard on `/new <alias>` can never fire.
-          // RemoteRuntime computes the alias and the handler reads it, but nothing joined the two.
-          ...(this.options.currentWorkspaceAlias
-            ? { currentWorkspaceAlias: this.options.currentWorkspaceAlias }
-            : {}),
-          ...(this.options.currentWorkspaceName
-            ? { currentWorkspaceName: this.options.currentWorkspaceName }
-            : {}),
-          notifyMute: {
-            get: (chatId: string) => this.isNotifyOn(chatId),
-            set: (chatId: string, on: boolean) => this.setNotify(chatId, on),
+        buildRemoteCommandDeps(
+          {
+            channel: this.channel,
+            store: this.store,
+            host: this.host,
+            signal: this.abort.signal,
+            commandCleanup: this.commandCleanup,
+            options: () => this.options,
+            totpEnrolled: () => this.auth.totpEnrolled(this.channel.name),
+            ...(this.contactService
+              ? {
+                  contactCommands: this.contactService.handleOwnerCommand.bind(this.contactService),
+                }
+              : {}),
           },
-          mirrorToggle: {
-            get: (chatId: string) => this.isMirrorOn(chatId),
-            set: (chatId: string, on: boolean) => this.setMirror(chatId, on),
+          event,
+          {
+            isNotifyOn: (chatId) => this.isNotifyOn(chatId),
+            setNotify: (chatId, on) => this.setNotify(chatId, on),
+            isMirrorOn: (chatId) => this.isMirrorOn(chatId),
+            setMirror: (chatId, on) => this.setMirror(chatId, on),
+            promptDeps: this.promptDeps,
           },
-          ...(this.options.switchWorkspace
-            ? { switchWorkspace: this.options.switchWorkspace }
-            : {}),
-          ...(this.options.setInactivityTimeout
-            ? { setInactivityTimeout: this.options.setInactivityTimeout }
-            : {}),
-          ...(this.options.setRateLimit ? { setRateLimit: this.options.setRateLimit } : {}),
-          ...(this.options.reloadWindow ? { reloadWindow: this.options.reloadWindow } : {}),
-          ...(this.options.voiceToggle ? { voiceToggle: this.options.voiceToggle } : {}),
-          ...(this.options.jobs ? { jobs: this.options.jobs } : {}),
-          ...(this.contactService
-            ? { contactCommands: this.contactService.handleOwnerCommand.bind(this.contactService) }
-            : {}),
-          resumeCurrent: (resumeEvent, resumeDedupKey) =>
-            resumeRemoteConversation(resumeEvent, resumeDedupKey, this.promptDeps),
-        },
+        ),
         key,
       );
       if (result.kind !== 'rejected' && result.kind !== 'retry') this.auth.touch(event);

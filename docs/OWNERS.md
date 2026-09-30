@@ -150,6 +150,8 @@ overlaps with an existing owner, extend the owner instead.
 | Extension-scoped transport lifecycle          | `src/remote/RemoteRuntime.ts`                   |
 | Remote transport validation status projection | `src/remote/remoteValidationStatus.ts`          |
 | Inbound admission, queue drain, notifications | `src/remote/RemoteController.ts`                |
+| Remote command dependency assembly             | `src/remote/remoteCommandDeps.ts`               |
+| Remote ownership/authentication gate           | `src/remote/remoteAuthGate.ts`                  |
 | Ephemeral remote message cleanup policy       | `src/remote/RemoteEphemeralMessages.ts`         |
 | Durable normal prompt admission               | `src/remote/RemotePromptAdmission.ts`           |
 | Durable queue execution + terminal outcome    | `src/remote/RemoteQueueDrain.ts`                |

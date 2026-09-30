@@ -7,6 +7,9 @@ import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
 import { RemoteAuth } from '../../src/remote/RemoteAuth';
 import { RemoteController } from '../../src/remote/RemoteController';
 import { handleRemoteCommand } from '../../src/remote/RemoteCommandHandler';
+import { buildRemoteCommandDeps } from '../../src/remote/remoteCommandDeps';
+import type { CommandCleanupScheduler } from '../../src/remote/CommandCleanupScheduler';
+import type { RemoteControllerOptions } from '../../src/remote/remoteControllerOptions';
 import { RemoteRequestStore, remoteDedupKey } from '../../src/remote/RemoteRequestStore';
 import { RemoteLeaseError, RemoteTransportLease } from '../../src/remote/RemoteTransportLease';
 import type { RemoteInboundEvent, RemoteRequestRecord } from '../../src/remote/types';
@@ -168,10 +171,7 @@ describe('RemoteRequestStore', () => {
     // The drain should pick up the steer-priority record and deliver it.
     await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
     // The steer record runs first (priority ordering), then the normal one.
-    expect(send.mock.calls.map((call) => call[1])).toEqual([
-      'steer-legacy text',
-      'normal text',
-    ]);
+    expect(send.mock.calls.map((call) => call[1])).toEqual(['steer-legacy text', 'normal text']);
     await controller.stop();
   });
 });
@@ -261,6 +261,75 @@ describe('remote configuration and lease', () => {
 });
 
 describe('RemoteController with fake channel', () => {
+  it('builds command dependencies from options current at dispatch time', async () => {
+    const state = await store();
+    const channel = new FakeRemoteChannel();
+    let options: RemoteControllerOptions = {
+      workspaceId: 'before',
+      queueLimit: 5,
+      maxMessageChars: 12_000,
+      rateLimitPerMinute: 30,
+      modelEntries: [],
+      attachmentsEnabled: false,
+      acceptPdfAttachments: false,
+      workspaceAliases: {},
+      currentWorkspaceAlias: 'before',
+    };
+    const event: Extract<RemoteInboundEvent, { kind: 'text' }> = {
+      channel: 'fake',
+      kind: 'text',
+      providerMessageId: 'command',
+      senderId: 'owner',
+      chatId: 'chat',
+      chatType: 'private',
+      receivedAt: Date.now(),
+      text: '/workspace',
+    };
+    const source = {
+      isNotifyOn: () => true,
+      setNotify: () => undefined,
+      isMirrorOn: () => false,
+      setMirror: () => undefined,
+      promptDeps: {
+        channel,
+        store: state,
+        host: {} as ForgeHostFacade,
+        options,
+        isBusy: () => false,
+        kickDrain: () => undefined,
+        restoreConversation: async () => undefined,
+      },
+    };
+    const deps = {
+      channel,
+      store: state,
+      host: {} as ForgeHostFacade,
+      signal: new AbortController().signal,
+      commandCleanup: {
+        trackReplies: (trackedChannel: typeof channel) => trackedChannel,
+      } as unknown as CommandCleanupScheduler,
+      options: () => options,
+      totpEnrolled: async () => false,
+    };
+
+    expect(buildRemoteCommandDeps(deps, event, source)).toMatchObject({
+      workspaceId: 'before',
+      currentWorkspaceAlias: 'before',
+      rateLimitPerMinute: 30,
+    });
+    options = {
+      ...options,
+      workspaceId: 'after',
+      currentWorkspaceAlias: 'after',
+      rateLimitPerMinute: 45,
+    };
+    expect(buildRemoteCommandDeps(deps, event, source)).toMatchObject({
+      workspaceId: 'after',
+      currentWorkspaceAlias: 'after',
+      rateLimitPerMinute: 45,
+    });
+  });
+
   it('pairs privately, durably deduplicates, executes, and delivers the real final text', async () => {
     const state = await store();
     const secrets = new MemorySecrets();
