@@ -14,7 +14,7 @@
 // present only so their real schemas can participate in the supervised run.
 import { describe, expect, it, beforeAll, afterAll } from 'vitest';
 import * as path from 'path';
-import type * as vscode from 'vscode';
+import * as vscode from 'vscode';
 import { loadConfig } from '../../src/config/ConfigLoader';
 import type { ForgeConfig } from '../../src/config/types';
 import { connectMcpServers } from '../../src/tools/mcpBridge';
@@ -24,7 +24,11 @@ import {
   isLazyGroupAvailable,
   resetLazyToolGroups,
 } from '../../src/tools/lazyToolGroups';
-import { ToolRegistry, type ToolPermission } from '../../src/tools/ToolRegistry';
+import {
+  ToolRegistry,
+  type ToolHandlerContext,
+  type ToolPermission,
+} from '../../src/tools/ToolRegistry';
 import { UserQuestionService } from '../../src/sidebar/UserQuestionService';
 import { UserNotificationService } from '../../src/sidebar/UserNotificationService';
 import type { IndexManager } from '../../src/search/IndexManager';
@@ -126,6 +130,11 @@ async function buildRegistry(): Promise<void> {
   mcp = await connectMcpServers(config.mcp_servers ?? [], registry, silentLog);
 }
 
+/** What ModelTurn passes: a vision model, so `computer_use` may load. */
+function liveContext(conversationId: string): ToolHandlerContext {
+  return { beforeMutate: () => undefined, conversationId, modelName: MODEL, isVisionModel: true };
+}
+
 /** The model-facing list for one conversation, composed as ModelTurn composes it. */
 function definitionsFor(conversationId: string): () => ToolDefinition[] {
   return () => {
@@ -139,6 +148,8 @@ describe.runIf(LIVE)('lazy tool groups against a live Qwen3.8', () => {
     if (MODEL.includes('no-vision')) {
       throw new Error('Set FORGE_LIVE_MODEL to a vision-capable model for the computer_use acceptance cases.');
     }
+    // Real Forge always has the repo open; without it every path tool throws.
+    vscode.workspace.workspaceFolders.splice(0, Infinity, { uri: vscode.Uri.file(ROOT) });
     await buildRegistry();
     // A green run here without all seven groups registered would prove nothing.
     for (const group of [
@@ -157,6 +168,7 @@ describe.runIf(LIVE)('lazy tool groups against a live Qwen3.8', () => {
   }, 120_000);
 
   afterAll(() => {
+    vscode.workspace.workspaceFolders.splice(0);
     mcp?.dispose();
     expect(wrongGroupLoads).toBeLessThanOrEqual(1);
   });
@@ -171,7 +183,7 @@ describe.runIf(LIVE)('lazy tool groups against a live Qwen3.8', () => {
       prompt: 'What did we decide about the Forge prompt cache in our previous sessions?',
       registry,
       allowed: READ_ONLY_PERMISSIONS,
-      context: { beforeMutate: () => undefined, conversationId },
+      context: liveContext(conversationId),
       getDefinitions: definitionsFor(conversationId),
       maxSteps: 10,
       onRound: ({ call, nextDefinitions }) => rounds.push({ call, nextDefinitions }),
@@ -196,7 +208,7 @@ describe.runIf(LIVE)('lazy tool groups against a live Qwen3.8', () => {
       prompt: 'Find the exact error we encountered previously with llama-tokenize.',
       registry,
       allowed: READ_ONLY_PERMISSIONS,
-      context: { beforeMutate: () => undefined, conversationId },
+      context: liveContext(conversationId),
       getDefinitions: definitionsFor(conversationId),
       maxSteps: 10,
     });
@@ -207,7 +219,7 @@ describe.runIf(LIVE)('lazy tool groups against a live Qwen3.8', () => {
     countWrongGroupLoads(result, 'halluscribe');
     expect(result.calls).toContain('load_tool_group');
     expect(result.calls.some((c) => HALLUSCRIBE_TOOLS.includes(c))).toBe(true);
-  }, 300_000);
+  }, 600_000);
 
   it('leaves the group unloaded on an ordinary coding request', async () => {
     const conversationId = 'live-ordinary';
@@ -217,7 +229,7 @@ describe.runIf(LIVE)('lazy tool groups against a live Qwen3.8', () => {
       prompt: 'Read package.json in this workspace and tell me which script npm run ci runs.',
       registry,
       allowed: READ_ONLY_PERMISSIONS,
-      context: { beforeMutate: () => undefined, conversationId },
+      context: liveContext(conversationId),
       getDefinitions: definitionsFor(conversationId),
       maxSteps: 10,
     });
@@ -240,7 +252,7 @@ describe.runIf(LIVE)('lazy tool groups against a live Qwen3.8', () => {
       prompt,
       registry,
       allowed: READ_ONLY_PERMISSIONS,
-      context: { beforeMutate: () => undefined, conversationId },
+      context: liveContext(conversationId),
       getDefinitions: definitionsFor(conversationId),
       maxSteps: 6,
     });
@@ -259,7 +271,7 @@ describe.runIf(LIVE)('lazy tool groups against a live Qwen3.8', () => {
       prompt,
       registry,
       allowed: READ_ONLY_PERMISSIONS,
-      context: { beforeMutate: () => undefined, conversationId },
+      context: liveContext(conversationId),
       getDefinitions: definitionsFor(conversationId),
       maxSteps: 8,
     });
