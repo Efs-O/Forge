@@ -2,6 +2,16 @@
 
 ## 0.16.71
 
+### New chats no longer refused at the chat cap (2026-10-01)
+
+- At the open-chat cap, starting a new chat (sidebar, `forge.sh --new`)
+  refused with "N bound to a remote chat" even with no Telegram binding.
+  The remote check had been inverted: every chat *not* bound to a remote
+  chat counted as pinned, so the oldest chat could never be archived to make
+  room. Unbound chats are evictable again; a bound one still is not.
+- With remote control turned off, no chat is pinned by remote state. While
+  the remote store is still loading, chats stay pinned until it answers.
+
 ### Local image generation on a spare GPU (2026-10-01)
 
 - `generate_image` gains a local backend, `provider: sdcpp`: Forge starts

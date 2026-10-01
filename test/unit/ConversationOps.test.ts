@@ -13,8 +13,9 @@ import { UNTITLED_TITLE } from '../../src/sidebar/sessionTypes';
 import {
   evictionBlockers,
   isConversationEvictable,
+  remoteEvictionSignals,
   type ConversationEvictionSignals,
-} from '../../src/sidebar/sidebarWiring';
+} from '../../src/sidebar/evictionGate';
 
 function sidebar(): SidebarRuntime {
   return {
@@ -206,6 +207,20 @@ describe('conversation eviction ledger', () => {
       expect(evictionBlockers({ ...clear, [signal]: true } as ConversationEvictionSignals)).not
         .toEqual([]);
     }
+  });
+
+  it('reads the remote answer as "blocks": an unbound chat is free, a loading store is not', () => {
+    // The runtime answers "does remote state pin this chat?". It was once
+    // turned into "is it clear?" and fed in as the blocker, so every chat NOT
+    // bound to Telegram was pinned and `--new` refused with 12 of 12 blocked.
+    expect(isConversationEvictable({ ...clear, ...remoteEvictionSignals(false) })).toBe(true);
+    expect(evictionBlockers({ ...clear, ...remoteEvictionSignals(true) })).toEqual([
+      'bound to a remote chat',
+      'with remote messages queued',
+    ]);
+    expect(evictionBlockers({ ...clear, ...remoteEvictionSignals(undefined) })).toEqual([
+      'with an unreachable remote runtime',
+    ]);
   });
 });
 

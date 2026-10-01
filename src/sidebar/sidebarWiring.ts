@@ -45,6 +45,12 @@ import { randomUUID } from 'crypto';
 import { createSidebarPromptRouter, type SidebarPromptRouter } from './backgroundExitNotice';
 import { unattendedConversations } from './unattendedConversations';
 import type { ArchivedSessions } from './ArchivedSessions';
+import {
+  evictionBlockers,
+  isConversationEvictable,
+  remoteEvictionSignals,
+  type ConversationEvictionSignals,
+} from './evictionGate';
 
 /** What the provider lends its collaborators. */
 export interface SidebarHost {
@@ -73,7 +79,12 @@ export interface SidebarHost {
   unloadModels: () => Promise<void>;
   unloadActiveModel: () => Promise<{ model: string; wasLoaded: boolean }>;
   isConversationQueued: (id: string) => boolean | undefined;
-  isRemoteEvictionClear: (id: string) => boolean;
+  /**
+   * Whether remote state (a chat binding, queued remote messages) pins this
+   * conversation: `undefined` while the remote store has not loaded, `false`
+   * when no remote runtime is configured.
+   */
+  remoteEvictionBlocks: (id: string) => boolean | undefined;
 }
 
 /** The construction-time collaborators, straight from the provider's ctor. */
@@ -112,65 +123,6 @@ export interface SidebarRuntimeParts {
   tellDrain: MidTurnTellDrain;
   /** The one routing decision for a prompt: a busy chat's inbox, or a new turn. */
   promptRouter: SidebarPromptRouter;
-}
-
-export interface ConversationEvictionSignals {
-  streaming: boolean;
-  activeRequestChain: boolean;
-  unattended: boolean;
-  pendingApprovalActive: boolean;
-  pendingApprovalQueued: boolean;
-  pendingQuestion: boolean;
-  unattributedRequest: boolean;
-  hostQueue: boolean | undefined;
-  webviewQueue: boolean;
-  beforeWebviewQueueReport: boolean;
-  remoteRuntimeUnavailable: boolean;
-  remoteBinding: boolean;
-  remoteIntakeQueue: boolean;
-}
-
-export function isConversationEvictable(signals: ConversationEvictionSignals): boolean {
-  return !Object.values(signals).some((signal) => signal === true || signal === undefined);
-}
-
-/**
- * Why each signal blocks, phrased to follow a count ("7 running a turn").
- * `Record<keyof …>` makes a signal added to the gate without a label a
- * compile error, so the explanation cannot drift from the gate.
- */
-const EVICTION_BLOCKER_LABELS: Record<keyof ConversationEvictionSignals, string> = {
-  streaming: 'running a turn',
-  activeRequestChain: 'mid-request',
-  unattended: 'running unattended',
-  pendingApprovalActive: 'waiting on a tool approval',
-  pendingApprovalQueued: 'waiting on a tool approval',
-  pendingQuestion: 'waiting on a question',
-  unattributedRequest: 'holding an unattributed request',
-  hostQueue: 'with messages queued',
-  webviewQueue: 'with messages queued',
-  beforeWebviewQueueReport: 'not yet reporting a queue',
-  remoteRuntimeUnavailable: 'with an unreachable remote runtime',
-  remoteBinding: 'bound to a remote chat',
-  remoteIntakeQueue: 'with remote messages queued',
-};
-
-/**
- * The labels for every signal that blocks, deduped, in gate order.
- *
- * Derived from the same signal object as `isConversationEvictable` rather than
- * a second enumeration of "reasons", so a refusal can name what actually
- * blocked. A chat with a Keep/Undo still undecided is NOT in this list: an
- * archived chat keeps its checkpoint stack, so there is nothing to warn about.
- */
-export function evictionBlockers(signals: ConversationEvictionSignals): string[] {
-  const labels: string[] = [];
-  for (const key of Object.keys(EVICTION_BLOCKER_LABELS) as (keyof ConversationEvictionSignals)[]) {
-    if (signals[key] !== true && signals[key] !== undefined) continue;
-    const label = EVICTION_BLOCKER_LABELS[key];
-    if (!labels.includes(label)) labels.push(label);
-  }
-  return labels;
 }
 
 export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRuntimeParts {
@@ -361,7 +313,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     const queued = host.isConversationQueued(id);
     const approvals = agentLoop.pendingApprovalConversationIds();
     const questions = parts.questions.pendingConversationIds();
-    const remote = host.isRemoteEvictionClear(id);
+    const remote = host.remoteEvictionBlocks(id);
     const chains = requestChains.status();
     return {
       // Every signal here is activity or an unresolved prompt. A Keep/Undo
@@ -377,9 +329,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
       hostQueue: queued,
       webviewQueue: queued === true,
       beforeWebviewQueueReport: queued === undefined,
-      remoteRuntimeUnavailable: remote === undefined,
-      remoteBinding: remote,
-      remoteIntakeQueue: remote,
+      ...remoteEvictionSignals(remote),
     };
   };
 

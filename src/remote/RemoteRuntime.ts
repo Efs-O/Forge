@@ -107,11 +107,14 @@ export class RemoteRuntime {
     });
   }
 
-  /** Undefined until the remote store has loaded; callers must fail closed. */
+  /**
+   * Undefined until the remote store has loaded; callers must fail closed.
+   * Remote turned off never loads the store, so it pins nothing — otherwise
+   * every chat would read as pinned for as long as remote stays off.
+   */
   blocksConversationEviction(conversationId: string): boolean | undefined {
-    return this.store.isLoaded()
-      ? this.store.blocksConversationEviction(conversationId)
-      : undefined;
+    if (this.store.isLoaded()) return this.store.blocksConversationEviction(conversationId);
+    return this.appliedConfig && this.appliedConfig.remote?.enabled !== true ? false : undefined;
   }
 
   /** Serializes operations that touch the active transport map. */

@@ -150,7 +150,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         unloadModels: () => this.unloadModels(),
         unloadActiveModel: () => this.unloadConversationModel(),
         isConversationQueued: (id) => this.queuedConversationIds?.has(id),
-        isRemoteEvictionClear: (id) => this.remoteEvictionQuery?.(id) === false,
+        // Passed through as-is: it was once reduced to "clear", which the gate
+        // then read as "blocks", so every unbound chat was pinned and the cap
+        // could never make room, while an unloaded store failed open.
+        remoteEvictionBlocks: (id) =>
+          this.remoteEvictionQuery ? this.remoteEvictionQuery(id) : false,
       },
       {
         pool,
