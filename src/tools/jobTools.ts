@@ -26,6 +26,7 @@ import {
 import { openDiscussChat } from '../jobs/jobDiscuss';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import { CLI_AGENT_CONSENT_DETAIL, needsCliConsent } from '../jobs/cliAgentGate';
+import { jobDefaultModel } from '../config/jobsSchema';
 import type { RegisteredTool } from './ToolRegistry';
 
 /** The actions `manage_jobs` can perform. */
@@ -193,14 +194,14 @@ export function makeManageJobsTool(deps: ManageJobsDeps): RegisteredTool {
   return tool;
 }
 
-/** The agent_task model a create/update would run on (an unset model pins active_model). */
+/** The agent_task model a create/update would run on (an unset model takes the job default). */
 function jobModelOf(deps: ManageJobsDeps, args: Record<string, unknown>): string | undefined {
   if (args['action'] !== 'create' && args['action'] !== 'update') return undefined;
   const def = args['definition'] as Record<string, unknown> | undefined;
   const action = def?.['action'] as Record<string, unknown> | null | undefined;
   if (action?.['kind'] !== 'agent_task') return undefined;
   const model = action['model'];
-  return typeof model === 'string' ? model : (deps.getConfig().active_model ?? undefined);
+  return typeof model === 'string' ? model : jobDefaultModel(deps.getConfig());
 }
 
 async function runManageJobs(deps: ManageJobsDeps, args: Record<string, unknown>): Promise<string> {
@@ -336,7 +337,7 @@ async function createJob(deps: ManageJobsDeps, args: Record<string, unknown>): P
     schedule: partial['schedule'],
     check: partial['check'],
     on_change: partial['on_change'],
-    action: pinAgentTaskModel(partial['action'] ?? null, deps.getConfig().active_model),
+    action: pinAgentTaskModel(partial['action'] ?? null, deps.getConfig()),
     created_at: nowMs,
     updated_at: nowMs,
   };
@@ -351,7 +352,11 @@ async function createJob(deps: ManageJobsDeps, args: Record<string, unknown>): P
   await deps.store.saveState(id, { ...defaultState(), next_due_at: firstRun.getTime() });
   const action = result.data.action;
   const runsOn =
-    action?.kind === 'agent_task' && action.model ? ` Its agent runs on ${action.model}.` : '';
+    action?.kind !== 'agent_task'
+      ? ''
+      : action.model
+        ? ` Its agent runs on ${action.model}.`
+        : ` Its agent runs on jobs.default_model (${jobDefaultModel(deps.getConfig()) ?? 'unset'}).`;
   return `Created job "${result.data.name}" [${id}]. First run: ${firstRun.toLocaleString()}.${runsOn}`;
 }
 
@@ -359,9 +364,11 @@ async function createJob(deps: ManageJobsDeps, args: Record<string, unknown>): P
  * An agent_task created without a `model` gets the current model written in.
  * Left empty, the runner fell back to the in-memory active model, which every
  * chat-tab model switch overwrites: an unattended job ran on a paid cloud model
- * because a tab had been switched to it two minutes earlier.
+ * because a tab had been switched to it two minutes earlier. With
+ * `jobs.default_model` set there is a stable default to follow, so no pin.
  */
-function pinAgentTaskModel(action: unknown, activeModel: string | null | undefined): unknown {
+function pinAgentTaskModel(action: unknown, config: ForgeConfig): unknown {
+  const activeModel = config.jobs?.default_model ? undefined : config.active_model;
   if (typeof action !== 'object' || action === null || Array.isArray(action)) return action;
   const fields = action as Record<string, unknown>;
   if (fields['kind'] !== 'agent_task' || fields['model'] !== undefined || !activeModel)
@@ -419,6 +426,13 @@ async function updateJob(
       ...state,
       next_due_at: nextDue(result.data.schedule, now).getTime(),
     });
+  } else if (partial['enabled'] === true && !jobFile.job.enabled) {
+    // A resume by update: same stale-slot rule as the resume action.
+    await deps.store.setEnabled(
+      { ...jobFile, job: result.data },
+      true,
+      (deps.now ?? (() => new Date()))(),
+    );
   }
   return `Updated job "${result.data.name}" [${id}].`;
 }
@@ -430,7 +444,7 @@ async function setEnabled(
   enabled: boolean,
 ): Promise<string> {
   // The job is already a validated `Job`; flipping `enabled` cannot make it invalid.
-  await deps.store.saveJob({ ...jobFile.job, enabled, updated_at: Date.now() });
+  await deps.store.setEnabled(jobFile, enabled, (deps.now ?? (() => new Date()))());
   return `${enabled ? 'Resumed' : 'Paused'} job "${jobFile.job.name}" [${jobFile.job.id}].`;
 }
 

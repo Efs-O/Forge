@@ -306,6 +306,8 @@ export interface JobsConfig {
   /** How many jobs may run at once. */
   max_concurrent: number;
   allow_cli_agents: boolean; // unattended jobs may drive Claude Code / Codex (cliAgentGate)
+  /** Model for agent tasks that name none; hand-edited, never moved by a tab switch. */
+  default_model?: string;
   gpu_gate?: GpuGateConfig;
 }
 

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { ForgeConfig } from './types';
 
 export const GpuGateConfigSchema = z.object({
   /** nvidia-smi indices of the GPUs local models use. */
@@ -26,7 +27,20 @@ export const JobsConfigSchema = z
     max_concurrent: z.number().int().min(1).max(8).default(2),
     /** Let an unattended job drive a CLI agent (Claude Code / Codex) on the user's seat. */
     allow_cli_agents: z.boolean().default(false),
+    /**
+     * Model for agent tasks that name none. Hand-edited only: unlike
+     * `active_model`, no chat-tab switch moves it.
+     */
+    default_model: z.string().min(1).optional(),
     /** Optional sampled safety gate for agent tasks on local GPUs. */
     gpu_gate: GpuGateConfigSchema.optional(),
   })
   .optional();
+
+/**
+ * The model an agent task with no `model` of its own runs on:
+ * `jobs.default_model`, else `active_model` (the behaviour before the field).
+ */
+export function jobDefaultModel(config: ForgeConfig): string | undefined {
+  return config.jobs?.default_model ?? config.active_model ?? undefined;
+}

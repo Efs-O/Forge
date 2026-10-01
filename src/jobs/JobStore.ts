@@ -5,6 +5,7 @@ import { writeFileAtomicSync } from '../util/atomicWrite';
 import { clearStaged } from './actions/stagedBuild';
 import { deleteOutboxItem } from './JobOutbox';
 import { getLogger } from '../util/logger';
+import { nextDue } from './schedule';
 import {
   JobSchema,
   JobStateSchema,
@@ -186,6 +187,23 @@ export class JobStore {
     await this.ensureDirs();
     this.deletedJobs.delete(job.id);
     writeFileAtomicSync(path.join(this.jobsDir, `${job.id}.json`), JSON.stringify(job, null, 2));
+  }
+
+  /**
+   * Pause or resume a job. Pausing leaves `next_due_at` where it was, so a
+   * resume must move a time that passed meanwhile: otherwise every job paused
+   * past its slot fires the moment it is resumed. A future time is kept, and
+   * runs missed while paused are not replayed.
+   */
+  async setEnabled(jobFile: JobFile, enabled: boolean, now: Date = new Date()): Promise<void> {
+    await this.saveJob({ ...jobFile.job, enabled, updated_at: now.getTime() });
+    if (!enabled) return;
+    const due = (await this.readState(jobFile.job.id)).next_due_at;
+    if (due === null || due <= now.getTime()) {
+      this.patchState(jobFile.job.id, {
+        next_due_at: nextDue(jobFile.job.schedule, now).getTime(),
+      });
+    }
   }
 
   /** Save a job's state atomically. */

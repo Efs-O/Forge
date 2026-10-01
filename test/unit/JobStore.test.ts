@@ -329,3 +329,39 @@ describe('JobStore delete', () => {
     expect(survivors).toEqual([]);
   });
 });
+
+describe('JobStore setEnabled', () => {
+  const now = new Date(2026, 9, 2, 2, 30);
+  const daily = { kind: 'daily', at: '08:00' } as const;
+
+  async function resumeWith(due: number | null): Promise<number | null> {
+    await store.saveJob(job({ enabled: false, schedule: daily }));
+    const loaded = (await store.load('disk'))!;
+    await store.saveState('disk', { ...loaded.state, next_due_at: due });
+    await store.setEnabled((await store.load('disk'))!, true, now);
+    const after = (await store.load('disk'))!;
+    expect(after.job.enabled).toBe(true);
+    return after.state.next_due_at;
+  }
+
+  it('moves a past slot to the next scheduled time instead of firing it', async () => {
+    const past = new Date(2026, 9, 1, 8, 0).getTime();
+    expect(await resumeWith(past)).toBe(new Date(2026, 9, 2, 8, 0).getTime());
+    expect(await resumeWith(null)).toBe(new Date(2026, 9, 2, 8, 0).getTime());
+  });
+
+  it('keeps a slot still in the future', async () => {
+    const future = new Date(2026, 9, 3, 8, 0).getTime();
+    expect(await resumeWith(future)).toBe(future);
+  });
+
+  it('pausing leaves the state alone', async () => {
+    await store.saveJob(job({ schedule: daily }));
+    const loaded = (await store.load('disk'))!;
+    await store.saveState('disk', { ...loaded.state, next_due_at: 5 });
+    await store.setEnabled((await store.load('disk'))!, false, now);
+    const after = (await store.load('disk'))!;
+    expect(after.job.enabled).toBe(false);
+    expect(after.state.next_due_at).toBe(5);
+  });
+});

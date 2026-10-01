@@ -31,6 +31,8 @@ jobs:
   # May a job drive a CLI agent (Claude Code / Codex) on your subscription?
   # Off by default; approving the card on a CLI-agent job sets it.
   allow_cli_agents: false
+  # Model for agent tasks that name none (optional; else active_model).
+  default_model: strata-flashnext-iq3s
 ```
 
 - `enabled: false` (or the block absent) → no scheduler, no lease, no
@@ -49,6 +51,12 @@ jobs:
   - a job's turn cannot delegate to a CLI agent.
 
   Attended chat is never gated. See `docs/plans/CLI_AGENT_JOBS_GATE_PLAN.md`.
+- `default_model` (optional) is the model an `agent_task` runs on when its
+  action names no `model`. Only you set it, so switching a chat tab's model
+  never moves a job. While it is set, `manage_jobs create` leaves `model` out
+  and the job follows this field; without it, create writes the current
+  `active_model` into the job. A `model` on the action always wins.
+  See `docs/plans/JOB_DEFAULT_MODEL_PLAN.md`.
 
 After editing, **Reload Window** so the scheduler picks up the change (a config
 hot-reload also reconciles it, but a reload is the clean way to start).
@@ -212,7 +220,9 @@ When a chat is bound to the workspace and Telegram is connected:
 - `/job <n>` — shows one job's detail (schedule, last run, last observation).
 - `/job <n> run` — run it now (crosses the schedule; idempotent — a second
   request before it's consumed does not double-run it).
-- `/job <n> pause` / `/job <n> resume` — toggle `enabled`.
+- `/job <n> pause` / `/job <n> resume` — toggle `enabled`. A resume moves a
+  run time that passed while paused to the next scheduled one; missed runs are
+  not replayed.
 - `/job <n> approve` — approve a `prepare`-mode staged `llamacpp_update` so the
   next idle tick performs the switch.
 - `/job <n> chat` — open the discuss chat for the job.

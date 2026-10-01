@@ -45,7 +45,10 @@ function job(overrides: Partial<Job> = {}): Job {
   });
 }
 
-async function call(args: Record<string, unknown>, depsOverride?: Partial<ManageJobsDeps>): Promise<string> {
+async function call(
+  args: Record<string, unknown>,
+  depsOverride?: Partial<ManageJobsDeps>,
+): Promise<string> {
   const t = depsOverride ? makeManageJobsTool(deps(depsOverride)) : tool;
   return t.handler(args) as Promise<string>;
 }
@@ -169,6 +172,32 @@ describe('manage_jobs — create', () => {
     expect(out).toContain('Its agent runs on primary.');
     const loaded = await store.load('watch');
     expect(loaded?.job.action).toMatchObject({ kind: 'agent_task', model: 'primary' });
+  });
+
+  it('follows jobs.default_model instead of pinning when it is set', async () => {
+    const config = makeConfig({
+      enabled: true,
+      allowed_hosts: [],
+      max_concurrent: 1,
+      default_model: 'steady',
+    });
+    const out = await call(
+      {
+        action: 'create',
+        definition: {
+          name: 'Watch',
+          schedule: { kind: 'daily', at: '08:00' },
+          check: { kind: 'none' },
+          on_change: { kind: 'notify' },
+          action: { kind: 'agent_task', task: 'look' },
+        },
+      },
+      { getConfig: () => config },
+    );
+    expect(out).toContain('jobs.default_model (steady)');
+    const action = (await store.load('watch'))?.job.action;
+    expect(action).toMatchObject({ kind: 'agent_task' });
+    expect(action).not.toHaveProperty('model');
   });
 
   it('keeps the model an agent_task names', async () => {
@@ -340,7 +369,9 @@ describe('manage_jobs — update', () => {
 
   it('requires a definition object for update', async () => {
     await store.saveJob(job());
-    await expect(call({ action: 'update', job: 'disk' })).rejects.toThrow(/requires an object `definition`/);
+    await expect(call({ action: 'update', job: 'disk' })).rejects.toThrow(
+      /requires an object `definition`/,
+    );
   });
 
   it('rejects a non-updatable key (including the id) before writing', async () => {
@@ -349,9 +380,9 @@ describe('manage_jobs — update', () => {
       call({ action: 'update', job: 'disk', definition: { id: 'hacked' } }),
     ).rejects.toThrow(/update cannot set: id/);
     expect((await store.load('disk'))?.job.id).toBe('disk');
-    await expect(
-      call({ action: 'update', job: 'disk', definition: { bogus: 1 } }),
-    ).rejects.toThrow(/update cannot set: bogus/);
+    await expect(call({ action: 'update', job: 'disk', definition: { bogus: 1 } })).rejects.toThrow(
+      /update cannot set: bogus/,
+    );
   });
 });
 
@@ -368,6 +399,24 @@ describe('manage_jobs — pause and resume', () => {
     const out = await call({ action: 'resume', job: 'disk' });
     expect(out).toContain('Resumed job "Disk" [disk]');
     expect((await store.load('disk'))?.job.enabled).toBe(true);
+  });
+
+  // Pausing leaves next_due_at behind; a resume that kept it fired every
+  // paused job at once (five jobs resumed at 02:30 would all run at 02:30).
+  it('resume moves a slot that passed while paused, by either path', async () => {
+    const now = new Date(2026, 9, 2, 2, 30);
+    const past = new Date(2026, 9, 1, 8, 0).getTime();
+    for (const args of [
+      { action: 'resume', job: 'disk' },
+      { action: 'update', job: 'disk', definition: { enabled: true } },
+    ]) {
+      await store.saveJob(job({ enabled: false, schedule: { kind: 'daily', at: '08:00' } }));
+      await store.saveState('disk', { ...(await store.load('disk'))!.state, next_due_at: past });
+      await call(args, { now: () => now });
+      expect((await store.load('disk'))?.state.next_due_at).toBe(
+        new Date(2026, 9, 2, 8, 0).getTime(),
+      );
+    }
   });
 });
 

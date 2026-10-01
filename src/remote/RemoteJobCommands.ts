@@ -202,7 +202,7 @@ async function handleJob(
   const jobFile = match.jobFile;
   switch (action) {
     case 'pause':
-      await context.store.saveJob({ ...jobFile.job, enabled: false, updated_at: Date.now() });
+      await context.store.setEnabled(jobFile, false);
       await reply(
         context,
         event.chatId,
@@ -210,7 +210,7 @@ async function handleJob(
       );
       return { kind: 'handled' };
     case 'resume':
-      await context.store.saveJob({ ...jobFile.job, enabled: true, updated_at: Date.now() });
+      await context.store.setEnabled(jobFile, true);
       await reply(
         context,
         event.chatId,

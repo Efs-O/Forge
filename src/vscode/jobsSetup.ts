@@ -11,6 +11,7 @@ import { PowerControl } from '../system/PowerControl';
 import type { SidebarProvider } from '../sidebar/SidebarProvider';
 import { forgeLocalRoot } from '../jobs/actions/stagedBuild';
 import { cliAgentSkip } from '../jobs/cliAgentGate';
+import { jobDefaultModel } from '../config/jobsSchema';
 import { extractZip, makeSetBinary, runCommand, sha256File } from '../jobs/actions/llamacppIo';
 
 /**
@@ -105,7 +106,7 @@ export function setupJobs(
         power,
         host: () => sidebar.getHostFacade(),
         pool: () => pool,
-        defaultModel: () => getConfig().active_model ?? undefined,
+        defaultModel: () => jobDefaultModel(getConfig()),
         gpuGate: {
           config: () => getConfig().jobs?.gpu_gate,
           model: (name) => modelForGpuGate(getConfig(), name),

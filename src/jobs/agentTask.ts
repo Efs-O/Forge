@@ -45,7 +45,7 @@ export interface AgentTaskDeps {
   power: PowerControl;
   host: () => ForgeHostFacade | undefined;
   pool: () => IBackendPool | undefined;
-  /** The default chat model (config active_model), when the action names none. */
+  /** The model when the action names none (`jobDefaultModel`: jobs.default_model, else active_model). */
   defaultModel: () => string | undefined;
   /** A skipped row when this model is a CLI agent jobs may not use (cliAgentGate). */
   cliAgentSkip?: (model: string, at: number, late: boolean) => RunRow | undefined;
