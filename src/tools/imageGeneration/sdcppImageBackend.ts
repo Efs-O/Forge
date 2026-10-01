@@ -1,6 +1,8 @@
 import * as path from 'path';
 import type { SdcppImageBackendConfig } from '../../config/types';
+import { localLlamaFetch } from '../../llm/localLlamaFetch';
 import { describeProbeFailure, probeGpus, type GpuInfo } from '../../system/systemProbes';
+import { withDescribedCause } from '../../util/describeError';
 import { mimeFromHeader } from '../imageTool';
 import { MAX_GENERATED_IMAGE_BYTES, type GeneratedImage } from './cloudImageBackend';
 
@@ -61,7 +63,7 @@ export interface SdcppImageRequest {
   signal?: AbortSignal;
   /** Injectable: the real probe spawns nvidia-smi. */
   probe?: () => Promise<GpuInfo[]>;
-  fetchImpl?: typeof fetch;
+  fetchImpl?: SdcppFetch;
   /** Injectable: the real seed is random, so a rerender is not a byte copy. */
   seed?: () => number;
 }
@@ -71,6 +73,13 @@ export type SdcppGeneratedImage = GeneratedImage & {
   width: number;
   height: number;
 };
+
+/**
+ * The transport this module needs. `typeof fetch` satisfies it (the call site
+ * always passes `init`), and `localLlamaFetch` does too, which is the point:
+ * the default must be the raised-timeout local fetch, not the global one.
+ */
+export type SdcppFetch = (url: string, init: RequestInit) => Promise<Response>;
 
 interface Txt2ImgResponse {
   images?: unknown;
@@ -92,7 +101,15 @@ const MAX_ERROR_BODY_CHARS = 400;
  */
 export async function generateSdcppImage(request: SdcppImageRequest): Promise<SdcppGeneratedImage> {
   const { backend, server } = request;
-  const fetchImpl = request.fetchImpl ?? fetch;
+  // The default is `localLlamaFetch`, not global `fetch`. `sd-server` sends no
+  // response headers until the render finishes — the same shape llama.cpp has —
+  // so a cold first render (lazy weights plus a CPU-resident text encoder) sits
+  // past undici's default 300 s headers timeout and dies as a bare
+  // `fetch failed: Headers Timeout Error`. That transport limit has no knob on
+  // global fetch; the shared local Agent raises it to 30 min, which stays above
+  // `request_timeout_ms`, so the request's own deadline below remains the one
+  // that decides when a render is given up on.
+  const fetchImpl: SdcppFetch = request.fetchImpl ?? localLlamaFetch;
   const { width, height } = sdcppSizeFor(request.size, backend);
   const seed = request.seed?.() ?? randomSeed();
   const turnSignal = request.signal;
@@ -141,7 +158,11 @@ export async function generateSdcppImage(request: SdcppImageRequest): Promise<Sd
           `${alternativeText(request.alternatives)}.`,
       );
     }
-    throw error;
+    // A transport fault (refused port, reset socket, headers timeout) reaches
+    // here as `TypeError: fetch failed`, whose only distinguishing detail lives
+    // in `cause`. Rebuild it with the chain in the message so the tool result
+    // names the fault instead of collapsing it into four words.
+    throw withDescribedCause(error);
   }
 
   const encoded = Array.isArray(body.images) ? body.images[0] : undefined;

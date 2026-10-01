@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { LOCAL_HEADERS_TIMEOUT_MS } from '../llm/localLlamaFetch';
 
 const BackendNameSchema = z
   .string()
@@ -40,7 +41,9 @@ const SdcppImageBackendSchema = z.object({
   port: z.number().int().min(1).max(65535),
   min_free_vram_mb: z.number().int().positive(),
   idle_timeout_ms: z.number().int().positive(),
-  request_timeout_ms: z.number().int().positive(),
+  // The render goes through localLlamaFetch, whose headers timeout would cut a
+  // longer deadline short as a bare transport fault.
+  request_timeout_ms: z.number().int().positive().max(LOCAL_HEADERS_TIMEOUT_MS),
   defaults: z.object({
     steps: z.number().int().positive(),
     cfg_scale: z.number().finite().positive(),

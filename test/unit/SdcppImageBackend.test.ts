@@ -9,6 +9,14 @@ import {
   type SdServerHandle,
 } from '../../src/tools/imageGeneration/sdcppImageBackend';
 
+// The transport default is the point of two tests below, so the module that
+// owns the raised-timeout Agent is stood in for a spy rather than a real Agent.
+const localFetch = vi.hoisted(() => vi.fn());
+vi.mock('../../src/llm/localLlamaFetch', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/llm/localLlamaFetch')>()),
+  localLlamaFetch: localFetch,
+}));
+
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 function sdcppConfig(overrides: Record<string, unknown> = {}): SdcppImageBackendConfig {
@@ -210,6 +218,45 @@ describe('generateSdcppImage request', () => {
           typeof fetch,
       }),
     ).rejects.toThrow(/not a PNG, JPEG, GIF, BMP or WebP image/);
+  });
+
+  it('sends the render through localLlamaFetch when no transport is injected', async () => {
+    // Global `fetch` would put the request under undici's default 300 s headers
+    // timeout, which a cold render crosses; the shared local Agent raises it.
+    localFetch.mockReset();
+    localFetch.mockImplementation(async () =>
+      new Response(JSON.stringify({ images: [PNG.toString('base64')] })));
+    const image = await generateSdcppImage({
+      backend: sdcppConfig(),
+      server: fakeServer().handle,
+      prompt: 'fox',
+      alternatives: ['grok-imagine'],
+      probe: enoughVram,
+    });
+    expect(localFetch).toHaveBeenCalledTimes(1);
+    expect(String(localFetch.mock.calls[0]?.[0])).toBe(
+      'http://127.0.0.1:8093/sdapi/v1/txt2img',
+    );
+    expect(image.mime).toBe('image/png');
+  });
+
+  it('reports a transport fault with its cause chain, not bare "fetch failed"', async () => {
+    await expect(
+      generateSdcppImage({
+        backend: sdcppConfig(),
+        server: fakeServer().handle,
+        prompt: 'fox',
+        alternatives: ['grok-imagine'],
+        probe: enoughVram,
+        fetchImpl: vi.fn(async () => {
+          throw new Error('fetch failed', {
+            cause: Object.assign(new Error('Headers Timeout Error'), {
+              code: 'UND_ERR_HEADERS_TIMEOUT',
+            }),
+          });
+        }) as unknown as typeof fetch,
+      }),
+    ).rejects.toThrow(/fetch failed: Headers Timeout Error \(UND_ERR_HEADERS_TIMEOUT\)/);
   });
 });
 
