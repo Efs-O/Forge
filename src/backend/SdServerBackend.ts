@@ -3,25 +3,33 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { SdcppImageBackendConfig } from '../config/types';
-import { touchAdoptedSdServerRecord, verifySdServerAdoption } from './sdServerAdoption';
+import { touchAdoptedSdServerRecord } from './sdServerAdoption';
 import { composeSdServerArgs, sdServerSignature } from './sdServerArgs';
 import { spawnLlamaServer, killLlamaProcess } from './llamaProcess';
+import { createSdServerRecord, reconcileSdServerRecord } from './sdServerReconciliation';
 import { isConnectionRefused, SdServerReadiness } from './sdServerReadiness';
 import {
   deleteSdServerRecord,
   lookupWindowsProcess,
   readSdServerRecord,
-  sameExecutablePath,
-  sameProcessCreation,
   sdServerRecordPath,
   terminateWindowsProcessTree,
-  waitForSdProcessExit,
   writeSdServerRecord,
   type SdProcessIdentity,
   type SdServerOwnerRecord,
 } from './sdServerOwnerRecord';
 
 export { composeSdServerArgs } from './sdServerArgs';
+
+export interface SdStartOptions {
+  /**
+   * Runs once per start, after reconciliation, and only when this window is
+   * about to spawn its own server — never for an adopted one. That is where the
+   * VRAM gate belongs: the owner gated when it spawned, and gating an adopter
+   * would refuse the very VRAM the owned server is holding.
+   */
+  beforeSpawn?: () => Promise<void>;
+}
 
 export interface SdServerBackendDeps {
   spawn?: typeof spawnLlamaServer;
@@ -96,7 +104,7 @@ export class SdServerBackend {
     return undefined;
   }
 
-  async start(): Promise<void> {
+  async start(options: SdStartOptions = {}): Promise<void> {
     if (this.disposed) throw new Error(`sdcpp backend "${this.config.name}" has been disposed.`);
     // An adopted server belongs to another window, which may have idled it out
     // or died since: re-reconcile against the owner record before every use,
@@ -108,7 +116,7 @@ export class SdServerBackend {
     }
     if (this.ready) return;
     if (this.startPromise) return this.startPromise;
-    const startPromise = this.startInternal();
+    const startPromise = this.startInternal(options);
     this.startPromise = startPromise;
     try {
       await startPromise;
@@ -117,12 +125,12 @@ export class SdServerBackend {
     }
   }
 
-  async withActivity<T>(operation: () => Promise<T>): Promise<T> {
+  async withActivity<T>(operation: () => Promise<T>, options: SdStartOptions = {}): Promise<T> {
     this.activeUses++;
     this.lastLocalUseAt = this.now();
     this.clearIdleTimer();
     try {
-      await this.start();
+      await this.start(options);
       if (this.adopted) {
         this.record = await touchAdoptedSdServerRecord(
           this.recordPath,
@@ -173,7 +181,43 @@ export class SdServerBackend {
     }
   }
 
-  private async startInternal(): Promise<void> {
+  /**
+   * The plan's abort rule. Phase 0b measured that dropping the HTTP connection
+   * does not cancel a render (`cancel_generating: false`), so an aborted turn
+   * leaves the card busy until the owned server is killed. An adopted server is
+   * never stopped, and an owned one only when `record.lastUsedAt` is older than
+   * `request_timeout_ms` — the only cross-window evidence that no other window
+   * has a render in flight. Returns the sentence the tool reports back.
+   */
+  async stopAfterAbort(): Promise<string> {
+    this.clearIdleTimer();
+    const idleMinutes = Math.ceil(this.config.idle_timeout_ms / 60_000);
+    if (this.adopted) {
+      return (
+        `The sd-server on port ${this.config.port} belongs to another Forge window, so Forge left it ` +
+        `running: its render continues and that window stops it after ${idleMinutes} minutes idle.`
+      );
+    }
+    if (!this.proc) {
+      return 'Forge no longer owns an sd-server, so the GPU is already free.';
+    }
+    const record = await readSdServerRecord(this.recordPath, (message) =>
+      this.output?.appendLine(message),
+    );
+    // No record means no adopter could have reached this server at all, so
+    // nothing but this window can be rendering on it.
+    if (record && this.now() - record.lastUsedAt < this.config.request_timeout_ms) {
+      const quietMinutes = Math.ceil(this.config.request_timeout_ms / 60_000);
+      return (
+        `Another window used this sd-server within the last ${quietMinutes} minute(s), so Forge left it ` +
+        `running rather than cut across a possible render; it stops after ${idleMinutes} minutes idle.`
+      );
+    }
+    await this.stopOwnedProcess();
+    return 'Forge stopped its own sd-server, the only way to cancel a render, so the card is free again.';
+  }
+
+  private async startInternal(options: SdStartOptions): Promise<void> {
     await this.verifyConfiguredPaths();
     this.output ??= vscode.window.createOutputChannel('Forge - image server');
     const readiness = new SdServerReadiness(
@@ -206,6 +250,7 @@ export class SdServerBackend {
       );
     }
 
+    await options.beforeSpawn?.();
     const args = composeSdServerArgs(this.config);
     const binary = this.config.binary;
     const processEnv = {
@@ -238,40 +283,11 @@ export class SdServerBackend {
     });
 
     try {
-      const pid = child.pid;
-      if (!pid) throw new Error('sd-server spawn returned no pid.');
-      const [serverIdentity, ownerIdentity] = await Promise.all([
-        this.lookupProcess(pid),
-        this.lookupProcess(this.ownerPid),
-      ]);
-      if (!serverIdentity)
-        throw new Error(`Get-CimInstance did not find spawned sd-server pid ${pid}.`);
-      if (!sameExecutablePath(serverIdentity.executablePath, binary)) {
-        throw new Error(
-          `Spawned sd-server pid ${pid} resolves to "${serverIdentity.executablePath}", not binary "${binary}".`,
-        );
-      }
-      if (!ownerIdentity) {
-        throw new Error(
-          `Get-CimInstance did not return creation time for Forge owner pid ${this.ownerPid}.`,
-        );
-      }
-      if (child.exitCode !== null || child.signalCode !== null) {
-        throw new Error(`sd-server exited before its owner record could be written (pid ${pid}).`);
-      }
-      const timestamp = this.now();
-      this.record = {
-        pid,
-        pidCreatedAt: serverIdentity.createdAt,
-        port: this.config.port,
-        binary,
-        diffusionModel: this.config.diffusion_model,
-        signature,
+      this.record = await createSdServerRecord(this.config, child, binary, signature, {
+        lookupProcess: this.lookupProcess,
+        now: this.now,
         ownerPid: this.ownerPid,
-        ownerCreatedAt: ownerIdentity.createdAt,
-        startedAt: timestamp,
-        lastUsedAt: timestamp,
-      };
+      });
       await writeSdServerRecord(this.recordPath, this.record);
       await readiness.waitUntilReady(child, startAbort.signal);
       this.ready = true;
@@ -296,63 +312,24 @@ export class SdServerBackend {
     }
   }
 
+  /**
+   * The identity decision lives in `sdServerReconciliation.ts`; this only turns
+   * its answer into this instance's state.
+   */
   private async reconcileExisting(
     record: SdServerOwnerRecord,
     signature: string,
   ): Promise<boolean> {
-    const [ownerIdentity, serverIdentity] = await Promise.all([
-      this.lookupProcess(record.ownerPid),
-      this.lookupProcess(record.pid),
-    ]);
-    const ownerAlive = sameProcessCreation(ownerIdentity, record.ownerCreatedAt);
-    const serverAlive = sameProcessCreation(serverIdentity, record.pidCreatedAt);
-    if (!serverAlive) {
-      await deleteSdServerRecord(this.recordPath);
-      return false;
-    }
-    if (!serverIdentity) {
-      throw new Error(`Get-CimInstance omitted identity for sd-server pid ${record.pid}.`);
-    }
-    if (!ownerAlive && serverAlive) {
-      const activeUntil = record.lastUsedAt + this.config.idle_timeout_ms;
-      if (activeUntil > this.now()) {
-        throw new Error(
-          `sdcpp port ${record.port} is held by recently used pid ${record.pid}; ` +
-            `Forge will not interrupt its possible in-flight request. Retry after ${new Date(activeUntil).toISOString()}.`,
-        );
-      }
-      if (!sameExecutablePath(serverIdentity.executablePath, this.config.binary)) {
-        throw new Error(
-          `sdcpp port ${record.port} is held by pid ${record.pid}, whose executable ` +
-            `"${serverIdentity.executablePath}" does not match configured binary "${this.config.binary}". ` +
-            'Forge will not kill an unverified process; stop it manually or choose another port.',
-        );
-      }
-      await this.terminateProcess(record.pid);
-      await waitForSdProcessExit(this.lookupProcess, record.pid, record.pidCreatedAt, this.now);
-      await deleteSdServerRecord(this.recordPath);
-      return false;
-    }
-    if (ownerAlive && record.signature !== signature) {
-      throw new Error(
-        `sdcpp port ${record.port} is owned by another Forge window using model ` +
-          `"${record.diffusionModel}". Stop that backend or configure another port/model.`,
-      );
-    }
-    if (!ownerAlive) {
-      throw new Error(
-        `sdcpp port ${record.port} is held by pid ${record.pid}, but its owner/process identity ` +
-          'cannot be verified. Stop it manually or choose another port.',
-      );
-    }
-    if (!sameExecutablePath(serverIdentity.executablePath, this.config.binary)) {
-      throw new Error(
-        `sdcpp owner record for port ${record.port} names pid ${record.pid} at ` +
-          `"${serverIdentity.executablePath}", not configured binary "${this.config.binary}".`,
-      );
-    }
-    await verifySdServerAdoption(this.config, this.baseUrl(), this.fetchImpl);
-    this.record = record;
+    const adopted = await reconcileSdServerRecord(this.config, record, signature, {
+      lookupProcess: this.lookupProcess,
+      now: this.now,
+      terminateProcess: this.terminateProcess,
+      fetchImpl: this.fetchImpl,
+      recordPath: this.recordPath,
+      baseUrl: this.baseUrl(),
+    });
+    if (!adopted) return false;
+    this.record = adopted;
     this.ready = true;
     this.adopted = true;
     this.output?.appendLine(

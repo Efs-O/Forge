@@ -68,6 +68,7 @@ import { makeViewImageTool } from './imageTool';
 import { makeWaitTool } from './waitTool';
 import { makeViewVideoTool } from './videoTool';
 import { makeGenerateImageTool } from './imageGeneration/generateImageTool';
+import { SdServerRegistry } from '../backend/sdServerRegistry';
 import { makeImageSearchTool } from './imageSearch/imageSearchTool';
 import { makeBrowserTools } from './browser/browserTools';
 import { makeDesktopTools } from './desktop/desktopTools';
@@ -99,7 +100,7 @@ export function registerAllTools(
     /** The active config.yaml, for install_llamacpp's binary switch. */
     configPath?: string;
   },
-): void {
+): SdServerRegistry | undefined {
   // config.yaml `extra_file_roots`: absolute folders outside the workspace that
   // create_directory / delete_file may also reach. A getter, so a
   // config reload applies without re-registering the tools.
@@ -187,8 +188,25 @@ export function registerAllTools(
 
   // Self-suppressing until config.yaml has an image_generation block, so a
   // config without one keeps the tool list -- and the KV prefix -- unchanged.
+  //
+  // The `sd-server` children are built here, beside the tool that dispatches to
+  // them, and returned: `registerAllTools` is called once per activation and the
+  // tool reads the live config through `getConfig`, so a config reload never
+  // re-registers the tool. The registry is what makes ledger row 1 true -- the
+  // caller disposes it on deactivate and calls `applyForgeConfig` on reload, so
+  // removing or editing an `sdcpp` backend stops its process instead of leaking
+  // a server that holds VRAM forever.
+  let sdServers: SdServerRegistry | undefined;
   if (getConfig) {
-    registry.register(makeGenerateImageTool({ getConfig, secrets, notifications }));
+    sdServers = new SdServerRegistry(getConfig());
+    registry.register(
+      makeGenerateImageTool({
+        getConfig,
+        secrets,
+        notifications,
+        sdServers: () => sdServers?.handles() ?? new Map(),
+      }),
+    );
     // Same self-suppression, keyed on an image_search block.
     registry.register(
       makeImageSearchTool({
@@ -248,4 +266,5 @@ export function registerAllTools(
   // bridged in: definitions() follows insertion order, so appending here
   // leaves the native prefix above byte-identical for the KV cache.
   registry.register(makeLoadToolGroupTool());
+  return sdServers;
 }

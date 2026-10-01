@@ -926,6 +926,10 @@ embeddings:
   exclude_globs: [ "**/node_modules/**", "**/dist/**", "**/out/**", "**/.git/**", "**/.forge/**" ]
 
 # generate_image tool (xAI grok-imagine, ~$0.04 per image).
+# Disabling the `fetch` permission disables this tool entirely -- including a
+# local sdcpp backend below: the image is fetched over localhost HTTP, so the
+# permission gate is the same one. Turning fetch off is not a way to keep the
+# tool but refuse the network.
 image_generation:
   default: grok-imagine
   output_dir: generated-images
@@ -935,6 +939,31 @@ image_generation:
       model: grok-imagine-image-2.0
       api_key_secret: xai
       confirm_each: true
+    # Local image generation via stable-diffusion.cpp (docs/plans/
+    # LOCAL_IMAGE_GENERATION_PLAN.md). Free per image, but it occupies a GPU:
+    # Forge spawns sd-server.exe on `port` (127.0.0.1 only), refuses to start it
+    # unless `min_free_vram_mb` is free on `cuda_device`, and stops it after
+    # `idle_timeout_ms` idle. All four paths are required, with no discovery.
+    # `cuda_device` is the nvidia-smi / PCI-bus ordinal, the same convention as
+    # voice.compute.device. idle_timeout_ms must be at least
+    # request_timeout_ms + 60000. `size` in generate_image (square 1024x1024,
+    # portrait 768x1344, landscape 1344x768) applies to this kind only.
+    # - name: qwen-image-local
+    #   provider: sdcpp
+    #   binary: "V:/Tools/sd.cpp-master-929/sd-server.exe"
+    #   diffusion_model: "V:/models/Qwen-Image-2.1/qwen_image_2.1-Q4_K.gguf"
+    #   text_encoder: "V:/models/Qwen-Image-2.1/Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+    #   vae: "V:/models/Qwen-Image-2.1/qwen_image_2.1_vae_bf16.safetensors"
+    #   cuda_device: 2
+    #   text_encoder_on_cpu: true
+    #   port: 8093
+    #   min_free_vram_mb: 7000    # measured peak VRAM delta + 1024 margin
+    #   idle_timeout_ms: 600000
+    #   request_timeout_ms: 300000
+    #   defaults: { steps: 20, cfg_scale: 6.0, sampler: euler, width: 1024, height: 1024 }
+    #   extra_args: []
+    #   confirm_on_start: true    # ask once before the GPU is occupied
+    #   confirm_each: false       # free per image, so no per-call prompt
 
 # view_video frame sampling (needs ffmpeg/ffprobe on PATH or ffmpeg_path).
 # frame_max_dimension is the context knob. Measured on a 5 s clip with

@@ -125,7 +125,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const chatAttachments = new ChatAttachmentStore(
     path.join(context.globalStorageUri.fsPath, 'chat-attachments'),
   );
-  registerAllTools(
+  const sdServers = registerAllTools(
     toolRegistry,
     context.workspaceState,
     context.secrets,
@@ -139,6 +139,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     (relativePath) => chatAttachments.resolve(relativePath),
     { store: jobsStore, hostFacade: jobsHostFacade, configPath: activeConfigPath },
   );
+  // The sd-server children built for `generate_image`. Teardown on deactivate,
+  // and reconciliation on a config reload that removes or edits an sdcpp
+  // backend -- `applyForgeConfig` below. Same lifecycle EmbeddingBackend has.
+  if (sdServers) context.subscriptions.push(sdServers);
 
   // External MCP stdio servers (e.g. halluscribe-mcp). Bridged as a
   // non-blocking background task: ToolRegistry.definitions() is re-read every
@@ -303,6 +307,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (config.control_server?.enabled) controlServer.start();
         statusBar.setStopped(config.active_model);
         serverLogs.apply(config);
+        sdServers?.applyForgeConfig(config);
         ModelManagerPanel.current?.refresh();
         // A reload can disable jobs (delete the recurring wake task) or change
         // a schedule (re-register it). Reconcile either way.

@@ -1,5 +1,5 @@
 import type * as vscode from 'vscode';
-import type { CloudImageBackendConfig, ImageBackendConfig } from '../../config/types';
+import type { CloudImageBackendConfig } from '../../config/types';
 import { resolveCloudRequestTarget } from '../../llm/CloudRequestResolver';
 import { mimeFromHeader } from '../imageTool';
 
@@ -17,7 +17,9 @@ export interface GeneratedImage {
 }
 
 export interface CloudImageRequest {
-  backend: ImageBackendConfig;
+  /** Narrowed to the cloud half of the union: `generateImageTool` dispatches on
+   *  `provider`, so an `sdcpp` entry never reaches this function. */
+  backend: CloudImageBackendConfig;
   prompt: string;
   secrets: vscode.SecretStorage | undefined;
   signal?: AbortSignal;
@@ -38,12 +40,6 @@ interface ImagesResponse {
  */
 export async function generateCloudImage(request: CloudImageRequest): Promise<GeneratedImage> {
   const { backend, prompt } = request;
-  if (backend.provider === 'sdcpp') {
-    throw new Error(
-      `generate_image: sdcpp backend "${backend.name}" is not wired into the tool yet; ` +
-        'use a cloud backend until local image generation Phase 2 is installed.',
-    );
-  }
   const fetchImpl = request.fetchImpl ?? fetch;
   const signal = withTimeout(request.signal);
   // The same resolver chat uses, so a backend authenticates exactly like a

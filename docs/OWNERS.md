@@ -239,6 +239,8 @@ overlaps with an existing owner, extend the owner instead.
 | stable-diffusion.cpp cross-window adoption       | `src/backend/sdServerAdoption.ts`      |
 | stable-diffusion.cpp argv and process signature   | `src/backend/sdServerArgs.ts`          |
 | stable-diffusion.cpp readiness + stderr diagnostics | `src/backend/sdServerReadiness.ts`   |
+| stable-diffusion.cpp start-time process identity  | `src/backend/sdServerReconciliation.ts` |
+| one `SdServerBackend` per configured sdcpp backend  | `src/backend/sdServerRegistry.ts`    |
 | External server log → output channel (`server_log`) | `src/backend/serverLogFollower.ts`   |
 | Localhost model-control HTTP API                  | `src/backend/ControlServer.ts`         |
 | Control-server load/capacity/unload               | `src/backend/ControlModelLifecycle.ts` |
@@ -378,6 +380,7 @@ overlaps with an existing owner, extend the owner instead.
 | `view_image` tool                          | `src/tools/imageTool.ts`              |
 | `generate_image` tool + save/deliver       | `src/tools/imageGeneration/generateImageTool.ts` |
 | Cloud `/v1/images/generations` backend     | `src/tools/imageGeneration/cloudImageBackend.ts` |
+| Local `/sdapi/v1/txt2img` backend + VRAM gate | `src/tools/imageGeneration/sdcppImageBackend.ts` |
 | `image_generation:` config schema          | `src/config/imageGenerationSchema.ts` |
 | `image_search` tool + attachment pick       | `src/tools/imageSearch/imageSearchTool.ts` |
 | SerpApi Google Lens call + result trimming | `src/tools/imageSearch/serpApiLens.ts` |

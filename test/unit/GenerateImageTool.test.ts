@@ -16,12 +16,15 @@ vi.mock('vscode', () => ({
 
 import type { ForgeConfig, ImageGenerationConfig } from '../../src/config/types';
 import { ImageGenerationConfigSchema } from '../../src/config/imageGenerationSchema';
+import type { SdServerBackend } from '../../src/backend/SdServerBackend';
 import {
+  backendCostTag,
   makeGenerateImageTool,
   pickBackend,
   targetPath,
 } from '../../src/tools/imageGeneration/generateImageTool';
 import { generateCloudImage } from '../../src/tools/imageGeneration/cloudImageBackend';
+import { SDCPP_SIZE_NAMES, type SdcppImageRequest } from '../../src/tools/imageGeneration/sdcppImageBackend';
 import { UserNotificationService } from '../../src/sidebar/UserNotificationService';
 
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
@@ -277,5 +280,171 @@ describe('generateCloudImage', () => {
     await expect(
       generateCloudImage({ backend: xai, prompt: 'fox', secrets, fetchImpl: plainHttp }),
     ).rejects.toThrow(/not https/);
+  });
+});
+
+describe('generate_image with an sdcpp backend', () => {
+  const LOCAL = {
+    name: 'qwen-local',
+    provider: 'sdcpp',
+    binary: 'V:/Tools/sd.cpp/sd-server.exe',
+    diffusion_model: 'V:/models/Qwen-Image-2.1/qwen_image_2.1-Q4_K.gguf',
+    text_encoder: 'V:/models/Qwen-Image-2.1/Qwen3VL-8B-Instruct-Q4_K_M.gguf',
+    vae: 'V:/models/Qwen-Image-2.1/qwen_image_2.1_vae_bf16.safetensors',
+    cuda_device: 2,
+    text_encoder_on_cpu: true,
+    port: 8093,
+    min_free_vram_mb: 7000,
+    idle_timeout_ms: 600_000,
+    request_timeout_ms: 300_000,
+    defaults: { steps: 20, cfg_scale: 6, sampler: 'euler', width: 1024, height: 1024 },
+    extra_args: [],
+    confirm_on_start: true,
+    confirm_each: false,
+  };
+
+  function localConfig(): ImageGenerationConfig {
+    return imageConfig({
+      default: 'qwen-local',
+      backends: [LOCAL, { name: 'grok-imagine', provider: 'xai', model: 'grok-imagine-image-2.0', api_key_secret: 'xai' }],
+    }) as ImageGenerationConfig;
+  }
+
+  function localRig(options: { startDetail?: string; withServer?: boolean } = {}) {
+    const startApproval = vi.fn(() =>
+      options.startDetail ? { detail: options.startDetail } : undefined,
+    );
+    const server = { startApproval, baseUrl: () => 'http://127.0.0.1:8093' } as unknown as SdServerBackend;
+    const servers = new Map<string, SdServerBackend>(
+      options.withServer === false ? [] : [[LOCAL.name, server]],
+    );
+    const generate = vi.fn(async () => ({ bytes: JPEG, mime: 'image/jpeg' }));
+    const generateLocal = vi.fn(async (_request: SdcppImageRequest) => ({
+      bytes: PNG,
+      mime: 'image/png',
+      seed: 1111,
+      width: 1024,
+      height: 1024,
+    }));
+    const tool = makeGenerateImageTool({
+      getConfig: () => ({ image_generation: localConfig() }) as unknown as ForgeConfig,
+      secrets: undefined,
+      notifications: new UserNotificationService(),
+      sdServers: () => servers,
+      generate,
+      generateLocal,
+      reveal: async () => undefined,
+      now: () => new Date('2026-09-14T10:20:30Z'),
+    });
+    return { tool, generate, generateLocal, startApproval };
+  }
+
+  it('dispatches on provider, passing the live server handle and the size', async () => {
+    const { tool, generate, generateLocal } = localRig();
+    const result = await tool.handler(
+      { prompt: 'a red fox', size: 'portrait' },
+      { beforeMutate: () => undefined },
+    );
+    expect(generate).not.toHaveBeenCalled();
+    const request = generateLocal.mock.calls[0]?.[0];
+    expect(request).toMatchObject({
+      backend: { name: 'qwen-local', provider: 'sdcpp' },
+      prompt: 'a red fox',
+      size: 'portrait',
+      alternatives: ['grok-imagine'],
+    });
+    expect(request.server.baseUrl()).toBe('http://127.0.0.1:8093');
+    const saved = path.join(root, 'generated-images', '20260914-102030-a-red-fox.png');
+    expect(fs.readFileSync(saved)).toEqual(PNG);
+    expect(result).toContain('Rendered locally at 1024x1024, seed 1111.');
+  });
+
+  it('refuses when this window built no server, naming the fix and the alternative', async () => {
+    const { tool, generateLocal } = localRig({ withServer: false });
+    await expect(tool.handler({ prompt: 'fox' }, noSnapshot)).rejects.toThrow(
+      /built no sd-server for image_generation\.backends\.qwen-local.*backend grok-imagine/,
+    );
+    // The fix differs by OS: sdcpp ownership needs Windows process identity.
+    await expect(tool.handler({ prompt: 'fox' }, noSnapshot)).rejects.toThrow(
+      process.platform === 'win32' ? /Reload the window/ : /sdcpp backends need Windows/,
+    );
+    expect(generateLocal).not.toHaveBeenCalled();
+  });
+
+  it('asks a dangerous confirmation for a billed backend and a plain one for a warm local backend', () => {
+    const { tool, startApproval } = localRig();
+    expect(tool.approval?.({ prompt: 'a fox' })).toMatchObject({ dangerous: false });
+    expect(tool.approval?.({ prompt: 'a fox' })?.detail).toContain(
+      'local · free · sdcpp · qwen_image_2.1-Q4_K',
+    );
+    expect(tool.approval?.({ prompt: 'a fox' })?.detail).not.toContain('billed per image');
+    expect(tool.approval?.({ prompt: 'a fox', backend: 'grok-imagine' })).toMatchObject({
+      dangerous: true,
+    });
+    expect(startApproval).toHaveBeenCalled();
+  });
+
+  it('adds the start approval only when a spawn is needed', () => {
+    const cold = localRig({ startDetail: 'Start qwen-local (qwen_image_2.1-Q4_K.gguf) on CUDA device 2' });
+    const coldApproval = cold.tool.approval?.({ prompt: 'a fox' });
+    expect(coldApproval?.detail).toContain(
+      'Start qwen-local (qwen_image_2.1-Q4_K.gguf) on CUDA device 2',
+    );
+    // confirm_each is false for the local backend, so only the start makes it ask.
+    expect(coldApproval).toMatchObject({ dangerous: true });
+    const warm = localRig();
+    expect(warm.tool.approval?.({ prompt: 'a fox' })?.detail).not.toContain('Start qwen-local');
+    expect(warm.tool.approval?.({ prompt: 'a fox' })).toMatchObject({ dangerous: false });
+  });
+
+  it('lists backends with cost tags and never an undefined model', () => {
+    const described = localRig().tool.describe?.();
+    const backend = (described?.function.parameters['properties'] as Record<
+      string,
+      { enum?: string[]; description?: string }
+    >)['backend'];
+    expect(backend?.enum).toEqual(['qwen-local', 'grok-imagine']);
+    expect(backend?.description).toContain('qwen-local (local · free · sdcpp · qwen_image_2.1-Q4_K)');
+    expect(backend?.description).toContain(
+      'grok-imagine (cloud · billed per image · xai · grok-imagine-image-2.0)',
+    );
+    expect(backend?.description).not.toContain('undefined');
+  });
+
+  it('offers the size enum, and says when a cloud backend ignored it', async () => {
+    const described = localRig().tool.describe?.();
+    const size = (described?.function.parameters['properties'] as Record<
+      string,
+      { enum?: string[] }
+    >)['size'];
+    // The definition inlines the literals for scripts/tool-audit-catalog.mjs;
+    // this is what keeps them from drifting away from the request mapping.
+    expect(size?.enum).toEqual([...SDCPP_SIZE_NAMES]);
+
+    const { tool, generateLocal } = localRig();
+    const cloud = await tool.handler(
+      { prompt: 'fox', backend: 'grok-imagine', size: 'square' },
+      noSnapshot,
+    );
+    expect(generateLocal).not.toHaveBeenCalled();
+    expect(cloud).toContain('The size argument applies to local backends only');
+  });
+
+  it('tags each backend by provider alone', () => {
+    const [local, cloud] = localConfig().backends;
+    expect(backendCostTag(local!)).toBe('local · free · sdcpp · qwen_image_2.1-Q4_K');
+    expect(backendCostTag(cloud!)).toBe(
+      'cloud · billed per image · xai · grok-imagine-image-2.0',
+    );
+  });
+
+  it('says the description no longer promises an approval for every call', () => {
+    const description = makeGenerateImageTool({
+      getConfig: () => ({ image_generation: localConfig() }) as unknown as ForgeConfig,
+      secrets: undefined,
+      notifications: new UserNotificationService(),
+    }).definition.function.description!;
+    expect(description).toContain('Cloud backends ask for approval and bill per image; local backends are free');
+    expect(description).not.toContain('Each call asks the user to approve it');
   });
 });
