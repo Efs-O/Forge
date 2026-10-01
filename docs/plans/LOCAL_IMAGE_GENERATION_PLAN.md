@@ -5,9 +5,11 @@ Status: **shipped in 0.16.71** (2026-10-01). Phases 0-3 done: config and
 a 1024x1024 card rendered on the 3060 in about 4 min, cold start included.
 The 3060 peaked at about 6.2 GB and both 5060 Tis stayed unchanged. The
 server stopped 12 s after a `request_timeout_ms` edit, as designed for a
-signature change; the 10-minute idle exit and Telegram delivery are not yet
-observed live. Sizes raised to Qwen-Image's native 1328x1328 / 928x1664 /
-1664x928 after the smoke. That turn ran on Strata (Flash-Next),
+signature change. Sizes then raised to Qwen-Image's native 1328x1328 /
+928x1664 / 1664x928. Second smoke, started from Telegram with no approval
+prompt: 1328x1328 in 4 min 43 s cold, 3060 peak 7.0 GB (about 6.1 GB over
+idle), 5060 Tis unchanged, photo delivered to the Telegram chat, and the
+server exited 10 min 10 s after the render (idle timeout). That turn ran on Strata (Flash-Next),
 not the Qwen Q6 + mmproj named in Phase 3.
 Implementer: decided at hand-off (Qwen via Forge, Codex, or a split by phase).
 Reviewer: Claude.
