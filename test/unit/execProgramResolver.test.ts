@@ -6,6 +6,7 @@ import {
   describeWrongPlatformProgram,
   matchPackageRunner,
   resolveExecInvocation,
+  resolveGitBash,
   resolvePackageRunnerInvocation,
   type RunnerProbe,
 } from '../../src/tools/execProgramResolver';
@@ -242,5 +243,40 @@ describe('canonicalizeExecCommand keeps the denylist effective', () => {
     expect(
       checkDenyList(canonicalizeExecCommand('npm.cmd'), ['rm', '-rf', '.'], deny),
     ).not.toBeNull();
+  });
+});
+
+describe('bash on Windows is Git Bash, never the WSL launcher', () => {
+  const env = { ProgramFiles: 'C:\\Program Files' };
+  const standard = 'C:\\Program Files\\Git\\bin\\bash.exe';
+
+  it('finds Git Bash under Program Files', () => {
+    expect(resolveGitBash(probeFor([standard], {}), env)).toBe(standard);
+  });
+
+  it('finds a Git installed elsewhere from git.exe on PATH', () => {
+    const custom = 'D:\\Tools\\Git\\bin\\bash.exe';
+    const probe = probeFor([custom], { 'git.exe': ['D:\\Tools\\Git\\cmd\\git.exe'] });
+    expect(resolveGitBash(probe, env)).toBe(custom);
+  });
+
+  it('refuses rather than falling back to WSL, and names the alternatives', () => {
+    expect(() => resolveGitBash(probeFor([], {}), env)).toThrow(/Install Git for Windows.*wsl/su);
+  });
+
+  it('rewrites bare bash and bash.exe only, keeping the arguments', () => {
+    // resolveExecInvocation reads the real environment, which has no
+    // ProgramFiles on a Linux runner; git.exe on PATH finds the root anywhere.
+    const probe = probeFor([standard], { 'git.exe': ['C:\\Program Files\\Git\\cmd\\git.exe'] });
+    for (const spelling of ['bash', 'BASH.EXE']) {
+      expect(resolveExecInvocation(spelling, ['-c', 'echo ok'], 'win32', probe)).toEqual({
+        command: standard,
+        args: ['-c', 'echo ok'],
+      });
+    }
+    expect(
+      resolveExecInvocation('C:\\Windows\\System32\\bash.exe', [], 'win32', probe).command,
+    ).toBe('C:\\Windows\\System32\\bash.exe');
+    expect(resolveExecInvocation('bash', [], 'linux', probe).command).toBe('bash');
   });
 });

@@ -95,7 +95,8 @@ export function makeExecCommandTool(
           properties: {
             command: {
               type: 'string',
-              description: 'Executable name or path. Bare npm/npx are resolved on Windows.',
+              description:
+                'Executable name or path. Bare npm/npx are resolved on Windows; bare bash is Git Bash, not WSL.',
             },
             args: { type: 'array', items: { type: 'string' }, description: 'Arguments array.' },
             cwd: { type: 'string', description: 'Working directory. Optional.' },

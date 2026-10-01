@@ -274,9 +274,45 @@ export function resolveExecInvocation(
   platform: NodeJS.Platform = process.platform,
   probe?: RunnerProbe,
 ): ExecInvocation {
+  if (platform === 'win32' && isBareBash(command)) {
+    return { command: resolveGitBash(probe ?? SYSTEM_PROBE), args };
+  }
   const runner = matchPackageRunner(command);
   if (!runner) return { command, args };
 
   const invocation = resolvePackageRunnerInvocation(runner, platform, probe);
   return { command: invocation.command, args: [...invocation.argsPrefix, ...args] };
+}
+
+function isBareBash(command: string): boolean {
+  const base = command.toLowerCase();
+  return base === 'bash' || base === 'bash.exe';
+}
+
+/**
+ * On Windows a bare `bash` resolves to `System32\bash.exe`, the WSL launcher,
+ * because System32 precedes Git on PATH. That is never the bash the agent
+ * means: WSL cannot read the Windows paths every tool hands out, cold-starts a
+ * VM, and an abandoned launch crashes its Interop server (microsoft/WSL#41592)
+ * until `wsl --terminate`. So bare `bash` is Git Bash, found by location, and
+ * a machine without it gets an error naming the fix rather than a silent WSL.
+ * WSL stays reachable on purpose through `wsl` or a full path.
+ */
+export function resolveGitBash(probe: RunnerProbe, env: NodeJS.ProcessEnv = process.env): string {
+  const roots = [env.ProgramW6432, env.ProgramFiles]
+    .filter((dir): dir is string => Boolean(dir))
+    .map((dir) => path.win32.join(dir, 'Git'));
+  if (env.LOCALAPPDATA) roots.push(path.win32.join(env.LOCALAPPDATA, 'Programs', 'Git'));
+  // Git installed anywhere else: git.exe sits in `<root>\cmd` or `<root>\bin`.
+  for (const git of probe.which('git.exe')) roots.push(path.win32.dirname(path.win32.dirname(git)));
+  const bash = roots
+    .map((root) => path.win32.join(root, 'bin', 'bash.exe'))
+    .find((candidate) => probe.exists(candidate));
+  if (bash) return bash;
+  throw new Error(
+    'bash: Git Bash was not found (looked for bin\\bash.exe under ' +
+      `${[...new Set(roots)].join(', ') || 'no Git install'}). A bare bash here would be the WSL ` +
+      'launcher, which cannot read Windows paths. Install Git for Windows, or run `wsl` explicitly ' +
+      'if WSL is what you want.',
+  );
 }
