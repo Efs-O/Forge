@@ -860,6 +860,10 @@ models:
     api_key_secret: strata
     model: qwen3.8-flash-next-iq3_s
     server_log: "xxxx/Strata/strata-iq3_s-2gpu.log"
+    # Sent as the request's reasoning_effort (Strata: none / low / medium / xhigh;
+    # its default is xhigh). medium matched xhigh's result in less time; low
+    # thought more, not less, on a coding task.
+    reasoning_effort: medium
 
   - name: claude-code
     provider: cli

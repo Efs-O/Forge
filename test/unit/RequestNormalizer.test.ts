@@ -134,4 +134,38 @@ describe('normalizeRequestForModel', () => {
       enable_thinking: false,
     });
   });
+
+  it('forwards a configured reasoning effort to an openai-compatible server', () => {
+    const model: ModelConfig = {
+      name: 'strata',
+      provider: 'openai-compatible',
+      endpoint: 'http://127.0.0.1:8080',
+      reasoning_effort: 'medium',
+    };
+
+    expect(normalizeRequestForModel(baseRequest, model)).toEqual({
+      ...baseRequest,
+      reasoning_effort: 'medium',
+    });
+  });
+
+  it('sends no reasoning effort to an openai-compatible server unless configured', () => {
+    const model: ModelConfig = { name: 'cloud', provider: 'openai-compatible' };
+
+    expect(normalizeRequestForModel(baseRequest, model)).toBe(baseRequest);
+  });
+
+  it('keeps a request-level effort and drops the config one when thinking is off', () => {
+    const model: ModelConfig = {
+      name: 'cloud',
+      provider: 'openrouter',
+      reasoning_effort: 'xhigh',
+    };
+    const request = { ...baseRequest, reasoning_effort: 'low' as const };
+
+    expect(normalizeRequestForModel(request, model).reasoning_effort).toBe('low');
+    expect(
+      normalizeRequestForModel(baseRequest, { ...model, think: false }).reasoning_effort,
+    ).toBeUndefined();
+  });
 });

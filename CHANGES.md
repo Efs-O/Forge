@@ -2,6 +2,18 @@
 
 ## 0.16.71
 
+### `reasoning_effort` reaches OpenAI-style servers (2026-10-01)
+
+- A model's `reasoning_effort` is now sent as the request's top-level
+  `reasoning_effort` for `openai-compatible`, `xai`, `openrouter` and
+  `openai` providers. Before, Forge forwarded it only to llama.cpp and
+  Ollama, so a Strata model always ran at Strata's default, xhigh.
+- Sent only when configured, and never with `think: false`. Models without
+  the field send exactly what they sent before.
+- In a benchmark of one fully specified coding task, Flash-Next on Strata
+  scored the same at `medium` as at `xhigh`, in ~10% less time. The example
+  config's Strata entry now sets `medium`.
+
 ### Status bar follows the working chat, and moves while it thinks (2026-10-01)
 
 - The session status bar now shows the chat that most recently started a

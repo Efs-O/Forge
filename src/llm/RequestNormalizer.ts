@@ -56,7 +56,17 @@ export function normalizeRequestForModel(
   }
 
   if (provider !== 'ollama') {
-    return request;
+    // OpenAI-route providers (Strata, Cerebras, xAI, OpenRouter, OpenAI) take a
+    // top-level reasoning_effort. Forward it only when configured: a server's
+    // own default (Strata's is xhigh) is the user's choice until they set one.
+    if (
+      request.reasoning_effort !== undefined ||
+      model.reasoning_effort === undefined ||
+      model.think === false
+    ) {
+      return request;
+    }
+    return { ...request, reasoning_effort: model.reasoning_effort };
   }
 
   const normalized = {
