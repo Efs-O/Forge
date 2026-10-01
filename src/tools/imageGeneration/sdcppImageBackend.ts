@@ -5,13 +5,13 @@ import { mimeFromHeader } from '../imageTool';
 import { MAX_GENERATED_IMAGE_BYTES, type GeneratedImage } from './cloudImageBackend';
 
 /**
- * The `size` argument, in the plan's mapping. Owned here so the tool's enum and
+ * The `size` argument: Qwen-Image's native training resolutions (about 1.7 MP). Owned here so the tool's enum and
  * the request's pixel dimensions cannot drift apart.
  */
 export const SDCPP_SIZES = {
-  square: { width: 1024, height: 1024 },
-  portrait: { width: 768, height: 1344 },
-  landscape: { width: 1344, height: 768 },
+  square: { width: 1328, height: 1328 },
+  portrait: { width: 928, height: 1664 },
+  landscape: { width: 1664, height: 928 },
 } as const;
 
 export type SdcppSizeName = keyof typeof SDCPP_SIZES;

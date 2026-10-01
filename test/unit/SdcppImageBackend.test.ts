@@ -94,9 +94,9 @@ describe('sdcpp size mapping', () => {
     const config = sdcppConfig({
       defaults: { steps: 20, cfg_scale: 6, sampler: 'euler', width: 512, height: 768 },
     });
-    expect(sdcppSizeFor('square', config)).toEqual({ width: 1024, height: 1024 });
-    expect(sdcppSizeFor('portrait', config)).toEqual({ width: 768, height: 1344 });
-    expect(sdcppSizeFor('landscape', config)).toEqual({ width: 1344, height: 768 });
+    expect(sdcppSizeFor('square', config)).toEqual({ width: 1328, height: 1328 });
+    expect(sdcppSizeFor('portrait', config)).toEqual({ width: 928, height: 1664 });
+    expect(sdcppSizeFor('landscape', config)).toEqual({ width: 1664, height: 928 });
     expect(sdcppSizeFor(undefined, config)).toEqual({ width: 512, height: 768 });
     expect(sdcppSizeFor('', config)).toEqual({ width: 512, height: 768 });
     expect(Object.keys(SDCPP_SIZES)).toEqual(['square', 'portrait', 'landscape']);
@@ -133,8 +133,8 @@ describe('generateSdcppImage request', () => {
     expect(seen[0]?.url).toBe('http://127.0.0.1:8093/sdapi/v1/txt2img');
     expect(seen[0]?.body).toMatchObject({
       prompt: 'a red fox',
-      width: 768,
-      height: 1344,
+      width: 928,
+      height: 1664,
       steps: 20,
       cfg_scale: 6,
       seed: 1111,
@@ -142,7 +142,7 @@ describe('generateSdcppImage request', () => {
     });
     expect(image.bytes).toEqual(PNG);
     expect(image.mime).toBe('image/png');
-    expect(image).toMatchObject({ seed: 1111, width: 768, height: 1344 });
+    expect(image).toMatchObject({ seed: 1111, width: 928, height: 1664 });
   });
 
   it('runs the VRAM gate only when a spawn is needed', async () => {

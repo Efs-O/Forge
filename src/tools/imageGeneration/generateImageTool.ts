@@ -77,7 +77,7 @@ export function makeGenerateImageTool(deps: GenerateImageDeps): RegisteredTool {
               // GenerateImageTool test asserts it equals SDCPP_SIZE_NAMES.
               enum: ['square', 'portrait', 'landscape'],
               description:
-                'Local backends only: 1024x1024, 768x1344, 1344x768. Cloud backends ignore it.',
+                'Local backends only: 1328x1328, 928x1664, 1664x928. Cloud backends ignore it.',
             },
           },
           required: ['prompt'],

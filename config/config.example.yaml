@@ -946,8 +946,8 @@ image_generation:
     # `idle_timeout_ms` idle. All four paths are required, with no discovery.
     # `cuda_device` is the nvidia-smi / PCI-bus ordinal, the same convention as
     # voice.compute.device. idle_timeout_ms must be at least
-    # request_timeout_ms + 60000. `size` in generate_image (square 1024x1024,
-    # portrait 768x1344, landscape 1344x768) applies to this kind only.
+    # request_timeout_ms + 60000. `size` in generate_image (square 1328x1328,
+    # portrait 928x1664, landscape 1664x928) applies to this kind only.
     # - name: qwen-image-local
     #   provider: sdcpp
     #   binary: "V:/Tools/sd.cpp-master-929/sd-server.exe"
@@ -959,7 +959,7 @@ image_generation:
     #   port: 8093
     #   min_free_vram_mb: 7000    # measured peak VRAM delta + 1024 margin
     #   idle_timeout_ms: 600000
-    #   request_timeout_ms: 300000
+    #   request_timeout_ms: 480000  # a cold 1328x1328 render is ~280 s
     #   defaults: { steps: 20, cfg_scale: 6.0, sampler: euler, width: 1024, height: 1024 }
     #   extra_args: []
     #   confirm_on_start: true    # ask once before the GPU is occupied

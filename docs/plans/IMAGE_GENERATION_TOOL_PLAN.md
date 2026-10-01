@@ -3,7 +3,9 @@
 Status (2026-09-14): **cloud half shipped in 0.16.0** — Phase 1 (cloud
 backend + tool + config) and Phase 3 (Telegram photo) are built, for `xai`,
 `openai` and `openai-compatible` image endpoints. **ComfyUI (Phases 0, 2, 4)
-is not started** and remains the plan below.
+was never started and is superseded** by `LOCAL_IMAGE_GENERATION_PLAN.md`
+(stable-diffusion.cpp on the RTX 3060, shipped in 0.16.71). The ComfyUI text
+below is kept for history only.
 
 Where the build deviated from this draft, and why:
 - Config keys are `provider` (not `kind`) and per-backend `confirm_each`

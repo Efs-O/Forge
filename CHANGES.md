@@ -1,5 +1,43 @@
 # Forge — Recent Changes
 
+## 0.16.71
+
+### Local image generation on a spare GPU (2026-10-01)
+
+- `generate_image` gains a local backend, `provider: sdcpp`: Forge starts
+  stable-diffusion.cpp's `sd-server` on the GPU named by `cuda_device`, on
+  first use, and stops it after `idle_timeout_ms`. Nothing is sent off the
+  machine. See the commented `qwen-image-local` example in
+  `config.example.yaml` (Qwen-Image Q4_K, about 6 GB of VRAM at 1024x1024).
+- Before starting, Forge checks the GPU has `min_free_vram_mb` free and asks
+  for approval (`confirm_on_start`); once the server is warm, calls run
+  without a prompt unless `confirm_each` is set.
+- New `size` argument for local backends, at Qwen-Image's native resolutions:
+  `square` (1328x1328), `portrait` (928x1664) or `landscape` (1664x928).
+- A server orphaned by a VS Code crash is reaped on the next start, but only
+  when its executable matches the configured `binary`; Forge never kills an
+  unverified process holding the port. Cancelling a render stops the server,
+  because sd-server has no abort endpoint.
+- Windows only for now; the backend is skipped on other platforms.
+
+### Fewer context-overflow failures (2026-10-01)
+
+- When a server refuses a request because prompt plus `max_tokens` exceeds
+  its context, and says how many tokens the prompt took (Strata does), Forge
+  resends that round once with the room the server reported, instead of
+  ending the turn on the raw 400.
+- Forge's token estimate now corrects itself against the prompt sizes the
+  server reports, so it stops under-reading long prompts.
+
+### Tool fixes (2026-10-01)
+
+- A tool argument that should be an array but arrives as a JSON string is
+  refused with a message naming the fix, instead of crashing the tool.
+- `web_fetch`: a 401/403 from `api.github.com` points at `gh api` /
+  `gh search code`.
+- `read_file` and `view_image` read any path. Writes and deletes stay inside
+  the workspace (plus `extra_file_roots`).
+
 ## 0.16.70
 
 ### Watch a hand-started server's log in VS Code (2026-10-01)
