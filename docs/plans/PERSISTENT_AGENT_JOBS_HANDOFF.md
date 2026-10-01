@@ -132,7 +132,7 @@ with streaming, steals focus). Separate job sessions avoid all three.
    still open but not blocking.)
 3. The same daily task wakes the PC two mornings in a row. — **deferred**
    (same RTC mechanism as check 2, low-risk; run later with
-   `a1-arm-test-wake.ps1 -Daily -At HH:MM` if desired).
+   `scripts/wake-test/a1-arm-test-wake.ps1 -Daily -At HH:MM` if desired).
 4. Measure resume → `llama-server` ready. This sets `WAKE_LEAD_MS`. — **DONE
    2026-09-15:** resident server healthy ~112 s after RTC fire (upper bound,
    human round-trip dominates) → **`WAKE_LEAD_MS ≈ 120000`**. Cold-server case

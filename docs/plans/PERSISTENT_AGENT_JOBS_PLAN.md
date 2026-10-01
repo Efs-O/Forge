@@ -213,13 +213,13 @@ helper so both call sites share it.
 **Check 2 (G3 scheduled wake) — PASS, by direct observation (2026-09-15).**
 
 - Armed a throwaway `TimeTrigger` wake (interactive-user principal, no
-  elevation) via `a1-arm-test-wake.ps1`, slept the PC, touched nothing.
+  elevation) via `scripts/wake-test/a1-arm-test-wake.ps1`, slept the PC, touched nothing.
 - **The PC woke itself at the scheduled time, unattended — confirmed twice**
   (the user watched the screen both times; the wake came back at the armed
   interval, not earlier). This is the core of Part A and it works: an RTC
   `WakeToRun` task brings the machine back from sleep with nobody at the box.
 - **Caveat — the Kernel-Power event log is NOT a reliable wake-timer here.**
-  `a1-read-sleep-events.ps1` reported the resume (107) only ~16–19 s after the
+  `scripts/wake-test/a1-read-sleep-events.ps1` reported the resume (107) only ~16–19 s after the
   dirty-shutdown (42) event and *before* the armed time, which contradicted the
   observed wake. The 42/107 pairing on this machine does not line up with the
   actual RTC wake (likely the 42 is logged at suspend-complete and the 107 is
@@ -229,7 +229,7 @@ helper so both call sites share it.
   question is still **not** cleanly measured; the user found the PC at the
   logon screen (awake) after the wake, which is consistent with *not*
   re-sleeping, but a clean no-input re-sleep timing is still open.
-- **Remaining for check 2:** optionally repeat with `a1-hold-awake.ps1` running
+- **Remaining for check 2:** optionally repeat with `scripts/wake-test/a1-hold-awake.ps1` running
   to confirm `holdAwake` behaviour, and get one clean no-input re-sleep
   timing. Not blocking — the scheduled-wake mechanism itself is validated.
 
@@ -237,7 +237,7 @@ helper so both call sites share it.
 
 - Server was **resident** (`llama-server` running, Qwen3.8-27B in VRAM) before
   sleep, so this is the fast case: the wake unfreezes an already-loaded server.
-- Armed boundary **13:14:55**; first healthy probe (`a1-probe-health.ps1` →
+- Armed boundary **13:14:55**; first healthy probe (`scripts/wake-test/a1-probe-health.ps1` →
   HTTP 200) at **13:16:47** → **~112 s** from RTC fire to a healthy endpoint.
 - **Caveat:** 112 s is an **upper bound**. The gap is dominated by the human
   round-trip (the user had to return and report the wake before the probe ran);
@@ -257,7 +257,7 @@ helper so both call sites share it.
 - The one-shot RTC wake was validated twice (check 2); the daily trigger is the
   same RTC `WakeToRun` mechanism, so the two-morning soak is low-risk. Deferred
   to avoid a two-day wait; can be run later with
-  `a1-arm-test-wake.ps1 -Daily -At HH:MM` if desired.
+  `scripts/wake-test/a1-arm-test-wake.ps1 -Daily -At HH:MM` if desired.
 
 ---
 

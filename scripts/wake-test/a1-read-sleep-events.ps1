@@ -1,5 +1,5 @@
 # Read recent sleep / wake / dirty-shutdown events for A1 checks 2 and 4.
-#   powershell -ExecutionPolicy Bypass -File a1-read-sleep-events.ps1
+#   powershell -ExecutionPolicy Bypass -File scripts/wake-test/a1-read-sleep-events.ps1
 # Kernel-Power: 107 = resume from sleep, 6 = sleep, 42 = dirty shutdown.
 # The 107 -> next 6 gap is "how long it stayed awake before re-sleeping" (check 2).
 # The 107 timestamp is the resume point for the lead-time measurement (check 4).

@@ -2,10 +2,10 @@
 # Interactive-user principal (no elevation needed). No-op action: the wake is the point.
 #
 # One-shot, N minutes out (check 2) -- mirrors the production TimeTrigger shape:
-#   powershell -ExecutionPolicy Bypass -File a1-arm-test-wake.ps1 3
+#   powershell -ExecutionPolicy Bypass -File scripts/wake-test/a1-arm-test-wake.ps1 3
 #
 # Daily, every day at HH:MM (check 3 -- must fire two mornings in a row):
-#   powershell -ExecutionPolicy Bypass -File a1-arm-test-wake.ps1 -Daily -At 06:00
+#   powershell -ExecutionPolicy Bypass -File scripts/wake-test/a1-arm-test-wake.ps1 -Daily -At 06:00
 #
 # Remove afterwards:  schtasks /delete /tn ForgeA1Test /f
 

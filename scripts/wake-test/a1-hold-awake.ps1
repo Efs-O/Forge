@@ -2,7 +2,7 @@
 # should NOT re-sleep after a wake. Run in its own terminal window, leave it
 # running through the sleep/wake test, then Ctrl+C to release.
 #
-#   powershell -ExecutionPolicy Bypass -File a1-hold-awake.ps1
+#   powershell -ExecutionPolicy Bypass -File scripts/wake-test/a1-hold-awake.ps1
 #
 # This is the manual stand-in for PowerControl.holdAwake (implemented in A2).
 
