@@ -2,6 +2,14 @@
 
 ## 0.16.68
 
+### FORGE.md is the only project-instruction file (2026-10-01)
+
+- Forge no longer reads `AGENTS.md` as a fallback where a folder has no
+  `FORGE.md`. `AGENTS.md` is Codex's instruction file; Forge's own agent reads
+  `FORGE.md` only. A repository with just an `AGENTS.md` gets a starter
+  `FORGE.md` from auto-create (`forge_instructions.auto_create`), and the
+  `AGENTS.md` is left untouched for Codex.
+
 ### Ollama tool calls and stalls, per-chat tool stripping (2026-10-01)
 
 - Ollama: a tool name repeated across stream frames no longer doubles

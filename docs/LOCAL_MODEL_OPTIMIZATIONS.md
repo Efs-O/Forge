@@ -109,7 +109,7 @@ active file there changed one line per turn and measured a **12–17× prompt-ev
 penalty with a KV cache hit rate of zero** — every turn re-processed the whole
 prefix. Turn context is injected at the tail instead.
 
-Project instructions (`FORGE.md` / `AGENTS.md`) are part of the stable prefix and
+Project instructions (`FORGE.md`) are part of the stable prefix and
 are assembled root-to-leaf with a single total byte budget — see
 [`src/llm/forgeInstructionsChain.ts`](../src/llm/forgeInstructionsChain.ts).
 

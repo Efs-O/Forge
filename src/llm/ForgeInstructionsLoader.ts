@@ -3,7 +3,6 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import {
   FORGE_MD,
-  INSTRUCTION_FILES,
   MAX_INSTRUCTION_BYTES,
   collectChainDirectories,
   renderInstructionChain,
@@ -30,18 +29,6 @@ export type ForgeInstructionsBootstrapResult =
   | { status: 'created'; path: string }
   | { status: 'exists'; path: string }
   | { status: 'error'; path: string; error: Error };
-
-/**
- * FORGE.md is authoritative for Forge-native agents. AGENTS.md remains a
- * compatibility fallback for repositories that have not adopted it yet.
- */
-export function resolveProjectInstructionsPath(workspaceRoot: string): string {
-  for (const fileName of INSTRUCTION_FILES) {
-    const candidate = path.join(workspaceRoot, fileName);
-    if (fs.existsSync(candidate)) return candidate;
-  }
-  return preferredProjectInstructionsPath(workspaceRoot);
-}
 
 export function preferredProjectInstructionsPath(repositoryRoot: string): string {
   return path.join(repositoryRoot, FORGE_MD);
@@ -99,8 +86,8 @@ export class ForgeInstructionsLoader implements vscode.Disposable {
    * Instructions for `target`, assembled from the repository root down to the
    * directory containing it.
    *
-   * Each level contributes at most one file, `FORGE.md` preferred over
-   * `AGENTS.md`, and levels without one are simply skipped. A target outside
+   * Each level contributes its `FORGE.md`, and levels without one are simply
+   * skipped (`AGENTS.md` is never read). A target outside
    * the workspace, or none at all, yields the workspace root's own file — the
    * behaviour this method has always had.
    */
@@ -123,22 +110,19 @@ export class ForgeInstructionsLoader implements vscode.Disposable {
     return text;
   }
 
-  /** The one instruction file governing `directory`, if it has one. */
+  /** The FORGE.md governing `directory`, if it has one. */
   private loadNearestInstructionFile(directory: string, chainRoot: string): ChainFile | undefined {
-    for (const fileName of INSTRUCTION_FILES) {
-      const filePath = path.join(directory, fileName);
-      const loaded = this.readInstructionFile(filePath);
-      if (loaded.state === 'absent') continue;
-      return {
-        path: filePath,
-        displayPath: displayPathFor(this.workspaceRoot, filePath),
-        scope: path.relative(chainRoot, directory).split(path.sep).join('/'),
-        ...(loaded.state === 'loaded'
-          ? { content: loaded.content ?? '' }
-          : { readError: loaded.error ?? 'unknown error' }),
-      };
-    }
-    return undefined;
+    const filePath = path.join(directory, FORGE_MD);
+    const loaded = this.readInstructionFile(filePath);
+    if (loaded.state === 'absent') return undefined;
+    return {
+      path: filePath,
+      displayPath: displayPathFor(this.workspaceRoot, filePath),
+      scope: path.relative(chainRoot, directory).split(path.sep).join('/'),
+      ...(loaded.state === 'loaded'
+        ? { content: loaded.content ?? '' }
+        : { readError: loaded.error ?? 'unknown error' }),
+    };
   }
 
   private readInstructionFile(filePath: string): LoadedInstructionFile {
@@ -177,10 +161,7 @@ export class ForgeInstructionsLoader implements vscode.Disposable {
 
   private watch(): void {
     try {
-      const pattern = new vscode.RelativePattern(
-        this.workspaceRoot,
-        `**/{${INSTRUCTION_FILES.join(',')}}`,
-      );
+      const pattern = new vscode.RelativePattern(this.workspaceRoot, `**/${FORGE_MD}`);
       const watcher = vscode.workspace.createFileSystemWatcher(pattern);
       const scheduleLoad = (): void => {
         if (this.debounceTimer !== undefined) clearTimeout(this.debounceTimer);

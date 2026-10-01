@@ -33,7 +33,7 @@ forge_instructions:
   auto_create: true
 
 custom_instructions: >-
-  Use the repository-specific FORGE.md injected by Forge (or AGENTS.md only as a compatibility fallback). Keep it concise and update it only when the user explicitly asks to record durable project instructions.
+  Use the repository-specific FORGE.md injected by Forge. Keep it concise and update it only when the user explicitly asks to record durable project instructions.
 
 # WARNING: FULL PERMISSIONS. Every one of these is OFF by default; this example
 # turns them ALL ON, so the agent may delete files, run terminal and headless

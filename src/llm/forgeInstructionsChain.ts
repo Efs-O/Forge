@@ -15,9 +15,12 @@
 
 import * as path from 'path';
 
-const AGENTS_MD = 'AGENTS.md';
+/**
+ * The only project-instruction file Forge reads. `AGENTS.md` is Codex's
+ * equivalent and is deliberately not a fallback: a repository with only an
+ * `AGENTS.md` gets a FORGE.md from auto-create instead.
+ */
 export const FORGE_MD = 'FORGE.md';
-export const INSTRUCTION_FILES = [FORGE_MD, AGENTS_MD] as const;
 
 /**
  * Total rendered budget, delimiters and markers included.

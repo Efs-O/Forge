@@ -18,7 +18,6 @@ import {
   discoverWorkspaceRepositoryRoots,
   ensureForgeInstructionsFile,
   ForgeInstructionsLoader,
-  resolveProjectInstructionsPath,
 } from '../../src/llm/ForgeInstructionsLoader';
 
 const roots: string[] = [];
@@ -46,33 +45,16 @@ describe('ensureForgeInstructionsFile', () => {
     expect(Buffer.byteLength(content, 'utf8')).toBeLessThan(25000);
   });
 
-  it('creates FORGE.md without overwriting an existing AGENTS.md fallback', () => {
+  it('creates FORGE.md beside an AGENTS.md and leaves the AGENTS.md alone', () => {
     const root = makeRoot();
     const agents = path.join(root, 'AGENTS.md');
-    fs.writeFileSync(agents, '# Existing shared instructions\n', 'utf8');
+    fs.writeFileSync(agents, '# Codex instructions\n', 'utf8');
 
     const result = ensureForgeInstructionsFile(root);
 
     expect(result.status).toBe('created');
-    expect(fs.readFileSync(agents, 'utf8')).toBe('# Existing shared instructions\n');
+    expect(fs.readFileSync(agents, 'utf8')).toBe('# Codex instructions\n');
     expect(result.path).toBe(path.join(root, 'FORGE.md'));
-  });
-
-  it('prefers FORGE.md when both instruction conventions exist', () => {
-    const root = makeRoot();
-    const forge = path.join(root, 'FORGE.md');
-    fs.writeFileSync(path.join(root, 'AGENTS.md'), '# Shared instructions\n', 'utf8');
-    fs.writeFileSync(forge, '# Forge instructions\n', 'utf8');
-
-    expect(resolveProjectInstructionsPath(root)).toBe(forge);
-  });
-
-  it('falls back to AGENTS.md when FORGE.md is absent', () => {
-    const root = makeRoot();
-    const agents = path.join(root, 'AGENTS.md');
-    fs.writeFileSync(agents, '# Shared instructions\n', 'utf8');
-
-    expect(resolveProjectInstructionsPath(root)).toBe(agents);
   });
 });
 
@@ -93,15 +75,16 @@ describe('ForgeInstructionsLoader', () => {
     loader.dispose();
   });
 
-  it('uses the repository AGENTS.md only as a local fallback', () => {
+  it('never reads AGENTS.md, even where no FORGE.md exists', () => {
     const root = makeRoot();
     const nested = path.join(root, 'nested');
     fs.mkdirSync(path.join(nested, '.git'), { recursive: true });
-    fs.writeFileSync(path.join(root, 'FORGE.md'), '# Workspace instructions\n', 'utf8');
-    fs.writeFileSync(path.join(nested, 'AGENTS.md'), '# Nested fallback\n', 'utf8');
+    fs.writeFileSync(path.join(root, 'AGENTS.md'), '# Root Codex instructions\n', 'utf8');
+    fs.writeFileSync(path.join(nested, 'AGENTS.md'), '# Nested Codex instructions\n', 'utf8');
     const loader = new ForgeInstructionsLoader(root);
 
-    expect(loader.instructionsFor(path.join(nested, 'new.ts'))).toBe('# Nested fallback\n');
+    expect(loader.instructions).toBeUndefined();
+    expect(loader.instructionsFor(path.join(nested, 'new.ts'))).toBeUndefined();
     loader.dispose();
   });
 

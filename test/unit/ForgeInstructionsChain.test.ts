@@ -144,7 +144,7 @@ describe('ForgeInstructionsLoader chain assembly', () => {
     loader.dispose();
   });
 
-  it('prefers FORGE.md over AGENTS.md at each level independently', () => {
+  it('ignores AGENTS.md at every level, with or without a FORGE.md beside it', () => {
     const root = makeRoot();
     fs.mkdirSync(path.join(root, '.git'));
     write(root, 'AGENTS.md', 'root agents');
@@ -153,8 +153,8 @@ describe('ForgeInstructionsLoader chain assembly', () => {
     const loader = new ForgeInstructionsLoader(root);
 
     const out = loader.instructionsFor('pkg/a.ts') ?? '';
-    expect(out).toContain('root agents');
     expect(out).toContain('pkg forge');
+    expect(out).not.toContain('root agents');
     expect(out).not.toContain('pkg agents');
     loader.dispose();
   });
