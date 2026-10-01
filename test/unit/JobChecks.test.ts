@@ -141,6 +141,33 @@ describe('githubIssueCheck', () => {
     expect(observation.last_comment.excerpt).toHaveLength(200);
   });
 
+  it('asks for the newest comment as the last one-item page', async () => {
+    // The per-issue endpoint ignores sort/direction and lists oldest first.
+    const urls: string[] = [];
+    const issue = fakeCtx(ISSUE_BODY);
+    issue.fetch = async (url) => {
+      urls.push(url);
+      return url.includes('/comments?')
+        ? { notModified: false, body: JSON.stringify([{ id: 12, user: { login: 'b' }, body: 'newest' }]), etag: null }
+        : { notModified: false, body: ISSUE_BODY, etag: null };
+    };
+    await githubIssueCheck({ kind: 'github_issue', repo: 'ggml-org/llama.cpp', issue_number: 1234 }, null, issue);
+    expect(urls.find((u) => u.includes('/comments?'))).toMatch(/[?&]per_page=1&page=4$/);
+  });
+
+  it('an issue with no comments makes no comments request', async () => {
+    const urls: string[] = [];
+    const body = JSON.stringify({ state: 'open', updated_at: '2026-09-14T10:00:00Z', title: 't', comments: 0 });
+    const issue = fakeCtx(body);
+    issue.fetch = async (url) => {
+      urls.push(url);
+      return { notModified: false, body, etag: null };
+    };
+    const result = await githubIssueCheck({ kind: 'github_issue', repo: 'ggml-org/llama.cpp', issue_number: 1 }, null, issue);
+    expect(urls.some((u) => u.includes('/comments'))).toBe(false);
+    expect((JSON.parse(result.observation) as { last_comment: unknown }).last_comment).toBeNull();
+  });
+
   it('a comment count change is reported as changed', async () => {
     const oldObs = JSON.stringify({
       state: 'open',

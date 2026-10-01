@@ -158,11 +158,15 @@ export async function githubIssueCheck(
     );
   }
   const state = typeof issue.state === 'string' ? issue.state : 'unknown';
+  const commentCount = typeof issue.comments === 'number' ? issue.comments : 0;
   // The issue payload changes for comments too, but retain the last-comment
   // fact requested by the job model so notifications can say what changed.
-  const commentsResult = await ctx.fetch(`${url}/comments?per_page=1&sort=created&direction=desc`);
+  // The per-issue comments endpoint ignores sort/direction and lists oldest
+  // first, so the newest comment is the last one-item page.
   let lastComment: { id: number; author: string; excerpt: string } | null = null;
-  if (!commentsResult.notModified) {
+  const commentsResult =
+    commentCount > 0 ? await ctx.fetch(`${url}/comments?per_page=1&page=${commentCount}`) : null;
+  if (commentsResult && !commentsResult.notModified) {
     const comments = JSON.parse(commentsResult.body) as unknown;
     if (Array.isArray(comments) && comments.length > 0) {
       const comment = comments[0] as { id?: unknown; user?: { login?: unknown }; body?: unknown };
@@ -174,7 +178,7 @@ export async function githubIssueCheck(
         };
       }
     }
-  } else if (lastObservation) {
+  } else if (commentsResult && lastObservation) {
     const prior = JSON.parse(lastObservation) as { last_comment?: typeof lastComment };
     lastComment = prior.last_comment ?? null;
   }
@@ -182,7 +186,7 @@ export async function githubIssueCheck(
     state,
     updated_at: issue.updated_at,
     title: typeof issue.title === 'string' ? issue.title : '',
-    comments: typeof issue.comments === 'number' ? issue.comments : 0,
+    comments: commentCount,
     last_comment: lastComment,
   });
   // The first run only records a baseline; it never reports "changed" (B.2).
