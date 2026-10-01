@@ -70,5 +70,6 @@ assets/.coordination/**
 assets/_preview/**
 assets/publisher-logo.svg
 
-# Local generate_image output
+# Local generate_image output (the agent also saves to images/ when asked)
 generated-images/**
+images/**
