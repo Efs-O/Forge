@@ -39,6 +39,7 @@ import { logWebviewDiagnostic } from './webviewDiagnostics';
 import {
   buildModelsMessage,
   buildSessionMetrics,
+  liveStreamMetrics,
   buildSessionSyncMessage,
 } from './sidebarPayloads';
 import { workspaceInfoMessage } from './workspaceInfo';
@@ -422,9 +423,21 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return this.tabs.active();
   }
 
-  getActiveSessionMetrics(): SessionTimeSnapshot {
-    const conv = this.getActive();
-    return buildSessionMetrics(conv, this.agentLoop.getSessionActiveMs(conv));
+  /**
+   * Metrics for the followed chat while it is still open, else the active one.
+   * A followed chat other than the active one is named, so the bar never shows
+   * one chat's numbers as if they were the visible chat's.
+   */
+  getSessionMetrics(followedId: string | undefined): SessionTimeSnapshot {
+    const active = this.getActive();
+    // Open chats only: an archived one has stopped, and its numbers are not news.
+    const followed = this.sidebar.conversations.find((c) => c.id === followedId);
+    const conv = followed ?? active;
+    return {
+      ...buildSessionMetrics(conv, this.agentLoop.getSessionActiveMs(conv)),
+      ...(conv.id !== active.id ? { following: conv.title } : {}),
+      ...liveStreamMetrics(this.agentLoop.getLiveStream(conv.id)),
+    };
   }
 
   private handleMessage(msg: WebviewToHost): void {

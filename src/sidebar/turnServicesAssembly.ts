@@ -28,6 +28,7 @@ import type { TurnLifecycle } from './TurnLifecycle';
 import type { SidebarProviderEvents } from './providerEvents';
 import type { CapabilityCache } from './CapabilityCache';
 import type { AgentProgressEvent } from './AgentProgress';
+import type { LiveStreamMeter } from './LiveStreamMeter';
 import type { AttachmentData } from './messageBridge';
 import type { UserPromptOptions } from './transcriptMutations';
 import { applyUsage } from './transcriptMutations';
@@ -54,6 +55,7 @@ export interface TurnServicesAssembly {
   workspaceRoot: string;
   cliSessions: CliSessionRegistry;
   capabilities: CapabilityCache;
+  streamMeter: LiveStreamMeter;
   promptRunControllers: Map<AbortController, string | undefined>;
   secrets?: vscode.SecretStorage;
   templateEngine?: TemplateEngine;
@@ -103,6 +105,7 @@ export function buildTurnServices(d: TurnServicesAssembly): TurnServices {
     ...(d.cliDriver ? { cliDriver: d.cliDriver } : {}),
     ...(d.getConfigPath ? { getConfigPath: d.getConfigPath } : {}),
     capabilities: (model, baseUrl) => d.capabilities.get(model, baseUrl),
+    streamMeter: d.streamMeter,
     warnOnce: (key, message) => d.warnOnce(key, message),
     // Wrapped rather than passed: both listeners are registered after
     // construction, so a snapshot taken here would capture undefined.

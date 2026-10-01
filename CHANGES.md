@@ -2,6 +2,16 @@
 
 ## 0.16.71
 
+### Status bar follows the working chat, and moves while it thinks (2026-10-01)
+
+- The session status bar now shows the chat that most recently started a
+  turn, marked `$(eye) <title>` when it is not the chat on screen, so a chat
+  started in the background (`forge.sh --new`, Telegram) is visible there.
+  Picking a chat in the sidebar switches the bar back to it.
+- While a request streams, the bar adds `think ~N · answer ~M`: an estimate
+  from the streamed text (about four characters per token), replaced by the
+  server's exact count when the request ends.
+
 ### New chats no longer refused at the chat cap (2026-10-01)
 
 - At the open-chat cap, starting a new chat (sidebar, `forge.sh --new`)

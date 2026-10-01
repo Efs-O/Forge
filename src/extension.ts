@@ -206,6 +206,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   if (forgeLoader) context.subscriptions.push(forgeLoader);
 
   let refreshSessionTime = (): void => {};
+  let followSessionTime: (conversationId: string | undefined) => void = () => {};
   sidebarProvider = new SidebarProvider(
     context.extensionUri,
     pool,
@@ -225,6 +226,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         // Turn START, not end: a cancelled or thrown turn never reaches its end,
         // and a leaked counter would silently mute the agent from then on.
         if (conversationId !== undefined) userNotifications.resetTurn(conversationId);
+        // The bar follows the chat that just started, so a chat run in the
+        // background (`forge.sh --new`) is the one it shows.
+        if (conversationId !== undefined) followSessionTime(conversationId);
         refreshSessionTime();
       },
       onGenerationFinished: (modelName) => {
@@ -237,6 +241,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       onConversationSwitched: (modelName) => {
         if (pool.isAnyReady()) statusBar.setReady(modelName);
         else statusBar.setStopped(modelName);
+        // Picking a chat is the user saying which one they want to see.
+        followSessionTime(undefined);
         refreshSessionTime();
       },
     },
@@ -269,8 +275,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     jobStore: jobsStore,
   });
   activeRemoteRuntime = remoteRuntime;
-  const sessionTimeBar = new SessionTimeStatusBar(() => sidebarProvider.getActiveSessionMetrics());
+  const sessionTimeBar = new SessionTimeStatusBar((followed) =>
+    sidebarProvider.getSessionMetrics(followed),
+  );
   refreshSessionTime = () => sessionTimeBar.refresh();
+  followSessionTime = (conversationId) => sessionTimeBar.follow(conversationId);
   context.subscriptions.push(sessionTimeBar);
   // Contributed in package.json since the setting was added, but read by
   // nothing until now -- unticking the box changed no behaviour. Same shape as

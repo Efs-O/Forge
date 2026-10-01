@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  formatSessionDuration,
-  formatSessionStatus,
-} from '../../src/vscode/SessionTimeStatusBar';
+import { formatSessionDuration, formatSessionStatus } from '../../src/vscode/SessionTimeStatusBar';
 import { formatTokens } from '../../src/util/formatTokens';
 
 describe('SessionTimeStatusBar formatting', () => {
@@ -26,5 +23,32 @@ describe('SessionTimeStatusBar formatting', () => {
         outputTokens: 3_100,
       }),
     ).toBe('$(timer) 01:01:01  $(layers) ctx 28k · session out 3.1k');
+  });
+});
+
+describe('SessionTimeStatusBar live and followed chats', () => {
+  it('shows the running request as an estimate, marked with ~', () => {
+    expect(
+      formatSessionStatus({
+        activeMs: 61_000,
+        contextTokens: 19_000,
+        outputTokens: 4_000,
+        liveReasoningTokens: 1_250,
+        liveAnswerTokens: 0,
+      }),
+    ).toBe(
+      '$(timer) 00:01:01  $(layers) ctx 19k · session out 4k  $(sync~spin) think ~1.3k · answer ~0',
+    );
+  });
+
+  it('names a followed chat that is not the one on screen, truncated', () => {
+    expect(
+      formatSessionStatus({
+        activeMs: 0,
+        following: 'claude: Implement the small library in docs',
+      }),
+    ).toBe(
+      '$(eye) claude: Implement the sm…  $(timer) 00:00:00  $(layers) ctx — · session out —',
+    );
   });
 });

@@ -29,6 +29,7 @@ import type { TurnLifecycle } from './TurnLifecycle';
 import type { SidebarProviderEvents } from './AgentLoop';
 import type { UserPromptOptions } from './transcriptMutations';
 import type { AgentProgressEvent } from './AgentProgress';
+import type { LiveStreamMeter } from './LiveStreamMeter';
 
 export interface TurnServices {
   pool: IBackendPool;
@@ -54,6 +55,8 @@ export interface TurnServices {
   onUsage: (conv: ConversationRuntime, inputTokens: number, outputTokens: number) => void;
   /** Persists a transcript mutation immediately, including an in-flight turn. */
   onTranscriptChanged: (conv: ConversationRuntime) => void;
+  /** Streamed-so-far estimate per conversation, for the status bar. */
+  streamMeter: LiveStreamMeter;
   /** Emits visible progress only; reasoning has no route into this seam. */
   emitAgentProgress: (event: AgentProgressEvent) => void;
   remoteReach?: (conversationId: string) => number;

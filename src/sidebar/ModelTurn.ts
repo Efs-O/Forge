@@ -49,6 +49,7 @@ import {
 } from '../agent/ToolCallingLoop';
 import { canUseThinkingKwargs, shouldStripThinking } from './turnModelBehavior';
 import type { AgentProgressEvent } from './AgentProgress';
+import type { LiveStreamMeter } from './LiveStreamMeter';
 
 const log = getLogger();
 
@@ -95,6 +96,7 @@ export interface ModelTurnContext {
   onUsage?: (conv: ConversationRuntime, inputTokens: number, outputTokens: number) => void;
   onTranscriptChanged?: (conv: ConversationRuntime) => void;
   emitAgentProgress: (event: AgentProgressEvent) => void;
+  streamMeter?: LiveStreamMeter;
   /** Remote chats bound to a conversation. Absent when no transport is live. */
   remoteReach?: (conversationId: string) => number;
   compactMidTurn?: (conv: ConversationRuntime, request: { exhausted: boolean }) => Promise<boolean>;
@@ -174,6 +176,9 @@ export async function runModelTurn(
   { resolveBaseUrl, conv, model, activeFile, ctrl, postC, apiKey, checkpoint }: ModelTurnRequest,
 ): Promise<ToolCallingLoopResult> {
   const config = ctx.getConfig();
+  // A cancelled request never reports usage; its leftover estimate must not
+  // carry into this turn's first request.
+  ctx.streamMeter?.reset(conv.id);
   const allowed = resolveToolPermissions(config);
   // One budget per turn — model is already resolveRequestModel()'d
   // (group tools/tool_call_limits merged) by the caller.
@@ -338,10 +343,14 @@ export async function runModelTurn(
       onMessagesChanged: () => ctx.onTranscriptChanged?.(conv),
       ...(ctx.drainTells ? { drainTells: () => ctx.drainTells!(conv.id) } : {}),
       onToken: (text) => {
+        ctx.streamMeter?.add(conv.id, 'answer', text);
         postC({ type: 'token', text });
         ctx.emitAgentProgress({ conversationId: conv.id, kind: 'commentary', text });
       },
-      onReasoning: (text) => postC({ type: 'reasoningToken', text }),
+      onReasoning: (text) => {
+        ctx.streamMeter?.add(conv.id, 'reasoning', text);
+        postC({ type: 'reasoningToken', text });
+      },
       // The round's own words, once it has finished saying them. Only remote
       // surfaces act on this: the sidebar already rendered every token of it.
       onRoundNarration: (text) =>
@@ -366,6 +375,7 @@ export async function runModelTurn(
         // what this writes, so publish the bar from here: an agentic turn
         // reports usage once per round and the bar stays live mid-turn.
         ctx.onUsage?.(conv, usage.prompt_tokens, usage.completion_tokens);
+        ctx.streamMeter?.reset(conv.id);
         const scale = promptEstimateScale(estimatedPrompt, usage.prompt_tokens);
         if (scale !== undefined) conv.promptEstimateScale = scale;
         ctx.onContextChanged?.(conv.id);

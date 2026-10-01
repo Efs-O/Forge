@@ -21,6 +21,7 @@ import {
 import { describeModelPickerModel } from './ModelPickerGroups';
 import { reportedContextTokens } from '../util/contextBudget';
 import type { SessionTimeSnapshot } from '../vscode/SessionTimeStatusBar';
+import type { LiveStreamEstimate } from './LiveStreamMeter';
 import type { UserQuestionRequestEvent } from './UserQuestionService';
 
 /**
@@ -140,6 +141,15 @@ export function buildQuestionMessage(event: UserQuestionRequestEvent): HostToWeb
     ...(event.questions ? { questions: event.questions } : {}),
     ...(event.conversationId ? { conversationId: event.conversationId } : {}),
   };
+}
+
+/** The streamed-so-far estimate as snapshot fields; nothing while idle. */
+export function liveStreamMetrics(
+  live: LiveStreamEstimate | undefined,
+): Pick<SessionTimeSnapshot, 'liveReasoningTokens' | 'liveAnswerTokens'> {
+  return live
+    ? { liveReasoningTokens: live.reasoningTokens, liveAnswerTokens: live.answerTokens }
+    : {};
 }
 
 export function buildSessionMetrics(

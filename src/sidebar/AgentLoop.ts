@@ -14,6 +14,7 @@ import { ToolRegistry } from '../tools/ToolRegistry';
 import type { KeepUndoCodeLensProvider } from './KeepUndoCodeLens';
 import { ToolFailureTracker } from '../tools/StripTools';
 import { SessionTimer } from './SessionTimer';
+import { LiveStreamMeter, type LiveStreamEstimate } from './LiveStreamMeter';
 import { wireSessionTimer } from './sessionTimerWiring';
 import type { SidebarProviderEvents } from './providerEvents';
 import { getLogger } from '../util/logger';
@@ -57,6 +58,7 @@ export class AgentLoop {
   private readonly promptRunControllers = new Map<AbortController, string | undefined>();
   private readonly contactGate: ContactPromptGate;
   private readonly sessionTimer = new SessionTimer();
+  private readonly streamMeter = new LiveStreamMeter();
   /**
    * Resolves a conversation id to its runtime object. Set by the SidebarProvider
    * after construction; without it the session timer is a no-op.
@@ -101,6 +103,11 @@ export class AgentLoop {
   /** Total active agent time in ms for a conversation (including in-progress). */
   getSessionActiveMs(conv: ConversationRuntime): number {
     return this.sessionTimer.totalActiveMs(conv);
+  }
+
+  /** What the running request has streamed so far, estimated; undefined when idle. */
+  getLiveStream(id: string): LiveStreamEstimate | undefined {
+    return this.lifecycle.isStreaming(id) ? this.streamMeter.read(id) : undefined;
   }
 
   /** Restore unfinished intervals after a VS Code reload. Call once at startup. */
@@ -198,6 +205,7 @@ export class AgentLoop {
       events,
       post,
       workspaceRoot: this.workspaceRoot,
+      streamMeter: this.streamMeter,
       cliSessions: this.cliSessions,
       capabilities: this.capabilities,
       promptRunControllers: this.promptRunControllers,
@@ -230,6 +238,7 @@ export class AgentLoop {
   disposeConversation(id: string): Promise<void> {
     const conv = this.conversationLookup?.(id);
     if (conv) this.sessionTimer.disposeConversation(conv);
+    this.streamMeter.reset(id);
     return this.cliSessions.disposeConversation(id);
   }
 
