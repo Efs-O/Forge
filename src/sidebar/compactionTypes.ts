@@ -13,6 +13,7 @@ export interface RecordedCompactionAction {
   outcome: 'ok' | 'failed' | 'unknown';
   line: string;
   durableEvidence?: boolean;
+  toolCallId?: string;
 }
 
 /**

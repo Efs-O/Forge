@@ -11,6 +11,8 @@ import {
 } from '../../src/sidebar/compactionLedger';
 import { TOOL_INTERRUPTED_RESULT } from '../../src/sidebar/sessionPersistence';
 import { formatExecCommandOutput } from '../../src/tools/execHelpers';
+import { makeReadToolResultTool } from '../../src/tools/toolResultTools';
+import { compactionPersistedSchema } from '../../src/sidebar/compactionPersistedSchema';
 import type { ChatMessage } from '../../src/llm/types';
 
 function call(id: string, name: string, args: Record<string, unknown>): ChatMessage {
@@ -60,8 +62,19 @@ describe('collectWriteActions', () => {
         key: 'file:src/foo.ts',
         outcome: 'ok',
         line: '- write_file src/foo.ts',
+        toolCallId: 'a',
       },
     ]);
+  });
+
+  it('omits an id the persisted schema would reject, so the record still loads', () => {
+    for (const id of ['', 'x'.repeat(129)]) {
+      const actions = collectWriteActions([
+        call(id, 'write_file', { path: 'src/foo.ts' }),
+        result(id, 'Wrote src/foo.ts'),
+      ]);
+      expect(actions[0]).not.toHaveProperty('toolCallId');
+    }
   });
 
   it('never reports a failed write as a completed one', () => {
@@ -138,6 +151,7 @@ describe('collectCommandActions', () => {
         key: 'command:exec_command|.|args=["run","ci"]\u001fcommand=npm',
         outcome: 'ok',
         line: '- ran `npm run ci` → exit 0',
+        toolCallId: 'a',
       },
     ]);
   });
@@ -232,6 +246,73 @@ describe('collectCommandActions', () => {
 describe('recordedActionsBlock', () => {
   it('is empty when nothing recordable happened', () => {
     expect(recordedActionsBlock([{ role: 'user', content: 'hi' }])).toBe('');
+  });
+
+  describe('persisted tool-call recall IDs', () => {
+    it('round-trips IDs, keeps old records, and resolves every rendered ID', async () => {
+      const messages: ChatMessage[] = [
+        call('write-id', 'write_file', { path: 'src/a.ts' }),
+        result('write-id', 'Wrote src/a.ts'),
+        call('command-id', 'exec_command', { command: 'npm', args: ['test'] }),
+        result('command-id', '[exit code: 0]'),
+      ];
+      const actions = collectRecordedActions(messages);
+      const withIds = compactionPersistedSchema.parse({
+        summary: 'done',
+        fromIndex: 4,
+        recordedActions: actions,
+      });
+      const oldState = compactionPersistedSchema.parse({
+        summary: 'done',
+        fromIndex: 4,
+        recordedActions: actions.map(({ toolCallId: _toolCallId, ...action }) => action),
+      });
+
+      expect(withIds.recordedActions?.map((action) => action.toolCallId)).toEqual([
+        'write-id',
+        'command-id',
+      ]);
+      expect(renderRecordedActionsBlock(oldState.recordedActions ?? [])).toMatchInlineSnapshot(`
+        "
+
+        **File changes (recorded by Forge, not written by the model):**
+        - write_file src/a.ts
+
+        **Commands run (recorded by Forge, not written by the model):**
+        - ran \`npm test\` → exit 0"
+      `);
+
+      const rendered = renderRecordedActionsBlock(withIds.recordedActions ?? []);
+      expect(rendered).toContain('- write_file src/a.ts (id write-id)');
+      expect(rendered).toContain('- ran `npm test` → exit 0 (id command-id)');
+      const tool = makeReadToolResultTool();
+      for (const action of withIds.recordedActions ?? []) {
+        const expectedResult = messages.find(
+          (message) => message.role === 'tool' && message.tool_call_id === action.toolCallId,
+        )?.content;
+        const resolved = await tool.handler(
+          { tool_call_id: action.toolCallId },
+          { beforeMutate: () => undefined, conversationMessages: messages },
+        );
+        expect(typeof expectedResult).toBe('string');
+        expect(resolved).toContain(expectedResult as string);
+      }
+    });
+
+    it('uses the newest ID when a later generation replaces the same action key', () => {
+      const older = collectWriteActions([
+        call('old-id', 'write_file', { path: 'src/a.ts' }),
+        result('old-id', 'old'),
+      ]);
+      const newer = collectWriteActions([
+        call('new-id', 'write_file', { path: 'src/a.ts' }),
+        result('new-id', 'new'),
+      ]);
+      const merged = mergeRecordedActions(older, newer);
+      expect(merged.actions).toHaveLength(1);
+      expect(merged.actions[0]?.toolCallId).toBe('new-id');
+      expect(renderRecordedActionsBlock(merged.actions)).toContain('(id new-id)');
+    });
   });
 
   it('labels both sections as host-recorded', () => {

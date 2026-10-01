@@ -2,6 +2,14 @@
 
 ## 0.16.69
 
+### Find text from before compaction (2026-10-01)
+
+- `read_tool_result` can search earlier user, assistant and tool text or read
+  an exact earlier message/result, including content before a compaction.
+- Compaction action IDs now identify the exact tool output they came from. An
+  older Forge build rejects these new fields in its strict persisted schema;
+  downgrading drops compaction records written by this version.
+
 ### FORGE.md is the only project-instruction file (2026-10-01)
 
 - Forge no longer reads `AGENTS.md` as a fallback where a folder has no

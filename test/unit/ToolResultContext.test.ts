@@ -67,6 +67,121 @@ describe('read_tool_result', () => {
     );
     expect(result).toContain('no text tool result');
   });
+
+  it('searches pre-compaction user, assistant, and tool text newest first', async () => {
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'Earlier Needle request.' },
+      { role: 'assistant', content: 'Earlier Needle answer.' },
+      {
+        role: 'tool',
+        tool_call_id: 'needle-tool-id',
+        name: 'exec_command',
+        content: [{ type: 'text', text: 'Earlier Needle output.' }],
+      },
+      { role: 'user', content: 'After the cut.' },
+    ];
+    const result = await makeReadToolResultTool().handler(
+      { query: 'needle' },
+      { beforeMutate: () => undefined, conversationMessages: messages },
+    );
+    expect(result).toContain('message_index 2, tool_call_id "needle-tool-id"');
+    expect(result).toContain('message_index 1');
+    expect(result).toContain('message_index 0');
+    expect(result.indexOf('message_index 2')).toBeLessThan(result.indexOf('message_index 1'));
+    expect(result.indexOf('message_index 1')).toBeLessThan(result.indexOf('message_index 0'));
+    expect(result).toContain('character offset 8');
+  });
+
+  it('reports offsets in the original text when case folding expands a character', async () => {
+    const result = await makeReadToolResultTool().handler(
+      { query: 'needle' },
+      {
+        beforeMutate: () => undefined,
+        conversationMessages: [{ role: 'user', content: 'İ needle' }],
+      },
+    );
+    expect(result).toContain('character offset 2');
+  });
+
+  it('reads exact user and assistant messages and directs tool rows to their ID', async () => {
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'User message body.' },
+      { role: 'assistant', content: [{ type: 'text', text: 'Assistant message body.' }] },
+      { role: 'tool', tool_call_id: 'exact-tool-id', name: 'read_file', content: 'tool output' },
+    ];
+    const tool = makeReadToolResultTool();
+    const user = await tool.handler(
+      { message_index: 0, offset: 5, max_chars: 9 },
+      { beforeMutate: () => undefined, conversationMessages: messages },
+    );
+    const assistant = await tool.handler(
+      { message_index: 1 },
+      { beforeMutate: () => undefined, conversationMessages: messages },
+    );
+    const toolRow = await tool.handler(
+      { message_index: 2 },
+      { beforeMutate: () => undefined, conversationMessages: messages },
+    );
+    expect(user).toContain('Message 0 (user)');
+    expect(user).toContain('message b');
+    expect(assistant).toContain('Assistant message body.');
+    expect(toolRow).toContain('tool_call_id "exact-tool-id"');
+  });
+
+  it('returns actionable validation errors naming all three modes', async () => {
+    const tool = makeReadToolResultTool();
+    const messages: ChatMessage[] = [{ role: 'user', content: 'hello' }];
+    const invoke = (args: Record<string, unknown>) =>
+      tool.handler(args, { beforeMutate: () => undefined, conversationMessages: messages });
+    for (const args of [{}, { tool_call_id: 'x', query: 'xx' }, { query: 'x' }, { message_index: 9 }]) {
+      const error = await invoke(args);
+      expect(error).toContain('tool_call_id');
+      expect(error).toContain('query');
+      expect(error).toContain('message_index');
+    }
+    expect(await invoke({})).toContain('Received 0 modes');
+    expect(await invoke({ tool_call_id: 'x', query: 'xx' })).toContain('Received 2 modes');
+    expect(await invoke({ query: 'x' })).toContain('between 2 and 200');
+    expect(await invoke({ message_index: 9 })).toContain('outside this conversation');
+  });
+
+  it('caps search output and reports how many matches were omitted', async () => {
+    const messages: ChatMessage[] = Array.from({ length: 50 }, (_, index) => ({
+      role: 'user' as const,
+      content: `needle-${index} ${'context '.repeat(60)}`,
+    }));
+    const result = await makeReadToolResultTool().handler(
+      { query: 'needle', max_matches: 10 },
+      { beforeMutate: () => undefined, conversationMessages: messages },
+    );
+    expect(result.length).toBeLessThanOrEqual(MAX_TOOL_RESULT_READ_CHARS);
+    expect(result).toContain('40 of 50 matching messages not shown');
+    expect(result).toContain('use a narrower query');
+    expect(result).toContain('message_index 49');
+    expect(result).not.toContain('message_index 39');
+  });
+
+  it('does not search reasoning or internal messages and names exact modes on no match', async () => {
+    const result = await makeReadToolResultTool().handler(
+      { query: 'secret' },
+      {
+        beforeMutate: () => undefined,
+        conversationMessages: [
+          { role: 'assistant', content: 'ordinary content', reasoning: 'secret reasoning' },
+          { role: 'user', content: 'secret internal', internal: true },
+        ],
+      },
+    );
+    expect(result).toContain('No matches');
+    expect(result).toContain('tool_call_id');
+    expect(result).toContain('message_index');
+    expect(result).not.toContain('secret reasoning');
+    expect(result).not.toContain('secret internal');
+  });
+
+  it('keeps the expanded tool definition within the 600-character growth budget', () => {
+    expect(JSON.stringify(makeReadToolResultTool().definition).length).toBeLessThanOrEqual(617 + 600);
+  });
 });
 
 describe('tool-loop context preflight', () => {

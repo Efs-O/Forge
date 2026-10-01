@@ -27,6 +27,7 @@ const recordedActionSchema = z
     outcome: z.enum(['ok', 'failed', 'unknown']),
     line: z.string().min(1).max(RECORDED_ACTION_LINE_MAX_CHARS),
     durableEvidence: z.boolean().optional(),
+    toolCallId: z.string().min(1).max(128).optional(),
   })
   .strict();
 

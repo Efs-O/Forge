@@ -197,6 +197,11 @@ export function collectWrittenFiles(messages: readonly ChatMessage[]): string[] 
   return [...found];
 }
 
+/** The id goes on only when the persisted schema (1-128 chars) will accept it. */
+function withToolCallId(action: Action, toolCallId: string): Action {
+  return toolCallId.length > 0 && toolCallId.length <= 128 ? { ...action, toolCallId } : action;
+}
+
 function writeAction(tool: string, paths: string[], result: string | undefined): Action {
   const target = paths.length > 0 ? paths.join(' → ') : '(unnamed path)';
   const key = truncate(
@@ -226,7 +231,12 @@ export function collectWriteActions(messages: readonly ChatMessage[]): Action[] 
       if (!WRITE_TOOLS.has(call.function.name)) continue;
       const args = parseArgs(call.function.arguments);
       if (!args) continue;
-      actions.push(writeAction(call.function.name, pathsFrom(args), results.get(call.id)));
+      actions.push(
+        withToolCallId(
+          writeAction(call.function.name, pathsFrom(args), results.get(call.id)),
+          call.id,
+        ),
+      );
     }
   }
   return actions;
@@ -432,7 +442,12 @@ export function collectCommandActions(messages: readonly ChatMessage[]): Action[
       if (!COMMAND_TOOLS.has(call.function.name)) continue;
       const args = parseArgs(call.function.arguments) ?? {};
       const label = commandLabel(call.function.name, args);
-      actions.push(commandAction(call.function.name, label, args, results.get(call.id)));
+      actions.push(
+        withToolCallId(
+          commandAction(call.function.name, label, args, results.get(call.id)),
+          call.id,
+        ),
+      );
     }
   }
   return actions;

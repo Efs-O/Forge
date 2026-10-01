@@ -101,7 +101,9 @@ function section(
   if (kept.length === 0) {
     return `\n\n**${title} (recorded by Forge, not written by the model):**${more}`;
   }
-  return `\n\n**${title} (recorded by Forge, not written by the model):**\n${kept.map((action) => action.line).join('\n')}${more}`;
+  return `\n\n**${title} (recorded by Forge, not written by the model):**\n${kept
+    .map((action) => `${action.line}${action.toolCallId ? ` (id ${action.toolCallId})` : ''}`)
+    .join('\n')}${more}`;
 }
 
 /**
@@ -140,7 +142,12 @@ export function renderRecordedActionsBlock(
   omitted: OmittedActionCounts | undefined = undefined,
 ): string {
   const counts = omitted ?? NO_OMITTED_ACTIONS;
+  const hasIds = actions.some((action) => Boolean(action.toolCallId));
+  const idGuidance = hasIds
+    ? '\n\nAn id in parentheses can be passed to `read_tool_result` as `tool_call_id` to read that call’s exact output.'
+    : '';
   return (
+    idGuidance +
     section(
       'File changes',
       actions.filter((action) => action.kind === 'file'),

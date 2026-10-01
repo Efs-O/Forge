@@ -10,6 +10,12 @@ const transcript = (): ChatMessage[] => [
 ];
 
 describe('applyCompactionWindow', () => {
+  it('points resumed agents at search for stored pre-compaction conversation text', () => {
+    expect(SUMMARY_PREAMBLE).toContain(
+      'Earlier conversation text is still stored; use `read_tool_result` with `query` to search it.',
+    );
+  });
+
   it('returns the transcript untouched when nothing is compacted', () => {
     const msgs = transcript();
     expect(applyCompactionWindow(msgs, undefined)).toEqual(msgs);

@@ -34,7 +34,8 @@ const SUMMARY_PREAMBLE =
   'Forge observed; do not redo an operation recorded as completed merely because this ' +
   'compaction happened. Where something is recorded as unknown, is contradicted by a ' +
   'later fact, or is needed and missing, verify that one thing specifically rather than ' +
-  're-establishing the whole task.';
+  're-establishing the whole task. Earlier conversation text is still stored; use ' +
+  '`read_tool_result` with `query` to search it.';
 
 function replacementUserContext(compaction: CompactionState): string {
   const userContext = renderCompactionUserMessages(compaction.userMessages);
