@@ -7,15 +7,19 @@ const TASKKILL_NOT_FOUND = 128;
 export class LlamaTerminationError extends Error {}
 
 /**
- * Single launch point for a `llama-server` child process. Both `DirectBackend`
- * (chat) and `EmbeddingBackend` (semantic search) go through here so the spawn
- * and teardown logic lives in one place rather than being duplicated per backend
- * (CLAUDE.md: `llama-server` lifecycle is owned in one spot).
+ * Shared launch point for Forge-managed server child processes. Direct chat,
+ * embeddings and the sd.cpp image server use this helper so spawning is not
+ * duplicated across backends.
  */
-export function spawnLlamaServer(binary: string, args: string[]): ChildProcess {
+export function spawnLlamaServer(
+  binary: string,
+  args: string[],
+  env?: NodeJS.ProcessEnv,
+): ChildProcess {
   return spawn(binary, args, {
     shell: false,
     stdio: ['ignore', 'pipe', 'pipe'],
+    ...(env ? { env } : {}),
   });
 }
 

@@ -1,5 +1,5 @@
 import type * as vscode from 'vscode';
-import type { ImageBackendConfig } from '../../config/types';
+import type { CloudImageBackendConfig, ImageBackendConfig } from '../../config/types';
 import { resolveCloudRequestTarget } from '../../llm/CloudRequestResolver';
 import { mimeFromHeader } from '../imageTool';
 
@@ -38,6 +38,12 @@ interface ImagesResponse {
  */
 export async function generateCloudImage(request: CloudImageRequest): Promise<GeneratedImage> {
   const { backend, prompt } = request;
+  if (backend.provider === 'sdcpp') {
+    throw new Error(
+      `generate_image: sdcpp backend "${backend.name}" is not wired into the tool yet; ` +
+        'use a cloud backend until local image generation Phase 2 is installed.',
+    );
+  }
   const fetchImpl = request.fetchImpl ?? fetch;
   const signal = withTimeout(request.signal);
   // The same resolver chat uses, so a backend authenticates exactly like a
@@ -111,7 +117,7 @@ async function downloadImage(
 }
 
 async function describeHttpFailure(
-  backend: ImageBackendConfig,
+  backend: CloudImageBackendConfig,
   response: Response,
 ): Promise<string> {
   const detail = (await response.text().catch(() => '')).slice(0, MAX_ERROR_BODY_CHARS);

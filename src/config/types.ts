@@ -5,9 +5,11 @@ import type {
   VoiceConfig,
 } from './mediaTypes';
 export type {
+  CloudImageBackendConfig,
   ImageBackendConfig,
   ImageGenerationConfig,
   ImageSearchConfig,
+  SdcppImageBackendConfig,
   VideoConfig,
   VoiceConfig,
 } from './mediaTypes';

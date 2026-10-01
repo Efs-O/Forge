@@ -232,8 +232,13 @@ overlaps with an existing owner, extend the owner instead.
 | Delegation capacity check + eviction pins         | `src/backend/DelegationGate.ts`        |
 | Direct mode (llama-server spawn)                  | `src/backend/DirectBackend.ts`         |
 | Adopted llama-server health polling               | `src/backend/adoptedServerMonitor.ts`  |
-| llama-server child-process spawn/teardown         | `src/backend/llamaProcess.ts`          |
+| llama-server and sd-server process spawn/teardown | `src/backend/llamaProcess.ts`          |
 | Embedding llama-server (semantic search)          | `src/backend/EmbeddingBackend.ts`      |
+| stable-diffusion.cpp server lifecycle             | `src/backend/SdServerBackend.ts`       |
+| stable-diffusion.cpp owner records + Windows process identity | `src/backend/sdServerOwnerRecord.ts` |
+| stable-diffusion.cpp cross-window adoption       | `src/backend/sdServerAdoption.ts`      |
+| stable-diffusion.cpp argv and process signature   | `src/backend/sdServerArgs.ts`          |
+| stable-diffusion.cpp readiness + stderr diagnostics | `src/backend/sdServerReadiness.ts`   |
 | External server log → output channel (`server_log`) | `src/backend/serverLogFollower.ts`   |
 | Localhost model-control HTTP API                  | `src/backend/ControlServer.ts`         |
 | Control-server load/capacity/unload               | `src/backend/ControlModelLifecycle.ts` |

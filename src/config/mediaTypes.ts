@@ -1,5 +1,5 @@
-/** One `image_generation.backends[]` entry (validated by imageGenerationSchema.ts). */
-export interface ImageBackendConfig {
+/** Cloud image backend entry. */
+export interface CloudImageBackendConfig {
   name: string;
   provider: 'xai' | 'openai' | 'openai-compatible';
   model: string;
@@ -7,6 +7,36 @@ export interface ImageBackendConfig {
   endpoint?: string;
   confirm_each: boolean;
 }
+
+/** Local stable-diffusion.cpp image backend entry. */
+export interface SdcppImageBackendConfig {
+  name: string;
+  provider: 'sdcpp';
+  model?: never;
+  binary: string;
+  diffusion_model: string;
+  text_encoder: string;
+  vae: string;
+  cuda_device: number;
+  text_encoder_on_cpu: boolean;
+  port: number;
+  min_free_vram_mb: number;
+  idle_timeout_ms: number;
+  request_timeout_ms: number;
+  defaults: {
+    steps: number;
+    cfg_scale: number;
+    sampler: string;
+    width: number;
+    height: number;
+  };
+  extra_args: string[];
+  confirm_on_start: boolean;
+  confirm_each: boolean;
+}
+
+/** One `image_generation.backends[]` entry (validated by imageGenerationSchema.ts). */
+export type ImageBackendConfig = CloudImageBackendConfig | SdcppImageBackendConfig;
 
 export interface ImageGenerationConfig {
   backends: ImageBackendConfig[];
