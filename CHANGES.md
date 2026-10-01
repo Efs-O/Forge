@@ -1,5 +1,14 @@
 # Forge — Recent Changes
 
+## Unreleased
+
+### Keep scheduled agent tasks off a busy local GPU
+
+- Local-GPU `agent_task` jobs now honor `~/.forge/jobs/gpu.hold` and can use
+  an opt-in sampled `jobs.gpu_gate` to defer while configured GPUs are busy.
+- Pending jobs retain their latest admission reason, show it in `manage_jobs`,
+  and include it in the one-time TTL skip summary.
+
 ## 0.16.70
 
 ### Watch a hand-started server's log in VS Code (2026-10-01)

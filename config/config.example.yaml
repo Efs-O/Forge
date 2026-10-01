@@ -69,6 +69,13 @@ jobs:
     - objects.githubusercontent.com
     - release-assets.githubusercontent.com
   max_concurrent: 2
+  # Optional local-GPU admission gate for agent_task jobs; hold files apply
+  # even when this block is absent. GPU indices are nvidia-smi indices.
+  # gpu_gate:
+  #   gpus: [0, 1]
+  #   max_util_percent: 1
+  #   max_idle_vram_mb: 1024
+  #   sample_seconds: 15
 
 # ===========================================================================
 # B. MODEL DEFINITIONS  (x_shared defines the &reasoning_budget_message anchor — must stay above models)

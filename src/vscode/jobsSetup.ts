@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import * as vscode from 'vscode';
 import { findConfigPath } from '../config/ConfigLoader';
 import type { ForgeConfig } from '../config/types';
+import { expandAlias, mergeGroupsIntoModel, splitModelProfile } from '../config/ConfigResolver';
 import { JobStore } from '../jobs/JobStore';
 import { JobScheduler } from '../jobs/JobScheduler';
 import type { IBackendPool } from '../backend/poolTypes';
@@ -34,6 +35,16 @@ export interface JobsSetup {
   /** Reconcile the recurring wake task after a config reload. */
   onConfigReloaded(): void;
   dispose(): void;
+}
+
+function modelForGpuGate(
+  config: ForgeConfig,
+  name: string,
+): ForgeConfig['models'][number] | undefined {
+  const expanded = expandAlias(config, name);
+  const { base } = splitModelProfile(expanded);
+  const model = config.models.find((candidate) => candidate.name === base);
+  return model ? mergeGroupsIntoModel(config, model) : undefined;
 }
 
 /**
@@ -95,6 +106,17 @@ export function setupJobs(
         host: () => sidebar.getHostFacade(),
         pool: () => pool,
         defaultModel: () => getConfig().active_model ?? undefined,
+        gpuGate: {
+          config: () => getConfig().jobs?.gpu_gate,
+          model: (name) => modelForGpuGate(getConfig(), name),
+          loadedModels: () => {
+            const config = getConfig();
+            return (pool?.loadedModelNames() ?? []).flatMap((name) => {
+              const model = modelForGpuGate(config, name);
+              return model ? [model] : [];
+            });
+          },
+        },
         cliAgentSkip: (model, at, late) => cliAgentSkip(getConfig(), model, at, late),
         outboxDir: store.outboxDir,
         notifyLocal: (message) => void vscode.window.showInformationMessage(message),

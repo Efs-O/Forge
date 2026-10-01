@@ -1,5 +1,13 @@
 import { z } from 'zod';
 
+export const GpuGateConfigSchema = z.object({
+  /** nvidia-smi indices of the GPUs local models use. */
+  gpus: z.array(z.number().int().nonnegative()).min(1),
+  max_util_percent: z.number().min(0).max(100).default(1),
+  max_idle_vram_mb: z.number().nonnegative().default(1024),
+  sample_seconds: z.number().int().positive().default(15),
+});
+
 /**
  * `jobs:` — absent means no scheduler, no lease, no `manage_jobs` tool, no
  * Telegram job commands. The KV prefix is unchanged for configs without it,
@@ -18,5 +26,7 @@ export const JobsConfigSchema = z
     max_concurrent: z.number().int().min(1).max(8).default(2),
     /** Let an unattended job drive a CLI agent (Claude Code / Codex) on the user's seat. */
     allow_cli_agents: z.boolean().default(false),
+    /** Optional sampled safety gate for agent tasks on local GPUs. */
+    gpu_gate: GpuGateConfigSchema.optional(),
   })
   .optional();

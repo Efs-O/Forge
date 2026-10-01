@@ -53,6 +53,60 @@ jobs:
 After editing, **Reload Window** so the scheduler picks up the change (a config
 hot-reload also reconciles it, but a reload is the clean way to start).
 
+## Keeping jobs off a busy GPU
+
+Only `agent_task` jobs using a local model are gated. This includes
+`openai-compatible` models whose endpoint host is `localhost`, `127.0.0.1`, or
+`::1` (for example, Strata). Cloud models, CLI agents, watch-only jobs, and
+`llamacpp_update` actions are not gated.
+
+### Explicit hold
+
+Create `~/.forge/jobs/gpu.hold` while training or another GPU workload must keep
+Forge jobs away. An empty file holds indefinitely; JSON can include a reason, a
+process id, and an expiry:
+
+```powershell
+'{"reason":"nemotron training","pid":' + $PID + '}' | Set-Content "$HOME\.forge\jobs\gpu.hold"
+# Remove it when training ends:
+Remove-Item "$HOME\.forge\jobs\gpu.hold"
+```
+
+```json
+{ "reason": "overnight training", "until": "2026-10-02T08:00:00Z" }
+```
+
+The file is checked even when the sampled gate below is not configured. A dead
+`pid` or past `until` is ignored and logged; Forge never deletes the file. A
+malformed file fails closed and remains a hold. While honored, `manage_jobs`
+shows the hold reason for the pending task.
+
+### Sampled GPU gate
+
+Optionally add `gpu_gate` under `jobs:` in `config.yaml`:
+
+```yaml
+jobs:
+  gpu_gate:
+    gpus: [0, 1] # nvidia-smi indices, not CUDA/llama.cpp order
+    max_util_percent: 1
+    max_idle_vram_mb: 1024
+    sample_seconds: 15
+```
+
+Every listed GPU must remain at or below the utilization limit for the whole
+sample window. If Forge has no local model loaded, its total VRAM use must also
+stay at or below `max_idle_vram_mb`. A missing probe or unlisted GPU fails
+closed and defers the task. Invalid indices surface as probe errors; they do
+not silently allow a task to start. If the scheduler is disposed or loses its
+lease during sampling, the sample is aborted and the task remains pending.
+
+On Windows WDDM, per-process VRAM is not available, so the idle-VRAM check
+uses per-GPU totals only when Forge has no local model loaded. When Forge does
+have a local model loaded, only utilization is checked; the hold file remains
+the way to protect an idle foreign workload. The gate is evaluated once at
+admission and does not pause jobs that are already running.
+
 ---
 
 ## 2. What a job looks like

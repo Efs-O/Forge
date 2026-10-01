@@ -77,6 +77,7 @@ describe('agent task phase 1 schema', () => {
     });
     expect(state.task_run).toBeNull();
     expect(state.task_pending).toBe(false);
+    expect(state.task_pending_reason).toBeNull();
   });
 });
 

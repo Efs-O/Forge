@@ -289,6 +289,15 @@ export interface EmbeddingsConfig {
   exclude_globs?: string[];
 }
 
+/** `jobs.gpu_gate` (validated by jobsSchema.ts). Absent means no sampled probe. */
+export interface GpuGateConfig {
+  /** nvidia-smi indices of the GPUs local models use. */
+  gpus: number[];
+  max_util_percent: number;
+  max_idle_vram_mb: number;
+  sample_seconds: number;
+}
+
 /** `jobs:` block (validated by jobsSchema.ts). Absent means no scheduler. */
 export interface JobsConfig {
   enabled: boolean;
@@ -297,6 +306,7 @@ export interface JobsConfig {
   /** How many jobs may run at once. */
   max_concurrent: number;
   allow_cli_agents: boolean; // unattended jobs may drive Claude Code / Codex (cliAgentGate)
+  gpu_gate?: GpuGateConfig;
 }
 
 export interface ForgeConfig {
