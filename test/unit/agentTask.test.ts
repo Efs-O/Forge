@@ -697,13 +697,12 @@ describe('AgentTaskRunner', () => {
         body: JSON.stringify({ updated_at: '2026-01-01T03:00:00Z' }),
         etag: 'e1',
       })
-      .mockResolvedValueOnce({ notModified: false, body: '[]', etag: 'e1-comments' })
+      // No `comments` count on the issue, so the check makes no comments request.
       .mockResolvedValueOnce({
         notModified: false,
         body: JSON.stringify({ updated_at: '2026-01-01T03:15:00Z' }),
         etag: 'e2',
       })
-      .mockResolvedValueOnce({ notModified: false, body: '[]', etag: 'e2-comments' })
       .mockResolvedValue({ notModified: true, body: '', etag: 'e2' });
 
     let nowMs = Date.parse('2026-01-01T03:00:00');
@@ -750,7 +749,8 @@ describe('AgentTaskRunner', () => {
       nowMs += 1_000;
       await scheduler.tick();
       expect(host.send).toHaveBeenCalledOnce();
-      expect(jobsFetch).toHaveBeenCalledTimes(4);
+      // Two issue fetches, both from the earlier ticks: the retry reruns no check.
+      expect(jobsFetch).toHaveBeenCalledTimes(2);
       resolveSend({ kind: 'completed', finalText: 'RESULT: ok — retried' });
       await Promise.race([
         runnerFinished,
