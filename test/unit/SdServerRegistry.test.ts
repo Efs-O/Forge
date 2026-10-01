@@ -31,14 +31,23 @@ const MODEL_FIELDS = {
 
 let root: string;
 let recordDir: string;
+const realPlatform = process.platform;
+
+// The registry skips sdcpp backends off Windows (sd-server ships as a Windows
+// binary), so every lifecycle case here runs as win32 whatever the CI host is.
+const setPlatform = (value: string): void => {
+  Object.defineProperty(process, 'platform', { value, configurable: true });
+};
 
 beforeEach(() => {
+  setPlatform('win32');
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-sd-registry-'));
   recordDir = path.join(root, 'records');
   for (const file of Object.values(MODEL_FIELDS)) fs.writeFileSync(path.join(root, file), 'test');
 });
 
 afterEach(() => {
+  setPlatform(realPlatform);
   fs.rmSync(root, { recursive: true, force: true });
 });
 
