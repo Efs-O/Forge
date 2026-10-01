@@ -850,6 +850,17 @@ models:
     model: qwen-3.8-27b
     group: openai-compatible-cloud
 
+  # A local server you start yourself (here Strata). Forge does not spawn it, so
+  # it cannot see its output - server_log mirrors the server's log file into the
+  # "Forge - <display_name> log" output channel (View > Output), new lines only.
+  - name: strata-flashnext-iq3s
+    display_name: "Qwen Flash-Next (Strata)"
+    provider: openai-compatible
+    endpoint: http://127.0.0.1:8080
+    api_key_secret: strata
+    model: qwen3.8-flash-next-iq3_s
+    server_log: "xxxx/Strata/strata-iq3_s-2gpu.log"
+
   - name: claude-code
     provider: cli
     cli: claude   # bare name, looked up on PATH at spawn (an absolute path also works)

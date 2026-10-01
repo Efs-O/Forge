@@ -1,5 +1,16 @@
 # Forge — Recent Changes
 
+## 0.16.70
+
+### Watch a hand-started server's log in VS Code (2026-10-01)
+
+- New model field `server_log`: the log file of a server Forge does not spawn
+  (Strata, a llama-server you start yourself). Forge follows it into the
+  output channel "Forge - <display name> log" (View > Output), so per-request
+  speed lines such as Strata's `58.0 tok/s` show inside VS Code. It starts at
+  the file's current end, shows a log created later from its first line,
+  notes a truncated (restarted) log, and caps a large backlog at 256 KB.
+
 ## 0.16.69
 
 ### Find text from before compaction (2026-10-01)

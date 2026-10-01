@@ -37,6 +37,7 @@ import { SessionTimeStatusBar } from './vscode/SessionTimeStatusBar';
 import { ForgeCodeActionProvider } from './vscode/codeActions';
 import { registerNativeCommands } from './vscode/nativeCommands';
 import { EmbeddingBackend } from './backend/EmbeddingBackend';
+import { ServerLogFollowers } from './backend/serverLogFollower';
 import { IndexManager } from './search/IndexManager';
 import { registerSecretCommands } from './vscode/secretCommands';
 import { LocalDelegationService } from './delegation/LocalDelegationService';
@@ -284,6 +285,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   log.info('[Forge] backend will start on first prompt');
   statusBar.setStopped(config.active_model);
+  const serverLogs = new ServerLogFollowers();
+  serverLogs.apply(config);
+  context.subscriptions.push(serverLogs);
 
   context.subscriptions.push(
     watchForgeConfig({
@@ -298,6 +302,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         controlServer.applyForgeConfig(config);
         if (config.control_server?.enabled) controlServer.start();
         statusBar.setStopped(config.active_model);
+        serverLogs.apply(config);
         ModelManagerPanel.current?.refresh();
         // A reload can disable jobs (delete the recurring wake task) or change
         // a schedule (re-register it). Reconcile either way.

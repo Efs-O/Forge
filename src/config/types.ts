@@ -129,6 +129,12 @@ export interface ModelConfig {
    * round cannot evict an image the user just attached.
    */
   image_retention_turns?: number;
+  /**
+   * Log file of a server Forge does not spawn (Strata, a hand-started
+   * llama-server). Forge follows it into the "Forge - <display name> log"
+   * output channel from activation on, starting at the file's current end.
+   */
+  server_log?: string;
   /** Base URL for Ollama or OpenAI-compatible HTTP providers. */
   endpoint?: string;
   /** Per-model GPU layer override. Falls back to LlamaServerConfig.n_gpu_layers. */

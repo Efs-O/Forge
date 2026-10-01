@@ -234,6 +234,7 @@ overlaps with an existing owner, extend the owner instead.
 | Adopted llama-server health polling               | `src/backend/adoptedServerMonitor.ts`  |
 | llama-server child-process spawn/teardown         | `src/backend/llamaProcess.ts`          |
 | Embedding llama-server (semantic search)          | `src/backend/EmbeddingBackend.ts`      |
+| External server log → output channel (`server_log`) | `src/backend/serverLogFollower.ts`   |
 | Localhost model-control HTTP API                  | `src/backend/ControlServer.ts`         |
 | Control-server load/capacity/unload               | `src/backend/ControlModelLifecycle.ts` |
 | Control-server HTTP/serialization helpers         | `src/backend/controlHttp.ts`           |

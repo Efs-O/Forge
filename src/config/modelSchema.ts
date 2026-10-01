@@ -52,6 +52,9 @@ export const ModelConfigSchema = z.object({
   // model). Absent = the global llama_server.binary. See ModelConfig.
   llama_server_binary: z.string().min(1).optional(),
   startup_timeout_ms: z.number().int().min(1_000).optional(),
+  // Log file of a server Forge does not spawn (e.g. Strata), mirrored into an
+  // output channel. See src/backend/serverLogFollower.ts.
+  server_log: z.string().min(1).optional(),
   // Omitted = disabled. No implicit default, and YAML `null` is rejected rather
   // than silently meaning "off" — opting in is explicit.
   image_retention_turns: z.number().int().nonnegative().optional(),
