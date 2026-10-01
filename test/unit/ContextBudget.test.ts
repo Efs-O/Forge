@@ -5,6 +5,7 @@ import {
   computeContextBudget,
   estimateTokens,
   perSlotContext,
+  promptEstimateScale,
   reasoningReserve,
   reportedContextTokens,
   SYSTEM_AND_TEMPLATE_OVERHEAD,
@@ -142,5 +143,28 @@ describe('reportedContextTokens', () => {
   it('tolerates a half-populated record from an older session file', () => {
     expect(reportedContextTokens({ last_input_tokens: 900 })).toBe(900);
     expect(reportedContextTokens({ last_output_tokens: 40 })).toBe(40);
+  });
+});
+
+describe('promptEstimateScale', () => {
+  // Strata, 2026-10-01: ~113K estimated against 121,867 tokenized.
+  it('tightens the next estimate by how far the last one fell short', () => {
+    expect(promptEstimateScale(113_000, 121_867)).toBeCloseTo(1.078, 3);
+  });
+
+  it('never loosens, never runs away, and ignores missing counts', () => {
+    expect(promptEstimateScale(100_000, 60_000)).toBe(1);
+    expect(promptEstimateScale(10_000, 90_000)).toBe(1.5);
+    expect(promptEstimateScale(0, 5_000)).toBeUndefined();
+    expect(promptEstimateScale(5_000, 0)).toBeUndefined();
+  });
+
+  it('shrinks the output room computeContextBudget reports', () => {
+    const model = { name: 'm', num_ctx: 154_624 } as ModelConfig;
+    const messages = [{ role: 'user' as const, content: 'x'.repeat(310_000) }];
+    const plain = computeContextBudget({ messages, model });
+    const scaled = computeContextBudget({ messages, model, estimateScale: 1.08 });
+    expect(scaled.used).toBe(Math.ceil(plain.used * 1.08));
+    expect(scaled.outputRoom).toBe(154_624 - scaled.used);
   });
 });

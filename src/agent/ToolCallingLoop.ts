@@ -22,6 +22,7 @@ import {
   contextExhaustionReason,
   isLlamaContextExhaustion,
   isNativeToolJsonParseError,
+  serverReportedOutputRoom,
   MAX_MID_TURN_COMPACTIONS,
   MID_TURN_COMPACTION_RESET_ROUNDS,
   MAX_ROUNDS_MESSAGE_PREFIX,
@@ -155,6 +156,8 @@ export async function runToolCallingLoop(
   let lastCompactionRound = 0;
   // Set when truncation retries ran out: the next round compacts or the turn fails.
   let forceCompaction = false;
+  // The room a server's own context 400 stated; caps the retry of that round.
+  let serverRoom: number | undefined;
 
   for (let round = 0; round < options.maxRounds; round++) {
     options.signal.throwIfAborted();
@@ -162,7 +165,10 @@ export async function runToolCallingLoop(
       const messages = options.prepareMessages
         ? options.prepareMessages([...options.messages])
         : [...options.messages];
-      return { prepared: messages, outputRoom: options.getOutputRoom?.(messages) };
+      const estimated = options.getOutputRoom?.(messages);
+      const outputRoom =
+        serverRoom === undefined ? estimated : Math.min(serverRoom, estimated ?? serverRoom);
+      return { prepared: messages, outputRoom };
     };
     let { prepared, outputRoom } = measure();
     // A recovery round runs with thinking off, so the reasoning reserve does
@@ -190,6 +196,7 @@ export async function runToolCallingLoop(
         // Room changed, so a pending retry starts a fresh (thinking-off) streak.
         truncationRecoveries = Math.min(truncationRecoveries, 1);
         options.onMessagesChanged?.();
+        serverRoom = undefined;
         ({ prepared, outputRoom } = measure());
       } else if (forceCompaction) {
         throw new Error(CONTEXT_EXHAUSTED_MESSAGE);
@@ -246,7 +253,13 @@ export async function runToolCallingLoop(
       // Estimates deliberately err on the safe side, but the server tokenizer
       // remains authoritative. Convert its 400 into Forge's recoverable path
       // instead of surfacing a raw provider failure.
-      if (isLlamaContextExhaustion(err)) {
+      const reportedRoom = serverReportedOutputRoom(err);
+      if (reportedRoom !== undefined && serverRoom === undefined) {
+        // Resend with the server's count; the pre-flight compacts if it is too thin.
+        serverRoom = reportedRoom;
+        continue;
+      }
+      if (isLlamaContextExhaustion(err) || reportedRoom !== undefined) {
         if (!options.compactMidTurn || midTurnCompactions >= MAX_MID_TURN_COMPACTIONS) {
           throw new Error(CONTEXT_INPUT_EXHAUSTED_MESSAGE);
         }
@@ -293,6 +306,7 @@ export async function runToolCallingLoop(
     // Only reached when the round streamed to completion — the truncation path
     // above continues. Recoveries are consecutive, so a good round clears them.
     truncationRecoveries = 0;
+    serverRoom = undefined;
 
     const trailingTool = structured.flush();
     const trailingHtml = html.push(trailingTool) + html.flush();

@@ -224,14 +224,34 @@ export interface ContextBudget {
   headroom: number;
 }
 
+/** Largest correction a reported prompt may apply; beyond it, distrust the report. */
+const MAX_ESTIMATE_SCALE = 1.5;
+
+/**
+ * How far the estimate fell short of the server's own prompt count, as a
+ * factor for the next estimate. The fixed chars-per-token rate is an average:
+ * a code-heavy Strata transcript tokenized ~7% denser than it, so `max_tokens`
+ * went out 8K too big and the turn died on the server's 400. Only ever
+ * tightens — a low report (a cache-only count, say) must not buy room the
+ * estimate never promised — and is clamped so a bogus report cannot force
+ * compaction on every round. Undefined when there is nothing to compare.
+ */
+export function promptEstimateScale(estimated: number, reported: number): number | undefined {
+  if (!(estimated > 0) || !(reported > 0)) return undefined;
+  return Math.min(MAX_ESTIMATE_SCALE, Math.max(1, reported / estimated));
+}
+
 export function computeContextBudget(input: {
   messages: ChatMessage[];
   toolTokens?: number;
   model: ModelConfig | undefined;
   server?: LlamaServerConfig | undefined;
+  /** From `promptEstimateScale`; 1 when the server has not reported yet. */
+  estimateScale?: number;
 }): ContextBudget {
-  const used =
+  const estimated =
     estimateTokens(input.messages) + (input.toolTokens ?? 0) + SYSTEM_AND_TEMPLATE_OVERHEAD;
+  const used = Math.ceil(estimated * (input.estimateScale ?? 1));
   const max = input.model ? perSlotContext(input.model, input.server) : 0;
   if (max <= 0) return { used, max: 0, outputRoom: 0, headroom: 0 };
   const outputRoom = Math.max(0, max - used);

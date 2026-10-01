@@ -179,6 +179,22 @@ export function isLlamaContextExhaustion(err: unknown): boolean {
   );
 }
 
+/**
+ * The output room a server states in its own pre-generation 400, when it
+ * checks `prompt + max_tokens` and names both counts — Strata's
+ * `prompt (121867 tokens) + max tokens (32768) exceeds the context (154624)`.
+ * Unlike llama-server's prompt-only refusal, the prompt still fits: only
+ * `max_tokens` was too big, because the chars-per-token estimate read that
+ * prompt ~7% short. The server tokenized it, so its number replaces the guess.
+ */
+export function serverReportedOutputRoom(err: unknown): number | undefined {
+  const message = err instanceof Error ? err.message : String(err);
+  const match = /prompt \((\d+) tokens\) \+ max tokens \(\d+\) exceeds the context \((\d+)\)/.exec(
+    message,
+  );
+  return match ? Number(match[2]) - Number(match[1]) : undefined;
+}
+
 export function isContextExhaustionReason(reason: string | undefined): boolean {
   return reason === CONTEXT_EXHAUSTED_MESSAGE || reason === CONTEXT_INPUT_EXHAUSTED_MESSAGE;
 }

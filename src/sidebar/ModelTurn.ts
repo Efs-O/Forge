@@ -20,7 +20,12 @@ import type { MidTurnDrainResult } from '../agent/MidTurnInbox';
 import type { ToolDispatch } from './ToolDispatch';
 import type { ToolFailureTracker } from '../tools/StripTools';
 import type { TurnLifecycle } from './TurnLifecycle';
-import { computeContextBudget, estimateToolTokens, perSlotContext } from '../util/contextBudget';
+import {
+  computeContextBudget,
+  estimateToolTokens,
+  perSlotContext,
+  promptEstimateScale,
+} from '../util/contextBudget';
 import { announceMissingImages } from './imageNotices';
 import { prepareModelTurnMessages } from './prepareModelTurnMessages';
 import { resolveToolPermissions } from '../tools/PermissionResolver';
@@ -259,6 +264,8 @@ export async function runModelTurn(
   freezeTurnContext(conv.messages, turnContext);
 
   const compactor = ctx.compactMidTurn;
+  // Unscaled estimate of the request in flight, compared with its reported prompt.
+  let estimatedPrompt = 0;
   const result = await trackTurnCompletion(ctx.lifecycle, conv.id, () =>
     runToolCallingLoop({
       resolveBaseUrl,
@@ -359,6 +366,8 @@ export async function runModelTurn(
         // what this writes, so publish the bar from here: an agentic turn
         // reports usage once per round and the bar stays live mid-turn.
         ctx.onUsage?.(conv, usage.prompt_tokens, usage.completion_tokens);
+        const scale = promptEstimateScale(estimatedPrompt, usage.prompt_tokens);
+        if (scale !== undefined) conv.promptEstimateScale = scale;
         ctx.onContextChanged?.(conv.id);
         // How much of the prompt llama-server served from its KV cache. A turn
         // that only grew should sit in the high 90s; a drop to 0 means
@@ -382,13 +391,18 @@ export async function runModelTurn(
           toolName: safeToolName,
         });
       },
-      getOutputRoom: (messages) =>
-        computeContextBudget({
+      getOutputRoom: (messages) => {
+        const scale = conv.promptEstimateScale ?? 1;
+        const budget = computeContextBudget({
           messages,
           toolTokens: estimateToolTokens(buildToolDefinitions()),
           model,
           server: config.llama_server,
-        }).outputRoom || undefined,
+          estimateScale: scale,
+        });
+        estimatedPrompt = budget.used / scale;
+        return budget.outputRoom || undefined;
+      },
       ...(compactor ? { compactMidTurn: (req) => compactor(conv, req) } : {}),
     }),
   );

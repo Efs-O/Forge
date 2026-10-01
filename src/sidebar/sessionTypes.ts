@@ -266,6 +266,13 @@ export interface ConversationRuntime {
    */
   imageLossNoticed?: boolean;
   /**
+   * `promptEstimateScale` from the last round's reported prompt, so the next
+   * round's `max_tokens` is sized against this transcript's real token density.
+   * Not persisted: after a reload the first round runs uncorrected, and the
+   * server's own context 400 is the backstop (`serverReportedOutputRoom`).
+   */
+  promptEstimateScale?: number;
+  /**
    * Accumulated active-agent time in milliseconds (model work + tool execution,
    * excluding approval waits). Set after each completed generation interval.
    */

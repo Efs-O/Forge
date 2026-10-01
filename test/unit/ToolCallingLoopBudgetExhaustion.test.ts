@@ -9,6 +9,7 @@ vi.mock('../../src/llm/ChatClient', () => ({ streamModelChatCompletion }));
 
 import { runToolCallingLoop } from '../../src/agent/ToolCallingLoop';
 import {
+  CONTEXT_INPUT_EXHAUSTED_MESSAGE,
   OUTPUT_BUDGET_EXHAUSTED_NOTICE,
   REASONING_ONLY_STOP_NOTICE,
   REASONING_STOP_RETRY_NUDGE,
@@ -168,5 +169,46 @@ describe('a round that spends its whole budget thinking', () => {
     const result = await runToolCallingLoop(baseOptions(messages, 9000) as never);
     expect(result.finalText).toBe('done');
     expect(streamModelChatCompletion).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('a server context 400 that states its own counts', () => {
+  beforeEach(() => {
+    streamModelChatCompletion.mockReset();
+  });
+
+  // Strata, 2026-10-01: the estimate read the prompt ~7% short, so max_tokens
+  // went out at 32768 with only ~32.7K left and the turn died on a raw 400.
+  const strataRefusal = new Error(
+    'HTTP 400: {"error": {"type": "invalid_request_error", "message": "prompt (121867 tokens) + max tokens (32768) exceeds the context (154624); requests are never truncated"}}',
+  );
+
+  it('resends the round capped to the room the server reported', async () => {
+    const sent: Array<{ max_tokens?: number }> = [];
+    streamModelChatCompletion.mockImplementation(
+      async (_u: string, r: { max_tokens?: number }, _m: unknown, h: Handlers) => {
+        sent.push(r);
+        if (sent.length === 1) throw strataRefusal;
+        h.onToken('done');
+        h.onDone('stop');
+      },
+    );
+    const messages: ChatMessage[] = [{ role: 'user', content: 'go' }];
+    const result = await runToolCallingLoop({
+      ...baseOptions(messages, 40000),
+      maxOutputTokens: 32768,
+    } as never);
+
+    expect(result.finalText).toBe('done');
+    expect(sent.map((r) => r.max_tokens)).toEqual([32768, 154624 - 121867 - 512]);
+  });
+
+  it('fails as context exhaustion, not a raw 400, when the capped resend is refused too', async () => {
+    streamModelChatCompletion.mockRejectedValue(strataRefusal);
+    const messages: ChatMessage[] = [{ role: 'user', content: 'go' }];
+    await expect(
+      runToolCallingLoop({ ...baseOptions(messages, 40000), maxOutputTokens: 32768 } as never),
+    ).rejects.toThrow(CONTEXT_INPUT_EXHAUSTED_MESSAGE);
+    expect(streamModelChatCompletion).toHaveBeenCalledTimes(2);
   });
 });
