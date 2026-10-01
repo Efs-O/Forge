@@ -170,7 +170,10 @@ async function runGenerateImage(
   await fs.writeFile(absolute, image.bytes);
 
   await (deps.reveal ?? revealBeside)(absolute).catch(() => undefined);
-  const caption = `🖼 ${backend.name}: ${prompt.slice(0, CAPTION_PROMPT_CHARS)}${prompt.length > CAPTION_PROMPT_CHARS ? '…' : ''}`;
+  // A cloud render may run with no prompt (`confirm_each: false`), so the
+  // caption and the result are where the user learns it was billed.
+  const paid = backend.provider === 'sdcpp' ? '' : ` (paid ${backend.provider} API)`;
+  const caption = `🖼 ${backend.name}${paid}: ${prompt.slice(0, CAPTION_PROMPT_CHARS)}${prompt.length > CAPTION_PROMPT_CHARS ? '…' : ''}`;
   const reached = await deps.notifications.deliverImage({
     ...(context?.conversationId ? { conversationId: context.conversationId } : {}),
     text: caption,
@@ -183,6 +186,7 @@ async function runGenerateImage(
       ? `Sent to ${reached} remote chat(s).`
       : 'No remote chat is watching this turn, so nothing was sent to a phone.',
   ];
+  if (paid) lines.push(`This was a paid ${backend.provider} API call, billed per image.`);
   if (isLocalImage(image)) {
     lines.push(`Rendered locally at ${image.width}x${image.height}, seed ${image.seed}.`);
   } else if (sizeRequested) {

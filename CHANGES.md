@@ -19,6 +19,9 @@
   unverified process holding the port. Cancelling a render stops the server,
   because sd-server has no abort endpoint.
 - Windows only for now; the backend is skipped on other platforms.
+- A cloud image (xAI, OpenAI, OpenRouter) now says it was a paid API call
+  in the tool result and the Telegram caption, so `confirm_each: false` can
+  drop the per-image prompt without hiding the cost.
 
 ### Fewer context-overflow failures (2026-10-01)
 

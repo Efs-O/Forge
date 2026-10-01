@@ -174,8 +174,9 @@ describe('generate_image', () => {
       }),
     );
     expect(delivered).toEqual([
-      { conversationId: 'c1', text: '🖼 grok-imagine: a red fox', imagePath: saved },
+      { conversationId: 'c1', text: '🖼 grok-imagine (paid xai API): a red fox', imagePath: saved },
     ]);
+    expect(result).toContain('This was a paid xai API call, billed per image.');
     expect(result).toContain('art/fox.jpg');
     expect(result).toContain('Sent to 1 remote chat(s).');
     expect(result).toContain('view_image');
@@ -357,6 +358,7 @@ describe('generate_image with an sdcpp backend', () => {
     const saved = path.join(root, 'generated-images', '20260914-102030-a-red-fox.png');
     expect(fs.readFileSync(saved)).toEqual(PNG);
     expect(result).toContain('Rendered locally at 1024x1024, seed 1111.');
+    expect(result).not.toContain('paid');
   });
 
   it('refuses when this window built no server, naming the fix and the alternative', async () => {
