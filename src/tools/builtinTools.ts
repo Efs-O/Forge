@@ -41,10 +41,11 @@ function capRead(text: string): string {
   );
 }
 
-/** `read_file`. `extraRoots` is config.yaml `extra_file_roots`: folders
- *  outside the workspace it may also read (read through a getter so a config
- *  reload applies without re-registering). */
-export function makeReadFileTool(extraRoots: () => readonly string[] = () => []): RegisteredTool {
+/** `read_file`. Reads any path on disk: refusing outside the workspace bought
+ *  nothing, because list_directory and exec_command already read anywhere —
+ *  Strata spent ~15 calls on `Get-Content` workarounds after a refusal. Writes
+ *  and deletes stay workspace-scoped; checkpoints only cover the workspace. */
+export function makeReadFileTool(): RegisteredTool {
   return {
     definition: {
       type: 'function',
@@ -58,9 +59,8 @@ export function makeReadFileTool(extraRoots: () => readonly string[] = () => [])
             path: {
               type: 'string',
               description:
-                'Workspace-relative or absolute path. Include a nested repository directory prefix. ' +
-                'An absolute path outside the workspace works only inside a folder listed under ' +
-                'extra_file_roots in config.yaml.',
+                'Workspace-relative or absolute path; an absolute path may be anywhere on disk. ' +
+                'Include a nested repository directory prefix.',
             },
             start_line: {
               type: 'integer',
@@ -88,10 +88,7 @@ export function makeReadFileTool(extraRoots: () => readonly string[] = () => [])
     },
     permission: 'read',
     handler: async (args) => {
-      const filePath = resolveWorkspacePath(args['path'] as string, {
-        mustBeInsideWorkspace: true,
-        extraRoots: extraRoots(),
-      });
+      const filePath = resolveWorkspacePath(args['path'] as string);
       let bytes: Buffer;
       try {
         bytes = fs.readFileSync(filePath);

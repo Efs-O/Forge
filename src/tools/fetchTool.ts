@@ -8,6 +8,23 @@ const BLOCKED_SCHEMES = ['file://', 'data:', 'javascript:'];
 const MAX_REDIRECT_HOPS = 3;
 
 /**
+ * web_fetch sends no credentials by design, so the GitHub API answers 401/403
+ * (code search always needs a token). Strata retried it blind; name the path
+ * that carries the user's own `gh auth login` instead.
+ */
+function authHint(url: string, status: number): string {
+  if (status !== 401 && status !== 403) return '';
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+  if (host !== 'api.github.com') return '';
+  return ' — web_fetch sends no credentials. Use exec_command with `gh api <path>` or `gh search code <query>`, which run under the gh login.';
+}
+
+/**
  * Reject private/loopback/link-local hostnames and IP ranges.
  * Returns the rejection reason, or null if the URL is acceptable.
  */
@@ -110,7 +127,9 @@ export function makeWebFetchTool(): RegisteredTool {
       }
 
       if (!response.ok) {
-        throw new ToolError(`web_fetch: HTTP ${response.status} ${response.statusText}`);
+        throw new ToolError(
+          `web_fetch: HTTP ${response.status} ${response.statusText}${authHint(url, response.status)}`,
+        );
       }
 
       const contentType = response.headers.get('content-type') ?? '';

@@ -44,8 +44,8 @@ The tool is advertised only when `llama_server.binary` is set.
 
 ## Reaching folders outside the workspace
 
-`read_file`, `create_directory` and `delete_file` normally stay inside the
-workspace. To let them reach other folders, such as `%LOCALAPPDATA%\Forge` for
+`read_file` and `view_image` read any path on disk. `create_directory` and
+`delete_file` normally stay inside the workspace. To let them reach other folders, such as `%LOCALAPPDATA%\Forge` for
 cleaning up old builds, list those folders in `config.yaml`:
 
 ```yaml
@@ -54,5 +54,5 @@ extra_file_roots:
 ```
 
 Entries must be absolute paths. Every write and delete still asks for approval.
-`list_directory` already accepts any absolute path, and `query_powershell` does
+`list_directory` also accepts any absolute path, and `query_powershell` does
 not reach outside the workspace.

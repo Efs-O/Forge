@@ -82,8 +82,8 @@ function outsideWorkspaceError(operation: SafePowerShellOperation, pathValue: st
   const alternative =
     operation === 'get_file_hash'
       ? 'Use `exec_command` with `certutil -hashfile <path> SHA256` instead.'
-      : 'Use `list_directory` instead — it accepts an absolute path anywhere on disk. ' +
-        '`read_file`, `create_directory` and `delete_file` reach outside the workspace only ' +
+      : 'Use `list_directory` or `read_file` instead — both accept an absolute path anywhere ' +
+        'on disk. `create_directory` and `delete_file` reach outside the workspace only ' +
         'inside the folders listed under `extra_file_roots` in config.yaml.';
   return new Error(
     `query_powershell: ${pathValue} is outside the workspace. This tool is workspace-relative ` +

@@ -122,7 +122,7 @@ export class ToolRegistry {
 
   /**
    * Refusal text when `args` omits a property the tool's schema requires, or
-   * sends a declared boolean as anything but a boolean; else undefined.
+   * sends a declared boolean or array as anything else; else undefined.
    * llama-server's grammar makes such a call impossible, but not every backend
    * constrains decoding. Strata sent `exec_command` without `command`, and the
    * handler died on `undefined.toLowerCase()` — an error that names neither the
@@ -144,16 +144,22 @@ export class ToolRegistry {
     }
     const properties = parameters.properties;
     if (typeof properties !== 'object' || properties === null) return undefined;
-    const notBoolean = Object.entries(properties as Record<string, { type?: unknown }>)
-      .filter(
-        ([key, schema]) =>
-          schema?.type === 'boolean' &&
-          present[key] !== undefined &&
-          typeof present[key] !== 'boolean',
-      )
+    const declared = Object.entries(properties as Record<string, { type?: unknown }>).filter(
+      ([key]) => present[key] !== undefined,
+    );
+    const notBoolean = declared
+      .filter(([key, schema]) => schema?.type === 'boolean' && typeof present[key] !== 'boolean')
       .map(([key]) => `"${key}" (got ${JSON.stringify(present[key])})`);
-    if (notBoolean.length === 0) return undefined;
-    return `Error: ${name} needs JSON true or false, not a string or number, for ${notBoolean.join(', ')}. Resend the call with a bare boolean.`;
+    if (notBoolean.length > 0) {
+      return `Error: ${name} needs JSON true or false, not a string or number, for ${notBoolean.join(', ')}. Resend the call with a bare boolean.`;
+    }
+    // Strata sent exec_command `args` as one JSON-encoded string; the handler
+    // died on `args.findIndex is not a function`, naming neither field nor fix.
+    const notArray = declared
+      .filter(([key, schema]) => schema?.type === 'array' && !Array.isArray(present[key]))
+      .map(([key]) => `"${key}" (got ${typeof present[key]})`);
+    if (notArray.length === 0) return undefined;
+    return `Error: ${name} needs a JSON array for ${notArray.join(', ')}, not a string holding one. Resend it as a bare array, e.g. ["a", "b"].`;
   }
 
   get(name: string): RegisteredTool | undefined {

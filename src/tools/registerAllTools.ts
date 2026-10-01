@@ -101,11 +101,11 @@ export function registerAllTools(
   },
 ): void {
   // config.yaml `extra_file_roots`: absolute folders outside the workspace that
-  // read_file / create_directory / delete_file may also reach. A getter, so a
+  // create_directory / delete_file may also reach. A getter, so a
   // config reload applies without re-registering the tools.
   const extraRoots = (): readonly string[] => getConfig?.().extra_file_roots ?? [];
   // v0.1 builtins
-  registry.register(makeReadFileTool(extraRoots));
+  registry.register(makeReadFileTool());
   registry.register(makeViewImageTool());
   // Registered unconditionally: getConfig is optional on this signature, and
   // gating on it would silently drop the tool wherever it is not supplied.

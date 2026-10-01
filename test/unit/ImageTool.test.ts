@@ -50,10 +50,16 @@ describe('view_image', () => {
     ]);
   });
 
-  it('rejects paths outside the workspace', async () => {
-    await expect(makeViewImageTool().handler({ path: path.join(root, '..', 'outside.png') })).rejects.toThrow(
-      /outside the workspace/,
-    );
+  it('reads an image outside the workspace and names it by absolute path', async () => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-view-outside-'));
+    const target = path.join(outside, 'outside.png');
+    fs.writeFileSync(target, pngBytes());
+    try {
+      const result = await makeViewImageTool().handler({ path: target });
+      expect(typeof result === 'string' ? result : result.text).toContain(fs.realpathSync.native(target));
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   it('rejects mismatched or unsupported image formats', async () => {

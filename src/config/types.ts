@@ -329,7 +329,7 @@ export interface ForgeConfig {
   log_level?: 'trace' | 'debug' | 'info' | 'warn' | 'error';
   /** Extra directories to scan for GGUF files (used by first-run wizard). */
   model_dirs?: string[];
-  /** Absolute folders outside the workspace that read_file / create_directory / delete_file may reach. */
+  /** Absolute folders outside the workspace that create_directory / delete_file may reach (read_file reads anywhere). */
   extra_file_roots?: string[];
   /** Path to a directory containing user-defined Nunjucks template overrides. */
   templates_dir?: string;

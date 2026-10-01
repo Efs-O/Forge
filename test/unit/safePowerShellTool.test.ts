@@ -109,9 +109,9 @@ describe('query_powershell refusals name the sanctioned alternative', () => {
 
   const run = (args: Record<string, unknown>) => makeSafePowerShellTool().handler(args);
 
-  it('points an out-of-workspace list_directory at list_directory and extra_file_roots', async () => {
+  it('points an out-of-workspace list_directory at list_directory, read_file and extra_file_roots', async () => {
     await expect(run({ operation: 'list_directory', path: outside })).rejects.toThrow(
-      /outside the workspace[\s\S]*Use `list_directory` instead[\s\S]*extra_file_roots/,
+      /outside the workspace[\s\S]*Use `list_directory` or `read_file` instead[\s\S]*extra_file_roots/,
     );
   });
 

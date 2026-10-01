@@ -44,6 +44,22 @@ describe('isolated file and directory tool execution', () => {
     ).rejects.toThrow('past end_line');
   });
 
+  // Refusing reads outside the workspace bought nothing: list_directory and
+  // exec_command read the same files, and Strata spent ~15 calls getting there.
+  it('reads outside the workspace, but still writes only inside it', async () => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-read-outside-'));
+    try {
+      const target = path.join(outside, 'bench.txt');
+      fs.writeFileSync(target, 'outside', 'utf8');
+      await expect(makeReadFileTool().handler({ path: target })).resolves.toBe('outside');
+      await expect(
+        makeWriteFileTool().handler({ path: target, content: 'changed' }),
+      ).rejects.toThrow('outside the workspace');
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
   // read_file was uncapped and decoded anything as UTF-8, so a 1.3 MB PNG
   // became ~1.3 M characters of replacement glyphs and exhausted a one-slot
   // context in a single tool result.

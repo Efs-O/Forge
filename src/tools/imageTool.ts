@@ -71,11 +71,9 @@ function workspaceRoot(): string {
 async function resolveImagePath(requestedPath: string): Promise<{ root: string; file: string }> {
   if (!requestedPath.trim()) throw new Error('view_image: path must not be empty.');
   const root = workspaceRoot();
-  const candidate = resolveWorkspacePath(requestedPath, { mustBeInsideWorkspace: true });
+  // Reading is not gated to the workspace, as for read_file.
+  const candidate = resolveWorkspacePath(requestedPath);
   const [realRoot, realFile] = await Promise.all([fs.realpath(root), fs.realpath(candidate)]);
-  if (!isPathInside(realRoot, realFile)) {
-    throw new Error(`view_image: path is outside the workspace: ${requestedPath}`);
-  }
   return { root: realRoot, file: realFile };
 }
 
@@ -140,7 +138,9 @@ export function makeViewImageTool(): RegisteredTool {
         );
       }
 
-      const relative = path.relative(root, file) || path.basename(file);
+      const relative = isPathInside(root, file)
+        ? path.relative(root, file) || path.basename(file)
+        : file;
       const text = `Loaded image ${relative} (${mime}, ${stat.size.toLocaleString()} bytes).`;
       const content: ContentPart[] = [
         { type: 'text', text },

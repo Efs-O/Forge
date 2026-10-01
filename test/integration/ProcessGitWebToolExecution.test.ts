@@ -219,6 +219,25 @@ describe('isolated process, Git, and web tool execution', () => {
   });
 });
 
+describe('web_fetch auth refusals', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('points a GitHub API 401 at the gh CLI, and leaves other hosts alone', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(
+        async () => new Response('{}', { status: 401, statusText: 'Unauthorized' }),
+      ),
+    );
+    await expect(
+      makeWebFetchTool().handler({ url: 'https://api.github.com/search/code?q=sd-server' }),
+    ).rejects.toThrow('`gh api <path>` or `gh search code <query>`');
+    await expect(
+      makeWebFetchTool().handler({ url: 'https://example.com/private' }),
+    ).rejects.toThrow(/^web_fetch: HTTP 401 Unauthorized$/);
+  });
+});
+
 function currentBranch(cwd: string): string {
   return execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd, encoding: 'utf8' }).trim();
 }

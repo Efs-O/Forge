@@ -261,6 +261,44 @@ describe('ToolDispatch', () => {
     expect(failureTracker.record).toHaveBeenCalledWith('conv-a');
   });
 
+  it('refuses an array argument sent as a string before the handler runs', async () => {
+    // Strata sent args: "[\"/c\", ...]"; the handler died on `findIndex is not a function`.
+    const handler = vi.fn().mockResolvedValue('should not run');
+    toolRegistry.register({
+      definition: {
+        type: 'function',
+        function: {
+          name: 'exec_command',
+          description: 'Run',
+          parameters: {
+            type: 'object',
+            properties: {
+              command: { type: 'string' },
+              args: { type: 'array', items: { type: 'string' } },
+            },
+            required: ['command', 'args'],
+          },
+        },
+      },
+      permission: 'read',
+      handler,
+    });
+
+    const messages: ChatMessage[] = [];
+    await dispatch.dispatch(
+      [makeToolCall('exec_command', { command: 'cmd', args: '["/c", "dir"]' })],
+      allowed,
+      messages,
+      'conv-a',
+    );
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(messages[0]?.content).toBe(
+      'Error: exec_command needs a JSON array for "args" (got string), not a string holding one. Resend it as a bare array, e.g. ["a", "b"].',
+    );
+    expect(failureTracker.record).toHaveBeenCalledWith('conv-a');
+  });
+
   it('does not clear the streak for a refusal or a declined call', async () => {
     requestApproval.mockResolvedValue(false);
     toolRegistry.register({
