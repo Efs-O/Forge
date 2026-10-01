@@ -13,6 +13,7 @@ import {
   type BusPaths,
 } from '../../src/agentBus/agentBus';
 import { AgentRoutes } from '../../src/backend/agentRoutes';
+import { TEST_BASH } from '../support/bash';
 
 const TOKEN = 'f'.repeat(64);
 let home: string;
@@ -339,7 +340,7 @@ function runClient(
 ): Promise<{ code: number; out: string }> {
   return new Promise((resolve) => {
     const child = execFile(
-      'bash',
+      TEST_BASH ?? 'bash',
       [paths.script.replace(/\\/g, '/'), ...args],
       { timeout: 20_000, env: { ...process.env, ...env } },
       (err, stdout, stderr) => {
@@ -358,9 +359,10 @@ describe('forge.sh against the routes', () => {
   beforeAll(async () => {
     const probe = path.join(os.tmpdir(), `forge-bash-probe-${process.pid}`);
     fs.writeFileSync(probe, '');
-    usable = await new Promise((resolve) =>
+    const bash = TEST_BASH;
+    usable = !!bash && await new Promise<boolean>((resolve) =>
       execFile(
-        'bash',
+        bash,
         ['-c', 'test -f "$1" && command -v curl >/dev/null', '_', probe.replace(/\\/g, '/')],
         { timeout: 10_000 },
         (err) => resolve(!err),
@@ -933,9 +935,10 @@ describe('forge.sh who against the routes (§11)', () => {
   beforeAll(async () => {
     const probe = path.join(os.tmpdir(), `forge-bash-who-${process.pid}`);
     fs.writeFileSync(probe, '');
-    usable = await new Promise((resolve) =>
+    const bash = TEST_BASH;
+    usable = !!bash && await new Promise<boolean>((resolve) =>
       execFile(
-        'bash',
+        bash,
         ['-c', 'test -f "$1" && command -v curl >/dev/null', '_', probe.replace(/\\/g, '/')],
         { timeout: 10_000 },
         (err) => resolve(!err),

@@ -8,6 +8,7 @@ import {
   makeMonitorExecutionTool,
   makeStopExecutionTool,
 } from '../../src/tools/backgroundExecutionTools';
+import { TEST_BASH } from '../support/bash';
 
 describe('exec_command safety policy', () => {
   it('reads the shell script permission getter on every dispatch', async () => {
@@ -32,7 +33,8 @@ describe('exec_command safety policy', () => {
       ...(process.platform === 'win32'
         ? [{ command: 'cmd', args: ['/c', 'echo forge-ok'] }]
         : []),
-      { command: 'bash', args: ['-c', 'printf forge-ok'] },
+      // Git Bash on Windows, never the WSL launcher (see test/support/bash.ts).
+      ...(TEST_BASH ? [{ command: TEST_BASH, args: ['-c', 'printf forge-ok'] }] : []),
     ];
     for (const run of cases) {
       const output = JSON.parse(

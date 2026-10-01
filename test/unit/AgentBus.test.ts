@@ -24,6 +24,7 @@ import {
   forgeInboundPrompt,
 } from '../../src/agentBus/busContent';
 import { codexMessage } from '../../src/agentBus/codexDelivery';
+import { TEST_BASH } from '../support/bash';
 
 let home: string;
 let paths: BusPaths;
@@ -116,13 +117,11 @@ describe('ensureBus', () => {
     expect(CLIENT_SCRIPT).toContain('"Authorization: Bearer $TOKEN" \\\n');
     expect(CLIENT_SCRIPT).toContain('VERB="${1:-}"');
     expect(CLIENT_SCRIPT).not.toContain('\r');
-    // On a Windows PATH without Git's bash, `bash` is the WSL launcher: with no
-    // usable distro it exits 1 and prints a UTF-16 error to stdout, which read
-    // as a syntax failure of forge.sh. Only a bash that runs can judge syntax.
-    const probe = spawnSync('bash', ['-c', 'echo ok'], { encoding: 'utf8' });
-    if (probe.error || probe.stdout.trim() !== 'ok') ctx.skip();
+    // Only a bash that runs can judge syntax; on Windows that is Git Bash, never
+    // the WSL launcher (see test/support/bash.ts).
+    if (!TEST_BASH) return ctx.skip();
     // Script on stdin: no Windows path for a bash to translate.
-    const check = spawnSync('bash', ['-n'], { input: CLIENT_SCRIPT, encoding: 'utf8' });
+    const check = spawnSync(TEST_BASH, ['-n'], { input: CLIENT_SCRIPT, encoding: 'utf8' });
     expect(check.stderr).toBe('');
     expect(check.status).toBe(0);
   });
