@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## 0.16.68
+## 0.16.69
 
 ### FORGE.md is the only project-instruction file (2026-10-01)
 
@@ -9,6 +9,8 @@
   `FORGE.md` only. A repository with just an `AGENTS.md` gets a starter
   `FORGE.md` from auto-create (`forge_instructions.auto_create`), and the
   `AGENTS.md` is left untouched for Codex.
+
+## 0.16.68
 
 ### Ollama tool calls and stalls, per-chat tool stripping (2026-10-01)
 
